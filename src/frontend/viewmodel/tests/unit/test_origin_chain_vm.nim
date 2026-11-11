@@ -1521,6 +1521,34 @@ suite "M86 — the origin badge and Pin to scratchpad, through the production br
       check originChainRequests(w.mock).len == 2
       dispose()
 
+  test "\"Show value origin\" on a row with no origin summary loads its chain in place":
+    # A backend that sends no `originSummary` with its locals (the native
+    # ones) draws no badge, but the row menu still offers "Show value
+    # origin", and it must load the chain (§3.1, "loading it when needed"),
+    # not expand the row to nothing.
+    createRoot proc(dispose: proc()) =
+      let w = makeWiredOrigin()
+      w.store.updateLocals(@[makeVariable("c", "10", "int")])
+      drain()
+      w.mock.clearReceivedCommands()
+      w.mock.expect("ct/originChain", twoHopChainPayload("c"))
+      let panel = renderStatePanel[MockRenderer, MockNode](MockRenderer(), w.state)
+      let row = findRowNamed(panel, "c")
+      check row != nil
+      row.fireEvent("contextmenu")
+      var showOrigin: proc() = nil
+      for entry in w.state.lastContextMenu.val:
+        if entry.label == "Show value origin":
+          showOrigin = entry.action
+      check not showOrigin.isNil
+      showOrigin()
+      drain()
+      let requests = originChainRequests(w.mock)
+      check requests.len == 1 and requests[0]["variableName"].getStr == "c"
+      check not w.origin.sidePanelOpen.val
+      check findAllByClass(row, "ct-origin-inline-chain-hop").len == 2
+      dispose()
+
   test "one \"Show value origin\" from the row menu sends one ct/originChain":
     # One gesture, one backward walk: each `ct/originChain` spends its own
     # budget (§6.1.7), so a second request for the same expression costs the

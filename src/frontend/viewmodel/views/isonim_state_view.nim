@@ -315,6 +315,13 @@ template onToggleOriginBadge*(vm: StateVM; item: proc(): VariableViewState; evTy
   ## For placeholder summaries the click goes to ``onShowOriginProc``
   ## instead, which resolves the placeholder (spec §3.2.3).
   ##
+  ## A row with NO summary is fetched like a loaded one. A backend that
+  ## sends no `originSummary` with its locals (the native ones) draws no
+  ## badge, but the row menu's "Show value origin" and `Ctrl+Shift+O` still
+  ## come here, and "loading it when needed" (§3.1) is the whole of what
+  ## they can do there: requiring a summary left such a row expanded to
+  ## nothing, with no request sent.
+  ##
   ## Both bridges are installed by
   ## ``origin_chain_bridges.wireOriginChainBridges`` once the
   ## ``OriginChainVM`` is available — without them the click just
@@ -335,7 +342,7 @@ template onToggleOriginBadge*(vm: StateVM; item: proc(): VariableViewState; evTy
       if not vm.onShowOriginProc.isNil and not vm.store.isNil:
         let loc = vm.store.debugger.val.location
         vm.onShowOriginProc(row.name, loc)
-    elif summary.isSome and vm.isOriginExpanded(id) and
+    elif vm.isOriginExpanded(id) and
         not vm.onLoadOriginChainProc.isNil and not vm.store.isNil and
         (vm.originChainLookup.isNil or vm.originChainLookup(row.name).isNone):
       let loc = vm.store.debugger.val.location
@@ -412,7 +419,7 @@ proc buildVariableRowContextMenu*(vm: StateVM;
       if summary.isSome and summary.get.isPlaceholder:
         if not stateVM.onShowOriginProc.isNil and not stateVM.store.isNil:
           stateVM.onShowOriginProc(name, loc)
-      elif summary.isSome and stateVM.isOriginExpanded(id) and
+      elif stateVM.isOriginExpanded(id) and
           not stateVM.onLoadOriginChainProc.isNil and not stateVM.store.isNil and
           (stateVM.originChainLookup.isNil or
            stateVM.originChainLookup(name).isNone):
