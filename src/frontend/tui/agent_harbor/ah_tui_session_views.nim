@@ -116,8 +116,10 @@ proc drawOverflowChip*(c: var AhCanvas; parent: AhNode; row, col, hidden, waits:
 
 proc drawMenu*(c: var AhCanvas; parent: AhNode; row, col, width, height: int;
                kind: string): AhNode =
-  ## A dropdown, on the card ground over whatever is under it.
-  c.area("menu:" & kind, row, col, width, height, c.tone.menu)
+  ## A dropdown, on the ground every surface dropped from the caption bar
+  ## takes over what it covers (`dropArea`: the card where the card is
+  ## clear of it), as the initiative popup.
+  discard c.dropArea("menu:" & kind, row, col, width, height)
   c.node(parent, row, col, width, height, [("menu", kind)])
 
 const
@@ -140,7 +142,7 @@ proc drawMenuItem*(c: var AhCanvas; menu: AhNode; row, col, width: int;
   ## end, right-aligned in a column `trailColumn` cells wide (the menu's
   ## widest; this item's own by default) that ends one cell in from the
   ## menu's edge, with `MenuOriginGap` cells between it and the title.
-  result = c.node(menu, row, col, width, 1, [("menu-item", key)])
+  result = c.node(menu, row, col, width, 1, [("menu-item", key), ("active", $active)])
   if active: c.fill(row, col, width, 1, c.p.activeTab)
   discard c.mark(result, row, col + 1, m)
   let tail = trailingCells(trailing)

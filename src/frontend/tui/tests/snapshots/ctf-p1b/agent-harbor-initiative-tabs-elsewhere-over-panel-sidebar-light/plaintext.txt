@@ -1,0 +1,56 @@
+ ● Telemetry uploa…  1/4  1  +3    ● +4   +
+ 9    ←  →   Auto: off
+ ● Port the route cache to t…          CLI
+   Route cache on the new st…      running
+                                             
+ ● Split the settings page i…          Web
+   Settings redesign               running
+                                             
+ ● Persist the telemetry que…          TUI
+   Telemetry upload retries        running
+                                             
+ ○ Migrate cached routes wit…           Tg
+   Route cache on the new st…         idle
+                                             
+ ● Cache the dependency grap…          CLI
+   CI runner migration         needs input
+                                             
+ ● Add jitter to the telemet…          Web
+   Telemetry upload retries      completed
+                                             
+ ● Add search to the setting…          TUI
+   Settings redesign               running
+                                             
+ ● Fix the flaky clock-skew…            Tg
+   CI runner migration             running
+                                             
+ ● Replace the hand-rolled J…          CLI
+   no initiative                   running
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             

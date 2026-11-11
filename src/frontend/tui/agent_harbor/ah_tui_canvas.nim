@@ -129,7 +129,10 @@ type
       ## the web draws a hairline under each header, the terminal changes
       ## the ground instead.
     filters*: string ## the fleet's filter strip, between two head bands
-    menu*: string    ## a dropdown, a popup: surface/base/card
+    menu*: string
+      ## surface/base/card, the web's dropdown surface: a dropped surface's
+      ## first choice of ground (`dropGround` steps off it where it is too
+      ## near what the surface covers)
     chip*: string    ## a control's own ground (+, +N, a badge, Retry)
     chipOnAction*: string
       ## A control's ground on the action surface (the `+N` chip of the
@@ -198,32 +201,29 @@ proc contrastOf*(a, b: string): float =
   let (la, lb) = (luminanceOf(a), luminanceOf(b))
   (max(la, lb) + 0.05) / (min(la, lb) + 0.05)
 
-const PopupGroundMinContrast* = 1.3
-  ## How far off what it covers the popup's ground is, at least: the step
-  ## a tab bar's notice and a control's own ground keep, since no outline
-  ## tells the popup from what lies under it.
+const DropGroundMinContrast* = 1.3
+  ## How far off what it covers a dropped surface's ground is, at least
+  ## (the popup and every menu): the step a tab bar's notice and a control's
+  ## own ground keep, since no outline tells it from what lies under it.
 
-proc popupGround*(p: AhPalette; covered: string): string =
-  ## The initiative popup's ground over `covered` (the window under the
-  ## caption bar, or a panel): the card, the web's dropdown surface, where
-  ## it is at least `PopupGroundMinContrast` off `covered`, else the next
-  ## surface role that is -- `surface/primary/secondary-hover`, then
+proc dropGround*(p: AhPalette; covered: openArray[string]): string =
+  ## The ground of a surface dropped from the caption bar -- the initiative
+  ## popup, the overflow menus, the sessions-elsewhere menu -- over the
+  ## grounds in `covered` (the window under the caption bar, a panel, or
+  ## both): the card, the web's dropdown surface, where it is at least
+  ## `DropGroundMinContrast` off every one of them, else the next surface
+  ## role that is -- `surface/primary/secondary-hover`, then
   ## `-tertiary-hover`. Light's card is 1.34:1 off the window but 1.12:1
-  ## off its panel; Dark's 1.14:1 and 1.03:1.
+  ## off its panel; Dark's 1.14:1 and 1.03:1. The one rule every dropped
+  ## surface takes, so the popup and the menus never differ over one ground.
   let candidates = [p.menu, p.hover,
                     tokenHexOf(dtColorsUiSurfacePrimaryTertiaryHover, p.mode)]
   for candidate in candidates:
-    if contrastOf(candidate, covered) >= PopupGroundMinContrast: return candidate
+    var clear = true
+    for ground in covered:
+      if contrastOf(candidate, ground) < DropGroundMinContrast: clear = false
+    if clear: return candidate
   candidates[^1]
-
-proc stripeOn*(t: AhTone; p: AhPalette; ground: string; besides = ""): string =
-  ## The ground of every other item of a list drawn on `ground`: the band,
-  ## or the next role that differs from `ground` (and from `besides`, the
-  ## ground the list lies against: a menu's window) where the band is one of
-  ## them (Light's band is the window's ground).
-  for candidate in [t.band, p.hover, t.filters]:
-    if candidate != ground and candidate != besides: return candidate
-  t.band
 
 proc selectedGround*(p: AhPalette): string =
   ## The selected initiative's ground: the palette's tint over the panel.
@@ -258,6 +258,20 @@ proc area*(c: var AhCanvas; name: string; row, col, width, height: int; bg: stri
   c.areas.add AhArea(name: name, row: row, col: col, width: width, height: height, bg: bg)
 
 proc bgAt*(c: AhCanvas; row, col: int): string = c.grid.styleAt(row, col).bg
+
+proc groundsUnder*(c: AhCanvas; row, col, width, height: int): seq[string] =
+  ## Every distinct ground drawn under the rectangle (clipped to the canvas),
+  ## in the order first met: what a surface dropped over it would cover.
+  for r in max(0, row) ..< min(c.rows, row + height):
+    for k in max(0, col) ..< min(c.cols, col + width):
+      let bg = c.bgAt(r, k)
+      if bg.len > 0 and bg notin result: result.add bg
+
+proc dropArea*(c: var AhCanvas; name: string; row, col, width, height: int): string =
+  ## A surface dropped from the caption bar (the popup, a menu): an area on
+  ## `dropGround` over every ground it covers. Returns that ground.
+  result = dropGround(c.p, c.groundsUnder(row, col, width, height))
+  c.area(name, row, col, width, height, result)
 
 proc node*(c: var AhCanvas; parent: AhNode; row, col, width, height: int;
            facts: openArray[(string, string)] = []): AhNode =

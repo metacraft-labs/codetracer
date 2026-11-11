@@ -1,0 +1,56 @@
+ ● Telemetry uploa…  1/4  1  +3    ● +6   +
+ 26    ←  →   Auto: off
+                                             
+ ● Route cache on the new storage la…   2/6
+ ● Settings redesign                    3/8
+ ● CI runner migration                 4/10
+ ● Release 3.0                         5/12
+ ● Audit the session token lifetimes
+ ● Profile the importer on the large…
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             

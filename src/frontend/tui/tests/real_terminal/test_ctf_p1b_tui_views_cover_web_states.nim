@@ -97,7 +97,7 @@ from ../../../viewmodel/views/agent_harbor_words import tabLabelOf, filterCount,
   countsText, activityLineIsError
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads this spelling.
-const ExpectedAssertions = 107
+const ExpectedAssertions = 104
 
 const
   Stem = "app_agent_harbor_story"
@@ -695,6 +695,56 @@ proc contrastRatio(a, b: string): float =
   let lb = relativeLuminance(b)
   (max(la, lb) + 0.05) / (min(la, lb) + 0.05)
 
+const DroppedGroundMinContrast = 1.3
+  ## The least contrast ratio between the ground of a surface dropped from
+  ## the caption bar -- the initiative popup, an overflow menu, the
+  ## sessions-elsewhere menu -- and the ground it covers: the terminal draws
+  ## no outline around it (the web and GPUI do), so below this step it has no
+  ## visible edge.
+
+proc droppedGroundProblems(m: AhTuiMount; look: LookOf; rows: int; p: AhPalette;
+                           t: AhTone): seq[string] =
+  ## Every dropped surface on one ground: the card, the web's dropdown
+  ## surface, where the card is at least `DroppedGroundMinContrast` off what
+  ## it covers (the window under the caption bar, or the panel the story
+  ## draws there), else the first of the next surface roles
+  ## (`surface/primary/secondary-hover`, `-tertiary-hover`) that is. A menu
+  ## is held to it over every cell -- a stripe under some items is reported
+  ## -- apart from an active item's row, which is on the active tab's fill;
+  ## the popup over its first row (its milestone bar and marks lie below).
+  let view = m.view
+  let covered = if hasPanelUnderCaption(m.surface, m.fixture): t.body else: t.frame
+  var wanted = ""
+  for role in [t.menu, p.hover, tokenHexOf(dtColorsUiSurfacePrimaryTertiaryHover, m.mode)]:
+    if contrastRatio(role, covered) >= DroppedGroundMinContrast:
+      wanted = role
+      break
+  var dropped: seq[(string, AhNode)]
+  for e in view.all("popup"):
+    dropped.add ("the popup", AhNode(row: e.row, col: e.col, width: e.width, height: 1))
+  for e in view.all("menu"): dropped.add ("the " & e.attr("menu") & " menu", e)
+  for (what, e) in dropped:
+    var activeRows: seq[int]
+    for item in e.all("menu-item"):
+      if item.attr("active") == "true":
+        for r in item.row ..< item.row + max(1, item.height): activeRows.add r
+    block cells:
+      for r in e.row ..< min(rows, e.row + max(1, e.height)):
+        if r in activeRows: continue
+        for c in e.col ..< e.col + e.width:
+          let got = look(r, c).bg
+          if got == wanted and wanted != "": continue
+          result.add what & " at (" & $r & "," & $c & ") is on " & got & ", " &
+                     (if got == "": "no ground"
+                      else: formatFloat(contrastRatio(got, covered), ffDecimal, 2) & ":1") &
+                     " off what it covers (" & covered & "), not " &
+                     (if wanted == "": "a surface role at least " &
+                                       formatFloat(DroppedGroundMinContrast, ffDecimal, 2) &
+                                       ":1 off it (none is)"
+                      else: wanted & " (" &
+                            formatFloat(contrastRatio(wanted, covered), ffDecimal, 2) & ":1)")
+          break cells
+
 proc fleetInkProblems(view: AhNode; look: LookOf; rows: int; p: AhPalette;
                       vm: FleetSnapshotVM): seq[string] =
   ## The fleet's inks the shared rules decide: an activity line red only on
@@ -767,6 +817,8 @@ proc styleProblems(m: AhTuiMount; look: LookOf): seq[string] =
                   else: formatFloat(contrastRatio(ground, bar), ffDecimal, 2) & ":1") &
                  " against the bar's " & bar & ", under " &
                  formatFloat(NoticeGroundMinContrast, ffDecimal, 2) & ":1"
+  # The popup and every menu: a ground clear of what it covers.
+  result.add droppedGroundProblems(m, look, rows, p, t)
   case m.surface
   of "agent-harbor-session-tabs":
     let vm = m.sessions
@@ -805,9 +857,6 @@ proc styleProblems(m: AhTuiMount; look: LookOf): seq[string] =
                            markInk(p.markOf(tab.attention)))
   of "agent-harbor-initiative-tabs":
     let vm = m.initiativeTabs
-    # What the bar's popup covers: the window, or the panel under the
-    # caption bar where the story draws one.
-    let covered = if hasPanelUnderCaption(m.surface, m.fixture): t.body else: t.frame
     for e in view.all("tab"):
       let active = e.attr("tab") == vm.activeTab.val
       if active:
@@ -820,22 +869,6 @@ proc styleProblems(m: AhTuiMount; look: LookOf): seq[string] =
       if e.attr("recording-active") == "true":
         result.expectGround(look, e, rows, "the active recording",
                             if m.mode == dmDark: p.action else: p.borderAction)
-    for e in view.all("popup"):
-      # The popup's ground is the card where the card is at least
-      # `PopupGroundMinContrast` off what it covers; elsewhere a surface
-      # role that is (`surface/primary/secondary-hover` or
-      # `-tertiary-hover`): no outline tells the popup from what it covers.
-      let drawn = AhNode(row: e.row, col: e.col, width: e.width, height: 1)
-      if contrastRatio(t.menu, covered) >= PopupGroundMinContrast:
-        result.expectGround(look, drawn, rows, "the popup", t.menu)
-      elif e.row < rows:
-        let got = look(e.row, e.col).bg
-        let roles = [p.hover, tokenHexOf(dtColorsUiSurfacePrimaryTertiaryHover, m.mode)]
-        if got notin roles or contrastRatio(got, covered) < PopupGroundMinContrast:
-          result.add "the popup is on " & got & ", " &
-                     formatFloat(contrastRatio(got, covered), ffDecimal, 2) &
-                     ":1 off what it covers (" & covered & "), not a surface role at least " &
-                     formatFloat(PopupGroundMinContrast, ffDecimal, 2) & ":1 off it"
     # Auto-switch on: its dot in the action border role in both modes
     # (`.ah-inbox-auto-on::before`), the mark two cells before the label.
     for e in view.all("auto-switch"):
@@ -1343,19 +1376,85 @@ suite "CTF-P1b: the round-3 checks can fail":
       ck cutGapProblems(m).join(" ").contains("is cut 1 cell(s) before 'x")
       m.dispose()
 
-  test "a popup on the card over a panel, where the card is too near it, is reported":
-    # The final visual review's caveat: the card is 1.12:1 off Light's panel
-    # (1.03:1 in Dark). Over the window it stays on the card in Light.
-    for mode in Modes:
-      let m = mountStory(storyOf("agent-harbor-initiative-tabs", PopupOverPanelFixture), 180, 56, mode)
-      ck styleProblems(m, m.gridLook()).len == 0
-      let e = m.view.first("popup")
-      ck not e.isNil
-      m.canvas.grid.restyle(e.row, e.col, e.width, proc(s: CellStyle): CellStyle =
-        result = s
-        result.bg = tone(ahPalette(mode)).menu)
-      ck styleProblems(m, m.gridLook()).join(" ").contains("off what it covers")
-      m.dispose()
+  # Every surface dropped from the caption bar, over the window and over a
+  # panel: the popup, the session strip's and the initiative bar's overflow
+  # menus, and the sessions-elsewhere menu (two lines an item on a stacked
+  # bar). `overflow-40` has no story with its menu open over the window; it
+  # is opened here.
+  const DroppedCases = [
+    ("agent-harbor-initiative-tabs", "popup", false),
+    ("agent-harbor-initiative-tabs", PopupOverPanelFixture, false),
+    ("agent-harbor-session-tabs", "single-line-active-late", false),
+    ("agent-harbor-session-tabs", SessionMenuOverPanelFixture, false),
+    ("agent-harbor-initiative-tabs", "elsewhere", false),
+    ("agent-harbor-initiative-tabs", ElsewhereOverPanelFixture, false),
+    ("agent-harbor-initiative-tabs", "overflow-40", true),
+    ("agent-harbor-initiative-tabs", OverflowMenuOverPanelFixture, false)]
+
+  proc mountDropped(family, fixture: string; openOverflow: bool; cols: int;
+                    mode: DesignMode): AhTuiMount =
+    result = mountStory(storyOf(family, fixture), cols, 56, mode)
+    if openOverflow:
+      result.initiativeTabs.overflowOpen.val = true
+      result.draw()
+
+  proc droppedOf(m: AhTuiMount): seq[AhNode] =
+    m.view.all("popup") & m.view.all("menu")
+
+  test "the popup and every menu are on a ground clear of what they cover":
+    # The final visual review's caveat, then its open question: on the card
+    # the popup and the menus were 1.12:1 off Light's panel and 1.03:1 off
+    # Dark's (1.14:1 off Dark's window); the elsewhere menu's Light stripe
+    # was the panel's own ground.
+    var missing, problems: seq[string]
+    for (family, fixture, openOverflow) in DroppedCases:
+      for (_, cols, _) in TuiSizes:
+        for mode in Modes:
+          let m = mountDropped(family, fixture, openOverflow, cols, mode)
+          let at = family & "/" & fixture & " " & $cols & " " & themeOf(mode)
+          if m.droppedOf.len == 0: missing.add at
+          for problem in droppedGroundProblems(m, m.gridLook(), m.rows, ahPalette(mode),
+                                               tone(ahPalette(mode))):
+            problems.add at & ": " & problem
+          m.dispose()
+    if missing.len > 0: echo "  nothing dropped in:\n    " & missing.join("\n    ")
+    if problems.len > 0: echo "  " & problems.join("\n  ")
+    ck missing.len == 0
+    ck problems.len == 0
+
+  test "a popup or menu on what it covers, or striped, is reported":
+    # Two controls on every case: the whole surface repainted with the
+    # ground it covers (1.00:1), and one cell of its last checked row with
+    # another surface role (a stripe, or the card where it is too near).
+    var unreported: seq[string]
+    for (family, fixture, openOverflow) in DroppedCases:
+      for (_, cols, _) in TuiSizes:
+        for mode in Modes:
+          let p = ahPalette(mode)
+          let t = tone(p)
+          let covered = if hasPanelUnderCaption(family, fixture): t.body else: t.frame
+          let at = family & "/" & fixture & " " & $cols & " " & themeOf(mode)
+          for spoil in ["covered", "stripe"]:
+            let m = mountDropped(family, fixture, openOverflow, cols, mode)
+            for e in m.droppedOf:
+              let last = if e.attr("popup").len > 0: e.row
+                         else: min(m.rows, e.row + max(1, e.height)) - 1
+              let first = if spoil == "covered": e.row else: last
+              let ground = m.canvas.bgAt(last, e.col)
+              let other = if spoil == "covered": covered
+                          elif ground == t.menu: p.hover else: t.menu
+              for r in first .. last:
+                let (from0, width) = if spoil == "covered": (e.col, e.width)
+                                     else: (e.col + e.width - 1, 1)
+                m.canvas.grid.restyle(r, from0, width, proc(s: CellStyle): CellStyle =
+                  result = s
+                  result.bg = other)
+            let found = droppedGroundProblems(m, m.gridLook(), m.rows, p, t)
+            if not found.join(" ").contains("off what it covers"):
+              unreported.add at & " (" & spoil & ")"
+            m.dispose()
+    if unreported.len > 0: echo "  not reported:\n    " & unreported.join("\n    ")
+    ck unreported.len == 0
 
   test "Retry on the panel's secondary surface is reported":
     let m = mountStory(storyOf("agent-harbor-fleet", "error"), 180, 56, dmDark)

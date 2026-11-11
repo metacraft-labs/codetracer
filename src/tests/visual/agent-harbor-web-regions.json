@@ -3791,6 +3791,378 @@
         }
       }
     },
+    "agent-harbor-initiative-tabs-elsewhere-over-panel-laptop-dark": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 1440,
+          "h": 34
+        },
+        "active-tab": {
+          "x": 0,
+          "y": 6,
+          "w": 322.53125,
+          "h": 26,
+          "fill": "#3c3c3c"
+        },
+        "overflow": {
+          "x": 958.765625,
+          "y": 7,
+          "w": 28.4375,
+          "h": 24
+        },
+        "add": {
+          "x": 995.203125,
+          "y": 6,
+          "w": 26,
+          "h": 26
+        },
+        "controls": {
+          "x": 1021.203125,
+          "y": 6,
+          "w": 410.796875,
+          "h": 26
+        },
+        "menu": {
+          "x": 582.203125,
+          "y": 37,
+          "w": 608,
+          "h": 262
+        },
+        "menu-item-first": {
+          "x": 587.203125,
+          "y": 42,
+          "w": 598,
+          "h": 28,
+          "index": 0
+        },
+        "menu-item-last": {
+          "x": 587.203125,
+          "y": 266,
+          "w": 598,
+          "h": 28,
+          "index": 8
+        },
+        "inbox-position": {
+          "x": 1221.015625,
+          "y": 10,
+          "w": 72,
+          "h": 18
+        },
+        "bar-tab-first": {
+          "x": 326.53125,
+          "y": 6,
+          "w": 256,
+          "h": 26,
+          "index": 0
+        },
+        "bar-tab-last": {
+          "x": 764.59375,
+          "y": 6,
+          "w": 190.171875,
+          "h": 26,
+          "index": 2
+        },
+        "bar-active-tab": {
+          "x": 0,
+          "y": 6,
+          "w": 322.53125,
+          "h": 26
+        },
+        "bar-overflow": {
+          "x": 958.765625,
+          "y": 7,
+          "w": 28.4375,
+          "h": 24
+        },
+        "bar-add": {
+          "x": 995.203125,
+          "y": 6,
+          "w": 26,
+          "h": 26
+        },
+        "caption": {
+          "x": 0,
+          "y": 0,
+          "w": 1440,
+          "h": 34
+        }
+      }
+    },
+    "agent-harbor-initiative-tabs-elsewhere-over-panel-laptop-light": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 1440,
+          "h": 34
+        },
+        "active-tab": {
+          "x": 0,
+          "y": 6,
+          "w": 322.53125,
+          "h": 26,
+          "fill": "#b5ae9f"
+        },
+        "overflow": {
+          "x": 958.765625,
+          "y": 7,
+          "w": 28.4375,
+          "h": 24
+        },
+        "add": {
+          "x": 995.203125,
+          "y": 6,
+          "w": 26,
+          "h": 26
+        },
+        "controls": {
+          "x": 1021.203125,
+          "y": 6,
+          "w": 410.796875,
+          "h": 26
+        },
+        "menu": {
+          "x": 582.203125,
+          "y": 37,
+          "w": 608,
+          "h": 262
+        },
+        "menu-item-first": {
+          "x": 587.203125,
+          "y": 42,
+          "w": 598,
+          "h": 28,
+          "index": 0
+        },
+        "menu-item-last": {
+          "x": 587.203125,
+          "y": 266,
+          "w": 598,
+          "h": 28,
+          "index": 8
+        },
+        "inbox-position": {
+          "x": 1221.015625,
+          "y": 10,
+          "w": 72,
+          "h": 18
+        },
+        "bar-tab-first": {
+          "x": 326.53125,
+          "y": 6,
+          "w": 256,
+          "h": 26,
+          "index": 0
+        },
+        "bar-tab-last": {
+          "x": 764.59375,
+          "y": 6,
+          "w": 190.171875,
+          "h": 26,
+          "index": 2
+        },
+        "bar-active-tab": {
+          "x": 0,
+          "y": 6,
+          "w": 322.53125,
+          "h": 26
+        },
+        "bar-overflow": {
+          "x": 958.765625,
+          "y": 7,
+          "w": 28.4375,
+          "h": 24
+        },
+        "bar-add": {
+          "x": 995.203125,
+          "y": 6,
+          "w": 26,
+          "h": 26
+        },
+        "caption": {
+          "x": 0,
+          "y": 0,
+          "w": 1440,
+          "h": 34
+        }
+      }
+    },
+    "agent-harbor-initiative-tabs-elsewhere-over-panel-sidebar-dark": {
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 68
+        },
+        "active-tab": {
+          "x": 0,
+          "y": 6,
+          "w": 264,
+          "h": 26,
+          "fill": "#3c3c3c"
+        },
+        "overflow": {
+          "x": 268,
+          "y": 7,
+          "w": 42.9375,
+          "h": 24
+        },
+        "add": {
+          "x": 318.9375,
+          "y": 6,
+          "w": 26,
+          "h": 26
+        },
+        "controls": {
+          "x": 0,
+          "y": 36,
+          "w": 352,
+          "h": 26
+        },
+        "menu": {
+          "x": 0,
+          "y": 67,
+          "w": 344,
+          "h": 451
+        },
+        "menu-item-first": {
+          "x": 5,
+          "y": 72,
+          "w": 334,
+          "h": 49,
+          "index": 0
+        },
+        "menu-item-last": {
+          "x": 5,
+          "y": 464,
+          "w": 334,
+          "h": 49,
+          "index": 8
+        },
+        "bar-active-tab": {
+          "x": 0,
+          "y": 6,
+          "w": 264,
+          "h": 26
+        },
+        "bar-overflow": {
+          "x": 268,
+          "y": 7,
+          "w": 42.9375,
+          "h": 24
+        },
+        "bar-add": {
+          "x": 318.9375,
+          "y": 6,
+          "w": 26,
+          "h": 26
+        },
+        "caption": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 68
+        }
+      }
+    },
+    "agent-harbor-initiative-tabs-elsewhere-over-panel-sidebar-light": {
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 68
+        },
+        "active-tab": {
+          "x": 0,
+          "y": 6,
+          "w": 264,
+          "h": 26,
+          "fill": "#b5ae9f"
+        },
+        "overflow": {
+          "x": 268,
+          "y": 7,
+          "w": 42.9375,
+          "h": 24
+        },
+        "add": {
+          "x": 318.9375,
+          "y": 6,
+          "w": 26,
+          "h": 26
+        },
+        "controls": {
+          "x": 0,
+          "y": 36,
+          "w": 352,
+          "h": 26
+        },
+        "menu": {
+          "x": 0,
+          "y": 67,
+          "w": 344,
+          "h": 451
+        },
+        "menu-item-first": {
+          "x": 5,
+          "y": 72,
+          "w": 334,
+          "h": 49,
+          "index": 0
+        },
+        "menu-item-last": {
+          "x": 5,
+          "y": 464,
+          "w": 334,
+          "h": 49,
+          "index": 8
+        },
+        "bar-active-tab": {
+          "x": 0,
+          "y": 6,
+          "w": 264,
+          "h": 26
+        },
+        "bar-overflow": {
+          "x": 268,
+          "y": 7,
+          "w": 42.9375,
+          "h": 24
+        },
+        "bar-add": {
+          "x": 318.9375,
+          "y": 6,
+          "w": 26,
+          "h": 26
+        },
+        "caption": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 68
+        }
+      }
+    },
     "agent-harbor-initiative-tabs-elsewhere-sidebar-dark": {
       "viewport": {
         "width": 360,
@@ -5470,6 +5842,378 @@
           "y": 0,
           "w": 1440,
           "h": 34
+        }
+      }
+    },
+    "agent-harbor-initiative-tabs-overflow-menu-over-panel-laptop-dark": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 1440,
+          "h": 34
+        },
+        "active-tab": {
+          "x": 0,
+          "y": 6,
+          "w": 312.3125,
+          "h": 26,
+          "fill": "#3c3c3c"
+        },
+        "overflow": {
+          "x": 937.59375,
+          "y": 7,
+          "w": 42.703125,
+          "h": 24
+        },
+        "add": {
+          "x": 988.296875,
+          "y": 6,
+          "w": 26,
+          "h": 26
+        },
+        "controls": {
+          "x": 1014.3125,
+          "y": 6,
+          "w": 417.6875,
+          "h": 26
+        },
+        "menu": {
+          "x": 1115.859375,
+          "y": 40,
+          "w": 312.140625,
+          "h": 94
+        },
+        "menu-item-first": {
+          "x": 1120.859375,
+          "y": 45,
+          "w": 302.140625,
+          "h": 28,
+          "index": 0
+        },
+        "menu-item-last": {
+          "x": 1120.859375,
+          "y": 101,
+          "w": 302.140625,
+          "h": 28,
+          "index": 2
+        },
+        "inbox-position": {
+          "x": 1221.015625,
+          "y": 10,
+          "w": 72,
+          "h": 18
+        },
+        "bar-tab-first": {
+          "x": 316.3125,
+          "y": 6,
+          "w": 256,
+          "h": 26,
+          "index": 0
+        },
+        "bar-tab-last": {
+          "x": 749.171875,
+          "y": 6,
+          "w": 184.421875,
+          "h": 26,
+          "index": 2
+        },
+        "bar-active-tab": {
+          "x": 0,
+          "y": 6,
+          "w": 312.3125,
+          "h": 26
+        },
+        "bar-overflow": {
+          "x": 937.59375,
+          "y": 7,
+          "w": 42.703125,
+          "h": 24
+        },
+        "bar-add": {
+          "x": 988.296875,
+          "y": 6,
+          "w": 26,
+          "h": 26
+        },
+        "caption": {
+          "x": 0,
+          "y": 0,
+          "w": 1440,
+          "h": 34
+        }
+      }
+    },
+    "agent-harbor-initiative-tabs-overflow-menu-over-panel-laptop-light": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 1440,
+          "h": 34
+        },
+        "active-tab": {
+          "x": 0,
+          "y": 6,
+          "w": 312.3125,
+          "h": 26,
+          "fill": "#b5ae9f"
+        },
+        "overflow": {
+          "x": 937.59375,
+          "y": 7,
+          "w": 42.703125,
+          "h": 24
+        },
+        "add": {
+          "x": 988.296875,
+          "y": 6,
+          "w": 26,
+          "h": 26
+        },
+        "controls": {
+          "x": 1014.3125,
+          "y": 6,
+          "w": 417.6875,
+          "h": 26
+        },
+        "menu": {
+          "x": 1115.859375,
+          "y": 40,
+          "w": 312.140625,
+          "h": 94
+        },
+        "menu-item-first": {
+          "x": 1120.859375,
+          "y": 45,
+          "w": 302.140625,
+          "h": 28,
+          "index": 0
+        },
+        "menu-item-last": {
+          "x": 1120.859375,
+          "y": 101,
+          "w": 302.140625,
+          "h": 28,
+          "index": 2
+        },
+        "inbox-position": {
+          "x": 1221.015625,
+          "y": 10,
+          "w": 72,
+          "h": 18
+        },
+        "bar-tab-first": {
+          "x": 316.3125,
+          "y": 6,
+          "w": 256,
+          "h": 26,
+          "index": 0
+        },
+        "bar-tab-last": {
+          "x": 749.171875,
+          "y": 6,
+          "w": 184.421875,
+          "h": 26,
+          "index": 2
+        },
+        "bar-active-tab": {
+          "x": 0,
+          "y": 6,
+          "w": 312.3125,
+          "h": 26
+        },
+        "bar-overflow": {
+          "x": 937.59375,
+          "y": 7,
+          "w": 42.703125,
+          "h": 24
+        },
+        "bar-add": {
+          "x": 988.296875,
+          "y": 6,
+          "w": 26,
+          "h": 26
+        },
+        "caption": {
+          "x": 0,
+          "y": 0,
+          "w": 1440,
+          "h": 34
+        }
+      }
+    },
+    "agent-harbor-initiative-tabs-overflow-menu-over-panel-sidebar-dark": {
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 68
+        },
+        "active-tab": {
+          "x": 0,
+          "y": 6,
+          "w": 264,
+          "h": 26,
+          "fill": "#3c3c3c"
+        },
+        "overflow": {
+          "x": 268,
+          "y": 7,
+          "w": 42.796875,
+          "h": 24
+        },
+        "add": {
+          "x": 318.796875,
+          "y": 6,
+          "w": 26,
+          "h": 26
+        },
+        "controls": {
+          "x": 0,
+          "y": 36,
+          "w": 352,
+          "h": 26
+        },
+        "menu": {
+          "x": 16.8125,
+          "y": 40,
+          "w": 331.1875,
+          "h": 178
+        },
+        "menu-item-first": {
+          "x": 21.8125,
+          "y": 45,
+          "w": 321.1875,
+          "h": 28,
+          "index": 0
+        },
+        "menu-item-last": {
+          "x": 21.8125,
+          "y": 185,
+          "w": 321.1875,
+          "h": 28,
+          "index": 5
+        },
+        "bar-active-tab": {
+          "x": 0,
+          "y": 6,
+          "w": 264,
+          "h": 26
+        },
+        "bar-overflow": {
+          "x": 268,
+          "y": 7,
+          "w": 42.796875,
+          "h": 24
+        },
+        "bar-add": {
+          "x": 318.796875,
+          "y": 6,
+          "w": 26,
+          "h": 26
+        },
+        "caption": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 68
+        }
+      }
+    },
+    "agent-harbor-initiative-tabs-overflow-menu-over-panel-sidebar-light": {
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 68
+        },
+        "active-tab": {
+          "x": 0,
+          "y": 6,
+          "w": 264,
+          "h": 26,
+          "fill": "#b5ae9f"
+        },
+        "overflow": {
+          "x": 268,
+          "y": 7,
+          "w": 42.796875,
+          "h": 24
+        },
+        "add": {
+          "x": 318.796875,
+          "y": 6,
+          "w": 26,
+          "h": 26
+        },
+        "controls": {
+          "x": 0,
+          "y": 36,
+          "w": 352,
+          "h": 26
+        },
+        "menu": {
+          "x": 16.8125,
+          "y": 40,
+          "w": 331.1875,
+          "h": 178
+        },
+        "menu-item-first": {
+          "x": 21.8125,
+          "y": 45,
+          "w": 321.1875,
+          "h": 28,
+          "index": 0
+        },
+        "menu-item-last": {
+          "x": 21.8125,
+          "y": 185,
+          "w": 321.1875,
+          "h": 28,
+          "index": 5
+        },
+        "bar-active-tab": {
+          "x": 0,
+          "y": 6,
+          "w": 264,
+          "h": 26
+        },
+        "bar-overflow": {
+          "x": 268,
+          "y": 7,
+          "w": 42.796875,
+          "h": 24
+        },
+        "bar-add": {
+          "x": 318.796875,
+          "y": 6,
+          "w": 26,
+          "h": 26
+        },
+        "caption": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 68
         }
       }
     },
@@ -12180,6 +12924,270 @@
           "y": 6,
           "w": 26,
           "h": 26
+        },
+        "caption": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 34
+        }
+      }
+    },
+    "agent-harbor-session-tabs-menu-over-panel-laptop-dark": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 1440,
+          "h": 34
+        },
+        "active-tab": {
+          "x": 1123.78125,
+          "y": 6,
+          "w": 224,
+          "h": 26,
+          "fill": "#3c3c3c"
+        },
+        "overflow": {
+          "x": 1351.78125,
+          "y": 6,
+          "w": 42.234375,
+          "h": 26
+        },
+        "add": {
+          "x": 1406.015625,
+          "y": 6,
+          "w": 26,
+          "h": 26
+        },
+        "menu": {
+          "x": 1022.25,
+          "y": 40,
+          "w": 405.75,
+          "h": 206
+        },
+        "menu-item-first": {
+          "x": 1027.25,
+          "y": 45,
+          "w": 395.75,
+          "h": 28,
+          "index": 0
+        },
+        "menu-item-last": {
+          "x": 1027.25,
+          "y": 213,
+          "w": 395.75,
+          "h": 28,
+          "index": 6
+        },
+        "inactive-tab-first": {
+          "x": 0,
+          "y": 6,
+          "w": 175.609375,
+          "h": 26,
+          "index": 0
+        },
+        "inactive-tab-last": {
+          "x": 930.78125,
+          "y": 6,
+          "w": 189,
+          "h": 26,
+          "index": 5
+        },
+        "caption": {
+          "x": 0,
+          "y": 0,
+          "w": 1440,
+          "h": 34
+        }
+      }
+    },
+    "agent-harbor-session-tabs-menu-over-panel-laptop-light": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 1440,
+          "h": 34
+        },
+        "active-tab": {
+          "x": 1123.78125,
+          "y": 6,
+          "w": 224,
+          "h": 26,
+          "fill": "#b5ae9f"
+        },
+        "overflow": {
+          "x": 1351.78125,
+          "y": 6,
+          "w": 42.234375,
+          "h": 26
+        },
+        "add": {
+          "x": 1406.015625,
+          "y": 6,
+          "w": 26,
+          "h": 26
+        },
+        "menu": {
+          "x": 1022.25,
+          "y": 40,
+          "w": 405.75,
+          "h": 206
+        },
+        "menu-item-first": {
+          "x": 1027.25,
+          "y": 45,
+          "w": 395.75,
+          "h": 28,
+          "index": 0
+        },
+        "menu-item-last": {
+          "x": 1027.25,
+          "y": 213,
+          "w": 395.75,
+          "h": 28,
+          "index": 6
+        },
+        "inactive-tab-first": {
+          "x": 0,
+          "y": 6,
+          "w": 175.609375,
+          "h": 26,
+          "index": 0
+        },
+        "inactive-tab-last": {
+          "x": 930.78125,
+          "y": 6,
+          "w": 189,
+          "h": 26,
+          "index": 5
+        },
+        "caption": {
+          "x": 0,
+          "y": 0,
+          "w": 1440,
+          "h": 34
+        }
+      }
+    },
+    "agent-harbor-session-tabs-menu-over-panel-sidebar-dark": {
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 34
+        },
+        "active-tab": {
+          "x": 0,
+          "y": 6,
+          "w": 224,
+          "h": 26,
+          "fill": "#3c3c3c"
+        },
+        "overflow": {
+          "x": 228,
+          "y": 6,
+          "w": 47.6875,
+          "h": 26
+        },
+        "add": {
+          "x": 287.6875,
+          "y": 6,
+          "w": 26,
+          "h": 26
+        },
+        "menu": {
+          "x": 0,
+          "y": 40,
+          "w": 348,
+          "h": 374
+        },
+        "menu-item-first": {
+          "x": 5,
+          "y": 45,
+          "w": 338,
+          "h": 28,
+          "index": 0
+        },
+        "menu-item-last": {
+          "x": 5,
+          "y": 381,
+          "w": 338,
+          "h": 28,
+          "index": 12
+        },
+        "caption": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 34
+        }
+      }
+    },
+    "agent-harbor-session-tabs-menu-over-panel-sidebar-light": {
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 34
+        },
+        "active-tab": {
+          "x": 0,
+          "y": 6,
+          "w": 224,
+          "h": 26,
+          "fill": "#b5ae9f"
+        },
+        "overflow": {
+          "x": 228,
+          "y": 6,
+          "w": 47.6875,
+          "h": 26
+        },
+        "add": {
+          "x": 287.6875,
+          "y": 6,
+          "w": 26,
+          "h": 26
+        },
+        "menu": {
+          "x": 0,
+          "y": 40,
+          "w": 348,
+          "h": 374
+        },
+        "menu-item-first": {
+          "x": 5,
+          "y": 45,
+          "w": 338,
+          "h": 28,
+          "index": 0
+        },
+        "menu-item-last": {
+          "x": 5,
+          "y": 381,
+          "w": 338,
+          "h": 28,
+          "index": 12
         },
         "caption": {
           "x": 0,

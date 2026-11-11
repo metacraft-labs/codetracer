@@ -579,7 +579,6 @@ proc drawInitiativeTabBar*(r: GpuiRenderer; host: GpuiElement;
       r.setStyle(chip, "margin-right", $(BarChipGapPx - BarGapPx) & "px")
       r.tag(chip, "bar-overflow", $overflow.len)
       r.appendChild(line, chip)
-      x += 28 + BarChipGapPx
     if vm.elsewhereCount > 0:
       r.appendChild(controls, r.drawElsewhere(p, vm))
       # Where the elsewhere control's anchor ends (the chip and its 4px
@@ -635,8 +634,10 @@ proc drawInitiativeTabBar*(r: GpuiRenderer; host: GpuiElement;
                                          if tabs[i].progressText.len > 0: @[tabs[i].progressText]
                                          else: @[], tabular = true))
     let menuW = clamp(widest, MenuMinPx, max(MenuMinPx, widthPx - 12))
-    let menu = r.drawMenu(p, tabBottom + MenuGapPx,
-                          max(0, min(x - 28 - BarChipGapPx, widthPx - 12 - menuW)), menuW,
+    # Right-aligned under the bar, as the web lays it out: the menu is the
+    # strip's `session-tab-overflow-menu` (`right: 0.25em` in the bar, which
+    # ends 8px short of the window), not anchored at the `+N` chip.
+    let menu = r.drawMenu(p, tabBottom + MenuGapPx, max(0, widthPx - 12 - menuW), menuW,
                           "overflow")
     for i in overflow:
       let tab = tabs[i]

@@ -1814,10 +1814,22 @@ proc mountAgentHarborVM[T](container: isonim_dom.Element;
     if rootDisposer != nil: rootDisposer()
     container.innerHTML = ""
 
+proc addAgentHarborPanelUnder(container: isonim_dom.Element; surface, fixture: string) =
+  ## The panel under the caption bar where the story asks for one
+  ## (`hasPanelUnderCaption`): the caption is fixed at the window's top, so
+  ## the panel fills the window behind it (`.ah-story-panel-under`) and shows
+  ## below it, where the bar's popup and menus drop.
+  if hasPanelUnderCaption(surface, fixture):
+    let panel = isonim_dom.createElement(isonim_dom.document, cstring"div")
+    isonim_dom.setAttribute(panel, cstring"class", cstring"ah-story-panel-under")
+    discard isonim_dom.appendChild(isonim_dom.Node(container), isonim_dom.Node(panel))
+
 proc mountAgentHarborSessionTabs(container: isonim_dom.Element;
                                  fixture: string): DisposeProc =
   ## The strip as CodeTracer draws it: in the caption bar (`#menu`), above an
-  ## empty working area. Several lines let the bar grow.
+  ## empty working area (or a panel, `addAgentHarborPanelUnder`). Several
+  ## lines let the bar grow.
+  addAgentHarborPanelUnder(container, "agent-harbor-session-tabs", fixture)
   let caption = isonim_dom.createElement(isonim_dom.document, cstring"div")
   isonim_dom.setAttribute(caption, cstring"id", cstring"menu")
   isonim_dom.setAttribute(caption, cstring"class", cstring(
@@ -1832,13 +1844,8 @@ proc mountAgentHarborSessionTabs(container: isonim_dom.Element;
 proc mountAgentHarborInitiativeTabs(container: isonim_dom.Element;
                                     fixture: string): DisposeProc =
   ## The tab bar with initiatives as tabs, in the caption bar; with a panel
-  ## under the bar where the story asks for one (`hasPanelUnderCaption`):
-  ## the caption is fixed at the window's top, so the panel fills the
-  ## window behind it (`.ah-story-panel-under`) and shows below it.
-  if hasPanelUnderCaption("agent-harbor-initiative-tabs", fixture):
-    let panel = isonim_dom.createElement(isonim_dom.document, cstring"div")
-    isonim_dom.setAttribute(panel, cstring"class", cstring"ah-story-panel-under")
-    discard isonim_dom.appendChild(isonim_dom.Node(container), isonim_dom.Node(panel))
+  ## under the bar where the story asks for one (`addAgentHarborPanelUnder`).
+  addAgentHarborPanelUnder(container, "agent-harbor-initiative-tabs", fixture)
   let caption = isonim_dom.createElement(isonim_dom.document, cstring"div")
   isonim_dom.setAttribute(caption, cstring"id", cstring"menu")
   isonim_dom.setAttribute(caption, cstring"class", cstring"ah-tab-caption")

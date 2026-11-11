@@ -96,7 +96,12 @@ import nim_agents_isonim_viewmodels/agent_harbor/[session_tabs_vm, initiatives_v
 export session_tabs_vm, initiatives_vm, initiative_progress_vm
 
 const
-  sessionTabsFixtures* = ["single-line", "single-line-active-late", "multi-line",
+  SessionMenuOverPanelFixture* = "menu-over-panel"
+    ## The strip's `single-line-active-late` state (its overflow menu open)
+    ## with a panel under the caption bar, as in the shell, so the menu drops
+    ## over a panel's ground rather than the window's.
+  sessionTabsFixtures* = ["single-line", "single-line-active-late",
+    SessionMenuOverPanelFixture, "multi-line",
     "single-line-40", "multi-line-40", "long-names", "needs-input-wins",
     "focused-initiative", "empty", "loading", "error"]
   sessionListFixtures* = ["sidebar", "sidebar-ungrouped", "sidebar-collapsed",
@@ -136,7 +141,8 @@ proc sessionsStorySource*(fixture: string;
                          "unreachable server")
   of "empty", "unknown": newSnapshotDataSource(FleetSnapshot(sourceLabel: "empty server"),
                                                "empty server")
-  of "single-line-40", "multi-line-40", "sidebar-40", "docked-40", "overflow-40":
+  of "single-line-40", "multi-line-40", "sidebar-40", "docked-40", "overflow-40",
+     "overflow-menu-over-panel":
     invented(40, 5)
   of "long-names":
     # Four sessions over five initiatives: the last initiative has none.
@@ -169,7 +175,7 @@ proc createSessionTabsStoryVM*(fixture: string): SessionTabStripVM =
   result = newSessionTabStripVM(source, mode, policy)
   result.load()
   case fixture
-  of "single-line-active-late":
+  of "single-line-active-late", SessionMenuOverPanelFixture:
     let tabs = result.tabs
     if tabs.len > 0: discard result.activate(tabs[^2].id)
     result.overflowOpen.val = true
@@ -275,15 +281,28 @@ const PopupOverPanelFixture* = "popup-over-panel"
   ## as in the shell, so the popup opens over a panel's ground rather than
   ## the window's.
 
-const initiativeTabsFixtures* = ["tabs", "popup", PopupOverPanelFixture, "elsewhere", "next",
-  "auto-switch", "recordings-many", "overflow-40", "long-names", "real", "empty", "loading",
-  "error"]
+const ElsewhereOverPanelFixture* = "elsewhere-over-panel"
+  ## The `elsewhere` state (the sessions-started-elsewhere menu open) over
+  ## a panel under the caption bar.
+
+const OverflowMenuOverPanelFixture* = "overflow-menu-over-panel"
+  ## The invented `overflow-40` set with the `+N` overflow menu open, over a
+  ## panel under the caption bar.
+
+const initiativeTabsFixtures* = ["tabs", "popup", PopupOverPanelFixture, "elsewhere",
+  ElsewhereOverPanelFixture, "next", "auto-switch", "recordings-many", "overflow-40",
+  OverflowMenuOverPanelFixture, "long-names", "real", "empty", "loading", "error"]
 
 func hasPanelUnderCaption*(surface, fixture: string): bool =
   ## Whether a story draws a panel under the caption bar (its whole window
-  ## below the bar on the panel's ground): each front-end's story host draws
-  ## it, the web's, GPUI's and the terminal's.
-  surface == "agent-harbor-initiative-tabs" and fixture == PopupOverPanelFixture
+  ## below the bar on the panel's ground), so the bar's popup or menu drops
+  ## over a panel: each front-end's story host draws it, the web's, GPUI's
+  ## and the terminal's.
+  case surface
+  of "agent-harbor-initiative-tabs":
+    fixture in [PopupOverPanelFixture, ElsewhereOverPanelFixture, OverflowMenuOverPanelFixture]
+  of "agent-harbor-session-tabs": fixture == SessionMenuOverPanelFixture
+  else: false
 
 proc inventedRecordings(count: int): seq[RecordingEntry] =
   ## More replays than any capture holds, one still loading, one that
@@ -302,10 +321,12 @@ proc createInitiativeTabsStoryVM*(fixture: string): InitiativeTabStripVM =
   ## The tab bar with one tab per initiative: `tabs` (the first active, with
   ## its loaded recordings), `popup` (its progress popup shown; with a panel
   ## under the bar, `popup-over-panel`), `elsewhere`
-  ## (the sessions started elsewhere, listed), `next` (Next taken: the first
+  ## (the sessions started elsewhere, listed; over a panel,
+  ## `elsewhere-over-panel`), `next` (Next taken: the first
   ## waiting session in view), `auto-switch` (auto-switch on and the
   ## instruction delivered: the view moved on), `recordings-many`, and the
-  ## invented `overflow-40`, `long-names`, and `empty`, `loading`, `error`.
+  ## invented `overflow-40` (its `+N` menu open over a panel,
+  ## `overflow-menu-over-panel`), `long-names`, and `empty`, `loading`, `error`.
   if fixture notin initiativeTabsFixtures:
     raise newException(ValueError, "no initiative tab bar story fixture named " & fixture)
   let source = sessionsStorySource(fixture, endpoint = "")
@@ -328,7 +349,8 @@ proc createInitiativeTabsStoryVM*(fixture: string): InitiativeTabStripVM =
     result.setRecordings(first, recordings, recordings[0].id)
   case fixture
   of "popup", PopupOverPanelFixture: result.popupId.val = first
-  of "elsewhere": result.elsewhereOpen.val = true
+  of "elsewhere", ElsewhereOverPanelFixture: result.elsewhereOpen.val = true
+  of OverflowMenuOverPanelFixture: result.overflowOpen.val = true
   of "next": discard result.stepInbox(1)
   of "auto-switch":
     result.autoSwitch.val = true

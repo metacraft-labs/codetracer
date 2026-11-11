@@ -162,10 +162,14 @@ proc drawPopup(c: var AhCanvas; parent: AhNode; popup: InitiativePopup;
   var height = 1 + 1 + 1 + legendRows + (if popup.currentMilestone.len > 0: 1 else: 0) +
                summary.len + 1 + popup.sessions.len + 1
   # What the popup covers (the window, or a panel below the bar): its ground
-  # steps at least 1.3:1 off it (`popupGround`), and the rows the bound
-  # over-counts are given back to it.
-  let covered = c.bgAt(row, col)
-  c.area("popup", row, col, width, min(height, c.rows - row), popupGround(c.p, covered))
+  # steps at least 1.3:1 off every ground it covers (`dropArea`), and the
+  # rows the bound over-counts are given back to what they were.
+  var covered: seq[seq[string]]
+  for r in row ..< min(row + height, c.rows):
+    var line: seq[string]
+    for k in col ..< min(col + width, c.cols): line.add c.bgAt(r, k)
+    covered.add line
+  discard c.dropArea("popup", row, col, width, min(height, c.rows - row))
   let n = c.node(parent, row, col, width, height, [("popup", popup.id)])
   var r = row + 1
   discard c.mark(n, r, col + 1, c.p.markOf(popup.state))
@@ -205,7 +209,8 @@ proc drawPopup(c: var AhCanvas; parent: AhNode; popup: InitiativePopup;
     if c.areas[a].name == "popup":
       c.areas[a].height = min(height, c.rows - row)
       break
-  if bound > height: c.fill(row + height, col, width, bound - height, covered)
+  for r in row + height ..< min(row + bound, c.rows):
+    for k, bg in covered[r - row]: c.fill(r, col + k, 1, 1, bg)
 
 proc popupHeadingCells(popup: InitiativePopup): int =
   ## The popup's first line whole: an inset, the mark and a space, the
@@ -298,20 +303,17 @@ proc drawElsewhere(c: var AhCanvas; parent: AhNode; vm: InitiativeTabStripVM;
   c.target(row, col, w, 1, proc() = target.elsewhereOpen.val = not target.elsewhereOpen.val)
 
 proc drawElsewhereItem(c: var AhCanvas; menu: AhNode; entry: ElsewhereSession;
-                       stacked: bool; index, third: int; row, col, width: int;
+                       stacked: bool; third: int; row, col, width: int;
                        onClick: proc()): int =
   ## A session started elsewhere: mark, title, its initiative, state and
-  ## origin — in columns, or on two lines in a stacked bar's menu, where
-  ## every other item lies on a stripe (as the fleet's rows) so a
-  ## second line is read with its title, and the origin and state share one
-  ## right-hand column `third` cells wide.
+  ## origin — in columns, or on two lines in a stacked bar's menu, where the
+  ## origin and state share one right-hand column `third` cells wide. The
+  ## caller keeps a blank line of the menu's ground between two stacked
+  ## items, so a second line is read with its title.
   let noInitiative = entry.initiativeTitle.len == 0
   let initiative = if noInitiative: "no initiative" else: entry.initiativeTitle
   let initiativeFg = if noInitiative: c.p.textCaption else: c.p.textLabel
   let height = if stacked: 2 else: 1
-  if stacked and index mod 2 == 1:
-    c.area("menu-item", row, col, width, height,
-           c.tone.stripeOn(c.p, c.tone.menu, besides = c.tone.frame))
   let n = c.node(menu, row, col, width, height, [("menu-item", entry.item.id)])
   c.target(row, col, width, height, onClick)
   discard c.mark(n, row, col + 1, c.p.markOf(entry.item.attention))
@@ -365,7 +367,6 @@ proc drawInitiativeTabBar*(c: var AhCanvas; vm: InitiativeTabStripVM; row, col, 
   var at = col
   var popupCol = -1
   var overflow: seq[int]
-  var chipCol = -1
   # A notice in place of the tabs is the session strip's: tab-shaped on its
   # own quiet ground, "+" directly after it.
   case vm.state.val
@@ -401,7 +402,6 @@ proc drawInitiativeTabBar*(c: var AhCanvas; vm: InitiativeTabStripVM; row, col, 
             tabs[i].kind == stkSession and tabs[i].session.attention == saNeedsInput:
           inc waits
       let target = vm
-      chipCol = at
       at += c.drawOverflowChip(host, row, at, overflow.len, waits, vm.overflowOpen.val,
                                proc() = target.overflowOpen.val = not target.overflowOpen.val) + 1
   c.drawPlus(host, row, at)
@@ -426,7 +426,9 @@ proc drawInitiativeTabBar*(c: var AhCanvas; vm: InitiativeTabStripVM; row, col, 
     for i in overflow:
       widest = max(widest, 3 + widthOf(tabs[i].title) + MenuOriginGap + column + MenuInset)
     let menuW = min(widest, width - 1)
-    let menuCol = max(col, min(chipCol, col + width - 1 - menuW))
+    # Right-aligned under the bar, as the web lays it out (the strip's
+    # overflow menu, `right: 0.25em` in the bar), not anchored at `+N`.
+    let menuCol = max(col, col + width - 1 - menuW)
     # A row of the menu's own ground above and below its items, as the
     # session strip's.
     let menu = c.drawMenu(host, barBelow, menuCol, menuW, overflow.len + 2, "overflow")
@@ -443,19 +445,24 @@ proc drawInitiativeTabBar*(c: var AhCanvas; vm: InitiativeTabStripVM; row, col, 
     let entries = vm.elsewhere
     let menuW = if vm.stacked: width - 2 else: min(ElsewhereMenuCells, width - 2)
     let menuCol = if vm.stacked: col else: max(col, controlsCol + elsewhereCells(vm) - menuW)
-    let per = if vm.stacked: 2 else: 1
-    let menu = c.drawMenu(host, barBelow, menuCol, menuW, entries.len * per, "elsewhere")
+    # A stacked item takes two lines, and a blank line of the menu's ground
+    # parts it from the next: the web keeps no line between a dropdown's
+    # rows, and a stripe under every other item found no pair of grounds
+    # both clear of a Dark panel (see `dropGround`).
+    let height = if vm.stacked: entries.len * 3 - 1 else: entries.len
+    let menu = c.drawMenu(host, barBelow, menuCol, menuW, height, "elsewhere")
     # The stacked menu's right-hand column, one width for every item, so the
     # titles and initiatives are cut at one width.
     var third = 0
     for entry in entries:
       third = max(third, max(widthOf(entry.item.originShort), widthOf(entry.item.statusLabel)))
     var r = barBelow
-    for k, entry in entries:
+    for entry in entries:
       let id = entry.item.id
       let target = vm
-      r += c.drawElsewhereItem(menu, entry, vm.stacked, k, third, r, menuCol, menuW,
+      r += c.drawElsewhereItem(menu, entry, vm.stacked, third, r, menuCol, menuW,
                                proc() = discard target.openSession(id))
+      if vm.stacked: inc r
 
 proc mountInitiativeTabBar*(vm: InitiativeTabStripVM; cols: int) =
   ## Tell the viewmodel the bar's width, in the unit its layout counts.
