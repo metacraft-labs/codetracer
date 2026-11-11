@@ -3,6 +3,7 @@ import { StatusBar } from "../../page-objects/status_bar";
 import { StatePanel } from "../../page-objects/state";
 import { LayoutPage } from "../../page-objects/layout-page";
 import { retry } from "../../lib/retry-helpers";
+import { moveAndSettle } from "../../lib/operation-settled";
 
 // Entry point: first executable line in main() is `let x = 3;` at line 11.
 const ENTRY_LINE = 11;
@@ -107,16 +108,10 @@ test.describe("wasm example — state and navigation", () => {
     // Step forward twice (next) to move past `let x = 3;` and `let y = 4;`
     // so both variables are assigned. Entry is at line 11; after two nexts
     // we should be at line 13 (`let result = add(x, y);`).
+    // Each Next is awaited by the position it moves to (`moveAndSettle`):
+    // `#stable-status` is drawn only while busy, so it cannot say "done".
     for (let i = 0; i < 2; i++) {
-      await layout.clickNextButton();
-      await retry(
-        async () => {
-          const status = ctPage.locator("#stable-status");
-          const className = (await status.getAttribute("class")) ?? "";
-          return className.includes("ready-status");
-        },
-        { maxAttempts: 60, delayMs: 500 },
-      );
+      await moveAndSettle(ctPage, () => layout.clickNextButton());
     }
 
     const statePanel = new StatePanel(ctPage);
@@ -132,15 +127,7 @@ test.describe("wasm example — state and navigation", () => {
     await readyOnEntry(ctPage);
     const statusBar = new StatusBar(ctPage, ctPage.locator("#status-base"));
     const layout = new LayoutPage(ctPage);
-    await layout.clickContinueButton();
-    await retry(
-      async () => {
-        const status = ctPage.locator("#stable-status");
-        const className = (await status.getAttribute("class")) ?? "";
-        return className.includes("ready-status");
-      },
-      { maxAttempts: 60, delayMs: 500 },
-    );
+    await moveAndSettle(ctPage, () => layout.clickContinueButton());
     const newLocation = await statusBar.location();
     expect(newLocation.line).toBeGreaterThanOrEqual(1);
   });
@@ -151,27 +138,13 @@ test.describe("wasm example — state and navigation", () => {
     const initialLocation = await statusBar.location();
     const layout = new LayoutPage(ctPage);
 
-    // First next may stay on the same line (function entry in WASM traces)
-    await layout.clickNextButton();
-    await retry(
-      async () => {
-        const status = ctPage.locator("#stable-status");
-        const className = (await status.getAttribute("class")) ?? "";
-        return className.includes("ready-status");
-      },
-      { maxAttempts: 60, delayMs: 500 },
-    );
+    // First next may stay on the same line (function entry in WASM traces),
+    // but it moves the recording: `moveAndSettle` waits for the position
+    // (line and tick) to change.
+    await moveAndSettle(ctPage, () => layout.clickNextButton());
 
     // Second next should advance to a different line
-    await layout.clickNextButton();
-    await retry(
-      async () => {
-        const status = ctPage.locator("#stable-status");
-        const className = (await status.getAttribute("class")) ?? "";
-        return className.includes("ready-status");
-      },
-      { maxAttempts: 60, delayMs: 500 },
-    );
+    await moveAndSettle(ctPage, () => layout.clickNextButton());
 
     const newLocation = await statusBar.location();
     expect(newLocation.line).toBeGreaterThanOrEqual(1);

@@ -1,3 +1,4 @@
+import { moveAndSettle, statusBusy, waitForNotBusy } from "./operation-settled";
 import type { Locator, Page } from "@playwright/test";
 import { LayoutPage } from "../page-objects/layout-page";
 import { retry } from "./retry-helpers";
@@ -24,37 +25,23 @@ async function clickTabButton(btn: Locator): Promise<void> {
 /**
  * Wait for the backend to settle on its current position.
  *
- * The naive "wait until #stable-status has class `ready-status`" check
- * races against operation dispatch: after clicking a debug button the
- * `InternalNewOperation` event reaches the status component asynchronously,
- * so the status may still read "ready" for a few ms before flipping to
- * "busy". This helper first observes the status flip to "busy" (or a
- * short timeout if the operation completes too quickly) and then waits
- * for it to come back to "ready".
+ * `#stable-status` is drawn only while an operation is in flight (see
+ * `operation-settled.ts`), so "settled" is the bar going idle, not the
+ * element reading `ready-status`. The busy flag reaches the bar
+ * asynchronously after a button press, so this first gives the operation a
+ * moment to show as busy (an operation that completes in <100ms may never
+ * do so), then waits for it to end.
  */
 async function waitForStableReady(
   page: Page,
   maxSeconds = 15,
 ): Promise<void> {
-  const status = page.locator("#stable-status");
-
-  // Best-effort wait for the busy transition. An operation that completes
-  // in <100ms may never flip to busy; in that case we proceed straight
-  // to the ready check.
   for (let i = 0; i < 20; i++) {
-    const className = (await status.getAttribute("class")) ?? "";
-    if (className.includes("busy-status")) break;
-    if (className.includes("ready-status") && i >= 3) break;
+    if (await statusBusy(page)) break;
+    if (i >= 3) break;
     await page.waitForTimeout(50);
   }
-
-  await retry(
-    async () => {
-      const className = (await status.getAttribute("class")) ?? "";
-      return className.includes("ready-status");
-    },
-    { maxAttempts: maxSeconds, delayMs: 1000 },
-  );
+  await waitForNotBusy(page, maxSeconds * 1000);
 }
 
 /**
@@ -170,16 +157,7 @@ export async function assertVariableVisible(
     // Use the layered click helper — under Xvfb the jstree filesystem
     // panel can overlap the debug-toolbar and intercept the pointer
     // event, so we need the same fallback chain as CallTracePane.clickTab.
-    await layout.clickNextButton();
-
-    await retry(
-      async () => {
-        const status = page.locator("#stable-status");
-        const className = (await status.getAttribute("class")) ?? "";
-        return className.includes("ready-status");
-      },
-      { maxAttempts: 60, delayMs: 1000 },
-    );
+    await moveAndSettle(page, () => layout.clickNextButton(), 60_000);
   }
 
   // Open the state pane and look for the variable.
@@ -372,17 +350,9 @@ export async function assertTerminalOutputAfterContinue(
 
   // Use the layered click helper — see notes on assertFlowValueVisible
   // for why a plain click is not sufficient under Xvfb.
-  await layout.clickContinueButton();
-
-  // Wait for the backend to finish processing (status returns to "ready").
-  await retry(
-    async () => {
-      const status = page.locator("#stable-status");
-      const className = (await status.getAttribute("class")) ?? "";
-      return className.includes("ready-status");
-    },
-    { maxAttempts: 120, delayMs: 1000 },
-  );
+  // Wait for the backend to finish processing: the position moves and the
+  // status bar goes idle (`operation-settled.ts`).
+  await moveAndSettle(page, () => layout.clickContinueButton(), 120_000);
 
   // Now check the terminal output.
   const terminalTabs = await layout.terminalTabs();

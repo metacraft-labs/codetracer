@@ -4243,6 +4243,31 @@ proc applySourceRevisionForLocation(self: EditorViewComponent;
     if not self.monacoEditor.isNil:
       self.monacoEditor.setValue(desiredSource)
 
+proc syncCodeStateLine(self: EditorViewComponent; location: types.Location) =
+  ## The Variables pane's code line ("<line> | <source>", `#code-state-line`)
+  ## from the editor that shows the stop's file, when that editor has the
+  ## line.
+  ##
+  ## The State pane fills it on the move itself (`state.
+  ## syncStoreCodeStateLineInto`), from the tab's editors, retrying for 3 s
+  ## while the file's editor is not open yet. On an entry stop the editor can
+  ## open later than that — the first `ct/complete-move` comes before the
+  ## layout opens the file, and a loaded host measured 3.8 s on a Wasm
+  ## recording — and the line stayed empty until the next move. The editor
+  ## is given the move again once it is built (`InternalLastCompleteMove`
+  ## from `register` and `initMonacoForEditor`), with its source loaded, so
+  ## filling the line here does not depend on how long the open took.
+  if self.editorView != ViewSource or location.path != self.name or
+      self.tabInfo.isNil:
+    return
+  let line = location.line
+  let lines = self.tabInfo.sourceLines
+  if line < 1 or line > lines.len:
+    return
+  let store = self.ownPaneStore()
+  if not store.isNil:
+    store.updateCodeStateLine(line, $lines[line - 1])
+
 method onCompleteMove*(self: EditorViewComponent, response: MoveState) {.async.} =
   # ``[NSS-1.64]`` Diagnostic for the noir-space-ship loop-iteration GUI
   # blocker (§5.8).  Both failing tests (lines 278, 393 in
@@ -4284,6 +4309,7 @@ method onCompleteMove*(self: EditorViewComponent, response: MoveState) {.async.}
   duration("complete move")
   self.location = response.location
   await self.applySourceRevisionForLocation(response.location)
+  self.syncCodeStateLine(response.location)
   # cdebug fmt"reset Flow {response.resetFlow}"
 
   if self.editorView == ViewTargetSource and self.data.trace.lang == LangNim and
