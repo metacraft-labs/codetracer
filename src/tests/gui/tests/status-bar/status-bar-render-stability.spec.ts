@@ -52,25 +52,21 @@
  * `Cannot read properties of null (reading 'scroller')` four times on every
  * launch.
  *
- * **Readiness, and why this file does not use `readyOnEntryTest`.**  The
- * shared fixture waits for `.location-path` to be *visible*.  Since
+ * **Readiness, and why this file does not use `readyOnEntryTest`.**  Since
  * `d83de2484` the status-bar designer hides `.location-path` and
- * `#copy-path-image` on purpose ("HIDDEN FOR NOW" in `status_bar.styl`), and
- * whether they come back is a design decision that is still open (codetracer-pm
- * `issues/2026-10-20-ready-on-entry-waits-for-a-location-path-the-status-bar-now-hides-by-design.md`
- * and `issues/2026-10-20-footer-visibility-guard-red-after-ui-design-work.md`).
- * Footer VISIBILITY has its own guards — `footer-visibility-css-guard.spec.ts`
- * and `status-bar-footer-contract.spec.ts` — which stay red as the trackers of
- * that decision.  This file is about render CHURN, which does not depend on
- * whether the path is painted: the element is still rendered, still carries
- * the `path:line#ticks` text, and is still patched or rebuilt like every other
- * node of the shell.  So it reads the two facts the fixture's visibility wait
- * stands for directly (`readyOnEntryWithHiddenPath`): the entry location was
- * reported (`.location-path` attached with non-empty text — it is rendered
- * only once `locationText` is non-empty) and the footer is laid out (the
- * test-certificate readout, the bar's visible right-hand readout under the
- * current design, has a box).  The node-identity case tags that readout too,
- * so in-place patching is proven on a node the user actually sees.
+ * `#copy-path-image` on purpose ("HIDDEN FOR NOW" in `status_bar.styl`,
+ * `docs/UI-Design-Decisions.md` D-05), and on 2026-11-11 the decision was to
+ * keep them hidden.  The shared fixture now waits for the editor's execution
+ * line instead.  This file is about the STATUS BAR's render churn, so it
+ * waits on the bar itself: the hidden element is still rendered, still
+ * carries the `path:line#ticks` text, and is still patched or rebuilt like
+ * every other node of the shell.  `readyOnEntryWithHiddenPath` reads the two
+ * facts this file needs directly: the entry location reached the bar
+ * (`.location-path` attached with non-empty text — it is rendered only once
+ * `locationText` is non-empty) and the bar is laid out (the test-certificate
+ * readout, the bar's visible right-hand readout under the current design, has
+ * a box).  The node-identity case tags that readout too, so in-place patching
+ * is proven on a node the user actually sees.
  *
  * No mocks: a real JavaScript recording opened by the real Electron app.
  */

@@ -2514,59 +2514,67 @@ export function wait(ms: number): Promise<void> {
  */
 export const READY_ON_ENTRY_BUDGET_MS = 30_000;
 
-/** Wait for the entry point to be ready (location path clickable).
+/**
+ * The readiness signal: the editor gutter cell that carries the
+ * execution-pointer arrow.
  *
- * `.location-path` is the status bar's `path:line#ticks` readout.  The
- * frontend renders it only once `StatusBaseModel.locationText` is non-empty
- * (`StatusComponent.statusBaseModel` in `src/frontend/ui/status.nim` fills it
- * from `displayLocation()` — the component's tracked debug location, or the
- * matching C location when a Nim trace is in target-source view), so a
- * *visible* `.location-path` means the session opened a trace, the debugger
- * reported an entry location and the footer is laid out and hit-testable.
- * That is the readiness contract
- * every Electron spec depends on, and it is deliberately a visibility wait
- * rather than an attachment wait: the element is in the DOM with the right
- * `title` long before it has a box, so `state: "attached"` /
- * `toBeAttached()` would report readiness for a status bar that never
- * renders.
+ * `EditorViewComponent.onCompleteMove` (`src/frontend/ui/editor.nim`) stores
+ * the debugger's location in the editor and repaints its gutter;
+ * `editorLineNumber` (`src/frontend/ui/trace.nim`) then marks the line the
+ * replay is stopped on with `gutter-highlight-active`
+ * (`lib/monaco_appearance.editorGutterLineHtml`), which the stylesheet draws as
+ * the arrow left of the line number.  The marker div itself is 0px tall (the
+ * arrow is its absolutely positioned `:before`), so the wait is on the gutter
+ * cell that holds it, which has the line's box.
+ */
+export const READY_ON_ENTRY_SELECTOR =
+  ".monaco-editor .gutter:has(> .gutter-highlight-active)";
+
+/** Wait until the session has reached its entry location.
  *
- * Is the hidden `.location-path` intended?  No — asked and answered when the
- * regression that hid it was tracked down.
- * Commit b27da3947 ("feat: Redesign of the status bar") added
- * `#status #status-base > *:not(#auto-hide-bottom-strip) { display: none !important }`
- * to `src/frontend/styles/components/status_bar.styl`, which hid this
- * element (and the copy-path button, the language/encoding readout, and the
- * auto-hide collapsed-icon zone) suite-wide.  That contradicts
- * `Auto-Hide-Panes.md` §3.1, which specifies that the footer keeps its
- * existing right-hand content (language, encoding, cursor location) while
- * hosting the bottom tab strip, and §10.3, which puts the icon zone in the
- * same bar.  The blanket rule was removed rather than worked around here;
- * the styl file carries the full rationale.  Keep this wait as a visibility
- * wait so a repeat of that regression fails loudly instead of silently.
+ * READY MEANS: the trace opened, the debugger reported an entry location,
+ * and the UI is laid out and hit-testable.  The signal is the one a user
+ * reads that from: an editor showing the entry file, with the
+ * execution-pointer arrow on the entry line.  `READY_ON_ENTRY_SELECTOR` names
+ * the exact element and the code that draws it.  The arrow is drawn by the
+ * same code path that receives the entry location (`ct/complete-move` →
+ * `EditorViewComponent.onCompleteMove` → `editorLineNumber`), not by a test
+ * hook, so it cannot appear before the location has arrived.
  *
- * It did repeat.  `51a3e820e "fix: UI regressions"` wrote the same rule back
- * one nesting level down and this wait failed loudly exactly as intended,
- * with the diagnosis below naming the cause.  What that round
- * added is a guard that does not depend on this wait, because this wait
- * cannot see every way of hiding the footer: Playwright's visibility
- * predicate is box-and-`visibility`, so an `opacity: 0` status bar would
- * pass here while being just as invisible to the user.
- * `tests/status-bar/footer-visibility-css-guard.spec.ts` measures the built
- * stylesheet directly and folds in effective opacity.  That guard is not
- * licence to relax this one — they catch different things.
+ * WHY NOT THE STATUS BAR ANY MORE.  Until 2026-11-11 this waited for the
+ * footer's `.location-path` readout to be visible.  The status-bar design
+ * hides that readout on purpose (`status_bar.styl`, "HIDDEN FOR NOW",
+ * `docs/UI-Design-Decisions.md` D-05, 2026-10-15), and on 2026-11-11 the
+ * decision was to keep it hidden and move readiness to the editor
+ * (codetracer-pm `spec/Planned-Features/Auto-Hide-Panes.md` §3.1, and the issue
+ * `2026-10-20-ready-on-entry-waits-for-a-location-path-the-status-bar-now-hides-by-design.md`).
+ * The hidden `.location-path` is still rendered and still carries the
+ * location text, so `StatusBar.location()` keeps working; it just no longer
+ * says anything about what the user can see.  The footer's own visibility is
+ * guarded by `tests/status-bar/footer-visibility-css-guard.spec.ts` and
+ * `status-bar-footer-contract.spec.ts`, which never depended on this wait.
+ *
+ * IT IS A VISIBILITY WAIT, NOT AN ATTACHMENT WAIT, for the reason it always
+ * was: an element can be in the DOM with the right content long before it has
+ * a box, and `state: "attached"` would call that ready.  The `b27da3947` and
+ * `51a3e820e` regressions (a blanket `display: none !important` on the
+ * footer) were caught by exactly this property of the old wait.  A rule that
+ * hides the editor, its margin or the arrow's gutter cell fails this one the
+ * same way, and `readinessDiagnosis` says which.  Playwright's visibility is
+ * box-and-`visibility`, so `opacity: 0` or an off-screen box still passes.
  */
 export async function readyOnEntryTest(p: Page): Promise<void> {
   // One wait, with a budget taken from the measured launch time.
   //
-  // WHAT THIS WAIT COSTS, MEASURED.  `.location-path` does not exist in the
-  // DOM until the frontend has loaded its bundle, built its view models,
-  // driven DAP to the entry location and rendered the status bar — the
-  // element is rendered only when `locationText` is non-empty, so its
-  // appearance IS the end of the launch.  Sampled over 40 consecutive
-  // launches of `statement_step*` on this host at load average 25-49 on 32
-  // cores: min 6.93s, median 8.04s, p90 10.60s, max 13.71s.  A single 15s
-  // budget therefore sat about 1.1x above the observed maximum, which is why
-  // roughly one launch in twelve used to time out here.
+  // WHAT THIS WAIT COSTS, MEASURED.  Nothing on the page can show the entry
+  // location until the frontend has loaded its bundle, built its view models
+  // and driven DAP to the entry location, so the appearance of the signal IS
+  // the end of the launch.  Sampled (on the earlier footer signal, which the
+  // same `ct/complete-move` renders) over 40 consecutive launches of
+  // `statement_step*` on this host at load average 25-49 on 32 cores: min
+  // 6.93s, median 8.04s, p90 10.60s, max 13.71s.  A single 15s budget
+  // therefore sat about 1.1x above the observed maximum, which is why roughly
+  // one launch in twelve used to time out here.
   //
   // The budget is per-launch wall clock, not CPU, and it degrades with
   // contention rather than with core count: pinning a run to 8 of the 32
@@ -2575,7 +2583,8 @@ export async function readyOnEntryTest(p: Page): Promise<void> {
   // launch-to-entry totals of 17.3s to 29.6s.  The box this suite runs on
   // carries the developer's own CI and has been observed at load average
   // 185.  So 30s is not padding: it is roughly 3.7x the median and 1.0-1.7x
-  // the worst case actually reproduced under contention.
+  // the worst case actually reproduced under contention.  The `# timing`
+  // line below reports every launch's margin against it.
   //
   // WHAT IT IS NOT.  Until 2026-08-06 this was two 15s attempts with a
   // "fresh" locator, on the theory that Playwright's poll stalls and a new
@@ -2583,21 +2592,17 @@ export async function readyOnEntryTest(p: Page): Promise<void> {
   // in Value-Origin-Tracking milestone M46: a `Locator` holds nothing but its
   // frame and selector (`client/locator.ts`), so a fresh one is the identical
   // call, and `DEBUG=pw:protocol` on a reproduced failure shows the poll
-  // running normally throughout — 8-12 `Runtime.callFunctionOn` iterations
-  // issued AND answered inside the 15s, every one returning
-  // `{log: "", visible: false, attached: false}`.  The absent
-  // `locator resolved to ...` line that the stall theory rested on is simply
-  // what Playwright logs for a selector matching zero elements: the injected
-  // predicate sets `log` only when it finds something.  A passing launch has
-  // exactly the same call log for 8-13s before it resolves.
+  // running normally throughout.
   //
-  // This is still a strict visibility wait on the same selector.  An app that
-  // never reaches an entry location still fails, and the extra wall clock is
-  // spent only on a run that was already going to fail.
+  // `filter({ visible: true }).first()`: several editors can carry the
+  // arrow at once (a split, a session in a background tab, an editor tab
+  // that is not in front), and only one that the user can see counts.
   const started = Date.now();
   try {
     await p
-      .locator(".location-path")
+      .locator(READY_ON_ENTRY_SELECTOR)
+      .filter({ visible: true })
+      .first()
       .waitFor({ state: "visible", timeout: READY_ON_ENTRY_BUDGET_MS });
   } catch (timeout) {
     throw new CodetracerTestError(
@@ -2609,79 +2614,140 @@ export async function readyOnEntryTest(p: Page): Promise<void> {
   const waitedMs = Date.now() - started;
   const percent = Math.round((waitedMs / READY_ON_ENTRY_BUDGET_MS) * 100);
   const line =
-    `# timing: ready on entry (.location-path visible): ` +
+    `# timing: ready on entry (execution line visible): ` +
     `${waitedMs}ms / ${READY_ON_ENTRY_BUDGET_MS}ms (${percent}%)`;
   if (waitedMs * 2 > READY_ON_ENTRY_BUDGET_MS) {
     console.warn(`${line} [over half the budget]`);
   } else {
     console.log(`${line} [ok]`);
   }
-  await p.locator(".location-path").click();
+  await settleFocusAfterEntry(p);
+}
+
+/**
+ * Leave the page in the state the old readiness wait left it in.
+ *
+ * The footer-based wait ended with a click on `.location-path`, a span with no
+ * handler.  That click did two things every spec after it has been written
+ * against: it moved the pointer onto the footer, away from the editor (where
+ * it would raise hovers), and it took keyboard focus off whatever had it, so
+ * key presses go to the document's shortcuts rather than into an editor.
+ * `.location-path` cannot be clicked now that it is hidden, so this clicks
+ * the language / encoding readout beside it, which has no handler either.
+ * The click is NOT part of the readiness contract: if a future design hides
+ * that readout too, the same two effects are produced without it, and
+ * readiness is unaffected.  Do not click the execution line instead — a
+ * press on the gutter reaches Monaco, which selects the line.
+ */
+async function settleFocusAfterEntry(p: Page): Promise<void> {
+  const neutral = p.locator("#status-base #file-info-status");
+  if (await neutral.isVisible().catch(() => false)) {
+    await neutral.click({ timeout: 5_000 });
+    return;
+  }
+  await p.evaluate(() => {
+    const focused = document.activeElement as HTMLElement | null;
+    if (focused !== null && focused !== document.body) focused.blur();
+  });
+  await p.mouse.move(1, 1);
 }
 
 /**
  * Explain a `readyOnEntryTest` timeout.
  *
- * The wait itself is unchanged and still strict — this only runs after it has
- * already failed, and it exists because the bare timeout does not say which of
- * three things happened: the launch overran the budget and the element arrived
- * just too late; the launch is genuinely wedged and the element is nowhere; or
- * the element is in the DOM but has no box.  Those want different responses.
+ * The wait itself is strict — this only runs after it has already failed, and
+ * it exists because a bare timeout does not say which link of the chain
+ * broke.  Ready needs four things, and each has its own evidence here:
  *
- * Read the output with Playwright's logging convention in mind
- * (Value-Origin-Tracking milestone M46, where misreading it cost this
- * milestone two wrong diagnoses): the wait's own call log carries a
- * `locator resolved to …` line only for a selector that MATCHED.  A call log
- * holding nothing but `waiting for locator('.location-path') to be visible`
- * therefore means every poll found zero elements — it is the normal shape of
- * a timeout on an element that was never there, not evidence that the poll
- * failed to run.  `DEBUG=pw:protocol` shows the poll iterations being issued
- * and answered throughout such a wait.
+ *   1. The page loaded and its renderer is alive (`page`, animation frames).
+ *   2. The debugger reported an entry location.  The status bar still renders
+ *      that location into its hidden `.location-path` readout (the design
+ *      hides the readout, not the model), so its text says whether a
+ *      `ct/complete-move` reached the frontend at all.  `.finished` instead
+ *      means the replay is already at its end.
+ *   3. An editor drew the execution line.  Each `.monaco-editor` is listed
+ *      with its component host, whether it has a box, and the line its arrow
+ *      is on, if any; the active tabs say which files are in front.
+ *   4. That editor is laid out where the user can see it.  An arrow cell that
+ *      is in the DOM but has no box is a hiding or layout regression, the
+ *      shape of `b27da3947` on the old footer signal.
  *
- * `page.evaluate` and the locator poll run in different JavaScript contexts —
- * the main world and Playwright's utility world — but against the *same*
- * document, because isolated worlds share the DOM.  They therefore cannot
- * disagree about what the page holds; they can only observe it at different
- * moments, which is exactly what happens while a launch is still building the
- * status bar.  That is why the retry below is reported with its full call log
- * rather than assumed to agree with the DOM snapshot taken just before it.
+ * Read the retry's call log with Playwright's convention in mind
+ * (Value-Origin-Tracking milestone M46): a call log holding nothing but
+ * `waiting for locator(...)` means every poll matched zero elements, which is
+ * the normal shape of a timeout on something that was never there, not
+ * evidence that the poll failed to run.
  */
 async function readinessDiagnosis(p: Page): Promise<string> {
   try {
-    const dom = await p.evaluate(() => {
-      const nodes = Array.from(document.querySelectorAll(".location-path"));
+    const dom = await p.evaluate((selector: string) => {
+      const boxOf = (node: Element) => {
+        const rect = node.getBoundingClientRect();
+        const style = getComputedStyle(node);
+        return {
+          width: Math.round(rect.width),
+          height: Math.round(rect.height),
+          display: style.display,
+          visibility: style.visibility,
+        };
+      };
+      // The nearest element, from `node` up, that takes the box away.
+      const hiddenBy = (node: Element): string | null => {
+        for (
+          let el: Element | null = node;
+          el !== null && el !== document.documentElement;
+          el = el.parentElement
+        ) {
+          const style = getComputedStyle(el);
+          if (style.display === "none" || style.visibility === "hidden") {
+            const id = el.id ? `#${el.id}` : "";
+            const cls = el.classList.length
+              ? `.${Array.from(el.classList).slice(0, 3).join(".")}`
+              : "";
+            return `${el.tagName.toLowerCase()}${id}${cls} { display: ${style.display}; visibility: ${style.visibility} }`;
+          }
+        }
+        return null;
+      };
+      const statusLocation = document.querySelector("#status-base .location-path");
       return {
         url: location.href,
         title: document.title,
         visibilityState: document.visibilityState,
-        hidden: document.hidden,
         hasStatusHost: document.getElementById("status") !== null,
-        statusStructure: document
-          .getElementById("status")
-          ?.getAttribute("data-status-structure") ?? null,
-        matches: nodes.map((node) => {
-          const rect = node.getBoundingClientRect();
-          const style = getComputedStyle(node);
+        statusLocation: statusLocation === null
+          ? null
+          : (statusLocation.textContent ?? "").slice(0, 160),
+        finished: document.querySelector("#status-base #location-status .finished") !== null,
+        editors: Array.from(document.querySelectorAll(".monaco-editor")).map((editor) => {
+          const arrow = editor.querySelector(".gutter:has(> .gutter-highlight-active)");
+          // Monaco's `data-uri` is an `inmemory://model/N` id, not the file,
+          // so the editor is named by its component host; the file it shows
+          // is the active tab's title, listed below.
           return {
-            text: (node.textContent ?? "").slice(0, 120),
-            width: rect.width,
-            height: rect.height,
-            display: style.display,
-            visibility: style.visibility,
-            opacity: style.opacity,
-            connected: node.isConnected,
+            host: editor.closest("[id^='editorComponent-']")?.id ?? null,
+            ...boxOf(editor),
+            arrowLine: arrow === null ? null : arrow.getAttribute("data-line"),
           };
         }),
+        arrows: Array.from(document.querySelectorAll(selector)).map((cell) => ({
+          line: cell.getAttribute("data-line"),
+          ...boxOf(cell),
+          hiddenBy: hiddenBy(cell),
+        })),
+        activeTabs: Array.from(document.querySelectorAll(".lm_tab.lm_active .lm_title"))
+          .map((tab) => (tab.textContent ?? "").trim())
+          .filter((title) => title.length > 0)
+          .slice(0, 12),
       };
-    });
+    }, READY_ON_ENTRY_SELECTOR);
 
-    // Renderer liveness, as frames serviced per 500ms.  This does NOT gate
-    // the locator poll — `waitForSelector` is a driver-side retry loop over
-    // `Runtime.callFunctionOn`, not a `requestAnimationFrame` loop — but it
-    // is a good proxy for how starved the renderer is, and starvation is what
-    // makes a launch overrun its budget.  A healthy idle host reports ~30
-    // (60fps); the failures captured while the host was carrying its own CI
-    // reported 1-5, i.e. 2-10fps.
+    // Renderer liveness, as frames serviced per 500ms.  It does not gate the
+    // locator poll (a driver-side retry loop over `Runtime.callFunctionOn`),
+    // but it is a good proxy for how starved the renderer is, and starvation
+    // is what makes a launch overrun its budget.  A healthy idle host reports
+    // ~30 (60fps); failures captured while the host carried its own CI
+    // reported 1-5.
     const frames = await p.evaluate(() => {
       return new Promise<number>((resolve) => {
         let count = 0;
@@ -2701,19 +2767,16 @@ async function readinessDiagnosis(p: Page): Promise<string> {
       });
     });
 
-    // Ask the same question the wait asked, once more, and keep the whole
-    // answer.  A quick `resolved` means the launch finished just past the
-    // budget.  `still unresolved` while `matches` above is non-empty is the
-    // interesting case, and the retry's OWN call log is the only thing that
-    // says why — a `locator resolved to hidden …` line, a strict mode
-    // violation and a `waiting for … navigation to finish` block all look
-    // identical from the outside — so it is not truncated here.
+    // Ask the same question once more and keep the whole answer.  A quick
+    // `resolved` means the launch finished just past the budget.
     let retryResolvedMs: number | null = null;
     const retry = await (async () => {
       const started = Date.now();
       try {
         await p
-          .locator(".location-path")
+          .locator(READY_ON_ENTRY_SELECTOR)
+          .filter({ visible: true })
+          .first()
           .waitFor({ state: "visible", timeout: 3_000 });
         retryResolvedMs = Date.now() - started;
         return `resolved in ${retryResolvedMs}ms`;
@@ -2724,61 +2787,76 @@ async function readinessDiagnosis(p: Page): Promise<string> {
       }
     })();
 
-    // Is every match invisible by its own box or computed style?  Playwright
-    // treats an element as visible when it has a non-empty bounding box and is
-    // not `visibility:hidden`, so a match with a zero box or `display:none`
-    // explains the timeout on its own — nothing about the poll or the two
-    // JavaScript worlds needs to be invoked.  This is the exact shape of the
-    // b27da3947 status-bar regression (`display: none !important` on every
-    // `#status-base` child), which is the regression this wait is documented
-    // to catch, so it gets a verdict that names it instead of being folded
-    // into the "the worlds disagree" case and read as a harness oddity.
-    const invisibleByStyle = dom.matches.filter(
-      (match) =>
-        match.display === "none" ||
-        match.visibility === "hidden" ||
-        match.width === 0 ||
-        match.height === 0,
-    );
+    const reported =
+      dom.statusLocation !== null && dom.statusLocation.length > 0;
+    const verdict = (() => {
+      if (retryResolvedMs !== null) {
+        return (
+          "  => the launch overran its budget: the execution line became " +
+          `visible ${retryResolvedMs}ms into the retry that ran right after ` +
+          "the wait. Raise the budget only against a fresh measurement of the " +
+          "launch time (readyOnEntryTest carries the last one)."
+        );
+      }
+      if (dom.arrows.length > 0) {
+        return (
+          "  => the execution line IS drawn but has no box: " +
+          `${JSON.stringify(dom.arrows[0])}. The wait is correctly refusing to ` +
+          "call this ready: the editor marked the entry line where the user " +
+          "cannot see it. Look for a rule or a layout change that hides the " +
+          "editor, its margin or its gutter (`hiddenBy` names the nearest " +
+          "element that does), the shape of the b27da3947 footer regression. " +
+          "Do NOT raise the budget for this."
+        );
+      }
+      if (dom.finished) {
+        return (
+          "  => the status bar says the replay is Finished: the session went " +
+          "to the end of the trace instead of stopping at an entry location, " +
+          "so there is no execution line to draw."
+        );
+      }
+      if (!reported) {
+        return (
+          "  => no entry location arrived: the status bar holds no location " +
+          "and no editor draws an execution line, so the debugger has not " +
+          "reported a stop (`ct/complete-move`) to this page. Frames above at " +
+          "1-5/500ms mean a starved renderer and a launch that was still " +
+          "running; ~30 means a renderer with nothing to do, i.e. a launch " +
+          "that is wedged rather than slow (or ctPage bound to another " +
+          "window). See M46."
+        );
+      }
+      if (dom.editors.length === 0) {
+        return (
+          `  => the debugger reported ${dom.statusLocation}, but no editor is ` +
+          "open: the entry file was never shown, so nothing can carry the " +
+          "execution line. Check the editor service's open-on-stop path and " +
+          "whether the entry file's source is available to the frontend."
+        );
+      }
+      return (
+        `  => the debugger reported ${dom.statusLocation}, and ` +
+        `${dom.editors.length} editor(s) are open, but none draws the ` +
+        "execution line: the editors in front show another file (see " +
+        "`active tabs`), or " +
+        "the location never reached `EditorViewComponent.onCompleteMove`, " +
+        "which is what marks the gutter."
+      );
+    })();
 
     return [
       "readyOnEntry diagnosis:",
       `  fresh locator retry: ${retry}`,
-      `  page: ${dom.title} <${dom.url}>`,
-      `  document.visibilityState=${dom.visibilityState} hidden=${dom.hidden}`,
-      `  #status present=${dom.hasStatusHost} structure=${dom.statusStructure}`,
-      `  .location-path matches=${dom.matches.length} ` +
-        JSON.stringify(dom.matches),
+      `  page: ${dom.title} <${dom.url}> visibilityState=${dom.visibilityState}`,
+      `  #status present=${dom.hasStatusHost} status-bar location=` +
+        `${JSON.stringify(dom.statusLocation)} finished=${dom.finished}`,
+      `  editors=${dom.editors.length} ${JSON.stringify(dom.editors)}`,
+      `  execution-line cells=${dom.arrows.length} ${JSON.stringify(dom.arrows)}`,
+      `  active tabs=${JSON.stringify(dom.activeTabs)}`,
       `  animation frames in 500ms=${frames}`,
       `  budget: ${READY_ON_ENTRY_BUDGET_MS}ms`,
-      dom.matches.length === 0
-        ? "  => the element is absent from this page: the app had not reached " +
-          "an entry location when the budget ran out. Frames above at 1-5/500ms " +
-          "means a starved renderer and a launch that was still running; ~30 " +
-          "means a renderer with nothing to do, i.e. a launch that is wedged " +
-          "rather than slow (or ctPage bound to another window). See M46."
-        : retryResolvedMs !== null
-          ? "  => the launch overran its budget: the element was not in the DOM " +
-            "for any poll of the wait, and arrived " +
-            `${retryResolvedMs}ms into the retry that ran right after it. ` +
-            "Raise the budget only against a fresh measurement of the launch " +
-            "time (readyOnEntryTest carries the last one)."
-          : invisibleByStyle.length === dom.matches.length
-            ? "  => .location-path IS in the DOM but has no box: " +
-              `${JSON.stringify(invisibleByStyle[0])}. The wait is correctly ` +
-              "refusing to call this ready — the status bar rendered a " +
-              "location the user cannot see. This is the shape of the " +
-              "b27da3947 regression (a blanket `display: none !important` on " +
-              "`#status-base` children); check " +
-              "`src/frontend/styles/components/status_bar.styl` and the " +
-              "`#status` structure above. Do NOT raise the budget for this."
-            : "  => .location-path is in the DOM with a real box, yet the retry " +
-              "still did not resolve within 3s. The snapshot above and the " +
-              "retry ran at different moments of a launch that is still " +
-              "changing, so read the retry's call log above (printed " +
-              "untruncated for this case): a strict-mode violation, a " +
-              "`locator resolved to hidden` line and a blocked navigation " +
-              "check all look like a plain timeout once truncated.",
+      verdict,
     ].join("\n");
   } catch (diagnosisFailure) {
     return `readyOnEntry diagnosis unavailable: ${String(diagnosisFailure)}`;

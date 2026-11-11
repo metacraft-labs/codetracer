@@ -541,12 +541,11 @@ NOTIFICATION_STACK_BOTTOM = STATUS_BAR_OUTER_HEIGHT + NOTIFICATION_STACK_GAP
     // Concretely, the rule silently deletes three surfaces that no other part
     // of the UI provides:
     //
-    //   * `.location-path` + `#copy-path-image` — the only place the current
-    //     debug location (`path:line#ticks`) is displayed at all; nothing else
-    //     in the frontend renders `StatusBaseModel.locationText`, and the only
-    //     other copy-a-path affordance is the editor tab's "Copy full path"
-    //     context-menu entry (`ui/layout.nim`), which copies the tab label,
-    //     not the location the debugger is actually stopped at.
+    //   * `.location-path` + `#copy-path-image` — the `path:line#ticks`
+    //     readout and its copy button.  These two are now hidden by design,
+    //     one by one and on purpose (the "HIDDEN FOR NOW" rule below, D-05,
+    //     confirmed 2026-11-11), which is the route this note asks for: a
+    //     specific readout removed in the design doc first, not the group.
     //   * `#file-info-status` — language / encoding / `stable: ready`.
     //   * `#auto-hide-collapsed-icon-zone` — the `!important` beat
     //     `.collapsed-icon-zone.has-icons`, so the Auto-Hide-Panes §10.3 icon
@@ -555,8 +554,9 @@ NOTIFICATION_STACK_BOTTOM = STATUS_BAR_OUTER_HEIGHT + NOTIFICATION_STACK_GAP
     // The layout the spec asks for falls out of the DOM order in
     // `viewmodel/views/isonim_status_view.nim` once nothing is force-hidden:
     // icon zone and `#file-info-status` on the left, the tab strip taking the
-    // slack (`#auto-hide-bottom-strip { flex: 1 }`), `.status-right` (location
-    // + copy button) pinned to the right edge.
+    // slack (`#auto-hide-bottom-strip { flex: 1 }`), `.status-right` (the
+    // test certificate; the location and copy button are hidden by design)
+    // pinned to the right edge.
     //
     // The constraint is checked against the BUILT stylesheet, on effect rather
     // than on wording, by
@@ -1332,11 +1332,15 @@ NOTIFICATION_STACK_BOTTOM = STATUS_BAR_OUTER_HEIGHT + NOTIFICATION_STACK_GAP
     mask-size: contain
 
 // HIDDEN FOR NOW (Nikolay, 2026-10-15): the location path and its copy button.
-// A deliberate design decision for the current iteration, made knowing the
-// warning at the top of this file: this is the only on-screen readout of the
-// debug location, and footer-visibility-css-guard.spec.ts /
-// status-bar-footer-contract.spec.ts FAIL while this rule exists.  Delete the
-// rule to bring both back.
+// A deliberate design decision for the current iteration
+// (docs/UI-Design-Decisions.md D-05), confirmed on 2026-11-11: the path stays
+// hidden, and the editor's execution-line arrow is where the user reads the
+// current location.  The tests follow that decision: `readyOnEntryTest` waits
+// for the execution line, not for this readout, and the footer guards
+// (footer-visibility-css-guard.spec.ts, status-bar-footer-contract.spec.ts)
+// no longer require these two elements.  Bringing the path back is a design
+// change: ask Nikolay, then add it back to `FOOTER_REQUIRED_REGIONS` in
+// src/tests/gui/page-objects/status-footer-contract.ts.
 #status #status-base .location-path,
 #status #status-base #copy-path-image
   display: none !important

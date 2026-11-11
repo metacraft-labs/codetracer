@@ -10,9 +10,19 @@
  * removed, `51a3e820e "fix: UI regressions"` writing it straight back; and
  * `00fd68b7f "fix: status bar styling"` reaching the same result a third way.
  * The first two announced themselves as a suite-wide timeout rather than as a
- * footer complaint, because every Electron spec opens with `readyOnEntryTest`
+ * footer complaint, because every Electron spec opened with `readyOnEntryTest`
  * waiting for `.location-path` to be *visible*.  The third announced nothing
- * at all and shipped for two weeks — see below.
+ * at all and shipped for two weeks — see below.  `readyOnEntryTest` now
+ * waits for the editor's execution line instead, so this guard and
+ * `status-bar-footer-contract.spec.ts` are what is left to notice.
+ *
+ * WHAT IS DELIBERATELY NOT GUARDED.  The location path (`.location-path`) and
+ * its copy button are hidden by design (`status_bar.styl`, "HIDDEN FOR NOW";
+ * `docs/UI-Design-Decisions.md` D-05), and on 2026-11-11 that was confirmed
+ * as the design: §3.1 now records it.  `FOOTER_MARKUP` still carries them,
+ * because the app still renders them, but `FOOTER_REQUIRED_REGIONS` does not
+ * require them.  The right-hand group is guarded through its visible readout,
+ * the test certificate.
  *
  * WHY A SECOND GUARD, GIVEN `status-bar-footer-contract.spec.ts` EXISTS.
  * That spec asserts the same contract and would have failed on `51a3e820e`
@@ -213,6 +223,10 @@ const FOOTER_MARKUP = `
           </div>
           <span class="test-movement">17</span>
           <span class="status-right">
+            <span class="test-certificate-status status-inline test-certificate-certified"
+                  role="status" data-certificate-state="certified">
+              <span class="test-certificate-label">Certified</span>
+            </span>
             <span id="location-status">
               <span class="location-path status-inline" data-toggle="tooltip"
                     data-placement="bottom" title="/tmp/program.js:1#3">/tmp/program.js:1#3</span>
@@ -335,8 +349,8 @@ test.describe("footer visibility guard (Auto-Hide-Panes §3.1 / §10.3)", () => 
 
     // Every region the rule displaced, by name.  `#auto-hide-bottom-strip` is
     // deliberately absent: the rule leaves the tab strip alone, which is the
-    // whole intent of a tabs-only footer, and a control that expected all six
-    // would be describing a different rule.
+    // whole intent of a tabs-only footer, and a control that expected all
+    // five would be describing a different rule.
     const refused = failures
       .map((f) => {
         const at = f.indexOf(": off-screen");
@@ -351,8 +365,7 @@ test.describe("footer visibility guard (Auto-Hide-Panes §3.1 / §10.3)", () => 
         "#status-base #file-info-status",
         "#status-base #file-info-status .file-info-status-language",
         "#status-base #file-info-status #stable-status",
-        "#status-base .status-right .location-path",
-        "#status-base #copy-path-image",
+        "#status-base .status-right .test-certificate-status",
       ].sort(),
     );
 

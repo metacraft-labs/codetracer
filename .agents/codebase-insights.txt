@@ -644,7 +644,7 @@ and a correlation marker's counterpart is by definition in another process.
   `ui/session_tabs.nim::installResizeRender` (50 ms throttle) and
   `ui/status.nim::requestStatusRender` (one pass per task turn). Related and
   still true: `.agents` note of 2026-08-06 on M51's debug-controls rebuild loop.
-- 2026-08-06 (a readyOnEntry timeout means a SLOW LAUNCH, and the old 'stalled locator' note here was wrong — M46): `lib/fixtures.ts::readyOnEntryTest` is ONE strict visibility wait on `.location-path` with `READY_ON_ENTRY_BUDGET_MS = 30_000`, and it prints `# timing: ready on entry ...: Xms / 30000ms (N%)` on EVERY launch, passing or not — that line is the measurement, use it before touching the budget. `.location-path` is rendered only when `locationText` is non-empty, so its appearance IS the end of the launch: median ~8-11s, observed max ~14.7s on a 32-core host at load average 33-82, and 17.4s for a three-recording session launch. THE PREVIOUS NOTE HERE IS WITHDRAWN. It claimed two fresh-locator attempts defeated a Playwright poll that 'stops making progress'. A `Locator` stores only `_frame` and `_selector` and `waitFor` is a plain `frame._channel.waitForSelector(...)`, so a fresh locator is a byte-identical call; and the missing `locator resolved to ...` line it rested on is just what Playwright logs for a selector matching ZERO elements (the injected predicate in `server/frames.js` sets `log` only on a match, and the caller guards with `if (log)`) — verified directly: a page with no `.location-path` logs only the `waiting for` line for 30s, while a page with a `display:none` one logs `62 x locator resolved to hidden ...`. Still true and still worth keeping: removing the status bar's per-redraw DOM churn did not change the flake rate (2/22 before, 4/54 after, same host), so do not expect a frontend churn fix to cure a readiness timeout. What IS unexplained: in the pre-churn-fix artefacts (`test-diagnostics/2026-07-30T01-*`) the status bar logged a non-empty location 57-66 times INSIDE the failing 15s window, which no 'element was absent' story covers; see the M46 completion note.
+- 2026-08-06 (a readyOnEntry timeout means a SLOW LAUNCH, and the old 'stalled locator' note here was wrong — M46): `lib/fixtures.ts::readyOnEntryTest` is ONE strict visibility wait (on `.location-path` until 2026-11-11, on the editor's execution line since) with `READY_ON_ENTRY_BUDGET_MS = 30_000`, and it prints `# timing: ready on entry ...: Xms / 30000ms (N%)` on EVERY launch, passing or not — that line is the measurement, use it before touching the budget. `.location-path` is rendered only when `locationText` is non-empty, so its appearance IS the end of the launch: median ~8-11s, observed max ~14.7s on a 32-core host at load average 33-82, and 17.4s for a three-recording session launch. THE PREVIOUS NOTE HERE IS WITHDRAWN. It claimed two fresh-locator attempts defeated a Playwright poll that 'stops making progress'. A `Locator` stores only `_frame` and `_selector` and `waitFor` is a plain `frame._channel.waitForSelector(...)`, so a fresh locator is a byte-identical call; and the missing `locator resolved to ...` line it rested on is just what Playwright logs for a selector matching ZERO elements (the injected predicate in `server/frames.js` sets `log` only on a match, and the caller guards with `if (log)`) — verified directly: a page with no `.location-path` logs only the `waiting for` line for 30s, while a page with a `display:none` one logs `62 x locator resolved to hidden ...`. Still true and still worth keeping: removing the status bar's per-redraw DOM churn did not change the flake rate (2/22 before, 4/54 after, same host), so do not expect a frontend churn fix to cure a readiness timeout. What IS unexplained: in the pre-churn-fix artefacts (`test-diagnostics/2026-07-30T01-*`) the status bar logged a non-empty location 57-66 times INSIDE the failing 15s window, which no 'element was absent' story covers; see the M46 completion note.
 - 2026-08-01 (test recordings are PRODUCED, never committed — M53): no `.ct` is
   committed anywhere in this repo any more. `scripts/materialize-recording.sh
   <fixture>` records one from the current tree and prints the directory; it
@@ -7580,10 +7580,17 @@ ONE ROUTER ON EVERY FRONT-END (2026-10-12, PLAT-68 Phase B).
   such as `frontend/tests/test_suites/`) into a scratch workspace whose
   siblings are at the pins and `just build-once` there with
   `CODETRACER_SKIP_SIBLING_CHECK=1` (the copy's submodules have no `.git`).
-- Electron specs that call `readyOnEntryTest` cannot pass on a tree whose
-  status bar hides `.location-path` (the "HIDDEN FOR NOW" rule of
-  2026-10-15, issue 2026-10-20-ready-on-entry-...): to compare two trees,
-  apply the same local removal of that rule to both scratch copies.
+- (2026-11-11) `readyOnEntryTest` no longer reads the status bar. Its signal
+  is the editor's execution-line gutter cell, `READY_ON_ENTRY_SELECTOR` in
+  `src/tests/gui/lib/fixtures.ts`, filtered to visible:
+  `.monaco-editor .gutter:has(> .gutter-highlight-active)`. The `.location-path`
+  readout stays hidden by design (D-05, confirmed 2026-11-11), but it is still
+  rendered and still holds `path:line#ticks`, so text reads of it
+  (`StatusBar.location()`, `not.toHaveText(":0#0")`) keep working; only
+  visibility waits on it are wrong. The arrow's own div is 0px tall (the arrow
+  is its `:before`), which is why the wait is on the `.gutter` cell. After the
+  wait the fixture clicks `#file-info-status` (no handler) to keep the old
+  click's effects: pointer off the editor, focus off any input.
 - `src/Tuprules.tup` hard-codes `CARGO_TARGET_BASE = /tmp/codetracer`, so
   every `just build-once` on the host shares one replay-server target. Two
   concurrent builds there (or two scratch copies sharing one
