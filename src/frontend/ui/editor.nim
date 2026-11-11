@@ -40,6 +40,8 @@ from ../viewmodel/viewmodels/run_control_ownership import rollbackRunSpinner
 # is still drawn by `ui/flow.nim`'s FlowComponent (D7.4 (b) is open).
 # ---------------------------------------------------------------------------
 import std/[json, tables]
+from ../viewmodel/input/editor_pointer import PointerElement, PointerButton,
+  PointerOperation, pointerOperation, pointerModsOf
 from ./chord_display import displayedChord
 from ../viewmodel/editor/word_classifier import UsualWordSeparators
 from ../viewmodel/backend/backend_service import BackendService, BackendFuture
@@ -3384,38 +3386,61 @@ proc initMonacoForEditor(self: EditorViewComponent, host: JsObject) =
       " alt=" & $cast[bool](e.event.altKey) &
       " shift=" & $cast[bool](e.event.shiftKey)
     let targetType = cast[int](e.target.toJs["type"])
-    if targetType == MouseTargetGutterGlyphMargin:
-      # Gestures 7 and 8, on the press and by this event's own line. Only the
-      # left button, and Ctrl does nothing here (MC.6).
-      if cast[bool](e.event.leftButton) and not cast[bool](e.event.ctrlKey) and
-         not e.target.position.isNil:
+    # Input-Routing §5.1: WHAT A PRESS MEANS is the editor's pointer table
+    # (`input/editor_pointer.EditorPointerRows`, Editor-Pane.md § Mouse
+    # Gestures), the one every front-end reads; this handler hit-tests the
+    # element Monaco reports and performs the debugger's half of the answer.
+    # Selections (the caret, words, lines, cursors) are Monaco's own on its
+    # text surface and need nothing here.
+    let element =
+      if targetType == MouseTargetGutterGlyphMargin: peGutterGlyph
+      elif targetType in [MouseTargetGutterLineNumbers,
+                          MouseTargetGutterLineDecorations]: peGutterLineNumber
+      else: peText
+    let pressButton =
+      if cast[bool](e.event.middleButton): pbMiddle
+      elif cast[bool](e.event.rightButton): pbRight
+      else: pbLeft
+    let pressCount = max(1, cast[int](e.event.browserEvent.detail))
+    let pressed = pointerOperation(element,
+      pointerModsOf(cast[bool](e.event.ctrlKey), cast[bool](e.event.altKey),
+                    cast[bool](e.event.shiftKey)),
+      pressButton, pressCount)
+    if element == peGutterGlyph:
+      # Gestures 7 and 8, on the press and by this event's own line. The right
+      # button's row is the menu's (`onContextMenu`).
+      if pressButton == pbLeft and not e.target.position.isNil:
         let line = cast[int](e.target.position.lineNumber)
-        if cast[bool](e.event.altKey):
-          self.toggleGlyphEnabled(self.name, line)
-        else:
+        case pressed
+        of poToggleBreakpoint:
           toggleBreakpoint(editorPointStore(), $self.name, line)
-    elif targetType in [MouseTargetGutterLineNumbers,
-                        MouseTargetGutterLineDecorations]:
-      # Monaco's own: a press on the numbers selects the line, whatever the
-      # modifier (gestures 9 - 12), and K12 is a gesture on the text.
+        of poSetEnabled:
+          self.toggleGlyphEnabled(self.name, line)
+        else: discard
+    elif element == peGutterLineNumber:
+      # Monaco's own: every row there is a selection (gestures 9 - 12).
       discard
-    elif cast[bool](e.event.ctrlKey) and cast[bool](e.event.altKey):
-      try:
-        let targetToken = self.getTokenFromPosition(e.target.position)
-        if targetToken != "":
-          self.sourceCallJump(
-            self.name,
-            self.lastMouseMoveLine,
-            targetToken,
-            SmartJump)
-      except AmbiguousFunctionCallException:
-        self.api.errorMessage getCurrentExceptionMsg()
-    elif cast[bool](e.event.ctrlKey) or cast[bool](e.event.middleButton):
+    elif pressed in {poLineJump, poCallJump} and not e.target.position.isNil:
       self.lastMouseClickLine = self.lastMouseMoveLine
       self.lastMouseClickCol = cast[int](e.target.toJs.position.column)
-      if cast[bool](e.event.middleButton) :
-        self.sourceOrCallJump(e.target.position)
-      else:
+      var token = ""
+      if pressed == poCallJump:
+        try:
+          token = $self.getTokenFromPosition(e.target.position)
+        except AmbiguousFunctionCallException:
+          self.api.errorMessage getCurrentExceptionMsg()
+          token = "\0"
+      if token == "\0":
+        discard
+      elif token.len > 0:
+        try:
+          self.sourceCallJump(self.name, self.lastMouseMoveLine, cstring(token),
+                              SmartJump)
+        except AmbiguousFunctionCallException:
+          self.api.errorMessage getCurrentExceptionMsg()
+      elif pressed == poLineJump or pressButton == pbMiddle:
+        # A middle press with no call under it goes to the line, as the first
+        # one did.
         self.editorLineJump(self.lastMouseMoveLine, SmartJump)
     elif e.target.position.isNil or e.target.element.isNil:
       # A press Monaco resolves to no text position (the margin's padding, an
