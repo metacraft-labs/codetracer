@@ -1798,6 +1798,34 @@ proc refresh*(s: TuiSession; rt: TuiRuntime) =
     selectedVariable: "",
     functions: @[])
 
+proc followPaneViewport*(s: TuiSession; rt: TuiRuntime; pane: PaneKind) =
+  ## `pane`'s rectangle changed size at the SAME stop: the pane reports its
+  ## new viewport and holds what that viewport shows (Viewport-Driven-Loading
+  ## V1), without rebuilding every pane from the stop as `refresh` does. That
+  ## rebuild re-asks the engine for the stack, every variable's origin and
+  ## the event log's first page; repeated for every frame of a dragged split,
+  ## it is what the editor-hosted front-ends waited on.
+  ##
+  ## A pane not listed here draws what it holds at any size.
+  if s.ended:
+    return
+  case pane
+  of paneCalltrace:
+    s.pageCallTrace(rt)
+  of paneState:
+    # The stop loader sizes the NEXT stop's locals from it (HSF-V2).
+    if not s.state.isNil:
+      s.state.setViewport(cellPaneViewport(
+        rt.paneBodyRows(paneState), rt.paneBodyCols(paneState),
+        rt.app.variables.scrollTop))
+  of paneEventLog:
+    rt.app.eventLog.ensureWindow(rt.app.eventLog.scrollTop,
+                                 rt.eventLogBodyRows)
+  of paneTerminalOutput:
+    rt.app.terminalOutput.ensureShown(rt.terminalOutputRows())
+  else:
+    discard
+
 proc recordedSourceText*(s: TuiSession; path: string):
     tuple[ok: bool, text, message: string] =
   ## PLAT-68: a file of the RECORDING, whole — the source provider's

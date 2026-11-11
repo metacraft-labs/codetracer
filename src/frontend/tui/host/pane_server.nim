@@ -118,6 +118,9 @@ type
       ## A file a pane's row asked to open (`file-tree.open`), to be shown in
       ## the editor's source window even when it is the stop's own file —
       ## which the terminal already shows, and so does not count as viewed.
+    sourceRows: int
+      ## The source window's height the stop's panes were last built for
+      ## (`resyncViewports`): 0 at the open, before the editor reports one.
 
   DapEndpoint = object
     listener: Socket
@@ -552,11 +555,31 @@ proc publish(srv: PaneServer; s: ServerSession; fullPanes: seq[PaneKind] = @[];
   if show.len > 0:
     result.add notification("source/show", %*{"session": s.id, "file": show})
 
-proc resyncViewports(s: ServerSession) =
-  ## The editor's windows changed size: each pane's viewport is its window's,
-  ## so the session loads what the windows now show.
-  s.tui.setViewportHeight(s.rt.sourcePaneRows())
-  s.tui.refresh(s.rt)
+proc resyncViewports(s: ServerSession; pane = paneEditor; opened = false) =
+  ## The editor's windows changed: `pane`'s window was opened (`opened`) or
+  ## resized, or the source window (`paneEditor`) scrolled or resized.
+  ##
+  ## Each pane's viewport is its window's (Editor-Hosted-Front-Ends §E5), and
+  ## what a viewport decides is how much is FETCHED for that pane
+  ## (Viewport-Driven-Loading V1) — not the stop. So the stop's panes are
+  ## rebuilt (`refresh`) only for a pane the editor just opened, since some
+  ## panes load only while they are shown (the Low Level Code listing), or
+  ## when the source window's HEIGHT changed, since `SourceVM` is sized from
+  ## it. Otherwise the resized pane follows its own viewport, as the
+  ## terminal's panes do while a divider is dragged (PLAT-51), and a source
+  ## window that only scrolled needs nothing: its decorations are read from
+  ## the model already held.
+  ##
+  ## Until 2026-11-11 every `pane/resize` and every scrolled source line
+  ## rebuilt the stop, about half a second each on `calc`, so dragging a split
+  ## in the editor queued seconds of work ahead of the user's input.
+  let rows = s.rt.sourcePaneRows()
+  if opened or rows != s.sourceRows:
+    s.sourceRows = rows
+    s.tui.setViewportHeight(rows)
+    s.tui.refresh(s.rt)
+  elif pane != paneEditor:
+    s.tui.followPaneViewport(s.rt, pane)
 
 # ---------------------------------------------------------------------------
 # Requests
@@ -772,7 +795,7 @@ proc handleRequest(srv: PaneServer; meth: string; params: JsonNode;
     s.panes[pane] = HostedPane(width: w, height: h)
     s.rt.hostedRows[pane] = h
     s.rt.hostedCols[pane] = w
-    s.resyncViewports()
+    s.resyncViewports(pane, opened = meth == "pane/open")
     if meth == "pane/open":
       extra.add srv.keymapOf(s, pane)
     extra.add srv.publish(s, fullPanes = @[pane])

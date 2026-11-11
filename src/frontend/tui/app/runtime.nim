@@ -9999,9 +9999,16 @@ proc hostedHotspots*(rt: TuiRuntime; pane: PaneKind;
   of paneCalltrace:
     if rt.app.callTrace.isEmpty:
       return
+    # Every cell is hit-tested against ONE measurement of the pane: measuring
+    # it again per cell (width × height times) was half a second of every
+    # publish — every resize, step and scroll the editor sent.
+    let trace = rt.app.callTrace
+    let geo = trace.callTraceGeometry(area)
+    let lines = trace.bodyLines(area)
     for r in 0 ..< height:
       for c in 0 ..< width:
-        let hit = rt.app.callTrace.callTraceHitAt(area, r + 1, c)
+        let hit = trace.callTraceHitAt(area, geo, lines, r + 1, c,
+                                       wantArg = false)
         case hit.kind
         of cthRow:
           result[r].addRun(c, "calltrace.go-to-call", PaneOpArgs(index: hit.index))

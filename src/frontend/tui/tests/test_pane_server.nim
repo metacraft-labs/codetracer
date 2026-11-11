@@ -26,6 +26,7 @@ import ../app/layout/cells
 import ../app/layout/project
 import ../host/pane_server
 import ./fixtures/fixture_provider
+from backend/stdio_backend import DapStdioBackend
 
 proc activeRuntime(srv: PaneServer): TuiRuntime =
   ## The active session's runtime, to compare a hosted pane with the
@@ -38,6 +39,15 @@ proc activeRuntime(srv: PaneServer): TuiRuntime =
   let session = srv.sessions[srv.active]
   privateAccess(typeof(session))
   session.rt
+
+proc engineRequests(srv: PaneServer): int =
+  ## How many requests the active session has sent the engine: the DAP
+  ## transport's sequence number, which every request takes the next of.
+  privateAccess(PaneServer)
+  let session = srv.sessions[srv.active]
+  privateAccess(typeof(session))
+  privateAccess(DapStdioBackend)
+  session.tui.session.backend.seqCounter
 
 const
   FixtureName = "calc"
@@ -208,11 +218,31 @@ suite "HSF-E1: the pane server, over a real recording":
       %*{"session": sid, "pane": "eventLog", "width": 80, "height": 8})
     check elNotes.notes("pane/content").len == 1
 
+    # ---- a resize at the same stop asks the engine for nothing -------------
+    # A resize moves the pane's viewport (Editor-Hosted-Front-Ends §E5), and
+    # what a viewport decides is how much is fetched, not the stop. Until
+    # 2026-11-11 every resize rebuilt every pane from the stop, so a split
+    # dragged in the editor queued a stop's worth of engine requests per
+    # frame of the drag. The pane is still painted at its new size.
+    let quiet = srv.engineRequests()
+    for w in [51, 56, 63]:
+      let (_, widened) = srv.request("pane/resize",
+        %*{"session": sid, "pane": "state", "width": w, "height": 12})
+      let painted = widened.notes("pane/content")
+      check painted.len == 1 and painted[0]{"params", "width"}.getInt == w and
+            painted[0]{"params", "rows"}.len == 12
+    let (_, shorter) = srv.request("pane/resize",
+      %*{"session": sid, "pane": "eventLog", "width": 80, "height": 6})
+    check shorter.notes("pane/content").len == 1
+    check srv.engineRequests() == quiet
+
     # ---- a step moves the position and updates only changed rows ----------
     let before = firstPos[0]{"params"}
     let (stepped, stepNotes) = srv.request("operation/run",
       %*{"session": sid, "operation": "debugger.step-over"})
     check stepped{"result", "ok"}.getBool
+    # The positive control for the counter above: a step does ask.
+    check srv.engineRequests() > quiet
     let moved = stepNotes.notes("session/position")
     check moved.len == 1
     check moved.len == 1 and
@@ -289,6 +319,19 @@ suite "HSF-E1: the pane server, over a real recording":
     check deco.len == 1
     check deco.len == 1 and deco[0]{"params", "rows"}.getElems.anyIt(
       it{"line"}.getInt == execLine and it{"execution"}.getBool)
+    # Scrolling the source window one line, at the same height, asks the
+    # engine for nothing: the decorations of the newly visible range are
+    # read from the source model already held.
+    let unscrolled = srv.engineRequests()
+    let (_, scrollNotes) = srv.request("source/viewport",
+      %*{"session": sid, "file": file, "firstLine": max(1, execLine - 4),
+         "lastLine": execLine + 6})
+    check srv.engineRequests() == unscrolled
+    let scrolledDeco = scrollNotes.notes("source/decorations")
+    check scrolledDeco.len == 1 and
+          scrolledDeco[0]{"params", "lastLine"}.getInt == execLine + 6 and
+          scrolledDeco[0]{"params", "rows"}.getElems.anyIt(
+            it{"line"}.getInt == execLine and it{"execution"}.getBool)
 
     # ---- an operation "at the cursor" acts at the editor's cursor ----------
     # The editor reports where its cursor is (`source/cursor`); toggling a
