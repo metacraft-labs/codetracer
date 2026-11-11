@@ -308,12 +308,14 @@ entry_point() {
 set -euo pipefail
 source "${repo_root}/ci/lib/codetracer-home.sh"
 ct_export_scratch_codetracer_home probe
-trap '_ct_rc=\$?; rm -rf \${ct_scratch_home_created:+"\$ct_scratch_home_created"}; ct_user_state_guard_exit probe "\$_ct_rc"' EXIT
+trap '_ct_rc=\$?; ct_remove_scratch_codetracer_home probe; ct_user_state_guard_exit probe "\$_ct_rc"' EXIT
+printf '%s\n' "\$CODETRACER_HOME" >"${scratch}/entry-home"
 $1
 exit $2
 ENTRY
+	rm -f "${scratch}/entry-home"
 	env -u CODETRACER_HOME HOME="${scratch}/home" TMPDIR="${scratch}/tmp" \
-		bash "${scratch}/entry.sh" >"${scratch}/out" 2>&1
+		${3:+"$3"} bash "${scratch}/entry.sh" >"${scratch}/out" 2>&1
 	echo $?
 }
 
@@ -359,6 +361,61 @@ else
 	t_fail "a guard checked without being started refuses (rc=${rc}): ${out}"
 fi
 
+# 11a-c. THE HOME IS REMOVED WHEN THE ENTRY POINT ENDS (2026-11-11). The two
+#     Windows lanes left theirs in place, so every run left a `ct-home-*` in
+#     the runner's temp directory for good. Through the helper the home goes
+#     whatever the status, stays when CT_KEEP_SCRATCH_HOME=1 asks (and says
+#     where), and a home that cannot be removed never fails the run. Each arm
+#     first requires the home to have existed while the entry point ran (its
+#     path was recorded from inside it).
+entry_home() { tr -d '\r' <"${scratch}/entry-home" 2>/dev/null; }
+probe_homes_left() { (cd "${scratch}/tmp" && for e in ct-home-probe.*; do [ -e "$e" ] && printf ' %s' "$e"; done); }
+removal_cases=2
+rc0="$(entry_point ':' 0)"
+h0="$(entry_home)"
+rc3="$(entry_point ':' 3)"
+h3="$(entry_home)"
+if [ "${rc0}" = 0 ] && [ "${rc3}" = 3 ] && [ -n "${h0}" ] && [ -n "${h3}" ] &&
+	[ "${h0}" != "${h3}" ] && [ ! -e "${h0}" ] && [ ! -e "${h3}" ] && [ -z "$(probe_homes_left)" ]; then
+	t_pass "an entry point's scratch home is removed when it ends, passing (0) or failing (3)"
+else
+	t_fail "an entry point's scratch home is removed when it ends (rc ${rc0}/${rc3}; homes '${h0}' '${h3}'; left:$(probe_homes_left))"
+	sed 's/^/       /' "${scratch}/out" >&2
+fi
+rm -rf "${scratch}/tmp/ct-home-probe."*
+rc="$(entry_point ':' 0 CT_KEEP_SCRATCH_HOME=1)"
+h="$(entry_home)"
+if [ "${rc}" = 0 ] && [ -n "${h}" ] && [ -d "${h}" ] &&
+	grep -qF "probe: CT_KEEP_SCRATCH_HOME=1: kept the scratch CODETRACER_HOME ${h}" "${scratch}/out"; then
+	t_pass "CT_KEEP_SCRATCH_HOME=1 keeps the entry point's home, names it, and keeps its status"
+else
+	t_fail "CT_KEEP_SCRATCH_HOME=1 keeps the entry point's home and names it (rc=${rc}; home '${h}')"
+	sed 's/^/       /' "${scratch}/out" >&2
+fi
+rm -rf "${scratch}/tmp/ct-home-probe."*
+# A home that cannot be removed: a read-only directory holding a file. Not on
+# Windows, where a mode bit does not stop a deletion (a held file does, which
+# a portable fixture cannot hold), and not as root, who ignores it.
+case "$(uname -s)" in
+Linux | Darwin)
+	if [ "$(id -u)" != 0 ]; then
+		removal_cases=3
+		# shellcheck disable=SC2016 # expanded by the entry point, not here
+		rc="$(entry_point 'mkdir -p "$CODETRACER_HOME/held" && : >"$CODETRACER_HOME/held/f" && chmod a-w "$CODETRACER_HOME/held"' 0)"
+		h="$(entry_home)"
+		if [ "${rc}" = 0 ] && [ -n "${h}" ] && [ -e "${h}/held/f" ] &&
+			grep -qF "WARNING: probe: could not remove the scratch CODETRACER_HOME ${h}" "${scratch}/out"; then
+			t_pass "a home that cannot be removed is reported, and the entry point keeps its own status (0)"
+		else
+			t_fail "a home that cannot be removed is reported and does not fail the entry point (rc=${rc}; home '${h}')"
+			sed 's/^/       /' "${scratch}/out" >&2
+		fi
+		[ -z "${h}" ] || chmod -R u+w "${h}" 2>/dev/null
+		rm -rf "${scratch}/tmp/ct-home-probe."*
+	fi
+	;;
+esac
+
 # 12. EVERY entry point that exports a scratch CODETRACER_HOME checks the guard,
 #     and runs itself in the stage sandbox first, so that on Linux only its
 #     own writes can fail it (2026-11-05: `ci/lint/nim.sh` had the sandbox,
@@ -369,17 +426,20 @@ fi
 #     never enters the sandbox.
 entry_points_unchecked() {
 	# Prints "<file>[:<recipe>]" for every unit that exports a scratch home in
-	# code and never calls ct_user_state_guard_exit / _check in code, and
+	# code and never calls ct_user_state_guard_exit / _check in code,
 	# "<file>[:<recipe>] (no sandbox)" for one that never calls
-	# ct_user_state_stage_sandbox before it exports.
+	# ct_user_state_stage_sandbox before it exports, and
+	# "<file>[:<recipe>] (home not removed)" for one that never calls
+	# ct_remove_scratch_codetracer_home.
 	awk -v file="$1" '
 	function flush() {
 		unit = file (recipe != "" ? ":" recipe : "")
 		if (exports && !checks) print unit
 		if (exports && !sandboxed) print unit " (no sandbox)"
-		exports = 0; checks = 0; sandboxed = 0
+		if (exports && !removes) print unit " (home not removed)"
+		exports = 0; checks = 0; sandboxed = 0; removes = 0
 	}
-	BEGIN { recipe = ""; exports = 0; checks = 0; sandboxed = 0; isjust = (file ~ /justfile$/) }
+	BEGIN { recipe = ""; exports = 0; checks = 0; sandboxed = 0; removes = 0; isjust = (file ~ /justfile$/) }
 	{
 		line = $0
 		if (isjust && line ~ /^[A-Za-z0-9_@-][A-Za-z0-9_-]*([ \t][^:=]*)?:([^=]|$)/) {
@@ -390,6 +450,7 @@ entry_points_unchecked() {
 		if (code ~ /(^|[^_[:alnum:]])ct_user_state_stage_sandbox[ \t]+[a-z]/ && !exports) sandboxed = 1
 		if (code ~ /(^|[^_[:alnum:]])ct_export_scratch_codetracer_home[ \t]+[a-z]/) exports = 1
 		if (code ~ /ct_user_state_guard_(exit|check)[ \t]/) checks = 1
+		if (code ~ /(^|[^_[:alnum:]])ct_remove_scratch_codetracer_home[ \t]+[a-z]/) removes = 1
 	}
 	END { flush() }' "$1"
 }
@@ -399,18 +460,24 @@ ok-recipe:
   source ci/lib/codetracer-home.sh
   ct_user_state_stage_sandbox a bash "$0" || :
   ct_export_scratch_codetracer_home a
-  trap 'ct_user_state_guard_exit a "$?"' EXIT
+  trap 'ct_remove_scratch_codetracer_home a; ct_user_state_guard_exit a "$?"' EXIT
 
 bad-recipe:
   source ci/lib/codetracer-home.sh
   ct_user_state_stage_sandbox b bash "$0" || :
   ct_export_scratch_codetracer_home b
-  trap 'rm -rf x' EXIT
+  trap 'ct_remove_scratch_codetracer_home b; rm -rf x' EXIT
 
 open-recipe:
   source ci/lib/codetracer-home.sh
   ct_export_scratch_codetracer_home c
-  trap 'ct_user_state_guard_exit c "$?"' EXIT
+  trap 'ct_remove_scratch_codetracer_home c; ct_user_state_guard_exit c "$?"' EXIT
+
+kept-recipe:
+  source ci/lib/codetracer-home.sh
+  ct_user_state_stage_sandbox d bash "$0" || :
+  ct_export_scratch_codetracer_home d
+  trap 'ct_user_state_guard_exit d "$?"' EXIT
 LANE_CONTROL_JUSTFILE
 control="$(entry_points_unchecked "${scratch}/control/justfile")"
 entry_files=()
@@ -429,11 +496,12 @@ for f in "${entry_files[@]+"${entry_files[@]}"}"; do
 	unchecked="${unchecked}$(cd "${repo_root}" && entry_points_unchecked "$f")"
 done
 expected_control="${scratch}/control/justfile:bad-recipe
-${scratch}/control/justfile:open-recipe (no sandbox)"
+${scratch}/control/justfile:open-recipe (no sandbox)
+${scratch}/control/justfile:kept-recipe (home not removed)"
 if [ "${control}" = "${expected_control}" ] && [ -z "${unchecked}" ] && [ "${units}" -ge 8 ]; then
-	t_pass "all ${units} entry points that export a scratch CODETRACER_HOME enter the sandbox and check the guard (controls flagged)"
+	t_pass "all ${units} entry points that export a scratch CODETRACER_HOME enter the sandbox, check the guard and remove the home (controls flagged)"
 else
-	t_fail "every entry point that exports a scratch CODETRACER_HOME enters the sandbox and checks the guard: unchecked='${unchecked}' units=${units} control='${control}'"
+	t_fail "every entry point that exports a scratch CODETRACER_HOME enters the sandbox, checks the guard and removes the home: unchecked='${unchecked}' units=${units} control='${control}'"
 fi
 
 # 13-14. THE SANDBOX (Linux): a file's own write to the user's state is still
@@ -531,7 +599,7 @@ set -uo pipefail
 source "${repo_root}/ci/lib/codetracer-home.sh"
 ct_user_state_stage_sandbox probe-stage bash "${scratch}/stage.sh"
 ct_export_scratch_codetracer_home probe-stage
-trap '_ct_rc=\$?; rm -rf \${ct_scratch_home_created:+"\$ct_scratch_home_created"}; ct_user_state_guard_exit probe-stage "\$_ct_rc"' EXIT
+trap '_ct_rc=\$?; ct_remove_scratch_codetracer_home probe-stage; ct_user_state_guard_exit probe-stage "\$_ct_rc"' EXIT
 $1
 if [ "$2" = 1 ]; then
 	: >"\${TMPDIR}/stage-started"
@@ -596,4 +664,4 @@ STAGE
 fi
 
 echo "lane-user-state-guard-test: ${passes} passed, ${failures} failed"
-[ "${failures}" -eq 0 ] && [ "${passes}" -eq $((13 + sandbox_cases)) ]
+[ "${failures}" -eq 0 ] && [ "${passes}" -eq $((13 + removal_cases + sandbox_cases)) ]

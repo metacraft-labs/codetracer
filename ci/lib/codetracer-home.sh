@@ -14,13 +14,14 @@
 # Usage (source it, then call):
 #   source ci/lib/codetracer-home.sh
 #   ct_export_scratch_codetracer_home <label>
-#   trap '_ct_rc=$?; rm -rf ${ct_scratch_home_created:+"$ct_scratch_home_created"}; ct_user_state_guard_exit <label> "$_ct_rc"' EXIT
+#   trap '_ct_rc=$?; ct_remove_scratch_codetracer_home <label>; ct_user_state_guard_exit <label> "$_ct_rc"' EXIT
 #
 # A caller that already exported a SCRATCH `CODETRACER_HOME` (inside the temp
 # directory, or marked with a `.codetracer-test-home` file — the rule every
 # test program applies) keeps it, so a lane started by another lane shares its root. The
 # directory it CREATES is named in `ct_scratch_home_created` (empty when an
-# inherited one was kept), so a lane removes only what it made.
+# inherited one was kept), so a lane removes only what it made:
+# `ct_remove_scratch_codetracer_home`, below, from the EXIT trap.
 #
 # The export also STARTS the user-state guard below, and the trap's last
 # command checks it: a lane whose tests all passed but which wrote the
@@ -55,6 +56,38 @@ ct_export_scratch_codetracer_home() {
 	ct_scratch_home_created="$(mktemp -d "${tmp}/ct-home-${label}.XXXXXX")" || return 1
 	# The line that matters: ct_home_isolation_test pins it verbatim.
 	export CODETRACER_HOME="${ct_scratch_home_created}"
+}
+
+# REMOVING THE HOME: every entry point that exports a scratch home removes the
+# one it made from its EXIT trap, by calling this. Until 2026-11-11 the two
+# Windows lanes (ci/test/windows-headless-tests.sh,
+# ci/test/windows-rust-components-tests.sh) left theirs in place on purpose,
+# because a Windows process still holding a file in it would have made a plain
+# `rm -rf` fail the run, so every run left a `ct-home-<label>.*` in the
+# runner's temp directory for good; on a persistent self-hosted runner that
+# only grows. This one never fails the caller: it retries for a few seconds
+# (the process holding the file is usually exiting) and then says what it
+# could not remove. `CT_KEEP_SCRATCH_HOME=1` keeps the home for debugging
+# (what a recording, a replay or the GUI left there) and says where it is.
+# ci/test/lane-user-state-guard-test.sh fails an entry point that exports a
+# home and does not call this, and drives all three outcomes.
+ct_remove_scratch_codetracer_home() {
+	local label="${1:-lane}" d="${ct_scratch_home_created:-}" _
+	[ -n "${d}" ] && [ -e "${d}" ] || return 0
+	if [ "${CT_KEEP_SCRATCH_HOME:-}" = 1 ]; then
+		echo "${label}: CT_KEEP_SCRATCH_HOME=1: kept the scratch CODETRACER_HOME ${d}" >&2
+		return 0
+	fi
+	for _ in 1 2 3 4 5; do
+		# `|| :`: the caller's trap may run under `set -e`, and a failed
+		# removal must not end it before the guard has been checked.
+		rm -rf "${d}" 2>/dev/null || :
+		[ -e "${d}" ] || return 0
+		sleep 1
+	done
+	echo "WARNING: ${label}: could not remove the scratch CODETRACER_HOME ${d}" \
+		"(a process may still hold a file in it); remove it by hand" >&2
+	return 0
 }
 
 # THE USER-STATE GUARD: read the developer's own CodeTracer state before a

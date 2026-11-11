@@ -250,7 +250,15 @@ else
 	_ct_lane_home="$(mktemp -d "${TMPDIR:-/tmp}/ct-lane-home.XXXXXX")"
 	_ct_lane_home_owned="${_ct_lane_home}"
 fi
-trap 'rm -rf ${_ct_lane_state:+"${_ct_lane_state}"} ${_ct_lane_home_owned:+"${_ct_lane_home_owned}"}' EXIT
+# The root this lane made is removed when it ends, unless CT_KEEP_SCRATCH_HOME=1
+# asks to keep it for debugging (the knob ci/lib/codetracer-home.sh's
+# `ct_remove_scratch_codetracer_home` reads too).
+trap 'rm -rf ${_ct_lane_state:+"${_ct_lane_state}"}
+if [ "${CT_KEEP_SCRATCH_HOME:-}" = 1 ] && [ -n "${_ct_lane_home_owned}" ]; then
+	echo "lane: CT_KEEP_SCRATCH_HOME=1: kept the per-file CODETRACER_HOMEs under ${_ct_lane_home_owned}" >&2
+else
+	rm -rf ${_ct_lane_home_owned:+"${_ct_lane_home_owned}"}
+fi' EXIT
 
 # THE GUARD: the user's own state is READ before the lane and after it — and
 # around every file below — never written, and the lane FAILS if anything there

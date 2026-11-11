@@ -77,10 +77,10 @@ ct_export_scratch_codetracer_home cross-repo
 # empty when an inherited scratch home was kept), however the run ends: the
 # helper's prescribed trap. Without it every run left its
 # `ct-home-cross-repo.*` behind in the temp directory.
-# shellcheck disable=SC2154 # set by ct_export_scratch_codetracer_home
 # The trap's last command fails the run if anything it ran wrote the
 # developer's real CodeTracer state (ci/lib/codetracer-home.sh, the guard).
-trap '_ct_rc=$?; rm -rf ${ct_scratch_home_created:+"$ct_scratch_home_created"}; ct_user_state_guard_exit cross-repo "$_ct_rc"' EXIT
+# shellcheck disable=SC2154 # _ct_rc is assigned by the trap itself, first
+trap '_ct_rc=$?; ct_remove_scratch_codetracer_home cross-repo; ct_user_state_guard_exit cross-repo "$_ct_rc"' EXIT
 LOG_DIR="$REPO_ROOT/target/cross-test-logs"
 CLONE_DIR="$REPO_ROOT/target/rr-backend-clone"
 

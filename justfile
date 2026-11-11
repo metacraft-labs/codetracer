@@ -1110,7 +1110,7 @@ test-rust:
   # only its own writes can fail it (ci/lib/codetracer-home.sh).
   ct_user_state_stage_sandbox rust-tests bash "$0" || :
   ct_export_scratch_codetracer_home rust-tests
-  trap '_ct_rc=$?; report_skips; rm -rf ${ct_scratch_home_created:+"$ct_scratch_home_created"}; ct_user_state_guard_exit rust-tests "$_ct_rc"' EXIT
+  trap '_ct_rc=$?; report_skips; ct_remove_scratch_codetracer_home rust-tests; ct_user_state_guard_exit rust-tests "$_ct_rc"' EXIT
   # The resolver itself (both sides of the CODETRACER_HOME contract).
   ( cd libs/ct-home && cargo test )
   # `libs/ct-dap-client` is a plain path dev-dependency of src/db-backend, so
@@ -1279,7 +1279,7 @@ test-python-api:
   # only its own writes can fail it (ci/lib/codetracer-home.sh).
   ct_user_state_stage_sandbox python-api bash "$0" || :
   ct_export_scratch_codetracer_home python-api
-  trap '_ct_rc=$?; rm -rf ${ct_scratch_home_created:+"$ct_scratch_home_created"}; ct_user_state_guard_exit python-api "$_ct_rc"' EXIT
+  trap '_ct_rc=$?; ct_remove_scratch_codetracer_home python-api; ct_user_state_guard_exit python-api "$_ct_rc"' EXIT
   cd python-api
   python3 -m pytest -q tests
 
@@ -2018,7 +2018,7 @@ test-acp-notifications:
   notification_test="$(mktemp "${TMPDIR:-/tmp}/codetracer-acp-notifications.XXXXXX.js")"
   sessions_test="$(mktemp "${TMPDIR:-/tmp}/codetracer-acp-sessions.XXXXXX.js")"
   git_changes_test="$(mktemp "${TMPDIR:-/tmp}/codetracer-acp-git-changes.XXXXXX.js")"
-  trap '_ct_rc=$?; rm -f "$notification_test" "$sessions_test" "$git_changes_test"; rm -rf ${ct_scratch_home_created:+"$ct_scratch_home_created"}; ct_user_state_guard_exit acp-notifications "$_ct_rc"' EXIT
+  trap '_ct_rc=$?; rm -f "$notification_test" "$sessions_test" "$git_changes_test"; ct_remove_scratch_codetracer_home acp-notifications; ct_user_state_guard_exit acp-notifications "$_ct_rc"' EXIT
   nim js -d:nodejs -d:server -d:chronicles_enabled=off \
     --out:"$notification_test" src/frontend/tests/acp_notification_test.nim
   node "$notification_test"
@@ -2061,7 +2061,7 @@ test-frontend-js:
   run_to_cursor_test="$(mktemp "${TMPDIR:-/tmp}/codetracer-run-to-cursor-test.XXXXXX.js")"
   html_sinks_probe="$(mktemp "${TMPDIR:-/tmp}/codetracer-html-sinks-probe.XXXXXX.js")"
   dap_refusal_test="$(mktemp "${TMPDIR:-/tmp}/codetracer-dap-refusal-test.XXXXXX.js")"
-  trap '_ct_rc=$?; rm -f "$nim_sourcemap_test" "$frontend_lang_test" "$scratchpad_dispatch_test" "$target_axes_js_test" "$ipc_registry_test" "$monaco_operations_test" "$desktop_list_operations_test" "$shortcut_presets_test" "$shortcut_dialog_test" "$debug_toolbar_tooltips_test" "$component_registry_binding_test" "$component_ids_across_sessions_test" "$stop_command_test" "$run_to_cursor_test" "$html_sinks_probe" "$dap_refusal_test"; rm -rf ${ct_scratch_home_created:+"$ct_scratch_home_created"}; ct_user_state_guard_exit frontend-js "$_ct_rc"' EXIT
+  trap '_ct_rc=$?; rm -f "$nim_sourcemap_test" "$frontend_lang_test" "$scratchpad_dispatch_test" "$target_axes_js_test" "$ipc_registry_test" "$monaco_operations_test" "$desktop_list_operations_test" "$shortcut_presets_test" "$shortcut_dialog_test" "$debug_toolbar_tooltips_test" "$component_registry_binding_test" "$component_ids_across_sessions_test" "$stop_command_test" "$run_to_cursor_test" "$html_sinks_probe" "$dap_refusal_test"; ct_remove_scratch_codetracer_home frontend-js; ct_user_state_guard_exit frontend-js "$_ct_rc"' EXIT
   echo "Running Nim Source Map V3 frontend tests..."
   nim -d:nodejs -d:chronicles_enabled=off -d:ctIndex -d:server \
     --out:"$nim_sourcemap_test" js src/frontend/tests/nim_sourcemap_test.nim

@@ -21,12 +21,14 @@ source "$REPO_ROOT/ci/lib/codetracer-home.sh"
 # call returns and the comparison in the EXIT trap is the guard.
 ct_user_state_stage_sandbox windows-headless bash "$0" "$@" || :
 ct_export_scratch_codetracer_home windows-headless
-# Fail the run if anything it ran wrote the developer's real CodeTracer
-# state (ci/lib/codetracer-home.sh, the guard). The scratch home is left in
-# place, as it always was here: a Windows process still holding a file in it
-# would make its removal fail the run for a reason that is not a test's.
+# Remove the home this run made (ct_remove_scratch_codetracer_home: it
+# retries while a Windows process that is still exiting holds a file in it,
+# and never fails the run for that; CT_KEEP_SCRATCH_HOME=1 keeps it), then
+# fail the run if anything it ran wrote the developer's real CodeTracer state
+# (ci/lib/codetracer-home.sh, the guard). Until 2026-11-11 the home was left
+# in place, and every run left one in the runner's temp directory for good.
 # shellcheck disable=SC2154 # _ct_rc is assigned by the trap itself, first
-trap '_ct_rc=$?; ct_user_state_guard_exit windows-headless "$_ct_rc"' EXIT
+trap '_ct_rc=$?; ct_remove_scratch_codetracer_home windows-headless; ct_user_state_guard_exit windows-headless "$_ct_rc"' EXIT
 filter="$(bash "$REPO_ROOT/ci/lib/not-provided-filter.sh" "$REPO_ROOT/ci/test/headless-not-provided.windows.txt" "$REPO_ROOT/src/db-backend/tests")"
 
 cd "$REPO_ROOT/src/db-backend"

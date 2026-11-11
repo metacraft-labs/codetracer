@@ -39,8 +39,7 @@ source ci/lib/codetracer-home.sh
 # no sandbox here, or in the sandboxed run itself.
 ct_user_state_stage_sandbox lint-nim bash ci/lint/nim.sh "$@"
 ct_export_scratch_codetracer_home lint-nim
-# shellcheck disable=SC2154 # set by ct_export_scratch_codetracer_home
-trap 'rm -rf ${ct_scratch_home_created:+"$ct_scratch_home_created"}' EXIT
+trap 'ct_remove_scratch_codetracer_home lint-nim' EXIT
 
 # See the note in ci/lint/bash.sh: the stage names its tools before it runs, so
 # a shell missing one says so by name instead of failing obscurely inside a
