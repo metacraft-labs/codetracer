@@ -2358,7 +2358,8 @@ package codeTracer:
       gateRustTestCrateCoverage,
       gateTestLaneCoverage,
       gateSiblingProvisioning,
-      gateSiblingInputBranch]
+      gateSiblingInputBranch,
+      gateReproLockAgreement]
 
     for gateAction in ctGateTestActions:
       auxiliaryActionIds.add(gateAction.id)
