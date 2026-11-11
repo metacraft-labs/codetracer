@@ -217,6 +217,23 @@ suite "HSF-E1: the pane server, over a real recording":
     let (_, elNotes) = srv.request("pane/open",
       %*{"session": sid, "pane": "eventLog", "width": 80, "height": 8})
     check elNotes.notes("pane/content").len == 1
+    # A click on an event's row jumps to that event: one hotspot spanning the
+    # row, naming the events in the order the log shows them (the hit test
+    # reads one paint of the log for every row).
+    block eventHotspots:
+      let el = elNotes.notes("pane/content")
+      if el.len != 1: break eventHotspots
+      var jumps: seq[int64] = @[]
+      for r in el[0]{"params", "rows"}.getElems:
+        for h in r{"hotspots"}.getElems:
+          check h{"operation"}.getStr == "event-log.jump"
+          check h{"start"}.getInt == 0 and
+                h{"end"}.getInt >= r{"text"}.getStr.strip(leading = false).len
+          check r{"text"}.getStr.strip.len > 0
+          jumps.add h{"args", "index"}.getBiggestInt
+      check jumps.len >= 2
+      for i in 1 ..< jumps.len:
+        check jumps[i] > jumps[i - 1]
 
     # ---- a resize at the same stop asks the engine for nothing -------------
     # A resize moves the pane's viewport (Editor-Hosted-Front-Ends §E5), and

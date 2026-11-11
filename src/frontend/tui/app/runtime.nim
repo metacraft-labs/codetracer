@@ -2468,13 +2468,17 @@ proc handleTerminalInfoToken(rt: TuiRuntime; token: string; nowMs: int64;
   rt.terminalInfo.lastKey = name
   discard rt.overlayTakes(name, TerminalInfoTable, nowMs, outcome)
 
+proc eventLogScreenIn(model: EventLogModel; area: CellArea): EventLogScreen =
+  ## The screen the log's painter produces in `area`, re-run on a scratch
+  ## grid so a hit test reads what the paint placed where.
+  var g = newStyledGrid(area.col + area.width, area.row + area.height)
+  paintEventLog(g, area, model)
+
 proc eventRowAt(model: EventLogModel; area: CellArea;
                 row: int): (bool, event_log.EventLogRow, EventLogScreen) =
-  ## The row painted on `row` when the log is painted into `area` (the
-  ## pane's painter, re-run on a scratch grid so the hit is the paint's), and
-  ## that screen (its header, for a header press).
-  var g = newStyledGrid(area.col + area.width, area.row + area.height)
-  let screen = paintEventLog(g, area, model)
+  ## The row painted on `row` when the log is painted into `area`, and that
+  ## screen (its header, for a header press).
+  let screen = eventLogScreenIn(model, area)
   let (ok, hit) = screen.eventRowAtScreen(row)
   (ok, hit, screen)
 
@@ -10018,8 +10022,11 @@ proc hostedHotspots*(rt: TuiRuntime; pane: PaneKind;
   of paneEventLog:
     if not rt.app.eventLog.hasContent:
       return
+    # One paint for every row: painting the log again per row (`height`
+    # times) was a third of every publish.
+    let screen = eventLogScreenIn(rt.app.eventLog, area)
     for r in 0 ..< height:
-      let (ok, row, _) = eventRowAt(rt.app.eventLog, area, r + 1)
+      let (ok, row) = screen.eventRowAtScreen(r + 1)
       if ok:
         let ev = row.event
         result[r].add PaneHotspot(startCol: 0, endCol: width,

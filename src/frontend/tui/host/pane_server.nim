@@ -508,10 +508,15 @@ proc decorationsOf(s: ServerSession): JsonNode =
 proc dapEvent(srv: PaneServer; event: string; body: JsonNode)
 
 proc publish(srv: PaneServer; s: ServerSession; fullPanes: seq[PaneKind] = @[];
-             fullFrameViewer = false): seq[JsonNode] =
+             fullFrameViewer = false;
+             onlyPanes: seq[PaneKind] = @[]): seq[JsonNode] =
   ## Everything the editor holds that this session's state changed: a new
   ## mode's layout, the debugger's position, the open panes' rows and the
   ## visible source lines' decorations. The DAP client is told of a move.
+  ##
+  ## The open panes are repainted and compared with what the editor holds —
+  ## all of them, or only `onlyPanes` when the caller knows the others cannot
+  ## have changed (a resize that moved one pane's viewport).
   let product = s.app.modes.product
   let layout = $layoutJson(s.currentLayout())
   if product != s.product or layout != s.layoutSent:
@@ -532,6 +537,8 @@ proc publish(srv: PaneServer; s: ServerSession; fullPanes: seq[PaneKind] = @[];
       srv.dapEvent("stopped", %*{"reason": "step", "threadId": 1,
                                  "allThreadsStopped": true})
   for pane in s.panes.keys:
+    if onlyPanes.len > 0 and pane notin onlyPanes:
+      continue
     let n = s.contentOf(pane, pane in fullPanes)
     if not n.isNil:
       result.add n
@@ -555,9 +562,11 @@ proc publish(srv: PaneServer; s: ServerSession; fullPanes: seq[PaneKind] = @[];
   if show.len > 0:
     result.add notification("source/show", %*{"session": s.id, "file": show})
 
-proc resyncViewports(s: ServerSession; pane = paneEditor; opened = false) =
+proc resyncViewports(s: ServerSession; pane = paneEditor;
+                     opened = false): bool {.discardable.} =
   ## The editor's windows changed: `pane`'s window was opened (`opened`) or
-  ## resized, or the source window (`paneEditor`) scrolled or resized.
+  ## resized, or the source window (`paneEditor`) scrolled or resized. True
+  ## when the stop's panes were rebuilt, so any of them may have changed.
   ##
   ## Each pane's viewport is its window's (Editor-Hosted-Front-Ends §E5), and
   ## what a viewport decides is how much is FETCHED for that pane
@@ -578,6 +587,7 @@ proc resyncViewports(s: ServerSession; pane = paneEditor; opened = false) =
     s.sourceRows = rows
     s.tui.setViewportHeight(rows)
     s.tui.refresh(s.rt)
+    return true
   elif pane != paneEditor:
     s.tui.followPaneViewport(s.rt, pane)
 
@@ -795,10 +805,16 @@ proc handleRequest(srv: PaneServer; meth: string; params: JsonNode;
     s.panes[pane] = HostedPane(width: w, height: h)
     s.rt.hostedRows[pane] = h
     s.rt.hostedCols[pane] = w
-    s.resyncViewports(pane, opened = meth == "pane/open")
+    let rebuilt = s.resyncViewports(pane, opened = meth == "pane/open")
     if meth == "pane/open":
       extra.add srv.keymapOf(s, pane)
-    extra.add srv.publish(s, fullPanes = @[pane])
+    # A resize that only moved `pane`'s viewport changed only `pane`: the
+    # engine answers inside the request (the stdio backend is synchronous),
+    # and what it loaded is that viewport's. Repainting every other open pane
+    # to find nothing changed was most of a resize — and a drag sends one
+    # per mouse motion.
+    extra.add srv.publish(s, fullPanes = @[pane],
+                          onlyPanes = (if rebuilt: @[] else: @[pane]))
     result = newJObject()
     result["pane"] = %($pane)
     result["width"] = %w
