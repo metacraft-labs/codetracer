@@ -1583,7 +1583,7 @@ core_line="$(grep -nF -- '- name: Build the codetracer-desktop core' "$REUSABLE"
 pin_outside_prefetch="$(strip_cr "$REUSABLE" | awk -v want="      - name: $PREFETCH_STEP" '
 	$0 == want { p=1; next }
 	p && /^      - name: / { p=0 }
-	!p' | grep -nE 'CanonicalNixpkgs|nixpkgs_pin[.]nim')"
+	!p { print NR ": " $0 }' | grep -E 'CanonicalNixpkgs|nixpkgs_pin[.]nim')"
 if [ -n "$prepare_line" ] && [ -n "$core_line" ] && [ "$prepare_line" -lt "$core_line" ] &&
 	[ -z "$pin_outside_prefetch" ]; then
 	ok "shared tool preparation precedes the core build; only the token-window fetch reads the SDK's nixpkgs pin"
