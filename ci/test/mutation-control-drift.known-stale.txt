@@ -271,3 +271,8 @@ src/frontend/tui/tests/plat72-screen-reader-mutation-control.sha256	src/frontend
 src/frontend/tui/tests/plat60-low-level-code-mutation-control.sha256	src/frontend/gpui/low_level_code_leaf.nim	cde0952a46ee3ae1ca7ba7169c0f45ea96084867cc2b765899c8665696a23cbf	c7e95971f1200a94ede803a49b5cc10f7042b32690dff7e791816cbc6cbebad4
 src/frontend/tui/tests/plat53-test-results-mutation-control.sha256	src/frontend/index/traces.nim	d330df8ade2815e1349df3a510ff883a17e882edaa94f703b924695a5a4cba05	cda2e63aac9f69017e71b603b3f5edc1890cf1ff1cff28bd368044a20daf25b6
 src/frontend/tui/tests/plat57-find-in-files-mutation-control.sha256	src/frontend/index/ipc_utils.nim	495a142330bbef0349ae9138d7213225d947d74a9624a75ec96cbdc4d24e2b57	2acc5c524b519326cd294dfc9b9ae7738885e60c230a967b746bdbb5970dfc45
+
+# 2026-11-13, a point evidence region maps as a point (reconcile.nim) and its example case
+# (test_editor_async_examples.nim): plat29 owes a re-grade for those bytes.
+src/frontend/viewmodel/tests/unit/plat29-async-mutation-control.sha256	src/frontend/viewmodel/editor/reconcile.nim	2b6c927c3f8c580cc131cda8b28c973f96e1d7e367cd06e55a9d69fef603481b	78c9b5fca17be52c3a17750d01034086ab9a2fda983a1b8c7189438468edabe4
+src/frontend/viewmodel/tests/unit/plat29-async-mutation-control.sha256	src/frontend/viewmodel/tests/unit/test_editor_async_examples.nim	740ec6623aa3b4ef933654f9c183040a413e619aa7eb9b09bb6627ef34a62dfa	bfdd811e6f2125970278f574afb1e0b22e64df79fa3305debdfeaaa2aa9f1507

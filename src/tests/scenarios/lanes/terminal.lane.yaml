@@ -21,6 +21,7 @@ applicable:
   - ../terminal/edit-mode-f5-and-ctrl-f5.yaml
   - ../terminal/edit-mode-stale-trace-notice.yaml
   - ../terminal/edit-mode-no-edit-no-notice.yaml
+  - ../terminal/edit-breakpoint-follows-its-line.yaml
   - ../terminal/stop-path-parent-component-add.yaml
   - ../terminal/stop-path-parent-component-scale.yaml
   - ../terminal/stop-path-parent-component-each-click.yaml

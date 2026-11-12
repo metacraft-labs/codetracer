@@ -69,7 +69,7 @@ template counted(condition: untyped) =
   inc countedAssertions
   check condition
 
-const ExpectedAssertions = 143
+const ExpectedAssertions = 163
   ## Asserted by the last case against the runtime tally.
 
 const Seed = 0x29e0a11e'u32
@@ -262,6 +262,30 @@ suite "PLAT-29 — the drop count, in both directions":
                               payload = "prefix anchor")
     discard vd2.applyChanges(changeSet(vd2.text.len, 0, prefixEnd, ""))
     counted reconcile(vd2, res2, rep).outcome == roMapped
+
+  test "a point region with text typed AT it stays a point, and reconciles again":
+    # The terminal UI's crash: Vim's `O` opens an empty line, whose highlight
+    # evidence is the point `[0, 0)`, and a character typed into it while the
+    # parse was in flight mapped that region to `[1, 0)` — start after the new
+    # text, end before it. The NEXT keystroke handed that inverted region back
+    # to `reconcile`, which refused it as being outside the document. So the
+    # case is the chain, two keystrokes long, for every producer: the first
+    # mapping must be a point, and the second must accept the first's answer.
+    var rep = initStalenessReport()
+    for producer in ProducerKind:
+      checkpoint($producer)
+      var vd = initVersionedDocument("\ndef second():\n")
+      let res = producerResult(producer, vd.version, vd.text.len, 0, 0,
+                               payload = "empty line")
+      discard vd.applyChanges(changeSet(vd.text.len, 0, 0, "#"))
+      let first = reconcile(vd, res, rep)
+      counted first.outcome == roMapped
+      counted (first.value.evidenceFrom, first.value.evidenceTo) == (1, 1)
+      discard vd.applyChanges(changeSet(vd.text.len, 1, 1, " "))
+      let second = reconcile(vd, first.value, rep)
+      counted second.outcome == roMapped
+      counted (second.value.evidenceFrom, second.value.evidenceTo) == (2, 2)
+      counted second.value.payload == "empty line"
 
 # ===========================================================================
 suite "PLAT-29 — the counted staleness report":
