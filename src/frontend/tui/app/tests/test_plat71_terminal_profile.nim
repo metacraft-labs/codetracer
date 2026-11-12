@@ -26,14 +26,20 @@
 ##   * §5.3's settings: the flags, the contradictions refused, and the
 ##     remembered `[terminal "<glob>"]` sections.
 ##
-## ## The personas here are WRITTEN, not captured — and that is stated
+## ## The personas: captured where a real terminal could be run
 ##
-## §13.1 asks for personas captured from real terminals. The answer sets
-## below are written from each terminal's documentation (§3.2's sources);
-## capturing them on the real emulators is PLAT-71 Part E's lane, which is
-## owed. A written persona is the one stand-in of this file, and it is not a
-## mock: the subject — `resolveCapabilities`, the parsers, the round — is the
-## shipped code, called directly.
+## §13.1 asks for personas captured from real terminals. kitty, foot, xterm,
+## Ghostty, Alacritty and tmux in kitty are: their answers are the bytes each
+## terminal wrote back to the round (`app/tests/personas/`, taken inside the real
+## emulator by the `tui-real-emulators` lane, which also re-checks on every
+## run that the terminal still answers so), read into a probe by
+## `personas.probeOf`, which `tests/test_plat71_terminal_round.nim` holds
+## equal to the shipped `noteReply`. VTE (narrow and set wide), foot 1.7, the
+## Linux console and a Latin-1 terminal are still WRITTEN from their
+## documentation (§3.2's sources), because none of them runs on the lane's
+## host; the silent persona is synthetic. A persona is the one stand-in of
+## this file, and it is not a mock: the subject — `resolveCapabilities`, the
+## parsers, the round — is the shipped code, called directly.
 ##
 ## ## Templates, not procs, for anything that calls `check`
 ##
@@ -51,10 +57,15 @@ import ../views/borders
 import ../views/glyph_table
 import ../views/scrollbar_styles
 import codetracer_embed
+import ./personas/personas
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count.
-const ExpectedAssertions = 554
+const ExpectedAssertions = 613
+  ## 554 -> 613, measured: the personas are the six CAPTURED ones (kitty,
+  ## foot, xterm, Ghostty, Alacritty, tmux in kitty) and six written ones
+  ## (twelve, from ten), each swept by TA-1, TA-9 and TA-13, and TA-1's cases
+  ## for the captured terminals check what they measured.
   ## 541 -> 554, measured on 2026-11-09: `d8e437ee5` added the
   ## `pointer-shapes` axis to the terminal profile, which TA-13
   ## sweeps once per persona (+10 for the ten personas); the other three are not
@@ -109,23 +120,11 @@ proc answered(xtversion = ""; da2 = (0, 0); sync = -1; grapheme = -1;
 let
   NarrowWidths = widthsProbe(1, 1, 1, 1, 2, 2)
   utf8Env = initTerminalEnv(term = "xterm-256color", lang = "en_US.UTF-8")
-  Personas = [
-    Persona(name: "kitty 0.36.4",
-            env: initTerminalEnv(term = "xterm-kitty", lang = "en_US.UTF-8"),
-            probe: answered("kitty(0.36.4)", (1, 4000), 2, 0, NarrowWidths,
-                            true)),
-    Persona(name: "foot 1.16.2",
-            env: initTerminalEnv(term = "foot", lang = "en_US.UTF-8"),
-            probe: answered("foot(1.16.2)", (1, 11602), 2, 2, NarrowWidths,
-                            true)),
+  WrittenPersonas = [
     Persona(name: "foot 1.7 (before Legacy Computing)",
             env: initTerminalEnv(term = "foot", lang = "en_US.UTF-8"),
             probe: answered("foot(1.7.0)", (1, 10700), 2, 2,
                             widthsProbe(1, 1, 1, 1, 2, 2), true)),
-    Persona(name: "xterm 389",
-            env: initTerminalEnv(term = "xterm-256color", lang = "en_US.UTF-8"),
-            probe: answered("XTerm(389)", (41, 389), 0, 0,
-                            widthsProbe(1, 1, 1, 1, 2, 4))),
     Persona(name: "VTE 0.76 (GNOME Terminal)",
             env: initTerminalEnv(term = "xterm-256color", lang = "en_US.UTF-8",
                                  vteVersion = "7600"),
@@ -135,9 +134,6 @@ let
                                  vteVersion = "7600"),
             probe: answered("VTE(7600)", (65, 7600), 4, 0,
                             widthsProbe(2, 2, 1, 2, 2, 2), true)),
-    Persona(name: "Alacritty (no XTVERSION)",
-            env: initTerminalEnv(term = "alacritty", lang = "en_US.UTF-8"),
-            probe: answered("", (0, 0), 2, -1, NarrowWidths, true)),
     Persona(name: "Linux console",
             env: initTerminalEnv(term = "linux", lang = "en_US.UTF-8"),
             probe: answered("", (0, 0), -1, -1, widthsProbe(1, 1, 1, 1, 1, 4))),
@@ -147,6 +143,15 @@ let
     Persona(name: "silent",
             env: utf8Env,
             probe: TerminalProbe(attempted: true, cprExpected: 6))]
+
+proc allPersonas(): seq[Persona] =
+  ## The captured personas (`personas/` beside this file), then the written ones.
+  for c in capturedPersonas():
+    result.add Persona(name: c.id, env: envOf(c), probe: probeOf(c))
+  for p in WrittenPersonas:
+    result.add p
+
+let Personas = allPersonas()
 
 # ---------------------------------------------------------------------------
 # An oracle for §4.3's width model, written from the spec's text
@@ -237,8 +242,8 @@ suite "PLAT-71 Tier 1: the terminal's capability profile":
       checkpoint(persona.name & ": " & describe(caps))
       inc rows
       case persona.name
-      of "kitty 0.36.4":
-        ck caps.identity.name == "kitty" and caps.identity.version == "0.36.4"
+      of "kitty-0.44.0":
+        ck caps.identity.name == "kitty" and caps.identity.version == "0.44.0"
         ck caps.identityFrom == csProbe
         ck caps.synchronizedOutput and caps.syncFrom == csProbe
         ck not caps.graphemeMode
@@ -246,24 +251,35 @@ suite "PLAT-71 Tier 1: the terminal's capability profile":
         ck not caps.modernUnicode      # off by default, even where it would draw
         ck caps.modernNote.contains("auto would turn it on")
         ck not caps.ambiguousWide and caps.ambiguousFrom == csProbe
-      of "foot 1.16.2":
+        ck caps.widths.unicode13 == knYes and caps.widths.clusters == knYes
+      of "foot-1.25.0":
+        ck caps.identity.name == "foot" and caps.identity.version == "1.25.0"
+        ck caps.graphemeMode and not caps.graphemeSet  # 2027 already set (Ps 1)
+      of "foot 1.7 (before Legacy Computing)":
         ck caps.identity.name == "foot"
         ck caps.graphemeMode and caps.graphemeSet   # 2027 recognised, off
-      of "xterm 389":
-        ck caps.identity.name == "xterm"
+      of "ghostty-1.3.1":
+        ck caps.identity.name == "ghostty" and caps.identity.version == "1.3.1"
+        ck caps.graphemeMode and caps.synchronizedOutput
+      of "xterm-403":
+        ck caps.identity.name == "xterm" and caps.identity.version == "403"
         # A NEGATIVE DECRQM answer beats every list (§5.2 note).
         ck not caps.synchronizedOutput and caps.syncFrom == csProbe
         ck caps.widths.clusters == knNo
+      of "tmux-3.6a-in-kitty-0.44.0":
+        ck caps.identity.via == @["tmux 3.6a"]
+        ck caps.widths.clusters == knYes
       of "VTE 0.76 (GNOME Terminal)":
         ck caps.identity.name == "vte" and caps.identity.version == "0.76.0"
         ck not caps.synchronizedOutput     # VTE answers 4: permanently reset
       of "VTE 0.76 set to ambiguous WIDE":
         ck caps.ambiguousWide and caps.ambiguousFrom == csProbe
         ck glyphProfileOf(caps).columnOf == gcolAmbiguous
-      of "Alacritty (no XTVERSION)":
+      of "alacritty-0.16.1":
         ck caps.identity.name == "alacritty"
-        ck caps.identityFrom == csEnvironment
-        ck caps.synchronizedOutput
+        ck caps.identityFrom == csEnvironment   # no XTVERSION answer
+        ck caps.synchronizedOutput and caps.syncFrom == csProbe
+        ck caps.widths.clusters == knNo
       of "Linux console":
         ck caps.tier == tierBasic
         ck caps.widths.wideOk == knNo
@@ -411,7 +427,8 @@ suite "PLAT-71 Tier 1: the terminal's capability profile":
                                      persona.probe, TerminalPrefs(
                                        global: TerminalChoices(
                                          modernUnicode: some(mcAuto))))
-      let expected = persona.name in ["kitty 0.36.4", "foot 1.16.2",
+      let expected = persona.name in ["kitty-0.44.0", "foot-1.25.0",
+                                      "ghostty-1.3.1",
                                       "VTE 0.76 (GNOME Terminal)",
                                       "VTE 0.76 set to ambiguous WIDE"]
       checkpoint(persona.name & " auto -> " & $auto.modernUnicode & " (" &

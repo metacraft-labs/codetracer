@@ -14,16 +14,30 @@
 ## answers into the real pty, in the order a terminal answers. `nim-libvterm`
 ## parses the screen the suites read and answers nothing itself.
 ##
-## The answers are WRITTEN FROM each terminal's documentation (§3.2's
-## sources), not yet captured from the real emulators: capturing them is
-## PLAT-71 Part E's lane, which is owed, and each persona says so. A cursor
-## report is answered from the persona's own width table for the probe glyph
-## the binary printed — libvterm has no ambiguous-wide setting, so its cursor
-## could not stand for a terminal set to draw East Asian Width `A` wide.
+## kitty, foot, xterm, Ghostty, Alacritty and tmux are CAPTURED: their
+## answers are the bytes each real terminal wrote back to the binary's round
+## (`app/tests/personas/<id>.json`, taken by `tools/capture-terminal-persona`
+## inside the real emulator by the `tui-real-emulators` lane, which also
+## checks on every run that the terminal still answers so). `fromCapture`
+## carries every answer over verbatim, and `test_plat71_terminal_round.nim`
+## checks that `answerFor` gives back exactly the captured bytes. The VTE
+## set to ambiguous WIDE and the Linux console are still WRITTEN from their
+## documentation (neither runs on the lane's host), and the silent and slow
+## personas are synthetic; each says so in its provenance. A cursor report is
+## answered from the persona's width table for the probe glyph the binary
+## printed — the same bytes the real terminal sent, since the probe prints at
+## the top-left — because libvterm has no ambiguous-wide setting, so its
+## cursor could not stand for a terminal set to draw East Asian Width `A`
+## wide.
 
-import std/[os, strutils, tables, times]
+import std/[json, os, strutils, tables, times]
 
 import term_assert
+
+import ../../app/theme/terminal_profile
+import ../../app/tests/personas/personas
+
+export personas
 
 type
   Persona* = object
@@ -45,6 +59,10 @@ type
       ## The answer to OSC 22's query, `1,0,…`; "" answers nothing.
     delayMs*: int
       ## How long the terminal takes to answer (a slow link).
+    verbatim*: Table[string, string]
+      ## A captured persona's other answers, by question (`OSC 11`,
+      ## XTGETTCAP, DECRQSS, the cell size, the Kitty keyboard flags),
+      ## written back byte for byte.
 
   PeerLog* = object
     answered*: seq[string]
@@ -95,14 +113,16 @@ proc answerFor*(p: Persona; query: string; cprIndex: int): string =
     let mode = parseInt(query[3 ..< query.len - 2])
     (if mode in p.modes: "\x1b[?" & $mode & ";" & $p.modes[mode] & "$y"
      else: "")
-  of "\x1b[?u": (if p.kittyKeyboard: "\x1b[?0u" else: "")
+  of "\x1b[?u":
+    (if "\x1b[?u" in p.verbatim: p.verbatim["\x1b[?u"]
+     elif p.kittyKeyboard: "\x1b[?0u" else: "")
   of "\x1b[6n":
     (if cprIndex < p.widths.len: "\x1b[1;" & $(p.widths[cprIndex] + 1) & "R"
      else: "")
   of PointerQuery, WrappedPointerQuery:
     (if p.pointerReply.len > 0: "\x1b]22;" & p.pointerReply & "\x1b\\" else: "")
   of "\x1b[c": p.da1
-  else: ""
+  else: p.verbatim.getOrDefault(query, "")
 
 proc serve*(sess: var TuiTestSession; p: Persona; timeoutMs = 20000;
             fromByte = 0): PeerLog =
@@ -142,25 +162,62 @@ proc serve*(sess: var TuiTestSession; p: Persona; timeoutMs = 20000;
     sess.send(pending)
 
 # ---------------------------------------------------------------------------
-# The personas (§13.1). WRITTEN FROM DOCUMENTATION — capture owed (Part E).
+# The personas (§13.1): captured from the real terminals, and the written ones
+# no terminal on the lane's host can stand for.
 # ---------------------------------------------------------------------------
 
-proc kitty*(): Persona =
-  Persona(name: "kitty 0.36.4",
-          provenance: "written from kitty's documentation (XTVERSION, " &
-                      "DECRQM 2026, the keyboard protocol); not captured",
-          xtversion: "kitty(0.36.4)", da2: "\x1b[>1;4000;29c",
-          da1: "\x1b[?62;22c", modes: {2026: 2, 2027: 0, 1016: 2}.toTable,
-          widths: @[1, 1, 1, 1, 2, 2], kittyKeyboard: true,
-          pointerReply: "1,1,1,0,0,1,1,1,1,1")
+proc stringBody(reply, prefix: string): string =
+  ## The text of a DCS / OSC reply between `prefix` and its terminator (ST
+  ## or BEL).
+  result = reply[prefix.len .. ^1]
+  if result.endsWith("\x1b\\"): result.setLen(result.len - 2)
+  elif result.endsWith("\x07"): result.setLen(result.len - 1)
 
-proc foot*(): Persona =
-  Persona(name: "foot 1.16.2",
-          provenance: "written from foot's CHANGELOG and foot.ini(5); not " &
-                      "captured",
-          xtversion: "foot(1.16.2)", da2: "\x1b[>1;11602;0c",
-          da1: "\x1b[?62;4;22c", modes: {2026: 2, 2027: 2, 1016: 2}.toTable,
-          widths: @[1, 1, 1, 1, 2, 2], kittyKeyboard: true)
+proc fromCapture*(c: CapturedPersona): Persona =
+  ## A captured persona as the peer serves it: every answer the terminal
+  ## gave, verbatim, for the question it answered.
+  result = Persona(name: c.terminal & " " & c.version,
+                   provenance: c.provenance, da1: c.answerFor("da1"),
+                   da2: c.answerFor("da2"))
+  let xt = c.answerFor("xtversion")
+  if xt.len > 0:
+    result.xtversion = stringBody(xt, "\x1bP>|")
+  for mode in [1016, 2026, 2027]:
+    let a = c.answerFor("decrqm." & $mode)
+    if a.len > 0:
+      let (ok, m, ps) = parseDecrqm(a)
+      if ok and m == mode: result.modes[mode] = ps
+  for i in 0 ..< c.cprCount:
+    let (_, _, col) = parseCpr(c.answerFor("cpr", i))
+    result.widths.add col - 1
+  let ptr22 = c.answerFor("osc22")
+  if ptr22.len > 0:
+    result.pointerReply = stringBody(ptr22, "\x1b]22;")
+  for (key, query) in [("osc11", "\x1b]11;?\x1b\\"),
+                       ("xtgettcap", "\x1bP+q524742;5463\x1b\\"),
+                       ("decrqss", "\x1bP$qm\x1b\\"), ("cellSize", "\x1b[16t"),
+                       ("kittyKeyboard", "\x1b[?u")]:
+    let a = c.answerFor(key)
+    if a.len > 0: result.verbatim[query] = a
+  result.kittyKeyboard = "\x1b[?u" in result.verbatim
+
+proc kitty*(): Persona = fromCapture(persona("kitty-0.44.0"))
+proc foot*(): Persona = fromCapture(persona("foot-1.25.0"))
+proc xterm*(): Persona = fromCapture(persona("xterm-403"))
+proc ghostty*(): Persona = fromCapture(persona("ghostty-1.3.1"))
+proc alacritty*(): Persona = fromCapture(persona("alacritty-0.16.1"))
+proc tmuxInKitty*(): Persona = fromCapture(persona("tmux-3.6a-in-kitty-0.44.0"))
+
+proc footGraphemeOff*(): Persona =
+  ## foot as captured, but answering DEC 2027 `2` (recognised, reset), so the
+  ## binary SETS grapheme clustering and the restore has a mode to undo
+  ## (TA-10). foot 1.25.0 itself answered `1` (already set): the binary sets
+  ## nothing there, which is right, and leaves TA-10's 2027 unexercised.
+  result = foot()
+  result.name = "foot 1.25.0, DEC 2027 answered 2"
+  result.provenance = "the captured foot 1.25.0 persona with DECRQM 2027 " &
+                      "answered 2 (recognised, reset) instead of its own 1"
+  result.modes[2027] = 2
 
 proc vteWide*(): Persona =
   Persona(name: "VTE 0.76, ambiguous-width characters set Wide",
@@ -169,15 +226,6 @@ proc vteWide*(): Persona =
           xtversion: "VTE(7600)", da2: "\x1b[>65;7600;1c",
           da1: "\x1b[?65;1;9c", modes: {2026: 4, 2027: 0}.toTable,
           widths: @[2, 2, 1, 2, 2, 2])
-
-proc xterm*(): Persona =
-  Persona(name: "xterm 389",
-          provenance: "written from invisible-island.net/xterm/ctlseqs; not " &
-                      "captured",
-          xtversion: "XTerm(389)", da2: "\x1b[>41;389;0c",
-          da1: "\x1b[?64;1;2;6;9;15;16;17;18;21;22;28c",
-          modes: {2026: 0, 2027: 0, 1016: 2}.toTable,
-          widths: @[1, 1, 1, 1, 2, 4])
 
 proc linuxConsole*(): Persona =
   Persona(name: "the Linux console",

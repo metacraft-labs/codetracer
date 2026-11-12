@@ -1,0 +1,57 @@
+{
+  "schema": "codetracer-terminal-persona/1",
+  "terminal": "xterm",
+  "version": "403",
+  "launch": "xterm -fa DejaVu Sans Mono -fs 11 -geometry 160x64+0+0 -bw 0 -b 0 +sb -e sh -c <command>",
+  "capturedAt": "2026-11-11T16:52:10Z",
+  "host": "Linux 6.18.55 x86_64",
+  "env": {
+    "TERM": "xterm",
+    "LANG": "C.UTF-8"
+  },
+  "cols": 160,
+  "rows": 64,
+  "fenceMs": 3.32,
+  "round": "\u001B]11;?\u001B\\\u001BP+q524742;5463\u001B\\\u001B[48:2:1:2:3m\u001BP$qm\u001B\\\u001B[m\u001B[?1016$p\u001B[16t\u001B[?u\u001B]22;?default,pointer,text,col-resize,row-resize,grab,grabbing,not-allowed,ew-resize,ns-resize\u001B\\\u001B[>q\u001B[>c\u001B[?2026$p\u001B[?2027$p\u001B[?2026h\u001B[1;1H…\u001B[6n\u001B[1;1H▕\u001B[6n\u001B[1;1H🮇\u001B[6n\u001B[1;1H⏮\u001B[6n\u001B[1;1H中\u001B[6n\u001B[1;1H👩‍💻\u001B[6n\u001B[1;1H\u001B[2K\u001B[?2026l\u001B[c",
+  "replies": [
+    "\u001B]11;rgb:ffff/ffff/ffff\u001B\\",
+    "\u001BP1+r524742=38;\u001B\\",
+    "\u001BP1$r0;48:2::1:2:3m\u001B\\",
+    "\u001B[?1016;2$y",
+    "\u001B[6;19;9t",
+    "\u001BP>|XTerm(403)\u001B\\",
+    "\u001B[>41;403;0c",
+    "\u001B[?2026;0$y",
+    "\u001B[?2027;0$y",
+    "\u001B[1;2R",
+    "\u001B[1;2R",
+    "\u001B[1;2R",
+    "\u001B[1;2R",
+    "\u001B[1;3R",
+    "\u001B[1;5R",
+    "\u001B[?64;1;2;6;9;15;16;17;18;21;22;28;29c"
+  ],
+  "answers": {
+    "osc11": "\u001B]11;rgb:ffff/ffff/ffff\u001B\\",
+    "xtgettcap": "\u001BP1+r524742=38;\u001B\\",
+    "decrqss": "\u001BP1$r0;48:2::1:2:3m\u001B\\",
+    "cellSize": "\u001B[6;19;9t",
+    "xtversion": "\u001BP>|XTerm(403)\u001B\\",
+    "da2": "\u001B[>41;403;0c",
+    "da1": "\u001B[?64;1;2;6;9;15;16;17;18;21;22;28;29c",
+    "decrqm": {
+      "1016": "\u001B[?1016;2$y",
+      "2026": "\u001B[?2026;0$y",
+      "2027": "\u001B[?2027;0$y"
+    },
+    "cpr": [
+      "\u001B[1;2R",
+      "\u001B[1;2R",
+      "\u001B[1;2R",
+      "\u001B[1;2R",
+      "\u001B[1;3R",
+      "\u001B[1;5R"
+    ],
+    "late": []
+  }
+}

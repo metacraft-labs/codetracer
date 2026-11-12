@@ -5486,6 +5486,34 @@ test-tui-real-terminal: build-tui
   exec > >(tee test-logs/test-tui-real-terminal.log) 2>&1
   bash ci/lib/run-nim-test-lane.sh tui-real-terminal
 
+# The persona capture tool (CodeTracer-TUI-Terminal-Adaptation.md §13.1): run
+# the binary's start-up round in the terminal it runs in and save the answers
+# as a persona fixture. Linked like `build-tui`, since it writes the round
+# with the same `host/terminal_probe.queriesFor`.
+build-capture-terminal-persona: tui-prereqs
+  #!/usr/bin/env bash
+  set -euo pipefail
+  read -r -a ts_flags < <(sed 's/^/--passL:/; s/ / --passL:/g' \
+    build/grammars/tui-link-flags.txt)
+  nim c --hints:off --mm:orc -d:release \
+    --path:src/frontend/viewmodel \
+    "-d:isonimTuiGrammarArchive=${PWD}/build/grammars/libcodetracer_tui_grammars.a" \
+    "${ts_flags[@]}" \
+    --nimcache:build/nimcache/capture-terminal-persona \
+    -o:build/bin/capture-terminal-persona \
+    tools/capture-terminal-persona/capture_terminal_persona.nim
+
+# Tier 3 (§13.4): the shipped binary in REAL terminal emulators — kitty,
+# xterm, Ghostty and Alacritty on a private Xvfb, foot on GuiAssert's headless
+# sway, tmux inside kitty — each from this checkout's pinned nixpkgs. Per
+# terminal: the persona captured and compared with the committed one, the
+# profile (`--capabilities=json`), the glyph test card screenshotted and read
+# by OCR and pixel checks, OSC 52 accepted or refused against the profile's
+# clipboard axis. An emulator this host cannot run is a counted
+# `MISSING-PREREQ SKIP:`. Needs ../GuiAssert (its dev shell runs the suite).
+test-tui-real-emulators: build-tui build-capture-terminal-persona
+  bash ci/test/tui-real-emulators.sh
+
 # PLAT-1: `--ui` front-end selection, end to end
 # (codetracer-specs/CLI/ct/ui-selection.md).
 #

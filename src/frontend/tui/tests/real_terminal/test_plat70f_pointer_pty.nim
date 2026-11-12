@@ -6,6 +6,9 @@
 ## as kitty's pointer-shape specification says, or stays silent as foot, Ghostty
 ## and xterm do. The subject (the shipped `codetracer-tui`, its negotiation, its
 ## hit-test, its restore) is real, and every assertion reads the bytes it wrote.
+## kitty's and xterm's answers are their CAPTURED personas (`app/tests/personas/`),
+## less the pixel-mouse answers the peer's cell reports could not honour
+## (`cellMouse`).
 
 import std/[monotimes, os, posix, strutils, times, unicode, unittest]
 
@@ -58,10 +61,21 @@ type Peer = object
   program: string
   tmux: string
 
+proc cellMouse(p: Persona): Persona =
+  ## A captured persona without its pixel-mouse answers (DECRQM 1016 and the
+  ## cell size): kitty and xterm offer SGR-pixel reports (1016), the binary
+  ## turns them on, and a real terminal then reports the pointer in PIXELS —
+  ## but TermAssert's `sendMouseMove` writes CELL reports, which the binary
+  ## would read as pixels near the top-left corner. Without the two answers
+  ## the binary asks for cell reports, which is what the peer sends.
+  result = p
+  result.modes.del 1016
+  result.verbatim.del "\x1b[16t"
+
 proc kittyPeer(reply = "1,1,1,0,0,1,1,1,1,1"): Peer =
-  ## The answer measured on kitty 0.47.0: no `col-resize` or `row-resize`, but
-  ## their `ew-resize` and `ns-resize`.
-  var p = kitty()
+  ## The answer measured on kitty 0.47.0 and captured from kitty 0.44.0: no
+  ## `col-resize` or `row-resize`, but their `ew-resize` and `ns-resize`.
+  var p = cellMouse(kitty())
   p.pointerReply = reply
   Peer(persona: p, term: "xterm-kitty")
 
@@ -73,7 +87,7 @@ proc setOnly(name: string): Peer =
   of "foot":
     Peer(persona: silent(), term: "foot")
   else:
-    var p = xterm()
+    var p = cellMouse(xterm())
     Peer(persona: p, term: "xterm-256color")
 
 proc open(peer: Peer; extra: seq[string] = @[]): (TuiTestSession, string) =
@@ -389,7 +403,7 @@ suite "tmux (PA-7)":
     report.close()
 
   test "an answered wrapped query: every sequence wrapped":
-    var outer = kitty()
+    var outer = cellMouse(kitty())
     outer.pointerReply = "1,1,1,1,1,1,1,1,0,0"
     var (sess, state) = open(Peer(persona: outer, term: "tmux-256color",
                                   tmux: "/tmp/none,1,0"))

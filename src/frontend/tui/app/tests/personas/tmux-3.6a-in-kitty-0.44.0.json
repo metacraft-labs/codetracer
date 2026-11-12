@@ -1,0 +1,53 @@
+{
+  "schema": "codetracer-terminal-persona/1",
+  "terminal": "tmux",
+  "version": "3.6a",
+  "launch": "kitty --config NONE -o font_family=DejaVu Sans Mono -o cursor_blink_interval=0 -o font_size=11 -o remember_window_size=no -o initial_window_width=160c -o initial_window_height=64c -o window_padding_width=0 -o update_check_interval=0 -o linux_display_server=x11 sh -c tmux -L ct-lane-<pid> -f <work>/tmux.conf new-session -x 160 -y 64 'sleep 1; <command>'",
+  "capturedAt": "2026-11-11T16:54:18Z",
+  "host": "Linux 6.18.55 x86_64",
+  "env": {
+    "TERM": "tmux-256color",
+    "COLORTERM": "truecolor",
+    "TERM_PROGRAM": "tmux",
+    "TERM_PROGRAM_VERSION": "3.6a",
+    "KITTY_WINDOW_ID": "set",
+    "TMUX": "set",
+    "LANG": "C.UTF-8"
+  },
+  "cols": 160,
+  "rows": 64,
+  "fenceMs": 0.88,
+  "round": "\u001B]11;?\u001B\\\u001BP+q524742;5463\u001B\\\u001B[48:2:1:2:3m\u001BP$qm\u001B\\\u001B[m\u001B[?1016$p\u001B[16t\u001B[?u\u001BPtmux;\u001B\u001B]22;?default,pointer,text,col-resize,row-resize,grab,grabbing,not-allowed,ew-resize,ns-resize\u001B\u001B\\\u001B\\\u001B[>q\u001B[>c\u001B[?2026$p\u001B[?2027$p\u001B[?2026h\u001B[1;1H…\u001B[6n\u001B[1;1H▕\u001B[6n\u001B[1;1H🮇\u001B[6n\u001B[1;1H⏮\u001B[6n\u001B[1;1H中\u001B[6n\u001B[1;1H👩‍💻\u001B[6n\u001B[1;1H\u001B[2K\u001B[?2026l\u001B[c",
+  "replies": [
+    "\u001B]11;rgb:0000/0000/0000\u001B\\",
+    "\u001BP0$r\u001B\\",
+    "\u001B[6;18;9t",
+    "\u001BP>|tmux 3.6a\u001B\\",
+    "\u001B[>84;0;0c",
+    "\u001B[1;2R",
+    "\u001B[1;2R",
+    "\u001B[1;2R",
+    "\u001B[1;2R",
+    "\u001B[1;3R",
+    "\u001B[1;3R",
+    "\u001B[?1;2;4c"
+  ],
+  "answers": {
+    "osc11": "\u001B]11;rgb:0000/0000/0000\u001B\\",
+    "decrqss": "\u001BP0$r\u001B\\",
+    "cellSize": "\u001B[6;18;9t",
+    "xtversion": "\u001BP>|tmux 3.6a\u001B\\",
+    "da2": "\u001B[>84;0;0c",
+    "da1": "\u001B[?1;2;4c",
+    "decrqm": {},
+    "cpr": [
+      "\u001B[1;2R",
+      "\u001B[1;2R",
+      "\u001B[1;2R",
+      "\u001B[1;2R",
+      "\u001B[1;3R",
+      "\u001B[1;3R"
+    ],
+    "late": []
+  }
+}

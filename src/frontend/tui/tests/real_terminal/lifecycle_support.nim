@@ -327,13 +327,22 @@ proc settleOnDebugger*(sess: var TuiTestSession; cols, rows: int;
   ## also building something else — measured at 66 ms idle and tens of seconds
   ## at load 58 on the same machine. A tight timeout here would fail as "the
   ## debugger never painted" for a run that was merely queued behind a compiler.
+  ##
+  ## The status row is not enough on its own: on a terminal that gave the
+  ## session a start-up hint (Terminal-Adaptation §10.2 — e.g. a light
+  ## background under the dark theme, as the captured xterm persona's OSC 11
+  ## answer does) frame 0's status row carries the hint instead of
+  ## `opening …`. The top bar names the trace only once it is open
+  ## (`trace: -` before), so frame 1 is also waited for there.
   discard sess.drainOutput(30)
   let deadline = getMonoTime() + initDuration(milliseconds = timeoutMs)
   var last = ""
   while getMonoTime() < deadline:
     discard sess.drainOutput(40)
     last = statusRowText(sess, cols, rows)
-    if last.len > 0 and not last.contains("opening "):
+    let top = sess.regionText(0, 0, cols, 1)
+    if last.len > 0 and not last.contains("opening ") and
+       not top.contains("trace: - "):
       waitForCompleteFrame(sess, cols, rows, timeoutMs = 30000)
       return
     if not sess.isAlive:

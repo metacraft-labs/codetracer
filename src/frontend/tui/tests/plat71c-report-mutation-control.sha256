@@ -3,7 +3,7 @@
 # Refreshed with --record-control-hashes, gated by the
 # needle scan.
 ed7fe9ca43ecce5c1006220de2e59cd0b4b5772faae01823ae22415a16f19ddf  src/frontend/tui/app/theme/terminal_report.nim
-cf49c5c00db6777abcafb2360192c7348849432ac560f56d5a2970f4bb68a59a  src/frontend/tui/app/runtime.nim
-76a97287c9920c548269a77bb73f253e3ef7cda2f526ce27d14de0cf0bc13d23  src/frontend/tui/app/tests/test_plat71_terminal_profile.nim
-4cc2712d46e2a2bd700cd4e6253d4e690efcbcc6b26bd269896327672d9fa276  src/frontend/tui/tests/real_terminal/test_plat71_terminal_pty.nim
+f2d39d86c7594525c18b9c688ddea1d0a32e2a205792a2deee76c82ad2ca00f2  src/frontend/tui/app/runtime.nim
+82344b5c0d18daf110e89c48bb567663d6dcf387a393aa67300a9ee98f24cff8  src/frontend/tui/app/tests/test_plat71_terminal_profile.nim
+9edc7f757e3705bb01d7d93990a74c6dd73529a6d19ccb88e1a97a1a4f703c99  src/frontend/tui/tests/real_terminal/test_plat71_terminal_pty.nim
 0007aaf532a43e5d5aa55031759552bc048dee43170920b8ed3c71d912356804  src/frontend/tui/tests/test_plat71_glyph_table.nim

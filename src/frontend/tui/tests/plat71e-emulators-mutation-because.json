@@ -1,0 +1,9 @@
+{
+  "E1": "WidthProbeText[wpLegacy].toRunes == @[Rune(0x0001FB87)]",
+  "E2": "shipped == read",
+  "E3": "p.answerFor(\"\\e]11;?\\e\\\\\", 0) == c.answerFor(\"osc11\")",
+  "E4": "c.answers == answers",
+  "E5": "tokens(c.replies.join(\"\")) == c.replies",
+  "E6": "legacyDrawn == (expectedIdentity(e) in [\"kitty\", \"ghostty\", \"foot\"])",
+  "E7": "confused.len == 0"
+}

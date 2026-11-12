@@ -4199,6 +4199,21 @@ jobs:
         if: ${{ !cancelled() }}
         run: nix develop .#devShells.x86_64-linux.default --command just ctf-p1b-gpui-captures
 
+      - name: The terminal front-end in real terminal emulators
+        # Terminal-Adaptation §13.4's `tui-real-emulators` lane, here because
+        # this job has what it needs: GuiAssert's checkout and dev shell (the
+        # headless sway foot runs on, Xvfb, tesseract) and the recursive
+        # checkout `build-tui`'s grammars come from. kitty, xterm, Ghostty
+        # and Alacritty on Xvfb, foot on the headless sway, tmux in kitty,
+        # each from this commit's pinned nixpkgs: the committed persona
+        # re-captured and compared, the profile, the glyph test card read by
+        # OCR and pixels, OSC 52 accepted or refused against the profile. An
+        # emulator this runner cannot provide or start is a counted
+        # MISSING-PREREQ skip, never a failure; `!cancelled()` so a red GPUI
+        # capture does not hide it.
+        if: ${{ !cancelled() }}
+        run: nix develop .#devShells.x86_64-linux.default --command just test-tui-real-emulators
+
       - name: Upload the frames
         if: failure()
         uses: actions/upload-artifact@v4
@@ -4211,6 +4226,7 @@ jobs:
             build/plat69/
             build/plat35/gpui-window/
             build/ctf-p1b/
+            build/real-emulators/out/
             src/tests/visual/plat45-gpui-arrangement.json
             src/tests/visual/plat47-gpui-window.json
             src/tests/visual/plat48-gpui-window.json

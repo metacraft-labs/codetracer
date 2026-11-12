@@ -1,0 +1,53 @@
+{
+  "schema": "codetracer-terminal-persona/1",
+  "terminal": "alacritty",
+  "version": "0.16.1",
+  "launch": "alacritty --config-file /dev/null -o font.normal.family=\"DejaVu Sans Mono\" -o font.size=11 -o window.dimensions.columns=160 -o window.dimensions.lines=64 -o window.decorations=\"None\" -e sh -c <command>",
+  "capturedAt": "2026-11-11T16:53:32Z",
+  "host": "Linux 6.18.55 x86_64",
+  "env": {
+    "TERM": "alacritty",
+    "COLORTERM": "truecolor",
+    "ALACRITTY_WINDOW_ID": "set",
+    "LANG": "C.UTF-8"
+  },
+  "cols": 160,
+  "rows": 64,
+  "fenceMs": 12.49,
+  "round": "\u001B]11;?\u001B\\\u001BP+q524742;5463\u001B\\\u001B[48:2:1:2:3m\u001BP$qm\u001B\\\u001B[m\u001B[?1016$p\u001B[16t\u001B[?u\u001B]22;?default,pointer,text,col-resize,row-resize,grab,grabbing,not-allowed,ew-resize,ns-resize\u001B\\\u001B[>q\u001B[>c\u001B[?2026$p\u001B[?2027$p\u001B[?2026h\u001B[1;1H…\u001B[6n\u001B[1;1H▕\u001B[6n\u001B[1;1H🮇\u001B[6n\u001B[1;1H⏮\u001B[6n\u001B[1;1H中\u001B[6n\u001B[1;1H👩‍💻\u001B[6n\u001B[1;1H\u001B[2K\u001B[?2026l\u001B[c",
+  "replies": [
+    "\u001B]11;rgb:1818/1818/1818\u001B\\",
+    "\u001B[?1016;0$y",
+    "\u001B[?0u",
+    "\u001B[>0;2501;1c",
+    "\u001B[?2026;2$y",
+    "\u001B[?2027;0$y",
+    "\u001B[1;2R",
+    "\u001B[1;2R",
+    "\u001B[1;2R",
+    "\u001B[1;2R",
+    "\u001B[1;3R",
+    "\u001B[1;5R",
+    "\u001B[?6c"
+  ],
+  "answers": {
+    "osc11": "\u001B]11;rgb:1818/1818/1818\u001B\\",
+    "kittyKeyboard": "\u001B[?0u",
+    "da2": "\u001B[>0;2501;1c",
+    "da1": "\u001B[?6c",
+    "decrqm": {
+      "1016": "\u001B[?1016;0$y",
+      "2026": "\u001B[?2026;2$y",
+      "2027": "\u001B[?2027;0$y"
+    },
+    "cpr": [
+      "\u001B[1;2R",
+      "\u001B[1;2R",
+      "\u001B[1;2R",
+      "\u001B[1;2R",
+      "\u001B[1;3R",
+      "\u001B[1;5R"
+    ],
+    "late": []
+  }
+}

@@ -1,0 +1,13 @@
+# Control digests for run-plat71e-emulators-mutations.py — the
+# subjects AND the suites the arms are graded by.
+# Refreshed with --record-control-hashes, gated by the
+# needle scan.
+ac7215a245a1be30f5a3cb569f9a5511696b5cdf376e89aa6509d28ec7320c92  src/frontend/tui/app/theme/terminal_profile.nim
+93e5db1b789b7fe14fb801a815d54c7023fa00c98dac66cf3ee3ced94011c2d9  tools/capture-terminal-persona/capture_terminal_persona.nim
+a8f2ee313b401694d0775231314f07687a389d6ced9090dcd338627e9592338e  src/frontend/tui/app/tests/personas/personas.nim
+43368e322f9ae8d0d2537f48364239dae0d0c6dd52f2ec1dc3953ba64994ae72  src/frontend/tui/tests/real_terminal/persona_peer.nim
+6bbf2a330199217e5fcc0cc3ed4090b515ff0b63179aac06202985946e8769b7  src/frontend/tui/tests/real_emulators/emulators.nim
+70d8d8949d9daf8874a7ee7727829bedfec5278a55d9a5a2985b88899010c877  src/frontend/tui/tests/test_plat71_terminal_round.nim
+fa4f013097edc9f821e9a3bf2d15d22963804623c7a8ac4da06c3f9734a88e9f  src/frontend/tui/tests/test_capture_terminal_persona.nim
+9edc7f757e3705bb01d7d93990a74c6dd73529a6d19ccb88e1a97a1a4f703c99  src/frontend/tui/tests/real_terminal/test_plat71_terminal_pty.nim
+1110188db1d70c1edc52f00454f0203bedfc9229b4dc418e4bb20935c4ea7058  src/frontend/tui/tests/real_emulators/test_real_emulators.nim

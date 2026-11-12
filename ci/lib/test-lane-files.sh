@@ -312,6 +312,7 @@ book-isonim
 tui
 tui-native
 tui-real-terminal
+tui-real-emulators
 gpui-shell
 agent-harbor-gpui-captures
 ui-selection
@@ -361,6 +362,7 @@ test_lane_description() {
 	tui) echo "CodeTracer TUI Tier-1 suites (isonim-tui harness, no terminal)" ;;
 	tui-native) echo "CodeTracer TUI Tier-1 suites over an rr recording of a native program (need rr, ct-native-replay and codetracer-native-test-programs; run by the rr CI job)" ;;
 	tui-real-terminal) echo "CodeTracer TUI Tier-2 suites (TermAssert: real pty + libvterm)" ;;
+	tui-real-emulators) echo "CodeTracer TUI in REAL terminal emulators (kitty, xterm, Ghostty, Alacritty on Xvfb; foot on GuiAssert's headless sway; tmux in kitty): personas captured and compared, the profile, the glyph test card read by OCR and pixels, OSC 52 against the profile" ;;
 	gpui-shell) echo "PLAT-20 GPUI shell: the dock projection against gpui-kit's own fixtures, and the shell/leaf split through the real isonim-gpui shim" ;;
 	agent-harbor-gpui-captures) echo "CTF-P1b: the GPUI window captures of the Agent Harbor stories against the committed web layout record (just ctf-p1b-gpui-captures takes the captures on headless sway first)" ;;
 	ui-selection) echo 'PLAT-1 --ui front-end selection, end to end: the real launcher, the real ct, the real TUI and a real ct host server' ;;
@@ -458,6 +460,15 @@ test_lane_recipe() {
 		# nimble requires ../../../isonim-docs) and runs the book's own
 		# Justfile; under the runner every file is a COMPILE ERROR.
 		echo "test-book-isonim"
+		;;
+	tui-real-emulators)
+		# Terminal-Adaptation §13.4. `ci/test/tui-real-emulators.sh` provides
+		# the emulators from the pinned nixpkgs, builds nothing of its own,
+		# and compiles and runs the suite in GuiAssert's dev shell, which
+		# declares the headless sway, grim, its Wayland helpers, Xvfb and
+		# tesseract; under the runner the suite would find none of them. An
+		# emulator that cannot run is a counted `MISSING-PREREQ SKIP:`.
+		echo "test-tui-real-emulators"
 		;;
 	screen-oracle)
 		# PLAT-39. `test_plat39_record.nim` is the portable gate
@@ -2340,6 +2351,13 @@ test_lane_files() {
 		# `src/build-debug/bin/ct` (or CODETRACER_CT_BIN), `node` and
 		# socket.io-client. `just test-ct-host-manifest` builds them.
 		_tlf_find src/tests/ct_host_manifest 'test_*.nim'
+		;;
+
+	tui-real-emulators)
+		# The real emulators (Terminal-Adaptation §13.4): discovery over the
+		# lane's own directory, which no Tier-1 or Tier-2 glob reaches (both
+		# are one level deep under `tests/`, or `real_terminal/`).
+		_tlf_find src/frontend/tui/tests/real_emulators 'test_*.nim'
 		;;
 
 	tui-real-terminal)

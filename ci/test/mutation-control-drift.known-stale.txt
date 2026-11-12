@@ -34,3 +34,16 @@
 # §39b's order and its control re-recorded, at codetracer ec8f2a7c6 (agents
 # cfdda1ce1) with every sibling at its pin. A change that leaves an entry
 # stale adds its line here again, in the diff that made it stale.
+
+# 2026-11-11, the real-emulator lane (Terminal-Adaptation §13.4): its lane, recipe
+# and CI step edit ci/lib/test-lane-files.sh, the justfile and the workflow
+# (plat17, plat33, plat34 owe a re-grade for those bytes only), and the pointer
+# suite now replays the captured kitty and xterm personas (plat70f; its pty
+# arms are the ones that read that suite).
+src/frontend/tui/tests/plat70f-pointer-mutation-control.sha256	src/frontend/tui/tests/real_terminal/test_plat70f_pointer_pty.nim	89bee093381e177a24c120bdde8fbcd9472d515805b3113565781be7c1fa602a	54d01bf212d1a5273d04a0f2bcec5f9c7b51a3b0d9820e5bd17c15479166a9ce
+src/frontend/viewmodel/tests/unit/plat17-wasm-mutation-control.sha256	ci/lib/test-lane-files.sh	feedef38b5f5f7395de6375746e1efc61a4f7c0f8cf76181af01727b52c7076a	5c504a84e1c9f8de843dccc42f1cba643bb94e21f47effa5570473dbccebdf75
+src/frontend/viewmodel/tests/unit/plat17-wasm-mutation-control.sha256	justfile	8523a6bfda763a72db546c06514ab3a32d204e1601db24b58f66e268f6e37e66	69f58e1defeb6c442d7684c2ef107e3ea5ee2251ccab4b29aa7023bb1ff2cfd7
+src/frontend/viewmodel/tests/unit/plat33-collab-mutation-control.sha256	.github/workflows/codetracer.yml	8b1cc3bfc2d6432b299e692de49c710886c95c0fac58b0c5cc3d420e6cf402d9	cc8d87a3fa42fecfff14411b80fb949af974130b068afe672f237fab933ea2bb
+src/frontend/viewmodel/tests/unit/plat33-collab-mutation-control.sha256	justfile	8523a6bfda763a72db546c06514ab3a32d204e1601db24b58f66e268f6e37e66	69f58e1defeb6c442d7684c2ef107e3ea5ee2251ccab4b29aa7023bb1ff2cfd7
+src/frontend/viewmodel/tests/unit/plat33-collab-mutation-control.sha256	ci/lib/test-lane-files.sh	feedef38b5f5f7395de6375746e1efc61a4f7c0f8cf76181af01727b52c7076a	5c504a84e1c9f8de843dccc42f1cba643bb94e21f47effa5570473dbccebdf75
+src/frontend/viewmodel/tests/unit/plat34-front-end-mutation-control.sha256	ci/lib/test-lane-files.sh	feedef38b5f5f7395de6375746e1efc61a4f7c0f8cf76181af01727b52c7076a	5c504a84e1c9f8de843dccc42f1cba643bb94e21f47effa5570473dbccebdf75
