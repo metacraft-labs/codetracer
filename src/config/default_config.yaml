@@ -282,5 +282,11 @@ skipInstall: true
 # "window" — spawn a new Electron window
 newTracePolicy: "tab"
 
+# Developer setting: draw the editor pane with the shared editing core (the
+# editor the terminal and the GPUI window use) instead of Monaco. Off by
+# default. CODETRACER_SHARED_EDITOR=1 (or 0) overrides it for one launch; the
+# command palette's "Developer: Toggle Shared Editor" switches an open window.
+sharedEditor: false
+
 # TODO: Use this somehow
 version: "0.1alpha"

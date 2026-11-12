@@ -2315,6 +2315,11 @@ type
     vcs*:                     VcsConfig
       ## The `vcs:` entry, or nil in a config file written before it existed.
       ## Read through `vcsFileClickOpensFullFile`.
+    sharedEditor*:            bool
+      ## `sharedEditor:` (see `common/config.nim`): the editor pane draws the
+      ## shared editing core instead of Monaco. js-yaml leaves it undefined
+      ## (falsy) in a config written before it existed; `index/config`
+      ## applies `CODETRACER_SHARED_EDITOR` over it.
     window*:                  WindowConfig
       ## PLAT-69: the `window:` entry, as js-yaml read it. nil (undefined)
       ## in a config file written before the entry existed; its fields are

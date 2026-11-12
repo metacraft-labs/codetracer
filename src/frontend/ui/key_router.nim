@@ -51,6 +51,10 @@ import ./chord_display
 from ./shortcut_dialog import ReferenceLine
 from ./status import onNotification
 import ./monaco_operations
+# The developer setting `sharedEditor`: the source editor may be the shared
+# editing core (`shared_editor`), whose keys the core runs.
+import ./shared_editor, ./shared_editor_facade
+from ../viewmodel/editing_core import EditingOutcome, eoIgnored
 import ./native_key_operations
 import ./editor_scope
 import ./video_player   # `videoPlayerHasFocus`, `currentVideoPlayerVM`
@@ -277,7 +281,19 @@ proc desktopFacts(): SessionFacts =
   var editor = if readOnly: sourceViewFacts()
                else: EditorFacts(readOnly: false, mode: emInsert)
   let monaco = focusedMonaco()
-  if not monaco.isNil:
+  let shared = textFocusedSharedEditor()
+  if not shared.isNil:
+    # The shared editor's modal state is the core's (Editor-ViewModel §10.3):
+    # the router reads the editor's mode and selection from the document.
+    # A read-only CUA / Emacs document is the source view the Monaco path
+    # describes (`sourceViewFacts`); a writable one, or a modal base's,
+    # carries the document's own mode.
+    if not shared.readOnly or isModal(shared.doc.model):
+      editor.mode = shared.doc.state.mode
+    editor.readOnly = shared.readOnly
+    for r in shared.doc.state.selection.ranges:
+      if not r.isEmpty: editor.hasSelection = true
+  elif not monaco.isNil:
     let sel = monaco.toJs.getSelection()
     if not sel.isNil:
       editor.hasSelection = not sel.isEmpty().to(bool)
@@ -556,6 +572,70 @@ proc runTableOperation(res: EditingResolution): bool =
     true
   else: false
 
+const SharedEditorNativeOperations = ["clipboard-copy", "clipboard-cut",
+                                     "clipboard-paste"]
+  ## The shared editor's operations its text area performs natively: the
+  ## browser's `copy` / `cut` / `paste` events carry the system clipboard,
+  ## and the editor's listeners run the core's operation with its text
+  ## (`shared_editor`'s `copy` / `cut` / `paste` handlers).
+
+proc runSharedEditor(res: EditingResolution): NativeKind =
+  ## An operation for the focused SHARED editor: the core runs an editing
+  ## operation (`applyResolved`, the router's resolution — the user's rows
+  ## included), the editor scrolls, and find opens the editor's find
+  ## widget. `nkLeaveToElement` when no shared editor has the focus or the
+  ## operation is not the editor's.
+  let ed = focusedSharedEditor()
+  if ed.isNil:
+    return nkLeaveToElement
+  ed.syncModel(deskRouter.base)
+  if res.operation in SharedEditorNativeOperations:
+    return nkLeaveToElement
+  if '.' notin res.operation:
+    # The document's operations only from its own text area; in its find
+    # field (or a tracepoint's) the field's keys are the field's.
+    if textFocusedSharedEditor() != ed:
+      return nkLeaveToElement
+    discard ed.applyResolved(res)
+    return nkHandled
+  if res.operation.startsWith("find."):
+    return (if ed.findCommand(res.operation): nkHandled else: nkLeaveToElement)
+  if res.operation.startsWith("editor.scroll-"):
+    let command = MonacoOperations.getOrDefault(res.operation, "")
+    if command.len > 0 and ed.runCommand(command, nil):
+      return nkHandled
+  nkLeaveToElement
+
+proc routeSharedEditorKey(name: string; ev: JsObject): bool =
+  ## A key for a WRITABLE shared editor, as GPUI's edit window takes one
+  ## (`gpui/main.editKey`): the router is asked first, without effect, and
+  ## keeps the keys that resolve to an operation outside the document
+  ## (stepping, the palette, panes, find); every other key — a character, an
+  ## editing chord, a modal key of Vim or Kakoune — is the document's own
+  ## keymap's (`EditingDocument.applyKey`). Answers whether the key was taken.
+  let ed = textFocusedSharedEditor()
+  if ed.isNil or ed.readOnly:
+    return false
+  ed.syncModel(deskRouter.base)
+  var probe = deskRouter
+  let routed = probe.route(desktopFacts(), desktopScopePath(), nmNormal, name,
+                           int64(now()))
+  if routed.kind == erOperation and
+     ('.' in routed.operation or routed.operation in HostIntents):
+    # Save is the host's (`HostIntents`), as GPUI's edit arm saves.
+    return false
+  let own = ed.probeKey(name)
+  if own.kind == erOperation and own.operation in SharedEditorNativeOperations:
+    # The text area's `copy` / `cut` / `paste` event carries the clipboard.
+    return true
+  let applied = ed.applyKeyName(name)
+  if applied.outcome == eoIgnored and applied.resolution == erNothing:
+    return false
+  traceOperation("shared-editor:" & name & " -> " & applied.operations.join(","))
+  discard ev.preventDefault()
+  discard ev.stopImmediatePropagation()
+  true
+
 proc runDesktopOperation(res: EditingResolution): NativeKind
 
 proc runPaletteOperation*(operation, argument: string) =
@@ -643,6 +723,11 @@ proc runDesktopOperation(res: EditingResolution): NativeKind =
     return nkHandled
   if runTableOperation(res):
     return nkHandled
+  case runSharedEditor(res)
+  of nkHandled: return nkHandled
+  of nkLeaveToElement:
+    if not focusedSharedEditor().isNil and
+       (res.operation in SharedEditorNativeOperations): return nkLeaveToElement
   if runMonaco(res.operation):
     return nkHandled
   if '.' notin res.operation:
@@ -756,6 +841,16 @@ proc routeKey(name: string; ev: JsObject) =
   syncContextMenuLayer()
   syncMenuLayer()
   syncVideoPickerLayer()
+  # A widget of the shared editor that owns keys while it is open (the
+  # suggestion list) answers first.
+  let sharedText = textFocusedSharedEditor()
+  if not sharedText.isNil and not sharedText.keyInterceptor.isNil and
+     sharedText.keyInterceptor(name):
+    stop(ev)
+    return
+  if not menuIsOpen() and not contextMenuIsOpen() and
+     routeSharedEditorKey(name, ev):
+    return
   let path = desktopScopePath()
   let facts = desktopFacts()
   # An open program menu owns its keys, as on the terminal and GPUI; the
@@ -937,6 +1032,19 @@ proc applyKeybindingsText*(text: string; notes: seq[string] = @[]) =
     keybindingsNotes.add deskRouter.loadSummary
   for note in keybindingsNotes:
     cwarn "keybindings: " & note
+  if not onKeymapChanged.isNil:
+    onKeymapChanged()
+
+proc selectDesktopKeymap*(model: BaseKeymap) =
+  ## This window's base keymap — the terminal's `:keymap <name>` — through
+  ## the router's own switch; the shared editors take it at their next key
+  ## (`SharedEditor.syncModel`). Said on the status bar.
+  deskRouter.switchBase(model, ksCommand)
+  inc keymapGeneration
+  for ed in sharedEditors:
+    ed.syncModel(model)
+    ed.requestRender()
+  showInertNote("keymap: " & $model)
   if not onKeymapChanged.isNil:
     onKeymapChanged()
 

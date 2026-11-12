@@ -427,6 +427,18 @@ proc registerSyncedEditor(component: EditorViewComponent; kind: string; candidat
   notifyDocumentObservers(kind)
   ensureDocumentOpened(entry)
 
+proc lspDocumentOf*(editorId: int): tuple[kind, uri: string] =
+  ## The language server family and the document URI this editor is synced
+  ## under (`registerSyncedEditor`), or ("", "") when it is not synced. The
+  ## shared editor's language features (`ui/shared_editor_lsp`) address the
+  ## server with exactly the document the router opened.
+  if not syncedByEditorId.hasKey(editorId):
+    return ("", "")
+  let entry = syncedByEditorId[editorId]
+  if entry.isNil:
+    return ("", "")
+  (normalizeKind(entry.lspKind), entry.uri)
+
 proc removeEditorPaths(editorId: int) =
   if not pathsByEditor.hasKey(editorId):
     return

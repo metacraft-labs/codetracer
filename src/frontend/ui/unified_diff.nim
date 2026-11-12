@@ -53,6 +53,7 @@ import
   ui_imports, session_viewmodels
 
 import std/strformat
+import ./shared_diff_editor, ./shared_editor_flag
 import isonim/core/signals
 import git_cli
 import flow_line_styles
@@ -1074,9 +1075,19 @@ proc initEditor(self: UnifiedDiffComponent) =
   let theme = monacoThemeName(self.data.config.theme)
   let language = cstring(pair.language)
 
-  self.diffEditor = udCreateDiffEditor(hostId, reviewDiffEditorOptions(
+  let diffOptions = reviewDiffEditorOptions(
     theme, diffContextLineCount(pair), self.data.ui.fontSize,
-    codeFontFamily(self.data.ui)))
+    codeFontFamily(self.data.ui))
+  # The developer setting `sharedEditor`: the diff on the shared editor
+  # (`shared_diff_editor`), behind the same diff-editor API.
+  self.diffEditor =
+    if sharedEditorEnabled(self.data.config):
+      newSharedDiffEditor(document.getElementById(hostId).toJs, diffOptions,
+                          self.data.ui.fontSize, $codeFontFamily(self.data.ui),
+                          darkTheme = theme != cstring"codetracerWhite",
+                          language = pair.language)
+    else:
+      udCreateDiffEditor(hostId, diffOptions)
 
   # Two real models, each with the language resolved from the reviewed file.
   self.originalModel = udCreateModel(

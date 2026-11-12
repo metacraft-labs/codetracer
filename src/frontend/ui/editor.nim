@@ -51,6 +51,10 @@ from ../viewmodel/viewmodels/editor_vm import
 import ./editor_points
 # The shared flow line-styling rule over the flow model's window.
 from ../viewmodel/viewmodels/flow_vm import flowStyledLinesOf
+# The developer setting `sharedEditor`: the source editor is the shared
+# editing core behind Monaco's API (`shared_editor_facade`) instead of Monaco.
+import ./shared_editor, ./shared_editor_facade, ./shared_editor_flag,
+       ./shared_editor_lsp
 from isonim/core/owner import createRoot
 from isonim/core/computation import createEffect
 from isonim/core/batch import untrack
@@ -2229,6 +2233,33 @@ proc createMonacoEditorIn(host: JsObject; options: MonacoEditorOptions): MonacoE
   ## Monaco on `host` itself: the element need not be in the document yet —
   ## with `automaticLayout` the editor sizes itself once it is laid out.
 
+proc createSourceEditorIn(self: EditorViewComponent; host: JsObject;
+                          options: MonacoEditorOptions): MonacoEditor =
+  ## The source editor of this pane: Monaco, or — under the developer
+  ## setting `sharedEditor` (`shared_editor_flag`) — the shared editing core
+  ## drawn as DOM (`shared_editor`), answering Monaco's API
+  ## (`shared_editor_facade`), so every caller below works on either. A macro
+  ## expansion and the low-level views keep Monaco.
+  if self.editorView == ViewSource and not self.isExpansion and
+     sharedEditorEnabled(self.data.config):
+    installMonacoGlobals()
+    let ed = newSharedEditor(host, $options.value, $self.name,
+      $options.language, options.readOnly, self.data.ui.fontSize,
+      $codeFontFamily(self.data.ui),
+      darkTheme = monacoThemeName(self.data.config.theme) != cstring"codetracerWhite",
+      cast[JsObject](options))
+    ed.observeSize()
+    # The language server's features, through the document the LSP router
+    # syncs for this editor (`lsp_router.lspDocumentOf`).
+    let editorId = self.id
+    let data = self.data
+    installSharedEditorLsp(ed,
+      proc(): tuple[kind, uri: string] = lspDocumentOf(editorId),
+      proc(path: string; line, column: int) =
+        discard data.openLocation(cstring(path), line, column))
+    return cast[MonacoEditor](facadeOf(ed))
+  createMonacoEditorIn(host, options)
+
 proc updateMonacoGutterWidth(editor: MonacoEditor, fontSize: int) =
   let options = cast[MonacoEditorOptions](editor.getOptions())
   let lineCount = editor.getModel().getLineCount()
@@ -3309,7 +3340,7 @@ proc initMonacoForEditor(self: EditorViewComponent, host: JsObject) =
 
     cdebug lang
 
-    tabInfo.monacoEditor = createMonacoEditorIn(
+    tabInfo.monacoEditor = self.createSourceEditorIn(
       host,
       MonacoEditorOptions(
         value: tabInfo.source,
@@ -4579,3 +4610,52 @@ proc watchSessionFlowWindows*(data: Data) =
       untrack proc() =
         for _, editor in data.ui.editors:
           editor.adoptFlowWindows(windows)
+
+proc remountSourceEditor*(self: EditorViewComponent) =
+  ## Rebuild this editor's instance with the editor `shared_editor_flag`
+  ## chooses now — the palette's **Developer: Toggle Shared Editor** in a
+  ## running window. The text (edits included), the caret and the scroll go
+  ## across; the decorations, the flow and the tracepoint zones belong to the
+  ## old instance and are put on the new one by the same calls that put them
+  ## on the first (`editorAfterRedraw`, the flow's reload).
+  if self.isNil or self.tabInfo.isNil or self.tabInfo.monacoEditor.isNil or
+     self.isExpansion or self.editorView != ViewSource:
+    return
+  let old = self.tabInfo.monacoEditor
+  let host = old.toJs.getContainerDomNode()
+  if host.isNil or jsUndefined == host:
+    return
+  let text = old.getValue()
+  let position = old.getPosition()
+  let scrollTop = old.toJs.getScrollTop()
+  unregisterLspEditor(self)
+  self.data.ui.monacoEditors = self.data.ui.monacoEditors.filterIt(it != old)
+  if not self.flow.isNil:
+    self.flow.clear()
+    self.flow = nil
+  self.viewZones = JsAssoc[int, int]{}
+  self.decorations = @[]
+  try:
+    old.dispose()
+  except:
+    cwarn "editor: disposing the old editor: " & getCurrentExceptionMsg()
+  # The pane's own container (its id, classes, scope stamp and test
+  # controls) stays: `dispose` takes away what the old editor drew in it.
+  self.tabInfo.monacoEditor = nil
+  self.monacoEditor = nil
+  self.tabInfo.source = text
+  self.initMonacoForEditor(host)
+  if self.tabInfo.monacoEditor.isNil:
+    return
+  if not position.isNil:
+    self.tabInfo.monacoEditor.setPosition(position)
+  discard self.tabInfo.monacoEditor.toJs.setScrollTop(scrollTop)
+  self.editorAfterRedraw()
+  discard self.loadInitialFlowIfReady()
+
+proc remountSourceEditors*(data: Data) =
+  ## Every open source editor, re-mounted (`remountSourceEditor`).
+  if data.isNil or data.ui.isNil or data.ui.editors.isNil:
+    return
+  for _, editor in data.ui.editors:
+    editor.remountSourceEditor()

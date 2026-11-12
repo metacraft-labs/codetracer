@@ -56,6 +56,8 @@ import
   # everything variable goes in as text, and that rule is worth being able to
   # test without loading the renderer.
   ui/hcr_live_edit_panel,
+  # The developer setting `sharedEditor`: its palette toggle.
+  ui/shared_editor_flag,
   # THE CONTAINER DEPLOYMENT'S CLIENT — WD1b. `container_boot` performs §6.3's
   # handshake over the socket `startIPC` opens below and installs the platform
   # the server describes; `browser_tab` supplies the ten operations that are
@@ -295,6 +297,8 @@ import viewmodel/session_vm
 import ui/session_viewmodels
 import ui/panel_host   # the panes it mounts render their tab's ViewModels
 import ui/pointer_stamp
+from viewmodel/keymap/editing_keymap import BaseKeymap, bkCua, bkEmacs, bkVim,
+  bkKakoune
 from ui/pane_host_lookup import tabOfPaneHost
 from isonim/web/dom_api as isonim_dom import nil
 import viewmodel/sdk/[debugger_session, trace_source]
@@ -1911,10 +1915,28 @@ proc refreshCommandPaletteMenuIndex*(data: Data) =
                           (NimTracePaletteLabels[0], aTraceMacroAtCursor),
                           (NimTracePaletteLabels[1], aTraceStaticBlockAtCursor),
                           (NimTracePaletteLabels[2], aTraceConstantAtCursor),
-                          (NimTracePaletteLabels[3], aTraceEval)]:
+                          (NimTracePaletteLabels[3], aTraceEval),
+                          # The developer setting `sharedEditor`.
+                          (ToggleSharedEditorLabel, aToggleSharedEditor)]:
     data.ui.commandPalette.interpreter.commands[cstring(label)] = Command(
       name: cstring(label), kind: ActionCommand, action: action,
       shortcut: displayedChord(action))
+  if sharedEditorEnabled(data.config):
+    # The base keymap, while the shared editor (whose modal state the core
+    # keeps) is the editor: Monaco has no Vim or Kakoune modes. A parent
+    # command with the four bases as its subcommands, so `:Keymap: vim` picks
+    # the base by name (the palette reads `Parent: argument`).
+    let keymaps = Command(name: cstring"Keymap", kind: ParentCommand,
+                          subcommands: @[])
+    for (label, action) in [("Keymap CUA", aKeymapCua),
+                            ("Keymap Emacs", aKeymapEmacs),
+                            ("Keymap Vim", aKeymapVim),
+                            ("Keymap Kakoune", aKeymapKakoune)]:
+      data.ui.commandPalette.interpreter.commands[cstring(label)] = Command(
+        name: cstring(label), kind: ActionCommand, action: action,
+        shortcut: displayedChord(action))
+      keymaps.subcommands.add cstring(label)
+    data.ui.commandPalette.interpreter.commands[cstring"Keymap"] = keymaps
   if not debug_toolbar.projectRunRoute.isNil:
     # Edit-Mode-Toolbar.md §9.4: the project's Run at the command's
     # destination (the natives' `omnibar_sources.replayOpenCommands`), where
@@ -6508,6 +6530,16 @@ var actions*: array[ClientAction, ClientActionHandler] = [
     data.runNimTraceInActiveEditor(ntaConstant),
   aTraceEval: proc(actionData: JsObject) = # aTraceEval
     data.runNimTraceInActiveEditor(ntaEval),
+  aToggleSharedEditor: proc(actionData: JsObject) = # aToggleSharedEditor
+    ## The developer setting `sharedEditor`, switched in this window: every
+    ## open source editor re-mounts with the other editor.
+    setSharedEditorOverride(not sharedEditorEnabled(data.config))
+    remountSourceEditors(data)
+    refreshCommandPaletteMenuIndex(data),
+  aKeymapCua: proc(actionData: JsObject) = selectDesktopKeymap(bkCua),
+  aKeymapEmacs: proc(actionData: JsObject) = selectDesktopKeymap(bkEmacs),
+  aKeymapVim: proc(actionData: JsObject) = selectDesktopKeymap(bkVim),
+  aKeymapKakoune: proc(actionData: JsObject) = selectDesktopKeymap(bkKakoune),
 ]
 
 data.actions = actions

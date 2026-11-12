@@ -362,7 +362,19 @@ type
     # beside `aTraceMacroAtCursor` / `aTraceStaticBlockAtCursor`: the
     # constant's and the evaluation's. Appended, for the same reason.
     aTraceConstantAtCursor,       # palette: Nim: Trace Constant at Cursor
-    aTraceEval                    # palette: Nim: Trace NimScript Evaluation
+    aTraceEval,                   # palette: Nim: Trace NimScript Evaluation
+    # The developer setting `sharedEditor` (`common/config.nim`), switched in
+    # a running window: the source editors re-mount with the other editor.
+    # Appended, for the same reason.
+    aToggleSharedEditor,          # palette: Developer: Toggle Shared Editor
+    # The base keymap of this window (Base-Keymaps-And-Layer-Stack.md §3: one
+    # base, CUA by default), the terminal's `:keymap <name>`. Offered while
+    # the shared editor is on, whose modal state the core keeps. Appended,
+    # for the same reason.
+    aKeymapCua,                   # palette: Keymap: CUA
+    aKeymapEmacs,                 # palette: Keymap: Emacs
+    aKeymapVim,                   # palette: Keymap: Vim
+    aKeymapKakoune                # palette: Keymap: Kakoune
 
   InputShortcutMap* = TableLike[langstring, langstring]
 
