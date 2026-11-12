@@ -6950,6 +6950,22 @@ jobs:
         # in an earlier step.
         run: nix develop .#devShells.x86_64-linux.default --command just test-tui-native
 
+      - name: The GPUI window over a native rr recording (the `gpui-native` lane)
+        if: ${{ !cancelled() }}
+        # The GPUI suites that open an rr recording of a native program --
+        # PLAT-60's Low Level Code pane in the GPUI window -- over the same
+        # sudoku fixture as the step above. In the `gpui-shell` lane they
+        # skipped every case: nothing there builds `ct-native-replay` or
+        # provides rr. rr, `replay-server`, `ct-native-replay` and the fixture
+        # come from the earlier steps, as for `tui-native`. isonim-gpui is the
+        # lock-provisioned sibling; its featureless shim is built in its own
+        # dev shell, as `tui-tests` builds it, and `just test-gpui-native`
+        # builds `codetracer-gpui` over it (and re-checks `ct-native-replay`,
+        # which `test-gui` already built).
+        run: |
+          (cd ../isonim-gpui && nix develop --command bash -c 'cd rust && cargo build')
+          nix develop .#devShells.x86_64-linux.default --command just test-gpui-native
+
       - name: Upload test artifacts
         if: failure()
         uses: actions/upload-artifact@v5
@@ -7693,6 +7709,16 @@ jobs:
         # and python3, all in the default dev shell.
         if: ${{ !cancelled() }}
         run: nix develop .#devShells.x86_64-linux.default --command just test-nix-package-ct-test-run
+
+      - name: Nim tracing from the Nix package and the AppImage layout
+        # The desktop's Nim tracing needs a Nim language server and a
+        # trace-enabled nimsuggest; the dev shell supplies both, an install
+        # must ship them. `ci/test/packaged-nim-tracing.sh` takes the
+        # environment the Nix package's `ct` wrapper and the AppImage's AppRun
+        # give the desktop, and traces a Nim static block through the language
+        # server they name, with no Nim tool on PATH.
+        if: ${{ !cancelled() }}
+        run: nix develop .#devShells.x86_64-linux.default --command just test-packaged-nim-tracing
 
       - name: Show the pinned conformance walk
         # The lane prints one headline per suite; this re-runs the walker the

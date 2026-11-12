@@ -314,6 +314,7 @@ tui-native
 tui-real-terminal
 tui-real-emulators
 gpui-shell
+gpui-native
 agent-harbor-gpui-captures
 ui-selection
 ct-host-admission
@@ -364,6 +365,7 @@ test_lane_description() {
 	tui-real-terminal) echo "CodeTracer TUI Tier-2 suites (TermAssert: real pty + libvterm)" ;;
 	tui-real-emulators) echo "CodeTracer TUI in REAL terminal emulators (kitty, xterm, Ghostty, Alacritty on Xvfb; foot on GuiAssert's headless sway; tmux in kitty): personas captured and compared, the profile, the glyph test card read by OCR and pixels, OSC 52 against the profile" ;;
 	gpui-shell) echo "PLAT-20 GPUI shell: the dock projection against gpui-kit's own fixtures, and the shell/leaf split through the real isonim-gpui shim" ;;
+	gpui-native) echo "GPUI suites over an rr recording of a native program (need rr, ct-native-replay, codetracer-native-test-programs and build/bin/codetracer-gpui; run by the rr CI job)" ;;
 	agent-harbor-gpui-captures) echo "CTF-P1b: the GPUI window captures of the Agent Harbor stories against the committed web layout record (just ctf-p1b-gpui-captures takes the captures on headless sway first)" ;;
 	ui-selection) echo 'PLAT-1 --ui front-end selection, end to end: the real launcher, the real ct, the real TUI and a real ct host server' ;;
 	ct-host-admission) echo 'ct host admission, session isolation and lifetime, end to end: the real ct host refuses a client without its session secret or from a foreign origin, gives every client its own replay and session, and leaves no process behind when it is signalled or killed; and it refuses a trace container it cannot read with one error line naming the reason' ;;
@@ -642,7 +644,7 @@ test_lane_parity_partner() {
 # macOS, so there the answer is empty and the run is unchanged.
 test_lane_run_library_path() {
 	case "$1" in
-	gpui-shell | tui | tui-native | vm-collab-integration)
+	gpui-shell | gpui-native | tui | tui-native | vm-collab-integration)
 		echo "${CODETRACER_GPUI_RUNTIME_LIB_PATH:-}"
 		;;
 	*) echo "" ;;
@@ -762,7 +764,7 @@ test_lane_extra_flags() {
 		# file entry points.
 		echo "--path:../GuiAssert/src"
 		;;
-	gpui-shell)
+	gpui-shell | gpui-native)
 		# PLAT-20. `--path:src/frontend/viewmodel` for the same reason every
 		# `vm-*` lane carries it: `codetracer_embed` is imported by bare module
 		# name. `src/frontend` itself is already on the path from
@@ -792,6 +794,9 @@ test_lane_extra_flags() {
 		# The path is spelled the way GuiAssert's own `config.nims` expects
 		# (`switch("path", "src")`), so modules are imported as
 		# `gui_assert/<module>`.
+		#
+		# `gpui-native` is `gpui-shell`'s rr-recording half (see that lane)
+		# and compiles the same kind of suite, so it takes these flags.
 		echo "--path:src/frontend/viewmodel --path:../GuiAssert/src"
 		;;
 
@@ -2291,7 +2296,27 @@ test_lane_files() {
 		# them here would mean giving this lane the grammar archive and the
 		# tree-sitter link flags, i.e. giving the GPUI lane a terminal
 		# renderer, which is exactly what the split forbids.
-		_tlf_glob src/frontend/gpui/tests 'test_*.nim'
+		#
+		# MINUS the suites that open an rr recording of a native program
+		# (every one that imports `fixtures/native_recording`): they are the
+		# `gpui-native` lane below, for the reason `tui-native` exists.
+		_tlf_glob src/frontend/gpui/tests 'test_*.nim' |
+			_tlf_reject_matching_file "${_TLF_NATIVE_RECORDING_IMPORT_RE}"
+		;;
+
+	gpui-native)
+		# The GPUI suites that open an rr recording of a native program: every
+		# one under `src/frontend/gpui/tests/` that imports
+		# `fixtures/native_recording` (PLAT-60's Low Level Code pane over a C
+		# program). They need rr, `ct-native-replay` and the native test
+		# programs, none of which the `gpui-shell` hosts have, so there they
+		# skipped every case. `just test-gpui-native` builds `ct-native-replay`
+		# and the GPUI binary first; CI runs it in `test-ui-tests-rr`, the job
+		# the workflow routes rr work to, after its rr setup and `just
+		# test-gui`. `ci/test/native-recording-suites-run-where-rr-is-test.py`
+		# holds every job that runs such a suite to those prerequisites.
+		_tlf_glob src/frontend/gpui/tests 'test_*.nim' |
+			_tlf_keep_matching_file "${_TLF_NATIVE_RECORDING_IMPORT_RE}"
 		;;
 
 	agent-harbor-gpui-captures)

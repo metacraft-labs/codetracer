@@ -94,8 +94,13 @@ proc argsJson(a: PaneOpArgs; operation: string): JsonNode =
     result["text"] = %a.text
   of "variables.toggle-expand", "variables.value-history",
      "variables.value-origin", "variables.load-more",
-     "file-tree.open", "file-tree.toggle-folder":
+     "file-tree.open", "file-tree.toggle-folder",
+     "tests.refresh-test":
     result["path"] = %a.path
+  of "tests.open-test":
+    result["path"] = %a.path
+    if a.text.len > 0:
+      result["text"] = %a.text
   of "history.seek-to-tick":
     result["tick"] = %a.tick
   of "frame-viewer.go-to-frame":

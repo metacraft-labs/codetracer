@@ -190,6 +190,13 @@
         # rebased and the SHA in this comment rotted once already.
         nim-fork = inputs.reprobuild.packages.${system}.nim-fork;
 
+        # The Nim language server the desktop starts for Nim sources: the
+        # metacraft-labs/langserver fork that `flake.nix`'s overlay puts in
+        # `pkgs` (it carries `nim/traceStaticBlock` and `nim/traceExpandMacro`).
+        # Exported so the AppImage bundles the same build the Nix package
+        # names, and so `ci/test/packaged-nim-tracing.sh` can build it.
+        nimlangserver = pkgs.nimlangserver;
+
         # `nargo` and friends, built HERE from the `noir` source input rather
         # than taken from a `packages.default` that input exports.
         #
@@ -2033,8 +2040,19 @@
           # `bin/` and `lib/` without the heavy runtime closure.
           passthru.ctIoMon = ct-io-mon;
 
+          # Nim tracing (Trace Static Block / Trace Macro Execution) needs the
+          # fork's language server and a nimsuggest that answers the trace
+          # queries. The desktop starts `CODETRACER_NIM_LS_COMMAND` (else
+          # `nimlangserver` on PATH), and that server, like the terminal and
+          # GPUI front-ends, uses the nimsuggest `CODETRACER_NIMSUGGEST` names
+          # when nothing configures one. Outside the dev shell neither was set
+          # and neither was in this closure, so an installed CodeTracer could
+          # not trace Nim at all. `--set-default`: a user's own value wins.
+          # `ci/test/packaged-nim-tracing.sh` runs this wrapper's environment.
           postFixup = ''
             wrapProgram $out/bin/ct \
+              --set-default CODETRACER_NIMSUGGEST ${nim-fork}/libexec/nimsuggest \
+              --set-default CODETRACER_NIM_LS_COMMAND ${pkgs.nimlangserver}/bin/nimlangserver \
               --prefix PATH : $out/bin:${pkgs.lib.makeBinPath [ cargo-stylus ]} \
               --prefix LD_LIBRARY_PATH : ${
                 pkgs.lib.makeLibraryPath [

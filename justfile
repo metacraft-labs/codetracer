@@ -4187,6 +4187,14 @@ test-ct-test-certificates:
 test-nix-package-ct-test-run:
   bash ci/test/nix-package-ct-test-run.sh
 
+# Nim tracing from a packaged CodeTracer: the Nix package's `ct` wrapper and the
+# AppImage's AppRun each name the trace-enabled nimsuggest and the Nim language
+# server they ship, and that server traces a static block with nothing else on
+# PATH. Needs nix, patchelf, lddtree and python3 (all in the default dev shell).
+test-packaged-nim-tracing:
+  bash ci/test/packaged-nim-tracing.sh --nix
+  bash ci/test/packaged-nim-tracing.sh --appimage
+
 # CTC-3a's negative control: the conformance-vector walker the
 # `ct-test-certificates` lane built (or `walker`) passes at the committed pin
 # and fails at an earlier revision of the standard and at one the sibling
@@ -5595,6 +5603,26 @@ test-gpui-shell:
   mkdir -p test-logs
   exec > >(tee test-logs/test-gpui-shell.log) 2>&1
   bash ci/lib/run-nim-test-lane.sh gpui-shell
+
+# The GPUI suites that open an rr recording of a native program
+# (`ci/lib/test-lane-files.sh`'s `gpui-native` lane — every suite under
+# `src/frontend/gpui/tests/` importing `fixtures/native_recording`, PLAT-60's
+# Low Level Code pane over a C program among them). In `gpui-shell` they
+# skipped every case: nothing there provides `ct-native-replay`.
+#
+# Builds what the lane runs: `build/bin/codetracer-gpui` (`build-gpui`, which
+# needs isonim-gpui's shim built in that sibling's own shell) and
+# `ct-native-replay` (`ensure-ct-native-replay`, from
+# `../codetracer-native-backend`). Also needs a built `replay-server`, a
+# working `rr` and the `../codetracer-native-test-programs` sibling; a missing
+# one is a counted `MISSING-PREREQ SKIP:`, and an all-skipped file fails the
+# lane. CI runs this in `test-ui-tests-rr` beside `test-tui-native`.
+test-gpui-native: build-gpui ensure-ct-native-replay
+  #!/usr/bin/env bash
+  set -euo pipefail
+  mkdir -p test-logs
+  exec > >(tee test-logs/test-gpui-native.log) 2>&1
+  bash ci/lib/run-nim-test-lane.sh gpui-native
 
 # ─── PLAT-35: cross-renderer visual alignment ───────────────────────────────
 #
