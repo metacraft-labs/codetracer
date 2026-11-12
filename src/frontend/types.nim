@@ -1576,7 +1576,11 @@ type
     modalValueComponent*: JsAssoc[cstring, ValueComponent]
     tippyElement*: JsObject
     leftPos*: cstring
-    lastScrollFireTime*: int64
+    lastScrollFireTime*: float
+      ## When the last value jump was asked for, in milliseconds since the
+      ## epoch (`jslib.dateNowMs`, a JS Number). Not an `int64`: that is a
+      ## BigInt on the JS backend, and adding the JS Number a clock returns to
+      ## one throws (`flow.afterJump`).
     position*: int
     # codeID*: int64
 

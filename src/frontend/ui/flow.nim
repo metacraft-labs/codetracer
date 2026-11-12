@@ -1387,18 +1387,18 @@ proc afterJump(self: FlowComponent, stepCount: int) =
   let currentStep = self.positionRRTicksToStepCount(location.highLevelLine, location.rrTicks)
   let reverse = if stepCount >= currentStep: false else: true
 
-  let currentTime: int64 = now()
-  let lastTimePlusDelay = (self.lastScrollFireTime.toJs + DELAY.toJs).to(int64)
-
-  if lastTimePlusDelay <= currentTime:
+  # The debounce is in JS Numbers throughout. It used to add the clock's
+  # Number to the `int64` delay, a BigInt on the JS backend: the addition
+  # threw "Cannot mix BigInt and other types", and every jump from a value
+  # (a click on it, or its menu's "Jump to value") died here, after the
+  # timer had fired, without moving.
+  if self.lastScrollFireTime + float(DELAY) <= dateNowMs():
     self.redrawFlow()
     self.jumpToLocalStep(self.location.path, step.line, stepCount, step.iteration, step.rrTicks, reverse)
 
 
 proc jumpToLocalStep*(self: FlowComponent, stepCount: int) =
-  let currentTime: int64 = now()
-
-  self.lastScrollFireTime = currentTime
+  self.lastScrollFireTime = dateNowMs()
 
   discard windowSetTimeout(
     proc =
