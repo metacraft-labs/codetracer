@@ -429,10 +429,8 @@ proc drawInitiativeTabBar*(c: var AhCanvas; vm: InitiativeTabStripVM; row, col, 
     for i in overflow:
       widest = max(widest, 3 + widthOf(tabs[i].title) + MenuOriginGap + column + MenuInset)
     let menuW = min(widest, width - 1)
-    # Hung from the `+N` chip, as the web's: its last cell under the chip's
-    # last cell (`chipEnd` is one past it), shifted only as far as it must
-    # be to stay inside the terminal on either side.
-    let menuCol = max(0, min(chipEnd - menuW, c.cols - menuW))
+    # Hung from the `+N` chip, as the session strip's.
+    let menuCol = hangMenuCol(chipEnd, menuW, c.cols)
     # A row of the menu's own ground above and below its items, as the
     # session strip's.
     let menu = c.drawMenu(host, barBelow, menuCol, menuW, overflow.len + 2, "overflow")

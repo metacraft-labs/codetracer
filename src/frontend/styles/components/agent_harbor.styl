@@ -1518,10 +1518,11 @@ AH_MARK = 0.5rem
 .ah-initiative-tab-bar.overflow-open .ah-overflow-menu
   display: flex
 
-// The initiative bar's `+N` menu keeps the strip's height under the caption
-// bar, but not its `right: 0.25em`: it hangs from its chip, its right edge on
-// the chip's, kept inside the window. Where the chip ends depends on the
-// tabs before it, so the view places it (`hangOverflowMenu`).
+// A strip's `+N` menu, the session strip's and the initiative bar's, keeps
+// `session-tab-overflow-menu`'s height under the caption bar, but not its
+// `right: 0.25em`: it hangs from its chip, its right edge on the chip's, kept
+// inside the window. Where the chip ends depends on the tabs before it, so
+// the view places it (`hangOverflowMenu`).
 
 // The bar clips what overflows it (`.session-tab-bar`); an open menu hangs
 // below it, whichever menu it is.

@@ -7,12 +7,13 @@
 ## - `renderAgentHarborTabStrip`: the strip in the caption bar, built from
 ##   CodeTracer's own session tab strip (`isonim_session_tabs_view.nim`,
 ##   `session_tabs.styl`): the same `.session-tab` shape and colours, the
-##   same active tab, close control, overflow chevron and menu, and "+". Each
-##   tab adds a status mark before its title (running, idle, needs input,
-##   queued, failed, ended) and the front-end that started the session after
-##   it. One line keeps the active tab visible and puts the rest in the
-##   overflow menu (`SessionTabStripVM.singleLine`, CodeTracer's rule); the
-##   multi-line layout wraps onto as many lines as it needs.
+##   same active tab, close control, overflow chevron and menu (hanging from
+##   its chip, `hangOverflowMenu`), and "+". Each tab adds a status mark
+##   before its title (running, idle, needs input, queued, failed, ended)
+##   and the front-end that started the session after it. One line keeps the
+##   active tab visible and puts the rest in the overflow menu
+##   (`SessionTabStripVM.singleLine`, CodeTracer's rule); the multi-line
+##   layout wraps onto as many lines as it needs.
 ## - `renderAgentHarborSessionList`: the same tabs as a vertical list -- the
 ##   strip's sidebar layout, collapsible to a rail of marks, and its docked
 ##   layout, a panel in the layout that spreads into columns when wide.
@@ -143,6 +144,50 @@ proc renderStatusTab[R](r: R; vm: SessionTabStripVM; cb: AgentHarborTabCallbacks
         button(class = "ah-tab-retry", onclick = proc() = vm.invokeRetry(cb)):
           text "Retry"
 
+when defined(js):
+  proc hangOverflowMenu*(within: isonim_dom.Element) {.importjs: """
+    (function(el) {
+      var bars = el.classList.contains('ah-tab-strip') ? [el]
+                 : el.querySelectorAll('.ah-tab-strip');
+      for (var i = 0; i < bars.length; i++) {
+        var bar = bars[i];
+        if (!bar.isConnected) continue;
+        var chip = bar.querySelector(':scope > .ah-tab-overflow-count');
+        var menu = bar.querySelector(':scope > .session-tab-overflow-menu');
+        if (!chip || !menu) continue;
+        menu.style.left = menu.style.right = menu.style.width = '';
+        var w = menu.getBoundingClientRect().width;
+        if (w === 0) continue;
+        var view = document.documentElement.clientWidth;
+        var left = Math.max(0, Math.min(chip.getBoundingClientRect().right - w, view - w));
+        var b = bar.getBoundingClientRect();
+        menu.style.right = 'auto';
+        menu.style.width = w + 'px';
+        menu.style.left = (left - b.left - bar.clientLeft) + 'px';
+      }
+    })(#)""".}
+    ## A strip's `+N` menu -- this strip's, and the initiative bar's -- hangs
+    ## from its chip: its right edge on the chip's right edge, shifted only
+    ## as far as it must be to stay inside the window on either side. The
+    ## menu is `session-tab-overflow-menu`, placed in its bar (its containing
+    ## block, so its height under the caption bar is the strip's), whose
+    ## rule right-aligns it under the bar's end; where the chip is cannot be
+    ## said in CSS, so it is measured. The width is measured where the
+    ## stylesheet puts it and kept, so moving the menu never rewraps it.
+    ## `within` is a bar or holds bars; a bar not yet in the document, or
+    ## whose menu is closed (not drawn), is left alone: the mount places it
+    ## again once it is (and when the window's size or its fonts move the
+    ## chip).
+
+  proc onFontsLoaded*(cb: proc()) {.importjs: """
+    (function(cb) {
+      if (!document.fonts) return;
+      document.fonts.ready.then(cb);
+      document.fonts.addEventListener('loadingdone', cb);
+    })(#)""".}
+    ## A face that arrives after a bar is drawn changes the tabs' widths,
+    ## and with them where the `+N` chip is.
+
 proc renderAgentHarborTabStrip*[R, N](r: R; vm: SessionTabStripVM;
     cb: AgentHarborTabCallbacks = AgentHarborTabCallbacks()): N =
   ## The strip, single-line or multi-line by `vm.mode`. Rebuilt when the
@@ -206,6 +251,11 @@ proc renderAgentHarborTabStrip*[R, N](r: R; vm: SessionTabStripVM;
       for i in overflowIndexes:
         r.appendRendered(menu, renderOverflowItem(r, vm, cb, tabs[i]))
       r.appendRendered(bar, menuNode)
+      # Open (the strip's `overflow-open`), the menu is drawn, so it is
+      # placed now.
+      when defined(js):
+        when N is isonim_dom.Element:
+          if vm.overflowOpen.val: hangOverflowMenu(bar)
   host
 
 # ---------------------------------------------------------------------------
@@ -375,8 +425,10 @@ when defined(js):
     let measure = proc() =
       let width = measureWidth(container)
       if width > 0 and width != vm.stripWidthPx.val: vm.stripWidthPx.val = width
+      hangOverflowMenu(container)
     measure()
     onResize(measure)
+    onFontsLoaded(proc() = hangOverflowMenu(container))
 
   proc mountAgentHarborSessionList*(container: isonim_dom.Element;
                                     vm: SessionTabStripVM;

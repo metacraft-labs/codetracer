@@ -22,7 +22,7 @@
 
 import replay_prerequisite
 import ../../../common/replay_server_path
-import std/[json, os, osproc, streams, strtabs, strutils, tempfiles, unittest]
+import std/[json, os, osproc, sequtils, streams, strtabs, strutils, tempfiles, unittest]
 import ./gpui_child_env
 
 import headless_session
@@ -34,7 +34,7 @@ import ../../tui/tests/fixtures/native_recording
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads this spelling
 # as the suite's RUNTIME assertion count.
-const ExpectedAssertions = 12
+const ExpectedAssertions = 14
 
 var countedAssertions = 0
 var skipped = false
@@ -222,6 +222,34 @@ suite "the Low Level Code pane in the GPUI window, native (rr) recording":
           break
         here = after
       ck stepped == 1
+
+  test "View Generated C Source: the generated C of the editor's Nim line":
+    # Generated-Code-Listing §13.4: the View menu's item, as choosing it runs
+    # it (`lowlevel:generated-c`), on CodeTracer's native Nim example
+    # recording (rr), which opens stopped in `nim_flow_test.nim`. The pane
+    # shows the module's generated C — its `#line` directives among the rows
+    # — read from the recording's bundled nimcache by the shared presenter.
+    let example = currentSourcePath().parentDir / ".." / ".." / ".." / ".." /
+      ".." / "codetracer-example-recordings" / "nim" / "flow_test"
+    if not dirExists(example) or getEnv("CODETRACER_CT_NATIVE_REPLAY_CMD").len == 0:
+      echo "  MISSING-PREREQ SKIP: the native Nim example recording (", example,
+           ") and the native backend ($CODETRACER_CT_NATIVE_REPLAY_CMD)"
+      skipped = true
+      skip()
+    else:
+      # The caret on the stop's line — the line asked about — then the item.
+      let line = windowPlan("", example).executionLine
+      checkpoint("the stop's line: " & $line)
+      var trace = ""
+      let plan = windowPlan("lowlevel:caret:" & $line & ",lowlevel:generated-c",
+                            example, trace)
+      let rows = plan.instructions
+      var texts: seq[string] = @[]
+      for r in rows: texts.add r.textOf
+      checkpoint("rows:\n" & texts.join("\n"))
+      checkpoint(trace)
+      ck plan.nodesWith(LowLevelAttribute).len == 1
+      ck texts.anyIt("#line" in it)
 
 suite "native GPUI suite self-check":
   test "native_gpui_assertion_count_is_measured":

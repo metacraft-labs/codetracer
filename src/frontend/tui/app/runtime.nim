@@ -164,6 +164,12 @@ type
       ## Starts a build and takes ownership of the process. The SESSION it
       ## reports into is `TuiApp.build`, which the host fills, because the poll
       ## loop that advances it is the host's too.
+    showGeneratedCode*: proc(targetId, path: string; line: int): string {.closure.}
+      ## The Generated Code Listing operation (Generated-Code-Listing §7,
+      ## §13.4) for `path:line`: the host builds the listing from the
+      ## session's recording and shows it in the Low Level Code pane
+      ## (`generated_code_presenter.showGeneratedCode`). "" when shown, else
+      ## why not. Nil in a window with no session.
     readSource*: proc(path: string): EditReadResult {.closure.}
       ## PLAT-68: the whole text of a file of the RECORDING (the source
       ## provider's, generation 0 — what the Debug-mode editor shows), for
@@ -3160,7 +3166,11 @@ proc revealLowLevelRow(rt: TuiRuntime; row: int) =
   if row < 0:
     return
   let (_, screen) = rt.lowLevelPaneScreen()
-  rt.app.lowLevel.scrollTop = rt.app.lowLevel.revealRow(screen.listRows, row)
+  # An editor's window shows the hosted pane (`hostedRows`), not the
+  # terminal's screen: its listing rows are the window's, less the header.
+  let rows = if screen.listRows > 0: screen.listRows
+             else: max(1, rt.hostedRows.getOrDefault(paneLowLevelCode, 0) - 1)
+  rt.app.lowLevel.scrollTop = rt.app.lowLevel.revealRow(rows, row)
 
 proc scrollLowLevel(rt: TuiRuntime; delta: int; outcome: var RuntimeOutcome) =
   ## The wheel over the listing scrolls it.
@@ -3225,6 +3235,31 @@ proc syncLowLevelCursor(rt: TuiRuntime) =
                                          line: at[1]))
   if rt.app.lowLevel.linkedRow >= 0:
     rt.revealLowLevelRow(rt.app.lowLevel.linkedRow)
+
+const GeneratedCTarget = "nim.c"
+  ## The Generated Code Listing's Nim target (`generated_code_operation`).
+
+proc nimTraceDocument(rt: TuiRuntime): tuple[path: string;
+                                              lines: seq[string]]
+
+proc generatedCodeSubject(rt: TuiRuntime): tuple[path: string; line: int] =
+  ## The source position "View Generated C Source" is about: Edit mode's
+  ## caret in its buffer; in Debug mode the command context — an editor's
+  ## cursor (`source/cursor`, `pane_server.applyCursor`), the terminal's
+  ## stop until a move — else the shown source at the caret.
+  # AN EDITOR'S CURSOR FIRST: a hosted session's source window is the
+  # editor's (`hostedRows[paneEditor]`), and the runtime's own buffer is
+  # only the shown source's read-only copy (PLAT-68), whose caret is not
+  # where the user is.
+  if rt.hostedRows.hasKey(paneEditor) and rt.context.file.len > 0 and
+     rt.context.line > 0:
+    return (rt.context.file, rt.context.line)
+  let buf = rt.editorBuffer()
+  if not buf.isNil:
+    return (rt.nimTraceDocument().path, buf.caretLine)
+  if rt.context.file.len > 0 and rt.context.line > 0:
+    return (rt.context.file, rt.context.line)
+  (rt.app.source.path, rt.editorCaretLine())
 
 proc openLowLevelCode(rt: TuiRuntime; outcome: var RuntimeOutcome) =
   ## `view.low-level-code` (Alt+1, the desktop's `aLowLevel1`): the Low Level
@@ -9464,6 +9499,40 @@ proc buildOperationTables(rt: TuiRuntime) =
   # PLAT-60: Alt+1, the desktop's `aLowLevel1` — the Low Level Code pane
   # beside the source.
   session.bindOp("view.low-level-code", act(rt.openLowLevelCode(outcome)))
+  # Generated-Code-Listing §13.4: the View menu's "View Disassembly" is the
+  # same pane — the stop's machine code, the generated C's for a Nim
+  # recording — and "View Generated C Source" the listing of the C the
+  # source under the caret compiled to, in that pane, cross-referenced with
+  # the source. Both did nothing on every surface until 2026-11-12.
+  session.bindOp("view.disassembly", act(rt.openLowLevelCode(outcome)))
+  session.bindOp("view.generated-c-source",
+    act do:
+      let (path, line) = rt.generatedCodeSubject()
+      let why = rt.editServices.showGeneratedCode(GeneratedCTarget, path, line)
+      if why.len > 0:
+        rt.note(why)
+      else:
+        rt.openLowLevelCode(outcome)
+        # The rows the caret's line compiled to, in view (the listing's
+        # active row, `showGeneratedListing`).
+        let row = if rt.app.lowLevel.executionRow >= 0: rt.app.lowLevel.executionRow
+                  else: rt.app.lowLevel.linkedRow
+        rt.revealLowLevelRow(row)
+        rt.note("Generated C of " & path.extractFilename & " beside the source"),
+    proc(): Enablement =
+      let path = rt.generatedCodeSubject().path
+      if rt.editServices.showGeneratedCode.isNil:
+        operationDisabled("View Generated C Source: this window has no " &
+                          "recording to read the generated C from")
+      elif not path.endsWith(".nim"):
+        operationDisabled("View Generated C Source: " &
+          (if path.len == 0: "there is no file in the editor"
+           else: path.extractFilename & " is not a Nim source"))
+      else: AlwaysEnabled)
+  session.bindOp("view.source-code", act do:
+    discard rt.focus.focusPaneKind(paneEditor)
+    rt.app.layoutBinding.focus = paneEditor
+    rt.note("the source"))
   # PLAT-55 (EMT-D22): `F8` / `Shift+F8` in Edit mode, `Ctrl+Alt+N` /
   # `Ctrl+Alt+P` — the desktop's `aGotoNextError` / `aGotoPreviousError`.
   session.onEach(["problems.next", "problems.previous"], act do:

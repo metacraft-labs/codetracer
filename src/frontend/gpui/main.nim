@@ -115,6 +115,10 @@ import ./window_preflight               # refuse by kind when no window can open
 import ./list_scrubber
 import ../viewmodel/views/debug_control_marks
 import ../viewmodel/viewmodels/history_cursor   # history back / forward: the desktop's cursor rule
+import ../viewmodel/viewmodels/generated_code_presenter   # Generated-Code-Listing §13.4
+from ../viewmodel/sdk/source_provider import newDapSourceProvider, fetch,
+  SourceFetch
+from ../viewmodel/viewmodels/source_vm import SourceLineRequest
 import ./host/certificate_indicator
 import ./design_font_metrics
 import ../tui/host/native_host   # `loadStopPanes`, the terminal's own producer
@@ -307,6 +311,8 @@ OPTIONS:
                     and (PLAT-60) the Low Level Code pane (`<index>` an
                     instruction's index in the listing):
                       lowlevel:show (Alt+1's `view.low-level-code`)
+                      lowlevel:generated-c  lowlevel:disassembly (the View
+                      menu's View Generated C Source / View Disassembly)
                       lowlevel:row:<index>  lowlevel:menu:<index>
                       lowlevel:choose:<label>  lowlevel:sync
                       lowlevel:key:<operation>  lowlevel:caret:<line>
@@ -3374,6 +3380,11 @@ proc syncLowLevelShown(): bool =
     vm.setSourceCursor(gEditorSurface.path,
                        gDebugDocs[gEditorSurface.path].caretLine)
 
+var gLowLevelReveal = -1
+  ## A row to bring into view once the pane has a body: an operation that
+  ## fills a pane the layout has only just placed (`showGeneratedC`) runs
+  ## before the draw that gives the pane its geometry.
+
 proc drawLowLevelPane(r: GpuiRenderer) =
   ## PLAT-60: draw the Low Level Code pane from the session's ViewModel,
   ## natively, replacing whatever the leaf held. A pane just shown asks the
@@ -3384,6 +3395,9 @@ proc drawLowLevelPane(r: GpuiRenderer) =
     return
   if syncLowLevelShown():
     discard gSession.loadStopPanes()
+  if gLowLevelReveal >= 0 and lowLevelBody().w > 0:
+    gLowLevel.revealIndex(vm, lowLevelBody(), gLowLevelReveal)
+    gLowLevelReveal = -1
   if drawLowLevelCode(r, pane, vm, gLowLevel, lowLevelBody()):
     applyTextFaces(r, pane)
 
@@ -4873,6 +4887,10 @@ type
       ## A debugger control (`control`), through `performControl`.
     gmrPane
       ## A View-menu pane brought forward (`pane`).
+    gmrGeneratedC
+      ## View › View Generated C Source: the Generated Code Listing for the
+      ## editor's caret (Generated-Code-Listing §13.4), in the Low Level
+      ## Code pane.
     gmrFindSymbol
     gmrFindInFiles
     gmrExit
@@ -4938,6 +4956,18 @@ proc gpuiMenuRouteOf(action: string): GpuiMenuRoute =
     GpuiMenuRoute(kind: gmrPane, pane: paneLowLevelCode,
                   reason: (if gSession.isNil: "the low-level code is a " &
                              "recording's: open one to see it" else: ""))
+  # Generated-Code-Listing §13.4: View › View Disassembly is the same pane
+  # (the stop's machine code); View Generated C Source the listing of the
+  # C the caret's Nim line compiled to, in it. Both did nothing until
+  # 2026-11-12.
+  of "aViewDisassembly":
+    GpuiMenuRoute(kind: gmrPane, pane: paneLowLevelCode,
+                  reason: (if gSession.isNil: "the low-level code is a " &
+                             "recording's: open one to see it" else: ""))
+  of "aViewGeneratedCSource":
+    GpuiMenuRoute(kind: gmrGeneratedC,
+                  reason: (if gSession.isNil: "the generated C is read from " &
+                             "a recording: open one to see it" else: ""))
   of "aShell": GpuiMenuRoute(kind: gmrPane, pane: paneShell)   # PLAT-61
   of "aExit": GpuiMenuRoute(kind: gmrExit)
   # File: the Welcome Screen's own flows (Multi-Window-Tab-Management.md rule
@@ -7140,6 +7170,9 @@ proc gpuiTestsCommand(r: GpuiRenderer; action: string): bool
   ## Test-Results-Pane.md §9.3's omnibox commands; defined with the pane's
   ## host below.
 
+proc showGeneratedC(r: GpuiRenderer)
+  ## Generated-Code-Listing §13.4: defined beside the point menu items.
+
 proc runGpuiMenuAction(r: GpuiRenderer; action: string) =
   traceGesture("menu action " & action)
   if gpuiTestsCommand(r, action):
@@ -7234,6 +7267,7 @@ proc runGpuiMenuAction(r: GpuiRenderer; action: string) =
   of gmrFindSymbol: openOmnibar(r, ":sym ")
   of gmrFindInFiles: openFindInFiles(r)
   of gmrPane: showPaneFromMenu(r, route.pane)
+  of gmrGeneratedC: showGeneratedC(r)
   of gmrExit:
     traceGesture("exit")
     gpui_quit()
@@ -7325,6 +7359,60 @@ proc runGpuiPointMenuOp(r: GpuiRenderer; op: PointMenuOp) =
     showTracepointHits(r, done.swept,
       "tracepoints: " & $done.sweptSpecs & " run — " & $done.swept.len &
       " hit(s)")
+
+proc showGeneratedC(r: GpuiRenderer) =
+  ## View › View Generated C Source: the shared presenter's listing of the C
+  ## the editor caret's Nim line compiled to, read from the shown recording
+  ## through its source provider, shown in the Low Level Code pane — the
+  ## operation every surface runs (`generated_code_presenter`).
+  let path = editorPath()
+  if not path.endsWith(".nim"):
+    traceGesture("View Generated C Source: " &
+      (if path.len == 0: "there is no file in the editor"
+       else: path.extractFilename & " is not a Nim source"))
+    return
+  let line = if gDebugDocs.hasKey(path): gDebugDocs[path].caretLine
+             else: max(1, gEditorSurface.executionLine)
+  let core = gSession.session
+  var files: seq[string] = @[]
+  if not core.fileTreeVM.isNil:
+    recordedPathsOf(core.fileTreeVM.rootEntry.val, files)
+  let provider = newDapSourceProvider(core.store.backend)
+  let refused = showGeneratedCode(core.generatedCodeVM, core.lowLevelCodeVM,
+    "nim.c", path, line, core.store.stop.val, files,
+    proc(p: string; done: proc(r: RecordedText)) =
+      provider.fetch(SourceLineRequest(path: p, sourceGeneration: 0,
+                                       sourceDigest: "", firstLine: 1,
+                                       lastLine: high(int32)),
+        proc(f: SourceFetch) =
+          let lines = if f.fileLines.len > 0: f.fileLines else: f.lines
+          if lines.len == 0:
+            done((ok: false, text: "",
+                  message: "could not read " & p & ": " & f.detail))
+          else:
+            done((ok: true, text: lines.join("\n") & "\n", message: ""))),
+    proc(failure: string) =
+      traceGesture(if failure.len > 0: "View Generated C Source: " & failure
+                   else: "Generated C of " & path.extractFilename))
+  if refused.len > 0:
+    traceGesture("View Generated C Source: " & refused)
+    return
+  showPaneFromMenu(r, paneLowLevelCode)
+  # The rows the caret's line compiled to, in view: the listing's active
+  # row (`showGeneratedListing` aligned it to the caret).
+  let vm = core.lowLevelCodeVM
+  let active = vm.activeOffset.val
+  let rows = vm.instructions.val
+  var at = -1
+  for i, instr in rows:
+    if instr.offset == active:
+      at = i
+      break
+  traceGesture("View Generated C Source: row " & $at & " of " & $rows.len &
+               " (offset " & $active & ", line " & $line & ")")
+  if at >= 0:
+    gLowLevelReveal = at
+    drawLowLevelPane(r)
 
 proc runWatchCommand(r: GpuiRenderer; query: string): bool
   ## PLAT-51: forward-declared; defined beside the value history.
@@ -13884,6 +13972,11 @@ proc runWindowOp(r: GpuiRenderer; op: string; release = true): string =
       of "show":
         runWindowOperation(r, EditingResolution(
           operation: "view.low-level-code"), 0)
+      of "generated-c", "disassembly":
+        # View › View Generated C Source / View Disassembly: what choosing the
+        # menu item runs (`gpuiMenuRouteOf`).
+        runGpuiMenuAction(r, if parts[1] == "generated-c": "aViewGeneratedCSource"
+                             else: "aViewDisassembly")
       of "key":
         gFocusPane = $paneLowLevelCode
         if not lowLevelKey(r, parts[2]):

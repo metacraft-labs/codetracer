@@ -60,18 +60,13 @@ from ../viewmodel/viewmodels/generated_code_anchors import
 
 from ../viewmodel/viewmodels/noir_build_producer import rendererPathFor
 
-from ../viewmodel/store/types as vmtypes import LowLevelInstruction
-from ../viewmodel/viewmodels/low_level_code_vm import showGeneratedListing
 from ./panel_host import panelSession
-
-const NO_HIGH_LEVEL_LINE = -1
-  ## `LowLevelInstruction.highLevelLine` is the LEGACY per-row back-pointer the
-  ## asm loader fills, and `isonim_low_level_code_view.sourceCrossRef` suppresses
-  ## the row's source span when it is not positive. It is left unset on purpose:
-  ## this listing's source correspondence is the ANCHOR SET, which is a range of
-  ## rows per source region, and writing a single line onto each row would be a
-  ## second, coarser mapping beside the real one — disagreeing with it wherever
-  ## an anchor covers more than one row, which is most of them.
+from ../event_helpers import warnMessage
+from isonim/core/signals import val
+import ../viewmodel/viewmodels/generated_code_presenter as presenter
+from ../viewmodel/sdk/source_provider import newDapSourceProvider, fetch,
+  SourceFetch
+from ../viewmodel/viewmodels/source_vm import SourceLineRequest
 
 from ../viewmodel/viewmodels/noir_anchor_producer import
   readArtefactJson, produceAnchors, aroOk
@@ -248,50 +243,54 @@ proc showGeneratedCode*(data: Data; path: cstring; line: int;
   if generatedCodeVMInstance.isNil:
     return
 
-  generatedCodeVMInstance.noteBuildStarted(t, $path, line)
+  if t.id == presenter.firstTargetOf("x.nim"):
+    # Generated-Code-Listing §13.4: Nim's generated C, read from THIS
+    # recording's bundled files through the shared source provider and shown
+    # by the shared presenter — the operation every surface runs.
+    let session = panelSession()
+    if session.isNil:
+      data.viewsApi.warnMessage(cstring(
+        "View Generated C Source: there is no recording to read it from"))
+      return
+    data.openLowLevelCode()
+    var files: seq[string] = @[]
+    if not session.fileTreeVM.isNil:
+      presenter.recordedPathsOf(session.fileTreeVM.rootEntry.val, files)
+    let provider = newDapSourceProvider(session.store.backend)
+    let refused = presenter.showGeneratedCode(generatedCodeVMInstance,
+      session.lowLevelCodeVM, t.id, $path, line, session.store.stop.val, files,
+      proc(p: string; done: proc(r: presenter.RecordedText)) =
+        provider.fetch(SourceLineRequest(path: p, sourceGeneration: 0,
+                                         sourceDigest: "", firstLine: 1,
+                                         lastLine: high(int32)),
+          proc(f: SourceFetch) =
+            let lines = if f.fileLines.len > 0: f.fileLines else: f.lines
+            if lines.len == 0:
+              done((ok: false, text: "",
+                    message: "could not read " & p & ": " & f.detail))
+            else:
+              done((ok: true, text: lines.join("\n") & "\n", message: ""))),
+      proc(failure: string) =
+        if failure.len > 0:
+          data.viewsApi.warnMessage(cstring(failure)))
+    if refused.len > 0:
+      data.viewsApi.warnMessage(cstring(refused))
+    return
 
   let (listing, failure) = buildListing(t, $path)
-  if failure.len > 0:
-    generatedCodeVMInstance.noteBuildFailed(failure)
-    # THE SURFACE STILL OPENS, carrying the reason. §8: a build that fails must
-    # show WHY rather than resolving into an empty listing, and a command that
-    # silently does nothing is the same defect as a listing nobody paints.
-    data.openLowLevelCode()
-    let session = panelSession()
-    if not session.isNil:
-      discard session.lowLevelCodeVM.showGeneratedListing(
-        @[], @[], ArtefactSupport(), $path, line, failure)
-    return
-  generatedCodeVMInstance.openListing(listing, line)
-
-  # AND SOMETHING PAINTS IT. `Generated-Code-Listing.md` §7 asks for an editor
-  # TAB; this opens the Low Level Code PANE, and the divergence is deliberate
-  # and recorded rather than glossed.
-  #
-  # `openTab(name, ViewInstructions)` is what §0 observes `openAlternativeView`
-  # already doing, and it is the wrong instrument here: that view is fed by
+  # AND SOMETHING PAINTS IT — the Low Level Code PANE, not the editor TAB
+  # §7 asks for, deliberately: `openTab(name, ViewInstructions)` is fed by
   # `CtLoadAsmFunction` against a recording's asm and knows nothing about a
-  # compile artefact, so the tab would have opened EMPTY. A surface a user
-  # invokes and finds blank is precisely the defect this thread exists to
-  # close, and matching the spec's noun while reintroducing it would have been
-  # the worse divergence.
-  #
-  # The pane already renders what the spec asks the surface to render: a
-  # fidelity badge per row (GCL-A7), the three not-aligned states told apart
-  # (GCL-A8) and the sync toggle's visible state — all asserted against the
-  # view in `test_low_level_code_view_anchors.nim`. The tab is the right long
-  # answer and it needs a view of its own; this is the surface that exists.
+  # compile artefact, so the tab would have opened EMPTY. The pane renders
+  # what §7 asks of the surface (fidelity badges, GCL-A7; the not-aligned
+  # states, GCL-A8; the sync toggle — `test_low_level_code_view_anchors`).
+  # A build that fails still opens it, carrying the reason (§8). Painting it
+  # is the shared presenter's, as for every producer and every surface.
   data.openLowLevelCode()
-  var rows: seq[LowLevelInstruction] = @[]
-  for r in listing.rows:
-    rows.add LowLevelInstruction(
-      name: r.text, args: "", other: r.annotation, offset: r.index,
-      highLevelPath: "", highLevelLine: NO_HIGH_LEVEL_LINE)
   let session = panelSession()
-  if not session.isNil:
-    discard session.lowLevelCodeVM.showGeneratedListing(
-      rows, listing.anchors, listing.support, $path, line,
-      listing.listingAbsence)
+  presenter.present(generatedCodeVMInstance,
+    (if session.isNil: nil else: session.lowLevelCodeVM), t, listing, failure,
+    $path, line)
 
 # `showFirstGeneratedCodeTarget` WAS HERE AND IS DELETED, with
 # `generated_code_operation.keybindingTarget` behind it.

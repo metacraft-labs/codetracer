@@ -831,6 +831,28 @@ proc runOperation(srv: PaneServer; s: ServerSession; params: JsonNode): JsonNode
     # its reason (the protocol summary: "success or the operation's refusal
     # reason").
     return %*{"ok": false, "operation": text, "detail": outcome.refused}
+  # §E13: the views that show the Low Level Code pane place it beside the
+  # source when the mode's layout does not — the terminal splits its own
+  # arrangement (`runtime.openLowLevelCode`), which a hosted session has no
+  # binding for; the server holds the layout, and the editor realises the
+  # change (`layout/changed`) and opens the pane.
+  if name in ["view.low-level-code", "view.disassembly",
+              "view.generated-c-source"]:
+    let tree = s.currentLayout()
+    if not tree.contains(paneLowLevelCode):
+      # `apply` leaves the tree as it is and answers with the new one, which
+      # becomes the mode's (the register holds one tree per mode).
+      let placed = tree.apply(cmdSplit(paneEditor, paneLowLevelCode, saRow,
+                                       ssAfter))
+      case placed.kind
+      of loApplied:
+        s.app.modes.layouts[s.app.modes.product] = placed.layout.tree
+      of loNoOp:
+        discard
+      of loRefused:
+        return %*{"ok": false, "operation": text, "detail":
+          "the Low Level Code pane could not be placed beside the source (" &
+          $placed.problem.kind & ")"}
   # A press on the VCS pane's or Test Results' controls is that source's, as
   # in the terminal's loop; anything else the session applies.
   if not s.vcs.applyClick(s.rt, outcome.paneClick) and

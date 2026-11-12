@@ -4674,6 +4674,23 @@ proc saveReplayOpenIn(data: Data; policy: TraceOpenPolicy) =
   data.ipc.send cstring"CODETRACER::replay-open-in-save",
     js{workspace: cstring(workspace), policy: cstring($policy)}
 
+proc viewGeneratedCAtCaret(data: Data) =
+  ## The View menu's **View Generated C Source**: the active editor's caret,
+  ## through the Generated Code Listing operation
+  ## (`generated_code.showGeneratedCode`, target `nim.c`).
+  let active = data.services.editor.active
+  if not data.ui.editors.hasKey(active):
+    data.viewsApi.warnMessage(cstring(
+      "View Generated C Source: there is no file in the editor"))
+    return
+  let editor = data.ui.editors[active]
+  if not ($editor.path).endsWith(".nim"):
+    data.viewsApi.warnMessage(cstring("View Generated C Source: " &
+      ($editor.path).extractFilename & " is not a Nim source"))
+    return
+  generated_code.showGeneratedCode(data, editor.path, editor.caretLine(),
+                                   "nim.c")
+
 proc runNimTraceInActiveEditor(data: Data; action: NimTraceAction) =
   ## The palette's **Nim: Trace … at Cursor** entries and the
   ## `editor.trace-*` chords (`client_actions`): the active editor's caret,
@@ -6366,17 +6383,14 @@ var actions*: array[ClientAction, ClientActionHandler] = [
   aRecordNewTrace: proc(actionData: JsObject) = data.showRecordNewTraceDialog(),
   aRecordFromLaunch: proc(actionData: JsObject) = data.recordFromLaunchConfig(actionData),
   aNewTraceTab: proc(actionData: JsObject) = createNewSession(data), aViewGeneratedCSource: # aNewTraceTab
-  # Language-specific View items.  The real implementations live
-  # behind the Nim langserver / sourcemap flow (S3/S6/S7) and are not
-  # all wired up yet — for now they surface a non-fatal info toast so
-  # the action is observable.  The menu shape is the contract these
-  # entries protect; behaviour will land in follow-up milestones.
+  # The View menu's language-specific items (Generated-Code-Listing §13.4):
+  # the Generated Code Listing operation for the active editor's caret, and
+  # the Low Level Code pane — the stop's machine code, the generated C's for
+  # a Nim recording. (Until 2026-11-12 both showed "not yet wired up".)
   proc(actionData: JsObject) = # aViewGeneratedCSource
-    data.viewsApi.successMessage(
-      cstring"View Generated C Source is not yet wired up"),
+    data.viewGeneratedCAtCaret(),
   aViewDisassembly: proc(actionData: JsObject) = # aViewDisassembly
-    data.viewsApi.successMessage(
-      cstring"View Disassembly is not yet wired up"),
+    data.openLowLevelCode(),
   aTraceMacroAtCursor: proc(actionData: JsObject) = # aTraceMacroAtCursor
     ## Nim's compile-time tracing at the active editor's caret
     ## (`trace_macro.startNimTrace`, through the shared ViewModel).
