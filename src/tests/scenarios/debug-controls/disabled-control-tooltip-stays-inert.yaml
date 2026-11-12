@@ -1,0 +1,35 @@
+scenario: 1
+name: debug-controls/disabled-control-tooltip-stays-inert
+pack: codetracer
+summary: >-
+  The history controls, disabled on a fresh recording, still raise their
+  tooltip on a rest, and a click on them leaves them disabled and the replay
+  where it was.
+
+stage:
+  - use: record-program
+    with: { program: py_console_logs/main.py }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - wait: { until: { at: 'toolbar/toolbar-button[label="next-image"]', present: true }, timeout: 60s }
+  - wait: { until: editor.loaded, timeout: 60s }
+  - expect: { at: 'toolbar/toolbar-button[label="history-back-image"]', enabled: false }
+  - move: { at: 'editor[file="main.py"]/line[number="1"]', anchor: text-start }
+  - wait: { until: { at: toolbar, assert: no-tooltip }, timeout: 30s }
+  - hover: { at: 'toolbar/toolbar-button[label="history-back-image"]', for: 900ms }
+  - wait: { until: { at: toolbar, assert: "only-tooltip-of(history-back-image)" }, timeout: 30s }
+  - click: 'toolbar/toolbar-button[label="history-back-image"]'
+  - expect: { at: 'toolbar/toolbar-button[label="history-back-image"]', enabled: false }
+  - expect: { at: 'editor[file="main.py"]', current-line: 1 }
+  - expect: { at: status-line, location: { matches: "main.py:1#" } }
+  - expect: { at: 'toolbar/toolbar-button[label="history-forward-image"]', enabled: false }
+  - move: { at: 'editor[file="main.py"]/line[number="1"]', anchor: text-start }
+  - wait: { until: { at: toolbar, assert: no-tooltip }, timeout: 30s }
+  - hover: { at: 'toolbar/toolbar-button[label="history-forward-image"]', for: 900ms }
+  - wait: { until: { at: toolbar, assert: "only-tooltip-of(history-forward-image)" }, timeout: 30s }
+  - click: 'toolbar/toolbar-button[label="history-forward-image"]'
+  - expect: { at: 'toolbar/toolbar-button[label="history-forward-image"]', enabled: false }
+  - expect: { at: 'editor[file="main.py"]', current-line: 1 }
+  - expect: { at: status-line, location: { matches: "main.py:1#" } }

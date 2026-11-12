@@ -35,6 +35,7 @@ type
     width*, height*: int    ## the window, in the front-end's own unit
     tick*: int              ## -1: at the recording's entry
     keymap*: string         ## the base keymap ("" for the product default)
+    review*: string         ## a review dataset (`ct review <json>`), "" for none
     env*: OrderedTable[string, string]
 
   StageState* = ref object
@@ -222,6 +223,20 @@ proc runStage*(s: StageState; use: string; args: JsonNode) =
     s.launch.workDir = folder
     s.launch.width = argInt(args, "width", s.launch.width)
     s.launch.height = argInt(args, "height", s.launch.height)
+  of "open-review":
+    # `ct review <dataset>`: a DeepReview dataset (a path relative to the
+    # repository, or absolute), opened in the review layout.
+    let dataset = argStr(args, "dataset")
+    if dataset.len == 0:
+      raise newException(ValueError, "open-review: no dataset")
+    let path = if dataset.isAbsolute: dataset else: repo() / dataset
+    if not fileExists(path):
+      raise newException(IOError, "open-review: no dataset at " & path)
+    s.launch.review = path
+    s.launch.recording = ""
+    s.launch.project = ""
+    s.launch.width = argInt(args, "width", s.launch.width)
+    s.launch.height = argInt(args, "height", s.launch.height)
   of "select-keymap":
     let preset = argStr(args, "preset")
     if preset notin ["cua", "emacs", "vim", "kakoune"]:
@@ -246,7 +261,7 @@ proc toJson*(s: StageState): JsonNode =
   %*{"root": s.root, "recording": s.launch.recording, "project": s.launch.project,
      "file": s.launch.file, "workDir": s.launch.workDir, "width": s.launch.width,
      "height": s.launch.height, "tick": s.launch.tick, "keymap": s.launch.keymap,
-     "env": env}
+     "review": s.launch.review, "env": env}
 
 proc removeStage*(s: StageState) =
   ## The run's scratch root, removed when the run ends.
@@ -270,5 +285,6 @@ proc loadFrom*(path: string): StageState =
   result.launch.height = j["height"].getInt
   result.launch.tick = j["tick"].getInt
   result.launch.keymap = j["keymap"].getStr
+  result.launch.review = j{"review"}.getStr
   for k, v in j["env"]: result.launch.env[k] = v.getStr
   for u in j{"stagesRun"}.getElems: result.stagesRun.add u.getStr

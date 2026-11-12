@@ -46,6 +46,9 @@ roles:
       welcome: optional
       menu-bar: optional
       pane-tab: many
+      # --- pw2 ---
+      vcs: optional
+      diff-view: many
 
   # The strip of session tabs: one tab per open recording or editing session.
   session-strip:
@@ -68,15 +71,26 @@ roles:
     keys: [label]
     properties: { label: text, active: bool }
     affordances: [click, context-click, drag-source]
+    # `close`: the tab's close button.
+    anchors: [close]
 
   # The transport controls of a replay session (step, continue, reverse, …)
   # and the edit-mode toolbar.
   toolbar:
     children: { toolbar-button: many }
+    assertions:
+      # Exactly one tooltip is on screen, and it is this control's.
+      only-tooltip-of(label): "(some b of toolbar-button: b.label == label and b.tooltip-shown) and (none c of toolbar-button: c.label != label and c.tooltip-shown)"
+      no-tooltip: "none b of toolbar-button: b.tooltip-shown"
+      # No tooltip is left on screen on any control but this one.
+      no-tooltip-but(label): "none b of toolbar-button: b.label != label and b.tooltip-shown"
 
   toolbar-button:
     keys: [label]
-    properties: { label: text, enabled: bool }
+    # `tooltip`: the control's tooltip text (`Next (F10)`); `tooltip-chord`:
+    # the chord it names (`F10`), "" when it names none; `tooltip-shown`: the
+    # tooltip is on screen.
+    properties: { label: text, enabled: bool, tooltip: text, tooltip-chord: text, tooltip-shown: bool }
     affordances: [click]
 
   # One source editor: a file, shown in its own editor tab.
@@ -97,6 +111,19 @@ roles:
       last-visible: int
       # The text of every line on screen, in order.
       text: lines
+      # --- pw2 ---
+      # The selected text of each cursor ("" for a bare caret), the first
+      # one's, and how many cursors there are.
+      selections: lines
+      selected-text: text
+      selection-count: int
+      # The code font, as drawn.
+      font-family: text
+      font-size: int
+      # The editor's find widget: shown, its query, its "n of m" count.
+      find-shown: bool
+      find-query: text
+      find-matches: text
     children: { line: many }
     affordances: [click, context-click, wheel, focusable, text-entry]
     assertions:
@@ -105,6 +132,8 @@ roles:
       caret-at(n): "caret-line == n"
       shows-line(n): "first-visible <= n and last-visible >= n"
       shows-text(t): "some line: line.text contains t"
+      # Exactly one of two lines is dimmed as a branch the run did not take.
+      dims-one-of(a, b): "(some x of line: x.number == a and x.dimmed) != (some y of line: y.number == b and y.dimmed)"
     sync:
       # The editor has a document and has drawn it.
       loaded: "count(line) > 0"
@@ -121,11 +150,21 @@ roles:
       caret: bool
       breakpoint: bool
       tracepoint: bool
+      # --- pw2 ---
+      # The marks in the line's glyph cell, space-separated, sorted:
+      # `breakpoint`, `breakpoint-disabled`, `breakpoint-tracepoint`, `hint`.
+      glyph: text
+      # The line is dimmed as part of a branch the run did not take.
+      dimmed: bool
+      # The columns (1-based) of the line's inline breakpoints.
+      inline-breakpoints: lines
     affordances: [click, double-click, context-click]
     # `gutter`: the breakpoint lane; `text-start` / `text-end`: the first and
     # last character of the line's text; `column(c)`: the c-th character
-    # (1-based) of the line's text.
-    anchors: [gutter, text-start, text-end, column(c)]
+    # (1-based) of the line's text; `glyph`: the glyph cell left of the line
+    # number; `line-number`: the line's number; `caret(c)`: where a press
+    # puts the caret before the c-th character (column c).
+    anchors: [gutter, text-start, text-end, column(c), glyph, line-number, caret(c)]
 
   # The call trace: the recording's calls, nested.
   call-trace:
@@ -135,6 +174,8 @@ roles:
     assertions:
       has-call(name): "some call: call.name == name"
       has-call-containing(text): "some call: call.name contains text"
+      # A row is marked selected.
+      has-selected-call: "some call: call.selected"
     sync:
       loaded: "count(call) > 0"
 
@@ -160,7 +201,11 @@ roles:
       total: int
       search: text
       focused: bool
-    children: { event: many }
+      # The last row shown, as the footer reports it (`… to <n> of <total>`).
+      last-shown: int
+      # The visible column titles, in order.
+      columns: lines
+    children: { event: many, columns-button: optional, columns-menu: optional }
     affordances: [wheel, focusable]
     assertions:
       has-output(text): "some event: event.text contains text"
@@ -211,7 +256,8 @@ roles:
 
   # The files pane.
   filesystem:
-    properties: { count: int, focused: bool }
+    # `loading`: the pane shows its loading state instead of a tree.
+    properties: { count: int, focused: bool, loading: bool }
     children: { file-node: many }
     affordances: [wheel, focusable]
 
@@ -251,10 +297,13 @@ roles:
     properties: { query: text, focused: bool, count: int }
     children: { option: many }
     affordances: [click, text-entry, focusable]
+    assertions:
+      offers(kind, text): "some option: option.kind == kind and option.label contains text"
 
   option:
     keys: [label]
-    properties: { label: text, detail: text, selected: bool }
+    # `kind`: file, command, symbol, … (what choosing it opens or runs).
+    properties: { label: text, detail: text, selected: bool, kind: text }
     affordances: [click]
 
   # A context menu, opened by a right press or its key.
@@ -264,10 +313,16 @@ roles:
     assertions:
       offers(label): "some menu-item: menu-item.label == label"
       lacks(label): "none menu-item: menu-item.label == label"
+      # Every disabled row says why (its hint column is not empty).
+      disabled-rows-say-why: "every menu-item: menu-item.enabled or menu-item.hint != \"\""
+      # No row prints an HTML entity instead of the character.
+      no-raw-entities: "none menu-item: menu-item.label matches \"&(lt|gt|amp);\" or menu-item.hint matches \"&(lt|gt|amp);\""
 
   menu-item:
     keys: [label]
-    properties: { label: text, enabled: bool, shortcut: text }
+    # `hint`: the row's second column — a hint, or why a disabled row is
+    # disabled.
+    properties: { label: text, enabled: bool, shortcut: text, hint: text }
     affordances: [click]
 
   # The application menu (the desktop's in-window menu, the terminal's and
@@ -311,6 +366,47 @@ roles:
     properties: { name: text, detail: text }
     affordances: [click, double-click]
 
+
+  # --- pw2 ---
+  # The event log's Columns button and the menu it opens: one option per
+  # column, shown or hidden by its check box, reordered by its handle.
+  columns-button:
+    properties: { label: text }
+    affordances: [click]
+
+  columns-menu:
+    children: { column-option: many }
+
+  column-option:
+    keys: [name]
+    properties: { name: text, shown: bool }
+    affordances: [click, drag-source, drop-target]
+    anchors: [check, handle]
+
+
+  # The VCS panel as a review shows it: the changeset header (`commit`: the
+  # abbreviated commit and the file count), its stats (`+16 -10`), the
+  # Unified Diff / Open File toggle, and the changed files.
+  vcs:
+    properties: { commit: text, stats: text, count: int, unified-diff: bool, error: text }
+    children: { changed-file: many, diff-toggle: optional }
+
+  changed-file:
+    keys: [name]
+    # `status`: M, A, D…; `status-kind`: modified, added, deleted…;
+    # `stats`: the added/removed line counts; `coverage`: its badge.
+    properties: { name: text, status: text, status-kind: text, stats: text, coverage: text, selected: bool }
+    affordances: [click]
+
+  diff-toggle:
+    properties: { unified: bool }
+    affordances: [click]
+
+  # A unified-diff view a review opened, headed by its file's path.
+  diff-view:
+    keys: [file]
+    properties: { file: text, text: lines }
+
 sync:
   # The implicit condition after every input: the window handled it and the
   # screen stopped changing.
@@ -338,11 +434,18 @@ stages:
     summary: >-
       Start the front-end on the recording the stage prepared (or on
       `recording`, a recording folder), in a window of the given size, with
-      the replay at its entry or at `tick`.
-    params: { recording: text, tick: int, width: int, height: int }
+      the replay at its entry or at `tick`. `deployment: web` serves it with
+      `ct host` and opens its page in a browser instead (front-ends that
+      have one).
+    params: { recording: text, tick: int, width: int, height: int, deployment: text }
   open-project:
     summary: Start the front-end in Edit mode on a project folder (a path under test-programs, or `$project` for the stage's own).
     params: { folder: text, file: text, width: int, height: int }
+  open-review:
+    summary: >-
+      Start the front-end on a DeepReview dataset (`ct review <dataset>`; a
+      path relative to the repository), in the review layout.
+    params: { dataset: text, width: int, height: int }
   select-keymap:
     summary: Choose the base keymap the front-end starts with (cua, emacs, vim, kakoune).
     params: { preset: text }

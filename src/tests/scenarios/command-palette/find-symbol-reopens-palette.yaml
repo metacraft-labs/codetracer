@@ -1,0 +1,20 @@
+scenario: 1
+name: command-palette/find-symbol-reopens-palette
+pack: codetracer
+summary: >-
+  Choosing the Find Symbol command in the palette leaves the palette open on
+  `:sym ` with the keyboard in its input.
+
+stage:
+  - use: record-program
+    with: { program: noir_example }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - wait: { until: editor.loaded, timeout: 60s }
+  - chord: Ctrl+p
+  - type: ":Find Symbol"
+  - wait: { until: { at: 'omnibox/option[label="Find Symbol"]', kind: command }, timeout: 10s }
+  - key: Enter
+  - expect: { at: omnibox, query: ":sym ", focused: true }

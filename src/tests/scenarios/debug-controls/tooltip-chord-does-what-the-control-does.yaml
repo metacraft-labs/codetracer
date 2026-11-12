@@ -1,0 +1,57 @@
+scenario: 1
+name: debug-controls/tooltip-chord-does-what-the-control-does
+pack: codetracer
+summary: >-
+  Pressing the chord a stepping control's tooltip names moves the replay
+  exactly where clicking that control moves it: Next, Step in and their
+  reverses.
+
+stage:
+  - use: record-program
+    with: { program: py_console_logs/main.py }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - wait: { until: { at: 'toolbar/toolbar-button[label="next-image"]', present: true }, timeout: 60s }
+  - wait: { until: editor.loaded, timeout: 60s }
+  - click: 'toolbar/toolbar-button[label="next-image"]'
+    settle: false
+  - wait: { until: { at: status-line, location: { matches: "main.py:8#" } }, timeout: 60s }
+  - click: 'toolbar/toolbar-button[label="next-image"]'
+    settle: false
+  - wait: { until: { at: status-line, location: { matches: "main.py:10#" } }, timeout: 60s }
+  - click: 'toolbar/toolbar-button[label="next-image"]'
+    settle: false
+  - wait: { until: { at: status-line, location: { matches: "main.py:11#" } }, timeout: 60s }
+  - expect: { at: 'editor[file="main.py"]', current-line: 11 }
+  # next-image: clicked, then by the chord its tooltip names
+  - click: 'toolbar/toolbar-button[label="next-image"]'
+    settle: false
+  - wait: { until: { at: status-line, location: { matches: "main.py:12#" } }, timeout: 60s }
+  - click: 'toolbar/toolbar-button[label="reverse-next-image"]'
+    settle: false
+  - wait: { until: { at: status-line, location: { matches: "main.py:11#" } }, timeout: 60s }
+  - expect: { at: 'toolbar/toolbar-button[label="next-image"]', tooltip-chord: "F10" }
+  - chord: F10
+    settle: false
+  - wait: { until: { at: status-line, location: { matches: "main.py:12#" } }, timeout: 60s }
+  - expect: { at: 'toolbar/toolbar-button[label="reverse-next-image"]', tooltip-chord: "Shift+F10" }
+  - chord: Shift+F10
+    settle: false
+  - wait: { until: { at: status-line, location: { matches: "main.py:11#" } }, timeout: 60s }
+  # step-in-image: clicked, then by the chord its tooltip names
+  - click: 'toolbar/toolbar-button[label="step-in-image"]'
+    settle: false
+  - wait: { until: { at: status-line, location: { matches: "main.py:12#" } }, timeout: 60s }
+  - click: 'toolbar/toolbar-button[label="reverse-step-in-image"]'
+    settle: false
+  - wait: { until: { at: status-line, location: { matches: "main.py:11#" } }, timeout: 60s }
+  - expect: { at: 'toolbar/toolbar-button[label="step-in-image"]', tooltip-chord: "F11" }
+  - chord: F11
+    settle: false
+  - wait: { until: { at: status-line, location: { matches: "main.py:12#" } }, timeout: 60s }
+  - expect: { at: 'toolbar/toolbar-button[label="reverse-step-in-image"]', tooltip-chord: "Shift+F11" }
+  - chord: Shift+F11
+    settle: false
+  - wait: { until: { at: status-line, location: { matches: "main.py:11#" } }, timeout: 60s }

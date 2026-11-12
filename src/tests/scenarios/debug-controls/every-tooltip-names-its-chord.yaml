@@ -1,0 +1,43 @@
+scenario: 1
+name: debug-controls/every-tooltip-names-its-chord
+pack: codetracer
+summary: >-
+  Every one of the thirteen toolbar controls' tooltips names a chord, in the
+  router's spelling, and each names the chord the default keymap binds to that
+  control's operation — thirteen different chords.
+
+stage:
+  - use: record-program
+    with: { program: py_console_logs/main.py }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - wait: { until: { at: 'toolbar/toolbar-button[label="next-image"]', present: true }, timeout: 60s }
+  - wait: { until: editor.loaded, timeout: 60s }
+  - expect: { at: 'toolbar/toolbar-button[label="history-back-image"]', tooltip: { matches: "^[A-Z][^()]+ \\((Ctrl\\+|Shift\\+|Alt\\+)*[^ ()]+\\)$" } }
+  - expect: { at: 'toolbar/toolbar-button[label="history-forward-image"]', tooltip: { matches: "^[A-Z][^()]+ \\((Ctrl\\+|Shift\\+|Alt\\+)*[^ ()]+\\)$" } }
+  - expect: { at: 'toolbar/toolbar-button[label="reverse-next-image"]', tooltip: { matches: "^[A-Z][^()]+ \\((Ctrl\\+|Shift\\+|Alt\\+)*[^ ()]+\\)$" } }
+  - expect: { at: 'toolbar/toolbar-button[label="next-image"]', tooltip: { matches: "^[A-Z][^()]+ \\((Ctrl\\+|Shift\\+|Alt\\+)*[^ ()]+\\)$" } }
+  - expect: { at: 'toolbar/toolbar-button[label="reverse-step-in-image"]', tooltip: { matches: "^[A-Z][^()]+ \\((Ctrl\\+|Shift\\+|Alt\\+)*[^ ()]+\\)$" } }
+  - expect: { at: 'toolbar/toolbar-button[label="step-in-image"]', tooltip: { matches: "^[A-Z][^()]+ \\((Ctrl\\+|Shift\\+|Alt\\+)*[^ ()]+\\)$" } }
+  - expect: { at: 'toolbar/toolbar-button[label="reverse-step-out-image"]', tooltip: { matches: "^[A-Z][^()]+ \\((Ctrl\\+|Shift\\+|Alt\\+)*[^ ()]+\\)$" } }
+  - expect: { at: 'toolbar/toolbar-button[label="step-out-image"]', tooltip: { matches: "^[A-Z][^()]+ \\((Ctrl\\+|Shift\\+|Alt\\+)*[^ ()]+\\)$" } }
+  - expect: { at: 'toolbar/toolbar-button[label="reverse-continue-image"]', tooltip: { matches: "^[A-Z][^()]+ \\((Ctrl\\+|Shift\\+|Alt\\+)*[^ ()]+\\)$" } }
+  - expect: { at: 'toolbar/toolbar-button[label="continue-image"]', tooltip: { matches: "^[A-Z][^()]+ \\((Ctrl\\+|Shift\\+|Alt\\+)*[^ ()]+\\)$" } }
+  - expect: { at: 'toolbar/toolbar-button[label="run-to-entry-image"]', tooltip: { matches: "^[A-Z][^()]+ \\((Ctrl\\+|Shift\\+|Alt\\+)*[^ ()]+\\)$" } }
+  - expect: { at: 'toolbar/toolbar-button[label="reset-operation-image"]', tooltip: { matches: "^[A-Z][^()]+ \\((Ctrl\\+|Shift\\+|Alt\\+)*[^ ()]+\\)$" } }
+  - expect: { at: 'toolbar/toolbar-button[label="run-tests-image"]', tooltip: { matches: "^[A-Z][^()]+ \\((Ctrl\\+|Shift\\+|Alt\\+)*[^ ()]+\\)$" } }
+  - expect: { at: 'toolbar/toolbar-button[label="history-back-image"]', tooltip-chord: "Ctrl+Alt+-" }
+  - expect: { at: 'toolbar/toolbar-button[label="history-forward-image"]', tooltip-chord: "Ctrl+Shift+-" }
+  - expect: { at: 'toolbar/toolbar-button[label="reverse-next-image"]', tooltip-chord: "Shift+F10" }
+  - expect: { at: 'toolbar/toolbar-button[label="next-image"]', tooltip-chord: "F10" }
+  - expect: { at: 'toolbar/toolbar-button[label="reverse-step-in-image"]', tooltip-chord: "Shift+F11" }
+  - expect: { at: 'toolbar/toolbar-button[label="step-in-image"]', tooltip-chord: "F11" }
+  - expect: { at: 'toolbar/toolbar-button[label="reverse-step-out-image"]', tooltip-chord: "Shift+F12" }
+  - expect: { at: 'toolbar/toolbar-button[label="step-out-image"]', tooltip-chord: "F12" }
+  - expect: { at: 'toolbar/toolbar-button[label="reverse-continue-image"]', tooltip-chord: "Shift+F8" }
+  - expect: { at: 'toolbar/toolbar-button[label="continue-image"]', tooltip-chord: "F8" }
+  - expect: { at: 'toolbar/toolbar-button[label="run-to-entry-image"]', tooltip-chord: "Ctrl+Alt+E" }
+  - expect: { at: 'toolbar/toolbar-button[label="reset-operation-image"]', tooltip-chord: "Ctrl+Alt+R" }
+  - expect: { at: 'toolbar/toolbar-button[label="run-tests-image"]', tooltip-chord: "Alt+L" }
