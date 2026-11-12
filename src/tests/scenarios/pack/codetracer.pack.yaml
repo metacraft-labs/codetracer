@@ -28,6 +28,17 @@ roles:
       title: text
       # `debug` while a recording is replayed, `edit` while files are edited.
       mode: "enum{debug,edit}"
+      # pw1: every pane tab of the layout, shown or behind another, and the
+      # ones in front of their stack.
+      layout-tabs: lines
+      front-tabs: lines
+      # Every auto-hide strip tab, as `<edge>:<label>`.
+      strip-tabs: lines
+    assertions:
+      has-pane(t): "layout-tabs contains t"
+      lacks-pane(t): "not (layout-tabs contains t)"
+      in-front(t): "front-tabs contains t"
+      not-in-front(t): "not (front-tabs contains t)"
     children:
       session-strip: optional
       toolbar: optional
@@ -55,6 +66,21 @@ roles:
       dropdown: many
       dock-label: many
       replay-position: optional
+      # pw1
+      strip-tab: many
+      auto-hide-overlay: optional
+      auto-hide-backdrop: optional
+      sidebar: many
+      selection-outline: many
+      docked-panel: many
+      build-panel: optional
+      problems-panel: optional
+      find-in-files: optional
+      agent-activity: optional
+      agent-workspace: optional
+      caption-progress: optional
+      edit-toolbar: optional
+      editor-hover: optional
 
   # The strip of session tabs: one tab per open recording or editing session.
   session-strip:
@@ -166,6 +192,10 @@ roles:
       dimmed: bool
       # The columns (1-based) of the line's inline breakpoints.
       inline-breakpoints: lines
+      # pw1: a build's diagnostic on this line — the gutter's glyph and the
+      # squiggle under its text.
+      diagnostic: "enum{none,error,warning,info}"
+      squiggle: "enum{none,error,warning,info}"
     affordances: [click, double-click, context-click]
     # `gutter`: the breakpoint lane; `text-start` / `text-end`: the first and
     # last character of the line's text; `column(c)`: the c-th character
@@ -184,6 +214,9 @@ roles:
       has-call-containing(text): "some call: call.name contains text"
       # A row is marked selected.
       has-selected-call: "some call: call.selected"
+      # pw1: the current-call mark is on exactly the named call / on no row.
+      marks-only(name): "(some call: call.current and call.name == name) and (every call: not call.current or call.name == name)"
+      marks-none: "none call: call.current"
     sync:
       loaded: "count(call) > 0"
 
@@ -194,6 +227,8 @@ roles:
       # The call the replay is in.
       current: bool
       selected: bool
+      # Its children are shown (the toggle draws the collapse icon).
+      expanded: bool
       depth: int
       # The call's arguments as drawn (`a=1, b=2`).
       arguments: text
@@ -301,14 +336,23 @@ roles:
       location: text
       # The editing keymap's mode indicator, when there is one.
       mode: text
-    # --- terminal ---
+      # The build's verdict in the status bar, and the notifications it
+      # shows now.
+      build-status: text
+      notifications: lines
     assertions:
       says(t): "message contains t"
       lacks(t): "not (message contains t)"
+      notifies(t): "notifications contains t"
 
   # The command palette / omnibox: a query field and its results.
   omnibox:
-    properties: { query: text, focused: bool, count: int }
+    properties:
+      query: text
+      focused: bool
+      count: int
+      # pw1: the options' labels, in order.
+      labels: lines
     children: { option: many }
     affordances: [click, text-entry, focusable]
     assertions:
@@ -403,11 +447,11 @@ roles:
     anchors: [check, handle]
 
 
-  # The VCS panel as a review shows it: the changeset header (`commit`: the
-  # abbreviated commit and the file count), its stats (`+16 -10`), the
-  # Unified Diff / Open File toggle, and the changed files.
+  # The VCS panel as a review shows it: its title (the branch), the changeset
+  # header (`commit`: the abbreviated commit and the file count), its stats
+  # (`+16 -10`), the Unified Diff / Open File toggle, and the changed files.
   vcs:
-    properties: { commit: text, stats: text, count: int, unified-diff: bool, error: text }
+    properties: { title: text, commit: text, stats: text, count: int, unified-diff: bool, error: text }
     children: { changed-file: many, diff-toggle: optional }
 
   changed-file:
@@ -503,6 +547,259 @@ roles:
       past(n): "tick > n"
       before(n): "tick < n"
 
+  # --- pw1 ---
+  # A tab on an auto-hide strip (the footer's, or a side's): a click docks
+  # its panel open, a rest of the pointer previews it in the overlay.
+  strip-tab:
+    keys: [label]
+    properties: { label: text, edge: "enum{left,right,bottom}", active: bool }
+    affordances: [click, context-click]
+
+  # The slide-in overlay a strip tab's hover opens.
+  auto-hide-overlay:
+    properties: { title: text, edge: "enum{left,right,bottom}" }
+
+  # The backdrop behind the overlay.
+  auto-hide-backdrop:
+    affordances: [click]
+
+  # A side strip's presentation (normal or minimal), its toggle in the
+  # status bar's icon zone, and the minimal sidebar's panel icons.
+  sidebar:
+    keys: [edge]
+    properties:
+      edge: "enum{left,right}"
+      minimal: bool
+      # The toggle's icon: `open` (normal sidebar) or `close` (minimal).
+      toggle: "enum{open,close,none}"
+      zone-visible: bool
+      mode-buttons: int
+    children: { panel-button: many }
+    assertions:
+      # The icon zone holds no buttons at all.
+      no-icons: "count(panel-button) == 0"
+
+  # The selection outline: the line drawn around the panel being worked in
+  # and its strip tab — a docked panel's, the overlay's, or a layout stack's.
+  selection-outline:
+    keys: [kind]
+    properties:
+      kind: "enum{docked,overlay,stack}"
+      # The resolved stroke paint (an `rgb(...)`, never a bare token).
+      stroke: text
+      stroke-width: number
+      solid: bool
+      # It paints above the overlay.
+      above-overlay: bool
+      # The strip tabs the line runs around.
+      encloses: lines
+      measurable: bool
+
+  # The panel docked open at an edge.
+  docked-panel:
+    keys: [edge]
+    properties: { edge: "enum{left,right,bottom}" }
+
+  # A button of a pane's header or body, named by its text or its title.
+  panel-button:
+    keys: [label]
+    properties: { label: text, enabled: bool, active: bool, title: text }
+    affordances: [click]
+
+  # The BUILD pane: its verdict line, its controls and its output.
+  build-panel:
+    properties:
+      verdict: text
+      # "No build has run." is shown.
+      idle: bool
+      count: int
+      text: lines
+      # Where it is shown: docked from its strip tab, in the overlay, or a
+      # tab of the layout.
+      where: "enum{docked,overlay,layout}"
+      state: "enum{none,failed,succeeded,cancelled}"
+      # Lines with a file location (clickable).
+      located: int
+    children: { build-line: many, panel-button: many }
+    assertions:
+      shows(t): "some build-line: build-line.text contains t"
+      lacks(t): "none build-line: build-line.text contains t"
+      # Lines of different streams are drawn in different colours.
+      streams-coloured-apart: "every a of build-line: every b of build-line: a.stream == b.stream or a.colour != b.colour"
+
+  build-line:
+    keys: [text]
+    properties:
+      text: text
+      # `located`: a compiler line with a file location (clickable).
+      stream: "enum{stdout,stderr,located}"
+      severity: "enum{none,error,warning,info}"
+      located: bool
+      italic: bool
+      colour: text
+      # Drawn as styled runs (the escape sequences became styles).
+      styled: bool
+    affordances: [click]
+
+  # The PROBLEMS pane.
+  problems-panel:
+    properties: { count: int, errors: int, warnings: int, empty: bool, groups: int, where: text }
+    children: { problem: many, panel-button: many }
+
+  problem:
+    keys: [message]
+    properties: { message: text, path: text, location: text, severity: "enum{error,warning,info}" }
+    affordances: [click]
+
+  # Find in Files.
+  find-in-files:
+    properties: { count: int, text: text, where: text }
+
+  # The Agent Activity pane.
+  agent-activity:
+    properties:
+      # The pane's whole text, as drawn.
+      text: text
+      # The conversation's text, as drawn.
+      conversation: text
+      # Every message's text, in order.
+      messages: lines
+      # A spinner or "Agent is working" is shown.
+      busy: bool
+      notice: text
+      notices: int
+      # How many of the retired review roll-up's elements are drawn.
+      roll-up: int
+      # The conversation is the pane's first block, and the prompt area
+      # comes after it.
+      conversation-first: bool
+      interaction-after: bool
+      failed-turns: int
+      evidence-cards: int
+      test-runs: int
+      test-rows: int
+    assertions:
+      says(t): "conversation contains t"
+      silent-about(t): "not (conversation contains t)"
+      never-says(t): "not (text contains t)"
+    children:
+      agent-prompt: optional
+      agent-message: many
+      panel-button: many
+      failed-turn: many
+      test-run-card: many
+      evidence-card: many
+      agent-settings: optional
+
+  agent-prompt:
+    properties:
+      value: text
+      height: int
+      lines: int
+      focused: bool
+      # How many text lines the box is tall.
+      visible-lines: int
+    affordances: [click, text-entry, focusable]
+
+  # One message of the conversation, by its place in it (1-based).
+  agent-message:
+    keys: [index]
+    properties: { index: int, text: text }
+
+  # A turn the agent refused: a red X and the agent's own message.
+  failed-turn:
+    properties: { error: text, icon: bool }
+
+  # A `ct test` run's summary card; its header expands it.
+  test-run-card:
+    keys: [title]
+    properties:
+      title: text
+      status: text
+      running: bool
+      expanded: bool
+      # The rows' test names and statuses, in order.
+      rows: lines
+      statuses: lines
+    children: { test-row: many }
+    affordances: [click]
+    anchors: [header]
+
+  test-row:
+    keys: [name]
+    properties:
+      name: text
+      status: text
+      outcome: "enum{passed,failed,errored,running}"
+      # It offers actions (Open recording).
+      has-actions: bool
+      output: text
+      diagnostic: text
+      recording-failed: bool
+      expanded: bool
+    children: { panel-button: many }
+    affordances: [click]
+    anchors: [header]
+
+  # An evidence tool call's card, named by its dataset's file name.
+  evidence-card:
+    keys: [dataset]
+    properties:
+      dataset: text
+      path: text
+      kind: text
+      shape: text
+      has-shape: bool
+      command: text
+      note: text
+      output: text
+      has-actions: bool
+      state: "enum{available,unavailable,failed,unreported}"
+    children: { panel-button: many }
+
+  # The Agent Activity settings panel.
+  agent-settings:
+    properties: { scroll-top: int, overflow: int }
+    children: { settings-select: many, settings-section: many, panel-button: many }
+    affordances: [wheel]
+
+  # A settings select, named by the label above it.
+  settings-select:
+    keys: [label]
+    properties: { label: text, value: text, open: bool }
+    children: { settings-option: many }
+    affordances: [click]
+
+  settings-option:
+    keys: [label]
+    properties: { label: text, active: bool }
+    affordances: [click]
+
+  settings-section:
+    keys: [title]
+    properties: { title: text }
+    affordances: [click]
+
+  # The VCS panel of a review: its title, stats and Changed Files.
+  # The editor's hover: the message for what is under the pointer.
+  editor-hover:
+    properties: { text: text }
+
+  # An agent's worktree session: the Agent Workspace panel (which working
+  # copy is shown, the files the agent changed) and its toggle.
+  agent-workspace:
+    properties: { label: text, path: text, files: lines }
+    children: { panel-button: many }
+
+  # The caption bar's progress of an agent's task (`3/5` milestones).
+  caption-progress:
+    properties: { text: text }
+    affordances: [click]
+
+  # The edit-mode toolbar's Build and Run.
+  edit-toolbar:
+    children: { panel-button: many }
+
 sync:
   # The implicit condition after every input: the window handled it and the
   # screen stopped changing.
@@ -513,6 +810,9 @@ sync:
   # --- terminal ---
   # The front-end has drawn its first frame (a replay or Edit mode).
   ready: ~
+  # pw1: the Agent Activity pane's agent (the `stub-agent` stand-in) was
+  # asked to open its session.
+  agent-session-open: ~
 
 stages:
   record-program:
@@ -543,7 +843,8 @@ stages:
   open-review:
     summary: >-
       Start the front-end on a DeepReview dataset (`ct review <dataset>`; a
-      path relative to the repository), in the review layout.
+      path relative to the repository), in the review layout. Without
+      `dataset`, on the one `review-dataset` prepared.
     params: { dataset: text, width: int, height: int }
   select-keymap:
     summary: Choose the base keymap the front-end starts with (cua, emacs, vim, kakoune).
@@ -600,4 +901,43 @@ stages:
       The visual fixture's GL scene recording (a program that drew frames),
       as the recording the next `open-recording` opens; it needs the visual
       replay player.
+    params: {}
+  # --- pw1 ---
+  stub-agent:
+    summary: >-
+      Put a stand-in for the Agent Activity pane's agent first on the
+      front-end's PATH (`refusing`: refuses the first prompt, answers the
+      next, holds a prompt marked to be held; `replay`: replays a review's
+      session).
+    params: { agent: text }
+  review-dataset:
+    summary: >-
+      Write a review dataset (the sample review) into the run's root — plain,
+      or with a session reference the replay agent resolves (`session`,
+      `session-pruned`, `test-run`, `test-run-partial`, `evidence`) — and
+      remember it as the review the next `open-review` opens.
+    params: { variant: text }
+  open-welcome:
+    summary: Start the front-end with nothing open (its welcome screen), in a window of the given size.
+    params: { width: int, height: int }
+  plant-edit-layout:
+    summary: Leave a saved edit-mode layout from a previous session (a review layout fixture by name).
+    params: { fixture: text }
+  project-fixture:
+    summary: >-
+      Write a named project (a C project with build tasks, a Noir crate, a
+      lone file, a folder whose task prints the compilers' diagnostics, …)
+      into the run's root; `open-project` with `folder: $project` opens it.
+    params: { name: text }
+  git-workspace:
+    summary: >-
+      Write a small committed git repository (src/feature.nim and its test)
+      into the run's root; `open-project` with `folder: $project` opens it.
+    params: {}
+  agent-harbor:
+    summary: >-
+      Point the front-end at a real Agent Harbor REST server prepared with the
+      CodeTracer worktree scenario (`AGENT_HARBOR_M7_BASE_URL`, and its
+      optional key, scenario and mock agent); fails, naming it, when none is
+      configured.
     params: {}

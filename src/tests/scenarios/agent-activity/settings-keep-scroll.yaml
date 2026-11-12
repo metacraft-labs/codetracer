@@ -1,0 +1,60 @@
+scenario: 1
+name: agent-activity/settings-keep-scroll
+pack: codetracer
+summary: >-
+  With the Agent Activity settings panel scrolled down to DELIVERY,
+  opening the Mode dropdown, choosing from it and closing it leave the panel
+  where it was, and the chosen value is shown (codetracer#861).
+
+stage:
+  - use: record-program
+    with: { program: py_console_logs/main.py }
+  # A short window, so the settings panel overflows its pane.
+  - use: open-recording
+    with: { width: 1280, height: 700 }
+
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - click: { at: 'pane-tab[label="AGENT ACTIVITY"]' }
+  - wait: { until: { at: 'agent-activity/panel-button[label="Agent settings"]', present: true }, timeout: 30s }
+  - click: { at: 'agent-activity/panel-button[label="Agent settings"]' }
+  - wait: { until: { at: agent-activity/agent-settings, present: true }, timeout: 15s }
+  - expect: { at: agent-activity/agent-settings, overflow: { gt: 40 }, scroll-top: 0 }
+
+  - beat: scroll-to-delivery
+    narration: { text: "The wheel scrolls the panel down to DELIVERY." }
+    steps:
+      - wheel: { at: agent-activity/agent-settings, direction: down, amount: 2 }
+      - wait: { until: { at: agent-activity/agent-settings, scroll-top: { gt: 0 } }, timeout: 5s }
+      - expect: { at: 'agent-activity/agent-settings/settings-select[label="Mode"]', value: "New branch" }
+      - expect:
+          at: 'agent-activity/agent-settings/settings-select[label="Mode"]'
+          geometry: { inside: agent-activity/agent-settings, visible: true }
+
+  - beat: open-choose-close
+    narration: { text: "Open Mode, choose Existing branch, open it again and close it: the panel stays put." }
+    steps:
+      - click: { at: 'agent-activity/agent-settings/settings-select[label="Mode"]' }
+      - wait: { until: { at: 'agent-activity/agent-settings/settings-select[label="Mode"]', open: true }, timeout: 5s }
+      - expect: { at: agent-activity/agent-settings, scroll-top: 200 }
+      - click: { at: 'agent-activity/agent-settings/settings-select[label="Mode"]/settings-option[label="Existing branch"]' }
+      - wait: { until: { at: 'agent-activity/agent-settings/settings-select[label="Mode"]', value: "Existing branch" }, timeout: 5s }
+      - expect: { at: 'agent-activity/agent-settings/settings-select[label="Mode"]', open: false }
+      - expect: { at: agent-activity/agent-settings, scroll-top: 200 }
+      - click: { at: 'agent-activity/agent-settings/settings-select[label="Mode"]' }
+      - wait: { until: { at: 'agent-activity/agent-settings/settings-select[label="Mode"]', open: true }, timeout: 5s }
+      - expect: { at: agent-activity/agent-settings, scroll-top: 200 }
+      - click: { at: 'agent-activity/agent-settings/settings-section[title="DELIVERY"]' }
+      - wait: { until: { at: 'agent-activity/agent-settings/settings-select[label="Mode"]', open: false }, timeout: 5s }
+      - expect: { at: agent-activity/agent-settings, scroll-top: 200 }
+      - expect: { at: 'agent-activity/agent-settings/settings-select[label="Mode"]', value: "Existing branch" }
+
+  - beat: done
+    steps:
+      # Done is at the panel's foot: the wheel brings it into view.
+      - wheel: { at: agent-activity/agent-settings, direction: down, amount: 5 }
+      - expect:
+          at: 'agent-activity/agent-settings/panel-button[label="Done"]'
+          geometry: { inside: agent-activity/agent-settings, visible: true }
+      - click: { at: 'agent-activity/agent-settings/panel-button[label="Done"]' }
+      - wait: { until: { at: agent-activity/agent-settings, absent: true }, timeout: 5s }

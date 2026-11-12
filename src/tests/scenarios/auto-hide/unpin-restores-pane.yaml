@@ -1,0 +1,30 @@
+scenario: 1
+name: auto-hide/unpin-restores-pane
+pack: codetracer
+summary: >-
+  Unpin, from the strip tab's context menu while its overlay is open,
+  closes the overlay, removes the strip tab and puts the pane back in the
+  layout.
+
+stage:
+  - use: record-program
+    with: { program: py_console_logs/main.py }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - wait: { until: { at: window, strip-tabs: { count: 4 } }, timeout: 30s }
+  - click: { at: 'pane-tab[label="EVENT LOG"]' }
+  - click: { at: 'pane-tab[label="EVENT LOG"]', button: right }
+  - wait: { until: { at: 'context-menu/menu-item[label="Pin to Bottom"]', present: true }, timeout: 15s }
+  - click: { at: 'context-menu/menu-item[label="Pin to Bottom"]' }
+  - wait: { until: { at: 'strip-tab[label="EVENT LOG"]', present: true }, timeout: 15s }
+  - hover: { at: 'strip-tab[label="EVENT LOG"]', for: 500ms }
+  - wait: { until: { at: auto-hide-overlay, present: true }, timeout: 15s }
+  - click: { at: 'strip-tab[label="EVENT LOG"]', button: right }
+  - wait: { until: { at: 'context-menu/menu-item[label="Unpin"]', present: true }, timeout: 15s }
+  - click: { at: 'context-menu/menu-item[label="Unpin"]' }
+  - wait: { until: { at: 'pane-tab[label="EVENT LOG"]', present: true }, timeout: 15s }
+  - expect: { at: auto-hide-overlay, absent: true }
+  - expect: { at: 'strip-tab[label="EVENT LOG"]', absent: true }
+  - expect: { at: window, strip-tabs: { count: 4 } }

@@ -1,0 +1,21 @@
+scenario: 1
+name: auto-hide/persisted-pin-restored
+pack: codetracer
+summary: >-
+  A FILES pane pinned to the left in the saved auto-hide state comes back
+  as a left strip tab on the next launch, beside the footer's four.
+
+stage:
+  - use: record-program
+    with: { program: py_console_logs/main.py }
+  - use: plant-config
+    with:
+      file: auto_hide_state.json
+      content: '{"panels": [{"edge": 0, "title": "FILES", "content": 9, "componentId": 0, "overlayWidth": 320, "overlayHeight": 0, "config": {"type": "component", "componentType": "genericUiComponent", "componentState": {"id": 0, "label": "filesystemComponent-0", "content": 9, "isEditor": false}, "title": "FILES"}}]}'
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - wait: { until: { at: 'strip-tab[label="FILES"]', present: true }, timeout: 30s }
+  - expect: { at: 'strip-tab[label="FILES"]', edge: left }
+  - wait: { until: { at: window, strip-tabs: { count: 5 } }, timeout: 15s }

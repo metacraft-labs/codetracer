@@ -1,0 +1,21 @@
+scenario: 1
+name: auto-hide/sidebar-invalid-left-mode
+pack: codetracer
+summary: >-
+  A saved sidebar presentation that is not a boolean is taken as normal,
+  and only that one: the other side keeps its saved mode.
+
+stage:
+  - use: record-program
+    with: { program: py_console_logs/main.py }
+  - use: plant-config
+    with:
+      file: auto_hide_state.json
+      content: '{"panels": [{"edge": 0, "title": "FILES", "content": 9, "componentId": 0, "overlayWidth": 320, "overlayHeight": 0, "config": {"type": "component", "componentType": "genericUiComponent", "componentState": {"id": 0, "label": "filesystemComponent-0", "content": 9, "isEditor": false}, "title": "FILES"}}, {"edge": 1, "title": "EVENTS", "content": 8, "componentId": 1, "overlayWidth": 320, "overlayHeight": 0, "config": {"type": "component", "componentType": "genericUiComponent", "componentState": {"id": 1, "label": "eventLogComponent-1", "content": 8}, "title": "EVENTS"}}], "leftMinimal": "true", "rightMinimal": true}'
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - wait: { until: { at: 'sidebar[edge="left"]', present: true }, timeout: 30s }
+  - expect: { at: 'sidebar[edge="left"]', minimal: false, toggle: open, zone-visible: true, mode-buttons: 0 }
+  - expect: { at: 'sidebar[edge="right"]', minimal: true, toggle: close, zone-visible: true, mode-buttons: 0 }

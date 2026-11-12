@@ -1,0 +1,37 @@
+scenario: 1
+name: auto-hide/focus-border-right-edge
+pack: codetracer
+summary: >-
+  A pane pinned to the right edge is outlined the same way in auto-hide and
+  docked: a resolved, solid line of the same colour and width that runs
+  around the panel and out to its strip tab — above the overlay in
+  auto-hide.
+
+stage:
+  - use: record-program
+    with: { program: py_console_logs/main.py }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - click: { at: 'pane-tab[label="EVENT LOG"]' }
+  - click: { at: 'pane-tab[label="EVENT LOG"]', button: right }
+  - wait: { until: { at: 'context-menu/menu-item[label="Pin to Right"]', present: true }, timeout: 15s }
+  - click: { at: 'context-menu/menu-item[label="Pin to Right"]' }
+  - wait: { until: { at: 'strip-tab[label="EVENT LOG"]', edge: right }, timeout: 15s }
+
+  - beat: auto-hide
+    steps:
+      - hover: { at: 'strip-tab[label="EVENT LOG"]', for: 500ms }
+      - wait: { until: { at: 'selection-outline[kind="overlay"]', present: true }, timeout: 15s }
+      - expect: { at: 'selection-outline[kind="overlay"]', solid: true, measurable: true, above-overlay: true }
+      - expect: { at: 'selection-outline[kind="overlay"]', encloses: { contains: "EVENT LOG" } }
+      - expect: { at: 'selection-outline[kind="overlay"]', stroke: "rgb(86, 86, 86)", stroke-width: 1 }
+
+  - beat: docked
+    steps:
+      - click: { at: 'strip-tab[label="EVENT LOG"]' }
+      - wait: { until: { at: 'selection-outline[kind="docked"]', present: true }, timeout: 15s }
+      - expect: { at: 'selection-outline[kind="docked"]', solid: true, measurable: true }
+      - expect: { at: 'selection-outline[kind="docked"]', encloses: { contains: "EVENT LOG" } }
+      - expect: { at: 'selection-outline[kind="docked"]', stroke: "rgb(86, 86, 86)", stroke-width: 1 }

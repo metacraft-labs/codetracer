@@ -55,4 +55,31 @@ applicable:
   - ../languages/elixir-canonical-flow.yaml
   - ../languages/erlang-canonical-flow.yaml
   - ../replay/portable-mcr-trace-replays.yaml
+  # --- pw1 ---
+  - ../calltrace/collapse-retires-mark.yaml
+  - ../build/header-controls.yaml
+  - ../build/bottom-strip-panels.yaml
+  - ../build/problems-panel-empty.yaml
+  - ../build/find-in-files-empty.yaml
+  - ../agent-activity/settings-keep-scroll.yaml
+  - ../auto-hide/pin-creates-strip-tab.yaml
+  - ../auto-hide/strip-tab-click-docks.yaml
+  - ../auto-hide/overlay-hover-and-dismiss.yaml
+  - ../auto-hide/unpin-restores-pane.yaml
+  - ../auto-hide/pin-to-different-edges.yaml
+  - ../auto-hide/editor-unpin.yaml
+  - ../auto-hide/persisted-pin-restored.yaml
+  - ../auto-hide/pinned-files-layout-not-reset.yaml
+  - ../auto-hide/sidebar-toggles-independently.yaml
+  - ../auto-hide/sidebar-modes-restored-right-minimal.yaml
+  - ../auto-hide/sidebar-modes-restored-left-minimal.yaml
+  - ../auto-hide/sidebar-modes-restored-both-minimal.yaml
+  - ../auto-hide/sidebar-invalid-left-mode.yaml
+  - ../auto-hide/sidebar-invalid-right-mode.yaml
+  - ../auto-hide/sidebar-empty-edges.yaml
+  - ../auto-hide/focus-border-bottom-edge.yaml
+  - ../auto-hide/focus-border-left-edge.yaml
+  - ../auto-hide/focus-border-right-edge.yaml
+  - ../auto-hide/focus-border-one-outline.yaml
+  - ../auto-hide/hover-on-docked-edge.yaml
 unsupported: []

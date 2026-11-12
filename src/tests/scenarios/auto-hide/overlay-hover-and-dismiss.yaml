@@ -1,0 +1,42 @@
+scenario: 1
+name: auto-hide/overlay-hover-and-dismiss
+pack: codetracer
+summary: >-
+  Resting the pointer on a pinned pane's strip tab slides the pane in over
+  the layout, titled with its name; Escape dismisses the overlay, and so
+  does a click on the backdrop; the pane stays pinned either way.
+
+stage:
+  - use: record-program
+    with: { program: py_console_logs/main.py }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - wait: { until: { at: window, strip-tabs: { count: 4 } }, timeout: 30s }
+  - click: { at: 'pane-tab[label="EVENT LOG"]' }
+  - click: { at: 'pane-tab[label="EVENT LOG"]', button: right }
+  - wait: { until: { at: 'context-menu/menu-item[label="Pin to Bottom"]', present: true }, timeout: 15s }
+  - click: { at: 'context-menu/menu-item[label="Pin to Bottom"]' }
+  - wait: { until: { at: 'strip-tab[label="EVENT LOG"]', present: true }, timeout: 15s }
+
+  - beat: escape
+    steps:
+      - hover: { at: 'strip-tab[label="EVENT LOG"]', for: 500ms }
+      - wait: { until: { at: auto-hide-overlay, present: true }, timeout: 15s }
+      - expect: { at: auto-hide-overlay, title: "EVENT LOG", edge: bottom }
+      - wait: { until: event-log.loaded, timeout: 30s }
+      # The pointer moves on into the overlay, as a user reaching for it does
+      # (resting on the strip tab keeps the preview up).
+      - move: { at: auto-hide-overlay }
+      - key: Esc
+      - wait: { until: { at: auto-hide-overlay, absent: true }, timeout: 15s }
+      - expect: { at: window, strip-tabs: { count: 5 } }
+
+  - beat: backdrop
+    steps:
+      - hover: { at: 'strip-tab[label="EVENT LOG"]', for: 500ms }
+      - wait: { until: { at: auto-hide-overlay, present: true }, timeout: 15s }
+      - click: { at: auto-hide-backdrop }
+      - wait: { until: { at: auto-hide-overlay, absent: true }, timeout: 15s }
+      - expect: { at: window, strip-tabs: { count: 5 } }

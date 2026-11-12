@@ -71,7 +71,7 @@ function runStageCli(args: string[]): any {
 // --- what this binding can deliver --------------------------------------------
 
 const ROLES: Record<string, { affordances: string[]; properties: string[] }> = {
-  window: { affordances: [], properties: ["title", "mode"] },
+  window: { affordances: [], properties: ["title", "mode", "layout-tabs", "front-tabs", "strip-tabs"] },
   "session-strip": { affordances: [], properties: ["count", "active"] },
   "session-tab": { affordances: ["click", "context-click"], properties: ["title", "active"] },
   "pane-tab": { affordances: ["click", "context-click", "drag-source"], properties: ["label", "active"] },
@@ -88,24 +88,24 @@ const ROLES: Record<string, { affordances: string[]; properties: string[] }> = {
   line: {
     affordances: ["click", "double-click", "context-click"],
     properties: ["number", "text", "current", "caret", "breakpoint", "tracepoint",
-                 "glyph", "dimmed", "inline-breakpoints"],
+                 "glyph", "dimmed", "inline-breakpoints", "diagnostic", "squiggle"],
   },
   "call-trace": { affordances: ["wheel", "focusable"], properties: ["count", "focused"] },
   call: { affordances: ["click", "double-click", "context-click"],
-          properties: ["name", "current", "selected", "arguments"] },
+          properties: ["name", "current", "selected", "expanded", "arguments"] },
   "event-log": { affordances: ["wheel", "focusable"], properties: ["count", "total", "focused", "last-shown", "columns"] },
   event: { affordances: ["click", "double-click", "context-click"], properties: ["text", "kind", "current", "future"] },
   variables: { affordances: ["wheel", "focusable"], properties: ["count", "focused"] },
   variable: { affordances: ["click", "double-click", "context-click"], properties: ["name", "type", "value"] },
-  "status-line": { affordances: [], properties: ["message", "location"] },
-  omnibox: { affordances: ["click", "text-entry", "focusable"], properties: ["query", "focused", "count"] },
+  "status-line": { affordances: [], properties: ["message", "location", "build-status", "notifications"] },
+  omnibox: { affordances: ["click", "text-entry", "focusable"], properties: ["query", "focused", "count", "labels"] },
   option: { affordances: ["click"], properties: ["label", "detail", "selected", "kind"] },
   "context-menu": { affordances: [], properties: ["count"] },
   "menu-item": { affordances: ["click"], properties: ["label", "enabled", "shortcut", "hint"] },
   "terminal-output": { affordances: ["wheel", "focusable"], properties: ["text", "count"] },
   filesystem: { affordances: ["wheel", "focusable"], properties: ["count", "focused", "loading"] },
   // --- pw2 ---
-  vcs: { affordances: [], properties: ["commit", "stats", "count", "unified-diff", "error"] },
+  vcs: { affordances: [], properties: ["title", "commit", "stats", "count", "unified-diff", "error"] },
   "changed-file": { affordances: ["click"], properties: ["name", "status", "status-kind", "stats", "coverage", "selected"] },
   "diff-toggle": { affordances: ["click"], properties: ["unified"] },
   "diff-view": { affordances: [], properties: ["file", "text"] },
@@ -113,6 +113,43 @@ const ROLES: Record<string, { affordances: string[]; properties: string[] }> = {
   "columns-menu": { affordances: [], properties: [] },
   "column-option": { affordances: ["click", "drag-source", "drop-target"], properties: ["name", "shown"] },
   "file-node": { affordances: ["click", "double-click", "context-click"], properties: ["name", "kind", "expanded", "selected"] },
+  // --- pw1 ---
+  "strip-tab": { affordances: ["click", "context-click"], properties: ["label", "edge", "active"] },
+  "auto-hide-overlay": { affordances: [], properties: ["title", "edge"] },
+  "auto-hide-backdrop": { affordances: ["click"], properties: [] },
+  "selection-outline": { affordances: [], properties: ["kind", "stroke", "stroke-width", "solid", "above-overlay",
+                                                    "encloses", "measurable"] },
+  sidebar: { affordances: [], properties: ["edge", "minimal", "toggle", "zone-visible", "mode-buttons"] },
+  "docked-panel": { affordances: [], properties: ["edge"] },
+  "panel-button": { affordances: ["click"], properties: ["label", "enabled", "active", "title"] },
+  "build-panel": { affordances: [], properties: ["verdict", "idle", "count", "text", "where", "state", "located"] },
+  "build-line": { affordances: ["click"], properties: ["text", "stream", "severity", "located", "italic", "colour", "styled"] },
+  "problems-panel": { affordances: [], properties: ["count", "errors", "warnings", "empty", "groups", "where"] },
+  problem: { affordances: ["click"], properties: ["message", "path", "location", "severity"] },
+  "find-in-files": { affordances: [], properties: ["count", "text", "where"] },
+  "agent-activity": {
+    affordances: [],
+    properties: ["text", "conversation", "messages", "busy", "notice", "notices", "roll-up", "conversation-first",
+                 "interaction-after", "failed-turns", "evidence-cards", "test-runs", "test-rows"],
+  },
+  "agent-prompt": { affordances: ["click", "text-entry", "focusable"], properties: ["value", "height", "lines", "focused", "visible-lines"] },
+  "failed-turn": { affordances: [], properties: ["error", "icon"] },
+  "test-run-card": { affordances: ["click"], properties: ["title", "status", "running", "expanded", "rows", "statuses"] },
+  "agent-message": { affordances: [], properties: ["index", "text"] },
+  "test-row": { affordances: ["click"], properties: ["name", "status", "outcome", "has-actions", "output", "diagnostic",
+                                                     "recording-failed", "expanded"] },
+  "evidence-card": { affordances: [], properties: ["dataset", "path", "kind", "shape", "has-shape", "command", "note",
+                                                   "output", "has-actions", "state"] },
+  "agent-settings": { affordances: ["wheel"], properties: ["scroll-top", "overflow"] },
+  "settings-select": { affordances: ["click"], properties: ["label", "value", "open"] },
+  "settings-option": { affordances: ["click"], properties: ["label", "active"] },
+  "settings-section": { affordances: ["click"], properties: ["title"] },
+  "agent-workspace": { affordances: [], properties: ["label", "path", "files"] },
+  "caption-progress": { affordances: ["click"], properties: ["text"] },
+  "edit-toolbar": { affordances: [], properties: [] },
+  "editor-hover": { affordances: [], properties: ["text"] },
+  welcome: { affordances: [], properties: ["heading"] },
+  "welcome-action": { affordances: ["click"], properties: ["label"] },
 };
 
 // --- the surface: one read of the DOM ------------------------------------------
@@ -314,6 +351,7 @@ function readSurface(): any {
       const items = Array.from(vc.querySelectorAll(".vcs-file-item")) as HTMLElement[];
       const toggle = vc.querySelector(".vcs-diff-toggle .vcs-toggle-button") as HTMLElement | null;
       const v = node("vcs", vc, {
+        title: text(vc.querySelector(".vcs-branch-name")),
         commit: text(vc.querySelector(".vcs-changed-files-commit")),
         stats: text(vc.querySelector(".vcs-review-stats")),
         count: items.length,
@@ -492,12 +530,24 @@ function readSurface(): any {
       if (!vis(r)) continue;
       const name = text(r.querySelector(".call-text")).replace(/\s+#\d+\s*$/, "").trim();
       if (!name) continue;
-      ct.children.push(node("call", r, {
-        name, current: r.classList.contains("current") || r.classList.contains("active-call"),
+      // The current-call mark is drawn three ways on one row (the row's
+      // `event-selected`, the `call-current` child box, the toggle icon's
+      // `active`; `CallTraceEntry.isSelected` and codetracer#811): any of
+      // them is the mark.
+      const toggle = r.querySelector(".call-child-box .toggle-call") as HTMLElement | null;
+      const callNode = node("call", r, {
+        name, current: r.classList.contains("event-selected") ||
+          !!r.querySelector(".call-child-box.call-current") || !!r.querySelector(".toggle-call .active"),
         selected: r.classList.contains("selected") || r.classList.contains("calltrace-selected")
           || r.classList.contains("event-selected"),
+        expanded: !!r.querySelector(".toggle-call .collapse-call-img"),
         arguments: text(r.querySelector(".call-args")),
-      }, [["name", name]]));
+      }, [["name", name]]);
+      if (toggle && vis(toggle)) {
+        const tb = toggle.getBoundingClientRect();
+        callNode.anchors = { points: { expander: { x: tb.left + tb.width / 2, y: tb.top + tb.height / 2 } } };
+      }
+      ct.children.push(callNode);
     }
     root.children.push(ct);
   }
@@ -587,6 +637,441 @@ function readSurface(): any {
   return root;
 }
 
+
+// --- pw1: the auto-hide strips, the build / problems / find-in-files panes,
+// the Agent Activity pane, the review's VCS panel ---------------------------
+//
+// Runs IN THE PAGE, in the same evaluation as `readSurface` (see
+// `SURFACE_EXTENSIONS`), on the tree it returned. Reads only.
+function readSurfacePw1(root: any): void {
+  const vis = (el: Element | null): boolean => {
+    if (!el) return false;
+    const r = (el as HTMLElement).getBoundingClientRect();
+    if (r.width <= 0 || r.height <= 0) return false;
+    const cs = getComputedStyle(el as HTMLElement);
+    return cs.visibility !== "hidden" && cs.display !== "none";
+  };
+  const text = (el: Element | null | undefined) => ((el?.textContent ?? "").replace(/\s+/g, " ").trim());
+  const node = (role: string, el: Element | null, props: Record<string, unknown>,
+                keys: Array<[string, string]> = []): any => {
+    const r = el ? (el as HTMLElement).getBoundingClientRect() : { left: 0, top: 0, width: 0, height: 0 };
+    return { role, keys, props, x: r.left, y: r.top, w: r.width, h: r.height,
+             visible: el ? vis(el) : false, children: [] as any[] };
+  };
+  const centre = (el: Element) => {
+    const r = (el as HTMLElement).getBoundingClientRect();
+    return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+  };
+  const active = document.activeElement;
+  const within = (el: Element | null) => !!(el && active && (el === active || el.contains(active)));
+  const has = (el: Element, cls: string) => el.classList.contains(cls);
+  // A button of a panel, named by its text, else its title.
+  const button = (b: HTMLElement, label?: string) => {
+    const l = label ?? (text(b) || b.getAttribute("title") || b.getAttribute("aria-label") || "");
+    return node("panel-button", b, {
+      label: l, enabled: !has(b, "disabled") && !(b as HTMLButtonElement).disabled,
+      active: has(b, "active"),
+    }, [["label", l]]);
+  };
+
+  // auto-hide strip tabs: the bottom strip (in the footer) and both sides
+  const edgeOf = (t: Element): string =>
+    t.closest("#auto-hide-bottom-strip, .auto-hide-strip-bottom") ? "bottom"
+      : t.closest("#auto-hide-strip-left, .auto-hide-strip-left") ? "left"
+      : t.closest("#auto-hide-strip-right, .auto-hide-strip-right") ? "right" : "bottom";
+  const stripTabs: string[] = [];
+  for (const t of Array.from(document.querySelectorAll(".auto-hide-strip-tab")) as HTMLElement[]) {
+    if (!vis(t)) continue;
+    const label = text(t.querySelector(".auto-hide-strip-tab-label") ?? t);
+    if (!label) continue;
+    root.children.push(node("strip-tab", t, { label, edge: edgeOf(t), active: has(t, "active") },
+                            [["label", label]]));
+    stripTabs.push(`${edgeOf(t)}:${label}`);
+  }
+  root.props["strip-tabs"] = stripTabs;
+  // the side strips' presentation: normal or minimal, the toggle in the
+  // status bar's icon zone, and the minimal sidebar's panel icons
+  for (const edge of ["left", "right"]) {
+    const strip = document.querySelector(`#auto-hide-strip-${edge}`) as HTMLElement | null;
+    const zone = document.querySelector(edge === "left" ? "#auto-hide-collapsed-icon-zone"
+      : "#auto-hide-collapsed-icon-zone-right") as HTMLElement | null;
+    if (!strip && !zone) continue;
+    const restore = zone?.querySelector(".auto-hide-restore-button") as HTMLElement | null;
+    const sb = node("sidebar", zone ?? strip, {
+      edge, minimal: !!strip && has(strip, "collapsed-mode"),
+      toggle: !restore ? "none" : has(restore, "sidebar-close") ? "close" : has(restore, "sidebar-open") ? "open" : "none",
+      "zone-visible": vis(zone), "mode-buttons": strip ? strip.querySelectorAll(".auto-hide-mode-button").length : 0,
+    }, [["edge", edge]]);
+    // the zone's buttons, and the rows of its tab list (lifted to the top of
+    // the page while open: `liftTabListMenu`, `ui/auto_hide.nim`)
+    const lifted = document.querySelector(`body > .auto-hide-tablist-menu.align-${edge}`);
+    for (const b of [...Array.from(zone?.querySelectorAll("button") ?? []),
+                     ...Array.from(lifted?.querySelectorAll("button") ?? [])] as HTMLElement[]) {
+      if (!vis(b)) continue;
+      sb.children.push(button(b, b.getAttribute("aria-label") || b.getAttribute("title") || text(b)));
+    }
+    root.children.push(sb);
+  }
+
+  // the selection outline (`ui/layout.nim`): one stroked path around the
+  // focused panel and its strip tab — docked, over the overlay, or a stack's
+  const overlayEl = document.querySelector("#auto-hide-overlay") as HTMLElement | null;
+  const overlayZ = overlayEl ? Number(getComputedStyle(overlayEl).zIndex) || 0 : 0;
+  for (const [kind, cls] of [["docked", "ct-docked-outline"], ["overlay", "ct-overlay-outline"],
+                             ["stack", "ct-selected-outline"]]) {
+    for (const svg of Array.from(document.querySelectorAll(`.${cls}`)) as HTMLElement[]) {
+      const p = svg.querySelector("path");
+      if (!p) continue;
+      const cs = getComputedStyle(p);
+      const r = p.getBoundingClientRect();
+      const tol = 2;
+      const encloses = (Array.from(document.querySelectorAll(".auto-hide-strip-tab")) as HTMLElement[])
+        .filter((t) => {
+          const b = t.getBoundingClientRect();
+          return vis(t) && r.left <= b.left + tol && r.right >= b.right - tol && r.top <= b.top + tol && r.bottom >= b.bottom - tol;
+        }).map((t) => text(t.querySelector(".auto-hide-strip-tab-label") ?? t));
+      root.children.push(node("selection-outline", p, {
+        kind, stroke: cs.stroke, "stroke-width": parseFloat(cs.strokeWidth) || 0,
+        solid: cs.strokeDasharray === "none" || cs.strokeDasharray === "",
+        "above-overlay": (Number(getComputedStyle(svg).zIndex) || 0) > overlayZ,
+        encloses, measurable: r.width > 1 && r.height > 1,
+      }, [["kind", kind]]));
+    }
+  }
+
+  // the backdrop behind the overlay (a click on it dismisses the overlay)
+  const backdrop = document.querySelector("#auto-hide-backdrop") as HTMLElement | null;
+  if (backdrop && vis(backdrop)) root.children.push(node("auto-hide-backdrop", backdrop, {}));
+  // the slide-in overlay (a strip tab's hover preview)
+  const overlay = document.querySelector("#auto-hide-overlay") as HTMLElement | null;
+  if (overlay && has(overlay, "visible")) {
+    const edge = has(overlay, "auto-hide-overlay-left") ? "left" : has(overlay, "auto-hide-overlay-right") ? "right" : "bottom";
+    root.children.push(node("auto-hide-overlay", overlay, {
+      title: text(document.querySelector("#auto-hide-overlay-title")), edge,
+    }));
+  }
+  // panels docked open from their strip tab
+  for (const edge of ["left", "right", "bottom"]) {
+    const c = document.querySelector(`#auto-hide-docked-${edge}`) as HTMLElement | null;
+    if (!c || !has(c, "docked-open")) continue;
+    root.children.push(node("docked-panel", c, { edge }, [["edge", edge]]));
+  }
+  const whereOf = (el: Element): string =>
+    el.closest("#auto-hide-overlay-content") ? "overlay"
+      : el.closest("[id^='auto-hide-docked-']") ? "docked" : "layout";
+
+  // the BUILD pane (`isonim_build_view.nim`): the one on screen
+  const bp = (Array.from(document.querySelectorAll(".build-panel")) as HTMLElement[]).find((e) => vis(e));
+  if (bp) {
+    const out = bp.querySelector("#build, .build-output-container");
+    const lines = out ? (Array.from(out.children) as HTMLElement[]) : [];
+    const texts: string[] = [];
+    const build = node("build-panel", bp, {
+      verdict: text(bp.querySelector(".build-command-label")),
+      idle: vis(bp.querySelector(".build-empty")),
+      count: lines.length, text: texts, where: whereOf(bp),
+      located: lines.filter((l) => has(l, "build-clickable")).length,
+      state: has(bp.querySelector(".build-header") ?? bp, "build-failed") ? "failed"
+        : has(bp.querySelector(".build-header") ?? bp, "build-succeeded") ? "succeeded"
+        : has(bp.querySelector(".build-header") ?? bp, "build-cancelled") ? "cancelled" : "none",
+    });
+    for (const l of lines) {
+      const t = (l.textContent ?? "").replace(/\u00a0/g, " ").replace(/\s+$/, "");
+      texts.push(t);
+      const cs = getComputedStyle(l);
+      const sev = has(l, "build-line-error") ? "error" : has(l, "build-line-warning") ? "warning"
+        : has(l, "build-line-info") ? "info" : "none";
+      build.children.push(node("build-line", l, {
+        text: t, stream: has(l, "build-stderr") ? "stderr" : has(l, "build-stdout") ? "stdout" : "located",
+        severity: sev, located: has(l, "build-clickable"),
+        italic: cs.fontStyle === "italic", colour: cs.color,
+        // the line's text as drawn carries no raw escape sequence
+        styled: l.querySelector("span") !== null,
+      }, [["text", t]]));
+    }
+    for (const b of Array.from(bp.querySelectorAll(".build-header-controls .build-ctrl-btn")) as HTMLElement[]) {
+      build.children.push(button(b, b.getAttribute("title") ?? ""));
+    }
+    root.children.push(build);
+  }
+
+  // the PROBLEMS pane (`isonim_errors_view.nim`)
+  const pp = (Array.from(document.querySelectorAll(".problems-panel")) as HTMLElement[]).find((e) => vis(e));
+  if (pp) {
+    const rows = Array.from(pp.querySelectorAll(".problems-row")) as HTMLElement[];
+    const pr = node("problems-panel", pp, {
+      count: rows.length,
+      errors: rows.filter((r) => has(r, "problems-severity-error")).length,
+      warnings: rows.filter((r) => has(r, "problems-severity-warning")).length,
+      empty: vis(pp.querySelector(".problems-empty")),
+      groups: pp.querySelectorAll(".problems-file-header").length,
+      where: whereOf(pp),
+    });
+    for (const r of rows) {
+      const message = text(r.querySelector(".problems-message"));
+      pr.children.push(node("problem", r, {
+        message, path: text(r.querySelector(".problems-path")),
+        location: text(r.querySelector(".problems-location")),
+        severity: has(r, "problems-severity-error") ? "error" : has(r, "problems-severity-warning") ? "warning" : "info",
+      }, [["message", message]]));
+    }
+    for (const b of Array.from(pp.querySelectorAll(".problems-filter-btn")) as HTMLElement[]) pr.children.push(button(b));
+    root.children.push(pr);
+  }
+
+  // Find in Files (`isonim_search_results_view.nim`)
+  const ff = (Array.from(document.querySelectorAll(".fif-panel")) as HTMLElement[]).find((e) => vis(e));
+  if (ff) {
+    const rows = Array.from(ff.querySelectorAll(".fif-match-row")) as HTMLElement[];
+    root.children.push(node("find-in-files", ff, {
+      count: rows.length, text: text(ff.querySelector(".fif-body")), where: whereOf(ff),
+    }));
+  }
+
+  // the Agent Activity pane (`isonim_agent_activity_view.nim`)
+  const aa = (Array.from(document.querySelectorAll(".agent-ha-container")) as HTMLElement[]).find((e) => vis(e));
+  if (aa) {
+    const com = aa.querySelector(".agent-com") as HTMLElement | null;
+    const kids = Array.from(aa.children) as HTMLElement[];
+    const rollup = aa.ownerDocument.querySelectorAll([".agent-ha-deepreview-host", ".activity-dr-container",
+      ".activity-dr-header", ".activity-dr-summary", ".activity-dr-card", ".activity-dr-files",
+      ".activity-dr-files-row", ".activity-dr-tests", ".activity-dr-test-item", ".activity-dr-notifs",
+      ".activity-dr-notif-item"].join(", ")).length;
+    const failed = Array.from(aa.querySelectorAll(".agent-turn-failed")) as HTMLElement[];
+    const pane = node("agent-activity", aa, {
+      text: aa.innerText ?? "",
+      conversation: com ? (com.innerText ?? "") : "",
+      messages: (Array.from(aa.querySelectorAll(".msg-content")) as HTMLElement[]).map((m) => text(m)),
+      busy: !!aa.querySelector(".ai-status, .agent-working-indicator"),
+      notice: text(aa.querySelector(".agent-session-notice")),
+      notices: aa.querySelectorAll(".agent-session-notice").length,
+      "roll-up": rollup,
+      "conversation-first": kids.length > 0 && kids[0].classList.contains("agent-com"),
+      "interaction-after": (() => {
+        const c = kids.findIndex((k) => k.classList.contains("agent-com"));
+        const i = kids.findIndex((k) => k.classList.contains("agent-interaction"));
+        return c >= 0 && i > c;
+      })(),
+      "failed-turns": failed.length,
+      "evidence-cards": aa.querySelectorAll(".agent-evidence").length,
+      "test-runs": aa.querySelectorAll(".agent-test-run").length,
+      "test-rows": aa.querySelectorAll(".agent-test-row").length,
+    });
+    const prompt = aa.querySelector(".agent-command-input") as HTMLTextAreaElement | null;
+    if (prompt && vis(prompt)) {
+      const value = prompt.value ?? "";
+      // how many text lines the box shows (its content height over the line
+      // height): the box grows with its text and shrinks back when emptied
+      const cs = getComputedStyle(prompt);
+      const lh = parseFloat(cs.lineHeight) || parseFloat(cs.fontSize) * 1.2;
+      const inner = prompt.getBoundingClientRect().height - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom)
+        - parseFloat(cs.borderTopWidth) - parseFloat(cs.borderBottomWidth);
+      pane.children.push(node("agent-prompt", prompt, {
+        value, height: Math.round(prompt.getBoundingClientRect().height),
+        lines: value.split("\n").length, focused: prompt === active,
+        "visible-lines": Math.max(1, Math.round(inner / lh)),
+      }));
+    }
+    for (const b of Array.from(aa.querySelectorAll(".agent-start-button, .agent-stop-button, .agent-settings-button")) as HTMLElement[]) {
+      if (vis(b)) pane.children.push(button(b, b.getAttribute("title") ?? ""));
+    }
+    // each message, by its place in the conversation (1-based)
+    (Array.from(aa.querySelectorAll(".msg-content")) as HTMLElement[]).forEach((m, i) => {
+      pane.children.push(node("agent-message", m, { index: i + 1, text: text(m) }, [["index", String(i + 1)]]));
+    });
+    for (const f of failed) {
+      pane.children.push(node("failed-turn", f, {
+        error: text(f.querySelector(".agent-turn-error")), icon: vis(f.querySelector(".agent-turn-failed-icon")),
+      }));
+    }
+    // a `ct test` run's card, and its rows
+    for (const c of Array.from(aa.querySelectorAll(".agent-test-run")) as HTMLElement[]) {
+      const header = c.querySelector(".agent-test-run-header");
+      const title = text(c.querySelector(".agent-test-run-title"));
+      const card = node("test-run-card", c, {
+        title, status: text(c.querySelector(".agent-test-run-status")),
+        running: has(c, "agent-test-run-running"), expanded: c.querySelectorAll(".agent-test-row").length > 0,
+        rows: (Array.from(c.querySelectorAll(".agent-test-row .agent-test-row-name")) as HTMLElement[]).map((n) => text(n)),
+        statuses: (Array.from(c.querySelectorAll(".agent-test-row .agent-test-row-status")) as HTMLElement[]).map((n) => text(n)),
+      }, [["title", title]]);
+      if (header) card.anchors = { points: { header: centre(header) } };
+      for (const r of Array.from(c.querySelectorAll(".agent-test-row")) as HTMLElement[]) {
+        const name = text(r.querySelector(".agent-test-row-name"));
+        const rh = r.querySelector(".agent-test-row-header");
+        const row = node("test-row", r, {
+          name, status: text(r.querySelector(".agent-test-row-status")),
+          outcome: has(r, "agent-test-row-passed") ? "passed" : has(r, "agent-test-row-failed") ? "failed"
+            : has(r, "agent-test-row-errored") ? "errored" : has(r, "agent-test-row-running") ? "running" : "",
+          "has-actions": !!r.querySelector(".agent-test-row-actions"),
+          output: text(r.querySelector(".agent-test-row-output")),
+          diagnostic: text(r.querySelector(".agent-test-row-diagnostic")),
+          "recording-failed": !!r.querySelector(".agent-test-row-recording-failed"),
+          expanded: !!r.querySelector(".agent-test-row-details"),
+        }, [["name", name]]);
+        if (rh) row.anchors = { points: { header: centre(rh) } };
+        for (const b of Array.from(r.querySelectorAll(".agent-test-row-actions button")) as HTMLElement[]) row.children.push(button(b));
+        card.children.push(row);
+      }
+      pane.children.push(card);
+    }
+    // an evidence tool call's card, keyed by its dataset's file name
+    for (const c of Array.from(aa.querySelectorAll(".agent-evidence")) as HTMLElement[]) {
+      const dataset = text(c.querySelector(".agent-evidence-dataset"));
+      const name = dataset.split("/").pop() ?? dataset;
+      const card = node("evidence-card", c, {
+        dataset: name, path: dataset,
+        kind: text(c.querySelector(".agent-evidence-kind")),
+        shape: text(c.querySelector(".agent-evidence-shape")),
+        "has-shape": !!c.querySelector(".agent-evidence-shape"),
+        command: text(c.querySelector(".agent-evidence-command")),
+        note: text(c.querySelector(".agent-evidence-note")),
+        output: text(c.querySelector(".agent-evidence-output")),
+        "has-actions": !!c.querySelector(".agent-evidence-actions"),
+        state: has(c, "agent-evidence-unavailable") ? "unavailable" : has(c, "agent-evidence-failed") ? "failed"
+          : has(c, "agent-evidence-unreported") ? "unreported" : "available",
+      }, [["dataset", name]]);
+      for (const b of Array.from(c.querySelectorAll(".agent-evidence-actions button")) as HTMLElement[]) card.children.push(button(b));
+      pane.children.push(card);
+    }
+    // the settings panel: each select is named by the label it sits under
+    const sp = aa.querySelector(".agent-settings-panel") as HTMLElement | null;
+    if (sp && vis(sp)) {
+      const st = node("agent-settings", sp, {
+        "scroll-top": Math.round(sp.scrollTop), overflow: sp.scrollHeight - sp.clientHeight,
+      });
+      for (const host of Array.from(sp.querySelectorAll(".agent-settings-section, .agent-settings-half-col")) as HTMLElement[]) {
+        const labels = (Array.from(host.children) as HTMLElement[]).filter((c) => has(c, "agent-settings-label"));
+        const selects = (Array.from(host.children) as HTMLElement[]).filter((c) => has(c, "agent-settings-select-wrapper"));
+        selects.forEach((w, i) => {
+          const label = text(labels[i]);
+          const list = w.querySelector(".agent-settings-dropdown-list");
+          const sel = node("settings-select", w.querySelector(".agent-settings-select-trigger") ?? w, {
+            label, value: text(w.querySelector(".agent-settings-select-text")), open: !!list && vis(list),
+          }, [["label", label]]);
+          for (const it of Array.from(w.querySelectorAll(".agent-settings-dropdown-item")) as HTMLElement[]) {
+            const l = text(it);
+            sel.children.push(node("settings-option", it, { label: l, active: has(it, "agent-settings-dropdown-item--active") }, [["label", l]]));
+          }
+          st.children.push(sel);
+        });
+        const h = (Array.from(host.children) as HTMLElement[]).find((c) => has(c, "agent-settings-section-header"));
+        if (h) { const t = text(h); st.children.push(node("settings-section", h, { title: t }, [["title", t]])); }
+      }
+      const done = sp.querySelector(".agent-settings-done") as HTMLElement | null;
+      if (done) st.children.push(button(done));
+      pane.children.push(st);
+    }
+    root.children.push(pane);
+  }
+
+  // an agent's worktree session: the Agent Workspace panel and the caption
+  // bar's progress
+  const aw = (Array.from(document.querySelectorAll(".agent-workspace-container")) as HTMLElement[]).find((e) => vis(e));
+  if (aw) {
+    const w = node("agent-workspace", aw, {
+      label: text(aw.querySelector(".agent-workspace-header-label")),
+      path: text(aw.querySelector(".agent-workspace-header-path")),
+      files: (Array.from(aw.querySelectorAll(".agent-workspace-file-item .agent-workspace-file-name")) as HTMLElement[])
+        .map((f) => text(f)),
+    });
+    const toggle = aw.querySelector(".agent-workspace-view-toggle") as HTMLElement | null;
+    if (toggle && vis(toggle)) w.children.push(button(toggle));
+    root.children.push(w);
+  }
+  const cp = document.querySelector(".caption-progress-container") as HTMLElement | null;
+  if (cp && vis(cp)) {
+    root.children.push(node("caption-progress", cp, { text: text(cp) }));
+  }
+
+  // every GoldenLayout tab, shown or not, and the ones in front of their stack
+  root.props["layout-tabs"] = (Array.from(document.querySelectorAll(".lm_tab .lm_title")) as HTMLElement[])
+    .map((t) => text(t));
+  root.props["front-tabs"] = (Array.from(document.querySelectorAll(".lm_tab.lm_active .lm_title")) as HTMLElement[])
+    .map((t) => text(t));
+
+  // the status bar's build verdict and its notifications
+  const sl = root.children.find((c: any) => c.role === "status-line");
+  if (sl) {
+    sl.props["build-status"] = text(document.querySelector("#status .build-status-text"));
+    sl.props.notifications = (Array.from(document.querySelectorAll(
+      "#active-notifications .status-notification .notification-message")) as HTMLElement[]).map((n) => text(n));
+  }
+
+  // the edit-mode toolbar's Build and Run
+  const eb = document.querySelector("#build-image") as HTMLElement | null;
+  const er = document.querySelector("#run-image") as HTMLElement | null;
+  if ((eb && vis(eb)) || (er && vis(er))) {
+    const tb = node("edit-toolbar", (eb ?? er)!.parentElement, {});
+    for (const [b, l] of [[eb, "Build"], [er, "Run"]] as Array<[HTMLElement | null, string]>) {
+      if (b && vis(b)) {
+        const n = button(b, l);
+        n.props.title = b.getAttribute("title") ?? "";
+        tb.children.push(n);
+      }
+    }
+    root.children.push(tb);
+  }
+
+  // a build's diagnostics on the editors' lines: the gutter's glyph
+  // (`build-diagnostic-margin-<severity>`, `ui/build.nim`) and the squiggle
+  // drawn on the line, matched to a line by where they are drawn
+  for (const ed of root.children.filter((c: any) => c.role === "editor")) {
+    const tops = (sel: string) => (Array.from(document.querySelectorAll(sel)) as HTMLElement[])
+      .filter((e) => vis(e)).map((e) => {
+        const r = e.getBoundingClientRect();
+        const cls = Array.from(e.classList).find((c) => /-(error|warning|info)$/.test(c)) ?? "";
+        return { top: r.top, bottom: r.bottom, x: r.left, sev: (/-(error|warning|info)$/.exec(cls) ?? ["", "none"])[1] };
+      });
+    const glyphs = tops(".build-diagnostic-margin");
+    const squiggles = tops(".squiggly-error, .squiggly-warning, .squiggly-info");
+    for (const ln of ed.children) {
+      const mid = ln.y + ln.h / 2;
+      const inRow = (g: any) => g.x >= ed.x && g.x <= ed.x + ed.w && mid >= g.top - 1 && mid <= g.bottom + 1;
+      ln.props.diagnostic = glyphs.find(inRow)?.sev ?? "none";
+      const sq = squiggles.filter((g: any) => g.x >= ed.x && g.x <= ed.x + ed.w && g.bottom >= ln.y && g.top <= ln.y + ln.h);
+      ln.props.squiggle = sq.some((g: any) => g.sev === "error") ? "error" : sq[0]?.sev ?? "none";
+    }
+  }
+  // the editor's hover (the message under the pointer)
+  const hover = (Array.from(document.querySelectorAll(".monaco-hover")) as HTMLElement[])
+    .find((h) => vis(h) && !has(h, "hidden"));
+  if (hover) root.children.push(node("editor-hover", hover, { text: text(hover) }));
+
+  // the command palette's rows: the label is the row's value, the detail its
+  // suffix, the chosen row `command-selected` (`isonim_command_palette_view.nim`)
+  const om = root.children.find((c: any) => c.role === "omnibox");
+  if (om) {
+    const rows = (Array.from(document.querySelectorAll("#command-view .command-result")) as HTMLElement[])
+      .filter((r) => !has(r, "empty"));
+    if (rows.length === om.children.length) {
+      rows.forEach((r, i) => {
+        const label = text(r.querySelector(".command-result-value")) || om.children[i].props.label;
+        om.children[i].props.label = label;
+        om.children[i].props.detail = text(r.querySelector(".command-result-suffix"));
+        om.children[i].props.selected = has(r, "command-selected");
+        om.children[i].keys = [["label", label]];
+      });
+    }
+    om.props.labels = om.children.map((o: any) => o.props.label);
+  }
+
+  // the welcome screen, when no other reader drew it
+  const ws = document.querySelector(".welcome-screen") as HTMLElement | null;
+  if (ws && vis(ws) && !root.children.some((c: any) => c.role === "welcome")) {
+    const w = node("welcome", ws, { heading: text(ws.querySelector("h1, .welcome-title")) });
+    for (const o of Array.from(ws.querySelectorAll(".start-option")) as HTMLElement[]) {
+      if (!vis(o)) continue;
+      const label = text(o.querySelector(".start-option-name, .option-name") ?? o);
+      w.children.push(node("welcome-action", o, { label }, [["label", label]]));
+    }
+    root.children.push(w);
+  }
+}
+
+// The readers that extend `readSurface`'s tree, run in the same page
+// evaluation (one read of the DOM).
+const SURFACE_EXTENSIONS: Array<(root: any) => void> = [readSurfacePw1];
+
 // --- the binding ----------------------------------------------------------------
 
 async function launchElectron(ctx: Ctx, launch: any): Promise<void> {
@@ -615,12 +1100,14 @@ async function launchElectron(ctx: Ctx, launch: any): Promise<void> {
     if (!m) throw new Error(`ct host did not import ${launch.recording}: ${r.stderr || r.stdout}`);
     env.CODETRACER_RECORDING_ID = m[1];
   } else if (launch.review) {
-    // pw2: `ct review <dataset>`
+    // a review dataset, as a user opens one (`ct review <PATH>`)
     args.push("review", launch.review);
   } else if (launch.project) {
-    args.push("edit", launch.project);
-    if (launch.file) args.push(path.join(launch.project, launch.file));
+    // `ct edit` takes ONE path (`ct/launch/launch.nim`): the file, when the
+    // stage names one (its folder is the project), else the folder.
+    args.push("edit", launch.file ? path.join(launch.project, launch.file) : launch.project);
   }
+  // (launch.welcome: no arguments — the welcome screen)
   env.CODETRACER_CALLER_PID = String(process.pid);
   const width = launch.width || 1600;
   const height = launch.height || 1000;
@@ -750,12 +1237,20 @@ const binding = {
       ctx.state.root = init.root;
     }
     const launch = runStageCli(["run", ctx.state.file, use, JSON.stringify(clean)]);
-    if (use === "open-recording" && clean.deployment === "web") await launchHosted(ctx, launch);
-    else if (use === "open-recording" || use === "open-project" || use === "open-review") await launchElectron(ctx, launch);
+    if (launch.env?.CT_FAKE_ACP_LOG) ctx.state.agentLog = launch.env.CT_FAKE_ACP_LOG;
+    if (use === "open-recording" && clean.deployment === "web") {
+      await launchHosted(ctx, launch);
+    } else if (use === "open-recording" || use === "open-project" || use === "open-review" || use === "open-welcome") {
+      await launchElectron(ctx, launch);
+    }
   },
 
   async surface(ctx: Ctx): Promise<Node> {
-    return await ctx.page.evaluate(readSurface);
+    // One evaluation: `readSurface`, then each extension over its tree.
+    return await ctx.page.evaluate(
+      `(() => { const root = (${readSurface.toString()})(); ` +
+      `for (const ext of [${SURFACE_EXTENSIONS.map((f) => f.toString()).join(", ")}]) ext(root); ` +
+      `return root; })()`);
   },
 
   async condition(ctx: Ctx, name: string): Promise<boolean | undefined> {
@@ -768,6 +1263,17 @@ const binding = {
         const loc = document.querySelector(".location-path")?.textContent ?? "";
         return !busy && loc.trim().length > 0;
       });
+    }
+    // pw1: the stand-in agent's method log (`stub-agent`): the pane opened
+    // its ACP session. The log is the agent's, outside the application.
+    if (name === "agent-session-open") {
+      const log = ctx.state.agentLog;
+      if (!log) return undefined;
+      try {
+        return fs.readFileSync(log, "utf8").split("\n").includes("session/new");
+      } catch {
+        return false;
+      }
     }
     return undefined;
   },
@@ -782,6 +1288,8 @@ const binding = {
   },
 
   async anchor(ctx: Ctx, n: any, anchor: string): Promise<{ x: number; y: number } | undefined> {
+    // a point a reader measured for a named anchor (`expander`, …)
+    if (n.anchors?.points?.[anchor]) return n.anchors.points[anchor];
     const p = await textAnchor(n, anchor);
     // pw2: never aim into the margin when the code is scrolled horizontally
     if (p && n.anchors?.contentLeft !== undefined && /^(text-start|text-end|column\(|caret\()/.test(anchor)) {

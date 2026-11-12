@@ -41,8 +41,9 @@ type
     width*, height*: int    ## the window, in the front-end's own unit
     tick*: int              ## -1: at the recording's entry
     keymap*: string         ## the base keymap ("" for the product default)
-    review*: string         ## a review dataset (`ct review <json>`), "" for none
+    review*: string         ## a review dataset (`ct review <PATH>`), or ""
     flags*: seq[string]     ## extra command-line options (`front-end-options`)
+    welcome*: bool          ## start on the welcome screen (nothing open)
     env*: OrderedTable[string, string]
 
   StageState* = ref object
@@ -339,6 +340,190 @@ proc dropRecordedFile*(s: StageState; name: string) =
                        " recorded files are named " & name)
   s.launch.recording = copy
 
+
+# --- pw1: agents, reviews and build projects ----------------------------------
+
+proc writeExecutable(path, content: string) =
+  writeFile(path, content)
+  setFilePermissions(path, {fpUserRead, fpUserWrite, fpUserExec,
+                            fpGroupRead, fpGroupExec, fpOthersRead, fpOthersExec})
+
+proc stubAgent*(s: StageState; agent: string) =
+  ## The Agent Activity pane's agent, replaced: the pane starts `codex-acp`
+  ## from `PATH` (`index/ipc_subsystems/acp_ipc.nim`), so a `codex-acp`
+  ## wrapper around a stdio ACP agent written for the tests goes first on the
+  ## front-end's `PATH`. The real agent needs a paid account and the network,
+  ## and cannot be made to refuse a turn or hold one on demand; everything on
+  ## CodeTracer's side of the ACP boundary stays real. The agents' own headers
+  ## give the protocol they implement.
+  let script =
+    case agent
+    of "refusing": repo() / "src/tests/gui/tests/agent-activity/fixtures/acp-refusing-agent.js"
+    of "replay": repo() / "src/tests/gui/tests/agent-activity-deepreview/fixtures/acp-replay-agent.js"
+    else: raise newException(ValueError, "stub-agent: unknown agent '" & agent & "'")
+  let node = findExe("node")
+  if node.len == 0:
+    raise newException(IOError, "stub-agent: prerequisite missing: `node` is not on PATH")
+  let dir = s.root / "stub-agent"
+  createDir(dir)
+  writeExecutable(dir / "codex-acp",
+    "#!/bin/sh\nexec " & quoteShell(node) & " " & quoteShell(script) & " \"$@\"\n")
+  s.launch.env["PATH"] = dir & ":" & getEnv("PATH")
+  s.launch.env["CT_FAKE_ACP_LOG"] = dir / "methods.log"
+
+proc reviewDataset*(s: StageState; variant: string) =
+  ## A review dataset (`deepreview/fixtures/sample-review.json`), written into
+  ## the run's root as the variant asks, and the review the next
+  ## `open-review` opens. A session reference names the replay agent
+  ## (`agent-activity-deepreview/fixtures/acp-replay-agent.js`), which the
+  ## review resolves the way `ct review collect` stamps it: by reference.
+  let sample = repo() / "src/tests/gui/tests/deepreview/fixtures/sample-review.json"
+  let dir = s.root / "review"
+  createDir(dir)
+  let replayAgent = repo() / "src/tests/gui/tests/agent-activity-deepreview/fixtures/acp-replay-agent.js"
+  proc withSession(id: string; args: seq[string]): JsonNode =
+    result = parseJson(readFile(sample))
+    result["session"] = %*{"sessionId": id, "backend": "acp", "workspacePath": dir,
+                           "taskId": "", "agentCommand": replayAgent, "agentArgs": args,
+                           "endpoint": ""}
+  var dataset: JsonNode
+  case variant
+  of "plain":
+    dataset = parseJson(readFile(sample))
+  of "session":
+    dataset = withSession("session-fixture", @[])
+  of "session-pruned":
+    dataset = withSession("session-pruned", @[])
+  of "test-run":
+    createDir(dir / "review-trace")
+    dataset = withSession("session-fixture", @["--test-run", "--trace-dir=" & dir / "review-trace"])
+  of "test-run-partial":
+    dataset = withSession("session-fixture", @["--test-run-partial"])
+  of "evidence":
+    # The datasets the replayed session's evidence calls name: two that
+    # exist, one cleaned up (`gone.json`, never written).
+    let evidence = dir / "evidence"
+    createDir(evidence)
+    for (name, title, a, b) in [("iteration-1.json", "DeepReview: iteration one", 0, 2),
+                                ("iteration-2.json", "DeepReview: iteration two", 2, 3)]:
+      var d = parseJson(readFile(sample))
+      d["sessionTitle"] = %title
+      var files = newJArray()
+      for i in a ..< b: files.add d["files"][i]
+      d["files"] = files
+      writeFile(evidence / name, $d)
+    dataset = withSession("session-fixture", @["--evidence", "--evidence-dir=" & evidence])
+  else:
+    raise newException(ValueError, "review-dataset: unknown variant '" & variant & "'")
+  let path = dir / (variant & ".json")
+  writeFile(path, pretty(dataset))
+  s.launch.review = path
+
+const
+  CompilerNargoOutput = "\e[1m\e[38;5;9merror\e[0m: Expected type bool, found type Field\n" &
+    "  \e[1m\e[38;5;12m-->\e[0m src/main.nr:3:19\n   |\n 3 |     let b: bool = a;\n" &
+    "   |                   ^ Expected type bool, found type Field\n\n" &
+    "\e[1m\e[38;5;9merror\e[0m: Aborting due to 1 previous error\n"
+  CompilerTscOutput = "src/index.ts(4,7): error TS2322: Type 'string' is not assignable to type 'number'.\n" &
+    "src/index.ts(7,7): error TS2322: Type 'number' is not assignable to type 'string'.\n" &
+    "src/index.ts(11,17): error TS2339: Property 'nonExistent' does not exist on type '{}'.\n" &
+    "\nFound 3 errors.\n"
+  CompilerGccOutput = "main.c:10:5: \e[1;31merror:\e[0m expected ';' before '}' token\n" &
+    "   10 |     printf(\"hello\")\n      |     ^~~~~~\n" &
+    "main.c:15:12: \e[1;35mwarning:\e[0m unused variable 'x' [-Wunused-variable]\n"
+
+proc projectFixture*(s: StageState; name: string) =
+  ## A named project, written into the run's root, and the folder the next
+  ## `open-project` (`folder: $project`) opens. Its `.codetracer/build.yaml`
+  ## declares the tasks the desktop's main process runs for real.
+  let root = s.root / ("project-" & name)
+  removeDir(root)
+  createDir(root)
+  proc tasks(lines: varargs[string]) =
+    createDir(root / ".codetracer")
+    writeFile(root / ".codetracer" / "build.yaml", "tasks:\n" & lines.join("\n") & "\n")
+  case name
+  of "c-build-tasks":
+    # The PLAT-56 project: the real gcc fails on main.c with two errors and
+    # a warning, and builds ok.c.
+    createDir(root / "src")
+    writeFile(root / "src" / "main.c", Plat56MainC)
+    writeFile(root / "src" / "ok.c", Plat56OkC)
+    tasks("  fail:", "    command: \"" & Plat56FailCommand & "\"", "    default: true",
+          "  pass:", "    command: \"" & Plat56PassCommand & "\"",
+          "  slow:", "    command: \"sleep 30\"",
+          "  clean:", "    command: \"gcc -fdiagnostics-color=always -c src/ok.c -o /dev/null\"")
+  of "noir-build":
+    createDir(root / "src")
+    writeFile(root / "Nargo.toml", Plat55NargoToml)
+    writeFile(root / "src" / "main.nr", Plat55MainNr)
+    writeFile(root / "src" / "util.nr", Plat55UtilNr)
+  of "run-build-saves":
+    # The build prints the file it read, so what it saw is on screen.
+    writeFile(root / "note.c", "int on_disk = 1;\n")
+    tasks("  show:", "    command: \"cat note.c\"", "    default: true")
+  of "lone-file":
+    writeFile(root / "lone.c", "int lone_marker = 1;\n")
+  of "lone-file-task":
+    writeFile(root / "lone.c", "int lone_marker = 1;\n")
+    tasks("  check:", "    command: \"grep -c lone_marker lone.c\"")
+  of "build-streams":
+    # Plain progress on stdout and on stderr: no location, no severity word.
+    writeFile(root / "README", "build-streams\n")
+    tasks("  streams:",
+          "    command: \"printf 'Compiling main\\\\nLinking main\\\\n'; printf 'progress: 2 of 2 units done\\\\n' >&2\"",
+          "    default: true")
+  of "compiler-output":
+    # Each compiler's diagnostics as it prints them, printed by a task.
+    writeFile(root / "nargo.txt", CompilerNargoOutput)
+    writeFile(root / "tsc.txt", CompilerTscOutput)
+    writeFile(root / "gcc.txt", CompilerGccOutput)
+    tasks("  nargo:", "    command: \"cat nargo.txt >&2; exit 1\"", "    default: true",
+          "  tsc:", "    command: \"cat tsc.txt; exit 2\"",
+          "  gcc:", "    command: \"cat gcc.txt >&2; exit 1\"")
+  else:
+    raise newException(ValueError, "project-fixture: unknown project '" & name & "'")
+  s.launch.project = root
+  s.launch.workDir = root
+
+proc gitWorkspace*(s: StageState) =
+  ## A committed git repository the agent works on in its own worktree.
+  let root = s.root / "git-workspace"
+  removeDir(root)
+  createDir(root / "src")
+  writeFile(root / "src" / "feature.nim", "proc featureValue*(): int =\n  1\n")
+  writeFile(root / "feature_test.nim", "import src/feature\n\ndoAssert featureValue() == 1\n")
+  for args in [@["init", "."], @["config", "user.email", "codetracer-gui@example.invalid"],
+               @["config", "user.name", "CodeTracer GUI E2E"], @["config", "commit.gpgsign", "false"],
+               @["add", "."], @["commit", "-m", "Initial fixture"]]:
+    let (output, code) = execCmdEx("git " & args.quoteShellCommand, workingDir = root)
+    if code != 0:
+      raise newException(IOError, "git-workspace: git " & args.join(" ") & ": " & output)
+  s.launch.project = root
+  s.launch.workDir = root
+
+proc agentHarbor*(s: StageState) =
+  ## The real Agent Harbor the worktree session runs on. There is no
+  ## stand-in: the session's whole point is Harbor's worktree and its task
+  ## history, so without a server this is a missing prerequisite, named.
+  let url = getEnv("AGENT_HARBOR_M7_BASE_URL")
+  if url.len == 0:
+    raise newException(IOError, "agent-harbor: prerequisite missing: AGENT_HARBOR_M7_BASE_URL " &
+      "(a real Agent Harbor REST server prepared with the CodeTracer worktree scenario)")
+  for k in ["AGENT_HARBOR_M7_BASE_URL", "AGENT_HARBOR_M7_API_KEY", "AGENT_HARBOR_M7_SCENARIO",
+            "AGENT_HARBOR_M7_MOCK_AGENT_BINARY"]:
+    if existsEnv(k): s.launch.env[k] = getEnv(k)
+
+proc plantEditLayout*(s: StageState; fixture: string) =
+  ## A saved edit-mode layout a previous session left behind
+  ## (`$CODETRACER_HOME/config/default_edit_layout.json`), from the review
+  ## fixtures (`deepreview/fixtures/<fixture>.json`).
+  let src = repo() / "src/tests/gui/tests/deepreview/fixtures" / (fixture & ".json")
+  if not fileExists(src):
+    raise newException(IOError, "plant-edit-layout: no layout fixture " & src)
+  createDir(s.configDir)
+  copyFile(src, s.configDir / "default_edit_layout.json")
+
 proc runStage*(s: StageState; use: string; args: JsonNode) =
   ## One stage call. `open-recording` / `open-project` only DECIDE the launch;
   ## the binding starts its own front-end from `s.launch` afterwards.
@@ -374,13 +559,15 @@ proc runStage*(s: StageState; use: string; args: JsonNode) =
   of "open-review":
     # `ct review <dataset>`: a DeepReview dataset (a path relative to the
     # repository, or absolute), opened in the review layout.
+    # Without `dataset`, the one `review-dataset` wrote.
     let dataset = argStr(args, "dataset")
-    if dataset.len == 0:
-      raise newException(ValueError, "open-review: no dataset")
-    let path = if dataset.isAbsolute: dataset else: repo() / dataset
-    if not fileExists(path):
-      raise newException(IOError, "open-review: no dataset at " & path)
-    s.launch.review = path
+    if dataset.len > 0:
+      let path = if dataset.isAbsolute: dataset else: repo() / dataset
+      if not fileExists(path):
+        raise newException(IOError, "open-review: no dataset at " & path)
+      s.launch.review = path
+    elif s.launch.review.len == 0:
+      raise newException(ValueError, "open-review: no dataset — name one, or call review-dataset first")
     s.launch.recording = ""
     s.launch.project = ""
     s.launch.width = argInt(args, "width", s.launch.width)
@@ -407,6 +594,26 @@ proc runStage*(s: StageState; use: string; args: JsonNode) =
   of "front-end-options":
     s.frontEndOptions(if args.isNil: nil else: args{"options"}, argStr(args, "term"),
                       if args.isNil: nil else: args{"env"})
+  # --- pw1 ---
+  of "stub-agent":
+    s.stubAgent(argStr(args, "agent"))
+  of "review-dataset":
+    s.reviewDataset(argStr(args, "variant", "plain"))
+  of "plant-edit-layout":
+    s.plantEditLayout(argStr(args, "fixture"))
+  of "project-fixture":
+    s.projectFixture(argStr(args, "name"))
+  of "git-workspace":
+    s.gitWorkspace()
+  of "agent-harbor":
+    s.agentHarbor()
+  of "open-welcome":
+    s.launch.recording = ""
+    s.launch.project = ""
+    s.launch.review = ""
+    s.launch.welcome = true
+    s.launch.width = argInt(args, "width", s.launch.width)
+    s.launch.height = argInt(args, "height", s.launch.height)
   of "start-from-layout":
     let layout = argStr(args, "layout")
     let src = currentSourcePath().parentDir.parentDir / "fixtures" / "layouts" / layout
@@ -424,7 +631,8 @@ proc toJson*(s: StageState): JsonNode =
   %*{"root": s.root, "recording": s.launch.recording, "project": s.launch.project,
      "file": s.launch.file, "workDir": s.launch.workDir, "width": s.launch.width,
      "height": s.launch.height, "tick": s.launch.tick, "keymap": s.launch.keymap,
-     "review": s.launch.review, "flags": s.launch.flags, "env": env}
+     "review": s.launch.review, "flags": s.launch.flags, "welcome": s.launch.welcome,
+     "env": env}
 
 proc removeStage*(s: StageState) =
   ## The run's scratch root, removed when the run ends.
@@ -449,6 +657,7 @@ proc loadFrom*(path: string): StageState =
   result.launch.tick = j["tick"].getInt
   result.launch.keymap = j["keymap"].getStr
   result.launch.review = j{"review"}.getStr
+  result.launch.welcome = j{"welcome"}.getBool
   for k, v in j["env"]: result.launch.env[k] = v.getStr
   for f in j{"flags"}.getElems: result.launch.flags.add f.getStr
   for u in j{"stagesRun"}.getElems: result.stagesRun.add u.getStr

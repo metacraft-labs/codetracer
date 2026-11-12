@@ -1,0 +1,44 @@
+scenario: 1
+name: calltrace/collapse-retires-mark
+pack: codetracer
+summary: >-
+  Collapsing the parent of the current call leaves no call-trace row marked
+  current, and expanding it again puts the mark back on that call only
+  (codetracer#811: the mark was a row index, so collapsing `main` moved it
+  onto `report_total`).
+
+stage:
+  - use: record-program
+    with: { program: py_calltrace_collapse/main.py }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - click: { at: 'pane-tab[label="CALLTRACE"]' }
+  - wait: { until: call-trace.loaded, timeout: 60s }
+
+  - beat: stop-in-nested-call
+    narration: { text: "Stop inside the nested call: the mark is on its row." }
+    steps:
+      - click: { at: 'call-trace/call[name="assert_in_range"]' }
+      - wait: { until: { at: 'call-trace/call[name="assert_in_range"]', current: true }, timeout: 30s }
+      - expect: { at: call-trace, assert: "marks-only(assert_in_range)" }
+
+  - beat: collapse-parent
+    narration: { text: "Collapse main, the parent of the current call." }
+    steps:
+      - expect: { at: 'call-trace/call[name="main"]', expanded: true }
+      - click: { at: 'call-trace/call[name="main"]', anchor: expander }
+      - wait: { until: { at: 'call-trace/call[name="assert_in_range"]', absent: true }, timeout: 30s }
+      - wait: { until: { at: 'call-trace/call[name="report_total"]', present: true }, timeout: 30s }
+      - expect: { at: 'call-trace/call[name="main"]', expanded: false }
+      - expect: { at: call-trace, assert: "marks-none" }
+      - capture: { name: collapsed-no-mark }
+
+  - beat: expand-parent
+    narration: { text: "Expand it again: the mark is back on assert_in_range, and only there." }
+    steps:
+      - click: { at: 'call-trace/call[name="main"]', anchor: expander }
+      - wait: { until: { at: 'call-trace/call[name="assert_in_range"]', current: true }, timeout: 30s }
+      - expect: { at: 'call-trace/call[name="main"]', expanded: true }
+      - expect: { at: call-trace, assert: "marks-only(assert_in_range)" }

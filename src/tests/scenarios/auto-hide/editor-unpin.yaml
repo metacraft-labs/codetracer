@@ -1,0 +1,30 @@
+scenario: 1
+name: auto-hide/editor-unpin
+pack: codetracer
+summary: >-
+  An editor pinned to the left leaves the layout for one left strip tab,
+  which stays put while nothing touches it; its overlay opens on hover, and
+  Unpin closes it and puts the editor back.
+
+stage:
+  - use: record-program
+    with: { program: py_console_logs/main.py }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - wait: { until: editor.loaded, timeout: 60s }
+  - click: { at: 'pane-tab[label="py_console_logs/main.py"]', button: right }
+  - wait: { until: { at: 'context-menu/menu-item[label="Pin to Left"]', present: true }, timeout: 15s }
+  - click: { at: 'context-menu/menu-item[label="Pin to Left"]' }
+  - wait: { until: { at: 'strip-tab[label="py_console_logs/main.py"]', present: true }, timeout: 15s }
+  - expect: { at: 'strip-tab[label="py_console_logs/main.py"]', edge: left }
+  - expect: { at: window, assert: 'lacks-pane("py_console_logs/main.py")' }
+  - hover: { at: 'strip-tab[label="py_console_logs/main.py"]', for: 500ms }
+  - wait: { until: { at: auto-hide-overlay, present: true }, timeout: 15s }
+  - click: { at: 'strip-tab[label="py_console_logs/main.py"]', button: right }
+  - wait: { until: { at: 'context-menu/menu-item[label="Unpin"]', present: true }, timeout: 15s }
+  - click: { at: 'context-menu/menu-item[label="Unpin"]' }
+  - wait: { until: { at: 'pane-tab[label="py_console_logs/main.py"]', present: true }, timeout: 15s }
+  - expect: { at: auto-hide-overlay, absent: true }
+  - expect: { at: 'strip-tab[label="py_console_logs/main.py"]', absent: true }

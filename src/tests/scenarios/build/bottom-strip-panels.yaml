@@ -1,0 +1,32 @@
+scenario: 1
+name: build/bottom-strip-panels
+pack: codetracer
+summary: >-
+  The footer's strip holds BUILD, PROBLEMS and FIND IN FILES; docking BUILD
+  shows its header, and docking PROBLEMS shows an empty problems panel.
+
+stage:
+  - use: record-program
+    with: { program: py_console_logs/main.py }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - wait: { until: { at: 'strip-tab[label="BUILD"]', present: true }, timeout: 30s }
+  - expect: { at: 'strip-tab[label="BUILD"]', edge: bottom }
+  - expect: { at: 'strip-tab[label="PROBLEMS"]', edge: bottom }
+  - expect: { at: 'strip-tab[label="FIND IN FILES"]', edge: bottom }
+
+  - beat: build
+    steps:
+      - click: { at: 'strip-tab[label="BUILD"]' }
+      - wait: { until: { at: build-panel, present: true }, timeout: 30s }
+      - expect: { at: build-panel, where: docked, idle: true }
+      - expect: { at: 'build-panel/panel-button[label="Stop build"]', present: true }
+
+  - beat: problems
+    steps:
+      - click: { at: 'strip-tab[label="PROBLEMS"]' }
+      - wait: { until: { at: problems-panel, present: true }, timeout: 30s }
+      - expect: { at: problems-panel, where: docked, count: 0, empty: true }
+      - capture: { name: problems-docked }
