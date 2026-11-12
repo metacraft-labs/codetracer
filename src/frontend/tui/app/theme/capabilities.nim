@@ -623,6 +623,10 @@ type
     pointerWrappedAsked*: bool
       ## The query went through tmux's passthrough: its answer comes from the
       ## outer terminal, after tmux's own answer to the fence.
+    pointerWrappedDue*: bool
+      ## The wrapped query is still to be written: inside tmux it goes AFTER
+      ## the fence (`terminal_probe.pointerQueryAfterFence`), never in the
+      ## round's own write.
     # --- Terminal-Adaptation §4.2's additions to the round -----------------
     xtversion*: string
       ## XTVERSION's text (`kitty(0.36.4)`, `tmux 3.4`); "" unanswered.
@@ -1177,7 +1181,8 @@ proc resolveCapabilities*(env: TerminalEnv; flags: CapabilityFlags;
       resolvePointerCaps(
         (if pointerChoice.found: pointerChoice.value else: pscAuto),
         probe.pointerAnswered, probe.pointerReply, env.tmux.len > 0,
-        env.term.toLowerAscii.startsWith("screen"), identity.name)
+        env.term.toLowerAscii.startsWith("screen"), identity.name,
+        probe.tmuxPassthrough)
     else:
       PointerCaps(dialect: pdOff, source: "no mouse")
   let motionChoice = firstExplicit(ranks, reduceMotion, bool, false)

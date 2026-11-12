@@ -9,6 +9,14 @@
 ## kitty's and xterm's answers are their CAPTURED personas (`app/tests/personas/`),
 ## less the pixel-mouse answers the peer's cell reports could not honour
 ## (`cellMouse`).
+##
+## THE SECOND STAND-IN: a `tmux` script on `PATH` for the report's remedy
+## (PA-7). The binary asks tmux one `display -p` for its options; the script
+## prints that one line with `allow-passthrough` off, then on, so the report's
+## two answers to an unanswered wrapped query are both reached without a tmux
+## server whose option the test would have to flip. What it stands in for is
+## one line of tmux's output, whose format `terminal_probe.TmuxFormats` names;
+## a real tmux answering `display -p` is `test_plat71_terminal_pty.nim`'s TA-14.
 
 import std/[monotimes, os, posix, strutils, times, unicode, unittest]
 
@@ -21,7 +29,9 @@ import ./persona_peer
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads this spelling
 # as the suite's RUNTIME assertion count.
-const ExpectedAssertions = 132
+const ExpectedAssertions = 135
+  ## 132 -> 135: the wrapped query is after the fence (+1); the remedy case
+  ## reads the option tmux reports, off and on (+3 for the one it replaced).
 
 var countedAssertions = 0
 
@@ -384,23 +394,52 @@ suite "the setting (§5.6)":
 
 suite "tmux (PA-7)":
   test "a silent wrapped query: nothing sent, and the remedy reported":
-    var (sess, state) = open(Peer(persona: silent(), term: "tmux-256color",
+    # tmux answers the round (the fence included); the outer terminal says
+    # nothing to the wrapped query.
+    var outer = cellMouse(kitty())
+    outer.pointerReply = ""
+    var (sess, state) = open(Peer(persona: outer, term: "tmux-256color",
                                   tmux: "/tmp/none,1,0"))
     sess.sweep(Rows div 2)
     let bytes = sess.transcriptBytes()
-    # The wrapped query alone, every ESC inside doubled.
+    # The wrapped query alone, every ESC inside doubled, and AFTER the fence
+    # (tmux drops a passthrough read with the alternate-screen switch).
     ck bytes.contains("\x1bPtmux;\x1b\x1b]22;?default")
     ck bytes.count("\x1bPtmux;\x1b\x1b]22;") == 1
+    ck bytes.find("\x1bPtmux;\x1b\x1b]22;?default") > bytes.find("\x1b[c")
     sess.close(state)
-    var report = newTuiTest(tuiBinary(), @["--capabilities"])
-      .width(Cols).height(Rows).transcript()
-      .envRemove("KITTY_WINDOW_ID", "TERM_PROGRAM", "SSH_CONNECTION", "SSH_TTY")
-      .envSet("TMUX", "/tmp/none,1,0").envSet("TERM", "tmux-256color")
-      .spawn()
-    discard report.waitExit(initDuration(seconds = 20))
-    discard report.drainOutput(100)
-    ck report.transcriptBytes().contains("allow-passthrough")
-    report.close()
+
+  test "the remedy names allow-passthrough only when tmux reports it off":
+    # The wrapped query unanswered in both runs; what differs is the option
+    # tmux reports (the `tmux` stand-in on PATH, see the header).
+    proc reportWith(passthrough: string): string =
+      let dir = getTempDir() / ("ct-plat70f-tmux-" & passthrough & "-" &
+                                $getCurrentProcessId())
+      createDir(dir)
+      let stub = dir / "tmux"
+      writeFile(stub, "#!/bin/sh\nprintf '\\t\\t\\t\\t3.6a\\t" &
+                passthrough & "\\ton\\toff\\ton\\ton\\n'\n")
+      discard chmod(stub.cstring, 0o755)
+      var report = newTuiTest(tuiBinary(), @["--capabilities"])
+        .width(Cols).height(Rows).transcript()
+        .envRemove("KITTY_WINDOW_ID", "TERM_PROGRAM", "SSH_CONNECTION",
+                   "SSH_TTY")
+        .envSet("TMUX", "/tmp/none,1,0").envSet("TERM", "tmux-256color")
+        .envSet("CT_TUI_PROBE_TIMEOUT_MS", "200")
+        .envSet("PATH", dir & ":" & getEnv("PATH"))
+        .spawn()
+      discard report.waitExit(initDuration(seconds = 20))
+      discard report.drainOutput(100)
+      result = report.transcriptBytes()
+      report.close()
+      removeDir(dir)
+    let off = reportWith("off")
+    checkpoint(off)
+    ck off.contains("allow-passthrough on` in tmux")
+    let on = reportWith("on")
+    checkpoint(on)
+    ck not on.contains("allow-passthrough")
+    ck on.contains("no answer through tmux")
 
   test "an answered wrapped query: every sequence wrapped":
     var outer = cellMouse(kitty())
@@ -409,6 +448,9 @@ suite "tmux (PA-7)":
                                   tmux: "/tmp/none,1,0"))
     sess.move(Rows div 2, 60)
     let bytes = sess.transcriptBytes()
+    checkpoint("wrapped query at " & $bytes.find("\x1bPtmux;\x1b\x1b]22;?") &
+               ", fence query at " & $bytes.find("\x1b[c") &
+               ", OSC 22 written: " & $bytes.count("]22;"))
     ck bytes.contains("\x1bPtmux;\x1b\x1b]22;>")
     ck bytes.replace("\x1b\x1b]22;", "").count(Osc) == 0
     sess.close(state)

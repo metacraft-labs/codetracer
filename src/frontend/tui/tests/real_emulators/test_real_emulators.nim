@@ -129,11 +129,11 @@ proc sessionEnv(work: string): seq[(string, string)] =
     createDir(work / d)
   @[("XDG_STATE_HOME", work / "state"), ("XDG_DATA_HOME", work / "data"),
     ("XDG_CONFIG_HOME", work / "config"), ("CODETRACER_HOME", work / "home"),
-    ("CODETRACER_TUI_LAYOUT_DIR", work / "layout"),
-    # The round's wait, raised from its 10 ms default: on Xvfb's software
-    # renderer the terminals answer in 20-60 ms (the capture's `fenceMs`),
-    # and what is measured here is what they answer, not how fast.
-    ("CT_TUI_PROBE_TIMEOUT_MS", "5000")]
+    ("CODETRACER_TUI_LAYOUT_DIR", work / "layout")]
+    # No `CT_TUI_PROBE_TIMEOUT_MS`: `--capabilities` is a one-shot report and
+    # waits for the fence up to the late-reply window by itself
+    # (`terminal_probe.diagnosticProbeTimeoutMs`), which is what a user's
+    # `ct doctor terminal` does on the same software renderer.
 
 proc answersDiff(live, committed: JsonNode): seq[string] =
   ## The questions whose answers differ, as `<key>: <committed> -> <live>`.

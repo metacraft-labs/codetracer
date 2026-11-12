@@ -539,7 +539,13 @@ proc reportCapabilities(command: TuiCommand): int =
     let driver = newTerminalDriver(caps)
     driver.start()
     try:
-      negotiated = driver.negotiateOnTerminal(flags, prefs).caps
+      # A one-shot report has no frame to protect: it waits for the fence
+      # up to the late-reply window, and inside tmux for the outer
+      # terminal's wrapped OSC 22 answer too, so a slow terminal is
+      # reported from its answers and not from the environment alone.
+      negotiated = driver.negotiateOnTerminal(
+        flags, prefs, timeoutMs = diagnosticProbeTimeoutMs(),
+        pointerGraceMs = DiagnosticPointerGraceMs).caps
     finally:
       driver.stop()
   if command.capabilitiesJson:

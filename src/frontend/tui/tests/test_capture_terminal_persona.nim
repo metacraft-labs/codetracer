@@ -40,7 +40,11 @@ suite "the persona capture tool":
       var fenced = false
       for t in c.replies:
         let key = keyOf(t)
-        if fenced or key == "":
+        if fenced and key == "osc22" and c.afterFence.len > 0 and
+           not answers.hasKey("osc22"):
+          # Asked after the fence (inside tmux), answered after it.
+          answers["osc22"] = %t
+        elif fenced or key == "":
           late.add %t
         elif key == "cpr":
           cpr.add %t

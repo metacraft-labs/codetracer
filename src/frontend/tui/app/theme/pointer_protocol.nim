@@ -48,7 +48,10 @@ type
     source*: string
       ## Why, for `--capabilities`: `query`, the identified terminal, `flag`.
     remedy*: string
-      ## Non-empty when tmux's option is what keeps the shapes off.
+      ## Non-empty when tmux's option is what keeps the shapes off — only
+      ## when tmux REPORTS `allow-passthrough` off: with it on, an unanswered
+      ## query means the outer terminal did not answer, which no tmux option
+      ## changes, and the source says so instead.
 
   PointerEmitter* = object
     ## What the terminal has been told. `emit` writes only on change (PA-6).
@@ -67,6 +70,9 @@ type
 
 const
   PointerRemedy* = "pointer shapes need `set -g allow-passthrough on` in tmux"
+  PointerNoAnswerThroughTmux* = "no answer through tmux"
+    ## The source when `allow-passthrough` is on and the outer terminal did
+    ## not answer the wrapped query.
   OscOpen = "\x1b]22;"
   St = "\x1b\\"
 
@@ -122,14 +128,24 @@ func parsePointerReply*(token: string): (bool, PointerReply) =
       reply.rowAlias = true
   (true, reply)
 
+func passthroughOn*(value: string): bool =
+  ## tmux's `allow-passthrough`: `on` (visible panes) or `all` (3.4+).
+  value.strip.toLowerAscii in ["on", "all", "1"]
+
+func passthroughOff*(value: string): bool =
+  value.strip.toLowerAscii in ["off", "0"]
+
 func resolvePointerCaps*(choice: PointerShapesChoice; answered: bool;
                          reply: PointerReply; inTmux, inScreen: bool;
-                         identity: string): PointerCaps =
+                         identity: string;
+                         passthrough = ""): PointerCaps =
   ## §5.2 and §5.5: what the terminal answered, then who it is. Inside tmux
   ## only the wrapped query's answer turns the shapes on, because the identity
   ## tmux reports says nothing about its passthrough; the same goes for GNU
   ## screen, which has no passthrough to rely on. `identity` is the outer
-  ## terminal's canonical name when it is known.
+  ## terminal's canonical name when it is known. `passthrough` is tmux's
+  ## `allow-passthrough` as its `display -p` printed it ("" when unknown):
+  ## the remedy names the option only when tmux reports it off.
   if choice == pscOff:
     return PointerCaps(dialect: pdOff, source: "setting")
   let all = {low(PointerShape) .. high(PointerShape)}
@@ -152,7 +168,11 @@ func resolvePointerCaps*(choice: PointerShapesChoice; answered: bool;
                        supported: all, resetName: resetName, wrapped: inTmux,
                        source: "forced")
   if inTmux:
-    return PointerCaps(dialect: pdOff, source: "tmux", remedy: PointerRemedy)
+    if passthroughOn(passthrough):
+      return PointerCaps(dialect: pdOff, source: PointerNoAnswerThroughTmux)
+    if passthroughOff(passthrough):
+      return PointerCaps(dialect: pdOff, source: "tmux", remedy: PointerRemedy)
+    return PointerCaps(dialect: pdOff, source: "tmux, passthrough unknown")
   if inScreen or setOnly == pdOff:
     return PointerCaps(dialect: pdOff, source: "unidentified")
   PointerCaps(dialect: setOnly, supported: all, resetName: resetName,

@@ -56,6 +56,9 @@ type
     fenceMs*: float
     round*: string
       ## The bytes the capture wrote: the binary's round for this terminal.
+    afterFence*: string
+      ## What it wrote once the fence came back: inside tmux, the wrapped
+      ## OSC 22 query (`terminal_probe.pointerQueryAfterFence`); "" elsewhere.
     cols*, rows*: int
 
 proc parsePersona*(id, text: string): CapturedPersona =
@@ -67,7 +70,8 @@ proc parsePersona*(id, text: string): CapturedPersona =
     capturedAt: j["capturedAt"].getStr, host: j["host"].getStr,
     env: j["env"], answers: j["answers"],
     fenceMs: (if j["fenceMs"].kind == JNull: -1.0 else: j["fenceMs"].getFloat),
-    round: j["round"].getStr, cols: j["cols"].getInt, rows: j["rows"].getInt)
+    round: j["round"].getStr, afterFence: j{"afterFence"}.getStr,
+    cols: j["cols"].getInt, rows: j["rows"].getInt)
   for r in j["replies"]:
     result.replies.add r.getStr
 
@@ -194,6 +198,13 @@ proc probeOf*(p: CapturedPersona; cprExpected = 6): TerminalProbe =
         result.truecolor = true
         if result.truecolorVia.len == 0:
           result.truecolorVia = "decrqss"
+  # Inside tmux the pointer query was asked after the fence, and the outer
+  # terminal's answer arrived after it too.
+  if p.afterFence.len > 0:
+    let (ok, reply) = parsePointerReply(p.answers{"osc22"}.getStr)
+    if ok:
+      result.pointerAnswered = true
+      result.pointerReply = reply
   if p.fenceMs >= 0:
     result.rttMeasured = true
     result.rttMs = int(round(p.fenceMs))

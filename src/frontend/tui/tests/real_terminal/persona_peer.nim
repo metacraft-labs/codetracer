@@ -84,6 +84,8 @@ const
     "\x1b[?2026$p", "\x1b[?2027$p", "\x1b[6n", "\x1b[c", WrappedPointerQuery, PointerQuery]
     ## Every question of the start-up round (`host/terminal_probe`).
   Da1Query* = "\x1b[c"
+  AfterFenceWaitMs* = 1500
+    ## How long after the fence the peer waits for the wrapped OSC 22 query.
   CprQuery* = "\x1b[6n"
 
 proc epochTimeMs*(): int64 =
@@ -155,6 +157,21 @@ proc serve*(sess: var TuiTestSession; p: Persona; timeoutMs = 20000;
           if p.delayMs > 0:
             sleep(p.delayMs)
           sess.send(pending)
+        # Inside tmux the binary asks the outer terminal about pointer
+        # shapes AFTER the fence (`terminal_probe.pointerQueryAfterFence`):
+        # a persona with an answer waits for that query and answers it, as
+        # the outer terminal does through tmux's passthrough.
+        if p.pointerReply.len > 0 and PointerQuery notin result.queries:
+          let until = epochTimeMs() + AfterFenceWaitMs
+          while epochTimeMs() < until and sess.isAlive:
+            discard sess.drainOutput(15)
+            let after = sess.transcriptBytes().find(WrappedPointerQuery, at)
+            if after >= 0:
+              result.queries.add WrappedPointerQuery
+              let a = p.answerFor(WrappedPointerQuery, cpr)
+              result.answered.add a
+              sess.send(a)
+              break
         return
     if not sess.isAlive:
       return

@@ -606,6 +606,14 @@ type
       ## exit path (`stop`, a signal, `atexit`).
     pointer*: PointerEmitter
       ## Pointer-Affordances §5.3: what the terminal was told about the pointer.
+    keyProtocolHeld*: bool
+      ## Extended key reporting waits while a reply is still to come THROUGH
+      ## tmux: the outer terminal's answer to the wrapped OSC 22 query reaches
+      ## the pane as input that tmux re-reads as keys, and once the pane has
+      ## asked for `modifyOtherKeys` (tmux's `extended-keys`), tmux re-encodes
+      ## the answer's `ESC ]` as Alt+`]` (`CSI 27 ; 3 ; 93 ~`) and the reply is
+      ## lost. Measured on tmux 3.6a in kitty 0.44.0 (2026-11-12). Set and
+      ## released by the negotiation (`holdKeyProtocol`).
     focusReporting: FocusReporting
       ## DECSET 1004, asked for by `start` whenever the terminal is ours (see
       ## "Focus reporting" above). `nim-termctl`'s, like the mouse and key
@@ -638,8 +646,8 @@ proc eraseByte*(d: TerminalDriver): char =
 proc applyKeyProtocol(d: TerminalDriver) =
   ## Bring the terminal's key reporting to `caps.keyProtocol`, on a started
   ## driver: undo what is on if it differs, then ask for what was negotiated.
-  ## Legacy asks for nothing.
-  if not d.started or not d.altOwned:
+  ## Legacy asks for nothing. Nothing changes while `keyProtocolHeld`.
+  if not d.started or not d.altOwned or d.keyProtocolHeld:
     return
   let want = case d.caps.keyProtocol
              of kpKitty: 1
@@ -657,6 +665,21 @@ proc applyKeyProtocol(d: TerminalDriver) =
   of 1: d.keyReporting = enableKeyReporting(krmKitty, d.outFd)
   of 2: d.keyReporting = enableKeyReporting(krmModifyOtherKeys, d.outFd)
   else: discard
+
+proc holdKeyProtocol*(d: TerminalDriver; held: bool) =
+  ## Hold extended key reporting back while a wrapped reply is outstanding
+  ## (`keyProtocolHeld`); releasing it applies what was negotiated.
+  if d.keyProtocolHeld == held:
+    return
+  d.keyProtocolHeld = held
+  if held:
+    # Already on (`:terminal-info`'s `r` asks again mid-session): off until
+    # the reply has come through.
+    if d.keyReporting.active:
+      disableKeyReporting(d.keyReporting)
+      d.framer.altChordsAsCsiU = false
+  else:
+    d.applyKeyProtocol()
 
 proc restoreUnion*(d: TerminalDriver): string =
   ## PLAT-71 (Terminal-Adaptation §4.8 rule 3): the resets of every mode this

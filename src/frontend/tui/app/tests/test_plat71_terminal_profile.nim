@@ -61,7 +61,9 @@ import ./personas/personas
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count.
-const ExpectedAssertions = 613
+const ExpectedAssertions = 614
+  ## 613 -> 614, measured: tmux in kitty's pointer answer, re-captured with
+  ## the query after the fence.
   ## 554 -> 613, measured: the personas are the six CAPTURED ones (kitty,
   ## foot, xterm, Ghostty, Alacritty, tmux in kitty) and six written ones
   ## (twelve, from ten), each swept by TA-1, TA-9 and TA-13, and TA-1's cases
@@ -269,6 +271,8 @@ suite "PLAT-71 Tier 1: the terminal's capability profile":
       of "tmux-3.6a-in-kitty-0.44.0":
         ck caps.identity.via == @["tmux 3.6a"]
         ck caps.widths.clusters == knYes
+        # kitty answered the wrapped OSC 22 query, asked after the fence.
+        ck caps.pointer.dialect == pdKitty and caps.pointer.wrapped
       of "VTE 0.76 (GNOME Terminal)":
         ck caps.identity.name == "vte" and caps.identity.version == "0.76.0"
         ck not caps.synchronizedOutput     # VTE answers 4: permanently reset

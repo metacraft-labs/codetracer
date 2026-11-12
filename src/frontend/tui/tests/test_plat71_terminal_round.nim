@@ -24,7 +24,8 @@ import ../app/tests/personas/personas
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count.
-const ExpectedAssertions = 78
+const ExpectedAssertions = 84
+  ## 78 -> 84: each captured persona's after-fence query is this binary's (+6).
   ## 48 -> 78, measured: the six probe code points (+6) and the six captured
   ## personas, four checks each (+24).
 
@@ -120,10 +121,21 @@ suite "PLAT-71 Tier 1: the start-up round":
     for c in capturedPersonas():
       checkpoint(c.provenance)
       ck queriesFor(initCapabilityFlags(), envOf(c), c.cols) == c.round
+      ck pointerQueryAfterFence(initCapabilityFlags(), envOf(c)) ==
+         c.afterFence
       var shipped = TerminalProbe(attempted: true, cprExpected: 6)
-      for token in c.replies:
+      var fenceAt = c.replies.len
+      for i, token in c.replies:
         discard noteReply(shipped, token)
-        if shipped.answered: break
+        if shipped.answered:
+          fenceAt = i
+          break
+      # After the fence, the answer to what was asked after it (tmux's
+      # wrapped OSC 22 query), as the main loop's `takeReply` reads it.
+      if c.afterFence.len > 0:
+        for token in c.replies[min(fenceAt + 1, c.replies.len) .. ^1]:
+          if token.startsWith("\x1b]22;"):
+            discard noteReply(shipped, token)
       var read = c.probeOf()
       # `noteReply` does not time the round; `runStartupProbe` does.
       read.rttMeasured = false

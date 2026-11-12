@@ -29,11 +29,15 @@
 ##   * `cols`, `rows`, `fenceMs` — the window and the time from the write to
 ##     the DA1 answer;
 ##   * `round` — the bytes written;
+##   * `afterFence` — what is written once the fence has come back: inside
+##     tmux, Pointer-Affordances §5.2's wrapped OSC 22 query, which the binary
+##     writes then too (`terminal_probe.pointerQueryAfterFence`); "" elsewhere;
 ##   * `replies` — every reply token, in arrival order, verbatim;
 ##   * `answers` — the same tokens keyed by the question they answer
 ##     (`xtversion`, `da2`, `da1`, `decrqm.<mode>`, `cpr` in order, `osc11`,
-##     `xtgettcap`, `decrqss`, `kittyKeyboard`, `cellSize`, `osc22`), and
-##     `late` for anything after the fence.
+##     `xtgettcap`, `decrqss`, `kittyKeyboard`, `cellSize`, `osc22` — after
+##     the fence too when `afterFence` asked it), and `late` for anything
+##     else after the fence.
 ##
 ## Reading continues for `--grace` ms after the fence (default 400), because
 ## some answers are written after it by design (Pointer-Affordances §5.5's
@@ -181,6 +185,7 @@ proc main() =
   # The default command line's round: no flag pins the theme, the depth or
   # the mouse, so every question the binary can ask is asked.
   let roundBytes = queriesFor(initCapabilityFlags(), env, cols)
+  let afterFence = pointerQueryAfterFence(initCapabilityFlags(), env)
   writeAll(tty, "\x1b[?1049h\x1b[?25l")
   let start = getMonoTime()
   writeAll(tty, roundBytes)
@@ -202,6 +207,9 @@ proc main() =
       for t in tokens(replies):
         if keyOf(t) == "da1":
           fenceAt = (getMonoTime() - start).inMicroseconds.float / 1000.0
+          # As the binary does: the wrapped query, now, in a write of its own.
+          if afterFence.len > 0:
+            writeAll(tty, afterFence)
           break
   writeAll(tty, "\x1b[?25h\x1b[?1049l")
   discard tcSetAttr(tty, TCSAFLUSH, addr saved)
@@ -217,7 +225,10 @@ proc main() =
     replyList.add %t
     let key = keyOf(t)
     if fenceSeen:
-      late.add %t
+      if key == "osc22" and afterFence.len > 0 and not answers.hasKey("osc22"):
+        answers["osc22"] = %t
+      else:
+        late.add %t
       continue
     case key
     of "": late.add %t
@@ -253,6 +264,7 @@ proc main() =
     "cols": cols, "rows": rows,
     "fenceMs": (if fenceAt >= 0: %(float(int(fenceAt * 100 + 0.5)) / 100) else: newJNull()),
     "round": roundBytes,
+    "afterFence": afterFence,
     "replies": replyList,
     "answers": answers}
   createDir(opts.outPath.parentDir)
