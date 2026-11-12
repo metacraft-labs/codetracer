@@ -1544,6 +1544,14 @@ proc nimTraceLines*(self: EditorViewComponent): seq[string] =
   for ln in 1 .. count:
     result.add $cast[cstring](model.getLineContent(ln))
 
+proc caretLine*(self: EditorViewComponent): int =
+  ## The 1-based line of the editor's caret (Monaco's position), 1 when the
+  ## editor has none yet.
+  if self.monacoEditor.isNil:
+    return 1
+  let pos = self.monacoEditor.toJs.getPosition()
+  if pos.isNil: 1 else: max(1, cast[int](pos.lineNumber))
+
 proc runNimTraceAtCaret*(self: EditorViewComponent; action: NimTraceAction) =
   ## An `editor.trace-*` operation (its chord, the palette): the caret's
   ## position, traced through the shared ViewModel.

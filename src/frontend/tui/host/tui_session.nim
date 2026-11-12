@@ -60,6 +60,7 @@ import ../../viewmodel/store/types as store_types
 import ../../viewmodel/viewmodels/inline_value_timeline
 
 import viewmodels/filesystem_vm   # the replay file tree the Files pane lists
+import viewmodels/generated_code_presenter   # Generated-Code-Listing §13.4
 import viewmodels/calltrace_vm    # CALLTRACE_BUFFER, the desktop's pre-fetch
 import ../../viewmodel/pane_viewport   # HSF-V2: the pane's cells as a Viewport
 import viewmodels/scratchpad_vm   # PLAT-50: the scratchpad pane
@@ -2281,6 +2282,27 @@ proc header*(s: TuiSession; rt: TuiRuntime) =
   rt.editServices.readSource = proc(path: string): EditReadResult =
     let read = s.recordedSourceText(path)
     EditReadResult(ok: read.ok, text: read.text, message: read.message)
+  # Generated-Code-Listing §13.4: "View Generated C Source" — the listing
+  # built by the shared presenter from THIS recording's files, read as the
+  # Debug-mode editor reads them, and shown in the Low Level Code pane.
+  let owner = s
+  rt.editServices.showGeneratedCode = proc(targetId, path: string;
+                                           line: int): string =
+    let core = owner.session.session
+    var files: seq[string] = @[]
+    if not core.fileTreeVM.isNil:
+      recordedPathsOf(core.fileTreeVM.rootEntry.val, files)
+    # The terminal's provider answers at once, so the listing is in the pane
+    # (and the pane's model rebuilt from it) before this returns.
+    var failure = ""
+    let refused = showGeneratedCode(core.generatedCodeVM, core.lowLevelCodeVM,
+      targetId, path, line, core.store.stop.val, files,
+      proc(p: string; done: proc(r: RecordedText)) =
+        done(owner.recordedSourceText(p)),
+      proc(why: string) =
+        failure = why
+        owner.refreshLowLevel(rt))
+    if refused.len > 0: refused else: failure
   # M76: the session's `DebugControlsVM` Stop (installed by `native_host`)
   # does this terminal's half too — Edit mode, the runtime forgetting the
   # session — whichever caller reaches it, so a Stop from anywhere leaves

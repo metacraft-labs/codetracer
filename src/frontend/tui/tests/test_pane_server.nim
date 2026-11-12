@@ -761,4 +761,51 @@ suite "HSF-E1: the pane server, over a real recording":
         break
     checkpoint("Low Level Code:\n" & listing)
     check listing.len > 0 and "No low-level code" notin listing
+
+    # ---- Generated-Code-Listing §13.4: the generated C --------------------
+    # Into the program's own module, then the editor's cursor on the stop.
+    var at = (file: "", line: 0)
+    for i in 0 ..< 40:
+      let (_, notes) = srv.request("operation/run", %*{"session": sid,
+        "operation": "debugger.step-into"})
+      for n in notes.notes("session/position"):
+        at = (file: n{"params", "file"}.getStr, line: n{"params", "line"}.getInt)
+      if at.file.endsWith("flow_test.nim"):
+        break
+    checkpoint("stop: " & $at)
+    check at.file.endsWith("flow_test.nim")
+    discard srv.request("source/cursor", %*{"session": sid, "file": at.file,
+                                            "line": at.line, "column": 1})
+    # As an editor meets it: the pane not shown, the layout not placing it.
+    discard srv.request("pane/close", %*{"session": sid, "pane": "lowLevelCode"})
+    let (shown, shownNotes) = srv.request("operation/run", %*{"session": sid,
+      "operation": "view.generated-c-source"})
+    checkpoint("view.generated-c-source answered " & $shown)
+    check shown{"result", "ok"}.getBool
+    # The layout now places the pane beside the source; the editor opens it.
+    let placed = shownNotes.notes("layout/changed")
+    check placed.len == 1 and "lowLevelCode" in $placed[0]{"params", "layout"}
+    let (_, openNotes) = srv.request("pane/open", %*{"session": sid,
+      "pane": "lowLevelCode", "width": 100, "height": 16})
+    var cRows: seq[string] = @[]
+    for n in openNotes.notes("pane/content"):
+      if n{"params", "pane"}.getStr == "lowLevelCode":
+        cRows = @[]
+        for r in n{"params", "rows"}.getElems:
+          cRows.add r{"text"}.getStr
+    checkpoint("generated C rows:\n" & cRows[0 ..< min(cRows.len, 20)].join("\n"))
+    # The pane shows the C the cursor's line compiled to: the directive
+    # naming that line is in view, not the file's `#define`s at its top.
+    check cRows.anyIt(("#line " & $at.line & " ") in it)
+    # "View Disassembly" is the pane's machine code again.
+    let (asmShown, _) = srv.request("operation/run", %*{"session": sid,
+      "operation": "view.disassembly"})
+    check asmShown{"result", "ok"}.getBool
+    # Outside a Nim source the operation refuses, with its reason.
+    discard srv.request("source/cursor", %*{"session": sid,
+      "file": "/somewhere/else.py", "line": 1, "column": 1})
+    let (refused, _) = srv.request("operation/run", %*{"session": sid,
+      "operation": "view.generated-c-source"})
+    check not refused{"result", "ok"}.getBool
+    check "not a Nim source" in refused{"result", "detail"}.getStr
     discard srv.request("shutdown")

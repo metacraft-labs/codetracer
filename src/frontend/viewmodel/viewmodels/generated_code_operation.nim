@@ -138,7 +138,9 @@ const LadderRows: seq[LadderRow] = @[
     lang: slNim,
     extensions: @["nim"],
     targets: @[
-      target("nim.c", "Generated C", "", NativeProducer),
+      # §13.4: read from the generated C's own `#line` directives
+      # (`nim_c_producer`), not from debug information.
+      target("nim.c", "Generated C", "", "nim-line-directives"),
       # THE CHAIN. Assembly is generated from the C, not from the Nim.
       target("nim.asm", "Assembly", "nim.c", NativeProducer),
     ]),

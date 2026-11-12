@@ -65,6 +65,7 @@ import viewmodels/[
   step_list_vm,
   repl_vm,
   low_level_code_vm,
+  generated_code_vm,
   request_panel_vm,
   trace_log_vm,
   command_palette_vm,
@@ -145,6 +146,10 @@ type
     stepListVM*: StepListVM
     replVM*: ReplVM
     lowLevelCodeVM*: LowLevelCodeVM
+    generatedCodeVM*: GeneratedCodeVM
+      ## The Generated Code Listing operation's state (Generated-Code-Listing
+      ## §7), for the listing the Low Level Code pane shows — the session's,
+      ## so every host reaches it (`generated_code_presenter`).
     visualReplay*: VisualReplayPanesVM
       ## PLAT-59: the Visual Replay panes (Video Player, Pixel History, Shader
       ## Debug) over their player — nil until a native host's producer
@@ -308,6 +313,8 @@ proc initializePanelViewModels*(session: SessionViewModel) =
     session.replVM = createReplVM(session.store)
   if session.lowLevelCodeVM.isNil:
     session.lowLevelCodeVM = createLowLevelCodeVM(session.store)
+  if session.generatedCodeVM.isNil:
+    session.generatedCodeVM = createGeneratedCodeVM()
   if session.requestPanelVM.isNil:
     session.requestPanelVM = createRequestPanelVM(session.store)
   if session.traceLogVM.isNil:
@@ -585,6 +592,8 @@ proc dispose*(session: SessionViewModel; disconnectBackend: bool = true) =
     session.replVM.dispose()
   if not session.lowLevelCodeVM.isNil:
     session.lowLevelCodeVM.dispose()
+  if not session.generatedCodeVM.isNil:
+    session.generatedCodeVM.dispose()
   if not session.requestPanelVM.isNil:
     session.requestPanelVM.dispose()
   if not session.traceLogVM.isNil:
