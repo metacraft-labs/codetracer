@@ -3932,6 +3932,36 @@ jobs:
         if: ${{ !cancelled() }}
         run: nix develop .#devShells.x86_64-linux.default --command just test-tui-real-terminal
 
+      - name: Scenarios — the linter, the inventory and the terminal lane
+        # CodeTracer's scenario pack (src/tests/scenarios): every scenario
+        # against the pack (no step may reach application code), the inventory
+        # of the UI tests and their port against the tree, the terminal lane
+        # (the shipped binary in a real pty, fast and realistic), the check that
+        # a failed run's recording names the failing step, and the
+        # documentation's captures against what their scenarios produce now.
+        # DemoVideoScript and DemoVideoScript-TermAssert are siblings at
+        # repro.lock's pins (provisioned above).
+        if: ${{ !cancelled() }}
+        run: |
+          nix develop .#devShells.x86_64-linux.default --command bash -c '
+            set -e
+            just scenario-build dvs stage terminal
+            just scenario-lint
+            just scenario-inventory
+            just scenario-lane terminal
+            bash ci/test/scenario-broken-run.sh terminal
+            just docs-captures --check'
+
+      - name: Upload the failed scenario runs (terminal)
+        # The recording of every failed run: manifest, per-step stills and
+        # state, the failure's screen, the cast. How to read one:
+        # .agents/codebase-insights.txt, "Scenario run recordings".
+        if: ${{ failure() }}
+        uses: metacraft-labs/DemoVideoScript/.github/actions/upload-failed-runs@a59da61fc085d01eb38e00ebba57476c6da44a81
+        with:
+          build-dir: build
+          name: scenario-runs-terminal
+
       - name: CTF-P1b's Agent Harbor stories on a real terminal, as captures
         # The `tui-real-terminal` suite `test_ctf_p1b_tui_views_cover_web_states`
         # again (Tier 2 above ran it too), now writing every story, theme and
@@ -4176,6 +4206,29 @@ jobs:
         # dev shell (the one that declares the X/Wayland libraries and the
         # compositor tools); the recipe enters it itself.
         run: nix develop .#devShells.x86_64-linux.default --command just gpui-window-captures
+
+      - name: Scenarios — the GPUI lane
+        # The windowed `build/bin/codetracer-gpui-window` and its shim, built by
+        # the step above, on DemoVideoScript-GuiAssert's private Xvfb: read by
+        # vision (GuiAssert's capture and OCR), driven by OS-level input.
+        # GuiAssert's capture and input helpers are built in GuiAssert's own
+        # dev shell, which declares their X and Wayland libraries.
+        if: ${{ !cancelled() }}
+        run: |
+          (cd ../GuiAssert && nix develop --command bash helpers/linux/build.sh "${{ github.workspace }}/build/gui-assert-helpers")
+          nix develop .#devShells.x86_64-linux.default --command bash -c '
+            set -e
+            export GUI_ASSERT_HELPER_DIR="$PWD/build/gui-assert-helpers"
+            just scenario-build dvs stage gpui
+            bash ci/test/scenarios.sh lane gpui
+            bash ci/test/scenario-broken-run.sh gpui'
+
+      - name: Upload the failed scenario runs (GPUI)
+        if: ${{ failure() }}
+        uses: metacraft-labs/DemoVideoScript/.github/actions/upload-failed-runs@a59da61fc085d01eb38e00ebba57476c6da44a81
+        with:
+          build-dir: build
+          name: scenario-runs-gpui
 
       - name: PLAT-35's GPUI arm as a real window, one per parity scenario
         # Linux has no headless GPUI renderer, so PLAT-35's GPUI frames on
@@ -6687,6 +6740,27 @@ jobs:
       # failure it guards against, the pane emptying after a jump, is one a
       # reader hits immediately, so it should be reported even when an earlier
       # spec in the suite has already gone red.
+      - name: Scenarios — the desktop lane
+        # The real `ct` → Electron through DemoVideoScript-Playwright's arm
+        # with CodeTracer's Playwright binding, under Xvfb at 2560x1440, 96 dpi.
+        if: ${{ !cancelled() && matrix.platform == 'nixos' }}
+        run: |
+          nix develop .#devShells.x86_64-linux.default --command bash -c '
+            set -e
+            just scenario-build dvs stage playwright
+            just scenario-lane-xvfb electron
+            . scripts/lib/own-xvfb.sh
+            trap own_xvfb_stop EXIT
+            own_xvfb_start -screen 0 2560x1440x24 -dpi 96 -nolisten tcp
+            bash ci/test/scenario-broken-run.sh electron'
+
+      - name: Upload the failed scenario runs (desktop)
+        if: ${{ failure() && matrix.platform == 'nixos' }}
+        uses: metacraft-labs/DemoVideoScript/.github/actions/upload-failed-runs@a59da61fc085d01eb38e00ebba57476c6da44a81
+        with:
+          build-dir: build
+          name: scenario-runs-electron
+
       - name: Event Log stays static across a jump
         if: always()
         run: ./ci/test/ui-tests-db.sh tests/event-log/event_log_is_static_across_jumps.spec.ts

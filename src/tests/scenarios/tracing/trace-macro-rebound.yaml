@@ -1,0 +1,33 @@
+scenario: 1
+name: tracing/trace-macro-rebound
+pack: codetracer
+summary: >-
+  The user rebound "Trace macro at cursor" in keybindings.json and removed its
+  default chord: the shortcut the scenario sends is the one the user's keymap
+  binds (the binding resolver asks the application's own router), and the
+  macro is traced in a new session tab as before.
+
+stage:
+  - use: nim-project
+  - use: plant-config
+    with:
+      file: keybindings.json
+      content: |
+        [
+          { "key": "ctrl+k t m", "command": "-editor.trace-macro-at-cursor" },
+          { "key": "ctrl+alt+j", "command": "editor.trace-macro-at-cursor" }
+        ]
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - wait: { until: editor.loaded, timeout: 60s }
+  - click: { at: 'editor[file="tracing.nim"]/line[number="26"]', anchor: text-start }
+  - expect: { at: 'editor[file="tracing.nim"]', assert: "caret-at(26)" }
+  - chord: { bound: editor.trace-macro-at-cursor }
+    settle: false
+  - wait: { until: { at: session-strip, count: 2 }, timeout: 180s }
+  - wait: { until: replay-idle, timeout: 120s }
+  - expect:
+      at: 'editor[file="tracing.nim"]'
+      assert: "stopped-within(3, 4)"

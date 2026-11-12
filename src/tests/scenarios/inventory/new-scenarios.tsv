@@ -1,0 +1,5 @@
+scenario	why
+tracing/trace-macro-at-caret.yaml	The user's own example (2026-10-07): open a recording, check the screen, click to put the caret on a macro call, send the trace-macro shortcut, check the new tab — on every flavour, fast and realistic.
+tracing/trace-macro-rebound.yaml	Chord by binding against a user's keybindings.json: the resolver must ask the application's own router, user rows and removals included.
+editor/click-after-the-pointer-rests.yaml	A click after the pointer came to rest on the editor places the caret (the GPUI window lost such presses; scripted clicks never rest).
+docs/terminal-trace-macro.yaml	The first documentation capture, cited by name from docs/book-isonim (ci/test/docs-captures.sh).

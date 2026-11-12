@@ -1,0 +1,13 @@
+# The terminal flavour: the shipped `codetracer-tui` in a real pty under
+# TermAssert (DemoVideoScript-TermAssert), with CodeTracer's TermAssert binding
+# linked in process (`dvs-termassert-codetracer`). Run from the repository
+# root: `ci/test/scenarios.sh lane terminal`.
+lane: 1
+name: terminal
+pack: ../pack/codetracer.pack.yaml
+backend: termassert
+modes: [fast, realistic]
+retention: { runs: 5, failure-days: 7 }
+applicable:
+  - ../tracing/trace-macro-at-caret.yaml
+unsupported: []

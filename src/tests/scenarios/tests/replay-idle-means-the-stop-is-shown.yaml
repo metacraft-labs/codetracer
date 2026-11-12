@@ -1,0 +1,19 @@
+scenario: 1
+name: tests/replay-idle-means-the-stop-is-shown
+pack: codetracer
+summary: >-
+  The pack's `replay-idle` condition holds only once the window shows where
+  the replay is stopped: an observation right after the wait, with no other
+  synchronisation, sees the editor on the stop. (The check that a binding's
+  sync condition does not fire early: the pack's mutation grade plants one
+  that does.)
+
+stage:
+  - use: nim-project
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - expect:
+      at: 'editor[file="tracing.nim"]'
+      assert: "stopped-within(18, 21)"

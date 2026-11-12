@@ -1,0 +1,22 @@
+scenario: 1
+name: editor/click-after-the-pointer-rests
+pack: codetracer
+summary: >-
+  A user moves the pointer onto a line, rests, then clicks: the caret goes to
+  that line. (The GPUI window re-creates the editor's rows when the pointer
+  enters it, and once lost every press made after the pointer came to rest;
+  scripted clicks never rest, so only real input showed it.)
+
+stage:
+  - use: nim-project
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - wait: { until: editor.loaded, timeout: 60s }
+  - move: { at: 'editor[file="tracing.nim"]/line[number="26"]', anchor: text-start }
+  - hover: { at: 'editor[file="tracing.nim"]/line[number="26"]', anchor: text-start, for: 800ms }
+  - click: { at: 'editor[file="tracing.nim"]/line[number="26"]', anchor: text-start }
+  - expect: { at: 'editor[file="tracing.nim"]', assert: "caret-at(26)" }
+  - click: { at: 'editor[file="tracing.nim"]/line[number="20"]', anchor: text-start }
+  - expect: { at: 'editor[file="tracing.nim"]', assert: "caret-at(20)" }

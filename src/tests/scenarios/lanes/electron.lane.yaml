@@ -1,0 +1,13 @@
+# The desktop flavour: the real `ct` → Electron, through
+# DemoVideoScript-Playwright's arm with CodeTracer's Playwright binding.
+# Run from the repository root (the backend's paths are relative to it):
+# `ci/test/scenarios.sh lane electron`.
+lane: 1
+name: electron
+pack: ../pack/codetracer.pack.yaml
+backend: "cmd:node build/scenario-arm/src/main.ts --binding src/tests/scenarios/bindings/playwright/codetracer-binding.ts"
+modes: [fast, realistic]
+retention: { runs: 5, failure-days: 7 }
+applicable:
+  - ../tracing/trace-macro-at-caret.yaml
+unsupported: []

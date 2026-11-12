@@ -5494,6 +5494,47 @@ test-tui-real-terminal: build-tui
   exec > >(tee test-logs/test-tui-real-terminal.log) 2>&1
   bash ci/lib/run-nim-test-lane.sh tui-real-terminal
 
+# ─── Scenarios: CodeTracer's DemoVideoScript pack ────────────────────────────
+#
+# The user-level tests as scenarios (src/tests/scenarios/README.md): one
+# scenario file runs on the desktop (Playwright), the terminal (TermAssert)
+# and the GPUI window (GuiAssert). The runner and the backends are siblings
+# at repro.lock's pins (ci/test/scenarios.sh names them). A failed run's
+# recording is under build/scenario-runs/; `.agents/codebase-insights.txt`,
+# "Scenario run recordings", says how to read one.
+
+# The runner, the stage tool and the three flavours' programs.
+scenario-build *parts:
+  bash ci/test/scenarios.sh build {{parts}}
+
+# The scenario linter over every scenario: no step may reach application code.
+scenario-lint:
+  bash ci/test/scenarios.sh lint
+
+# One flavour's lane: `terminal`, `gpui` or `electron` (the last two need a
+# display: run them under Xvfb, as `scenario-lane-xvfb` does).
+scenario-lane flavour: build-tui
+  bash ci/test/scenarios.sh lane {{flavour}}
+
+# A lane on a private Xvfb at 2560x1440, 96 dpi (the desktop's and GPUI's).
+scenario-lane-xvfb flavour:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  . "{{justfile_directory()}}/scripts/lib/own-xvfb.sh"
+  trap "own_xvfb_stop" EXIT
+  own_xvfb_start -screen 0 2560x1440x24 -dpi 96 -nolisten tcp || exit 1
+  bash ci/test/scenarios.sh lane {{flavour}}
+
+# The inventory of the UI tests and their port, checked against the tree.
+scenario-inventory:
+  python3 ci/test/scenario-inventory.py
+
+# The documentation's captures, made deterministically by the scenarios the
+# pages cite (`<!-- capture scenario=… capture=… -->`); `--check` fails when a
+# page's capture is not what its scenario produces now.
+docs-captures *args: build-tui
+  bash ci/test/docs-captures.sh {{args}}
+
 # The persona capture tool (CodeTracer-TUI-Terminal-Adaptation.md §13.1): run
 # the binary's start-up round in the terminal it runs in and save the answers
 # as a persona fixture. Linked like `build-tui`, since it writes the round

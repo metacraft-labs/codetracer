@@ -1,0 +1,16 @@
+# The GPUI flavour: the shipped `codetracer-gpui` window on a private X
+# display, read by vision and driven by OS-level input (DemoVideoScript-
+# GuiAssert), with CodeTracer's GuiAssert binding — the screen oracle —
+# linked in process (`dvs-guiassert-codetracer`). Run from the repository
+# root: `ci/test/scenarios.sh lane gpui`.
+lane: 1
+name: gpui
+pack: ../pack/codetracer.pack.yaml
+backend: guiassert
+modes: [fast, realistic]
+retention: { runs: 5, failure-days: 7 }
+# a GPU window drawn by a software renderer takes longer to settle
+settle-timeout: 20000
+applicable:
+  - ../tracing/trace-macro-at-caret.yaml
+unsupported: []

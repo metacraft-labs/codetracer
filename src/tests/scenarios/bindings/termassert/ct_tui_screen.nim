@@ -1,0 +1,394 @@
+## ct_tui_screen.nim — the terminal front-end's page objects, read off its
+## screen: the CodeTracer pack's TermAssert binding's reader.
+##
+## What a person reading the terminal sees, and nothing else: the top bar
+## (menu, transport, omnibox, session tabs, the `[ct]` trace summary), the
+## boxes of the layout — each with its strip of pane tabs and its content —,
+## the context menu and palette overlays, and the status line. Every property
+## comes from the cells (their text, and the colours that tell an active tab
+## from an inactive one); the terminal's cursor is the editor's caret when the
+## editor holds the focus, as on a real terminal.
+##
+## What is not drawn cannot be read. A property the screen does not show at
+## the moment (an editor's caret while it has no focus, a list's rows past the
+## box) is reported unreadable, so a scenario that needs it is `unsupported`
+## on this backend rather than answered from somewhere else.
+##
+## The reader is a pure function of the screen (`ScreenGrid`), so it is
+## exercised by `test_ct_tui_screen.nim` on captured screens as well as live.
+
+import std/[json, strutils, options, tables]
+from std/unicode import Rune, toRunes, runeLen, `$`, strip
+import demo_video_script/surface
+
+type
+  GridCell* = object
+    text*: string          ## the cell's character ("" for a continuation)
+    bg*: string            ## its background, as a comparable token
+    fg*: string
+    bold*, inverse*: bool
+
+  ScreenGrid* = object
+    width*, height*: int
+    rows*: seq[seq[GridCell]]
+    cursorRow*, cursorCol*: int
+    cursorVisible*: bool
+
+  Box* = object
+    ## One box of the layout: its strip row and its content rectangle.
+    left*, right*: int     ## columns [left, right)
+    strip*: int            ## the row of its pane-tab strip
+    bottom*: int           ## rows (strip, bottom) are its content
+    labels*: seq[tuple[label: string, col: int, active: bool]]
+
+const
+  BoxEdge = "▏"
+
+proc rowText*(g: ScreenGrid; r: int; a = 0; b = -1): string =
+  let e = if b < 0: g.width else: min(b, g.width)
+  for c in a ..< e:
+    let t = g.rows[r][c].text
+    result.add(if t.len == 0: "" else: t)
+
+proc cellsOf(g: ScreenGrid; r: int; a, b: int): seq[GridCell] =
+  for c in a ..< min(b, g.width): result.add g.rows[r][c]
+
+proc fl(i: int): float = float(i)
+
+proc findCol(g: ScreenGrid; r: int; needle: string; start = 0): int =
+  ## The cell column where `needle` starts on row `r` (cells, not bytes).
+  var c = start
+  let n = needle.toRunes
+  while c + n.len <= g.width:
+    var ok = true
+    for k in 0 ..< n.len:
+      if g.rows[r][c + k].text != $n[k]:
+        ok = false
+        break
+    if ok: return c
+    inc c
+  -1
+
+template allIt(s, pred: untyped): bool =
+  var res = true
+  for it {.inject.} in s:
+    if not pred:
+      res = false
+      break
+  res
+
+proc labelsIn(g: ScreenGrid; r, a, b: int): seq[tuple[label: string, col: int, active: bool]] =
+  ## The tab labels of a strip: runs of text separated by two or more blanks.
+  var c = a
+  var found: seq[tuple[label: string, col: int, bg: string, bold: bool]]
+  while c < b:
+    while c < b and g.rows[r][c].text in ["", " ", BoxEdge]: inc c
+    if c >= b: break
+    let start = c
+    var label = ""
+    var blanks = 0
+    while c < b and g.rows[r][c].text != BoxEdge:
+      let t = g.rows[r][c].text
+      if t == " " or t == "":
+        inc blanks
+        if blanks >= 2: break
+      else:
+        if blanks == 1: label.add " "
+        blanks = 0
+        label.add t
+      inc c
+    if label.len > 0:
+      found.add (label, start, g.rows[r][start].bg, g.rows[r][start].bold)
+  # the active tab is drawn apart: the one label whose ground (or weight)
+  # differs from the others'
+  var counts = initCountTable[string]()
+  for f in found: counts.inc f.bg
+  for f in found:
+    let active =
+      if found.len == 1: true
+      elif counts[f.bg] == 1 and counts.len > 1: true
+      else: f.bold and not found.allIt(it.bold)
+    result.add (f.label, f.col, active)
+
+proc boxes*(g: ScreenGrid): seq[Box] =
+  ## The layout's boxes. A box starts at a strip row — the row of pane-tab
+  ## labels at its top — and spans the columns between two edges (`▏`) or the
+  ## screen's sides; it ends at the next strip row in the same columns, or at
+  ## the status line.
+  let last = g.height - 1
+  # column segments of the first body row: edges split it
+  var edges: seq[int] = @[]
+  for c in 0 ..< g.width:
+    if g.rows[1][c].text == BoxEdge: edges.add c
+  var spans: seq[(int, int)] = @[]
+  var prev = 0
+  for e in edges:
+    if e > prev: spans.add (prev, e)
+    prev = e + 1
+  if prev < g.width: spans.add (prev, g.width)
+  for (a, b) in spans:
+    # strips within this column span: row 1, and any later row whose text in
+    # the span starts with a label and whose row above is not text of the
+    # same box (a strip is drawn as its own band)
+    var strips = @[1]
+    for r in 2 ..< last:
+      let t = g.rowText(r, a, b)
+      if t.strip.len == 0: continue
+      # a strip row: its first cell is blank, then a capitalised label, and its
+      # cells carry the strip's ground, which differs from the content's
+      let first = g.rows[r][min(a + 1, b - 1)]
+      let content = g.rows[r - 1][min(a + 1, b - 1)]
+      if t.startsWith(" ") and t.len > 1 and t[1] in {'A'..'Z'} and
+         first.bg != content.bg and g.rows[r][a].bg == g.rows[1][a].bg:
+        strips.add r
+    for i, s in strips:
+      let bottom = if i + 1 < strips.len: strips[i + 1] else: last
+      result.add Box(left: a, right: b, strip: s, bottom: bottom,
+                     labels: g.labelsIn(s, a, b))
+
+proc activeLabel*(b: Box): string =
+  for l in b.labels:
+    if l.active: return l.label
+  if b.labels.len > 0: b.labels[0].label else: ""
+
+proc baseName(path: string): string =
+  let i = path.rfind('/')
+  if i >= 0: path[i + 1 .. ^1] else: path
+
+proc isSourceLabel(label: string): bool =
+  ## An editor's strip names its file (`nim-project/tracing.nim`).
+  let base = label.baseName
+  base.contains('.') and not base.contains(' ') and label.len > 2
+
+proc readEditor(g: ScreenGrid; b: Box; t: var Tree; root: SurfaceNode) =
+  var file = ""
+  for l in b.labels:
+    if l.label.isSourceLabel and (l.active or file.len == 0):
+      file = l.label.baseName
+  if file.len == 0: return
+  let ed = node("editor", fl(b.left), fl(b.strip), fl(b.right - b.left), fl(b.bottom - b.strip),
+                newJObject(), @[("file", file)])
+  t.add(root, ed)
+  var current, caret, first, last = 0
+  var texts: seq[string]
+  # The caret: in a writable editor the terminal's cursor; in the read-only
+  # editor (Debug mode) a reversed cell in the code (Editor-Pane.md, "The
+  # caret in a read-only editor"). Either one means the editor holds it.
+  let cursorIn = g.cursorVisible and g.cursorRow > b.strip and g.cursorRow < b.bottom and
+                 g.cursorCol >= b.left and g.cursorCol < b.right
+  var reversedRow = -1
+  for r in b.strip + 1 ..< b.bottom:
+    let line = g.rowText(r, b.left, b.right)
+    var i = 1
+    while i < line.len and line[i] == ' ': inc i
+    var j = i
+    while j < line.len and line[j] in Digits: inc j
+    if j == i: continue
+    var reversed = 0
+    for c in b.left + j + 5 ..< b.right:
+      if g.rows[r][c].inverse: inc reversed
+    # one reversed cell is a caret; a run of them is a selection's
+    if reversed >= 1 and reversed <= 2:
+      reversedRow = r
+  let focused = cursorIn or reversedRow >= 0
+  let caretRow = if cursorIn: g.cursorRow else: reversedRow
+  for r in b.strip + 1 ..< b.bottom:
+    let line = g.rowText(r, b.left, b.right)
+    # breakpoint lane, the number right-aligned, two blanks, the pointer lane,
+    # two blanks, the text
+    let rs = line.toRunes
+    if rs.len < 4: continue
+    var i = 1
+    while i < rs.len and $rs[i] == " ": inc i
+    var digits = ""
+    while i < rs.len and ($rs[i])[0] in Digits:
+      digits.add $rs[i]
+      inc i
+    if digits.len == 0: continue
+    if i + 4 >= rs.len and i + 3 > rs.len: continue
+    let n = parseInt(digits)
+    let marker = if i + 2 < rs.len: $rs[i + 2] else: " "
+    let textCol = i + 5
+    var text = if textCol <= rs.len: $rs[min(textCol, rs.len) ..< rs.len] else: ""
+    text = text.strip(leading = false)
+    let bpGlyph = $rs[0]
+    let isCurrent = marker == "▸"
+    let isCaret = focused and caretRow == r
+    if isCurrent: current = n
+    if isCaret: caret = n
+    if first == 0: first = n
+    last = n
+    texts.add text
+    let ln = node("line", fl(b.left), fl(r), fl(b.right - b.left), 1,
+                  %*{"number": n, "text": text, "current": isCurrent, "caret": isCaret,
+                     "breakpoint": bpGlyph in ["●", "◉", "○", "◆"],
+                     "tracepoint": bpGlyph in ["◆", "◇"]},
+                  @[("number", $n)])
+    if not focused:
+      ln.unreadable["caret"] = "the editor does not hold the focus, so no caret is drawn"
+    t.add(ed, ln)
+  ed.props = %*{"file": file, "active": true, "focused": focused, "read-only": true,
+                "current-line": current, "caret-line": caret, "first-visible": first,
+                "last-visible": last, "text": texts}
+  ed.focused = focused
+  if not focused:
+    ed.unreadable["caret-line"] = "the editor does not hold the focus, so no caret is drawn"
+  ed.unreadable["read-only"] = "the terminal draws no read-only marker; the mode is on the status line"
+
+proc readList(g: ScreenGrid; b: Box; t: var Tree; root: SurfaceNode;
+              role, childRole, key: string) =
+  let pane = node(role, fl(b.left), fl(b.strip), fl(b.right - b.left), fl(b.bottom - b.strip))
+  t.add(root, pane)
+  var n = 0
+  for r in b.strip + 1 ..< b.bottom:
+    let text = g.rowText(r, b.left, b.right).strip
+    if text.len == 0: continue
+    var props = newJObject()
+    var keyVal = text
+    case childRole
+    of "call":
+      # `name(args) → ret` rows, indented by depth, with fold glyphs
+      var s = text
+      for g in ["▼ ", "▶ ", "▸ ", "▾ ", "• "]:
+        s = s.replace(g, "")
+      let paren = s.find('(')
+      let name = (if paren > 0: s[0 ..< paren] else: s).strip
+      keyVal = name
+      props = %*{"name": name, "arguments": (if paren > 0: s[paren .. ^1] else: ""),
+                 "current": text.contains("◀") or g.rows[r][b.left + 1].inverse,
+                 "selected": g.rows[r][b.left + 1].inverse}
+    of "event":
+      if text.startsWith("tick") and text.contains("kind"): continue  # the header
+      let parts = text.splitWhitespace()
+      # tick, index, kind, output…
+      let output = if parts.len >= 4: parts[3 .. ^1].join(" ") else: text
+      keyVal = output
+      props = %*{"text": output, "kind": (if parts.len >= 3: parts[2] else: ""),
+                 "current": g.rows[r][b.left + 1].inverse, "future": false}
+    of "variable":
+      let parts = text.splitWhitespace()
+      if parts.len == 0 or text.contains("empty at this position") or
+         text.startsWith("+ Add watch"): continue
+      # a category letter column, then `name: value` / `name type value`
+      var s = text
+      if parts[0].len == 1 and parts.len > 1: s = text[text.find(parts[1]) .. ^1]
+      let colon = s.find(':')
+      let name = (if colon > 0: s[0 ..< colon] else: s.splitWhitespace()[0]).strip
+      let value = if colon > 0: s[colon + 1 .. ^1].strip else: ""
+      if name.len == 0 or name.contains(' '): continue
+      keyVal = name
+      props = %*{"name": name, "value": value, "type": ""}
+    else:
+      props = %*{"text": text}
+    inc n
+    t.add(pane, node(childRole, fl(b.left), fl(r), fl(b.right - b.left), 1, props, @[(key, keyVal)]))
+  pane.props = %*{"count": n, "focused": false}
+
+proc readTopBar(g: ScreenGrid; t: var Tree; root: SurfaceNode) =
+  let top = g.rowText(0)
+  let ct = g.findCol(0, "[ct]")
+  # the trace summary: `[ct] | trace: <name> | tick: …`
+  var activeTitle = ""
+  let tr = top.find("trace: ")
+  if tr >= 0:
+    let rest = top[tr + 7 .. ^1]
+    let bar = rest.find(" |")
+    activeTitle = (if bar >= 0: rest[0 ..< bar] else: rest).strip
+  # the session tabs: between the omnibox's right edge and `[ct]`, `<title> ×`
+  let om = g.findCol(0, BoxEdge, max(0, g.findCol(0, "⌕")))
+  var titles: seq[tuple[title: string, col: int]] = @[]
+  if om >= 0 and ct > om:
+    var c = om + 1
+    var cur = ""
+    var start = -1
+    while c < ct:
+      let ch = g.rows[0][c].text
+      if ch == "×":
+        if cur.strip.len > 0: titles.add (cur.strip, start)
+        cur = ""
+        start = -1
+      elif ch in ["+", "‹", "›"]:
+        discard
+      else:
+        if start < 0 and ch notin ["", " "]: start = c
+        if start >= 0: cur.add(if ch.len == 0: "" else: ch)
+      inc c
+  # The strip is drawn with its `+` (open a new session tab); a top bar too
+  # narrow for it draws neither, and then how many sessions there are is not
+  # on the screen.
+  var plus = false
+  if om >= 0 and ct > om:
+    for c in om + 1 ..< ct:
+      if g.rows[0][c].text == "+": plus = true
+  if titles.len == 0 and activeTitle.len > 0 and plus:
+    # one session: the strip is the summary's
+    titles.add (activeTitle, max(0, ct))
+  let strip = node("session-strip", fl(max(0, om)), 0, fl(max(1, ct - om)), 1,
+                   %*{"count": titles.len, "active": activeTitle})
+  if not plus:
+    strip.unreadable["count"] = "the top bar is too narrow to draw the session tabs"
+    strip.unreadable["active"] = "the top bar is too narrow to draw the session tabs"
+  t.add(root, strip)
+  for (title, col) in titles:
+    t.add(strip, node("session-tab", fl(col), 0, fl(title.runeLen), 1,
+                      %*{"title": title, "active": activeTitle.startsWith(title) or
+                                                    title.startsWith(activeTitle)},
+                      @[("title", title)]))
+  # the omnibox
+  let lens = g.findCol(0, "⌕")
+  if lens >= 0:
+    let edge = g.findCol(0, BoxEdge, lens)
+    let q = g.rowText(0, lens + 1, (if edge > 0: edge else: lens + 40)).strip
+    let placeholder = q.startsWith("Navigate to file")
+    let focused = g.cursorVisible and g.cursorRow == 0
+    t.add(root, node("omnibox", fl(lens), 0, fl(max(1, edge - lens)), 1,
+                     %*{"query": (if placeholder: "" else: q), "focused": focused, "count": 0}))
+
+proc readStatus(g: ScreenGrid; t: var Tree; root: SurfaceNode) =
+  let r = g.height - 1
+  let text = g.rowText(r).strip
+  var location = ""
+  for w in text.splitWhitespace():
+    let c = w.rfind(':')
+    if c > 0 and c < w.len - 1 and w[c + 1 .. ^1].allCharsInSet(Digits) and w.contains('/'):
+      location = w.baseName
+  var mode = ""
+  for m in ["[DEBUG]", "[EDIT]", "[NORMAL]", "[INSERT]"]:
+    if text.contains(m): mode = m[1 .. ^2]
+  t.add(root, node("status-line", 0, fl(r), fl(g.width), 1,
+                   %*{"message": text, "location": location, "mode": mode}))
+
+proc addPaneTab(t: var Tree; b: Box; l: tuple[label: string, col: int, active: bool]) =
+  t.add(t.root, node("pane-tab", fl(l.col), fl(b.strip), fl(l.label.runeLen), 1,
+                     %*{"label": l.label, "active": l.active}, @[("label", l.label)]))
+
+proc readSurface*(g: ScreenGrid): Tree =
+  ## The page objects on the screen.
+  result.root = node("window", 0, 0, fl(g.width), fl(g.height), newJObject())
+  result.root.visible = true
+  readTopBar(g, result, result.root)
+  var mode = "debug"
+  if g.rowText(g.height - 1).contains("[EDIT]"): mode = "edit"
+  result.root.props = %*{"title": "", "mode": mode}
+  result.root.unreadable["title"] = "a terminal has no window title the screen shows"
+  for b in g.boxes():
+    for l in b.labels:
+      addPaneTab(result, b, l)
+    let active = b.activeLabel
+    if active.isSourceLabel or active.contains("the recording's source"):
+      readEditor(g, b, result, result.root)
+    else:
+      case active
+      of "Call Trace": readList(g, b, result, result.root, "call-trace", "call", "name")
+      of "Event Log": readList(g, b, result, result.root, "event-log", "event", "text")
+      of "Variables": readList(g, b, result, result.root, "variables", "variable", "name")
+      of "Terminal Output":
+        var lines: seq[string]
+        for r in b.strip + 1 ..< b.bottom:
+          let s = g.rowText(r, b.left, b.right).strip(leading = false)
+          if s.strip.len > 0: lines.add s.strip
+        result.add(result.root, node("terminal-output", fl(b.left), fl(b.strip),
+                                     fl(b.right - b.left), fl(b.bottom - b.strip),
+                                     %*{"text": lines, "count": lines.len}))
+      else: discard
+  readStatus(g, result, result.root)

@@ -1,0 +1,354 @@
+# CodeTracer's scenario pack: the backend-neutral part.
+#
+# The page objects a user perceives in CodeTracer — the window, its session
+# tabs, the panes and what is in them — declared once, for every front-end:
+# the desktop (Playwright), the VS Code extension (WebDriverIO, in
+# codetracer-vscode-extension), the terminal (TermAssert) and the GPUI window
+# (GuiAssert). How each front-end shows them is that front-end's binding
+# (`../bindings/`); what a scenario may do to them is DemoVideoScript's format.
+#
+# Property shapes follow the domain models the screen oracle and the desktop's
+# page objects already share (`src/tests/gui/page-objects/layout_models.ts`,
+# `src/tests/visual/screen_oracle/domain_models.nim`): a variable is a name, a
+# type and a value; an event is its console output; a call is its name; an
+# editor knows the line it is stopped on. They are not defined a second time:
+# a binding reads them into these properties.
+#
+# A property a binding cannot read on its front-end is declared unreadable by
+# that binding, so a scenario that needs it is `unsupported` there rather than
+# answered from somewhere else.
+pack: 1
+name: codetracer
+summary: CodeTracer — the time-travelling debugger's windows, panes and controls.
+root: window
+
+roles:
+  window:
+    properties:
+      title: text
+      # `debug` while a recording is replayed, `edit` while files are edited.
+      mode: "enum{debug,edit}"
+    children:
+      session-strip: optional
+      toolbar: optional
+      editor: many
+      call-trace: optional
+      event-log: optional
+      variables: optional
+      filesystem: optional
+      terminal-output: optional
+      scratchpad: optional
+      breakpoints: optional
+      status-line: optional
+      omnibox: optional
+      context-menu: optional
+      dialog: optional
+      welcome: optional
+      menu-bar: optional
+      pane-tab: many
+
+  # The strip of session tabs: one tab per open recording or editing session.
+  session-strip:
+    properties: { count: int, active: text }
+    children: { session-tab: many }
+    assertions:
+      has-tab(title): "some session-tab: session-tab.title contains title"
+      has-tab-matching(pattern): "some session-tab: session-tab.title matches pattern"
+      active-is(title): "active contains title"
+      at-least(n): "count >= n"
+
+  session-tab:
+    keys: [title]
+    properties: { title: text, active: bool }
+    affordances: [click, context-click]
+
+  # A pane's tab in the layout (Editor, Call Trace, Event Log, …): what a user
+  # clicks to bring a pane forward.
+  pane-tab:
+    keys: [label]
+    properties: { label: text, active: bool }
+    affordances: [click, context-click, drag-source]
+
+  # The transport controls of a replay session (step, continue, reverse, …)
+  # and the edit-mode toolbar.
+  toolbar:
+    children: { toolbar-button: many }
+
+  toolbar-button:
+    keys: [label]
+    properties: { label: text, enabled: bool }
+    affordances: [click]
+
+  # One source editor: a file, shown in its own editor tab.
+  editor:
+    keys: [file]
+    properties:
+      file: text
+      # The editor whose tab is in front.
+      active: bool
+      focused: bool
+      read-only: bool
+      # The line the replay is stopped on (the execution pointer); 0 when the
+      # stop is not in this file.
+      current-line: int
+      # The line the caret is on; 0 when the editor shows no caret.
+      caret-line: int
+      first-visible: int
+      last-visible: int
+      # The text of every line on screen, in order.
+      text: lines
+    children: { line: many }
+    affordances: [click, context-click, wheel, focusable, text-entry]
+    assertions:
+      stopped-at(n): "current-line == n"
+      stopped-within(first, last): "current-line >= first and current-line <= last"
+      caret-at(n): "caret-line == n"
+      shows-line(n): "first-visible <= n and last-visible >= n"
+      shows-text(t): "some line: line.text contains t"
+    sync:
+      # The editor has a document and has drawn it.
+      loaded: "count(line) > 0"
+
+  # One line of an editor, as it is on screen.
+  line:
+    keys: [number]
+    properties:
+      number: int
+      text: text
+      # The replay is stopped on this line.
+      current: bool
+      # The caret is on this line.
+      caret: bool
+      breakpoint: bool
+      tracepoint: bool
+    affordances: [click, double-click, context-click]
+    # `gutter`: the breakpoint lane; `text-start` / `text-end`: the first and
+    # last character of the line's text; `column(c)`: the c-th character
+    # (1-based) of the line's text.
+    anchors: [gutter, text-start, text-end, column(c)]
+
+  # The call trace: the recording's calls, nested.
+  call-trace:
+    properties: { count: int, focused: bool }
+    children: { call: many }
+    affordances: [wheel, focusable]
+    assertions:
+      has-call(name): "some call: call.name == name"
+      has-call-containing(text): "some call: call.name contains text"
+    sync:
+      loaded: "count(call) > 0"
+
+  call:
+    keys: [name]
+    properties:
+      name: text
+      # The call the replay is in.
+      current: bool
+      selected: bool
+      depth: int
+      # The call's arguments as drawn (`a=1, b=2`).
+      arguments: text
+    affordances: [click, double-click, context-click]
+    anchors: [expander]
+
+  # The event log: the recording's output and events, in order.
+  event-log:
+    properties:
+      # Rows on screen.
+      count: int
+      # Rows in the log, as its footer reports them.
+      total: int
+      search: text
+      focused: bool
+    children: { event: many }
+    affordances: [wheel, focusable]
+    assertions:
+      has-output(text): "some event: event.text contains text"
+    sync:
+      loaded: "count(event) > 0"
+
+  event:
+    keys: [text]
+    properties:
+      # The event's console output (or its description), as drawn.
+      text: text
+      kind: text
+      # The event the replay is at.
+      current: bool
+      # A row past the replay's position (drawn dimmed).
+      future: bool
+    affordances: [click, double-click, context-click]
+
+  # The state pane: the variables at the replay's position.
+  variables:
+    properties:
+      count: int
+      watch: text
+      focused: bool
+    children: { variable: many }
+    affordances: [wheel, focusable]
+    assertions:
+      has-variable(name): "some variable: variable.name == name"
+      value-of(name, value): "some variable: variable.name == name and variable.value contains value"
+    sync:
+      loaded: "count(variable) > 0"
+
+  variable:
+    keys: [name]
+    properties: { name: text, type: text, value: text, expanded: bool }
+    affordances: [click, double-click, context-click]
+    anchors: [expander]
+
+  # The breakpoints and tracepoints list.
+  breakpoints:
+    properties: { count: int }
+    children: { point: many }
+
+  point:
+    keys: [location]
+    properties: { location: text, kind: "enum{breakpoint,tracepoint}", enabled: bool }
+    affordances: [click, context-click]
+
+  # The files pane.
+  filesystem:
+    properties: { count: int, focused: bool }
+    children: { file-node: many }
+    affordances: [wheel, focusable]
+
+  file-node:
+    keys: [name]
+    properties: { name: text, kind: "enum{file,folder}", expanded: bool, selected: bool }
+    affordances: [click, double-click, context-click]
+
+  # The program's terminal output.
+  terminal-output:
+    properties: { text: lines, count: int }
+    affordances: [wheel, focusable]
+    assertions:
+      shows(t): "text contains t"
+
+  # The scratchpad: values the user pinned.
+  scratchpad:
+    properties: { count: int }
+    children: { scratch-entry: many }
+
+  scratch-entry:
+    keys: [expression]
+    properties: { expression: text, value: text }
+    affordances: [click, context-click]
+
+  # The status line at the bottom of the window.
+  status-line:
+    properties:
+      message: text
+      # Where the replay is, as the status line says it (`file:line`).
+      location: text
+      # The editing keymap's mode indicator, when there is one.
+      mode: text
+
+  # The command palette / omnibox: a query field and its results.
+  omnibox:
+    properties: { query: text, focused: bool, count: int }
+    children: { option: many }
+    affordances: [click, text-entry, focusable]
+
+  option:
+    keys: [label]
+    properties: { label: text, detail: text, selected: bool }
+    affordances: [click]
+
+  # A context menu, opened by a right press or its key.
+  context-menu:
+    properties: { count: int }
+    children: { menu-item: many }
+    assertions:
+      offers(label): "some menu-item: menu-item.label == label"
+      lacks(label): "none menu-item: menu-item.label == label"
+
+  menu-item:
+    keys: [label]
+    properties: { label: text, enabled: bool, shortcut: text }
+    affordances: [click]
+
+  # The application menu (the desktop's in-window menu, the terminal's and
+  # the GPUI window's top-bar menus).
+  menu-bar:
+    children: { menu: many }
+
+  menu:
+    keys: [label]
+    properties: { label: text, open: bool }
+    affordances: [click]
+
+  # A dialog or notification asking the user something, or telling them.
+  dialog:
+    keys: [title]
+    properties: { title: text, message: text }
+    children: { dialog-button: many, text-field: many }
+
+  dialog-button:
+    keys: [label]
+    properties: { label: text, enabled: bool }
+    affordances: [click]
+
+  text-field:
+    keys: [label]
+    properties: { label: text, value: text, focused: bool }
+    affordances: [click, text-entry, focusable]
+
+  # The welcome screen a window shows before a recording or project is open.
+  welcome:
+    properties: { heading: text }
+    children: { welcome-action: many, recent: many }
+
+  welcome-action:
+    keys: [label]
+    properties: { label: text }
+    affordances: [click]
+
+  recent:
+    keys: [name]
+    properties: { name: text, detail: text }
+    affordances: [click, double-click]
+
+sync:
+  # The implicit condition after every input: the window handled it and the
+  # screen stopped changing.
+  settled: ~
+  # The replay engine has answered everything asked of it and the window shows
+  # where the replay is.
+  replay-idle: ~
+
+stages:
+  record-program:
+    summary: >-
+      Record a test program (a path under the repository's test-programs, or
+      a named fixture) once, kept for the lane, and remember it as the
+      recording the next `open-recording` opens.
+    params: { program: text, backend: text }
+  nim-project:
+    summary: >-
+      Write the Nim compile-time tracing project (a macro, a static block, a
+      constant section and a NimScript file) into a fresh folder and record a
+      trace of its static block with the product's own route; that trace is the
+      recording the next `open-recording` opens, with the project folder as
+      its working directory.
+    params: {}
+  open-recording:
+    summary: >-
+      Start the front-end on the recording the stage prepared (or on
+      `recording`, a recording folder), in a window of the given size, with
+      the replay at its entry or at `tick`.
+    params: { recording: text, tick: int, width: int, height: int }
+  open-project:
+    summary: Start the front-end in Edit mode on a project folder (a path under test-programs, or `$project` for the stage's own).
+    params: { folder: text, file: text, width: int, height: int }
+  select-keymap:
+    summary: Choose the base keymap the front-end starts with (cua, emacs, vim, kakoune).
+    params: { preset: text }
+  plant-config:
+    summary: Write a file into the front-end's configuration directory before it starts (keybindings.json, a layout, settings).
+    params: { file: text, content: text }
+  start-from-layout:
+    summary: Start from a saved layout (a file under the pack's fixtures).
+    params: { layout: text }

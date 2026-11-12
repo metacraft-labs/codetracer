@@ -1,0 +1,54 @@
+scenario: 1
+name: tests/broken-trace-macro-expectation
+pack: codetracer
+summary: >-
+  DELIBERATELY BROKEN — the recordings' own test (ci/test/scenario-broken-run.sh):
+  the user's example with one wrong expectation (the macro's trace stopped on
+  lines 10..12), so the run fails at that step and its recording must say so.
+  With a Nim recording open, a click puts the caret on a macro call and the
+  shortcut that traces the macro under the caret opens its expansion in a new
+  session tab, stopped in the macro's body.
+
+stage:
+  - use: nim-project
+  - use: open-recording
+
+steps:
+  - beat: open
+    narration: { text: "A recording of a Nim project, stopped in a static block." }
+    steps:
+      - wait: { until: replay-idle, timeout: 120s }
+      - wait: { until: editor.loaded, timeout: 60s }
+      - expect: { at: session-strip, count: 1 }
+      - expect:
+          at: 'editor[file="tracing.nim"]'
+          active: true
+          assert: "stopped-within(18, 21)"
+      - expect:
+          at: 'editor[file="tracing.nim"]/line[number="26"]'
+          text: { contains: "twice:" }
+          current: false
+      - capture: { name: recording-open }
+
+  - beat: place-caret
+    narration: { text: "Click the macro call to put the caret on it.", to: place-caret }
+    steps:
+      - click: { at: 'editor[file="tracing.nim"]/line[number="26"]', anchor: text-start, pace: thoughtful }
+      - expect: { at: 'editor[file="tracing.nim"]', assert: "caret-at(26)" }
+
+  - beat: trace
+    narration: { text: "One shortcut traces the macro under the caret.", to: trace }
+    steps:
+      # Tracing takes the compiler seconds and shows its progress meanwhile:
+      # the next wait is on the new tab, not on the window going quiet.
+      - chord: { bound: editor.trace-macro-at-cursor }
+        settle: false
+        dwell: 1s
+      - wait: { until: { at: session-strip, count: 2 }, timeout: 180s }
+      - wait: { until: replay-idle, timeout: 120s }
+      - expect: { at: session-strip, assert: "at-least(2)" }
+      - expect:
+          at: 'editor[file="tracing.nim"]'
+          active: true
+          assert: "stopped-within(10, 12)"
+      - capture: { name: macro-trace-tab }
