@@ -7694,6 +7694,16 @@ jobs:
         if: ${{ !cancelled() }}
         run: nix develop .#devShells.x86_64-linux.default --command just test-nix-package-ct-test-run
 
+      - name: Nim tracing from the Nix package and the AppImage layout
+        # The desktop's Nim tracing needs a Nim language server and a
+        # trace-enabled nimsuggest; the dev shell supplies both, an install
+        # must ship them. `ci/test/packaged-nim-tracing.sh` takes the
+        # environment the Nix package's `ct` wrapper and the AppImage's AppRun
+        # give the desktop, and traces a Nim static block through the language
+        # server they name, with no Nim tool on PATH.
+        if: ${{ !cancelled() }}
+        run: nix develop .#devShells.x86_64-linux.default --command just test-packaged-nim-tracing
+
       - name: Show the pinned conformance walk
         # The lane prints one headline per suite; this re-runs the walker the
         # lane already built, so the log names the pin it walked and its case

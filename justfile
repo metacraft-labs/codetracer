@@ -4187,6 +4187,14 @@ test-ct-test-certificates:
 test-nix-package-ct-test-run:
   bash ci/test/nix-package-ct-test-run.sh
 
+# Nim tracing from a packaged CodeTracer: the Nix package's `ct` wrapper and the
+# AppImage's AppRun each name the trace-enabled nimsuggest and the Nim language
+# server they ship, and that server traces a static block with nothing else on
+# PATH. Needs nix, patchelf, lddtree and python3 (all in the default dev shell).
+test-packaged-nim-tracing:
+  bash ci/test/packaged-nim-tracing.sh --nix
+  bash ci/test/packaged-nim-tracing.sh --appimage
+
 # CTC-3a's negative control: the conformance-vector walker the
 # `ct-test-certificates` lane built (or `walker`) passes at the committed pin
 # and fails at an earlier revision of the standard and at one the sibling
