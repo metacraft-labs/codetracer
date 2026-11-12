@@ -23,6 +23,7 @@ This guide is structured to help you get started quickly and then dive deeper in
     *   [**Command-Line Interface (CLI)**](./cli.md): Discover how to record traces and manage trace files from your terminal.
 *   **To learn about specific features**, see these sections:
     *   [**Tracepoints**](./tracepoints.md): A deep dive into using tracepoints for advanced debugging scenarios.
+    *   [**Tracing Nim compile-time code**](./nim-compile-time-tracing.md): Recording what a macro, a `static:` block or a constant's initializer does when the compiler runs it.
 *   **To review a change with its recordings attached**, see the
     [**DeepReview**](/deep_review) section: what each changed line did — which
     lines ran, with which values — shown on the diff itself, plus the agent
