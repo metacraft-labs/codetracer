@@ -217,6 +217,24 @@ proc hopAriaLabel*(hop: OriginHop; index: int): string =
     of okUnknown:         "unknown"
   fmt"hop {index + 1}: {kindLabel} at step {hop.stepId}"
 
+const LowConfidenceBelow* = 0.7
+  ## A hop whose confidence is below this is a low-confidence hop
+  ## (Value-Origin-Tracking.md §3.2.2, "Side panel"; §13.6 holds an ambiguous
+  ## write below it).
+
+proc hopConfidenceLabel*(confidence: float): string =
+  ## A hop's confidence as the side panel prints it: two decimals at most,
+  ## one at least ("0.6", "0.75", "1.0"). The wire carries an f32, so a
+  ## recorded 0.6 arrives as 0.6000000238…; rounding is what keeps it "0.6".
+  result = formatFloat(confidence, ffDecimal, 2)
+  if result.endsWith("0") and not result.endsWith(".0"):
+    result.setLen(result.len - 1)
+
+proc isLowConfidence*(confidence: float): bool =
+  ## Compared at the precision the label shows, so a hop that reads "0.7" is
+  ## not flagged low because its f32 is 0.69999….
+  hopConfidenceLabel(confidence).parseFloat < LowConfidenceBelow
+
 proc focusNextHop*(panel: var OriginChainPanel; chain: OriginChain) =
   ## ↓ key. Wraps from the last hop back to 0.
   if chain.hops.len == 0:
@@ -445,6 +463,22 @@ when defined(js):
       # when the hop lives in a sibling process, so a chain that walked
       # a boundary can be navigated back across it.
       li.appendChild(button)
+      # The hop's confidence, as text (§3.2.2 "Side panel", §13.0): the
+      # number, and for a low-confidence hop the "!" glyph with its label.
+      let confidence = document.createElement(cstring"span")
+      confidence.setAttribute(cstring"class", cstring"ct-origin-hop-confidence")
+      confidence.textContent =
+        cstring("confidence " & hopConfidenceLabel(hop.confidence))
+      li.appendChild(confidence)
+      if isLowConfidence(hop.confidence):
+        let low = document.createElement(cstring"span")
+        low.setAttribute(cstring"class", cstring"ct-origin-low-confidence")
+        let glyph = document.createElement(cstring"span")
+        glyph.setAttribute(cstring"aria-hidden", cstring"true")
+        glyph.textContent = cstring"!"
+        low.appendChild(glyph)
+        low.appendChild(document.createTextNode(cstring" low confidence"))
+        li.appendChild(low)
       li.addEventListener(cstring"click", hopRowClickHandler(vm, hopIndex))
       if hop.operandSnapshots.len > 0:
         let details = document.createElement(cstring"details")

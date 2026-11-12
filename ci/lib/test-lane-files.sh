@@ -1125,6 +1125,10 @@ test_lane_files() {
 		echo src/frontend/tests/debug_toolbar_follows_active_tab_test.nim
 		echo src/frontend/tests/agent_editor_selection_dom_test.nim
 		echo src/frontend/tests/origin_chain_wiring_test.nim
+		# `origin_side_panel_confidence_test.nim` holds the origin side panel
+		# to printing each hop's confidence, and the low-confidence label
+		# below 0.7 (Value-Origin-Tracking.md §3.2.2 "Side panel").
+		echo src/frontend/tests/origin_side_panel_confidence_test.nim
 		# `session_viewmodels_test.nim` holds each window tab to owning its
 		# ViewModels: the panel host renders a tab's panes over that tab's
 		# session, a hidden tab's move updates its own store only, each tab has

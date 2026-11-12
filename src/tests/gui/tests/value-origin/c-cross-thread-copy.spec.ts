@@ -68,15 +68,13 @@ test("e2e_origin_c_cross_thread_copy_in_codetracer_gui", async ({ ctPage }) => {
 
   // In the side panel the hop says what it is in its accessible name
   // (§13.0, `hopAriaLabel`), and shows its confidence (spec §6.3
-  // "Cross-thread guard": 0.6) as text, as §13.0 requires of a
-  // low-confidence hop. The side panel draws no confidence yet: that half
-  // stays red until it does (codetracer-pm issue
-  // `2026-11-12-desktop-origin-side-panel-shows-no-hop-confidence`). It used
-  // to look for `data-testid="origin-hop-cross-thread"`, which nothing
-  // renders.
+  // "Cross-thread guard": 0.6) as text, with the low-confidence label a hop
+  // below 0.7 carries (§3.2.2 "Side panel", §13.0). It used to look for
+  // `data-testid="origin-hop-cross-thread"`, which nothing renders.
   await origin.openInSidePanel("local");
   const crossThreadHop = origin.sidePanel()
     .locator('section > ol > li.ct-origin-hop[aria-label*="cross-thread copy"]');
   await expect(crossThreadHop).toHaveCount(1, { timeout: 30_000 });
-  await expect(crossThreadHop).toContainText("0.6");
+  await expect(crossThreadHop).toContainText("confidence 0.6");
+  await expect(crossThreadHop.locator(".ct-origin-low-confidence")).toHaveText("! low confidence");
 });
