@@ -17,7 +17,7 @@
 ## The reader is a pure function of the screen (`ScreenGrid`), so it is
 ## exercised by `test_ct_tui_screen.nim` on captured screens as well as live.
 
-import std/[json, strutils, options, tables]
+import std/[json, strutils, options, tables, sequtils]
 from std/sequtils import anyIt
 from std/unicode import Rune, toRunes, runeLen, `$`, strip
 import demo_video_script/surface
@@ -108,10 +108,21 @@ proc labelsIn(g: ScreenGrid; r, a, b: int): seq[tuple[label: string, col: int, a
   var grounds = initCountTable[string]()
   for c in a ..< b: grounds.inc g.rows[r][c].bg
   let ground = if grounds.len > 0: grounds.largest.key else: ""
+  # In a narrow strip the active tab's own ground (its label and padding)
+  # can cover most of it. A blank cell two or more away from every label is
+  # the strip's ground for certain: when there is one, it decides.
+  var clear = initCountTable[string]()
+  for c in a ..< b:
+    if g.rows[r][c].text notin ["", " "]: continue
+    var near = false
+    for f in found:
+      if c >= f.col - 1 and c <= f.col + f.label.len: near = true
+    if not near: clear.inc g.rows[r][c].bg
+  let stripGround = if clear.len > 0: clear.largest.key else: ground
   for f in found:
     let active =
       if found.len == 1: true
-      elif found.len == 2 and counts.len == 2: f.bg != ground
+      elif found.len == 2 and counts.len == 2: f.bg != stripGround
       elif counts[f.bg] == 1 and counts.len > 1: true
       else: f.bold and not found.allIt(it.bold)
     result.add (f.label, f.col, active)
@@ -146,7 +157,10 @@ proc boxes*(g: ScreenGrid): seq[Box] =
       let content = g.rows[r - 1][min(a + 1, b - 1)]
       # (a focused pane's strip is drawn on the focus ground, which row 1
       # need not show: then the strip is a band of one ground, end to end)
-      if t.startsWith(" ") and t.len > 1 and t[1] in {'A'..'Z'} and
+      # (a box has a row of content under its strip: the row right under a
+      # strip — a docked pane's query field, say — never starts another)
+      if strips[^1] != r - 1 and
+         t.startsWith(" ") and t.len > 1 and t[1] in {'A'..'Z'} and
          first.bg != content.bg and
          (g.rows[r][a].bg == g.rows[1][a].bg or
           (g.rows[r][a].bg == g.rows[r][b - 1].bg and g.rows[r][b - 1].bg != content.bg)):
