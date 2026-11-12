@@ -1,13 +1,3 @@
-## Ported in part to the scenario
-## src/tests/scenarios/terminal/top-bar-menu-follows-the-keymap.yaml; kept as
-## the subject of its mutation harness (run-plat48-topbar-mutations.py,
-## run-plat64-input-routing-mutations.py); named by
-## src/frontend/tui/tests/test_bound_mode_switch.nim,
-## src/frontend/tui/tests/test_plat48_top_bar.nim,
-## src/frontend/tui/tests/test_plat49_panes_shell.nim,
-## src/frontend/viewmodel/tests/unit/test_point_menu_ops.nim; and for its cases
-## no scenario ports yet.
-##
 ## test_plat48_top_bar.nim — PLAT-48, Tier 2. **The desktop's top bar and
 ## footer on a real terminal**: the shipped `codetracer-tui` on the `calc`
 ## recording in a real PTY (TermAssert + libvterm), a real `replay-server`

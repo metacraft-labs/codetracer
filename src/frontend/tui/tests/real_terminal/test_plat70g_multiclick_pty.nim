@@ -1,10 +1,3 @@
-## Ported in part to the scenarios
-## src/tests/scenarios/terminal/multiclick-double-selects-the-word.yaml,
-## src/tests/scenarios/terminal/multiclick-triple-selects-the-line.yaml,
-## src/tests/scenarios/terminal/multiclick-double-on-separators.yaml; kept as
-## the subject of its mutation harness (run-plat70g-multiclick-mutations.py);
-## and for its cases no scenario ports yet.
-##
 ## test_plat70g_multiclick_pty.nim — multi-click selection, the gutter's two
 ## zones, Alt+click and Shift+F9 on a real terminal (Editor-Pane.md MC.1 – MC.7).
 ##

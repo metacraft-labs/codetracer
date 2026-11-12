@@ -1,15 +1,3 @@
-## Ported to the scenarios
-## src/tests/scenarios/terminal/stop-path-parent-component-add.yaml,
-## src/tests/scenarios/terminal/stop-path-parent-component-scale.yaml,
-## src/tests/scenarios/terminal/stop-path-parent-component-each-click.yaml,
-## src/tests/scenarios/terminal/stop-path-parent-component-after-files.yaml,
-## src/tests/scenarios/terminal/stop-path-missing-file-is-named.yaml; kept as
-## the subject of its mutation harness (run-plat50-stop-path-mutations.py);
-## named by
-## src/frontend/gpui/tests/test_stop_path_parent_component_gpui_plan.nim,
-## src/frontend/tui/tests/test_absent_source_pane.nim,
-## src/frontend/viewmodel/tests/unit/test_source_provider_revisions.nim.
-##
 ## test_stop_path_parent_component.nim — **a stop whose recorded path has a
 ## `..` component shows THAT file's source**, in the shipped `codetracer-tui`,
 ## in a real terminal.

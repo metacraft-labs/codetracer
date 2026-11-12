@@ -1,13 +1,3 @@
-## Ported in part to the scenarios
-## src/tests/scenarios/terminal/keys-debug-f-keys.yaml,
-## src/tests/scenarios/terminal/keys-f12-in-edit-mode.yaml,
-## src/tests/scenarios/terminal/keys-letters-step-in-the-read-only-editor.yaml,
-## src/tests/scenarios/terminal/keys-later-user-row-wins.yaml,
-## src/tests/scenarios/terminal/keys-later-user-row-wins-swapped.yaml; kept as
-## the subject of its mutation harness (run-plat68-keymaps-mutations.py); named
-## by src/frontend/gpui/tests/test_plat68c_gpui_plan.nim; and for its cases no
-## scenario ports yet.
-##
 ## test_plat68c_pty.nim — PLAT-68's real-stack boxes on a real terminal: the
 ## shipped `codetracer-tui` in a real PTY (TermAssert + libvterm) over a real
 ## recording and a real `replay-server`, driven by the bytes a terminal

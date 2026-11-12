@@ -1,8 +1,3 @@
-## Ported to the scenario
-## src/tests/scenarios/terminal/input-routing-user-chords.yaml; kept as the
-## subject of its mutation harness (run-plat64-input-routing-mutations.py);
-## named by src/frontend/tui/tests/real_terminal/test_plat50_clicks.nim.
-##
 ## test_plat64_input_routing_pty.nim — Input-Routing-And-Keymaps.md on the shipped
 ## terminal binary, over a real pty and one user `keybindings.json`: IR-5 (a user's
 ## chord reaches its operation through this front-end's decoder), §5.1 (a press on

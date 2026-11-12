@@ -1,10 +1,3 @@
-## Ported in part to the scenarios
-## src/tests/scenarios/terminal/find-in-files-match-case-toggle.yaml,
-## src/tests/scenarios/terminal/find-in-files-from-the-edit-menu.yaml; kept as
-## the subject of its mutation harness (run-plat57-find-in-files-mutations.py);
-## named by src/frontend/tui/tests/real_terminal/test_plat70d_grep_pty.nim; and
-## for its cases no scenario ports yet.
-##
 ## test_plat57_find_in_files_pty.nim — PLAT-57, Tier 2. **Find in Files on a
 ## real terminal.**
 ##

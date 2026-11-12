@@ -1,9 +1,3 @@
-## Ported in part to the scenario
-## src/tests/scenarios/terminal/fit-event-log-wide-column-scrolls.yaml; kept as
-## the subject of its mutation harness (run-plat70i-fit-mutations.py); named by
-## src/tests/gui/tests/layout/plat70i-fit-or-scroll.spec.ts; and for its cases
-## no scenario ports yet.
-##
 ## test_plat70i_fit_pty.nim — PLAT-70 Part I (Horizontal-Overflow.md §5.5),
 ## the shipped `codetracer-tui` on a REAL pseudo-terminal (TermAssert: a real
 ## pty, the screen read back through libvterm), over real recordings against

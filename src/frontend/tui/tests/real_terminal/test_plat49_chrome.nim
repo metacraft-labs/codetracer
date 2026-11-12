@@ -1,14 +1,3 @@
-## Ported in part to the scenarios
-## src/tests/scenarios/terminal/chrome-menu-cascades.yaml,
-## src/tests/scenarios/terminal/chrome-a-click-is-a-click.yaml,
-## src/tests/scenarios/terminal/chrome-control-tooltip.yaml,
-## src/tests/scenarios/terminal/chrome-omnibox-caret-editing.yaml,
-## src/tests/scenarios/terminal/chrome-variables-rows-tagged.yaml; kept as the
-## subject of its mutation harness (run-plat49-chrome-mutations.py); named by
-## src/frontend/tui/tests/test_plat49_chrome_shell.nim,
-## src/frontend/viewmodel/tests/unit/test_plat49_chrome_models.nim; and for its
-## cases no scenario ports yet.
-##
 ## test_plat49_chrome.nim — PLAT-49 part A, Tier 2. **The terminal's chrome as
 ## the user asked for it on 2026-10-01**, read back from a real terminal: the
 ## shipped `codetracer-tui` on the `calc` recording in a real PTY (TermAssert
