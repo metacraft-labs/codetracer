@@ -341,8 +341,7 @@ proc markReady(s: DebuggerSession; trace: TraceSource) =
   # A session that is a PRIMARY for mirrors — a `ct host` page's server
   # session, the VS Code extension host's — is where a mirror's
   # `toggleHistory` runs (`mirror_session.hostedPageRelays`): without the
-  # loader here the row opened and stayed empty (codetracer-pm
-  # issues/2026-11-12-a-ct-host-page-never-shows-a-variables-value-history.md).
+  # loader here the row opened and stayed empty.
   # A host that installed its own loader keeps it.
   let stateVM = s.app.session.stateVM
   if not stateVM.isNil and stateVM.onToggleHistory.isNil:
