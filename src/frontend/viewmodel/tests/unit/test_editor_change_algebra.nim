@@ -117,251 +117,40 @@ template counted(condition: untyped) =
   inc countedAssertions
   check condition
 
-const ExpectedAssertions = 2078
-  ## *2072 -> 2078 on 2026-11-08, measured against agents e52ed2090f (2072):
-  ## the native route for Nim's compile-time tracing and its suites add six
-  ## scanned assertions. None calls `rebase(` or spells `mapOver`.*
-  ## *2057 -> 2072 on 2026-11-08, measured: `input/operation_table`, `keymap/overlay_rows`,
-  ## `keymap/pointer_rows`, `views/field_keys`, `views/dismissals` and
-  ## `views/shell_keys` x three assertions. None calls `rebase(` or spells
-  ## `mapOver`.*
-  ## *2040 -> 2057 on 2026-11-08: the editor pointer's modules add their scanned
-  ## assertions (measured on the branch).*
-  ## *2037 -> 2031 on 2026-11-06, measured on a clean checkout of agents
-  ## 7139dbc901 (the tree this scan walks holds the 644 tracked `.nim` files and
-  ## nothing else) and again on its merge with dev f288cfadc3: both count 2031.
-  ## The 2037 below was not reproducible on either.*
-  ## *2034 -> 2037 on 2026-11-05: `host/native_shell_host.nim` (the Shell
-  ## pane's native host) x three assertions. It calls no `rebase(` and spells
-  ## no `mapOver`.*
-  ## *-> 2034 on 2026-11-05, measured: `host/native_constraints_host.nim` (the
-  ## native Constraints pane's measurement) x three assertions, over the
-  ## production modules added upstream since the last count. None calls
-  ## `rebase(` or spells `mapOver`.*
-  ## *2013 -> 2016 on 2026-11-04: `host/native_constraints_host.nim` (the
-  ## native Constraints pane's measurement) x three assertions. It neither
-  ## calls `rebase(` nor spells `mapOver`.*
-  ## 2001 -> 2013, measured: agents db71c1840d2 already counts 2010 (three
-  ## production modules added since 2001 was written), and
-  ## `host/native_verification_host.nim` adds three more facts.
-  ## *1998 -> 2001 on 2026-11-02: `viewmodels/constraints_answer.nim` (the
-  ## Constraints pane's model) x three assertions. It neither calls `rebase(`
-  ## nor spells `mapOver`.*
-  ## *1989 -> 1998 on 2026-10-30: `viewmodels/build_auto_reveal.nim`,
-  ## `viewmodels/build_tasks.nim` and `viewmodels/editor_diagnostics.nim` (the
-  ## build residuals) x three assertions. None calls `rebase(` or spells
-  ## `mapOver`.*
-  ## *1986 -> 1989 on 2026-10-30: `backend/stderr_capture.nim` (the replay
-  ## engine's diagnostics, kept off the protocol stream) x three assertions.
-  ## It calls no `rebase(` and spells no `mapOver`.*
-  ## *1983 -> 1986 on 2026-10-28: `host/native_requests_host.nim` (the
-  ## Requests pane's native host) x three assertions. It calls no `rebase(`
-  ## and spells no `mapOver`.*
-  ## *1977 -> 1983 on 2026-10-28: `viewmodels/agent_prompt_context.nim` and
-  ## `viewmodels/build_output_model.nim` x three assertions. Neither calls
-  ## `rebase(` or spells `mapOver`.*
-  ## *1974 -> 1977 on 2026-10-28: `viewmodels/replay_open_setting.nim` x
-  ## three assertions. It calls no `rebase(` and spells no `mapOver`.*
-  ## *1966 -> 1974 on 2026-10-28: the in-document find's two modules.
-  ## `editor/find_match.nim` x five (it is in `editor/`, the directory that
-  ## calls the primitive, so the two FLAG needles apply to it too) and
-  ## `viewmodels/find_vm.nim` x three. Neither calls `rebase(`, spells
-  ## `mapOver` or declares `before: bool`.*
-  ## *1945 -> 1966 on 2026-10-27: seven production modules x three
-  ## assertions — `platform/session_allocation.nim`, `sdk/expression_eval.nim`,
-  ## `store/row_address.nim`, `viewmodels/build_diagnostics.nim`,
-  ## `views/pane_measure_dom.nim`, `views/row_link_dom.nim` and
-  ## `views/row_links.nim`. None calls `rebase(` or spells `mapOver`.*
-  ## *1930 -> 1945 on 2026-10-26: the Agent Activity pane's five production
-  ## modules (codetracer `6673057756`) — `host/agent_live_worker.nim`,
-  ## `host/agent_session_files.nim`, `host/native_agent_host.nim`,
-  ## `viewmodels/agent_activity_feed.nim` and
-  ## `viewmodels/agent_activity_text.nim` — x three assertions. None calls
-  ## `rebase(` or spells `mapOver`.*
-  ## *1927 -> 1930 on 2026-10-26: `keymap/menu_accelerators.nim` (the macOS
-  ## menu's chords from the key router) x three assertions. It calls no
-  ## `rebase(` and spells no `mapOver`.*
-  ## *1876 -> 1927 on 2026-10-26, measured on `c80549db8` plus the shared
-  ## rows' keyboard module: seventeen production modules x three assertions,
-  ## net. Ten had been added without moving the count before 1876 was set,
-  ## and `viewmodels/shared_pane_state.nim` (counted at 1858 -> 1861) has
-  ## since been deleted (codetracer-pm issues/2026-10-23-editor-change-
-  ## algebra-assertion-tally-misses-ten-new-viewmodel-modules.md):
-  ## `viewmodels/no_project_folder.nim`, `views/isonim_flow_inline_view.nim`,
-  ## `pane_viewport.nim`, `sync/webview_transport.nim`,
-  ## `viewmodels/action_sink.nim`, `viewmodels/flow_line_values.nim`,
-  ## `views/isonim_flow_value_view.nim`, `sdk/breakpoints.nim`,
-  ## `viewmodels/calltrace_navigation.nim` and `sdk/scrub_queue.nim`. Eight
-  ## more since: `codetracer_ui_components.nim`, `host/native_file_tree.nim`,
-  ## `viewmodels/scrollbar_interaction.nim`, `viewmodels/table_fit.nim`,
-  ## `views/table_fit_dom.nim`, `views/isonim_activation.nim`,
-  ## `host/native_test_host.nim` and `viewmodels/test_catalog_answer.nim`.
-  ## Each was read for the needles: none calls `rebase(` and none spells
-  ## `mapOver`.*
-  ## *1867 -> 1876 on 2026-10-22: three table-overflow production modules —
-  ## `viewmodels/table_overflow.nim`, `host/table_column_widths.nim` and
-  ## `views/table_overflow_dom.nim` — x three assertions. None calls `rebase(`.*
-  ## *1864 -> 1867 on 2026-10-22: `viewmodels/point_menu_ops.nim` (the Debug
-  ## menu's Stop and its breakpoint and tracepoint items, codetracer#843) x
-  ## three assertions. It calls no `rebase(` and spells no `mapOver`.*
-  ## *1861 -> 1864 on 2026-10-21: `viewmodels/run_control_ownership.nim`
-  ## (codetracer#731, a7f6ef42d) adds three production-module scan assertions.
-  ## It calls no `rebase(` and spells no `mapOver`; every functional check stays.*
-  ## *1858 -> 1861 on 2026-10-21: `viewmodels/shared_pane_state.nim` (each
-  ## window tab's Files, Test Results and Constraints state, codetracer#835)
-  ## x three assertions. It calls no `rebase(` and spells no `mapOver`.*
-  ## *1855 -> 1858 on 2026-10-21: `viewmodels/origin_chain_bridges.nim` (the
-  ## origin badge, side panel and Scratchpad bridges, codetracer#856) x three
-  ## assertions. It calls no `rebase(` and spells no `mapOver`.*
-  ## *1849 -> 1855 on 2026-10-20: the session mirror over a socket
-  ## (`sync/hosted_primary.nim`, `sync/socket_transport.nim`, `a928063082` / `86c11d2afb`)
-  ## x three assertions. Neither calls `rebase(`.*
-  ## *1846 -> 1849 on 2026-10-20: `viewmodels/diff_target.nim` (`0101549581`, a review
-  ## commit's file rows) x three assertions. It calls no `rebase(`.*
-  ## *1828 -> 1846 on 2026-10-20: six production modules the latest
-  ## refactors added without moving the count — the session mirror
-  ## (`sync/mirror_session`, `sync_host`, `synced_signals`, `transport`,
-  ## `9e06354dd3`), the viewport contract (`viewport.nim`, `403d8d7db0`) and
-  ## the toolbar's history cursor (`viewmodels/history_cursor.nim`,
-  ## `b7f4511527`) — x three assertions. None calls `rebase(` or spells
-  ## `mapOver`.*
-  ## *1822 -> 1828 on 2026-10-19: two production modules the per-stop loader
-  ## added (`d883db0e2b`) — `sdk/stop_loader.nim` and
-  ## `store/locals_answer.nim` — x three assertions, which that change did not
-  ## count. Neither calls `rebase(` or spells `mapOver`.*
-  ## *1819 -> 1822 on 2026-10-16 (PLAT-70 Part A): one new production module
-  ## under `viewmodels/` — `horizontal_scroll.nim` (a text pane's horizontal
-  ## view and its overflow-only bar) — x three assertions. It calls no
-  ## `rebase(` and spells no `mapOver`.*
-  ## *1813 -> 1819 on 2026-10-16 (PLAT-57): two new production modules under
-  ## `host/` — `find_in_files.nim` (the one search runner) and
-  ## `text_match.nim` (its matcher) — x three assertions. Neither calls
-  ## `rebase(` or spells `mapOver`.*
-  ## *1774 -> 1813 on 2026-10-12 (PLAT-68 Phase B): thirteen new production
-  ## modules — under `keymap/` `keymap_router`, `scope_path`, `layer_stack`,
-  ## `operation_catalogue`, `user_keymap`, `binding_sets`, `keymap_importers`,
-  ## `client_actions`, `navigation_keymap`, `base_keymaps`, `alt_tap`, and
-  ## under `host/` `keybindings_file`, `keybindings_location` — x three
-  ## assertions. None calls `rebase(` or spells `mapOver`.*
-  ## *1762 -> 1774 on 2026-10-11 (PLAT-68): five new production modules under
-  ## `viewmodel/keymap/` — `context_keys`, `when_expr`, `base_rows`,
-  ## `cua_keymap`, `emacs_keymap` — and one deleted (`product_keymap`), x three
-  ## assertions. None calls `rebase(` or spells `mapOver`.*
-  ## *1759 -> 1762 on 2026-10-10 (SB-2a): one new production module under
-  ## `viewmodel/`, `host/node_certificate_host.nim` (node's git runner and
-  ## store-root resolver for the content facts) x three assertions. It calls
-  ## no `rebase(` and spells no `mapOver`.*
-  ## *1750 -> 1759 on 2026-10-08 (PLAT-51 part B): three new production
-  ## modules under `viewmodel/` — `viewmodels/native_welcome.nim` (the native
-  ## front-ends' Welcome Screen), `viewmodels/layout_settings.nim` and
-  ## `host/layout_preferences.nim` (the focus-highlight / live-resize settings
-  ## and their remembered preference) — x three assertions.
-  ## *1747 -> 1750 on 2026-10-06 (PLAT-51): net one more production module
-  ## under `viewmodel/` (`viewmodels/value_changes.nim` and
-  ## `views/list_scrubber_dom.nim` added, `views/isonim_timeline_view.nim`
-  ## removed with the Timeline panel) x three assertions.
-  ## *1738 -> 1747 on 2026-10-06: three new production modules under
-  ## `viewmodel/` — `viewmodels/terminal_output_model.nim` (the Terminal
-  ## Output pane's lines and screen), `viewmodels/scrollbar_scrubber.nim` (a
-  ## list pane's scrollbar as a scrubber) and `host/terminal_output_source.nim`
-  ## (the native front-ends' producer) — x three assertions.
-  ## *1735 -> 1738 on 2026-10-04: one new production module under
-  ## `viewmodel/`, `host/native_vcs_details.nim` (a commit's changed files and
-  ## a file's diff for the native VCS panes) x three assertions.
-  ## *1693 -> 1735 on 2026-10-01: §35's enumeration over `viewmodel/` — FOURTEEN
-  ## net new production modules x three assertions, landed on 2026-09-30 by
-  ## lines of work that each left this number alone (none ran this suite after
-  ## the merge that combined them). Per commit: `5ba334de4` `identity/issuer.nim`
-  ## (+3); `f9cee486d` `identity/jwt.nim` (+3); `b53bb9d1d`
-  ## `identity/rs256_verifier.nim` replacing `identity/webcrypto_verifier.nim`
-  ## (0); `cbce5bb66` `platform/endpoint_codec.nim` and
-  ## `platform/endpoint_protocol.nim` (+6); `f892f9eea`
-  ## `host/container_platform.nim` replacing `host/remote_stub.nim` (0);
-  ## `8008eeb74` `host/browser_tab.nim` and `host/container_boot.nim` (+6);
-  ## `111119e87` `platform/browser_facades.nim` (+3); `0026c2d6e`
-  ## `platform/deployment_descriptor.nim` (+3); `01fce044d`
-  ## `host/icons_preference.nim`, `viewmodels/menu_vm.nim`,
-  ## `viewmodels/omnibar_sources.nim`, `viewmodels/omnibar_vm.nim`,
-  ## `viewmodels/product_menu.nim` and `viewmodels/transport_icons.nim` (+18).
-  ## None calls `rebase(` or spells `mapOver`; every other case's count is
-  ## unchanged (measured per case against `3214a61de`). No law, population or
-  ## example moved.*
-  ## *1690 -> 1693 on 2026-09-29: §35's enumeration over `viewmodel/` — PLAT-47
-  ## part B's one new production module x three assertions:
-  ## `host/native_vcs.nim` (the system-git VCS facade, moved out of
-  ## `desktop_native.nim` so the terminal and GPUI hosts share it). It calls
-  ## no `rebase(` and spells no `mapOver`.*
-  ## *1687 -> 1690 on 2026-09-24: §35's enumeration over `viewmodel/` again —
-  ## M50's one new production module x three assertions:
-  ## `viewmodels/desktop_test_host.nim` (the desktop Test Results host, issue
-  ## #748). It calls no `rebase(` and spells no `mapOver`; it touches no
-  ## document text at all. No law, population or example moved.*
-  ## *1681 -> 1687 on 2026-09-23: §35's enumeration over `viewmodel/` once
-  ## more — PLAT-29's two new production modules x three assertions each:
-  ## `store/stop_timeline.nim` (the DAP answer's stop version) and
-  ## `viewmodels/inline_value_timeline.nim` (the draw-time gate). Neither calls
-  ## `rebase(` or spells `mapOver`: both reconcile through `reconcile`.*
-  ## *1672 -> 1681 on 2026-09-23: §35's enumeration over `viewmodel/` again,
-  ## three new production modules x three assertions each —
-  ## `keymap/keymap_selection.nim` (PLAT-43's one selector),
-  ## `host/keymap_preference.nim` and `host/native_state.nim` (the stored
-  ## choice and the native hosts' state root). None calls `rebase(` or spells
-  ## `mapOver`.*
-  ## *1666 -> 1669 on 2026-09-20: §35's enumeration firing for an EIGHTH time,
-  ## and the first time over `viewmodel/` rather than over `viewmodel/editor/`.
-  ## PLAT-34 added `viewmodel/editing_core.nim`, `ProductionModules` walks
-  ## every `.nim` under `viewmodel/` at any depth, and the per-module sweep
-  ## contributes three assertions for a module that calls no `rebase(` and
-  ## spells no `mapOver` — which this one does not. The gate said so by name on
-  ## the first floor-gate run of that milestone, before either of its own
-  ## suites existed. No list moved, because there is no list: the repair for
-  ## this scan was to derive the subject set, and this is that repair being
-  ## cheap.*
-  ## **959 -> 1666 ON 2026-09-20: §35's SUBJECT SET STOPPED BEING A
-  ## DIRECTORY.** The double-mapping scan below used to run over the 19
-  ## modules of `viewmodel/editor/`; it now runs over all 252 production
-  ## modules under `viewmodel/`, derived from the tree at compile time. The
-  ## jump is that change and nothing else — no law, no population and no
-  ## example moved.
+var sweptAssertions = 0
+
+template swept(condition: untyped) =
+  ## One per-module assertion of the tree sweep. Kept out of
+  ## `countedAssertions` because its number is a function of how many
+  ## production modules exist, and is checked against
+  ## `ExpectedSweptAssertions` instead of a hand-kept constant.
+  inc sweptAssertions
+  check condition
+
+const ExpectedAssertions = 882
+  ## The assertions whose number does not depend on the size of the tree:
+  ## every law cell, the generator's population checks, the call-site spot
+  ## reads, the shrinker and the sweep's own non-vacuity floors. Asserted by
+  ## the last case. Update it deliberately, in the same commit as the checks
+  ## that moved it.
   ##
-  ## It is here rather than in a footnote because the reason for the widening
-  ## is a measurement: a ninth `rebase(`-calling routine planted in a new
-  ## `editor/` module reddened this suite, and THE IDENTICAL ROUTINE PLANTED
-  ## IN `collab/` LEFT IT GREEN. `walkDir` was hard-coded to `"editor"`, so
-  ## the directory PLAT-33 had just added code to was not a subject. Both
-  ## defeat attempts were re-run after the widening and both are red.
+  ## **THE TREE SWEEP IS NOT IN IT, SINCE 2026-11-12.** Until then this one
+  ## constant also counted the per-module assertions of "no module anywhere in
+  ## the ViewModel tree can spell the double mapping", three for every
+  ## production `.nim` under `viewmodel/` and five for one in a directory that
+  ## calls `rebase(`. So every module anybody added anywhere in the ViewModel
+  ## moved it, and this suite went red on work that had nothing to do with the
+  ## edit algebra: the constant was bumped by hand more than forty times, and
+  ## was found stale by a lane at least four times (most recently by
+  ## `views/agent_harbor_palette.nim`, 2078 counted as 2081). Each bump was a
+  ## transcription of a number the scan itself already knew.
   ##
-  ## **AND AGAIN ON 2026-09-20: PLAT-33 ADDED `collab_text.nim`, THE SEVENTH
-  ## FIRING OF §35's ENUMERATION.** Five suites went red by name on the first
-  ## run of the floor gate — PLAT-25's, PLAT-27's, PLAT-28's, PLAT-29's and
-  ## PLAT-32's — before either of PLAT-33's own suites existed, and none of
-  ## them knew the milestone was happening. Every repair was a list entry and
-  ## this number, except PLAT-27's, which needed two lists because its scan
-  ## splits the directory by what a module IS.
-  ##
-  ## The new module is the one that would host a seventh hand-written double
-  ## mapping if one were ever written: `receiveUpdates` and `rebaseUpdates`
-  ## are the last two of the reference's five sites, and they are the two the
-  ## reference spells out by hand. It does not; it calls `rebase`.
-  ## **+4 ON 2026-09-19: PLAT-32 ADDED `history.nim` TO `viewmodel/editor/`,
-  ## AND THIS SUITE SAID SO BEFORE THAT MILESTONE'S OWN SUITES EXISTED.**
-  ## §35's enumeration firing for the sixth time, from a milestone that had
-  ## been green for a day. The repair is a list entry and this number.
-  ## 898 -> 906 -> 914 on 2026-09-18: PLAT-29 added `document_version.nim` and
-  ## `reconcile.nim` to `viewmodel/editor/` and PLAT-30 added `operations.nim`
-  ## and `editor_state.nim`, and the double-mapping scan below runs FOUR
-  ## assertions over every module in that directory. The directory enumeration
-  ## is what made each of those an edit rather than a silence — and PLAT-30's
-  ## made the PRODUCT move too: a paste operation's natural parameter name is
-  ## this scan's own needle, `before: bool`, so `operations.nim` calls it
-  ## `atRangeStart` rather than the scan being widened to spare it.
-  ## Asserted by the last case. Update it deliberately, in the same commit as
-  ## the checks that moved it.
-  ##
-  ## It moved from 858 to 870 when PLAT-26 added `selection.nim` and
-  ## `selection_ops.nim` to `viewmodel/editor/`: the compile-time directory
-  ## enumeration below put them in the scan's subject set, which is §35's
-  ## mechanism doing exactly what it was added for.
+  ## The sweep's assertions are now tallied separately (`swept`) and compared
+  ## against `ExpectedSweptAssertions`, which is derived from the scan's own
+  ## facts about each module. Adding a module moves both sides together;
+  ## dropping a check, skipping a module or breaking out of the sweep early
+  ## still leaves the two sides apart, and the tally case says which one.
+  ## The constant's history before the split is in this file's git log.
 
 # ---------------------------------------------------------------------------
 # THE SEED. Printed, so a failure is reproducible without re-running anything.
@@ -1175,6 +964,23 @@ const
     sort(xs)
     xs
 
+  ExpectedSweptAssertions = block:
+    ## **HOW MANY ASSERTIONS THE SWEEP MAKES OVER THIS TREE**, derived from
+    ## the same facts the sweep reads and written out once more, branch for
+    ## branch, so the two can disagree. A new module raises both sides; a
+    ## sweep that skips a module, stops early or loses a check raises only
+    ## this one.
+    var n = 0
+    for m in ProductionModules:
+      inc n                        # the two-sided `rebase(` count
+      if m.rawRebase == 0:
+        inc n                      # a raw zero forces a stripped zero
+      if m.path != ChangeSetPath:
+        inc n                      # no `mapOver`
+        if m.dir in RebaseDirectories:
+          n += 2                   # neither flag needle
+    n
+
   RebaseSites = {
     "editor/change_set.nim": 1,
     "editor/transaction.nim": 1,
@@ -1294,18 +1100,18 @@ suite "PLAT-25 — one function, one name":
       # primitive cannot be silently missing from the table — which is how
       # `reconcile.nim` came to be unlisted from PLAT-29 until PLAT-33, and
       # how a `collab/` call site would have gone unseen indefinitely.
-      counted m.rebaseCalls == RebaseSites.getOrDefault(m.path, 0)
+      swept m.rebaseCalls == RebaseSites.getOrDefault(m.path, 0)
       # A module that pass 1 cleared must have been cleared soundly: stripping
       # comments only deletes text, so a raw zero forces a stripped zero.
       if m.rawRebase == 0:
-        counted m.rebaseCalls == 0
+        swept m.rebaseCalls == 0
       if m.path != ChangeSetPath:
-        counted m.mapOverHits == 0
+        swept m.mapOverHits == 0
         # The FLAG needles apply wherever the primitive is actually called —
         # a set derived above, not a directory chosen here.
         if m.dir in RebaseDirectories:
-          counted m.flagSig == 0
-          counted m.flagTrue == 0
+          swept m.flagSig == 0
+          swept m.flagTrue == 0
     counted deepScanned > 0
     counted deepScanned >= 19            # all of `editor/` gets pass 2
 
@@ -1634,5 +1440,9 @@ suite "PLAT-25 — the shrinker reaches a known minimum":
 
 suite "PLAT-25 — the tally":
   test "assertion count":
-    echo "CHECKS: " & $countedAssertions
+    echo "CHECKS: " & $(countedAssertions + sweptAssertions)
     check countedAssertions == ExpectedAssertions
+    # The sweep's share, against the number derived from the tree. The floor
+    # keeps the derivation honest: every module contributes at least two.
+    check sweptAssertions == ExpectedSweptAssertions
+    check ExpectedSweptAssertions >= 2 * ProductionModules.len
