@@ -989,6 +989,23 @@ proc testChordForAction(actionName: cstring): cstring =
   except ValueError:
     cstring""
 
+proc testChordForOperation(operation: cstring): cstring =
+  ## Read-only browser-test seam for the scenario pack's binding resolver
+  ## (DemoVideoScript-Format §4.3.4): the chord the live router would run
+  ## `operation` (`name` or `name(argument)`) with where the focus is now,
+  ## user rows included — the lookup the menus and tooltips display. "" when
+  ## no key reaches it.
+  var name = $operation
+  var arg = ""
+  let paren = name.find('(')
+  if paren > 0 and name.endsWith(")"):
+    arg = name[paren + 1 .. ^2]
+    name = name[0 ..< paren]
+  syncPaletteLayer()
+  syncContextMenuLayer()
+  cstring(deskRouter.chordFor(name, desktopFacts(), desktopScopePath(),
+                              nmNormal, arg))
+
 # PLAT-70 Part B: the copy hint under a table row names the chord that
 # copies it where the focus is (KL-8).
 copyChordOf = proc(): string =
@@ -1052,7 +1069,8 @@ proc installKeyRouter*() =
   installed = true
   {.emit: ["window.__ctKeymapProbe = ", probeKeys, ";"].}
   {.emit: ["window.__CODETRACER_TEST__ = window.__CODETRACER_TEST__ || {};",
-           "window.__CODETRACER_TEST__.chordForAction = ", testChordForAction, ";"].}
+           "window.__CODETRACER_TEST__.chordForAction = ", testChordForAction, ";",
+           "window.__CODETRACER_TEST__.chordForOperation = ", testChordForOperation, ";"].}
   {.emit: ["window.addEventListener('keydown', ", onKeyDown, ", true);",
            "window.addEventListener('keyup', ", onKeyUp, ", true);",
            "window.addEventListener('mousedown', ", onPointerDown, ", true);",
