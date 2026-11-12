@@ -12,9 +12,8 @@ stage:
     with: { width: 200, height: 50 }
 steps:
   - wait: { until: replay-idle, timeout: 120s }
-  - expect: { at: omnibox, query: "", focused: false }
+  - expect: { at: omnibox, query: "" }
   - chord: Ctrl+P
-  - wait: { until: { at: omnibox, focused: true }, timeout: 10s }
   - type: "calc"
   - wait: { until: { at: omnibox, query: calc }, timeout: 10s }
   - key: Left
@@ -25,4 +24,3 @@ steps:
   - key: Insert
   - key: Esc
   - wait: { until: { at: omnibox, query: "" }, timeout: 10s }
-  - expect: { at: omnibox, focused: false }

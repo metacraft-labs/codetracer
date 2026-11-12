@@ -13,4 +13,6 @@ retention: { runs: 5, failure-days: 7 }
 settle-timeout: 20000
 applicable:
   - ../tracing/trace-macro-at-caret.yaml
+  - ../gpui/keys-debug-function-keys.yaml
+  - ../gpui/editor-wheel-scrolls-rows.yaml
 unsupported: []

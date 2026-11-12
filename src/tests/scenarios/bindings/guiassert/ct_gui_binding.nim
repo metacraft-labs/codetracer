@@ -1029,6 +1029,8 @@ proc readOverlays(ctx: GuiContext; f: Frame; t: var Tree; boxes: seq[PaneBox]) =
     for r in textRows(ctx.wordsS(f, fx0 + 22, fy0 + 2, fx1 - fx0 - 24, fy1 - fy0 - 3, psm = 7)):
       if q.len > 0: q.add " "
       q.add r.text
+    # the caret, a bar between two characters, reads as `|`
+    q = q.replace("|", "").strip
     if q.replace(" ", "") == OmnibarPlaceholderText.replace(" ", ""): q = ""
     omni = node("omnibox", fl(fx0), fl(fy0), fl(fx1 - fx0), fl(fy1 - fy0), %*{"query": q, "count": 0})
     omni.unreadable["focused"] = "the field draws the same border open or closed"
