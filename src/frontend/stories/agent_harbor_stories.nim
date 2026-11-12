@@ -142,7 +142,7 @@ proc sessionsStorySource*(fixture: string;
   of "empty", "unknown": newSnapshotDataSource(FleetSnapshot(sourceLabel: "empty server"),
                                                "empty server")
   of "single-line-40", "multi-line-40", "sidebar-40", "docked-40", "overflow-40",
-     "overflow-menu-over-panel":
+     "overflow-menu-over-panel", "overflow-menu-near-left":
     invented(40, 5)
   of "long-names":
     # Four sessions over five initiatives: the last initiative has none.
@@ -289,9 +289,16 @@ const OverflowMenuOverPanelFixture* = "overflow-menu-over-panel"
   ## The invented `overflow-40` set with the `+N` overflow menu open, over a
   ## panel under the caption bar.
 
+const OverflowMenuNearLeftFixture* = "overflow-menu-near-left"
+  ## The invented `overflow-40` set with its shortest-named initiative
+  ## active and the `+N` overflow menu open: on a narrow bar the active tab
+  ## is the only one drawn, so the chip ends near the window's left edge and
+  ## the menu hanging from it must shift right to stay inside the window.
+
 const initiativeTabsFixtures* = ["tabs", "popup", PopupOverPanelFixture, "elsewhere",
   ElsewhereOverPanelFixture, "next", "auto-switch", "recordings-many", "overflow-40",
-  OverflowMenuOverPanelFixture, "long-names", "real", "empty", "loading", "error"]
+  OverflowMenuOverPanelFixture, OverflowMenuNearLeftFixture, "long-names", "real", "empty",
+  "loading", "error"]
 
 func hasPanelUnderCaption*(surface, fixture: string): bool =
   ## Whether a story draws a panel under the caption bar (its whole window
@@ -326,7 +333,9 @@ proc createInitiativeTabsStoryVM*(fixture: string): InitiativeTabStripVM =
   ## waiting session in view), `auto-switch` (auto-switch on and the
   ## instruction delivered: the view moved on), `recordings-many`, and the
   ## invented `overflow-40` (its `+N` menu open over a panel,
-  ## `overflow-menu-over-panel`), `long-names`, and `empty`, `loading`, `error`.
+  ## `overflow-menu-over-panel`; open from a chip near the window's left
+  ## edge, `overflow-menu-near-left`), `long-names`, and `empty`, `loading`,
+  ## `error`.
   if fixture notin initiativeTabsFixtures:
     raise newException(ValueError, "no initiative tab bar story fixture named " & fixture)
   let source = sessionsStorySource(fixture, endpoint = "")
@@ -351,6 +360,15 @@ proc createInitiativeTabsStoryVM*(fixture: string): InitiativeTabStripVM =
   of "popup", PopupOverPanelFixture: result.popupId.val = first
   of "elsewhere", ElsewhereOverPanelFixture: result.elsewhereOpen.val = true
   of OverflowMenuOverPanelFixture: result.overflowOpen.val = true
+  of OverflowMenuNearLeftFixture:
+    # The shortest-named initiative (the first of them on a tie) active,
+    # then the menu open: activating a tab closes it.
+    var shortest = -1
+    for i, t in tabs:
+      if t.kind == stkInitiative and (shortest < 0 or t.title.len < tabs[shortest].title.len):
+        shortest = i
+    discard result.activate(initiativeKey(tabs[shortest].id))
+    result.overflowOpen.val = true
   of "next": discard result.stepInbox(1)
   of "auto-switch":
     result.autoSwitch.val = true

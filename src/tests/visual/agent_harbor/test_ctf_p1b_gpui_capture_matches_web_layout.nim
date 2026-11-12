@@ -56,6 +56,12 @@
 ##     web's. The pane-rectangle comparison above still applies to them;
 ##     this one only adds the pixel-sized answer it cannot give (two
 ##     hundredths of the laptop viewport are 29px).
+##   * on either side, the initiative bar's `+N` menu (`bar-overflow-menu`)
+##     does not hang from its chip (`bar-overflow`): its right edge on the
+##     chip's right edge, shifted only as far as it must be to stay inside the
+##     viewport on either side, to within `HangTolerancePx`. The
+##     pane-rectangle comparison cannot see this: two hundredths of the
+##     laptop viewport would let a menu drift 29px off its chip.
 ##
 ## The verdicts, each region's rectangle on both sides and its deltas are
 ## written to `build/ctf-p1b/parity/report.json` and `report.md` (the
@@ -69,7 +75,9 @@
 ## tolerance pass — so a judge that cannot fail, or one whose tolerance
 ## silently became zero, is caught. The same for a row picked at another
 ## index, for a fill one and two units off (one passes, two fails), and for
-## a `px` edge off by `PxTolerance` (passes) and one pixel more (fails).
+## a `px` edge off by `PxTolerance` (passes) and one pixel more (fails),
+## and for a `+N` menu moved off its chip (right-aligned under the bar, or
+## past the window's left edge where the window should have stopped it).
 ##
 ## No mocks: both sides are real captures of real renderers, over the
 ## committed synthetic fixture set both builds embed.
@@ -102,6 +110,13 @@ const
   MinimumStories = 59
     ## The section's stories at CTF-P2a's landing; a floor, so a declaration
     ## that lost its stories cannot pass by expecting nothing.
+  HangTolerancePx = 1.0
+    ## Between where the `+N` menu is and where hanging it from its chip
+    ## puts it, on one side. The browser measures its chip and places the
+    ## menu in fractions of a pixel; GPUI places it where its own Flexbox
+    ## shrink in whole pixels (`fitWidths`) says the chip ends, which its
+    ## layout can round a pixel the other way (measured: the chip ending at
+    ## 982 and the menu at 981 on the laptop `overflow-menu-over-panel`).
   PxTolerance = 2.0
     ## Per edge, in pixels, for the edges a region declares in `px`, ON TOP
     ## of the pane-rectangle comparison (which stays as it is): the browser
@@ -140,6 +155,7 @@ type
     vLayout = "layout"
     vFill = "fill"
     vPixels = "pixels"
+    vHang = "hang"
 
   RegionDelta = object
     name: string
@@ -301,6 +317,29 @@ proc comparePixels(judgement: var CaptureJudgement) =
           formatFloat(b, ffDecimal, 1) & "px in GPUI, " & formatFloat(a, ffDecimal, 1) &
           "px on the web (tolerance " & $int(PxTolerance) & "px)"
 
+proc menuHangProblems(side: string; regions: RegionSet; vw: int): seq[string] =
+  ## The initiative bar's `+N` menu, where one side drew it open, against
+  ## the place hanging it from that side's own chip gives it: its right
+  ## edge on the chip's, shifted only as far as the viewport requires.
+  if "bar-overflow-menu" notin regions: return
+  if "bar-overflow" notin regions:
+    return @[side & " draws the +N menu with no +N chip"]
+  let chip = regions["bar-overflow"]
+  let menu = regions["bar-overflow-menu"]
+  let want = max(0.0, min(chip.x + chip.w - menu.w, float(vw) - menu.w))
+  if abs(menu.x - want) > HangTolerancePx:
+    result.add side & " draws the +N menu at x " & formatFloat(menu.x, ffDecimal, 1) &
+      " to " & formatFloat(menu.x + menu.w, ffDecimal, 1) & ", not hanging from its chip (" &
+      formatFloat(chip.x, ffDecimal, 1) & " to " & formatFloat(chip.x + chip.w, ffDecimal, 1) &
+      "): x " & formatFloat(want, ffDecimal, 1) & " in a " & $vw & "px viewport (tolerance " &
+      $int(HangTolerancePx) & "px)"
+
+proc compareHangs(web, gpui: RegionSet; vw: int; judgement: var CaptureJudgement) =
+  ## The `+N` menu's place on both sides, each against its own chip.
+  for problem in menuHangProblems("GPUI", gpui, vw) & menuHangProblems("the web", web, vw):
+    if judgement.verdict == vPass: judgement.verdict = vHang
+    judgement.problems.add problem
+
 proc compareRegions(web, gpui: RegionSet; vw, vh: int;
                     judgement: var CaptureJudgement) =
   ## PLAT-35's comparator over the two answers; every region's deltas are
@@ -410,6 +449,7 @@ proc judgeCapture(id: string; dir: string; webCapture: JsonNode;
   compareRegions(regionsOf(webCapture["regions"]), gpui, vw, vh, result)
   comparePixels(result)
   compareFills(webCapture["regions"], gpui, frame, result)
+  compareHangs(regionsOf(webCapture["regions"]), gpui, vw, result)
 
 # ---------------------------------------------------------------------------
 # The expected captures
@@ -672,4 +712,70 @@ suite "CTF-P1b: the layout judge fails what it must (negative controls)":
     for problem in j.problems:
       if "region session-line-last is row" in problem: named = true
     check named
+
+  # The `+N` menu's hang, on a capture of each kind: hanging from its chip
+  # (the laptop menu over a panel) and stopped by the window's left edge
+  # (the narrow bar's menu near it). Each is moved where a view that did not
+  # hang it would draw it: right-aligned under the bar, as the strip's menu
+  # is, and hung from the chip with the window's edge ignored.
+  proc plantOf(id: string): string =
+    removeDir(scratch)
+    createDir(scratch)
+    for ext in [".ppm", ".png", ".regions.json"]:
+      copyFile(gpuiDir / (id & ext), scratch / (id & ext))
+    scratch
+
+  proc movedMenu(id: string; vw: int; toX: proc(chip, menu: Rect): float): CaptureJudgement =
+    let dir = plantOf(id)
+    let path = dir / (id & ".regions.json")
+    var doc = parseJson(readFile(path))
+    let regions = regionsOf(doc["regions"])
+    check "bar-overflow-menu" in regions and "bar-overflow" in regions
+    if "bar-overflow-menu" notin regions or "bar-overflow" notin regions:
+      return CaptureJudgement(verdict: vMissing)
+    doc["regions"]["bar-overflow-menu"]["x"] = %toX(regions["bar-overflow"],
+                                                    regions["bar-overflow-menu"])
+    writeFile(path, $doc)
+    judgeCapture(id, dir, web{id}, vw, 900)
+
+  proc namesHang(j: CaptureJudgement): bool =
+    for problem in j.problems:
+      if "GPUI draws the +N menu" in problem and "not hanging from its chip" in problem:
+        return true
+
+  const Hung = "agent-harbor-initiative-tabs-overflow-menu-over-panel-laptop-dark"
+  const Stopped = "agent-harbor-initiative-tabs-overflow-menu-near-left-sidebar-dark"
+
+  test "the +N menu's captures the controls plant into pass untouched":
+    check judgeCapture(Hung, plantOf(Hung), web{Hung}, 1440, 900).verdict == vPass
+    check judgeCapture(Stopped, plantOf(Stopped), web{Stopped}, 360, 900).verdict == vPass
+
+  test "a +N menu right-aligned under the bar, not hung from its chip, fails":
+    # Asked of the hang check itself: moved that far, the region lies over
+    # nothing but the panel's ground in the frame, and the judge stops at
+    # that (a blank region) before it reaches the hang.
+    let regions = regionsOf(parseJson(readFile(plantOf(Hung) / (Hung & ".regions.json")))["regions"])
+    check "bar-overflow-menu" in regions and "bar-overflow" in regions
+    if "bar-overflow-menu" in regions:
+      var moved = regions
+      moved["bar-overflow-menu"].x = 1440.0 - 12.0 - moved["bar-overflow-menu"].w
+      check menuHangProblems("GPUI", regions, 1440).len == 0
+      let problems = menuHangProblems("GPUI", moved, 1440)
+      check problems.len == 1 and "not hanging from its chip" in problems.join(" ")
+    check movedMenu(Hung, 1440, proc(chip, menu: Rect): float =
+      1440.0 - 12.0 - menu.w).verdict != vPass
+
+  test "a +N menu one pixel past the tolerance off its chip fails, one at it passes":
+    let at = movedMenu(Hung, 1440, proc(chip, menu: Rect): float =
+      chip.x + chip.w - menu.w + HangTolerancePx)
+    check at.verdict == vPass
+    let beyond = movedMenu(Hung, 1440, proc(chip, menu: Rect): float =
+      chip.x + chip.w - menu.w + HangTolerancePx + 1.0)
+    check beyond.verdict == vHang
+    check namesHang(beyond)
+
+  test "a +N menu hung past the window's left edge, not stopped by it, fails":
+    let j = movedMenu(Stopped, 360, proc(chip, menu: Rect): float = chip.x + chip.w - menu.w)
+    check j.verdict != vPass
+    check namesHang(j)
     removeDir(scratch)

@@ -81,6 +81,18 @@ const initiativesCheck = (assert) => hostCheck(".agent-harbor-initiatives", asse
 const progressCheck = (assert) => hostCheck(".agent-harbor-progress", assert);
 const initiativeTabsCheck = (assert) => hostCheck(".ah-initiative-tab-bar", assert);
 
+// What every story of the initiative bar with tabs must draw: the tabs, each
+// with its progress and its state class, and exactly one active.
+async function initiativeTabsDrawn(el) {
+  await waitFor(el, ".ah-initiative-tab");
+  expect(el.querySelectorAll(".ah-initiative-tab").length).toBeGreaterThan(0);
+  for (const tab of el.querySelectorAll(".ah-initiative-tab")) {
+    expect(tab.querySelector(".ah-tab-progress")?.textContent).toMatch(/^\d+\/\d+$/);
+    expect([...tab.classList].some((c) => c.startsWith("ah-ist-"))).toBe(true);
+  }
+  expect(el.querySelectorAll(".ah-initiative-tab.active").length).toBe(1);
+}
+
 // The inbox's Previous / Next: the colour each arrow computes to, and the
 // colours of the two roles it may take in the theme in view. The disabled
 // role is read from a disabled `<button>` (CodeTracer's own `button:disabled`
@@ -271,15 +283,7 @@ export const plays = {
     expect(el.querySelector(".ah-tab-retry")).toBeTruthy();
   }),
 
-  "agent-harbor-initiative-tabs": initiativeTabsCheck(async (el) => {
-    await waitFor(el, ".ah-initiative-tab");
-    expect(el.querySelectorAll(".ah-initiative-tab").length).toBeGreaterThan(0);
-    for (const tab of el.querySelectorAll(".ah-initiative-tab")) {
-      expect(tab.querySelector(".ah-tab-progress")?.textContent).toMatch(/^\d+\/\d+$/);
-      expect([...tab.classList].some((c) => c.startsWith("ah-ist-"))).toBe(true);
-    }
-    expect(el.querySelectorAll(".ah-initiative-tab.active").length).toBe(1);
-  }),
+  "agent-harbor-initiative-tabs": initiativeTabsCheck(initiativeTabsDrawn),
   "agent-harbor-initiative-tabs-popup": initiativeTabsCheck(async (el) => {
     await waitFor(el, ".ah-initiative-popup");
     expect(el.querySelector(".ah-initiative-popup .ah-popup-headline")?.textContent).toMatch(/milestone/);
@@ -304,6 +308,27 @@ export const plays = {
     const menu = el.querySelector(".ah-elsewhere-menu");
     expect(menu.getBoundingClientRect().height).toBeGreaterThan(0);
     expect(getComputedStyle(el.querySelector(".ah-initiative-tab-bar")).overflow).toBe("visible");
+  }),
+  // The +N menu hangs from its chip: its right edge on the chip's right edge,
+  // shifted only as far as it must be to stay inside the window on either
+  // side (the session strip's menu, under the end of its bar, is not this).
+  "agent-harbor-initiative-tabs-overflow-menu": initiativeTabsCheck(async (el) => {
+    // The bar's own checks first: this play replaces the bar's for its stories.
+    await initiativeTabsDrawn(el);
+    await waitFor(el, ".ah-initiative-tab-bar .ah-overflow-menu .session-tab-overflow-item");
+    // A face arriving late moves the chip; the view places the menu again.
+    await document.fonts.ready;
+    await new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)));
+    const chip = el.querySelector(".ah-initiative-tab-bar .ah-tab-overflow-count").getBoundingClientRect();
+    const menu = el.querySelector(".ah-initiative-tab-bar .ah-overflow-menu").getBoundingClientRect();
+    const view = document.documentElement.clientWidth;
+    expect(menu.height).toBeGreaterThan(0);
+    const left = Math.max(0, Math.min(chip.right - menu.width, view - menu.width));
+    // To half a pixel: the browser places the menu in fractions of one.
+    expect(menu.left).toBeCloseTo(left, 0);
+    expect(menu.left).toBeGreaterThanOrEqual(-0.5);
+    expect(menu.right).toBeLessThanOrEqual(view + 0.5);
+    if (left === chip.right - menu.width) expect(menu.right).toBeCloseTo(chip.right, 0);
   }),
   "agent-harbor-initiative-tabs-inbox": initiativeTabsCheck(async (el) => {
     await waitFor(el, ".ah-inbox");

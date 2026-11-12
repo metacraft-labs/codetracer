@@ -223,8 +223,15 @@ func agentHarborSection(): CodeTracerStorySection =
             "Five invented initiatives and forty sessions"),
       story("InitiativeTabsOverflowMenuOverPanel", "Initiative Tabs: Overflow Menu Over A Panel", "view",
             "agent-harbor-initiative-tabs", "overflow-menu-over-panel",
-            "agent-harbor-initiative-tabs",
+            "agent-harbor-initiative-tabs-overflow-menu",
             "Forty invented sessions over five initiatives, the +N menu opening over the panel under the caption bar"),
+      # The menu hangs from its chip; with the chip near the window's left
+      # edge (a narrow bar draws only the short active tab before it), it
+      # shifts right only as far as the window requires.
+      story("InitiativeTabsOverflowMenuNearLeft", "Initiative Tabs: Overflow Menu Near The Left Edge", "view",
+            "agent-harbor-initiative-tabs", "overflow-menu-near-left",
+            "agent-harbor-initiative-tabs-overflow-menu",
+            "Forty invented sessions over five initiatives, the shortest-named one active and the +N menu open"),
       story("InitiativeTabsLongNames", "Initiative Tabs: Long Names", "view", "agent-harbor-initiative-tabs", "long-names",
             "agent-harbor-initiative-tabs",
             "Invented initiatives with very long names"),

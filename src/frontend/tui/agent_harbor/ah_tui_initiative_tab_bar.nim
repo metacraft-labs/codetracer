@@ -367,6 +367,7 @@ proc drawInitiativeTabBar*(c: var AhCanvas; vm: InitiativeTabStripVM; row, col, 
   var at = col
   var popupCol = -1
   var overflow: seq[int]
+  var chipEnd = -1
   # A notice in place of the tabs is the session strip's: tab-shaped on its
   # own quiet ground, "+" directly after it.
   case vm.state.val
@@ -403,7 +404,9 @@ proc drawInitiativeTabBar*(c: var AhCanvas; vm: InitiativeTabStripVM; row, col, 
           inc waits
       let target = vm
       at += c.drawOverflowChip(host, row, at, overflow.len, waits, vm.overflowOpen.val,
-                               proc() = target.overflowOpen.val = not target.overflowOpen.val) + 1
+                               proc() = target.overflowOpen.val = not target.overflowOpen.val)
+      chipEnd = at
+      inc at
   c.drawPlus(host, row, at)
   # The controls: sessions started elsewhere, then the inbox.
   let controls = c.node(host, controlsRow, controlsCol, controlsW, 1,
@@ -426,9 +429,10 @@ proc drawInitiativeTabBar*(c: var AhCanvas; vm: InitiativeTabStripVM; row, col, 
     for i in overflow:
       widest = max(widest, 3 + widthOf(tabs[i].title) + MenuOriginGap + column + MenuInset)
     let menuW = min(widest, width - 1)
-    # Right-aligned under the bar, as the web lays it out (the strip's
-    # overflow menu, `right: 0.25em` in the bar), not anchored at `+N`.
-    let menuCol = max(col, col + width - 1 - menuW)
+    # Hung from the `+N` chip, as the web's: its last cell under the chip's
+    # last cell (`chipEnd` is one past it), shifted only as far as it must
+    # be to stay inside the terminal on either side.
+    let menuCol = max(0, min(chipEnd - menuW, c.cols - menuW))
     # A row of the menu's own ground above and below its items, as the
     # session strip's.
     let menu = c.drawMenu(host, barBelow, menuCol, menuW, overflow.len + 2, "overflow")

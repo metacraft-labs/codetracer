@@ -35,7 +35,10 @@
 ##      panel's wide layout they end flush with the ages
 ##      (`sessionHeaderProblems`); the popup's heading shows a title whole
 ##      wherever the bar can hold it (`popupHeadingProblems`); an overflow
-##      menu keeps two cells before its origin (`menuGapProblems`). A cut
+##      menu keeps two cells before its origin (`menuGapProblems`), and the
+##      initiative bar's `+N` menu hangs from its chip: its last cell under
+##      the chip's, shifted only as far as the terminal requires on either
+##      side (`menuHangProblems`). A cut
 ##      text never leaves a space or a dangling separator before its "…",
 ##      and a tree header's counts are cut only between their parts
 ##      (`cutEdgeProblems`); a title keeps two cells before the status word
@@ -97,7 +100,7 @@ from ../../../viewmodel/views/agent_harbor_words import tabLabelOf, filterCount,
   countsText, activityLineIsError
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads this spelling.
-const ExpectedAssertions = 104
+const ExpectedAssertions = 112
 
 const
   Stem = "app_agent_harbor_story"
@@ -302,6 +305,24 @@ proc menuGapProblems(m: AhTuiMount): seq[string] =
                    " cell(s) before its origin"
       if menu.col + menu.width - (trail.col + trail.width) < 1:
         result.add "the menu item '" & t.attr("title") & "' puts its origin against the menu's edge"
+
+proc hangColOf(chip, menu: AhNode; cols: int): int =
+  ## Where hanging `menu` from `chip` puts its first cell: its last cell
+  ## under the chip's last, shifted only as far as `cols` cells require.
+  max(0, min(chip.col + chip.width - menu.width, cols - menu.width))
+
+proc menuHangProblems(m: AhTuiMount): seq[string] =
+  ## The initiative bar's `+N` menu hangs from its chip, as the web's.
+  if m.surface != "agent-harbor-initiative-tabs" or m.view.isNil: return
+  let chip = m.view.first("overflow")
+  for menu in m.view.all("menu"):
+    if menu.attr("menu") != "overflow": continue
+    if chip.isNil: return @["the +N menu is drawn with no +N chip"]
+    let want = hangColOf(chip, menu, m.cols)
+    if menu.col != want:
+      result.add "the +N menu spans columns " & $menu.col & ".." & $(menu.col + menu.width - 1) &
+        ", not hanging from its chip (" & $chip.col & ".." & $(chip.col + chip.width - 1) &
+        "): from column " & $want & " of " & $m.cols
 
 proc cutEdgeProblems(m: AhTuiMount): seq[string] =
   ## A text cut to its cells never leaves a space, or a separator (" · ",
@@ -1001,7 +1022,8 @@ proc renderOnTerminal(story: CodeTracerStory; sizeName: string; cols, rows: int;
   defer: m.dispose()
   result = checkStory(m) & drawnTextProblems(m) & cutTextProblems(m) &
            separatorWrapProblems(m) & sessionHeaderProblems(m) & popupHeadingProblems(m) &
-           menuGapProblems(m) & cutEdgeProblems(m) & statusGapProblems(m) &
+           menuGapProblems(m) & menuHangProblems(m) & cutEdgeProblems(m) &
+           statusGapProblems(m) &
            cutGapProblems(m) &
            styleProblems(m, m.gridLook())
   var sess = spawnStory(id, cols, rows, mode)
@@ -1490,6 +1512,38 @@ suite "CTF-P1b: the round-3 checks can fail":
     m.repaint(AhNode(row: e.row, col: e.col - 2, width: 1, height: 1), ahPalette(dmLight).action)
     ck styleProblems(m, m.gridLook()).join(" ").contains("the auto-switch dot")
     m.dispose()
+
+suite "CTF-P1b: the +N menu hangs from its chip":
+  # The initiative bar's overflow menu: under its chip on a wide bar, and on
+  # a narrow one stopped by the terminal's left edge. Each is then moved where
+  # a view that did not hang it would draw it -- right-aligned under the bar,
+  # as the session strip's menu is, or hung from the chip past the left edge
+  # -- and must be reported.
+
+  test "a +N menu hangs from its chip, and the left edge stops it":
+    let wide = mountStory(storyOf("agent-harbor-initiative-tabs", OverflowMenuOverPanelFixture),
+                          180, 56, dmDark)
+    let wideMenu = wide.view.first("menu")
+    let wideChip = wide.view.first("overflow")
+    ck not wideMenu.isNil and not wideChip.isNil
+    ck menuHangProblems(wide).len == 0
+    # Not stopped by an edge: its last cell is the chip's.
+    ck wideMenu.col + wideMenu.width == wideChip.col + wideChip.width
+    wideMenu.col = wide.cols - 1 - wideMenu.width
+    ck menuHangProblems(wide).join(" ").contains("not hanging from its chip")
+    wide.dispose()
+    let narrow = mountStory(storyOf("agent-harbor-initiative-tabs", OverflowMenuNearLeftFixture),
+                            45, 56, dmDark)
+    let menu = narrow.view.first("menu")
+    let chip = narrow.view.first("overflow")
+    ck not menu.isNil and not chip.isNil
+    ck menuHangProblems(narrow).len == 0
+    # The story exercises the edge: hung from the chip alone, the menu would
+    # start left of the terminal.
+    ck chip.col + chip.width - menu.width < 0 and menu.col == 0
+    menu.col = chip.col + chip.width - menu.width
+    ck menuHangProblems(narrow).join(" ").contains("not hanging from its chip")
+    narrow.dispose()
 
 suite "CTF-P1b: the story host answers the pointer on a real terminal":
   # The initiative popup opens on hover (DEC 1003 motion,

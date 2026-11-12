@@ -101,6 +101,7 @@ const sessionTabsExports = [
   "InitiativeTabsRecordingsMany",
   "InitiativeTabsOverflow",
   "InitiativeTabsOverflowMenuOverPanel",
+  "InitiativeTabsOverflowMenuNearLeft",
   "InitiativeTabsLongNames",
   "InitiativeTabsRealPlans",
   "InitiativeTabsEmpty",

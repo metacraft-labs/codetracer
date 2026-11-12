@@ -56,7 +56,12 @@
     "offset; the initiative bar's tabs, `+N` and \"+\", the `bar-*` regions,",
     "whose places follow from the inactive tabs' widths; and a tab bar's",
     "`caption`, whose height follows from its lines), so a pixel-level answer",
-    "is the one that can fail."
+    "is the one that can fail.",
+    "",
+    "`bar-overflow-menu` is the initiative bar's `+N` menu alone (`menu` is",
+    "whichever dropdown is open). It hangs from its chip, `bar-overflow`: the",
+    "layout test holds its right edge to the chip's on each side, shifted only",
+    "as far as the window requires."
   ],
   "schemaVersion": 1,
   "regions": [
@@ -406,6 +411,13 @@
       "px": [
         "x"
       ]
+    },
+    {
+      "name": "bar-overflow-menu",
+      "web": ".ah-initiative-tab-bar .ah-overflow-menu",
+      "gpui": {
+        "data-ah-bar-menu": "overflow"
+      }
     },
     {
       "name": "caption",

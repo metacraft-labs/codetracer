@@ -513,6 +513,7 @@ proc drawInitiativeTabBar*(r: GpuiRenderer; host: GpuiElement;
   var x = 0
   var popupLeft = -1
   var elsewhereRight = -1
+  var chipRight = -1
   let tabs = vm.tabs
   var overflow: seq[int]
   case vm.state.val
@@ -579,6 +580,7 @@ proc drawInitiativeTabBar*(r: GpuiRenderer; host: GpuiElement;
       r.setStyle(chip, "margin-right", $(BarChipGapPx - BarGapPx) & "px")
       r.tag(chip, "bar-overflow", $overflow.len)
       r.appendChild(line, chip)
+      chipRight = x + overflowChipWidth(overflow.len, waits > 0)
     if vm.elsewhereCount > 0:
       r.appendChild(controls, r.drawElsewhere(p, vm))
       # Where the elsewhere control's anchor ends (the chip and its 4px
@@ -634,11 +636,13 @@ proc drawInitiativeTabBar*(r: GpuiRenderer; host: GpuiElement;
                                          if tabs[i].progressText.len > 0: @[tabs[i].progressText]
                                          else: @[], tabular = true))
     let menuW = clamp(widest, MenuMinPx, max(MenuMinPx, widthPx - 12))
-    # Right-aligned under the bar, as the web lays it out: the menu is the
-    # strip's `session-tab-overflow-menu` (`right: 0.25em` in the bar, which
-    # ends 8px short of the window), not anchored at the `+N` chip.
-    let menu = r.drawMenu(p, tabBottom + MenuGapPx, max(0, widthPx - 12 - menuW), menuW,
+    # Hung from the `+N` chip, as the web's (`hangOverflowMenu`): its right
+    # edge on the chip's, shifted only as far as it must be to stay inside
+    # the window on either side.
+    let menu = r.drawMenu(p, tabBottom + MenuGapPx,
+                          max(0, min(chipRight - menuW, widthPx - menuW)), menuW,
                           "overflow")
+    r.tag(menu, "bar-menu", "overflow")
     for i in overflow:
       let tab = tabs[i]
       let key = if tab.kind == stkInitiative: initiativeKey(tab.id) else: sessionKey(tab.id)

@@ -12,7 +12,8 @@
 ##   progress popup (executive summary, milestones by status, current
 ##   milestone, its sessions);
 ## - a tab per open session launched for no initiative;
-## - the `+N` overflow chip, and "+" right after the last tab;
+## - the `+N` overflow chip, its menu hanging from it (`hangOverflowMenu`),
+##   and "+" right after the last tab;
 ## - at the bar's end, as ghost controls (no fill until hovered): the
 ##   sessions started elsewhere, a count badge and `agent harbor sessions`
 ##   (on a compact bar the badge alone, its label in the tooltip), a menu
@@ -241,6 +242,37 @@ proc renderElsewhere[R, N](r: R; vm: InitiativeTabStripVM; anchor: N) =
       r.appendRendered(menu, renderElsewhereItem(r, vm, entry))
     r.appendRendered(anchor, menuNode)
 
+when defined(js):
+  proc hangOverflowMenu(within: isonim_dom.Element) {.importjs: """
+    (function(el) {
+      var bar = el.classList.contains('ah-initiative-tab-bar') ? el
+                : el.querySelector('.ah-initiative-tab-bar');
+      if (!bar || !bar.isConnected) return;
+      var chip = bar.querySelector(':scope > .ah-tab-overflow-count');
+      var menu = bar.querySelector(':scope > .ah-overflow-menu');
+      if (!chip || !menu) return;
+      menu.style.left = menu.style.right = menu.style.width = '';
+      var w = menu.getBoundingClientRect().width;
+      if (w === 0) return;
+      var view = document.documentElement.clientWidth;
+      var left = Math.max(0, Math.min(chip.getBoundingClientRect().right - w, view - w));
+      var b = bar.getBoundingClientRect();
+      menu.style.right = 'auto';
+      menu.style.width = w + 'px';
+      menu.style.left = (left - b.left - bar.clientLeft) + 'px';
+    })(#)""".}
+    ## The `+N` menu hangs from its chip: its right edge on the chip's
+    ## right edge, shifted only as far as it must be to stay inside the
+    ## window on either side. The menu is the strip's
+    ## `session-tab-overflow-menu`, placed in the bar (its containing block,
+    ## so its height under the caption bar is the strip's), whose rule
+    ## right-aligns it under the bar's end; where the chip is cannot be
+    ## said in CSS, so it is measured. The width is measured where the
+    ## stylesheet puts it and kept, so moving the menu never rewraps it.
+    ## Nothing happens until the bar is in the document with the menu
+    ## open: the mount places it again once it is (and when the window's
+    ## size or its fonts move the chip).
+
 proc renderAgentHarborInitiativeTabBar*[R, N](r: R; vm: InitiativeTabStripVM): N =
   mixin clearChildren, setAttribute
   var bar, controls: N
@@ -344,11 +376,24 @@ proc renderAgentHarborInitiativeTabBar*[R, N](r: R; vm: InitiativeTabStripVM): N
       (if vm.overflowOpen.val: " overflow-open" else: "") &
       (if vm.elsewhereOpen.val: " ah-elsewhere-open-bar" else: "") &
       (if vm.popupId.val.len > 0: " ah-popup-open" else: ""))
+    # Open, the menu is drawn only now (the bar's `overflow-open`), so it is
+    # placed only now.
+    when defined(js):
+      when N is isonim_dom.Element:
+        if vm.overflowOpen.val: hangOverflowMenu(bar)
   host
 
 when defined(js):
   proc measureWidth(el: isonim_dom.Element): int {.importjs: "(#.getBoundingClientRect().width | 0)".}
   proc onResize(cb: proc()) {.importjs: "window.addEventListener('resize', #)".}
+  proc onFontsLoaded(cb: proc()) {.importjs: """
+    (function(cb) {
+      if (!document.fonts) return;
+      document.fonts.ready.then(cb);
+      document.fonts.addEventListener('loadingdone', cb);
+    })(#)""".}
+    ## A face that arrives after the bar is drawn changes the tabs' widths,
+    ## and with them where the `+N` chip is.
 
   proc mountAgentHarborInitiativeTabBar*(container: isonim_dom.Element;
                                          vm: InitiativeTabStripVM) =
@@ -359,5 +404,7 @@ when defined(js):
     let measure = proc() =
       let width = measureWidth(container)
       if width > 0 and width != vm.stripWidth.val: vm.stripWidth.val = width
+      hangOverflowMenu(container)
     measure()
     onResize(measure)
+    onFontsLoaded(proc() = hangOverflowMenu(container))
