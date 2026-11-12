@@ -10,12 +10,18 @@
 ##     generated C it bundles: every directive's run is anchored, the anchors
 ##     pass `generated_code_anchors.validate`, and the module's own C file is
 ##     the one chosen for its source. Without the checkout that case says so
-##     and is skipped (the excerpt still runs).
+##     and is skipped (the excerpt still runs);
+##   * Edit mode's source, the compiler run now
+##     (`native_nim_c_compiler`): a two-proc file compiled with the `nim` on
+##     the PATH, its own C file chosen and anchored at its lines. Without a
+##     `nim` that case says so and is skipped.
 ##
-## No mocks: a producer is a pure function of the compiler's text.
+## No mocks: a producer is a pure function of the compiler's text, and the
+## compile is the real compiler's.
 import std/[strutils, tables, unittest]
 when not defined(js):
   import std/os
+  import ../../host/native_nim_c_compiler
 
 import ../../viewmodels/generated_code_vm
 import ../../viewmodels/generated_code_anchors
@@ -73,6 +79,31 @@ suite "the Nim producer reads the generated C's line directives":
     # What `LowLevelCodeVM.showGeneratedListing` installs must validate.
     check validate(l.anchors, l.support).len == 0
 
+  test "a Source Map v3 anchors a C file with no directives":
+    # The codetracer compiler's form (`--sourcemap:on`): line 0 unmapped,
+    # lines 1 and 2 from /a.nim:2 (`AACA` moves the original line by +1,
+    # `AAAA` keeps it), line 3 unmapped, line 4 from /a.nim:3.
+    let map = """{"version": 3, "file": "@ma.nim.c", "sources": ["/a.nim"],
+                  "names": [], "mappings": ";AACA;AAAA;;AACA"}"""
+    check mapRowsOf(map) == @[(path: "", line: 0), (path: "/a.nim", line: 2),
+                              (path: "/a.nim", line: 2), (path: "", line: 0),
+                              (path: "/a.nim", line: 3)]
+    let c = "#include \"nimbase.h\"\nint a;\nint b;\n\nint c;\n"
+    let l = nimCListing(c, "/a.nim", map)
+    check l.anchors.len == 2
+    check (l.anchors[0].generatedFirst, l.anchors[0].generatedLast) == (1, 2)
+    check l.anchors[0].sources[0].startLine == 2
+    check (l.anchors[1].generatedFirst, l.anchors[1].generatedLast) == (4, 4)
+    check validate(l.anchors, l.support).len == 0
+    check directiveCount(c, "/a.nim", map) == 2
+    # Directives win over a map; a map that is not v3 is no map.
+    check nimCListing(Excerpt, "/home/u/project/flow_test.nim", map).anchors.len == 4
+    check mapRowsOf("""{"version": 2, "mappings": "AACA"}""").len == 0
+    check mapRowsOf("not json").len == 0
+    check nimCFileFor("/a.nim", [(path: "x.nim.c", text: c, map: ""),
+                                 (path: "a.nim.c", text: c, map: map)]) == "a.nim.c"
+    check mapPathOf("/c/@ma.nim.c") == "/c/@ma.nim.c.map"
+
   test "the module's own C file is the one whose directives name it most":
     let own = Excerpt
     let other = "#define FX_0 \"/home/u/project/flow_test.nim\"\n" &
@@ -123,3 +154,52 @@ suite "the Nim producer reads the generated C's line directives":
            check l.anchors.len == lineDirectives(c.text.splitLines()).len
            check validate(l.anchors, l.support).len == 0
            check directiveCount(c.text, source) > 0
+
+  when not defined(js):
+   test "Edit mode: the C the compiler writes now":
+     if findExe("nim").len == 0 and getEnv("CODETRACER_NIM").len == 0:
+       echo "  MISSING-PREREQ SKIP: no nim on the PATH"
+       skip()
+     else:
+       let dir = getTempDir() / "ct-nim-c-compile-test"
+       createDir(dir)
+       let state = dir / "state"
+       putEnv("CODETRACER_TUI_LAYOUT_DIR", state)   # nativeStateRoot
+       let source = dir / "squares.nim"
+       writeFile(source, "proc square(x: int): int =\n" &
+                         "  result = x * x\n" &
+                         "\n" &
+                         "echo square(7)\n")
+       let c = newNimCCompile()
+       check c.startNimCCompile(source)
+       check c.waitNimCCompile()
+       checkpoint("compile: " & $c.phase & " " & c.message)
+       # A stock compiler anchors by directives, CodeTracer's by the map
+       # beside each file: whichever this `nim` wrote.
+       var candidates: seq[tuple[path, text, map: string]] = @[]
+       for f in c.cFiles:
+         let m = mapPathOf(f)
+         candidates.add (path: f, text: readFile(f),
+                         map: (if fileExists(m): readFile(m) else: ""))
+       let chosen = nimCFileFor(source, candidates)
+       checkpoint("its C: " & chosen)
+       check chosen.len > 0
+       for cand in candidates:
+         if cand.path == chosen:
+           let l = nimCListing(cand.text, source, cand.map)
+           # Line 2's statement, `result = x * x`, has a run of its own.
+           var found = false
+           for a in l.anchors:
+             if a.sources.len > 0 and a.sources[0].path == source and
+                a.sources[0].startLine == 2:
+               found = true
+           check found
+           check validate(l.anchors, l.support).len == 0
+       # A file that does not compile is refused with the compiler's error.
+       let broken = dir / "broken.nim"
+       writeFile(broken, "let x: int = \"text\"\n")
+       let b = newNimCCompile()
+       check b.startNimCCompile(broken)
+       check not b.waitNimCCompile()
+       check "Error:" in b.message
+       removeDir(dir)

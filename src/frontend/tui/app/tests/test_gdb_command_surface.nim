@@ -162,7 +162,11 @@ const
     ("onCancelLoad", "origin_binding.nim"),
   ]
 
-  ExpectedAppModules = 129
+  ExpectedAppModules = 131
+    ## 2026-11-12: 129 → 131, `tests/personas/personas.nim` (`39414d8cde1`, the
+    ## captured terminal personas; landed without re-counting) and
+    ## `views/focus_locator.nim` (`47a2d0393d2`, the screen-reader mode's
+    ## focused element).
     ## 2026-11-09: 127 → 129, `theme/pointer_protocol.nim` (`d8e437ee5`, the
     ## pointer's shape on every front-end) and `views/visual_replay_panes.nim`
     ## (`919620c00`, Visual Replay on the terminal), landed without re-counting.
