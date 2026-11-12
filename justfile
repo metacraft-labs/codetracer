@@ -5604,6 +5604,26 @@ test-gpui-shell:
   exec > >(tee test-logs/test-gpui-shell.log) 2>&1
   bash ci/lib/run-nim-test-lane.sh gpui-shell
 
+# The GPUI suites that open an rr recording of a native program
+# (`ci/lib/test-lane-files.sh`'s `gpui-native` lane — every suite under
+# `src/frontend/gpui/tests/` importing `fixtures/native_recording`, PLAT-60's
+# Low Level Code pane over a C program among them). In `gpui-shell` they
+# skipped every case: nothing there provides `ct-native-replay`.
+#
+# Builds what the lane runs: `build/bin/codetracer-gpui` (`build-gpui`, which
+# needs isonim-gpui's shim built in that sibling's own shell) and
+# `ct-native-replay` (`ensure-ct-native-replay`, from
+# `../codetracer-native-backend`). Also needs a built `replay-server`, a
+# working `rr` and the `../codetracer-native-test-programs` sibling; a missing
+# one is a counted `MISSING-PREREQ SKIP:`, and an all-skipped file fails the
+# lane. CI runs this in `test-ui-tests-rr` beside `test-tui-native`.
+test-gpui-native: build-gpui ensure-ct-native-replay
+  #!/usr/bin/env bash
+  set -euo pipefail
+  mkdir -p test-logs
+  exec > >(tee test-logs/test-gpui-native.log) 2>&1
+  bash ci/lib/run-nim-test-lane.sh gpui-native
+
 # ─── PLAT-35: cross-renderer visual alignment ───────────────────────────────
 #
 # "The GPUI front-end looks like the Electron one", as a check that can fail.
