@@ -47,9 +47,6 @@ const shared = process.env.PLAT64_SHARED_KEYBINDINGS ?? (() => {
 })();
 const results = process.env.PLAT64_SHARED_RESULTS ??
   path.join(path.dirname(shared), "results.jsonl");
-// The app reads the file this names (`viewmodel/host/keybindings_location`);
-// the Electron child inherits this process's environment.
-process.env.CODETRACER_KEYBINDINGS = shared;
 
 function recording(prefixName: string): string {
   const cache = process.env.PLAT68_FIXTURES_DIR ??
@@ -93,6 +90,22 @@ async function keyTrace(page: any): Promise<string[]> {
 test.setTimeout(300_000);
 
 test.describe("one keybindings.json: the desktop's answer", () => {
+  // The app reads the file `CODETRACER_KEYBINDINGS` names
+  // (`viewmodel/host/keybindings_location`), and the Electron child inherits
+  // this process's environment. It is set for this describe's tests only and
+  // put back after them: set at import time, it leaked into every other spec
+  // the runner loaded (the runner imports every file to list its tests, and
+  // its workers inherit its environment), so the keymap specs that write
+  // their own keybindings.json ran against this file instead.
+  let keybindingsBefore: string | undefined;
+  test.beforeAll(() => {
+    keybindingsBefore = process.env.CODETRACER_KEYBINDINGS;
+    process.env.CODETRACER_KEYBINDINGS = shared;
+  });
+  test.afterAll(() => {
+    if (keybindingsBefore === undefined) delete process.env.CODETRACER_KEYBINDINGS;
+    else process.env.CODETRACER_KEYBINDINGS = keybindingsBefore;
+  });
   test.use({
     sourcePath: recording("calc"),
     launchMode: "trace-folder",
