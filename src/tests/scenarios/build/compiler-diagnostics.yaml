@@ -28,6 +28,7 @@ steps:
       - wait: { until: { at: omnibox, present: true }, timeout: 15s }
       - type: "nargo"
       - key: Enter
+        settle: false
       - wait: { until: { at: build-panel, state: failed }, timeout: 120s }
       - expect: { at: build-panel, verdict: { contains: "build failed" } }
       - expect: { at: build-panel, verdict: { contains: "exit code" } }
@@ -48,6 +49,7 @@ steps:
       - wait: { until: { at: omnibox, present: true }, timeout: 15s }
       - type: "tsc"
       - key: Enter
+        settle: false
       - wait: { until: { at: build-panel, text: { contains: "TS2339" } }, timeout: 120s }
       - wait: { until: { at: build-panel, state: failed }, timeout: 30s }
       - expect: { at: build-panel, text: { contains: "TS2322" } }
@@ -66,6 +68,7 @@ steps:
       - wait: { until: { at: omnibox, present: true }, timeout: 15s }
       - type: "gcc"
       - key: Enter
+        settle: false
       - wait: { until: { at: build-panel, text: { contains: "unused variable" } }, timeout: 120s }
       - wait: { until: { at: build-panel, state: failed }, timeout: 30s }
       - expect: { at: build-panel, text: { contains: "expected ';' before '}' token" } }

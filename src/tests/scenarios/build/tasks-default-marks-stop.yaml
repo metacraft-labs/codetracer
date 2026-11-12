@@ -41,6 +41,7 @@ steps:
     narration: { text: "Enter runs it: the real gcc fails." }
     steps:
       - key: Enter
+        settle: false
       - wait: { until: { at: status-line, build-status: "Build failed: 2 errors, 1 warning" }, timeout: 120s }
       # The failure slides PROBLEMS in over the layout; a click on the
       # backdrop puts it away, and BUILD's strip tab docks the build.
@@ -73,6 +74,7 @@ steps:
       - wait: { until: { at: omnibox, present: true }, timeout: 15s }
       - type: "pass"
       - key: Enter
+        settle: false
       - wait: { until: { at: build-panel, verdict: { contains: "build succeeded" } }, timeout: 120s }
       - wait: { until: { at: 'editor[file="main.c"]/line[number="10"]', diagnostic: none }, timeout: 15s }
       - expect: { at: 'editor[file="main.c"]/line[number="10"]', squiggle: none }

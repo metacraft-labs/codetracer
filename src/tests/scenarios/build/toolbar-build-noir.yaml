@@ -19,6 +19,7 @@ steps:
   - wait: { until: { at: 'edit-toolbar/panel-button[label="Build"]', enabled: true }, timeout: 60s }
   - expect: { at: 'edit-toolbar/panel-button[label="Run"]', enabled: true, title: { contains: "nargo trace" } }
   - click: { at: 'edit-toolbar/panel-button[label="Build"]' }
+    settle: false
   - wait: { until: { at: status-line, build-status: { matches: "^Build failed: 2 errors?, 1 warning" } }, timeout: 120s }
   # The failure brings PROBLEMS up with nargo's diagnostics.
   - wait: { until: { at: problems-panel, count: 3 }, timeout: 30s }

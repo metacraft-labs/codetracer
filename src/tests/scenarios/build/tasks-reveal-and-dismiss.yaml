@@ -22,6 +22,7 @@ steps:
       - wait: { until: { at: omnibox, present: true }, timeout: 15s }
       - type: "clean"
       - key: Enter
+        settle: false
       - wait: { until: { at: build-panel, where: overlay }, timeout: 60s }
       - wait: { until: { at: build-panel, verdict: { contains: "build succeeded" } }, timeout: 120s }
       - wait: { until: { at: auto-hide-overlay, absent: true }, timeout: 10s }
@@ -32,6 +33,7 @@ steps:
       - wait: { until: { at: omnibox, present: true }, timeout: 15s }
       - type: "pass"
       - key: Enter
+        settle: false
       - wait: { until: { at: build-panel, where: overlay }, timeout: 60s }
       - wait: { until: { at: build-panel, verdict: { contains: "build succeeded" } }, timeout: 120s }
       # The pointer rests elsewhere well past the two seconds a clean

@@ -26,6 +26,7 @@ steps:
       - wait: { until: { at: omnibox, present: true }, timeout: 15s }
       - expect: { at: omnibox, query: ":build: " }
       - key: Enter
+        settle: false
       - wait: { until: { at: build-panel, state: succeeded }, timeout: 120s }
 
   - beat: streams

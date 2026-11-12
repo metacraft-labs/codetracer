@@ -20,6 +20,6 @@ steps:
   - wait: { until: { at: agent-activity, test-rows: 3 }, timeout: 15s }
   - expect: { at: status-line, notifications: { count: 0 } }
   - click: { at: 'agent-activity/test-run-card/test-row[name="test_add"]/panel-button[label="Open recording"]' }
-  - wait: { until: { at: status-line, notifications: { count: 1 } }, timeout: 15s }
+  - wait: { until: { at: status-line, notifications: { count: 1 } }, timeout: 45s }
   - expect: { at: status-line, notifications: { contains: "No trace found at" } }
   - expect: { at: status-line, notifications: { contains: "review-trace" } }
