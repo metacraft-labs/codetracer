@@ -4307,6 +4307,13 @@ method onCompleteMove*(self: EditorViewComponent, response: MoveState) {.async.}
     stopStore.applyStopLocation(parseJson($stringifyMove(response.toJs)))
 
   duration("complete move")
+  # The move handed again to a pane built after it (`InternalLastCompleteMove`)
+  # reaches every editor. One that already shows this stop has nothing to
+  # catch up on, and must not take the active editor back from a file the user
+  # opened since (Filesystem-Pane.md, "Opening a file").
+  let alreadyAtThisStop = response.redelivered and
+    self.location.rrTicks == response.location.rrTicks and
+    sameSourceRevisionPath(self.location.path, response.location.path)
   self.location = response.location
   await self.applySourceRevisionForLocation(response.location)
   self.syncCodeStateLine(response.location)
@@ -4347,7 +4354,9 @@ method onCompleteMove*(self: EditorViewComponent, response: MoveState) {.async.}
      sameSourceRevisionPath(response.location.highLevelPath, sourceFilePath))
 
   if moveTargetsEditor:
-    if not response.location.isExpanded:
+    if alreadyAtThisStop:
+      discard
+    elif not response.location.isExpanded:
       self.service.active = canonicalSourceRevisionPath(response.location.path)
     else:
       self.service.active = cstring(&"expanded-{response.location.expansionFirstLine}")

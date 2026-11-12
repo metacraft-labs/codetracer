@@ -405,7 +405,9 @@ proc setupMiddlewareApis*(dapApi: DapApi, viewsApi: MediatorWithSubscribers) {.e
       # redundant round-trips and re-renders per replay. The live path got
       # its `isoBatch.batch` wrapper and this one, which is the same event
       # by another door, did not.
-      let cached = lastCompleteMove
+      let cached = MoveState()
+      cached[] = lastCompleteMove[]
+      cached.redelivered = true
       isoBatch.batch proc() =
         viewsApi.emit(CtCompleteMove, cached.toJs)
   )

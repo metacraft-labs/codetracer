@@ -133,6 +133,11 @@ type
     stopSignal*: RRGDBStopSignal
     frameInfo*: FrameInfo
     eventLogIndex*: int
+    redelivered*: bool
+      ## The last move handed again to a pane built after it
+      ## (`InternalLastCompleteMove`), not a new one. It brings that pane up
+      ## to the stop; it does not take the active editor back to the stop's
+      ## file from one the user opened since. Never set by the backend.
 
   RunTestOptions* = ref object
     testName*: cstring
