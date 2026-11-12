@@ -1,0 +1,93 @@
+scenario: 1
+name: build/compiler-diagnostics
+pack: codetracer
+summary: >-
+  nargo, tsc and gcc diagnostics, printed by a build, render in the BUILD
+  panel without raw escape sequences, under a header naming the exit code,
+  with their located lines clickable and coloured by severity; and they
+  populate PROBLEMS with each problem's severity, where its filters narrow
+  the rows. (The original test wrote the output into the panel's model;
+  here a real build prints it.)
+
+stage:
+  - use: project-fixture
+    with: { name: compiler-output }
+  - use: open-project
+    with: { folder: $project }
+
+steps:
+  - wait: { until: { at: 'strip-tab[label="BUILD"]', present: true }, timeout: 60s }
+  - wait: { until: settled, timeout: 30s }
+  - click: { at: 'strip-tab[label="BUILD"]' }
+  - wait: { until: { at: build-panel, present: true }, timeout: 30s }
+
+  - beat: nargo
+    narration: { text: "nargo's type error, with its location." }
+    steps:
+      - chord: { bound: build.run }
+      - wait: { until: { at: omnibox, present: true }, timeout: 15s }
+      - type: "nargo"
+      - key: Enter
+      - wait: { until: { at: build-panel, state: failed }, timeout: 120s }
+      - expect: { at: build-panel, verdict: { contains: "build failed" } }
+      - expect: { at: build-panel, verdict: { contains: "exit code" } }
+      - expect: { at: build-panel, text: { contains: "Expected type bool, found type Field" } }
+      - expect: { at: build-panel, text: { contains: "src/main.nr" } }
+      - expect: { at: build-panel, assert: 'lacks("[0m")' }
+      - click: { at: 'strip-tab[label="PROBLEMS"]' }
+      - wait: { until: { at: problems-panel, present: true }, timeout: 30s }
+      - expect: { at: problems-panel, count: 1, errors: 1 }
+      - expect: { at: problems-panel, assert: 'has-problem-at("src/main.nr", "3:19", error)' }
+
+  - beat: tsc
+    narration: { text: "tsc's three errors: three located lines, three problems." }
+    steps:
+      - click: { at: 'strip-tab[label="BUILD"]' }
+      - wait: { until: { at: build-panel, present: true }, timeout: 30s }
+      - chord: { bound: build.run }
+      - wait: { until: { at: omnibox, present: true }, timeout: 15s }
+      - type: "tsc"
+      - key: Enter
+      - wait: { until: { at: build-panel, text: { contains: "TS2339" } }, timeout: 120s }
+      - wait: { until: { at: build-panel, state: failed }, timeout: 30s }
+      - expect: { at: build-panel, text: { contains: "TS2322" } }
+      - expect: { at: build-panel, text: { contains: "src/index.ts" } }
+      - expect: { at: build-panel, located: { ge: 3 } }
+      - click: { at: 'strip-tab[label="PROBLEMS"]' }
+      - wait: { until: { at: problems-panel, count: 3 }, timeout: 30s }
+      - expect: { at: problems-panel, errors: 3, warnings: 0 }
+
+  - beat: gcc
+    narration: { text: "gcc's coloured output: styled, never raw escapes; an error and a warning." }
+    steps:
+      - click: { at: 'strip-tab[label="BUILD"]' }
+      - wait: { until: { at: build-panel, present: true }, timeout: 30s }
+      - chord: { bound: build.run }
+      - wait: { until: { at: omnibox, present: true }, timeout: 15s }
+      - type: "gcc"
+      - key: Enter
+      - wait: { until: { at: build-panel, text: { contains: "unused variable" } }, timeout: 120s }
+      - wait: { until: { at: build-panel, state: failed }, timeout: 30s }
+      - expect: { at: build-panel, text: { contains: "expected ';' before '}' token" } }
+      - expect: { at: build-panel, assert: 'lacks("[1;31m")' }
+      - expect: { at: build-panel, assert: 'lacks("[0m")' }
+      - expect: { at: 'build-panel/build-line[text="main.c:10:5: error: expected '';'' before ''}'' token"]', located: true, severity: error, styled: true }
+      - expect: { at: 'build-panel/build-line[text="main.c:15:12: warning: unused variable ''x'' [-Wunused-variable]"]', located: true, severity: warning }
+      - expect: { at: 'build-panel/build-line[text="   10 |     printf(\"hello\")"]', located: false }
+      - expect: { at: build-panel, located: 2 }
+      - capture: { name: gcc-build }
+
+  - beat: problem-filters
+    narration: { text: "PROBLEMS: All, Errors and Warnings narrow the rows." }
+    steps:
+      - click: { at: 'strip-tab[label="PROBLEMS"]' }
+      - wait: { until: { at: problems-panel, count: 2 }, timeout: 30s }
+      - expect: { at: problems-panel, errors: 1, warnings: 1 }
+      - click: { at: 'problems-panel/panel-button[label="Errors"]' }
+      - wait: { until: { at: problems-panel, count: 1 }, timeout: 15s }
+      - expect: { at: problems-panel, errors: 1 }
+      - click: { at: 'problems-panel/panel-button[label="Warnings"]' }
+      - wait: { until: { at: problems-panel, warnings: 1 }, timeout: 15s }
+      - expect: { at: problems-panel, count: 1 }
+      - click: { at: 'problems-panel/panel-button[label="All"]' }
+      - wait: { until: { at: problems-panel, count: 2 }, timeout: 15s }

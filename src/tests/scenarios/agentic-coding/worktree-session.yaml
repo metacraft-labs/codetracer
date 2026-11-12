@@ -1,0 +1,40 @@
+scenario: 1
+name: agentic-coding/worktree-session
+pack: codetracer
+summary: >-
+  An agent session started from CodeTracer's Agent Activity prompt runs in
+  its own git worktree on Agent Harbor: the caption bar shows its progress,
+  the Agent Workspace lists the feature.nim it changed, the toggle goes back
+  to the user's workspace, and the agent's evidence command enters a
+  DeepReview (the VCS panel's title, the file's diff tab, the Agent Activity
+  panel with no roll-up).
+
+stage:
+  - use: agent-harbor
+  - use: git-workspace
+  - use: open-project
+    with: { folder: $project }
+
+steps:
+  - click: { at: 'pane-tab[label="AGENT ACTIVITY"]' }
+  - wait: { until: { at: agent-activity/agent-prompt, present: true }, timeout: 60s }
+  - click: { at: agent-activity/agent-prompt }
+  - type: "Make featureValue return 42 and record the evidence"
+  - click: { at: 'agent-activity/panel-button[label="Send"]' }
+  - wait: { until: { at: caption-progress, text: { matches: "\\d+/\\d+" } }, timeout: 180s }
+
+  - beat: agent-workspace
+    steps:
+      - wait: { until: { at: agent-workspace, label: { contains: "Agent Workspace" } }, timeout: 180s }
+      - wait: { until: { at: agent-workspace, files: { contains: "feature.nim" } }, timeout: 180s }
+
+  - beat: user-workspace
+    steps:
+      - click: { at: 'agent-workspace/panel-button[label="Switch to User"]' }
+      - wait: { until: { at: agent-workspace, label: { contains: "User Workspace" } }, timeout: 30s }
+
+  - beat: deep-review
+    steps:
+      - wait: { until: { at: vcs, title: { contains: "DeepReview:" } }, timeout: 300s }
+      - expect: { at: window, assert: 'has-pane("Diff: feature.nim")' }
+      - expect: { at: agent-activity, roll-up: 0 }

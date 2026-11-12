@@ -1,0 +1,23 @@
+scenario: 1
+name: build/lone-file-task-builds
+pack: codetracer
+summary: >-
+  A lone file whose folder declares a build task: Run build builds it.
+  (The original test wrote the task file while the window was open; here
+  the folder declares it before the launch.)
+
+stage:
+  - use: project-fixture
+    with: { name: lone-file-task }
+  - use: open-project
+    with: { folder: $project, file: lone.c }
+
+steps:
+  - wait: { until: { at: 'strip-tab[label="BUILD"]', present: true }, timeout: 60s }
+  - wait: { until: settled, timeout: 30s }
+  - wait: { until: { at: 'editor[file="lone.c"]', assert: "shows-text(lone_marker)" }, timeout: 60s }
+  - click: { at: 'strip-tab[label="BUILD"]' }
+  - wait: { until: { at: build-panel, present: true }, timeout: 30s }
+  - click: { at: 'build-panel/panel-button[label="Run build (no re-record)"]' }
+  - wait: { until: { at: status-line, build-status: { matches: "^Build succeeded" } }, timeout: 120s }
+  - expect: { at: build-panel, text: { contains: "1" } }

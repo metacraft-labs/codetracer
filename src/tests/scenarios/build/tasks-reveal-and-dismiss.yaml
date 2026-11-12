@@ -1,0 +1,41 @@
+scenario: 1
+name: build/tasks-reveal-and-dismiss
+pack: codetracer
+summary: >-
+  With the BUILD panel on its strip, a build reveals it in the overlay; a
+  clean success puts it away again, a success with a warning leaves it up.
+
+stage:
+  - use: project-fixture
+    with: { name: c-build-tasks }
+  - use: open-project
+    with: { folder: $project }
+
+steps:
+  - wait: { until: { at: 'strip-tab[label="BUILD"]', present: true }, timeout: 60s }
+  - wait: { until: settled, timeout: 30s }
+  - expect: { at: auto-hide-overlay, absent: true }
+
+  - beat: clean-success
+    steps:
+      - chord: { bound: build.run }
+      - wait: { until: { at: omnibox, present: true }, timeout: 15s }
+      - type: "clean"
+      - key: Enter
+      - wait: { until: { at: build-panel, where: overlay }, timeout: 60s }
+      - wait: { until: { at: build-panel, verdict: { contains: "build succeeded" } }, timeout: 120s }
+      - wait: { until: { at: auto-hide-overlay, absent: true }, timeout: 10s }
+
+  - beat: success-with-warning
+    steps:
+      - chord: { bound: build.run }
+      - wait: { until: { at: omnibox, present: true }, timeout: 15s }
+      - type: "pass"
+      - key: Enter
+      - wait: { until: { at: build-panel, where: overlay }, timeout: 60s }
+      - wait: { until: { at: build-panel, verdict: { contains: "build succeeded" } }, timeout: 120s }
+      # The pointer rests elsewhere well past the two seconds a clean
+      # success stays up: this one stays.
+      - hover: { at: window, for: 3500ms }
+      - expect: { at: build-panel, where: overlay }
+      - expect: { at: auto-hide-overlay, present: true }

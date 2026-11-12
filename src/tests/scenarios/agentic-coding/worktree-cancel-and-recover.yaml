@@ -1,0 +1,26 @@
+scenario: 1
+name: agentic-coding/worktree-cancel-and-recover
+pack: codetracer
+summary: >-
+  Stop on a running worktree agent session cancels it, and the pane says so;
+  the next prompt starts a fresh session that runs.
+
+stage:
+  - use: agent-harbor
+  - use: git-workspace
+  - use: open-project
+    with: { folder: $project }
+
+steps:
+  - click: { at: 'pane-tab[label="AGENT ACTIVITY"]' }
+  - wait: { until: { at: agent-activity/agent-prompt, present: true }, timeout: 60s }
+  - click: { at: agent-activity/agent-prompt }
+  - type: "Make featureValue return 42"
+  - click: { at: 'agent-activity/panel-button[label="Send"]' }
+  - wait: { until: { at: 'agent-activity/panel-button[label="Stop"]', present: true }, timeout: 120s }
+  - click: { at: 'agent-activity/panel-button[label="Stop"]' }
+  - wait: { until: { at: agent-activity, conversation: { matches: "(?i)cancel" } }, timeout: 60s }
+  - click: { at: agent-activity/agent-prompt }
+  - type: "Make featureValue return 42"
+  - click: { at: 'agent-activity/panel-button[label="Send"]' }
+  - wait: { until: { at: caption-progress, text: { matches: "\\d+/\\d+" } }, timeout: 180s }

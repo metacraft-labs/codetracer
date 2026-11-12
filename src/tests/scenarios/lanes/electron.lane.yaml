@@ -82,4 +82,39 @@ applicable:
   - ../auto-hide/focus-border-right-edge.yaml
   - ../auto-hide/focus-border-one-outline.yaml
   - ../auto-hide/hover-on-docked-edge.yaml
+  - ../build/output-streams.yaml
+  - ../build/tasks-default-marks-stop.yaml
+  - ../build/tasks-reveal-and-dismiss.yaml
+  - ../build/toolbar-build-noir.yaml
+  - ../build/compiler-diagnostics.yaml
+  - ../build/run-build-saves-first.yaml
+  - ../build/lone-file-says-why.yaml
+  - ../build/lone-file-task-builds.yaml
+  - ../build/no-project-folder.yaml
+  - ../agent-activity/refused-prompt-fails-turn.yaml
+  - ../agent-activity/enter-sends-prompt.yaml
+  - ../agent-activity/shift-enter-adds-newline.yaml
+  - ../agent-activity/prompt-box-resizes.yaml
+  - ../agent-activity/stop-empties-follow-up.yaml
+  - ../agent-activity-deepreview/pane-mounts-in-review.yaml
+  - ../agent-activity-deepreview/review-focuses-the-pillar.yaml
+  - ../agent-activity-deepreview/review-coverage-on-changed-files.yaml
+  - ../agent-activity-deepreview/review-select-file-opens-diff.yaml
+  - ../agent-activity-deepreview/review-over-saved-edit-layout.yaml
+  - ../agent-activity-deepreview/review-brings-buried-pillar-forward.yaml
+  - ../agent-activity-deepreview/session-renders-conversation.yaml
+  - ../agent-activity-deepreview/session-pruned-says-so.yaml
+  - ../agent-activity-deepreview/session-absent-shows-nothing.yaml
+  - ../agent-activity-deepreview/test-run-summary.yaml
+  - ../agent-activity-deepreview/test-run-rows.yaml
+  - ../agent-activity-deepreview/test-run-open-recording.yaml
+  - ../agent-activity-deepreview/test-run-in-flight.yaml
+  - ../agent-activity-deepreview/evidence-cards.yaml
+  - ../agent-activity-deepreview/evidence-open-review.yaml
+  - ../browser/materialized-replay.yaml
+  # These need what the host may lack, and their stage says which:
+  # ct-native-replay (recording C), and a real Agent Harbor server.
+  - ../browser/mcr-replay.yaml
+  - ../agentic-coding/worktree-session.yaml
+  - ../agentic-coding/worktree-cancel-and-recover.yaml
 unsupported: []

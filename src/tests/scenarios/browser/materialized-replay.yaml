@@ -1,0 +1,32 @@
+scenario: 1
+name: browser/materialized-replay
+pack: codetracer
+summary: >-
+  In the web deployment (`ct host`, in a browser), a Python recording opens
+  main.py in the editor, fills the event log, and a click on solve_sudoku
+  in the call trace moves the replay to it (main.py in front).
+
+stage:
+  - use: record-program
+    with: { program: py_sudoku_solver/main.py }
+  - use: open-in-browser
+
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - wait: { until: { at: 'editor[file="main.py"]', present: true }, timeout: 60s }
+
+  - beat: event-log
+    steps:
+      - click: { at: 'pane-tab[label="EVENT LOG"]' }
+      - wait: { until: event-log.loaded, timeout: 60s }
+      - expect: { at: event-log, count: { gt: 0 } }
+
+  - beat: call-trace
+    steps:
+      - click: { at: 'pane-tab[label="CALLTRACE"]' }
+      - wait: { until: call-trace.loaded, timeout: 60s }
+      - wait: { until: { at: 'call-trace/call[name="solve_sudoku"]', present: true }, timeout: 60s }
+      - click: { at: 'call-trace/call[name="solve_sudoku"]', anchor: name }
+      - wait: { until: { at: 'call-trace/call[name="solve_sudoku"]', current: true }, timeout: 30s }
+      - wait: { until: replay-idle, timeout: 60s }
+      - expect: { at: 'editor[file="main.py"]', active: true }

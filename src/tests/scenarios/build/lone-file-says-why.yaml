@@ -1,0 +1,34 @@
+scenario: 1
+name: build/lone-file-says-why
+pack: codetracer
+summary: >-
+  `ct edit` of a lone file in a folder that is no project shows the file,
+  hides the toolbar's Build and Run, and Run build and the palette's
+  Project: Run each say why nothing runs.
+
+stage:
+  - use: project-fixture
+    with: { name: lone-file }
+  - use: open-project
+    with: { folder: $project, file: lone.c }
+
+steps:
+  - wait: { until: { at: 'strip-tab[label="BUILD"]', present: true }, timeout: 60s }
+  - wait: { until: settled, timeout: 30s }
+  - wait: { until: { at: 'editor[file="lone.c"]', assert: "shows-text(lone_marker)" }, timeout: 60s }
+  - expect: { at: edit-toolbar, absent: true }
+
+  - beat: run-build
+    steps:
+      - click: { at: 'strip-tab[label="BUILD"]' }
+      - wait: { until: { at: build-panel, present: true }, timeout: 30s }
+      - click: { at: 'build-panel/panel-button[label="Run build (no re-record)"]' }
+      - wait: { until: { at: status-line, notifications: { contains: "No build tasks: add .codetracer/build.yaml to the project" } }, timeout: 30s }
+
+  - beat: project-run
+    steps:
+      - chord: { bound: palette.quick-open-file }
+      - wait: { until: { at: omnibox, present: true }, timeout: 30s }
+      - type: ":Project: Run"
+      - key: Enter
+      - wait: { until: { at: status-line, notifications: { contains: "CodeTracer does not recognise this folder as a project" } }, timeout: 30s }

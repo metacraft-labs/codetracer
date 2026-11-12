@@ -1,0 +1,31 @@
+scenario: 1
+name: build/toolbar-build-noir
+pack: codetracer
+summary: >-
+  In a Noir crate the edit toolbar's Build and Run are offered (Run says it
+  runs `nargo trace`); Build runs the project's build through the desktop's
+  main process, and nargo's failure is the status bar's verdict.
+
+stage:
+  - use: project-fixture
+    with: { name: noir-build }
+  - use: open-project
+    with: { folder: $project }
+
+steps:
+  - wait: { until: { at: 'strip-tab[label="BUILD"]', present: true }, timeout: 60s }
+  - wait: { until: settled, timeout: 30s }
+  - wait: { until: { at: 'edit-toolbar/panel-button[label="Build"]', present: true }, timeout: 60s }
+  - wait: { until: { at: 'edit-toolbar/panel-button[label="Build"]', enabled: true }, timeout: 60s }
+  - expect: { at: 'edit-toolbar/panel-button[label="Run"]', enabled: true, title: { contains: "nargo trace" } }
+  - click: { at: 'edit-toolbar/panel-button[label="Build"]' }
+  - wait: { until: { at: status-line, build-status: { matches: "^Build failed: 2 errors?, 1 warning" } }, timeout: 120s }
+  # The failure brings PROBLEMS up with nargo's diagnostics.
+  - wait: { until: { at: problems-panel, count: 3 }, timeout: 30s }
+  - expect: { at: problems-panel, errors: 2, warnings: 1 }
+  - expect: { at: problems-panel, assert: 'has-problem-at("src/util.nr", "3:22", error)' }
+  - expect: { at: problems-panel, assert: 'has-problem-at("src/main.nr", "5:19", error)' }
+  - expect: { at: problems-panel, assert: 'has-problem-at("src/util.nr", "2:9", warning)' }
+  - click: { at: 'strip-tab[label="BUILD"]' }
+  - wait: { until: { at: build-panel, present: true }, timeout: 15s }
+  - expect: { at: build-panel, verdict: { contains: "build failed (exit code 1)" } }

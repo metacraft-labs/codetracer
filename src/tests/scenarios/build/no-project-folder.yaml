@@ -1,0 +1,48 @@
+scenario: 1
+name: build/no-project-folder
+pack: codetracer
+summary: >-
+  With no project folder (Welcome → New File), Run build, `:build` and
+  `:build <command>` start nothing and say there is no project folder, and
+  Project: Run says there is no program to run; no save is asked first and
+  no build verdict appears.
+
+stage:
+  - use: open-welcome
+
+steps:
+  - wait: { until: { at: 'welcome/welcome-action[label="New file"]', present: true }, timeout: 60s }
+  - click: { at: 'welcome/welcome-action[label="New file"]' }
+  - wait: { until: { at: welcome, absent: true }, timeout: 30s }
+  - wait: { until: { at: 'strip-tab[label="BUILD"]', present: true }, timeout: 60s }
+  - wait: { until: settled, timeout: 30s }
+  - type: "int scratch = 1;\n"
+
+  - beat: run-build
+    steps:
+      - click: { at: 'strip-tab[label="BUILD"]' }
+      - wait: { until: { at: build-panel, present: true }, timeout: 30s }
+      - click: { at: 'build-panel/panel-button[label="Run build (no re-record)"]' }
+      - wait: { until: { at: status-line, notifications: { contains: "No project folder is open. There is nothing to build: open the project's folder to build it." } }, timeout: 30s }
+
+  - beat: palette
+    steps:
+      - chord: { bound: palette.quick-open-file }
+      - wait: { until: { at: omnibox, present: true }, timeout: 30s }
+      - type: ":build"
+      - key: Enter
+      - chord: { bound: palette.quick-open-file }
+      - wait: { until: { at: omnibox, present: true }, timeout: 30s }
+      - type: ":build echo from-the-launch-directory"
+      - key: Enter
+      - chord: { bound: palette.quick-open-file }
+      - wait: { until: { at: omnibox, present: true }, timeout: 30s }
+      - type: ":Project: Run"
+      - key: Enter
+      - wait: { until: { at: status-line, notifications: { contains: "No project folder is open, so there is no program to run." } }, timeout: 30s }
+
+  - beat: nothing-started
+    steps:
+      - expect: { at: dialog, absent: true }
+      - expect: { at: status-line, assert: "no-build-shown" }
+      - expect: { at: build-panel, idle: true }

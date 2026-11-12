@@ -1,0 +1,44 @@
+scenario: 1
+name: build/run-build-saves-first
+pack: codetracer
+summary: >-
+  The BUILD panel's Run build writes the modified editors before the build
+  runs: the project's task prints the file it reads, and it prints the edit
+  that was typed and never saved — once for the default task, once more for
+  the shown build's command.
+
+stage:
+  - use: project-fixture
+    with: { name: run-build-saves }
+  - use: open-project
+    with: { folder: $project, file: note.c }
+
+steps:
+  - wait: { until: { at: 'strip-tab[label="BUILD"]', present: true }, timeout: 60s }
+  - wait: { until: settled, timeout: 30s }
+  - wait: { until: 'editor.loaded', timeout: 60s }
+  - expect: { at: 'editor[file="note.c"]/line[number="1"]', text: { contains: "int on_disk = 1;" } }
+
+  - beat: first-edit
+    narration: { text: "An edit typed and not saved; then Run build." }
+    steps:
+      - click: { at: 'editor[file="note.c"]/line[number="1"]', anchor: text-start }
+      - chord: Ctrl+Home
+      - type: "// first unsaved edit\n"
+      - expect: { at: 'editor[file="note.c"]/line[number="1"]', text: { contains: "// first unsaved edit" } }
+      - click: { at: 'strip-tab[label="BUILD"]' }
+      - wait: { until: { at: build-panel, present: true }, timeout: 30s }
+      - click: { at: 'build-panel/panel-button[label="Run build (no re-record)"]' }
+      - wait: { until: { at: status-line, build-status: { matches: "^Build succeeded" } }, timeout: 120s }
+      - wait: { until: { at: build-panel, text: { contains: "int on_disk = 1;" } }, timeout: 30s }
+      - expect: { at: build-panel, text: { contains: "// first unsaved edit" } }
+
+  - beat: second-edit
+    narration: { text: "Again, with that build shown: its command runs again, after a save." }
+    steps:
+      - click: { at: 'editor[file="note.c"]/line[number="1"]', anchor: text-start }
+      - chord: Ctrl+Home
+      - type: "// second unsaved edit\n"
+      - click: { at: 'build-panel/panel-button[label="Run build (no re-record)"]' }
+      - wait: { until: { at: build-panel, text: { contains: "// second unsaved edit" } }, timeout: 120s }
+      - expect: { at: build-panel, text: { contains: "// first unsaved edit" } }

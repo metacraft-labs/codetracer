@@ -20,7 +20,7 @@ steps:
   - beat: stop-in-nested-call
     narration: { text: "Stop inside the nested call: the mark is on its row." }
     steps:
-      - click: { at: 'call-trace/call[name="assert_in_range"]' }
+      - click: { at: 'call-trace/call[name="assert_in_range"]', anchor: name }
       - wait: { until: { at: 'call-trace/call[name="assert_in_range"]', current: true }, timeout: 30s }
       - expect: { at: call-trace, assert: "marks-only(assert_in_range)" }
 

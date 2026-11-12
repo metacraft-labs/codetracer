@@ -1,0 +1,37 @@
+scenario: 1
+name: browser/mcr-replay
+pack: codetracer
+summary: >-
+  In the web deployment (`ct host`, in a browser), a C recording opens
+  main.c, fills the event log with the program's output ("Solved"), a click
+  on main in the call trace moves the replay there, and test_boards is among
+  the variables.
+
+stage:
+  - use: record-program
+    with: { program: c_sudoku_solver/main.c }
+  - use: open-in-browser
+
+steps:
+  - wait: { until: replay-idle, timeout: 180s }
+  - wait: { until: { at: 'editor[file="main.c"]', present: true }, timeout: 60s }
+
+  - beat: event-log
+    steps:
+      - click: { at: 'pane-tab[label="EVENT LOG"]' }
+      - wait: { until: event-log.loaded, timeout: 60s }
+      - wait: { until: { at: event-log, assert: "has-output(Solved)" }, timeout: 30s }
+
+  - beat: call-trace
+    steps:
+      - click: { at: 'pane-tab[label="CALLTRACE"]' }
+      - wait: { until: call-trace.loaded, timeout: 60s }
+      - click: { at: 'call-trace/call[name="main"]', anchor: name }
+      - wait: { until: { at: 'call-trace/call[name="main"]', current: true }, timeout: 30s }
+      - wait: { until: replay-idle, timeout: 60s }
+      - expect: { at: 'editor[file="main.c"]', active: true }
+
+  - beat: variables
+    steps:
+      - click: { at: 'pane-tab[label="VARIABLES"]' }
+      - wait: { until: { at: variables, assert: "has-variable(test_boards)" }, timeout: 60s }

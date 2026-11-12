@@ -1,0 +1,95 @@
+scenario: 1
+name: build/tasks-default-marks-stop
+pack: codetracer
+summary: >-
+  Ctrl+Shift+B lists the project's build tasks, the default first; Enter
+  runs the real failing gcc build (the status bar's verdict, the BUILD
+  panel's lines, the editor's squiggles and gutter glyphs, the compiler's
+  message on hover); the passing task clears the marks; Stop cancels a
+  running task.
+
+stage:
+  - use: project-fixture
+    with: { name: c-build-tasks }
+  - use: open-project
+    with: { folder: $project }
+
+steps:
+  - wait: { until: { at: 'strip-tab[label="BUILD"]', present: true }, timeout: 60s }
+  - wait: { until: settled, timeout: 30s }
+
+  - beat: picker
+    narration: { text: "Ctrl+Shift+B lists the tasks, the default first." }
+    steps:
+      - chord: { bound: build.run }
+      - wait: { until: { at: omnibox, present: true }, timeout: 15s }
+      - wait: { until: { at: omnibox, count: 7 }, timeout: 15s }
+      - expect: { at: omnibox, query: ":build: " }
+      # the project's tasks, the default first and marked, then the commands
+      - expect:
+          at: omnibox
+          labels:
+            - "fail gcc -Wall -fdiagnostics-color=always -c src/main.c -o /dev/null (default)"
+            - "pass gcc -Wall -fdiagnostics-color=always -c src/ok.c -o /dev/null"
+            - "slow sleep 30"
+            - "clean gcc -fdiagnostics-color=always -c src/ok.c -o /dev/null"
+            - "stop Stop the running build"
+            - "clear Clear the build output"
+            - "history Show an earlier build"
+
+  - beat: failing-build
+    narration: { text: "Enter runs it: the real gcc fails." }
+    steps:
+      - key: Enter
+      - wait: { until: { at: status-line, build-status: "Build failed: 2 errors, 1 warning" }, timeout: 120s }
+      # The failure slides PROBLEMS in over the layout; a click on the
+      # backdrop puts it away, and BUILD's strip tab docks the build.
+      - wait: { until: { at: problems-panel, present: true }, timeout: 30s }
+      - wait: { until: { at: problems-panel, errors: 2 }, timeout: 15s }
+      - expect: { at: problems-panel, warnings: 1, where: overlay }
+      - click: { at: auto-hide-backdrop }
+      - wait: { until: { at: auto-hide-overlay, absent: true }, timeout: 15s }
+      - click: { at: 'strip-tab[label="BUILD"]' }
+      - wait: { until: { at: build-panel, present: true }, timeout: 15s }
+      - expect: { at: build-panel, verdict: { contains: "build failed (exit code 1)" }, count: 15 }
+
+  - beat: editor-marks
+    narration: { text: "A located line opens the file: the build's marks are on its lines." }
+    steps:
+      - click: { at: 'build-panel/build-line[text="src/main.c:5:17: error: expected ‘;’ before ‘}’ token"]' }
+      - wait: { until: { at: 'editor[file="main.c"]/line[number="10"]', diagnostic: error }, timeout: 30s }
+      - expect: { at: 'editor[file="main.c"]/line[number="10"]', squiggle: error }
+      - expect: { at: 'editor[file="main.c"]/line[number="5"]', diagnostic: error }
+      - expect: { at: 'editor[file="main.c"]/line[number="4"]', diagnostic: warning, squiggle: warning }
+      - move: { at: 'editor[file="main.c"]/line[number="10"]', anchor: column(14) }
+      - hover: { at: 'editor[file="main.c"]/line[number="10"]', anchor: column(15), for: 1s }
+      - wait: { until: { at: editor-hover, text: { contains: "undeclared" } }, timeout: 15s }
+      - capture: { name: editor-marks }
+
+  - beat: passing-build
+    narration: { text: "The passing task clears the marks." }
+    steps:
+      - chord: { bound: build.run }
+      - wait: { until: { at: omnibox, present: true }, timeout: 15s }
+      - type: "pass"
+      - key: Enter
+      - wait: { until: { at: build-panel, verdict: { contains: "build succeeded" } }, timeout: 120s }
+      - wait: { until: { at: 'editor[file="main.c"]/line[number="10"]', diagnostic: none }, timeout: 15s }
+      - expect: { at: 'editor[file="main.c"]/line[number="10"]', squiggle: none }
+      - expect: { at: 'editor[file="main.c"]/line[number="4"]', diagnostic: none }
+
+  - beat: stop
+    narration: { text: "Stop ends a running task at once." }
+    steps:
+      - chord: { bound: build.run }
+      - wait: { until: { at: omnibox, present: true }, timeout: 15s }
+      - type: "slow"
+      # A running build redraws its clock: wait on its verdict, not for the
+      # window to go still.
+      - key: Enter
+        settle: false
+      - wait: { until: { at: build-panel, verdict: { contains: "running sleep 30" } }, timeout: 30s }
+      - click: { at: 'build-panel/panel-button[label="Stop build"]' }
+        settle: false
+      - wait: { until: { at: build-panel, verdict: { contains: "build cancelled" } }, timeout: 15s }
+      - expect: { at: status-line, build-status: "Build cancelled" }
