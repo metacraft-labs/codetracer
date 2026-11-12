@@ -53,7 +53,7 @@ from ../../tui/tests/fixtures/fixture_provider import MissingPrereqSkipPrefix
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads this spelling
 # as the suite's RUNTIME assertion count.
-const ExpectedAssertions = 39
+const ExpectedAssertions = 46
 
 var countedAssertions = 0
 var skipped = false
@@ -138,6 +138,12 @@ proc textOf(n: JsonNode): string =
 
 proc instructions(plan: JsonNode): seq[JsonNode] =
   plan.nodesWith(LowLevelRowAttribute)
+
+proc lowLevelEmpty(plan: JsonNode): string =
+  ## What an empty listing says (its own words, not an error).
+  for n in plan.nodesWith("data-ct-low-level-empty"):
+    return n.attr("data-ct-low-level-empty")
+  ""
 
 proc lowLevelError(plan: JsonNode): string =
   ## The pane's message line (a refusal, or "compiling…").
@@ -380,11 +386,13 @@ echo acc
     else:
       let project = nimProject("calc.nim", CalcNim)
       # While the compiler runs the window keeps going: the plan reported
-      # right after the gesture shows the pane saying so.
+      # right after the gesture shows the pane saying so — as the listing's
+      # own words, not as an error.
       let during = windowPlan("lowlevel:caret:2,lowlevel:generated-c", project,
                               edit = true)
-      checkpoint("during: " & during.lowLevelError)
-      ck during.lowLevelError.startsWith("compiling calc.nim to C")
+      checkpoint("during: " & during.lowLevelEmpty & " / " & during.lowLevelError)
+      ck during.lowLevelEmpty.startsWith("compiling calc.nim to C")
+      ck during.lowLevelError == ""
       # Settled: the module's C, scrolled to the caret line's row.
       var trace = ""
       let plan = windowPlan("lowlevel:caret:2,lowlevel:generated-c,wait:120000",
@@ -402,6 +410,41 @@ echo acc
       # In view, and the row the caret's line compiled to (the anchor's).
       ck rows.anyIt(parseInt(it.attr(LowLevelRowAttribute)) == revealed and
                     it.attr("data-ct-active") == "true")
+      removeDir(project)
+
+  test "Edit mode: the caret's line links its C rows; a selected C row marks its line":
+    # PLAT-60's cross-reference both ways (Generated-Code-Listing §0.2), in
+    # an Edit window's generated-C listing as in a replay's: SOURCE -> C, the
+    # rows the caret's line compiled to are the listing's linked rows;
+    # C -> SOURCE, the line a selected C row came from is on the editor's
+    # cross-reference ground, wherever the caret is.
+    if not haveNim:
+      echo "  ", MissingPrereqSkipPrefix, " Edit mode's generated C — no `nim`"
+      skipped = true
+      skip()
+    else:
+      let project = nimProject("calc.nim", CalcNim)
+      let listed = "lowlevel:caret:2,lowlevel:generated-c,wait:120000"
+      var trace = ""
+      discard windowPlan(listed, project, trace, edit = true)
+      let line2 = trace.revealedRow   # the row line 2 compiled to
+      ck line2 >= 0
+      # The caret moved up to line 1 (`proc triple…`) by a key in the editor:
+      # its C — the function's head — is linked, line 2's row no longer is.
+      let source = windowPlan(listed & ",key:up", project, edit = true)
+      let linked = source.instructions.filterIt(it.attr("data-ct-linked") == "true")
+      checkpoint("linked: " & $linked.mapIt(it.attr("data-ct-instruction")))
+      ck linked.len > 0
+      ck linked.anyIt("triple" in it.attr("data-ct-instruction"))
+      ck not linked.anyIt(parseInt(it.attr(LowLevelRowAttribute)) == line2)
+      # The caret on line 6, line 2's row selected (its menu's press selects
+      # it without going to it): the editor marks line 2, and only it.
+      let cross = windowPlan(listed & ",lowlevel:caret:6,lowlevel:menu:" & $line2,
+                             project, edit = true)
+      let marked = cross.nodesWith("data-ct-cross-ref")
+      checkpoint("marked: " & $marked.mapIt(it.attr("data-ct-row")))
+      ck marked.len == 1
+      ck marked.len == 1 and marked[0].attr("data-ct-row") == "2"
       removeDir(project)
 
   test "Edit mode: a file that does not compile is refused with the compiler's error":

@@ -1241,6 +1241,41 @@ proc drawEditorBody(r: GpuiRenderer; pane: GpuiElement;
                     sticky: seq[tuple[line: int; text: string; top: int]] = @[])
   ## PLAT-70: forward-declared; defined with the window's editor helpers.
 
+var
+  gEditLowLevel: LowLevelCodeVM = nil
+    ## HSF-E11: the Edit window's Low Level Code listing. An Edit window has
+    ## no replay session, so no session's `LowLevelCodeVM`: this one has no
+    ## store (`createLowLevelCodeVM(nil)`) and holds only the generated C
+    ## View Generated C Source puts in it. Made on that first request.
+  gEditGeneratedCode: GeneratedCodeVM = nil
+    ## HSF-E11: the operation's state for that listing (§8's build, open,
+    ## failed), as a session's `generatedCodeVM` is for a recording's.
+
+proc editArmPath(arm: GpuiEditArm): string
+  ## The absolute path of an edit arm's file; defined with the Edit window's
+  ## files.
+
+var
+  gNimCCompile: NimCCompile = nil
+    ## HSF-E11: Edit mode's `nim c --compileOnly` for View Generated C
+    ## Source (`host/native_nim_c_compiler`), polled on the record tick so
+    ## the window keeps painting while the compiler runs.
+  gNimCCompileAt: tuple[path: string; line: int]
+    ## The file and the caret line the compile in flight was asked for: the
+    ## listing is anchored there when it settles, wherever the caret went.
+  gNimCCompilingText = ""
+    ## What the pane says while that compile runs (its empty listing's
+    ## words, `drawLowLevelPane`).
+
+proc nimCCompileRunning(): bool =
+  not gNimCCompile.isNil and gNimCCompile.running
+
+proc editLowLevelShown(): bool =
+  ## HSF-E11: whether an Edit window's generated-C listing is on screen
+  ## (`syncLowLevelShown` keeps `shown`). Only an Edit window has an open
+  ## arm, and only it makes this listing.
+  not openArm.isNil and not gEditLowLevel.isNil and gEditLowLevel.shown.val
+
 proc redrawEditor() =
   ## PLAT-44. Redraw the editor pane from the arm's CURRENT document.
   ##
@@ -1260,9 +1295,21 @@ proc redrawEditor() =
   gEditorSurface = openArm.surfaceOf(editViewportRows)
   for row in gEditorSurface.rows.mitems:
     row.hinted = row.line == gEditorPointer.hintLine and row.mark == emNone
+  # HSF-E11: the generated-C listing's cross-reference, both ways, as a
+  # replay's editor has it (PLAT-60). INSTRUCTION -> SOURCE: the line the
+  # listing's selected C row came from, on the cross-reference ground.
+  # SOURCE -> INSTRUCTIONS: the listing drawn again, so the rows the caret's
+  # line compiled to are its linked rows (`syncLowLevelShown` hands it the
+  # caret).
+  if editLowLevelShown():
+    let x = gEditLowLevel.crossRefSource
+    if x.line > 0 and sameSourcePath(x.path, editArmPath(openArm)):
+      gEditorSurface.crossRefLine = x.line
   drawEditorBody(r, editPane)
   noteEditorTab(r, editorTabLabel(openArm.root / openArm.path, openArm.isDirty))
   applyTextFaces(r, editPane)
+  if editLowLevelShown():
+    drawLowLevelPane(r)
 
 proc cancelWindowGesture(): bool
   ## PLAT-47: `Esc` during a layout gesture (defined with the gestures below).
@@ -3362,20 +3409,6 @@ proc drawBuildPane(r: GpuiRenderer) =
   if drawBuildOutput(r, pane, vm, gBuildPane, buildBody()):
     applyTextFaces(r, pane)
 
-var
-  gEditLowLevel: LowLevelCodeVM = nil
-    ## HSF-E11: the Edit window's Low Level Code listing. An Edit window has
-    ## no replay session, so no session's `LowLevelCodeVM`: this one has no
-    ## store (`createLowLevelCodeVM(nil)`) and holds only the generated C
-    ## View Generated C Source puts in it. Made on that first request.
-  gEditGeneratedCode: GeneratedCodeVM = nil
-    ## HSF-E11: the operation's state for that listing (§8's build, open,
-    ## failed), as a session's `generatedCodeVM` is for a recording's.
-
-proc editArmPath(arm: GpuiEditArm): string
-  ## The absolute path of an edit arm's file; defined with the Edit window's
-  ## files.
-
 proc lowLevelVM(): LowLevelCodeVM =
   ## PLAT-60: the shown session's `LowLevelCodeVM` — in an Edit window
   ## (HSF-E11), the window's own generated-C listing, or nil before one.
@@ -3430,7 +3463,11 @@ proc drawLowLevelPane(r: GpuiRenderer) =
   if gLowLevelReveal >= 0 and lowLevelBody().w > 0:
     gLowLevel.revealIndex(vm, lowLevelBody(), gLowLevelReveal)
     gLowLevelReveal = -1
-  if drawLowLevelCode(r, pane, vm, gLowLevel, lowLevelBody()):
+  # HSF-E11: an Edit-mode listing on its way says so as the listing's own
+  # words, not as an error.
+  let pending = if gSession.isNil and nimCCompileRunning(): gNimCCompilingText
+                else: ""
+  if drawLowLevelCode(r, pane, vm, gLowLevel, lowLevelBody(), pending):
     applyTextFaces(r, pane)
 
 proc verificationRoot(): string =
@@ -7398,18 +7435,6 @@ proc runGpuiPointMenuOp(r: GpuiRenderer; op: PointMenuOp) =
       "tracepoints: " & $done.sweptSpecs & " run — " & $done.swept.len &
       " hit(s)")
 
-var
-  gNimCCompile: NimCCompile = nil
-    ## HSF-E11: Edit mode's `nim c --compileOnly` for View Generated C
-    ## Source (`host/native_nim_c_compiler`), polled on the record tick so
-    ## the window keeps painting while the compiler runs.
-  gNimCCompileAt: tuple[path: string; line: int]
-    ## The file and the caret line the compile in flight was asked for: the
-    ## listing is anchored there when it settles, wherever the caret went.
-
-proc nimCCompileRunning(): bool =
-  not gNimCCompile.isNil and gNimCCompile.running
-
 proc revealGeneratedRow(r: GpuiRenderer; vm: LowLevelCodeVM; line: int) =
   ## The rows the caret's line compiled to, in view: the listing's active
   ## row (`showGeneratedListing` aligned it to the caret). The pane may only
@@ -7481,8 +7506,11 @@ proc startEditGeneratedC(r: GpuiRenderer) =
   let compiling = "compiling " & path.extractFilename & " to C…" &
     (if openArm.isDirty: " (the saved file: the buffer has unsaved changes)"
      else: "")
+  # The listing emptied, with no error: the pane says it is compiling as
+  # its empty listing's words until the compile settles.
+  gNimCCompilingText = compiling
   discard gEditLowLevel.showGeneratedListing(@[], @[],
-    GeneratedListing().support, path, line, compiling)
+    GeneratedListing().support, path, line, "")
   gEditLowLevel.setNoirProject(false)
   traceGesture("View Generated C Source: " & compiling)
   armHoverTick()
@@ -9336,6 +9364,11 @@ proc lowLevelSelected(r: GpuiRenderer) =
     return
   gLowLevel.revealIndex(vm, lowLevelBody(), vm.selected.val)
   drawLowLevelPane(r)
+  if gSession.isNil:
+    # HSF-E11: an Edit window's editor shows the cross-reference itself
+    # (`redrawEditor`); its view follows the caret, which this does not move.
+    redrawEditor()
+    return
   let x = vm.crossRefSource
   if x.line > 0 and sameSourcePath(x.path, gEditorSurface.path):
     let rows = max(1, editorRowsOf(gGeom))

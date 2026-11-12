@@ -206,9 +206,13 @@ proc groundOf(l: LowLevelRowView): string =
   else: ""
 
 proc drawLowLevelCode*(r: GpuiRenderer; pane: GpuiElement; vm: LowLevelCodeVM;
-                       st: GLowLevelPane; body: PxRect): bool =
+                       st: GLowLevelPane; body: PxRect;
+                       pendingText = ""): bool =
   ## Draw the pane into `pane` (its children replaced), its body at `body` in
   ## window pixels. False when there is nothing to draw it from.
+  ## `pendingText`, when given, is what an EMPTY listing says instead of
+  ## `vm.emptyText` — a listing on its way (Edit mode's "compiling…"), which
+  ## is neither an error nor "no low-level code here".
   if pane.isNil or vm.isNil:
     return false
   while childCount(pane) > 0:
@@ -247,7 +251,7 @@ proc drawLowLevelCode*(r: GpuiRenderer; pane: GpuiElement; vm: LowLevelCodeVM;
   r.setAttribute(pane, "data-ct-low-level-rows", $lay.rows)
   r.setAttribute(pane, "data-ct-low-level-total-lines", $lay.lines.len)
   if lay.lines.len == 0:
-    let empty = vm.emptyText
+    let empty = if pendingText.len > 0: pendingText else: vm.emptyText
     if empty.len > 0:
       let el = rowElement(r, lay.list.w)
       r.setAttribute(el, "data-ct-low-level-empty", empty)
