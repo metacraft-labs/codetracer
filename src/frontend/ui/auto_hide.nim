@@ -2358,6 +2358,11 @@ proc restoreAutoHideState*(saved: JsObject) =
 # Keyboard / backdrop dismissal
 # ---------------------------------------------------------------------------
 
+proc pointerRestsOnStripTab(): bool {.importjs:
+  "(document.querySelector('.auto-hide-strip-tab:hover, .collapsed-strip-line:hover') !== null)".}
+  ## Whether the pointer is on a strip tab or a collapsed strip line now — the
+  ## elements whose `mouseenter` opens a hover preview.
+
 proc setupOverlayDismissal*() =
   ## Set up global event handlers for dismissing the auto-hide overlay:
   ## - Escape key
@@ -2367,8 +2372,20 @@ proc setupOverlayDismissal*() =
   ## Call once after DOM is ready.
 
   # Escape key handler.
+  #
+  # Escape dismisses the overlay wherever the pointer is (Auto-Hide-Panes.md
+  # §3.3), and that includes the strip tab whose hover opened it. Closing the
+  # overlay re-renders the strip, so the tab under a resting pointer is a NEW
+  # element, and Chromium answers the next layout with `mouseenter` on it —
+  # which started a fresh hover preview, and the overlay was back 300 ms
+  # later. So when the pointer rests on a tab (or a collapsed line), hovering
+  # it opens nothing again until the pointer has left it, as after a docked
+  # panel is closed from its tab.
   registerDismissal(proc(): bool =
     if not autoHideState.isNil and autoHideState.overlayVisible:
+      if pointerRestsOnStripTab():
+        suppressHoverAfterClose = true
+        suppressLineHoverUntilLeave = true
       hideOverlay()
       return true
     false)

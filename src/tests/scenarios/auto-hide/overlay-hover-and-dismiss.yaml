@@ -3,8 +3,10 @@ name: auto-hide/overlay-hover-and-dismiss
 pack: codetracer
 summary: >-
   Resting the pointer on a pinned pane's strip tab slides the pane in over
-  the layout, titled with its name; Escape dismisses the overlay, and so
-  does a click on the backdrop; the pane stays pinned either way.
+  the layout, titled with its name; Escape dismisses the overlay, with the
+  pointer in the overlay or still resting on the tab (which then opens
+  nothing until the pointer leaves it), and so does a click on the backdrop;
+  the pane stays pinned either way.
 
 stage:
   - use: record-program
@@ -26,8 +28,25 @@ steps:
       - wait: { until: { at: auto-hide-overlay, present: true }, timeout: 15s }
       - expect: { at: auto-hide-overlay, title: "EVENT LOG", edge: bottom }
       - wait: { until: event-log.loaded, timeout: 30s }
-      # The pointer moves on into the overlay, as a user reaching for it does
-      # (resting on the strip tab keeps the preview up).
+      # The pointer moves on into the overlay, as a user reaching for it does.
+      - move: { at: auto-hide-overlay }
+      - key: Esc
+      - wait: { until: { at: auto-hide-overlay, absent: true }, timeout: 15s }
+      - expect: { at: window, strip-tabs: { count: 5 } }
+
+  - beat: escape-on-tab
+    steps:
+      - hover: { at: 'strip-tab[label="EVENT LOG"]', for: 500ms }
+      - wait: { until: { at: auto-hide-overlay, present: true }, timeout: 15s }
+      - key: Esc
+      - wait: { until: { at: auto-hide-overlay, absent: true }, timeout: 15s }
+      # Still on the tab, past the hover delay: the overlay stays closed.
+      - hover: { at: 'strip-tab[label="EVENT LOG"]', for: 1500ms }
+      - expect: { at: auto-hide-overlay, absent: true }
+      # Off the tab and back, and hovering opens it again.
+      - move: { at: 'pane-tab[label="VARIABLES"]' }
+      - hover: { at: 'strip-tab[label="EVENT LOG"]', for: 500ms }
+      - wait: { until: { at: auto-hide-overlay, title: "EVENT LOG" }, timeout: 15s }
       - move: { at: auto-hide-overlay }
       - key: Esc
       - wait: { until: { at: auto-hide-overlay, absent: true }, timeout: 15s }
