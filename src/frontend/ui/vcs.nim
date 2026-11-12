@@ -35,6 +35,8 @@ from ../viewmodel/viewmodels/review_session import
   ReviewSession, reviewSessionFrom
 
 from isonim/web/dom_api as isonim_dom_api import nil
+import ../viewmodel/input/dom_pointer
+from std/jsffi import JsObject
 import isonim/web/web_renderer
 import ./panel_host
 from ../viewmodel/session_vm import SessionViewModel
@@ -1058,3 +1060,41 @@ setPanelRenderer(Content.VCS,
     component.syncLegacyVCSIntoVM()
     renderVCSPanel[WebRenderer, isonim_dom_api.Element](
       r, vm, component.vcsCallbacks()))
+
+# ---------------------------------------------------------------------------
+# A press on a changed file or a commit's expander (K34, K53)
+# ---------------------------------------------------------------------------
+#
+# The pointer rows `vcs.open-file-diff` and `vcs.toggle-commit`, performed on
+# the element the key router's hit test found (`input/dom_pointer`), with the
+# callbacks of the pane the element is in: its host's VCS component, as the
+# panel renderer above finds it.
+
+proc closestVcsHost(element: JsObject): isonim_dom_api.Element {.importjs:
+  "((e) => (e && e.closest && e.closest('[id^=\"vCSComponent-\"]')) || null)(#)".}
+
+proc vcsOfPress(p: ElementPress): tuple[component: VCSComponent, vm: VCSVM] =
+  let host = closestVcsHost(p.element)
+  if cast[JsObject](host).isNil:
+    return
+  let component = VCSComponent(
+    data.hostTabComponent(host, Content.VCS, panelHostComponentId(host)))
+  if component.isNil:
+    return
+  (component, ensureVCSVM(component))
+
+registerElementOperation("vcs.open-file-diff", proc(p: ElementPress): bool =
+  let (component, vm) = vcsOfPress(p)
+  let target = attributeOf(p.element, "data-ct-vcs-file-diff")
+  if vm.isNil or target.len == 0:
+    return false
+  invokeOpenFileDiff(component.vcsCallbacks(), target)
+  true)
+
+registerElementOperation("vcs.toggle-commit", proc(p: ElementPress): bool =
+  let (component, vm) = vcsOfPress(p)
+  let index = intAttributeOf(p.element, "data-ct-vcs-commit-toggle")
+  if vm.isNil or index < 0:
+    return false
+  vm.invokeToggleCommitExpand(component.vcsCallbacks(), index, true, false)
+  true)

@@ -64,6 +64,17 @@ import views/isonim_pixel_history_view
 import views/isonim_shader_debug_view
 import views/isonim_toggle_view
 import views/isonim_video_player_view
+import input/pane_presses
+
+proc pressReaderOf(node: MockNode): AttributeReader =
+  ## What a DOM front-end's reader does (`input/dom_pane_presses.readerOf`):
+  ## the attribute on the node pressed or its nearest ancestor carrying it.
+  result = proc(name: string): string =
+    var n = node
+    while not n.isNil:
+      if name in n.attributes: return n.attributes[name]
+      n = n.parent
+    ""
 
 # ---------------------------------------------------------------------------
 # Lookup helpers
@@ -688,7 +699,10 @@ suite "IsoNim Pixel History — events":
       vm.entries.val = @[
         historyEntry(0, 1'u64, true), historyEntry(1, 2'u64, true)]
       let panel = renderPixelHistoryPanel[MockRenderer, MockNode](MockRenderer(), vm)
-      panel.findByClass("pixel-history-list").children[1].fireEvent("click")
+      # The press is the pointer row `pixel-history.activate`, performed by
+      # `pane_presses` on the entry's own identity.
+      check pressPixelHistory(vm, "pixel-history.activate", pressReaderOf(
+        panel.findByClass("pixel-history-list").children[1]))
       check vm.selectedEntry.val == some(1)
       dispose()
 

@@ -24,6 +24,8 @@ import isonim/core/signals
 import isonim/web/dom_api as dom_api
 import isonim/web/web_renderer
 import ./panel_host
+import ../viewmodel/input/dom_pointer
+from std/jsffi import JsObject, to, `[]`
 from ../viewmodel/session_vm import SessionViewModel
 
 var visualReplayPanesInstance: VisualReplayPanesVM
@@ -366,3 +368,31 @@ setPanelDecorator(Content.VideoPlayer,
 method register*(self: VideoPlayerComponent, api: MediatorWithSubscribers) =
   self.api = api
   initVideoPlayerVM()
+
+# A press on the frame picks the pixel under it (K72): the pointer row
+# `video-player.select-pixel`, performed on the stage the key router's hit
+# test found (`input/dom_pointer`), at the press's position over the frame
+# image. With the picker on, the pick is made where the press is (the
+# magnifier moved there first, for a press with no motion before it); with it
+# off, the press still selects the pixel, for Pixel History.
+proc imageRectOf(stage: JsObject): JsObject {.importjs: """
+  ((s) => { const i = s && s.querySelector && s.querySelector('.video-player-image');
+            return i ? i.getBoundingClientRect() : null; })(#)""".}
+
+registerElementOperation("video-player.select-pixel", proc(p: ElementPress): bool =
+  let vm = videoPlayerVMInstance
+  let rect = imageRectOf(p.element)
+  if vm.isNil or rect.isNil:
+    return false
+  let x = p.event[cstring"clientX"].to(float) - rect[cstring"left"].to(float)
+  let y = p.event[cstring"clientY"].to(float) - rect[cstring"top"].to(float)
+  let w = rect[cstring"width"].to(float)
+  let h = rect[cstring"height"].to(float)
+  if vm.pickerState.val == PickerActive:
+    vm.updateMagnifier(x, y, w, h)
+    vm.commitPickedPixel()
+    vm.magnifier.val = none(MagnifierPosition)
+    vm.magnifierCenterColor.val = none(VisualReplayPixelColor)
+  else:
+    vm.frameVm.selectPixelFromRenderedPoint(x, y, w, h)
+  true)

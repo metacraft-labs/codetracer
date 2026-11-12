@@ -7,9 +7,10 @@
 ##
 ## The views are the Call Trace and Event Log, mounted under `WebRenderer` into
 ## jsdom's document with a host link builder, as BlockTracer mounts them. The
-## clicks are real `MouseEvent`s dispatched on the links; whether the browser
-## would navigate is read from the event (`defaultPrevented`), which is what
-## `row_link_dom` decides. The markup half is
+## clicks are real `MouseEvent`s dispatched on the links, into pane hosts whose
+## presses go through the DOM front-end's one pointer listener
+## (`dom_pointer_test_host`); whether the browser would navigate is read from
+## the event (`defaultPrevented`), which that listener decides. The markup half is
 ## `viewmodel/tests/unit/test_row_address.nim`'s. Recorded as codetracer-pm
 ## issues/2026-10-24-shared-pane-rows-are-clickable-without-a-role-a-keyboard-path-or-a-link.md.
 ##
@@ -35,6 +36,8 @@ import ../viewmodel/backend/mock_backend
 import ../viewmodel/store/[replay_data_store, row_address, types]
 import ../viewmodel/viewmodels/[calltrace_vm, event_log_vm]
 import ../viewmodel/views/[isonim_calltrace_view, isonim_event_log_view]
+import ../viewmodel/input/pane_presses
+import ./dom_pointer_test_host
 
 proc queryAll(root: Element; selector: cstring): seq[Element]
   {.importjs: "Array.from(#.querySelectorAll(#))".}
@@ -97,9 +100,11 @@ suite "a linked shared row: plain click is the row's, a modified one the browser
         CallLine(index: 1, name: "helper", callKey: "1", rrTicks: 2,
                  location: Location(file: "/src/main.py", line: 2))]
       store.calltrace.totalCallsCount.val = 2
+      routePresses(proc(op: string; attr: AttributeReader): bool =
+        pressCalltrace(vm, op, attr))
       let panel = renderCalltracePanel[WebRenderer, Element](WebRenderer(), vm,
                                                              links)
-      discard appendChild(documentBody(), Node(panel))
+      discard appendChild(Node(paneHost("calltrace")), Node(panel))
       drainPlatformCallbacks()
       let texts = panel.queryAll(cstring"a.call-text")
       ck texts.len == 2
@@ -131,9 +136,11 @@ suite "a linked shared row: plain click is the row's, a modified one the browser
                              kind: "event", line: i + 1, value: "e" & $i,
                              rrTicks: uint64(i + 1), file: "/src/main.py")
       store.applyEventLogRows(rows, 0, recordsTotal = 3)
+      routePresses(proc(op: string; attr: AttributeReader): bool =
+        pressEventLog(vm, op, attr))
       let panel = renderEventLogPanel[WebRenderer, Element](WebRenderer(), vm,
                                                             links)
-      discard appendChild(documentBody(), Node(panel))
+      discard appendChild(Node(paneHost("eventLog")), Node(panel))
       drainPlatformCallbacks()
       let shown = panel.queryAll(cstring"tr.eventLog-row a.eventLog-row-link")
       ck shown.len == 3

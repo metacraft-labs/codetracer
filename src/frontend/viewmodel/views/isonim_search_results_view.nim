@@ -117,11 +117,9 @@ proc matchRowClass(vm: SearchResultsVM; index: int): string =
 proc optionClass(on: bool; which: SearchOption): string =
   "fif-option fif-option-" & $which & (if on: " fif-option-on" else: "")
 
-proc openResultHandler(vm: SearchResultsVM; index: int): proc() =
-  ## A row's click. A factory, so each row's closure owns its index (Nim
-  ## closures capture variables by reference:
-  ## https://nim-lang.org/docs/manual.html#procedures-closures).
-  result = proc() = discard vm.openResult(index)
+# A row's press is the pointer row `search.open-result`, performed by the
+# front-end on the row's `data-search-result-index` (on a DOM front-end
+# `input/pane_presses`).
 
 proc toggleOptionHandler(vm: SearchResultsVM; which: SearchOption): proc() =
   result = proc() = vm.toggleOption(which)
@@ -135,7 +133,7 @@ proc matchRow[R, N](r: R; vm: SearchResultsVM; index: int;
   var textSpan: N
   result = ui(r):
     tdiv(role = "button", tabindex = "0", class = matchRowClass(vm, index),
-         onclick = openResultHandler(vm, index)):
+         `data-search-result-index` = $index):
       span(class = "fif-line-number"): text $row.line
       span(ref = textSpan, class = "fif-match-text"): discard
   # Highlight children appended imperatively (the DSL discards proc-call

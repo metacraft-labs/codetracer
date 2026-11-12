@@ -12,6 +12,7 @@ import isonim/core/signals
 import isonim/web/dom_api as dom_api
 import isonim/web/web_renderer
 import ./panel_host
+import ../viewmodel/input/[dom_pointer, dom_pane_presses, pane_presses]
 from ../viewmodel/session_vm import SessionViewModel
 
 var pixelHistoryVMInstance: PixelHistoryVM
@@ -65,3 +66,10 @@ setPanelRenderer(Content.PixelHistory,
 method register*(self: PixelHistoryComponent, api: MediatorWithSubscribers) =
   self.api = api
   initPixelHistoryVM()
+
+# A press on an entry goes to the draw call's source (K73): the pointer row
+# `pixel-history.activate`, performed on the entry the key router's hit test
+# found (`input/dom_pointer`).
+registerElementOperation("pixel-history.activate", proc(p: ElementPress): bool =
+  pressPixelHistory(pixelHistoryVMInstance, "pixel-history.activate",
+                    readerOf(p.element)))

@@ -24,6 +24,17 @@ import store/[replay_data_store, types]
 import viewmodels/[low_level_code_vm, source_vm]
 import sdk/[stop_loader, source_provider]
 import views/isonim_low_level_code_view
+import input/pane_presses
+
+proc pressReaderOf(node: MockNode): AttributeReader =
+  ## What a DOM front-end's reader does (`input/dom_pane_presses.readerOf`):
+  ## the attribute on the node pressed or its nearest ancestor carrying it.
+  result = proc(name: string): string =
+    var n = node
+    while not n.isNil:
+      if name in n.attributes: return n.attributes[name]
+      n = n.parent
+    ""
 
 proc setSourceProvider(vm: LowLevelCodeVM; provider: SourceProvider) =
   ## Use `provider` for the groups' source text instead of the DAP default:
@@ -307,7 +318,10 @@ suite "HSF-D3: the view groups the listing under its source lines":
       let rows = panel.allByClass("low-level-code-instruction")
       check rows.len == 2
       if rows.len == 2:
-        rows[1].fireEvent("click")
+        # The press is the pointer row `low-level.go-to-source-line`,
+        # performed by `pane_presses` on the row's own identity.
+        check pressLowLevel(vm, "low-level.go-to-source-line",
+                            pressReaderOf(rows[1]))
         let jump = mock.lastArgs("ct/source-line-jump")
         check not jump.isNil and jump["line"].getInt == 8
       dispose()

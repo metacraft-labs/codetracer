@@ -107,20 +107,20 @@ suite "the Call Trace panel":
       check rows.len == 2 and "event-selected" notin rows[0].attributes["class"]
       dispose()
 
-  test "a click on a row goes to that call; the toggle expands it":
+  test "a row carries the identity a press is performed on":
+    # What a press on the call or its toggle does is the pointer keymap's
+    # row, performed by `input/pane_presses` (`test_plat64_pane_presses`);
+    # the row draws what that procedure reads.
     createRoot proc(dispose: proc()) =
-      let (store, vm, mock) = setup()
+      let (store, vm, _) = setup()
       let panel = renderCalltracePanel[MockRenderer, MockNode](MockRenderer(), vm)
       store.updateCalltraceSection(@[line(0, "main", children = true,
                                           key = "k0")], 0'i64, 1'u64)
-      mock.clearReceivedCommands()
-      fireEvent(panel.byId("local-call-text-0"), "click")
-      check vm.selectedEntry.val == some(0'i64)
-      check mock.findCommand("ct/calltrace-jump").isSome
-      var toggles = panel.allByClass("toggle-call")
-      check toggles.len == 1
-      fireEvent(toggles[0], "click")
-      check mock.findCommand("ct/expand-calls").isSome
+      let rows = panel.allByClass("calltrace-call-line")
+      check rows.len == 1
+      check rows.len == 1 and rows[0].attributes.getOrDefault("data-call-index") == "0"
+      check rows.len == 1 and rows[0].attributes.getOrDefault("data-call-key") == "k0"
+      check panel.allByClass("toggle-call").len == 1
       dispose()
 
   test "the search results follow the engine's answer":

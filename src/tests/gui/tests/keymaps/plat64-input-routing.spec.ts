@@ -128,7 +128,8 @@ test.describe("one keybindings.json: the desktop's answer", () => {
     // row's own click also run, the press would have gone to the call.
     await ctPage.keyboard.press("F5");
     const afterSecondContinue = await settled(ctPage);
-    // The plain press is the element's own: it goes to that call.
+    // The plain press is the base's row (`calltrace.go-to-call`), performed by
+    // the desktop's procedure on the call pressed: it goes to that call.
     await ctPage.locator(".calltrace-view .call-text", { hasText: "add" }).first().click();
     const afterPress = await settled(ctPage);
     const trace = await keyTrace(ctPage);
@@ -139,7 +140,8 @@ test.describe("one keybindings.json: the desktop's answer", () => {
     const answer = { frontEnd: "desktop", start, afterChord, afterCtrlPress, afterPress, chordShown };
     fs.appendFileSync(results, JSON.stringify(answer) + "\n");
     console.log("answer", JSON.stringify(answer), "trace", JSON.stringify(trace));
-    expect(trace).toEqual(["debugger.step-over", "debugger.continue", "debugger.continue"]);
+    expect(trace).toEqual(["debugger.step-over", "debugger.continue", "debugger.continue",
+                           "calltrace.go-to-call"]);
     expect(afterChord).not.toBe(start);
     expect(afterCtrlPress).not.toBe(afterChord);
     expect(afterSecondContinue).toBe(afterCtrlPress);

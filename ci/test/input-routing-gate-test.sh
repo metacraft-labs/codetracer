@@ -74,6 +74,15 @@ proc planted(el: Node) =
 NIM
 expect_red listen listen
 
+t="$(make_tree click)"
+cat >>"${t}/src/frontend/viewmodel/views/isonim_point_list_view.nim" <<'NIM'
+proc planted[R, N](r: R; vm: PointListVM): N =
+  ui(r):
+    tdiv(onclick = proc() = vm.selectPoint(some(0))):
+      discard
+NIM
+expect_red click click
+
 t="$(make_tree stale)"
 echo "src/frontend/ui/key_chords_gone.nim case 3" >>"${t}/ci/test/input-routing-gate-ledger.txt"
 expect_red stale ledger

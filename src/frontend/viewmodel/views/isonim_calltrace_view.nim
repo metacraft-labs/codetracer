@@ -69,48 +69,15 @@ import ../viewport   # `withRows` / `withCols`
 export signals, computation, components
 
 # ---------------------------------------------------------------------------
-# Per-row click handlers
+# Presses
 # ---------------------------------------------------------------------------
 #
-# The DSL attaches handlers via `onclick = expr` which expects `proc()`.
-# Each row's handler must read the *current* line value so that updates
-# to a row's underlying CallLine (via `indexEach`) are reflected in the
-# action the click triggers. We achieve this by closing over the
-# `item()` accessor: the handler reads the live signal value when fired,
-# rather than capturing a stale snapshot.
-
-type
-  RowHandlers = object
-    onSelect:    proc()
-    onDblClick:  proc()
-    onToggle:    proc()
-
-proc rowHandlers(vm: CalltraceVM; item: proc(): CallLine): RowHandlers =
-  ## Build the trio of click handlers used by both Mock and Web row
-  ## bodies. Each handler reads the latest CallLine via `item()` so it
-  ## stays correct under indexEach signal updates.
-  let getLine = item
-  RowHandlers(
-    onSelect: proc() =
-      let line = getLine()
-      # Single click in the legacy Karax calltrace selects the row AND
-      # navigates to the source location (calltraceJump). Without the
-      # navigation, Playwright `activate()` selects the row but the
-      # editor never opens the target file.
-      # Select the row's CALL, so the mark stays on it when a collapse or
-      # a filter change moves it to another row (#811). `ForMove`, because
-      # the jump below lands where several frames can share the step, and
-      # following the debugger's call there would mark a deeper one.
-      if line.callKey.len > 0:
-        vm.selectCallForMove(line.callKey)
-      else:
-        vm.selectEntry(some(line.index))
-      vm.doubleClickEntry(line.index),
-    onDblClick: proc() =
-      vm.doubleClickEntry(getLine().index),
-    onToggle: proc() =
-      vm.toggleExpandCallChildren(getLine().index),
-  )
+# A row's presses are not this view's: the call's text and its toggle are the
+# elements a pointer row names (`pointer_rows`: Click / DoubleClick on the row
+# go to the call, Click on the toggle expands it), and the front-end's
+# procedure performs the operation — on a DOM front-end `input/pane_presses`', on
+# the element `input/dom_pointer` hit-tests. The row carries what that
+# procedure needs: `data-call-index` and `data-call-key`.
 
 # ---------------------------------------------------------------------------
 # Reactive helpers used inside DSL expressions
@@ -653,7 +620,7 @@ proc callTextLink(vm: CalltraceVM; links: RowLinks; row: int): string =
   links.linkOf(vm.rowAddress(row))
 
 proc renderCallText[R, N](r: R; vm: CalltraceVM; item: proc(): CallLine;
-                          h: RowHandlers; links: RowLinks; row: int;
+                          links: RowLinks; row: int;
                           callTextEl: var N): N =
   ## The call's text: the row's main control. Without a link builder it is a
   ## `role="button"` with a tab stop. With one (a host that can address a row,
@@ -667,14 +634,12 @@ proc renderCallText[R, N](r: R; vm: CalltraceVM; item: proc(): CallLine;
     result = ui(r):
       tdiv(ref = callTextEl,
            id = "local-call-text-" & $item().index, class = "call-text",
-           role = "button", tabindex = "0",
-           onclick = h.onSelect, ondblclick = h.onDblClick):
+           role = "button", tabindex = "0"):
         text callDisplayName(item()) & " #" & $item().index
   else:
     result = ui(r):
       a(ref = callTextEl,
-        id = "local-call-text-" & $item().index, class = "call-text",
-        onclick = h.onSelect, ondblclick = h.onDblClick):
+        id = "local-call-text-" & $item().index, class = "call-text"):
         text callDisplayName(item()) & " #" & $item().index
     # A row the builder made no URL for has no `href` at all (an empty one
     # would link to the page itself) and stays a button with a tab stop.
@@ -693,7 +658,6 @@ proc renderCallLineRow*[R, N](r: R; vm: CalltraceVM;
   ## toggle expands or collapses its children. A leaf's dot is neither. With a
   ## host's link builder the call text is a link instead (`renderCallText`) to
   ## the address of the held row at `slot`, the position this row is drawn at.
-  let h = rowHandlers(vm, item)
   var argsHost, callTextEl, childBoxEl, callArgsEl: N
   let row = ui(r):
     tdiv(class = rowClass(vm, item),
@@ -704,7 +668,8 @@ proc renderCallLineRow*[R, N](r: R; vm: CalltraceVM;
          `data-source-digest` = item().location.sourceDigest,
          `data-code-generation` = $item().codeGeneration,
          `data-rr-ticks` = $item().rrTicks,
-         `data-call-key` = item().callKey):
+         `data-call-key` = item().callKey,
+         `data-call-index` = $item().index):
       span(min_width = $(item().depth * int(CallDepthIndentPx)) & "px"):
         discard
       tdiv(class = "calltrace-child call-depth"):
@@ -717,8 +682,7 @@ proc renderCallLineRow*[R, N](r: R; vm: CalltraceVM;
                role = toggleRole(item), tabindex = toggleTabIndex(item),
                `aria-expanded` = toggleExpanded(item),
                `aria-label` = "Show or hide the calls it makes",
-               title = "Show or hide the calls it makes",
-               onclick = h.onToggle):
+               title = "Show or hide the calls it makes"):
             tdiv(class = toggleClass(vm, item)):
               discard
           # The call text goes here, between the toggle and the arguments
@@ -737,7 +701,7 @@ proc renderCallLineRow*[R, N](r: R; vm: CalltraceVM;
             span(class = "return-text"):
               text returnValueForRow(vm, item)
   r.insertBefore(childBoxEl,
-                 renderCallText[R, N](r, vm, item, h, links, slot,
+                 renderCallText[R, N](r, vm, item, links, slot,
                                       callTextEl),
                  callArgsEl)
   indexEach[CallArg, R, N](r, argsHost,

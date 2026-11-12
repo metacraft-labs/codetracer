@@ -28,9 +28,9 @@ proc entryClass(vm: PixelHistoryVM; index: int): string =
   else:
     "pixel-history-entry"
 
-proc onEntryClick(vm: PixelHistoryVM; index: int): proc() =
-  let captured = index
-  result = proc() = vm.selectEntry(captured)
+# An entry's press is the pointer row `pixel-history.activate`, performed by
+# the front-end on the entry's `data-pixel-history-index` (on the desktop
+# `ui/pixel_history.nim`'s procedure).
 
 proc renderPixelHistoryEntry[R, N](r: R; vm: PixelHistoryVM;
                                    entry: proc(): VisualReplayPixelHistoryEntry;
@@ -47,7 +47,7 @@ proc renderPixelHistoryEntry[R, N](r: R; vm: PixelHistoryVM;
            `data-geid` = $entry().geid,
            title = "Click to jump to the source line that issued draw " &
                     $entry().drawCallIndex,
-           onclick = onEntryClick(vm, index)):
+           `data-pixel-history-index` = $index):
       tdiv(class = "pixel-history-entry-main"):
         span(class = "pixel-history-draw"):
           text drawText(entry())

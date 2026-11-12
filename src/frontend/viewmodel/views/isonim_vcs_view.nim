@@ -184,7 +184,7 @@ proc invokeSelectCommit(vm: VCSVM; callbacks: VCSCallbacks; index: int) =
   else:
     vm.selectedCommitIndices.val = @[index]
 
-proc invokeToggleCommitExpand(vm: VCSVM; callbacks: VCSCallbacks;
+proc invokeToggleCommitExpand*(vm: VCSVM; callbacks: VCSCallbacks;
                                index: int; ctrl: bool; shift: bool) =
   ## Toggle accordion for the given commit index.
   ## Falls back to simple exclusive-select logic when no callback is registered
@@ -238,7 +238,7 @@ proc invokeRefresh(callbacks: VCSCallbacks) =
   if callbacks.onRefresh != nil:
     callbacks.onRefresh()
 
-proc invokeOpenFileDiff(callbacks: VCSCallbacks; target: string) =
+proc invokeOpenFileDiff*(callbacks: VCSCallbacks; target: string) =
   if callbacks.onOpenFileDiff != nil:
     callbacks.onOpenFileDiff(target)
 
@@ -291,30 +291,14 @@ proc setInnerHtml[R, N](r: R; node: N; html: string) =
     when N is isonim_dom.Element:
       setInnerHtmlJS(node, cstring(html))
 
-proc attachDiffClick[R, N](r: R; btn: N; callbacks: VCSCallbacks;
-                           target: string) =
-  ## Open `target`'s diff on a click on `btn`. In a browser the click does not
-  ## also reach the row underneath, which would select it.
-  # Bound where instantiated: on JS this module also sees WebRenderer's.
-  mixin addEventListener
-  let t = target
-  template plainClick() =
-    r.addEventListener(btn, "click", proc() = callbacks.invokeOpenFileDiff(t))
-  when defined(js):
-    when N is isonim_dom.Element:
-      isonim_dom.addEventListener(isonim_dom.Node(btn), cstring"click",
-        proc(ev: isonim_dom.Event) =
-          callbacks.invokeOpenFileDiff(t)
-          ev.stopPropagation()
-          ev.preventDefault())
-    else:
-      plainClick()
-  else:
-    plainClick()
-
 proc attachFileDiffClick[R, N](r: R; btn: N; callbacks: VCSCallbacks;
                                target: string) =
-  r.attachDiffClick(btn, callbacks, target)
+  ## Marks `btn` as the element whose press opens `target`'s diff: the pointer
+  ## row `vcs.open-file-diff`, performed by the front-end on the element's
+  ## `data-ct-vcs-file-diff` (on the desktop `ui/vcs.nim`'s procedure, which
+  ## also keeps the press from reaching the row underneath).
+  mixin setAttribute
+  r.setAttribute(btn, "data-ct-vcs-file-diff", target)
 
 proc renderBranchOption[R](r: R; vm: VCSVM; callbacks: VCSCallbacks;
                            branch: string): auto =
@@ -366,24 +350,13 @@ proc attachCommitClick[R, N](r: R; header: N; vm: VCSVM;
 
 proc attachCommitToggle[R, N](r: R; toggle: N; vm: VCSVM;
                               callbacks: VCSCallbacks; index: int) =
-  ## The commit's expand control: expand or collapse it in the tree, and
-  ## nothing else — the click does not reach the header, which would open the
-  ## commit's diff.
-  # Bound where instantiated: on JS this module also sees WebRenderer's.
-  mixin addEventListener
-  template plainClick() =
-    r.addEventListener(toggle, "click", proc() =
-      vm.invokeToggleCommitExpand(callbacks, index, true, false))
-  when defined(js):
-    when N is isonim_dom.Element:
-      isonim_dom.addEventListener(isonim_dom.Node(toggle), cstring"click",
-        proc(ev: isonim_dom.Event) =
-          ev.stopPropagation()
-          vm.invokeToggleCommitExpand(callbacks, index, true, false))
-    else:
-      plainClick()
-  else:
-    plainClick()
+  ## Marks the commit's expand control: the pointer row `vcs.toggle-commit`,
+  ## performed by the front-end on its `data-ct-vcs-commit-toggle` (on the
+  ## desktop `ui/vcs.nim`'s procedure: it expands or collapses the commit in
+  ## the tree, and the press does not reach the header, which would open the
+  ## commit's diff).
+  mixin setAttribute
+  r.setAttribute(toggle, "data-ct-vcs-commit-toggle", $index)
 
 # ---------------------------------------------------------------------------
 # Commit-detail tooltip

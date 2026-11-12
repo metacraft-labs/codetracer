@@ -60,6 +60,17 @@ import ../../viewmodels/constraints_answer
 import ../../viewmodels/table_fit
 from ../../viewmodels/no_project_folder import NoProjectFolderText
 import ../../views/isonim_constraints_view
+import ../../input/pane_presses
+
+proc pressReaderOf(node: MockNode): AttributeReader =
+  ## What a DOM front-end's reader does (`input/dom_pane_presses.readerOf`):
+  ## the attribute on the node pressed or its nearest ancestor carrying it.
+  result = proc(name: string): string =
+    var n = node
+    while not n.isNil:
+      if name in n.attributes: return n.attributes[name]
+      n = n.parent
+    ""
 import ../../../../ct_test/frameworks/noir_test_syntax
 import ../../../tui/tests/fixtures/plat62_noir_circuit
 
@@ -442,13 +453,17 @@ suite "PLAT-62: the Constraints pane's shared model":
       ck "linked" in drawn[0].attributes["class"]
       ck "linked" notin drawn[2].attributes["class"]
       ck "selected" notin drawn[0].attributes["class"]
-      fireEvent(drawn[1], "click")
+      # A press is the pointer row `constraints.go-to-source`, performed
+      # by `pane_presses` on the row's own identity.
+      discard pressConstraints(vm, "constraints.go-to-source",
+                               pressReaderOf(drawn[1]))
       ck asked == @["src/main.nr:11"]
       ck vm.selected.val == 1
       drawn = rowsOf(panel)
       ck "selected" in drawn[1].attributes["class"]
       ck "selected" notin drawn[0].attributes["class"]
-      fireEvent(drawn[2], "click")
+      discard pressConstraints(vm, "constraints.go-to-source",
+                               pressReaderOf(drawn[2]))
       ck asked.len == 1 and vm.selected.val == 2
       dispose()
 

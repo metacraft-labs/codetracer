@@ -35,6 +35,8 @@ from ./pane_host_lookup import tabOfPaneHost
 import isonim/core/signals
 import isonim/web/web_renderer
 import ./panel_host
+import ../viewmodel/input/[dom_pointer, dom_pane_presses, pane_presses]
+from std/jsffi import JsObject
 from ../viewmodel/session_vm import SessionViewModel
 import ../viewmodel/views/isonim_constraints_view
 
@@ -187,3 +189,10 @@ proc noteEditorSourceChanged*(path: cstring) =
 method register*(self: ConstraintsComponent, api: MediatorWithSubscribers) =
   self.api = api
   initConstraintsVM()
+
+# A press on a row selects it and opens its source (K67): the pointer row
+# `constraints.go-to-source`, performed on the row the key router's hit test
+# found (`input/dom_pointer`), on the ViewModel of the tab holding it.
+registerElementOperation("constraints.go-to-source", proc(p: ElementPress): bool =
+  pressConstraints(constraintsVMForHost(cast[dom_api.Element](p.element)),
+                   "constraints.go-to-source", readerOf(p.element)))

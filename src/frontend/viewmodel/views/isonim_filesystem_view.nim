@@ -395,12 +395,6 @@ proc renderCreateFieldNode[R, N](r: R; vm: FilesystemVM;
   r.appendChild(node, renderNameField[R, N](r, vm, edit))
   node
 
-proc entryAction(vm: FilesystemVM; path: string; isFolder: bool): proc() =
-  ## A row's activation: a folder toggles, a file opens. A factory, so each
-  ## row's closure owns its own path (see `diffOpenHandler`).
-  result = proc() =
-    if isFolder: vm.toggleExpanded(path) else: vm.openFile(path)
-
 proc folderToggle(vm: FilesystemVM; path: string; isFolder: bool): proc() =
   ## The twisty: a folder toggles; a file's twisty does nothing.
   result = proc() =
@@ -417,7 +411,6 @@ proc renderEntry[R, N](r: R; vm: FilesystemVM; entry: FilesystemEntryNode;
   let expandedFlag = vm.isExpanded(entry.path)
   let nodeId = jstreeNodeId(entry)
   let isFolder = entry.isFolder
-  let activate = entryAction(vm, entry.path, isFolder)
   var anchor, children: N
   let row = ui(r):
     li(class = jstreeNodeClass(entry, expandedFlag, isLast), id = nodeId,
@@ -434,25 +427,19 @@ proc renderEntry[R, N](r: R; vm: FilesystemVM; entry: FilesystemEntryNode;
         discard
       a(ref = anchor, class = "jstree-anchor",
         id = (if nodeId.len > 0: nodeId & "_anchor" else: ""),
-        href = "#", tabindex = "-1"):
+        href = "#", tabindex = "-1",
+        `data-ct-path` = entry.path,
+        `data-ct-folder` = (if isFolder: "true" else: "false")):
         i(class = jstreeIconClass(entry), role = "presentation"):
           discard
         text entry.text
       ul(ref = children, class = "jstree-children", role = "group"):
         discard
-  # The anchor's click activates the row. In a browser the click must also
-  # not follow the `#` link nor reach the tree beneath, which needs the event.
-  when defined(js):
-    when N is isonim_dom.Element:
-      isonim_dom.addEventListener(isonim_dom.Node(anchor), cstring"click",
-        proc(ev: isonim_dom.Event) =
-          ev.fsPreventDefault()
-          ev.fsStopPropagation()
-          activate())
-    else:
-      r.addEventListener(anchor, "click", activate)
-  else:
-    r.addEventListener(anchor, "click", activate)
+  # A press on the anchor activates the row (a folder toggles, a file opens):
+  # the pointer row `file-tree.activate`, performed by the front-end on the
+  # anchor's `data-ct-path` / `data-ct-folder` (on a DOM front-end
+  # `input/pane_presses`, run by `input/dom_pointer`, which also keeps the
+  # `#` link from being followed).
   bindRowContextMenu[R, N](r, vm, row, entry.path)
   # The name field, when Create or Rename is open on this row. Reading
   # `nameEdit` here makes the panel's render effect follow it.

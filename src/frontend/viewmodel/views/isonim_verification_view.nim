@@ -72,13 +72,9 @@ proc openHandler(handlers: VerificationPanelHandlers;
     if not f.isNil:
       f(id)
 
-proc activateHandler(handlers: VerificationPanelHandlers;
-                     key: string): proc() =
-  let f = handlers.onActivate
-  let k = key
-  result = proc() =
-    if not f.isNil:
-      f(k)
+# A finding's press is the pointer row `verification.go-to-source`, performed
+# by the front-end on the row's `data-ct-verification-key` (on the desktop
+# `ui/verification.nim`'s procedure, by `VerificationPanelHandlers.onActivate`).
 
 proc plainHandler(f: proc()): proc() =
   result = proc() =
@@ -278,7 +274,7 @@ proc renderVerificationPanelTree[R, N](r: R; mdl: VerificationPanelModel;
                    `data-ct-verification-kind` = $row.kind,
                    `data-ct-verification-is-failure` = $row.isFailure,
                    `data-ct-verification-location` = row.location,
-                   onclick = activateHandler(hnd, key)):
+                   `data-ct-verification-target` = "finding"):
                 span(class = "ct-verification-row-kind"):
                   text row.kindLabel
                 span(class = "ct-verification-row-title"):

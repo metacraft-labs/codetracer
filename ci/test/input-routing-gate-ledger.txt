@@ -1,2 +1,89 @@
 # Key-name sites in view modules not yet moved to the router (input-routing-gate.sh).
 # <file> <check> <count>. This file only shrinks.
+#
+# `click`: press handlers a view or a legacy component still holds itself. The
+# panes' elements the pointer keymap names (pointer_rows: a row, a toggle, a
+# header, the Video Player's frame, a Pixel History entry) are performed by
+# the desktop's procedures (`ui/desktop_elements`), and their views hold no
+# handler: a handler put back on one raises its file's count above its entry.
+# What is listed is every other press — a button's own action, a menu's
+# entries, a drag's start — counted so that none is added.
+src/frontend/gpui/agent_harbor/ah_fleet_panel.nim click 3
+src/frontend/gpui/agent_harbor/ah_initiative_panels.nim click 3
+src/frontend/gpui/agent_harbor/ah_initiative_tab_bar.nim click 6
+src/frontend/gpui/agent_harbor/ah_session_views.nim click 7
+src/frontend/gpui/agent_harbor/ah_theme.nim click 2
+src/frontend/gpui/main.nim click 4
+src/frontend/gpui/window_clicks.nim click 1
+src/frontend/tui/app/layout/binding.nim click 1
+src/frontend/ui/auto_hide.nim click 3
+src/frontend/ui/auto_hide_overlay.nim click 2
+src/frontend/ui/caption_bar_progress.nim click 1
+src/frontend/ui/diff_expansion.nim click 2
+src/frontend/ui/editor.nim click 2
+src/frontend/ui/event_log.nim click 2
+src/frontend/ui/file_conflict_dialog.nim click 1
+src/frontend/ui/isonim_origin_chain.nim click 4
+src/frontend/ui/layout.nim click 3
+src/frontend/ui/origin_badge.nim click 1
+src/frontend/ui/shortcuts.nim click 2
+src/frontend/ui/trace.nim click 11
+src/frontend/ui/value.nim click 3
+src/frontend/viewmodel/views/context_menu_bridge.nim click 2
+src/frontend/viewmodel/views/isonim_agent_activity_view.nim click 46
+src/frontend/viewmodel/views/isonim_agent_harbor_fleet_view.nim click 5
+src/frontend/viewmodel/views/isonim_agent_harbor_initiative_tabs_view.nim click 10
+src/frontend/viewmodel/views/isonim_agent_harbor_initiatives_view.nim click 6
+src/frontend/viewmodel/views/isonim_agent_harbor_session_tabs_view.nim click 12
+src/frontend/viewmodel/views/isonim_agent_workspace_view.nim click 3
+src/frontend/viewmodel/views/isonim_auto_hide_bottom_strip_view.nim click 4
+src/frontend/viewmodel/views/isonim_auto_hide_collapsed_icons_view.nim click 6
+src/frontend/viewmodel/views/isonim_auto_hide_overlay_tabs_view.nim click 1
+src/frontend/viewmodel/views/isonim_auto_hide_side_strip_view.nim click 6
+src/frontend/viewmodel/views/isonim_build_view.nim click 7
+src/frontend/viewmodel/views/isonim_calltrace_view.nim click 2
+src/frontend/viewmodel/views/isonim_command_palette_view.nim click 1
+src/frontend/viewmodel/views/isonim_constraints_view.nim click 1
+src/frontend/viewmodel/views/isonim_counterexample_view.nim click 5
+src/frontend/viewmodel/views/isonim_debug_controls_view.nim click 18
+src/frontend/viewmodel/views/isonim_edit_mode_toolbar_view.nim click 1
+src/frontend/viewmodel/views/isonim_errors_view.nim click 5
+src/frontend/viewmodel/views/isonim_event_log_filter_dropdown_view.nim click 2
+src/frontend/viewmodel/views/isonim_event_log_view.nim click 6
+src/frontend/viewmodel/views/isonim_filesystem_view.nim click 6
+src/frontend/viewmodel/views/isonim_flow_inline_view.nim click 5
+src/frontend/viewmodel/views/isonim_flow_view.nim click 5
+src/frontend/viewmodel/views/isonim_frame_viewer_view.nim click 4
+src/frontend/viewmodel/views/isonim_low_level_code_view.nim click 1
+src/frontend/viewmodel/views/isonim_menu_shell_view.nim click 10
+src/frontend/viewmodel/views/isonim_no_source_view.nim click 1
+src/frontend/viewmodel/views/isonim_process_tree_view.nim click 1
+src/frontend/viewmodel/views/isonim_recording_switcher_view.nim click 2
+src/frontend/viewmodel/views/isonim_request_panel_view.nim click 10
+src/frontend/viewmodel/views/isonim_scratchpad_view.nim click 3
+src/frontend/viewmodel/views/isonim_search_results_view.nim click 4
+src/frontend/viewmodel/views/isonim_search_view.nim click 5
+src/frontend/viewmodel/views/isonim_session_tabs_view.nim click 6
+src/frontend/viewmodel/views/isonim_shader_debug_view.nim click 4
+src/frontend/viewmodel/views/isonim_shell_view.nim click 1
+src/frontend/viewmodel/views/isonim_state_view.nim click 9
+src/frontend/viewmodel/views/isonim_status_view.nim click 11
+src/frontend/viewmodel/views/isonim_step_list_view.nim click 1
+src/frontend/viewmodel/views/isonim_terminal_output_view.nim click 2
+src/frontend/viewmodel/views/isonim_test_results_view.nim click 4
+src/frontend/viewmodel/views/isonim_toggle_view.nim click 1
+src/frontend/viewmodel/views/isonim_trace_log_view.nim click 1
+src/frontend/viewmodel/views/isonim_unified_diff_view.nim click 4
+src/frontend/viewmodel/views/isonim_vcs_view.nim click 9
+src/frontend/viewmodel/views/isonim_verification_view.nim click 4
+src/frontend/viewmodel/views/isonim_video_player_view.nim click 10
+src/frontend/viewmodel/views/isonim_welcome_screen_view.nim click 10
+src/frontend/viewmodel/views/row_link_dom.nim click 1
+src/frontend/viewmodel/views/table_overflow_dom.nim click 2
+# The shared editing core as the desktop's editor (behind a developer
+# setting, fb808972e7a): its own key handling, not yet moved to the router.
+src/frontend/ui/shared_editor.nim click 2
+src/frontend/ui/shared_editor.nim compare 3
+src/frontend/ui/shared_editor_lsp.nim case 4
+src/frontend/ui/shared_editor_lsp.nim compare 4
+src/frontend/ui/shared_editor_lsp.nim listen 2

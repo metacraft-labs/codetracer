@@ -396,11 +396,9 @@ when defined(js):
   proc setCanvasMouseHandlers(
       panel: isonim_dom.Element;
       onMouseMove: proc(renderedX, renderedY, renderedWidth,
-                        renderedHeight: float) {.closure.};
-      onClick: proc(renderedX, renderedY, renderedWidth,
-                    renderedHeight: float) {.closure.})
+                        renderedHeight: float) {.closure.})
       {.importjs: """
-        (function(panel, onMouseMove, onClick) {
+        (function(panel, onMouseMove) {
           function imageForEvent(event) {
             return event.target && event.target.closest
               ? event.target.closest(".video-player-stage")?.querySelector(".video-player-image")
@@ -418,18 +416,7 @@ when defined(js):
           panel.addEventListener("mouseleave", function() {
             onMouseMove(-1, -1, 0, 0);
           });
-          panel.addEventListener("click", function(event) {
-            const image = imageForEvent(event);
-            if (!image) return;
-            const rect = image.getBoundingClientRect();
-            onClick(
-              event.clientX - rect.left,
-              event.clientY - rect.top,
-              rect.width,
-              rect.height
-            );
-          });
-        })(#, #, #);
+        })(#, #);
       """.}
 
   # Listen for both "input" (live drag) and "change" (final value) so the
@@ -713,19 +700,10 @@ when defined(js):
           vm.magnifier.val = none(MagnifierPosition)
           vm.magnifierCenterColor.val = none(VisualReplayPixelColor)
           return
-        vm.updateMagnifier(renderedX, renderedY, renderedWidth, renderedHeight),
-      proc(renderedX, renderedY, renderedWidth, renderedHeight: float) =
-        if vm.pickerState.val == PickerActive:
-          ## Make sure the magnifier reflects the click position before
-          ## commit (covers the "click without prior mousemove" path).
-          vm.updateMagnifier(renderedX, renderedY,
-                             renderedWidth, renderedHeight)
-          vm.commitPickedPixel()
-        else:
-          ## Fallback: clicks outside picker mode still update the pixel
-          ## selection — useful for the existing pixel-history workflow.
-          vm.frameVm.selectPixelFromRenderedPoint(
-            renderedX, renderedY, renderedWidth, renderedHeight))
+        vm.updateMagnifier(renderedX, renderedY, renderedWidth, renderedHeight))
+    # A press on the frame is the pointer row `video-player.select-pixel`,
+    # performed by the front-end (on the desktop `ui/video_player.nim`'s
+    # procedure, at the press's position over `.video-player-image`).
 
     # FRAMES SIZED (Viewport-Driven-Loading, Decided Q5): the stage the
     # image is shown in, which the VM turns into the frame size it asks for.

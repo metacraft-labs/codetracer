@@ -43,6 +43,7 @@ import isonim/core/[signals, computation]
 import std/dom as dom
 from ../ui/isonim_origin_chain import OriginChainPanel, newOriginChainPanel,
                                      renderPanelDom
+import ../viewmodel/input/dom_pane_presses
 
 const PanelKinds* = ["state", "calltrace", "eventLog", "terminalOutput",
                      "scratchpad", "traceLog", "flow", "pointList",
@@ -148,6 +149,16 @@ proc mountVsCodePanel*(kind: string; root: dom_api.Element): MirrorSession =
   addToScratchpadHook = proc(name, text: string) =
     scratchpad.addValue(ScratchpadValueEntry(expression: name,
                                              valueText: text))
+  # A press on the panel's elements: the base keymap's pointer rows
+  # (`pointer_rows`), performed on the mirror's ViewModels as the desktop
+  # performs them (`dom_pane_presses`); the action relays to the primary.
+  let session = mirror.session
+  # The root is the panel's PANE scope element, as a desktop pane's host is,
+  # so a press inside it names its pane (`paneKind`) to the pointer rows.
+  let paneId = if kind == "requestPanel": "requests" else: kind
+  dom_api.setAttribute(root, cstring"data-scope-kind", cstring"pane")
+  dom_api.setAttribute(root, cstring"data-scope-id", cstring(paneId))
+  installPanePointerRouting(proc(): SessionViewModel = session)
   createRoot proc(dispose: proc()) =
     let panel = renderPanel(kind, mirror.session)
     if not dom_api.isNodeNil(dom_api.Node(panel)):

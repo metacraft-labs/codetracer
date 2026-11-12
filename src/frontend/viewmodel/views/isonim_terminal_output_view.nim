@@ -170,28 +170,10 @@ proc wireStepKeys[R, N](r: R; node: N; vm: TerminalOutputVM) =
     r.addEventListener(node, KeyDownEvent, proc(ev: MockEvent) =
       if stepKey(vm, ev.key): ev.preventDefault())
 
-proc wireLineClick[R, N](r: R; node: N; vm: TerminalOutputVM; write: int) =
-  ## A click on a line PAST its text (on the line itself, not a fragment)
-  ## goes to the write that completed the line.
-  when defined(js):
-    when N is isonim_dom.Element:
-      r.addEventListener(node, "click", proc(ev: isonim_dom.Event) =
-        if ev.target == isonim_dom.Node(node): vm.jumpToEvent(write))
-    else:
-      r.addEventListener(node, "click", proc(ev: MockEvent) =
-        if ev.target == node: vm.jumpToEvent(write))
-  else:
-    r.addEventListener(node, "click", proc(ev: MockEvent) =
-      if ev.target == node: vm.jumpToEvent(write))
-
-proc jumpOnClick(vm: TerminalOutputVM; eventIndex: int): proc() =
-  ## A fragment's click handler, made by a FACTORY so the write it goes to is
-  ## this call's own: a closure written inside the line loop would capture
-  ## the loop's variable, which Nim's JS backend shares across iterations —
-  ## every fragment then went to the LAST write (measured on the real
-  ## desktop: a click on line 10 sent the event-jump of write 129).
-  let idx = eventIndex
-  result = proc() = vm.jumpToEvent(idx)
+# A fragment's press, and a press on a line past its text, are the pointer
+# row `terminal-output.jump-to-write`, performed by the front-end on the
+# fragment's `data-event-index` (a line's is its last fragment's) — on the
+# desktop `input/pane_presses`'s procedure.
 
 # ---------------------------------------------------------------------------
 # The builder, generic over the renderer
@@ -320,11 +302,11 @@ proc renderTerminalOutputPanel*[R, N](r: R; vm: TerminalOutputVM): N =
       let lineNode = el(r, "div", "terminal-line")
       r.setAttribute(lineNode, "id", "terminal-line-" & $line.lineIndex)
       if line.fragments.len > 0:
-        wireLineClick[R, N](r, lineNode, vm, line.fragments[^1].eventIndex)
+        r.setAttribute(lineNode, "data-last-event-index",
+                       $line.fragments[^1].eventIndex)
       for frag in line.fragments:
         let fragNode = el(r, "div", fragmentClass(focus, frag.rrTicks))
         r.setAttribute(fragNode, "data-event-index", $frag.eventIndex)
-        r.addEventListener(fragNode, "click", jumpOnClick(vm, frag.eventIndex))
         let content = r.createElement("div")
         r.appendChild(content, styledSpan(r, frag.text, frag.style))
         r.appendChild(fragNode, content)

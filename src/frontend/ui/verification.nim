@@ -66,6 +66,7 @@ import
 from isonim/web/dom_api import nil
 import isonim/web/web_renderer
 import ./panel_host
+import ../viewmodel/input/dom_pointer
 from ../viewmodel/session_vm import SessionViewModel
 import std/options
 import ../viewmodel/viewmodels/verification_vm
@@ -335,3 +336,15 @@ method register*(self: VerificationComponent, api: MediatorWithSubscribers) =
   ## No subscriptions: the VMs are pushed at by this module's host.
   self.api = api
   initVerificationVM()
+
+# A press on a finding goes to its source (K64): the pointer row
+# `verification.go-to-source`, performed on the row the key router's hit test
+# found (`input/dom_pointer`), by the pane's own activation.
+registerElementOperation("verification.go-to-source", proc(p: ElementPress): bool =
+  let key = attributeOf(p.element, "data-ct-verification-key")
+  if key.len == 0:
+    return false
+  initVerificationVM()
+  verificationHandlersFor(verificationVMInstance,
+                          counterexampleVMInstance).onActivate(key)
+  true)

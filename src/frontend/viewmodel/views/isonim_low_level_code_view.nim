@@ -138,16 +138,11 @@ proc lowLevelRows*(vm: LowLevelCodeVM): seq[LowLevelRowView] =
   ## The listing as rows — the ViewModel's (`displayRows`).
   vm.displayRows()
 
-proc onRowClick(vm: LowLevelCodeVM; index: int): proc() =
-  ## A row's click: go to the source line its instruction was generated
-  ## from. A factory, so each row's closure owns its index.
-  result = proc() =
-    let rows = vm.instructions.val
-    if index >= 0 and index < rows.len:
-      vm.jumpToInstruction(rows[index])
-
-proc onSyncToggle(vm: LowLevelCodeVM): proc() =
-  result = proc() = vm.setSyncEnabled(not vm.syncSettings.val.enabled)
+# An instruction's press and the sync toggle's are the pointer rows
+# `low-level.go-to-source-line` and `low-level.toggle-sync`, performed by the
+# front-end on the row's `data-low-level-row` and the toggle's
+# `data-ct-low-level-sync` (on the desktop by the procedures in
+# `input/pane_presses`).
 
 when defined(js):
   proc preventMenuDefault(ev: isonim_dom.Event) {.importjs: "#.preventDefault()".}
@@ -200,7 +195,7 @@ proc renderLowLevelRow*[R, N](r: R; vm: LowLevelCodeVM;
     var item: N
     result = ui(r):
       tdiv(role = "button", tabindex = "0", ref = item, class = rowClass(row),
-           onclick = onRowClick(vm, row.index)):
+           `data-low-level-row` = $row.index):
         span(class = "low-level-code-instruction-offset"):
           text row.offsetText
         span(class = "low-level-code-instruction-name"):
@@ -240,7 +235,7 @@ proc renderLowLevelCodePanel*[R, N](r: R; vm: LowLevelCodeVM): N =
         tdiv(ref = addressSlot, class = "low-level-code-address-slot"):
           discard
         tdiv(class = syncToggleClass(vm.syncSettings.val.enabled),
-             onclick = onSyncToggle(vm)):
+             `data-ct-low-level-sync` = "true"):
           text syncToggleLabel(vm.syncSettings.val.enabled)
         tdiv(class = "low-level-code-stepping"):
           text steppingText(vm)

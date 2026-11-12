@@ -395,15 +395,13 @@ proc markerBoundaryChip*(row: MarkerEventRow): string =
 # Handlers, made by factories so each closes over its own value
 # ---------------------------------------------------------------------------
 
-proc onHeaderClick(vm: EventLogVM; col: EventLogColumn): proc() =
-  result = proc() = vm.sortBy(vm.order().clickedHeader(col))
-
-proc onRowClick(vm: EventLogVM; position: int): proc() =
-  ## A click selects the event and moves the debugger to it.
-  result = proc() =
-    let at = position - vm.store.eventLog.loadedStart.val
-    vm.selectRow(some(at))
-    vm.doubleClickRow(at)
+# A row's and a column header's presses are not this view's: the pointer
+# rows (`pointer_rows`: Click on a row jumps to the event, RightClick shows its
+# content, Click on a header orders by its column) resolve them and the
+# front-end's procedure performs them — on a DOM front-end `input/pane_presses`' (the right press's,
+# `ui/event_log.nim`'s),
+# on the element `input/dom_pointer` hit-tests, by its `data-position` and
+# `data-column`.
 
 proc onToggleColumn(vm: EventLogVM; col: EventLogColumn): proc() =
   result = proc() = discard vm.toggleColumn(col)
@@ -491,8 +489,7 @@ proc renderEventRow*[R, N](r: R; vm: EventLogVM; position: int;
        `data-max-rr-ticks` = $vm.rowAt(position).maxRRTicks,
        `data-source-generation` = $vm.rowAt(position).sourceGeneration,
        `data-source-digest` = vm.rowAt(position).sourceDigest,
-       role = "button", tabindex = "0",
-       onclick = onRowClick(vm, position)):
+       role = "button", tabindex = "0"):
       discard
 
   forEachKeyed[EventLogColumn, R, N](r, rowEl,
@@ -791,8 +788,7 @@ proc renderEventLogPanel*[R, N](r: R; vm: EventLogVM;
       ui(r):
         span(class = columnClass(col()), `data-column` = $col(),
              style = columnWidthStyle(vm, col()),
-             role = "button", tabindex = "0",
-             onclick = onHeaderClick(vm, col())):
+             role = "button", tabindex = "0"):
           span(class = "eventLog-column-label"):
             text columnHeaderText(vm, col())
           # Its separator: the grip a drag resizes the column by (§5.2).

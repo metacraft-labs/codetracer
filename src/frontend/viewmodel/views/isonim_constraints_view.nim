@@ -196,11 +196,9 @@ when defined(js):
         showContextMenu(rowMenuItems(vm, index), ev.eventClientX(),
                         ev.eventClientY()))
 
-proc onRowPress(vm: ConstraintsVM; index: int): proc() =
-  ## A press: select the row and open its source. A FACTORY so each row's
-  ## handler holds its own index.
-  let captured = index
-  result = proc() = discard vm.activateRow(captured)
+# A row's press (select it and open its source) is the pointer row
+# `constraints.go-to-source`, performed by the front-end on the row's
+# `data-constraint-index` (on the desktop `ui/constraints.nim`'s procedure).
 
 proc renderRow[R, N](r: R; vm: ConstraintsVM; row: ConstraintRow;
                      index: int; selected: bool): N =
@@ -211,7 +209,7 @@ proc renderRow[R, N](r: R; vm: ConstraintsVM; row: ConstraintRow;
   let where = whereText(row.source)
   result = ui(r):
     tdiv(class = rowElementClass(row, selected), `data-ct-row` = $index,
-         title = rowTitle(row), onclick = onRowPress(vm, index)):
+         title = rowTitle(row), `data-constraint-index` = $index):
       span(class = "constraints-name"):
         text row.name
       span(class = "constraints-kind"):
@@ -231,7 +229,7 @@ proc renderOpcode[R, N](r: R; vm: ConstraintsVM; row: ConstraintRow;
   let where = whereText(row.source)
   result = ui(r):
     tdiv(class = rowElementClass(row, selected), `data-ct-row` = $index,
-         title = rowTitle(row), onclick = onRowPress(vm, index)):
+         title = rowTitle(row), `data-constraint-index` = $index):
       span(class = "low-level-code-instruction-offset"):
         text row.count
       span(class = "low-level-code-instruction-name"):

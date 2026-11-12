@@ -15,6 +15,12 @@
 #   case     a `case` over a key-shaped value with an `of "<key name>"` arm
 #   compare  a key-shaped value compared with a key name or key code
 #   listen   a `keydown` / `keyup` listener outside the one per window
+#   click    a press handler: `onclick =` / `ondblclick =` / `oncontextmenu =`,
+#            or a `click` / `dblclick` / `contextmenu` / `auxclick` listener.
+#            A press on a pane's element is the pointer keymap's row,
+#            performed by the front-end's procedure on the element its hit
+#            test found (§5.1; the desktop's `ui/desktop_elements`), so a view
+#            that handles a press itself is a behaviour no keymap can rebind.
 #
 # DECLARED: a decoder's job is exactly to spell key names, so the modules that
 # turn a device's bytes or events into canonical names are named here and not
@@ -67,6 +73,7 @@ COMPARE = re.compile(
     r'|(?:\bkey\w*|\.key)\s+(?:in|notin)\s+\[\s*c?"(?:%s)"'
     r'|\bkeyCode\s*(?:==|!=)|\.which\s*(?:==|!=)' % (KEY, KEY))
 LISTEN = re.compile(r'''["']key(?:down|up|press)["']''')
+CLICK = re.compile(r'''\bon(?:click|dblclick|contextmenu|auxclick)\s*=|["'](?:click|dblclick|contextmenu|auxclick)["']''')
 FIELD_LISTEN = "KeyDownEvent"  # a field's own keys, read through `field_keys`
 QUIET = "ir1-gate: not a key"
 
@@ -107,6 +114,9 @@ for top in SCANNED:
                     if LISTEN.search(line) and "addEventListener" in line + "":
                         counts[(rel, "listen")] += 1
                         where[(rel, "listen")].append(number)
+                    if CLICK.search(line):
+                        counts[(rel, "click")] += 1
+                        where[(rel, "click")].append(number)
 
 ledger = {}
 path = os.path.join(root, "ci/test/input-routing-gate-ledger.txt")
@@ -125,7 +135,7 @@ for key in sorted(set(counts) | set(ledger)):
     if have > allowed:
         failed += 1
         lines = ",".join(str(n) for n in where[key][:12])
-        print("FAIL  [%s] %s: %d key-name site(s), the ledger allows %d (lines %s)"
+        print("FAIL  [%s] %s: %d site(s), the ledger allows %d (lines %s)"
               % (check, rel, have, allowed, lines))
     elif have < allowed:
         failed += 1

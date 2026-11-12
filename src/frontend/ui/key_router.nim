@@ -59,6 +59,9 @@ import ./native_key_operations
 import ./editor_scope
 import ./video_player   # `videoPlayerHasFocus`, `currentVideoPlayerVM`
 import ./menu_keys
+import ../viewmodel/input/[dom_pointer, dom_pane_presses]
+import ./panel_host
+from ../viewmodel/session_vm import SessionViewModel
 import ../viewmodel/keymap/alt_tap
 from ../viewmodel/keymap/keymap_selection import selectKeymap
 from ../viewmodel/viewmodels/omnibar_vm import paletteFieldOf
@@ -176,22 +179,6 @@ proc focusedMonaco(): MonacoEditor =
   ## The Monaco instance the caret is in, or nil.
   let editor = focusedEditorView()
   if editor.isNil: nil else: editor.monacoEditor
-
-proc scopeChainOf(start: JsObject): seq[ScopeElement] =
-  ## The scope elements from the document down to `start`.
-  var node = start
-  var reversed: seq[ScopeElement] = @[]
-  while not node.isNil and not node.isUndefined:
-    let getAttr = node[cstring"getAttribute"]
-    if not getAttr.isNil and not getAttr.isUndefined:
-      let kind = node.getAttribute(cstring"data-scope-kind")
-      if not kind.isNil and not kind.isUndefined:
-        let id = node.getAttribute(cstring"data-scope-id")
-        reversed.add elementOfAttributes($kind.to(cstring),
-          (if id.isNil or id.isUndefined: "" else: $id.to(cstring)))
-    node = node[cstring"parentNode"]
-  for i in countdown(reversed.high, 0):
-    result.add reversed[i]
 
 proc focusInWritableMonaco(): bool {.importjs: """
   (function(){
@@ -968,52 +955,6 @@ proc onKeyUp(ev: JsObject) =
   if deskAltTap.modifiersChanged(heldModifiers(ev)):
     routeKey("Alt", ev)
 
-var swallowNextClick = false
-  ## A press a user's pointer row ran; its click is swallowed.
-
-proc elementKindOfTarget(target: JsObject): cstring {.importjs: """
-  (function (t) {
-    if (!t || !t.closest) return '';
-    if (t.closest('.lm_tab, .session-tab')) return 'tab';
-    if (t.closest('.eventLog-column-header .eventLog-cell')) return 'header';
-    if (t.closest('.calltrace-lines > *, .eventLog-row, .value-expanded, .jstree-anchor')) return 'row';
-    if (t.closest('button, [role="button"]')) return 'button';
-    return '';
-  })(#)""".}
-  ## §5.3: which kind of element is under the press, in the DOM's geometry.
-
-proc routeUserPointerGesture(ev: JsObject) =
-  ## **A PRESS A USER'S `keybindings.json` BOUND** (Input-Routing §5.1): a pointer
-  ## row of the user layer runs its operation instead of the element's own
-  ## handler. The base's rows name what those handlers already do, so they are
-  ## left to them while the desktop's views still hold their DOM handlers.
-  let kind = $elementKindOfTarget(ev.target)
-  if kind.len == 0 or deskRouter.user.bindingCount == 0:
-    return
-  var path = scopeChainOf(ev.target)
-  if path.innermostPane < 0:
-    return
-  path.add elementOfAttributes(kind, "")
-  let button = case ev.button.to(int)
-               of 1: prMiddle
-               of 2: prSecondary
-               else: prPrimary
-  let res = deskRouter.routePointer(desktopFacts(), path, nmNormal,
-    pointerGesture(button, ev.ctrlKey.to(bool), ev.shiftKey.to(bool),
-                   ev.altKey.to(bool), ev.metaKey.to(bool)))
-  if res.kind == erOperation and res.layer.startsWith("user:"):
-    if runDesktopOperation(res) == nkHandled:
-      stop(ev)
-      # The press's `click` and `auxclick` follow: they are the gesture's too,
-      # and the element's own handler must not also run.
-      swallowNextClick = true
-
-proc onClickAfterGesture(ev: JsObject) =
-  ## Swallows the click of a press a user's pointer row took.
-  if swallowNextClick:
-    swallowNextClick = false
-    stop(ev)
-
 proc onPointerDown(ev: JsObject) =
   deskAltTap.interrupted()       # Alt+click is not Alt tapped
 
@@ -1175,6 +1116,19 @@ proc installKeyRouter*() =
   if installed:
     return
   installed = true
+  # A press on a pane's element: the same router, its pointer rows, and the
+  # procedures for the session's panes (`dom_pane_presses`, over the tab on
+  # screen) and the desktop's own panes (registered by their `ui/` modules).
+  installSessionPanePresses(proc(): SessionViewModel = panelSession())
+  installDomPointerRouting(
+    proc(path: ScopePath; gesture: string): EditingResolution =
+      deskRouter.routePointer(desktopFacts(), path, nmNormal, gesture),
+    proc(res: EditingResolution; press: ElementPress): bool =
+      # A user's row naming an operation no element performs (`Ctrl+click`
+      # on a call runs Continue): the desktop's dispatch, as a key's would
+      # be. A base row with no procedure here is left to the element.
+      res.layer.startsWith("user:") and runDesktopOperation(res) == nkHandled,
+    proc(operation: string) = traceOperation(operation))
   {.emit: ["window.__ctKeymapProbe = ", probeKeys, ";"].}
   {.emit: ["window.__CODETRACER_TEST__ = window.__CODETRACER_TEST__ || {};",
            "window.__CODETRACER_TEST__.chordForAction = ", testChordForAction, ";",
@@ -1182,9 +1136,6 @@ proc installKeyRouter*() =
   {.emit: ["window.addEventListener('keydown', ", onKeyDown, ", true);",
            "window.addEventListener('keyup', ", onKeyUp, ", true);",
            "window.addEventListener('mousedown', ", onPointerDown, ", true);",
-           "window.addEventListener('mousedown', ", routeUserPointerGesture, ", true);",
-           "window.addEventListener('click', ", onClickAfterGesture, ", true);",
-           "window.addEventListener('auxclick', ", onClickAfterGesture, ", true);",
            "window.addEventListener('blur', ", onWindowBlur, ");"].}
   if not data.isNil and not data.ipc.isNil:
     data.ipc.on(KeybindingsMessage, proc(event: JsObject; payload: JsObject) =

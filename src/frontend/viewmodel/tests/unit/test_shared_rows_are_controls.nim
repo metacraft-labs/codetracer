@@ -43,6 +43,17 @@ import ../../store/types as store_types
 import ../../viewmodels/[calltrace_vm, event_log_vm, state_vm]
 import ../../views/[isonim_calltrace_view, isonim_event_log_view,
                     isonim_state_view]
+import ../../input/pane_presses
+
+proc pressReaderOf(node: MockNode): AttributeReader =
+  ## What a DOM front-end's reader does (`input/dom_pane_presses.readerOf`):
+  ## the attribute on the node pressed or its nearest ancestor carrying it.
+  result = proc(name: string): string =
+    var n = node
+    while not n.isNil:
+      if name in n.attributes: return n.attributes[name]
+      n = n.parent
+    ""
 
 # Counted, so a loop over an empty list cannot pass by asserting nothing.
 const ExpectedAssertions = 42
@@ -113,10 +124,12 @@ suite "the shared views' clickable rows are controls":
         # CONTROL: the leaf.
         ck toggles[1].attr("role") == "presentation"
         ck toggles[1].attr("tabindex") == "-1"
-      # The click a key stands for still goes to the call.
+      # The press a key stands for still goes to the call: the pointer row
+      # `calltrace.go-to-call`, performed by `pane_presses`.
       mock.clearReceivedCommands()
       if texts.len == 2:
-        texts[1].fireEvent("click")
+        discard pressCalltrace(vm, "calltrace.go-to-call",
+                               pressReaderOf(texts[1]))
       drainPlatformCallbacks()
       ck mock.findCommand("ct/calltrace-jump").isSome
       dispose()
@@ -150,7 +163,7 @@ suite "the shared views' clickable rows are controls":
         ck c.attr("aria-pressed") in ["true", "false"]
       mock.clearReceivedCommands()
       if shown.len == 3:
-        shown[1].fireEvent("click")
+        discard pressEventLog(vm, "event-log.jump", pressReaderOf(shown[1]))
       drainPlatformCallbacks()
       ck mock.findCommand("ct/event-jump").isSome
       dispose()

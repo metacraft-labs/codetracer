@@ -633,14 +633,10 @@ proc onLoadMore(vm: StateVM; item: proc(): VariableViewState): proc() =
   ## Reads `item()` when clicked, so a reused row loads the variable it shows.
   result = proc() = vm.loadMore(item().path)
 
-proc onToggleExpand(vm: StateVM; item: proc(): VariableViewState): proc() =
-  ## The expand-button only reacts when the variable has children.
-  ## Reading `item()` inside the closure ensures the toggle targets the
-  ## current variable at this row's position, even after `indexEach`
-  ## reuses the row for a different item.
-  result = proc() =
-    let v = item()
-    if v.hasChildren: vm.toggleExpand(v.path)
+# A compound value's expander is an element the pointer rows name
+# (`pointer_rows`: Click on a Variables row toggles it); the front-end's
+# procedure performs it — on a DOM front-end `input/pane_presses`', on the expander's
+# `data-variable-path`.
 
 # ---------------------------------------------------------------------------
 # Reactive sub-lists of a variable row (origin chain, value history)
@@ -785,7 +781,6 @@ proc renderVariableRow*[R, N](r: R; vm: StateVM;
   mixin BadgeEvent
   var chainContainer, historyContainer: N
   var expandSlot, nameTypeSlot, valueTypeSlot: N
-  let onToggle = onToggleExpand(vm, item)
   let onBadgeClick = onToggleOriginBadge(vm, item, BadgeEvent(r))
   let onRowContextMenu = onShowVariableRowContextMenu(vm, item)
   let row = ui(r):
@@ -891,7 +886,7 @@ proc renderVariableRow*[R, N](r: R; vm: StateVM;
              `aria-expanded` = (if item().isExpanded: "true" else: "false"),
              `aria-label` = "Show or hide the value's parts",
              title = "Show or hide the value's parts",
-             onclick = onToggle):
+             `data-variable-path` = item().path):
           tdiv(class = caretClass(item)):
             discard)
   show(r, nameTypeSlot,

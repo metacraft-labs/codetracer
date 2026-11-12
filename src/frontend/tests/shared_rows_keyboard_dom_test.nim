@@ -6,9 +6,11 @@
 ## `views/isonim_activation` turns Enter or Space on a focused
 ## `[role="button"]` that is not a native control into that element's
 ## `click()` (https://www.w3.org/WAI/ARIA/apg/patterns/button/), so the
-## keyboard runs the handler the view already attached. This suite mounts the
-## Call Trace and Event Log views under `WebRenderer` into jsdom's document,
-## presses keys on their rows and reads the requests the click sends. The
+## keyboard runs what a press on it runs: the pointer keymap's row, performed
+## by the DOM front-end's procedure (`input/dom_pointer`, `pane_presses`). This
+## suite mounts the Call Trace and Event Log views under `WebRenderer` into a
+## pane host in jsdom's document (`dom_pointer_test_host`), presses keys on
+## their rows and reads the requests the press sends. The
 ## markup half (every such row is a `role="button"` with a tab stop) is
 ## `viewmodel/tests/unit/test_shared_rows_are_controls.nim`'s. Recorded as
 ## codetracer-pm
@@ -36,6 +38,8 @@ import ../viewmodel/backend/mock_backend
 import ../viewmodel/store/[replay_data_store, types]
 import ../viewmodel/viewmodels/[calltrace_vm, event_log_vm]
 import ../viewmodel/views/[isonim_calltrace_view, isonim_event_log_view]
+import ../viewmodel/input/pane_presses
+import ./dom_pointer_test_host
 
 proc queryAll(root: Element; selector: cstring): seq[Element]
   {.importjs: "Array.from(#.querySelectorAll(#))".}
@@ -80,8 +84,10 @@ suite "Enter and Space on a shared row are its click":
       let vm = createCalltraceVM(store)
       store.calltrace.lines.val = @[callLine(0, "main"), callLine(1, "helper")]
       store.calltrace.totalCallsCount.val = 2
+      routePresses(proc(op: string; attr: AttributeReader): bool =
+        pressCalltrace(vm, op, attr))
       let panel = renderCalltracePanel[WebRenderer, Element](WebRenderer(), vm)
-      discard appendChild(documentBody(), Node(panel))
+      discard appendChild(Node(paneHost("calltrace")), Node(panel))
       drainPlatformCallbacks()
       let texts = panel.queryAll(cstring".call-text")
       ck texts.len == 2
@@ -116,8 +122,10 @@ suite "Enter and Space on a shared row are its click":
                              line: i + 1, value: "e" & $i,
                              rrTicks: uint64(i + 1), file: "/src/main.py")
       store.applyEventLogRows(rows, 0, recordsTotal = 3)
+      routePresses(proc(op: string; attr: AttributeReader): bool =
+        pressEventLog(vm, op, attr))
       let panel = renderEventLogPanel[WebRenderer, Element](WebRenderer(), vm)
-      discard appendChild(documentBody(), Node(panel))
+      discard appendChild(Node(paneHost("eventLog")), Node(panel))
       drainPlatformCallbacks()
       let shown = panel.queryAll(cstring"tr.eventLog-row")
       ck shown.len == 3

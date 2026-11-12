@@ -45,6 +45,7 @@ from ../viewmodel/views/isonim_event_log_filter_dropdown_view import
   FilterTabRecord, FilterTagRow, FilterKindRecord, FilterDropdownCallbacks,
   FilterDropdownContainerId, mountFilterDropdownInto
 import ./panel_host
+import ../viewmodel/input/dom_pointer
 from ./trace import onTraceResultsChanged
 
 var sessionEventLogVM: EventLogVM
@@ -348,32 +349,27 @@ proc setupFilterDropdown(host: Element; vm: EventLogVM) =
 # A right click opens an event's text
 # ---------------------------------------------------------------------------
 
-proc closestRow(target: Element): Element {.importjs:
-  "((e) => (e && e.closest && e.closest('tr[data-position]')) || null)(#)".}
-
 proc rowAtPosition(vm: EventLogVM; position: int): Option[EventLogRow] =
   let at = position - vm.store.eventLog.loadedStart.val
   let rows = vm.eventRows.val
   if at >= 0 and at < rows.len: some(rows[at]) else: none(EventLogRow)
 
-proc setupOpenInEditor(host: Element; vm: EventLogVM) =
-  ## A right click on a recorded event opens its text in an editor view.
-  host.addEventListener(cstring"contextmenu", proc(e: Event) =
-    let tr = closestRow(cast[Element](e.target))
-    if tr.isNil:
-      return
-    e.preventDefault()
-    let position =
-      try: parseInt($tr.getAttribute(cstring"data-position"))
-      except ValueError: -1
-    let row = vm.rowAtPosition(position)
-    if row.isNone or row.get.kindId == ord(TraceLogEvent):
-      return
-    data.makeEditorView(
-      cstring(&"event: {row.get.kind} #{row.get.eventIndex}"),
-      cstring(eventLogText(row.get)),
-      ViewEventContent,
-      LangUnknown))
+# A right press on a recorded event opens its text in an editor view: the
+# pointer row `event-log.show-content` (K25), performed here on the row the
+# key router's hit test found (`input/dom_pointer`).
+registerElementOperation("event-log.show-content", proc(p: ElementPress): bool =
+  let vm = paneVM()
+  if vm.isNil:
+    return false
+  let row = vm.rowAtPosition(intAttributeOf(p.element, "data-position"))
+  if row.isNone or row.get.kindId == ord(TraceLogEvent):
+    return false
+  data.makeEditorView(
+    cstring(&"event: {row.get.kind} #{row.get.eventIndex}"),
+    cstring(eventLogText(row.get)),
+    ViewEventContent,
+    LangUnknown)
+  true)
 
 # ---------------------------------------------------------------------------
 # The panel host's decorator
@@ -484,7 +480,6 @@ proc decorateEventLog(host: dom_api.Element; session: SessionViewModel) =
     return
   let element = cast[Element](host)
   setupFilterDropdown(element, vm)
-  setupOpenInEditor(element, vm)
   setupColumnGrips(element, vm)
   requestEventLogWidths(vm)
   # The rows' cells are table cells (`table_overflow_dom`): fitted, hovered,

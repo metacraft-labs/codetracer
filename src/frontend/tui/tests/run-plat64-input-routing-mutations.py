@@ -67,6 +67,9 @@ GMAIN = "src/frontend/gpui/main.nim"
 GKEYS = "src/frontend/gpui/app/gpui_keys.nim"
 FIELD = "src/frontend/viewmodel/views/field_keys.nim"
 KEYROUTER = "src/frontend/ui/key_router.nim"
+DESKHIT = "src/frontend/viewmodel/input/dom_pointer.nim"
+DESKOPS = "src/frontend/viewmodel/input/pane_presses.nim"
+EVVIEW = "src/frontend/viewmodel/views/isonim_event_log_view.nim"
 GATE = "ci/test/input-routing-gate.sh"
 
 # Suites.
@@ -81,11 +84,17 @@ SPEC = "src/tests/gui/tests/keymaps/plat64-input-routing.spec.ts"
 GATETEST = "ci/test/input-routing-gate-test.sh"
 TOPBAR = "src/frontend/tui/tests/test_plat48_top_bar.nim"
 VPSPEC = "src/tests/gui/tests/frame-viewer/video-player-keymap-rows.spec.ts"
+DESKSPEC = "src/tests/gui/tests/keymaps/plat64-desktop-pointer-rows.spec.ts"
+PRESSES = "src/frontend/viewmodel/tests/unit/test_plat64_pane_presses.nim"
+GATERUN = "ci/test/input-routing-gate.sh"
+  # The gate run on the tree itself (a suite as well as a subject): an arm
+  # that puts a handler back in a view is graded by the gate's own count.
 
 SUBJECTS = [TABLE, ROUTER, KEYNAMES, POINTER, OVERLAY, CLIENT, CLICKS, RUNTIME,
-            MOUSE, GMAIN, GKEYS, FIELD, KEYROUTER, GATE]
+            MOUSE, GMAIN, GKEYS, FIELD, KEYROUTER, DESKHIT, DESKOPS, EVVIEW,
+            GATE]
 SUITES = [MAP, TABLES, CENSUS, UNIT, LAYERS, PTY, PLAN, SPEC, GATETEST, TOPBAR,
-          VPSPEC]
+          VPSPEC, DESKSPEC, PRESSES]
 
 # (id, [(subject, find, replace), ...], [(suite, filter), ...], what it breaks)
 ARMS = [
@@ -243,17 +252,32 @@ ARMS = [
      [(PLAN, None)],
      "GPUI's + press bypasses the router"),
     # ---- the desktop -----------------------------------------------------------
-    ("W1", [(KEYROUTER, '  if res.kind == erOperation and res.layer.startsWith("user:"):\n    if runDesktopOperation(res) == nkHandled:',
-             '  if false:\n    if runDesktopOperation(res) == nkHandled:')],
+    ("W1", [(KEYROUTER, '      res.layer.startsWith("user:") and runDesktopOperation(res) == nkHandled,',
+             '      false and runDesktopOperation(res) == nkHandled,')],
      [(SPEC, None)],
      "the desktop ignores a user's pointer row"),
-    ("W2", [(KEYROUTER, '    pointerGesture(button, ev.ctrlKey.to(bool), ev.shiftKey.to(bool),',
-             '    pointerGesture(button, false, ev.shiftKey.to(bool),')],
+    ("W2", [(DESKHIT, '  var res = resolver(path, chordName(mods, gestureKey))',
+             '  var res = resolver(path, chordName(mods - {kmodCtrl}, gestureKey))')],
      [(SPEC, None)],
      "the desktop's gesture drops Ctrl"),
-    ("W3", [(KEYROUTER, "      swallowNextClick = true\n", "")],
+    ("W3", [(DESKOPS, '  of "calltrace.go-to-call":',
+             '  of "calltrace.go-to-call-unregistered":')],
+     [(PRESSES, None), (DESKSPEC, None)],
+     "a DOM front-end has no procedure for a call row's base row: a plain press does nothing"),
+    ("W4", [(DESKHIT, '  var res = resolver(path, chordName(mods, gestureKey))',
+             '  var res = EditingResolution(kind: erOperation, operation:\n'
+             '    (if hit.kind == "row" and paneKind == "calltrace": "calltrace.go-to-call" else: ""))')],
      [(SPEC, None)],
-     "the desktop runs a user's pointer row and the element's own click too"),
+     "a press bypasses the router: the element's procedure runs whatever the keymap says"),
+    ("W5", [(EVVIEW, '       role = "button", tabindex = "0"):\n      discard\n\n  forEachKeyed[EventLogColumn, R, N](r, rowEl,',
+             '       role = "button", tabindex = "0",\n'
+             '       onclick = proc() = vm.selectRow(some(position))):\n      discard\n\n  forEachKeyed[EventLogColumn, R, N](r, rowEl,')],
+     [(GATERUN, None)],
+     "a view's own click handler is put back on the event log's row"),
+    ("W6", [(DESKHIT, '    ("eventLog", "tr[data-position]", "row"),',
+             '    ("eventLog", "tr[data-position]", "button"),')],
+     [(DESKSPEC, None)],
+     "the desktop's hit test names an event row a button: its row's operation never runs"),
     # ---- the source gate -------------------------------------------------------
     ("G1", [(GATE, 'if stack and KEYISH.search(stack[-1][1]):', 'if False:')],
      [(GATETEST, None)],
@@ -272,12 +296,13 @@ IN_BINARY = {TABLE, ROUTER, KEYNAMES, POINTER, OVERLAY, CLIENT, CLICKS, RUNTIME,
   # Subjects compiled into `codetracer-tui`.
 IN_GPUI = {TABLE, ROUTER, KEYNAMES, POINTER, OVERLAY, CLIENT, CLICKS, GMAIN, GKEYS}
   # Subjects compiled into `codetracer-gpui`.
-IN_DESKTOP = {ROUTER, KEYNAMES, POINTER, OVERLAY, CLIENT, FIELD, KEYROUTER}
+IN_DESKTOP = {ROUTER, KEYNAMES, POINTER, OVERLAY, CLIENT, FIELD, KEYROUTER,
+              DESKHIT, DESKOPS, EVVIEW}
   # Subjects compiled into the desktop's bundle.
 PTY_SUITES = {PTY}
 GPUI_SUITES = {PLAN}
-DESKTOP_SUITES = {SPEC, VPSPEC}
-SHELL_SUITES = {GATETEST}
+DESKTOP_SUITES = {SPEC, VPSPEC, DESKSPEC}
+SHELL_SUITES = {GATETEST, GATERUN}
 
 
 def path_of(rel):

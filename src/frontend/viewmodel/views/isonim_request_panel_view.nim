@@ -142,27 +142,21 @@ proc makeTabClickHandler*(vm: RequestPanelVM; tab: string): proc() =
   let captured = tab
   result = proc() = vm.setDetailTab(captured)
 
-proc pressAndActivateRow(vm: RequestPanelVM; index: int): bool =
+proc pressAndActivateRow*(vm: RequestPanelVM; index: int): bool =
   ## Both a row click and the continuation of a click displaced by the
   ## detail resize use the ViewModel's one double-press rule.
   if vm.pressRow(index, int64(epochTime() * 1000)) == rpActivate:
     vm.jumpToHandler(index)
     return true
 
-proc onRowClick(vm: RequestPanelVM; index: int): proc() =
-  ## Closure factory that captures the row's filtered-list index so
-  ## each row's click handler refers to its own value.  Without the
-  ## per-row capture every row's closure would observe the loop
-  ## variable's final value (same closure-capture concern as the
-  ## low_level_code / step_list views).
-  ##
-  ## PLAT-58: a press is counted (`RequestPanelVM.pressRow`, the rule the
-  ## terminal's and GPUI's panes use): the second press on the same row in
-  ## time goes to its handler. The selection rebuilds the table body, so the
-  ## browser's own `dblclick` never reaches the row it replaced — measured by
-  ## the Electron capture, where a double click moved nothing.
-  let captured = index
-  result = proc() = discard pressAndActivateRow(vm, captured)
+# A row's press is the pointer row `requests.select`, performed by the
+# front-end on the row's `data-request-index` (on a DOM front-end
+# `input/pane_presses`, by `pressAndActivateRow`). PLAT-58: a
+# press is counted (`RequestPanelVM.pressRow`, the rule the terminal's and
+# GPUI's panes use): the second press on the same row in time goes to its
+# handler. The selection rebuilds the table body, so the browser's own
+# `dblclick` never reaches the row it replaced — measured by the Electron
+# capture, where a double click moved nothing.
 
 proc onRowDoubleClick(vm: RequestPanelVM; index: int): proc() =
   ## Closure factory for the per-row ``ondblclick`` handler: go to the
@@ -414,7 +408,7 @@ proc renderRow[R, N](r: R; vm: RequestPanelVM; req: RequestRecord;
   result = ui(r):
     tdiv(role = "button", tabindex = "0", class = rowClass(selected, req.isOpen),
          `data-request-id` = $req.id,
-         onclick = onRowClick(vm, index),
+         `data-request-index` = $index,
          ondblclick = onRowDoubleClick(vm, index)):
       tdiv(class = "request-col-id"):
         text formatReqId(req.id)

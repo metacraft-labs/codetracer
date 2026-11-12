@@ -62,6 +62,8 @@ import
   ../types,
   ../lib/[ jslib, logging ],
   ./auto_hide_panel_config
+from std/options import isSome, get
+from ../headless_app/desktop_panes import paneOfContent
 # Node type comes from kdom; do not import dom.Node which conflicts.
 
 when defined(js):
@@ -496,6 +498,19 @@ proc pinPanel*(
   deferredUpdateGLSize()
   dispatchLayoutUpdated()
 
+proc markAutoHidePaneScope(host: Element; content: int) =
+  ## A pane shown from the auto-hide state names its kind for the DOM pointer
+  ## listener (`viewmodel/input/dom_pointer`, `data-ct-pane`), as a
+  ## GoldenLayout pane's host does through its scope attributes
+  ## (`layout.markPaneScope`): without it a press on the pane's rows has no
+  ## pane to resolve against. (It is not a key scope: the panes shown here
+  ## keep their keys as they were.)
+  if host.isNil or not host.getAttribute(cstring"data-ct-pane").isNil:
+    return
+  let pane = paneOfContent(content)
+  if pane.isSome:
+    host.setAttribute(cstring"data-ct-pane", cstring($pane.get))
+
 proc addStandaloneAutoHidePanel*(
   title: cstring,
   content: Content,
@@ -538,6 +553,7 @@ proc addStandaloneAutoHidePanel*(
   ## Registering a second entry instead would leave the restored one shadowing
   ## it in `findPanelByContent`; dropping the restored one would put the pane
   ## back at `edge`, which is #807.
+  markAutoHidePaneScope(liveElement, ord(content))
   if autoHideState.isNil:
     initAutoHideState()
 
@@ -828,6 +844,11 @@ proc instantiatePanelElement*(panel: AutoHidePanel): bool =
   let label = configComponentLabel(panel.config)
   panel.liveElement = jsCreatePanelHost(label)
   panel.containerElement = panel.liveElement
+  let state = panel.config[cstring"componentState"]
+  if not state.isNil and not state.isUndefined:
+    let content = state[cstring"content"]
+    if not content.isNil and not content.isUndefined:
+      markAutoHidePaneScope(panel.liveElement, content.to(int))
   panel.instantiatedFromConfig = true
   cdebug fmt"auto_hide: rebuilt host for restored panel '{panel.title}' ({label})"
   true
