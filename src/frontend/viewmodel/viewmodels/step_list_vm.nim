@@ -332,7 +332,11 @@ proc jumpToStepLine*(vm: StepListVM; line: StepLine) =
     "threadId": threadId,
     "ticks": line.location.rrTicks,
   }
-  discard vm.store.backend.send("ct/goto-ticks", args)
+  # The step list is the page's own on a `ct host` page (its rows come from
+  # the page's IPC, `ui/step_list`), and so is its jump: over the page's
+  # connection to the replay, not the mirror's inert backend
+  # (`directBackend`).
+  discard vm.store.directBackend.send("ct/goto-ticks", args)
 
 # ---------------------------------------------------------------------------
 # Factory

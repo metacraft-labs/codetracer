@@ -253,3 +253,12 @@ src/frontend/tui/tests/plat70e-origin-mutation-control.sha256	src/frontend/ui/ke
 src/frontend/tui/tests/plat70f-pointer-mutation-control.sha256	src/frontend/gpui/main.nim	53824dcec0e694e93da069c1b7c3357a717531b4f8e99f19a1548d0a34ac2450	d51a610d6db840663dc7b2234ec7fa1267920ba7610d6b6c908d53e1a44bff1c
 src/frontend/viewmodel/tests/unit/plat34-front-end-mutation-control.sha256	src/frontend/gpui/main.nim	53824dcec0e694e93da069c1b7c3357a717531b4f8e99f19a1548d0a34ac2450	d51a610d6db840663dc7b2234ec7fa1267920ba7610d6b6c908d53e1a44bff1c
 src/frontend/viewmodel/tests/unit/plat68-keymaps-mutation-control.sha256	src/frontend/gpui/main.nim	53824dcec0e694e93da069c1b7c3357a717531b4f8e99f19a1548d0a34ac2450	d51a610d6db840663dc7b2234ec7fa1267920ba7610d6b6c908d53e1a44bff1c
+
+# 2026-11-12, a ct host page's own panes: the event log's counterpart lookup
+# and its jump take the page's connection to the replay (event_log_vm.nim).
+# Every harness below owes a re-grade for these bytes.
+ci/test/plat70i-fit-mutation-control.sha256	src/frontend/viewmodel/viewmodels/event_log_vm.nim	93e1f0b645ec65ce358e4dbe169dca8dfb1ce70264d3aed2bcfe34698cf45c72	26158d77dd8f6e58b67e9b9edb89f1e3b01ace21df15e569811687402e479b02
+src/frontend/tui/tests/plat49-chrome-mutation-control.sha256	src/frontend/viewmodel/viewmodels/event_log_vm.nim	93e1f0b645ec65ce358e4dbe169dca8dfb1ce70264d3aed2bcfe34698cf45c72	26158d77dd8f6e58b67e9b9edb89f1e3b01ace21df15e569811687402e479b02
+src/frontend/tui/tests/plat50-clicks-mutation-control.sha256	src/frontend/viewmodel/viewmodels/event_log_vm.nim	93e1f0b645ec65ce358e4dbe169dca8dfb1ce70264d3aed2bcfe34698cf45c72	26158d77dd8f6e58b67e9b9edb89f1e3b01ace21df15e569811687402e479b02
+src/frontend/tui/tests/plat70b-table-mutation-control.sha256	src/frontend/viewmodel/viewmodels/event_log_vm.nim	93e1f0b645ec65ce358e4dbe169dca8dfb1ce70264d3aed2bcfe34698cf45c72	26158d77dd8f6e58b67e9b9edb89f1e3b01ace21df15e569811687402e479b02
+src/frontend/viewmodel/tests/unit/hsf-sdk-mutation-control.sha256	src/frontend/viewmodel/viewmodels/event_log_vm.nim	93e1f0b645ec65ce358e4dbe169dca8dfb1ce70264d3aed2bcfe34698cf45c72	26158d77dd8f6e58b67e9b9edb89f1e3b01ace21df15e569811687402e479b02

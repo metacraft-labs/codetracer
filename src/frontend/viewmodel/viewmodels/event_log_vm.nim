@@ -1175,7 +1175,10 @@ proc requestCounterparts*(vm: EventLogVM; row: MarkerEventRow;
     "direction": directionWireText(row.direction),
     "keyValue": row.keyValue,
   }
-  let future = vm.store.backend.send("ct/pairIndexLookup", args)
+  # The counterparts are this side's cache (the chip's gesture runs where
+  # the pane is), so the lookup takes this side's connection: on a `ct host`
+  # page the page's, not the mirror's inert backend (`directBackend`).
+  let future = vm.store.directBackend.send("ct/pairIndexLookup", args)
   let vmRef = vm
   let cacheKey = key
   let continuation = then
@@ -1389,7 +1392,8 @@ proc jumpToCounterpart*(vm: EventLogVM; row: MarkerEventRow) =
     "threadId": threadId,
     "ticks": row.stepId,
   }
-  discard vm.store.backend.send("ct/goto-ticks", gotoArgs)
+  # A move made from the pane, over this side's connection, as the lookup.
+  discard vm.store.directBackend.send("ct/goto-ticks", gotoArgs)
 
 proc jumpToCounterpartOf*(vm: EventLogVM; row: MarkerEventRow) =
   ## §5.3 — the boundary-chip gesture on a marker row.

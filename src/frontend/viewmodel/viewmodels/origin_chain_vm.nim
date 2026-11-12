@@ -24,6 +24,12 @@
 ## - §5.3 DAP request         — issued via `BackendService.send("ct/originChain", …)`.
 ## - §5.3.2 lazy fill         — issued via `BackendService.send("ct/originSummary", …)`.
 ##
+## The requests go over the store's `directBackend`: this ViewModel's state
+## is the host's own and is not mirrored, so on a `ct host` page, whose store
+## is a mirror's over an inert backend, they take the page's connection to
+## the replay (`ReplayDataStore.navigationBackend`); elsewhere that is the
+## store's `backend`.
+##
 ## Headless test posture (per the milestones-file Introduction): tests
 ## drive the real backend whenever possible. Pure VM-state tests run
 ## against the existing `MockBackendService` which records every command;
@@ -224,7 +230,7 @@ proc sendChainQuery(vm: OriginChainVM; expression: string; stepId: int64;
   # which never passes through here, counted as the side panel's.
   vm.sendingRowChainRequest = not forSidePanel
   try:
-    async_compat.onComplete(vm.store.backend.send("ct/originChain", args),
+    async_compat.onComplete(vm.store.directBackend.send("ct/originChain", args),
       onSuccess = proc(response: JsonNode) =
         let body = responseBody(response)
         if responseSucceeded(response) and body.hasKey("hops"):
@@ -256,7 +262,7 @@ proc onShowOrigin*(vm: OriginChainVM; expression: string; location: Location;
   ##
   ## The origin badge's in-place fetch is `loadRowChain`, which touches
   ## neither the side panel nor its breadcrumb trail.
-  if vm.store.isNil or vm.store.backend.isNil:
+  if vm.store.isNil or vm.store.directBackend.isNil:
     return
   vm.sidePanelOpen.val = true
   var stack = vm.breadcrumbStack.val
@@ -292,7 +298,7 @@ proc loadRowChain*(vm: OriginChainVM; expression: string; location: Location) =
   ## pending request and its breadcrumb trail are left alone. Asked at most
   ## once per row per stop, so the expand click and the re-ask after a move
   ## cannot duplicate it.
-  if vm.store.isNil or vm.store.backend.isNil:
+  if vm.store.isNil or vm.store.directBackend.isNil:
     return
   let stop = stopIdentityOf(vm.store.debugger.val)
   if vm.rowChainAt(expression, stop).isSome:
@@ -397,7 +403,7 @@ proc onSeekToHop*(vm: OriginChainVM; hop: OriginHop) =
     let loc = Location(file: hop.location.path, line: hop.location.line)
     vm.onSeekProc(hop.stepId, loc)
     return
-  if vm.store.isNil or vm.store.backend.isNil:
+  if vm.store.isNil or vm.store.directBackend.isNil:
     return
   # Fallback: forward the seek as a history-jump request so the
   # existing backend dispatcher (`ct/history-jump`) handles it.
@@ -543,7 +549,7 @@ proc flushPlaceholderFill*(vm: OriginChainVM) =
   let queue = vm.placeholderFillQueue.val
   if queue.len == 0:
     return
-  if vm.store.isNil or vm.store.backend.isNil:
+  if vm.store.isNil or vm.store.directBackend.isNil:
     return
   vm.inFlightSummary.val = true
   let args = originSummaryArgs(queue)
@@ -552,7 +558,7 @@ proc flushPlaceholderFill*(vm: OriginChainVM) =
   # that no host had, so it stopped after the first batch.
   let vmRef = vm
   let sent = queue
-  async_compat.onComplete(vm.store.backend.send("ct/originSummary", args),
+  async_compat.onComplete(vm.store.directBackend.send("ct/originSummary", args),
     onSuccess = proc(response: JsonNode) =
       if responseSucceeded(response):
         vmRef.applySummaryResponse(sent,

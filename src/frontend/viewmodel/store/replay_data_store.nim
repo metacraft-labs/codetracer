@@ -395,6 +395,11 @@ type
       ## it makes. A jump from a pane that runs on the page (a Pixel History
       ## entry, a frame, an event) has to take that same connection, or it
       ## is sent to a backend that never answers. nil: `backend`.
+      ##
+      ## The same holds for the requests of the ViewModels whose state is
+      ## the page's own and is not mirrored from the server's session (the
+      ## step list, the origin chain, the event log's counterpart lookup):
+      ## they ask over this connection too (`directBackend`).
     requestTracker*: RequestTracker
     stops*: StopTimeline
       ## PLAT-29. The stops the debugger has been at, as versions — so a
@@ -663,16 +668,21 @@ proc enterHistoricalModeForNavigation*(store: ReplayDataStore) =
     store.session.val = session
     store.requestRecordingHead()
 
+proc directBackend*(store: ReplayDataStore): BackendService =
+  ## The connection this side's own requests to the replay take: the host's
+  ## `navigationBackend` when it set one (a `ct host` page's connection),
+  ## else `backend`. For a move made from a pane that runs on this side, and
+  ## for a query whose answer only this side keeps.
+  if store.navigationBackend.isNil: store.backend
+  else: store.navigationBackend
+
 proc requestHistoricalNavigation*(store: ReplayDataStore; command: string;
                                   args: JsonNode) =
   ## Send a navigation command that targets a recorded moment. When invoked
   ## from a live session, the UI enters historical mode immediately; the
   ## backend's complete-move event will refresh the exact debugger position.
   store.enterHistoricalModeForNavigation()
-  let backend =
-    if store.navigationBackend.isNil: store.backend
-    else: store.navigationBackend
-  discard backend.send(command, args)
+  discard store.directBackend.send(command, args)
 
 proc updateRecordingHead*(store: ReplayDataStore; rrTicks: uint64) =
   ## Mirror a backend recording-head update into session and timeline state.
