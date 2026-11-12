@@ -209,6 +209,9 @@ function readSurface(): any {
     return {
       glyph: gmb && gmb.width > 0 ? { x: gmb.left + gmb.width / 2, y: lb.top + lb.height / 2 } : undefined,
       lineNumber: { x: numX, y: lb.top + lb.height / 2 },
+      // where the code area begins on screen: a text anchor scrolled off to
+      // the left is aimed at the first visible character instead
+      contentLeft: li ? eb.left + li.contentLeft : undefined,
     };
   }
   // The editor's selections (the selected text of each cursor; "" for a bare
@@ -713,6 +716,26 @@ function killTree(pid: number): void {
   try { process.kill(pid, "SIGKILL"); } catch { /* already gone */ }
 }
 
+// The point a line anchor names (`gutter`, `text-start`, `column(c)`, …).
+async function textAnchor(n: any, anchor: string): Promise<{ x: number; y: number } | undefined> {
+  const a = n.anchors;
+  if (!a) return undefined;
+  if (anchor === "gutter") return a.gutter;
+  if (anchor === "glyph") return a.glyph;
+  if (anchor === "line-number") return a.lineNumber;
+  // pw2: a column option's check box and drag handle
+  if ((anchor === "check" || anchor === "handle" || anchor === "close") && a[anchor]) return a[anchor];
+  // pw2: `caret(c)`: just right of the boundary before the c-th character,
+  // where a press puts the caret at column c
+  const caretAt = /^caret\((\d+)\)$/.exec(anchor);
+  if (caretAt) return { x: a.textLeft + (parseInt(caretAt[1], 10) - 1) * a.charWidth + 2, y: a.midY };
+  if (anchor === "text-start") return { x: a.textLeft + (a.firstChar + 0.5) * a.charWidth, y: a.midY };
+  if (anchor === "text-end") return { x: a.textRight - a.charWidth / 2, y: a.midY };
+  const col = /^column\((\d+)\)$/.exec(anchor);
+  if (col) return { x: a.textLeft + (parseInt(col[1], 10) - 0.5) * a.charWidth, y: a.midY };
+  return undefined;
+}
+
 const binding = {
   name: "codetracer-desktop",
   roles: ROLES,
@@ -758,23 +781,14 @@ const binding = {
     return chord.split(" ").map((c) => c.replace(/(^|\+)([A-Z])$/, (_m, p, l) => p + l.toLowerCase())).join(" ");
   },
 
-  async anchor(_ctx: Ctx, n: any, anchor: string): Promise<{ x: number; y: number } | undefined> {
-    const a = n.anchors;
-    if (!a) return undefined;
-    if (anchor === "gutter") return a.gutter;
-    if (anchor === "glyph") return a.glyph;
-    if (anchor === "line-number") return a.lineNumber;
-    // pw2: a column option's check box and drag handle
-    if ((anchor === "check" || anchor === "handle" || anchor === "close") && a[anchor]) return a[anchor];
-    // pw2: `caret(c)`: just right of the boundary before the c-th character,
-    // where a press puts the caret at column c
-    const caretAt = /^caret\((\d+)\)$/.exec(anchor);
-    if (caretAt) return { x: a.textLeft + (parseInt(caretAt[1], 10) - 1) * a.charWidth + 2, y: a.midY };
-    if (anchor === "text-start") return { x: a.textLeft + (a.firstChar + 0.5) * a.charWidth, y: a.midY };
-    if (anchor === "text-end") return { x: a.textRight - a.charWidth / 2, y: a.midY };
-    const col = /^column\((\d+)\)$/.exec(anchor);
-    if (col) return { x: a.textLeft + (parseInt(col[1], 10) - 0.5) * a.charWidth, y: a.midY };
-    return undefined;
+  async anchor(ctx: Ctx, n: any, anchor: string): Promise<{ x: number; y: number } | undefined> {
+    const p = await textAnchor(n, anchor);
+    // pw2: never aim into the margin when the code is scrolled horizontally
+    if (p && n.anchors?.contentLeft !== undefined && /^(text-start|text-end|column\(|caret\()/.test(anchor)) {
+      p.x = Math.max(p.x, n.anchors.contentLeft + 2);
+    }
+    void ctx;
+    return p;
   },
 
   async close(ctx: Ctx): Promise<void> {
