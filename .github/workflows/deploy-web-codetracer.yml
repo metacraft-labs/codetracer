@@ -439,7 +439,7 @@ jobs:
             # isonim-gpui again 2026-11-09, after the flake.lock re-pin ffbaf94f3;
             # isonim-gpui again 2026-11-11, after cfdda1ce1; isonim-tui again
             # 2026-11-12 (its web driver reads the browser's capabilities).
-            isonim=b7ff71e7c17593beccbee772cba87519e746e030
+            isonim=b5cc28aee4781a71eeec34b14b4c27ba2cd68e67
             isonim-tui=8e43ce06f7f078530c7a8585c210ad7648fa0051
             isonim-gpui=9833561d1be64a20ddce7ccf2bece2f1f0ae4db9
             nim-everywhere=23cf930e5b2463d964579b318e01e4ef1cab63b3
