@@ -51,7 +51,8 @@ proc deactivateNotification*(self: StatusComponent, notification: Notification) 
   self.redraw()
 
 proc canAutoDismiss(notification: Notification): bool =
-  notification.active and not notification.isOperationStatus and notification.actions.len == 0
+  notification.active and not notification.isOperationStatus and
+    notification.actions.len == 0 and not notification.persistent
 
 proc clearNotificationTimer(notification: Notification) =
   if not notification.hasTimeout:
@@ -155,11 +156,29 @@ proc onLaunchFailed*(self: StatusComponent, failure: LaunchFailure) =
   ## This tab's replay cannot start (`ct/launch-failed`).
   ##
   ## Nothing will ever answer the operation the bar shows as running, so it
-  ## stops showing the tab busy. The reason itself is not drawn from here: the
-  ## server sends the same sentence as an Error `ct/notification` beside this
-  ## event, and that arrives through `onNotification` like any other notice.
+  ## stops showing the tab busy, and the reason — the same sentence the server
+  ## sends as an Error `ct/notification` beside this event — is kept on screen.
   self.state.stableBusy = false
   self.state.currentOperation = cstring""
+  # The reason stays on screen until the user dismisses it
+  # (`Multi-Window-Tab-Management.md` item 7). As a toast it was gone three
+  # seconds after the launch, and the tab showed nothing at all: no editor,
+  # no stop, and no word of why. The server's Error `ct/notification` with
+  # the same sentence is the one kept, whichever of the two arrived first.
+  if failure.message.len > 0:
+    var shown: Notification = nil
+    for notification in self.notifications:
+      if notification.kind == NotificationError and notification.text == failure.message:
+        shown = notification
+    if shown.isNil:
+      self.onNotification(newNotification(NotificationError, $failure.message))
+      for notification in self.notifications:
+        if notification.kind == NotificationError and notification.text == failure.message:
+          shown = notification
+    if not shown.isNil:
+      clearNotificationTimer(shown)
+      shown.active = true
+      shown.persistent = true
   self.redraw()
 
 when defined(js):

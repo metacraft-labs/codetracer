@@ -94,6 +94,10 @@ struct WorkerStopLine {
 pub struct ReplayWorkerStartError {
     /// The parsed stop reason, when the worker wrote a machine-readable one.
     pub stop_reason: Option<WorkerStopReason>,
+    /// The error the worker exited with, in its own words (see
+    /// [`worker_exit_error`]), when its stderr holds one: what the user is
+    /// shown when there is no stop reason.
+    pub worker_error: Option<String>,
     /// The untyped detail (transport error plus raw worker stderr), kept for
     /// diagnostics and for every failure the worker does not classify.
     pub detail: String,
@@ -138,6 +142,15 @@ impl std::fmt::Display for ReplayWorkerStartError {
                 "replay worker for pid {} refused to start: {}",
                 self.worker_pid, reason.code
             ),
+            // The worker said why: that, and that the replay did not start, is
+            // what the user reads (`Multi-Window-Tab-Management.md` item 7).
+            // Not the pid or the worker's log lines, which differ between
+            // attempts and name source files of the worker; they are logged.
+            None if self.worker_error.is_some() => write!(
+                f,
+                "The replay could not start: {}",
+                self.worker_error.as_deref().unwrap_or_default()
+            ),
             None => write!(
                 f,
                 "failed to initialize replay-worker transport for pid {}: {}",
@@ -148,6 +161,21 @@ impl std::fmt::Display for ReplayWorkerStartError {
 }
 
 impl Error for ReplayWorkerStartError {}
+
+/// The error a replay worker exited with, from its stderr: a Rust `main` that
+/// returns `Err` writes `Error: <the error's Debug form>` as its last words,
+/// and a string error's Debug form is a quoted, escaped literal, which is read
+/// back here. `None` when the worker wrote no such line.
+pub fn worker_exit_error(stderr: &str) -> Option<String> {
+    let line = stderr.lines().map(str::trim).find(|line| line.starts_with("Error: "))?;
+    let error = line["Error: ".len()..].trim();
+    let unquoted = if error.starts_with('"') {
+        serde_json::from_str::<String>(error).unwrap_or_else(|_| error.trim_matches('"').to_string())
+    } else {
+        error.to_string()
+    };
+    (!unquoted.is_empty()).then_some(unquoted)
+}
 
 /// A replay worker that went away while a query was in flight: it closed its
 /// connection without answering, or the connection broke under the query.
@@ -558,8 +586,10 @@ impl ReplayWorker {
                      raw detail: {detail}"
                 );
             }
+            warn!("replay worker pid {worker_pid} failed to start: {detail}");
             return Err(Box::new(ReplayWorkerStartError {
                 stop_reason,
+                worker_error: worker_stderr.as_deref().and_then(worker_exit_error),
                 detail,
                 worker_pid,
             }));
@@ -2382,6 +2412,27 @@ mod tests {
             "the exit must carry the status: {}",
             death.exit
         );
+    }
+
+    /// The worker's own error is what a start failure shows the user, read
+    /// back from the `Error: "…"` line a failing Rust `main` writes, among
+    /// the worker's log lines.
+    #[test]
+    fn a_start_failure_shows_the_workers_own_error() {
+        let stderr = "src/rr_engine.rs:253 2026-11-12T06:22:45.597 [INFO] - start rr replay\n\
+                      Error: \"rr could not replay this recording: rr: Trace file `/t/version' not found.\"\n\
+                      src/main_non_windows.inc.rs:695 2026-11-12T06:22:45.655 [ERROR] - replay error\n";
+        let error = ReplayWorkerStartError {
+            stop_reason: None,
+            worker_error: worker_exit_error(stderr),
+            detail: format!("worker exited; worker stderr: {stderr}"),
+            worker_pid: 42,
+        };
+        assert_eq!(
+            error.to_string(),
+            "The replay could not start: rr could not replay this recording: rr: Trace file `/t/version' not found."
+        );
+        assert_eq!(worker_exit_error("no error line here\n"), None);
     }
 
     /// A session built `without_respawn_after_worker_death` answers every
