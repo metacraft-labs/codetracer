@@ -112,9 +112,4 @@ applicable:
   - ../agent-activity-deepreview/evidence-cards.yaml
   - ../agent-activity-deepreview/evidence-open-review.yaml
   - ../browser/materialized-replay.yaml
-  # These need what the host may lack, and their stage says which:
-  # ct-native-replay (recording C), and a real Agent Harbor server.
-  - ../browser/mcr-replay.yaml
-  - ../agentic-coding/worktree-session.yaml
-  - ../agentic-coding/worktree-cancel-and-recover.yaml
 unsupported: []
