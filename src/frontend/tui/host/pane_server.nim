@@ -64,6 +64,15 @@ import ../app/views/shell
 import ./native_host
 import ./tui_session
 import ./visual_replay_host
+import ./build_runner
+import ./build_output_source
+import ./edit_host
+import ./edit_services
+import ./problems_source
+import ./test_results_source
+import ./vcs_source
+from ../../viewmodel/viewmodels/trace_open import TraceOpenPolicy,
+  TraceOpenRequest, topNewTab, topCurrentTab
 from ../app/source_binding import sptBreakpoint
 import ../../viewmodel/host/keymap_preference
 import ../../viewmodel/host/keybindings_file
@@ -80,6 +89,10 @@ const
   ErrMethodNotFound = -32601
   ErrNotInitialized = -32002
   ErrRequestFailed = -32803
+  TickMs = 200
+    ## How often the loop polls what runs without a request (`tick`): a
+    ## build's output, a test run, a Nim trace — the terminal's own idle poll
+    ## (`main.IdlePollMs`). A poll that finds nothing changed sends nothing.
 
 type
   HostedPane = object
@@ -121,6 +134,20 @@ type
     sourceRows: int
       ## The source window's height the stop's panes were last built for
       ## (`resyncViewports`): 0 at the open, before the editor reports one.
+    edit: EditHostState
+      ## Edit mode's host services — the files, the build and task runner,
+      ## Nim's compile-time tracer (`edit_services`, §E9). The terminal's
+      ## window owns these; here each session does, since each is its own
+      ## editor tab and may be another project's.
+    controlsSent: string
+      ## The debugger controls last sent as `controls/state`, so the strip is
+      ## sent when a control's enablement changes, not on every publish.
+    tests: TestsSource
+    problems: ProblemsSource
+    buildOut: BuildOutputSource
+    vcs: VcsSource
+      ## The window sources the terminal's loop owns (PLAT-53, PLAT-55,
+      ## PLAT-56, PLAT-50), polled by `tick`.
 
   DapEndpoint = object
     listener: Socket
@@ -147,9 +174,17 @@ type
     dapOut: seq[JsonNode]
       ## DAP messages to send to the attached client.
     dapEnabled*: bool
+    projectRoot*: string
+      ## Edit mode's project for a session that names none: the directory the
+      ## editor started the server in, as `ct replay` takes the shell's.
+    outbox: seq[JsonNode]
+      ## Notifications produced outside any request — a recording a test or
+      ## a Nim trace finished (`session/opened`), a build's progress — sent
+      ## by the loop after its next `tick`.
 
 proc newPaneServer*(dap = true): PaneServer =
-  PaneServer(active: -1, nextId: 1, dapEnabled: dap)
+  PaneServer(active: -1, nextId: 1, dapEnabled: dap,
+             projectRoot: getCurrentDir())
 
 # ---------------------------------------------------------------------------
 # Framing (the LSP base protocol)
@@ -253,6 +288,50 @@ proc sessionById(srv: PaneServer; params: JsonNode): ServerSession =
 proc currentLayout(s: ServerSession): LayoutNode =
   s.app.shellModel(NominalWidth, NominalHeight).layout
 
+proc openRecording(srv: PaneServer; origin: ServerSession; folder: string;
+                   policy: TraceOpenPolicy): string
+
+proc wireServices(srv: PaneServer; s: ServerSession) =
+  ## Hand the session the host services the terminal's loop hands its window
+  ## (§E9): Edit mode's files, build and task runner and Nim tracer
+  ## (`edit_services.wireEditServices`, the terminal's own), and the Test
+  ## Results, Problems, Build Output and VCS sources over the session's
+  ## project. A recording one of them produces opens as a new session the
+  ## editor is told of (`openRecording`).
+  let rt = s.rt
+  rt.app.projectRoot = srv.projectRoot
+  s.edit = wireEditServices(rt, srv.projectRoot, "",
+                            proc(): EditListResult =
+    let listing = listProjectFiles(rt.app.projectRoot)
+    EditListResult(files: listing.files, truncated: listing.truncated))
+  # `wireEditServices` selects the stored keymap base, as the terminal's
+  # loops do; the user's `keybindings.json` goes back over it (ED-AREQ6).
+  wireKeymap(rt)
+  let opener = proc(path: string; line, col: int): string =
+    if rt.app.modes.product == pmEdit or s.tui.isNil:
+      rt.openWorkingFileAt(path, line, col)
+    else:
+      s.tui.showFileAt(rt, path, line, col)
+  s.problems = newProblemsSource(rt, opener)
+  s.buildOut = newBuildOutputSource(rt, s.problems, opener,
+    proc(command, noun: string): string =
+      if rt.editServices.startBuild.isNil:
+        return "this session has no build runner"
+      let started = rt.editServices.startBuild(bkBuild, command)
+      started.message)
+  s.tests = newTestsSource(
+    projectRoot = proc(): string = rt.app.projectRoot,
+    ctBinary = proc(): string = nativeCtBinary(),
+    resolveFolder = proc(id: string): string = recordingFolderOf(id),
+    openFolder = proc(testId, recordingId, folder: string;
+                      policy: TraceOpenPolicy): string =
+      srv.openRecording(s, folder, policy))
+  discard s.tests.setTabs(s.id, not s.tui.isNil and
+                                rt.app.modes.product == pmDebug, true)
+  s.tests.refresh(rt)
+  s.vcs = newVcsSource(srv.projectRoot)
+  s.vcs.refresh(rt)
+
 proc openServerSession(srv: PaneServer; trace: string): ServerSession =
   let folder = resolveTraceFolder(trace)
   let problem = traceFolderProblem(folder)
@@ -305,8 +384,18 @@ proc openServerSession(srv: PaneServer; trace: string): ServerSession =
   inc srv.nextId
   srv.sessions.add result
   srv.active = srv.sessions.len - 1
+  srv.wireServices(result)
 
 proc close(s: ServerSession) =
+  if not s.tests.isNil:
+    s.tests.close()
+    s.tests = nil
+  if not s.problems.isNil:
+    s.problems.close()
+    s.problems = nil
+  if not s.vcs.isNil:
+    s.vcs.close()
+    s.vcs = nil
   if not s.graphics.isNil:
     s.graphics.close()
     s.graphics = nil
@@ -545,6 +634,17 @@ proc publish(srv: PaneServer; s: ServerSession; fullPanes: seq[PaneKind] = @[];
   let fv = srv.frameViewerContent(s, fullFrameViewer)
   if not fv.isNil:
     result.add fv
+  # §E11: the debugger controls' strip, when what it shows changed.
+  var buttons = newJArray()
+  for c in s.rt.hostedControls():
+    buttons.add %*{"id": c.id, "label": c.label, "tooltip": c.tooltip,
+                   "operation": c.operation, "enabled": c.enabled,
+                   "glyphs": {"nerd": c.nerd, "unicode": c.unicode,
+                              "text": c.text}}
+  let controls = %*{"session": s.id, "buttons": buttons}
+  if $controls != s.controlsSent:
+    s.controlsSent = $controls
+    result.add notification("controls/state", controls)
   let deco = s.decorationsOf()
   if not deco.isNil and $deco != s.decorationsSent:
     s.decorationsSent = $deco
@@ -663,6 +763,12 @@ proc runOperation(srv: PaneServer; s: ServerSession; params: JsonNode): JsonNode
   var isPaneOp = false
   for (op, _) in PaneOperations:
     if op == name: isPaneOp = true
+  # What the operation says is its answer's `detail`, so the status line is
+  # cleared BEFORE it runs. (It was cleared after, which erased every
+  # message an operation gave through the status line — "this window runs
+  # no Nim compiler" among them — and an operation that could not act
+  # answered with a silent success: codetracer-pm issue 2026-11-12.)
+  s.app.notification = ""
   s.applyCursor()
   if isPaneOp:
     let args = paneArgsOf(params{"args"})
@@ -676,8 +782,16 @@ proc runOperation(srv: PaneServer; s: ServerSession; params: JsonNode): JsonNode
     outcome = s.rt.runNamedOperation(name, argument, epochTime().int64 * 1000)
   else:
     fail(ErrInvalidParams, "'" & name & "' is not an operation")
-  s.app.notification = ""
-  s.tui.applyOutcome(s.rt, outcome)
+  if outcome.refused.len > 0:
+    # Disabled now, or not something this front-end performs: refused with
+    # its reason (the protocol summary: "success or the operation's refusal
+    # reason").
+    return %*{"ok": false, "operation": text, "detail": outcome.refused}
+  # A press on the VCS pane's or Test Results' controls is that source's, as
+  # in the terminal's loop; anything else the session applies.
+  if not s.vcs.applyClick(s.rt, outcome.paneClick) and
+     not s.tests.applyClick(s.rt, outcome.paneClick):
+    s.tui.applyOutcome(s.rt, outcome)
   let detail = if outcome.detail.len > 0: outcome.detail else: s.app.notification
   %*{"ok": true, "operation": text, "detail": detail}
 
@@ -713,6 +827,9 @@ proc handleRequest(srv: PaneServer; meth: string; params: JsonNode;
                   $panePointList, $paneScratchpad,
                   $paneTerminalOutput, $paneSearch,
                   $paneFileTree, $paneBuildOutput, $paneVcs,
+                  # §E9: filled by the session's Test Results and Problems
+                  # sources since 2026-11-12.
+                  $paneTestResults, $paneProblems,
                   FrameViewerPane]}}
   of "shutdown":
     srv.shutdownRequested = true
@@ -729,6 +846,9 @@ proc handleRequest(srv: PaneServer; meth: string; params: JsonNode;
     s.layoutSent = $layoutJson(s.currentLayout())
     result = s.layoutParams()
     result["graphics"] = s.graphicsJson()
+    # §E11: the source window's keys — the debugger's, bound in the editor's
+    # source buffers while the session is shown.
+    extra.add srv.keymapOf(s, paneEditor)
     extra.add srv.publish(s)
   of "session/list":
     result = newJArray()
@@ -1088,6 +1208,60 @@ proc handleDap*(srv: PaneServer; req: JsonNode): seq[JsonNode] =
       result.add srv.dapReply(req, false, nil, "'" & command &
         "' is not supported by the CodeTracer pane server")
 
+proc openRecording(srv: PaneServer; origin: ServerSession; folder: string;
+                   policy: TraceOpenPolicy): string =
+  ## A recording a test, Run or a Nim trace produced, opened as a session and
+  ## announced to the editor (`session/opened`, §E9), placed by the shared
+  ## rule's `policy`: a new tab, or `origin`'s tab (`replaces`), which the
+  ## editor re-uses and then closes with `session/close` — the server does
+  ## not close it here, since this runs inside `origin`'s own sources.
+  ## "" when it opened, else why not.
+  var opened: ServerSession = nil
+  try:
+    opened = srv.openServerSession(folder)
+  except RequestError as e:
+    return "could not open " & folder & ": " & e.msg
+  opened.layoutSent = $layoutJson(opened.currentLayout())
+  var params = opened.layoutParams()
+  params["trace"] = %opened.folder
+  params["title"] = %opened.app.traceName
+  params["placement"] = %($policy)
+  if policy == topCurrentTab and not origin.isNil:
+    params["replaces"] = %origin.id
+  params["graphics"] = opened.graphicsJson()
+  srv.outbox.add notification("session/opened", params)
+  srv.outbox.add srv.keymapOf(opened, paneEditor)
+  srv.outbox.add srv.publish(opened)
+  ""
+
+proc tick*(srv: PaneServer): seq[JsonNode] =
+  ## Advance what runs without a request — a build, a Nim trace, a test run,
+  ## the VCS listing — and return what the editor must now be told: the
+  ## sessions those changed, and what `openRecording` queued. The loop calls
+  ## it between messages (`TickMs`), as the terminal's loop polls the same
+  ## sources between keys.
+  # A COPY of the list: a test or a trace that settles opens its recording
+  # as a new session (`openRecording`), which appends to `srv.sessions`, and
+  # `items` yields views into the seq's buffer that the append reallocates
+  # (measured: SIGSEGV reading the next source of the session it came from).
+  let sessions = srv.sessions
+  for s in sessions:
+    if s.rt.isNil:
+      continue
+    var changed = advanceBuild(s.rt, s.edit, report = true)
+    let sess = s
+    changed = advanceNimTrace(s.rt, s.edit,
+      proc(request: TraceOpenRequest): string =
+        srv.openRecording(sess, request.tracePath, request.policy)) or changed
+    changed = s.tests.tick(s.rt) or changed
+    changed = s.problems.tick(s.rt, nowMonoMs()) or changed
+    changed = s.buildOut.tick(s.rt) or changed
+    changed = s.vcs.tick(s.rt) or changed
+    if changed:
+      result.add srv.publish(s)
+  result.add srv.outbox
+  srv.outbox.setLen(0)
+
 proc publishActive*(srv: PaneServer): seq[JsonNode] =
   ## What a DAP request changed, for the editor's panes.
   if srv.active >= 0:
@@ -1144,7 +1318,11 @@ proc runPaneServer*(): int =
         try: srv.dap.client.send(frame(m))
         except CatchableError: discard
   while not srv.exitRequested:
-    for ready in selector.select(-1):
+    # The sources a build, a trace or a test run advance are polled between
+    # messages (`tick`), so the loop wakes at least every `TickMs`.
+    let events = selector.select(TickMs)
+    sendEditor(srv.tick())
+    for ready in events:
       # ONE EVENT'S FAILURE IS NOT THE SERVER'S: a DAP client that breaks
       # off mid-message, or a write to it that fails, is reported and the
       # editor's session goes on.

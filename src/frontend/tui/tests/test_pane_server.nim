@@ -15,7 +15,7 @@
 ## No mocks: the recording, the engine, the session and the painters are the
 ## product's. The stdio transport itself is `test_pane_server_stdio.nim`'s.
 
-import std/[importutils, json, options, os, sequtils, strutils, tables, unittest]
+import std/[importutils, json, options, os, sequtils, strutils, tables, tempfiles, times, unittest]
 
 import headless_app/layout_model
 
@@ -26,6 +26,8 @@ import ../app/layout/cells
 import ../app/layout/project
 import ../host/pane_server
 import ./fixtures/fixture_provider
+import ./fixtures/plat53_noir_project
+from ../host/native_host import traceFolderProblem
 from backend/stdio_backend import DapStdioBackend
 
 proc activeRuntime(srv: PaneServer): TuiRuntime =
@@ -97,6 +99,10 @@ suite "HSF-E1: the pane server, over a real recording":
       return
     let srv = newPaneServer()
     srv.openDapListener()
+    # Edit mode's project: one file, not the directory the suite runs in.
+    let editProject = createTempDir("ct-hsf-e1-project-", "")
+    writeFile(editProject / "edited_app.py", "print('edited')\n")
+    srv.projectRoot = editProject
 
     # ---- before initialize, nothing is served ------------------------------
     block:
@@ -288,41 +294,6 @@ suite "HSF-E1: the pane server, over a real recording":
          "pane": "calltrace"})
     check scrolled{"error"}.isNil
 
-    # ---- mode switch, the user's layout edit, and back --------------------
-    let (edited, _) = srv.request("layout/edited",
-      %*{"session": sid, "mode": "debug", "sizes": {"calltrace": 3.0}})
-    # Recorded on the region the pane occupies — the call trace is a tab of a
-    # stack, so the stack's weight is what sizes it.
-    check regionOf(edited{"result", "layout"}, "calltrace"){"weight"}.getFloat == 3.0
-    # A weight addressed by its node's path reaches a container, which a
-    # weight keyed by pane cannot: the root's last child here. A path that
-    # names no node, and the root itself, are ignored.
-    let rootKids = edited{"result", "layout", "children"}.len
-    check rootKids >= 2
-    let (byPath, _) = srv.request("layout/edited",
-      %*{"session": sid, "mode": "debug",
-         "weights": [{"path": [rootKids - 1], "weight": 42.0},
-                     {"path": [99], "weight": 1.0},
-                     {"path": [], "weight": 7.0}]})
-    check byPath{"result", "layout", "children"}[rootKids - 1]{"weight"}.getFloat == 42.0
-    check byPath{"result", "layout"}{"weight"}.getFloat(0.0) != 7.0
-    let (_, toEdit) = srv.request("operation/run",
-      %*{"session": sid, "operation": "session.toggle-product-mode"})
-    let editLayout = toEdit.notes("layout/changed")
-    check editLayout.len == 1
-    check editLayout.len == 1 and editLayout[0]{"params", "mode"}.getStr == "edit"
-    let (_, toDebug) = srv.request("operation/run",
-      %*{"session": sid, "operation": "session.toggle-product-mode"})
-    let debugLayout = toDebug.notes("layout/changed")
-    check debugLayout.len == 1
-    check debugLayout.len == 1 and
-          debugLayout[0]{"params", "mode"}.getStr == "debug"
-    # The arrangement the user left the mode in comes back with it.
-    check debugLayout.len == 1 and regionOf(debugLayout[0]{"params", "layout"},
-                                            "calltrace"){"weight"}.getFloat == 3.0
-    check debugLayout.len == 1 and debugLayout[0]{"params", "layout",
-      "children"}[rootKids - 1]{"weight"}.getFloat == 42.0
-
     # ---- source decorations for the visible lines -------------------------
     let pos = srv.request("session/list")[0]
     discard pos
@@ -432,6 +403,57 @@ suite "HSF-E1: the pane server, over a real recording":
             tree.entries[tree.selected].path == path
     discard srv.request("pane/close", %*{"session": sid, "pane": "fileTree"})
 
+    # ---- mode switch, the user's layout edit, and back --------------------
+    # AFTER the file-tree checks above: those are of the recording's tree, and
+    # once Edit mode has listed the project the Files pane keeps that listing
+    # (`tui_session.refresh`, PLAT-47), in the terminal and here alike.
+    let (edited, _) = srv.request("layout/edited",
+      %*{"session": sid, "mode": "debug", "sizes": {"calltrace": 3.0}})
+    # Recorded on the region the pane occupies — the call trace is a tab of a
+    # stack, so the stack's weight is what sizes it.
+    check regionOf(edited{"result", "layout"}, "calltrace"){"weight"}.getFloat == 3.0
+    # A weight addressed by its node's path reaches a container, which a
+    # weight keyed by pane cannot: the root's last child here. A path that
+    # names no node, and the root itself, are ignored.
+    let rootKids = edited{"result", "layout", "children"}.len
+    check rootKids >= 2
+    let (byPath, _) = srv.request("layout/edited",
+      %*{"session": sid, "mode": "debug",
+         "weights": [{"path": [rootKids - 1], "weight": 42.0},
+                     {"path": [99], "weight": 1.0},
+                     {"path": [], "weight": 7.0}]})
+    check byPath{"result", "layout", "children"}[rootKids - 1]{"weight"}.getFloat == 42.0
+    check byPath{"result", "layout"}{"weight"}.getFloat(0.0) != 7.0
+    let (_, toEdit) = srv.request("operation/run",
+      %*{"session": sid, "operation": "session.toggle-product-mode"})
+    let editLayout = toEdit.notes("layout/changed")
+    check editLayout.len == 1
+    check editLayout.len == 1 and editLayout[0]{"params", "mode"}.getStr == "edit"
+    # Edit mode lists the session's project — the editor's directory, here
+    # the suite's one-file project (§E9: until 2026-11-12 the server gave the
+    # runtime no lister, and Edit mode's Files pane was empty).
+    let (_, editFiles) = srv.request("pane/open",
+      %*{"session": sid, "pane": "fileTree", "width": 40, "height": 6})
+    let listedRows = editFiles.notes("pane/content")
+    check listedRows.len == 1 and listedRows[0]{"params", "rows"}.getElems.anyIt(
+      "edited_app.py" in it{"text"}.getStr)
+    # ...and a press on the file's row opens it in the editor.
+    check listedRows.len == 1 and listedRows[0]{"params", "rows"}.getElems.anyIt(
+      it{"hotspots"}.getElems.anyIt(it{"operation"}.getStr == "file-tree.open" and
+        it{"args", "path"}.getStr.endsWith("edited_app.py")))
+    discard srv.request("pane/close", %*{"session": sid, "pane": "fileTree"})
+    let (_, toDebug) = srv.request("operation/run",
+      %*{"session": sid, "operation": "session.toggle-product-mode"})
+    let debugLayout = toDebug.notes("layout/changed")
+    check debugLayout.len == 1
+    check debugLayout.len == 1 and
+          debugLayout[0]{"params", "mode"}.getStr == "debug"
+    # The arrangement the user left the mode in comes back with it.
+    check debugLayout.len == 1 and regionOf(debugLayout[0]{"params", "layout"},
+                                            "calltrace"){"weight"}.getFloat == 3.0
+    check debugLayout.len == 1 and debugLayout[0]{"params", "layout",
+      "children"}[rootKids - 1]{"weight"}.getFloat == 42.0
+
     # ---- the DAP endpoint drives the same session -------------------------
     var dseq = 0
     proc dap(command: string; args: JsonNode = newJObject()): JsonNode =
@@ -472,3 +494,127 @@ suite "HSF-E1: the pane server, over a real recording":
     check down{"error"}.isNil
     check srv.handle(%*{"jsonrpc": "2.0", "method": "exit"}).len == 0
     check srv.exitRequested
+
+  test "HSF-E5: edit-mode services — refusals, messages, a test recorded from Test Results":
+    # Editor-Hosted-Front-Ends §E9. Until 2026-11-12 the server wired none of
+    # the services the terminal's window owns, and `operation/run` erased the
+    # operation's own message, so every operation below answered
+    # `{"ok": true, "detail": ""}` and did nothing (codetracer-pm issue
+    # 2026-11-12). The project is PLAT-53's two-test Noir crate, recorded
+    # with the real `ct record-test`; no stand-in: the recording is opened by
+    # the server as a session of its own.
+    let resolution = resolveFixture(FixtureName)
+    if resolution.outcome == foMissingPrereq:
+      echo "  ", missingPrereqMessage(resolution.spec, resolution.detail)
+      fail()
+      return
+    let ctBin = findCtBinary()
+    doAssert ctBin.len > 0, "prerequisite missing: ct (build it, or set CT_BIN)"
+    putEnv("CT_BIN", ctBin)
+    putEnv("TEST_CERTIFICATES_DIR", createTempDir("ct-hsf-e5-certs-", ""))
+    let project = writePlat53Project("ct-hsf-e5-project-")
+    let srv = newPaneServer(dap = false)
+    srv.projectRoot = project
+    let (init, _) = srv.request("initialize", %*{
+      "capabilities": {"media": ["text"]}, "keymapOverrides": []})
+    # The panes the session's sources fill are drawable: an editor leaves
+    # out of its layout what `capabilities.panes` does not name.
+    let drawable = init{"result", "capabilities", "panes"}.getElems.mapIt(it.getStr)
+    check "testResults" in drawable and "problems" in drawable
+    let (opened, openNotes) = srv.request("session/open",
+                                          %*{"trace": resolution.tracePath})
+    let sid = opened{"result", "session"}.getInt
+    check sid > 0
+
+    # ---- HSF-E7: the debugger controls' strip -------------------------------
+    # The terminal's top-bar controls, in the desktop toolbar's order, then
+    # Stop; each names the operation a press runs, and is enabled by the
+    # desktop toolbar's rule (`transportAvailable`).
+    proc buttonsOf(notes: seq[JsonNode]): Table[string, JsonNode] =
+      for n in notes.notes("controls/state"):
+        for b in n{"params", "buttons"}.getElems:
+          result[b{"id"}.getStr] = b
+    # The source window's keys come with the session: the editor binds the
+    # debugger's in its source buffers (§E11, Q6).
+    let sourceKeys = openNotes.notes("pane/keymap").filterIt(
+      it{"params", "pane"}.getStr == "editor")
+    check sourceKeys.len == 1 and sourceKeys[0]{"params", "bindings"}.getElems.anyIt(
+      it{"operation"}.getStr == "debugger.step-over")
+    let strip = buttonsOf(openNotes)
+    check strip.len == 10
+    check strip.hasKey("next") and strip["next"]{"enabled"}.getBool and
+          strip["next"]{"operation"}.getStr == "debugger.step-over"
+    check strip.hasKey("reverse-next") and
+          strip["reverse-next"]{"operation"}.getStr == "debugger.reverse-step-over"
+    check strip.hasKey("stop") and strip["stop"]{"enabled"}.getBool
+    check strip.hasKey("next") and strip["next"]{"glyphs", "unicode"}.getStr.len > 0
+    # A press is that operation: one step.
+    let (_, steppedNotes) = srv.request("operation/run", %*{"session": sid,
+      "operation": strip.getOrDefault("next", %*{}){"operation"}.getStr})
+    check steppedNotes.notes("session/position").len == 1
+    # Unchanged, the strip is not sent again.
+    let (_, idleNotes) = srv.request("source/viewport", %*{"session": sid,
+      "file": "", "firstLine": 1, "lastLine": 10})
+    check idleNotes.notes("controls/state").len == 0
+
+    # ---- a refusal is a refusal ---------------------------------------------
+    let (gone, _) = srv.request("operation/run", %*{"session": sid,
+      "operation": "tests.open-test", "args": {"path": "no-such-test"}})
+    check not gone{"result", "ok"}.getBool
+    check gone{"result", "detail"}.getStr.len > 0
+
+    # ---- an operation's own message is its answer ---------------------------
+    # The Nim tracer is wired now; on `calc`'s Python file it says why it
+    # cannot trace there — before, that sentence was erased and the answer
+    # was an empty success.
+    let (traced, _) = srv.request("operation/run", %*{"session": sid,
+      "operation": "editor.trace-macro-at-cursor"})
+    checkpoint("trace-macro answered " & $traced)
+    check traced{"result", "detail"}.getStr.len > 0
+
+    # ---- Test Results: the project's tests, their controls as hotspots ------
+    let (_, shownNotes) = srv.request("pane/open", %*{"session": sid,
+      "pane": "testResults", "width": 90, "height": 10})
+    let shown = shownNotes.notes("pane/content")
+    check shown.len == 1
+    var openSpot: JsonNode = nil
+    var text = ""
+    if shown.len == 1:
+      for r in shown[0]{"params", "rows"}.getElems:
+        text.add r{"text"}.getStr & "\n"
+        for h in r{"hotspots"}.getElems:
+          if h{"operation"}.getStr == "tests.open-test" and
+             Plat53Failing in r{"text"}.getStr:
+            openSpot = h
+    checkpoint("Test Results rows:\n" & text)
+    check Plat53Passing in text and Plat53Failing in text
+    check not openSpot.isNil
+    if openSpot.isNil: return
+
+    # ---- ⏵ records the test; its recording opens as a session --------------
+    let (pressed, _) = srv.request("operation/run", %*{"session": sid,
+      "operation": "tests.open-test", "args": openSpot{"args"}})
+    check pressed{"result", "ok"}.getBool
+    var announced: JsonNode = nil
+    let deadline = epochTime() + 240.0
+    while announced.isNil and epochTime() < deadline:
+      for m in srv.tick():
+        if m{"method"}.getStr == "session/opened":
+          announced = m{"params"}
+      sleep(100)
+    check not announced.isNil
+    if announced.isNil: return
+    check announced{"session"}.getInt != sid
+    check announced{"placement"}.getStr == "new-tab"
+    check traceFolderProblem(announced{"trace"}.getStr) == ""
+    check announced{"layout"}.kind == JObject
+    let (list, _) = srv.request("session/list")
+    check list{"result"}.len == 2
+
+    # ---- Stop ends the replay: the strip goes dim --------------------------
+    let (_, stoppedNotes) = srv.request("operation/run", %*{"session": sid,
+      "operation": "debugger.stop"})
+    let stopped = buttonsOf(stoppedNotes)
+    check stopped.len == 10
+    check stopped.len == 10 and toSeq(stopped.values).allIt(not it{"enabled"}.getBool)
+    discard srv.request("shutdown")

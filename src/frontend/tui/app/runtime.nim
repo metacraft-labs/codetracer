@@ -396,6 +396,11 @@ type
       ## The dispatch's own message. Copied into the notification, and kept
       ## here too so a caller can tell "nothing happened" from "the engine
       ## refused".
+    refused*: string
+      ## Why the operation did not run: it is disabled now, or this front-end
+      ## does not perform it (`runOperation`'s `oiDisabled` / `oiAbsent`).
+      ## Empty when it ran. An editor's `operation/run` answers `ok: false`
+      ## with it (Editor-Hosted-Front-Ends §E9).
 
   BarGrab* = object
     ## PLAT-70 Part H: a thumb held (§7.4) — the bar, and the point of the
@@ -9460,10 +9465,13 @@ proc runOperation(rt: TuiRuntime; res: EditingResolution; nowMs: int64;
   let answer = rt.operations.invoke(call, outcome)
   case answer.kind
   of oiRan: discard
-  of oiDisabled: rt.note(answer.reason)
+  of oiDisabled:
+    rt.note(answer.reason)
+    outcome.refused = answer.reason
   of oiAbsent:
     rt.note("`" & call.fullName & "` (" & operationLabelOf(res.operation) &
             ") is not available in the terminal")
+    outcome.refused = rt.app.notification
 
 proc runResolution(rt: TuiRuntime; res: EditingResolution; nowMs: int64;
                    outcome: var RuntimeOutcome) =
@@ -10076,7 +10084,10 @@ const
     ("variables.load-more", "Load more members"),
     ("history.seek-to-tick", "Go to this moment"),
     ("file-tree.open", "Open this file"),
-    ("file-tree.toggle-folder", "Expand or collapse this folder")]
+    ("file-tree.toggle-folder", "Expand or collapse this folder"),
+    ("tests.run-suite", "Run the project's tests"),
+    ("tests.refresh-test", "Record this test again"),
+    ("tests.open-test", "Open this test's recording")]
     ## The operations a hosted pane's rows offer: what a click on the same
     ## cells of the terminal's pane does (`routeMouseReport`,
     ## `routePaneClick`), named so an editor can bind them.
@@ -10134,10 +10145,21 @@ proc hostedHotspots*(rt: TuiRuntime; pane: PaneKind;
     # K17 / K18: a row opens its file or opens or closes its folder, as a
     # press on the terminal's row does (`routePaneClick`).
     let tree = rt.app.fileTree
-    if tree.entries.len == 0:
+    if tree.isEmpty:
       return
     var g = newStyledGrid(area.col + area.width, area.row + area.height)
     let screen = paintFileTree(g, area, tree)
+    if tree.entries.len == 0:
+      # Edit mode's project listing (`installProjectListing`): a row is a
+      # project file, which a press opens (`filesRowPath`, the path the
+      # terminal's Files menu acts on). Until 2026-11-12 these rows offered
+      # nothing, so an editor's click on Edit mode's Files pane did nothing.
+      for r in 0 ..< height:
+        let i = screen.entryIndexAt(r + 1)
+        if i >= 0 and i < tree.files.len:
+          result[r].add PaneHotspot(startCol: 0, endCol: width,
+            operation: "file-tree.open", args: PaneOpArgs(path: rt.filesRowPath(i)))
+      return
     for r in 0 ..< height:
       let i = screen.entryIndexAt(r + 1)
       if i < 0 or i >= tree.entries.len:
@@ -10179,6 +10201,29 @@ proc hostedHotspots*(rt: TuiRuntime; pane: PaneKind;
           operation: "event-log.jump",
           args: PaneOpArgs(index: int64(ev.index), tick: ev.tick,
                            path: ev.file, line: ev.line, text: ev.content))
+  of paneTestResults:
+    # PLAT-53's controls — the ▶, each row's `⟳` and `⏵` — where its painter
+    # drew them. The pane paints its rows from its area's first row (the
+    # terminal hands it the rows under its strip, `testsPaneScreen`), so the
+    # hosted rows are that area's from row 0.
+    if not rt.app.tests.loaded:
+      return
+    let rows = CellArea(col: 0, row: 0, width: width, height: height)
+    var g = newStyledGrid(width, height)
+    let screen = paintTestResults(g, rows, rt.app.tests)
+    for r in 0 ..< height:
+      for c in 0 ..< width:
+        let t = rt.app.tests.testsTargetAt(screen, rows, r, c)
+        case t.kind
+        of tpRun:
+          result[r].addRun(c, "tests.run-suite", PaneOpArgs())
+        of tpRefresh:
+          result[r].addRun(c, "tests.refresh-test",
+                           PaneOpArgs(path: rt.app.tests.rows[t.row].testId))
+        of tpOpen:
+          result[r].addRun(c, "tests.open-test",
+                           PaneOpArgs(path: rt.app.tests.rows[t.row].testId))
+        else: discard
   of paneState:
     if rt.app.variables.isEmpty:
       return
@@ -10213,6 +10258,60 @@ proc hostedHotspots*(rt: TuiRuntime; pane: PaneKind;
   else:
     discard
 
+type
+  HostedControl* = object
+    ## One debugger control as an editor draws it (Editor-Hosted-Front-Ends
+    ## §E11, `controls/state`): the terminal's top-bar control, its
+    ## enablement and its tooltip, and the operation a press runs.
+    id*, label*, tooltip*, operation*: string
+    enabled*: bool
+    nerd*, unicode*, text*: string
+      ## Its three glyph renderings (`transport_icons`): the editor picks.
+
+proc hostedControls*(rt: TuiRuntime): seq[HostedControl] =
+  ## The debugger controls in the desktop toolbar's order, then Stop — what
+  ## the terminal's top bar draws (`top_bar`), with the enablement it greys
+  ## them by (`controlsEnabledOf`) and the tooltip it says on hover. A press
+  ## is the operation the top bar's press runs (`operationOfClientAction`),
+  ## so an editor's strip and the terminal's cannot differ.
+  let enabled = rt.app.controlsEnabledOf()
+  for i, c in TransportControls:
+    result.add HostedControl(id: c.id, label: c.label,
+      tooltip: transportTooltip(c.id, rt.chordOf(transportKeyAction(c.id))),
+      operation: operationOfClientAction(c.clientAction),
+      enabled: i < enabled.len and enabled[i],
+      nerd: c.nerd, unicode: c.unicode, text: c.text)
+  result.add HostedControl(id: StopControl.id, label: StopControl.label,
+    tooltip: tooltipText(StopControl.label, rt.chordOfOperation("debugger.stop")),
+    operation: "debugger.stop", enabled: rt.hasDebugSession,
+    nerd: StopControl.nerd, unicode: StopControl.unicode, text: StopControl.text)
+
+proc runTestsPaneOperation(rt: TuiRuntime; operation: string;
+                           args: PaneOpArgs; outcome: var RuntimeOutcome) =
+  ## PLAT-53's three controls pressed from an editor's hotspot: what a press
+  ## on the terminal's ▶, a row's `⟳` or its `⏵` does (`routePaneClick`) —
+  ## the control's own enablement and title included. The row is named by its
+  ## test, since the editor's rows may be stale by the time it is pressed.
+  outcome.repaint = true
+  if not rt.app.tests.loaded:
+    outcome.refused = "the Test Results pane has not read the project's tests"
+    return
+  if operation == "tests.run-suite":
+    rt.pressTestsControl(rt.app.tests.run, PaneClickRequest(kind: pcTestsRun),
+                         outcome)
+    return
+  for i, r in rt.app.tests.rows:
+    if r.testId == args.path:
+      rt.app.tests.selected = i
+      if operation == "tests.refresh-test":
+        rt.pressTestsControl(r.refresh, PaneClickRequest(kind: pcTestsRefresh,
+                             text: r.testId), outcome)
+      else:
+        rt.pressTestsControl(r.open, PaneClickRequest(kind: pcTestsOpen,
+                             text: r.testId), outcome)
+      return
+  outcome.refused = "that test is no longer listed"
+
 proc runPaneOperation*(rt: TuiRuntime; operation: string; args: PaneOpArgs;
                        outcome: var RuntimeOutcome): bool =
   ## A hosted pane's operation (`PaneOperations`), as the outcome the same
@@ -10221,6 +10320,9 @@ proc runPaneOperation*(rt: TuiRuntime; operation: string; args: PaneOpArgs;
   if rt.operations.isNil:
     rt.buildOperationTables()
   outcome.repaint = true
+  if operation in ["tests.run-suite", "tests.refresh-test", "tests.open-test"]:
+    rt.runTestsPaneOperation(operation, args, outcome)
+    return true
   let call = TerminalCall(name: operation, pointer: true, target: ContextTarget(
     index: args.index, tick: args.tick, path: args.path, line: args.line,
     text: args.text))
