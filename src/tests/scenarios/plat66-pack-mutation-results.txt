@@ -1,6 +1,7 @@
 # run-plat66-pack-mutations.py, graded 2026-11-12 on the Linux workstation
 # (1-minute load 60-180), against the subjects and suites in
-# plat66-pack-mutation-control.sha256, on codetracer agents at 7549e02ad56
+# plat66-pack-mutation-control.sha256, on the scenario tree of codetracer
+# agents e776bc4d129 (measured before its rebase over unrelated agents commits)
 # plus that control file. Terminal and GPUI arms rebuilt their dvs-*-codetracer
 # against DemoVideoScript a59da61; the desktop arms ran the real Electron on
 # Xvfb 2560x1440x24 at 96 dpi.
