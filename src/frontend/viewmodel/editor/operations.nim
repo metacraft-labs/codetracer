@@ -604,6 +604,19 @@ var lastDerived: ref DerivedDocument
   ## never what it is — and display-dependent and display-independent
   ## operations still cost the same (see `initOpEnv`).
 
+
+when defined(js):
+  proc shared[T](x: T): T {.importjs: "#".}
+    ## `x` itself, not a deep copy. On the JS backend every binding of a
+    ## string or a seq copies it, and a derivation stores the document and
+    ## its cluster boundaries in two contexts — four copies of the whole
+    ## document per keystroke (`nimCopy`, measured 2026-11-12: over half of a
+    ## key's time on a 1,000-line file in node `--cpu-prof`). A
+    ## `DerivedDocument` is never written after it is built (see
+    ## `lastDerived`), so its contexts may share the values.
+else:
+  template shared[T](x: T): T = x
+
 proc fullDerivation(doc: string; settings: WrapSettings): ref DerivedDocument =
   ## Everything, from the text. The boundaries and the line index are
   ## computed ONCE and shared by both contexts — `initOpCtx` and
@@ -611,12 +624,12 @@ proc fullDerivation(doc: string; settings: WrapSettings): ref DerivedDocument =
   let store = toTextStore(doc)
   let bounds = clusterBoundariesOf(doc)
   (ref DerivedDocument)(
-    doc: doc, settings: settings,
-    ctx: OpCtx(doc: doc, store: store, boundaries: bounds,
+    doc: shared(doc), settings: settings,
+    ctx: OpCtx(doc: shared(doc), store: shared(store), boundaries: shared(bounds),
                policy: settings.policy, inserted: "X"),
-    display: DisplayCtx(doc: doc, store: store,
+    display: DisplayCtx(doc: shared(doc), store: shared(store),
                         cache: initWrapCache(doc, settings),
-                        boundaries: bounds, settings: settings))
+                        boundaries: shared(bounds), settings: settings))
 
 proc editBetween(a, b: string): tuple[prefix, suffix: int] =
   ## The one contiguous edit that turns `a` into `b`: the common prefix, and
@@ -644,7 +657,7 @@ proc incrementalDerivation(prev: ref DerivedDocument;
   ## incremental path (`LAW-C6` holds it to the full computation). The line
   ## index is rebuilt: it is the cheap part (~6 ms at 40,000 lines).
   ## `test_op_env_memo.nim` holds the whole of this to `fullDerivation`.
-  let old = prev.doc
+  let old = shared(prev.doc)
   let (p, q) = editBetween(old, doc)
   let delta = doc.len - old.len
   let lineStart = (if p == 0: 0 else: doc.rfind('\n', last = p - 1) + 1)
@@ -654,7 +667,7 @@ proc incrementalDerivation(prev: ref DerivedDocument;
   let oldLineEnd = newLineEnd - delta
   var bounds = newSeqOfCap[int](prev.ctx.boundaries.len + max(0, delta) + 1)
   var i = 0
-  let olds = prev.ctx.boundaries
+  let olds = shared(prev.ctx.boundaries)
   while i < olds.len and olds[i] < lineStart:
     bounds.add olds[i]
     inc i
@@ -665,18 +678,25 @@ proc incrementalDerivation(prev: ref DerivedDocument;
     bounds.add olds[j] + delta
     inc j
   let cs = changeSet(old.len, p, old.len - q, doc[p ..< editEnd])
-  var cache: WrapCache
-  try:
-    cache = updateWrapCache(prev.display.cache, old, cs, doc)
-  except WrapError:
+  # Bound through `shared`, not assigned: on the JS backend binding the
+  # try-expression's value deep-copies the whole cache.
+  var refused = false
+  let cache = shared(
+    try:
+      updateWrapCache(prev.display.cache, old, cs, doc)
+    except WrapError:
+      refused = true
+      WrapCache())
+  if refused:
     return fullDerivation(doc, prev.settings)
   let store = toTextStore(doc)
   (ref DerivedDocument)(
-    doc: doc, settings: prev.settings,
-    ctx: OpCtx(doc: doc, store: store, boundaries: bounds,
+    doc: shared(doc), settings: prev.settings,
+    ctx: OpCtx(doc: shared(doc), store: shared(store), boundaries: shared(bounds),
                policy: prev.settings.policy, inserted: "X"),
-    display: DisplayCtx(doc: doc, store: store, cache: cache,
-                        boundaries: bounds, settings: prev.settings))
+    display: DisplayCtx(doc: shared(doc), store: shared(store),
+                        cache: shared(cache), boundaries: shared(bounds),
+                        settings: prev.settings))
 
 proc derivedFor(doc: string; settings: WrapSettings): ref DerivedDocument =
   if lastDerived.isNil or lastDerived.settings != settings:
