@@ -45,6 +45,7 @@ import { test, expect } from "../../lib/fixtures";
 import { LayoutPage } from "../../page-objects/layout-page";
 import { StatusBar } from "../../page-objects/status_bar";
 import { retry } from "../../lib/retry-helpers";
+import { moveAndSettle } from "../../lib/operation-settled";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -62,17 +63,6 @@ async function getSessionCount(page: import("@playwright/test").Page): Promise<n
     const d = (window as any).data;
     return d?.sessions?.length ?? 0;
   });
-}
-
-async function waitForStepComplete(page: import("@playwright/test").Page): Promise<void> {
-  await retry(
-    async () => {
-      const status = page.locator("#stable-status");
-      const className = (await status.getAttribute("class")) ?? "";
-      return className.includes("ready-status");
-    },
-    { maxAttempts: 60, delayMs: 500 },
-  );
 }
 
 async function currentRRTicks(page: import("@playwright/test").Page): Promise<number> {
@@ -192,11 +182,9 @@ test.describe("Real tab switching with GL rebuild", () => {
     // 3. Step forward to establish a non-initial position
     // ==================================================================
 
-    await layout.nextButton().click({ force: true });
-    await waitForStepComplete(ctPage);
+    await moveAndSettle(ctPage, () => layout.nextButton().click({ force: true }));
 
-    await layout.nextButton().click({ force: true });
-    await waitForStepComplete(ctPage);
+    await moveAndSettle(ctPage, () => layout.nextButton().click({ force: true }));
 
     // Record post-step location
     const steppedLocation = await statusBar.location();

@@ -20,6 +20,7 @@ import { test, expect } from "../../lib/fixtures";
 import { LayoutPage } from "../../page-objects/layout-page";
 import { StatusBar } from "../../page-objects/status_bar";
 import { retry } from "../../lib/retry-helpers";
+import { moveAndSettle, moveOrStayAndSettle, waitForNotBusy } from "../../lib/operation-settled";
 import {
   ViewInstructions,
   ViewTargetSource,
@@ -50,22 +51,6 @@ async function waitForStatusBarLocation(
   return result;
 }
 
-/**
- * Waits for the debugger to be "ready" (not busy) after a navigation action.
- * Polls the stable-status element's class for "ready-status".
- */
-async function waitForReadyStatus(
-  page: import("@playwright/test").Page,
-): Promise<void> {
-  await retry(
-    async () => {
-      const status = page.locator("#stable-status");
-      const className = (await status.getAttribute("class")) ?? "";
-      return className.includes("ready-status");
-    },
-    { maxAttempts: 60, delayMs: 1000 },
-  );
-}
 
 /**
  * Reads the raw status bar text which has format: path:line#rrTicks
@@ -136,7 +121,7 @@ async function waitForNimEditorReady(
     },
     { maxAttempts: 60, delayMs: 1000 },
   );
-  await waitForReadyStatus(page);
+  await waitForNotBusy(page);
 }
 
 // ---------------------------------------------------------------------------
@@ -163,10 +148,9 @@ test.describe("SteppingThroughViews", () => {
     // view cannot be opened — see `lib/alternative-views.ts` for why this is a
     // failure rather than a skip.
     await openAlternativeView(ctPage, ViewTargetSource, async () => {
-      await ctPage.locator("#next-image").click();
-      await waitForReadyStatus(ctPage);
+      await moveAndSettle(ctPage, () => ctPage.locator("#next-image").click());
     });
-    await waitForReadyStatus(ctPage);
+    await waitForNotBusy(ctPage);
 
     // Record the current C line from the status bar.
     const beforeLocation = await waitForStatusBarLocation(statusBar);
@@ -177,8 +161,7 @@ test.describe("SteppingThroughViews", () => {
     // Press the step-forward (next) button. In C view, this should issue a
     // C-level next (nextc) which advances by one C source line.
     const nextBtn = ctPage.locator("#next-image");
-    await nextBtn.click();
-    await waitForReadyStatus(ctPage);
+    await moveAndSettle(ctPage, () => nextBtn.click());
 
     // Verify that the execution position moved forward. We check that either
     // the line changed or the rrTicks advanced (the line may wrap back on
@@ -203,16 +186,14 @@ test.describe("SteppingThroughViews", () => {
     await waitForSourcemap(ctPage);
 
     await openAlternativeView(ctPage, ViewTargetSource, async () => {
-      await ctPage.locator("#next-image").click();
-      await waitForReadyStatus(ctPage);
+      await moveAndSettle(ctPage, () => ctPage.locator("#next-image").click());
     });
-    await waitForReadyStatus(ctPage);
+    await waitForNotBusy(ctPage);
 
     // Step forward a few times to establish a position we can step back from.
     const nextBtn = ctPage.locator("#next-image");
     for (let i = 0; i < 3; i++) {
-      await nextBtn.click();
-      await waitForReadyStatus(ctPage);
+      await moveAndSettle(ctPage, () => nextBtn.click());
     }
 
     // Record the position after stepping forward.
@@ -223,8 +204,7 @@ test.describe("SteppingThroughViews", () => {
     // Step backward (reverse-next). In C view with rr, this should issue a
     // reverse nextc which moves back by one C source line.
     const reverseNextBtn = ctPage.locator("#reverse-next-image");
-    await reverseNextBtn.click();
-    await waitForReadyStatus(ctPage);
+    await moveAndSettle(ctPage, () => reverseNextBtn.click());
 
     // Verify that the execution position moved backward. The rrTicks should
     // have decreased (or at least the line should have changed).
@@ -261,10 +241,9 @@ test.describe("SteppingThroughViews", () => {
     await waitForSourcemap(ctPage);
 
     await openAlternativeView(ctPage, ViewInstructions, async () => {
-      await ctPage.locator("#next-image").click();
-      await waitForReadyStatus(ctPage);
+      await moveAndSettle(ctPage, () => ctPage.locator("#next-image").click());
     });
-    await waitForReadyStatus(ctPage);
+    await waitForNotBusy(ctPage);
 
     // Record the current position. In assembly view the status bar still
     // shows path:line#ticks, but the line corresponds to an instruction offset.
@@ -275,8 +254,7 @@ test.describe("SteppingThroughViews", () => {
     // Step forward. In assembly view, this should move to the next instruction
     // (stepi-level granularity).
     const nextBtn = ctPage.locator("#next-image");
-    await nextBtn.click();
-    await waitForReadyStatus(ctPage);
+    await moveAndSettle(ctPage, () => nextBtn.click());
 
     // Verify the instruction offset or ticks changed.
     const afterRaw = await getRawStatusBarText(statusBar);
@@ -299,16 +277,14 @@ test.describe("SteppingThroughViews", () => {
     await waitForSourcemap(ctPage);
 
     await openAlternativeView(ctPage, ViewInstructions, async () => {
-      await ctPage.locator("#next-image").click();
-      await waitForReadyStatus(ctPage);
+      await moveAndSettle(ctPage, () => ctPage.locator("#next-image").click());
     });
-    await waitForReadyStatus(ctPage);
+    await waitForNotBusy(ctPage);
 
     // Step forward a few times first.
     const nextBtn = ctPage.locator("#next-image");
     for (let i = 0; i < 3; i++) {
-      await nextBtn.click();
-      await waitForReadyStatus(ctPage);
+      await moveAndSettle(ctPage, () => nextBtn.click());
     }
 
     // Record position before stepping back.
@@ -318,8 +294,7 @@ test.describe("SteppingThroughViews", () => {
 
     // Step backward in assembly view.
     const reverseNextBtn = ctPage.locator("#reverse-next-image");
-    await reverseNextBtn.click();
-    await waitForReadyStatus(ctPage);
+    await moveAndSettle(ctPage, () => reverseNextBtn.click());
 
     // Verify backward movement.
     const afterRaw = await getRawStatusBarText(statusBar);
@@ -406,8 +381,8 @@ test.describe("SteppingThroughViews", () => {
     let afterTicks = beforeTicks;
     let positionChanged = false;
     for (let attempt = 0; attempt < maxStepAttempts; attempt++) {
-      await layout.clickNextButton();
-      await waitForReadyStatus(ctPage);
+      // A Nim-level Next can stay put (see above), so this one may.
+      await moveOrStayAndSettle(ctPage, () => layout.clickNextButton());
       afterLocation = await waitForStatusBarLocation(statusBar);
       const afterRaw = await getRawStatusBarText(statusBar);
       afterTicks = parseRrTicks(afterRaw);

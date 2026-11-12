@@ -21,6 +21,7 @@ import { test, expect } from "../../lib/fixtures";
 import { LayoutPage } from "../../page-objects/layout-page";
 import { StatusBar } from "../../page-objects/status_bar";
 import { retry } from "../../lib/retry-helpers";
+import { moveAndSettle, waitForNotBusy } from "../../lib/operation-settled";
 import {
   ViewInstructions,
   ViewTargetSource,
@@ -51,22 +52,6 @@ async function waitForStatusBarPath(
   return path;
 }
 
-/**
- * Waits for the debugger to be "ready" (not busy) after a navigation action.
- * Polls the stable-status element's class for "ready-status".
- */
-async function waitForReadyStatus(
-  page: import("@playwright/test").Page,
-): Promise<void> {
-  await retry(
-    async () => {
-      const status = page.locator("#stable-status");
-      const className = (await status.getAttribute("class")) ?? "";
-      return className.includes("ready-status");
-    },
-    { maxAttempts: 60, delayMs: 1000 },
-  );
-}
 
 /**
  * Reads the text content of the currently active editor's Monaco instance.
@@ -198,7 +183,7 @@ test.describe("NimViewSwitching", () => {
       },
       { maxAttempts: 60, delayMs: 1000 },
     );
-    await waitForReadyStatus(ctPage);
+    await waitForNotBusy(ctPage);
 
     // Give the backend a chance to deliver the sourcemap.  This is a wait,
     // not a gate: if the C view cannot be opened, `openAlternativeView`
@@ -212,8 +197,7 @@ test.describe("NimViewSwitching", () => {
 
     // Trigger the switch to ViewTargetSource (C code view).
     await openAlternativeView(ctPage, ViewTargetSource, async () => {
-      await layout.clickNextButton();
-      await waitForReadyStatus(ctPage);
+      await moveAndSettle(ctPage, () => layout.clickNextButton());
     });
 
     // Wait for a new editor tab to appear with a .c file.
@@ -285,12 +269,11 @@ test.describe("NimViewSwitching", () => {
       },
       { maxAttempts: 60, delayMs: 1000 },
     );
-    await waitForReadyStatus(ctPage);
+    await waitForNotBusy(ctPage);
     await waitForSourcemap(ctPage);
 
     await openAlternativeView(ctPage, ViewInstructions, async () => {
-      await layout.clickNextButton();
-      await waitForReadyStatus(ctPage);
+      await moveAndSettle(ctPage, () => layout.clickNextButton());
     });
 
     // Wait for an editor tab with assembly content to appear.
@@ -335,7 +318,7 @@ test.describe("NimViewSwitching", () => {
       },
       { maxAttempts: 60, delayMs: 1000 },
     );
-    await waitForReadyStatus(ctPage);
+    await waitForNotBusy(ctPage);
 
     const statusBar = new StatusBar(ctPage, ctPage.locator("#status-base"));
 
@@ -348,8 +331,7 @@ test.describe("NimViewSwitching", () => {
     // `jstree-themeicon` overlay (which intermittently intercepts
     // pointer events on this layout) falls through to a force-click
     // / dispatchEvent fallback rather than failing the click outright.
-    await layout.clickNextButton();
-    await waitForReadyStatus(ctPage);
+    await moveAndSettle(ctPage, () => layout.clickNextButton());
 
     // Verify the Nim line changed (or at least the debugger moved).
     // The line may or may not change depending on the instruction, but
@@ -376,8 +358,7 @@ test.describe("NimViewSwitching", () => {
     await waitForSourcemap(ctPage);
 
     await openAlternativeView(ctPage, ViewTargetSource, async () => {
-      await layout.clickNextButton();
-      await waitForReadyStatus(ctPage);
+      await moveAndSettle(ctPage, () => layout.clickNextButton());
     });
 
     // (1) Both projections are open simultaneously.
@@ -391,8 +372,7 @@ test.describe("NimViewSwitching", () => {
 
     // (2) A step advances the shared position, and the C projection tracks it.
     const beforeStep = await readDebuggerPosition(ctPage);
-    await layout.clickNextButton();
-    await waitForReadyStatus(ctPage);
+    await moveAndSettle(ctPage, () => layout.clickNextButton());
     const afterStep = await readDebuggerPosition(ctPage);
 
     expect(afterStep.rrTicks).not.toBe(beforeStep.rrTicks);
@@ -418,7 +398,7 @@ test.describe("NimViewSwitching", () => {
       );
     }
     await nimEditor.tabButton().click();
-    await waitForReadyStatus(ctPage);
+    await waitForNotBusy(ctPage);
 
     const afterSwitchBack = await readDebuggerPosition(ctPage);
     expect(afterSwitchBack.rrTicks).toBe(afterStep.rrTicks);

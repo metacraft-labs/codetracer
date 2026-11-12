@@ -30,9 +30,9 @@ import { test, expect, readyOnEntryTest as readyOnEntry, loadedEventLog } from "
 import { StatusBar } from "../../page-objects/status_bar";
 import { StatePanel } from "../../page-objects/state";
 import { LayoutPage } from "../../page-objects/layout-page";
-import { retry } from "../../lib/retry-helpers";
 import { hasToolOnPath } from "../../lib/sibling-test-programs";
 import { defineRecorderColumnBreakpointSuite } from "../../lib/column-aware-helpers";
+import { moveAndSettle } from "../../lib/operation-settled";
 
 // ---------------------------------------------------------------------------
 // Tool-availability guards
@@ -210,16 +210,9 @@ test.describe("solana_example — call trace", () => {
     const statusBar = new StatusBar(ctPage, ctPage.locator("#status-base"));
     const initialLocation = await statusBar.location();
     const layout = new LayoutPage(ctPage);
-    await layout.continueButton().click();
-    // Wait for the backend to finish processing.
-    await retry(
-      async () => {
-        const status = ctPage.locator("#stable-status");
-        const className = (await status.getAttribute("class")) ?? "";
-        return className.includes("ready-status");
-      },
-      { maxAttempts: 60, delayMs: 500 },
-    );
+    // Awaited by the position the move reaches: `#stable-status` is drawn
+    // only while busy, so it cannot say "done" (`lib/operation-settled.ts`).
+    await moveAndSettle(ctPage, () => layout.continueButton().click());
     const newLocation = await statusBar.location();
     expect(newLocation.line).toBeGreaterThanOrEqual(1);
   });
@@ -229,16 +222,9 @@ test.describe("solana_example — call trace", () => {
     const statusBar = new StatusBar(ctPage, ctPage.locator("#status-base"));
     const initialLocation = await statusBar.location();
     const layout = new LayoutPage(ctPage);
-    await layout.nextButton().click();
-    // Wait for the backend to finish processing.
-    await retry(
-      async () => {
-        const status = ctPage.locator("#stable-status");
-        const className = (await status.getAttribute("class")) ?? "";
-        return className.includes("ready-status");
-      },
-      { maxAttempts: 60, delayMs: 500 },
-    );
+    // Awaited by the position the move reaches: `#stable-status` is drawn
+    // only while busy, so it cannot say "done" (`lib/operation-settled.ts`).
+    await moveAndSettle(ctPage, () => layout.nextButton().click());
     const newLocation = await statusBar.location();
     expect(newLocation.line).not.toBe(initialLocation.line);
   });

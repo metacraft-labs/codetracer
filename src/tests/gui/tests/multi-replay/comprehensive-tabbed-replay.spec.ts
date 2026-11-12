@@ -32,6 +32,7 @@ import { test, expect } from "../../lib/fixtures";
 import { LayoutPage } from "../../page-objects/layout-page";
 import { StatusBar } from "../../page-objects/status_bar";
 import { retry } from "../../lib/retry-helpers";
+import { moveAndSettle } from "../../lib/operation-settled";
 
 // ---------------------------------------------------------------------------
 // Helpers — extract session/debugger state via window.data
@@ -137,23 +138,6 @@ async function setActiveSessionIndex(
   }, index);
 }
 
-/**
- * Wait for the ready-status indicator to confirm a stepping operation
- * has completed.
- */
-async function waitForStepComplete(
-  page: import("@playwright/test").Page,
-): Promise<void> {
-  await retry(
-    async () => {
-      const status = page.locator("#stable-status");
-      const className = (await status.getAttribute("class")) ?? "";
-      return className.includes("ready-status");
-    },
-    { maxAttempts: 60, delayMs: 500 },
-  );
-}
-
 // ---------------------------------------------------------------------------
 // Suite
 // ---------------------------------------------------------------------------
@@ -237,8 +221,7 @@ test.describe("Comprehensive tabbed replay", () => {
       { maxAttempts: 30, delayMs: 500 },
     );
 
-    await layout.nextButton().click({ force: true });
-    await waitForStepComplete(ctPage);
+    await moveAndSettle(ctPage, () => layout.nextButton().click({ force: true }));
 
     // Record the debugger position after stepping.
     const locationAfterStepping = await getSessionDebuggerLocation(ctPage, 0);
@@ -346,8 +329,7 @@ test.describe("Comprehensive tabbed replay", () => {
     //         fully interactive after a data-model round-trip.
     // ------------------------------------------------------------------
 
-    await layout.nextButton().click({ force: true });
-    await waitForStepComplete(ctPage);
+    await moveAndSettle(ctPage, () => layout.nextButton().click({ force: true }));
 
     const locAfterFinalStep = await getSessionDebuggerLocation(ctPage, 0);
     expect(locAfterFinalStep).not.toBeNull();
@@ -487,8 +469,7 @@ test.describe("Comprehensive tabbed replay", () => {
     // First step in session 0
     // ------------------------------------------------------------------
 
-    await layout.nextButton().click({ force: true });
-    await waitForStepComplete(ctPage);
+    await moveAndSettle(ctPage, () => layout.nextButton().click({ force: true }));
 
     // Verify session 0 moved.
     const tab1LocAfterStep1 = await getSessionDebuggerLocation(ctPage, 0);
@@ -509,8 +490,7 @@ test.describe("Comprehensive tabbed replay", () => {
     // Second step in session 0
     // ------------------------------------------------------------------
 
-    await layout.nextButton().click({ force: true });
-    await waitForStepComplete(ctPage);
+    await moveAndSettle(ctPage, () => layout.nextButton().click({ force: true }));
 
     const tab1LocAfterStep2 = await getSessionDebuggerLocation(ctPage, 0);
     expect(tab1LocAfterStep2).not.toBeNull();
@@ -529,8 +509,7 @@ test.describe("Comprehensive tabbed replay", () => {
     // Continue (run to end) in session 0
     // ------------------------------------------------------------------
 
-    await layout.continueButton().click({ force: true });
-    await waitForStepComplete(ctPage);
+    await moveAndSettle(ctPage, () => layout.continueButton().click({ force: true }));
 
     const tab1LocAfterContinue = await getSessionDebuggerLocation(ctPage, 0);
     expect(tab1LocAfterContinue).not.toBeNull();

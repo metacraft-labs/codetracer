@@ -21,6 +21,7 @@
 import { test, expect } from "../../lib/fixtures";
 import { LayoutPage } from "../../page-objects/layout-page";
 import { retry } from "../../lib/retry-helpers";
+import { moveAndSettle } from "../../lib/operation-settled";
 import { debugLogger } from "../../lib/debug-logger";
 
 // ---------------------------------------------------------------------------
@@ -212,17 +213,9 @@ test.describe("StreamingRecording", () => {
     // initialized (at function entry, locals may not yet be assigned).
     // Use dispatchEvent to bypass viewport issues with the debug button.
     const stepOverBtn = ctPage.locator("#next-image");
-    await stepOverBtn.dispatchEvent("click");
-
-    // Wait for the backend to return to ready state
-    await retry(
-      async () => {
-        const status = ctPage.locator("#stable-status");
-        const className = (await status.getAttribute("class")) ?? "";
-        return className.includes("ready-status");
-      },
-      { maxAttempts: 60, delayMs: 1000 },
-    );
+    // Awaited by the position the step reaches: `#stable-status` is drawn
+    // only while busy, so it cannot say "done" (`lib/operation-settled.ts`).
+    await moveAndSettle(ctPage, () => stepOverBtn.dispatchEvent("click"), 60_000);
 
     // Check the Program State pane for variables a, b, n.
     // Python DB traces may show variables in the state pane or as flow values.
@@ -273,15 +266,7 @@ test.describe("StreamingRecording", () => {
         // If state pane is empty, try stepping forward once more.
         // Use dispatchEvent to bypass viewport issues.
         if (variables.length === 0) {
-          await stepOverBtn.dispatchEvent("click");
-          await retry(
-            async () => {
-              const status = ctPage.locator("#stable-status");
-              const className = (await status.getAttribute("class")) ?? "";
-              return className.includes("ready-status");
-            },
-            { maxAttempts: 30, delayMs: 500 },
-          );
+          await moveAndSettle(ctPage, () => stepOverBtn.dispatchEvent("click"), 15_000);
         }
 
         return false;

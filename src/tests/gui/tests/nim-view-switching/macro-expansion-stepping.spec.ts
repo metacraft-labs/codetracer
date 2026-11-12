@@ -30,26 +30,12 @@ import { ctUserConfigDir } from "../../lib/ct-home";
 import { LayoutPage } from "../../page-objects/layout-page";
 import { StatusBar } from "../../page-objects/status_bar";
 import { retry } from "../../lib/retry-helpers";
+import { moveAndSettle, waitForNotBusy } from "../../lib/operation-settled";
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-/**
- * Waits for the debugger to be "ready" (not busy) after a navigation action.
- */
-async function waitForReadyStatus(
-  page: import("@playwright/test").Page,
-): Promise<void> {
-  await retry(
-    async () => {
-      const status = page.locator("#stable-status");
-      const className = (await status.getAttribute("class")) ?? "";
-      return className.includes("ready-status");
-    },
-    { maxAttempts: 60, delayMs: 1000 },
-  );
-}
 
 /**
  * Waits for the status bar location to stabilize and returns the parsed
@@ -167,7 +153,7 @@ async function waitForNimEditorReady(
     },
     { maxAttempts: 60, delayMs: 1000 },
   );
-  await waitForReadyStatus(page);
+  await waitForNotBusy(page);
 }
 
 // ---------------------------------------------------------------------------
@@ -294,8 +280,7 @@ test.describe("MacroExpansionStepping", () => {
 
     // Step forward through the expanded macro code.
     const nextBtn = ctPage.locator("#next-image");
-    await nextBtn.click();
-    await waitForReadyStatus(ctPage);
+    await moveAndSettle(ctPage, () => nextBtn.click());
 
     // Verify that the execution position changed — we should move through
     // the expanded macro lines.
@@ -312,8 +297,7 @@ test.describe("MacroExpansionStepping", () => {
     const secondBeforeRaw = await getRawStatusBarText(statusBar);
     const secondBeforeTicks = parseRrTicks(secondBeforeRaw);
 
-    await nextBtn.click();
-    await waitForReadyStatus(ctPage);
+    await moveAndSettle(ctPage, () => nextBtn.click());
 
     const secondAfterRaw = await getRawStatusBarText(statusBar);
     const secondAfterTicks = parseRrTicks(secondAfterRaw);
@@ -395,10 +379,8 @@ test.describe("MacroExpansionStepping", () => {
 
     // Step forward a couple of times in expanded code.
     const nextBtn = ctPage.locator("#next-image");
-    await nextBtn.click();
-    await waitForReadyStatus(ctPage);
-    await nextBtn.click();
-    await waitForReadyStatus(ctPage);
+    await moveAndSettle(ctPage, () => nextBtn.click());
+    await moveAndSettle(ctPage, () => nextBtn.click());
 
     // Record position in expanded code.
     const expandedRaw = await getRawStatusBarText(statusBar);
@@ -408,7 +390,7 @@ test.describe("MacroExpansionStepping", () => {
     await ctPage.keyboard.press("Alt+e");
 
     // Wait for the UI to settle after collapse.
-    await waitForReadyStatus(ctPage);
+    await waitForNotBusy(ctPage);
 
     // The debugger position (rrTicks) should be preserved — we are still at
     // the same execution point, just viewing it in the original source.

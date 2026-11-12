@@ -70,3 +70,35 @@ export async function moveAndSettle(
   await waitForNotBusy(page, timeoutMs);
   return statusLocation(page);
 }
+
+/**
+ * Run `action` — a step that may legitimately leave the position where it
+ * was (a micro-step the backend reports at the same line and tick) — and
+ * wait for it to settle. Returns whether the position moved.
+ *
+ * A move is recognised as in `moveAndSettle`. When the position has not
+ * moved within `stayWindowMs`, the step is taken to have stayed, and only the
+ * bar going idle is awaited. Use `moveAndSettle` wherever the step must move:
+ * this helper is for callers that check the movement themselves and have a
+ * deliberate answer for a step that stays.
+ */
+export async function moveOrStayAndSettle(
+  page: Page,
+  action: () => Promise<void>,
+  stayWindowMs = 5_000,
+  timeoutMs = 30_000,
+): Promise<boolean> {
+  const before = await statusLocation(page);
+  await action();
+  let moved = false;
+  try {
+    await expect
+      .poll(() => statusLocation(page), { timeout: stayWindowMs })
+      .not.toBe(before);
+    moved = true;
+  } catch {
+    moved = false;
+  }
+  await waitForNotBusy(page, timeoutMs);
+  return moved;
+}
