@@ -1298,7 +1298,8 @@ proc tick*(srv: PaneServer): seq[JsonNode] =
     let sess = s
     changed = advanceNimTrace(s.rt, s.edit,
       proc(request: TraceOpenRequest): string =
-        srv.openRecording(sess, request.tracePath, request.policy)) or changed
+        srv.openRecording(sess, request.tracePath, request.policy),
+      followIntoDebug = false) or changed
     changed = s.tests.tick(s.rt) or changed
     changed = s.problems.tick(s.rt, nowMonoMs()) or changed
     changed = s.buildOut.tick(s.rt) or changed
