@@ -279,6 +279,13 @@ proc menuItemWidth*(title: string; trailing: seq[string]; tabular = false): int 
   result = 2 * 4 + 2 + 2 * MenuItemPadPx + MarkPx + 8 + textPx(title, MenuItemTextPx)
   for word in trailing: result += 8 + textPx(word, CaptionPx, tabular)
 
+func hangMenuLeft*(chipRight, menuW, widthPx: int): int =
+  ## Where a `+N` menu `menuW` wide starts when it hangs from the chip
+  ## ending at `chipRight`, as the web's (`hangOverflowMenu`): its right
+  ## edge on the chip's, shifted only as far as it must be to stay inside
+  ## the `widthPx` window on either side.
+  max(0, min(chipRight - menuW, widthPx - menuW))
+
 proc drawMenu*(r: GpuiRenderer; p: AhPalette; top, left, width: int;
                kind: string): GpuiElement =
   ## A dropdown under the strip (`session-tab-overflow-menu`).
@@ -351,6 +358,8 @@ proc drawSessionTabStrip*(r: GpuiRenderer; host: GpuiElement;
     lines.add result
   var line = newLine()
   var overflow: seq[int]
+  # Where the `+N` chip starts (one line: the overflow menu hangs from it).
+  var chipLeft = 0
   case vm.state.val
   of asIdle, asLoading:
     r.appendChild(line, r.drawStatusTab(p, vm, AgentHarborTabsLoadingText, "loading", false,
@@ -397,6 +406,8 @@ proc drawSessionTabStrip*(r: GpuiRenderer; host: GpuiElement;
                                fixed, maxes = maxes)
         for k, i in layout.visible:
           r.appendChild(line, r.drawTab(p, vm, tabs[i], closable, fitted[k]))
+          chipLeft += fitted[k] + StripGapPx
+  var chipRight = -1
   if overflow.len > 0:
     var waits = 0
     for i in overflow:
@@ -406,7 +417,9 @@ proc drawSessionTabStrip*(r: GpuiRenderer; host: GpuiElement;
                                   open = vm.overflowOpen.val)
     # 12px clear of "+" (the strip's 4px gap plus the chip's 8px margin).
     r.setStyle(chip, "margin-right", $(ChipGapPx - StripGapPx) & "px")
+    r.tag(chip, "strip-overflow", $overflow.len)
     r.appendChild(line, chip)
+    chipRight = chipLeft + overflowChipWidth(overflow.len, waits > 0)
   r.appendChild(line, r.drawAddButton(p))
   for l in lines: r.appendChild(host, l)
   r.tag(host, "lines", $lines.len)
@@ -417,8 +430,8 @@ proc drawSessionTabStrip*(r: GpuiRenderer; host: GpuiElement;
     r.setStyle(host, "padding-bottom", $(6 - (StripLinePx - StripTabPx) div 2) & "px")
   if overflow.len > 0 and vm.overflowOpen.val:
     # As wide as its widest item, from 13.75em to the window less 0.75rem,
-    # its right edge 4px in from the bar's (which ends 8px short of the
-    # window), 6px below the bar.
+    # 6px below the bar, hung from the `+N` chip as the web's
+    # (`hangOverflowMenu`).
     var widest = 0
     for i in overflow:
       widest = max(widest, menuItemWidth(tabs[i].title,
@@ -426,7 +439,8 @@ proc drawSessionTabStrip*(r: GpuiRenderer; host: GpuiElement;
                                          else: @[]))
     let menuW = clamp(widest, MenuMinPx, max(MenuMinPx, widthPx - 12))
     let menu = r.drawMenu(p, StripTopPx + lines.len * StripLinePx + MenuGapPx,
-                          max(0, widthPx - 12 - menuW), menuW, "overflow")
+                          hangMenuLeft(chipRight, menuW, widthPx), menuW, "overflow")
+    r.tag(menu, "strip-menu", "overflow")
     for i in overflow:
       let id = tabs[i].id
       var trailing: seq[(string, string)]

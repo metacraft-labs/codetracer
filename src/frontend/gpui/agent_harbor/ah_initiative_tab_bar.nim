@@ -636,12 +636,9 @@ proc drawInitiativeTabBar*(r: GpuiRenderer; host: GpuiElement;
                                          if tabs[i].progressText.len > 0: @[tabs[i].progressText]
                                          else: @[], tabular = true))
     let menuW = clamp(widest, MenuMinPx, max(MenuMinPx, widthPx - 12))
-    # Hung from the `+N` chip, as the web's (`hangOverflowMenu`): its right
-    # edge on the chip's, shifted only as far as it must be to stay inside
-    # the window on either side.
+    # Hung from the `+N` chip, as the session strip's.
     let menu = r.drawMenu(p, tabBottom + MenuGapPx,
-                          max(0, min(chipRight - menuW, widthPx - menuW)), menuW,
-                          "overflow")
+                          hangMenuLeft(chipRight, menuW, widthPx), menuW, "overflow")
     r.tag(menu, "bar-menu", "overflow")
     for i in overflow:
       let tab = tabs[i]

@@ -1,12 +1,12 @@
  ● Replace the…   CLI   ● Cap the telem…  CT   ● Fix the flaky…  Tg   ● Add search to…  TUI   ● Benchmark rout…  CT   ● Add jitter to…  Web   ● Port the route c…  CLI ✕   ● +7   +
                                                                                                                                                                                     
-                                                                                                                           ● Cache the dependency graph between CI runs        CLI
-                                                                                                                           ● Profile the importer on the large fixture          CT
-                                                                                                                           ○ Migrate cached routes without a cold start         Tg
-                                                                                                                           ● Persist the telemetry queue across restarts       TUI
-                                                                                                                           ○ Migrate the CI matrix to the new runners           CT
-                                                                                                                           ● Split the settings page into tabs                 Web
-                                                                                                                           ● Retry telemetry uploads with exponential backoff   CT
+                                                                                                                        ● Cache the dependency graph between CI runs        CLI
+                                                                                                                        ● Profile the importer on the large fixture          CT
+                                                                                                                        ○ Migrate cached routes without a cold start         Tg
+                                                                                                                        ● Persist the telemetry queue across restarts       TUI
+                                                                                                                        ○ Migrate the CI matrix to the new runners           CT
+                                                                                                                        ● Split the settings page into tabs                 Web
+                                                                                                                        ● Retry telemetry uploads with exponential backoff   CT
                                                                                                                                                                                     
                                                                                                                                                                                     
                                                                                                                                                                                     

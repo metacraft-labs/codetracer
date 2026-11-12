@@ -114,6 +114,13 @@ proc drawOverflowChip*(c: var AhCanvas; parent: AhNode; row, col, hidden, waits:
   c.target(row, col, w, 1, onClick)
   w
 
+func hangMenuCol*(chipEnd, menuW, cols: int): int =
+  ## Where a `+N` menu `menuW` cells wide starts when it hangs from the chip
+  ## ending before `chipEnd` (one past its last cell), as the web's: its
+  ## last cell under the chip's last cell, shifted only as far as it must be
+  ## to stay inside the `cols` cells of the terminal on either side.
+  max(0, min(chipEnd - menuW, cols - menuW))
+
 proc drawMenu*(c: var AhCanvas; parent: AhNode; row, col, width, height: int;
                kind: string): AhNode =
   ## A dropdown, on the ground every surface dropped from the caption bar
@@ -307,13 +314,16 @@ proc drawSessionTabStrip*(c: var AhCanvas; vm: SessionTabStripVM; row, col, widt
           at += fitted[k] + 1
   # The last line holds `+N` and "+", after its last tab.
   let lastRow = row + lines - 1
+  var chipEnd = -1
   if overflow.len > 0:
     var waits = 0
     for i in overflow:
       if tabs[i].attention == saNeedsInput: inc waits
     let target = vm
     at += c.drawOverflowChip(host, lastRow, at, overflow.len, waits, vm.overflowOpen.val,
-                             proc() = target.toggleOverflow()) + 1
+                             proc() = target.toggleOverflow())
+    chipEnd = at
+    inc at
   c.drawPlus(host, lastRow, min(at, col + width - AddCells))
   host.height = lines
   host.tag("lines", $lines)
@@ -327,7 +337,8 @@ proc drawSessionTabStrip*(c: var AhCanvas; vm: SessionTabStripVM; row, col, widt
     for i in overflow:
       widest = max(widest, 3 + widthOf(tabs[i].title) + MenuOriginGap + column + MenuInset)
     let menuW = min(widest, width - 1)
-    let menuCol = col + max(0, width - 1 - menuW)
+    # Hung from the `+N` chip, as the web's.
+    let menuCol = hangMenuCol(chipEnd, menuW, c.cols)
     let menu = c.drawMenu(host, lastRow + 1, menuCol, menuW,
                           min(overflow.len + 2, c.rows - lastRow - 1), "overflow")
     for k, i in overflow:

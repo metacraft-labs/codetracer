@@ -61,7 +61,8 @@
     "`bar-overflow-menu` is the initiative bar's `+N` menu alone (`menu` is",
     "whichever dropdown is open). It hangs from its chip, `bar-overflow`: the",
     "layout test holds its right edge to the chip's on each side, shifted only",
-    "as far as the window requires."
+    "as far as the window requires. `strip-overflow-menu` and `strip-overflow`",
+    "are the session strip's menu and chip, held to the same rule."
   ],
   "schemaVersion": 1,
   "regions": [
@@ -417,6 +418,20 @@
       "web": ".ah-initiative-tab-bar .ah-overflow-menu",
       "gpui": {
         "data-ah-bar-menu": "overflow"
+      }
+    },
+    {
+      "name": "strip-overflow",
+      "web": ".ah-tab-strip:not(.ah-initiative-tab-bar) > .session-tab-overflow",
+      "gpui": {
+        "data-ah-strip-overflow": ""
+      }
+    },
+    {
+      "name": "strip-overflow-menu",
+      "web": ".ah-tab-strip:not(.ah-initiative-tab-bar) > .session-tab-overflow-menu",
+      "gpui": {
+        "data-ah-strip-menu": "overflow"
       }
     },
     {

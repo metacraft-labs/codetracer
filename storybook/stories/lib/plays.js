@@ -93,6 +93,26 @@ async function initiativeTabsDrawn(el) {
   expect(el.querySelectorAll(".ah-initiative-tab.active").length).toBe(1);
 }
 
+// A strip's +N menu hangs from its chip: its right edge on the chip's right
+// edge, shifted only as far as it must be to stay inside the window on either
+// side. `bar` names the strip: the session strip or the initiative bar.
+async function overflowMenuHangs(el, bar) {
+  await waitFor(el, `${bar} > .session-tab-overflow-menu .session-tab-overflow-item`);
+  // A face arriving late moves the chip; the view places the menu again.
+  await document.fonts.ready;
+  await new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)));
+  const chip = el.querySelector(`${bar} > .ah-tab-overflow-count`).getBoundingClientRect();
+  const menu = el.querySelector(`${bar} > .session-tab-overflow-menu`).getBoundingClientRect();
+  const view = document.documentElement.clientWidth;
+  expect(menu.height).toBeGreaterThan(0);
+  const left = Math.max(0, Math.min(chip.right - menu.width, view - menu.width));
+  // To half a pixel: the browser places the menu in fractions of one.
+  expect(menu.left).toBeCloseTo(left, 0);
+  expect(menu.left).toBeGreaterThanOrEqual(-0.5);
+  expect(menu.right).toBeLessThanOrEqual(view + 0.5);
+  if (left === chip.right - menu.width) expect(menu.right).toBeCloseTo(chip.right, 0);
+}
+
 // The inbox's Previous / Next: the colour each arrow computes to, and the
 // colours of the two roles it may take in the theme in view. The disabled
 // role is read from a disabled `<button>` (CodeTracer's own `button:disabled`
@@ -248,6 +268,7 @@ export const plays = {
     expect(active).toBeTruthy();
     expect(el.querySelector(".ah-tab-strip.overflow-open")).toBeTruthy();
     expect(el.querySelectorAll(".session-tab-overflow-item.active").length).toBe(0);
+    await overflowMenuHangs(el, ".ah-tab-strip:not(.ah-initiative-tab-bar)");
   }),
   "agent-harbor-session-tabs-multi": tabsCheck(async (el) => {
     await waitFor(el, ".ah-tab");
@@ -309,26 +330,13 @@ export const plays = {
     expect(menu.getBoundingClientRect().height).toBeGreaterThan(0);
     expect(getComputedStyle(el.querySelector(".ah-initiative-tab-bar")).overflow).toBe("visible");
   }),
-  // The +N menu hangs from its chip: its right edge on the chip's right edge,
-  // shifted only as far as it must be to stay inside the window on either
-  // side (the session strip's menu, under the end of its bar, is not this).
+  // The +N menu hangs from its chip, as the session strip's does.
   "agent-harbor-initiative-tabs-overflow-menu": initiativeTabsCheck(async (el) => {
     // The bar's own checks first: this play replaces the bar's for its stories.
     await initiativeTabsDrawn(el);
-    await waitFor(el, ".ah-initiative-tab-bar .ah-overflow-menu .session-tab-overflow-item");
-    // A face arriving late moves the chip; the view places the menu again.
-    await document.fonts.ready;
-    await new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)));
-    const chip = el.querySelector(".ah-initiative-tab-bar .ah-tab-overflow-count").getBoundingClientRect();
-    const menu = el.querySelector(".ah-initiative-tab-bar .ah-overflow-menu").getBoundingClientRect();
-    const view = document.documentElement.clientWidth;
-    expect(menu.height).toBeGreaterThan(0);
-    const left = Math.max(0, Math.min(chip.right - menu.width, view - menu.width));
-    // To half a pixel: the browser places the menu in fractions of one.
-    expect(menu.left).toBeCloseTo(left, 0);
-    expect(menu.left).toBeGreaterThanOrEqual(-0.5);
-    expect(menu.right).toBeLessThanOrEqual(view + 0.5);
-    if (left === chip.right - menu.width) expect(menu.right).toBeCloseTo(chip.right, 0);
+    await overflowMenuHangs(el, ".ah-initiative-tab-bar");
+    // The menu placed is the +N menu, not the sessions-elsewhere one.
+    expect(el.querySelector(".ah-initiative-tab-bar > .ah-overflow-menu")).toBeTruthy();
   }),
   "agent-harbor-initiative-tabs-inbox": initiativeTabsCheck(async (el) => {
     await waitFor(el, ".ah-inbox");
