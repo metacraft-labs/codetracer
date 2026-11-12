@@ -725,7 +725,7 @@ jobs:
             # recorder repos' lock records these edges also resolve did not
             # carry it. They do now; going bare is a separate change.
             isonim=b7ff71e7c17593beccbee772cba87519e746e030
-            isonim-tui=2e45dfbca5f522afabf873976922a34b5301d440
+            isonim-tui=8e43ce06f7f078530c7a8585c210ad7648fa0051
             runquota=9818dc0c90be8ba7993424a7bbfbb6e009ffa965
             # Required by scripts/require-siblings.sh (`ct` links its reference
             # library). SHA, not bare: this workflow is also called from recorder

@@ -7469,11 +7469,11 @@
     "isonim-tui": {
       "flake": false,
       "locked": {
-        "lastModified": 1794207977,
-        "narHash": "sha256-CjWkk031XbBDj7zD0kxKgUNsWYBGPJarOX9s1OF1bOQ=",
+        "lastModified": 1794420526,
+        "narHash": "sha256-WQqVD6RApCT1JUbHfA3gL8JsxLV/8dprry9ak3ZcX4I=",
         "owner": "metacraft-labs",
         "repo": "isonim-tui",
-        "rev": "2e45dfbca5f522afabf873976922a34b5301d440",
+        "rev": "8e43ce06f7f078530c7a8585c210ad7648fa0051",
         "type": "github"
       },
       "original": {
