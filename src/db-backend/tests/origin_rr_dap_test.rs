@@ -564,6 +564,107 @@ mod rr {
         );
     }
 
+    /// A walk that crossed threads returns the replay to the stop it was
+    /// asked at, so a second query there answers like the first (spec §6.3,
+    /// "The replay after a walk"). The desktop's "Show in side panel" is
+    /// that second query. Before the replay was returned, the walk left it
+    /// at the writer thread's write, where `local` has no storage, and the
+    /// second query failed with `EvaluateWithAddress(local) … no valid
+    /// storage address`.
+    #[test]
+    fn test_origin_rr_cross_thread_copy_second_query_answers_like_the_first() {
+        let ct_native_replay = rr_backend("cross_thread_copy_second_query");
+        require_tool("gcc", "--version", "cross_thread_copy_second_query");
+        let recording = record_rr_fixture_with_regenerate("c", "cross_thread_copy", "main.c", &ct_native_replay);
+        let breakpoint_line = fixture_line_containing("c", "cross_thread_copy", "main.c", "printf(\"%d\\n\", local)");
+
+        let mut client = test_harness::DapStdioTestClient::start().expect("DAP stdio client should start");
+        client
+            .initialize_and_launch_rr(&recording, &ct_native_replay)
+            .expect("RR DAP launch should succeed");
+        client
+            .set_breakpoint(&recording.source_path, breakpoint_line)
+            .expect("set breakpoint at cross_thread_copy printf");
+        let location = client
+            .continue_to_breakpoint()
+            .expect("continue to cross_thread_copy printf breakpoint");
+        assert_eq!(
+            location.line, breakpoint_line as i64,
+            "stopped at the wrong line: {location:?}"
+        );
+
+        // The desktop asks at the current stop (`stepId` -1), both times.
+        let first = send_rr_origin_chain_request(&mut client, "local", -1, DEFAULT_ORIGIN_MAX_HOPS);
+        assert!(
+            first.hops.iter().any(|hop| hop.kind == OriginKind::CrossThreadCopy),
+            "the first query must cross threads for this test to mean anything: {first:?}"
+        );
+        let second = send_rr_origin_chain_request(&mut client, "local", -1, DEFAULT_ORIGIN_MAX_HOPS);
+        let shape = |chain: &OriginChain| {
+            (
+                chain
+                    .hops
+                    .iter()
+                    .map(|hop| {
+                        (
+                            hop.kind,
+                            hop.location.path.clone(),
+                            hop.location.line,
+                            hop.source_expr.clone(),
+                        )
+                    })
+                    .collect::<Vec<_>>(),
+                chain.terminator.kind,
+                chain.terminator.expression.clone(),
+            )
+        };
+        assert_eq!(
+            shape(&second),
+            shape(&first),
+            "a second query at the same stop must answer like the first"
+        );
+    }
+
+    /// A hop whose reverse continue runs past the per-hop cap still takes the
+    /// write it found: the cap bounds re-issues, not the reverse continue
+    /// that finds the write (spec §6.3, "Per-hop cap"). The cap is set to
+    /// 1 ms, so every hop here runs past it — what a loaded host did to the
+    /// 1,500 ms cap, which used to end the chain at its first hop with "rr
+    /// per-hop wall-clock cap (1500 ms) tripped".
+    #[test]
+    fn test_origin_rr_cross_thread_copy_takes_a_write_found_after_the_per_hop_cap() {
+        let ct_native_replay = rr_backend("cross_thread_copy_slow_hop");
+        require_tool("gcc", "--version", "cross_thread_copy_slow_hop");
+        let recording = record_rr_fixture_with_regenerate("c", "cross_thread_copy", "main.c", &ct_native_replay);
+        let breakpoint_line = fixture_line_containing("c", "cross_thread_copy", "main.c", "printf(\"%d\\n\", local)");
+
+        let mut client = test_harness::DapStdioTestClient::start_with_env(&[
+            ("CODETRACER_IN_UI_TEST", "1"),
+            ("CT_RR_ORIGIN_PER_HOP_WALL_CLOCK_MS", "1"),
+        ])
+        .expect("DAP stdio client should start");
+        client
+            .initialize_and_launch_rr(&recording, &ct_native_replay)
+            .expect("RR DAP launch should succeed");
+        client
+            .set_breakpoint(&recording.source_path, breakpoint_line)
+            .expect("set breakpoint at cross_thread_copy printf");
+        client
+            .continue_to_breakpoint()
+            .expect("continue to cross_thread_copy printf breakpoint");
+
+        let chain = send_rr_origin_chain_request(&mut client, "local", -1, DEFAULT_ORIGIN_MAX_HOPS);
+        assert_ne!(
+            chain.terminator.kind,
+            TerminatorKind::OutOfBudget,
+            "a found write must be taken however long its reverse continue ran: {chain:?}"
+        );
+        assert!(
+            chain.hops.iter().any(|hop| hop.kind == OriginKind::CrossThreadCopy),
+            "the chain must reach the writer thread's write: {chain:?}"
+        );
+    }
+
     #[test]
     fn test_origin_rr_cross_thread_copy_worker_protocol_hits_previous_write() {
         let ct_native_replay = rr_backend("cross_thread_copy_worker_protocol");

@@ -983,10 +983,16 @@ pub struct DapStdioTestClient {
 impl DapStdioTestClient {
     /// Spawn `db-backend dap-server --stdio` and set up pipes.
     pub fn start() -> Result<Self, String> {
+        Self::start_with_env(&[])
+    }
+
+    /// [`Self::start`], with `envs` added to the server's environment.
+    pub fn start_with_env(envs: &[(&str, &str)]) -> Result<Self, String> {
         let db_backend_bin = env!("CARGO_BIN_EXE_replay-server");
         let mut child = Command::new(db_backend_bin)
             .arg("dap-server")
             .arg("--stdio")
+            .envs(envs.iter().copied())
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())

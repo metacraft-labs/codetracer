@@ -71,8 +71,10 @@ use origin_classifier::{Classification, Lang as ClassifierLang, PatternSet, pars
 
 /// Default per-hop wall-clock cap for the RR origin loop (spec §6.3 —
 /// lower than the M2 materialized default because each hop costs a
-/// reverse-continue). The dispatcher applies this on top of the
-/// per-request budget.
+/// reverse-continue). It bounds how long one hop keeps re-issuing reverse
+/// continues past stops that are not a usable write; a write is taken
+/// however long the reverse continue that found it ran. The per-request
+/// budget bounds the whole walk.
 pub const RR_PER_HOP_WALL_CLOCK_MS: u32 = 1_500;
 const RR_UI_TEST_PER_HOP_ENV: &str = "CT_RR_ORIGIN_PER_HOP_WALL_CLOCK_MS";
 const RR_UI_TEST_PER_HOP_MAX_MS: u32 = 10_000;
@@ -221,7 +223,51 @@ pub fn classifier_lang_for_path(path: &str) -> Option<ClassifierLang> {
 ///
 /// Returns an [`OriginChain`] on success or an [`OriginError`] carrying
 /// one of the spec §5.3 codes 6101–6106.
+///
+/// The walk runs the replay back to each write, and onto the writing thread
+/// when a write came from another one. Afterwards the replay is returned to
+/// the point it was asked at (spec §6.3, "The replay after a walk"), so that
+/// the next query there — the side panel asking for the chain the row just
+/// showed, or a step — starts where the user stands and not at the last
+/// write. The point is remembered as an rr checkpoint
+/// ([`ReplayQuery::SaveReplayPosition`]); a seek back to the starting tick
+/// count is not enough, because rr counts ticks per thread and seeks them on
+/// the thread it last stopped in.
 pub fn run_rr_origin_chain(
+    session: &mut RecreatorReplaySession,
+    args: &CtOriginChainArguments,
+    budget: &OriginBudget,
+    expr_loader: &mut ExprLoader,
+    patterns: &PatternSet,
+    meta_dat_sources_root: Option<&std::path::Path>,
+) -> RrOriginResult {
+    let mark = match session.stable.dispatch_replay_query(ReplayQuery::SaveReplayPosition) {
+        Ok(raw) => match serde_json::from_str::<JsonValue>(&raw) {
+            Ok(mark) => Some(mark),
+            Err(e) => {
+                warn!("origin_chain: the worker's position mark is not JSON ({e}): `{raw}`");
+                None
+            }
+        },
+        Err(e) => {
+            warn!("origin_chain: the worker cannot remember its position, so the walk will leave it moved: {e}");
+            None
+        }
+    };
+    let result = walk_rr_origin_chain(session, args, budget, expr_loader, patterns, meta_dat_sources_root);
+    if let Some(mark) = mark
+        && let Err(e) = session
+            .stable
+            .dispatch_replay_query(ReplayQuery::RestoreReplayPosition { mark })
+    {
+        log::error!(
+            "origin_chain: returning the replay to the queried point failed; it stays where the walk left it: {e}"
+        );
+    }
+    result
+}
+
+fn walk_rr_origin_chain(
     session: &mut RecreatorReplaySession,
     args: &CtOriginChainArguments,
     budget: &OriginBudget,
@@ -346,7 +392,20 @@ pub fn run_rr_origin_chain(
         // instruction's source line does not target `current_var_name`
         // (spec §6.3 "stack-slot reuse / aliasing guard").
         let hop_started = WallClockDeadline::new(per_hop_cap_ms);
+        // The cap bounds the RE-ISSUES (spec §6.3, "Per-hop cap"): a stop
+        // that is not a usable write is re-issued only while the hop is
+        // within its cap. A write found by a reverse continue that itself
+        // took longer than the cap is still taken — the time is spent
+        // already, and throwing the write away only made the chain's length
+        // depend on the host's load (a loaded host ended the first hop of a
+        // cross-thread chain at the cap). The request's wall-clock budget
+        // still bounds the query between hops.
+        let mut reissue = false;
         let validated = loop {
+            if reissue && hop_started.exceeded() {
+                break ValidatedHop::OutOfBudget;
+            }
+            reissue = true;
             let raw = match wp_guard
                 .session
                 .stable
@@ -370,14 +429,7 @@ pub fn run_rr_origin_chain(
                     "origin_chain: reverse-continue stopped for non-watchpoint reason `{}`; re-issuing until watchpoint, recording start, or cap",
                     rc.reason
                 );
-                if hop_started.exceeded() {
-                    break ValidatedHop::OutOfBudget;
-                }
                 continue;
-            }
-            // Per-hop wall-clock cap.
-            if hop_started.exceeded() {
-                break ValidatedHop::OutOfBudget;
             }
 
             // 3. Inspect the writing PC and decode (path, line).
@@ -694,7 +746,9 @@ fn rr_per_hop_wall_clock_ms() -> u32 {
     std::env::var(RR_UI_TEST_PER_HOP_ENV)
         .ok()
         .and_then(|raw| raw.parse::<u32>().ok())
-        .map(|ms| ms.clamp(RR_PER_HOP_WALL_CLOCK_MS, RR_UI_TEST_PER_HOP_MAX_MS))
+        // Below the default too: a test sets 1 ms to make every hop "slow"
+        // and check that a found write is still taken (spec §6.3 "Per-hop cap").
+        .map(|ms| ms.clamp(1, RR_UI_TEST_PER_HOP_MAX_MS))
         .unwrap_or(RR_PER_HOP_WALL_CLOCK_MS)
 }
 
