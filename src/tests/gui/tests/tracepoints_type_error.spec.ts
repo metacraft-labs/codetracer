@@ -96,14 +96,26 @@ async function openPopulatedTracepoint(ctPage: Page) {
   const tracePanel = new TraceLogPanel(editor, 1);
   await tracePanel.root.waitFor({ state: "visible", timeout: 15000 });
 
-  await tracePanel.typeExpression("a");
+  // `log(a)`: a tracepoint logs what its code passes to `log`, so a bare `a`
+  // logs a row only where evaluating it fails (`a` not yet declared, before
+  // the loop), and never one per iteration. The rows the loop must yield are
+  // the logged values; the first one is still the error row.
+  await tracePanel.typeExpression("log(a)");
 
   // Run the configured tracepoint to collect hits and populate the DataTable
   await editor.runTracepointsJs();
 
-  // Wait for the DataTable to populate the rows
+  // Wait for the DataTable to populate the rows: the grid draws its first
+  // row before the rest of the sweep's hits are in it, so wait for the loop's
+  // rows, not for the first one.
   const rowsLocator = tracePanel.root.locator(".trace-table tbody tr");
   await expect(rowsLocator.first()).toBeVisible({ timeout: 15000 });
+  await expect
+    .poll(() => rowsLocator.count(), {
+      message: `the tracepoint in the loop logs at least ${MIN_EXPECTED_ROWS} rows`,
+      timeout: 15000,
+    })
+    .toBeGreaterThanOrEqual(MIN_EXPECTED_ROWS);
 
   return { editor, tracePanel, rowsLocator };
 }

@@ -2194,17 +2194,67 @@ impl MaterializedReplaySession {
     /// is the same, keeps two independent cases right.  Two column-aware
     /// breakpoints on one line are two stops, and a conditional breakpoint
     /// whose condition turns true part way through a statement fires there.
+    ///
+    /// A step that executes its position again starts a visit of its own
+    /// (`step_repeats_position`): that is how a loop whose iterations never
+    /// leave the line shows in the recording.
     fn breakpoint_slot_fires_at(&self, column: Option<i64>, step: &DbStep) -> bool {
         if !self.breakpoint_slot_live_at(column, step) {
             return false;
         }
         match self.step_continued_by(step) {
             Some(previous) if previous.path_id == step.path_id && previous.line == step.line => {
-                // A column slot spans only the steps at its own column.
-                (column.is_some() && previous.column != step.column) || !self.breakpoint_slot_live_at(column, previous)
+                self.step_repeats_position(previous, step)
+                    // A column slot spans only the steps at its own column.
+                    || (column.is_some() && previous.column != step.column)
+                    || !self.breakpoint_slot_live_at(column, previous)
             }
             _ => true,
         }
+    }
+
+    /// Does `step` execute the position of `previous`, the step it continues,
+    /// a second time?
+    ///
+    /// The recording carries no loop iterations, so this is read from the
+    /// steps.  A recorder writes a step when execution reaches a new position:
+    /// the JavaScript recorder one per statement it runs, the EVM and Noir
+    /// recorders one per change of source position.  Two steps in a row at the
+    /// same line and column, with the frame's recorded values changed between
+    /// them, are therefore the same statement run twice: that is what a loop
+    /// body looks like when the recorder writes no step for the loop's header
+    /// between iterations.  Several steps of ONE run of a statement sit at
+    /// different columns, or carry no column at all, and stay one visit.
+    ///
+    /// The values are part of the test because a recorder also writes the
+    /// same position twice when nothing ran in between: the JavaScript
+    /// recorder writes the program's first position again once the main
+    /// thread has started, and the reader gives the thread-start slot that
+    /// position too.  Nothing changed there, and it is one visit.  The cost is
+    /// a loop whose iteration changes none of the values recorded at the step,
+    /// which stays one visit.
+    ///
+    /// Only directly consecutive steps count.  Coming back from a call made
+    /// at a position resumes it (`step_continued_by`), so a step after a call
+    /// that lands on the caller's position again is the same visit.
+    fn step_repeats_position(&self, previous: &DbStep, step: &DbStep) -> bool {
+        step.column.is_some()
+            && step.column == previous.column
+            && self
+                .step_before(step.step_id)
+                .is_some_and(|before| before.step_id == previous.step_id)
+            && self.recorded_values_differ(previous.step_id, step.step_id)
+    }
+
+    /// Do the values recorded at `a` and at `b` differ?
+    fn recorded_values_differ(&self, a: StepId, b: StepId) -> bool {
+        let before = self.reader.variables_at(a).unwrap_or(&[]);
+        let after = self.reader.variables_at(b).unwrap_or(&[]);
+        before.len() != after.len()
+            || before
+                .iter()
+                .zip(after)
+                .any(|(x, y)| x.variable_id != y.variable_id || x.value != y.value)
     }
 
     /// Is the breakpoint in the `(step.line, column)` slot enabled, not
@@ -2729,6 +2779,10 @@ impl MaterializedReplaySession {
 }
 
 impl ReplaySession for MaterializedReplaySession {
+    fn breakpoints_stop_once_per_visit(&self) -> bool {
+        true
+    }
+
     fn load_location(&mut self, expr_loader: &mut ExprLoader) -> Result<Location, Box<dyn Error>> {
         info!("load_location: db replay");
         // Event-only traces (e.g. Stylus) have no steps — return a default location
@@ -6040,24 +6094,143 @@ mod breakpoint_condition_tests {
         assert_eq!(continue_walk(&mut session, &[false]), vec![1]);
     }
 
-    /// A column-aware breakpoint spans only its own column, so two of them on
-    /// one line are two stops, and each is one stop however many steps its
-    /// column recorded.  A line-only breakpoint spans the line, columns and all.
-    #[test]
-    fn continue_coalesces_a_column_breakpoint_within_its_own_column_only() {
-        let at = |line, column| Visit {
+    /// A step at `line` and `column` in the outermost frame.
+    fn at(line: i64, column: i64) -> Visit {
+        Visit {
             column: Some(column),
             ..on_line(line)
+        }
+    }
+
+    /// A column-aware breakpoint spans only its own column, so two of them on
+    /// one line are two stops, and each is one stop however many steps its
+    /// column recorded: here column 14 makes a call and is resumed after it.
+    /// A line-only breakpoint spans the line, columns and all.
+    #[test]
+    fn continue_coalesces_a_column_breakpoint_within_its_own_column_only() {
+        let callee = Visit {
+            frame: 1,
+            ..on_line(10)
         };
-        let visits = [at(1, 1), at(1, 14), at(1, 14), at(1, 28), at(2, 1), at(2, 9), at(3, 1)];
+        let visits = [
+            at(1, 1),
+            at(1, 14),
+            callee,
+            at(1, 14),
+            at(1, 28),
+            at(2, 1),
+            at(2, 9),
+            at(3, 1),
+        ];
 
         let mut session = session_with_visits(&visits);
         for column in [14, 28] {
             session.add_breakpoint("synthetic.src", 1, Some(column), None).unwrap();
         }
         session.add_breakpoint("synthetic.src", 2, None, None).unwrap();
-        assert_eq!(continue_walk(&mut session, &[true, true, true]), vec![1, 3, 4]);
-        assert_eq!(continue_walk(&mut session, &[false, false]), vec![3, 1]);
+        assert_eq!(continue_walk(&mut session, &[true, true, true]), vec![1, 4, 5]);
+        assert_eq!(continue_walk(&mut session, &[false, false]), vec![4, 1]);
+    }
+
+    /// The `n`th iteration of a loop body at `line`, `column`: the loop's
+    /// variable `x` holds `n` there.
+    fn iteration(line: i64, column: i64, n: i64) -> Visit {
+        Visit {
+            x: Some(n),
+            ..at(line, column)
+        }
+    }
+
+    /// A loop body the recorder writes as one step per iteration, with no step
+    /// for the loop's header in between (the JavaScript recorder's
+    /// `for (…) {\n  var a = i;\n}`): each iteration is a visit, because each
+    /// runs the statement at line 2, column 3 again, and `x` changed.  The
+    /// reverse walk retraces the iterations.
+    #[test]
+    fn continue_stops_once_per_iteration_of_a_body_line_with_no_header_step() {
+        let body = |n| iteration(2, 3, n);
+        let visits = [at(1, 1), body(0), body(1), body(2), body(3), body(4), at(4, 1)];
+        let mut session = session_with_visits(&visits);
+        session.add_breakpoint("synthetic.src", 2, None, None).unwrap();
+
+        assert_eq!(
+            continue_walk(&mut session, &[true, true, true, true, true]),
+            vec![1, 2, 3, 4, 5],
+            "forward Continue must stop on every iteration"
+        );
+        assert_eq!(
+            continue_walk(&mut session, &[false, false, false, false]),
+            vec![4, 3, 2, 1]
+        );
+    }
+
+    /// A loop that never leaves its line (`for (…) { var a = i; }`): the first
+    /// iteration continues the visit the `for` statement began at step 0, and
+    /// every iteration after it runs column 31 again and is a visit of its own.
+    /// A column breakpoint on the body stops on each iteration, the first too.
+    #[test]
+    fn continue_stops_once_per_iteration_of_a_one_line_loop() {
+        let body = |n| iteration(1, 31, n);
+        let visits = [at(1, 1), body(0), body(1), body(2), at(2, 1)];
+
+        // The session starts on step 0, the `for` statement's own visit.
+        let mut session = session_with_visits(&visits);
+        session.add_breakpoint("synthetic.src", 1, None, None).unwrap();
+        assert_eq!(continue_walk(&mut session, &[true, true]), vec![2, 3]);
+        assert_eq!(continue_walk(&mut session, &[false, false]), vec![2, 0]);
+
+        let mut session = session_with_visits(&visits);
+        session.add_breakpoint("synthetic.src", 1, Some(31), None).unwrap();
+        assert_eq!(continue_walk(&mut session, &[true, true, true]), vec![1, 2, 3]);
+    }
+
+    /// The steps of ONE run of a statement are one visit wherever their
+    /// columns go, backwards included (an EVM statement's opcodes map to
+    /// `b`, then `a`, then the whole `x = a + b`), and so is the run of a
+    /// position that made a call and is resumed after it.  Only the same
+    /// position twice in a row, with a value changed, is a second run.
+    #[test]
+    fn continue_keeps_one_run_of_a_statement_one_visit() {
+        let callee = Visit {
+            frame: 1,
+            ..on_line(10)
+        };
+        let visits = [
+            at(1, 1),
+            at(2, 9),
+            at(2, 5),
+            at(2, 1),
+            at(3, 5),
+            callee,
+            at(3, 5),
+            at(4, 1),
+        ];
+        let mut session = session_with_visits(&visits);
+        for line in [2, 3, 4] {
+            session.add_breakpoint("synthetic.src", line, None, None).unwrap();
+        }
+        assert_eq!(continue_walk(&mut session, &[true, true, true]), vec![1, 4, 7]);
+        assert_eq!(continue_walk(&mut session, &[false, false]), vec![4, 1]);
+    }
+
+    /// The same position written again with nothing changed is not a second
+    /// run: the JavaScript recorder writes the program's first position again
+    /// once its main thread has started.  A breakpoint there stops once.
+    #[test]
+    fn continue_keeps_a_position_written_twice_with_no_change_one_visit() {
+        let visits = [
+            at(9, 1),
+            at(1, 1),
+            at(1, 1),
+            at(1, 1),
+            iteration(1, 31, 0),
+            iteration(1, 31, 1),
+            at(2, 1),
+        ];
+        let mut session = session_with_visits(&visits);
+        session.add_breakpoint("synthetic.src", 1, None, None).unwrap();
+        assert_eq!(continue_walk(&mut session, &[true, true]), vec![1, 5]);
+        assert_eq!(continue_walk(&mut session, &[false]), vec![1]);
     }
 
     /// A condition that turns true part way through a statement fires where

@@ -31,6 +31,20 @@ pub trait ReplaySession: std::fmt::Debug {
         false
     }
 
+    /// Does a line breakpoint of this engine stop once per visit to its line?
+    ///
+    /// The materialized engine decides visits from the recording
+    /// (`MaterializedReplaySession::breakpoint_slot_fires_at`): one stop per
+    /// run of the line, and a loop's next iteration is a new run.  A
+    /// debugger-driven engine can resolve one source line to several
+    /// addresses and stop at each of them, so a caller that wants one hit per
+    /// visit steps past the line itself, which is right there and wrong here:
+    /// it would also step past every further iteration of a loop that never
+    /// leaves the line.
+    fn breakpoints_stop_once_per_visit(&self) -> bool {
+        false
+    }
+
     /// M2 — statement-granularity step-over.
     ///
     /// Advance by exactly one /statement/ rather than by one source

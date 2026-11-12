@@ -5956,6 +5956,14 @@ impl Handler {
 
                         *visit_entry = visit_index;
 
+                        // An engine whose breakpoints already stop once per
+                        // visit is Continued from the hit: the next stop is
+                        // the next visit, a loop's next iteration on this
+                        // same line included.
+                        if self.replay.breakpoints_stop_once_per_visit() {
+                            continue;
+                        }
+
                         // Step past the current source line to skip any
                         // remaining sub-breakpoint addresses. GDB/LLDB can
                         // resolve a single source-line breakpoint to
@@ -8398,8 +8406,8 @@ mod tests {
     // use event_db::{IndexInSingleTable, SingleTableId};
     // use futures::stream::Iter;
     use codetracer_trace_types::{
-        CallRecord, FieldTypeRecord, FunctionId, FunctionRecord, NONE_VALUE, StepId, StepRecord, TraceLowLevelEvent,
-        TraceMetadata, TypeId, TypeKind, TypeRecord, TypeSpecificInfo, ValueRecord,
+        CallRecord, FieldTypeRecord, FullValueRecord, FunctionId, FunctionRecord, NONE_VALUE, StepId, StepRecord,
+        TraceLowLevelEvent, TraceMetadata, TypeId, TypeKind, TypeRecord, TypeSpecificInfo, ValueRecord, VariableId,
     };
     use codetracer_trace_writer::non_streaming_trace_writer::NonStreamingTraceWriter;
     use codetracer_trace_writer::trace_writer::TraceWriter;
@@ -9355,6 +9363,147 @@ mod tests {
         handler.event_load(dap::Request::default(), sender.clone())?;
         handler.run_tracepoints(dap::Request::default(), make_tracepoints_args(1, 0), sender)?;
         assert_eq!(handler.event_db.single_tables.len(), 2);
+        Ok(())
+    }
+
+    /// One recorded step of [`setup_db_at_positions`]: its line and column,
+    /// and the value of the local `x` recorded there, if any.
+    type Position = (i64, i64, Option<i64>);
+
+    /// A materialized trace whose steps sit at `positions`, all in the one
+    /// frame, as a column-aware recorder writes them.
+    fn setup_db_at_positions(positions: &[Position]) -> Db {
+        let none_type = TypeRecord {
+            kind: TypeKind::None,
+            lang_type: "None".to_string(),
+            specific_info: TypeSpecificInfo::None,
+        };
+        let int_type = TypeRecord {
+            kind: TypeKind::Int,
+            lang_type: "int".to_string(),
+            specific_info: TypeSpecificInfo::None,
+        };
+        let mut trace: Vec<TraceLowLevelEvent> = vec![
+            TraceLowLevelEvent::Path(PathBuf::from("/test/workdir")),
+            TraceLowLevelEvent::Function(FunctionRecord {
+                path_id: PathId(0),
+                line: Line(1),
+                name: "<top-level>".to_string(),
+            }),
+            TraceLowLevelEvent::Call(CallRecord {
+                function_id: FunctionId(0),
+                args: vec![],
+            }),
+            TraceLowLevelEvent::Type(none_type),
+            TraceLowLevelEvent::Type(int_type),
+            TraceLowLevelEvent::VariableName("x".to_string()),
+        ];
+        for (line, _, x) in positions {
+            trace.push(TraceLowLevelEvent::Step(StepRecord {
+                path_id: PathId(0),
+                line: Line(*line),
+            }));
+            if let Some(x) = x {
+                trace.push(TraceLowLevelEvent::Value(FullValueRecord {
+                    variable_id: VariableId(0),
+                    value: ValueRecord::Int {
+                        i: *x,
+                        type_id: TypeId(1),
+                    },
+                }));
+            }
+        }
+        let mut db = Db::new(&PathBuf::from("/test/workdir"));
+        let mut trace_processor = TraceProcessor::new(&mut db);
+        trace_processor.postprocess(&trace).unwrap();
+        // `StepRecord` carries no column; give each step the one the
+        // column-aware reader would have decoded.
+        for (index, (_, column, _)) in positions.iter().enumerate() {
+            db.steps[StepId(index as i64)].column = Some(Line(*column));
+        }
+        for per_path in db.step_map.iter_mut() {
+            for steps in per_path.values_mut() {
+                for step in steps.iter_mut() {
+                    step.column = Some(Line(positions[step.step_id.0 as usize].1));
+                }
+            }
+        }
+        db
+    }
+
+    /// The step ids a tracepoint on `line` logs over `positions`.
+    fn tracepoint_hits(positions: &[Position], line: usize) -> Result<Vec<usize>, Box<dyn Error>> {
+        let (sender, _r) = mpsc::channel();
+        let mut handler = Handler::new(
+            TraceKind::Materialized,
+            RecreatorArgs::default(),
+            Box::new(setup_db_at_positions(positions)),
+        );
+        handler.event_load(dap::Request::default(), sender)?;
+        let stops = handler.handle_trace_steps(&make_tracepoints_args(line, 0))?;
+        Ok(stops.iter().map(|stop| stop.rr_ticks).collect())
+    }
+
+    /// A tracepoint logs once per iteration of a loop whose iterations never
+    /// leave its line.  The JavaScript recorder writes no step for the loop's
+    /// header between iterations, so `for (…) { var a = i; }` is the `for`
+    /// statement's step and then one step per run of `var a = i` at column 31,
+    /// each with the loop's variable changed, and the body of a loop written
+    /// over three lines is one step per run at line 2, column 3.  The program
+    /// opens on its first position written twice, as that recorder writes it.
+    /// Before, the sweep stepped past the whole line after its first hit and
+    /// logged one row.
+    #[test]
+    fn tracepoint_logs_every_iteration_of_a_loop_that_stays_on_its_line() -> Result<(), Box<dyn Error>> {
+        // The sweep starts on step 0 and Continues from it, so each fixture
+        // opens on a line no tracepoint is on (line 9, the program's entry).
+        let one_line = [
+            (9, 1, None),
+            (9, 1, None),
+            (1, 1, None),
+            (1, 31, Some(0)),
+            (1, 31, Some(1)),
+            (1, 31, Some(2)),
+            (1, 31, Some(3)),
+            (1, 31, Some(4)),
+            (2, 1, Some(4)),
+        ];
+        // Step 3, the first iteration, continues the `for` statement's visit.
+        assert_eq!(tracepoint_hits(&one_line, 1)?, vec![2, 4, 5, 6, 7]);
+
+        let body_line = [
+            (9, 1, None),
+            (1, 1, None),
+            (2, 3, Some(0)),
+            (2, 3, Some(1)),
+            (2, 3, Some(2)),
+            (2, 3, Some(3)),
+            (2, 3, Some(4)),
+            (4, 1, Some(4)),
+        ];
+        assert_eq!(tracepoint_hits(&body_line, 2)?, vec![2, 3, 4, 5, 6]);
+        Ok(())
+    }
+
+    /// The steps of one run of a statement are still one hit: a statement
+    /// whose steps move between columns (an EVM statement's opcodes) logs once
+    /// per run, a loop that comes back to the line logs each time, and the
+    /// same position written twice with nothing changed is one run.
+    #[test]
+    fn tracepoint_logs_one_row_per_run_of_a_statement() -> Result<(), Box<dyn Error>> {
+        let positions = [
+            (1, 1, None),
+            (2, 9, None),
+            (2, 5, None),
+            (2, 1, None),
+            (3, 1, None),
+            (2, 9, None),
+            (2, 9, None),
+            (2, 5, None),
+            (2, 1, None),
+            (4, 1, None),
+        ];
+        assert_eq!(tracepoint_hits(&positions, 2)?, vec![1, 5]);
         Ok(())
     }
 
