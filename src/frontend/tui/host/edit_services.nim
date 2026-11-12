@@ -145,7 +145,8 @@ proc wireEditServices*(rt: TuiRuntime; root: string; keymapFlag: string;
   state
 
 proc advanceNimTrace*(rt: TuiRuntime; edit: EditHostState;
-                     open: proc(request: TraceOpenRequest): string): bool =
+                     open: proc(request: TraceOpenRequest): string;
+                     followIntoDebug = true): bool =
   ## The Nim trace in flight, polled: once it settles, its recording is
   ## opened where the shared rule places it (`nimTracePlacement`, a new
   ## session tab) — or, in a loop that has no session tabs (`open` nil), the
@@ -161,7 +162,12 @@ proc advanceNimTrace*(rt: TuiRuntime; edit: EditHostState;
                           t.vm.tracePath
     return true
   let why = open(traceOpenRequestOf(t.vm.tracePath))
-  if why.len == 0 and rt.app.modes.product == pmEdit:
+  # `followIntoDebug`: whether `rt` is the runtime the recording is SHOWN in.
+  # The terminal's window has one runtime for all its tabs, so the new tab is
+  # shown in Debug mode through it; a pane server's session has a runtime of
+  # its own, the recording opens as ANOTHER session, and the session the
+  # trace was started from stays in Edit mode.
+  if why.len == 0 and followIntoDebug and rt.app.modes.product == pmEdit:
     # A replay opens in Debug mode (Mode-Transitions.md): a trace started
     # from Edit mode shows its recording, not the buffer it was asked from.
     rt.enterProductMode(pmDebug)

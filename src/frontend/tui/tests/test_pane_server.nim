@@ -27,6 +27,7 @@ import ../app/layout/project
 import ../host/pane_server
 import ./fixtures/fixture_provider
 import ./fixtures/plat53_noir_project
+import ./fixtures/plat65_nim_project
 from ../host/native_host import traceFolderProblem
 from backend/stdio_backend import DapStdioBackend
 
@@ -662,3 +663,62 @@ suite "HSF-E1: the pane server, over a real recording":
     check stopped.len == 10
     check stopped.len == 10 and toSeq(stopped.values).allIt(not it{"enabled"}.getBool)
     discard srv.request("shutdown")
+
+  test "HSF-E8: Nim's compile-time tracing at the editor's cursor":
+    # Editor-Hosted-Front-Ends §E12. The terminal traces a macro, a static
+    # block, a constant or an evaluation at its caret through the window's
+    # Nim tracer; an editor-hosted session's caret is the editor's cursor
+    # (`source/cursor`), and what the trace records opens as a session the
+    # editor is told of. No stand-in: PLAT-65's project, codetracer-nim's
+    # nimsuggest and `nim e --trace`, the product's tracer.
+    let missing = missingPrereq()
+    if missing.len > 0:
+      echo "  MISSING-PREREQ: ", missing
+      fail()
+      return
+    let project = writeNimProject("hsf-e8")
+    let srv = newPaneServer(dap = false)
+    srv.projectRoot = project.root
+    discard srv.request("initialize", %*{"capabilities": {"media": ["text"]},
+                                         "keymapOverrides": []})
+    let (opened, _) = srv.request("session/open", %*{"trace": project.recording})
+    let sid = opened{"result", "session"}.getInt
+    check sid > 0
+    # Edit mode: the project's file at the editor's cursor.
+    discard srv.request("operation/run", %*{"session": sid,
+      "operation": "session.toggle-product-mode"})
+    let source = project.root / "tracing.nim"
+    proc traceAt(operation: string; line, column: int): JsonNode =
+      ## Run `operation` with the editor's cursor at `line:column`; the
+      ## `session/opened` its recording is announced with, or nil.
+      discard srv.request("source/cursor", %*{"session": sid, "file": source,
+                                              "line": line, "column": column})
+      let (answer, _) = srv.request("operation/run", %*{"session": sid,
+        "operation": operation})
+      checkpoint(operation & " answered " & $answer)
+      check answer{"result", "ok"}.getBool
+      let deadline = epochTime() + 300.0
+      while epochTime() < deadline:
+        for m in srv.tick():
+          if m{"method"}.getStr == "session/opened":
+            return m{"params"}
+        sleep(100)
+    let staticTrace = traceAt("editor.trace-static-block-at-cursor",
+                              StaticLines.a, 5)
+    check not staticTrace.isNil
+    if not staticTrace.isNil:
+      check traceFolderProblem(staticTrace{"trace"}.getStr) == ""
+      check staticTrace{"session"}.getInt != sid
+    # The session the trace was started from stays in Edit mode: the
+    # recording is another session's (until 2026-11-12 the terminal's rule
+    # moved this one to Debug mode, and the next trace read the recording's
+    # file instead of the project's).
+    let (listed, _) = srv.request("session/list")
+    check listed{"result"}.getElems.anyIt(it{"session"}.getInt == sid and
+                                          it{"mode"}.getStr == "edit")
+    let macroTrace = traceAt("editor.trace-macro-at-cursor", TwiceLine, 1)
+    check not macroTrace.isNil
+    if not macroTrace.isNil:
+      check traceFolderProblem(macroTrace{"trace"}.getStr) == ""
+    discard srv.request("shutdown")
+    removeProject(project)
