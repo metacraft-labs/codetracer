@@ -212,7 +212,8 @@ proc createMirrorSession*(
 proc hostedPageRelays*(vm, action: string): bool =
   ## The actions a `ct host` page relays to the server's session
   ## (`createHostedPageMirror`): the panes' viewports, the call trace's
-  ## actions, and the request panel's selection, filters and detail tab. The
+  ## actions, the state pane's value-history toggle, and the request panel's
+  ## selection, filters and detail tab. The
   ## call trace's ViewModel takes no callback from the page, so all its
   ## actions run the same on either side. The request panel's window is
   ## loaded by the server's session, from the viewport the page relays, so
@@ -220,7 +221,19 @@ proc hostedPageRelays*(vm, action: string): bool =
   ## page alone would filter rows the page does not load. Its row activation
   ## (`jumpToHandler`) stays on the page, which installs the hook that opens
   ## a request recorded in another container (`openExternalTrace`).
+  ##
+  ## THE VALUE HISTORY IS LOADED BY THE SERVER'S SESSION. A row's history is
+  ## the answer to `ct/load-history`, which the page's ViewModel would send
+  ## through this mirror's inert backend, where it waits forever; and the
+  ## history is the server's (`StateVM.valueHistory` is backend-authoritative),
+  ## so a history the page loaded itself would be replaced by the server's on
+  ## its next batch. Relayed, the toggle opens the row on the server's
+  ## session, whose loader (`debugger_session.markReady`) asks its replay,
+  ## and the open row and its history come back in the next batch. A history
+  ## row's jump (`jumpToHistoryEntry`) stays on the page, which navigates
+  ## over its own connection (`ReplayDataStore.navigationBackend`).
   vm == "viewport" or vm == "calltrace" or
+    (vm == "state" and action == "toggleHistory") or
     (vm == "requestPanel" and action != "jumpToHandler")
 
 const HostedPageOwnedSignals = ["fileTree."]
@@ -260,6 +273,8 @@ proc createHostedPageMirror*(
   ##   connection to the replay, not the mirror's inert backend.
   ## * the request panel's filters, selection and detail tab: its window is
   ##   loaded on the server's session, so they must be that session's.
+  ## * the state pane's value-history toggle: the history is loaded by the
+  ##   server's session, over its connection to the replay.
   ##
   ## The other panels' actions stay on the page, as before: several reach
   ## callbacks only the page installs — the file tree opens a file in the

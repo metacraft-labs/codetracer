@@ -40,6 +40,7 @@ import ../app/app_vm
 import ../session_vm
 import ../store/[replay_data_store, types]
 import ../viewmodels/calltrace_vm   # `followDebuggerCall`
+import ../viewmodels/state_vm       # `loadValueHistory`
 import trace_source, stop_loader
 export stop_loader
 
@@ -334,6 +335,19 @@ proc markReady(s: DebuggerSession; trace: TraceSource) =
   # left the landing's frame marked for the rest of the session.
   if not s.app.session.calltraceVM.isNil:
     s.app.session.calltraceVM.followDebuggerCall()
+  # A row's value history is asked for by the state pane's ViewModel over
+  # this session's backend (`ct/load-history` at the current stop), as the
+  # desktop and the web page install it (`ui/state.initStateVMFromSession`).
+  # A session that is a PRIMARY for mirrors — a `ct host` page's server
+  # session, the VS Code extension host's — is where a mirror's
+  # `toggleHistory` runs (`mirror_session.hostedPageRelays`): without the
+  # loader here the row opened and stayed empty (codetracer-pm
+  # issues/2026-11-12-a-ct-host-page-never-shows-a-variables-value-history.md).
+  # A host that installed its own loader keeps it.
+  let stateVM = s.app.session.stateVM
+  if not stateVM.isNil and stateVM.onToggleHistory.isNil:
+    stateVM.onToggleHistory = proc(expression: string) =
+      stateVM.loadValueHistory(expression)
   if s.stops.isNil:
     s.stops = createStopLoader(s.app.session)
   if s.stopLoading == slmFollow:

@@ -30,6 +30,7 @@ import std/[json, jsonutils, options, sets, tables, unittest]
 import isonim/core/[async_compat, computation, owner, signals]
 
 import ../../backend/mock_backend
+import ../../sdk/[debugger_session, trace_source]
 import ../../session_vm
 import ../../store/replay_data_store
 import ../../store/types
@@ -1059,6 +1060,67 @@ suite "a ct host page's mirror (Shared-DOM-Front-Ends D2)":
       ck mock.findCommand("ct/seek-to-geid").isNone
       mirror.dispose()
       host.dispose()
+      done()
+
+  test "a value history opened on the page is loaded by the server's session":
+    # The state pane's "Toggle history value" opens a variable's history,
+    # the answer to `ct/load-history` at the current stop. A `ct host` page's
+    # ViewModel sent that request through its mirror's inert backend, where
+    # it waited forever: the row opened empty and no request reached the
+    # replay (codetracer-pm
+    # issues/2026-11-12-a-ct-host-page-never-shows-a-variables-value-history.md).
+    # The toggle is relayed, and the server's session — a `DebuggerSession`,
+    # as `hosted_primary` makes it — loads the history over its own backend.
+    # The primary is the SDK's session (not `newPrimary`'s bare one) because
+    # its loader is the SDK's (`debugger_session.markReady`).
+    createRoot proc(done: proc()) =
+      let mock = newMockBackendService(autoRespond = true)
+      let debugger = newDebuggerSession(mock.toBackendService())
+      debugger.attach(localFolderTrace("/trace"))
+      let primary = debugger.session
+      let host = newSyncHost(manual)
+      host.addPrimary("ct-host/replay-0", primary)
+      let link = newInMemoryLink()
+      host.attach(link.a, follow = "ct-host/replay-0")
+      let mirror = createHostedPageMirror(link.b)
+      link.settle()
+      primary.moveTo(120, "shield.nr", 9)
+      link.settle()
+      drainPlatformCallbacks()
+      link.settle()
+
+      mock.expect("ct/load-history", %*{
+        "type": "response", "command": "ct/load-history", "success": true,
+        "body": {"expression": "damage", "total": 2, "start": 0, "results": [
+          {"location": {"path": "shield.nr", "line": 9, "rrTicks": 100},
+           "value": {"kind": 7, "i": "0", "typ": {"kind": 7,
+                                                   "langType": "u32"}}},
+          {"location": {"path": "shield.nr", "line": 9, "rrTicks": 110},
+           "value": {"kind": 7, "i": "4026", "typ": {"kind": 7,
+                                                      "langType": "u32"}}}]}})
+      mock.clearReceivedCommands()
+      mirror.session.stateVM.toggleHistory("damage")
+      link.settle()
+      drainPlatformCallbacks()
+      link.settle()
+
+      let sent = mock.findCommand("ct/load-history")
+      ck sent.isSome
+      if sent.isSome:
+        ck sent.get.args["expression"].getStr == "damage"
+        ck sent.get.args["location"]["rrTicks"].getInt == 120
+      # The page shows the row open, with the server's history in it.
+      ck "damage" in mirror.session.stateVM.expandedHistories.val
+      let histories = mirror.session.stateVM.valueHistory.val
+      ck histories.hasKey("damage")
+      if histories.hasKey("damage"):
+        ck histories["damage"].len == 2
+        ck histories["damage"].len == 2 and
+          histories["damage"][1].locationTicks == 110
+      ck primary.stateVM.valueHistory.val.hasKey("damage")
+      mirror.dispose()
+      host.dispose()
+      debugger.dispose()
       done()
 
   test "a pane measured before the server's session exists loads once it does":
