@@ -522,7 +522,7 @@ proc facadeOf*(ed: SharedEditor): JsObject =
     let t = if isNilOrUndef(p["scrollTop"]): ed.scrollTop else: int(jsNum(p["scrollTop"]))
     let l = if isNilOrUndef(p["scrollLeft"]): ed.scrollLeft else: int(jsNum(p["scrollLeft"]))
     ed.setScroll(t, l)
-  f["getScrollHeight"] = proc(): int = ed.contentHeight
+  f["getScrollHeight"] = proc(): int = ed.scrollHeightPx
   f["getContentHeight"] = proc(): int = ed.contentHeight
   f["getScrollWidth"] = proc(): int = ed.width
   f["getTopForLineNumber"] = proc(line: int): int = ed.topForLine(line)
@@ -547,7 +547,7 @@ proc facadeOf*(ed: SharedEditor): JsObject =
   f["revealLine"] = proc(line: int) = ed.revealLine(line)
   f["revealLineInCenter"] = proc(line: int) = ed.revealLine(line, center = true)
   f["revealLineInCenterIfOutsideViewport"] = proc(line: int) =
-    if line notin ed.visible: ed.revealLine(line, center = true)
+    if not ed.lineFullyVisible(line): ed.revealLine(line, center = true)
   f["revealLineNearTop"] = proc(line: int) = ed.revealLine(line, center = true)
   f["revealLines"] = proc(a, b: int) = ed.revealLine(a)
   f["revealLinesInCenter"] = proc(a, b: int) = ed.revealLine(a, center = true)
@@ -556,21 +556,40 @@ proc facadeOf*(ed: SharedEditor): JsObject =
     ed.revealLine(int(jsNum(p["lineNumber"])), center = true)
   f["revealPositionInCenterIfOutsideViewport"] = proc(p: JsObject) =
     let line = int(jsNum(p["lineNumber"]))
-    if line notin ed.visible: ed.revealLine(line, center = true)
+    if not ed.lineFullyVisible(line): ed.revealLine(line, center = true)
   f["revealRange"] = proc(r: JsObject) = ed.revealLine(int(jsNum(r["startLineNumber"])))
   f["revealRangeInCenter"] = proc(r: JsObject) =
     ed.revealLine(int(jsNum(r["startLineNumber"])), center = true)
   f["revealRangeInCenterIfOutsideViewport"] = proc(r: JsObject) =
     let line = int(jsNum(r["startLineNumber"]))
-    if line notin ed.visible: ed.revealLine(line, center = true)
+    if not ed.lineFullyVisible(line): ed.revealLine(line, center = true)
   f["saveViewState"] = proc(): JsObject =
+    ## Monaco's view state carries every cursor's selection (`cursorState`),
+    ## so a re-mounted pane (a mode switch) gives the selection back.
     result = jsNew()
     result["scrollTop"] = ed.scrollTop
     result["scrollLeft"] = ed.scrollLeft
     result["head"] = ed.doc.state.primaryHead
+    let sels = jsArray()
+    for r in ed.doc.state.selection.ranges:
+      let pair = jsArray()
+      pair.jsPush(toJs(r.anchor))
+      pair.jsPush(toJs(r.head))
+      sels.jsPush(pair)
+    result["selections"] = sels
   f["restoreViewState"] = proc(s: JsObject) =
     if isNilOrUndef(s): return
-    if not isNilOrUndef(s["head"]):
+    let size = ed.doc.state.doc.len
+    if not isNilOrUndef(s["selections"]) and jsLen(s["selections"]) > 0:
+      var ranges: seq[SelectionRange] = @[]
+      for i in 0 ..< jsLen(s["selections"]):
+        let pair = s["selections"][i]
+        ranges.add spanRange(clamp(int(jsNum(pair[0])), 0, size),
+                             clamp(int(jsNum(pair[1])), 0, size))
+      discard ed.runCoreStep("api", proc(d: var EditingDocument): EditingOutcome =
+        d.state.selection = editorSelection(ranges)
+        eoMoved)
+    elif not isNilOrUndef(s["head"]):
       let h = int(jsNum(s["head"]))
       ed.setSelectionOffsets(h, h)
     if not isNilOrUndef(s["scrollTop"]):

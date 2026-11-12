@@ -178,7 +178,7 @@ type
     lineNumbersFn: JsObject
     darkTheme*: bool
     # DOM
-    host*, root*, guard, margin, marginOverlays, scrollable, linesContent,
+    host*, root*, guard, margin, marginOverlays, glyphLayer, scrollable, linesContent,
       overlays, zonesLayer, linesLayer, widgetsLayer, cursorsLayer,
       textarea*, vbar, vslider, hbar, hslider, overlayWidgetsLayer,
       measureSpan: JsObject
@@ -360,7 +360,16 @@ proc textViewportWidth(ed: SharedEditor): int =
   max(0, ed.width - ed.gutterPx - ScrollbarPx)
 
 proc maxScrollTop(ed: SharedEditor): int =
-  max(0, ed.contentHeight - ed.textViewportHeight)
+  ## Monaco's: with `scrollBeyondLastLine` (its default) the last line can
+  ## scroll up to the top of the view; without it, to the bottom.
+  let beyond = ed.options.isNil or isNilOrUndef(ed.options["scrollBeyondLastLine"]) or
+               ed.options["scrollBeyondLastLine"].to(bool)
+  if beyond: max(0, ed.contentHeight - ed.lineHeight)
+  else: max(0, ed.contentHeight - ed.textViewportHeight)
+
+proc scrollHeightPx*(ed: SharedEditor): int =
+  ## Monaco's `getScrollHeight`: what the view can scroll through.
+  ed.maxScrollTop + ed.textViewportHeight
 
 proc clampScroll(ed: SharedEditor) =
   ed.scrollTop = clamp(ed.scrollTop, 0, ed.maxScrollTop)
@@ -448,8 +457,25 @@ proc lineWidthPx(ed: SharedEditor; line1: int): float =
   let t = ed.lineText(line1)
   ed.xOfByteCol(line1, t.len)
 
+var codiconProbe = -1
+
+proc codiconFontPresent(): bool =
+  ## Whether the page carries Monaco's codicon rules (the folding chevron's
+  ## `::before` glyph), probed once.
+  if codiconProbe < 0:
+    var present = false
+    {.emit: ["""(function(){ try { const e = document.createElement('div');
+      e.className = 'codicon codicon-folding-expanded'; e.style.position = 'absolute';
+      e.style.visibility = 'hidden'; document.body.appendChild(e);
+      const c = getComputedStyle(e, '::before').content;
+      """, present, """ = !!c && c !== 'none' && c !== 'normal' && c !== '""';
+      e.remove(); } catch (_) {} })();"""].}
+    codiconProbe = (if present: 1 else: 0)
+  codiconProbe == 1
+
 proc renderGutterLine(ed: SharedEditor; line1, top: int; deco: LineDecorations;
-                      active, foldable, folded: bool): JsObject =
+                      active, foldable, folded: bool;
+                      highlighted = false): JsObject =
   let row = createEl("div")
   row.setStyle("position", "absolute")
   row.setStyle("top", cstring($top & "px"))
@@ -458,18 +484,29 @@ proc renderGutterLine(ed: SharedEditor; line1, top: int; deco: LineDecorations;
   row.setAttr("data-line", cstring($line1))
   var mcls = ""
   for c in deco.marginClasses: mcls.add c & " "
-  if active: mcls.add "current-line-margin"
+  if active or highlighted: mcls.add "current-line-margin"
   if mcls.len > 0: row.setClass(cstring(mcls.strip))
-  let glyph = createEl("div")
-  var gcls = "cgmr codicon"
-  for c in deco.glyphClasses: gcls.add " " & c
-  glyph.setClass(cstring(gcls))
-  glyph.setStyle("position", "absolute")
-  glyph.setStyle("left", "0px")
-  glyph.setStyle("width", cstring($GlyphMarginPx & "px"))
-  glyph.setStyle("height", cstring($ed.lineHeight & "px"))
-  glyph.setAttr("data-ct-target", "glyph")
-  row.appendChild(glyph)
+  # Monaco's row: the current line's margin highlight, the line decorations
+  # that exist, the number, and the folding control where a block starts —
+  # an element only where there is something to draw, in this order, since
+  # the page paints every `div` of the margin's rows with the gutter's
+  # ground (`text_editor.styl`) and an empty cell would cover the number.
+  if active or highlighted:
+    let hl = createEl("div")
+    hl.setClass("current-line current-line-margin-both")
+    hl.setStyle("width", cstring($ed.gutterPx & "px"))
+    row.appendChild(hl)
+  if deco.lineDecoClasses.len > 0:
+    let ldeco = createEl("div")
+    var lcls = "cldr"
+    for c in deco.lineDecoClasses: lcls.add " " & c
+    ldeco.setClass(cstring(lcls))
+    ldeco.setStyle("position", "absolute")
+    ldeco.setStyle("left", cstring($(ed.gutterPx - LineDecorationsPx - FoldingPx) & "px"))
+    ldeco.setStyle("width", cstring($LineDecorationsPx & "px"))
+    ldeco.setStyle("height", cstring($ed.lineHeight & "px"))
+    ldeco.setAttr("data-ct-target", "decorations")
+    row.appendChild(ldeco)
   let num = createEl("div")
   num.setClass(cstring(if active: "line-numbers active-line-number" else: "line-numbers"))
   num.setStyle("position", "absolute")
@@ -480,29 +517,39 @@ proc renderGutterLine(ed: SharedEditor; line1, top: int; deco: LineDecorations;
   num.setAttr("data-ct-target", "number")
   num.setHtml(ed.numberLabel(line1))
   row.appendChild(num)
-  let ldeco = createEl("div")
-  var lcls = "cldr"
-  for c in deco.lineDecoClasses: lcls.add " " & c
-  ldeco.setClass(cstring(lcls))
-  ldeco.setStyle("position", "absolute")
-  ldeco.setStyle("left", cstring($(ed.gutterPx - LineDecorationsPx - FoldingPx) & "px"))
-  ldeco.setStyle("width", cstring($LineDecorationsPx & "px"))
-  ldeco.setStyle("height", cstring($ed.lineHeight & "px"))
-  ldeco.setAttr("data-ct-target", "decorations")
-  row.appendChild(ldeco)
-  let fold = createEl("div")
-  fold.setStyle("position", "absolute")
-  fold.setStyle("left", cstring($(ed.gutterPx - FoldingPx) & "px"))
-  fold.setStyle("width", cstring($FoldingPx & "px"))
-  fold.setStyle("height", cstring($ed.lineHeight & "px"))
-  fold.setAttr("data-ct-target", "fold")
   if foldable:
+    let fold = createEl("div")
+    fold.setStyle("position", "absolute")
+    fold.setStyle("left", cstring($(ed.gutterPx - FoldingPx) & "px"))
+    fold.setStyle("top", "0px")
+    fold.setStyle("width", cstring($FoldingPx & "px"))
+    fold.setStyle("height", cstring($ed.lineHeight & "px"))
+    fold.setAttr("data-ct-target", "fold")
     fold.setClass(cstring(if folded: "cldr codicon codicon-folding-collapsed ct-fold-toggle"
                           else: "cldr codicon codicon-folding-expanded ct-fold-toggle"))
     fold.setAttr("data-folded", cstring(if folded: "true" else: "false"))
-    fold.textContent = cstring(if folded: "›" else: "˅")
-  row.appendChild(fold)
+    # The chevron is the codicon font's where the page has Monaco's styles;
+    # a page without them gets a character.
+    if not codiconFontPresent():
+      fold.textContent = cstring(if folded: "›" else: "˅")
+    row.appendChild(fold)
   row
+
+proc glyphCell(ed: SharedEditor; line1, top: int; deco: LineDecorations): JsObject =
+  ## A line's glyph-margin cell, in the glyph layer (`.glyph-margin-widgets`)
+  ## as Monaco draws its glyph decorations: a `.cgmr` per line at the line's
+  ## top, carrying the decorations' `glyphMarginClassName`s.
+  result = createEl("div")
+  var gcls = "cgmr codicon"
+  for c in deco.glyphClasses: gcls.add " " & c
+  result.setClass(cstring(gcls))
+  result.setStyle("position", "absolute")
+  result.setStyle("left", "0px")
+  result.setStyle("top", cstring($top & "px"))
+  result.setStyle("width", cstring($GlyphMarginPx & "px"))
+  result.setStyle("height", cstring($ed.lineHeight & "px"))
+  result.setAttr("data-line", cstring($line1))
+  result.setAttr("data-ct-target", "glyph")
 
 proc overlayRect(parent: JsObject; cls: string; left, width: float) =
   let el = createEl("div")
@@ -544,6 +591,7 @@ proc render*(ed: SharedEditor) =
   ed.linesContent.setStyle("top", cstring($(-ed.scrollTop) & "px"))
   ed.linesContent.setStyle("left", cstring($(-ed.scrollLeft) & "px"))
   ed.marginOverlays.setStyle("top", cstring($(-ed.scrollTop) & "px"))
+  ed.glyphLayer.setStyle("top", cstring($(-ed.scrollTop) & "px"))
   let lines = lay.visibleLines(ed.scrollTop, ed.textViewportHeight)
   ed.visible = lines
   let firstL0 = if lines.len > 0: lines[0] - 1 else: 0
@@ -551,14 +599,19 @@ proc render*(ed: SharedEditor) =
   let decoByLine = ed.decos.decorationsByLine(ed.index, firstL0, lastL0)
   let caretLine0 = ed.index.lineOfOffset(ed.primaryOffset)
   var hasSelection = false
+  # Monaco highlights the line of every cursor, not only the primary's.
+  var caretLines0: seq[int] = @[caretLine0]
   for r in ed.doc.state.selection.ranges:
     if not r.isEmpty: hasSelection = true
+    let hl0 = ed.index.lineOfOffset(r.head)
+    if hl0 notin caretLines0: caretLines0.add hl0
   let highlightCurrent = ed.options.isNil or
     isNilOrUndef(ed.options["renderLineHighlight"]) or
     $jsStr(ed.options["renderLineHighlight"]) != "none"
   # ---- write: the lines, the gutter and the overlay rows ----------------
   ed.linesLayer.clearChildren()
   ed.marginOverlays.clearChildren()
+  ed.glyphLayer.clearChildren()
   ed.overlays.clearChildren()
   var overlayRows = initTable[int, JsObject]()
   var widestChars = 0
@@ -606,7 +659,8 @@ proc render*(ed: SharedEditor) =
     vl.appendChild(outer)
     ed.linesLayer.appendChild(vl)
     ed.marginOverlays.appendChild(ed.renderGutterLine(line1, top, deco,
-      line0 == caretLine0, foldable, folded))
+      line0 == caretLine0, foldable, folded, line0 in caretLines0))
+    ed.glyphLayer.appendChild(ed.glyphCell(line1, top, deco))
     let ov = createEl("div")
     ov.setStyle("position", "absolute")
     ov.setStyle("top", cstring($top & "px"))
@@ -621,7 +675,7 @@ proc render*(ed: SharedEditor) =
       cd.setStyle("width", "100%")
       cd.setStyle("height", "100%")
       ov.appendChild(cd)
-    if line0 == caretLine0 and not hasSelection and highlightCurrent:
+    if line0 in caretLines0 and not hasSelection and highlightCurrent:
       let cl = createEl("div")
       cl.setClass("current-line")
       cl.setStyle("position", "absolute")
@@ -979,7 +1033,7 @@ proc fireScroll(ed: SharedEditor; topChanged, leftChanged: bool) =
   let ev = jsNew()
   ev["scrollTop"] = ed.scrollTop
   ev["scrollLeft"] = ed.scrollLeft
-  ev["scrollHeight"] = ed.contentHeight
+  ev["scrollHeight"] = ed.scrollHeightPx
   ev["scrollTopChanged"] = topChanged
   ev["scrollLeftChanged"] = leftChanged
   ed.fire("scroll", ev)
@@ -993,6 +1047,12 @@ proc setScroll*(ed: SharedEditor; top, left: int) =
   if ed.scrollTop != t0 or ed.scrollLeft != l0:
     ed.render()
     ed.fireScroll(ed.scrollTop != t0, ed.scrollLeft != l0)
+
+proc lineFullyVisible*(ed: SharedEditor; line1: int): bool =
+  ## Monaco's test for the `…IfOutsideViewport` reveals: the line's whole
+  ## box inside the view (a line cut by an edge is outside).
+  let top = ed.topForLine(line1)
+  top >= ed.scrollTop and top + ed.lineHeight <= ed.scrollTop + ed.textViewportHeight
 
 proc revealLine*(ed: SharedEditor; line1: int; center = false) =
   let top = ed.topForLine(line1)
@@ -1096,6 +1156,16 @@ proc hitAt(ed: SharedEditor; clientX, clientY: float; target: JsObject): Hit =
           let spanText = $jsStr(n.data)
           byteCol = from0 + byteColumnOf(spanText, off16 + 1)
           found = true
+          # A press on the middle of a character: Monaco places the caret
+          # after it (the browser's caret position rounds the tie to the
+          # left). Measured against the drawn boundaries either side.
+          let xr = clientX - jsNum(rectOf(ed.linesContent).left)
+          if byteCol < lt.len:
+            var nextCol = byteCol + 1
+            while nextCol < lt.len and (ord(lt[nextCol]) and 0xC0) == 0x80: inc nextCol
+            let a = ed.xOfByteCol(result.line1, byteCol)
+            let b = ed.xOfByteCol(result.line1, nextCol)
+            if b > a and xr >= (a + b) / 2 - 0.5: byteCol = nextCol
     if not found:
       # Past the end of the line, or between spans: by x.
       let x = clientX - jsNum(rectOf(ed.linesContent).left)
@@ -1262,9 +1332,11 @@ proc refreshFindWidget(ed: SharedEditor) =
   if ed.findWidget.isNil: return
   if not ed.find.open:
     ed.findWidget.setStyle("display", "none")
+    discard ed.findWidget.classList.remove(cstring"visible")
     ed.root.setAttr("data-ct-find", "closed")
     return
   ed.findWidget.setStyle("display", "flex")
+  discard ed.findWidget.classList.add(cstring"visible")
   ed.root.setAttr("data-ct-find", "open")
   ed.findCount.textContent = cstring(ed.find.countText(ed.doc))
   let caseOn = ed.doc.state.search.options.caseSensitive
@@ -1279,7 +1351,7 @@ proc refreshFindWidget(ed: SharedEditor) =
 
 proc afterFindMove(ed: SharedEditor; r: FindReveal) =
   if r.line > 0:
-    if r.line notin ed.visible: ed.revealLine(r.line, center = true)
+    if not ed.lineFullyVisible(r.line): ed.revealLine(r.line, center = true)
   ed.refreshFindWidget()
   ed.fireCursor("find")
   ed.render()
@@ -1504,6 +1576,17 @@ proc measureHost(ed: SharedEditor) =
     let ev = jsNew()
     ed.fire("layout", ev)
 
+proc massagedFontFamily*(family: string): string =
+  ## The family Monaco draws with: the option's, then Monaco's platform
+  ## default (`EDITOR_FONT_DEFAULTS.fontFamily`) as the fallback.
+  let fallback = case hostPlatform()
+    of pkMac: "Menlo, Monaco, \"Courier New\", monospace"
+    of pkWindows: "Consolas, \"Courier New\", monospace"
+    else: "\"Droid Sans Mono\", \"monospace\", monospace"
+  if family.len == 0: fallback
+  elif family.endsWith(fallback): family
+  else: family & ", " & fallback
+
 proc defaultLineHeight*(fontSize: int; mac: bool): int =
   ## Monaco's line height for a font size: `fontSize * 1.5` on macOS,
   ## `* 1.35` elsewhere (`EditorFontInfo`'s golden ratio), rounded.
@@ -1618,7 +1701,7 @@ proc newSharedEditor*(host: JsObject; text, path, language: string;
                  ("font-size", $ed.fontSize & "px"),
                  ("--ct-shared-editor-line-height", $ed.lineHeight & "px")])
   if fontFamily.len > 0:
-    root.setStyle("font-family", cstring(fontFamily))
+    root.setStyle("font-family", cstring(massagedFontFamily(fontFamily)))
   ed.root = root
   let guard = createEl("div")
   guard.setClass("overflow-guard")
@@ -1637,6 +1720,20 @@ proc newSharedEditor*(host: JsObject; text, path, language: string;
   mo.styleBox([("position", "absolute"), ("left", "0"), ("width", "100%")])
   margin.appendChild(mo)
   ed.marginOverlays = mo
+  # Monaco's glyph margin: the column (`.glyph-margin`, what a user aims at)
+  # and the layer its decorations are drawn in (`.glyph-margin-widgets`).
+  let gcol = createEl("div")
+  gcol.setClass("glyph-margin")
+  gcol.styleBox([("position", "absolute"), ("top", "0"), ("left", "0"),
+                 ("width", $GlyphMarginPx & "px"), ("height", "100%"),
+                 ("pointer-events", "none")])
+  margin.appendChild(gcol)
+  let gl = createEl("div")
+  gl.setClass("glyph-margin-widgets")
+  gl.styleBox([("position", "absolute"), ("left", "0"),
+               ("width", $GlyphMarginPx & "px")])
+  margin.appendChild(gl)
+  ed.glyphLayer = gl
   let sc = createEl("div")
   sc.setClass("monaco-scrollable-element editor-scrollable")
   sc.setAttr("role", "presentation")
@@ -1646,7 +1743,12 @@ proc newSharedEditor*(host: JsObject; text, path, language: string;
   ed.scrollable = sc
   let lc = createEl("div")
   lc.setClass("lines-content monaco-editor-background")
-  lc.styleBox([("position", "absolute"), ("width", "1000000px")])
+  # Monaco's: a strictly contained, composited box, so what the page's
+  # widgets draw `position: fixed` (the flow's value chips) is placed in the
+  # editor's text, not in the window.
+  lc.styleBox([("position", "absolute"), ("width", "1000000px"),
+               ("height", "1000000px"), ("overflow", "hidden"),
+               ("contain", "strict"), ("transform", "translate3d(0px, 0px, 0px)")])
   sc.appendChild(lc)
   ed.linesContent = lc
   let ov = createEl("div")
@@ -2048,7 +2150,7 @@ proc setFont*(ed: SharedEditor; fontSize: int; fontFamily: string) =
        jsNum(ed.options["lineHeight"]) <= 0:
       ed.lineHeight = defaultLineHeight(fontSize, hostPlatform() == pkMac)
   if fontFamily.len > 0:
-    ed.root.setStyle("font-family", cstring(fontFamily))
+    ed.root.setStyle("font-family", cstring(massagedFontFamily(fontFamily)))
   ed.measureFont()
   ed.render()
 

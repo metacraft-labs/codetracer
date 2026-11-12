@@ -488,11 +488,27 @@ proc installSemanticStyles() =
   el.textContent = cstring(css)
   {.emit: ["(document.head || document.documentElement).appendChild(", el, ");"].}
 
+proc semanticEnabled(ed: SharedEditor): bool =
+  let o = ed.options
+  if o.isNil: return false
+  let v = o[cstring"semanticHighlighting.enabled"]
+  if not isNilOrUndef(v): return v.to(bool)
+  let nested = o[cstring"semanticHighlighting"]
+  not isNilOrUndef(nested) and not isNilOrUndef(nested["enabled"]) and
+    nested["enabled"].to(bool)
+
 proc requestSemantic(st: LspState) {.async.} =
   let ed = st.ed
   if not st.ready or ed.visible.len == 0: return
   let (kind, uri) = st.target()
   if not serverHas(cstring(kind), "semanticTokensProvider"): return
+  # Asked only where the editor's options turn Monaco's semantic
+  # highlighting on (`semanticHighlighting.enabled`). The desktop's editors
+  # do not, and Monaco there sends no semantic-token request (measured: the
+  # trace-macro scenario's language-server traffic, both editors) — which
+  # matters, since a range request the Nim server does not answer holds up
+  # every request queued behind it, the macro trace's among them.
+  if not semanticEnabled(ed): return
   let version = ed.doc.timeline.version
   let first = ed.visible[0]
   let last = ed.visible[^1]
@@ -574,6 +590,13 @@ proc installSharedEditorLsp*(ed: SharedEditor; target: LspTarget;
   installSemanticStyles()
   discard ed.on("mouseMove", toJs(proc(ev: JsObject) = st.onMouseMove(ev)))
   discard ed.on("mouseDown", toJs(proc(ev: JsObject) =
+    # A press hides the hover and cancels the one pending, as Monaco's hover
+    # controller does: the server is asked again only after the pointer
+    # moves on.
+    if st.hoverTimer != 0:
+      clearTimeoutJs(st.hoverTimer)
+      st.hoverTimer = 0
+    st.hideHover()
     # Ctrl+click (Cmd+click) on a symbol: Monaco's go to definition. In a
     # read-only (Debug) editor the press is the debugger's line jump
     # (Editor-Pane.md MC.6), so only a writable editor takes it.

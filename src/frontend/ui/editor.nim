@@ -4235,6 +4235,14 @@ proc cancelEditorFind*(): bool =
   ## `find.cancel` on the desktop: Monaco's find widget closed and the
   ## selections and both scroll offsets put back exactly as they were when
   ## `find.open` ran. Answers whether there was a find to cancel.
+  # The shared editor keeps its own origin (its find session's): its
+  # widget closes restoring the selection and the scroll it opened over.
+  for ed in sharedEditors:
+    if ed.find.open:
+      ed.closeFindWidget(restore = true)
+      ed.focusEditor()
+      desktopFindOrigin = DesktopFindOrigin()
+      return true
   let o = desktopFindOrigin
   desktopFindOrigin = DesktopFindOrigin()
   if o.editor.isNil or o.editor.monacoEditor.isNil:
