@@ -35,6 +35,20 @@
 ##     template's or an inline proc's body at the line the directive names.
 ##     The artefact's ceiling says so (`hasInliningRecords = false`).
 ##
+## ## THE CODETRACER COMPILER WRITES A SOURCE MAP INSTEAD
+##
+## CodeTracer's own Nim compiler (codetracer-nim, "V3") writes no `#line`
+## directives and no `FX_` table: with `--sourcemap:on` it writes a Source
+## Map v3 file beside each C file, `<module>.nim.c.map`
+## (https://sourcemaps.info/spec.html; codetracer-nim `compiler/cgen.nim`),
+## and `ct record` compiles every Nim program that way
+## (`ct/trace/recorder_dispatch.nim`). The map is the same artefact in
+## another form: each generated line's first mapped segment names the Nim
+## position it came from, and a run of lines naming the same Nim line is
+## one anchor, as a directive's run is (`mapRowsOf`, `nimCListing`'s
+## `mapText`). A file with directives is read by them; one without is read
+## by its map.
+##
 ## ## WHICH C FILE
 ##
 ## A Nim module's C draws from many sources (every `system` include names
@@ -42,7 +56,7 @@
 ## module's own C file is the one whose DIRECTIVES name `S` most
 ## (`nimCFileFor`); the debugger's stop names one directly
 ## (`StopLocation.cPath`), which the host prefers when it has it.
-import std/[strutils, tables]
+import std/[json, strutils, tables]
 
 import ./generated_code_vm
 import ./generated_code_anchors
@@ -103,11 +117,86 @@ proc lineDirectives*(lines: openArray[string]): seq[NimLineDirective] =
              else: files.getOrDefault(name, "")
     result.add NimLineDirective(row: i, line: line, path: path)
 
-proc nimCListing*(cText, sourcePath: string): GeneratedListing =
+const
+  Base64Digits = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+    ## Source Map v3's VLQ digits (the spec's "Base64 VLQ").
+
+proc vlqDigit(c: char): int =
+  Base64Digits.find(c)
+
+proc decodeVlq(s: string; i: var int; ok: var bool): int =
+  ## One Base64 VLQ value of `s` from `i`: five bits per digit, the sixth the
+  ## continuation, the sign in the result's lowest bit.
+  var shift = 0
+  var value = 0
+  while true:
+    if i >= s.len:
+      ok = false
+      return 0
+    let d = vlqDigit(s[i])
+    inc i
+    if d < 0:
+      ok = false
+      return 0
+    value += (d and 31) shl shift
+    if (d and 32) == 0:
+      break
+    shift += 5
+  if (value and 1) == 1: -(value shr 1) else: value shr 1
+
+proc mapRowsOf*(mapText: string): seq[tuple[path: string, line: int]] =
+  ## Per generated line of a Source Map v3, the Nim position its first mapped
+  ## segment names (`line` 1-based; 0 for a line with no mapped segment).
+  ## Empty when `mapText` is not a version-3 map.
+  if not mapText.strip.startsWith("{"):
+    return
+  var doc: JsonNode
+  try:
+    doc = parseJson(mapText)
+  except:
+    # Bare: on the JS backend a malformed document can surface as a native
+    # error that `CatchableError` does not match, and a broken map is no
+    # map on every backend.
+    return
+  if doc.kind != JObject or doc{"version"}.getInt(0) != 3:
+    return
+  let root = doc{"sourceRoot"}.getStr("")
+  var sources: seq[string] = @[]
+  for src in doc{"sources"}.getElems:
+    let p = src.getStr("")
+    sources.add(if root.len > 0 and not p.startsWith("/"):
+                  root.strip(leading = false, chars = {'/'}) & "/" & p
+                else: p)
+  let mappings = doc{"mappings"}.getStr("")
+  # The fields after the column are relative to the previous segment's,
+  # across lines; the column resets on each line.
+  var source, origLine = 0
+  for lineText in mappings.split(';'):
+    var row = (path: "", line: 0)
+    for segment in lineText.split(','):
+      if segment.len == 0:
+        continue
+      var i = 0
+      var ok = true
+      discard decodeVlq(segment, i, ok)          # generated column
+      if not ok or i >= segment.len:
+        continue                                  # a 1-field segment: unmapped
+      source += decodeVlq(segment, i, ok)
+      origLine += decodeVlq(segment, i, ok)
+      if not ok:
+        return @[]
+      if row.line == 0 and source >= 0 and source < sources.len:
+        row = (path: sources[source], line: origLine + 1)
+    result.add row
+
+proc nimCListing*(cText, sourcePath: string;
+                  mapText = ""): GeneratedListing =
   ## The `nim.c` listing of one generated C file, described as the listing of
   ## `sourcePath` (the file the cursor is in, which `GeneratedCodeVM`
   ## compares against). Every directive's run is an anchor, whichever source
   ## it names: a cursor in an included file's line still finds its C here.
+  ## A file with no directives is anchored by its Source Map v3, `mapText`
+  ## (the `.c.map` beside it), when there is one.
   let lines = cText.splitLines()
   # `splitLines` gives a trailing "" for a file that ends in a newline: that
   # is not a row the compiler printed.
@@ -118,6 +207,24 @@ proc nimCListing*(cText, sourcePath: string): GeneratedListing =
   for i in 0 ..< count:
     result.rows.add GeneratedRow(index: i, text: lines[i])
   let directives = lineDirectives(lines.toOpenArray(0, count - 1))
+  if directives.len == 0 and mapText.len > 0:
+    # A run is a stretch of lines whose first segments name one Nim line.
+    let mapped = mapRowsOf(mapText)
+    var i = 0
+    while i < min(count, mapped.len):
+      let at = mapped[i]
+      if at.line <= 0:
+        inc i
+        continue
+      var last = i
+      while last + 1 < min(count, mapped.len) and mapped[last + 1] == at:
+        inc last
+      result.anchors.add MappingAnchor(
+        generatedFirst: i, generatedLast: last, fidelity: mfCoarse,
+        sources: @[SourceRegion(path: at.path, startLine: at.line,
+                                endLine: at.line)])
+      i = last + 1
+    return
   for k, d in directives:
     if d.path.len == 0:
       continue
@@ -129,11 +236,16 @@ proc nimCListing*(cText, sourcePath: string): GeneratedListing =
       sources: @[SourceRegion(path: d.path, startLine: d.line,
                               endLine: d.line)])
 
-proc directiveCount*(cText, sourcePath: string): int =
-  ## How many `#line` directives of `cText` name `sourcePath`.
+proc directiveCount*(cText, sourcePath: string; mapText = ""): int =
+  ## How many `#line` directives of `cText` name `sourcePath` — or, for a
+  ## file with none, how many of its map's runs do.
   for d in lineDirectives(cText.splitLines()):
     if d.path == sourcePath:
       inc result
+  if result == 0 and mapText.len > 0:
+    for a in nimCListing(cText, sourcePath, mapText).anchors:
+      if a.sources[0].path == sourcePath:
+        inc result
 
 proc nimCFileFor*(sourcePath: string;
                   candidates: openArray[tuple[path, text: string]]): string =
@@ -146,6 +258,20 @@ proc nimCFileFor*(sourcePath: string;
     if n > best:
       best = n
       result = c.path
+
+proc nimCFileFor*(sourcePath: string;
+                  candidates: openArray[tuple[path, text, map: string]]): string =
+  ## `nimCFileFor` over C files with their source maps ("" for none).
+  var best = 0
+  for c in candidates:
+    let n = directiveCount(c.text, sourcePath, c.map)
+    if n > best:
+      best = n
+      result = c.path
+
+proc mapPathOf*(cPath: string): string =
+  ## Where the codetracer compiler writes `cPath`'s Source Map v3.
+  cPath & ".map"
 
 proc isGeneratedNimC*(path: string): bool =
   ## Whether `path` names a Nim compiler's generated C file

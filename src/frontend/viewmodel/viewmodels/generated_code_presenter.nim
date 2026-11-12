@@ -88,18 +88,33 @@ proc present*(gvm: GeneratedCodeVM; pane: LowLevelCodeVM;
     if listing.producer != "noir-acir-compile":
       pane.setNoirProject(false)
 
+type GeneratedC = tuple[path, text, map: string]
+  ## A generated C file and its Source Map v3 ("" when it has none).
+
+proc fetchWithMap(path: string; fetch: RecordedFetch;
+                  done: proc(got: GeneratedC; ok: bool)) =
+  ## `path` and the `.c.map` beside it (`nim_c_producer.mapPathOf`): the
+  ## codetracer compiler anchors its C by the map, a stock compiler by
+  ## `#line` directives, so a missing map is not a failure.
+  fetch(path, proc(r: RecordedText) =
+    if not r.ok:
+      done((path: path, text: "", map: ""), false)
+      return
+    let text = r.text
+    fetch(mapPathOf(path), proc(m: RecordedText) =
+      done((path: path, text: text, map: (if m.ok: m.text else: "")), true)))
+
 proc fetchAll(paths: seq[string]; fetch: RecordedFetch; at: int;
-              acc: seq[tuple[path, text: string]];
-              done: proc(got: seq[tuple[path, text: string]])) =
+              acc: seq[GeneratedC]; done: proc(got: seq[GeneratedC])) =
   ## `paths` read one after another (a provider may serve one request at a
   ## time), the ones that could not be read left out.
   if at >= paths.len:
     done(acc)
     return
-  fetch(paths[at], proc(r: RecordedText) =
+  fetchWithMap(paths[at], fetch, proc(got: GeneratedC; ok: bool) =
     var next = acc
-    if r.ok:
-      next.add (path: paths[at], text: r.text)
+    if ok:
+      next.add got
     fetchAll(paths, fetch, at + 1, next, done))
 
 proc nimCListingOf*(stop: StopLocation; path: string;
@@ -110,15 +125,17 @@ proc nimCListingOf*(stop: StopLocation; path: string;
   ## `StopLocation.cPath`); otherwise the recording's generated C file whose
   ## directives name `path` most (`nimCFileFor`). Every file read through
   ## `fetch`, so a recording is read as the editor reads it.
-  proc finish(cPath, cText: string) =
-    if cPath.len == 0:
+  proc finish(c: GeneratedC) =
+    if c.path.len == 0:
       done(GeneratedListing(), "no generated C file of this recording " &
-        "names " & path & " in its line directives")
+        "maps back to " & path)
       return
-    let listing = nimCListing(cText, path)
+    let listing = nimCListing(c.text, path, c.map)
     if listing.anchors.len == 0:
-      done(listing, cPath & " carries no #line directives: the program " &
-        "was compiled without --lineDir:on, so its C cannot be mapped back")
+      done(listing, c.path & " carries neither #line directives nor a " &
+        "source map (a .c.map beside it), so its " &
+        "C cannot be mapped back: compile with --lineDir:on, or with " &
+        "CodeTracer's Nim and --sourcemap:on")
     else:
       done(listing, "")
   var generated: seq[string] = @[]
@@ -131,17 +148,16 @@ proc nimCListingOf*(stop: StopLocation; path: string;
         "(a native recording of a Nim program bundles its nimcache's " &
         "`*.nim.c` files)")
       return
-    fetchAll(generated, fetch, 0, @[], proc(got: seq[tuple[path, text: string]]) =
+    fetchAll(generated, fetch, 0, @[], proc(got: seq[GeneratedC]) =
       let chosen = nimCFileFor(path, got)
-      var text = ""
+      var found: GeneratedC = (path: "", text: "", map: "")
       for c in got:
         if c.path == chosen:
-          text = c.text
-      finish(chosen, text))
+          found = c
+      finish(found))
   if stop.cPath.len > 0 and stop.path == path:
-    let cPath = stop.cPath
-    fetch(cPath, proc(r: RecordedText) =
-      if r.ok: finish(cPath, r.text)
+    fetchWithMap(stop.cPath, fetch, proc(got: GeneratedC; ok: bool) =
+      if ok: finish(got)
       else: search())
   else:
     search()
