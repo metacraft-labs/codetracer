@@ -3752,6 +3752,26 @@ jobs:
         # build; the recipe's desktop half starts its own Xvfb.
         run: nix develop .#devShells.x86_64-linux.default --command bash -c 'just build-tui && just build-gpui && just plat68-one-keymap'
 
+      - name: One input routing, three front-ends (keys and presses)
+        if: ${{ !cancelled() }}
+        # Input-Routing-And-Keymaps.md IR-3, IR-5 and §5.1: one user file
+        # binds a chord to Step Over and Ctrl+click on a call-trace row to
+        # Continue; the terminal (a real pty), the GPUI window and the
+        # Electron app each step on the chord, continue on the rebound press,
+        # go to the call on the plain press, and show the new chord. The
+        # recipe's desktop half starts its own Xvfb.
+        run: nix develop .#devShells.x86_64-linux.default --command bash -c 'just build-tui && just build-gpui && just plat64-input-routing'
+
+      - name: The desktop's presses are the pointer keymap's rows
+        if: ${{ !cancelled() }}
+        # A press on a call, its toggle and an Event Log column header runs
+        # each element's pointer row through the desktop's one pointer
+        # listener; a user's row removing the base's leaves the press with
+        # nothing to run — in the REAL Electron app on `calc`.
+        env:
+          PLAT68_SPEC: tests/keymaps/plat64-desktop-pointer-rows.spec.ts
+        run: nix develop .#devShells.x86_64-linux.default --command just plat68-desktop-keys
+
       - name: Upload test logs
         if: always()
         uses: actions/upload-artifact@v4
