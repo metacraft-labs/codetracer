@@ -1,0 +1,14 @@
+scenario: 1
+name: deepreview/empty-review
+pack: codetracer
+summary: >-
+  A review whose dataset has no files opens without an error: the VCS panel
+  says "0 files", lists nothing and shows no stats.
+
+stage:
+  - use: open-review
+    with: { dataset: src/tests/gui/tests/deepreview/fixtures/empty-review.json }
+
+steps:
+  - wait: { until: { at: vcs, present: true }, timeout: 120s }
+  - expect: { at: vcs, commit: { contains: "0 files" }, count: 0, stats: "", error: "" }

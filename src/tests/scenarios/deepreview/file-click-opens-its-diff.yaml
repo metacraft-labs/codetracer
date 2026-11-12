@@ -1,0 +1,27 @@
+scenario: 1
+name: deepreview/file-click-opens-its-diff
+pack: codetracer
+summary: >-
+  Clicking a changed file selects it and brings its diff tab forward; clicking
+  back brings the first file's diff back; and clicking a file again does not
+  open a second tab for it.
+
+stage:
+  - use: open-review
+    with: { dataset: src/tests/gui/tests/deepreview/fixtures/sample-review.json }
+
+steps:
+  - wait: { until: { at: vcs, present: true }, timeout: 120s }
+  - expect: { at: 'vcs/changed-file[name="main.rs"]', selected: true }
+  - click: 'vcs/changed-file[name="utils.rs"]'
+  - wait: { until: { at: 'pane-tab[label="Diff: utils.rs"]', active: true }, timeout: 30s }
+  - expect: { at: 'vcs/changed-file[name="utils.rs"]', selected: true }
+  - expect: { at: 'vcs/changed-file[name="main.rs"]', selected: false }
+  - expect: { at: 'diff-view[file="src/utils.rs"]', geometry: { visible: true } }
+  - click: 'vcs/changed-file[name="main.rs"]'
+  - wait: { until: { at: 'pane-tab[label="Diff: main.rs"]', active: true }, timeout: 30s }
+  - expect: { at: 'vcs/changed-file[name="main.rs"]', selected: true }
+  - expect: { at: 'diff-view[file="src/main.rs"]', geometry: { visible: true } }
+  - click: 'vcs/changed-file[name="utils.rs"]'
+  - wait: { until: { at: 'pane-tab[label="Diff: utils.rs"]', active: true }, timeout: 30s }
+  - expect: { at: 'pane-tab[label="Diff: main.rs"]', present: true }

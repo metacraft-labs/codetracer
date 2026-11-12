@@ -1,0 +1,23 @@
+scenario: 1
+name: deepreview/changed-files-list
+pack: codetracer
+summary: >-
+  The review's changed files are listed, visible, by basename and in order —
+  main.rs (modified, +8 -3), utils.rs (added, +8), config.rs (deleted, -7) —
+  with the first one selected.
+
+stage:
+  - use: open-review
+    with: { dataset: src/tests/gui/tests/deepreview/fixtures/sample-review.json }
+
+steps:
+  - wait: { until: { at: vcs, present: true }, timeout: 120s }
+  - expect: { at: vcs, count: 3 }
+  - expect: { at: 'vcs/changed-file[name="main.rs"]', geometry: { visible: true }, selected: true, status: M, status-kind: modified }
+  - expect: { at: 'vcs/changed-file[name="utils.rs"]', geometry: { visible: true }, selected: false, status: A, status-kind: added }
+  - expect: { at: 'vcs/changed-file[name="config.rs"]', geometry: { visible: true }, selected: false, status: D, status-kind: deleted }
+  - expect: { at: 'vcs/changed-file[name="main.rs"]', stats: { matches: "\\+8.*-3" } }
+  - expect: { at: 'vcs/changed-file[name="utils.rs"]', stats: { matches: "^[^-]*\\+8[^-]*$" } }
+  - expect: { at: 'vcs/changed-file[name="config.rs"]', stats: { matches: "^[^+]*-7[^+]*$" } }
+  - expect: { at: 'vcs/changed-file[name="main.rs"]', geometry: { above: 'vcs/changed-file[name="utils.rs"]' } }
+  - expect: { at: 'vcs/changed-file[name="utils.rs"]', geometry: { above: 'vcs/changed-file[name="config.rs"]' } }

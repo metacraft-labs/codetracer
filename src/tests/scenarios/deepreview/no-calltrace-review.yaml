@@ -1,0 +1,15 @@
+scenario: 1
+name: deepreview/no-calltrace-review
+pack: codetracer
+summary: >-
+  A review whose dataset has no call trace still lists its one file, lib.rs,
+  with no coverage (or the '--' badge).
+
+stage:
+  - use: open-review
+    with: { dataset: src/tests/gui/tests/deepreview/fixtures/no-calltrace-review.json }
+
+steps:
+  - wait: { until: { at: vcs, present: true }, timeout: 120s }
+  - expect: { at: vcs, count: 1 }
+  - expect: { at: 'vcs/changed-file[name="lib.rs"]', coverage: { one-of: ["", "--"] } }
