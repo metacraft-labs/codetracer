@@ -7960,11 +7960,11 @@
     "nim-langserver": {
       "flake": false,
       "locked": {
-        "lastModified": 1794190650,
-        "narHash": "sha256-YOkBD69ktjSfSgGxpWDaNE8Ajb6B/eZ8+wvLi8NORNo=",
+        "lastModified": 1794412162,
+        "narHash": "sha256-YnFGrw40S1JT7QP0nLe9o6hHPoY1SrUwZ643s8ACDPk=",
         "owner": "metacraft-labs",
         "repo": "langserver",
-        "rev": "6a58b47b1de8fa05121e8413bf1ccd6bb3f75564",
+        "rev": "a4e9fb1db01a1cfe83199b55bd1e85760fb13ed0",
         "type": "github"
       },
       "original": {
