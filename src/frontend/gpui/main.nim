@@ -119,6 +119,18 @@ import ../viewmodel/viewmodels/generated_code_presenter   # Generated-Code-Listi
 from ../viewmodel/sdk/source_provider import newDapSourceProvider, fetch,
   SourceFetch
 from ../viewmodel/viewmodels/source_vm import SourceLineRequest
+# HSF-E11: Edit mode's generated C — the compile, and the listing's own
+# ViewModels for a window with no replay session.
+import ../viewmodel/host/native_nim_c_compiler
+from ../viewmodel/viewmodels/low_level_code_vm import createLowLevelCodeVM
+from ../viewmodel/viewmodels/generated_code_vm import createGeneratedCodeVM,
+  GeneratedCodeVM, noteBuildStarted,
+  GeneratedListing
+from ../viewmodel/viewmodels/generated_code_operation import targetById,
+  GeneratedCodeTarget
+from ../viewmodel/viewmodels/nim_c_producer import NimCTargetId
+from ../viewmodel/store/types import StopLocation
+import ./host/trace_nimcache   # a `ct record` recording's own nimcache
 import ./host/certificate_indicator
 import ./design_font_metrics
 import ../tui/host/native_host   # `loadStopPanes`, the terminal's own producer
@@ -3350,9 +3362,24 @@ proc drawBuildPane(r: GpuiRenderer) =
   if drawBuildOutput(r, pane, vm, gBuildPane, buildBody()):
     applyTextFaces(r, pane)
 
+var
+  gEditLowLevel: LowLevelCodeVM = nil
+    ## HSF-E11: the Edit window's Low Level Code listing. An Edit window has
+    ## no replay session, so no session's `LowLevelCodeVM`: this one has no
+    ## store (`createLowLevelCodeVM(nil)`) and holds only the generated C
+    ## View Generated C Source puts in it. Made on that first request.
+  gEditGeneratedCode: GeneratedCodeVM = nil
+    ## HSF-E11: the operation's state for that listing (§8's build, open,
+    ## failed), as a session's `generatedCodeVM` is for a recording's.
+
+proc editArmPath(arm: GpuiEditArm): string
+  ## The absolute path of an edit arm's file; defined with the Edit window's
+  ## files.
+
 proc lowLevelVM(): LowLevelCodeVM =
-  ## PLAT-60: the shown session's `LowLevelCodeVM`.
-  if gSession.isNil: nil else: gSession.session.lowLevelCodeVM
+  ## PLAT-60: the shown session's `LowLevelCodeVM` — in an Edit window
+  ## (HSF-E11), the window's own generated-C listing, or nil before one.
+  if gSession.isNil: gEditLowLevel else: gSession.session.lowLevelCodeVM
 
 proc lowLevelBody(): PxRect =
   ## PLAT-60: the Low Level Code pane's body in window pixels — the visible
@@ -3376,7 +3403,10 @@ proc syncLowLevelShown(): bool =
   let shown = lowLevelBody().w > 0
   result = shown and not vm.shown.val
   vm.setShown(shown)
-  if shown and gDebugDocs.hasKey(gEditorSurface.path):
+  if shown and gSession.isNil and not openArm.isNil:
+    # HSF-E11: an Edit window's caret is its open arm's.
+    vm.setSourceCursor(editArmPath(openArm), caretLine(openArm.doc))
+  elif shown and gDebugDocs.hasKey(gEditorSurface.path):
     vm.setSourceCursor(gEditorSurface.path,
                        gDebugDocs[gEditorSurface.path].caretLine)
 
@@ -3393,7 +3423,9 @@ proc drawLowLevelPane(r: GpuiRenderer) =
   let vm = lowLevelVM()
   if pane.isNil or vm.isNil:
     return
-  if syncLowLevelShown():
+  # A session's listing is the engine's, asked for once the pane is on
+  # screen; an Edit window's (HSF-E11) is already in its ViewModel.
+  if syncLowLevelShown() and not gSession.isNil:
     discard gSession.loadStopPanes()
   if gLowLevelReveal >= 0 and lowLevelBody().w > 0:
     gLowLevel.revealIndex(vm, lowLevelBody(), gLowLevelReveal)
@@ -4965,9 +4997,12 @@ proc gpuiMenuRouteOf(action: string): GpuiMenuRoute =
                   reason: (if gSession.isNil: "the low-level code is a " &
                              "recording's: open one to see it" else: ""))
   of "aViewGeneratedCSource":
+    # HSF-E11: an Edit window compiles the file it edits instead.
     GpuiMenuRoute(kind: gmrGeneratedC,
-                  reason: (if gSession.isNil: "the generated C is read from " &
-                             "a recording: open one to see it" else: ""))
+                  reason: (if gSession.isNil and openArm.isNil:
+                             "the generated C is read from a recording or " &
+                             "compiled from an edited file: open one to see it"
+                           else: ""))
   of "aShell": GpuiMenuRoute(kind: gmrPane, pane: paneShell)   # PLAT-61
   of "aExit": GpuiMenuRoute(kind: gmrExit)
   # File: the Welcome Screen's own flows (Multi-Window-Tab-Management.md rule
@@ -6541,6 +6576,9 @@ proc editFolderRoot(folder: string): string =
   while result.len > 1 and result[^1] in {'/', '\\'}:
     result.setLen(result.len - 1)
 
+proc editArmPath(arm: GpuiEditArm): string =
+  joinTreePath(editFolderRoot(arm.root), arm.path)
+
 proc relistEditFiles(vm: FilesystemVM; root: string) =
   ## The opened folder walked again, so the pane follows the disk; the
   ## folders the reader opened stay open, and the folder's own row is.
@@ -7360,47 +7398,23 @@ proc runGpuiPointMenuOp(r: GpuiRenderer; op: PointMenuOp) =
       "tracepoints: " & $done.sweptSpecs & " run — " & $done.swept.len &
       " hit(s)")
 
-proc showGeneratedC(r: GpuiRenderer) =
-  ## View › View Generated C Source: the shared presenter's listing of the C
-  ## the editor caret's Nim line compiled to, read from the shown recording
-  ## through its source provider, shown in the Low Level Code pane — the
-  ## operation every surface runs (`generated_code_presenter`).
-  let path = editorPath()
-  if not path.endsWith(".nim"):
-    traceGesture("View Generated C Source: " &
-      (if path.len == 0: "there is no file in the editor"
-       else: path.extractFilename & " is not a Nim source"))
-    return
-  let line = if gDebugDocs.hasKey(path): gDebugDocs[path].caretLine
-             else: max(1, gEditorSurface.executionLine)
-  let core = gSession.session
-  var files: seq[string] = @[]
-  if not core.fileTreeVM.isNil:
-    recordedPathsOf(core.fileTreeVM.rootEntry.val, files)
-  let provider = newDapSourceProvider(core.store.backend)
-  let refused = showGeneratedCode(core.generatedCodeVM, core.lowLevelCodeVM,
-    "nim.c", path, line, core.store.stop.val, files,
-    proc(p: string; done: proc(r: RecordedText)) =
-      provider.fetch(SourceLineRequest(path: p, sourceGeneration: 0,
-                                       sourceDigest: "", firstLine: 1,
-                                       lastLine: high(int32)),
-        proc(f: SourceFetch) =
-          let lines = if f.fileLines.len > 0: f.fileLines else: f.lines
-          if lines.len == 0:
-            done((ok: false, text: "",
-                  message: "could not read " & p & ": " & f.detail))
-          else:
-            done((ok: true, text: lines.join("\n") & "\n", message: ""))),
-    proc(failure: string) =
-      traceGesture(if failure.len > 0: "View Generated C Source: " & failure
-                   else: "Generated C of " & path.extractFilename))
-  if refused.len > 0:
-    traceGesture("View Generated C Source: " & refused)
-    return
-  showPaneFromMenu(r, paneLowLevelCode)
-  # The rows the caret's line compiled to, in view: the listing's active
-  # row (`showGeneratedListing` aligned it to the caret).
-  let vm = core.lowLevelCodeVM
+var
+  gNimCCompile: NimCCompile = nil
+    ## HSF-E11: Edit mode's `nim c --compileOnly` for View Generated C
+    ## Source (`host/native_nim_c_compiler`), polled on the record tick so
+    ## the window keeps painting while the compiler runs.
+  gNimCCompileAt: tuple[path: string; line: int]
+    ## The file and the caret line the compile in flight was asked for: the
+    ## listing is anchored there when it settles, wherever the caret went.
+
+proc nimCCompileRunning(): bool =
+  not gNimCCompile.isNil and gNimCCompile.running
+
+proc revealGeneratedRow(r: GpuiRenderer; vm: LowLevelCodeVM; line: int) =
+  ## The rows the caret's line compiled to, in view: the listing's active
+  ## row (`showGeneratedListing` aligned it to the caret). The pane may only
+  ## just have been placed, so the row is brought into view on the draw that
+  ## gives it a body (`gLowLevelReveal`).
   let active = vm.activeOffset.val
   let rows = vm.instructions.val
   var at = -1
@@ -7412,7 +7426,154 @@ proc showGeneratedC(r: GpuiRenderer) =
                " (offset " & $active & ", line " & $line & ")")
   if at >= 0:
     gLowLevelReveal = at
+  drawLowLevelPane(r)
+
+proc nimCTarget(): GeneratedCodeTarget =
+  ## The `nim.c` rung, for a refusal shown in the pane (`present`).
+  discard targetById(NimCTargetId, result)
+
+proc readFromDisk(path: string; done: proc(r: RecordedText)) =
+  ## A file read whole from disk, as the presenter's fetch answers.
+  # `done` runs outside the `try`, so an error raised by what it does is
+  # not answered as a second, failed read.
+  var got: RecordedText
+  try:
+    got = (ok: true, text: readFile(path), message: "")
+  except CatchableError as e:
+    got = (ok: false, text: "", message: "could not read " & path & ": " & e.msg)
+  done(got)
+
+proc startEditGeneratedC(r: GpuiRenderer) =
+  ## HSF-E11 (Generated-Code-Listing §13.4, "Where the C comes from"): in an
+  ## Edit window there is no recording, so the C is the compiler's, made
+  ## now — the SAVED file compiled as the main module
+  ## (`native_nim_c_compiler`). The compile runs in the background, polled
+  ## from the window's loop (`pollGpuiNimCCompile`); the pane says it is
+  ## compiling until it settles. A compile that cannot start (no compiler,
+  ## a file never saved) is refused in the pane with the reason, as §8 has a
+  ## failed build open the surface carrying it.
+  let path = editArmPath(openArm)
+  if not path.endsWith(".nim"):
+    traceGesture("View Generated C Source: " & path.extractFilename &
+                 " is not a Nim source")
+    return
+  let line = caretLine(openArm.doc)
+  if gNimCCompile.isNil:
+    gNimCCompile = newNimCCompile()
+  if nimCCompileRunning():
+    # The one in flight keeps the pane; asking again only says so.
+    traceGesture("View Generated C Source: " & gNimCCompile.source.extractFilename &
+                 " is still being compiled")
+    return
+  if gEditLowLevel.isNil:
+    gEditLowLevel = createLowLevelCodeVM(nil)
+  if gEditGeneratedCode.isNil:
+    gEditGeneratedCode = createGeneratedCodeVM()
+  gNimCCompileAt = (path, line)
+  if not gNimCCompile.startNimCCompile(path):
+    present(gEditGeneratedCode, gEditLowLevel, nimCTarget(), GeneratedListing(),
+            gNimCCompile.message, path, line)
+    traceGesture("View Generated C Source: " & gNimCCompile.message)
+    showPaneFromMenu(r, paneLowLevelCode)
     drawLowLevelPane(r)
+    return
+  gEditGeneratedCode.noteBuildStarted(nimCTarget(), path, line)
+  let compiling = "compiling " & path.extractFilename & " to C…" &
+    (if openArm.isDirty: " (the saved file: the buffer has unsaved changes)"
+     else: "")
+  discard gEditLowLevel.showGeneratedListing(@[], @[],
+    GeneratedListing().support, path, line, compiling)
+  gEditLowLevel.setNoirProject(false)
+  traceGesture("View Generated C Source: " & compiling)
+  armHoverTick()
+  showPaneFromMenu(r, paneLowLevelCode)
+  drawLowLevelPane(r)
+
+proc pollGpuiNimCCompile(r: GpuiRenderer): bool =
+  ## HSF-E11: the compile in flight advanced; once it settles, its C files
+  ## go to the shared presenter as a recording's would (`recordedFiles`, read
+  ## from disk), anchored at the line it was asked for and scrolled there —
+  ## or the compiler's error is the pane's refusal. True on the poll it
+  ## settled.
+  if gNimCCompile.isNil or not gNimCCompile.pollNimCCompile():
+    return false
+  let c = gNimCCompile
+  let (path, line) = gNimCCompileAt
+  if c.phase != nccDone:
+    present(gEditGeneratedCode, gEditLowLevel, nimCTarget(), GeneratedListing(),
+            c.message, path, line)
+    traceGesture("View Generated C Source: " & c.message)
+    drawLowLevelPane(r)
+    drawTopBar(r)
+    return true
+  let refused = showGeneratedCode(gEditGeneratedCode, gEditLowLevel,
+    NimCTargetId, path, line, StopLocation(), c.cFiles, readFromDisk,
+    proc(failure: string) =
+      traceGesture(if failure.len > 0: "View Generated C Source: " & failure
+                   else: "Generated C of " & path.extractFilename))
+  if refused.len > 0:
+    traceGesture("View Generated C Source: " & refused)
+  else:
+    revealGeneratedRow(r, gEditLowLevel, line)
+  drawTopBar(r)
+  true
+
+proc showGeneratedC(r: GpuiRenderer) =
+  ## View › View Generated C Source: the shared presenter's listing of the C
+  ## the editor caret's Nim line compiled to, read from the shown recording
+  ## through its source provider, shown in the Low Level Code pane — the
+  ## operation every surface runs (`generated_code_presenter`). In an Edit
+  ## window, compiled from the edited file (`startEditGeneratedC`).
+  if gSession.isNil:
+    if not openArm.isNil:
+      startEditGeneratedC(r)
+    else:
+      traceGesture("View Generated C Source: there is no file in the editor")
+    return
+  let path = editorPath()
+  if not path.endsWith(".nim"):
+    traceGesture("View Generated C Source: " &
+      (if path.len == 0: "there is no file in the editor"
+       else: path.extractFilename & " is not a Nim source"))
+    return
+  let line = if gDebugDocs.hasKey(path): gDebugDocs[path].caretLine
+             else: max(1, gEditorSurface.executionLine)
+  let core = gSession.session
+  var recorded: seq[string] = @[]
+  if not core.fileTreeVM.isNil:
+    recordedPathsOf(core.fileTreeVM.rootEntry.val, recorded)
+  # A `ct record` recording keeps its C and the Source Maps beside them in
+  # `<trace>/nimcache/`, which its file tree serves only in part (none of
+  # the maps): they are offered as candidates too, and read from the trace
+  # folder when the provider cannot serve them (`trace_nimcache`).
+  let traceDir = absolutePath(gSession.tracePath)
+  let files = nimcacheCandidates(traceDir, recorded)
+  let provider = newDapSourceProvider(core.store.backend)
+  let refused = showGeneratedCode(core.generatedCodeVM, core.lowLevelCodeVM,
+    "nim.c", path, line, core.store.stop.val, files,
+    proc(p: string; done: proc(r: RecordedText)) =
+      provider.fetch(SourceLineRequest(path: p, sourceGeneration: 0,
+                                       sourceDigest: "", firstLine: 1,
+                                       lastLine: high(int32)),
+        proc(f: SourceFetch) =
+          let lines = if f.fileLines.len > 0: f.fileLines else: f.lines
+          if lines.len > 0:
+            done((ok: true, text: lines.join("\n") & "\n", message: ""))
+            return
+          let local = nimcacheFileFor(traceDir, p)
+          if local.len > 0:
+            readFromDisk(local, done)
+          else:
+            done((ok: false, text: "",
+                  message: "could not read " & p & ": " & f.detail))),
+    proc(failure: string) =
+      traceGesture(if failure.len > 0: "View Generated C Source: " & failure
+                   else: "Generated C of " & path.extractFilename))
+  if refused.len > 0:
+    traceGesture("View Generated C Source: " & refused)
+    return
+  showPaneFromMenu(r, paneLowLevelCode)
+  revealGeneratedRow(r, core.lowLevelCodeVM, line)
 
 proc runWatchCommand(r: GpuiRenderer; query: string): bool
   ## PLAT-51: forward-declared; defined beside the value history.
@@ -7926,7 +8087,8 @@ proc armHoverTick() =
   # PLAT-61: a running shell, every `ShellPollMs` — below the activities
   # above, whose ticks pump it too (`pumpShellWindow`).
   if due < 0 and shellLive() and gRecordJob.isNil and gTestJob.isNil and
-     not nimTraceRunning() and not gTestsHost.running and (gBuild.isNil or
+     not nimTraceRunning() and not nimCCompileRunning() and
+     not gTestsHost.running and (gBuild.isNil or
                                  gBuild.session.verdict != bvRunning):
     let want = (due: -7'i64, vcs: false)
     if gArmedTick != want:
@@ -7937,6 +8099,7 @@ proc armHoverTick() =
   # `RecordPollMs`, while it runs.
   if due < 0 and (gVerification.running or   # PLAT-63: a Verno run
                   nimTraceRunning() or   # a Nim trace, compiling
+                  nimCCompileRunning() or   # HSF-E11: Edit mode's C
                   (not gRecordJob.isNil and not gRecordJob.done) or
                   (not gTestJob.isNil and not gTestJob.done) or
                   # PLAT-53: a Test Results run, polled on the same tick.
@@ -9137,6 +9300,21 @@ proc lowLevelGoTo(r: GpuiRenderer; target: SourceLineRef) =
   if target.line <= 0:
     traceGesture("low-level: " & NoSourceLineReason)
     return
+  if gSession.isNil:
+    # HSF-E11: an Edit window has no debugger to move. A generated-C row of
+    # the edited file puts its caret on the row's line instead, which is
+    # the line the listing then follows.
+    if openArm.isNil or not sameSourcePath(target.path, editArmPath(openArm)):
+      traceGesture("low-level: " & target.path.extractFilename & ":" &
+                   $target.line & " is not the edited file")
+      return
+    openArm.doc.moveCaretTo(target.line - 1, 0)
+    openArm.viewportTop = followedViewportTop(openArm.viewportTop,
+      target.line, openArm.viewportRows)
+    traceGesture("low-level: caret to " & $target.line)
+    redrawEditor()
+    drawLowLevelPane(r)
+    return
   try:
     gSession.sourceLineJump(target.path, target.line, "smart")
   except CatchableError as e:
@@ -9231,7 +9409,8 @@ proc lowLevelStep(r: GpuiRenderer; operation: string): bool =
   ## instruction when the engine offers it (DAP `granularity`); otherwise
   ## the ordinary step runs, by line, as the pane's header says.
   let vm = lowLevelVM()
-  if vm.isNil or gFocusPane != $paneLowLevelCode:
+  # An Edit window's listing (HSF-E11) has no engine to step.
+  if vm.isNil or gSession.isNil or gFocusPane != $paneLowLevelCode:
     return false
   let request = vm.instructionStepRequest(operation)
   if not request.offered:
@@ -10146,6 +10325,7 @@ proc recordTick() {.cdecl.} =
   gArmedTick = (due: -2'i64, vcs: false)
   discard pollWelcomeRecording(r)
   discard pollGpuiNimTrace(r)
+  discard pollGpuiNimCCompile(r)   # HSF-E11
   discard pollTestRun(r)
   discard pollTestsHost(r)
   discard pollConstraintsHost(r)
@@ -13983,6 +14163,14 @@ proc runWindowOp(r: GpuiRenderer; op: string; release = true): string =
           return "the Low Level Code pane does not take '" & parts[2] & "'"
       of "caret":
         # The editor's caret put on a line, as a press on its text puts it.
+        if gSession.isNil and not openArm.isNil:
+          # HSF-E11: an Edit window's caret is its arm's.
+          openArm.doc.moveCaretTo(at(2) - 1, 0)
+          openArm.viewportTop = followedViewportTop(openArm.viewportTop,
+            at(2), openArm.viewportRows)
+          redrawEditor()
+          drawLowLevelPane(r)
+          return ""
         let path = gEditorSurface.path
         if not debugDocumentFor(path, gEditorSurface.executionLine):
           return "there is no document in the editor"
@@ -15067,6 +15255,14 @@ proc runWindowOp(r: GpuiRenderer; op: string; release = true): string =
         let deadline = epochTime() + float(at(1)) / 1000.0
         while epochTime() < deadline:
           if pollGpuiNimTrace(r):
+            break
+          sleep(RecordPollMs)
+      # HSF-E11: and Edit mode's generated C compiling — REALLY waited for,
+      # up to `ms`, polled as the record tick polls it.
+      if nimCCompileRunning():
+        let deadline = epochTime() + float(at(1)) / 1000.0
+        while epochTime() < deadline:
+          if pollGpuiNimCCompile(r):
             break
           sleep(RecordPollMs)
       # PLAT-54: and a live agent's turn — REALLY waited for, up to `ms`,

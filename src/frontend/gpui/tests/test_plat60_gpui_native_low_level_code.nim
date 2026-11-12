@@ -16,9 +16,25 @@
 ##     and F10 pressed in the listing moves the pointer to the next
 ##     instruction (from one that falls through); Shift+F10 then returns it.
 ##
-## No mocks: the binary, the engine, the replay worker and the recording are
-## the product's. Without `ct-native-replay` or `rr` the cases skip, each
-## printing `MISSING-PREREQ SKIP:` with what is missing.
+## And View › View Generated C Source (Generated-Code-Listing §13.4):
+##
+##   * over the native Nim example recording (a stock compiler's C, mapped by
+##     its `#line` directives);
+##   * over a recording `ct record` makes of a Nim program today
+##     (`nim_ct_recording`): CodeTracer's compiler writes no directives, only
+##     `.nim.c.map` Source Maps, kept in `<trace>/nimcache/`, which the
+##     recording's file tree serves none of — the window offers and reads
+##     them from the trace folder (`gpui/host/trace_nimcache`);
+##   * in an Edit window (HSF-E11), with no recording: the saved file
+##     compiled to C (`native_nim_c_compiler`) while the window keeps
+##     running, then its listing scrolled to the caret line's C — and a file
+##     that does not compile, or a missing compiler, refused in the pane with
+##     the reason.
+##
+## No mocks: the binary, the engine, the replay worker, the recordings and
+## the compiler are the product's. Without `ct-native-replay`, `rr`, `ct`,
+## `ct-mcr` or CodeTracer's Nim the cases that need one skip, each printing
+## `MISSING-PREREQ SKIP:` with what is missing.
 
 import replay_prerequisite
 import ../../../common/replay_server_path
@@ -31,10 +47,13 @@ import gpui/app/leaves
 import gpui/low_level_code_leaf
 import codetracer_embed
 import ../../tui/tests/fixtures/native_recording
+import ./nim_ct_recording
+import gpui/host/trace_nimcache
+from ../../tui/tests/fixtures/fixture_provider import MissingPrereqSkipPrefix
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads this spelling
 # as the suite's RUNTIME assertion count.
-const ExpectedAssertions = 14
+const ExpectedAssertions = 39
 
 var countedAssertions = 0
 var skipped = false
@@ -53,7 +72,9 @@ let bin = repo / "build/bin/codetracer-gpui"
 let shimDir = getEnv("ISONIM_GPUI_SHIM_DIR",
                    repo.parentDir / "isonim-gpui/rust/target/debug")
 
-proc windowPlan(ops: string; subject: string; trace: var string): JsonNode =
+proc windowPlan(ops: string; subject: string; trace: var string;
+                edit = false; extraEnv: openArray[(string, string)] = []):
+    JsonNode =
   if not fileExists(bin):
     raise newException(IOError, "prerequisite missing: " & bin &
                        " (just build-gpui)")
@@ -69,7 +90,12 @@ proc windowPlan(ops: string; subject: string; trace: var string): JsonNode =
   env["XDG_STATE_HOME"] = state
   env["CODETRACER_HOME"] = state / "ct-home"
   env["CODETRACER_GPUI_GESTURE_TRACE"] = "1"
+  for (k, v) in extraEnv:
+    env[k] = v
   var args = @["--report-window-plan", "--width=" & $W, "--height=" & $H]
+  if edit:
+    # An Edit window over a project folder (`ct edit`'s spelling).
+    args.insert("--edit", 0)
   if ops.len > 0:
     args.add "--window-ops=" & ops
   args.add subject
@@ -88,9 +114,10 @@ proc windowPlan(ops: string; subject: string; trace: var string): JsonNode =
     raise newException(IOError, "the window plan run failed (" & ops & ")")
   parseJson(output)
 
-proc windowPlan(ops: string; subject: string): JsonNode =
+proc windowPlan(ops: string; subject: string; edit = false;
+                extraEnv: openArray[(string, string)] = []): JsonNode =
   var t: string
-  windowPlan(ops, subject, t)
+  windowPlan(ops, subject, t, edit, extraEnv)
 
 proc attr(n: JsonNode; name: string): string =
   if n{"attributes"}.kind == JObject: n["attributes"]{name}.getStr else: ""
@@ -111,6 +138,25 @@ proc textOf(n: JsonNode): string =
 
 proc instructions(plan: JsonNode): seq[JsonNode] =
   plan.nodesWith(LowLevelRowAttribute)
+
+proc lowLevelError(plan: JsonNode): string =
+  ## The pane's message line (a refusal, or "compiling…").
+  for n in plan.nodesWith("data-ct-low-level-error"):
+    return n.attr("data-ct-low-level-error")
+  ""
+
+proc revealedRow(trace: string): int =
+  ## The listing row View Generated C Source said it brought into view (-1
+  ## when the caret's line maps to none), from the gesture trace.
+  const Marker = "View Generated C Source: row "
+  let at = trace.rfind(Marker)
+  if at < 0: return -2
+  let rest = trace[at + Marker.len .. ^1]
+  parseInt(rest[0 ..< rest.find(' ')])
+
+proc rowTexts(plan: JsonNode): seq[string] =
+  ## The drawn rows' WHOLE text (the row's own text is cut to the pane).
+  for r in plan.instructions: result.add r.attr("data-ct-instruction")
 
 proc executionLine(plan: JsonNode): int =
   for n in plan.nodesWith(EditorExecutionAttribute):
@@ -250,6 +296,142 @@ suite "the Low Level Code pane in the GPUI window, native (rr) recording":
       checkpoint(trace)
       ck plan.nodesWith(LowLevelAttribute).len == 1
       ck texts.anyIt("#line" in it)
+
+  test "View Generated C Source over a `ct record` recording: the C its maps anchor":
+    # Generated-Code-Listing §13.4, "Where the C comes from": a recording
+    # `ct record` made of a Nim program keeps its C and the Source Maps
+    # beside them in `<trace>/nimcache/`; the recording's file tree bundles
+    # the C and none of the maps. The listing is the program's own module's
+    # C, anchored by its map (it has no `#line` directive), and the row the
+    # stop's line compiled to is brought into view. (The recording bundles
+    # no copy of the program's `.nim` source either, so the editor has no
+    # document to put a caret in: the item asks about the stop's line.)
+    let rec = nimCtRecording()
+    if not rec.ok or getEnv("CODETRACER_CT_NATIVE_REPLAY_CMD").len == 0:
+      echo "  ", MissingPrereqSkipPrefix, " ", NimCtFixtureName, " — ",
+           (if rec.ok: "the native backend ($CODETRACER_CT_NATIVE_REPLAY_CMD)"
+            else: rec.detail)
+      skipped = true
+      skip()
+    else:
+      var trace = ""
+      let plan = windowPlan("lowlevel:generated-c", rec.tracePath, trace)
+      let rows = plan.instructions
+      let texts = plan.rowTexts
+      checkpoint("rows:\n" & texts.join("\n"))
+      checkpoint(trace)
+      ck plan.nodesWith(LowLevelAttribute).len == 1
+      ck rows.len > 0
+      # CodeTracer's compiler: mapped by the map, there is no directive.
+      ck not texts.anyIt("#line" in it)
+      # The program module's own C file: its frame records name the source.
+      ck texts.anyIt(NimCtProgramName & ".nim" in it)
+      let revealed = trace.revealedRow
+      ck revealed >= 0
+      # In view, and the row the caret's line compiled to (the anchor's).
+      ck rows.anyIt(parseInt(it.attr(LowLevelRowAttribute)) == revealed and
+                    it.attr("data-ct-active") == "true")
+
+  test "a `ct record` recording's nimcache: offered, and read only inside the trace":
+    # `trace_nimcache` over a real folder: what the window adds to the
+    # recording's file list, and which paths its fallback reads from disk
+    # when the session's source provider cannot serve one.
+    let t = createTempDir("plat60-gpui-nimcache-", "")
+    createDir(t / NimcacheDir)
+    let c = t / NimcacheDir / "@mmain.nim.c"
+    writeFile(c, "int main(void) { return 0; }\n")
+    writeFile(c & ".map", "{}")
+    writeFile(t / NimcacheDir / "main.json", "{}")
+    # A C file the tree already names (where it was recorded) is not offered
+    # twice; one it lacks is offered from the trace folder.
+    let named = ["/recorded/at/nimcache/@mmain.nim.c", "/src/main.nim"]
+    ck nimcacheCandidates(t, named) == @named
+    ck nimcacheCandidates(t, ["/src/main.nim"]) == @["/src/main.nim", c]
+    # Read from the trace folder: the C or its map, by the recorded path's
+    # name; nothing else, and nothing outside it.
+    ck nimcacheFileFor(t, "/recorded/at/nimcache/@mmain.nim.c.map") == c & ".map"
+    ck nimcacheFileFor(t, c) == c
+    ck nimcacheFileFor(t, t / NimcacheDir / "main.json") == ""
+    ck nimcacheFileFor(t, "/recorded/at/nimcache/@mother.nim.c") == ""
+    removeDir(t)
+
+  # HSF-E11: Edit mode. A project folder holding one Nim file, opened in an
+  # Edit window — no recording, no engine: the C is compiled now.
+  const CalcNim = """proc triple(n: int): int =
+  result = n * 3
+
+var acc = 0
+for i in 1..5:
+  acc += triple(i)
+echo acc
+"""
+  let haveNim = getEnv("CODETRACER_NIM").len > 0 or findExe("nim").len > 0
+
+  proc nimProject(name, text: string): string =
+    result = createTempDir("plat60-gpui-edit-", "")
+    writeFile(result / name, text)
+
+  test "Edit mode: View Generated C Source compiles the saved file, then lists its C":
+    if not haveNim:
+      echo "  ", MissingPrereqSkipPrefix, " Edit mode's generated C — no `nim` ",
+           "(set CODETRACER_NIM, or put `nim` on the PATH)"
+      skipped = true
+      skip()
+    else:
+      let project = nimProject("calc.nim", CalcNim)
+      # While the compiler runs the window keeps going: the plan reported
+      # right after the gesture shows the pane saying so.
+      let during = windowPlan("lowlevel:caret:2,lowlevel:generated-c", project,
+                              edit = true)
+      checkpoint("during: " & during.lowLevelError)
+      ck during.lowLevelError.startsWith("compiling calc.nim to C")
+      # Settled: the module's C, scrolled to the caret line's row.
+      var trace = ""
+      let plan = windowPlan("lowlevel:caret:2,lowlevel:generated-c,wait:120000",
+                            project, trace, edit = true)
+      let rows = plan.instructions
+      let texts = plan.rowTexts
+      checkpoint("rows:\n" & texts.join("\n"))
+      checkpoint(trace)
+      ck plan.nodesWith(LowLevelAttribute).len == 1
+      ck rows.len > 0
+      ck plan.lowLevelError == ""
+      ck texts.anyIt("triple" in it)
+      let revealed = trace.revealedRow
+      ck revealed >= 0
+      # In view, and the row the caret's line compiled to (the anchor's).
+      ck rows.anyIt(parseInt(it.attr(LowLevelRowAttribute)) == revealed and
+                    it.attr("data-ct-active") == "true")
+      removeDir(project)
+
+  test "Edit mode: a file that does not compile is refused with the compiler's error":
+    if not haveNim:
+      echo "  ", MissingPrereqSkipPrefix, " Edit mode's generated C — no `nim`"
+      skipped = true
+      skip()
+    else:
+      let project = nimProject("broken.nim", "let x: int = \"text\"\necho x\n")
+      var trace = ""
+      let plan = windowPlan("lowlevel:generated-c,wait:120000", project, trace,
+                            edit = true)
+      checkpoint(trace)
+      let error = plan.lowLevelError
+      checkpoint("error: " & error)
+      ck plan.nodesWith(LowLevelAttribute).len == 1
+      ck plan.instructions.len == 0
+      ck "Error:" in error
+      ck "broken.nim" in error
+      removeDir(project)
+
+  test "Edit mode: with no Nim compiler the item says so":
+    let project = nimProject("calc.nim", CalcNim)
+    let plan = windowPlan("lowlevel:generated-c", project, edit = true,
+                          extraEnv = [("CODETRACER_NIM",
+                                       project / "no-such-nim")])
+    checkpoint("error: " & plan.lowLevelError)
+    ck plan.nodesWith(LowLevelAttribute).len == 1
+    ck "no `nim` to compile calc.nim" in plan.lowLevelError
+    removeDir(project)
 
 suite "native GPUI suite self-check":
   test "native_gpui_assertion_count_is_measured":
