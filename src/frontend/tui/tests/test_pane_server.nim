@@ -722,3 +722,43 @@ suite "HSF-E1: the pane server, over a real recording":
       check traceFolderProblem(macroTrace{"trace"}.getStr) == ""
     discard srv.request("shutdown")
     removeProject(project)
+
+  test "HSF-E9: an editor's Low Level Code pane is sent the stop's listing":
+    # Editor-Hosted-Front-Ends §E13. The listing is asked for only while the
+    # pane is shown, and until 2026-11-12 "shown" meant the terminal's own
+    # screen, so an editor's Low Level Code pane was never sent one. The
+    # recording is CodeTracer's native Nim example (rr), replayed by the
+    # native backend.
+    let recording = currentSourcePath().parentDir / ".." / ".." / ".." / ".." /
+      ".." / "codetracer-example-recordings" / "nim" / "flow_test"
+    let native = getEnv("CODETRACER_CT_NATIVE_REPLAY_CMD")
+    if not dirExists(recording) or native.len == 0 or not fileExists(native):
+      echo "  MISSING-PREREQ SKIP: the native Nim example recording (",
+           recording, ") and the native backend ($CODETRACER_CT_NATIVE_REPLAY_CMD)"
+      skip()
+      return
+    let srv = newPaneServer(dap = false)
+    discard srv.request("initialize", %*{"capabilities": {"media": ["text"]},
+                                         "keymapOverrides": []})
+    let (opened, _) = srv.request("session/open", %*{"trace": recording})
+    checkpoint("open: " & $opened)
+    let sid = opened{"result", "session"}.getInt
+    check sid > 0
+    if sid <= 0: return
+    discard srv.request("pane/open", %*{"session": sid, "pane": "lowLevelCode",
+                                        "width": 100, "height": 16})
+    # Into the program: a step at a time until the listing has instructions.
+    var listing = ""
+    for i in 0 ..< 12:
+      let (_, notes) = srv.request("operation/run", %*{"session": sid,
+        "operation": "debugger.step-into"})
+      for n in notes.notes("pane/content"):
+        if n{"params", "pane"}.getStr == "lowLevelCode":
+          listing = ""
+          for r in n{"params", "rows"}.getElems:
+            listing.add r{"text"}.getStr & "\n"
+      if listing.len > 0 and "No low-level code" notin listing:
+        break
+    checkpoint("Low Level Code:\n" & listing)
+    check listing.len > 0 and "No low-level code" notin listing
+    discard srv.request("shutdown")

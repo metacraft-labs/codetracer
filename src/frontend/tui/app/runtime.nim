@@ -3135,8 +3135,12 @@ proc requestSourceScroll(rt: TuiRuntime; scroll: SourceScroll;
 proc lowLevelPaneShown*(rt: TuiRuntime): bool =
   ## Whether the Low Level Code pane is on screen — what the host tells the
   ## session's `LowLevelCodeVM` (`setShown`), so the listing is asked for
-  ## only then.
-  rt.paneAreaOf(paneLowLevelCode).width > 0
+  ## only then. On screen is the terminal's own screen, or an editor's window
+  ## showing the hosted pane (`hostedRows`, 0 once the editor closes it):
+  ## until 2026-11-12 only the first counted, and an editor's Low Level Code
+  ## pane was never sent a listing.
+  rt.paneAreaOf(paneLowLevelCode).width > 0 or
+    rt.hostedRows.getOrDefault(paneLowLevelCode, 0) > 0
 
 proc lowLevelPaneScreen*(rt: TuiRuntime): tuple[area: CellArea,
                                                screen: LowLevelPaneScreen] =

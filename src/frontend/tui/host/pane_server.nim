@@ -874,6 +874,8 @@ proc handleRequest(srv: PaneServer; meth: string; params: JsonNode;
                   # §E9: filled by the session's Test Results and Problems
                   # sources since 2026-11-12.
                   $paneTestResults, $paneProblems,
+                  # §E13: the Low Level Code listing, opened on demand.
+                  $paneLowLevelCode,
                   FrameViewerPane]}}
   of "shutdown":
     srv.shutdownRequested = true
