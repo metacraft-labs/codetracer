@@ -1,0 +1,34 @@
+scenario: 1
+name: terminal/find-in-files-lists-and-opens
+pack: codetracer
+summary: >-
+  In a replay `:grep scale` lists the recording's sources' matches (4 results
+  in 2 files, main.py's lines 26-28 and extra.py's line 4) without moving the
+  replay; a click on a result opens it, `:cnext`, F4 and Shift+F4 walk the
+  results — the tick stays where it was throughout.
+stage:
+  - use: record-program
+    with: { program: multi_root/app/main.py }
+  - use: open-recording
+    with: { width: 200, height: 50 }
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - expect: { at: replay-position, tick: 1 }
+  - chord: Ctrl+P
+  - type: ":grep scale"
+  - key: Enter
+  - wait: { until: { at: 'pane[title="FIND IN FILES"]', assert: 'has-row("4 results in 2 files")' }, timeout: 30s }
+  - expect:
+      at: 'pane[title="FIND IN FILES"]'
+      assert: ['has-row("26  scaled = extra.scale(total, 4)")', 'has-row("4  def scale(value, factor):")']
+  - expect: { at: replay-position, tick: 1 }
+  - click: { at: 'pane[title="FIND IN FILES"]/row[text="4  def scale(value, factor):"]', anchor: text-start }
+  - wait: { until: { at: 'editor[file="extra.py"]', assert: 'shows-text("def scale(value, factor):")' }, timeout: 20s }
+  - expect: { at: replay-position, tick: 1 }
+  - chord: Ctrl+P
+  - type: ":cnext"
+  - key: Enter
+  - wait: { until: { at: status-line, assert: 'says("main.py:")' }, timeout: 20s }
+  - key: F4
+  - chord: Shift+F4
+  - expect: { at: replay-position, tick: 1 }

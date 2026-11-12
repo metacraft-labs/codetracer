@@ -1,0 +1,20 @@
+scenario: 1
+name: terminal/terminal-output-scrubber-shows-the-end
+pack: codetracer
+summary: >-
+  The Terminal Output pane's scrollbar scrubs the whole output: wheeling to
+  its end shows the last line the program wrote (`row 119`, then `done`)
+  without moving the replay.
+stage:
+  - use: record-program
+    with: { program: terminal_colours/main.py }
+  - use: open-recording
+    with: { width: 200, height: 50 }
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - click: { at: 'pane-tab[label="Terminal Output"]' }
+  - wait: { until: { at: terminal-output, assert: 'shows("red plain bold green")' }, timeout: 20s }
+  - wheel: { at: terminal-output, direction: down, amount: 60 }
+  - wait: { until: { at: terminal-output, assert: 'shows("done")' }, timeout: 20s }
+  - expect: { at: terminal-output, assert: 'shows("row 119 ")' }
+  - expect: { at: replay-position, tick: 1 }

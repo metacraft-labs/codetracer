@@ -1,0 +1,26 @@
+scenario: 1
+name: terminal/clicks-points-pane-from-the-omnibox
+pack: codetracer
+summary: >-
+  Two breakpoints set from the gutter; the omnibox's View › Breakpoints &
+  Tracepoints opens the Points pane listing both in order, and a click selects
+  one.
+stage:
+  - use: record-program
+    with: { program: calc }
+  - use: open-recording
+    with: { width: 200, height: 50 }
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - wait: { until: { at: 'editor[file="main.py"]', assert: "shows-line(36)" }, timeout: 30s }
+  - click: { at: 'editor[file="main.py"]/line[number="31"]', anchor: gutter }
+  - wait: { until: { at: 'editor[file="main.py"]/line[number="31"]', breakpoint: true }, timeout: 10s }
+  - click: { at: 'editor[file="main.py"]/line[number="36"]', anchor: gutter }
+  - wait: { until: { at: 'editor[file="main.py"]/line[number="36"]', breakpoint: true }, timeout: 10s }
+  - chord: Ctrl+P
+  - type: ":Breakp"
+  - wait: { until: { at: 'omnibox/option[label="View › Breakpoints & Tracepoints"]', present: true }, timeout: 10s }
+  - key: Enter
+  - wait: { until: { at: status-line, assert: 'says("opened pointList")' }, timeout: 10s }
+  - wait: { until: { at: 'pane[title="Points"]', assert: 'has-row("breakpoint main.py:36")' }, timeout: 10s }
+  - expect: { at: 'pane[title="Points"]', text: { subsequence: ["breakpoint main.py:31", "breakpoint main.py:36"] } }

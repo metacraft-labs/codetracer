@@ -1,0 +1,28 @@
+scenario: 1
+name: terminal/clicks-files-menu-in-a-recording
+pack: codetracer
+summary: >-
+  A right-click on a file of a recording opens the Files pane's menu: Create,
+  Rename and Delete are disabled with the reason (a recording's sources are
+  read-only) and choosing one only says so; Edit opens the file.
+stage:
+  - use: record-program
+    with: { program: multi_root/app/main.py }
+  - use: open-recording
+    with: { width: 200, height: 50 }
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - click: { at: 'filesystem/file-node[name="helpers.py"]', button: right }
+  - wait: { until: { at: context-menu, present: true }, timeout: 10s }
+  - expect: { at: context-menu, count: 4 }
+  - expect: { at: 'context-menu/menu-item[label="Create"]', enabled: false, shortcut: { contains: "A recording's sources are read-only" } }
+  - expect: { at: 'context-menu/menu-item[label="Rename"]', enabled: false, shortcut: { contains: "read-only" } }
+  - expect: { at: 'context-menu/menu-item[label="Delete"]', enabled: false, shortcut: { contains: "read-only" } }
+  - expect: { at: 'context-menu/menu-item[label="Edit"]', enabled: true, shortcut: "" }
+  - click: { at: 'context-menu/menu-item[label="Create"]' }
+  - expect: { at: 'context-menu/menu-item[label="Edit"]', present: true }
+  - wait: { until: { at: status-line, assert: "says(\"A recording's sources are read-only\")" }, timeout: 10s }
+  - click: { at: 'context-menu/menu-item[label="Edit"]' }
+  - wait: { until: { at: 'editor[file="helpers.py"]', assert: 'shows-text("def add(left, right):")' }, timeout: 30s }
+  - expect: { at: 'pane-tab[label="shared/helpers.py"]', present: true }
+  - expect: { at: status-line, assert: 'says("opened ")' }

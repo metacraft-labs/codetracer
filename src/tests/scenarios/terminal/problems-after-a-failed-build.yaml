@@ -1,0 +1,37 @@
+scenario: 1
+name: terminal/problems-after-a-failed-build
+pack: codetracer
+summary: >-
+  In Edit mode a real `nargo compile` of a crate with two type errors fails;
+  F8 reveals the Problems pane and opens the next error (1 of 2); the pane
+  lists the desktop's rows in its order (the warning at src/util.nr 2:9, the
+  errors at 3:22 and src/main.nr 5:19) with ● 2, ⚠ 1, Total: 3; a right click
+  opens nothing; a press on the warning opens src/util.nr at line 2.
+stage:
+  - use: fixture-project
+    with: { name: noir-build-errors }
+  - use: open-project
+    with: { folder: $project, width: 200, height: 50 }
+steps:
+  - wait: { until: ready, timeout: 60s }
+  - expect: { at: 'dock-label[label="PROBLEMS"]', present: true }
+  - chord: Ctrl+P
+  - type: ":build nargo compile"
+  - key: Enter
+  - wait: { until: { at: status-line, assert: 'says("build FAILED")' }, timeout: 120s }
+  - key: F8
+  - wait: { until: { at: status-line, assert: 'says("error 1 of 2")' }, timeout: 20s }
+  - wait: { until: { at: 'pane[title="PROBLEMS"]', assert: 'has-row("Total: 3")' }, timeout: 20s }
+  - expect: { at: 'pane[title="PROBLEMS"]', assert: ['has-row("● 2  ⚠ 1  Total: 3")', 'has-row("Group by File")'] }
+  - expect:
+      at: 'pane[title="PROBLEMS"]'
+      text:
+        subsequence:
+          - "⚠ src/util.nr 2:9  unused variable unused"
+          - "● src/util.nr 3:22 Expected type bool, found type Field"
+          - "● src/main.nr 5:19 Expected type bool, found type Field"
+  - click: { at: 'pane[title="PROBLEMS"]/row[text="⚠ src/util.nr 2:9  unused variable unused"]', button: right }
+  - expect: { at: context-menu, absent: true }
+  - click: { at: 'pane[title="PROBLEMS"]/row[text="⚠ src/util.nr 2:9  unused variable unused"]' }
+  - wait: { until: { at: status-line, assert: 'says("opened src/util.nr:2:9")' }, timeout: 20s }
+  - expect: { at: 'editor[file="util.nr"]/line[number="2"]', text: { contains: "let unused = 1;" } }

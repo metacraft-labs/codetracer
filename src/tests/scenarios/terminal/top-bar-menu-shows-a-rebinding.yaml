@@ -1,0 +1,31 @@
+scenario: 1
+name: terminal/top-bar-menu-shows-a-rebinding
+pack: codetracer
+summary: >-
+  A user's keybindings.json that moves Step Over to Ctrl+N is what the menu's
+  Debug › Step Over shows, and choosing that entry steps the replay.
+stage:
+  - use: record-program
+    with: { program: calc }
+  - use: select-keymap
+    with: { preset: vim }
+  - use: plant-config
+    with:
+      file: keybindings.json
+      content: |
+        [
+          { "key": "n", "command": "-debugger.step-over" },
+          { "key": "f10", "command": "-debugger.step-over" },
+          { "key": "ctrl+n", "command": "debugger.step-over" }
+        ]
+  - use: open-recording
+    with: { width: 200, height: 50 }
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - expect: { at: replay-position, tick: 1 }
+  - click: { at: 'menu-bar/menu[label="Menu"]' }
+  - click: { at: 'dropdown[level="1"]/dropdown-item[label="Debug"]' }
+  - wait: { until: { at: 'dropdown[level="2"]', present: true }, timeout: 10s }
+  - expect: { at: 'dropdown[level="2"]/dropdown-item[label="Step Over"]', shortcut: "Ctrl+N" }
+  - click: { at: 'dropdown[level="2"]/dropdown-item[label="Step Over"]' }
+  - wait: { until: { at: replay-position, assert: "past(1)" }, timeout: 30s }

@@ -1,0 +1,28 @@
+scenario: 1
+name: terminal/welcome-open-folder
+pack: codetracer
+summary: >-
+  A new tab's welcome screen opens a folder: Open folder asks for it, and the
+  tab becomes an editing session on that folder, listing its file.
+stage:
+  - use: record-program
+    with: { program: calc }
+  - use: write-project
+    with:
+      files:
+        plat51proj/main.py: "answer = 42\nprint(answer)\n"
+  - use: open-recording
+    with: { width: 200, height: 50 }
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - chord: Alt+f
+  - wait: { until: { at: 'dropdown[level="2"]/dropdown-item[label="New Trace Tab"]', present: true }, timeout: 10s }
+  - click: { at: 'dropdown[level="2"]/dropdown-item[label="New Trace Tab"]' }
+  - wait: { until: { at: welcome, present: true }, timeout: 10s }
+  - click: { at: 'welcome/welcome-action[label="Open folder"]' }
+  - wait: { until: { at: welcome, assert: 'shows("Folder to open")' }, timeout: 10s }
+  - type: "plat51proj"
+  - key: Enter
+  - wait: { until: { at: 'filesystem/file-node[name="main.py"]', present: true }, timeout: 30s }
+  - expect: { at: session-strip, assert: 'has-tab-matching("plat51proj")' }
+  - expect: { at: welcome, absent: true }

@@ -1,0 +1,27 @@
+scenario: 1
+name: terminal/test-results-run-the-tests
+pack: codetracer
+summary: >-
+  Replaying from inside a Noir crate, the Tests pane lists the crate's tests
+  as the desktop does before a run ("2 tests, not run yet"; test_passes and
+  test_fails, not run); its ▶ runs the real `ct test run`, after
+  which test_passes is marked ✓, test_fails ✗, and the headline counts one
+  passed and one failed.
+stage:
+  - use: record-program
+    with: { program: calc }
+  - use: fixture-project
+    with: { name: noir-tests }
+  - use: open-recording
+    with: { width: 200, height: 50 }
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - click: { at: 'pane-tab[label="Tests"]' }
+  - wait: { until: { at: 'pane[title="Tests"]', assert: 'has-row("2 tests, not run yet")' }, timeout: 60s }
+  - expect: { at: 'pane[title="Tests"]', text: { subsequence: ["2 tests, not run yet     ▶"] } }
+  - expect: { at: 'pane[title="Tests"]/row[first="· test_passes"]', present: true }
+  - expect: { at: 'pane[title="Tests"]/row[first="· test_fails"]', present: true }
+  - click: { at: 'pane[title="Tests"]/row[first="2 tests, not run yet"]/cell[text="▶"]' }
+  - wait: { until: { at: 'pane[title="Tests"]', assert: 'has-row("1 passed, 1 failed")' }, timeout: 240s }
+  - expect: { at: 'pane[title="Tests"]/row[first="✓ test_passes"]', present: true }
+  - expect: { at: 'pane[title="Tests"]/row[first="✗ test_fails"]', present: true }

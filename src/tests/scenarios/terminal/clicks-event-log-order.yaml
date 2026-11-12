@@ -1,0 +1,27 @@
+scenario: 1
+name: terminal/clicks-event-log-order
+pack: codetracer
+summary: >-
+  A click on the event log's output header orders the log by output,
+  ascending (and says so); a second click reverses it; a click on an event
+  still goes to its tick.
+stage:
+  - use: record-program
+    with: { program: calc }
+  - use: open-recording
+    with: { width: 200, height: 50 }
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - wait: event-log.loaded
+  - click: { at: 'pane[title="Event Log"]/row[text="tick    # kind output"]', anchor: text-end }
+  - wait: { until: { at: status-line, assert: 'says("event log ordered by output, ascending")' }, timeout: 10s }
+  - expect: { at: 'pane[title="Event Log"]', assert: 'has-row("output ▲")' }
+  - expect:
+      at: 'pane[title="Event Log"]'
+      text:
+        subsequence: ["168    4 out  1 + 2 * 3 - 4 / 2 = 2", "38    0 out  2 + 3 = 5",
+                      "170    5 out  checksum = 73"]
+  - click: { at: 'pane[title="Event Log"]/row[text="tick    # kind output ▲"]', anchor: text-end }
+  - wait: { until: { at: 'pane[title="Event Log"]', assert: 'has-row("output ▼")' }, timeout: 10s }
+  - click: { at: 'event-log/event[text="6 * 7 = 42"]' }
+  - wait: { until: { at: replay-position, tick: 88 }, timeout: 30s }

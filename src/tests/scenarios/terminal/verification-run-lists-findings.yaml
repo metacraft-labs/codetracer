@@ -1,0 +1,32 @@
+scenario: 1
+name: terminal/verification-run-lists-findings
+pack: codetracer
+summary: >-
+  In Edit mode over a Verno package, `:verify` opens the Verification pane
+  with the declared task; Run lists the findings by kind, word for word
+  (pipeline error (2): Expected type Field, found type u32 at
+  typeerr/src/main.nr:2:20, …), says the run failed before reaching the
+  prover, and a right click on a finding opens its menu (Go to Source, Copy
+  Message, Copy Location).
+stage:
+  - use: fixture-project
+    with: { name: verno-type-error }
+  - use: open-project
+    with: { folder: $project, width: 200, height: 50 }
+steps:
+  - wait: { until: ready, timeout: 60s }
+  - chord: Ctrl+P
+  - type: ":verify"
+  - key: Enter
+  - wait: { until: { at: 'pane-tab[label="Verification"]', present: true }, timeout: 30s }
+  - click: { at: 'pane-tab[label="Verification"]', button: right }
+  - wait: { until: { at: 'context-menu/menu-item[label="Maximise container"]', present: true }, timeout: 10s }
+  - click: { at: 'context-menu/menu-item[label="Maximise container"]' }
+  - wait: { until: { at: 'pane[title="Verification"]/row[first="not run"]/cell[text="▶ Verify with Verno"]', present: true }, timeout: 10s }
+  - click: { at: 'pane[title="Verification"]/row[first="not run"]/cell[text="▶ Verify with Verno"]' }
+  - wait: { until: { at: 'pane[title="Verification"]', assert: 'has-row("pipeline error (2)")' }, timeout: 120s }
+  - expect:
+      at: 'pane[title="Verification"]'
+      assert: ['has-row("verno --program-dir . formal-verify -- --rlimit 60")',
+               'has-row("pipeline error  typeerr/src/main.nr:2  Expected type Field, found type u32  typeerr/src/main.nr:2:20")']
+  - expect: { at: status-line, assert: 'says("failed before reaching the prover")' }

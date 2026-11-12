@@ -1,0 +1,24 @@
+scenario: 1
+name: terminal/visual-replay-video-player
+pack: codetracer
+summary: >-
+  A visual recording shows the Video Player beside the editor (with Pixel
+  History and Shader Debug): its frame viewer at Frame 0 / 59 with its
+  transport; End moves to the last frame (Frame 59 / 59, Draw 3 / 3) and
+  Right steps a frame.
+stage:
+  - use: visual-recording
+  - use: open-recording
+    with: { width: 200, height: 50 }
+steps:
+  - wait: { until: replay-idle, timeout: 180s }
+  - wait: { until: { at: 'pane-tab[label="Video Player"]', present: true }, timeout: 60s }
+  - expect: { at: 'pane-tab[label="Pixel History"]', present: true }
+  - expect: { at: 'pane-tab[label="Shader Debug"]', present: true }
+  - click: { at: 'pane-tab[label="Video Player"]' }
+  - wait: { until: { at: 'pane[title="Video Player"]', assert: 'has-row("Frame 0 / 59")' }, timeout: 60s }
+  - expect: { at: 'pane[title="Video Player"]', assert: ['has-row("FRAME VIEWER")', 'has-row("256x256px")', 'has-row("[|<][<<][>][>>][>|]")'] }
+  - click: { at: 'pane[title="Video Player"]' }
+  - key: End
+  - wait: { until: { at: 'pane[title="Video Player"]', assert: 'has-row("Frame 59 / 59")' }, timeout: 30s }
+  - expect: { at: 'pane[title="Video Player"]', assert: 'has-row("Draw 3 / 3")' }

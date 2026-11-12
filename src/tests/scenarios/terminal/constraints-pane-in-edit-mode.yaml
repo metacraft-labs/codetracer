@@ -1,0 +1,22 @@
+scenario: 1
+name: terminal/constraints-pane-in-edit-mode
+pack: codetracer
+summary: >-
+  In Edit mode over a Noir circuit, the Constraints pane shows the desktop's
+  headline (18 ACIR opcodes, 33 unconstrained) and rows — each function and
+  opcode with its count and where it is declared (main at src/main.nr:3,
+  halve's line, the range checks in src/checks.nr:2); a right press on a row
+  opens the desktop's menu (Go to Source, Copy Name, Copy Source Location).
+stage:
+  - use: fixture-project
+    with: { name: noir-constraints }
+  - use: open-project
+    with: { folder: $project, width: 200, height: 50 }
+steps:
+  - wait: { until: ready, timeout: 60s }
+  - chord: Ctrl+P
+  - type: ":constraints"
+  - key: Enter
+  - wait: { until: { at: 'pane[title="Constraints"]', assert: 'has-row("18 ACIR opcodes, 33 unconstrained")' }, timeout: 120s }
+  - expect: { at: 'pane[title="Constraints"]', assert: ['has-row("src/main.nr:3")', 'has-row("BLACKBOX::RANGE")', 'has-row("src/checks.nr:2")', 'has-row("halve")'] }
+  - click: { at: 'pane[title="Constraints"]', button: right }

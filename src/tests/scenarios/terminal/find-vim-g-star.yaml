@@ -1,0 +1,20 @@
+scenario: 1
+name: terminal/find-vim-g-star
+pack: codetracer
+summary: >-
+  Under Vim in Edit mode, `g g g *` from the first line of a document of
+  foo/foobar/foo_x words moves the caret to line 1 (`*` whole-word
+  forward, `n` continues, `#` back, `g*` matches inside words).
+stage:
+  - use: write-project
+    with: { files: { find.txt: "foo bar foobar\nbaz foo qux\none two three foo\nfoo_x foo\n" } }
+  - use: select-keymap
+    with: { preset: vim }
+  - use: open-project
+    with: { folder: $project, file: find.txt, width: 160, height: 40 }
+steps:
+  - wait: { until: ready, timeout: 60s }
+  - wait: { until: { at: 'editor[file="find.txt"]', assert: 'shows-text("foo bar foobar")' }, timeout: 20s }
+  - click: { at: 'editor[file="find.txt"]/line[number="1"]', anchor: text-start }
+  - chord: g g g *
+  - wait: { until: { at: 'editor[file="find.txt"]', assert: "caret-at(1)" }, timeout: 10s }

@@ -1,0 +1,27 @@
+scenario: 1
+name: terminal/requests-pane
+pack: codetracer
+summary: >-
+  A recording that served requests reveals the Requests pane by itself, with
+  the producer's rows (#, method, URL, status, duration, size) under a
+  header; `:requests users` narrows them to the URLs holding `users` and
+  `:requests` clears it; a single click moves nothing, a double click goes to
+  the request's handler; a row's menu offers Copy URL, and its Go to Handler
+  moves to that request's handler.
+stage:
+  - use: request-session
+  - use: open-recording
+    with: { width: 200, height: 50 }
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - wait: { until: { at: 'pane[title="REQUESTS"]', assert: 'has-row("/api/reports/slow")' }, timeout: 30s }
+  - expect: { at: 'pane[title="REQUESTS"]', assert: ['has-row("URL")', 'has-row("Duration")', 'has-row("/api/users/42")', 'has-row("/static/app.css")'] }
+  - chord: Ctrl+P
+  - type: ":requests users"
+  - key: Enter
+  - wait: { until: { at: 'pane[title="REQUESTS"]', assert: 'lacks-row("/static/app.css")' }, timeout: 20s }
+  - expect: { at: 'pane[title="REQUESTS"]', assert: ['has-row("/api/users/42")', 'has-row("DELETE")', 'has-row("POST")', 'lacks-row("/api/reports/slow")', 'lacks-row("/api/orders/7")'] }
+  - chord: Ctrl+P
+  - type: ":requests"
+  - key: Enter
+  - wait: { until: { at: 'pane[title="REQUESTS"]', assert: 'has-row("/static/app.css")' }, timeout: 20s }

@@ -1,0 +1,15 @@
+scenario: 1
+name: terminal/vcs-pane-outside-a-repository
+pack: codetracer
+summary: Outside a git repository, the VCS pane says so.
+stage:
+  - use: record-program
+    with: { program: calc }
+  - use: write-project
+    with: { files: { notes.txt: "not a repository\n" } }
+  - use: open-recording
+    with: { width: 200, height: 50 }
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - click: { at: 'pane-tab[label="VCS"]' }
+  - wait: { until: { at: 'pane[title="VCS"]', assert: 'has-row("Not a git repository")' }, timeout: 30s }

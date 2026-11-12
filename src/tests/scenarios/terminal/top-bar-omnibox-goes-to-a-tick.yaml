@@ -1,0 +1,26 @@
+scenario: 1
+name: terminal/top-bar-omnibox-goes-to-a-tick
+pack: codetracer
+summary: >-
+  In the omnibox `#42` offers "Go to tick 42" and Enter puts the replay at
+  tick 42; `:sym apply` lists the apply_op function with its location, and
+  Enter goes there.
+stage:
+  - use: record-program
+    with: { program: calc }
+  - use: open-recording
+    with: { width: 200, height: 50 }
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - chord: Ctrl+P
+  - type: "#42"
+  - wait: { until: { at: 'omnibox/option[label="Go to tick 42"]', present: true }, timeout: 10s }
+  - key: Enter
+  - wait: { until: { at: replay-position, tick: 42 }, timeout: 30s }
+  - chord: Ctrl+P
+  - type: ":sym apply"
+  - wait: { until: { at: 'omnibox/option[label="apply_op"]', present: true }, timeout: 10s }
+  - expect: { at: 'omnibox/option[label="apply_op"]', detail: "main.py:61" }
+  - key: Enter
+  - wait: { until: { at: 'editor[file="main.py"]', assert: "shows-line(61)" }, timeout: 30s }
+  - expect: { at: replay-position, assert: "before(42)" }
