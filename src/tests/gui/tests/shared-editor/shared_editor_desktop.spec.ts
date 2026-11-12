@@ -133,8 +133,11 @@ test.describe("Edit mode, the shared editor", () => {
       await editorReady(page);
       expect(await activeEditorIsShared(page)).toBe(true);
       await clickLine(page, 1, 1);
-      await page.keyboard.type("# ");
-      expect((await textOf(page)).startsWith("# answer = 42")).toBe(true);
+      // One keystroke, so one undo step whatever the machine's load: two
+      // keystrokes more than the history's 500 ms apart are two steps, as
+      // in Monaco and CodeMirror.
+      await page.keyboard.type("#");
+      expect((await textOf(page)).startsWith("#answer = 42")).toBe(true);
       await page.keyboard.press("Control+KeyZ");
       expect((await textOf(page)).startsWith("answer = 42")).toBe(true);
       await page.keyboard.type("x");
@@ -188,6 +191,9 @@ test.describe("Edit mode, the shared editor", () => {
     expect(selected.length).toBeGreaterThan(0);
     await page.keyboard.press("d");
     expect((await textOf(page)).includes("third")).toBe(false);
+    // Kakoune's own Ctrl+P (extend-jump-back) is the editor's while it has
+    // the keys, as in the terminal; the palette is reached from outside it.
+    await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
     await palette.executeCommand("Keymap: CUA");
   });
 });
