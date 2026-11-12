@@ -4,9 +4,15 @@
 ## disabled operation is inert and says why (IR-6), and one this front-end does
 ## not perform says so.
 ##
+## The top bar's elements and a docked pane's label are pressed with real SGR
+## reports: a plain press does what it always did, a user's row takes it over.
+##
 ## No mocks: the shipped runtime over its real ViewModels, with no terminal. The
 ## Video Player's suite records the acts its host is asked for; its header says
-## why that one stand-in is not a mock.
+## why that one stand-in is not a mock. The top bar's suite gives the runtime a
+## welcome host that starts nothing: the strip offers its "+" only to a host
+## that can open a tab, and what is asserted is the tab the press adds and
+## which operation a press reaches, both before the host would be asked.
 
 import std/[strutils, tempfiles, unittest]
 
@@ -17,9 +23,12 @@ import ../app/theme/capabilities
 import ../app/tui_app
 import ../app/views/frame_viewer
 import ../app/views/visual_replay_panes
+import ../app/views/[shell, top_bar]
+import ../app/layout/binding
 import ../../headless_app/layout_model
 import ../../viewmodel/keymap/[keymap_router, user_keymap]
 import ../../viewmodel/viewmodels/video_player_vm
+from ../../viewmodel/viewmodels/native_welcome import NativeWelcomeIntent
 
 const
   Cols = 140
@@ -168,3 +177,95 @@ suite "the Video Player's keys and presses reach its operations":
     rt.app.frameViewer.magnified = false
     rt.app.frameViewer.transport.picker = false
     check rt.probeKey("Left").operation == "video-player.step-frame-back"
+
+suite "§5.1: the top bar's and a docked label's presses go through the router":
+  # A press on the top bar's elements and on a docked pane's label: the plain
+  # press does what it always did, and a user's row for the element's press
+  # (`paneKind == topBar`, or the label's pane) runs the user's operation
+  # instead. `help.check-key-delivery` is the user's operation because its
+  # answer is on the status line.
+  const UserTakesIt = "keys check"
+
+  proc barColumn(rt: TuiRuntime; kind: TopBarHitKind): int =
+    let screen = rt.shellScreenOf()
+    let tabs = rt.app.shellModel(rt.width, rt.height).topBar.tabs
+    for col in 0 ..< rt.width:
+      if screen.topBarLayout.topBarHitAt(col, tabs).kind == kind:
+        return col
+    -1
+
+  proc click(rt: TuiRuntime; row, col: int) =
+    discard rt.handleToken("\x1b[<0;" & $(col + 1) & ";" & $(row + 1) & "M", 0)
+    discard rt.handleToken("\x1b[<0;" & $(col + 1) & ";" & $(row + 1) & "m", 0)
+
+  proc userRow(rt: TuiRuntime; whenText: string) =
+    rt.router.applyUserKeymap(parseUserKeymap("""[
+      { "key": "click", "command": "help.check-key-delivery",
+        "when": """" & whenText & """" }
+    ]"""))
+
+  test "the menu button opens and closes the menu; a user's row takes it":
+    let rt = runtime()
+    let col = rt.barColumn(thMenuButton)
+    check col >= 0
+    rt.click(0, col)
+    check rt.app.menu.isOpen
+    rt.click(0, col)
+    check not rt.app.menu.isOpen
+    rt.userRow("paneKind == topBar && elementKind == button")
+    rt.click(0, col)
+    check not rt.app.menu.isOpen
+    check UserTakesIt in rt.app.notification
+
+  test "the strip's + adds a tab, and a press on a tab is the user's when bound":
+    let rt = runtime()
+    # The host's welcome flow: the strip offers its "+" only to a host that
+    # can open a tab. What it would start is not asked for here.
+    rt.app.welcomeHost = proc(tab: int; intent: NativeWelcomeIntent): string = ""
+    let tabsBefore = rt.app.welcomeTabs.tabs.len
+    let add = rt.barColumn(thTabAdd)
+    check add >= 0
+    rt.click(0, add)
+    rt.click(0, rt.barColumn(thTabAdd))
+    check rt.app.welcomeTabs.tabs.len == tabsBefore + 2
+    let tab = rt.barColumn(thTab)
+    check tab >= 0
+    rt.userRow("paneKind == topBar && elementKind == tab")
+    rt.click(0, tab)
+    check UserTakesIt in rt.app.notification
+
+  test "the omnibox opens on a press":
+    let rt = runtime()
+    let col = rt.barColumn(thOmnibar)
+    check col >= 0
+    rt.click(0, col)
+    check rt.app.omnibar.isOpen
+
+  test "a docked pane's label docks it open; a user's row takes the press":
+    proc labelCell(rt: TuiRuntime; pane: PaneKind): tuple[row, col: int] =
+      let geom = rt.layoutGeometry()
+      for s in geom.strips:
+        for sl in s.slots:
+          if sl.pane == pane:
+            return (sl.area.row, sl.area.col)
+      (-1, -1)
+    proc dockedOpen(rt: TuiRuntime; pane: PaneKind): bool =
+      let layout = rt.app.layoutBinding.layout
+      let at = layout.dockedIndex(pane)
+      at >= 0 and layout.docked[at].open
+    let rt = runtime()
+    let panes = rt.app.layoutBinding.layout.visiblePanes
+    check panes.len > 1
+    let pane = panes[^1]
+    check rt.app.layoutBinding.dispatch(cmdDock(pane, leLeft)).status == lasApplied
+    rt.resize(Cols, Rows)
+    let (row, col) = rt.labelCell(pane)
+    check row >= 0
+    rt.click(row, col)
+    check rt.dockedOpen(pane)
+    rt.click(row, col)
+    check not rt.dockedOpen(pane)
+    rt.userRow("paneKind == " & $pane & " && elementKind == button")
+    rt.click(row, col)
+    check not rt.dockedOpen(pane)
+    check UserTakesIt in rt.app.notification

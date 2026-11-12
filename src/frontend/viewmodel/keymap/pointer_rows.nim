@@ -103,5 +103,13 @@ const
 
     # --- A pane's tab (K5) -------------------------------------------------
     BaseRow(chords: "Click", operation: "layout.activate-tab",
-            whenText: "elementKind == tab", table: PointerTable),
+            whenText: "elementKind == tab && paneKind != topBar",
+            table: PointerTable),
+
+    # --- A session tab on the top bar's strip (K4). The bar's buttons (the
+    # menu, the omnibox, a tab's close and the strip's "+") carry their
+    # operation; a user's row for `paneKind == topBar` takes any of them.
+    BaseRow(chords: "Click", operation: "session-tabs.activate",
+            whenText: "paneKind == topBar && elementKind == tab",
+            table: PointerTable),
   ]

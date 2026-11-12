@@ -218,6 +218,30 @@ ARMS = [
              "  let path = desktopScopePath()")],
      [(VPSPEC, None)],
      "the desktop never pushes the picker's layer: Escape does not cancel it"),
+    # ---- the top bar, a tab's pin and a docked label ----------------------------
+    ("B1", [(RUNTIME, '  of thTab:\n    press(ekTab, "session-tabs.activate", hit.index)',
+             '  of thTab:\n'
+             '    let at = rt.app.shell.stripTabAt(rt.app.welcomeTabs, hit.index)\n'
+             '    if at.isWelcome: rt.showWelcomeTab(at.welcomeIndex, outcome)\n'
+             '    else: rt.showSessionTab(at.sessionIndex, outcome)')],
+     [(TABLES, None)],
+     "the terminal's session-tab press bypasses the router: a user's row cannot take it"),
+    ("B2", [(RUNTIME, '    discard rt.pressElement(event, pane, ekButton, "layout.toggle-docked-pane",\n'
+                      '                            ContextTarget(pane: pane), outcome)',
+             '    rt.labelAction = binding.toggleDockOpen(pane)')],
+     [(TABLES, None)],
+     "the terminal's docked label press bypasses the router"),
+    ("B3", [(GMAIN, '  of gtTab:\n    press(ekTab, "session-tabs.activate", hit.index)',
+             '  of gtTab:\n'
+             '    let at = mainShell().app.stripTabAt(gWelcomeTabs, hit.index)\n'
+             '    if at.isWelcome: showWelcomeTab(r, at.welcomeIndex)\n'
+             '    else: showSessionTab(r, at.sessionIndex)')],
+     [(PLAN, None)],
+     "GPUI's session-tab press bypasses the router: a user's row cannot take it"),
+    ("B4", [(GMAIN, '  of gtTabAdd:\n    press(ekButton, "session-tabs.new")',
+             '  of gtTabAdd:\n    gHoverTabAdd = false\n    openWelcomeTab(r)')],
+     [(PLAN, None)],
+     "GPUI's + press bypasses the router"),
     # ---- the desktop -----------------------------------------------------------
     ("W1", [(KEYROUTER, '  if res.kind == erOperation and res.layer.startsWith("user:"):\n    if runDesktopOperation(res) == nkHandled:',
              '  if false:\n    if runDesktopOperation(res) == nkHandled:')],

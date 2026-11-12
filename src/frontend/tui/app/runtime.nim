@@ -648,6 +648,10 @@ type
     topBarPressConsumed*: bool
       ## PLAT-48: the top bar (or an open menu / omnibar) took the last
       ## press, so its release is not a layout gesture.
+    labelAction: LayoutAction
+      ## What a docked pane's label press did to the layout, when its
+      ## operation (`layout.toggle-docked-pane`) ran: `routeLayoutMouse`
+      ## reports it as the gesture's own action.
     layoutDocumentQuarantined*: bool
       ## Whether this session started from a document it could NOT read.
       ##
@@ -2334,7 +2338,7 @@ proc pointerCellX(event: MouseEvent; fallback = -1.0): float =
 
 proc pressElement(rt: TuiRuntime; event: MouseEvent; pane: PaneKind;
                   kind: ElementKind; operation: string; target: ContextTarget;
-                  outcome: var RuntimeOutcome): bool
+                  outcome: var RuntimeOutcome; scope = ""): bool
   ## A press on an element, through the router: defined beside `runPointer`.
 
 proc routeTerminalOutputClick(rt: TuiRuntime; area: CellArea;
@@ -4445,11 +4449,13 @@ func plainGestureOf(event: MouseEvent): string =
   pointerGesture(event.buttonOf, false, false, false)
 
 proc pointerOperation(rt: TuiRuntime; event: MouseEvent; pane: PaneKind;
-                      kind: ElementKind): EditingResolution =
+                      kind: ElementKind; scope = ""): EditingResolution =
   ## The operation a press on this element runs (`pointer_rows`, a user's
   ## `keybindings.json`). A modified press with no row of its own is the plain
   ## gesture: a Ctrl+click on a row is still a click on it.
-  let path = @[element(ekWindow, "window"), pane($pane), element(kind, "")]
+  ## `scope` names the press's scope when it is not a pane's (`TopBarScope`).
+  let path = @[element(ekWindow, "window"),
+               pane(if scope.len > 0: scope else: $pane), element(kind, "")]
   let facts = rt.sessionFacts
   result = rt.router.routePointer(facts, path, rt.navMode, gestureOf(event))
   if result.kind != erOperation:
@@ -4458,11 +4464,11 @@ proc pointerOperation(rt: TuiRuntime; event: MouseEvent; pane: PaneKind;
 proc runPointer(rt: TuiRuntime; event: MouseEvent; pane: PaneKind;
                 kind: ElementKind; target: ContextTarget;
                 outcome: var RuntimeOutcome;
-                menu = ContextMenuModel()): bool =
+                menu = ContextMenuModel(); scope = ""): bool =
   ## **A PRESS ON AN ELEMENT, THROUGH THE ROUTER** (Input-Routing §5.1): its
   ## operation is the pointer keymap's, performed by the operation tables. A
   ## context click opens the element's `menu`. Answers whether it was taken.
-  let res = rt.pointerOperation(event, pane, kind)
+  let res = rt.pointerOperation(event, pane, kind, scope)
   if res.kind != erOperation:
     return false
   if res.operation == "context-menu.open":
@@ -4488,13 +4494,13 @@ proc runPointer(rt: TuiRuntime; event: MouseEvent; pane: PaneKind;
 
 proc pressElement(rt: TuiRuntime; event: MouseEvent; pane: PaneKind;
                   kind: ElementKind; operation: string; target: ContextTarget;
-                  outcome: var RuntimeOutcome): bool =
+                  outcome: var RuntimeOutcome; scope = ""): bool =
   ## **A PRESS ON AN ELEMENT THAT DECLARES ITS OPERATION** (Input-Routing §5.1):
   ## the hit test found the element and what it is; a pointer row for the
   ## gesture (a user's `keybindings.json`, the base's) decides first, and a
   ## plain primary press runs the element's own `operation` by name through the
   ## operation tables — a transport button's step, a Shader Debug button's.
-  if rt.runPointer(event, pane, kind, target, outcome):
+  if rt.runPointer(event, pane, kind, target, outcome, scope = scope):
     return true
   if operation.len == 0 or event.button != mbLeft:
     return false
@@ -6172,10 +6178,19 @@ proc routeMouseReport(rt: TuiRuntime; event: MouseEvent;
     (not geometry.openDock.isEmptyArea and
      geometry.openDock.contains(event.row, event.col)) or
     before in GestureInteractions
-  let acted =
+  binding.routeLabelClicks = true
+  var acted =
     if bindingsOwn: binding.onMouse(rt.layoutGeometry(), event)
     else: LayoutAction(status: lasNoGesture,
                        message: "a maximized pane's own press")
+  if acted.labelPress.isSome:
+    # K8: the click on a docked pane's label is a press of that label, through
+    # the router (Input-Routing §5.1); its operation reports what it did.
+    let pane = acted.labelPress.get
+    rt.labelAction = LayoutAction(status: lasNoGesture, message: acted.message)
+    discard rt.pressElement(event, pane, ekButton, "layout.toggle-docked-pane",
+                            ContextTarget(pane: pane), outcome)
+    acted = rt.labelAction
   # PLAT-49 part B: a click on a label docked its pane open (or closed it)
   # — the preview and its timers end; an overlay closed any other way (an
   # outside press) is no longer the hover machine's either.
@@ -7938,13 +7953,17 @@ proc routeTopBarMouse(rt: TuiRuntime; event: MouseEvent;
   outcome.repaint = true
   let hit = lay.topBarHitAt(event.col, rt.app.shell.stripTabsOf(
     rt.app.welcomeTabs))
+  # Each element of the bar is pressed through the router (Input-Routing §5.1):
+  # a pointer row for the press decides first (a user's `keybindings.json`, the
+  # base's session-tab row), else the element's own operation runs by name.
+  # The procedures are the operation tables' (`elements`).
+  template press(kind: ElementKind; operation: string; at = -1) =
+    discard rt.pressElement(event, PaneKind.low, kind, operation,
+                            ContextTarget(index: int64(at)), outcome,
+                            scope = TopBarScope)
   case hit.kind
   of thMenuButton:
-    if vm.isOpen:
-      vm.close()
-    else:
-      rt.refreshMenuAvailability()
-      vm.open(keyboard = false)
+    press(ekButton, "menu.toggle")
   of thControl:
     # A toolbar button carries its operation (Input-Routing §5.1): the action
     # it names, by the one table.
@@ -7958,44 +7977,15 @@ proc routeTopBarMouse(rt: TuiRuntime; event: MouseEvent;
       rt.runOperation(EditingResolution(kind: erOperation, operation: name,
                                         argument: arg), 0, outcome)
   of thOmnibar:
-    if not rt.app.omnibar.isOpen:
-      rt.openOmnibar()
+    press(ekInput, "palette.open-commands")
   of thStop:
-    # M76: the toolbar's Stop — the same proc the menu item and the chord
-    # run (`stopDebugging`); with no session it answers so.
-    rt.app.hoveredStop = false
-    if not rt.hasDebugSession:
-      rt.note("Stop: " & NoDebugSessionReason)
-    else:
-      rt.stopDebugging(outcome)
+    press(ekButton, "debugger.stop")
   of thTab:
-    # A click on a session tab switches to it; the switch is on the screen,
-    # so nothing is echoed (PLAT-49 part B). PLAT-51: a welcome tab (or a
-    # folder it became) is shown the same way.
-    let at = rt.app.shell.stripTabAt(rt.app.welcomeTabs, hit.index)
-    if at.isWelcome: rt.showWelcomeTab(at.welcomeIndex, outcome)
-    else: rt.showSessionTab(at.sessionIndex, outcome)
+    press(ekTab, "session-tabs.activate", hit.index)
   of thTabClose:
-    # PLAT-49 part B: the tab's close control — the desktop's
-    # `.session-tab-close` (Multi-Window-Tab-Management.md, rule 4: "Closing
-    # a tab stops its backend and removes it"). The HOST closes a session it
-    # opened — its engine with it (`sessionCloser`).
-    let at = rt.app.shell.stripTabAt(rt.app.welcomeTabs, hit.index)
-    if at.isWelcome:
-      rt.closeWelcomeTabAt(at.welcomeIndex, outcome)
-      rt.app.hoveredTab = -1
-    else:
-      let closed =
-        if not rt.app.sessionCloser.isNil: rt.app.sessionCloser(at.sessionIndex)
-        else: rt.app.shell.closeTab(at.sessionIndex)
-      if closed:
-        rt.app.hoveredTab = -1
+    press(ekButton, "session-tabs.close-tab", hit.index)
   of thTabAdd:
-    # PLAT-51 deliverable 8 (Multi-Window-Tab-Management.md rule 3): the
-    # strip's "+" opens a new tab showing the WELCOME SCREEN, as the
-    # desktop's does — the performer File › New Trace Tab shares.
-    rt.app.hoveredTabAdd = false
-    rt.addTab(outcome)
+    press(ekButton, "session-tabs.new")
   of thTabMore:
     rt.app.tabScroll = max(0, rt.app.tabScroll + hit.index)
   of thNone:
@@ -9422,6 +9412,58 @@ proc buildOperationTables(rt: TuiRuntime) =
   onTarget("constraints.go-to-source"):
     discard rt.actOnConstraints(ConstraintsAct(kind: cakOpen,
                                                index: int(c.target.index)), outcome)
+  # The top bar's elements (`routeTopBarMouse`, K1 - K4) and a docked pane's
+  # label (K8): what their presses always ran. From a key these decline, and
+  # the walk goes on to the session's own entries.
+  onTarget("menu.toggle"):
+    if rt.app.menu.isOpen:
+      rt.app.menu.close()
+    else:
+      rt.refreshMenuAvailability()
+      rt.app.menu.open(keyboard = false)
+  onTarget("palette.open-commands"):
+    if not rt.app.omnibar.isOpen:
+      rt.openOmnibar()
+  onTarget("debugger.stop"):
+    # M76: the toolbar's Stop — the same proc the menu item and the chord
+    # run (`stopDebugging`); with no session it answers so.
+    rt.app.hoveredStop = false
+    if not rt.hasDebugSession:
+      rt.note("Stop: " & NoDebugSessionReason)
+    else:
+      rt.stopDebugging(outcome)
+  onTarget("session-tabs.activate"):
+    # A click on a session tab switches to it; the switch is on the screen,
+    # so nothing is echoed (PLAT-49 part B). PLAT-51: a welcome tab (or a
+    # folder it became) is shown the same way.
+    let at = rt.app.shell.stripTabAt(rt.app.welcomeTabs, int(c.target.index))
+    if at.isWelcome: rt.showWelcomeTab(at.welcomeIndex, outcome)
+    else: rt.showSessionTab(at.sessionIndex, outcome)
+  onTarget("session-tabs.close-tab"):
+    # PLAT-49 part B: the tab's close control — the desktop's
+    # `.session-tab-close` (Multi-Window-Tab-Management.md, rule 4: "Closing
+    # a tab stops its backend and removes it"). The HOST closes a session it
+    # opened — its engine with it (`sessionCloser`).
+    let at = rt.app.shell.stripTabAt(rt.app.welcomeTabs, int(c.target.index))
+    if at.isWelcome:
+      rt.closeWelcomeTabAt(at.welcomeIndex, outcome)
+      rt.app.hoveredTab = -1
+    else:
+      let closed =
+        if not rt.app.sessionCloser.isNil: rt.app.sessionCloser(at.sessionIndex)
+        else: rt.app.shell.closeTab(at.sessionIndex)
+      if closed:
+        rt.app.hoveredTab = -1
+  onTarget("session-tabs.new"):
+    # PLAT-51 deliverable 8 (Multi-Window-Tab-Management.md rule 3): the
+    # strip's "+" opens a new tab showing the WELCOME SCREEN, as the
+    # desktop's does — the performer File › New Trace Tab shares.
+    rt.app.hoveredTabAdd = false
+    rt.addTab(outcome)
+  onTarget("layout.toggle-docked-pane"):
+    # PLAT-49 part B: a click on a docked pane's label docks it open, or
+    # closes it again (`LayoutBinding.toggleDockOpen`).
+    rt.labelAction = rt.app.layoutBinding.toggleDockOpen(c.target.pane)
   hub.add elements
 
   # --- The session ----------------------------------------------------------

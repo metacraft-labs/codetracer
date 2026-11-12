@@ -1153,10 +1153,12 @@ const
     ## §5.1). The rows `pointer_rows` holds resolve through the pointer keymap;
     ## `test_plat64_operation_mapping` asserts every row a front-end implements
     ## is here and names an operation that exists.
-    ("K1", "menu.open"), ("K2", "debugger.step-over"),
+    ("K1", "menu.toggle"), ("K2", "debugger.step-over"),
     ("K3", "palette.open-commands"), ("K4", "session-tabs.activate"),
+    ("K4", "session-tabs.close-tab"), ("K4", "session-tabs.new"),
     ("K5", "layout.activate-tab"), ("K6", GestureMachine),
     ("K7", "context-menu.open"), ("K8", "layout.reveal-next-docked"),
+    ("K8", "layout.toggle-docked-pane"),
     ("K9", GestureMachine), ("K10", "editor.toggle-breakpoint"),
     ("K11", "editor.enable-breakpoint"), ("K12", "debugger.smart-jump"),
     ("K13", "context-menu.open"), ("K14", "editor.add-column-breakpoint"),
@@ -1174,6 +1176,7 @@ const
     ("K37", "status.copy-path"), ("K38", "calltrace.go-to-call"),
     ("K40", "variables.value-history"), ("K41", "variables.value-origin"),
     ("K42", "context-menu.open"), ("K43", "layout.pin-pane-left"),
+    ("K43", "layout.pin-pane-bottom"),
     ("K53", "vcs.toggle-commit"), ("K58", "requests.select"),
     ("K59", "context-menu.open"), ("K60", "requests.filter-method"),
     ("K61", "low-level.go-to-source-line"), ("K62", "context-menu.open"),

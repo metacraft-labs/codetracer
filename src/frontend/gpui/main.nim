@@ -3019,10 +3019,11 @@ var gPressGesture = "Click"
 
 proc runElementGesture(r: GpuiRenderer; gesture: string; pane: PaneKind;
                        kind: ElementKind; target: ContextTarget;
-                       menu = ContextMenuModel(); x = 0; y = 0): bool {.discardable.}
+                       menu = ContextMenuModel(); x = 0; y = 0;
+                       scope = ""): bool {.discardable.}
 proc pressElement(r: GpuiRenderer; pane: PaneKind; kind: ElementKind;
                   operation: string; target: ContextTarget;
-                  gesture = "Click"; x = 0; y = 0): bool
+                  gesture = "Click"; x = 0; y = 0; scope = ""): bool
   ## PLAT-64: forward-declared; defined beside `runElementGesture`.
 
 proc clickCalltrace(r: GpuiRenderer; x, y: int): bool =
@@ -4550,8 +4551,13 @@ proc windowPointer(r0: GpuiRenderer; kind: GpuiEventKind; x, y: int;
       # PLAT-49 part B: a label's click docked its pane open (or closed it):
       # the hover preview and its timers end.
       if c.kind == lcSetAutoHide and c.autoHideDirection in {ahOpen, ahClose}:
-        gAutoHide.clicked()
-      applyGestureCommand(r, c)
+        # K8: the click on the label is a press of it, through the router
+        # (Input-Routing §5.1); `layout.toggle-docked-pane` docks it.
+        discard pressElement(r, c.autoHidePane, ekButton,
+                             "layout.toggle-docked-pane",
+                             ContextTarget(pane: c.autoHidePane))
+      else:
+        applyGestureCommand(r, c)
       # A tab's press initially hits the pane that was active before it.
       # Once activated, its own element must own the next key's scope.
       if c.kind == lcActivateTab:
@@ -7937,8 +7943,12 @@ proc handleTopPress(r: GpuiRenderer; x, y: int): bool =
         continue
       for k in PaneKind:
         if $k == n.panes[t]:
-          applyGestureCommand(r, if onPin: cmdDock(k, leBottom)
-                                 else: cmdRemovePane(k))
+          # K43: each icon is a button carrying its operation, pressed
+          # through the router (Input-Routing §5.1).
+          discard pressElement(r, k, ekButton,
+                               if onPin: "layout.pin-pane-bottom"
+                               else: "layout.close-pane",
+                               ContextTarget(pane: k))
       discard drawArrangement(r)
       drawTopBar(r)
       return true
@@ -7950,13 +7960,17 @@ proc handleTopPress(r: GpuiRenderer; x, y: int): bool =
   let hit = gTopLayout.topBarHitAt(x, y)
   if hit.index < 0 and hit.rect.w == 0:
     return true
+  # Each element of the band is pressed through the router (Input-Routing
+  # §5.1): a pointer row for the press decides first (a user's
+  # `keybindings.json`, the base's session-tab row), else the element's own
+  # operation runs by name. The procedures are the operation tables'
+  # (`elements`).
+  template press(kind: ElementKind; operation: string; at = -1) =
+    discard pressElement(r, PaneKind.low, kind, operation,
+                         ContextTarget(index: int64(at)), scope = TopBarScope)
   case hit.part
   of gtMenuButton:
-    if gMenu.isOpen:
-      gMenu.close()
-    else:
-      refreshGpuiMenuAvailability()
-      gMenu.open(keyboard = false)
+    press(ekButton, "menu.toggle")
   of gtControl:
     # A toolbar button carries its operation (Input-Routing §5.1): the action
     # it names, by the one table. `performControl` is what a control's
@@ -7972,29 +7986,14 @@ proc handleTopPress(r: GpuiRenderer; x, y: int): bool =
     return true
   of gtOmnibar:
     if not gOmnibar.isOpen:
-      openOmnibar(r)
+      press(ekInput, "palette.open-commands")
       return true
   of gtTab:
-    # PLAT-51: a welcome tab (or the folder it became) is shown the same way
-    # a session tab is.
-    let at = mainShell().app.stripTabAt(gWelcomeTabs, hit.index)
-    if at.isWelcome: showWelcomeTab(r, at.welcomeIndex)
-    else: showSessionTab(r, at.sessionIndex)
+    press(ekTab, "session-tabs.activate", hit.index)
   of gtTabClose:
-    # PLAT-49 part B: the desktop's `.session-tab-close` — closing a tab
-    # stops its session (Multi-Window-Tab-Management.md, rule 4).
-    let at = mainShell().app.stripTabAt(gWelcomeTabs, hit.index)
-    if at.isWelcome: closeWelcomeTabAt(r, at.welcomeIndex)
-    else:
-      leaveFolder(r)
-      closeSessionTab(r, at.sessionIndex)
-    gHoverTab = -1
+    press(ekButton, "session-tabs.close-tab", hit.index)
   of gtTabAdd:
-    # PLAT-51 deliverable 8 (Multi-Window-Tab-Management.md rule 3): the
-    # desktop's "New tab" opens a tab showing the WELCOME SCREEN. (PLAT-49
-    # part B opened the omnibar on `:open ` here.)
-    gHoverTabAdd = false
-    openWelcomeTab(r)
+    press(ekButton, "session-tabs.new")
     return true
   of gtWindowButton:
     # PLAT-69: the renderer acts on a window button's press itself (its
@@ -12848,6 +12847,53 @@ proc buildWindowOperationTables(r: GpuiRenderer) =
   onTarget("constraints.go-to-source"):
     traceGesture("constraints: press row " & $c.target.index)
     activateConstraintRow(r, int(c.target.index))
+  # The band's elements (`handleTopPress`, K1 - K4), a tab's pin and close
+  # icons (K43) and a docked pane's label (K8): what their presses always
+  # ran. From a key these decline, and the walk goes on to the window's own.
+  onTarget("menu.toggle"):
+    if gMenu.isOpen:
+      gMenu.close()
+    else:
+      refreshGpuiMenuAvailability()
+      gMenu.open(keyboard = false)
+  onTarget("palette.open-commands"):
+    if not gOmnibar.isOpen:
+      openOmnibar(r)
+  onTarget("session-tabs.activate"):
+    # PLAT-51: a welcome tab (or the folder it became) is shown the same way
+    # a session tab is.
+    let at = mainShell().app.stripTabAt(gWelcomeTabs, int(c.target.index))
+    if at.isWelcome: showWelcomeTab(r, at.welcomeIndex)
+    else: showSessionTab(r, at.sessionIndex)
+  onTarget("session-tabs.close-tab"):
+    # PLAT-49 part B: the desktop's `.session-tab-close` — closing a tab
+    # stops its session (Multi-Window-Tab-Management.md, rule 4).
+    let at = mainShell().app.stripTabAt(gWelcomeTabs, int(c.target.index))
+    if at.isWelcome: closeWelcomeTabAt(r, at.welcomeIndex)
+    else:
+      leaveFolder(r)
+      closeSessionTab(r, at.sessionIndex)
+    gHoverTab = -1
+  onTarget("session-tabs.new"):
+    # PLAT-51 deliverable 8 (Multi-Window-Tab-Management.md rule 3): the
+    # desktop's "New tab" opens a tab showing the WELCOME SCREEN.
+    gHoverTabAdd = false
+    openWelcomeTab(r)
+  onTarget("layout.pin-pane-bottom"):
+    # The tab's pin docks its pane to the bottom, as the box's pin did.
+    applyGestureCommand(r, cmdDock(c.target.pane, leBottom))
+  onTarget("layout.close-pane"):
+    applyGestureCommand(r, cmdRemovePane(c.target.pane))
+  onTarget("layout.toggle-docked-pane"):
+    # PLAT-49 part B: a label's click docks its pane open, or closes it
+    # again; the hover preview and its timers end.
+    let docked = committedLayout().docked
+    var open = false
+    for d in docked:
+      if d.pane == c.target.pane: open = d.open
+    gAutoHide.clicked()
+    applyGestureCommand(r, if open: cmdCloseDocked(c.target.pane)
+                           else: cmdOpenDocked(c.target.pane))
   hub.add elements
 
   # --- The window -----------------------------------------------------------
@@ -13000,12 +13046,15 @@ proc buildWindowOperationTables(r: GpuiRenderer) =
 
 proc runElementGesture(r: GpuiRenderer; gesture: string; pane: PaneKind;
                        kind: ElementKind; target: ContextTarget;
-                       menu = ContextMenuModel(); x = 0; y = 0): bool =
+                       menu = ContextMenuModel(); x = 0; y = 0;
+                       scope = ""): bool =
   ## **A PRESS ON AN ELEMENT, THROUGH THE ROUTER** (Input-Routing §5.1): its
   ## operation is the pointer keymap's, performed by the operation tables. A
   ## context click opens the element's `menu`. A modified press with no row of
   ## its own is the plain gesture: a Ctrl+click on a row is still a click on it.
-  let path = @[element(ekWindow, "window"), pane($pane), element(kind, "")]
+  ## `scope` names the press's scope when it is not a pane's (`TopBarScope`).
+  let path = @[element(ekWindow, "window"),
+               pane(if scope.len > 0: scope else: $pane), element(kind, "")]
   let facts = windowSessionFacts()
   var res = gRouter.routePointer(facts, path, nmNormal, gesture)
   if res.kind != erOperation and '+' in gesture:
@@ -13035,17 +13084,19 @@ proc runElementGesture(r: GpuiRenderer; gesture: string; pane: PaneKind;
 
 proc pressElement(r: GpuiRenderer; pane: PaneKind; kind: ElementKind;
                   operation: string; target: ContextTarget;
-                  gesture = "Click"; x = 0; y = 0): bool =
+                  gesture = "Click"; x = 0; y = 0; scope = ""): bool =
   ## **A PRESS ON AN ELEMENT THAT DECLARES ITS OPERATION** (Input-Routing §5.1):
   ## the hit test found the element and what it is; a pointer row for the
   ## press decides first (a user's `keybindings.json`, the base's), and
   ## otherwise the element's own `operation` runs by name through the
   ## operation tables — a transport button's step, a Shader Debug button's.
-  if runElementGesture(r, gesture, pane, kind, target, x = x, y = y):
+  if runElementGesture(r, gesture, pane, kind, target, x = x, y = y,
+                       scope = scope):
     return true
   if operation.len == 0 or gesture.endsWith("RightClick") or
      gesture.endsWith("MiddleClick"):
     return false
+  traceGesture("press " & operation)
   if gOperations.isNil:
     buildWindowOperationTables(r)
   var ctx = WindowDispatch()

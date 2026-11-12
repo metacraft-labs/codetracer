@@ -130,7 +130,7 @@ func domainOf*(k: ContextKey): seq[string] =
   ## against it at load, and `when_expr.canBothHold` enumerates it.
   case k
   of ckProductMode: @["debug", "edit"]
-  of ckPaneKind: @["none"] & @PaneKinds
+  of ckPaneKind: @["none"] & @PaneKinds & @[TopBarScope]
   of ckElementKind: @["none", "editor", "row", "tab", "input", "button",
                       "gutter", "menu", "overlay", "toggle", "header", "value"]
   of ckEditorMode: @["normal", "insert", "visual", "visual-line",

@@ -3,7 +3,8 @@
 ## reaches its operation through GPUI's decoder), §5.1 (a press on a call row, a
 ## tab's menu and a toolbar button run what the element declares, and a Ctrl+press
 ## the user rebound follows the rebinding), IR-3 (the program menu shows the new
-## chord) and IR-6 (an operation with no session says so).
+## chord) and IR-6 (an operation with no session says so); the top bar's
+## elements, a tab's pin and a docked pane's label are pressed the same way.
 ##
 ## No mocks: the shipped binary, a real recording, a real `replay-server`.
 
@@ -30,12 +31,12 @@ let shimDir = getEnv("ISONIM_GPUI_SHIM_DIR",
                      repo.parentDir / "isonim-gpui/rust/target/debug")
 let calc = requireFixture(fixtureSpec("calc"))
 
-proc run(ops: string; subject = calc): tuple[plan: JsonNode; trace: string;
-                                           geometry: JsonNode] =
+proc run(ops: string; subject = calc; rows = UserRows):
+    tuple[plan: JsonNode; trace: string; geometry: JsonNode] =
   if not fileExists(bin):
     raise newException(IOError, "prerequisite missing: " & bin & " (just build-gpui)")
   let state = createTempDir("plat64-gpui-plan-", "")
-  writeFile(state / "keybindings.json", UserRows)
+  writeFile(state / "keybindings.json", rows)
   var env = newStringTable()
   for k, v in envPairs(): env[k] = v
   env["LD_LIBRARY_PATH"] = gpuiLibraryPath(shimDir)
@@ -108,3 +109,37 @@ suite "PLAT-64 on GPUI":
     let r = run("wait:1000,key:`:alt,wait:200,key:down,wait:200,key:escape,wait:200")
     check "operation menu.focus-next" in r.trace
     check "operation menu.close" in r.trace
+
+suite "the band's and a docked label's presses go through the router":
+  # A press on the top bar's elements, a tab's pin and a docked pane's label:
+  # the plain press runs the element's operation, and a user's row for that
+  # press (`paneKind == topBar`, or the label's pane) runs the user's instead.
+  proc userRow(whenText: string): string =
+    """[ { "key": "click", "command": "debugger.continue", "when": """" &
+      whenText & """" } ]"""
+
+  test "the strip's + and a session tab, plain and rebound":
+    let plain = run("wait:1000,tab-add,wait:300,tab:0,wait:300")
+    check "press session-tabs.new" in plain.trace
+    check "pointer Click -> session-tabs.activate" in plain.trace
+    let rebound = run("wait:1000,tab-add,wait:300,tab:0,wait:300",
+                      rows = userRow("paneKind == topBar && elementKind == tab"))
+    check "pointer Click -> debugger.continue" in rebound.trace
+    check "pointer Click -> session-tabs.activate" notin rebound.trace
+
+  test "the menu button, plain and rebound":
+    let plain = run("wait:1000,menu:Debug,wait:300")
+    check "press menu.toggle" in plain.trace
+    let rebound = run("wait:1000,tab-add,wait:300",
+                      rows = userRow("paneKind == topBar && elementKind == button"))
+    check "pointer Click -> debugger.continue" in rebound.trace
+    check "press session-tabs.new" notin rebound.trace
+
+  test "a tab's pin docks its pane, and its label docks it open":
+    let plain = run("wait:1000,pin:state,wait:300,label:state,wait:300")
+    check "press layout.pin-pane-bottom" in plain.trace
+    check "press layout.toggle-docked-pane" in plain.trace
+    let rebound = run("wait:1000,dock:state,wait:300,label:state,wait:300",
+                      rows = userRow("paneKind == state && elementKind == button"))
+    check "pointer Click -> debugger.continue" in rebound.trace
+    check "press layout.toggle-docked-pane" notin rebound.trace

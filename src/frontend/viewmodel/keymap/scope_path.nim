@@ -115,6 +115,10 @@ const
     ## — its `ElementKind` and identity (§5.2) — so each front-end's producer
     ## reads the scope path off its OWN focus chain: the terminal's
     ## `isonim-tui` nodes, GPUI's elements and the desktop's DOM.
+  TopBarScope* = "topBar"
+    ## The scope a press on the native top bar and its session-tab strip is
+    ## routed in (`paneKind == topBar` to a pointer row's `when`): the bar is
+    ## no pane, but its elements are pressed like a pane's.
 
 func element*(kind: ElementKind; id: string; paneKind = ""): ScopeElement =
   ScopeElement(kind: kind, id: id, paneKind: paneKind)

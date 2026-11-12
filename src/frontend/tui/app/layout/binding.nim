@@ -226,6 +226,9 @@ type
       ## "asserted on the resulting layout, not on the screen alone".
     problem*: Option[LayoutProblem]
       ## Set for `lasRefused`, so a caller can say WHY by kind.
+    labelPress*: Option[PaneKind]
+      ## A click on this docked pane's label, left to the caller to route
+      ## (`LayoutBinding.routeLabelClicks`): nothing was dispatched.
 
   LayoutBinding* = ref object
     ## The terminal's layout state: the committed layout with its undo log, the
@@ -236,6 +239,10 @@ type
     ## every gesture mutates it; everything it ANSWERS is a value.
     history*: LayoutHistory
     interaction*: Interaction
+    routeLabelClicks*: bool
+      ## Whether a click on a docked pane's label is answered as a
+      ## `labelPress` for the front-end to route through its keymap (the
+      ## terminal does) rather than docked open or closed here.
     profile*: LayoutProfile
     product*: ProductMode
       ## WHICH MODE'S DEFAULT this binding re-flows to on a resize and resets
@@ -1461,6 +1468,17 @@ proc toggleDockOpen*(b: LayoutBinding; pane: PaneKind): LayoutAction =
   else:
     b.dispatch(cmdOpenDocked(pane))
 
+proc labelClicked(b: LayoutBinding; pane: PaneKind): LayoutAction =
+  ## A click on a docked pane's label: docked open or closed here, or — when
+  ## the front-end routes the press (`routeLabelClicks`) — handed back to it.
+  if b.routeLabelClicks:
+    if b.interaction.kind == ikRevealingDock:
+      b.interaction = b.interaction.cancel()
+    result = action(lasNoGesture, "pressed the " & $pane & " label")
+    result.labelPress = some(pane)
+  else:
+    result = b.toggleDockOpen(pane)
+
 proc focusedIndexIn(geom: LayoutGeometry; pane: PaneKind): int =
   for i, r in geom.projection.regions:
     if r.pane == pane:
@@ -1888,7 +1906,7 @@ proc onMouse*(b: LayoutBinding; geom: LayoutGeometry;
       else:
         let source = pending.get
         if b.layout.dockedIndex(source) >= 0:
-          return b.toggleDockOpen(source)
+          return b.labelClicked(source)
         return b.activateClickedTab(source)
     if b.interaction.kind != ikDraggingTab:
       # A plain click, or the release of a press that marked nothing: not a
@@ -1901,7 +1919,7 @@ proc onMouse*(b: LayoutBinding; geom: LayoutGeometry;
       # two entries onto one undo log for one gesture.
       discard b.cancelGesture()
       if b.layout.dockedIndex(source) >= 0:
-        return b.toggleDockOpen(source)
+        return b.labelClicked(source)
       return b.activateClickedTab(source)
     let (px, py) = pixelOf(event)
     discard b.hoverAtPx(geom, px, py)
