@@ -1,5 +1,5 @@
 scenario: 1
-name: calltrace/collapse-retires-mark
+name: call-trace/collapse-retires-mark
 pack: codetracer
 summary: >-
   Collapsing the parent of the current call leaves no call-trace row marked

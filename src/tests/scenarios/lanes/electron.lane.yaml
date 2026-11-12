@@ -56,7 +56,7 @@ applicable:
   - ../languages/erlang-canonical-flow.yaml
   - ../replay/portable-mcr-trace-replays.yaml
   # --- pw1 ---
-  - ../calltrace/collapse-retires-mark.yaml
+  - ../call-trace/collapse-retires-mark.yaml
   - ../build/header-controls.yaml
   - ../build/bottom-strip-panels.yaml
   - ../build/problems-panel-empty.yaml

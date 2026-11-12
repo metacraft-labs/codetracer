@@ -9,7 +9,8 @@ summary: >-
 stage:
   - use: record-program
     with: { program: py_sudoku_solver/main.py }
-  - use: open-in-browser
+  - use: open-recording
+    with: { deployment: web }
 
 steps:
   - wait: { until: replay-idle, timeout: 120s }

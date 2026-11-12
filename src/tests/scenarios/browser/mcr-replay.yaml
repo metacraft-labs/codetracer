@@ -10,7 +10,8 @@ summary: >-
 stage:
   - use: record-program
     with: { program: c_sudoku_solver/main.c }
-  - use: open-in-browser
+  - use: open-recording
+    with: { deployment: web }
 
 steps:
   - wait: { until: replay-idle, timeout: 180s }
