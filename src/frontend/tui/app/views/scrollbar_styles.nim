@@ -389,6 +389,11 @@ proc paintBar*(g: var StyledGrid; axis: BarAxis; origin, at, cells: int;
   let pane = g.painting
   g.bars.add BarSpot(pane: pane, axis: axis, origin: origin, at: at,
                      cells: cells, model: model)
+  if g.glyphs.quiet:
+    # The screen-reader mode (Terminal-Adaptation §9.4 SR-D3): the bar is
+    # recorded — a click where it is still scrolls — and not drawn. A thumb
+    # read aloud at the end of every line is noise.
+    return
   let frame = g.scrollbars
   let faded = frame.faded[pane]
   if faded >= 1.0:

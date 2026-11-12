@@ -49,6 +49,20 @@ import ../app/theme/capabilities
 
 export capabilities
 
+const SpeakupSynthPath* = "/sys/accessibility/speakup/synth"
+  ## Speakup's current synthesizer (the kernel's console screen reader).
+
+proc speakupSynthOf(term: string): string =
+  ## The synthesizer Speakup drives, read only on the Linux console (where
+  ## Speakup reads the screen); "" when it is not loaded. One small sysfs
+  ## read, no spawn (§4.6's budget).
+  if term != "linux":
+    return ""
+  try:
+    readFile(SpeakupSynthPath)
+  except CatchableError:
+    ""
+
 proc readTerminalEnv*(fd: cint = STDOUT_FILENO): TerminalEnv =
   ## Every variable capability resolution reads, plus whether `fd` is a tty.
   ##
@@ -86,7 +100,11 @@ proc readTerminalEnv*(fd: cint = STDOUT_FILENO): TerminalEnv =
     ctModernUnicode: getEnv("CODETRACER_TUI_MODERN_UNICODE", ""),
     ctAmbiguousWidth: getEnv("CODETRACER_TUI_AMBIGUOUS_WIDTH", ""),
     ctColors: getEnv("CODETRACER_TUI_COLORS", ""),
-    ctProbe: getEnv("CODETRACER_TUI_PROBE", ""))
+    ctProbe: getEnv("CODETRACER_TUI_PROBE", ""),
+    ctScreenReader: getEnv("CODETRACER_TUI_SCREEN_READER", ""),
+    # PLAT-72 (§9.4 SR-D2): what says a screen reader is listening.
+    accessible: getEnv("ACCESSIBLE", ""),
+    speakupSynth: speakupSynthOf(getEnv("TERM", "")))
 
 proc negotiateCapabilities*(flags: CapabilityFlags;
                             fd: cint = STDOUT_FILENO): TerminalCapabilities =

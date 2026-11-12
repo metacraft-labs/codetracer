@@ -19,7 +19,8 @@
 ##     (off | on | auto — it governs ALL chrome, not only the scrollbars,
 ##     OQ-T9), `ambiguous-width` (auto | narrow | wide), `colors` (auto |
 ##     truecolor | 256 | 16 | mono), `terminal-probe` (on | off),
-##     `reduce-motion` (auto | on | off) and `terminal-hints` (on | off).
+##     `reduce-motion` (auto | on | off), `screen-reader` (auto | on | off,
+##     PLAT-72) and `terminal-hints` (on | off).
 ##     They are the TERMINAL's (`isTerminalSetting`): the window front-end
 ##     draws with real fonts and offers none of them. Any of them may be
 ##     scoped to one terminal by a `[terminal "<glob>"]` section of the
@@ -69,6 +70,7 @@ type
     lsTerminalProbe = "terminal-probe"
     lsReduceMotion = "reduce-motion"
     lsPointerShapes = "pointer-shapes"
+    lsScreenReader = "screen-reader"
     lsTerminalHints = "terminal-hints"
     lsMultiClickInterval = "multi-click-interval"
     lsWordSeparators = "word-separators"
@@ -85,6 +87,8 @@ type
     terminalProbe*: string
     reduceMotion*: string
     pointerShapes*: string
+    screenReader*: string
+      ## PLAT-72 (Terminal-Adaptation §9.4 SR-D1): `auto`, `on`, `off`.
     terminalHints*: string
 
   ScopedSettings* = object
@@ -140,7 +144,7 @@ const
   DefaultTerminalSettingWords* = TerminalSettingWords(
     glyphs: "auto", modernUnicode: "off", ambiguousWidth: "auto",
     colors: "auto", terminalProbe: "on", reduceMotion: "auto",
-    pointerShapes: "auto",
+    pointerShapes: "auto", screenReader: "auto",
     terminalHints: "on")
     ## §5.3's defaults. `modern-unicode` is `off` (the user's decision).
 
@@ -157,13 +161,15 @@ func defaultLayoutSettings*(overflowMarkers = true): LayoutSettings =
 func isTerminalSetting*(which: LayoutSetting): bool =
   ## PLAT-71: a setting only the terminal front-end has (§5.3).
   which in {lsModernUnicode, lsGlyphs, lsAmbiguousWidth, lsColors,
-            lsTerminalProbe, lsReduceMotion, lsPointerShapes, lsTerminalHints}
+            lsTerminalProbe, lsReduceMotion, lsPointerShapes, lsScreenReader,
+            lsTerminalHints}
 
 func isOnOff*(which: LayoutSetting): bool =
   ## Whether the setting is on / off (else it takes `settingValues`).
   which notin {lsScrollbarThickness, lsScrollbarClick, lsModernUnicode,
                lsGlyphs, lsAmbiguousWidth, lsColors, lsReduceMotion,
-               lsPointerShapes, lsMultiClickInterval, lsWordSeparators}
+               lsPointerShapes, lsScreenReader, lsMultiClickInterval,
+               lsWordSeparators}
 
 func settingValues*(which: LayoutSetting): seq[string] =
   ## The words the setting takes, in the order the omnibox lists them.
@@ -178,6 +184,7 @@ func settingValues*(which: LayoutSetting): seq[string] =
   of lsColors: result = @["auto", "truecolor", "256", "16", "mono"]
   of lsReduceMotion: result = @["auto", "on", "off"]
   of lsPointerShapes: result = @["auto", "on", "off"]
+  of lsScreenReader: result = @["auto", "on", "off"]
   of lsMultiClickInterval: result = @["300", "400", "500", "600"]
   of lsWordSeparators:
     # The default, and the default with `-` a word character (kebab-case names).
@@ -253,6 +260,7 @@ func valueText*(s: LayoutSettings; which: LayoutSetting): string =
   of lsTerminalProbe: s.terminal.terminalProbe
   of lsReduceMotion: s.terminal.reduceMotion
   of lsPointerShapes: s.terminal.pointerShapes
+  of lsScreenReader: s.terminal.screenReader
   of lsTerminalHints: s.terminal.terminalHints
   of lsMultiClickInterval: $s.multiClickIntervalMs
   of lsWordSeparators: s.wordSeparators
@@ -282,6 +290,7 @@ proc assignValue*(s: var LayoutSettings; which: LayoutSetting;
   of lsTerminalProbe: s.terminal.terminalProbe = v
   of lsReduceMotion: s.terminal.reduceMotion = v
   of lsPointerShapes: s.terminal.pointerShapes = v
+  of lsScreenReader: s.terminal.screenReader = v
   of lsTerminalHints: s.terminal.terminalHints = v
   of lsMultiClickInterval: s.multiClickIntervalMs = parseInt(v)
   of lsWordSeparators: s.wordSeparators = v
@@ -498,6 +507,7 @@ func settingCommandLabel*(which: LayoutSetting; value: string): string =
     of lsTerminalProbe: "Terminal probe"
     of lsReduceMotion: "Reduce motion"
     of lsPointerShapes: "Pointer shapes"
+    of lsScreenReader: "Screen reader"
     of lsTerminalHints: "Terminal hints"
     of lsMultiClickInterval: "Multi-click interval"
     of lsWordSeparators: "Word separators"

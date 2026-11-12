@@ -386,15 +386,22 @@ proc paint(driver: TerminalDriver; rt: TuiRuntime) =
   ## does not move the cursor. §3.3.6's prompt DOES move it, so it goes in the
   ## epilogue — `docs/tui-testing.md` records why those two are different hooks
   ## and what it costs a reader of the frame barrier.
-  let screen = rt.shellScreenOf()
+  var screen = rt.shellScreenOf()
+  # Terminal-Adaptation §9.4 (the screen-reader mode): find the focused
+  # element on the frame; a focus change is announced on the status line,
+  # so the frame is painted again with it (SR-D5, SR-D7).
+  if rt.followFocus(screen):
+    screen = rt.shellScreenOf()
   var epilogue = ""
   # PLAT-48: the debugger controls as the desktop's marks, placed over the
-  # cells the top bar reserved — only on a terminal measured to draw them.
+  # cells the top bar reserved — only on a terminal measured to draw them,
+  # and never in the screen-reader mode, which reads text (SR-D3).
   let mode = rt.caps.mode
-  epilogue.add controlIconBytes(gIconState, screen.topBarLayout,
-                                rt.app.controlsEnabledOf(),
-                                RoleColourTable[mode][srChromeText].fgRgb,
-                                RoleColourTable[mode][srChromeMuted].fgRgb)
+  if not rt.caps.screenReader:
+    epilogue.add controlIconBytes(gIconState, screen.topBarLayout,
+                                  rt.app.controlsEnabledOf(),
+                                  RoleColourTable[mode][srChromeText].fgRgb,
+                                  RoleColourTable[mode][srChromeMuted].fgRgb)
   # PLAT-59: the Video Player's frame at tier 0, transmitted over the cells
   # the pane reserved (taken down when they go).
   let frameRect =
@@ -418,14 +425,24 @@ proc paint(driver: TerminalDriver; rt: TuiRuntime) =
       gCaretSupport)
   # PLAT-51: A WELCOME TAB'S FORM owns the caret when it is open (the
   # omnibar's and the prompt's win, being over it).
+  var formCaret = false
   if not prompting and not caret.shown:
     let wv = rt.app.welcomeViewOf()
     if wv.shown:
       let wc = welcomeCursor(wv, screen.welcomeLayout)
       if wc.on:
+        formCaret = true
         epilogue.add caretBytes(
           TextCaret(row: wc.row, col: wc.col, visible: true, shape: ckBar),
           gCaretSupport)
+  # Terminal-Adaptation §9.4 SR-D5: THE CURSOR FOLLOWS FOCUS in the
+  # screen-reader mode — shown, a steady block, on the focused element, so a
+  # screen reader's review cursor tracks it. A prompt, the omnibar and a
+  # form keep the caret they own.
+  if rt.caps.screenReader and rt.focusSpot.found and not prompting and
+     not caret.shown and not formCaret:
+    epilogue.add "\x1b[" & $(rt.focusSpot.row + 1) & ";" &
+                 $(rt.focusSpot.col + 1) & "H\x1b[2 q" & ShowCursorBytes
   # PLAT-50: TEXT A CLICK COPIED (the editor menu's Copy) goes to the
   # terminal's clipboard — OSC 52 (`ESC ] 52 ; c ; <base64> BEL`, xterm's
   # "Manipulate Selection Data",
@@ -572,13 +589,14 @@ proc wireTerminalService(rt: TuiRuntime; n: StartupNegotiation;
       var c = TerminalChoices()
       if not choicesOf(which, value, c):
         return "'" & value & "' is not a value of " & $which
-      if which in {lsGlyphs, lsAmbiguousWidth, lsColors, lsReduceMotion} and
-         value == "auto":
+      if which in {lsGlyphs, lsAmbiguousWidth, lsColors, lsReduceMotion,
+                   lsScreenReader} and value == "auto":
         # `auto` at rank 1 SAYS NOTHING: drop an earlier `:set` of this axis.
         case which
         of lsGlyphs: n.session.glyphs = none(GlyphsChoice)
         of lsAmbiguousWidth: n.session.ambiguousWidth = none(AmbiguousChoice)
         of lsColors: n.session.colors = none(ColorsChoice)
+        of lsScreenReader: n.session.screenReader = none(bool)
         else: n.session.reduceMotion = none(bool)
       discard n.setSessionChoice(driver, c)
       rt.adoptCaps(n.caps)
@@ -594,6 +612,8 @@ proc wireTerminalService(rt: TuiRuntime; n: StartupNegotiation;
          of lsColors: "colours " & $caps.colors
          of lsReduceMotion: "motion " &
            (if caps.reduceMotion: "reduced" else: "animated")
+         of lsScreenReader: "screen reader " &
+           (if caps.screenReader: "on" else: "off")
          else: "applied"),
     setForThisTerminal: proc(which: LayoutSetting; value: string): string =
       let name = n.caps.identity.name

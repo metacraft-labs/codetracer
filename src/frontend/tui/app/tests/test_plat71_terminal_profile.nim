@@ -61,9 +61,10 @@ import ./personas/personas
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count.
-const ExpectedAssertions = 614
-  ## 613 -> 614, measured: tmux in kitty's pointer answer, re-captured with
-  ## the query after the fence.
+const ExpectedAssertions = 626
+  ## 613 -> 626, measured: the report's `screenReader` axis (§9.4), which
+  ## TA-13 sweeps once per persona (+12 for the twelve personas), and tmux in
+  ## kitty's pointer answer, re-captured with the query after the fence (+1).
   ## 554 -> 613, measured: the personas are the six CAPTURED ones (kitty,
   ## foot, xterm, Ghostty, Alacritty, tmux in kitty) and six written ones
   ## (twelve, from ten), each swept by TA-1, TA-9 and TA-13, and TA-1's cases
@@ -539,8 +540,9 @@ suite "PLAT-71 Tier 1: the terminal's capability profile":
                                                      persona.probe))
       ck report.len >= 14
       ck report[0].startsWith("Terminal")
-    # 18 -> 19 axes per persona: `pointer-shapes` (`d8e437ee5`).
-    ck axes == Personas.len * 19
+    # 18 -> 19 axes per persona: `pointer-shapes` (`d8e437ee5`); 19 -> 20:
+    # `screenReader` (§9.4).
+    ck axes == Personas.len * 20
 
   test "§6.3: the glyph table's columns and the views' published constants":
     ck GlyphProfile(tier: tierAscii).glyph(grTruncation) == "~"

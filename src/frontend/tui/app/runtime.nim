@@ -55,6 +55,7 @@ import ./theme/degradation
 import ./tui_app
 import ./views/command_line
 import ./views/shell
+import ./views/focus_locator
 import ./views/welcome_view
 import headless_app/welcome_tabs
 import ./views/event_log
@@ -73,6 +74,7 @@ import ./views/shell_session_pane   # PLAT-61
 import ./frame_viewer_binding   # PLAT-59: the Visual Replay panes
 
 export interpreter, keymap, motions, command_line, tui_app, degradation
+export focus_locator
 export persistence
 
 type
@@ -503,6 +505,19 @@ type
     modal*: ModalState
     focus*: PaneFocus
     maximize*: MaximizeState
+    hostingPane*: bool
+    focusSpot*: FocusSpot
+      ## The screen-reader mode (Terminal-Adaptation §9.4): the focused
+      ## element the last frame showed (`followFocus`).
+    eventWroteNote*: bool
+      ## The token just handled wrote a status-line message of its own, which
+      ## the focus announcement must not replace (SR-D7).
+    paneNamed*: bool
+      ## The focused pane has been announced by name with a row that said
+      ## something: until it has (a pane still opening, its row blank), the
+      ## next announcement names it again.
+      ## `hostedPaneRows` is painting one pane for the pane server: what
+      ## `maximize` holds is that pane, whatever the screen-reader mode says.
     prompt*: CommandLineModel
       ## §3.3.6's `:` / `/` / `?` line. One model rather than three, and the
       ## kind on it says which sigil is showing — `command_line.open` is what
@@ -792,6 +807,17 @@ proc applyUserKeymap*(rt: TuiRuntime; uk: UserKeymap): string =
   rt.router.applyUserKeymap(uk)
   rt.router.loadSummary
 
+proc shownMaximize*(rt: TuiRuntime): MaximizeState =
+  ## The arrangement the screen SHOWS: `z`'s maximize, or — in the
+  ## screen-reader mode (Terminal-Adaptation §9.4 SR-D6) — the focused pane
+  ## maximized, following focus, so no terminal line holds two panes' rows.
+  ## The focus ring is still built from the whole arrangement
+  ## (`rebuildFocus`), so every focus key reaches every pane.
+  if rt.hostingPane or not rt.caps.screenReader:
+    return rt.maximize
+  let (had, focused) = rt.focus.focusedPane()
+  if had: MaximizeState(active: true, pane: focused) else: rt.maximize
+
 proc layoutBindingEnabled*(rt: TuiRuntime): bool =
   ## Whether PLAT-6's layout binding is driving this runtime's arrangement.
   ##
@@ -857,10 +883,10 @@ proc paintedGeometry*(rt: TuiRuntime): LayoutGeometry =
   ## cell in the UN-maximized arrangement (codetracer-pm issue
   ## 2026-10-24-tui-maximized-pane-receives-no-pane-clicks). Composed exactly
   ## as `shell.shellScreen` composes the frame.
-  if not rt.maximize.active or not rt.layoutBindingEnabled():
+  if not rt.shownMaximize.active or not rt.layoutBindingEnabled():
     return rt.layoutGeometry()
   let model = rt.app.shellModel(rt.width, rt.height)
-  geometryOf(initLayout(rt.maximize.layoutFor(model.profile), model.docked),
+  geometryOf(initLayout(rt.shownMaximize.layoutFor(model.profile), model.docked),
              bodyArea(rt.width, rt.height), model.interaction,
              DefaultProjectionPolicy, footerLeadCells(model.fileInfo))
 
@@ -1108,6 +1134,13 @@ proc resize*(rt: TuiRuntime; width, height: int) =
 proc note(rt: TuiRuntime; message: string) =
   rt.app.notification = message
 
+proc noteFocus(rt: TuiRuntime; pane: PaneKind) =
+  ## A focus move's status-line word. In the screen-reader mode the frame's
+  ## focus announcement says it (Terminal-Adaptation §9.4 SR-D7), with the
+  ## row, so nothing is written here.
+  if not rt.caps.screenReader:
+    rt.note("focus " & $pane)
+
 proc promptCandidates(rt: TuiRuntime): seq[string] =
   ## What `Tab` completes at the open prompt. §4.3's command names at `:`, and
   ## nothing at `/` or `?` — a search pattern is not drawn from a vocabulary.
@@ -1246,7 +1279,8 @@ proc applyLayoutSetting*(rt: TuiRuntime; which: LayoutSetting; value: string;
   of lsWordSeparators:
     rt.app.wordSeparators = value
   of lsModernUnicode, lsGlyphs, lsAmbiguousWidth, lsColors,
-     lsTerminalProbe, lsReduceMotion, lsPointerShapes, lsTerminalHints:
+     lsTerminalProbe, lsReduceMotion, lsPointerShapes, lsScreenReader,
+     lsTerminalHints:
     discard
   of lsScrollbarThickness, lsScrollbarFade, lsScrollbarTrack,
      lsScrollbarClick:
@@ -2541,10 +2575,10 @@ proc paintedAreaOf*(rt: TuiRuntime; kind: PaneKind): CellArea =
   ## The rectangle pane `kind`'s painter is handed this frame (its strip row
   ## first): the maximized pane's under `z`, else `paneAreaOf`'s (a tiled
   ## pane, or a docked one shown open or revealed).
-  if rt.maximize.active:
+  if rt.shownMaximize.active:
     let body = bodyArea(rt.width, rt.height)
     let projection = projectLayout(
-      rt.maximize.layoutFor(selectProfile(rt.width, rt.height)), body)
+      rt.shownMaximize.layoutFor(selectProfile(rt.width, rt.height)), body)
     for region in projection.regions:
       if region.pane == kind:
         let frame = paneFrame(region.area, body)
@@ -2729,7 +2763,7 @@ proc routeHorizontalWheel(rt: TuiRuntime; event: MouseEvent;
     return false
   let at = rt.layoutGeometry().paneAt(event.row, event.col)
   var pane = if at.found: at.region.pane else: paneEditor
-  if rt.maximize.active:
+  if rt.shownMaximize.active:
     for kind in [paneEditor, paneTerminalOutput, paneBuildOutput,
                  paneEventLog, paneCalltrace, paneState]:
       if rt.paintedAreaOf(kind).contains(event.row, event.col):
@@ -2884,7 +2918,8 @@ proc testsHoverPointer(rt: TuiRuntime; event: MouseEvent;
   ## puts the hovered control's title on the status line, and leaving it
   ## gives the line back (`shellScreenOf` shows the hover over the
   ## notification, which it does not replace).
-  let title = rt.testsControlTitleAt(event.row, event.col)
+  let title = if rt.caps.screenReader: ""   # §9.4 SR-D4: no hover speaks
+              else: rt.testsControlTitleAt(event.row, event.col)
   if title != rt.app.testsHover:
     rt.app.testsHover = title
     outcome.repaint = true
@@ -4184,7 +4219,12 @@ proc cellHoverPointer(rt: TuiRuntime; event: MouseEvent; nowMs: int64;
 
 proc tickCellHover*(rt: TuiRuntime; nowMs: int64): bool =
   ## The hover's clock: the tooltip shows once the pointer has rested
-  ## `HoverDelayMs` on a truncated cell. True when the screen changed.
+  ## `HoverDelayMs` on a truncated cell. True when the screen changed. Never
+  ## in the screen-reader mode (§9.4 SR-D4): the detail gesture shows the
+  ## full value instead.
+  if rt.caps.screenReader:
+    discard rt.app.cellHover.dismiss()
+    return false
   if not rt.app.cellHover.tick(nowMs):
     return false
   let a = rt.app.cellHoverAnchor
@@ -4619,8 +4659,8 @@ proc barScreen(rt: TuiRuntime): ShellScreen =
   ## anything by being hit-tested.
   var model = rt.app.shellModel(rt.width, rt.height)
   rt.editorPaneModel(model, follow = false)
-  if rt.maximize.active:
-    model.layout = rt.maximize.layoutFor(model.profile)
+  if rt.shownMaximize.active:
+    model.layout = rt.shownMaximize.layoutFor(model.profile)
   let (hasFocus, focused) = rt.focus.focusedPane()
   model.hasFocus = hasFocus
   model.focused = focused
@@ -6057,7 +6097,7 @@ proc routeMouseReport(rt: TuiRuntime; event: MouseEvent;
     else:
       rt.hasDockKeys = false
   let before = binding.interaction.kind
-  let bindingsOwn = not rt.maximize.active or
+  let bindingsOwn = not rt.shownMaximize.active or
     geometry.stripIndexAt(event.row, event.col) >= 0 or
     (not geometry.openDock.isEmptyArea and
      geometry.openDock.contains(event.row, event.col)) or
@@ -6410,12 +6450,12 @@ proc applyLocalAction(rt: TuiRuntime; action: KeyAction;
   case action
   of kaFocusNextPane:
     let (moved, pane) = rt.focus.focusNextPane()
-    if moved: rt.note("focus " & $pane)
+    if moved: rt.noteFocus(pane)
     outcome.repaint = moved
     true
   of kaFocusPrevPane:
     let (moved, pane) = rt.focus.focusPrevPane()
-    if moved: rt.note("focus " & $pane)
+    if moved: rt.noteFocus(pane)
     outcome.repaint = moved
     true
   of kaFocusLeft, kaFocusDown, kaFocusUp, kaFocusRight:
@@ -6424,7 +6464,7 @@ proc applyLocalAction(rt: TuiRuntime; action: KeyAction;
       return false
     let (moved, pane) = rt.focus.focusDirection(dir)
     if moved:
-      rt.note("focus " & $pane)
+      rt.noteFocus(pane)
     else:
       rt.note("no pane " & $dir & " of the focused one")
     outcome.repaint = true
@@ -6441,6 +6481,12 @@ proc applyLocalAction(rt: TuiRuntime; action: KeyAction;
     let (had, focused) = rt.focus.focusedPane()
     if not had:
       rt.note("nothing is focused, so nothing can be maximized")
+      outcome.repaint = true
+      return true
+    if rt.caps.screenReader:
+      # SR-D6: the screen already shows one pane, the focused one.
+      rt.note("the screen-reader layout shows one pane at a time: the " &
+              "focused one")
       outcome.repaint = true
       return true
     discard rt.maximize.toggleMaximize(focused)
@@ -7275,7 +7321,7 @@ proc showPane(rt: TuiRuntime; pane: PaneKind; outcome: var RuntimeOutcome) =
     b.focus = pane
     rt.rebuildFocus()
     discard rt.focus.focusPaneKind(pane)
-    rt.note("focus " & $pane)
+    rt.noteFocus(pane)
   elif at >= 0:
     let acted = b.beginRevealDock(pane)
     rt.note(acted.message)
@@ -7286,7 +7332,7 @@ proc showPane(rt: TuiRuntime; pane: PaneKind; outcome: var RuntimeOutcome) =
     rt.rebuildFocus()
     discard rt.focus.focusPaneKind(pane)
     b.focus = pane
-    rt.note("focus " & $pane)
+    rt.noteFocus(pane)
   else:
     # PLAT-50: A PANE THE ARRANGEMENT DOES NOT PLACE IS OPENED, as the
     # desktop's View menu opens its panel — a tab beside the event log
@@ -7725,7 +7771,9 @@ proc routeTopBarMouse(rt: TuiRuntime; event: MouseEvent;
     var hoveredTab = -1
     var hoveredStop = false
     var hoveredAdd = false
-    if event.row == 0:
+    # The screen-reader mode (Terminal-Adaptation §9.4 SR-D4): no hover
+    # speaks — a pointer crossing the top bar leaves the status line alone.
+    if event.row == 0 and not rt.caps.screenReader:
       let hit = lay.topBarHitAt(event.col)
       if hit.kind == thControl:
         hovered = hit.index
@@ -9572,7 +9620,8 @@ proc runPromptKey(rt: TuiRuntime; key: string;
   else:
     discard before
 
-proc handleToken*(rt: TuiRuntime; token: string; nowMs: int64): RuntimeOutcome =
+proc handleTokenUnwatched(rt: TuiRuntime; token: string;
+                          nowMs: int64): RuntimeOutcome =
   ## ONE input token, end to end.
   ##
   ## The order is the §4.1/§4.2 order and each step is here because leaving it
@@ -9617,7 +9666,7 @@ proc handleToken*(rt: TuiRuntime; token: string; nowMs: int64): RuntimeOutcome =
      not rt.app.menu.isOpen and not rt.app.content.open and
      not rt.terminalInfo.open and
      rt.probeKey(rt.lastKey).kind == erNothing:
-    return rt.handleToken(token[1 .. 1], nowMs)
+    return rt.handleTokenUnwatched(token[1 .. 1], nowMs)
   # PLAT-71: `:terminal-info` takes every token while it is open.
   if rt.terminalInfo.open:
     rt.handleTerminalInfoToken(token, nowMs, result)
@@ -9767,6 +9816,16 @@ proc handleToken*(rt: TuiRuntime; token: string; nowMs: int64): RuntimeOutcome =
   # resolver; the answer is dispatched by `runResolution`.
   rt.runResolution(rt.routeKey(name, nowMs), nowMs, result)
 
+proc handleToken*(rt: TuiRuntime; token: string; nowMs: int64): RuntimeOutcome =
+  ## ONE input token, end to end (`handleTokenUnwatched`), noting whether it
+  ## wrote a status-line message of its own: in the screen-reader mode that
+  ## message is what the keystroke had to say, and the focus announcement
+  ## does not replace it (Terminal-Adaptation §9.4 SR-D7).
+  let before = rt.app.notification
+  result = rt.handleTokenUnwatched(token, nowMs)
+  if rt.app.notification != before and rt.app.notification.len > 0:
+    rt.eventWroteNote = true
+
 # ---------------------------------------------------------------------------
 # The screen
 # ---------------------------------------------------------------------------
@@ -9895,11 +9954,11 @@ proc shellScreenOf*(rt: TuiRuntime): ShellScreen =
   # once writable, and its selection over the recording's source while not;
   # PLAT-70: its horizontal view, the caret followed.
   rt.editorPaneModel(model, follow = true)
-  if rt.maximize.active:
+  if rt.shownMaximize.active:
     # `z`. `motions.layoutFor` builds a one-pane `LayoutNode` of the SAME type
     # the profiles build, so `projectLayout`'s totality checks apply to the
     # maximized screen unchanged.
-    model.layout = rt.maximize.layoutFor(model.profile)
+    model.layout = rt.shownMaximize.layoutFor(model.profile)
   if rt.app.notification.len > 0:
     model.status.notification = rt.app.notification
   # Test-Results-Pane.md §9.6: the hovered control's title, over the
@@ -9946,7 +10005,7 @@ proc paneBodyRows*(rt: TuiRuntime; pane: PaneKind): int =
   if rt.hostedRows.len > 0:
     return rt.hostedRows.getOrDefault(pane)
   let model = rt.app.shellModel(rt.width, rt.height)
-  let layout = if rt.maximize.active: rt.maximize.layoutFor(model.profile)
+  let layout = if rt.shownMaximize.active: rt.shownMaximize.layoutFor(model.profile)
                else: model.layout
   let body = bodyArea(rt.width, rt.height)
   let projection = projectLayout(layout, body)
@@ -9964,7 +10023,7 @@ proc paneBodyCols*(rt: TuiRuntime; pane: PaneKind): int =
   if rt.hostedRows.len > 0:
     return rt.hostedCols.getOrDefault(pane)
   let model = rt.app.shellModel(rt.width, rt.height)
-  let layout = if rt.maximize.active: rt.maximize.layoutFor(model.profile)
+  let layout = if rt.shownMaximize.active: rt.shownMaximize.layoutFor(model.profile)
                else: model.layout
   let body = bodyArea(rt.width, rt.height)
   let projection = projectLayout(layout, body)
@@ -10001,7 +10060,7 @@ proc sourcePaneRows*(rt: TuiRuntime): int =
   if rt.hostedRows.len > 0:
     return rt.hostedRows.getOrDefault(paneEditor)
   let model = rt.app.shellModel(rt.width, rt.height)
-  let layout = if rt.maximize.active: rt.maximize.layoutFor(model.profile)
+  let layout = if rt.shownMaximize.active: rt.shownMaximize.layoutFor(model.profile)
                else: model.layout
   let projection = projectLayout(layout, bodyArea(rt.width, rt.height))
   # PLAT-70: the horizontal bar takes the pane's last row while the
@@ -10109,6 +10168,7 @@ proc hostedPaneRows*(rt: TuiRuntime; pane: PaneKind;
   let savedWidth = rt.width
   let savedHeight = rt.height
   rt.maximize = MaximizeState(active: true, pane: pane)
+  rt.hostingPane = true
   rt.width = width
   rt.height = height + ChromeRows + 1
   try:
@@ -10117,6 +10177,7 @@ proc hostedPaneRows*(rt: TuiRuntime; pane: PaneKind;
       result.add (if r < screen.styledRows.len: screen.styledRows[r] else: @[])
   finally:
     rt.maximize = savedMaximize
+    rt.hostingPane = false
     rt.width = savedWidth
     rt.height = savedHeight
 
@@ -10591,7 +10652,7 @@ proc pointerTargetAt(rt: TuiRuntime; event: MouseEvent): HitTarget =
     return
   let geometry = rt.paintedGeometry()
   let binding = rt.app.layoutBinding
-  if not rt.maximize.active:
+  if not rt.shownMaximize.active:
     case binding.dividerAxisAt(geometry, r, c)
     of daNone: discard
     of daAcrossColumns: return paneTarget(hkDividerVertical)
@@ -10616,3 +10677,43 @@ proc pointerShapeAt*(rt: TuiRuntime; event: MouseEvent): PointerShape =
   if gesture.kind != pgNone:
     return pointerShapeOf(HitTarget(), gesture)
   pointerShapeOf(rt.pointerTargetAt(event))
+
+# ---------------------------------------------------------------------------
+# The screen-reader mode: the cursor follows focus, focus changes are said
+# (CodeTracer-TUI-Terminal-Adaptation.md §9.4, SR-D5 and SR-D7)
+# ---------------------------------------------------------------------------
+
+proc followFocus*(rt: TuiRuntime; screen: ShellScreen): bool =
+  ## Find the focused element on `screen` (`focus_locator`), remember it in
+  ## `focusSpot` for the cursor, and — when focus has moved since the last
+  ## frame — write the announcement on the status line. True when it wrote
+  ## one, so the caller paints the frame again with it. Nothing outside the
+  ## screen-reader mode.
+  if not rt.caps.screenReader:
+    rt.focusSpot = FocusSpot()
+    return false
+  let (had, pane) = rt.focus.focusedPane()
+  let wrote = rt.eventWroteNote
+  rt.eventWroteNote = false
+  if not had:
+    rt.focusSpot = FocusSpot()
+    return false
+  var spot = focusSpotIn(screen.styledRows, rt.paintedAreaOf(pane),
+                         ambiguousPolicyOf(rt.caps))
+  spot.pane = pane
+  let last = rt.focusSpot
+  rt.focusSpot = spot
+  if not spot.found:
+    return false
+  if not last.found or last.pane != pane:
+    rt.paneNamed = false
+  let entered = not rt.paneNamed
+  if last.found and last.pane == pane and last.row == spot.row and
+     last.text == spot.text:
+    return false
+  if wrote:
+    return false
+  rt.note(announcementOf(spot, entered, paneTitle(pane, "")))
+  if entered and spot.text.len > 0:
+    rt.paneNamed = true
+  true

@@ -95,6 +95,9 @@ type
     reduceMotion*: Option[bool]
     pointerShapes*: Option[PointerShapesChoice]
       ## `pointer-shapes`: Pointer-Affordances §5.6.
+    screenReader*: Option[bool]
+      ## `screen-reader` (§9.4 SR-D1): `auto` says nothing, so the hints of
+      ## SR-D2 decide below every rank.
 
   ScopedChoices* = object
     ## A `[terminal "<glob>"]` section (§5.3, OQ-T6).
@@ -146,11 +149,12 @@ proc merge*(above, below: TerminalChoices): TerminalChoices =
   if above.probe.isSome: result.probe = above.probe
   if above.reduceMotion.isSome: result.reduceMotion = above.reduceMotion
   if above.pointerShapes.isSome: result.pointerShapes = above.pointerShapes
+  if above.screenReader.isSome: result.screenReader = above.screenReader
 
 proc isEmpty*(c: TerminalChoices): bool =
   c.glyphs.isNone and c.modernUnicode.isNone and c.ambiguousWidth.isNone and
     c.colors.isNone and c.probe.isNone and c.reduceMotion.isNone and
-    c.pointerShapes.isNone
+    c.pointerShapes.isNone and c.screenReader.isNone
 
 # ---------------------------------------------------------------------------
 # Glob matching for `[terminal "<glob>"]`

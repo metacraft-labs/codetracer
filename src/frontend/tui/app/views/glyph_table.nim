@@ -117,6 +117,10 @@ type
     tier*: ChromeTier
     ambiguousWide*: bool
     modernUnicode*: bool
+    quiet*: bool
+      ## The screen-reader mode (§9.4 SR-D3): the decorative roles draw a
+      ## space, one cell for one cell, so a screen reader reading the line
+      ## says nothing for them. Set with the ASCII tier, never alone.
 
 const
   RvSpace* = "\x1b[rv]"
@@ -188,6 +192,15 @@ const
   DefaultGlyphs* = GlyphProfile()
     ## Extended, narrow, classic: the screen before profiles.
 
+  DecorativeRoles* = {grDividerV, grDividerH, grSpan, grDotFill, grDashFill,
+                      grFieldEdgeLeft, grFieldEdgeRight, grBoxTopLeft,
+                      grBoxTopRight, grBoxBottomLeft, grBoxBottomRight,
+                      grBoxVertical, grBoxHorizontal, grBoxCross, grSeparator,
+                      grShellRange}
+    ## §9.4 SR-D3: the roles that only draw — frames, dividers, rules, fills,
+    ## the separator dot. Every other role carries a meaning (a marker, a
+    ## toggle, a state) and keeps its ASCII glyph in the screen-reader mode.
+
 func columnOf*(p: GlyphProfile): GlyphColumn =
   ## The column a profile draws from: ASCII wins (it is narrow everywhere),
   ## then the ambiguous-wide rule, then the tier.
@@ -197,8 +210,10 @@ func columnOf*(p: GlyphProfile): GlyphColumn =
   else: gcolExtended
 
 func glyph*(p: GlyphProfile; role: GlyphRole): string =
-  ## The glyph `role` is drawn with on this profile.
-  ChromeGlyphs[role][p.columnOf]
+  ## The glyph `role` is drawn with on this profile: a space for a
+  ## decorative role in the screen-reader mode (SR-D3).
+  if p.quiet and role in DecorativeRoles: " "
+  else: ChromeGlyphs[role][p.columnOf]
 
 func canonical*(role: GlyphRole): string =
   ## The extended glyph — the spelling a view's published constant keeps.

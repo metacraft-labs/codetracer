@@ -84,10 +84,14 @@ func borderSetOf*(p: GlyphProfile): BorderSet =
     horizontal: g(grBoxHorizontal), vertical: g(grBoxVertical),
     # The tees exist only as `+` on the ASCII tier; Unicode screens draw no
     # tee today (see the module header), so the cross stands in for them.
-    teeLeft: (if p.tier == tierAscii or p.ambiguousWide: "+" else: "├"),
-    teeRight: (if p.tier == tierAscii or p.ambiguousWide: "+" else: "┤"),
-    teeTop: (if p.tier == tierAscii or p.ambiguousWide: "+" else: "┬"),
-    teeBottom: (if p.tier == tierAscii or p.ambiguousWide: "+" else: "┴"),
+    teeLeft: (if p.quiet: " " elif p.tier == tierAscii or p.ambiguousWide: "+"
+              else: "├"),
+    teeRight: (if p.quiet: " " elif p.tier == tierAscii or p.ambiguousWide: "+"
+               else: "┤"),
+    teeTop: (if p.quiet: " " elif p.tier == tierAscii or p.ambiguousWide: "+"
+             else: "┬"),
+    teeBottom: (if p.quiet: " " elif p.tier == tierAscii or p.ambiguousWide:
+                  "+" else: "┴"),
     cross: g(grBoxCross),
     breakpoint: g(grBreakpoint), breakpointDisabled: g(grBreakpointDisabled),
     tracepoint: g(grTracepoint), collapsed: g(grTreeCollapsed),
@@ -174,7 +178,8 @@ func glyphProfileOf*(caps: TerminalCapabilities): GlyphProfile =
   ## pre-PLAT-71 spelling) means the same screen it always meant.
   GlyphProfile(tier: (if caps.borders == bmAscii: tierAscii else: caps.tier),
                ambiguousWide: caps.ambiguousWide,
-               modernUnicode: caps.modernUnicode)
+               modernUnicode: caps.modernUnicode,
+               quiet: caps.screenReader)
 
 func ambiguousPolicyOf*(caps: TerminalCapabilities): AmbiguousWidth =
   ## The width policy every width in the frame is computed under (§6.6).

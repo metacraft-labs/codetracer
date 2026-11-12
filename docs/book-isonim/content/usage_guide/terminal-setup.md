@@ -146,7 +146,19 @@ where listed, a `CODETRACER_TUI_*` variable.
 | `colors` | `auto`, `truecolor`, `256`, `16`, `mono` | `auto` (`--truecolor`, `--no-color`; `CODETRACER_TUI_COLORS`) |
 | `terminal-probe` | `on`, `off` | `on` (`--no-probe`; `CODETRACER_TUI_PROBE`) |
 | `reduce-motion` | `auto`, `on`, `off` | `auto`: reduced over a slow link |
+| `pointer-shapes` | `auto`, `on`, `off` | `auto`: where the terminal answers or is known to take them |
+| `screen-reader` | `auto`, `on`, `off` | `auto`: on when `ACCESSIBLE` is set, or Speakup speaks on the Linux console (`CODETRACER_TUI_SCREEN_READER`) |
 | `terminal-hints` | `on`, `off` | `on` |
+
+**With a screen reader** (Orca, NVDA, Narrator, VoiceOver, Speakup), turn on
+`screen-reader` — `--screen-reader=on`, `:set screen-reader on`, or `ACCESSIBLE=1`
+in your environment, which other terminal programs read too. CodeTracer then
+draws plain ASCII without frames, dividers or scrollbars, shows one pane at a
+time (the focused one; `F6` and the other focus keys move between them), puts
+the terminal's cursor on what has focus so your screen reader's review cursor
+follows it, says on the status line where focus went (`Call Stack: main
+calc.py:12` on entering a pane, the row alone as you move inside it), and
+turns animations and hover tooltips off.
 
 A setting can be scoped to one terminal in the remembered preferences file
 (`tui-preferences` in CodeTracer's state directory):

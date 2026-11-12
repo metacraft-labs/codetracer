@@ -204,10 +204,18 @@ type
     sshConnection*, sshTty*: string
       ## A remote session (§3.4). Marks remote, not slow.
     ctGlyphs*, ctModernUnicode*, ctAmbiguousWidth*, ctColors*,
-      ctProbe*: string
+      ctProbe*, ctScreenReader*: string
       ## The CodeTracer environment overrides (§5.2 rank 3):
       ## `CODETRACER_TUI_GLYPHS`, `…_MODERN_UNICODE`, `…_AMBIGUOUS_WIDTH`,
-      ## `…_COLORS`, `…_PROBE`.
+      ## `…_COLORS`, `…_PROBE`, `…_SCREEN_READER`.
+    accessible*: string
+      ## `$ACCESSIBLE` (§9.4 SR-D2): the convention of Charm's `huh` forms
+      ## and the GitHub CLI for "a screen reader is listening". Anything but
+      ## empty, `0`, `false`, `no` or `off` is a yes.
+    speakupSynth*: string
+      ## `/sys/accessibility/speakup/synth` on the Linux console (SR-D2):
+      ## the synthesizer Speakup drives, `none` when it drives none, "" when
+      ## Speakup is not loaded. Read by the host, local only.
 
   CapabilityFlags* = object
     ## §6.2's four capability flags, as a value. Parsed by `app/cli.nim`, which
@@ -332,6 +340,14 @@ type
       ## state, hover repaints are coalesced.
     reduceMotion*: bool
     reduceMotionFrom*: CapabilitySource
+    screenReader*: bool
+      ## §9.4: the screen-reader mode — the ASCII tier with the decorative
+      ## glyphs as spaces (SR-D3), motion and hover off (SR-D4), the cursor
+      ## on the focused element (SR-D5), one pane at a time (SR-D6), focus
+      ## changes announced (SR-D7).
+    screenReaderFrom*: CapabilitySource
+    screenReaderNote*: string
+      ## Which rank or which hint decided (`ACCESSIBLE=1`, `:set`).
     pointer*: PointerCaps
       ## Pointer-Affordances §5.2: the OSC 22 dialect, or off.
     pointerFrom*: CapabilitySource
@@ -741,7 +757,26 @@ proc envChoices*(env: TerminalEnv): (TerminalChoices, seq[string]) =
     var v: bool
     if parseOnOffWord(env.ctProbe, v): c.probe = some(v)
     else: bad.add "CODETRACER_TUI_PROBE=" & env.ctProbe & " is not on or off"
+  if env.ctScreenReader.len > 0:
+    var v: bool
+    if env.ctScreenReader.strip.toLowerAscii == "auto": discard
+    elif parseOnOffWord(env.ctScreenReader, v): c.screenReader = some(v)
+    else: bad.add "CODETRACER_TUI_SCREEN_READER=" & env.ctScreenReader &
+                  " is not auto, on or off"
   (c, bad)
+
+proc screenReaderHint*(env: TerminalEnv): (bool, string) =
+  ## §9.4 SR-D2: whether the environment says a screen reader is listening,
+  ## and which hint said so. `ACCESSIBLE` anywhere; Speakup only on the
+  ## Linux console, where it reads the screen.
+  let a = env.accessible.strip
+  if a.len > 0 and a.toLowerAscii notin ["0", "false", "no", "off"]:
+    return (true, "ACCESSIBLE=" & a)
+  if env.term == "linux":
+    let s = env.speakupSynth.strip
+    if s.len > 0 and s.toLowerAscii != "none":
+      return (true, "Speakup (" & s & ")")
+  (false, "")
 
 proc flagChoices(flags: CapabilityFlags): TerminalChoices =
   ## Rank 2, with the older flags folded in: `--ascii-borders` is
@@ -1149,10 +1184,25 @@ proc resolveCapabilities*(env: TerminalEnv; flags: CapabilityFlags;
     elif not probe.answered and cache.isSome and cache.get.truecolor:
       (colors, colorsFrom) = (cdTrueColor, csCache)
 
-  # Glyphs.
+  # The screen-reader mode (§9.4): a choice at any rank, else the hints.
+  let readerChoice = firstExplicit(ranks, screenReader, bool, false)
+  var (screenReader, screenReaderFrom, screenReaderNote) =
+    (false, csDefault, "")
+  if readerChoice.found:
+    (screenReader, screenReaderFrom, screenReaderNote) =
+      (readerChoice.value, readerChoice.source, readerChoice.note)
+  else:
+    let (hinted, why) = screenReaderHint(env)
+    if hinted:
+      (screenReader, screenReaderFrom, screenReaderNote) =
+        (true, csEnvironment, why)
+
+  # Glyphs. The screen-reader mode forces the ASCII tier (SR-D3).
   let glyphChoice = firstExplicit(ranks, glyphs, GlyphsChoice, true)
-  let (tier, tierFrom, tierNote) =
+  var (tier, tierFrom, tierNote) =
     resolveTier(env, glyphChoice, widths, widthsFrom, identity, probe)
+  if screenReader:
+    (tier, tierFrom, tierNote) = (tierAscii, screenReaderFrom, "screen-reader")
   let ambiguousChoice = firstExplicit(ranks, ambiguousWidth, AmbiguousChoice,
                                       true)
   let (ambiguousWide, ambiguousFrom, ambiguousNote) =
@@ -1191,6 +1241,9 @@ proc resolveCapabilities*(env: TerminalEnv; flags: CapabilityFlags;
     (reduceMotion, reduceMotionFrom) = (motionChoice.value, motionChoice.source)
   elif conservative:
     (reduceMotion, reduceMotionFrom) = (true, rttFrom)
+  if screenReader:
+    # SR-D4: motion off whatever `reduce-motion` says.
+    (reduceMotion, reduceMotionFrom) = (true, screenReaderFrom)
   let probeChoice = firstExplicit(ranks, probe, bool, false)
 
   # Grapheme clustering (DEC 2027): set it when recognised and off.
@@ -1234,6 +1287,8 @@ proc resolveCapabilities*(env: TerminalEnv; flags: CapabilityFlags;
     syncNote: syncNote,
     rttMs: rtt, rttFrom: rttFrom, linkConservative: conservative,
     reduceMotion: reduceMotion, reduceMotionFrom: reduceMotionFrom,
+    screenReader: screenReader, screenReaderFrom: screenReaderFrom,
+    screenReaderNote: screenReaderNote,
     pointer: pointerCaps,
     pointerFrom: (if pointerChoice.found: pointerChoice.source
                   elif probe.pointerAnswered: csProbe

@@ -1,0 +1,22 @@
+{
+  "D1": "j[\"identity\"][\"value\"][\"name\"].getStr == \"kitty\"",
+  "D2": "not early.contains(ModifyOtherKeysOn)",
+  "D3": "on.contains(\"no answer through tmux\")",
+  "D4": "early.find(WrappedPointerQuery) > early.find(Da1Query)",
+  "D5": "early.contains(WrappedPointerQuery)",
+  "S1": "hinted.screenReader",
+  "S10": "announcementOf(s, false, \"Call Stack\") == \"first row\"",
+  "S11": "status.contains(\"screen-reader\") and status.contains(\"screen reader on\")",
+  "S12": "screen.projection.regions.len == 1",
+  "S13": "(status != quiet) == speaks",
+  "S14": "line.contains(\"on:\")",
+  "S15": "s.rowAt(1).toLowerAscii.contains(firstPane.toLowerAscii)",
+  "S2": "not resolveWith(env(accessible = off)).screenReader",
+  "S3": "not resolveWith(env(term = \"xterm-256color\", speakup = \"soft\")).screenReader",
+  "S4": "on.tier == tierAscii",
+  "S5": "on.reduceMotion and on.reduceMotionFrom == csEnvironment",
+  "S6": "quiet.glyph(role) == \" \"",
+  "S7": "drawn.strip.len == 0",
+  "S8": "s.cursorVisible()",
+  "S9": "firstPane.len > 0"
+}

@@ -1,0 +1,18 @@
+# Control digests for run-plat72-screen-reader-mutations.py — the
+# subjects AND the suites the arms are graded by.
+# Refreshed with --record-control-hashes, gated by the
+# needle scan.
+f1f2c84a36ed368523f503701d3a0700b16a9fd1aa5c4c6d9c93c713fe54e38b  src/frontend/tui/app/theme/capabilities.nim
+55bf6277bdf57ce65709fbfc0f0b19cf5f5f4810fbdf25323268b24a4de27a51  src/frontend/tui/app/views/glyph_table.nim
+006af6b962ebf9c4737a70b2b3b51971cdec937a6cc1d2340e071ae48a2ae938  src/frontend/tui/app/views/scrollbar_styles.nim
+3d2ee41cb785bc563a5f0498ce0a1ce2c46fbc8207aead13bdbc3b7c8aaea083  src/frontend/tui/app/views/focus_locator.nim
+2ffb13fa4541be85cde288716f6194d877ab06069ee57f2b4386f3edc9e7afae  src/frontend/tui/app/views/shell.nim
+81e926e3dd54e3e5d83c565557a568d127f7b943bb1775d1351770c5eb5bf285  src/frontend/tui/app/theme/terminal_report.nim
+8ccf1af3e2dfbe1c9b9450a7c2efc64432b9dc6be0f477588a792756ce49ed3d  src/frontend/tui/app/theme/pointer_protocol.nim
+3677240a7ae107da79396ffa54919841805336aeeed74c9c7a9bfeaf7864698c  src/frontend/tui/app/runtime.nim
+bb207c070558793e2bcafbba5e3cbfe30dc69a5554acc6787abccafa7a9305f6  src/frontend/tui/main.nim
+124b9e0d5977013726b504dd51c62c291de43270ba8932fde09594388fffd9fb  src/frontend/tui/host/terminal_probe.nim
+1bb1907c844deceee1d320d61f1fbd5e4baeb51a3a74805f87fd9c56bafc21be  src/frontend/tui/tests/test_plat72_screen_reader.nim
+438b8efea78634feab40d8976fd9b73f1185d5b484db20757c9020e7f059ee82  src/frontend/tui/tests/real_terminal/test_plat72_screen_reader_pty.nim
+371467787c03bb1b47f730666ad0cd7c375d3365459f17232a8c2d287cf750d5  src/frontend/tui/tests/real_terminal/test_terminal_diagnostics_pty.nim
+d20f3ae7d905ee2dfc2afb1a9270864d260a44ebd713e7c1c8c1967d4db9aa83  src/frontend/tui/tests/real_terminal/test_plat70f_pointer_pty.nim

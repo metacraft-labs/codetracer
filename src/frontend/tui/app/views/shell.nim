@@ -1402,6 +1402,18 @@ proc shellScreen*(model: ShellModel; width, height: int;
                                           revealPane: geometry.revealPane,
                                           openDock: geometry.openDock,
                                           openDockPane: geometry.openDockPane))
+    # The screen-reader mode (Terminal-Adaptation §9.4 SR-D7): THE MESSAGE
+    # LEADS THE ROW. A screen reader reads the line from its start, and a
+    # focus announcement right-aligned behind the file info and the bottom
+    # labels was cut, or read last. The labels keep their cells for the
+    # pointer (the strips are hit-tested from the geometry, not the text).
+    if g.glyphs.quiet and status.notification.len > 0:
+      let said = asciiProse(status.notification)
+      g.fillSurface(height - 1, 0, width, 1, srSurfaceStatusLine)
+      g.paint(height - 1, 0, repeat(' ', width))
+      g.paint(height - 1, 1, fitCells(said & "   " & status.modeText & " " &
+                                      productIndicator(status.product),
+                                      max(0, width - 1)))
 
   for row in 0 ..< height:
     result.rows.add g.rowText(row)

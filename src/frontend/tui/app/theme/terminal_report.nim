@@ -76,6 +76,10 @@ proc profileReport*(caps: TerminalCapabilities): seq[string] =
              $caps.keyProtocolFrom & ")"
   result.add pad("Motion") & (if caps.reduceMotion: "reduced" else: "animated") &
              "   (" & $caps.reduceMotionFrom & ")"
+  result.add pad("Screen reader") &
+             (if caps.screenReader: "on: ASCII, no decoration, one pane, " &
+                "the cursor on focus" else: "off") & "   (" &
+             sourceText(caps.screenReaderFrom, caps.screenReaderNote) & ")"
   result.add pad("Pointer") & $caps.pointer.dialect &
              (if caps.pointer.wrapped: " through tmux" else: "") & "   (" &
              caps.pointer.source & ")"
@@ -136,6 +140,8 @@ proc profileJson*(caps: TerminalCapabilities): JsonNode =
     "rttMs": axis(%caps.rttMs, caps.rttFrom),
     "linkConservative": axis(%caps.linkConservative, caps.rttFrom),
     "reduceMotion": axis(%caps.reduceMotion, caps.reduceMotionFrom),
+    "screenReader": axis(%caps.screenReader, caps.screenReaderFrom,
+                         caps.screenReaderNote),
     "pointerShapes": axis(%*{"dialect": $caps.pointer.dialect,
                              "pushPop": caps.pointer.dialect == pdKitty,
                              "wrapped": caps.pointer.wrapped,
