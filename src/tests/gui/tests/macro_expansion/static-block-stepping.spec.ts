@@ -20,14 +20,17 @@
  *    refuses (not connected or feature missing).  The renderer must
  *    show a toast notification explaining the failure.
  *
- * In CI the second outcome is the normal case because the GUI test
- * harness does not currently spin up `nimlangserver`.  The first
- * outcome will exercise itself in environments where the user has the
- * trace-enabled nimsuggest configured.
+ * The first outcome is REQUIRED when `CODETRACER_NIMSUGGEST` names a
+ * trace-enabled nimsuggest (the dev shell exports it, and the language
+ * server uses it when the window names none); the second is accepted only
+ * where there is no such nimsuggest.
  *
  * Sibling of `nim-view-switching/macro-expansion-stepping.spec.ts` (S7).
  */
 
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
 import { test, expect } from "../../lib/fixtures";
 import type { Page } from "@playwright/test";
 import { LayoutPage } from "../../page-objects/layout-page";
@@ -37,6 +40,24 @@ import { retry } from "../../lib/retry-helpers";
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+/**
+ * The program, copied OUT of this repository. nimsuggest (stock and
+ * codetracer-nim's alike) crashes on this repository's root `config.nims`
+ * (`IndexDefect`, then "Failed to parse nimsuggest port"), so the language
+ * server cannot trace a Nim file anywhere under the checkout, while a user's
+ * project, which is not under it, traces fine. The copy is that project.
+ * The suite runs from `src/tests/gui`, as `lib/fixtures.ts` assumes.
+ */
+const staticBlockProgram = (() => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ct-nim-static-block-"));
+  fs.cpSync(
+    path.resolve("..", "..", "..", "test-programs", "nim_static_block"),
+    dir,
+    { recursive: true },
+  );
+  return path.join(dir, "main.nim");
+})();
 
 const STATIC_BLOCK_MENU_ITEM = "Trace Static Block Execution";
 
@@ -188,7 +209,10 @@ test.describe("TraceStaticBlock", () => {
   // Use the dedicated nim_static_block test program; its main.nim
   // contains a real `static:` block (strtabs-based) that mirrors the
   // codetracer-nim/tests/sourcemap/tvm_trace_static.nim fixture.
-  test.use({ sourcePath: "nim_static_block/main.nim", launchMode: "trace" });
+  test.use({ sourcePath: staticBlockProgram, launchMode: "trace" });
+  test.afterAll(() => {
+    fs.rmSync(path.dirname(staticBlockProgram), { recursive: true, force: true });
+  });
 
   // Nim is an RR-based language: give extra time for record + replay.
   test.setTimeout(240_000);
@@ -284,20 +308,50 @@ test.describe("TraceStaticBlock", () => {
       ).toBeGreaterThan(sessionsBefore);
     }
 
+    // THE FULL PIPELINE, required wherever it can run. With a trace-enabled
+    // nimsuggest in the environment (the dev shell exports
+    // CODETRACER_NIMSUGGEST, and the Nim language server uses it when the
+    // window names no nimsuggest) the language server writes a recording, the
+    // main process imports it, and it opens in a NEW session tab. Two defects
+    // each stopped that and both left this test green on the toast above: the
+    // language server ran the stock nimsuggest and answered "No trace result",
+    // and the window looked the bare .ct up without importing it and answered
+    // "No trace found". Without that nimsuggest (most CI hosts) the toast is
+    // still the accepted outcome.
+    const traceNimsuggest = process.env.CODETRACER_NIMSUGGEST ?? "";
+    if (traceNimsuggest !== "" && fs.existsSync(traceNimsuggest)) {
+      const opened = await retry(
+        async () => (await countSessionTabs(ctPage)) > sessionsBefore,
+        { maxAttempts: 120, delayMs: 1000 },
+      ).then(() => true, () => false);
+      const why = opened ? null : await waitForNotificationContaining(
+        ctPage, ["No trace", "not a static", "failed", "error"], 1_000);
+      expect(
+        opened,
+        "expected the static block's recording in a new session tab " +
+          `(trace-enabled nimsuggest ${traceNimsuggest}); notification: ${why}`,
+      ).toBe(true);
+    }
+
     // If a new session opened, sanity-check that its editor surfaces
     // the static-block file.  This is the full-pipeline success path
     // and only fires when the langserver actually returned a .ct.
     const sessionsAfter = await countSessionTabs(ctPage);
     if (sessionsAfter > sessionsBefore) {
-      await expect(ctPage.locator(".monaco-editor .view-lines").first())
-        .toBeVisible({ timeout: 30_000 });
+      // The new session's editor: the first session's stays in the DOM,
+      // hidden, so the visible one is the one to wait for.
+      await expect(
+        ctPage.locator(".monaco-editor .view-lines")
+          .filter({ visible: true }).first(),
+      ).toBeVisible({ timeout: 30_000 });
+      // `retry` resolves to nothing and throws when it gives up.
       const nimEditorVisible = await retry(
         async () => {
           const tabs = await layout.editorTabs(true);
           return tabs.some((t) => t.fileName.endsWith(".nim"));
         },
         { maxAttempts: 20, delayMs: 500 },
-      );
+      ).then(() => true, () => false);
       expect(nimEditorVisible).toBe(true);
     }
   });
