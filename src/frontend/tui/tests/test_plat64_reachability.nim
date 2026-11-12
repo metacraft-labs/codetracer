@@ -42,6 +42,10 @@ const
     "layout.new-state", "layout.new-terminal", "layout.new-vertical-group",
     "layout.save", "layout.switch-debug-wide", "layout.switch-edit-normal",
     "palette.fixed-search", "preferences.options", "search.replace-in-files",
+    # the desktop palette's developer setting and keymap choices
+    "preferences.toggle-shared-editor", "preferences.keymap-cua",
+    "preferences.keymap-emacs", "preferences.keymap-vim",
+    "preferences.keymap-kakoune",
     "session.debug", "session.load-trace", "session.new-file",
     "session.open-folder", "session.open-recent", "session.record-from-launch",
     "session.save", "session.save-all", "session.save-as",

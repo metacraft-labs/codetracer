@@ -427,6 +427,13 @@ const
     op("view.previous-point-in-time", GlobalTable, "Previous Point in Time"),
     op("view.next-point-in-time", GlobalTable, "Next Point in Time"),
     op("preferences.options", GlobalTable, "Options"),
+    # The desktop's editor (the `sharedEditor` developer setting) and the
+    # shared editor's base keymap, from the palette.
+    op("preferences.toggle-shared-editor", GlobalTable, "Developer: Toggle Shared Editor"),
+    op("preferences.keymap-cua", GlobalTable, "Keymap: CUA"),
+    op("preferences.keymap-emacs", GlobalTable, "Keymap: Emacs"),
+    op("preferences.keymap-vim", GlobalTable, "Keymap: Vim"),
+    op("preferences.keymap-kakoune", GlobalTable, "Keymap: Kakoune"),
     op("help.user-manual", GlobalTable, "User Manual"),
     op("help.report-problem", GlobalTable, "Report a Problem"),
     op("help.suggest-feature", GlobalTable, "Suggest a Feature"),
