@@ -154,7 +154,8 @@ proc createMirrorSession*(
     channel: SyncChannel;
     debugCommandsFor: proc(session: SessionViewModel): DebugCommands = nil;
     relayActions = false;
-    relays: RelayFilter = nil
+    relays: RelayFilter = nil;
+    localOwners: openArray[string] = []
 ): MirrorSession =
   ## A mirror over `channel`. It follows the session the host activates, or
   ## the one `switchTo` names.
@@ -171,6 +172,10 @@ proc createMirrorSession*(
   ## (Shared-DOM-Front-Ends D6) — a VS Code webview, and a `ct host` page
   ## (`createHostedPageMirror`). Off for a mirror that only shows a session.
   ## `relays` narrows them to the actions it accepts; nil relays every one.
+  ##
+  ## `localOwners`: the ViewModels, by key prefix, whose state this side
+  ## produces and the primary's snapshots and batches must not replace
+  ## (`sync_subscriber.ownedLocally`; `HostedPageOwnedSignals`).
   let m = MirrorSession(channel: channel, viewports: newJObject())
   createRoot proc(dispose: proc()) =
     m.disposeRoot = dispose
@@ -180,7 +185,7 @@ proc createMirrorSession*(
     m.session.initializePanelViewModels()
     if relayActions:
       m.relayActions(relays)
-  m.subscriber = createSyncSubscriber(m.session)
+  m.subscriber = createSyncSubscriber(m.session, localOwners)
   channel.setHandler(proc(msg: JsonNode) = m.onHostMessage(msg))
   # THE VIEW STATE IS THE PRIMARY'S. A tab chosen, a row expanded or a watch
   # added in a mirror's pane goes through the session's collaboration core
@@ -218,6 +223,27 @@ proc hostedPageRelays*(vm, action: string): bool =
   vm == "viewport" or vm == "calltrace" or
     (vm == "requestPanel" and action != "jumpToHandler")
 
+const HostedPageOwnedSignals = ["fileTree."]
+  ## The ViewModels whose state a `ct host` page produces itself, and which
+  ## the server's session therefore must not overwrite in the page's mirror.
+  ##
+  ## THE FILE TREE IS THE PAGE'S. The server's session never loads one: the
+  ## page asks the index for the trace's source folders and their lazily
+  ## loaded sub-folders over its own IPC (`CODETRACER::filesystem-loaded`,
+  ## `load-path-content`) and writes the answers into this mirror's
+  ## `FilesystemVM` (`ui/filesystem.syncLegacyFilesystemIntoVM`), and every
+  ## file-tree action runs on the page (`hostedPageRelays`). The server's
+  ## `FilesystemVM` stays at its initial "Loading..." state, so applying it
+  ## replaced the tree the page had loaded with "Loading..." on the first
+  ## snapshot, for good. The VS Code host is the other way round — its
+  ## extension host loads the tree into the primary
+  ## (`vscode_host.setSourceFiles`) and its webviews take it from there —
+  ## which is why the exception is this page's, not the subscriber's.
+  ##
+  ## A ViewModel joins this list when the page produces its state and the
+  ## server's session does not, and leaves it when the server's session is
+  ## given an equivalent (Shared-DOM-Front-Ends, "Server-managed sessions").
+
 proc createHostedPageMirror*(
     channel: SyncChannel;
     debugCommandsFor: proc(session: SessionViewModel): DebugCommands = nil
@@ -243,8 +269,12 @@ proc createHostedPageMirror*(
   ## stays the page's too, through `debugCommandsFor`: the page drives the
   ## replay it launched, and the server's session follows the moves it makes
   ## (`hosted_primary`).
+  ##
+  ## The file tree's STATE is the page's too, not only its actions: the page
+  ## loads it (`HostedPageOwnedSignals`).
   createMirrorSession(channel, debugCommandsFor, relayActions = true,
-                      relays = hostedPageRelays)
+                      relays = hostedPageRelays,
+                      localOwners = HostedPageOwnedSignals)
 
 proc rememberViewport(m: MirrorSession; args: JsonNode) =
   ## Keep `args` as the pane's last report, for the next primary `switchTo`

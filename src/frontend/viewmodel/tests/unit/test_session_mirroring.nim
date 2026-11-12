@@ -1094,4 +1094,71 @@ suite "a ct host page's mirror (Shared-DOM-Front-Ends D2)":
       host.dispose()
       done()
 
+  test "the page's file tree is the page's: the server's session does not replace it":
+    # A `ct host` page loads its Files pane itself, over its own IPC to the
+    # index (`ui/filesystem.syncLegacyFilesystemIntoVM`); the server's
+    # session never loads a tree and keeps its initial "Loading..." state.
+    # Applying the server's file-tree signals put the page's pane back on
+    # "Loading..." for good at the first snapshot (`HostedPageOwnedSignals`).
+    # The plain mirror beside it (a VS Code webview, whose host DOES load the
+    # tree into the primary) still takes the primary's.
+    createRoot proc(done: proc()) =
+      let (primary, _) = newPrimary()
+      let host = newSyncHost(manual)
+      let link = newInMemoryLink()
+      let webviewLink = newInMemoryLink()
+      host.attach(link.a, follow = "ct-host/replay-0")
+      host.attach(webviewLink.a, follow = "ct-host/replay-0")
+      let mirror = createHostedPageMirror(link.b)
+      let webview = createMirrorSession(webviewLink.b)
+      let tree = FilesystemEntryNode(text: "source folders", isFolder: true,
+        children: @[FilesystemEntryNode(text: "main.nr",
+                                        path: "/src/main.nr")])
+      # The page's tree arrives before the server's session exists: the
+      # index answers `filesystem-loaded` before the replay's first stop.
+      mirror.session.fileTreeVM.setRoot(tree)
+      mirror.session.fileTreeVM.expandPath("/src")
+      link.settle()
+      ck primary.fileTreeVM.loadingState.val == lsLoading
+
+      primary.moveTo(100, "/src/main.nr", 13)
+      host.addPrimary("ct-host/replay-0", primary)
+      link.settle()
+      webviewLink.settle()
+      ck mirror.following == "ct-host/replay-0"
+      ck mirror.subscriber.inStep
+      # The snapshot brought the session's position ...
+      ck mirror.session.store.debugger.val.rrTicks == 100
+      # ... and left the page's tree, its state and its expansion alone.
+      ck mirror.session.fileTreeVM.loadingState.val == lsIdle
+      ck mirror.session.fileTreeVM.rootEntry.val == tree
+      ck "/src" in mirror.session.fileTreeVM.expandedPaths.val
+      ck webview.session.fileTreeVM.loadingState.val == lsLoading
+
+      # A batch that carries a file tree of the server's does not replace
+      # the page's either, while the rest of that batch is applied. The
+      # webview takes it: its host is the one that loads the tree.
+      let serverTree = FilesystemEntryNode(text: "server folders",
+                                           isFolder: true)
+      primary.fileTreeVM.setRoot(serverTree)
+      primary.fileTreeVM.expandPath("/server")
+      primary.moveTo(200, "/src/main.nr", 15)
+      link.settle()
+      webviewLink.settle()
+      ck mirror.subscriber.inStep
+      ck mirror.session.store.debugger.val.rrTicks == 200
+      ck mirror.session.fileTreeVM.rootEntry.val == tree
+      ck mirror.session.fileTreeVM.loadingState.val == lsIdle
+      ck "/src" in mirror.session.fileTreeVM.expandedPaths.val
+      ck "/server" notin mirror.session.fileTreeVM.expandedPaths.val
+      ck webview.subscriber.inStep
+      ck webview.session.store.debugger.val.rrTicks == 200
+      ck webview.session.fileTreeVM.rootEntry.val == serverTree
+      ck webview.session.fileTreeVM.loadingState.val == lsIdle
+      ck "/server" in webview.session.fileTreeVM.expandedPaths.val
+      webview.dispose()
+      mirror.dispose()
+      host.dispose()
+      done()
+
 echo "CHECKS: ", checks
