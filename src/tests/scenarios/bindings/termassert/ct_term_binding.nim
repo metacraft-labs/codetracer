@@ -75,7 +75,29 @@ proc roles(): JsonNode =
     "variable": {"properties": ["name", "value"], "affordances": ["click", "double-click", "context-click"]},
     "terminal-output": {"properties": ["text", "count"], "affordances": ["wheel", "focusable"]},
     "status-line": {"properties": ["message", "location", "mode"], "affordances": []},
-    "omnibox": {"properties": ["query", "focused"], "affordances": ["click", "text-entry", "focusable"]}}
+    "omnibox": {"properties": ["query", "focused", "count"], "affordances": ["click", "text-entry", "focusable"]},
+    # --- terminal ---
+    "pane": {"properties": ["title", "text", "count", "tabs", "hbar"],
+             "affordances": ["click", "wheel", "context-click", "drop-target"]},
+    "row": {"properties": ["text", "first", "selected"], "affordances": ["click", "double-click", "context-click"]},
+    "cell": {"properties": ["text"], "affordances": ["click", "double-click", "context-click"]},
+    "popup": {"properties": ["title", "text"], "affordances": ["click"]},
+    "context-menu": {"properties": ["count"], "affordances": []},
+    "menu-item": {"properties": ["label", "enabled", "shortcut"], "affordances": ["click"]},
+    "menu-bar": {"properties": [], "affordances": []},
+    "menu": {"properties": ["label", "open"], "affordances": ["click"]},
+    "dropdown": {"properties": ["level", "count"], "affordances": []},
+    "dropdown-item": {"properties": ["label", "shortcut", "folder", "selected"], "affordances": ["click"]},
+    "toolbar": {"properties": [], "affordances": []},
+    "toolbar-button": {"properties": ["label", "enabled"], "affordances": ["click"]},
+    "filesystem": {"properties": ["count"], "affordances": ["wheel", "focusable"]},
+    "file-node": {"properties": ["name", "kind", "expanded", "selected"],
+                  "affordances": ["click", "double-click", "context-click"]},
+    "dock-label": {"properties": ["label"], "affordances": ["click", "context-click"]},
+    "welcome": {"properties": ["heading", "text"], "affordances": []},
+    "welcome-action": {"properties": ["label"], "affordances": ["click"]},
+    "replay-position": {"properties": ["tick", "total", "paused"], "affordances": []},
+    "option": {"properties": ["label", "detail", "selected"], "affordances": ["click"]}}
 
 var stageStates* = initTable[string, StageState]()
   ## The run's stage state, by its root (one run per process).
@@ -94,6 +116,7 @@ proc stageState(ctx: TermContext): StageState =
 proc launchTui(ctx: TermContext; s: StageState) =
   var args = @["--theme=dark"]
   if s.launch.keymap.len > 0: args.add "--keymap=" & s.launch.keymap
+  for f in s.launch.flags: args.add f
   if s.launch.recording.len > 0:
     args.add s.launch.recording
   else:
@@ -157,7 +180,14 @@ proc ctTermBinding*(): TermBinding =
       of "replay-idle":
         # the top bar's trace summary: the replay is paused at a tick
         let top = ctx.grid().rowText(0)
-        some(top.contains("[ct]") and top.contains("tick: ") and top.contains("[PAUSED]"))
+        some(top.contains("[ct]") and top.contains("tick: ") and top.contains("[PAUSED]") and
+             not top.contains("trace: - "))
+      of "ready":
+        # --- terminal --- the front-end drew its first frame: the status
+        # row carries the product mode
+        let g = ctx.grid()
+        let status = g.rowText(g.height - 1)
+        some(status.contains("[DEBUG]") or status.contains("[EDIT]"))
       else: none(bool),
     resolveChord: proc (ctx: TermContext; operation: string): Option[string] =
       let s = ctx.stageState()
@@ -167,6 +197,30 @@ proc ctTermBinding*(): TermBinding =
                              s.configDir / "keybindings.json")
       router.resolveChord(operation, scopeOf(readSurface(ctx.grid()))),
     anchor: proc (ctx: TermContext; n: SurfaceNode; anchor: string): Option[(int, int)] =
+      if n.role == "call" and anchor == "name":
+        # --- terminal --- the call's name: the first letter after the
+        # indentation and the fold glyph
+        let row = int(n.y)
+        let g = ctx.grid()
+        var c = int(n.x)
+        while c < int(n.x + n.w) - 1 and g.rows[row][c].text in [" ", "", "▾", "▸", "▼", "▶", "·", "•"]: inc c
+        return some((row, c + 1))
+      if n.role == "call" and anchor == "expander":
+        # --- terminal --- the fold glyph before the call's name
+        let row = int(n.y)
+        let g = ctx.grid()
+        for c in int(n.x) ..< int(n.x + n.w):
+          if g.rows[row][c].text in ["▾", "▸", "▼", "▶"]: return some((row, c))
+        return none((int, int))
+      if n.role == "row" and anchor in ["text-start", "text-end"]:
+        # --- terminal --- the first / last character of the row's text
+        let row = int(n.y)
+        let g = ctx.grid()
+        var a = int(n.x)
+        var b = int(n.x + n.w) - 1
+        while a < b and g.rows[row][a].text in [" ", "", "▏"]: inc a
+        while b > a and g.rows[row][b].text in [" ", "", "▏", "▕"]: dec b
+        return some((row, if anchor == "text-start": a else: b))
       if n.role != "line": return none((int, int))
       let row = int(n.y)
       let g = ctx.grid()

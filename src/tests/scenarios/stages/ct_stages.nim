@@ -22,6 +22,12 @@ import std/[json, os, osproc, strutils, times, tables]
 import ../../../frontend/tui/tests/fixtures/fixture_provider
 import ../../../frontend/tui/tests/fixtures/plat65_nim_project
 import ../../../frontend/viewmodel/host/native_nim_tracer
+import ../../../frontend/tui/tests/fixtures/[plat53_noir_project, plat55_noir_build,
+                                            plat62_noir_circuit, plat63_verno_projects]
+import ../../../frontend/viewmodel/tests/unit/build_fixtures/plat56_c_build
+import results
+import ../../../tools/demo_request_session
+import ../../../frontend/tui/tests/fixtures/visual_fixture
 
 export fixture_provider
 
@@ -36,6 +42,7 @@ type
     tick*: int              ## -1: at the recording's entry
     keymap*: string         ## the base keymap ("" for the product default)
     review*: string         ## a review dataset (`ct review <json>`), "" for none
+    flags*: seq[string]     ## extra command-line options (`front-end-options`)
     env*: OrderedTable[string, string]
 
   StageState* = ref object
@@ -191,6 +198,147 @@ proc plantConfig*(s: StageState; file, content: string) =
   createDir(path.parentDir)
   writeFile(path, content)
 
+# --- terminal ---------------------------------------------------------------
+
+proc writeProject*(s: StageState; files: JsonNode) =
+  ## A project folder written from `files` (relative path -> content) into
+  ## this run's root. It becomes the folder the next `open-project` (with
+  ## `folder: $project`) edits, and the working directory of the next
+  ## `open-recording`, so a replay started there edits it on Ctrl+F5.
+  let root = s.root / "project"
+  createDir(root)
+  if files != nil and files.kind == JObject:
+    for rel, content in files:
+      if rel.contains("..") or rel.isAbsolute:
+        raise newException(ValueError, "write-project: '" & rel &
+                           "' is not a path inside the project")
+      let path = root / rel
+      if rel.endsWith("/"):
+        createDir(path)
+      else:
+        createDir(path.parentDir)
+        writeFile(path, content.getStr)
+  s.launch.project = root
+  s.launch.workDir = root
+
+proc fixtureProject*(s: StageState; name: string) =
+  ## One of the repository's fixture projects (the ones its suites build
+  ## with), written into this run's project folder; `write-project` may add
+  ## files to it afterwards.
+  let root = s.root / "project"
+  createDir(root)
+  proc put(rel, content: string) =
+    createDir((root / rel).parentDir)
+    writeFile(root / rel, content)
+  case name
+  of "c-build":
+    # PLAT-56's C project: src/main.c fails to build, src/ok.c builds.
+    put("src/main.c", Plat56MainC)
+    put("src/ok.c", Plat56OkC)
+  of "noir-build-errors":
+    # PLAT-55's Noir crate whose `nargo compile` reports two type errors.
+    put("Nargo.toml", Plat55NargoToml)
+    put("src/main.nr", Plat55MainNr)
+    put("src/util.nr", Plat55UtilNr)
+  of "verno-type-error", "verno-counterexample":
+    # PLAT-63's Verno packages with the replaying `verno` stand-in (the
+    # recorded run of the real verifier; its header in
+    # `plat63_verno_projects.nim` says why it stands in), first on PATH.
+    let run = if name == "verno-type-error": writeTypeErrRun() else: writeCounterexampleRun()
+    removeDir(root)
+    copyDir(run.root, root)
+    copyDir(run.bin, s.root / "verno-bin")
+    run.removeRun()
+    for f in walkDirRec(s.root / "verno-bin"):
+      if f.extractFilename == "verno":
+        setFilePermissions(f, {fpUserRead, fpUserWrite, fpUserExec})
+    s.launch.env["PATH"] = (s.root / "verno-bin") & ":" & getEnv("PATH")
+  of "vcs-repo":
+    # PLAT-47's git repository: a commit, then a modified, an added (staged)
+    # and an untracked file (`scripts/plat47-vcs-fixture.sh`).
+    removeDir(root)
+    let (output, code) = execCmdEx("bash " &
+      quoteShell(repo() / "scripts" / "plat47-vcs-fixture.sh") & " " & quoteShell(root))
+    if code != 0:
+      raise newException(IOError, "fixture-project vcs-repo: " & output)
+  of "noir-constraints":
+    # PLAT-62's Noir circuit, measured by `nargo info --json`.
+    put("Nargo.toml", Plat62NargoToml)
+    for (path, content) in Plat62Files: put(path, content)
+  of "noir-tests":
+    # PLAT-53's Noir crate with one passing and one failing test.
+    put("Nargo.toml", Plat53NargoToml)
+    put("src/main.nr", Plat53MainNr)
+  else:
+    raise newException(ValueError, "fixture-project: no fixture project '" & name & "'")
+  s.launch.project = root
+  s.launch.workDir = root
+
+proc requestSession*(s: StageState) =
+  ## The RS-M4 demo request session: a real `.ct` container with eight
+  ## request spans over a recorded timeline, written by the canonical writer
+  ## (`src/tools/demo_request_session`), as the recording to open.
+  let folder = s.root / "request-session"
+  removeDir(folder)
+  createDir(folder)
+  let written = writeDemoRequestSession(folder)
+  if written.isErr:
+    raise newException(IOError, "request-session: " & $written.error)
+  s.launch.recording = folder
+
+proc plantState*(s: StageState; file, content: string) =
+  ## A file in the front-end's state directory (its saved layout, its keymap
+  ## preference) before it starts.
+  if file.contains("..") or file.isAbsolute:
+    raise newException(ValueError, "plant-state: '" & file &
+                       "' is not a name inside the state directory")
+  let path = s.launch.env["CODETRACER_TUI_LAYOUT_DIR"] / file
+  createDir(path.parentDir)
+  writeFile(path, content)
+
+proc visualRecording*(s: StageState) =
+  ## The visual fixture's `gl_scene` recording (made by ct-mcr), opened with
+  ## the real `ct_gfx_player`; a missing recording or player is a failed
+  ## stage, named.
+  let skip = visualFixtureSkip()
+  if skip.len > 0:
+    raise newException(IOError, "visual-recording: " & skip)
+  s.launch.recording = visualFixtureFolder()
+
+proc frontEndOptions*(s: StageState; options: JsonNode; term: string;
+                      env: JsonNode = nil) =
+  ## Command-line options the front-end starts with (`name: value` becomes
+  ## `--name=value`, an empty value `--name`), the terminal type the
+  ## terminal flavour announces (`TERM`), and environment variables (a
+  ## `$project` in a value is the stage's project folder) — the options,
+  ## terminals and environment a user starts the product with.
+  if options != nil and options.kind == JObject:
+    for k, v in options:
+      let val = (if v.kind == JString: v.getStr else: $v)
+      s.launch.flags.add(if val.len == 0: "--" & k else: "--" & k & "=" & val)
+  if term.len > 0: s.launch.env["TERM"] = term
+  if env != nil and env.kind == JObject:
+    for k, v in env:
+      s.launch.env[k] = v.getStr.replace("$project", s.launch.project)
+
+proc dropRecordedFile*(s: StageState; name: string) =
+  ## The prepared recording, copied into this run's root without the
+  ## recorded source file `name`: a recording that lacks one of its files.
+  if s.launch.recording.len == 0:
+    raise newException(ValueError, "drop-recorded-file: no recording prepared")
+  let copy = s.root / "recording-copy"
+  removeDir(copy)
+  copyDir(s.launch.recording, copy)
+  var removed = 0
+  for f in walkDirRec(copy / "files"):
+    if f.extractFilename == name:
+      removeFile(f)
+      inc removed
+  if removed != 1:
+    raise newException(IOError, "drop-recorded-file: " & $removed &
+                       " recorded files are named " & name)
+  s.launch.recording = copy
+
 proc runStage*(s: StageState; use: string; args: JsonNode) =
   ## One stage call. `open-recording` / `open-project` only DECIDE the launch;
   ## the binding starts its own front-end from `s.launch` afterwards.
@@ -244,6 +392,21 @@ proc runStage*(s: StageState; use: string; args: JsonNode) =
     s.launch.keymap = preset
   of "plant-config":
     s.plantConfig(argStr(args, "file"), argStr(args, "content"))
+  of "write-project":
+    s.writeProject(if args.isNil: nil else: args{"files"})
+  of "plant-state":
+    s.plantState(argStr(args, "file"), argStr(args, "content"))
+  of "visual-recording":
+    s.visualRecording()
+  of "request-session":
+    s.requestSession()
+  of "fixture-project":
+    s.fixtureProject(argStr(args, "name"))
+  of "drop-recorded-file":
+    s.dropRecordedFile(argStr(args, "name"))
+  of "front-end-options":
+    s.frontEndOptions(if args.isNil: nil else: args{"options"}, argStr(args, "term"),
+                      if args.isNil: nil else: args{"env"})
   of "start-from-layout":
     let layout = argStr(args, "layout")
     let src = currentSourcePath().parentDir.parentDir / "fixtures" / "layouts" / layout
@@ -261,7 +424,7 @@ proc toJson*(s: StageState): JsonNode =
   %*{"root": s.root, "recording": s.launch.recording, "project": s.launch.project,
      "file": s.launch.file, "workDir": s.launch.workDir, "width": s.launch.width,
      "height": s.launch.height, "tick": s.launch.tick, "keymap": s.launch.keymap,
-     "review": s.launch.review, "env": env}
+     "review": s.launch.review, "flags": s.launch.flags, "env": env}
 
 proc removeStage*(s: StageState) =
   ## The run's scratch root, removed when the run ends.
@@ -287,4 +450,5 @@ proc loadFrom*(path: string): StageState =
   result.launch.keymap = j["keymap"].getStr
   result.launch.review = j{"review"}.getStr
   for k, v in j["env"]: result.launch.env[k] = v.getStr
+  for f in j{"flags"}.getElems: result.launch.flags.add f.getStr
   for u in j{"stagesRun"}.getElems: result.stagesRun.add u.getStr

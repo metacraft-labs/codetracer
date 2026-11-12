@@ -49,6 +49,12 @@ roles:
       # --- pw2 ---
       vcs: optional
       diff-view: many
+      # --- terminal ---
+      pane: many
+      popup: many
+      dropdown: many
+      dock-label: many
+      replay-position: optional
 
   # The strip of session tabs: one tab per open recording or editing session.
   session-strip:
@@ -134,6 +140,8 @@ roles:
       shows-text(t): "some line: line.text contains t"
       # Exactly one of two lines is dimmed as a branch the run did not take.
       dims-one-of(a, b): "(some x of line: x.number == a and x.dimmed) != (some y of line: y.number == b and y.dimmed)"
+      # --- terminal ---
+      lacks-text(t): "none line: line.text contains t"
     sync:
       # The editor has a document and has drawn it.
       loaded: "count(line) > 0"
@@ -190,7 +198,8 @@ roles:
       # The call's arguments as drawn (`a=1, b=2`).
       arguments: text
     affordances: [click, double-click, context-click]
-    anchors: [expander]
+    # `name`: the call's name (terminal batch)
+    anchors: [expander, name]
 
   # The event log: the recording's output and events, in order.
   event-log:
@@ -242,7 +251,8 @@ roles:
     keys: [name]
     properties: { name: text, type: text, value: text, expanded: bool }
     affordances: [click, double-click, context-click]
-    anchors: [expander]
+    # `name`: the call's name (terminal batch)
+    anchors: [expander, name]
 
   # The breakpoints and tracepoints list.
   breakpoints:
@@ -291,6 +301,10 @@ roles:
       location: text
       # The editing keymap's mode indicator, when there is one.
       mode: text
+    # --- terminal ---
+    assertions:
+      says(t): "message contains t"
+      lacks(t): "not (message contains t)"
 
   # The command palette / omnibox: a query field and its results.
   omnibox:
@@ -353,8 +367,13 @@ roles:
 
   # The welcome screen a window shows before a recording or project is open.
   welcome:
-    properties: { heading: text }
+    properties:
+      heading: text
+      # --- terminal --- what the screen says, row by row
+      text: lines
     children: { welcome-action: many, recent: many }
+    assertions:
+      shows(t): "text contains t"
 
   welcome-action:
     keys: [label]
@@ -407,6 +426,83 @@ roles:
     keys: [file]
     properties: { file: text, text: lines }
 
+  # --- terminal ---
+  # Any pane of the layout, by the label of its tab in front: what it shows,
+  # row by row. The panes no other role reads (Problems, Find in Files,
+  # Build, VCS, Constraints, Requests, …) are read through it.
+  pane:
+    keys: [title]
+    properties:
+      title: text
+      # Its rows' text, in order, as drawn.
+      text: lines
+      count: int
+      # The labels of the tabs on its strip.
+      tabs: lines
+      # A horizontal scrollbar is drawn across it.
+      hbar: bool
+    children: { row: many }
+    affordances: [click, wheel, context-click, drop-target]
+    assertions:
+      shows(t): "text contains t"
+      has-row(t): "some row: row.text contains t"
+      lacks-row(t): "none row: row.text contains t"
+      rows-match(re): "every row: row.text matches re"
+      has-tab(t): "tabs contains t"
+      lacks-tab(t): "not (tabs contains t)"
+
+  # One row of a pane, by its whole text or by its first column.
+  row:
+    keys: [text, first]
+    properties: { text: text, first: text, selected: bool }
+    children: { cell: many }
+    affordances: [click, double-click, context-click]
+    anchors: [text-start, text-end]
+
+  # One column of a row: a run of text set two or more blanks apart from the
+  # next (a button, a name, a count).
+  cell:
+    keys: [text]
+    properties: { text: text }
+    affordances: [click, double-click, context-click]
+
+  # A box shown over the window that is not a menu: an event's whole content,
+  # a value's history, a detail row, a tooltip.
+  popup:
+    properties: { title: text, text: lines }
+    affordances: [click]
+    assertions:
+      shows(t): "text contains t"
+
+  # One level of the program menu, open: the first under the menu button,
+  # every entered folder to its right.
+  dropdown:
+    keys: [level]
+    properties: { level: int, count: int }
+    children: { dropdown-item: many }
+    assertions:
+      offers(label): "some dropdown-item: dropdown-item.label == label"
+
+  dropdown-item:
+    keys: [label]
+    properties: { label: text, shortcut: text, folder: bool, selected: bool }
+    affordances: [click]
+
+  # A label of the footer's auto-hide panels (Build, Problems, …): a click
+  # docks its pane.
+  dock-label:
+    keys: [label]
+    properties: { label: text }
+    affordances: [click, context-click]
+
+  # Where the replay is in the recording: its tick, of how many.
+  replay-position:
+    properties: { tick: int, total: int, paused: bool }
+    assertions:
+      at-tick(n): "tick == n"
+      past(n): "tick > n"
+      before(n): "tick < n"
+
 sync:
   # The implicit condition after every input: the window handled it and the
   # screen stopped changing.
@@ -414,6 +510,9 @@ sync:
   # The replay engine has answered everything asked of it and the window shows
   # where the replay is.
   replay-idle: ~
+  # --- terminal ---
+  # The front-end has drawn its first frame (a replay or Edit mode).
+  ready: ~
 
 stages:
   record-program:
@@ -455,3 +554,50 @@ stages:
   start-from-layout:
     summary: Start from a saved layout (a file under the pack's fixtures).
     params: { layout: text }
+  # --- terminal ---
+  write-project:
+    summary: >-
+      Write a project folder from `files` (a relative path to its content; a
+      path ending in `/` is an empty folder). The next `open-project` with
+      `folder: $project` edits it, and the next `open-recording` runs in it.
+    params: { files: record }
+  front-end-options:
+    summary: >-
+      Start the front-end with these command-line options (`name: value` is
+      `--name=value`), on a terminal of type `term` (the terminal flavour's
+      `TERM`), with these environment variables (`$project` in a value is
+      the stage's project folder).
+    params: { options: record, term: text, env: record }
+  drop-recorded-file:
+    summary: >-
+      Copy the prepared recording into the run's root without its recorded
+      source file `name`, and open that copy: a recording that lacks a file.
+    params: { name: text }
+  fixture-project:
+    summary: >-
+      Write one of the repository's fixture projects into the run's project
+      folder (`c-build`: a C project whose src/main.c fails to build;
+      `noir-build-errors`: a Noir crate with two type errors; `noir-tests`: a
+      Noir crate with a passing and a failing test; `noir-constraints`: a
+      Noir circuit for the Constraints pane; `vcs-repo`: a git repository
+      with a modified, an added and an untracked file; `verno-type-error`,
+      `verno-counterexample`: a Verno package with a recorded verifier run).
+      `write-project` may add
+      files to it.
+    params: { name: text }
+  request-session:
+    summary: >-
+      Write the demo request session (a recording whose program served eight
+      HTTP requests) and make it the recording the next `open-recording` opens.
+    params: {}
+  plant-state:
+    summary: >-
+      Write a file into the front-end's state directory before it starts (a
+      saved layout document, the stored keymap preference).
+    params: { file: text, content: text }
+  visual-recording:
+    summary: >-
+      The visual fixture's GL scene recording (a program that drew frames),
+      as the recording the next `open-recording` opens; it needs the visual
+      replay player.
+    params: {}
