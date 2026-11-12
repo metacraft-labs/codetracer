@@ -1117,9 +1117,11 @@ proc interactive(command: TuiCommand): int =
     session.requestsAct(rt, act)
   # PLAT-60: the Low Level Code pane — a press, a menu, a key, the sync
   # toggle, the editor's caret, a step — done through the shown session's
-  # `LowLevelCodeVM`.
+  # `LowLevelCodeVM` — in Edit mode, Edit mode's listing of the compiled C
+  # (HSF-E11, `edit_services.editLowLevelAct`).
   app.lowLevelAct = proc(act: LowLevelAct): LowLevelActResult =
-    session.lowLevelAct(rt, act)
+    if app.modes.product == pmEdit: rt.editLowLevelAct(edit, act)
+    else: session.lowLevelAct(rt, act)
   # PLAT-61: the Shell pane — a key, a press on a recorded command, the
   # scrollback — done through the shown session's `ShellVM`; its shell is
   # pumped on the idle tick below.
@@ -1527,7 +1529,9 @@ proc interactive(command: TuiCommand): int =
       let visualChanged = session.pumpVisual(rt, nowMs())
       # PLAT-51: a welcome tab's recording, when it finishes; a Nim trace's
       # too.
-      let recorded = pollRecording() or advanceNimTrace(rt, edit, openNimTrace)
+      # HSF-E11: Edit mode's generated C, when its compile settles.
+      let recorded = pollRecording() or advanceNimTrace(rt, edit, openNimTrace) or
+                     advanceGeneratedC(rt, edit)
       # PLAT-49 part B: the auto-hide hover's clock — a preview due after
       # the pointer rested on a label, a dismissal due after it left.
       let hoverChanged = rt.tickAutoHide(nowMs()) or
@@ -1862,6 +1866,10 @@ proc editInteractive(command: TuiCommand): int =
   let files = startFiles(rt, root, highlights)
   defer: files.stop()
 
+  # HSF-E11: the Low Level Code pane shows Edit mode's generated C, from the
+  # services' own listing (this loop has no replay).
+  app.lowLevelAct = proc(act: LowLevelAct): LowLevelActResult =
+    rt.editLowLevelAct(edit, act)
   # THE SAME FUNCTION THE TOGGLE CALLS. Opening the first file and filling the
   # tree used to be written out here as well as in `app/runtime.nim`; two
   # copies of one behaviour is §14's subject, and this is the copy no suite
@@ -1950,7 +1958,8 @@ proc editInteractive(command: TuiCommand): int =
       # read while the compiler runs, and the clock that bounds an unattended
       # session is checked on every tick. See `host/build_runner.pollBuild`.
       let built = advanceBuild(rt, edit, report = true) or
-                  advanceNimTrace(rt, edit, nil)
+                  advanceNimTrace(rt, edit, nil) or
+                  advanceGeneratedC(rt, edit)
       let vcsChanged = vcs.tick(rt)
       let testsChanged = tests.tick(rt)
       let problemsTicked = problems.tick(rt, nowMonoMs())

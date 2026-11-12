@@ -42,7 +42,7 @@
 when defined(js):
   {.error: "src/frontend/tui/host is native-only: it spawns replay-server.".}
 
-import std/[json, os, sets, strutils, tables]
+import std/[algorithm, json, os, sets, strutils, tables]
 
 import codetracer_embed
 import headless_session
@@ -61,6 +61,7 @@ import ../../viewmodel/viewmodels/inline_value_timeline
 
 import viewmodels/filesystem_vm   # the replay file tree the Files pane lists
 import viewmodels/generated_code_presenter   # Generated-Code-Listing §13.4
+from viewmodels/nim_c_producer import isGeneratedNimC   # `<trace>/nimcache/`
 import viewmodels/calltrace_vm    # CALLTRACE_BUFFER, the desktop's pre-fetch
 import ../../viewmodel/pane_viewport   # HSF-V2: the pane's cells as a Viewport
 import viewmodels/scratchpad_vm   # PLAT-50: the scratchpad pane
@@ -1113,7 +1114,8 @@ proc lowLevelModelOf*(vm: LowLevelCodeVM;
   ## (`displayRows`). The reading position (`scrollTop`) is the pane's own,
   ## kept.
   result = LowLevelPaneModel(loaded: not vm.isNil, scrollTop: prior.scrollTop,
-                             executionRow: -1, selectedRow: -1, linkedRow: -1)
+                             executionRow: -1, selectedRow: -1, linkedRow: -1,
+                             activeRow: -1)
   if vm.isNil:
     return
   result.error = vm.errorMessage.val
@@ -1146,6 +1148,7 @@ proc lowLevelModelOf*(vm: LowLevelCodeVM;
       if d.executing: result.executionRow = at
       if d.selected: result.selectedRow = at
       if d.linked and result.linkedRow < 0: result.linkedRow = at
+      if d.active and result.activeRow < 0: result.activeRow = at
 
 proc refreshLowLevel*(s: TuiSession; rt: TuiRuntime) =
   ## The pane's value at this moment. Whether the pane is on screen is told
@@ -1153,6 +1156,14 @@ proc refreshLowLevel*(s: TuiSession; rt: TuiRuntime) =
   ## engine for the listing only while it is, and asks at once when it
   ## becomes shown.
   if s.ended:
+    return
+  # EDIT MODE'S LISTING IS NOT THE REPLAY'S: it is the C the edited file
+  # compiles to (`edit_services`, HSF-E11), held by the host's own
+  # `LowLevelCodeVM`. A replay session toggled into Edit mode shows that
+  # one, and the stop's listing again once it is back in Debug mode.
+  if rt.app.modes.product == pmEdit and
+     not rt.editServices.editLowLevelModel.isNil:
+    rt.app.lowLevel = rt.editServices.editLowLevelModel(rt.app.lowLevel)
     return
   let vm = s.session.session.lowLevelCodeVM
   if vm.isNil:
@@ -1165,6 +1176,60 @@ proc refreshLowLevel*(s: TuiSession; rt: TuiRuntime) =
       discard s.session.loadStopPanes()
   rt.app.lowLevel = lowLevelModelOf(vm, rt.app.lowLevel)
 
+proc actOnListing*(vm: LowLevelCodeVM; act: LowLevelAct;
+                   answer: var LowLevelActResult): SourceLineRef =
+  ## The ViewModel half of the pane's `act` — select, menu, a key, the sync
+  ## toggle, the editor's caret — shared by a replay session (`lowLevelAct`)
+  ## and Edit mode's listing of the compiled C (`edit_services`, which has
+  ## no replay). Answers the source line a press, Enter or Go to Source Line
+  ## goes to (`line` 0 for none); what "go" means is the caller's (a replay
+  ## moves the debugger, Edit mode moves the editor's caret), and so is a
+  ## step (`llaStep`), which only a replay can take. Its words, menu and
+  ## copied text go to `answer`.
+  var jump = SourceLineRef()
+  case act.kind
+  of llaPress:
+    vm.selectInstruction(act.index)
+    jump = vm.jumpTargetOf(act.index)
+    if jump.line <= 0:
+      answer.note = NoSourceLineReason
+  of llaActivate:
+    jump = vm.jumpTargetOf(vm.selected.val)
+    if vm.selected.val < 0:
+      answer.note = "no instruction is selected"
+    elif jump.line <= 0:
+      answer.note = NoSourceLineReason
+  of llaRowMenu:
+    vm.selectInstruction(act.index)
+    answer.menu = vm.lowLevelRowContextMenuOf(act.index)
+  of llaMenuChoice:
+    let (isLowLevel, wanted) = lowLevelMenuActionOf(act.action)
+    if isLowLevel:
+      let index = int(act.target.index)
+      let rows = vm.instructions.val
+      if index < 0 or index >= rows.len or
+         rows[index].offset != act.target.line:
+        answer.note = "that instruction is no longer listed"
+      else:
+        let outcome = vm.runRowMenu(index, wanted, send = false)
+        answer.note = outcome.note
+        answer.copied = outcome.copied
+        jump = outcome.jumpTo
+  of llaKey:
+    if vm.moveSelection(act.operation, act.page) < 0:
+      answer.note = "the listing has no instruction"
+  of llaToggleSync:
+    vm.setSyncEnabled(not vm.syncSettings.val.enabled)
+    answer.note = "source syncing is " &
+      (if vm.syncSettings.val.enabled: "on" else: "off")
+  of llaClearSelection:
+    vm.selectInstruction(NoSelectedInstruction)
+  of llaSourceCursor:
+    vm.setSourceCursor(act.path, act.line)
+  of llaStep:
+    discard
+  jump
+
 proc lowLevelAct*(s: TuiSession; rt: TuiRuntime;
                   act: LowLevelAct): LowLevelActResult =
   ## The pane's act done through the session's `LowLevelCodeVM` (and, for a
@@ -1175,47 +1240,8 @@ proc lowLevelAct*(s: TuiSession; rt: TuiRuntime;
   let vm = s.session.session.lowLevelCodeVM
   if vm.isNil:
     return LowLevelActResult(note: "this session has no low-level code")
-  var jump = SourceLineRef()
-  case act.kind
-  of llaPress:
-    vm.selectInstruction(act.index)
-    jump = vm.jumpTargetOf(act.index)
-    if jump.line <= 0:
-      result.note = NoSourceLineReason
-  of llaActivate:
-    jump = vm.jumpTargetOf(vm.selected.val)
-    if vm.selected.val < 0:
-      result.note = "no instruction is selected"
-    elif jump.line <= 0:
-      result.note = NoSourceLineReason
-  of llaRowMenu:
-    vm.selectInstruction(act.index)
-    result.menu = vm.lowLevelRowContextMenuOf(act.index)
-  of llaMenuChoice:
-    let (isLowLevel, wanted) = lowLevelMenuActionOf(act.action)
-    if isLowLevel:
-      let index = int(act.target.index)
-      let rows = vm.instructions.val
-      if index < 0 or index >= rows.len or
-         rows[index].offset != act.target.line:
-        result.note = "that instruction is no longer listed"
-      else:
-        let outcome = vm.runRowMenu(index, wanted, send = false)
-        result.note = outcome.note
-        result.copied = outcome.copied
-        jump = outcome.jumpTo
-  of llaKey:
-    if vm.moveSelection(act.operation, act.page) < 0:
-      result.note = "the listing has no instruction"
-  of llaToggleSync:
-    vm.setSyncEnabled(not vm.syncSettings.val.enabled)
-    result.note = "source syncing is " &
-      (if vm.syncSettings.val.enabled: "on" else: "off")
-  of llaClearSelection:
-    vm.selectInstruction(NoSelectedInstruction)
-  of llaSourceCursor:
-    vm.setSourceCursor(act.path, act.line)
-  of llaStep:
+  let jump = actOnListing(vm, act, result)
+  if act.kind == llaStep:
     let request = vm.instructionStepRequest(act.operation)
     if request.offered:
       try:
@@ -2269,6 +2295,37 @@ proc seekToStartupTick*(s: TuiSession; rt: TuiRuntime; tick: int64): string =
     s.refresh(rt)
   outcome.detail
 
+proc anyGeneratedNimC(files: openArray[string]): bool =
+  for f in files:
+    if isGeneratedNimC(f):
+      return true
+
+proc recordingNimcacheFiles*(tracePath: string): seq[string] =
+  ## The generated C files of a recording's `nimcache/` folder (absolute,
+  ## sorted): where `ct record` keeps a Nim program's C and source maps.
+  let dir = tracePath / "nimcache"
+  if not dirExists(dir):
+    return
+  for kind, f in walkDir(dir):
+    if kind in {pcFile, pcLinkToFile} and isGeneratedNimC(f):
+      result.add f
+  result.sort()
+
+proc readInsideTrace*(tracePath, path: string;
+                      fallback: tuple[ok: bool, text, message: string]):
+    tuple[ok: bool, text, message: string] =
+  ## `path` read from disk when it lies inside the recording's folder
+  ## (resolved, so `..` cannot leave it), else `fallback` — what the source
+  ## provider answered.
+  let root = absolutePath(tracePath).normalizedPath
+  let full = absolutePath(path).normalizedPath
+  if not full.startsWith(root & DirSep) or not fileExists(full):
+    return fallback
+  try:
+    (true, readFile(full), "")
+  except IOError, OSError:
+    fallback
+
 proc header*(s: TuiSession; rt: TuiRuntime) =
   ## Point the runtime at this session — the one shown: the trace's NAME
   ## where §3.1's header row reads it, and (PLAT-68) the reader the Debug-mode
@@ -2292,13 +2349,27 @@ proc header*(s: TuiSession; rt: TuiRuntime) =
     var files: seq[string] = @[]
     if not core.fileTreeVM.isNil:
       recordedPathsOf(core.fileTreeVM.rootEntry.val, files)
+    # A recording `ct record` made of a Nim program keeps its generated C
+    # (and the `.c.map` beside each file) in `<trace>/nimcache/`
+    # (`recorder_dispatch.nimNativeCompileArgs`), which the recording's
+    # file tree does not list: offered from there when the tree has none.
+    let nimcache = recordingNimcacheFiles(owner.session.tracePath)
+    if not files.anyGeneratedNimC:
+      files.add nimcache
     # The terminal's provider answers at once, so the listing is in the pane
     # (and the pane's model rebuilt from it) before this returns.
     var failure = ""
     let refused = showGeneratedCode(core.generatedCodeVM, core.lowLevelCodeVM,
       targetId, path, line, core.store.stop.val, files,
       proc(p: string; done: proc(r: RecordedText)) =
-        done(owner.recordedSourceText(p)),
+        # Through the source provider, as the Debug-mode editor reads; a
+        # file of the trace folder the provider does not serve (the
+        # nimcache's C and maps) from disk — and nothing outside the folder.
+        let read = owner.recordedSourceText(p)
+        if read.ok:
+          done(read)
+        else:
+          done(readInsideTrace(owner.session.tracePath, p, read)),
       proc(why: string) =
         failure = why
         owner.refreshLowLevel(rt))

@@ -28,6 +28,12 @@ import ../host/pane_server
 import ./fixtures/fixture_provider
 import ./fixtures/plat53_noir_project
 import ./fixtures/plat65_nim_project
+import ./fixtures/native_recording
+import ../app/edit_binding
+import ../app/views/low_level_code_pane
+from ../host/edit_services import EditHostState
+from ../host/tui_session import TuiSession
+import viewmodels/low_level_code_vm
 from ../host/native_host import traceFolderProblem
 from backend/stdio_backend import DapStdioBackend
 
@@ -42,6 +48,19 @@ proc activeRuntime(srv: PaneServer): TuiRuntime =
   let session = srv.sessions[srv.active]
   privateAccess(typeof(session))
   session.rt
+
+proc activeEdit(srv: PaneServer): EditHostState =
+  ## The active session's Edit-mode services, for the listing they hold.
+  privateAccess(PaneServer)
+  let session = srv.sessions[srv.active]
+  privateAccess(typeof(session))
+  session.edit
+
+proc activeReplay(srv: PaneServer): TuiSession =
+  privateAccess(PaneServer)
+  let session = srv.sessions[srv.active]
+  privateAccess(typeof(session))
+  session.tui
 
 proc engineRequests(srv: PaneServer): int =
   ## How many requests the active session has sent the engine: the DAP
@@ -808,4 +827,300 @@ suite "HSF-E1: the pane server, over a real recording":
       "operation": "view.generated-c-source"})
     check not refused{"result", "ok"}.getBool
     check "not a Nim source" in refused{"result", "detail"}.getStr
+    discard srv.request("shutdown")
+
+
+# ---------------------------------------------------------------------------
+# §E9 "A project, not only a recording", and HSF-E11: Edit mode's generated C
+# ---------------------------------------------------------------------------
+
+const
+  TinyNim = "proc triple(n: int): int =\n" &
+            "  let zebraCount = n * 3\n" &
+            "  result = zebraCount + 1\n" &
+            "\n" &
+            "echo triple(14)\n"
+    ## Line 2's C names `zebraCount` (CodeTracer's Nim and a stock one both
+    ## keep a local's name, suffixed), so the listing's anchored row can be
+    ## checked by its text as well as by its mapping.
+  BrokenNim = "let answer: int = \"forty-two\"\n"
+    ## A type error: `nim c` fails with "type mismatch".
+
+proc paneRowsOf(msgs: seq[JsonNode]; pane: string;
+                rows: var seq[string]): bool =
+  ## The rows of the last `pane/content` for `pane` in `msgs` applied to
+  ## `rows` (a full update replaces them, a partial one patches them); true
+  ## when there was one.
+  for n in msgs.notes("pane/content"):
+    if n{"params", "pane"}.getStr != pane:
+      continue
+    result = true
+    if n{"params", "full"}.getBool:
+      rows = @[]
+    for r in n{"params", "rows"}.getElems:
+      let i = r{"index"}.getInt
+      while rows.len <= i: rows.add ""
+      rows[i] = r{"text"}.getStr
+
+proc tickUntil(srv: PaneServer; pane: string; rows: var seq[string];
+               done: proc(rows: seq[string]): bool; seconds = 120.0): bool =
+  ## The server's loop polled (`tick`, as `runPaneServer` does every
+  ## `TickMs`) until `pane`'s rows satisfy `done`.
+  let deadline = epochTime() + seconds
+  while epochTime() < deadline:
+    discard paneRowsOf(srv.tick(), pane, rows)
+    if done(rows):
+      return true
+    sleep(100)
+  false
+
+proc anchoredRow(m: LowLevelPaneModel): int =
+  ## The listing's anchored instruction: the VM index of the model's active
+  ## row, -1 for none.
+  if m.activeRow < 0 or m.activeRow >= m.rows.len: -1
+  else: m.rows[m.activeRow].index
+
+suite "§E9 and HSF-E11: a project session, and Edit mode's generated C":
+
+  test "session/open {project}: an Edit-mode session with no recording":
+    # Editor-Hosted-Front-Ends §E9 ("A project, not only a recording"): a
+    # project folder opens in Edit mode, with the project's files, its files
+    # read from disk inside it, and DAP refused — there is nothing to debug.
+    let project = createTempDir("ct-e9-project-", "")
+    writeFile(project / "tiny.nim", TinyNim)
+    createDir(project / "sub")
+    writeFile(project / "sub" / "other.nim", "echo 1\n")
+    let srv = newPaneServer(dap = false)
+    discard srv.request("initialize", %*{"capabilities": {"media": ["text"]},
+                                         "keymapOverrides": []})
+    let (opened, notes) = srv.request("session/open", %*{"project": project})
+    checkpoint("open: " & $opened)
+    check opened{"error"}.isNil
+    let sid = opened{"result", "session"}.getInt
+    check sid > 0
+    check opened{"result", "mode"}.getStr == "edit"
+    check opened{"result", "graphics", "available"}.getBool == false
+    # Edit mode's own layout, and the session's keys, sent as for a recording.
+    check notes.notes("pane/keymap").len >= 1
+    # A project session has no debugger position.
+    check notes.notes("session/position").len == 0
+    let (listed, _) = srv.request("session/list")
+    check listed{"result"}.getElems.anyIt(it{"session"}.getInt == sid and
+      it{"mode"}.getStr == "edit" and it{"project"}.getStr == project)
+    # Its files are the project's, as Edit mode lists them.
+    let (files, _) = srv.request("session/files", %*{"session": sid})
+    let paths = files{"result"}.getElems.mapIt(it{"path"}.getStr)
+    checkpoint("files: " & $paths)
+    check (project / "tiny.nim") in paths
+    check (project / "sub" / "other.nim") in paths
+    # A file is read from disk, inside the project only.
+    let (read, _) = srv.request("source/read", %*{"session": sid,
+                                                  "file": project / "tiny.nim"})
+    check read{"result", "text"}.getStr == TinyNim
+    let (outside, _) = srv.request("source/read", %*{"session": sid,
+      "file": project / ".." / "elsewhere.nim"})
+    check not outside{"error"}.isNil
+    check "outside the project" in outside{"error", "message"}.getStr
+    # A pane is painted from the runtime: the Files pane lists the project.
+    let (_, fileNotes) = srv.request("pane/open", %*{"session": sid,
+      "pane": "fileTree", "width": 40, "height": 12})
+    var tree: seq[string] = @[]
+    check paneRowsOf(fileNotes, "fileTree", tree)
+    checkpoint("file tree:\n" & tree.join("\n"))
+    check tree.anyIt("tiny.nim" in it)
+    # DAP: refused, with the reason.
+    let dap = srv.handleDap(%*{"seq": 1, "type": "request",
+                               "command": "threads"})
+    check dap.len == 1 and not dap[0]{"success"}.getBool
+    check "no recording" in dap[0]{"message"}.getStr
+    let step = srv.handleDap(%*{"seq": 2, "type": "request", "command": "next"})
+    check not step[0]{"success"}.getBool
+    # A folder that holds a recording opens the recording, as `ct` does.
+    let recording = resolveFixture(FixtureName)
+    if recording.outcome != foMissingPrereq:
+      let (asProject, _) = srv.request("session/open",
+                                       %*{"project": recording.tracePath})
+      checkpoint("recording as project: " & $asProject)
+      check asProject{"result", "mode"}.getStr == "debug"
+    # Not a folder: refused.
+    let (missing, _) = srv.request("session/open",
+                                   %*{"project": project / "nope"})
+    check "no such folder" in missing{"error", "message"}.getStr
+    discard srv.request("shutdown")
+    removeDir(project)
+
+  test "HSF-E11: View Generated C in Edit mode compiles the file, its caret's row in view":
+    # Generated-Code-Listing §13.4, Edit mode: the C comes from the compiler,
+    # now (`native_nim_c_compiler`), asynchronously — the pane opens at once
+    # saying it is compiling, and the listing follows on the loop's poll,
+    # scrolled to the row anchored to the cursor's line. The REAL `nim`.
+    if findExe("nim").len == 0:
+      echo "  MISSING-PREREQ SKIP: `nim` is not on PATH"
+      skip()
+      return
+    let project = createTempDir("ct-e11-project-", "")
+    # Enough Nim above the line that its C is far down the file, so "in
+    # view" is not the file's top.
+    var source = ""
+    for i in 1 .. 40:
+      source.add "proc filler" & $i & "(): int = " & $i & "\n"
+    let zebraLine = 40 + 2
+    source.add TinyNim
+    writeFile(project / "tiny.nim", source)
+    writeFile(project / "broken.nim", BrokenNim)
+    let srv = newPaneServer(dap = false)
+    discard srv.request("initialize", %*{"capabilities": {"media": ["text"]},
+                                         "keymapOverrides": []})
+    let (opened, _) = srv.request("session/open", %*{"project": project})
+    let sid = opened{"result", "session"}.getInt
+    check sid > 0
+    if sid <= 0: return
+    discard srv.request("source/cursor", %*{"session": sid,
+      "file": project / "tiny.nim", "line": zebraLine, "column": 3})
+    let (shown, shownNotes) = srv.request("operation/run", %*{"session": sid,
+      "operation": "view.generated-c-source"})
+    checkpoint("view.generated-c-source answered " & $shown)
+    check shown{"result", "ok"}.getBool
+    check "compiling" in shown{"result", "detail"}.getStr
+    # The layout places the pane beside the source; the editor opens it and
+    # it says it is compiling.
+    let placed = shownNotes.notes("layout/changed")
+    check placed.len == 1 and "lowLevelCode" in $placed[0]{"params", "layout"}
+    let (_, openNotes) = srv.request("pane/open", %*{"session": sid,
+      "pane": "lowLevelCode", "width": 100, "height": 16})
+    var cRows: seq[string] = @[]
+    check paneRowsOf(openNotes, "lowLevelCode", cRows)
+    checkpoint("while compiling:\n" & cRows.join("\n"))
+    check cRows.anyIt("compiling tiny.nim" in it)
+    # The listing arrives on the loop's poll.
+    check srv.tickUntil("lowLevelCode", cRows,
+      proc(rows: seq[string]): bool = rows.anyIt("zebraCount" in it))
+    checkpoint("generated C rows:\n" & cRows.join("\n"))
+    # The row the listing anchored to the cursor maps back to the cursor's
+    # line, and it is IN VIEW — not the file's top: line 2 of the program
+    # is below forty procs' C.
+    let rt = srv.activeRuntime()
+    let m = rt.app.lowLevel
+    let anchored = m.anchoredRow
+    check anchored >= 0
+    let edit = srv.activeEdit()
+    check not edit.listing.isNil
+    if anchored >= 0 and not edit.listing.isNil:
+      let back = edit.listing.sourceLineOf(anchored)
+      check back.line == zebraLine
+      check back.path.endsWith("tiny.nim")
+      check m.scrollTop > 0
+      # The row as the pane shows it (a long one ends in "…").
+      let shownText = m.rows[m.activeRow].instruction.strip
+      check cRows.anyIt(shownText[0 ..< min(30, shownText.len)] in it)
+    # And the C of the line after its anchor: the local's assignment.
+    check cRows.anyIt("zebraCount" in it and " = " in it and "NI " notin it)
+    # A press goes to the Nim line in the editor's buffer; a step refuses.
+    if anchored >= 0:
+      let pressed = rt.app.lowLevelAct(LowLevelAct(kind: llaPress,
+                                                    index: anchored))
+      checkpoint("press: " & pressed.note)
+      let buf = rt.app.editSession.activeBuffer()
+      check buf.path.endsWith("tiny.nim")
+      check buf.caretLine == zebraLine
+      let stepped = rt.app.lowLevelAct(LowLevelAct(kind: llaStep,
+        operation: "debugger.step-over"))
+      check "no replay" in stepped.note
+    # A file that does not compile: the compiler's error, in the pane.
+    discard srv.request("source/cursor", %*{"session": sid,
+      "file": project / "broken.nim", "line": 1, "column": 1})
+    let (broken, _) = srv.request("operation/run", %*{"session": sid,
+      "operation": "view.generated-c-source"})
+    check broken{"result", "ok"}.getBool
+    check srv.tickUntil("lowLevelCode", cRows,
+      proc(rows: seq[string]): bool = rows.anyIt("Error:" in it))
+    checkpoint("broken:\n" & cRows.join("\n"))
+    check cRows.anyIt("type mismatch" in it)
+    check "type mismatch" in rt.app.notification
+    # No compiler: refused at once, with the reason.
+    putEnv("CODETRACER_NIM", project / "no-such-nim")
+    discard srv.request("source/cursor", %*{"session": sid,
+      "file": project / "tiny.nim", "line": zebraLine, "column": 1})
+    let (noNim, _) = srv.request("operation/run", %*{"session": sid,
+      "operation": "view.generated-c-source"})
+    delEnv("CODETRACER_NIM")
+    checkpoint("no nim: " & $noNim)
+    check not noNim{"result", "ok"}.getBool
+    check "no `nim`" in noNim{"result", "detail"}.getStr
+    discard srv.request("shutdown")
+    removeDir(project)
+
+  test "HSF-E11: a recording made by `ct record` shows its C, and Edit mode compiles":
+    # Debug mode over today's `ct record` recording of a Nim program: the C
+    # and its source maps are in `<trace>/nimcache/`, which the recording's
+    # file tree does not list; the listing is anchored by the maps (the
+    # fork writes no `#line`). Then the same session toggled into Edit mode
+    # compiles the source instead (Edit mode means the edited file).
+    let rec = nimForkRecording()
+    if not rec.ok:
+      echo "  ", MissingPrereqSkipPrefix, " ", NimForkFixtureName, " — ",
+           rec.detail
+      skip()
+      return
+    let srv = newPaneServer(dap = false)
+    discard srv.request("initialize", %*{"capabilities": {"media": ["text"]},
+                                         "keymapOverrides": []})
+    let (opened, _) = srv.request("session/open", %*{"trace": rec.tracePath})
+    checkpoint("open: " & $opened)
+    let sid = opened{"result", "session"}.getInt
+    check sid > 0
+    if sid <= 0: return
+    var at = (file: "", line: 0)
+    for i in 0 ..< 60:
+      let (_, notes) = srv.request("operation/run", %*{"session": sid,
+        "operation": "debugger.step-into"})
+      for n in notes.notes("session/position"):
+        at = (file: n{"params", "file"}.getStr, line: n{"params", "line"}.getInt)
+      if at.file.endsWith("nim_flow_test.nim") and at.line > 0:
+        break
+    checkpoint("stop: " & $at)
+    check at.file.endsWith("nim_flow_test.nim")
+    discard srv.request("source/cursor", %*{"session": sid, "file": at.file,
+                                            "line": at.line, "column": 1})
+    let (shown, _) = srv.request("operation/run", %*{"session": sid,
+      "operation": "view.generated-c-source"})
+    checkpoint("view.generated-c-source answered " & $shown)
+    check shown{"result", "ok"}.getBool
+    let (_, openNotes) = srv.request("pane/open", %*{"session": sid,
+      "pane": "lowLevelCode", "width": 100, "height": 16})
+    var cRows: seq[string] = @[]
+    discard paneRowsOf(openNotes, "lowLevelCode", cRows)
+    checkpoint("generated C rows:\n" & cRows.join("\n"))
+    check not cRows.anyIt("carries no generated C" in it)
+    let rt = srv.activeRuntime()
+    let m = rt.app.lowLevel
+    let anchored = m.anchoredRow
+    check anchored >= 0
+    if anchored >= 0:
+      let vm = srv.activeReplay().session.session.lowLevelCodeVM
+      let back = vm.sourceLineOf(anchored)
+      check back.line == at.line
+      check back.path.endsWith("nim_flow_test.nim")
+      let shownText = m.rows[m.activeRow].instruction.strip
+      check cRows.anyIt(shownText[0 ..< min(30, shownText.len)] in it)
+    # Edit mode: the edited source's C, compiled now — not the recording's.
+    let (toggled, _) = srv.request("operation/run", %*{"session": sid,
+      "operation": "session.toggle-product-mode"})
+    check toggled{"result", "ok"}.getBool
+    let program = rec.sourcePath
+    discard srv.request("source/cursor", %*{"session": sid, "file": program,
+                                            "line": 8, "column": 3})
+    let (compiling, _) = srv.request("operation/run", %*{"session": sid,
+      "operation": "view.generated-c-source"})
+    checkpoint("edit-mode view.generated-c-source: " & $compiling)
+    check compiling{"result", "ok"}.getBool
+    check "compiling" in compiling{"result", "detail"}.getStr
+    check srv.tickUntil("lowLevelCode", cRows,
+      proc(rows: seq[string]): bool = rows.anyIt("doubled" in it))
+    let em = rt.app.lowLevel
+    let edit = srv.activeEdit()
+    if em.anchoredRow >= 0 and not edit.listing.isNil:
+      check edit.listing.sourceLineOf(em.anchoredRow).line == 8
+    else:
+      check false
     discard srv.request("shutdown")

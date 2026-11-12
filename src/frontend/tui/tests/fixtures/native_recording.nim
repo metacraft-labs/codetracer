@@ -1,6 +1,7 @@
 ## native_recording.nim — an rr recording of the workspace's shared native
 ## fixture, for the suites that need a NATIVE recording's replay (rr, LLDB),
-## which no recording of the corpus in `fixture_provider` is.
+## which no recording of the corpus in `fixture_provider` is — and a Nim
+## program recorded by `ct record` (`nimForkRecording`, at the end).
 ##
 ## The program is `codetracer-native-test-programs/c/sudoku_solver/main.c`
 ## (`$NATIVE_TEST_PROGRAMS_REPO`, else the workspace sibling). It is built and
@@ -170,3 +171,110 @@ proc nativeRecording*(): NativeRecording =
 
 proc missingNativePrereq*(rec: NativeRecording): string =
   MissingPrereqSkipPrefix & " " & NativeFixtureName & " — " & rec.detail
+
+# ---------------------------------------------------------------------------
+# A Nim program recorded by `ct record` (CodeTracer's Nim, MCR)
+# ---------------------------------------------------------------------------
+#
+# Generated-Code-Listing §13.4: `ct record` compiles a Nim program with
+# CodeTracer's own Nim fork (`--sourcemap:on`, no `#line` directives) and
+# keeps the C and its `.c.map` files in `<trace>/nimcache/`
+# (`src/ct/trace/recorder_dispatch.nimNativeCompileArgs`). The example
+# recording in codetracer-example-recordings was built by a STOCK compiler
+# and bundles C with directives, so a suite over it alone never sees the
+# recordings users make today. This one is recorded now, by the product's
+# own `ct record`, of codetracer's `nim_flow_test` program.
+#
+# Prerequisites, each named when missing (a counted `MISSING-PREREQ SKIP:`):
+# `ct` (`$CT_BIN`, else on the PATH), the MCR recorder `ct-mcr`
+# (`$CODETRACER_CT_MCR_CMD`, else the sibling
+# `codetracer-native-recorder/ct_cli/ct_cli`), `nim` on the PATH (the dev
+# shell's is CodeTracer's fork) and `ct-native-replay` to replay it. A
+# recorder that is present and fails raises.
+#
+# The recorder runs WITHOUT `LD_PRELOAD` (`env -u LD_PRELOAD`): a library
+# preloaded into the recording process (agent-harbor's command-trace shim,
+# in an agent session) is recorded with the program and its recording does
+# not replay (codetracer-pm issue 2026-11-12, "rr replay of a C program that
+# uses the heap fails on the Linux workstation"). With nothing preloaded,
+# the flag changes nothing.
+
+const NimForkFixtureName* = "nim_fork_flow"
+
+proc ctBinary(): string =
+  let fromEnv = getEnv("CT_BIN")
+  if fromEnv.len > 0 and fileExists(fromEnv): fromEnv
+  else: findExe("ct")
+
+proc ctMcrBinary(): string =
+  let fromEnv = getEnv("CODETRACER_CT_MCR_CMD")
+  if fromEnv.len > 0 and fileExists(fromEnv):
+    return fromEnv
+  let sibling = repoRoot().parentDir / "codetracer-native-recorder" /
+                "ct_cli" / "ct_cli"
+  if fileExists(sibling): sibling else: ""
+
+proc identity(path: string): string =
+  ## What changes when a binary is rebuilt: its size and modification time.
+  let info = getFileInfo(path)
+  $info.size & "@" & $info.lastWriteTime.toUnix
+
+proc nimForkRecording*(): NativeRecording =
+  ## The `ct record` recording of `nim_flow_test.nim`, recorded now unless
+  ## this checkout's cache holds one for the same program and tools.
+  let source = repoRoot() / "src" / "db-backend" / "test-programs" / "nim" /
+               "nim_flow_test.nim"
+  result.sourcePath = source
+  let ct = ctBinary()
+  let mcr = ctMcrBinary()
+  let nim = findExe("nim")
+  let replay = findCtNativeReplay()
+  if not fileExists(source):
+    result.detail = source & " is missing"
+  elif ct.len == 0:
+    result.detail = "`ct` was not found (set CT_BIN, or put it on PATH)"
+  elif mcr.len == 0:
+    result.detail = "the MCR recorder ct-mcr was not found (set " &
+      "CODETRACER_CT_MCR_CMD, or build codetracer-native-recorder's ct_cli)"
+  elif nim.len == 0:
+    result.detail = "`nim` is not on PATH"
+  elif replay.len == 0:
+    result.detail = "ct-native-replay was not found (set " &
+      "CODETRACER_CT_NATIVE_REPLAY_CMD)"
+  if result.detail.len > 0:
+    return
+  putEnv("CODETRACER_CT_NATIVE_REPLAY_CMD", replay)
+  putEnv("CODETRACER_CT_MCR_CMD", mcr)
+  putEnv("CODETRACER_IN_UI_TEST", "1")
+  let key = toHex(hash(readFile(source) & "|" & identity(ct) & "|" &
+                       identity(mcr) & "|" & nim), 12).toLowerAscii
+  # OUTSIDE THE CHECKOUT, unlike every other fixture here: Nim reads the
+  # `config.nims` of the main module's directory and its parents, and the
+  # checkout's root one (paths, defines, a force-imported test module) made
+  # `ct record` build a program its recorder could not run ("cannot map the
+  # recording's GEID page", measured 2026-11-13). A user's program is not
+  # compiled under CodeTracer's own configuration, so the fixture's is not.
+  let dir = getTempDir() / "codetracer-tui-fixtures" /
+            NimForkFixtureName & "-" & key
+  let trace = dir / "trace"
+  let program = dir / "src" / source.extractFilename
+  result.sourcePath = program
+  if fileExists(trace / "trace.ct") and dirExists(trace / "nimcache") and
+     fileExists(program):
+    result.ok = true
+    result.tracePath = trace
+    return
+  removeDir(dir)
+  createDir(dir / "src")
+  copyFile(source, program)
+  let (output, code) = execCmdEx(quoteShellCommand(
+    @["env", "-u", "LD_PRELOAD", ct, "record", "-o", trace, program]),
+    workingDir = dir / "src")
+  if code != 0:
+    raise newException(IOError, "ct record " & program & " failed (" & $code &
+      "):\n" & output)
+  if not fileExists(trace / "trace.ct") or not dirExists(trace / "nimcache"):
+    raise newException(IOError, "ct record exited 0 and left no trace.ct " &
+      "and nimcache/ in " & trace & ":\n" & output)
+  result.ok = true
+  result.tracePath = trace

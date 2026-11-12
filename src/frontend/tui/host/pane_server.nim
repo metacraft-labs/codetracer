@@ -61,6 +61,7 @@ import ../app/views/gutter
 import ../app/views/inline_annotations
 import ../app/views/variables
 import ../app/views/shell
+from ../app/views/low_level_code_pane import LowLevelAct, LowLevelActResult   # HSF-E11
 import ./native_host
 import ./tui_session
 import ./visual_replay_host
@@ -104,9 +105,18 @@ type
   ServerSession = ref object
     id: int
     folder: string
+      ## The recording's folder; for a project session (`session/open
+      ## {project}`, §E9), the project's.
+    root: string
+      ## The project Edit mode's services read (`wireServices`): the
+      ## server's (`PaneServer.projectRoot`) for a recording, the folder
+      ## itself for a project session.
     app: TuiApp
     rt: TuiRuntime
     tui: TuiSession
+      ## The replay behind the session — nil for a PROJECT session, which
+      ## has none: an Edit-mode session over a folder, as `ct edit` opens
+      ## one. Every use below asks.
     panes: Table[PaneKind, HostedPane]
     product: ProductMode
     layoutSent: string
@@ -302,14 +312,24 @@ proc wireServices(srv: PaneServer; s: ServerSession) =
   ## project. A recording one of them produces opens as a new session the
   ## editor is told of (`openRecording`).
   let rt = s.rt
-  rt.app.projectRoot = srv.projectRoot
-  s.edit = wireEditServices(rt, srv.projectRoot, "",
+  rt.app.projectRoot = s.root
+  s.edit = wireEditServices(rt, s.root, "",
                             proc(): EditListResult =
     let listing = listProjectFiles(rt.app.projectRoot)
     EditListResult(files: listing.files, truncated: listing.truncated))
   # `wireEditServices` selects the stored keymap base, as the terminal's
   # loops do; the user's `keybindings.json` goes back over it (ED-AREQ6).
   wireKeymap(rt)
+  # The Low Level Code pane's presses, keys and menu: the replay's listing
+  # in Debug mode, Edit mode's compiled C in Edit mode (HSF-E11) — which is
+  # the only one a project session has. (Until HSF-E11 the server routed
+  # none, so a press in an editor's pane did nothing.)
+  let edit = s.edit
+  rt.app.lowLevelAct = proc(act: LowLevelAct): LowLevelActResult =
+    if rt.app.modes.product == pmEdit or s.tui.isNil:
+      rt.editLowLevelAct(edit, act)
+    else:
+      s.tui.lowLevelAct(rt, act)
   let opener = proc(path: string; line, col: int): string =
     if rt.app.modes.product == pmEdit or s.tui.isNil:
       rt.openWorkingFileAt(path, line, col)
@@ -335,7 +355,7 @@ proc wireServices(srv: PaneServer; s: ServerSession) =
   discard s.tests.setTabs(s.id, not s.tui.isNil and
                                 rt.app.modes.product == pmDebug, true)
   s.tests.refresh(rt)
-  s.vcs = newVcsSource(srv.projectRoot)
+  s.vcs = newVcsSource(s.root)
   s.vcs.refresh(rt)
 
 proc openServerSession(srv: PaneServer; trace: string): ServerSession =
@@ -381,7 +401,8 @@ proc openServerSession(srv: PaneServer; trace: string): ServerSession =
     tui.close()
     fail(ErrRequestFailed, "cannot open " & folder & ": " &
          StalledAfterOpenPhrase & " (" & e.msg & ")")
-  result = ServerSession(id: srv.nextId, folder: folder, app: app, rt: rt,
+  result = ServerSession(id: srv.nextId, folder: folder, root: srv.projectRoot,
+                         app: app, rt: rt,
                          tui: tui, product: app.modes.product,
                          pngCache: (frame: -1, png: "", width: 0, height: 0))
   # A recording that carries a gfx stream has graphics: the player the
@@ -391,6 +412,51 @@ proc openServerSession(srv: PaneServer; trace: string): ServerSession =
   srv.sessions.add result
   srv.active = srv.sessions.len - 1
   srv.wireServices(result)
+
+proc holdsRecording(folder: string): bool =
+  ## Whether `folder` is a recording `replay-server` can open — the shape
+  ## check the terminal makes before it spawns anything.
+  try:
+    traceFolderProblem(resolveTraceFolder(folder)) == ""
+  except CatchableError:
+    false
+
+proc openProjectSession(srv: PaneServer; project: string): ServerSession =
+  ## `session/open {project}` (§E9, "A project, not only a recording"): an
+  ## Edit-mode session over a project folder with NO replay — what `ct edit`
+  ## opens in the terminal (`main.editInteractive`), built the same way: the
+  ## mode register starts in Edit mode, the project is the folder, Edit
+  ## mode's services are wired (`wireServices`) and its workspace furnished
+  ## (`ensureEditWorkspace`: the file tree filled, the first file open). Its
+  ## `tui` is nil; `session/files` lists the project and `source/read` reads
+  ## from it, and DAP requests are refused.
+  let target = editLaunchTarget(absolutePath(project.expandTilde()))
+  let root = target.root.normalizedPath
+  let problem = editProjectProblem(root)
+  if problem.len > 0:
+    fail(ErrRequestFailed, root & ": " & problem)
+  let app = newTuiApp()
+  app.modes = initModeRegister(pmEdit)
+  app.projectRoot = root
+  let rt = newTuiRuntime(app, paneCaps(), NominalWidth, NominalHeight)
+  app.modes.layouts[pmEdit] = layoutForMode(pmEdit,
+    selectProfile(NominalWidth, NominalHeight))
+  wireKeymap(rt)
+  # The source window is the editor's, as in a recording's session.
+  rt.hostedRows[paneEditor] = 0
+  rt.app.title = root.extractFilename
+  result = ServerSession(id: srv.nextId, folder: root, root: root, app: app,
+                         rt: rt, tui: nil, product: app.modes.product,
+                         pngCache: (frame: -1, png: "", width: 0, height: 0))
+  inc srv.nextId
+  srv.sessions.add result
+  srv.active = srv.sessions.len - 1
+  srv.wireServices(result)
+  let furnished = rt.ensureEditWorkspace()
+  if furnished.len > 0:
+    app.notification = furnished
+  if target.file.len > 0:
+    discard rt.openWorkingFileAt(root / target.file, 1, 0)
 
 proc close(s: ServerSession) =
   if not s.tests.isNil:
@@ -651,10 +717,12 @@ proc publish(srv: PaneServer; s: ServerSession; fullPanes: seq[PaneKind] = @[];
     s.product = product
     s.layoutSent = layout
     result.add notification("layout/changed", s.layoutParams())
-  let t = s.tui.session
-  let pos = (file: t.getCurrentFile(), line: t.getCurrentLine(),
-             tick: t.getCurrentRRTicks())
-  if pos != s.position:
+  # A project session has no replay, so no debugger position to report.
+  let t = if s.tui.isNil: nil else: s.tui.session
+  let pos = if t.isNil: s.position
+            else: (file: t.getCurrentFile(), line: t.getCurrentLine(),
+                   tick: t.getCurrentRRTicks())
+  if not t.isNil and pos != s.position:
     s.position = pos
     let col = t.getCurrentColumn()
     result.add notification("session/position",
@@ -726,6 +794,10 @@ proc resyncViewports(s: ServerSession; pane = paneEditor;
   ## Until 2026-11-11 every `pane/resize` and every scrolled source line
   ## rebuilt the stop, about half a second each on `calc`, so dragging a split
   ## in the editor queued seconds of work ahead of the user's input.
+  # A project session's panes are the runtime's own, painted at their
+  # windows' sizes: no stop to rebuild.
+  if s.tui.isNil:
+    return false
   let rows = s.rt.sourcePaneRows()
   if opened or rows != s.sourceRows:
     s.sourceRows = rows
@@ -856,7 +928,7 @@ proc runOperation(srv: PaneServer; s: ServerSession; params: JsonNode): JsonNode
   # A press on the VCS pane's or Test Results' controls is that source's, as
   # in the terminal's loop; anything else the session applies.
   if not s.vcs.applyClick(s.rt, outcome.paneClick) and
-     not s.tests.applyClick(s.rt, outcome.paneClick):
+     not s.tests.applyClick(s.rt, outcome.paneClick) and not s.tui.isNil:
     s.tui.applyOutcome(s.rt, outcome)
   let detail = if outcome.detail.len > 0: outcome.detail else: s.app.notification
   %*{"ok": true, "operation": text, "detail": detail}
@@ -907,10 +979,15 @@ proc handleRequest(srv: PaneServer; meth: string; params: JsonNode;
     srv.active = -1
     result = newJNull()
   of "session/open":
+    # A recording (`trace`), or a project (`project`, §E9): a project folder
+    # that holds a recording opens the recording, as `ct` does.
     let trace = params{"trace"}.getStr("")
-    if trace.len == 0:
-      fail(ErrInvalidParams, "session/open names a `trace`")
-    let s = srv.openServerSession(trace)
+    let project = params{"project"}.getStr("")
+    if trace.len == 0 and project.len == 0:
+      fail(ErrInvalidParams, "session/open names a `trace` or a `project`")
+    let s = if trace.len > 0: srv.openServerSession(trace)
+            elif holdsRecording(project): srv.openServerSession(project)
+            else: srv.openProjectSession(project)
     s.layoutSent = $layoutJson(s.currentLayout())
     result = s.layoutParams()
     result["graphics"] = s.graphicsJson()
@@ -921,10 +998,16 @@ proc handleRequest(srv: PaneServer; meth: string; params: JsonNode;
   of "session/list":
     result = newJArray()
     for i, s in srv.sessions:
-      result.add %*{"session": s.id, "trace": s.folder,
-                    "title": s.app.traceName,
-                    "mode": modeName(s.app.modes.product),
-                    "active": i == srv.active}
+      var entry = %*{"session": s.id, "trace": s.folder,
+                     "title": s.app.traceName,
+                     "mode": modeName(s.app.modes.product),
+                     "active": i == srv.active}
+      if s.tui.isNil:
+        # A project session: its folder is a project, not a recording.
+        entry["trace"] = %""
+        entry["project"] = %s.folder
+        entry["title"] = %s.folder.extractFilename
+      result.add entry
   of "session/activate":
     let s = srv.sessionById(params)
     srv.active = srv.sessions.find(s)
@@ -1045,9 +1128,15 @@ proc handleRequest(srv: PaneServer; meth: string; params: JsonNode;
     # not in its project.
     let s = srv.sessionById(params)
     var files: seq[JsonNode] = @[]
-    let vm = s.tui.session.session.fileTreeVM
-    if not vm.isNil:
-      recordedFiles(vm.rootEntry.val, files)
+    if s.tui.isNil:
+      # A project session: the project's files, as Edit mode lists them.
+      if not s.rt.editServices.listFiles.isNil:
+        for rel in s.rt.editServices.listFiles().files:
+          files.add %*{"path": s.root / rel, "name": rel.extractFilename}
+    else:
+      let vm = s.tui.session.session.fileTreeVM
+      if not vm.isNil:
+        recordedFiles(vm.rootEntry.val, files)
     result = %files
   of "source/read":
     # A recorded file, whole, as the recording holds it — for a source the
@@ -1056,6 +1145,15 @@ proc handleRequest(srv: PaneServer; meth: string; params: JsonNode;
     let file = params{"file"}.getStr("")
     if file.len == 0:
       fail(ErrInvalidParams, "source/read names a `file`")
+    if s.tui.isNil:
+      # A project session reads the project from disk, and only the project
+      # (`readProjectFile` refuses a path that resolves outside it).
+      let rel = if file.isAbsolute: file.relativePath(s.root) else: file
+      try:
+        result = %*{"file": file, "text": readProjectFile(s.root, rel)}
+      except TuiHostError as e:
+        fail(ErrRequestFailed, e.msg)
+      return
     let (ok, text, message) = s.tui.recordedSourceText(file)
     if not ok:
       fail(ErrRequestFailed, message)
@@ -1194,6 +1292,12 @@ proc handleDap*(srv: PaneServer; req: JsonNode): seq[JsonNode] =
     result.add srv.dapReply(req, false, nil, "no CodeTracer session is open")
     return
   let s = srv.sessions[srv.active]
+  if s.tui.isNil:
+    # A project session has no recording behind it: nothing to debug.
+    result.add srv.dapReply(req, false, nil, "the active CodeTracer session " &
+      "is the project " & s.folder & " in Edit mode: it has no recording to " &
+      "debug")
+    return
   case command
   of "configurationDone":
     result.add srv.dapReply(req, true, nil)
@@ -1324,6 +1428,8 @@ proc tick*(srv: PaneServer): seq[JsonNode] =
       proc(request: TraceOpenRequest): string =
         srv.openRecording(sess, request.tracePath, request.policy),
       followIntoDebug = false) or changed
+    # HSF-E11: Edit mode's generated C, when its compile settles.
+    changed = advanceGeneratedC(s.rt, s.edit) or changed
     changed = s.tests.tick(s.rt) or changed
     changed = s.problems.tick(s.rt, nowMonoMs()) or changed
     changed = s.buildOut.tick(s.rt) or changed

@@ -170,6 +170,21 @@ type
       ## session's recording and shows it in the Low Level Code pane
       ## (`generated_code_presenter.showGeneratedCode`). "" when shown, else
       ## why not. Nil in a window with no session.
+    compileGeneratedCode*: proc(targetId, path: string; line: int): string {.closure.}
+      ## HSF-E11, Edit mode's half of the same operation: Edit mode means the
+      ## EDITED source, so its C is compiled now, from the saved file
+      ## (`host/native_nim_c_compiler`, Generated-Code-Listing §13.4 "Where
+      ## the C comes from") — asynchronously: this starts the compile and
+      ## puts "compiling" in the Low Level Code pane, and the host's loop
+      ## polls it and shows the listing when it settles
+      ## (`edit_services.advanceGeneratedC`). "" when it started, else why
+      ## not. Nil in a window with no compiler service.
+    editLowLevelModel*: proc(prior: LowLevelPaneModel): LowLevelPaneModel {.closure.}
+      ## The Low Level Code pane's value in Edit mode — the compiled C's
+      ## listing, from the host's own `LowLevelCodeVM` (there may be no
+      ## replay) — for a host that rebuilds the pane from a replay session
+      ## (`tui_session.refreshLowLevel`) and must not show the stop's listing
+      ## while the user edits. Nil with no compiler service.
     readSource*: proc(path: string): EditReadResult {.closure.}
       ## PLAT-68: the whole text of a file of the RECORDING (the source
       ## provider's, generation 0 — what the Debug-mode editor shows), for
@@ -3161,16 +3176,32 @@ proc lowLevelPaneScreen*(rt: TuiRuntime): tuple[area: CellArea,
                         result.area.row + result.area.height)
   result.screen = paintLowLevelCode(g, result.area, rt.app.lowLevel)
 
-proc revealLowLevelRow(rt: TuiRuntime; row: int) =
+proc lowLevelListRows(rt: TuiRuntime): int =
+  ## How many rows of the listing the pane shows: the terminal's screen's,
+  ## or an editor's window's (`hostedRows`), less the header — 1 while the
+  ## pane is shown nowhere.
+  let (_, screen) = rt.lowLevelPaneScreen()
+  if screen.listRows > 0: screen.listRows
+  else: max(1, rt.hostedRows.getOrDefault(paneLowLevelCode, 0) - 1)
+
+proc revealLowLevelRow*(rt: TuiRuntime; row: int) =
   ## Keep display row `row` of the listing in view.
   if row < 0:
     return
-  let (_, screen) = rt.lowLevelPaneScreen()
-  # An editor's window shows the hosted pane (`hostedRows`), not the
-  # terminal's screen: its listing rows are the window's, less the header.
-  let rows = if screen.listRows > 0: screen.listRows
-             else: max(1, rt.hostedRows.getOrDefault(paneLowLevelCode, 0) - 1)
-  rt.app.lowLevel.scrollTop = rt.app.lowLevel.revealRow(rows, row)
+  rt.app.lowLevel.scrollTop = rt.app.lowLevel.revealRow(rt.lowLevelListRows(), row)
+
+proc revealAnchoredRow*(rt: TuiRuntime; row: int) =
+  ## A generated-code listing's anchored row (`LowLevelPaneModel.activeRow`)
+  ## brought into view WITH WHAT FOLLOWS IT: the C a line compiled to is the
+  ## run of rows from its anchor on, so the anchor is put a quarter of the
+  ## way down rather than wherever the least scroll leaves it (at the
+  ## bottom edge, with the run below it hidden). In a pane shown nowhere yet
+  ## the anchor is the top row, which a window opened later keeps.
+  if row < 0:
+    return
+  let rows = rt.lowLevelListRows()
+  rt.app.lowLevel.scrollTop = clampLowLevelTop(rt.app.lowLevel.rows.len,
+                                               row - rows div 4, rows)
 
 proc scrollLowLevel(rt: TuiRuntime; delta: int; outcome: var RuntimeOutcome) =
   ## The wheel over the listing scrolls it.
@@ -9508,20 +9539,45 @@ proc buildOperationTables(rt: TuiRuntime) =
   session.bindOp("view.generated-c-source",
     act do:
       let (path, line) = rt.generatedCodeSubject()
+      if rt.app.modes.product == pmEdit and
+         not rt.editServices.compileGeneratedCode.isNil:
+        # HSF-E11: Edit mode's C is the compiler's, made now. The pane opens
+        # at once, saying it is compiling; the listing follows when the
+        # compile settles (the host's poll), its anchored row in view.
+        let why = rt.editServices.compileGeneratedCode(GeneratedCTarget,
+                                                       path, line)
+        if why.len > 0:
+          rt.note(why)
+          outcome.refused = why
+        else:
+          rt.openLowLevelCode(outcome)
+          rt.note("compiling " & path.extractFilename & " to C (the saved " &
+                  "file) beside the source")
+        return
+      if rt.editServices.showGeneratedCode.isNil:
+        rt.note("View Generated C Source: this window has no recording to " &
+                "read the generated C from")
+        outcome.refused = rt.app.notification
+        return
       let why = rt.editServices.showGeneratedCode(GeneratedCTarget, path, line)
       if why.len > 0:
         rt.note(why)
       else:
         rt.openLowLevelCode(outcome)
-        # The rows the caret's line compiled to, in view (the listing's
-        # active row, `showGeneratedListing`).
-        let row = if rt.app.lowLevel.executionRow >= 0: rt.app.lowLevel.executionRow
-                  else: rt.app.lowLevel.linkedRow
-        rt.revealLowLevelRow(row)
+        # The rows the caret's line compiled to, in view: the row the listing
+        # anchored to the caret (`showGeneratedListing`'s active row).
+        let m = rt.app.lowLevel
+        if m.activeRow >= 0:
+          rt.revealAnchoredRow(m.activeRow)
+        else:
+          rt.revealLowLevelRow(if m.executionRow >= 0: m.executionRow
+                               else: m.linkedRow)
         rt.note("Generated C of " & path.extractFilename & " beside the source"),
     proc(): Enablement =
       let path = rt.generatedCodeSubject().path
-      if rt.editServices.showGeneratedCode.isNil:
+      let editing = rt.app.modes.product == pmEdit and
+                    not rt.editServices.compileGeneratedCode.isNil
+      if not editing and rt.editServices.showGeneratedCode.isNil:
         operationDisabled("View Generated C Source: this window has no " &
                           "recording to read the generated C from")
       elif not path.endsWith(".nim"):
