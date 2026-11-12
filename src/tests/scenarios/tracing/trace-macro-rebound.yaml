@@ -5,7 +5,9 @@ summary: >-
   The user rebound "Trace macro at cursor" in keybindings.json and removed its
   default chord: the shortcut the scenario sends is the one the user's keymap
   binds (the binding resolver asks the application's own router), and the
-  macro is traced in a new session tab as before.
+  macro is traced in a new session tab as before. The new chord is
+  Ctrl+Alt+K: a terminal without an extended key protocol sends Ctrl+J as a
+  line feed, so Ctrl+Alt+J could not reach a terminal front-end.
 
 stage:
   - use: nim-project
@@ -15,7 +17,7 @@ stage:
       content: |
         [
           { "key": "ctrl+k t m", "command": "-editor.trace-macro-at-cursor" },
-          { "key": "ctrl+alt+j", "command": "editor.trace-macro-at-cursor" }
+          { "key": "ctrl+alt+k", "command": "editor.trace-macro-at-cursor" }
         ]
   - use: open-recording
 

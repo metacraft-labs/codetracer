@@ -157,8 +157,12 @@ run)
 	shift 3
 	settle=()
 	# A GPU window drawn by a software renderer on a loaded machine takes
-	# longer than the runner's default 5 s to stop changing after an input.
-	[ "${flavour}" != gpui ] || settle=(--settle-timeout 20000)
+	# longer than the runner's default 5 s to stop changing after an input,
+	# and so does Electron at a 1-minute load above 100 (each lane says so too).
+	case "${flavour}" in
+	gpui) settle=(--settle-timeout 20000) ;;
+	electron) settle=(--settle-timeout 15000) ;;
+	esac
 	"$(runner_of "${flavour}")" run "${scenario}" --pack "${S}/pack/codetracer.pack.yaml" \
 		--backend "$(backend_of "${flavour}")" --build "${build_dir}" "${settle[@]}" "$@"
 	;;
