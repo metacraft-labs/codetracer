@@ -292,7 +292,7 @@ proc currentLayout(s: ServerSession): LayoutNode =
   s.app.shellModel(NominalWidth, NominalHeight).layout
 
 proc openRecording(srv: PaneServer; origin: ServerSession; folder: string;
-                   policy: TraceOpenPolicy): string
+                   policy: TraceOpenPolicy; title = ""): string
 
 proc wireServices(srv: PaneServer; s: ServerSession) =
   ## Hand the session the host services the terminal's loop hands its window
@@ -328,7 +328,10 @@ proc wireServices(srv: PaneServer; s: ServerSession) =
     resolveFolder = proc(id: string): string = recordingFolderOf(id),
     openFolder = proc(testId, recordingId, folder: string;
                       policy: TraceOpenPolicy): string =
-      srv.openRecording(s, folder, policy))
+      var name = testId
+      for r in rt.app.tests.rows:
+        if r.testId == testId: name = r.name
+      srv.openRecording(s, folder, policy, title = name))
   discard s.tests.setTabs(s.id, not s.tui.isNil and
                                 rt.app.modes.product == pmDebug, true)
   s.tests.refresh(rt)
@@ -1250,7 +1253,7 @@ proc handleDap*(srv: PaneServer; req: JsonNode): seq[JsonNode] =
         "' is not supported by the CodeTracer pane server")
 
 proc openRecording(srv: PaneServer; origin: ServerSession; folder: string;
-                   policy: TraceOpenPolicy): string =
+                   policy: TraceOpenPolicy; title = ""): string =
   ## A recording a test, Run or a Nim trace produced, opened as a session and
   ## announced to the editor (`session/opened`, §E9), placed by the shared
   ## rule's `policy`: a new tab, or `origin`'s tab (`replaces`), which the
@@ -1265,7 +1268,9 @@ proc openRecording(srv: PaneServer; origin: ServerSession; folder: string;
   opened.layoutSent = $layoutJson(opened.currentLayout())
   var params = opened.layoutParams()
   params["trace"] = %opened.folder
-  params["title"] = %opened.app.traceName
+  # What the editor names the tab: the test's name for a test's recording
+  # (its folder is a recording id), else the recording's own name.
+  params["title"] = %(if title.len > 0: title else: opened.app.traceName)
   params["placement"] = %($policy)
   if policy == topCurrentTab and not origin.isNil:
     params["replaces"] = %origin.id

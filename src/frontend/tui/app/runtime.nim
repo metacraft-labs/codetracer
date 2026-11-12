@@ -10307,8 +10307,14 @@ proc runTestsPaneOperation(rt: TuiRuntime; operation: string;
         rt.pressTestsControl(r.refresh, PaneClickRequest(kind: pcTestsRefresh,
                              text: r.testId), outcome)
       else:
+        # §9.3: `args.text == "redirect"` is the terminal's Ctrl on the press
+        # — the destination inverted for this press (the editor's
+        # Ctrl+click on a test's sign).
         rt.pressTestsControl(r.open, PaneClickRequest(kind: pcTestsOpen,
-                             text: r.testId), outcome)
+                             text: r.testId,
+                             behaviour: (if args.text == "redirect":
+                                           TestsRedirectBehaviour
+                                         else: "")), outcome)
       return
   outcome.refused = "that test is no longer listed"
 

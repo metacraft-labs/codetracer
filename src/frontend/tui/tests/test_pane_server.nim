@@ -631,8 +631,29 @@ suite "HSF-E1: the pane server, over a real recording":
     check announced{"placement"}.getStr == "new-tab"
     check traceFolderProblem(announced{"trace"}.getStr) == ""
     check announced{"layout"}.kind == JObject
+    # Its tab is named by the test, not by the recording's folder (an id).
+    check announced{"title"}.getStr == Plat53Failing
     let (list, _) = srv.request("session/list")
     check list{"result"}.len == 2
+
+    # ---- ⏵ redirected: the recording takes the current tab ------------------
+    # The terminal's Ctrl on the press (§9.3), an editor's Ctrl+click: the
+    # destination inverted, so the session it was pressed from is replaced.
+    let redirected = openSpot{"args"}.copy
+    redirected["text"] = %"redirect"
+    let (again, _) = srv.request("operation/run", %*{"session": sid,
+      "operation": "tests.open-test", "args": redirected})
+    check again{"result", "ok"}.getBool
+    var replaced: JsonNode = nil
+    let until = epochTime() + 240.0
+    while replaced.isNil and epochTime() < until:
+      for m in srv.tick():
+        if m{"method"}.getStr == "session/opened":
+          replaced = m{"params"}
+      sleep(100)
+    check not replaced.isNil
+    check not replaced.isNil and replaced{"placement"}.getStr == "current-tab" and
+          replaced{"replaces"}.getInt == sid
 
     # ---- Stop ends the replay: the strip goes dim --------------------------
     let (_, stoppedNotes) = srv.request("operation/run", %*{"session": sid,
