@@ -60,6 +60,13 @@ type
       ## answering that subscription replaces this mirror's document, and these
       ## are what the session's next batch brings back (codetracer-pm
       ## issues/2026-10-22-a-watch-typed-in-the-browser-never-produces-a-row.md).
+    unsentBreakpoints: JsonNode
+      ## The breakpoint sets changed on this mirror before it followed any
+      ## session, by file (the `args` of a `breakpoints` / `set` action, the
+      ## latest per file): a `ct host` page shows the trace, and accepts a
+      ## gutter click, before the replay's first stop creates the server's
+      ## session. Sent to the first session it follows (`switchTo`), after its
+      ## subscription, whose snapshot would otherwise replace them.
     disposeRoot: proc()
 
 proc inertBackend*(): BackendService =
@@ -99,6 +106,10 @@ proc switchTo*(m: MirrorSession; sessionId: string) =
   for op in m.unsentViewOps:
     m.channel.send(serializeAction("collab", "viewop", op.toJson, sessionId))
   m.unsentViewOps = @[]
+  if not m.unsentBreakpoints.isNil:
+    for _, args in m.unsentBreakpoints.pairs:
+      m.channel.send(serializeAction("breakpoints", "set", args, sessionId))
+    m.unsentBreakpoints = nil
 
 proc onHostMessage(m: MirrorSession; msg: JsonNode) =
   if msg.isNil or msg.kind != JObject:
@@ -149,6 +160,8 @@ proc relayActions(m: MirrorSession; relays: RelayFilter) =
   if not s.pointListVM.isNil: s.pointListVM.actionSink = sink
   if not s.fileTreeVM.isNil: s.fileTreeVM.actionSink = sink
   if not s.requestPanelVM.isNil: s.requestPanelVM.actionSink = sink
+  # The breakpoints are the store's, not a panel's (`sdk/breakpoints`).
+  if not s.store.isNil: s.store.actionSink = sink
 
 proc createMirrorSession*(
     channel: SyncChannel;
@@ -212,9 +225,9 @@ proc createMirrorSession*(
 proc hostedPageRelays*(vm, action: string): bool =
   ## The actions a `ct host` page relays to the server's session
   ## (`createHostedPageMirror`): the panes' viewports, the call trace's
-  ## actions, the state pane's value-history toggle, and the request panel's
-  ## selection, filters and detail tab. The
-  ## call trace's ViewModel takes no callback from the page, so all its
+  ## actions, the state pane's value-history toggle and "load more", the
+  ## breakpoints, and the request panel's selection, filters and detail tab.
+  ## The call trace's ViewModel takes no callback from the page, so all its
   ## actions run the same on either side. The request panel's window is
   ## loaded by the server's session, from the viewport the page relays, so
   ## its filters and selection must be the server's too: a filter set on the
@@ -232,8 +245,22 @@ proc hostedPageRelays*(vm, action: string): bool =
   ## and the open row and its history come back in the next batch. A history
   ## row's jump (`jumpToHistoryEntry`) stays on the page, which navigates
   ## over its own connection (`ReplayDataStore.navigationBackend`).
-  vm == "viewport" or vm == "calltrace" or
-    (vm == "state" and action == "toggleHistory") or
+  ##
+  ## A COLLECTION'S "LOAD MORE" IS THE SERVER'S for the same reason: the
+  ## locals are the server's session's (the page's own decoders stand down,
+  ## `claimLocalsLoading`), so the next elements (`ct/load-value-elements`)
+  ## are asked and appended there, and reach the page with the locals.
+  ##
+  ## THE BREAKPOINTS ARE THE SERVER'S. A change planned on the page (the
+  ## editor's gutter and menus, `sdk/breakpoints`) is the store's
+  ## `breakpoints` / `set`: the server's session sends the file's set over
+  ## its connection to the replay — the replay the page's Continue runs —
+  ## and holds the rows the engine verified, which reach the page with its
+  ## batches and outlive a reload of the page, as the replay's breakpoints
+  ## do. Sent through the mirror's inert backend, the request never left
+  ## the page and Continue ran past the breakpoint the gutter showed.
+  vm == "viewport" or vm == "calltrace" or vm == "breakpoints" or
+    (vm == "state" and action in ["toggleHistory", "loadMore"]) or
     (vm == "requestPanel" and action != "jumpToHandler")
 
 const HostedPageOwnedSignals = ["fileTree."]
@@ -273,8 +300,11 @@ proc createHostedPageMirror*(
   ##   connection to the replay, not the mirror's inert backend.
   ## * the request panel's filters, selection and detail tab: its window is
   ##   loaded on the server's session, so they must be that session's.
-  ## * the state pane's value-history toggle: the history is loaded by the
-  ##   server's session, over its connection to the replay.
+  ## * the state pane's value-history toggle and a collection's "load more":
+  ##   the history and the locals are loaded by the server's session, over
+  ##   its connection to the replay.
+  ## * the breakpoints (the store's `breakpoints` / `set`): the server's
+  ##   session sends them to the replay and holds the rows it verified.
   ##
   ## The other panels' actions stay on the page, as before: several reach
   ## callbacks only the page installs — the file tree opens a file in the
@@ -304,6 +334,13 @@ proc relay*(m: MirrorSession; vm, action: string;
   ## by `action_relay` on the primary, enums by name.
   if vm == "viewport" and action == "set" and not args.isNil:
     m.rememberViewport(args)
+  if vm == "breakpoints" and m.following.len == 0 and not args.isNil:
+    # Held for the first session followed (`unsentBreakpoints`): no session
+    # would run it now.
+    if m.unsentBreakpoints.isNil:
+      m.unsentBreakpoints = newJObject()
+    m.unsentBreakpoints[args{"path"}.getStr("")] = args.copy
+    return
   m.channel.send(serializeAction(vm, action, args, m.following))
 
 proc setViewport*(m: MirrorSession; pane: string; rows: int; depth = 0;

@@ -26,6 +26,7 @@ import isonim/core/[signals, owner, async_compat, batch]
 import isonim/viewmodel
 
 import ../backend/backend_service
+import ../viewmodels/action_sink   # `actionSink`: a mirror's breakpoint changes
 import types, request_tracker, degraded_state, stop_timeline
 import ../viewport   # the windowed panes' debounce timer
 # PLAT-49 part B: a call's arguments and return value, rendered by the one
@@ -400,6 +401,11 @@ type
       ## the page's own and is not mirrored from the server's session (the
       ## step list, the origin chain, the event log's counterpart lookup):
       ## they ask over this connection too (`directBackend`).
+    actionSink*: ActionSink
+      ## Where a MIRROR's store hands the changes it does not make itself:
+      ## a breakpoint change (`sdk/breakpoints.requestBreakpoints`, as
+      ## `breakpoints` / `set`). Set by `mirror_session` with the panels'
+      ## sinks; nil on a primary, which sends them over `backend`.
     requestTracker*: RequestTracker
     stops*: StopTimeline
       ## PLAT-29. The stops the debugger has been at, as versions — so a

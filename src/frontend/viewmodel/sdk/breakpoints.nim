@@ -25,6 +25,7 @@ from isonim/core/async_compat import nil
 
 import ../backend/backend_service
 import ../store/[replay_data_store, types]
+import ../viewmodels/action_sink
 
 export BreakpointSpec
 
@@ -38,6 +39,19 @@ proc heldBreakpoints*(store: ReplayDataStore; path: string): seq[BreakpointSpec]
       result.add BreakpointSpec(line: r.line, column: r.column,
                                 condition: r.condition,
                                 logMessage: r.logMessage, enabled: r.enabled)
+
+proc breakpointResolution*(store: ReplayDataStore; path: string;
+                           line, column: int): string =
+  ## How far `path:line` (at `column`, 0 for the whole line) has got: the
+  ## row's `resolution` — `requested` while held before the engine answered,
+  ## `verified` once the engine bound it (`applyVerifiedBreakpoints`) — or ""
+  ## when there is no such breakpoint.
+  if store.isNil:
+    return
+  for r in store.pointList.rows.val:
+    if r.kind == PointKindBreakpoint and r.path == path and r.line == line and
+       r.column == column:
+      return r.resolution
 
 func breakpointAt*(held: openArray[BreakpointSpec];
                    line: int): Option[BreakpointSpec] =
@@ -196,6 +210,19 @@ proc requestBreakpoints*(store: ReplayDataStore; path: string;
   ## just placed, and the second answer was the only thing that could bring
   ## it back.
   store.applyVerifiedBreakpoints(path, plan, resolution = "requested")
+  ##
+  ## A MIRROR'S CHANGE IS MADE BY ITS PRIMARY. On a `ct host` page the store
+  ## is the mirror's, over a backend that never answers, so a request sent
+  ## from here never reached the replay: the gutter showed the breakpoint
+  ## and Continue ran past it.
+  ## The planned set is handed to the server's session (`actionSink`,
+  ## `action_relay`'s `breakpoints` / `set`), which sends it over its own
+  ## connection to the replay; its rows, at `requested` and then as the
+  ## engine verified them, reach this store with its next batches. `onDone`
+  ## is not called then: the answer is the primary's.
+  if store.actionSink.forwards("breakpoints", "set",
+      %*{"path": path, "plan": sinkArg(plan)}):
+    return
   if store.backend.isNil:
     if not onDone.isNil: onDone(false)
     return

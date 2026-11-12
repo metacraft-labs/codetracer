@@ -32,6 +32,8 @@ import isonim/core/signals   # `Signal.val`: a pane's held viewport
 
 import ../session_vm
 import ../store/types as store_types
+import ../store/replay_data_store   # `BreakpointSpec`
+import ../sdk/breakpoints            # `requestBreakpoints`
 import ../collab/[codec, reducer, session_core, types as collab_types]
 import ../viewmodels/[
   calltrace_vm,
@@ -357,6 +359,27 @@ proc applyAction*(session: SessionViewModel; msg: JsonNode): bool =
     of "setSearchText": v.setSearchText(a.arg("text", ""))
     of "setDetailTab": v.setDetailTab(a.arg("tab", "headers"))
     else: return false
+
+  of "breakpoints":
+    # A breakpoint change a mirror planned over its rows (`sdk/breakpoints`,
+    # `requestBreakpoints`): the file's whole set, sent from here over this
+    # session's backend, whose rows the engine's answer replaces. A store
+    # action rather than a ViewModel's, because the breakpoints are the
+    # store's (Shared-DOM-Front-Ends D7.4).
+    #
+    # A set that does not decode is refused, not read as "none": an empty
+    # plan deletes every breakpoint of the file.
+    let path = a.arg("path", "")
+    let plan = a{"plan"}
+    if action != "set" or path.len == 0 or session.store.isNil or
+       plan.isNil or plan.kind != JArray:
+      return false
+    var specs: seq[BreakpointSpec] = @[]
+    try:
+      fromJson(specs, plan, DecodeOptions)
+    except CatchableError, AssertionDefect:
+      return false
+    session.store.requestBreakpoints(path, specs)
 
   of "pointList":
     let v = session.pointListVM
