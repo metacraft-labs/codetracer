@@ -1230,6 +1230,14 @@ test_lane_files() {
 		# Measuring a pane stays out of the browser's ResizeObserver delivery.
 		# Only a browser has that delivery loop; jsdom observes nothing.
 		echo src/frontend/tests/pane_measure_resize_loop_chromium_test.nim
+		# The desktop's shared editor (the `sharedEditor` developer setting):
+		# trusted clicks, an input method's composition, the accessibility
+		# tree a screen reader reads, a forced-colours theme — what only a
+		# browser decides about the editor's DOM.
+		echo src/frontend/tests/shared_editor_chromium_test.nim
+		# …and its language features against the dev shell's real
+		# `nimlangserver`, spoken to over stdio by the runner.
+		echo src/frontend/tests/shared_editor_lsp_chromium_test.nim
 		;;
 
 	main-process)
