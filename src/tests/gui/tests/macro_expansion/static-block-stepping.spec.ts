@@ -48,8 +48,15 @@ import { retry } from "../../lib/retry-helpers";
  * server cannot trace a Nim file anywhere under the checkout, while a user's
  * project, which is not under it, traces fine. The copy is that project.
  * The suite runs from `src/tests/gui`, as `lib/fixtures.ts` assumes.
+ *
+ * Only a worker runs the test, so only a worker makes the copy (and its
+ * `afterAll` removes it). Playwright's runner process also loads this file,
+ * to list the tests; a copy made there was never removed.
  */
 const staticBlockProgram = (() => {
+  if (process.env.TEST_WORKER_INDEX === undefined) {
+    return path.join(os.tmpdir(), "ct-nim-static-block-not-copied", "main.nim");
+  }
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ct-nim-static-block-"));
   fs.cpSync(
     path.resolve("..", "..", "..", "test-programs", "nim_static_block"),
