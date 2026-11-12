@@ -1,0 +1,26 @@
+scenario: 1
+name: gpui/top-bar-shift-f5-stops
+pack: codetracer
+summary: >-
+  The Debug menu offers Stop, and Shift+F5 is Stop: the replay ends and the
+  window gives way to editing — the replay's panes (Call Trace, Event Log)
+  leave, the status line no longer names a position in a recording.
+
+stage:
+  - use: record-program
+    with: { program: calc }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - click: { at: 'menu-bar/menu[label="Menu"]' }
+  - wait: { until: { at: 'dropdown[level="1"]', present: true }, timeout: 30s }
+  - click: { at: 'dropdown[level="1"]/dropdown-item[label="Debug"]' }
+  - wait: { until: { at: 'dropdown[level="2"]', assert: 'offers("Stop")' }, timeout: 30s }
+  - key: Esc
+  - key: Esc
+  - wait: { until: { at: 'dropdown[level="1"]', absent: true }, timeout: 30s }
+  - chord: Shift+F5
+  - wait: { until: { at: 'pane-tab[label="Call Trace"]', absent: true }, timeout: 60s }
+  - expect: { at: 'pane-tab[label="Event Log"]', absent: true }
+  - expect: { at: replay-position, absent: true }

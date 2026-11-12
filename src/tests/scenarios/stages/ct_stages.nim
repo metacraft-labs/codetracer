@@ -22,6 +22,7 @@ import std/[json, os, osproc, strutils, times, tables]
 import ../../../frontend/tui/tests/fixtures/fixture_provider
 import ../../../frontend/tui/tests/fixtures/plat65_nim_project
 import ../../../frontend/viewmodel/host/native_nim_tracer
+import ../../../frontend/headless_app/layout_model
 import ../../../frontend/tui/tests/fixtures/[plat53_noir_project, plat55_noir_build,
                                             plat62_noir_circuit, plat63_verno_projects]
 import ../../../frontend/viewmodel/tests/unit/build_fixtures/plat56_c_build
@@ -524,6 +525,58 @@ proc plantEditLayout*(s: StageState; fixture: string) =
   createDir(s.configDir)
   copyFile(src, s.configDir / "default_edit_layout.json")
 
+# --- gpui -------------------------------------------------------------------
+
+proc copyProject*(s: StageState; folder: string) =
+  ## A copy of a project folder (a path under test-programs, or a single file
+  ## there) in this run's project folder, so an Edit-mode scenario writes to
+  ## its own files; `open-project` with `folder: $project` opens it.
+  let rel = resolveProgram(folder)
+  let src = if rel.isAbsolute: rel else: repo() / rel
+  let dest = s.root / "project"
+  removeDir(dest)
+  if dirExists(src): copyDir(src, dest)
+  elif fileExists(src):
+    createDir(dest)
+    copyFile(src, dest / src.extractFilename)
+  else:
+    raise newException(IOError, "copy-project: no folder or file " & src)
+  s.launch.project = dest
+  s.launch.workDir = dest
+
+proc savedLayout*(s: StageState; file, ops: string) =
+  ## The shared default with layout commands applied, saved as the
+  ## front-end's own layout document — what a rearranged window leaves for
+  ## its next start (the commands are `layout_model`'s, the product's own).
+  if file.len == 0 or file.contains('/') or file.contains(".."):
+    raise newException(ValueError, "saved-layout: '" & file & "' is not a file name")
+  proc paneOf(n: string): PaneKind =
+    for k in PaneKind:
+      if $k == n: return k
+    raise newException(ValueError, "saved-layout: no pane '" & n & "'")
+  let shared = sharedDefaultLayout()
+  var layout = initLayout(shared.tree, sharedDefaultDocked())
+  for op in ops.split(','):
+    let p = op.strip.split(':')
+    if p.len == 0 or p[0].len == 0: continue
+    let cmd =
+      case p[0]
+      of "dock":
+        var edge = leBottom
+        for e in LayoutEdge:
+          if $e == p[2]: edge = e
+        cmdDock(paneOf(p[1]), edge)
+      of "activate": cmdActivateTab(paneOf(p[1]))
+      of "merge": cmdMergeIntoStack(paneOf(p[1]), paneOf(p[2]))
+      else: raise newException(ValueError, "saved-layout: unknown op '" & op & "'")
+    let r = apply(layout, cmd)
+    if r.kind != loApplied:
+      raise newException(ValueError, "saved-layout: '" & op & "' was refused")
+    layout = r.layout
+  let path = s.launch.env["CODETRACER_TUI_LAYOUT_DIR"] / file
+  createDir(path.parentDir)
+  writeFile(path, $saveLayout(layout))
+
 proc runStage*(s: StageState; use: string; args: JsonNode) =
   ## One stage call. `open-recording` / `open-project` only DECIDE the launch;
   ## the binding starts its own front-end from `s.launch` afterwards.
@@ -614,6 +667,10 @@ proc runStage*(s: StageState; use: string; args: JsonNode) =
     s.launch.welcome = true
     s.launch.width = argInt(args, "width", s.launch.width)
     s.launch.height = argInt(args, "height", s.launch.height)
+  of "copy-project":
+    s.copyProject(argStr(args, "folder"))
+  of "saved-layout":
+    s.savedLayout(argStr(args, "file"), argStr(args, "ops"))
   of "start-from-layout":
     let layout = argStr(args, "layout")
     let src = currentSourcePath().parentDir.parentDir / "fixtures" / "layouts" / layout

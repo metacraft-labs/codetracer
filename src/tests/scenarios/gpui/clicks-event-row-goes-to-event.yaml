@@ -1,0 +1,25 @@
+scenario: 1
+name: gpui/clicks-event-row-goes-to-event
+pack: codetracer
+summary: >-
+  A click on an event-log row goes to that event (tick 68, line 111); a right
+  click on another row shows its whole content over the window without moving
+  the replay, and Esc closes it.
+
+stage:
+  - use: record-program
+    with: { program: calc }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - wait: { until: event-log.loaded, timeout: 60s }
+  - click: { at: 'event-log/event[text="10 - 4 + 1 = 7"]' }
+  - wait: { until: { at: replay-position, tick: 68 }, timeout: 60s }
+  - expect: { at: 'editor[file="main.py"]', assert: "stopped-at(111)" }
+  - click: { at: 'event-log/event[text="6 * 7 = 42"]', button: right }
+  - wait: { until: { at: popup, present: true }, timeout: 30s }
+  - expect: { at: popup, assert: 'shows("6 * 7 = 42")' }
+  - expect: { at: replay-position, tick: 68 }
+  - key: Esc
+  - wait: { until: { at: popup, absent: true }, timeout: 30s }

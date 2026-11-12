@@ -1,0 +1,35 @@
+scenario: 1
+name: gpui/find-in-files-grep-lists-and-opens
+pack: codetracer
+summary: >-
+  In a replay `:grep scale` typed into the omnibox lists the recording's
+  sources' matches grouped by file (4 results in 2 files: main.py's lines
+  26-28, extra.py's line 4) without moving the replay; a press on a result
+  opens its file at its line, and F4 and Shift+F4 walk the results — the
+  tick stays where it was throughout.
+
+stage:
+  - use: record-program
+    with: { program: multi_root/app/main.py }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - expect: { at: replay-position, tick: 1 }
+  - chord: Ctrl+P
+  - type: ":grep scale"
+  - key: Enter
+  - wait: { until: { at: 'pane[title="Find in Files"]', assert: 'has-row("4 results in 2 files")' }, timeout: 60s }
+  - expect:
+      at: 'pane[title="Find in Files"]'
+      assert: ['has-row("scaled = extra.scale(total, 4)")', 'has-row("def scale(value, factor):")',
+               'has-row("return scaled")']
+  - expect: { at: replay-position, tick: 1 }
+  - click: { at: 'pane[title="Find in Files"]/row[text="4 def scale(value, factor):"]' }
+  - wait: { until: { at: 'editor[file="extra.py"]', assert: 'shows-text("def scale(value, factor):")' }, timeout: 30s }
+  - expect: { at: replay-position, tick: 1 }
+  - key: F4
+  - wait: { until: { at: 'editor[file="main.py"]', assert: "shows-line(26)" }, timeout: 30s }
+  - chord: Shift+F4
+  - wait: { until: { at: 'editor[file="extra.py"]', assert: "shows-line(4)" }, timeout: 30s }
+  - expect: { at: replay-position, tick: 1 }

@@ -1,0 +1,23 @@
+scenario: 1
+name: gpui/editor-wheel-scrolls-rows
+pack: codetracer
+summary: >-
+  The wheel over the Debug-mode editor moves its rows — the file is longer
+  than the editor — and back, without focusing it first and without moving
+  the replay.
+
+stage:
+  - use: record-program
+    with: { program: calc }
+  - use: open-recording
+    with: { width: 1440, height: 900 }
+
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - wait: { until: { at: 'editor[file="main.py"]', current-line: 1, first-visible: 1 }, timeout: 60s }
+  - expect: { at: status-line, location: { matches: "main.py:1#" } }
+  - wheel: { at: 'editor[file="main.py"]', direction: down, amount: 3 }
+  - expect: { at: 'editor[file="main.py"]', first-visible: { gt: 1 } }
+  - expect: { at: status-line, location: { matches: "main.py:1#" } }
+  - wheel: { at: 'editor[file="main.py"]', direction: up, amount: 3 }
+  - expect: { at: 'editor[file="main.py"]', first-visible: 1, current-line: 1 }

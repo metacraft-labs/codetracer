@@ -1,0 +1,25 @@
+scenario: 1
+name: gpui/keys-user-rows-later-wins
+pack: codetracer
+summary: >-
+  Two rows of the user's keybindings.json bind one chord in one scope: the
+  later row fires, as in VS Code — here Ctrl+Alt+U steps back, not over.
+
+stage:
+  - use: record-program
+    with: { program: calc }
+  - use: plant-config
+    with:
+      file: keybindings.json
+      content: >-
+        [ { "key": "ctrl+alt+u", "command": "debugger.step-over" },
+          { "key": "ctrl+alt+u", "command": "debugger.reverse-step-over" } ]
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - wait: { until: { at: 'editor[file="main.py"]', current-line: 1 }, timeout: 60s }
+  - key: F10
+  - wait: { until: { at: 'editor[file="main.py"]', current-line: 2 }, timeout: 60s }
+  - chord: Ctrl+Alt+U
+  - wait: { until: { at: 'editor[file="main.py"]', current-line: 1 }, timeout: 60s }

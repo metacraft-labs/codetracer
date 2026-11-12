@@ -1,0 +1,19 @@
+scenario: 1
+name: gpui/top-bar-ctrl-o-reveals-docked
+pack: codetracer
+summary: >-
+  Ctrl+O reveals the first docked pane (Build Output) itself over the panes,
+  and Esc hides it again.
+
+stage:
+  - use: record-program
+    with: { program: calc }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - expect: { at: 'pane[title="Build Output"]', absent: true }
+  - chord: Ctrl+O
+  - wait: { until: { at: 'pane[title="Build Output"]', present: true }, timeout: 30s }
+  - key: Esc
+  - wait: { until: { at: 'pane[title="Build Output"]', absent: true }, timeout: 30s }

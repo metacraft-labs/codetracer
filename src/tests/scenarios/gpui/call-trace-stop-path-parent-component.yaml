@@ -1,0 +1,48 @@
+scenario: 1
+name: gpui/call-trace-stop-path-parent-component
+pack: codetracer
+summary: >-
+  multi_root's runner puts `app/../shared` on sys.path, so the recorder reports
+  the stops in `helpers.add` and `extra.scale` under paths with a `..`
+  component. A click on `add` in the call trace shows helpers.py from the
+  recording — its tab, its source, the execution line on it; a click on
+  `scale` then shows extra.py, every line of it (it is one line longer than
+  helpers.py, and a window clamped to the previous file's length left its
+  last line unloaded).
+
+stage:
+  - use: record-program
+    with: { program: multi_root/app/main.py }
+  - use: open-recording
+    with: { width: 1440, height: 1400 }
+
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - wait: { until: call-trace.loaded, timeout: 60s }
+
+  - beat: add
+    steps:
+      - click: { at: 'call-trace/call[name="add"]' }
+      - wait: { until: { at: 'editor[file="helpers.py"]', current-line: 4 }, timeout: 60s }
+      - expect: { at: 'editor[file="extra.py"]', absent: true }
+      - expect:
+          at: 'editor[file="helpers.py"]/line[number="4"]'
+          text: { contains: "def add(left, right):" }
+      - expect:
+          at: 'editor[file="helpers.py"]/line[number="5"]'
+          text: { contains: "return left + right" }
+
+  - beat: scale
+    steps:
+      - click: { at: 'call-trace/call[name="scale"]' }
+      - wait: { until: { at: 'editor[file="extra.py"]', current-line: 4 }, timeout: 60s }
+      - expect: { at: 'editor[file="helpers.py"]', absent: true }
+      - expect:
+          at: 'editor[file="extra.py"]/line[number="4"]'
+          text: { contains: "def scale(value, factor):" }
+      - expect:
+          at: 'editor[file="extra.py"]/line[number="5"]'
+          text: { contains: "result = value * factor" }
+      - expect:
+          at: 'editor[file="extra.py"]/line[number="6"]'
+          text: { contains: "return result" }

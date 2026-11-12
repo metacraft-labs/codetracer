@@ -1,0 +1,22 @@
+scenario: 1
+name: gpui/pointer-shapes
+pack: codetracer
+summary: >-
+  Elements carry the shared pointer shapes: resting on a call-trace row the
+  pointer is a hand, on the editor's code it is the text beam, on a pane's tab
+  a hand.
+
+stage:
+  - use: record-program
+    with: { program: calc }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - wait: { until: call-trace.loaded, timeout: 60s }
+  - hover: { at: 'call-trace/call[#3]', for: 300ms }
+  - expect: { at: window, pointer: pointer }
+  - hover: { at: 'editor[file="main.py"]/line[number="1"]', anchor: text-start, for: 300ms }
+  - expect: { at: window, pointer: text }
+  - hover: { at: 'pane-tab[label="VCS"]', for: 300ms }
+  - expect: { at: window, pointer: pointer }

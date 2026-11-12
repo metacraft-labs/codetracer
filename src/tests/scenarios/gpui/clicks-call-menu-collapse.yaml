@@ -1,0 +1,24 @@
+scenario: 1
+name: gpui/clicks-call-menu-collapse
+pack: codetracer
+summary: >-
+  A right click on a call opens the call trace's menu; on apply_op, Collapse
+  Call Children is enabled, and choosing it folds the call's children away.
+
+stage:
+  - use: record-program
+    with: { program: calc }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - wait: { until: call-trace.loaded, timeout: 60s }
+  - expect: { at: 'call-trace/call[#5]', name: apply_op }
+  - expect: { at: 'call-trace/call[#6]', name: add }
+  - click: { at: 'call-trace/call[#5]', button: right }
+  - wait: { until: { at: 'context-menu/menu-item[label="Collapse Call Children"]', present: true }, timeout: 30s }
+  - expect: { at: 'context-menu/menu-item[label="Collapse Call Children"]', enabled: true }
+  - click: { at: 'context-menu/menu-item[label="Collapse Call Children"]' }
+  - wait: { until: { at: context-menu, absent: true }, timeout: 30s }
+  - expect: { at: 'call-trace/call[#5]', name: apply_op }
+  - expect: { at: 'call-trace/call[#6]', name: { one-of: [apply_op, evaluate] } }

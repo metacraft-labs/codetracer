@@ -1,0 +1,24 @@
+scenario: 1
+name: gpui/layout-saved-arrangement-restored
+pack: codetracer
+summary: >-
+  A window rearranged and closed is restored from its own saved layout: the
+  call-trace stack's second tab (Agent Activity) in front and the Tests pane
+  merged into the Files stack. (The terminal's own saved layout, docking the
+  Event Log, is not read: the Event Log stays in the centre.)
+
+stage:
+  - use: record-program
+    with: { program: calc }
+  - use: saved-layout
+    with: { file: gpui-layout.json, ops: "activate:agentActivity" }
+  - use: saved-layout
+    with: { file: tui-layout.json, ops: "dock:eventLog:bottom" }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - expect: { at: 'pane[title="Agent Activity"]', tabs: ["Call Trace", "Agent Activity"] }
+  - expect: { at: 'pane-tab[label="Agent Activity"]', active: true }
+  - expect: { at: 'pane-tab[label="Call Trace"]', active: false }
+  - expect: { at: 'pane[title="Event Log"]', tabs: ["Event Log", "Terminal Output"] }

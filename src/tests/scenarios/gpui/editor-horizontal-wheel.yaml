@@ -1,0 +1,31 @@
+scenario: 1
+name: gpui/editor-horizontal-wheel
+pack: codetracer
+summary: >-
+  On a line wider than the editor, the horizontal wheel scrolls the text
+  sideways and never the rows: the wide line's start leaves the view, the
+  first drawn row stays, and the replay does not move; the wheel back brings
+  the start back.
+
+stage:
+  - use: record-program
+    with: { program: wide_lines }
+  - use: open-recording
+    with: { width: 1440, height: 900 }
+
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - wait: { until: editor.loaded, timeout: 60s }
+  - expect:
+      at: 'editor[file="main.py"]/line[number="26"]'
+      text: { contains: "WIDE_SOURCE" }
+  - expect: { at: 'editor[file="main.py"]', first-visible: 1 }
+  - wheel: { at: 'editor[file="main.py"]', direction: right, amount: 6 }
+  - expect:
+      at: 'editor[file="main.py"]/line[number="26"]'
+      text: { matches: "^\\W?[a-z ]*brown fox" }
+  - expect: { at: 'editor[file="main.py"]', first-visible: 1 }
+  - wheel: { at: 'editor[file="main.py"]', direction: left, amount: 6 }
+  - expect:
+      at: 'editor[file="main.py"]/line[number="26"]'
+      text: { contains: "WIDE_SOURCE" }

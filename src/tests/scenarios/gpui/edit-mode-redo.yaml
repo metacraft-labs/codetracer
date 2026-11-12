@@ -1,0 +1,27 @@
+scenario: 1
+name: gpui/edit-mode-redo
+pack: codetracer
+summary: >-
+  Edit mode under the CUA keymap: "redo", typed as keys into the
+  document and saved with Ctrl+S, shows the line the transaction produced, and
+  the editor stays writable (no read-only notice).
+
+stage:
+  - use: write-project
+    with: { files: { doc.txt: "def calc(n):\n    total = 0\n    for i in range(n):\n        total += i\n    return total\n" } }
+  - use: open-project
+    with: { folder: $project, file: doc.txt, width: 1280, height: 800 }
+
+steps:
+  - wait: { until: editor.loaded, timeout: 60s }
+  - expect:
+      at: 'editor[file="doc.txt"]/line[number="1"]'
+      text: { contains: "def calc(n):" }
+  - type: "X"
+  - chord: Ctrl+Z
+  - chord: Ctrl+Y
+  - chord: Ctrl+S
+  - expect:
+      at: 'editor[file="doc.txt"]/line[number="1"]'
+      text: { contains: "Xdef calc(n):" }
+  - expect: { at: 'editor[file="doc.txt"]', assert: 'lacks-text("read-only")' }

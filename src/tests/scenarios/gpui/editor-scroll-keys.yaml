@@ -1,0 +1,23 @@
+scenario: 1
+name: gpui/editor-scroll-keys
+pack: codetracer
+summary: >-
+  With the read-only editor focused by a click on its text, `j` and
+  Ctrl+Down each scroll the rows one line down (CUA's read-only rows), and
+  the replay stays where it was.
+
+stage:
+  - use: record-program
+    with: { program: calc }
+  - use: open-recording
+    with: { width: 1440, height: 900 }
+
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - wait: { until: { at: 'editor[file="main.py"]', current-line: 1, first-visible: 1 }, timeout: 60s }
+  - click: { at: 'editor[file="main.py"]/line[number="3"]', anchor: text-start }
+  - key: j
+  - expect: { at: 'editor[file="main.py"]', first-visible: 2 }
+  - chord: Ctrl+Down
+  - expect: { at: 'editor[file="main.py"]', first-visible: 3 }
+  - expect: { at: status-line, location: { matches: "main.py:1#" } }

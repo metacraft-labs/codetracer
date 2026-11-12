@@ -1,0 +1,18 @@
+scenario: 1
+name: gpui/chrome-debug-editor-tab-names-the-file
+pack: codetracer
+summary: >-
+  In a replay every pane box has a strip of tabs naming its panes (no pane
+  draws a heading of its own), and the editor's lone tab is its file, by its
+  folder and name (calc/main.py).
+
+stage:
+  - use: record-program
+    with: { program: calc }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - expect: { at: 'pane[title="calc/main.py"]', tabs: ["calc/main.py"] }
+  - expect: { at: 'pane[title="Variables"]', assert: 'lacks-row("State")' }
+  - expect: { at: 'pane[title="Call Trace"]', assert: 'lacks-row("Call Trace")' }

@@ -1,0 +1,18 @@
+scenario: 1
+name: gpui/keys-save-in-replay-refused
+pack: codetracer
+summary: >-
+  Ctrl+S in a replay saves nothing, steps nothing, and the status bar says why:
+  saving needs an editing session.
+
+stage:
+  - use: record-program
+    with: { program: calc }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - wait: { until: { at: 'editor[file="main.py"]', current-line: 1 }, timeout: 60s }
+  - chord: Ctrl+S
+  - wait: { until: { at: status-line, message: { contains: "editing session" } }, timeout: 30s }
+  - expect: { at: 'editor[file="main.py"]', current-line: 1 }

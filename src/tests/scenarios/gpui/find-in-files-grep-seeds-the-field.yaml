@@ -1,0 +1,38 @@
+scenario: 1
+name: gpui/find-in-files-grep-seeds-the-field
+pack: codetracer
+summary: >-
+  `:grep FACTOR` lists every line holding it in any case (extra.py's lines 4
+  and 5) and the tick does not move; F4 opens the first with its match
+  selected, and Ctrl+Shift+F then opens Find in Files' field seeded with that
+  selection (`factor`, not the query) — typing replaces it; `:grep` alone
+  opens the field on the pane's query.
+
+stage:
+  - use: record-program
+    with: { program: multi_root/app/main.py }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - expect: { at: replay-position, tick: 1 }
+  - chord: Ctrl+P
+  - type: ":grep FACTOR"
+  - key: Enter
+  - wait: { until: { at: 'pane[title="Find in Files"]', assert: 'has-row("2 results in 1 file")' }, timeout: 60s }
+  - expect:
+      at: 'pane[title="Find in Files"]'
+      assert: ['has-row("def scale(value, factor):")', 'has-row("result = value * factor")']
+  - expect: { at: replay-position, tick: 1 }
+  - key: F4
+  - wait: { until: { at: 'editor[file="extra.py"]', assert: 'shows-text("def scale(value, factor):")' }, timeout: 30s }
+  - chord: Ctrl+Shift+F
+  - wait: { until: { at: omnibox, query: ":grep factor" }, timeout: 30s }
+  - type: "scale"
+  - wait: { until: { at: omnibox, query: ":grep scale" }, timeout: 30s }
+  - key: Esc
+  - chord: Ctrl+P
+  - type: ":grep"
+  - key: Enter
+  - wait: { until: { at: omnibox, query: ":grep FACTOR" }, timeout: 30s }
+  - expect: { at: replay-position, tick: 1 }

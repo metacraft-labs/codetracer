@@ -1,0 +1,27 @@
+scenario: 1
+name: gpui/layout-shared-default
+pack: codetracer
+summary: >-
+  With nothing remembered the window opens the shared default layout, every
+  pane placed and drawn: Files, VCS and Tests; the editor; Variables and the
+  Scratchpad; the Call Trace and Agent Activity; the Event Log and Terminal
+  Output; the footer's docked Build, Problems, Find in Files and Requests —
+  and no Constraints pane.
+
+stage:
+  - use: record-program
+    with: { program: calc }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - expect: { at: 'pane[title="Files"]', tabs: ["Files", "VCS", "Tests"] }
+  - expect: { at: 'pane[title="Variables"]', tabs: ["Variables", "Scratchpad"] }
+  - expect: { at: 'pane[title="Call Trace"]', tabs: ["Call Trace", "Agent Activity"] }
+  - expect: { at: 'pane[title="Event Log"]', tabs: ["Event Log", "Terminal Output"] }
+  - expect: { at: 'pane[title="calc/main.py"]', present: true }
+  - expect: { at: 'dock-label[label="BUILD"]', present: true }
+  - expect: { at: 'dock-label[label="PROBLEMS"]', present: true }
+  - expect: { at: 'dock-label[label="FIND IN FILES"]', present: true }
+  - expect: { at: 'dock-label[label="REQUESTS"]', present: true }
+  - expect: { at: 'pane-tab[label="Constraints"]', absent: true }

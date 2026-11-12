@@ -34,6 +34,10 @@ roles:
       front-tabs: lines
       # Every auto-hide strip tab, as `<edge>:<label>`.
       strip-tabs: lines
+      # The pointer's shape where it rests (Pointer-Affordances.md §4):
+      # default, pointer, text, col-resize, row-resize, grab, grabbing,
+      # not-allowed.
+      pointer: text
     assertions:
       has-pane(t): "layout-tabs contains t"
       lacks-pane(t): "not (layout-tabs contains t)"
@@ -57,6 +61,7 @@ roles:
       welcome: optional
       menu-bar: optional
       pane-tab: many
+      find-field: optional
       # --- pw2 ---
       vcs: optional
       diff-view: many
@@ -804,6 +809,11 @@ roles:
   edit-toolbar:
     children: { panel-button: many }
 
+  # The in-document find (Ctrl+F), when open: its query and how many matches
+  # it found (`2 of 12`: the current one, of all).
+  find-field:
+    properties: { query: text, count: text }
+
 sync:
   # The implicit condition after every input: the window handled it and the
   # screen stopped changing.
@@ -945,3 +955,17 @@ stages:
       optional key, scenario and mock agent); fails, naming it, when none is
       configured.
     params: {}
+  copy-project:
+    summary: >-
+      Copy a project folder (a path under test-programs, or a single file
+      there) into the run's own project folder; `open-project` with `folder:
+      $project` then edits the copy, never the repository's files.
+    params: { folder: text }
+  saved-layout:
+    summary: >-
+      Write a saved layout into the front-end's state directory (`file`: the
+      front-end's own layout document, e.g. gpui-layout.json): the shared
+      default with `ops` applied — `dock:<pane>:<edge>`, `activate:<pane>`,
+      `merge:<pane>:<beside>`, comma-separated, panes by their layout names
+      (`eventLog`, `agentActivity`, …) — the arrangement a user left it in.
+    params: { file: text, ops: text }

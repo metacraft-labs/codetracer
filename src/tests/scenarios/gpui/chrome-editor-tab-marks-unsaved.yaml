@@ -1,0 +1,21 @@
+scenario: 1
+name: gpui/chrome-editor-tab-marks-unsaved
+pack: codetracer
+summary: >-
+  A lone editor's tab names its file by its folder and name; in an Edit window
+  a typed key marks the tab unsaved (●) and Ctrl+S makes it clean again.
+
+stage:
+  - use: write-project
+    with: { files: { main.py: "print(1)\n" } }
+  - use: open-project
+    with: { folder: $project, file: main.py }
+
+steps:
+  - wait: { until: editor.loaded, timeout: 60s }
+  - expect: { at: 'pane-tab[label="project/main.py"]', active: true }
+  - type: "x"
+  - wait: { until: { at: 'pane-tab[label="project/main.py ●"]', present: true }, timeout: 30s }
+  - chord: Ctrl+S
+  - wait: { until: { at: 'pane-tab[label="project/main.py"]', present: true }, timeout: 30s }
+  - expect: { at: 'editor[file="main.py"]/line[number="1"]', text: { contains: "xprint(1)" } }
