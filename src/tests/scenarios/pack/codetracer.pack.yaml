@@ -62,6 +62,9 @@ roles:
       menu-bar: optional
       pane-tab: many
       find-field: optional
+      requests: optional
+      origin-chain: optional
+      hover-card: optional
       # --- pw2 ---
       vcs: optional
       diff-view: many
@@ -226,7 +229,9 @@ roles:
       loaded: "count(call) > 0"
 
   call:
-    keys: [name]
+    # `arguments` tells apart the calls of one function (`square(n=3)` from
+    # `square(n=4)`), as a reader does.
+    keys: [name, arguments]
     properties:
       name: text
       # The call the replay is in.
@@ -254,10 +259,13 @@ roles:
       last-shown: int
       # The visible column titles, in order.
       columns: lines
-    children: { event: many, columns-button: optional, columns-menu: optional }
+    children: { event: many, event-marker: many, columns-button: optional, columns-menu: optional }
     affordances: [wheel, focusable]
     assertions:
       has-output(text): "some event: event.text contains text"
+      # More rows than the first window shows: paging has something to fetch.
+      pages-remain: "last-shown < total"
+      shows-all: "last-shown == total"
     sync:
       loaded: "count(event) > 0"
 
@@ -284,14 +292,21 @@ roles:
     assertions:
       has-variable(name): "some variable: variable.name == name"
       value-of(name, value): "some variable: variable.name == name and variable.value contains value"
+      all-have-origin-badges: "count(variable) > 0 and every variable: variable.origin-badge == true"
     sync:
       loaded: "count(variable) > 0"
 
   variable:
     keys: [name]
-    properties: { name: text, type: text, value: text, expanded: bool }
+    properties:
+      name: text
+      type: text
+      value: text
+      expanded: bool
+      # The row offers its value's origin (the badge that opens the chain).
+      origin-badge: bool
     affordances: [click, double-click, context-click]
-    # `name`: the call's name, where a click activates it.
+    # `name`: the variable's name.
     anchors: [expander, name]
 
   # The breakpoints and tracepoints list.
@@ -330,7 +345,11 @@ roles:
 
   scratch-entry:
     keys: [expression]
-    properties: { expression: text, value: text }
+    properties:
+      expression: text
+      value: text
+      # The value is an evaluation error (drawn as one).
+      error: bool
     affordances: [click, context-click]
 
   # The status line at the bottom of the window.
@@ -809,6 +828,73 @@ roles:
   edit-toolbar:
     children: { panel-button: many }
 
+  # --- vscode-wdio: the VS Code extension's panels ------------------------
+  # The Request Panel: the HTTP requests a recording served.
+  requests:
+    properties:
+      count: int
+      # Its table's header and body are drawn (the body empty for none).
+      header: bool
+      body: bool
+
+  # The Origin Chain of a value: how it came to be, hop by hop, back to where
+  # it was made (Value-Origin-Tracking), as the State panel shows it.
+  origin-chain:
+    properties:
+      count: int
+      # Where the chain ends (a literal, an input), as drawn.
+      terminator: text
+    children: { origin-hop: many }
+    assertions:
+      has-hop(classification): "some origin-hop: origin-hop.classification == classification"
+      has-frame-transition: "some origin-hop: origin-hop.frame-transition == true"
+      has-confidence(c): "some origin-hop: origin-hop.confidence == c"
+    sync:
+      loaded: "count(origin-hop) > 0"
+
+  origin-hop:
+    keys: [number]
+    properties:
+      # 1 for the hop nearest the value.
+      number: int
+      text: text
+      # TrivialCopy, Computational, CrossThreadCopy, FrameTransition, …
+      classification: text
+      confidence: number
+      # The source line the hop happened on.
+      line: int
+      # The hop crosses a call boundary.
+      frame-transition: bool
+      # Operand snapshots shown under an expanded Computational hop.
+      operands: int
+    affordances: [click]
+    # `expander`: the chevron that shows a Computational hop's operands.
+    anchors: [expander]
+
+  # The hover card an editor shows over a symbol, with its command links.
+  hover-card:
+    properties: { text: lines }
+    children: { hover-link: many }
+
+  hover-link:
+    keys: [label]
+    properties: { label: text }
+    affordances: [click]
+
+  # A cross-process boundary in the event log: where a request, a response or
+  # a realm crossing joins this recording to another.
+  event-marker:
+    keys: [boundary]
+    properties:
+      boundary: text
+      # The boundary's chip, as drawn (`[account-balance-with-wasm]`).
+      chip: text
+      # The correlation key's value.
+      key-value: text
+      # The row shows the crossing's direction.
+      direction: bool
+    affordances: [click]
+
   # The in-document find (Ctrl+F), when open: its query and how many matches
   # it found (`2 of 12`: the current one, of all).
   find-field:
@@ -849,8 +935,11 @@ stages:
       `recording`, a recording folder), in a window of the given size, with
       the replay at its entry or at `tick`. `deployment: web` serves it with
       `ct host` and opens its page in a browser instead (front-ends that
-      have one).
-    params: { recording: text, tick: int, width: int, height: int, deployment: text }
+      have one). `panes` (comma-separated pane roles: call-trace, event-log,
+      variables, scratchpad, requests) are opened with it, for a front-end
+      that opens its panels one by one (VS Code); a front-end whose layout
+      already shows them ignores it.
+    params: { recording: text, tick: int, width: int, height: int, deployment: text, panes: text }
   open-project:
     summary: Start the front-end in Edit mode on a project folder (a path under test-programs, or `$project` for the stage's own).
     params: { folder: text, file: text, width: int, height: int }
