@@ -1,0 +1,36 @@
+scenario: 1
+name: editor/glyph-toggles-on-press-numbers-select
+pack: codetracer
+summary: >-
+  The glyph cell toggles a breakpoint on the press, before the release, even
+  when the pointer is dragged off; a right press disables it and a second
+  enables it, with no menu; a click on the line number selects the line and
+  toggles nothing; and two presses on the glyph toggle twice.
+
+stage:
+  - use: record-program
+    with: { program: src/db-backend/tests/fixtures/origin/python/simple_trivial_chain/main.py }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - wait: { until: { at: 'editor[file="main.py"]/line[number="8"]', text: "def main() -> None:" }, timeout: 60s }
+  - expect: { at: 'editor[file="main.py"]', read-only: true }
+  - expect: { at: 'editor[file="main.py"]/line[number="8"]', glyph: "" }
+  - press: { at: 'editor[file="main.py"]/line[number="8"]', anchor: glyph, button: left }
+  - expect: { at: 'editor[file="main.py"]/line[number="8"]', glyph: breakpoint }
+  - release: { at: 'editor[file="main.py"]/line[number="12"]', anchor: text-end, button: left }
+  - expect: { at: 'editor[file="main.py"]/line[number="8"]', glyph: breakpoint }
+  - click: { at: 'editor[file="main.py"]/line[number="8"]', anchor: glyph, button: right }
+  - expect: { at: 'editor[file="main.py"]/line[number="8"]', glyph: breakpoint-disabled }
+  - expect: { at: context-menu, absent: true }
+  - click: { at: 'editor[file="main.py"]/line[number="8"]', anchor: glyph, button: right }
+  - expect: { at: 'editor[file="main.py"]/line[number="8"]', glyph: breakpoint }
+  - expect: { at: context-menu, absent: true }
+  - click: { at: 'editor[file="main.py"]/line[number="8"]', anchor: line-number }
+  - expect: { at: 'editor[file="main.py"]', selected-text: "def main() -> None:\n" }
+  - expect: { at: 'editor[file="main.py"]/line[number="8"]', glyph: breakpoint }
+  - click: { at: 'editor[file="main.py"]/line[number="8"]', anchor: glyph }
+  - expect: { at: 'editor[file="main.py"]/line[number="8"]', glyph: { one-of: ["", hint] } }
+  - click: { at: 'editor[file="main.py"]/line[number="8"]', anchor: glyph }
+  - expect: { at: 'editor[file="main.py"]/line[number="8"]', glyph: breakpoint }

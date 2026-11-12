@@ -1,3 +1,8 @@
+/**
+ * Ported to the scenarios src/tests/scenarios/command-palette/*.yaml; kept
+ * as the `:sym` cases' check until their scenarios can pass: a recording of
+ * noir_example carries no function_index.json, so `:sym` finds nothing.
+ */
 import { test, expect, testProgramsPath } from "../../lib/fixtures";
 import { LayoutPage } from "../../page-objects/layout-page";
 

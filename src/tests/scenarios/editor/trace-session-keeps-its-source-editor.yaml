@@ -1,0 +1,35 @@
+scenario: 1
+name: editor/trace-session-keeps-its-source-editor
+pack: codetracer
+summary: >-
+  A trace session keeps its source editor on every transition: toggled to
+  Edit mode, back to Debug mode and out by Stop, py_console_logs/main.py is
+  still the active tab and its editor still draws its code.
+
+stage:
+  - use: record-program
+    with: { program: py_console_logs/main.py }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - wait: { until: { at: 'editor[file="main.py"]', assert: 'shows-text("Demonstrate a variety")' }, timeout: 60s }
+  - expect: { at: 'pane-tab[label="py_console_logs/main.py"]', active: true }
+  - chord: Ctrl+F5
+    settle: false
+  - wait: { until: { at: window, mode: edit }, timeout: 60s }
+  - wait: { until: { at: 'editor[file="main.py"]', assert: 'shows-text("Demonstrate a variety")' }, timeout: 60s }
+  - expect: { at: 'pane-tab[label="py_console_logs/main.py"]', active: true }
+  - expect: { at: 'editor[file="main.py"]', active: true, geometry: { visible: true } }
+  - chord: Ctrl+F5
+    settle: false
+  - wait: { until: { at: window, mode: debug }, timeout: 60s }
+  - wait: { until: { at: 'editor[file="main.py"]', assert: 'shows-text("Demonstrate a variety")' }, timeout: 60s }
+  - expect: { at: 'pane-tab[label="py_console_logs/main.py"]', active: true }
+  - expect: { at: 'editor[file="main.py"]', active: true, geometry: { visible: true } }
+  - click: 'toolbar/toolbar-button[label="stop-image"]'
+    settle: false
+  - wait: { until: { at: window, mode: edit }, timeout: 60s }
+  - wait: { until: { at: 'editor[file="main.py"]', assert: 'shows-text("Demonstrate a variety")' }, timeout: 60s }
+  - expect: { at: 'pane-tab[label="py_console_logs/main.py"]', active: true }
+  - expect: { at: 'editor[file="main.py"]', active: true, geometry: { visible: true } }

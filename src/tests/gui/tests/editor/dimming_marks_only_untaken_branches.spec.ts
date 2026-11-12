@@ -1,4 +1,6 @@
 /**
+ * Ported to the scenario src/tests/scenarios/editor/dimming-marks-only-untaken-branches.yaml; kept as flow_line_styles_test.nim and event_log_is_static_across_jumps.spec.ts cite it.
+ *
  * DIMMING MARKS UNTAKEN BRANCHES, NOT EVERYTHING ABOVE THE CURSOR.
  *
  * Reported: "Sometimes the dimming after a jump works in surprising ways. I

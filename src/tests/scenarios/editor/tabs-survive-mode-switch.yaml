@@ -1,0 +1,90 @@
+scenario: 1
+name: editor/tabs-survive-mode-switch
+pack: codetracer
+summary: >-
+  An edit session's editor tabs — a file opened from the Files pane, the
+  selected tab, an unsaved edit and a selection in it — survive three round
+  trips through Debug mode and Stop; a tab closed in Debug mode stays closed.
+
+stage:
+  - use: open-project
+    with: { folder: test-programs }
+
+steps:
+  - wait: { until: { at: 'editor[file="main.nr"]/line[number="2"]', present: true }, timeout: 90s }
+  - expect: { at: window, mode: edit }
+  - click: { at: 'filesystem/file-node[name="calc"]', count: 2 }
+  - wait: { until: { at: 'filesystem/file-node[name="main.py"]', present: true }, timeout: 30s }
+  - click: 'filesystem/file-node[name="main.py"]'
+  - wait: { until: { at: 'pane-tab[label="calc/main.py"]', active: true }, timeout: 30s }
+  - click: 'pane-tab[label="src/main.nr"]'
+  - wait: { until: { at: 'editor[file="main.nr"]/line[number="2"]', present: true }, timeout: 30s }
+  - click: { at: 'editor[file="main.nr"]/line[number="2"]', anchor: text-start }
+  - key: Home
+  - type: "// mode working set "
+  - key: Home
+  - chord: Shift+Right
+  - expect: { at: 'pane-tab[label="src/main.nr"]', active: true }
+  - expect: { at: 'editor[file="main.nr"]', active: true }
+  - expect: { at: 'editor[file="main.nr"]/line[number="2"]', text: { contains: "// mode working set " } }
+  - expect: { at: 'editor[file="main.nr"]', selected-text: "/" }
+  - expect: { at: 'pane-tab[label="calc/main.py"]', present: true }
+  # round trip 1
+  - chord: Ctrl+F5
+    settle: false
+  - wait: { until: { at: window, mode: debug }, timeout: 60s }
+  - wait: { until: { at: 'editor[file="main.nr"]', present: true }, timeout: 60s }
+  - expect: { at: 'pane-tab[label="src/main.nr"]', active: true }
+  - expect: { at: 'editor[file="main.nr"]', active: true }
+  - expect: { at: 'editor[file="main.nr"]/line[number="2"]', text: { contains: "// mode working set " } }
+  - expect: { at: 'editor[file="main.nr"]', selected-text: "/" }
+  - expect: { at: 'pane-tab[label="calc/main.py"]', present: true }
+  - chord: Ctrl+F5
+    settle: false
+  - wait: { until: { at: window, mode: edit }, timeout: 60s }
+  - wait: { until: { at: 'editor[file="main.nr"]', present: true }, timeout: 60s }
+  - expect: { at: 'pane-tab[label="src/main.nr"]', active: true }
+  - expect: { at: 'editor[file="main.nr"]', active: true }
+  - expect: { at: 'editor[file="main.nr"]/line[number="2"]', text: { contains: "// mode working set " } }
+  - expect: { at: 'editor[file="main.nr"]', selected-text: "/" }
+  - expect: { at: 'pane-tab[label="calc/main.py"]', present: true }
+  # round trip 2: a tab closed in Debug mode
+  - chord: Ctrl+F5
+    settle: false
+  - wait: { until: { at: window, mode: debug }, timeout: 60s }
+  - wait: { until: { at: 'editor[file="main.nr"]', present: true }, timeout: 60s }
+  - expect: { at: 'pane-tab[label="src/main.nr"]', active: true }
+  - expect: { at: 'editor[file="main.nr"]', active: true }
+  - expect: { at: 'editor[file="main.nr"]/line[number="2"]', text: { contains: "// mode working set " } }
+  - expect: { at: 'editor[file="main.nr"]', selected-text: "/" }
+  - expect: { at: 'pane-tab[label="calc/main.py"]', present: true }
+  - click: { at: 'pane-tab[label="calc/main.py"]', anchor: close }
+  - wait: { until: { at: 'pane-tab[label="calc/main.py"]', absent: true }, timeout: 30s }
+  - chord: Ctrl+F5
+    settle: false
+  - wait: { until: { at: window, mode: edit }, timeout: 60s }
+  - wait: { until: { at: 'editor[file="main.nr"]', present: true }, timeout: 60s }
+  - expect: { at: 'pane-tab[label="src/main.nr"]', active: true }
+  - expect: { at: 'editor[file="main.nr"]', active: true }
+  - expect: { at: 'editor[file="main.nr"]/line[number="2"]', text: { contains: "// mode working set " } }
+  - expect: { at: 'editor[file="main.nr"]', selected-text: "/" }
+  - expect: { at: 'pane-tab[label="calc/main.py"]', present: false }
+  # round trip 3, out by Stop
+  - chord: Ctrl+F5
+    settle: false
+  - wait: { until: { at: window, mode: debug }, timeout: 60s }
+  - wait: { until: { at: 'editor[file="main.nr"]', present: true }, timeout: 60s }
+  - expect: { at: 'pane-tab[label="src/main.nr"]', active: true }
+  - expect: { at: 'editor[file="main.nr"]', active: true }
+  - expect: { at: 'editor[file="main.nr"]/line[number="2"]', text: { contains: "// mode working set " } }
+  - expect: { at: 'editor[file="main.nr"]', selected-text: "/" }
+  - expect: { at: 'pane-tab[label="calc/main.py"]', present: false }
+  - click: 'toolbar/toolbar-button[label="stop-image"]'
+    settle: false
+  - wait: { until: { at: window, mode: edit }, timeout: 60s }
+  - wait: { until: { at: 'editor[file="main.nr"]', present: true }, timeout: 60s }
+  - expect: { at: 'pane-tab[label="src/main.nr"]', active: true }
+  - expect: { at: 'editor[file="main.nr"]', active: true }
+  - expect: { at: 'editor[file="main.nr"]/line[number="2"]', text: { contains: "// mode working set " } }
+  - expect: { at: 'editor[file="main.nr"]', selected-text: "/" }
+  - expect: { at: 'pane-tab[label="calc/main.py"]', present: false }

@@ -1,0 +1,33 @@
+scenario: 1
+name: editor/writable-after-stop
+pack: codetracer
+summary: >-
+  After Ctrl+F5 into Debug mode and Stop back to Edit mode, a keystroke
+  typed into the editor reaches the buffer (and did before, too).
+
+stage:
+  - use: open-project
+    with: { folder: test-programs }
+
+steps:
+  - wait: { until: { at: 'editor[file="main.nr"]/line[number="1"]', present: true }, timeout: 90s }
+  - expect: { at: window, mode: edit }
+  - expect: { at: 'editor[file="main.nr"]', read-only: false }
+  - click: { at: 'editor[file="main.nr"]/line[number="1"]', anchor: text-start }
+  - key: Home
+  - type: CTBEFORERUN
+  - expect: { at: 'editor[file="main.nr"]/line[number="1"]', text: { contains: CTBEFORERUN } }
+  - chord: Ctrl+F5
+    settle: false
+  - wait: { until: { at: window, mode: debug }, timeout: 60s }
+  - wait: { until: { at: 'toolbar/toolbar-button[label="stop-image"]', present: true }, timeout: 60s }
+  - wait: { until: { at: 'editor[file="main.nr"]', read-only: true }, timeout: 60s }
+  - click: 'toolbar/toolbar-button[label="stop-image"]'
+    settle: false
+  - wait: { until: { at: window, mode: edit }, timeout: 60s }
+  - wait: { until: { at: 'editor[file="main.nr"]/line[number="1"]', present: true }, timeout: 60s }
+  - expect: { at: 'editor[file="main.nr"]', read-only: false }
+  - click: { at: 'editor[file="main.nr"]/line[number="1"]', anchor: text-start }
+  - key: Home
+  - type: CTAFTERSTOP
+  - expect: { at: 'editor[file="main.nr"]/line[number="1"]', text: { contains: CTAFTERSTOP } }

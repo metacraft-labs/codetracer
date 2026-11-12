@@ -1,0 +1,37 @@
+scenario: 1
+name: editor/incremental-find-walks-and-keeps-the-match
+pack: codetracer
+summary: >-
+  Ctrl+F seeds the editor's find widget with the word at the caret; typing
+  finds, Enter walks to the next match, Escape closes the widget and keeps the
+  match selected; and the replay never moves.
+
+stage:
+  - use: record-program
+    with: { program: calc }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - wait: { until: call-trace.loaded, timeout: 120s }
+  - wait: { until: { at: 'editor[file="main.py"]/line[number="31"]', text: { contains: "return left + right" } }, timeout: 60s }
+  - expect: { at: 'editor[file="main.py"]', current-line: 1 }
+  # The caret inside `left` (line 31: `    return left + right`).
+  - click: { at: 'editor[file="main.py"]/line[number="31"]', anchor: column(14) }
+  - expect: { at: 'editor[file="main.py"]', assert: "caret-at(31)" }
+  - chord: Ctrl+f
+  - wait: { until: { at: 'editor[file="main.py"]', find-shown: true }, timeout: 20s }
+  - expect: { at: 'editor[file="main.py"]', find-query: left }
+  - type: right
+  - expect: { at: 'editor[file="main.py"]', find-query: right }
+  - wait: { until: { at: 'editor[file="main.py"]', find-matches: { contains: " of " } }, timeout: 10s }
+  - expect: { at: 'editor[file="main.py"]', selected-text: right, caret-line: 31 }
+  - key: Enter
+  - expect: { at: 'editor[file="main.py"]', selected-text: right, caret-line: 34 }
+  # Escape closes the widget and keeps the match.
+  - key: Esc
+  - expect: { at: 'editor[file="main.py"]', find-shown: false }
+  - expect: { at: 'editor[file="main.py"]', selected-text: right, caret-line: 34 }
+  # The replay did not move.
+  - expect: { at: 'editor[file="main.py"]', current-line: 1 }
+  - expect: { at: status-line, location: { matches: "main.py:1#" } }

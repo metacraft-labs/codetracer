@@ -1,0 +1,22 @@
+scenario: 1
+name: editor/multiclick-selects-caret-word-line
+pack: codetracer
+summary: >-
+  In the read-only editor a single click places a bare caret, a double click
+  selects the word and a triple click selects the whole line.
+
+stage:
+  - use: record-program
+    with: { program: src/db-backend/tests/fixtures/origin/python/simple_trivial_chain/main.py }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - wait: { until: { at: 'editor[file="main.py"]/line[number="8"]', text: "def main() -> None:" }, timeout: 60s }
+  - expect: { at: 'editor[file="main.py"]', read-only: true }
+  - click: { at: 'editor[file="main.py"]/line[number="8"]', anchor: column(3) }
+  - expect: { at: 'editor[file="main.py"]', caret-line: 8, selected-text: "", selection-count: 1 }
+  - click: { at: 'editor[file="main.py"]/line[number="8"]', anchor: column(3), count: 2 }
+  - expect: { at: 'editor[file="main.py"]', selected-text: def }
+  - click: { at: 'editor[file="main.py"]/line[number="8"]', anchor: column(3), count: 3 }
+  - expect: { at: 'editor[file="main.py"]', selected-text: "def main() -> None:\n" }

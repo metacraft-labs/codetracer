@@ -1,0 +1,39 @@
+scenario: 1
+name: editor/inline-breakpoint-by-shift-f9-and-menu
+pack: codetracer
+summary: >-
+  Shift+F9 at a caret on column 3 adds an inline breakpoint at column 3 and a
+  second press removes it; at column 1 it is a line breakpoint; the editor's
+  menu offers Add Inline Breakpoint with its chord (and Add breakpoint with
+  its gutter hint), adds one at the press, and then offers Remove Inline
+  Breakpoint, which removes it.
+
+stage:
+  - use: record-program
+    with: { program: src/db-backend/tests/fixtures/origin/python/simple_trivial_chain/main.py }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - wait: { until: { at: 'editor[file="main.py"]/line[number="8"]', text: "def main() -> None:" }, timeout: 60s }
+  - expect: { at: 'editor[file="main.py"]', read-only: true }
+  - click: { at: 'editor[file="main.py"]/line[number="8"]', anchor: caret(3) }
+  - chord: Shift+F9
+  - expect: { at: 'editor[file="main.py"]/line[number="8"]', glyph: breakpoint, inline-breakpoints: ["3"] }
+  - chord: Shift+F9
+  - expect: { at: 'editor[file="main.py"]/line[number="8"]', glyph: { one-of: ["", hint] }, inline-breakpoints: { count: 0 } }
+  - click: { at: 'editor[file="main.py"]/line[number="8"]', anchor: caret(1) }
+  - chord: Shift+F9
+  - expect: { at: 'editor[file="main.py"]/line[number="8"]', glyph: breakpoint, inline-breakpoints: { count: 0 } }
+  - chord: Shift+F9
+  - expect: { at: 'editor[file="main.py"]/line[number="8"]', glyph: { one-of: ["", hint] } }
+  - click: { at: 'editor[file="main.py"]/line[number="8"]', anchor: caret(3), button: right }
+  - wait: { until: { at: context-menu, present: true }, timeout: 10s }
+  - expect: { at: 'context-menu/menu-item[label="Add Inline Breakpoint"]', hint: Shift+F9 }
+  - expect: { at: 'context-menu/menu-item[label="Add breakpoint"]', hint: "<click left of the line number>" }
+  - click: 'context-menu/menu-item[label="Add Inline Breakpoint"]'
+  - expect: { at: 'editor[file="main.py"]/line[number="8"]', inline-breakpoints: { count: 1 } }
+  - click: { at: 'editor[file="main.py"]/line[number="8"]', anchor: caret(3), button: right }
+  - wait: { until: { at: context-menu, present: true }, timeout: 10s }
+  - click: 'context-menu/menu-item[label="Remove Inline Breakpoint"]'
+  - expect: { at: 'editor[file="main.py"]/line[number="8"]', inline-breakpoints: { count: 0 } }

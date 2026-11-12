@@ -1,4 +1,6 @@
 /**
+ * Ported to the scenario src/tests/scenarios/editor/context-menu-is-mode-dependent.yaml; kept as ci/test/editor-context-menu-modes.sh and the codetracer workflow run it.
+ *
  * THE EDITOR'S RIGHT-CLICK MENU IS THE MODE'S.
  *
  * Reported against noirstudio.dev: "I noticed that the right click menu content

@@ -1,4 +1,6 @@
 /**
+ * Ported to the scenario src/tests/scenarios/editor/multiclick-selects-caret-word-line.yaml (and the other editor/ multiclick, glyph and inline-breakpoint scenarios); kept as src/frontend/tui/tests/run-plat70g-multiclick-mutations.py grades it.
+ *
  * Multi-click selection, the glyph column, Alt+click and Shift+F9 on the desktop
  * (Editor-Pane.md MC.1 – MC.7, § Inline breakpoints), read back from Monaco on the
  * real app, a real `replay-server` and a real recording. No mocks.

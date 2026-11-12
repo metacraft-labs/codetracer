@@ -1,0 +1,30 @@
+scenario: 1
+name: editor/dimming-marks-only-untaken-branches
+pack: codetracer
+summary: >-
+  Stopped at shield.nr:34 inside calculate_damage, exactly one arm of its
+  if/else is dimmed as the branch the run did not take, and the unconditional
+  first statement (line 26), which ran to get there, is not.
+
+stage:
+  - use: record-program
+    with: { program: noir_space_ship }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 180s }
+  - wait: { until: { at: 'editor[file="main.nr"]', present: true }, timeout: 60s }
+  # shield.nr, opened through the palette, and a breakpoint on line 34.
+  - chord: Ctrl+p
+  - type: shield.nr
+  - wait: { until: { at: omnibox, assert: "offers(file, shield.nr)" }, timeout: 10s }
+  - key: Enter
+  - wait: { until: { at: 'editor[file="shield.nr"]/line[number="34"]', present: true }, timeout: 30s }
+  - click: { at: 'editor[file="shield.nr"]/line[number="34"]', anchor: glyph }
+  - wait: { until: { at: 'editor[file="shield.nr"]/line[number="34"]', glyph: breakpoint }, timeout: 10s }
+  - click: 'toolbar/toolbar-button[label="continue-image"]'
+    settle: false
+  - wait: { until: { at: 'editor[file="shield.nr"]', current-line: 34 }, timeout: 120s }
+  - wait: { until: replay-idle, timeout: 60s }
+  - wait: { until: { at: 'editor[file="shield.nr"]', assert: "dims-one-of(29, 32)" }, timeout: 30s }
+  - expect: { at: 'editor[file="shield.nr"]/line[number="26"]', dimmed: false }

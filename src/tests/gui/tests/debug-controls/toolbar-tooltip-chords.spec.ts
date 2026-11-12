@@ -1,4 +1,6 @@
 /**
+ * Ported to the scenario src/tests/scenarios/debug-controls/tooltip-rest-raises-exactly-one.yaml (and the other debug-controls/*tooltip* scenarios); kept as history_cursor.nim and test_history_cursor.nim cite it, and it holds the chord-oracle self-check and the sub-delay "absent before the delay" reading, which the scenario binding cannot time.
+ *
  * RUN IT with
  *   just test-gui tests/debug-controls/toolbar-tooltip-chords.spec.ts
  * from a checkout that sits beside its sibling repos: `just test-gui`
