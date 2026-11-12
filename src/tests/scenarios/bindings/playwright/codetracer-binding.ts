@@ -543,10 +543,18 @@ function readSurface(): any {
         expanded: !!r.querySelector(".toggle-call .collapse-call-img"),
         arguments: text(r.querySelector(".call-args")),
       }, [["name", name]]);
+      const points: Record<string, { x: number; y: number }> = {};
       if (toggle && vis(toggle)) {
         const tb = toggle.getBoundingClientRect();
-        callNode.anchors = { points: { expander: { x: tb.left + tb.width / 2, y: tb.top + tb.height / 2 } } };
+        points.expander = { x: tb.left + tb.width / 2, y: tb.top + tb.height / 2 };
       }
+      // the call's name, where a click activates it
+      const nameEl = r.querySelector(".call-text") as HTMLElement | null;
+      if (nameEl && vis(nameEl)) {
+        const nb = nameEl.getBoundingClientRect();
+        points.name = { x: nb.left + Math.min(nb.width / 2, 40), y: nb.top + nb.height / 2 };
+      }
+      callNode.anchors = { points };
       ct.children.push(callNode);
     }
     root.children.push(ct);
@@ -789,8 +797,13 @@ function readSurfacePw1(root: any): void {
         styled: l.querySelector("span") !== null,
       }, [["text", t]]));
     }
-    for (const b of Array.from(bp.querySelectorAll(".build-header-controls .build-ctrl-btn")) as HTMLElement[]) {
-      build.children.push(button(b, b.getAttribute("title") ?? ""));
+    // the header's controls, by what they are (`BuildControlTitles`, their
+    // titles; a tooltip can take a title off while the pointer rests on it)
+    for (const [cls, label] of [["build-run-btn", "Run build (no re-record)"], ["build-stop-btn", "Stop build"],
+                                ["build-clear-btn", "Clear build output"], ["build-scroll-btn", "Toggle auto-scroll"]]) {
+      for (const b of Array.from(bp.querySelectorAll(`.build-header-controls .${cls}`)) as HTMLElement[]) {
+        build.children.push(button(b, label));
+      }
     }
     root.children.push(build);
   }
@@ -872,8 +885,13 @@ function readSurfacePw1(root: any): void {
         "visible-lines": Math.max(1, Math.round(inner / lh)),
       }));
     }
-    for (const b of Array.from(aa.querySelectorAll(".agent-start-button, .agent-stop-button, .agent-settings-button")) as HTMLElement[]) {
-      if (vis(b)) pane.children.push(button(b, b.getAttribute("title") ?? ""));
+    // named by what they are (their `title` is the same words, but a tooltip
+    // can take it off the element while the pointer rests on it)
+    for (const [cls, label] of [["agent-start-button", "Send"], ["agent-stop-button", "Stop"],
+                                ["agent-settings-button", "Agent settings"]]) {
+      for (const b of Array.from(aa.querySelectorAll(`.${cls}`)) as HTMLElement[]) {
+        if (vis(b)) pane.children.push(button(b, label));
+      }
     }
     // each message, by its place in the conversation (1-based)
     (Array.from(aa.querySelectorAll(".msg-content")) as HTMLElement[]).forEach((m, i) => {
@@ -1028,7 +1046,8 @@ function readSurfacePw1(root: any): void {
       const mid = ln.y + ln.h / 2;
       const inRow = (g: any) => g.x >= ed.x && g.x <= ed.x + ed.w && mid >= g.top - 1 && mid <= g.bottom + 1;
       ln.props.diagnostic = glyphs.find(inRow)?.sev ?? "none";
-      const sq = squiggles.filter((g: any) => g.x >= ed.x && g.x <= ed.x + ed.w && g.bottom >= ln.y && g.top <= ln.y + ln.h);
+      const sq = squiggles.filter((g: any) => g.x >= ed.x && g.x <= ed.x + ed.w &&
+        (g.top + g.bottom) / 2 >= ln.y && (g.top + g.bottom) / 2 < ln.y + ln.h);
       ln.props.squiggle = sq.some((g: any) => g.sev === "error") ? "error" : sq[0]?.sev ?? "none";
     }
   }

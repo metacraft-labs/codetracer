@@ -1,0 +1,31 @@
+scenario: 1
+name: agent-activity-deepreview/test-run-summary
+pack: codetracer
+summary: >-
+  A `ct test` run in the review's session renders as one summary card — its
+  title and pass / fail / errored counts, never the raw event stream — that
+  expands to its tests in order.
+
+stage:
+  - use: review-dataset
+    with: { variant: test-run }
+  - use: open-review
+
+steps:
+  - wait: { until: { at: vcs, present: true }, timeout: 60s }
+  # the window has finished loading the review
+  - wait: { until: settled, timeout: 30s }
+  - wait: { until: { at: agent-activity, test-runs: 1 }, timeout: 30s }
+  - expect: { at: agent-activity/test-run-card, status: { contains: "1 passed" } }
+  - expect: { at: agent-activity/test-run-card, status: { contains: "1 failed" } }
+  - expect: { at: agent-activity/test-run-card, status: { contains: "1 errored" } }
+  - expect: { at: agent-activity/test-run-card, title: { contains: "ct-mcr" } }
+  - expect: { at: agent-activity, assert: 'silent-about("schemaVersion")' }
+  - expect: { at: agent-activity, assert: 'silent-about("recording-created")' }
+  - expect: { at: agent-activity, assert: 'says("Recording the calculator tests")' }
+  - expect: { at: agent-activity, assert: 'says("One test fails and one could not be recorded.")' }
+  - expect: { at: agent-activity, test-rows: 0 }
+  - click: { at: agent-activity/test-run-card, anchor: header }
+  - wait: { until: { at: agent-activity, test-rows: 3 }, timeout: 15s }
+  - expect: { at: agent-activity/test-run-card, rows: [test_add, test_sub, test_mul] }
+  - expect: { at: agent-activity/test-run-card, statuses: [passed, failed, errored] }

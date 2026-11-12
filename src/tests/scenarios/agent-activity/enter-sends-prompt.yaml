@@ -1,0 +1,32 @@
+scenario: 1
+name: agent-activity/enter-sends-prompt
+pack: codetracer
+summary: >-
+  Enter in the Agent Activity prompt sends it and clears the box (the
+  stand-in agent refuses it, which shows it arrived); after that finished
+  turn, Enter sends the next prompt and it is answered.
+
+stage:
+  - use: record-program
+    with: { program: py_console_logs/main.py }
+  - use: stub-agent
+    with: { agent: refusing }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - click: { at: 'pane-tab[label="AGENT ACTIVITY"]' }
+  - wait: { until: { at: agent-activity/agent-prompt, present: true }, timeout: 30s }
+  - wait: { until: agent-session-open, timeout: 60s }
+  - click: { at: agent-activity/agent-prompt }
+  - type: "Explain this trace"
+  - expect: { at: agent-activity/agent-prompt, value: "Explain this trace" }
+  - key: Enter
+  - wait: { until: { at: agent-activity, failed-turns: 1 }, timeout: 30s }
+  - expect: { at: agent-activity/agent-prompt, value: "" }
+  - expect: { at: 'agent-activity/panel-button[label="Send"]', present: true }
+  - click: { at: agent-activity/agent-prompt }
+  - type: "Try again"
+  - key: Enter
+  - wait: { until: { at: agent-activity, assert: 'says("Second turn answered after the refusal.")' }, timeout: 30s }
+  - expect: { at: agent-activity/agent-prompt, value: "" }

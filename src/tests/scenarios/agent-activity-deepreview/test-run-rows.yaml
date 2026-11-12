@@ -1,0 +1,44 @@
+scenario: 1
+name: agent-activity-deepreview/test-run-rows
+pack: codetracer
+summary: >-
+  In an expanded `ct test` run, a recorded test offers Open recording and
+  Open in new tab; a failed test with no recording offers nothing and shows
+  its output; a test whose recording failed shows the diagnostics and
+  offers no trace.
+
+stage:
+  - use: review-dataset
+    with: { variant: test-run }
+  - use: open-review
+
+steps:
+  - wait: { until: { at: vcs, present: true }, timeout: 60s }
+  # the window has finished loading the review
+  - wait: { until: settled, timeout: 30s }
+  - wait: { until: { at: agent-activity, test-runs: 1 }, timeout: 30s }
+  - click: { at: agent-activity/test-run-card, anchor: header }
+  - wait: { until: { at: agent-activity, test-rows: 3 }, timeout: 15s }
+
+  - beat: recorded
+    steps:
+      - expect: { at: 'agent-activity/test-run-card/test-row[name="test_add"]', has-actions: true }
+      - expect: { at: 'agent-activity/test-run-card/test-row[name="test_add"]/panel-button[label="Open recording"]', present: true }
+      - expect: { at: 'agent-activity/test-run-card/test-row[name="test_add"]/panel-button[label="Open in new tab"]', present: true }
+
+  - beat: not-recorded
+    steps:
+      - expect: { at: 'agent-activity/test-run-card/test-row[name="test_sub"]', outcome: failed, has-actions: false }
+      - click: { at: 'agent-activity/test-run-card/test-row[name="test_sub"]', anchor: header }
+      - wait: { until: { at: 'agent-activity/test-run-card/test-row[name="test_sub"]', expanded: true }, timeout: 5s }
+      - expect: { at: 'agent-activity/test-run-card/test-row[name="test_sub"]', output: { contains: "expected 1, got 2" } }
+
+  - beat: recording-failed
+    steps:
+      - expect: { at: 'agent-activity/test-run-card/test-row[name="test_mul"]', outcome: errored, has-actions: false }
+      - click: { at: 'agent-activity/test-run-card/test-row[name="test_mul"]', anchor: header }
+      - wait: { until: { at: 'agent-activity/test-run-card/test-row[name="test_mul"]', expanded: true }, timeout: 5s }
+      - expect: { at: 'agent-activity/test-run-card/test-row[name="test_mul"]', recording-failed: true }
+      - expect: { at: 'agent-activity/test-run-card/test-row[name="test_mul"]', diagnostic: { contains: "did not produce a non-empty .ct artifact" } }
+      - expect: { at: 'agent-activity/test-run-card/test-row[name="test_mul"]', output: { contains: "cannot open perf events" } }
+      - expect: { at: 'agent-activity/test-run-card/test-row[name="test_mul"]', has-actions: false }

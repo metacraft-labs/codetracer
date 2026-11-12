@@ -1,0 +1,36 @@
+scenario: 1
+name: agent-activity/stop-empties-follow-up
+pack: codetracer
+summary: >-
+  While a turn runs, a multi-line follow-up typed into the prompt is
+  emptied by Stop and the box shrinks back to one line; Send comes back.
+
+stage:
+  - use: record-program
+    with: { program: py_console_logs/main.py }
+  - use: stub-agent
+    with: { agent: refusing }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - click: { at: 'pane-tab[label="AGENT ACTIVITY"]' }
+  - wait: { until: { at: agent-activity/agent-prompt, present: true }, timeout: 30s }
+  - wait: { until: agent-session-open, timeout: 60s }
+  - click: { at: agent-activity/agent-prompt }
+  # The stand-in holds a prompt carrying this marker until it is cancelled.
+  - type: "Explain [hold this turn]"
+  - key: Enter
+  - wait: { until: { at: 'agent-activity/panel-button[label="Stop"]', present: true }, timeout: 30s }
+  - click: { at: agent-activity/agent-prompt }
+  - type: "follow-up"
+  - chord: Shift+Enter
+  - type: "second line"
+  - chord: Shift+Enter
+  - type: "third line"
+  - expect: { at: agent-activity/agent-prompt, value: "follow-up\nsecond line\nthird line" }
+  - wait: { until: { at: agent-activity/agent-prompt, visible-lines: { gt: 1 } }, timeout: 5s }
+  - click: { at: 'agent-activity/panel-button[label="Stop"]' }
+  - wait: { until: { at: agent-activity/agent-prompt, value: "" }, timeout: 30s }
+  - wait: { until: { at: agent-activity/agent-prompt, visible-lines: 1 }, timeout: 5s }
+  - wait: { until: { at: 'agent-activity/panel-button[label="Send"]', present: true }, timeout: 30s }

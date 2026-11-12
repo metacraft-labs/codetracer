@@ -3,9 +3,10 @@
 # Playwright review suite installs as `default_edit_layout.json`
 # (`editLayoutPath` in `lib/fixtures.ts`, seeded by `lib/layout-reset.ts`), so
 # a review can be launched over a layout a PREVIOUS edit-mode session left
-# behind.  Its consumer is
-# `agent-activity-deepreview.spec.ts`, "the third pillar survives a persisted
-# edit layout".
+# behind.  Its consumer is the scenario
+# `src/tests/scenarios/agent-activity-deepreview/review-over-saved-edit-layout.yaml`
+# ("the third pillar survives a persisted edit layout"), through the pack's
+# `plant-edit-layout` stage.
 #
 # The fixture is a GOLDEN FILE, not a scenario document: it must equal, byte
 # for byte after canonicalisation, what `index/window.onSaveConfig` writes when

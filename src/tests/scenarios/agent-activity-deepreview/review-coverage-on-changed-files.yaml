@@ -1,0 +1,20 @@
+scenario: 1
+name: agent-activity-deepreview/review-coverage-on-changed-files
+pack: codetracer
+summary: >-
+  A review reports per-file coverage on the VCS panel's Changed Files rows:
+  15/17 on main.rs, 5/7 on utils.rs, and no badge on config.rs, which the
+  dataset measured nothing for.
+
+stage:
+  - use: review-dataset
+    with: { variant: plain }
+  - use: open-review
+
+steps:
+  - wait: { until: { at: vcs, present: true }, timeout: 60s }
+  - wait: { until: settled, timeout: 30s }
+  - wait: { until: { at: vcs, count: 3 }, timeout: 30s }
+  - expect: { at: 'vcs/changed-file[name="main.rs"]', coverage: "15/17" }
+  - expect: { at: 'vcs/changed-file[name="utils.rs"]', coverage: "5/7" }
+  - expect: { at: 'vcs/changed-file[name="config.rs"]', coverage: "" }

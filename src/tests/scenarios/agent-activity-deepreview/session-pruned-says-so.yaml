@@ -1,0 +1,22 @@
+scenario: 1
+name: agent-activity-deepreview/session-pruned-says-so
+pack: codetracer
+summary: >-
+  A review whose referenced session the agent no longer has shows one notice
+  naming the session and the agent's reason, and no messages; the review
+  itself is unaffected.
+
+stage:
+  - use: review-dataset
+    with: { variant: session-pruned }
+  - use: open-review
+
+steps:
+  - wait: { until: { at: vcs, present: true }, timeout: 60s }
+  # the window has finished loading the review
+  - wait: { until: settled, timeout: 30s }
+  - wait: { until: { at: agent-activity, notices: 1 }, timeout: 30s }
+  - expect: { at: agent-activity, notice: { contains: "session-pruned" } }
+  - expect: { at: agent-activity, notice: { contains: "unknown session" } }
+  - expect: { at: agent-activity, messages: { count: 0 } }
+  - expect: { at: vcs, stats: { contains: "3 files" } }

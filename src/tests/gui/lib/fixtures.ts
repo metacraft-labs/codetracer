@@ -489,8 +489,8 @@ interface CodetracerOptions {
    * (`CODETRACER_HOME`, `XDG_CONFIG_HOME`, …) are applied after these and
    * cannot be overridden from here.
    *
-   * #862: `agent-activity/acp_prompt_failure.spec.ts` uses it to put a stub
-   * `codex-acp` first on the app's `PATH`.
+   * #862: `agent-activity/enter_submits_prompt.spec.ts` uses it to put a
+   * stub `codex-acp` first on the app's `PATH`.
    */
   launchEnv: Record<string, string>;
   /**

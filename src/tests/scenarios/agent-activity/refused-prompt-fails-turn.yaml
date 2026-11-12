@@ -1,0 +1,48 @@
+scenario: 1
+name: agent-activity/refused-prompt-fails-turn
+pack: codetracer
+summary: >-
+  A prompt the agent refuses marks the turn failed with a red X and the
+  agent's own message, loading stops (Send comes back), and the next prompt
+  runs and is answered (codetracer#862). The agent is a stand-in that
+  refuses the first prompt with the error a real one sent.
+
+stage:
+  - use: record-program
+    with: { program: py_console_logs/main.py }
+  - use: stub-agent
+    with: { agent: refusing }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - click: { at: 'pane-tab[label="AGENT ACTIVITY"]' }
+  - wait: { until: { at: agent-activity/agent-prompt, present: true }, timeout: 30s }
+  - wait: { until: agent-session-open, timeout: 60s }
+
+  - beat: refused
+    narration: { text: "The agent refuses the prompt: the turn fails, with its reason." }
+    steps:
+      - click: { at: agent-activity/agent-prompt }
+      - type: "Explain this trace"
+      - click: { at: 'agent-activity/panel-button[label="Send"]' }
+      - wait: { until: { at: agent-activity, failed-turns: 1 }, timeout: 30s }
+      - expect: { at: agent-activity/failed-turn, icon: true }
+      - expect:
+          at: agent-activity/failed-turn
+          error: { contains: "The 'gpt-6.1-sol' model is not supported when using Codex with a ChatGPT account." }
+      - expect: { at: agent-activity/failed-turn, error: { contains: "Internal error" } }
+      - expect: { at: agent-activity, busy: false }
+      - expect: { at: 'agent-activity/panel-button[label="Stop"]', absent: true }
+      - expect: { at: 'agent-activity/panel-button[label="Send"]', present: true }
+      - capture: { name: refused-turn }
+
+  - beat: next-prompt
+    narration: { text: "The session survives: the next prompt is answered." }
+    steps:
+      - click: { at: agent-activity/agent-prompt }
+      - type: "Try again"
+      - click: { at: 'agent-activity/panel-button[label="Send"]' }
+      - wait: { until: { at: agent-activity, assert: 'says("Second turn answered after the refusal.")' }, timeout: 30s }
+      - expect: { at: agent-activity, failed-turns: 1 }
+      - wait: { until: { at: 'agent-activity/panel-button[label="Stop"]', absent: true }, timeout: 30s }

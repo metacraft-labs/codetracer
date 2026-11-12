@@ -1,0 +1,27 @@
+scenario: 1
+name: agent-activity-deepreview/review-focuses-the-pillar
+pack: codetracer
+summary: >-
+  A review opens with the AGENT ACTIVITY panel present once and in front of
+  its stack, in the editor layout (no CALLTRACE), and the panel carries no
+  coverage roll-up and claims nothing about a run it never saw.
+
+stage:
+  - use: review-dataset
+    with: { variant: plain }
+  - use: open-review
+
+steps:
+  - wait: { until: { at: vcs, present: true }, timeout: 60s }
+  # the window has finished loading the review
+  - wait: { until: settled, timeout: 30s }
+  - wait: { until: { at: window, assert: 'in-front("AGENT ACTIVITY")' }, timeout: 30s }
+  # one AGENT ACTIVITY tab (the locator resolves to exactly one), in front
+  - expect: { at: 'pane-tab[label="AGENT ACTIVITY"]', active: true }
+  - expect: { at: window, assert: 'lacks-pane("CALLTRACE")' }
+  - wait: { until: { at: agent-activity, present: true }, timeout: 30s }
+  - expect: { at: agent-activity, roll-up: 0 }
+  - expect: { at: agent-activity, assert: 'never-says("all passing")' }
+  - expect: { at: agent-activity, assert: 'never-says("0/0")' }
+  - expect: { at: agent-activity, assert: 'never-says(" 0 passed")' }
+  - expect: { at: agent-activity, assert: 'never-says("83.3%")' }

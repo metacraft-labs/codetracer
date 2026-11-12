@@ -1,0 +1,25 @@
+scenario: 1
+name: agent-activity-deepreview/test-run-open-recording
+pack: codetracer
+summary: >-
+  Open recording on a recorded test goes through the trace-open path: with
+  no trace at the folder the run reported, the status bar says "No trace
+  found at" that folder.
+
+stage:
+  - use: review-dataset
+    with: { variant: test-run }
+  - use: open-review
+
+steps:
+  - wait: { until: { at: vcs, present: true }, timeout: 60s }
+  # the window has finished loading the review
+  - wait: { until: settled, timeout: 30s }
+  - wait: { until: { at: agent-activity, test-runs: 1 }, timeout: 30s }
+  - click: { at: agent-activity/test-run-card, anchor: header }
+  - wait: { until: { at: agent-activity, test-rows: 3 }, timeout: 15s }
+  - expect: { at: status-line, notifications: { count: 0 } }
+  - click: { at: 'agent-activity/test-run-card/test-row[name="test_add"]/panel-button[label="Open recording"]' }
+  - wait: { until: { at: status-line, notifications: { count: 1 } }, timeout: 15s }
+  - expect: { at: status-line, notifications: { contains: "No trace found at" } }
+  - expect: { at: status-line, notifications: { contains: "review-trace" } }

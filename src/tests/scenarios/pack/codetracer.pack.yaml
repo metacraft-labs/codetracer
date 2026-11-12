@@ -233,7 +233,7 @@ roles:
       # The call's arguments as drawn (`a=1, b=2`).
       arguments: text
     affordances: [click, double-click, context-click]
-    # `name`: the call's name (terminal batch)
+    # `name`: the call's name, where a click activates it.
     anchors: [expander, name]
 
   # The event log: the recording's output and events, in order.
@@ -286,7 +286,7 @@ roles:
     keys: [name]
     properties: { name: text, type: text, value: text, expanded: bool }
     affordances: [click, double-click, context-click]
-    # `name`: the call's name (terminal batch)
+    # `name`: the call's name, where a click activates it.
     anchors: [expander, name]
 
   # The breakpoints and tracepoints list.
@@ -344,6 +344,8 @@ roles:
       says(t): "message contains t"
       lacks(t): "not (message contains t)"
       notifies(t): "notifications contains t"
+      # No build verdict or progress ("Build succeeded", "Building…").
+      no-build-shown: "not (build-status contains \"Build\")"
 
   # The command palette / omnibox: a query field and its results.
   omnibox:
@@ -645,6 +647,8 @@ roles:
   problems-panel:
     properties: { count: int, errors: int, warnings: int, empty: bool, groups: int, where: text }
     children: { problem: many, panel-button: many }
+    assertions:
+      has-problem-at(path, location, severity): "some problem: problem.path contains path and problem.location contains location and problem.severity == severity"
 
   problem:
     keys: [message]

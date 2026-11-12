@@ -1,0 +1,43 @@
+scenario: 1
+name: agent-activity-deepreview/evidence-cards
+pack: codetracer
+summary: >-
+  Evidence tool calls in a review's session render as their own cards,
+  naming the dataset, its shape and the command; a missing dataset, a
+  failed command and an unreported one each say so and offer no Open.
+
+stage:
+  - use: review-dataset
+    with: { variant: evidence }
+  - use: open-review
+
+steps:
+  - wait: { until: { at: vcs, present: true }, timeout: 60s }
+  # the window has finished loading the review
+  - wait: { until: settled, timeout: 30s }
+  - wait: { until: { at: agent-activity, evidence-cards: 5 }, timeout: 30s }
+  - expect: { at: agent-activity, assert: 'says("Collecting the first review dataset")' }
+  - expect: { at: agent-activity, assert: 'says("The tokenizer change is ready to read.")' }
+
+  - beat: datasets
+    steps:
+      - expect: { at: 'agent-activity/evidence-card[dataset="iteration-1.json"]', kind: "Collected review evidence", shape: "2 files · a1b2c3d4e5f6..." }
+      - expect: { at: 'agent-activity/evidence-card[dataset="iteration-1.json"]', command: { contains: "ct review collect --repo . --diff main..HEAD" } }
+      - expect: { at: 'agent-activity/evidence-card[dataset="iteration-2.json"]', kind: "Handed over review evidence", shape: "1 file · a1b2c3d4e5f6..." }
+
+  - beat: missing
+    steps:
+      - expect: { at: 'agent-activity/evidence-card[dataset="gone.json"]', state: unavailable, has-actions: false, has-shape: false }
+      - expect: { at: 'agent-activity/evidence-card[dataset="gone.json"]', note: { contains: "could not be read" } }
+      - expect: { at: 'agent-activity/evidence-card[dataset="gone.json"]', note: { contains: "gone.json" } }
+      - expect: { at: 'agent-activity/evidence-card[dataset="gone.json"]', command: { contains: "ct review collect --repo . --diff main..HEAD" } }
+
+  - beat: failed-and-unreported
+    steps:
+      - expect: { at: 'agent-activity/evidence-card[dataset="failed.json"]', state: failed, has-actions: false }
+      - expect: { at: 'agent-activity/evidence-card[dataset="failed.json"]', note: "This command failed, so there is no review dataset to open." }
+      - expect: { at: 'agent-activity/evidence-card[dataset="failed.json"]', output: { contains: "found no recordings" } }
+      - expect: { at: 'agent-activity/evidence-card[dataset="failed.json"]', command: { contains: "ct review collect --repo . --diff main..HEAD" } }
+      - expect: { at: 'agent-activity/evidence-card[dataset="pending.json"]', state: unreported, has-actions: false }
+      - expect: { at: 'agent-activity/evidence-card[dataset="pending.json"]', note: "No outcome has been reported for this command yet." }
+      - expect: { at: 'agent-activity/evidence-card[dataset="pending.json"]', command: { contains: "ct review collect --repo . --diff main..HEAD" } }
