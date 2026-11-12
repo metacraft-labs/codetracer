@@ -8195,6 +8195,9 @@ proc handleTopHover(r: GpuiRenderer; x, y: int) =
       editorScrollbarShown = over
       if openArm.isNil: redrawReplayEditor(r)
       else: redrawEditor()
+      # The rows are new elements: a press after the pointer came to rest
+      # over them must find them wired, as after `redrawAfterPointer`.
+      wireClicks(r)
   var control = -1
   var tool = -1
   var tab = -1
