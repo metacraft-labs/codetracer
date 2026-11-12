@@ -1,0 +1,29 @@
+scenario: 1
+name: breakpoints/column-breakpoint-replaces-the-lines-column
+pack: codetracer
+summary: >-
+  A second inline breakpoint on a line that already has one replaces its
+  column (one per line), and Continue halts at the new column.
+
+stage:
+  - use: record-program
+    with: { program: js_column_breakpoints/program.js }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - click: 'toolbar/toolbar-button[label="run-to-entry-image"]'
+    settle: false
+  - wait: { until: { at: 'editor[file="program.js"]', current-line: 1 }, timeout: 60s }
+  - wait: { until: replay-idle, timeout: 60s }
+  - click: { at: 'editor[file="program.js"]/line[number="1"]', anchor: caret(23) }
+  - chord: Shift+F9
+  - expect: { at: 'editor[file="program.js"]/line[number="1"]', inline-breakpoints: ["23"] }
+  - click: { at: 'editor[file="program.js"]/line[number="1"]', anchor: caret(12) }
+  - chord: Shift+F9
+  - expect: { at: 'editor[file="program.js"]/line[number="1"]', inline-breakpoints: ["12"] }
+  - click: 'toolbar/toolbar-button[label="continue-image"]'
+    settle: false
+  - wait: { until: { at: variables, assert: 'value-of(a, "1")' }, timeout: 60s }
+  - expect: { at: 'editor[file="program.js"]', current-line: 1 }
+  - expect: { at: 'variables/variable[name="b"]', value: { contains: undefined } }

@@ -1,0 +1,24 @@
+scenario: 1
+name: call-trace/move-keeps-selection
+pack: codetracer
+summary: >-
+  After jumping to `main` from the call trace and stepping Next, a call-trace
+  row is still marked selected.
+
+stage:
+  - use: record-program
+    with: { program: c_sudoku_solver/main.c }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 180s }
+  - click: 'pane-tab[label="CALLTRACE"]'
+  - wait: { until: { at: 'call-trace/call[name="main"]', present: true }, timeout: 120s }
+  - click: 'call-trace/call[name="main"]'
+    settle: false
+  - wait: { until: { at: 'call-trace/call[name="main"]', selected: true }, timeout: 30s }
+  - wait: { until: replay-idle, timeout: 60s }
+  - click: 'toolbar/toolbar-button[label="next-image"]'
+    settle: false
+  - wait: { until: replay-idle, timeout: 60s }
+  - wait: { until: { at: call-trace, assert: has-selected-call }, timeout: 30s }

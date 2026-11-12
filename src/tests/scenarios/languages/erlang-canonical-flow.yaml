@@ -1,0 +1,50 @@
+scenario: 1
+name: languages/erlang-canonical-flow
+pack: codetracer
+summary: >-
+  The Erlang canonical_flow recording: the debug controls are on the
+  toolbar; run to entry shows canonical_flow.erl stopped on a line; the call trace shows
+  canonical_flow calls and the event log has rows; stepping reveals A, B, SumVal, Doubled, FinalResult
+  with FinalResult = 94; and Next moves the line.
+
+stage:
+  - use: record-program
+    with: { program: ../codetracer-beam-recorder/test-programs/erlang/canonical_flow/src/canonical_flow.erl }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 180s }
+  - expect: { at: 'toolbar/toolbar-button[label="continue-image"]', present: true }
+  - expect: { at: 'toolbar/toolbar-button[label="next-image"]', present: true }
+  - expect: { at: 'toolbar/toolbar-button[label="step-in-image"]', present: true }
+  - expect: { at: 'toolbar/toolbar-button[label="reverse-next-image"]', present: true }
+  - expect: { at: 'toolbar/toolbar-button[label="run-to-entry-image"]', present: true }
+  - click: 'toolbar/toolbar-button[label="run-to-entry-image"]'
+    settle: false
+  - wait: { until: { at: status-line, location: { contains: canonical_flow.erl } }, timeout: 60s }
+  - wait: { until: { at: 'editor[file="canonical_flow.erl"]', current-line: { gt: 0 } }, timeout: 60s }
+  - expect: { at: 'editor[file="canonical_flow.erl"]', assert: 'shows-text("->")' }
+  - wait: { until: { at: call-trace, assert: 'has-call-containing("canonical_flow")' }, timeout: 30s }
+  - wait: { until: event-log.loaded, timeout: 30s }
+  - click: 'toolbar/toolbar-button[label="step-in-image"]'
+    settle: false
+  - wait: { until: replay-idle, timeout: 60s }
+  - click: 'toolbar/toolbar-button[label="next-image"]'
+    settle: false
+  - wait: { until: { at: variables, assert: 'has-variable("A")' }, timeout: 60s }
+  - click: 'toolbar/toolbar-button[label="next-image"]'
+    settle: false
+  - wait: { until: { at: variables, assert: 'has-variable("B")' }, timeout: 60s }
+  - click: 'toolbar/toolbar-button[label="next-image"]'
+    settle: false
+  - wait: { until: { at: variables, assert: 'has-variable("SumVal")' }, timeout: 60s }
+  - click: 'toolbar/toolbar-button[label="next-image"]'
+    settle: false
+  - wait: { until: { at: variables, assert: 'has-variable("Doubled")' }, timeout: 60s }
+  - click: 'toolbar/toolbar-button[label="next-image"]'
+    settle: false
+  - wait: { until: { at: variables, assert: 'value-of("FinalResult", "94")' }, timeout: 60s }
+  - click: 'toolbar/toolbar-button[label="next-image"]'
+    settle: false
+  - wait: { until: replay-idle, timeout: 60s }
+  - expect: { at: 'editor[file="canonical_flow.erl"]', current-line: { gt: 0 } }

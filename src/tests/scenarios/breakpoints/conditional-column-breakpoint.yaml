@@ -1,0 +1,32 @@
+scenario: 1
+name: breakpoints/conditional-column-breakpoint
+pack: codetracer
+summary: >-
+  A column breakpoint with the condition `i > 1`, set on the loop body at the
+  column where the line's first statement is recorded, makes Continue stop on
+  that line only once `i` is 2.
+
+stage:
+  - use: record-program
+    with: { program: js_column_condition/program.js }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - click: 'toolbar/toolbar-button[label="run-to-entry-image"]'
+    settle: false
+  - wait: { until: { at: 'editor[file="program.js"]', current-line: 1 }, timeout: 60s }
+  - wait: { until: replay-idle, timeout: 60s }
+  - click: { at: 'editor[file="program.js"]/line[number="2"]', anchor: caret(3) }
+  - chord: Shift+F9
+  - expect: { at: 'editor[file="program.js"]/line[number="2"]', inline-breakpoints: ["3"] }
+  - click: { at: 'editor[file="program.js"]/line[number="2"]', anchor: caret(3), button: right }
+  - wait: { until: { at: context-menu, present: true }, timeout: 10s }
+  - click: 'context-menu/menu-item[label="Edit breakpoint condition"]'
+  - wait: { until: { at: dialog, present: true }, timeout: 10s }
+  - type: "i > 1"
+  - key: Enter
+  - click: 'toolbar/toolbar-button[label="continue-image"]'
+    settle: false
+  - wait: { until: { at: 'editor[file="program.js"]', current-line: 2 }, timeout: 60s }
+  - wait: { until: { at: variables, assert: 'value-of(i, "2")' }, timeout: 60s }

@@ -1,0 +1,15 @@
+scenario: 1
+name: replay/portable-mcr-trace-replays
+pack: codetracer
+summary: >-
+  A portable MCR recording made on this platform (linux-x86_64, from
+  codetracer-example-recordings) replays: the status bar shows a location in
+  the recorded program's source.
+
+stage:
+  - use: open-recording
+    with: { recording: ../codetracer-example-recordings/mcr/linux-x86_64 }
+
+steps:
+  - wait: { until: replay-idle, timeout: 300s }
+  - wait: { until: { at: status-line, location: { contains: "source.c:" } }, timeout: 120s }

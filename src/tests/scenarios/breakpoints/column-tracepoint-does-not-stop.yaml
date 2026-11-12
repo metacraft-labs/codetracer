@@ -1,0 +1,26 @@
+scenario: 1
+name: breakpoints/column-tracepoint-does-not-stop
+pack: codetracer
+summary: >-
+  A tracepoint added from the editor's menu at the caret on `var b` is stored
+  at that column, and Continue does not stop there.
+
+stage:
+  - use: record-program
+    with: { program: js_column_breakpoints/program.js }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - click: 'toolbar/toolbar-button[label="run-to-entry-image"]'
+    settle: false
+  - wait: { until: { at: 'editor[file="program.js"]', current-line: 1 }, timeout: 60s }
+  - wait: { until: replay-idle, timeout: 60s }
+  - click: { at: 'editor[file="program.js"]/line[number="1"]', anchor: caret(12), button: right }
+  - wait: { until: { at: context-menu, present: true }, timeout: 10s }
+  - click: 'context-menu/menu-item[label="Add tracepoint"]'
+  - expect: { at: 'editor[file="program.js"]/line[number="1"]', tracepoint: true }
+  - click: 'toolbar/toolbar-button[label="continue-image"]'
+    settle: false
+  - wait: { until: replay-idle, timeout: 60s }
+  - wait: { until: { at: 'editor[file="program.js"]', current-line: { gt: 1 } }, timeout: 60s }

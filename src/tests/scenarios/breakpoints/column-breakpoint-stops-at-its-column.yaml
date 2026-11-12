@@ -1,0 +1,27 @@
+scenario: 1
+name: breakpoints/column-breakpoint-stops-at-its-column
+pack: codetracer
+summary: >-
+  A column breakpoint set with Shift+F9 at the caret on `var b` (line 1,
+  column 12) makes Continue stop there: on line 1 with `a` already assigned
+  and `b` not yet.
+
+stage:
+  - use: record-program
+    with: { program: js_column_breakpoints/program.js }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - click: 'toolbar/toolbar-button[label="run-to-entry-image"]'
+    settle: false
+  - wait: { until: { at: 'editor[file="program.js"]', current-line: 1 }, timeout: 60s }
+  - wait: { until: replay-idle, timeout: 60s }
+  - click: { at: 'editor[file="program.js"]/line[number="1"]', anchor: caret(12) }
+  - chord: Shift+F9
+  - expect: { at: 'editor[file="program.js"]/line[number="1"]', glyph: breakpoint, inline-breakpoints: ["12"] }
+  - click: 'toolbar/toolbar-button[label="continue-image"]'
+    settle: false
+  - wait: { until: { at: variables, assert: 'value-of(a, "1")' }, timeout: 60s }
+  - expect: { at: 'editor[file="program.js"]', current-line: 1 }
+  - expect: { at: 'variables/variable[name="b"]', value: { contains: undefined } }

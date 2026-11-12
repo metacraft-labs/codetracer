@@ -1,0 +1,23 @@
+scenario: 1
+name: breakpoints/glyph-breakpoint-is-line-only
+pack: codetracer
+summary: >-
+  A press in the glyph cell of line 2 makes a line breakpoint (no column
+  marker), and Continue stops on line 2.
+
+stage:
+  - use: record-program
+    with: { program: js_column_breakpoints/program.js }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - click: 'toolbar/toolbar-button[label="run-to-entry-image"]'
+    settle: false
+  - wait: { until: { at: 'editor[file="program.js"]', current-line: 1 }, timeout: 60s }
+  - wait: { until: replay-idle, timeout: 60s }
+  - click: { at: 'editor[file="program.js"]/line[number="2"]', anchor: glyph }
+  - expect: { at: 'editor[file="program.js"]/line[number="2"]', glyph: breakpoint, inline-breakpoints: { count: 0 } }
+  - click: 'toolbar/toolbar-button[label="continue-image"]'
+    settle: false
+  - wait: { until: { at: 'editor[file="program.js"]', current-line: 2 }, timeout: 60s }

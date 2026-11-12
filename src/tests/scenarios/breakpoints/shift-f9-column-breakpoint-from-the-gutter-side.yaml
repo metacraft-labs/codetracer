@@ -1,0 +1,33 @@
+scenario: 1
+name: breakpoints/shift-f9-column-breakpoint-from-the-gutter-side
+pack: codetracer
+summary: >-
+  Shift+F9 at a mid-line caret adds a column breakpoint whose marker sits at
+  that column and whose glyph is a breakpoint; Continue halts at that column;
+  a glyph press on another line is line-only and Continue then halts on that
+  line.
+
+stage:
+  - use: record-program
+    with: { program: js_column_breakpoints/program.js }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - click: 'toolbar/toolbar-button[label="run-to-entry-image"]'
+    settle: false
+  - wait: { until: { at: 'editor[file="program.js"]', current-line: 1 }, timeout: 60s }
+  - wait: { until: replay-idle, timeout: 60s }
+  - click: { at: 'editor[file="program.js"]/line[number="1"]', anchor: caret(23) }
+  - chord: Shift+F9
+  - expect: { at: 'editor[file="program.js"]/line[number="1"]', glyph: breakpoint, inline-breakpoints: ["23"] }
+  - click: 'toolbar/toolbar-button[label="continue-image"]'
+    settle: false
+  - wait: { until: { at: variables, assert: 'value-of(b, "2")' }, timeout: 60s }
+  - expect: { at: 'editor[file="program.js"]', current-line: 1 }
+  - expect: { at: 'variables/variable[name="c"]', value: { contains: undefined } }
+  - click: { at: 'editor[file="program.js"]/line[number="2"]', anchor: glyph }
+  - expect: { at: 'editor[file="program.js"]/line[number="2"]', glyph: breakpoint, inline-breakpoints: { count: 0 } }
+  - click: 'toolbar/toolbar-button[label="continue-image"]'
+    settle: false
+  - wait: { until: { at: 'editor[file="program.js"]', current-line: 2 }, timeout: 60s }
