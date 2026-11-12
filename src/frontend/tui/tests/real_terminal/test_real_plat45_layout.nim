@@ -1,3 +1,12 @@
+## Ported to the scenarios
+## src/tests/scenarios/terminal/layout-default-at-80x24.yaml,
+## src/tests/scenarios/terminal/layout-default-at-120x40.yaml,
+## src/tests/scenarios/terminal/layout-default-at-200x50.yaml,
+## src/tests/scenarios/terminal/layout-corrupt-document-reported.yaml,
+## src/tests/scenarios/terminal/layout-dock-and-reset.yaml; kept as the subject
+## of its mutation harness (run-plat45-layout-mutations.py,
+## run-plat47-parity-mutations.py).
+##
 ## test_real_plat45_layout.nim — PLAT-45, Tier 2. **The shipped terminal
 ## binary, on a real PTY: the shared default, its fold, and the layout the
 ## terminal remembers — its own and nobody else's.**

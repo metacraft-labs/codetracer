@@ -1,3 +1,11 @@
+## Ported in part to the scenarios
+## src/tests/scenarios/terminal/keymap-selector-select-by-command.yaml,
+## src/tests/scenarios/terminal/keymap-selector-unknown-model-refused.yaml,
+## src/tests/scenarios/terminal/keymap-selector-sourced-mappings.yaml; kept as
+## named by ci/test/editor-model-case-floor.sh,
+## src/frontend/tui/tests/test_plat43_keymap_selector.nim; and for its cases no
+## scenario ports yet.
+##
 ## test_real_keymap_selector.nim — PLAT-43, Tier 2.
 ##
 ## Run (needs `just build-tui`):

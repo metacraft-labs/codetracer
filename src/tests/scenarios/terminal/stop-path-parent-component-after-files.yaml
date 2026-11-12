@@ -1,0 +1,19 @@
+scenario: 1
+name: terminal/stop-path-parent-component-after-files
+pack: codetracer
+summary: >-
+  A file opened from the Files pane first, then `add` clicked in the call
+  trace: the editor shows the call's file, not the one opened before.
+stage:
+  - use: record-program
+    with: { program: multi_root/app/main.py }
+  - use: open-recording
+    with: { width: 200, height: 50 }
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - click: { at: 'filesystem/file-node[name="extra.py"]' }
+  - wait: { until: { at: 'editor[file="extra.py"]', assert: 'shows-text("result = value * factor")' }, timeout: 30s }
+  - click: { at: 'call-trace/call[name="add"]' }
+  - wait: { until: { at: 'editor[file="helpers.py"]', assert: 'shows-text("return left + right")' }, timeout: 30s }
+  - expect: { at: 'editor[file="extra.py"]', absent: true }
+  - expect: { at: status-line, message: { contains: "helpers.py" } }

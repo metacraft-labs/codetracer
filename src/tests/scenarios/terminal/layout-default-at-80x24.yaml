@@ -1,0 +1,20 @@
+scenario: 1
+name: terminal/layout-default-at-80x24
+pack: codetracer
+summary: >-
+  At 80x24 the shared default layout folds two panes away and says so
+  ([folded 2]): Variables and the Event Log are shown, Files and the Call
+  Trace are not, and there is no Constraints pane.
+stage:
+  - use: record-program
+    with: { program: calc }
+  - use: open-recording
+    with: { width: 80, height: 24 }
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - expect: { at: status-line, assert: 'says("[folded 2]")' }
+  - expect: { at: 'pane-tab[label="Variables"]', present: true }
+  - expect: { at: 'pane-tab[label="Event Log"]', present: true }
+  - expect: { at: 'pane-tab[label="Files"]', absent: true }
+  - expect: { at: 'pane-tab[label="Call Trace"]', absent: true }
+  - expect: { at: 'pane-tab[label="Constraints"]', absent: true }

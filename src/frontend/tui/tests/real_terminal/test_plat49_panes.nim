@@ -1,3 +1,16 @@
+## Ported in part to the scenarios
+## src/tests/scenarios/terminal/panes-call-trace-click-goes-to-the-call.yaml,
+## src/tests/scenarios/terminal/panes-call-trace-toggle.yaml,
+## src/tests/scenarios/terminal/panes-event-log-columns.yaml,
+## src/tests/scenarios/terminal/panes-footer-dock-label.yaml,
+## src/tests/scenarios/terminal/panes-footer-hover-previews.yaml,
+## src/tests/scenarios/terminal/panes-drop-zone-joins-the-stack.yaml; kept as
+## the subject of its mutation harness (run-plat49-chrome-mutations.py); named
+## by .agents/codebase-insights.txt, AGENTS.md,
+## src/frontend/gpui/tests/test_gpui_welcome_panel_scroll.nim,
+## src/frontend/gpui/tests/test_plat48_gpui_plan.nim and others; and for its
+## cases no scenario ports yet.
+##
 ## test_plat49_panes.nim — PLAT-49 part B, Tier 2. **The terminal's panes as
 ## the user asked for them on 2026-10-01**, read back from a real terminal: the
 ## shipped `codetracer-tui` on the `calc` recording in a real PTY (TermAssert

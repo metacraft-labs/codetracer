@@ -1,3 +1,9 @@
+## Ported in part to the scenario
+## src/tests/scenarios/terminal/grep-vim-prompt.yaml; kept as the subject of its
+## mutation harness (run-plat70d-grep-mutations.py); named by
+## src/frontend/tui/tests/real_terminal/test_plat57_find_in_files_pty.nim; and
+## for its cases no scenario ports yet.
+##
 ## test_plat70d_grep_pty.nim — PLAT-70 Part D (Find-And-Incremental-Search.md
 ## §5): **`:grep` and `Ctrl+Shift+F` on a real terminal.**
 ##

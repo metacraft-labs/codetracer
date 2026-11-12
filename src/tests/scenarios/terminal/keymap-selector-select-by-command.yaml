@@ -1,0 +1,24 @@
+scenario: 1
+name: terminal/keymap-selector-select-by-command
+pack: codetracer
+summary: >-
+  `:keymap vim` from the palette selects Vim — the status line says so and
+  shows Vim's mode — and the keys then act as Vim's: `x` deletes the
+  character under the caret.
+stage:
+  - use: write-project
+    with: { files: { doc.txt: "alpha beta\ngamma delta\n" } }
+  - use: open-project
+    with: { folder: $project, file: doc.txt, width: 160, height: 40 }
+steps:
+  - wait: { until: ready, timeout: 60s }
+  - wait: { until: { at: 'editor[file="doc.txt"]', assert: 'shows-text("alpha beta")' }, timeout: 20s }
+  - key: F1
+  - wait: { until: { at: status-line, assert: 'says("PALETTE ")' }, timeout: 10s }
+  - type: ":keymap vim"
+  - key: Enter
+  - wait: { until: { at: status-line, assert: 'says("keymap vim")' }, timeout: 10s }
+  - key: Esc
+  - wait: { until: { at: status-line, assert: 'says("NORMAL")' }, timeout: 10s }
+  - key: x
+  - wait: { until: { at: 'editor[file="doc.txt"]/line[number="1"]', text: "lpha beta" }, timeout: 10s }

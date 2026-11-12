@@ -1,0 +1,24 @@
+scenario: 1
+name: terminal/keymaps-switch-to-vim
+pack: codetracer
+summary: >-
+  `:keymap vim` changes what one keystroke sequence does to the document —
+  Vim: `dd` deletes the first line and `x` the next line's first character.
+stage:
+  - use: write-project
+    with: { files: { doc.txt: "alpha\n    beta\ngamma\n" } }
+  - use: open-project
+    with: { folder: $project, file: doc.txt, width: 160, height: 40 }
+steps:
+  - wait: { until: ready, timeout: 60s }
+  - wait: { until: { at: 'editor[file="doc.txt"]', assert: 'shows-text("alpha")' }, timeout: 20s }
+  - key: F1
+  - wait: { until: { at: status-line, assert: 'says("PALETTE ")' }, timeout: 10s }
+  - type: ":keymap vim"
+  - key: Enter
+  - wait: { until: { at: status-line, assert: 'says("keymap vim")' }, timeout: 10s }
+  - key: d
+  - key: d
+  - key: x
+  - wait: { until: { at: 'editor[file="doc.txt"]/line[number="1"]', text: "   beta" }, timeout: 10s }
+  - expect: { at: 'editor[file="doc.txt"]/line[number="2"]', text: "gamma" }

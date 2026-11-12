@@ -1,0 +1,26 @@
+scenario: 1
+name: terminal/edit-mode-opens-the-project
+pack: codetracer
+summary: >-
+  Started on a project in Edit mode, the terminal shows the file in an editor
+  tab over the working tree, the Files and Build & Run panes, the CUA [EDIT]
+  indicator and no Call Trace.
+stage:
+  - use: write-project
+    with:
+      files:
+        alpha.nim: "proc alpha() =\n  echo 1\n"
+  - use: open-project
+    with: { folder: $project, width: 170, height: 40 }
+steps:
+  - wait: { until: ready, timeout: 60s }
+  - wait: { until: { at: 'editor[file="alpha.nim"]', present: true }, timeout: 30s }
+  - expect: { at: window, mode: edit }
+  - expect: { at: status-line, message: { contains: "CUA [EDIT]" } }
+  - expect: { at: 'editor[file="alpha.nim"]', assert: 'shows-text("proc alpha() =")' }
+  - expect: { at: 'editor[file="alpha.nim"]', assert: 'shows-text("echo 1")' }
+  - expect: { at: 'pane-tab[label="the working tree"]', present: true }
+  - expect: { at: 'pane-tab[label="Files"]', present: true }
+  - expect: { at: 'pane-tab[label="Build & Run"]', present: true }
+  - expect: { at: 'pane-tab[label="Call Trace"]', absent: true }
+  - expect: { at: 'pane[title="Build & Run"]', assert: 'shows("No build has run.")' }

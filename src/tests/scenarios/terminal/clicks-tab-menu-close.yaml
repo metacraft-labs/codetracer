@@ -1,0 +1,25 @@
+scenario: 1
+name: terminal/clicks-tab-menu-close
+pack: codetracer
+summary: >-
+  A right click on a pane's tab opens the tab menu — Pin to Left, Bottom,
+  Right and Top, Close, Maximise container, in that order — and Close removes
+  the tab, leaving its neighbours.
+stage:
+  - use: record-program
+    with: { program: calc }
+  - use: open-recording
+    with: { width: 200, height: 50 }
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - click: { at: 'pane-tab[label="VCS"]', button: right }
+  - wait: { until: { at: context-menu, present: true }, timeout: 10s }
+  - expect: { at: 'context-menu/menu-item[label="Pin to Bottom"]', geometry: { below: 'context-menu/menu-item[label="Pin to Left"]' } }
+  - expect: { at: 'context-menu/menu-item[label="Pin to Right"]', geometry: { below: 'context-menu/menu-item[label="Pin to Bottom"]' } }
+  - expect: { at: 'context-menu/menu-item[label="Pin to Top"]', geometry: { below: 'context-menu/menu-item[label="Pin to Right"]' } }
+  - expect: { at: 'context-menu/menu-item[label="Close"]', geometry: { below: 'context-menu/menu-item[label="Pin to Top"]' } }
+  - expect: { at: 'context-menu/menu-item[label="Maximise container"]', geometry: { below: 'context-menu/menu-item[label="Close"]' } }
+  - click: { at: 'context-menu/menu-item[label="Close"]' }
+  - wait: { until: { at: 'pane-tab[label="VCS"]', absent: true }, timeout: 10s }
+  - expect: { at: context-menu, absent: true }
+  - expect: { at: 'pane-tab[label="Files"]', present: true }

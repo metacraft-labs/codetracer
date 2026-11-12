@@ -1,0 +1,25 @@
+scenario: 1
+name: terminal/keys-letters-step-in-the-read-only-editor
+pack: codetracer
+summary: >-
+  Under CUA, with the read-only editor focused by a click, `n` steps over and
+  `p` steps back; Ctrl+F opens the find field, which takes `n` into its query
+  instead of stepping.
+stage:
+  - use: record-program
+    with: { program: calc }
+  - use: open-recording
+    with: { width: 200, height: 50 }
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - click: { at: 'editor[file="main.py"]/line[number="11"]', anchor: "column(5)" }
+  - key: n
+  - wait: { until: { at: 'editor[file="main.py"]', assert: "stopped-at(2)" }, timeout: 30s }
+  - key: p
+  - wait: { until: { at: 'editor[file="main.py"]', assert: "stopped-at(1)" }, timeout: 30s }
+  - expect: { at: replay-position, tick: 1 }
+  - chord: Ctrl+F
+  - wait: { until: { at: status-line, message: { matches: "^/" } }, timeout: 10s }
+  - key: n
+  - wait: { until: { at: status-line, message: { matches: "^/n" } }, timeout: 10s }
+  - expect: { at: replay-position, tick: 1 }

@@ -1,0 +1,30 @@
+scenario: 1
+name: terminal/edit-find-in-files
+pack: codetracer
+summary: >-
+  In Edit mode Find in Files searches the project: `:grep print('main')` lists
+  the one matching line under its file, and F4 opens that file at the match
+  and says so on the status line.
+stage:
+  - use: write-project
+    with:
+      files:
+        README.md: "# readme\n"
+        src/main.py: "print('main')\n"
+        src/util.py: "def util():\n    return 1\n"
+  - use: open-project
+    with: { folder: $project, width: 160, height: 40 }
+steps:
+  - wait: { until: ready, timeout: 60s }
+  - chord: Ctrl+P
+  - type: ":grep print('main')"
+  - key: Enter
+  - wait:
+      until: { at: 'pane[title="FIND IN FILES"]', text: { contains: "1 result in 1 file" } }
+      timeout: 30s
+  - expect: { at: 'pane[title="FIND IN FILES"]', assert: 'lacks-row("needs a recording")' }
+  - expect: { at: 'pane[title="FIND IN FILES"]', assert: 'has-row("main.py · 1 match")' }
+  - key: F4
+  - wait: { until: { at: status-line, message: { contains: "main.py:1" } }, timeout: 30s }
+  - expect: { at: status-line, message: { contains: "opened " } }
+  - expect: { at: 'editor[file="main.py"]', assert: 'shows-text("print(''main'')")' }

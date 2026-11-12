@@ -1,0 +1,24 @@
+scenario: 1
+name: terminal/fit-event-log-wide-column-scrolls
+pack: codetracer
+summary: >-
+  The Event Log draws no horizontal scrollbar while its columns fit;
+  `:column-width output 300` widens the output column past the pane and a
+  bar appears; `:column-width output 20` fits it again and the bar goes.
+stage:
+  - use: record-program
+    with: { program: wide_lines/main.py }
+  - use: open-recording
+    with: { width: 200, height: 50 }
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - wait: { until: { at: 'pane[title="Event Log"]', assert: 'has-row("<<LEFT-EDGE>>")' }, timeout: 30s }
+  - expect: { at: 'pane[title="Event Log"]', hbar: false }
+  - chord: Ctrl+P
+  - type: ":column-width output 300"
+  - key: Enter
+  - wait: { until: { at: 'pane[title="Event Log"]', hbar: true }, timeout: 10s }
+  - chord: Ctrl+P
+  - type: ":column-width output 20"
+  - key: Enter
+  - wait: { until: { at: 'pane[title="Event Log"]', hbar: false }, timeout: 10s }

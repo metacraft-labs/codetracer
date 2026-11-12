@@ -1,0 +1,32 @@
+scenario: 1
+name: terminal/clicks-breakpoint-line-menu
+pack: codetracer
+summary: >-
+  On a breakpoint's line the editor menu offers Disable, Delete, Add Inline
+  Breakpoint, Delete breakpoints in file and Delete ALL breakpoints (and no
+  Add breakpoint); Disable greys the mark, and Delete ALL breakpoints removes
+  it and says so.
+stage:
+  - use: record-program
+    with: { program: calc }
+  - use: open-recording
+    with: { width: 200, height: 50 }
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - wait: { until: { at: 'editor[file="main.py"]', assert: "shows-line(31)" }, timeout: 30s }
+  - click: { at: 'editor[file="main.py"]/line[number="31"]', anchor: gutter }
+  - wait: { until: { at: 'editor[file="main.py"]/line[number="31"]', breakpoint: true }, timeout: 10s }
+  - click: { at: 'editor[file="main.py"]/line[number="31"]', anchor: text-end, button: right }
+  - wait: { until: { at: context-menu, present: true }, timeout: 10s }
+  - expect: { at: 'context-menu/menu-item[label="Delete breakpoint"]', geometry: { below: 'context-menu/menu-item[label="Disable breakpoint"]' } }
+  - expect: { at: 'context-menu/menu-item[label="Add Inline Breakpoint"]', geometry: { below: 'context-menu/menu-item[label="Delete breakpoint"]' } }
+  - expect: { at: 'context-menu/menu-item[label="Delete breakpoints in file"]', geometry: { below: 'context-menu/menu-item[label="Add Inline Breakpoint"]' } }
+  - expect: { at: 'context-menu/menu-item[label="Delete ALL breakpoints"]', geometry: { below: 'context-menu/menu-item[label="Delete breakpoints in file"]' } }
+  - expect: { at: context-menu, assert: 'lacks("Add breakpoint")' }
+  - click: { at: 'context-menu/menu-item[label="Disable breakpoint"]' }
+  - wait: { until: { at: status-line, assert: 'says("disabled the breakpoint at line 31")' }, timeout: 10s }
+  - click: { at: 'editor[file="main.py"]/line[number="31"]', anchor: text-end, button: right }
+  - wait: { until: { at: 'context-menu/menu-item[label="Enable breakpoint"]', present: true }, timeout: 10s }
+  - click: { at: 'context-menu/menu-item[label="Delete ALL breakpoints"]' }
+  - wait: { until: { at: status-line, assert: 'says("deleted the breakpoints")' }, timeout: 10s }
+  - expect: { at: 'editor[file="main.py"]/line[number="31"]', breakpoint: false }

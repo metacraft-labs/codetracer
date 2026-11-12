@@ -1,0 +1,26 @@
+scenario: 1
+name: terminal/clicks-files-open-and-fold
+pack: codetracer
+summary: >-
+  In the Files pane a click on a file opens it in the editor (its tab names
+  shared/helpers.py and the status line says it opened it); a click on a
+  folder collapses it, hiding its files, and a second click expands it.
+stage:
+  - use: record-program
+    with: { program: multi_root/app/main.py }
+  - use: open-recording
+    with: { width: 200, height: 50 }
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - expect: { at: 'pane-tab[label="shared/helpers.py"]', absent: true }
+  - click: { at: 'filesystem/file-node[name="helpers.py"]' }
+  - wait: { until: { at: 'editor[file="helpers.py"]', assert: 'shows-text("def add(left, right):")' }, timeout: 30s }
+  - expect: { at: 'pane-tab[label="shared/helpers.py"]', present: true }
+  - expect: { at: status-line, assert: 'says("opened ")' }
+  - expect: { at: 'filesystem/file-node[name="shared"]', kind: folder, expanded: true }
+  - click: { at: 'filesystem/file-node[name="shared"]' }
+  - wait: { until: { at: 'filesystem/file-node[name="shared"]', expanded: false }, timeout: 10s }
+  - expect: { at: 'filesystem/file-node[name="extra.py"]', absent: true }
+  - click: { at: 'filesystem/file-node[name="shared"]' }
+  - wait: { until: { at: 'filesystem/file-node[name="shared"]', expanded: true }, timeout: 10s }
+  - expect: { at: 'filesystem/file-node[name="extra.py"]', present: true }

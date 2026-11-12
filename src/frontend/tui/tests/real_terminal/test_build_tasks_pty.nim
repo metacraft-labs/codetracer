@@ -1,3 +1,10 @@
+## Ported in part to the scenarios
+## src/tests/scenarios/terminal/build-tasks-default-task-and-marks.yaml,
+## src/tests/scenarios/terminal/build-tasks-lone-file.yaml,
+## src/tests/scenarios/terminal/build-tasks-lone-file-declared-task.yaml; kept
+## as the subject of its mutation harness (run-build-residuals-mutations.py);
+## and for its cases no scenario ports yet.
+##
 ## test_build_tasks_pty.nim — Tier 3: **the shipped `codetracer-tui` runs a
 ## project's build task from `Ctrl+Shift+B`, and marks the build's
 ## diagnostics in its editor**, on a real terminal.

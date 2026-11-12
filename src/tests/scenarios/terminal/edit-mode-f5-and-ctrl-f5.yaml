@@ -1,0 +1,32 @@
+scenario: 1
+name: terminal/edit-mode-f5-and-ctrl-f5
+pack: codetracer
+summary: >-
+  A plain F5 is inert in Edit mode and says why; Ctrl+F5 switches to Debug
+  mode (the indicator moves, the Call Trace appears) and back to Edit mode
+  (the file and the Files pane again).
+stage:
+  - use: write-project
+    with:
+      files:
+        alpha.nim: "proc alpha() =\n  echo 1\n"
+  - use: open-project
+    with: { folder: $project, width: 170, height: 40 }
+steps:
+  - wait: { until: ready, timeout: 60s }
+  - wait: { until: { at: 'editor[file="alpha.nim"]', present: true }, timeout: 30s }
+  - key: F5
+  - wait: { until: { at: status-line, message: { contains: "needs a replay session" } }, timeout: 20s }
+  - expect: { at: status-line, message: { contains: "continue" } }
+  - expect: { at: status-line, message: { contains: "Ctrl+F5 switches" } }
+  - expect: { at: status-line, message: { contains: "CUA [EDIT]" } }
+  - chord: Ctrl+F5
+  - wait: { until: { at: status-line, message: { contains: "CUA [DEBUG]" } }, timeout: 20s }
+  - expect: { at: window, mode: debug }
+  - expect: { at: 'pane-tab[label="Call Trace"]', present: true }
+  - expect: { at: 'pane-tab[label="alpha.nim"]', absent: true }
+  - chord: Ctrl+F5
+  - wait: { until: { at: status-line, message: { contains: "CUA [EDIT]" } }, timeout: 20s }
+  - wait: { until: { at: 'editor[file="alpha.nim"]', present: true }, timeout: 20s }
+  - expect: { at: 'editor[file="alpha.nim"]', assert: 'shows-text("proc alpha() =")' }
+  - expect: { at: 'pane-tab[label="Files"]', present: true }

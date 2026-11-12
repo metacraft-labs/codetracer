@@ -1,0 +1,47 @@
+scenario: 1
+name: terminal/chrome-menu-cascades
+pack: codetracer
+summary: >-
+  The program menu is one root button: Alt+` drops its first level (File,
+  Edit, View, Build, Reset, Debug, Help); Right on Debug cascades its entries
+  beside the first level, not below it; Esc closes the cascade, then the
+  menu; a click on the button and on Debug does the same.
+stage:
+  - use: record-program
+    with: { program: calc }
+  - use: open-recording
+    with: { width: 200, height: 50 }
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - expect: { at: menu-bar/menu, label: Menu }
+  - chord: Alt+`
+  - wait: { until: { at: 'dropdown[level="1"]', present: true }, timeout: 10s }
+  - expect: { at: 'dropdown[level="1"]', count: 7 }
+  - expect:
+      at: 'dropdown[level="1"]'
+      assert: ['offers("File")', 'offers("Edit")', 'offers("View")', 'offers("Build")',
+               'offers("Reset")', 'offers("Debug")', 'offers("Help")']
+  - key: Down
+  - key: Down
+  - key: Down
+  - key: Down
+  - key: Down
+  - key: Right
+  - wait: { until: { at: 'dropdown[level="2"]', present: true }, timeout: 10s }
+  - expect: { at: 'dropdown[level="2"]', assert: 'offers("Continue")' }
+  - expect: { at: 'dropdown[level="2"]', geometry: { right-of: 'dropdown[level="1"]' } }
+  - key: Esc
+  - wait: { until: { at: 'dropdown[level="2"]', absent: true }, timeout: 10s }
+  - expect: { at: 'dropdown[level="1"]', present: true }
+  - key: Esc
+  - wait: { until: { at: 'dropdown[level="1"]', absent: true }, timeout: 10s }
+  - click: { at: 'menu-bar/menu[label="Menu"]' }
+  - wait: { until: { at: 'dropdown[level="1"]', present: true }, timeout: 10s }
+  - click: { at: 'dropdown[level="1"]/dropdown-item[label="Debug"]' }
+  - wait: { until: { at: 'dropdown[level="2"]', present: true }, timeout: 10s }
+  - expect: { at: 'dropdown[level="2"]', assert: 'offers("Continue")' }
+  - expect: { at: 'dropdown[level="2"]', geometry: { right-of: 'dropdown[level="1"]' } }
+  - key: Esc
+  - wait: { until: { at: 'dropdown[level="2"]', absent: true }, timeout: 10s }
+  - key: Esc
+  - wait: { until: { at: 'dropdown[level="1"]', absent: true }, timeout: 10s }

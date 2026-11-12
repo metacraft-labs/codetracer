@@ -1,0 +1,15 @@
+scenario: 1
+name: terminal/chrome-control-tooltip
+pack: codetracer
+summary: >-
+  The pointer over the Next control shows its tooltip — the label and its
+  chord, from the ViewModel — and the status line repeats it.
+stage:
+  - use: record-program
+    with: { program: calc }
+  - use: open-recording
+    with: { width: 200, height: 50 }
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - hover: { at: 'toolbar/toolbar-button[label="Next"]', for: 500ms }
+  - wait: { until: { at: status-line, assert: 'says("Next (")' }, timeout: 10s }

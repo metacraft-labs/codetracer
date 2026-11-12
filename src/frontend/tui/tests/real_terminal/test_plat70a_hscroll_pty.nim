@@ -1,3 +1,9 @@
+## Ported in part to the scenario
+## src/tests/scenarios/terminal/hscroll-caret-follow-end-and-home.yaml; kept as
+## the subject of its mutation harness (run-plat70a-hscroll-mutations.py); named
+## by src/tests/gui/tests/layout/plat70a-output-hscroll.spec.ts; and for its
+## cases no scenario ports yet.
+##
 ## test_plat70a_hscroll_pty.nim — PLAT-70 Part A (Horizontal-Overflow.md §4),
 ## the shipped `codetracer-tui` on a REAL pseudo-terminal (TermAssert: a real
 ## pty, the screen read back through libvterm), over a real recording of

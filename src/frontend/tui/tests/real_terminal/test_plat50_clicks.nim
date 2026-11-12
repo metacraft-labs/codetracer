@@ -1,3 +1,18 @@
+## Ported in part to the scenarios
+## src/tests/scenarios/terminal/clicks-files-open-and-fold.yaml,
+## src/tests/scenarios/terminal/clicks-gutter-breakpoint.yaml,
+## src/tests/scenarios/terminal/clicks-ctrl-and-middle-click-go-to-a-line.yaml,
+## src/tests/scenarios/terminal/clicks-editor-menu-run-to-cursor.yaml,
+## src/tests/scenarios/terminal/clicks-breakpoint-line-menu.yaml,
+## src/tests/scenarios/terminal/clicks-tab-menu-close.yaml,
+## src/tests/scenarios/terminal/clicks-call-trace-click-status.yaml,
+## src/tests/scenarios/terminal/clicks-vcs-diff-and-commit.yaml; kept as the
+## subject of its mutation harness (run-plat50-clicks-mutations.py); named by
+## .agents/codebase-insights.txt, ci/test/plat64_input_routing_probe.nim,
+## ci/test/plat68_one_keymap_probe.nim,
+## src/frontend/tui/tests/real_terminal/test_plat64_input_routing_pty.nim and
+## others; and for its cases no scenario ports yet.
+##
 ## test_plat50_clicks.nim — PLAT-50 deliverable 3, Tier 2. **The desktop's
 ## click behaviours, in a real terminal** (the user, 2026-10-02: "clicking a
 ## file in Files should open it; clicking a call-trace row should navigate to

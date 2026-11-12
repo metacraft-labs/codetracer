@@ -1,0 +1,19 @@
+scenario: 1
+name: terminal/keys-f12-in-edit-mode
+pack: codetracer
+summary: >-
+  F12 in Edit mode steps nothing: the status line names debugger.step-out and
+  says it needs a replay session, and the tick stays.
+stage:
+  - use: record-program
+    with: { program: calc }
+  - use: open-recording
+    with: { width: 200, height: 50 }
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - chord: Ctrl+F5
+  - wait: { until: { at: status-line, assert: 'says("[EDIT]")' }, timeout: 20s }
+  - key: F12
+  - wait: { until: { at: status-line, assert: 'says("debugger.step-out")' }, timeout: 20s }
+  - expect: { at: status-line, assert: 'says("replay session")' }
+  - expect: { at: replay-position, tick: 1 }

@@ -1,0 +1,19 @@
+scenario: 1
+name: terminal/panes-footer-hover-previews
+pack: codetracer
+summary: >-
+  Resting the pointer on the BUILD label previews the Build pane after a
+  moment; moving the pointer away dismisses the preview.
+stage:
+  - use: record-program
+    with: { program: calc }
+  - use: open-recording
+    with: { width: 200, height: 50 }
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - expect: { at: 'pane[title="BUILD"]', absent: true }
+  - hover: { at: 'dock-label[label="BUILD"]', for: 1s }
+  - wait: { until: { at: 'pane[title="BUILD"]', present: true }, timeout: 5s }
+  - expect: { at: 'pane[title="BUILD"]', assert: 'shows("No build has run.")' }
+  - move: { at: 'editor[file="main.py"]' }
+  - wait: { until: { at: 'pane[title="BUILD"]', absent: true }, timeout: 5s }

@@ -1,0 +1,34 @@
+scenario: 1
+name: terminal/files-menu-create
+pack: codetracer
+summary: >-
+  In Edit mode a right-click on a Files row opens Create, Rename, Delete and
+  Edit, none disabled; Create puts `create ` on the command line, and the name
+  typed there creates the file, lists it and opens it in the editor.
+stage:
+  - use: write-project
+    with:
+      files:
+        notes.txt: "notes\n"
+        src/main.py: "print(1)\n"
+  - use: open-project
+    with: { folder: $project, width: 140, height: 40 }
+steps:
+  - wait: { until: ready, timeout: 60s }
+  - wait: { until: { at: 'filesystem/file-node[name="notes.txt"]', present: true }, timeout: 30s }
+  - click: { at: 'filesystem/file-node[name="notes.txt"]', button: right }
+  - expect:
+      at: context-menu
+      count: 4
+  - expect: { at: 'context-menu/menu-item[label="Create"]', enabled: true }
+  - expect: { at: 'context-menu/menu-item[label="Rename"]', enabled: true }
+  - expect: { at: 'context-menu/menu-item[label="Delete"]', enabled: true }
+  - expect: { at: 'context-menu/menu-item[label="Edit"]', enabled: true }
+  - click: { at: 'context-menu/menu-item[label="Create"]' }
+  - wait: { until: { at: status-line, message: { contains: "New file in project" } }, timeout: 20s }
+  - type: "fresh.txt"
+  - wait: { until: { at: status-line, message: { contains: ":create fresh.txt" } }, timeout: 20s }
+  - key: Enter
+  - wait: { until: { at: status-line, message: { contains: "created fresh.txt" } }, timeout: 20s }
+  - expect: { at: 'filesystem/file-node[name="fresh.txt"]', selected: true }
+  - expect: { at: 'editor[file="fresh.txt"]', present: true }

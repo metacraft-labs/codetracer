@@ -1,3 +1,15 @@
+## Ported in part to the scenarios
+## src/tests/scenarios/terminal/keymaps-cua-editing-sequence.yaml,
+## src/tests/scenarios/terminal/keymaps-switch-to-vim.yaml,
+## src/tests/scenarios/terminal/keymaps-switch-to-emacs.yaml,
+## src/tests/scenarios/terminal/keymaps-flag-holds-for-the-session.yaml; kept as
+## the subject of its mutation harness (run-plat68-keymaps-mutations.py); named
+## by ci/test/plat68-cua-window.sh,
+## src/frontend/gpui/tests/test_plat68_cua_window.nim,
+## src/frontend/tui/app/tests/test_capability_resolution.nim,
+## src/frontend/tui/tests/real_terminal/test_real_capability_negotiation.nim;
+## and for its cases no scenario ports yet.
+##
 ## test_plat68_keymaps_pty.nim — PLAT-68 Phase A, Tier 2: the CUA default,
 ## the key decoders and the terminal's key protocol, through the SHIPPED
 ## binary on a real pty.

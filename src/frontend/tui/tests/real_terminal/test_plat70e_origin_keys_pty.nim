@@ -1,3 +1,8 @@
+## Ported in part to the scenario
+## src/tests/scenarios/terminal/origin-menu-and-a-hop-press.yaml; kept as the
+## subject of its mutation harness (run-plat70e-origin-mutations.py,
+## run-plat70f-pointer-mutations.py); and for its cases no scenario ports yet.
+##
 ## test_plat70e_origin_keys_pty.nim — PLAT-70 Part E (Variable-State-Pane.md
 ## § Value origin from the keyboard; Value-Origin-Tracking.md §13.0): **the
 ## value origin from the keyboard, on a real terminal.**

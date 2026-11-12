@@ -1,3 +1,12 @@
+## Ported in part to the scenarios
+## src/tests/scenarios/terminal/parity-no-timeline-pointer-glyph.yaml,
+## src/tests/scenarios/terminal/parity-shift-right-click-is-the-terminals.yaml,
+## src/tests/scenarios/terminal/parity-alt-t-tracepoint-at-the-caret.yaml; kept
+## as the subject of its mutation harness (run-plat51-parity-mutations.py);
+## named by .agents/codebase-insights.txt,
+## src/frontend/tui/tests/real_terminal/test_real_high_latency.nim; and for its
+## cases no scenario ports yet.
+##
 ## test_plat51_pty.nim — PLAT-51, the shipped `codetracer-tui` on a REAL
 ## pseudo-terminal (TermAssert: a real pty, the screen read back through
 ## libvterm), over the real `noir_space_ship` (70 events) and `calc`

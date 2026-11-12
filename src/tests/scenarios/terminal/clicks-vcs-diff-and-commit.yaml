@@ -1,0 +1,22 @@
+scenario: 1
+name: terminal/clicks-vcs-diff-and-commit
+pack: codetracer
+summary: >-
+  In the VCS pane a click on a changed file shows its diff against the
+  working tree; Esc closes it; a click on a commit lists its files, and a
+  second click folds them.
+stage:
+  - use: record-program
+    with: { program: calc }
+  - use: fixture-project
+    with: { name: vcs-repo }
+  - use: open-recording
+    with: { width: 200, height: 50 }
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - click: { at: 'pane-tab[label="VCS"]' }
+  - wait: { until: { at: 'pane[title="VCS"]/row[text="M notes.txt"]', present: true }, timeout: 30s }
+  - click: { at: 'pane[title="VCS"]/row[text="M notes.txt"]', anchor: text-end }
+  - wait: { until: { at: popup, title: { contains: "diff notes.txt  (working tree)" } }, timeout: 20s }
+  - key: Esc
+  - wait: { until: { at: popup, absent: true }, timeout: 10s }

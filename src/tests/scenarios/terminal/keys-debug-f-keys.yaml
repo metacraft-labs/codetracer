@@ -1,0 +1,26 @@
+scenario: 1
+name: terminal/keys-debug-f-keys
+pack: codetracer
+summary: >-
+  In Debug mode under CUA, F10 steps over (line 1 to line 2), Shift+F10 steps
+  back to the start, F11 steps into and F12 steps out, each moving the tick
+  the right way.
+stage:
+  - use: record-program
+    with: { program: calc }
+  - use: open-recording
+    with: { width: 200, height: 50 }
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - expect: { at: 'editor[file="main.py"]', assert: "stopped-at(1)" }
+  - expect: { at: replay-position, tick: 1 }
+  - key: F10
+  - wait: { until: { at: 'editor[file="main.py"]', assert: "stopped-at(2)" }, timeout: 30s }
+  - expect: { at: replay-position, assert: "past(1)" }
+  - chord: Shift+F10
+  - wait: { until: { at: 'editor[file="main.py"]', assert: "stopped-at(1)" }, timeout: 30s }
+  - expect: { at: replay-position, tick: 1 }
+  - key: F11
+  - wait: { until: { at: replay-position, assert: "past(1)" }, timeout: 30s }
+  - key: F12
+  - wait: { until: { at: replay-position, assert: "past(2)" }, timeout: 30s }

@@ -1,0 +1,40 @@
+scenario: 1
+name: terminal/build-tasks-default-task-and-marks
+pack: codetracer
+summary: >-
+  `:build` runs the default (failing) task of the folder's
+  `.codetracer/build.yaml`: the Build & Run pane says "build failed (exit code
+  1)" and the status line names the task's command; src/main.c opens with the
+  diagnosed lines; `:build: pass` runs the passing task, which succeeds. (The
+  suite's Ctrl+Shift+B task picker has no legacy terminal encoding.)
+stage:
+  - use: fixture-project
+    with: { name: c-build }
+  - use: write-project
+    with:
+      files:
+        .codetracer/build.yaml: |
+          tasks:
+            fail:
+              command: "gcc -Wall -fdiagnostics-color=always -c src/main.c -o /dev/null"
+              default: true
+            pass:
+              command: "gcc -Wall -fdiagnostics-color=always -c src/ok.c -o /dev/null"
+  - use: open-project
+    with: { folder: $project, width: 200, height: 50 }
+steps:
+  - wait: { until: ready, timeout: 60s }
+  - chord: Ctrl+P
+  - type: ":build"
+  - key: Enter
+  - wait: { until: { at: 'pane[title="Build & Run"]', assert: 'has-row("build failed (exit code 1)")' }, timeout: 120s }
+  - expect: { at: status-line, assert: 'says("build FAILED (exit 1): gcc -Wall -fdiagnostics-color=always -c src/main.c")' }
+  - chord: Ctrl+P
+  - type: ":e src/main.c"
+  - key: Enter
+  - wait: { until: { at: 'editor[file="main.c"]', assert: 'shows-text("int unused = 1;")' }, timeout: 20s }
+  - expect: { at: 'editor[file="main.c"]', assert: 'shows-text("return undefined_name;")' }
+  - chord: Ctrl+P
+  - type: ":build: pass"
+  - key: Enter
+  - wait: { until: { at: status-line, assert: 'says("build succeeded")' }, timeout: 120s }

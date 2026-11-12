@@ -1,0 +1,32 @@
+scenario: 1
+name: terminal/files-menu-delete-asks-first
+pack: codetracer
+summary: >-
+  Delete asks first: Escape keeps the file; choosing Delete again and Enter
+  moves it to the trash, and the Files pane no longer lists it.
+stage:
+  - use: write-project
+    with:
+      files:
+        notes.txt: "notes\n"
+        src/main.py: "print(1)\n"
+  - use: open-project
+    with: { folder: $project, width: 140, height: 40 }
+steps:
+  - wait: { until: ready, timeout: 60s }
+  - wait: { until: { at: 'filesystem/file-node[name="notes.txt"]', present: true }, timeout: 30s }
+  - click: { at: 'filesystem/file-node[name="notes.txt"]', button: right }
+  - wait: { until: { at: 'context-menu/menu-item[label="Delete"]', present: true }, timeout: 10s }
+  - click: { at: 'context-menu/menu-item[label="Delete"]' }
+  - wait: { until: { at: status-line, message: { contains: ":trash notes.txt" } }, timeout: 20s }
+  - expect: { at: status-line, message: { contains: "Move \"notes.txt\" to the trash?" } }
+  - key: Esc
+  - wait: { until: { at: status-line, message: { contains: "kept notes.txt" } }, timeout: 20s }
+  - expect: { at: 'filesystem/file-node[name="notes.txt"]', present: true }
+  - click: { at: 'filesystem/file-node[name="notes.txt"]', button: right }
+  - wait: { until: { at: 'context-menu/menu-item[label="Delete"]', present: true }, timeout: 10s }
+  - click: { at: 'context-menu/menu-item[label="Delete"]' }
+  - wait: { until: { at: status-line, message: { contains: ":trash notes.txt" } }, timeout: 20s }
+  - key: Enter
+  - wait: { until: { at: status-line, message: { contains: "moved notes.txt to the trash" } }, timeout: 20s }
+  - wait: { until: { at: 'filesystem/file-node[name="notes.txt"]', absent: true }, timeout: 20s }

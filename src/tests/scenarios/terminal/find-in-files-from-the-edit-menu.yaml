@@ -1,0 +1,27 @@
+scenario: 1
+name: terminal/find-in-files-from-the-edit-menu
+pack: codetracer
+summary: >-
+  The program menu's Edit › Find in Files opens the omnibox on `:grep`,
+  seeded with the last query.
+stage:
+  - use: record-program
+    with: { program: multi_root/app/main.py }
+  - use: open-recording
+    with: { width: 200, height: 50 }
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - chord: Ctrl+P
+  - type: ":grep scale"
+  - key: Enter
+  - wait: { until: { at: 'pane[title="FIND IN FILES"]', assert: 'has-row("4 results in 2 files")' }, timeout: 30s }
+  - key: Esc
+  - click: { at: 'menu-bar/menu[label="Menu"]' }
+  - wait: { until: { at: 'dropdown[level="1"]', present: true }, timeout: 10s }
+  # the cascade walked with the keys: a pointer travelling over the first
+  # level would open the folders it crosses on its way
+  - key: Down
+  - key: Right
+  - wait: { until: { at: 'dropdown[level="2"]', assert: 'offers("Find in Files")' }, timeout: 10s }
+  - key: Enter
+  - wait: { until: { at: omnibox, query: ":grep scale" }, timeout: 10s }

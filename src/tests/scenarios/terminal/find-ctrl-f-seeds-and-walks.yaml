@@ -1,0 +1,47 @@
+scenario: 1
+name: terminal/find-ctrl-f-seeds-and-walks
+pack: codetracer
+summary: >-
+  In the read-only Debug editor, Ctrl+F seeds the find field with the word
+  under the caret (`left`) and counts its matches; typing replaces the query
+  and counts again; Enter and F3 walk the matches until the search wraps
+  (search hit BOTTOM); Esc closes the field — and the replay never moved.
+stage:
+  - use: record-program
+    with: { program: calc }
+  - use: open-recording
+    with: { width: 200, height: 50 }
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - wait: { until: { at: 'editor[file="main.py"]', assert: "shows-line(31)" }, timeout: 30s }
+  - click: { at: 'editor[file="main.py"]/line[number="31"]', anchor: "column(14)" }
+  - chord: Ctrl+F
+  - wait: { until: { at: status-line, assert: ['says("left")', 'says(" of ")'] }, timeout: 10s }
+  - type: "rig"
+  - wait: { until: { at: status-line, assert: ['says("rig")', 'says(" of ")'] }, timeout: 10s }
+  - key: Enter
+  - wait: { until: { at: status-line, assert: 'says("/rig   3 of 12")' }, timeout: 10s }
+  - key: F3
+  - wait: { until: { at: status-line, assert: 'says("/rig   4 of 12")' }, timeout: 10s }
+  - key: F3
+  - wait: { until: { at: status-line, assert: 'says("/rig   5 of 12")' }, timeout: 10s }
+  - key: F3
+  - wait: { until: { at: status-line, assert: 'says("/rig   6 of 12")' }, timeout: 10s }
+  - key: F3
+  - wait: { until: { at: status-line, assert: 'says("/rig   7 of 12")' }, timeout: 10s }
+  - key: F3
+  - wait: { until: { at: status-line, assert: 'says("/rig   8 of 12")' }, timeout: 10s }
+  - key: F3
+  - wait: { until: { at: status-line, assert: 'says("/rig   9 of 12")' }, timeout: 10s }
+  - key: F3
+  - wait: { until: { at: status-line, assert: 'says("/rig   10 of 12")' }, timeout: 10s }
+  - key: F3
+  - wait: { until: { at: status-line, assert: 'says("/rig   11 of 12")' }, timeout: 10s }
+  - key: F3
+  - wait: { until: { at: status-line, assert: 'says("/rig   12 of 12")' }, timeout: 10s }
+  - key: F3
+  - wait: { until: { at: status-line, assert: 'says("search hit BOTTOM")' }, timeout: 10s }
+  - key: Esc
+  - wait: { until: { at: status-line, assert: 'says("CUA [DEBUG]")' }, timeout: 10s }
+  - expect: { at: status-line, assert: 'lacks("FIND [")' }
+  - expect: { at: replay-position, tick: 1 }

@@ -1,0 +1,23 @@
+scenario: 1
+name: terminal/keys-program-menu-from-the-keyboard
+pack: codetracer
+summary: >-
+  Alt+` opens the program menu and Alt+` closes it; Alt+D opens its Debug
+  folder (Step Out, Reverse Step Over), and Esc twice closes the menu.
+stage:
+  - use: record-program
+    with: { program: calc }
+  - use: open-recording
+    with: { width: 200, height: 50 }
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - chord: Alt+`
+  - wait: { until: { at: 'dropdown[level="1"]', assert: ['offers("View")', 'offers("Debug")'] }, timeout: 10s }
+  - chord: Alt+`
+  - wait: { until: { at: 'dropdown[level="1"]', absent: true }, timeout: 10s }
+  - chord: Alt+d
+  - wait: { until: { at: 'dropdown[level="2"]', assert: ['offers("Reverse Step Over")', 'offers("Step Out")'] }, timeout: 10s }
+  - key: Esc
+  - wait: { until: { at: 'dropdown[level="2"]', absent: true }, timeout: 10s }
+  - key: Esc
+  - wait: { until: { at: 'dropdown[level="1"]', absent: true }, timeout: 10s }

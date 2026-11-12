@@ -1,3 +1,9 @@
+## Ported in part to the scenarios
+## src/tests/scenarios/terminal/find-ctrl-f-seeds-and-walks.yaml,
+## src/tests/scenarios/terminal/find-ctrl-f3-whole-word.yaml; kept as the
+## subject of its mutation harness (run-plat70c-find-mutations.py); and for its
+## cases no scenario ports yet.
+##
 ## test_plat70c_find_pty.nim — PLAT-70 Part C (Find-And-Incremental-Search.md
 ## §3, §4), the shipped `codetracer-tui` on a REAL pseudo-terminal
 ## (TermAssert: a real pty, the screen read back through libvterm):

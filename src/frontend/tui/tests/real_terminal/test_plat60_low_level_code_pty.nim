@@ -1,3 +1,7 @@
+## Ported to the scenario
+## src/tests/scenarios/terminal/low-level-code-beside-the-source.yaml; kept as
+## the subject of its mutation harness (run-plat60-low-level-code-mutations.py).
+##
 ## test_plat60_low_level_code_pty.nim — PLAT-60, Tier 2. **The Low Level Code
 ## pane on a real terminal.**
 ##

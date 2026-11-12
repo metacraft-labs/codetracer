@@ -1,3 +1,15 @@
+## Ported in part to the scenarios
+## src/tests/scenarios/terminal/keys-status-label.yaml,
+## src/tests/scenarios/terminal/keys-status-label-vim.yaml,
+## src/tests/scenarios/terminal/keys-enter-opens-the-tracepoint-editor.yaml,
+## src/tests/scenarios/terminal/keys-user-row-beats-the-base.yaml,
+## src/tests/scenarios/terminal/keys-program-menu-from-the-keyboard.yaml,
+## src/tests/scenarios/terminal/keys-shift-end-selects-and-ctrl-c-copies.yaml;
+## kept as the subject of its mutation harness
+## (run-plat68-keymaps-mutations.py); named by
+## src/frontend/tui/tests/real_terminal/test_plat48_top_bar.nim; and for its
+## cases no scenario ports yet.
+##
 ## test_plat68b_pty.nim — PLAT-68 Phase B, Tier 2: the shipped
 ## `codetracer-tui` in a real PTY (TermAssert + libvterm) over a real
 ## recording and a real `replay-server`, driven by the bytes a terminal sends.

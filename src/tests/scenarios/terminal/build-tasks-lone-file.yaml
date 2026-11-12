@@ -1,0 +1,29 @@
+scenario: 1
+name: terminal/build-tasks-lone-file
+pack: codetracer
+summary: >-
+  `--edit <file>` opens its folder on that file; with no build.yaml `:build`
+  says what is missing and Project: Run says the folder is not a recognised
+  project. (A task the folder declares builds: the second half, with the
+  build.yaml present from the start.)
+stage:
+  - use: write-project
+    with:
+      files:
+        a_first.c: "int first = 1;\n"
+        lone.c: "int lone_marker = 1;\n"
+  - use: open-project
+    with: { folder: $project, file: lone.c, width: 200, height: 50 }
+steps:
+  - wait: { until: ready, timeout: 60s }
+  - wait: { until: { at: 'editor[file="lone.c"]', assert: 'shows-text("int lone_marker = 1;")' }, timeout: 20s }
+  - expect: { at: 'editor[file="a_first.c"]', absent: true }
+  - chord: Ctrl+P
+  - type: ":build"
+  - key: Enter
+  - wait: { until: { at: status-line, assert: 'says("No build tasks: add .codetracer/build.yaml")' }, timeout: 20s }
+  - key: Esc
+  - chord: Ctrl+P
+  - type: ":Project: Run"
+  - key: Enter
+  - wait: { until: { at: status-line, assert: 'says("does not recognise this folder as a project")' }, timeout: 20s }

@@ -1,0 +1,35 @@
+scenario: 1
+name: terminal/edit-mode-stale-trace-notice
+pack: codetracer
+summary: >-
+  Replaying a recording from inside a project, Ctrl+F5 edits the project;
+  after an edit and `:w`, switching back to Debug mode tells the user the
+  recording predates the file and its line numbers may not match.
+stage:
+  - use: record-program
+    with: { program: calc }
+  - use: write-project
+    with:
+      files:
+        alpha.nim: "proc alpha() =\n  echo 1\n"
+  - use: open-recording
+    with: { width: 170, height: 40 }
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - expect: { at: status-line, message: { contains: "CUA [DEBUG]" } }
+  - expect: { at: 'pane-tab[label="Call Trace"]', present: true }
+  - chord: Ctrl+F5
+  - wait: { until: { at: status-line, message: { contains: "CUA [EDIT]" } }, timeout: 20s }
+  - expect: { at: status-line, message: { contains: "1 file(s)" } }
+  - wait: { until: { at: 'editor[file="alpha.nim"]', present: true }, timeout: 20s }
+  - type: "Z"
+  - wait: { until: { at: 'pane-tab[label="alpha.nim ●"]', present: true }, timeout: 20s }
+  - key: F1
+  - type: ":w"
+  - key: Enter
+  - wait: { until: { at: status-line, message: { contains: "wrote alpha.nim" } }, timeout: 20s }
+  - chord: Ctrl+F5
+  - wait: { until: { at: status-line, message: { contains: "predates" } }, timeout: 20s }
+  - expect: { at: status-line, message: { contains: "CUA [DEBUG]" } }
+  - expect: { at: status-line, message: { contains: "alpha.nim" } }
+  - expect: { at: status-line, message: { contains: "line numbers" } }

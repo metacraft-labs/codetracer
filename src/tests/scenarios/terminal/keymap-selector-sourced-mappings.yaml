@@ -1,0 +1,31 @@
+scenario: 1
+name: terminal/keymap-selector-sourced-mappings
+pack: codetracer
+summary: >-
+  Under Vim, `:source vimrc` translates the file's two mappings and says so;
+  then `Q` acts as `D` (deletes to the end of the line) and `Z` as `jJ`
+  (joins the next line).
+stage:
+  - use: write-project
+    with:
+      files:
+        doc.txt: "alpha beta\ngamma delta\nepsilon zeta\n"
+        vimrc: "nnoremap Q D\nnnoremap Z jJ\n"
+  - use: select-keymap
+    with: { preset: vim }
+  - use: open-project
+    with: { folder: $project, file: doc.txt, width: 160, height: 40 }
+steps:
+  - wait: { until: ready, timeout: 60s }
+  - wait: { until: { at: 'editor[file="doc.txt"]', assert: 'shows-text("alpha beta")' }, timeout: 20s }
+  - key: F1
+  - wait: { until: { at: status-line, assert: 'says("PALETTE ")' }, timeout: 10s }
+  - type: ":source vimrc"
+  - key: Enter
+  - wait: { until: { at: status-line, assert: 'says("sourced vimrc")' }, timeout: 10s }
+  - expect: { at: status-line, assert: 'says("2 of 2 mapping line(s) translated")' }
+  - key: w
+  - key: Q
+  - wait: { until: { at: 'editor[file="doc.txt"]/line[number="1"]', text: "alpha" }, timeout: 10s }
+  - key: Z
+  - wait: { until: { at: 'editor[file="doc.txt"]/line[number="2"]', text: "gamma delta epsilon zeta" }, timeout: 10s }

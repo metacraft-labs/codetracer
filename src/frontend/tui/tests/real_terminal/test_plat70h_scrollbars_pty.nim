@@ -1,3 +1,8 @@
+## Ported in part to the scenario
+## src/tests/scenarios/terminal/scrollbars-thick-setting.yaml; kept as the
+## subject of its mutation harness (run-plat70h-scrollbar-mutations.py); and for
+## its cases no scenario ports yet.
+##
 ## test_plat70h_scrollbars_pty.nim — PLAT-70 Part H (Scrollbar-Scrubbers.md
 ## §7), the shipped `codetracer-tui` on a REAL pseudo-terminal (TermAssert: a
 ## real pty, the screen read back through libvterm, the child's byte stream

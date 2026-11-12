@@ -1,3 +1,8 @@
+## Ported to the scenario
+## src/tests/scenarios/terminal/build-output-failing-gcc-build.yaml; kept as the
+## subject of its mutation harness (run-plat56-build-output-mutations.py); named
+## by src/tests/gui/tests/build/plat56-build-output-capture.spec.ts.
+##
 ## test_plat56_build_output_pty.nim — PLAT-56, Tier 3: **the shipped
 ## `codetracer-tui` draws the Build Output pane on a real terminal** after a
 ## real coloured `gcc` build, and the screen is the desktop's.

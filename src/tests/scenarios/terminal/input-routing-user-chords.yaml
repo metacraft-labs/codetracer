@@ -1,0 +1,37 @@
+scenario: 1
+name: terminal/input-routing-user-chords
+pack: codetracer
+summary: >-
+  A user's keybindings.json routes input: their Ctrl+Alt+K steps over; their
+  Ctrl+click on a call-trace row continues to the end of the recording
+  instead of the row's own action; a plain press on a row still goes to that
+  call; the shortcut reference lists the user's chord. (The suite's Ctrl+Alt+J
+  is Ctrl+Alt+K here: a legacy terminal sends Ctrl+J as a line feed, and the
+  terminal flavour has no modifyOtherKeys encoding.)
+stage:
+  - use: record-program
+    with: { program: calc }
+  - use: plant-config
+    with:
+      file: keybindings.json
+      content: |
+        [
+          { "key": "ctrl+alt+k", "command": "debugger.step-over" },
+          { "key": "ctrl+click", "command": "debugger.continue",
+            "when": "paneKind == calltrace && elementKind == row" }
+        ]
+  - use: open-recording
+    with: { width: 200, height: 50 }
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - expect: { at: replay-position, tick: 1 }
+  - chord: Ctrl+Alt+K
+  - wait: { until: { at: replay-position, assert: "past(1)" }, timeout: 30s }
+  - click: { at: 'call-trace/call[#6]', modifiers: [Ctrl] }
+  - wait: { until: { at: replay-position, tick: 171 }, timeout: 30s }
+  - click: { at: 'call-trace/call[#9]' }
+  - wait: { until: { at: replay-position, assert: "before(171)" }, timeout: 30s }
+  - chord: Ctrl+P
+  - type: ":keys reference"
+  - key: Enter
+  - wait: { until: { at: popup, assert: 'shows("ctrl+alt+k  debugger.step-over")' }, timeout: 20s }

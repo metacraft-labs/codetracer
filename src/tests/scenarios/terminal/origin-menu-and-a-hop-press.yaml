@@ -1,0 +1,22 @@
+scenario: 1
+name: terminal/origin-menu-and-a-hop-press
+pack: codetracer
+summary: >-
+  At tick 118 a right click on `value` offers Toggle value history and Show
+  value origin; Show value origin opens the chain under it, and a press on a
+  hop seeks the replay to that hop's tick.
+stage:
+  - use: record-program
+    with: { program: calc }
+  - use: open-recording
+    with: { width: 200, height: 50 }
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - type: ":goto 118"
+  - key: Enter
+  - wait: { until: { at: 'variables/variable[name="value"]', present: true }, timeout: 30s }
+  - click: { at: 'variables/variable[name="value"]', button: right }
+  - wait: { until: { at: context-menu, assert: 'offers("Show value origin")' }, timeout: 10s }
+  - expect: { at: context-menu, assert: 'offers("Toggle value history")' }
+  - click: { at: 'context-menu/menu-item[label="Show value origin"]' }
+  - wait: { until: { at: 'pane[title="Variables"]', assert: 'has-row("⇠ tick ")' }, timeout: 30s }

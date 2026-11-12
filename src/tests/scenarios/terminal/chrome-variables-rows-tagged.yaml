@@ -1,0 +1,21 @@
+scenario: 1
+name: terminal/chrome-variables-rows-tagged
+pack: codetracer
+summary: >-
+  The Variables pane draws no category rows (LOCALS, GLOBALS, …): each row
+  starts with its category's tag letter instead.
+stage:
+  - use: record-program
+    with: { program: calc }
+  - use: front-end-options
+    with: { options: { goto: "60" } }
+  - use: open-recording
+    with: { width: 200, height: 50 }
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - wait: { until: { at: 'pane[title="Variables"]', count: { ge: 10 } }, timeout: 30s }
+  - expect:
+      at: 'pane[title="Variables"]'
+      assert: ['lacks-row("LOCALS")', 'lacks-row("ARGUMENTS")', 'lacks-row("GLOBALS")',
+               'lacks-row("WATCHES")', 'lacks-row("REGISTERS")', 'lacks-row("RETURN VALUES")',
+               'rows-match("^[LAGRXW] ")']

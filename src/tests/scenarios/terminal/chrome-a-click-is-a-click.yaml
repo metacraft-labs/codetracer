@@ -1,0 +1,25 @@
+scenario: 1
+name: terminal/chrome-a-click-is-a-click
+pack: codetracer
+summary: >-
+  Clicks never start a drag: clicks in the body say nothing of drags and
+  leave the tab strips as they were; a click on the VCS tab brings it forward;
+  a press and a release on the Files tab is a click too and brings it back.
+stage:
+  - use: record-program
+    with: { program: calc }
+  - use: open-recording
+    with: { width: 200, height: 50 }
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - click: { at: 'editor[file="main.py"]/line[number="20"]' }
+  - expect: { at: status-line, assert: ['lacks("drag")', 'lacks("would ")', 'lacks("applied")'] }
+  - expect: { at: 'pane-tab[label="Files"]', active: true }
+  - click: { at: 'pane-tab[label="VCS"]' }
+  - wait: { until: { at: 'pane-tab[label="VCS"]', active: true }, timeout: 10s }
+  - expect: { at: status-line, assert: ['lacks("drag")', 'lacks("would ")', 'lacks("applied")'] }
+  - press: { at: 'pane-tab[label="Files"]', button: left }
+  - release: { at: 'pane-tab[label="Files"]', button: left }
+  - wait: { until: { at: 'pane-tab[label="Files"]', active: true }, timeout: 10s }
+  - expect: { at: status-line, assert: ['lacks("would ")', 'lacks("applied")'] }
+  - expect: { at: 'pane-tab[label="VCS"]', active: false }

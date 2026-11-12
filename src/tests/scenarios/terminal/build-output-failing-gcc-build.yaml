@@ -1,0 +1,26 @@
+scenario: 1
+name: terminal/build-output-failing-gcc-build
+pack: codetracer
+summary: >-
+  In Edit mode `:build` of a failing gcc build shows the desktop's verdict
+  ("build failed (exit code 1)") in the Build & Run pane and its status indicator
+  ("✗ Build failed: 2 errors, 1 warning") on the status line, with the
+  compiler's error line; a right click on it opens nothing, and a press opens
+  src/main.c at 5:17.
+stage:
+  - use: fixture-project
+    with: { name: c-build }
+  - use: open-project
+    with: { folder: $project, width: 200, height: 50 }
+steps:
+  - wait: { until: ready, timeout: 60s }
+  - chord: Ctrl+P
+  - type: ":build gcc -Wall -fdiagnostics-color=always -c src/main.c -o /dev/null"
+  - key: Enter
+  - wait: { until: { at: 'pane[title="Build & Run"]', assert: 'has-row("build failed (exit code 1)")' }, timeout: 120s }
+  - expect: { at: status-line, assert: 'says("✗ Build failed: 2 errors, 1 warning")' }
+  - expect: { at: 'pane[title="Build & Run"]', assert: 'has-row("src/main.c:5:17: error: expected")' }
+  - click: { at: 'pane[title="Build & Run"]/row[text="src/main.c:5:17: error: expected ‘;’ befor›"]', anchor: text-start, button: right }
+  - expect: { at: context-menu, absent: true }
+  - click: { at: 'pane[title="Build & Run"]/row[text="src/main.c:5:17: error: expected ‘;’ befor›"]', anchor: text-start }
+  - wait: { until: { at: status-line, assert: 'says("opened src/main.c:5:17")' }, timeout: 20s }

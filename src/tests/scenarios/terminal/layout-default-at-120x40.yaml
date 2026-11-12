@@ -1,0 +1,19 @@
+scenario: 1
+name: terminal/layout-default-at-120x40
+pack: codetracer
+summary: >-
+  At 120x40 the shared default layout is shown whole, nothing folded:
+  Files, the Call Trace, Variables and the Event Log, and no Constraints pane.
+stage:
+  - use: record-program
+    with: { program: calc }
+  - use: open-recording
+    with: { width: 120, height: 40 }
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - expect: { at: status-line, assert: 'lacks("[folded")' }
+  - expect: { at: 'pane-tab[label="Variables"]', present: true }
+  - expect: { at: 'pane-tab[label="Event Log"]', present: true }
+  - expect: { at: 'pane-tab[label="Files"]', present: true }
+  - expect: { at: 'pane-tab[label="Call Trace"]', present: true }
+  - expect: { at: 'pane-tab[label="Constraints"]', absent: true }

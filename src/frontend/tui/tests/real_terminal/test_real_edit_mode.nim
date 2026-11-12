@@ -1,3 +1,15 @@
+## Ported in part to the scenarios
+## src/tests/scenarios/terminal/edit-mode-opens-the-project.yaml,
+## src/tests/scenarios/terminal/edit-mode-typing-and-undo.yaml,
+## src/tests/scenarios/terminal/edit-mode-f5-and-ctrl-f5.yaml,
+## src/tests/scenarios/terminal/edit-mode-stale-trace-notice.yaml,
+## src/tests/scenarios/terminal/edit-mode-no-edit-no-notice.yaml; kept as the
+## subject of its mutation harness (run-plat16-mutations.py); named by
+## src/frontend/tui/app/cli.nim, src/frontend/tui/app/runtime.nim,
+## src/frontend/tui/app/tests/test_edit_mode_build.nim,
+## src/frontend/tui/app/tests/test_edit_mode_source.nim; and for its cases no
+## scenario ports yet.
+##
 ## test_real_edit_mode.nim — PLAT-16, Tier 2.
 ##
 ## ## WHAT ONLY THIS FILE CAN SAY

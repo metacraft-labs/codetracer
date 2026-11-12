@@ -1,0 +1,22 @@
+scenario: 1
+name: terminal/build-tasks-lone-file-declared-task
+pack: codetracer
+summary: >-
+  `--edit <file>` in a folder whose `.codetracer/build.yaml` declares a task:
+  `:build` runs the folder's task, and it succeeds.
+stage:
+  - use: write-project
+    with:
+      files:
+        a_first.c: "int first = 1;\n"
+        lone.c: "int lone_marker = 1;\n"
+        .codetracer/build.yaml: "tasks:\n  check:\n    command: \"grep -c lone_marker lone.c\"\n"
+  - use: open-project
+    with: { folder: $project, file: lone.c, width: 200, height: 50 }
+steps:
+  - wait: { until: ready, timeout: 60s }
+  - wait: { until: { at: 'editor[file="lone.c"]', assert: 'shows-text("int lone_marker = 1;")' }, timeout: 20s }
+  - chord: Ctrl+P
+  - type: ":build"
+  - key: Enter
+  - wait: { until: { at: status-line, assert: 'says("build succeeded")' }, timeout: 120s }

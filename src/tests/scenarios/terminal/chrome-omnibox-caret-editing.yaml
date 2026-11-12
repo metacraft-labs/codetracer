@@ -1,0 +1,28 @@
+scenario: 1
+name: terminal/chrome-omnibox-caret-editing
+pack: codetracer
+summary: >-
+  The omnibox shows its placeholder until it is opened; typing fills it,
+  Left then Insert switches to overwrite so the next character replaces the
+  one under the caret, and Esc closes it again.
+stage:
+  - use: record-program
+    with: { program: calc }
+  - use: open-recording
+    with: { width: 200, height: 50 }
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - expect: { at: omnibox, query: "", focused: false }
+  - chord: Ctrl+P
+  - wait: { until: { at: omnibox, focused: true }, timeout: 10s }
+  - type: "calc"
+  - wait: { until: { at: omnibox, query: calc }, timeout: 10s }
+  - key: Left
+  - key: Insert
+  - type: "X"
+  - wait: { until: { at: omnibox, query: calX }, timeout: 10s }
+  - key: Right
+  - key: Insert
+  - key: Esc
+  - wait: { until: { at: omnibox, query: "" }, timeout: 10s }
+  - expect: { at: omnibox, focused: false }
