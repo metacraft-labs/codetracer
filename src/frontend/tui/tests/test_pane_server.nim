@@ -591,6 +591,29 @@ suite "HSF-E1: the pane server, over a real recording":
     check not openSpot.isNil
     if openSpot.isNil: return
 
+    # ---- HSF-E10: the shown source file's tests ------------------------------
+    # The editor shows the crate's source: each test the catalog places in it
+    # is sent with its line and the pane's own controls, so a press on the
+    # test's line is the pane's ⏵ (`tests.open-test`).
+    let (_, sourceNotes) = srv.request("source/viewport", %*{"session": sid,
+      "file": project / "src" / "main.nr", "firstLine": 1, "lastLine": 14})
+    let inSource = sourceNotes.notes("source/tests")
+    check inSource.len == 1
+    if inSource.len == 1:
+      let controls = inSource[0]{"params", "controls"}.getElems
+      checkpoint("source/tests: " & $inSource[0])
+      check controls.len == 2
+      check controls.anyIt(it{"name"}.getStr == Plat53Passing and
+                           it{"line"}.getInt == Plat53PassingLine)
+      check controls.anyIt(it{"name"}.getStr == Plat53Failing and
+                           it{"line"}.getInt == Plat53FailingLine and
+                           it{"testId"}.getStr == openSpot{"args", "path"}.getStr and
+                           it{"open", "label"}.getStr.len > 0)
+    # Unchanged, they are not sent again.
+    let (_, againNotes) = srv.request("source/viewport", %*{"session": sid,
+      "file": project / "src" / "main.nr", "firstLine": 2, "lastLine": 14})
+    check againNotes.notes("source/tests").len == 0
+
     # ---- ⏵ records the test; its recording opens as a session --------------
     let (pressed, _) = srv.request("operation/run", %*{"session": sid,
       "operation": "tests.open-test", "args": openSpot{"args"}})

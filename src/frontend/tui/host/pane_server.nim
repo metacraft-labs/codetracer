@@ -71,6 +71,7 @@ import ./edit_services
 import ./problems_source
 import ./test_results_source
 import ./vcs_source
+from ../app/views/test_results_pane import TestsPaneControl
 from ../../viewmodel/viewmodels/trace_open import TraceOpenPolicy,
   TraceOpenRequest, topNewTab, topCurrentTab
 from ../app/source_binding import sptBreakpoint
@@ -142,6 +143,8 @@ type
     controlsSent: string
       ## The debugger controls last sent as `controls/state`, so the strip is
       ## sent when a control's enablement changes, not on every publish.
+    testsSent: string
+      ## The source window's test controls last sent as `source/tests`.
     tests: TestsSource
     problems: ProblemsSource
     buildOut: BuildOutputSource
@@ -596,6 +599,39 @@ proc decorationsOf(s: ServerSession): JsonNode =
 
 proc dapEvent(srv: PaneServer; event: string; body: JsonNode)
 
+proc controlJson(c: TestsPaneControl): JsonNode =
+  %*{"label": c.label, "enabled": c.enabled, "title": c.title, "mode": c.mode}
+
+proc testsOf(s: ServerSession): JsonNode =
+  ## `source/tests` (§E10) for the file the editor's source window shows:
+  ## each test the session's Test Results catalog places in it — its line
+  ## (the catalog's, the test's attribute or declaration), its state and its
+  ## two controls as the pane decides them. Read from the pane's own model,
+  ## so the source's controls and the pane's cannot disagree, and a press is
+  ## the pane's (`tests.open-test` / `tests.refresh-test`). nil with no file.
+  let file = s.sourceView.file
+  if file.len == 0:
+    return nil
+  let tests = s.rt.app.tests
+  var controls = newJArray()
+  if tests.loaded:
+    let shown = normalizedPath(absolutePath(file))
+    for r in tests.rows:
+      let colon = r.where.rfind(':')
+      if colon <= 0:
+        continue
+      let line = try: parseInt(r.where[colon + 1 .. ^1]) except ValueError: 0
+      var path = r.where[0 ..< colon]
+      if not path.isAbsolute:
+        path = s.rt.app.projectRoot / path
+      if line <= 0 or normalizedPath(absolutePath(path)) != shown:
+        continue
+      controls.add %*{"line": line, "testId": r.testId, "name": r.name,
+                      "state": r.state, "mark": r.mark,
+                      "open": controlJson(r.open),
+                      "refresh": controlJson(r.refresh)}
+  %*{"session": s.id, "file": file, "controls": controls}
+
 proc publish(srv: PaneServer; s: ServerSession; fullPanes: seq[PaneKind] = @[];
              fullFrameViewer = false;
              onlyPanes: seq[PaneKind] = @[]): seq[JsonNode] =
@@ -645,6 +681,11 @@ proc publish(srv: PaneServer; s: ServerSession; fullPanes: seq[PaneKind] = @[];
   if $controls != s.controlsSent:
     s.controlsSent = $controls
     result.add notification("controls/state", controls)
+  # §E10: the shown file's tests, when they or their states changed.
+  let tests = s.testsOf()
+  if not tests.isNil and $tests != s.testsSent:
+    s.testsSent = $tests
+    result.add notification("source/tests", tests)
   let deco = s.decorationsOf()
   if not deco.isNil and $deco != s.decorationsSent:
     s.decorationsSent = $deco
