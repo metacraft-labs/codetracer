@@ -1,0 +1,34 @@
+scenario: 1
+name: ct-host/breakpoint-stops-continue-and-a-cleared-one-does-not
+pack: codetracer
+summary: >-
+  On a `ct host` page a press in the glyph cell of shield.nr's line 6 (where
+  the asteroid loop computes `damage`, on every iteration) makes a breakpoint,
+  and Continue stops on it; a second press clears it, and Continue runs past
+  the line to the end of `main`.
+
+stage:
+  - use: record-program
+    with: { program: noir_space_ship }
+  - use: open-recording
+    with: { deployment: web }
+
+steps:
+  - wait: { until: call-trace.loaded, timeout: 360s }
+  - wait: { until: { at: status-line, location: { contains: "main.nr" } }, timeout: 60s }
+  - wait: { until: { at: 'filesystem/file-node[name="shield.nr"]', present: true }, timeout: 30s }
+  - click: 'pane-tab[label="FILES"]'
+  - click: 'filesystem/file-node[name="shield.nr"]'
+    settle: false
+  - wait: { until: { at: 'pane-tab[label="src/shield.nr"]', present: true }, timeout: 30s }
+  - click: { at: 'editor[file="shield.nr"]/line[number="6"]', anchor: glyph }
+  - expect: { at: 'editor[file="shield.nr"]/line[number="6"]', glyph: breakpoint }
+  - click: 'toolbar/toolbar-button[label="continue-image"]'
+    settle: false
+  - wait: { until: { at: 'editor[file="shield.nr"]', current-line: 6 }, timeout: 60s }
+  - wait: { until: replay-idle, timeout: 60s }
+  - click: { at: 'editor[file="shield.nr"]/line[number="6"]', anchor: glyph }
+  - expect: { at: 'editor[file="shield.nr"]/line[number="6"]', breakpoint: false }
+  - click: 'toolbar/toolbar-button[label="continue-image"]'
+    settle: false
+  - wait: { until: { at: status-line, location: { contains: "main.nr" } }, timeout: 60s }

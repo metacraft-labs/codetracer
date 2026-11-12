@@ -25,12 +25,12 @@
 ##
 ## Runs on the C and JS backends (`vm-unit`, `vm-unit-js`).
 
-import std/[json, jsonutils, options, sets, tables, unittest]
+import std/[json, jsonutils, options, sequtils, sets, tables, unittest]
 
 import isonim/core/[async_compat, computation, owner, signals]
 
 import ../../backend/mock_backend
-import ../../sdk/[debugger_session, trace_source]
+import ../../sdk/[breakpoints, debugger_session, trace_source]
 import ../../session_vm
 import ../../store/replay_data_store
 import ../../store/types
@@ -41,7 +41,7 @@ import ../../viewmodels/[calltrace_vm, debug_controls_vm, event_log_vm,
                          filesystem_vm, pixel_history_vm, request_panel_vm,
                          terminal_output_model,
                          terminal_output_vm, visual_replay_client,
-                         state_vm]
+                         state_vm, step_list_vm, origin_chain_vm]
 import ../../viewport
 import ./in_memory_transport
 
@@ -1121,6 +1121,225 @@ suite "a ct host page's mirror (Shared-DOM-Front-Ends D2)":
       mirror.dispose()
       host.dispose()
       debugger.dispose()
+      done()
+
+  test "a breakpoint set on the page is sent to the replay by the server's session":
+    # A press on a line's glyph cell holds the breakpoint on the page at once
+    # (`sdk/breakpoints.requestBreakpoints`), and the replay must receive it,
+    # or Continue runs past it. A `ct host` page sent `setBreakpoints` through
+    # its mirror's inert backend, where it waited forever: the gutter showed
+    # the breakpoint and the replay never had it.
+    # The change is relayed, and the server's session sends the file's set
+    # over its own connection and holds the rows the engine verified.
+    createRoot proc(done: proc()) =
+      let (primary, mock) = newPrimary()
+      let host = newSyncHost(manual)
+      host.addPrimary("ct-host/replay-0", primary)
+      let link = newInMemoryLink()
+      host.attach(link.a, follow = "ct-host/replay-0")
+      let mirror = createHostedPageMirror(link.b)
+      link.settle()
+      primary.moveTo(100, "src/main.nr", 38)
+      link.settle()
+      let page = mirror.session.store
+      # The page's own connection, as `ui_js` sets it: a breakpoint must not
+      # take it, because the rows are the server's session's.
+      let pageConnection = newMockBackendService(autoRespond = true)
+      page.navigationBackend = pageConnection.toBackendService()
+
+      # SET: shown on the page at once, then sent by the server's session.
+      mock.expect("setBreakpoints", %*{
+        "type": "response", "command": "setBreakpoints", "success": true,
+        "body": {"breakpoints": [{"verified": true, "line": 18}]}})
+      mock.clearReceivedCommands()
+      page.toggleBreakpoint("src/shield.nr", 18)
+      ck page.breakpointAt("src/shield.nr", 18).isSome
+      link.settle()
+      drainPlatformCallbacks()
+      link.settle()
+      let sent = mock.findCommand("setBreakpoints")
+      ck sent.isSome
+      if sent.isSome:
+        ck sent.get.args["source"]["path"].getStr == "src/shield.nr"
+        ck sent.get.args["lines"] == %*[18]
+      ck pageConnection.findCommand("setBreakpoints").isNone
+      ck primary.store.breakpointAt("src/shield.nr", 18).isSome
+      ck page.breakpointAt("src/shield.nr", 18).isSome
+      var resolutions: seq[string]
+      for r in page.pointList.rows.val:
+        if r.kind == PointKindBreakpoint: resolutions.add r.resolution
+      ck resolutions == @["verified"]
+
+      # DISABLE: the row stays, dimmed; the replay is sent the set without it.
+      mock.expect("setBreakpoints", %*{
+        "type": "response", "command": "setBreakpoints", "success": true,
+        "body": {"breakpoints": []}})
+      mock.clearReceivedCommands()
+      ck page.setBreakpointEnabled("src/shield.nr", 18, false)
+      link.settle()
+      drainPlatformCallbacks()
+      link.settle()
+      let disarmed = mock.findCommand("setBreakpoints")
+      ck disarmed.isSome
+      if disarmed.isSome:
+        ck disarmed.get.args["lines"] == newJArray()
+      ck page.breakpointAt("src/shield.nr", 18).isSome and
+        not page.breakpointAt("src/shield.nr", 18).get.enabled
+      ck primary.store.breakpointAt("src/shield.nr", 18).isSome and
+        not primary.store.breakpointAt("src/shield.nr", 18).get.enabled
+
+      # CLEAR: gone from the replay, the server's rows and the page's.
+      mock.expect("setBreakpoints", %*{
+        "type": "response", "command": "setBreakpoints", "success": true,
+        "body": {"breakpoints": []}})
+      mock.clearReceivedCommands()
+      page.clearBreakpoints("src/shield.nr")
+      link.settle()
+      drainPlatformCallbacks()
+      link.settle()
+      ck mock.findCommand("setBreakpoints").isSome
+      ck primary.store.breakpointAt("src/shield.nr", 18).isNone
+      ck page.breakpointAt("src/shield.nr", 18).isNone
+      ck pageConnection.findCommand("setBreakpoints").isNone
+      mirror.dispose()
+      host.dispose()
+      done()
+
+  test "a breakpoint set on the page before the server's session exists reaches it":
+    # The page shows the trace, and its gutter takes a click, before the
+    # replay's first stop makes the server's session. The change is held and
+    # sent once the page follows that session; sent before, no session would
+    # have run it, and the snapshot answering the page's subscription would
+    # have replaced the row the page held.
+    createRoot proc(done: proc()) =
+      let (primary, mock) = newPrimary()
+      let host = newSyncHost(manual)
+      let link = newInMemoryLink()
+      host.attach(link.a, follow = "ct-host/replay-0")
+      let mirror = createHostedPageMirror(link.b)
+      link.settle()
+      ck mirror.following == ""
+      mirror.session.store.toggleBreakpoint("src/shield.nr", 6)
+      link.settle()
+
+      mock.expect("setBreakpoints", %*{
+        "type": "response", "command": "setBreakpoints", "success": true,
+        "body": {"breakpoints": [{"verified": true, "line": 6}]}})
+      mock.clearReceivedCommands()
+      primary.moveTo(100, "src/main.nr", 38)
+      host.addPrimary("ct-host/replay-0", primary)
+      link.settle()
+      drainPlatformCallbacks()
+      link.settle()
+      ck mirror.following == "ct-host/replay-0"
+      ck mock.findCommand("setBreakpoints").isSome
+      ck primary.store.breakpointAt("src/shield.nr", 6).isSome
+      ck mirror.session.store.breakpointAt("src/shield.nr", 6).isSome
+      mirror.dispose()
+      host.dispose()
+      done()
+
+  test "a collection's next elements asked on the page are loaded by the server's session":
+    # "Load More" under a collection the locals budget cut short asks for its
+    # next elements (`ct/load-value-elements`) and appends them to the row.
+    # The locals are the server's session's, and a `ct host` page asked
+    # through its mirror's inert backend: nothing was loaded. Relayed, the
+    # server's session asks its replay and the longer row reaches the page.
+    createRoot proc(done: proc()) =
+      let (primary, mock) = newPrimary()
+      let host = newSyncHost(manual)
+      host.addPrimary("ct-host/replay-0", primary)
+      let link = newInMemoryLink()
+      host.attach(link.a, follow = "ct-host/replay-0")
+      let mirror = createHostedPageMirror(link.b)
+      link.settle()
+      primary.moveTo(100, "src/main.nr", 38)
+      primary.store.locals.locals.val = @[Variable(
+        name: "ships", value: "[..]", typeName: "[u32; 4]", hasChildren: true,
+        children: @[Variable(name: "[0]", value: "1"),
+                    Variable(name: "[1]", value: "2")],
+        moreElements: true, elementsTotal: 4)]
+      link.settle()
+      ck mirror.session.store.locals.locals.val.len == 1
+
+      mock.expect("ct/load-value-elements", %*{
+        "type": "response", "command": "ct/load-value-elements",
+        "success": true,
+        "body": {"startIndex": 2, "more": false, "elements": [
+          {"kind": 7, "i": "3", "typ": {"kind": 7, "langType": "u32"}},
+          {"kind": 7, "i": "4", "typ": {"kind": 7, "langType": "u32"}}]}})
+      mock.clearReceivedCommands()
+      mirror.session.stateVM.loadMore("ships")
+      link.settle()
+      drainPlatformCallbacks()
+      link.settle()
+      let sent = mock.findCommand("ct/load-value-elements")
+      ck sent.isSome
+      if sent.isSome:
+        ck sent.get.args["expression"].getStr == "ships"
+        ck sent.get.args["startIndex"].getInt == 2
+      let rows = mirror.session.store.locals.locals.val
+      ck rows.len == 1 and rows[0].children.len == 4
+      ck rows.len == 1 and not rows[0].moreElements
+      mirror.dispose()
+      host.dispose()
+      done()
+
+  test "the page's own panes ask over the page's connection":
+    # The step list, the origin chain and the event log's counterpart chip
+    # run on the page, with state the server's session does not have (the
+    # step list's rows come over the page's IPC; the origin chain and the
+    # counterparts are kept where they were asked). Their requests went
+    # through the mirror's inert backend and were never sent. They take the
+    # page's connection (`ReplayDataStore.directBackend`).
+    createRoot proc(done: proc()) =
+      let (primary, mock) = newPrimary()
+      let host = newSyncHost(manual)
+      host.addPrimary("ct-host/replay-0", primary)
+      let link = newInMemoryLink()
+      host.attach(link.a, follow = "ct-host/replay-0")
+      let mirror = createHostedPageMirror(link.b)
+      link.settle()
+      primary.moveTo(100, "src/main.nr", 38)
+      link.settle()
+      let page = newMockBackendService(autoRespond = true)
+      let origin = createOriginChainVM(mirror.session.store)
+      let marker = MarkerEventRow(boundaryId: "http", keyValue: "req-7",
+                                  stepId: 40)
+      let row = StepLine(kind: slkLine, delta: 2, location: StepLineLocation(
+        path: "src/shield.nr", line: 6, rrTicks: 140))
+
+      proc act() =
+        mirror.session.stepListVM.jumpToStepLine(row)
+        origin.onShowOrigin("damage", Location(file: "src/shield.nr", line: 9))
+        mirror.session.eventLogVM.jumpToCounterpartOf(marker)
+        link.settle()
+        drainPlatformCallbacks()
+        link.settle()
+
+      # CONTROL: without the page's connection none of them is sent anywhere.
+      mock.clearReceivedCommands()
+      act()
+      for command in ["ct/goto-ticks", "ct/originChain", "ct/pairIndexLookup"]:
+        ck page.findCommand(command).isNone
+        ck mock.findCommand(command).isNone
+
+      mirror.session.store.navigationBackend = page.toBackendService()
+      page.expect("ct/pairIndexLookup", %*{"counterparts": [
+        {"boundaryId": "http", "keyValue": "req-7", "stepId": 90,
+         "recordingId": "be"}]})
+      act()
+      let jumps = page.receivedCommands.filterIt(it.command == "ct/goto-ticks")
+      ck jumps.len == 2
+      if jumps.len == 2:
+        ck jumps[0].args["ticks"].getInt == 140
+        ck jumps[1].args["ticks"].getInt == 90
+      ck page.findCommand("ct/originChain").isSome
+      ck page.findCommand("ct/pairIndexLookup").isSome
+      for command in ["ct/goto-ticks", "ct/originChain", "ct/pairIndexLookup"]:
+        ck mock.findCommand(command).isNone
+      mirror.dispose()
+      host.dispose()
       done()
 
   test "a pane measured before the server's session exists loads once it does":

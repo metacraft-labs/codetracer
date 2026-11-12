@@ -421,9 +421,11 @@ proc newJsArray(): JsObject {.importjs: "(new Array())".}
 
 proc breakpointRowsForTests(): JsObject {.exportc: "ctBreakpointRows".} =
   ## The active session's breakpoints as plain objects — `{path, line,
-  ## column, enabled, condition, logMessage}` — for the GUI tests, which read
-  ## breakpoint state from the page. The rows are the session store's
-  ## (`sdk/breakpoints`); there is no other breakpoint state to read.
+  ## column, enabled, condition, logMessage, resolution}` — for the GUI
+  ## tests, which read breakpoint state from the page. The rows are the
+  ## session store's (`sdk/breakpoints`); there is no other breakpoint state
+  ## to read. `resolution` tells a breakpoint the engine bound (`verified`)
+  ## from one only held on this side (`requested`).
   result = newJsArray()
   if data.isNil or data.services.isNil or data.services.debugger.isNil:
     return
@@ -439,9 +441,10 @@ proc breakpointRowsForTests(): JsObject {.exportc: "ctBreakpointRows".} =
       let enabled = held[i].enabled
       let condition = cstring(held[i].condition)
       let logMessage = cstring(held[i].logMessage)
+      let resolution = cstring(breakpointResolution(st, file, line, column))
       discard result.push(js{
         path: path, line: line, column: column, enabled: enabled,
-        condition: condition, logMessage: logMessage})
+        condition: condition, logMessage: logMessage, resolution: resolution})
 
 proc deleteBreakpointForTests(path: cstring; line: int): bool {.exportc: "ctDeleteBreakpoint".} =
   ## Delete the active session's breakpoint on `path:line` — for the GUI
