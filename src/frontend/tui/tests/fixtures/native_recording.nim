@@ -22,6 +22,20 @@
 ## `replay-server` finds through `CODETRACER_CT_NATIVE_REPLAY_CMD`: resolving
 ## the recording sets it for this process and its children.
 ##
+## The recorder runs with `LD_PRELOAD` REMOVED from its environment
+## (`env -u LD_PRELOAD`). A library preloaded into `rr record` itself — an
+## agent session's command-trace shim is one — runs code in rr's forked child
+## before the tracee's exec (`getcwd` into rr's own heap), rr records it, and
+## the replay cannot write it back: every later session on the recording
+## failed with "Failed to determine RR port from output" (`rr-stderr-*.log`:
+## `write_data_with_holes() errno: EIO` at event 30). Measured 2026-11-12 on
+## the Linux workstation (codetracer-pm issue
+## `2026-11-12-rr-replay-of-a-c-program-that-uses-the-heap-fails-on-the-linux-workstation.md`).
+## `unset LD_PRELOAD` in a shell does not drop such a shim — it hooks
+## `execve` and puts itself back — while `env -u` starts the recorder without
+## it. The recording's key names this (`RecordingRecipe`), so a recording an
+## earlier fixture made with the preload is recorded again, not reused.
+##
 ## On a hybrid Intel CPU it also confines this process and its children to the
 ## performance cores, because rr counts branches on the core PMU only: a stock
 ## rr that lands on an efficiency core dies with "Got 0 branch events, expected
@@ -45,6 +59,11 @@ type
       ## Why there is no recording, when `ok` is false.
 
 const NativeFixtureName* = "native_sudoku_c"
+
+const RecordingRecipe = "record-without-ld-preload"
+  ## Part of the recording's key: how it was recorded. Changing how the
+  ## fixture records must change it, or a checkout keeps replaying a
+  ## recording the old way made.
 
 proc nativeTestPrograms*(): string =
   let fromEnv = getEnv("NATIVE_TEST_PROGRAMS_REPO")
@@ -117,7 +136,8 @@ proc nativeRecording*(): NativeRecording =
   putEnv("CODETRACER_IN_UI_TEST", "1")
   let info = getFileInfo(replay)
   let key = toHex(hash(readFile(source) & "|" & $info.size & "|" &
-                       $info.lastWriteTime.toUnix), 12).toLowerAscii
+                       $info.lastWriteTime.toUnix & "|" & RecordingRecipe),
+                  12).toLowerAscii
   let dir = repoRoot() / "test-logs" / "tui-fixtures" /
             NativeFixtureName & "-" & key
   let trace = dir / "trace"
@@ -132,7 +152,10 @@ proc nativeRecording*(): NativeRecording =
   createDir(dir)
   let binary = dir / "sudoku_solver"
   for args in [@["build", source, binary], @["record", "-o", trace, binary]]:
-    let (output, code) = execCmdEx(quoteShellCommand(@[replay] & args))
+    # Without the preload (the header says why): `env` is coreutils', on
+    # every host rr runs on.
+    let (output, code) = execCmdEx(quoteShellCommand(
+      @["env", "-u", "LD_PRELOAD", replay] & args))
     if code != 0:
       raise newException(IOError, "ct-native-replay " & args[0] &
         " failed (" & $code & "):\n" & output)
