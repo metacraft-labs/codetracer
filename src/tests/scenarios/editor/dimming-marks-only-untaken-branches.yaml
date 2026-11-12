@@ -19,6 +19,7 @@ steps:
   - type: shield.nr
   - wait: { until: { at: omnibox, assert: "offers(file, shield.nr)" }, timeout: 10s }
   - key: Enter
+    settle: false
   - wait: { until: { at: 'editor[file="shield.nr"]/line[number="34"]', present: true }, timeout: 30s }
   - click: { at: 'editor[file="shield.nr"]/line[number="34"]', anchor: glyph }
   - wait: { until: { at: 'editor[file="shield.nr"]/line[number="34"]', glyph: breakpoint }, timeout: 10s }

@@ -13,7 +13,8 @@ Scenarios that port no test — new coverage the pack brings — are listed in
 `inventory/new-scenarios.tsv`, each with why.
 
 This check fails when the inventory and the tree disagree in either direction
-(a test file nobody classified, a row for a file that is gone), when a ported
+(a test file nobody classified, a row for a file that is gone and that
+no scenario ports — a ported test may be retired, its row stays), when a ported
 row names no scenario or a scenario that does not exist, when a scenario is
 named by no row, or when the counts in inventory/COUNTS differ from the rows.
 
@@ -84,8 +85,12 @@ def main():
     tree = tree_files()
     for p in sorted(tree - local):
         problems.append(f"{p}: a UI test the inventory does not classify")
+    ported_rows = {r["path"] for r in rs
+                   if r["class"] != "lower-tier" and r["scenarios"] not in ("", "-")}
     for p in sorted(local - tree):
-        problems.append(f"{p}: in the inventory but not in the tree")
+        # a ported test may be retired: its row stays, naming what ports it
+        if p not in ported_rows:
+            problems.append(f"{p}: in the inventory but not in the tree")
     named = set()
     for r in rs:
         if r["class"] not in CLASSES:

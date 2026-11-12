@@ -10,4 +10,49 @@ modes: [fast, realistic]
 retention: { runs: 5, failure-days: 7 }
 applicable:
   - ../tracing/trace-macro-at-caret.yaml
+  # --- pw2 ---
+  - ../breakpoints/column-breakpoint-replaces-the-lines-column.yaml
+  - ../breakpoints/column-breakpoint-stops-at-its-column.yaml
+  - ../breakpoints/column-tracepoint-does-not-stop.yaml
+  - ../breakpoints/conditional-column-breakpoint.yaml
+  - ../breakpoints/glyph-breakpoint-is-line-only.yaml
+  - ../breakpoints/shift-f9-column-breakpoint-from-the-gutter-side.yaml
+  - ../call-trace/move-keeps-selection.yaml
+  - ../command-palette/find-symbol-reopens-palette.yaml
+  - ../command-palette/finds-files-and-menu-items.yaml
+  - ../command-palette/symbol-choice-by-click-focuses-editor.yaml
+  - ../command-palette/symbol-choice-by-enter-focuses-editor.yaml
+  - ../ct-host/files-pane-survives-session-sync.yaml
+  - ../debug-controls/disabled-control-tooltip-stays-inert.yaml
+  - ../debug-controls/every-tooltip-names-its-chord.yaml
+  - ../debug-controls/tooltip-chord-does-what-the-control-does.yaml
+  - ../debug-controls/tooltip-crossing-leaves-no-wake.yaml
+  - ../debug-controls/tooltip-follows-a-keybindings-rebind.yaml
+  - ../debug-controls/tooltip-rest-raises-exactly-one.yaml
+  - ../deepreview/changed-files-list.yaml
+  - ../deepreview/empty-review.yaml
+  - ../deepreview/file-click-opens-its-diff.yaml
+  - ../deepreview/full-file-is-read-only.yaml
+  - ../deepreview/no-calltrace-review.yaml
+  - ../deepreview/review-names-its-changeset.yaml
+  - ../editor/alt-click-adds-a-cursor.yaml
+  - ../editor/context-menu-is-mode-dependent.yaml
+  - ../editor/ctrl-double-click-leaves-no-selection.yaml
+  - ../editor/dimming-marks-only-untaken-branches.yaml
+  - ../editor/find-cancel-and-return-restores-the-view.yaml
+  - ../editor/font-survives-mode-switch.yaml
+  - ../editor/glyph-hint-on-hovered-line.yaml
+  - ../editor/glyph-toggles-on-press-numbers-select.yaml
+  - ../editor/gutter-right-click-menu.yaml
+  - ../editor/incremental-find-walks-and-keeps-the-match.yaml
+  - ../editor/inline-breakpoint-by-shift-f9-and-menu.yaml
+  - ../editor/multiclick-selects-caret-word-line.yaml
+  - ../editor/read-only-toggle-after-stop.yaml
+  - ../editor/tabs-survive-mode-switch.yaml
+  - ../editor/trace-session-keeps-its-source-editor.yaml
+  - ../editor/writable-after-stop.yaml
+  - ../event-log/column-change-keeps-scroll-range.yaml
+  - ../languages/elixir-canonical-flow.yaml
+  - ../languages/erlang-canonical-flow.yaml
+  - ../replay/portable-mcr-trace-replays.yaml
 unsupported: []
