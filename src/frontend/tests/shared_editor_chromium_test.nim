@@ -122,7 +122,7 @@ proc endCase(name: string) =
 
 const
   Source = "def main():\n    x = 1\n    if x:\n        y = 2\n\n    return x\nprint(main())\n"
-  ExpectedChecks = 92
+  ExpectedChecks = 99
     ## Written from a run. See the end of `main`.
 
 proc fresh(text = Source; readOnly = false; model = bkCua;
@@ -344,7 +344,7 @@ proc caseDecorationsAndZones() {.async.} =
   await settle()
   ck num(ids.length) == 1
   ck not isNull(ed.root.querySelector(cstring(".view-overlays div[data-line=\"2\"] .cdr.on")))
-  ck not isNull(ed.root.querySelector(cstring(".margin-view-overlays div[data-line=\"2\"] .cgmr.gutter-glyph-breakpoint")))
+  ck not isNull(ed.root.querySelector(cstring(".glyph-margin-widgets .cgmr[data-line=\"2\"].gutter-glyph-breakpoint")))
   ck not isNull(ed.root.querySelector(cstring(".view-line[data-line=\"2\"] .line-flow-hit")))
   # The decoration follows its line when a line is typed above it.
   ed.focusEditor()
@@ -432,6 +432,7 @@ proc caseFindAndReplace() {.async.} =
   discard ed.findCommand("find.open")
   await settle()
   ck str(ed.root.getAttribute(cstring"data-ct-find")) == "open"
+  ck not isNull(ed.root.querySelector(cstring".find-widget.visible")), "Monaco's open-widget class"
   ck activeEl() == ed.findInput, "the field takes the keyboard"
   ck str(ed.findInput.value) == "x", "seeded with `" & str(ed.findInput.value) & "`"
   ck $textOf(ed.root.querySelector(cstring".ct-find-count")) == "1 of 3",
@@ -451,6 +452,7 @@ proc caseFindAndReplace() {.async.} =
   await ctPress("", "Escape")
   await settle()
   ck str(ed.root.getAttribute(cstring"data-ct-find")) == "closed"
+  ck isNull(ed.root.querySelector(cstring".find-widget.visible"))
   ck ed.selectedText == "return" and ed.hasTextFocus
   # Replace all, as one undoable change.
   discard ed.findCommand("find.open-replace")
@@ -525,6 +527,40 @@ proc caseBracketsAndWheel() {.async.} =
   ck isNull(viewLine(1)), "line 1 scrolled out of the drawn window"
   endCase("bracket matching at the caret, and the wheel scrolls")
 
+proc caseScrollRangeAndViewState() {.async.} =
+  beginCase()
+  # Monaco's scroll range: with `scrollBeyondLastLine` (its default, the
+  # desktop's source editors') a line near the end is centred, the last
+  # line able to reach the top; without it the view stops at the last line.
+  var lines: seq[string] = @[]
+  for i in 1 .. 60: lines.add "row_" & $i
+  let ed = fresh(lines.join("\n"))
+  let f = facadeOf(ed)
+  discard f.revealLineInCenter(55)
+  await settle()
+  let vh = ed.height
+  let lh = ed.lineHeight
+  ck ed.scrollTop == ed.topForLine(55) - (vh - lh) div 2,
+    "line 55 centred past the last screenful (" & $ed.scrollTop & ")"
+  ck num(f.getScrollHeight()) == float(60 * lh - lh + vh), "Monaco's scroll height"
+  ed.options[cstring"scrollBeyondLastLine"] = false
+  discard f.setScrollTop(100_000)
+  await settle()
+  ck ed.scrollTop == 60 * lh - vh, "without it, the last line stops at the bottom"
+  # The view state Monaco gives back on a re-mount (a mode switch): every
+  # cursor's selection, with its direction.
+  discard f.setSelections(toJs(@[
+    js{startLineNumber: 2, startColumn: 1, endLineNumber: 2, endColumn: 4},
+    js{startLineNumber: 5, startColumn: 1, endLineNumber: 5, endColumn: 3}]))
+  let state = f.saveViewState()
+  discard f.setPosition(js{lineNumber: 9, column: 1})
+  discard f.restoreViewState(state)
+  let sels = f.getSelections()
+  ck num(sels.length) == 2, "both selections back"
+  ck str(f.getModel().getValueInRange(sels[0])) == "row" and
+     str(f.getModel().getValueInRange(sels[1])) == "ro", "with their text"
+  endCase("Monaco's scroll range, and the view state carries every selection")
+
 proc caseHugeFile() {.async.} =
   beginCase()
   # 200,000 lines (PLAT-24's corpus size): the editor opens it, draws only
@@ -598,6 +634,7 @@ proc main() {.async.} =
   await guarded(caseFindAndReplace, "caseFindAndReplace")
   await guarded(caseUnifiedDiff, "caseUnifiedDiff")
   await guarded(caseBracketsAndWheel, "caseBracketsAndWheel")
+  await guarded(caseScrollRangeAndViewState, "caseScrollRangeAndViewState")
   await guarded(caseHugeFile, "caseHugeFile")
   beginCase()
   inc checks

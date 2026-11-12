@@ -30,7 +30,7 @@ var
   MainPath = ""
   MainUri = ""
     ## Set from the directory the runner wrote the project into.
-  ExpectedChecks = 14
+  ExpectedChecks = 15
     ## Written from a run. See the end of `main`.
 
 proc ctLspStart(command: cstring; args: JsObject; filesJson: cstring): Future[cstring] {.importjs:
@@ -236,6 +236,14 @@ proc caseSemanticTokens(ed: SharedEditor) {.async.} =
   # `languages/nimSemanticTokens.js`) is played here instead, through the
   # same bridge; what is graded is the decoding and the painting.
   cannedSemanticTokens()
+  # Monaco's option: the desktop's editors leave it off, and neither editor
+  # asks the server for semantic tokens there (`requestSemantic`) — off,
+  # nothing is asked and nothing is painted.
+  ed.render()
+  let unasked = await waitFor(proc(): bool =
+    not isNull(ed.root.querySelector(cstring(".view-line span[class*=\"ct-sem-\"]"))), 2_000)
+  ck not unasked, "no semantic tokens asked for with the option off"
+  ed.options[cstring"semanticHighlighting.enabled"] = true
   ed.render()
   let coloured = await waitFor(proc(): bool =
     not isNull(ed.root.querySelector(cstring(".view-line span[class*=\"ct-sem-\"]"))), 10_000)
