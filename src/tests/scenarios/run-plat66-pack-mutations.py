@@ -96,9 +96,11 @@ ARMS = [
      [("terminal", EXAMPLE)],
      "the terminal binding reads every property off the first screen it saw"),
     ("T4", [(TERM_BIND,
-             '        some(top.contains("[ct]") and top.contains("tick: ") and top.contains("[PAUSED]"))',
-             "        some(true)")],
-     [("terminal", IDLE)],
+             '        some(top.contains("[ct]") and top.contains("tick: ") and top.contains("[PAUSED]") and',
+             "        some(true or")],
+     # at launch the terminal front-end draws the stop with its first frame;
+     # a new session opened by the trace is where an early `replay-idle` shows
+     [("terminal", IDLE), ("terminal", EXAMPLE)],
      "the terminal's replay-idle fires before the window shows the stop"),
     ("P1", [(PW_BIND,
              "        const current = highlightTops.some((t) => Math.abs(t - r.g.getBoundingClientRect().top) < 3);",

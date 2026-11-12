@@ -1,0 +1,12 @@
+# Control digests for run-plat66-pack-mutations.py — the subjects
+# AND the scenarios they are graded by. Refreshed with
+# --record-control-hashes, gated by the needle scan.
+d5bb3105be8f708c2885f26e8a675e8a88a3e0a4272e62bb3db4ff23526a6808  src/tests/scenarios/bindings/termassert/ct_tui_screen.nim
+516f20d67699ea3c05237b8eb1609c8b058be419e3a2b46b3d05159091fdc788  src/tests/scenarios/bindings/termassert/ct_term_binding.nim
+352e3a8153c7b8324784212f54a33fe4edace5a9902d86f248657832ca12278a  src/tests/scenarios/bindings/playwright/codetracer-binding.ts
+ab9a95f5f0cc52cc823cf3ac0d385987418ce85b038a57460d6c9c094508494b  src/tests/scenarios/bindings/guiassert/ct_gui_binding.nim
+ea54334d3c660c0212a5ab3c5b37aca4ba526a783367774ddad0647756afce5b  src/tests/scenarios/resolver/ct_resolver.nim
+1102f6565cc74974cdc0f510242a03904d2dd9aeeb4aa50515387624434a7072  src/tests/scenarios/tracing/trace-macro-at-caret.yaml
+bc90f69fcfa378f0de095cbc2c50a2ecfe70b9891c83e468aacd49387dd152cb  src/tests/scenarios/tracing/trace-macro-rebound.yaml
+079b36167ae9222a54a354890ff9562eb2295d5a69ef28707ca3dda51301acef  src/tests/scenarios/tests/replay-idle-means-the-stop-is-shown.yaml
+dfd0c6930df0862ca8968de0cc3c79b2137998516a39961ce4100cec52b74cc8  ci/test/scenarios.sh

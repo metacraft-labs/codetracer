@@ -1,0 +1,12 @@
+{
+  "G1": "step 1.4: 'editor[file=\"tracing.nim\"]' does not satisfy stopped-within(18, 21)",
+  "P1": "step 1.4: 'editor[file=\"tracing.nim\"]' does not satisfy stopped-within(18, 21)",
+  "P2": "",
+  "R1": "step 6: waited 180000 ms",
+  "R2": "step 3.2: waited 180000 ms",
+  "S1": "lint L1",
+  "T1": "step 1.4: 'editor[file=\"tracing.nim\"]' does not satisfy stopped-within(18, 21)",
+  "T2": "step 2.2: backend",
+  "T3": "step 2.2: backend",
+  "T4": ""
+}

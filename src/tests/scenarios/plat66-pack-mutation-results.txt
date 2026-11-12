@@ -1,0 +1,25 @@
+# run-plat66-pack-mutations.py, graded 2026-11-12 on the Linux workstation
+# (1-minute load 60-180), against the subjects and suites in
+# plat66-pack-mutation-control.sha256, on codetracer agents at 7549e02ad56
+# plus that control file. Terminal and GPUI arms rebuilt their dvs-*-codetracer
+# against DemoVideoScript a59da61; the desktop arms ran the real Electron on
+# Xvfb 2560x1440x24 at 96 dpi.
+T1   KILLED     the terminal binding misreads the line the replay is stopped on
+T2   KILLED     the terminal binding never sees the read-only editor's caret
+T3   KILLED     the terminal binding reads every property off the first screen it saw
+T4   SURVIVED   the terminal's replay-idle fires before the window shows the stop
+P1   KILLED     the desktop binding never reads the line the replay is stopped on
+P2   SURVIVED   the desktop's replay-idle fires before the window shows the stop
+G1   KILLED     the GPUI binding never sees the execution pointer
+R1   KILLED     the binding resolver ignores the user's keybindings.json
+R2   KILLED     the binding resolver sends the display form's capital (Shift+t)
+S1   KILLED     a stage call smuggled into the user's example's steps
+# 8 of 10 killed. T4 and P2 survive because no scenario can observe them: on
+# both front-ends the window draws a replay's stop in the same frame as the
+# state `replay-idle` reads (the top bar's [PAUSED], the status bar's
+# location), and every input's implicit settle waits past that frame. A
+# scenario that sends a step with `settle: false` and checks the stop right
+# after `replay-idle` is racy against the UNMUTATED binding too (1 of 2 runs
+# read the old line), so it cannot be the kill. A kill needs a front-end
+# signal for "a request is in flight" that the screen shows before the
+# answer; neither front-end draws one.
