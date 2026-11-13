@@ -3858,6 +3858,12 @@ proc showVisualPane*(rt: TuiRuntime; pane: PaneKind) =
   if b.layout.tree.contains(pane) and
      b.dispatch(cmdActivateTab(pane)).status == lasApplied:
     rt.afterLayoutCommit()
+    # The tab brought forward is now its stack's pane on screen: the focus
+    # ring is re-derived so a press on it can focus it. Left stale, the ring
+    # still named the tab it replaced, the press's `focusPaneKind` found no
+    # region, and the row's operation (`pixel-history.activate`, whose table
+    # wants the pane focused) was "not available in the terminal".
+    rt.rebuildFocus()
 
 proc openWorkingFileAt*(rt: TuiRuntime; path: string; line, col: int): string =
   ## PLAT-55 (K35): a working-tree file opened in Edit mode's editor — the
