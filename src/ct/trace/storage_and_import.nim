@@ -291,6 +291,9 @@ proc readTraceFolderMeta*(folder: string): CtfsMetaDat =
   else:
     raise newException(IOError, describeMissingTraceContainer(folder))
 
+const RECORDING_SYMBOLS_FILE* = "symbols.json"
+  ## The recording's symbol index (`db_backend_record.recordSymbols`).
+
 proc copyMaterializedTracePayload(sourceFolder, outputFolder: string) =
   ## Copy a materialized `runtime_tracing` recording (event stream +
   ## sidecars) into the recording folder `importTrace` allocated for it.
@@ -466,6 +469,19 @@ proc importTrace*(
     # when the source files are still available and unchanged
     if paths.len > 0:
       storeTraceFiles(paths, outputFolder, workdir, axes)
+
+  # The symbol index `ct record` writes beside a recording (`symbols.json`:
+  # ctags over its sources, what the command palette's `:sym` searches) is
+  # part of the recording. A copy without it left `:sym` with nothing to
+  # find in every imported recording, which is every recording the desktop
+  # opens through `ct host --trace-path`.
+  if outputFolder != recordingSourceFolder:
+    for folder in [recordingSourceFolder, traceFolder]:
+      let source = folder / RECORDING_SYMBOLS_FILE
+      if fileExists(source):
+        if not fileExists(outputFolder / RECORDING_SYMBOLS_FILE):
+          copyFile(source, outputFolder / RECORDING_SYMBOLS_FILE)
+        break
 
   var sourceFoldersInitialSet = initHashSet[string]()
   for path in paths:
