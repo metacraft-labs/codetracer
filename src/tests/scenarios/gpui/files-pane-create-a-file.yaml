@@ -1,0 +1,27 @@
+scenario: 1
+name: gpui/files-pane-create-a-file
+pack: codetracer
+summary: >-
+  In an Edit window, the Files pane lists the opened folder; its menu on the
+  folder's row offers Create, and a name typed into the field it opens
+  creates the file and opens it in the editor.
+
+stage:
+  - use: write-project
+    with:
+      files:
+        notes.txt: "notes\n"
+        src/main.py: "print(1)\n"
+  - use: open-project
+    with: { folder: $project }
+
+steps:
+  - wait: { until: ready, timeout: 60s }
+  - wait: { until: { at: 'filesystem/file-node[name="notes.txt"]', present: true }, timeout: 30s }
+  - click: { at: 'filesystem/file-node[name="src"]', button: right }
+  - wait: { until: { at: context-menu, assert: 'offers("Create")' }, timeout: 20s }
+  - click: { at: 'context-menu/menu-item[label="Create"]' }
+  - type: "fresh.txt"
+  - key: Enter
+  - wait: { until: { at: 'filesystem/file-node[name="fresh.txt"]', present: true }, timeout: 30s }
+  - wait: { until: { at: 'pane-tab[label="src/fresh.txt"]', present: true }, timeout: 30s }

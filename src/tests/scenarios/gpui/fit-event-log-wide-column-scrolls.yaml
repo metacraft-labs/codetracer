@@ -1,0 +1,20 @@
+scenario: 1
+name: gpui/fit-event-log-wide-column-scrolls
+pack: codetracer
+summary: >-
+  The event log fits without a sideways bar until its output column is made wider than the pane (`:column-width output 300`); narrowed again, the bar goes.
+
+stage:
+  - use: record-program
+    with: { program: wide_lines/main.py }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - wait: { until: { at: 'pane[title="Event Log"]', assert: 'has-row("LEFT-EDGE")' }, timeout: 30s }
+  - chord: Ctrl+P
+  - type: ":column-width output 300"
+  - key: Enter
+  - wait: { until: { at: 'pane[title="Event Log"]', assert: 'lacks-row("RIGHT-EDGE")' }, timeout: 20s }
+  - wheel: { at: 'pane[title="Event Log"]', direction: right, amount: 40 }
+  - wait: { until: { at: 'pane[title="Event Log"]', assert: 'lacks-row("tick")' }, timeout: 20s }

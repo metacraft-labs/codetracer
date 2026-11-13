@@ -1,0 +1,17 @@
+scenario: 1
+name: gpui/low-level-code-native-steps-by-instruction
+pack: codetracer
+summary: >-
+  Over a native (rr) C recording, Alt+1 lists main's machine code with the pointer at the stop and says steps go by instruction; F10 then moves the replay forward by one instruction and Shift+F10 back.
+
+stage:
+  - use: native-recording
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 300s }
+  - chord: Alt+1
+  - wait: { until: { at: 'pane[title="Low Level Code"]', assert: 'has-row("instruction")' }, timeout: 120s }
+  - expect: { at: 'pane[title="Low Level Code"]', assert: 'has-row("main")' }
+  - key: F10
+  - wait: { until: { at: replay-position, assert: "past(1)" }, timeout: 120s }

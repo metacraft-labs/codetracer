@@ -1,0 +1,20 @@
+scenario: 1
+name: gpui/find-ctrl-f-seeds-and-walks
+pack: codetracer
+summary: >-
+  Ctrl+F opens the editor's find seeded with the word at the caret; typing replaces it and the field counts the matches, and F3 walks to the next one.
+
+stage:
+  - use: record-program
+    with: { program: calc }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - click: { at: 'editor[file="main.py"]/line[number="31"]', anchor: "column(14)" }
+  - chord: Ctrl+F
+  - wait: { until: { at: find-field, present: true }, timeout: 20s }
+  - type: "right"
+  - wait: { until: { at: find-field, query: { contains: "right" } }, timeout: 20s }
+  - key: F3
+  - wait: { until: { at: find-field, count: { contains: " of " } }, timeout: 20s }

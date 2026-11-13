@@ -1,0 +1,23 @@
+scenario: 1
+name: gpui/problems-after-a-failed-build
+pack: codetracer
+summary: >-
+  After a failing `nargo compile`, the Problems pane lists the errors and the warning with their places, and Next Problem (F8) opens the first error in its file.
+
+stage:
+  - use: fixture-project
+    with: { name: noir-build-errors }
+  - use: open-project
+    with: { folder: $project }
+
+steps:
+  - wait: { until: ready, timeout: 60s }
+  - chord: Ctrl+P
+  - type: ":build nargo compile"
+  - key: Enter
+    settle: false
+  - wait: { until: { at: 'pane[title="Problems"]', assert: 'has-row("Expected type bool, found type Field")' }, timeout: 180s }
+  - wait: { until: settled, timeout: 60s }
+  - expect: { at: 'pane[title="Problems"]', assert: ['has-row("unused variable unused")', 'has-row("src/main.nr")'] }
+  - key: F8
+  - wait: { until: { at: 'editor[file="util.nr"]', assert: 'shows-text("Field")' }, timeout: 30s }

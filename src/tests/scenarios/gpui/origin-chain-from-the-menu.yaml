@@ -1,0 +1,20 @@
+scenario: 1
+name: gpui/origin-chain-from-the-menu
+pack: codetracer
+summary: >-
+  At tick 118 the Variables pane's menu on `value` offers Show value origin; choosing it opens the value's origin chain under the row.
+
+stage:
+  - use: record-program
+    with: { program: calc }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - click: { at: 'event-log/event[text="100 / 5 - 3 = 17"]' }
+  - wait: { until: { at: replay-position, tick: 118 }, timeout: 60s }
+  - wait: { until: { at: 'variables/variable[name="value"]', present: true }, timeout: 30s }
+  - click: { at: 'variables/variable[name="value"]', button: right }
+  - wait: { until: { at: context-menu, assert: 'offers("Show value origin")' }, timeout: 20s }
+  - click: { at: 'context-menu/menu-item[label="Show value origin"]' }
+  - wait: { until: { at: 'pane[title="Variables"]', assert: 'has-row("tick")' }, timeout: 30s }

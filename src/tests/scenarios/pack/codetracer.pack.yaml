@@ -1788,6 +1788,12 @@ stages:
       as the recording the next `open-recording` opens; it needs the visual
       replay player.
     params: {}
+  native-recording:
+    summary: >-
+      Record the native fixture (the C sudoku solver of
+      codetracer-native-test-programs) with rr, as the native suites do, and
+      remember it as the recording the next `open-recording` opens.
+    params: {}
   # --- pw1 ---
   stub-agent:
     summary: >-

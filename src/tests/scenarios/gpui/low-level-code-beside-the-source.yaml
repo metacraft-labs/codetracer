@@ -1,0 +1,20 @@
+scenario: 1
+name: gpui/low-level-code-beside-the-source
+pack: codetracer
+summary: >-
+  Alt+1 opens the Low Level Code pane beside the source over the Noir recording: its listing under the source lines, sync on, steps by line; a right press on a row opens its menu.
+
+stage:
+  - use: record-program
+    with: { program: noir_space_ship }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 180s }
+  - expect: { at: 'pane-tab[label="Low Level Code"]', absent: true }
+  - chord: Alt+1
+  - wait: { until: { at: 'pane[title="Low Level Code"]', assert: 'has-row("sync on")' }, timeout: 60s }
+  - expect: { at: 'pane[title="Low Level Code"]', assert: 'has-row("StepId")' }
+  - click: { at: 'pane[title="Low Level Code"]/row[#4]', anchor: text-start, button: right }
+  - wait: { until: { at: context-menu, assert: 'offers("Go to Source Line")' }, timeout: 20s }
+  - key: Esc

@@ -29,6 +29,7 @@ import ../../../frontend/viewmodel/tests/unit/build_fixtures/plat56_c_build
 import results
 import ../../../tools/demo_request_session
 import ../../../frontend/tui/tests/fixtures/visual_fixture
+import ../../../frontend/tui/tests/fixtures/native_recording
 
 export fixture_provider
 
@@ -400,6 +401,15 @@ proc visualReplayCapable*(s: StageState) =
   createDir(dest / "gfx_stream")
   writeFile(dest / "gfx_stream" / "gfx_commands.dat", "")
   s.launch.recording = dest
+
+proc nativeRecordingStage*(s: StageState) =
+  ## The native fixture (codetracer-native-test-programs' C sudoku solver)
+  ## recorded with rr, as the native suites record it; a missing recorder,
+  ## program or replay engine is a failed stage, named.
+  let rec = nativeRecording()
+  if not rec.ok:
+    raise newException(IOError, "native-recording: " & missingNativePrereq(rec))
+  s.launch.recording = rec.tracePath
 
 proc frontEndOptions*(s: StageState; options: JsonNode; term: string;
                       env: JsonNode = nil) =
@@ -1092,6 +1102,8 @@ proc runStage*(s: StageState; use: string; args: JsonNode) =
     s.visualRecording()
   of "visual-replay-capable":
     s.visualReplayCapable()
+  of "native-recording":
+    s.nativeRecordingStage()
   of "request-session":
     s.requestSession()
   of "fixture-project":

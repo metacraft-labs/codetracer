@@ -1,0 +1,39 @@
+scenario: 1
+name: gpui/build-tasks-default-task-from-the-picker
+pack: codetracer
+summary: >-
+  In an Edit window on a project with declared build tasks, Ctrl+Shift+B opens
+  the task picker with the default task first, and Enter builds it: the
+  failing gcc task's errors reach the Problems pane; `:build: pass` then
+  builds the passing task and the errors go.
+
+stage:
+  - use: fixture-project
+    with: { name: c-build }
+  - use: write-project
+    with:
+      files:
+        .codetracer/build.yaml: |
+          tasks:
+            fail:
+              command: "gcc -Wall -fdiagnostics-color=always -c src/main.c -o /dev/null"
+              default: true
+            pass:
+              command: "gcc -Wall -fdiagnostics-color=always -c src/ok.c -o /dev/null"
+  - use: open-project
+    with: { folder: $project }
+
+steps:
+  - wait: { until: ready, timeout: 60s }
+  - chord: Ctrl+Shift+B
+  - wait: { until: { at: 'omnibox/option[#1]', present: true }, timeout: 20s }
+  - expect: { at: 'omnibox/option[#1]', label: { contains: "fail" } }
+  - key: Enter
+    settle: false
+  - wait: { until: { at: 'pane[title="Problems"]', assert: 'has-row("src/main.c")' }, timeout: 180s }
+  - wait: { until: settled, timeout: 60s }
+  - chord: Ctrl+P
+  - type: ":build: pass"
+  - key: Enter
+    settle: false
+  - wait: { until: { at: 'pane[title="Problems"]', assert: 'lacks-row("src/main.c")' }, timeout: 180s }

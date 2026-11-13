@@ -1,0 +1,21 @@
+scenario: 1
+name: gpui/constraints-pane-in-edit-mode
+pack: codetracer
+summary: >-
+  In an Edit window on a Noir circuit, `:constraints` measures it and the Constraints pane lists the opcodes by the lines that declare them.
+
+stage:
+  - use: fixture-project
+    with: { name: noir-constraints }
+  - use: open-project
+    with: { folder: $project }
+
+steps:
+  - wait: { until: ready, timeout: 60s }
+  - chord: Ctrl+P
+  - type: ":constraints"
+  - key: Enter
+    settle: false
+  - wait: { until: { at: 'pane[title="Constraints"]', assert: 'has-row("ACIR opcodes")' }, timeout: 180s }
+  - wait: { until: settled, timeout: 60s }
+  - expect: { at: 'pane[title="Constraints"]', assert: ['has-row("src/main.nr:3")', 'has-row("src/checks.nr:2")'] }

@@ -1,0 +1,18 @@
+scenario: 1
+name: gpui/terminal-output-press-goes-to-the-write
+pack: codetracer
+summary: >-
+  The Terminal Output pane shows the colours program's lines; a press on a line moves the replay to the write that printed it, past the start.
+
+stage:
+  - use: record-program
+    with: { program: terminal_colours/main.py }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - click: { at: 'pane-tab[label="Terminal Output"]' }
+  - wait: { until: { at: 'pane[title="Terminal Output"]', assert: 'has-row("red plain bold green")' }, timeout: 30s }
+  - expect: { at: replay-position, tick: 1 }
+  - click: { at: 'pane[title="Terminal Output"]/row[#3]', anchor: text-start }
+  - wait: { until: { at: replay-position, assert: "past(1)" }, timeout: 30s }

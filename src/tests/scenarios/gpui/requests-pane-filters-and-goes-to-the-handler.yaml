@@ -1,0 +1,21 @@
+scenario: 1
+name: gpui/requests-pane-filters-and-goes-to-the-handler
+pack: codetracer
+summary: >-
+  A recording that served requests shows the Requests pane by itself with the producer's rows; `:requests users` narrows them to the URLs holding `users`, and a double press on a row goes to its handler.
+
+stage:
+  - use: request-session
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - wait: { until: { at: 'pane[title="Requests"]', assert: 'has-row("/api/users/42")' }, timeout: 60s }
+  - expect: { at: 'pane[title="Requests"]', assert: ['has-row("/static/app.css")', 'has-row("/api/orders/7")'] }
+  - chord: Ctrl+P
+  - type: ":requests users"
+  - key: Enter
+  - wait: { until: { at: 'pane[title="Requests"]', assert: 'lacks-row("/static/app.css")' }, timeout: 30s }
+  - expect: { at: 'pane[title="Requests"]', assert: 'has-row("/api/users/42")' }
+  - click: { at: 'pane[title="Requests"]/row[#3]', anchor: text-start, count: 2 }
+  - wait: { until: { at: replay-position, assert: "past(1)" }, timeout: 60s }

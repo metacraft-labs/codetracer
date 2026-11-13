@@ -1,0 +1,24 @@
+scenario: 1
+name: gpui/verification-run-lists-findings
+pack: codetracer
+summary: >-
+  `:verify` opens the Verification pane; Run runs the package's task, which fails before reaching the prover, and the pane lists the type error with its place.
+
+stage:
+  - use: fixture-project
+    with: { name: verno-type-error }
+  - use: open-project
+    with: { folder: $project }
+
+steps:
+  - wait: { until: ready, timeout: 60s }
+  - chord: Ctrl+P
+  - type: ":verify"
+  - key: Enter
+  - wait: { until: { at: 'pane[title="Verification"]', present: true }, timeout: 30s }
+  - chord: Ctrl+P
+  - type: ":Verification: Run"
+  - key: Enter
+    settle: false
+  - wait: { until: { at: 'pane[title="Verification"]', assert: 'has-row("Expected type Field, found type u32")' }, timeout: 180s }
+  - expect: { at: 'pane[title="Verification"]', assert: 'has-row("typeerr/src/main.nr")' }
