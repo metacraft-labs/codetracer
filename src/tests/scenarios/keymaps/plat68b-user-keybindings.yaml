@@ -1,0 +1,34 @@
+scenario: 1
+name: keymaps/plat68b-user-keybindings
+pack: codetracer
+summary: >-
+  A user keybindings.json row adds Ctrl+Alt+N for Step Over and another removes F10: F10 does nothing, Ctrl+Alt+N steps over, and the toolbar's Step Over tooltip names Ctrl+Alt+N.
+
+stage:
+  - use: record-program
+    with: { program: calc }
+  - use: plant-config
+    with:
+      file: keybindings.json
+      content: |
+        // a user keymap, JSONC
+        [
+          { "key": "ctrl+alt+n", "command": "debugger.step-over" },
+          { "key": "f10", "command": "-debugger.step-over" },
+        ]
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 180s }
+  - wait: { until: call-trace.loaded, timeout: 120s }
+  - expect: { at: 'editor[file="main.py"]', assert: "stopped-at(1)" }
+  - click: { at: 'editor[file="main.py"]/line[number="1"]', anchor: text-start }
+  - expect: { at: 'editor[file="main.py"]', focused: true }
+  - key: F10
+  - wait: { until: replay-idle, timeout: 60s }
+  - expect: { at: 'editor[file="main.py"]', assert: "stopped-at(1)" }
+  - chord: Ctrl+Alt+N
+    settle: false
+  - wait: { until: { at: 'editor[file="main.py"]', assert: "stopped-at(2)" }, timeout: 60s }
+  - hover: { at: 'toolbar/toolbar-button[label="next-image"]', for: 1s }
+  - expect: { at: 'toolbar/toolbar-button[label="next-image"]', tooltip: "Next (Ctrl+Alt+N)", tooltip-shown: true }

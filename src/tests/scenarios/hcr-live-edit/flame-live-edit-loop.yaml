@@ -1,0 +1,37 @@
+scenario: 1
+name: hcr-live-edit/flame-live-edit-loop
+pack: codetracer
+summary: >-
+  In the Live Edit (HCR) panel, three typed edits into one running flame each
+  answer "applied" with no restart, and an out-of-range value is refused by
+  name. (The flame's plateau verdict and the session's patch count are the
+  demo's checks, read after the run.)
+
+stage:
+  - use: record-program
+    with: { program: py_console_logs/main.py }
+  - use: hcr-flame
+    with: { platform: linux, arm: live-edit }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 180s }
+  - chord: Ctrl+P
+  - wait: { until: { at: omnibox, present: true }, timeout: 15s }
+  - type: ":Live Edit"
+  - wait: { until: { at: 'omnibox/option[label="Live Edit (HCR)"]', present: true }, timeout: 15s }
+  - click: { at: 'omnibox/option[label="Live Edit (HCR)"]' }
+  - wait: { until: { at: live-edit-panel, status: waiting }, timeout: 15s }
+  - flow: live-edit
+    with: { edit: "rise_speed=2.7" }
+  - flow: live-edit
+    with: { edit: "rise_speed=5.4" }
+  - flow: live-edit
+    with: { edit: "rise_speed=9.0" }
+  - click: { at: 'live-edit-panel/text-field[label="edit"]' }
+  - chord: Ctrl+A
+  - type: "rise_speed=0"
+  - key: Enter
+    settle: false
+  - wait: { until: { at: live-edit-panel, status: edit-value-out-of-range }, timeout: 300s }
+  - expect: { at: live-edit-panel, detail: { contains: "not positive" } }

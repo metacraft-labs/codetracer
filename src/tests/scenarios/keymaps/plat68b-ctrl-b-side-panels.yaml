@@ -1,0 +1,28 @@
+# Not yet run: some expected values here (stack counts, stop lines, the track press's column,
+# a search result's text) are read from probe screenshots or estimated, and must be
+# confirmed by the first run before this scenario goes into a lane.
+scenario: 1
+name: keymaps/plat68b-ctrl-b-side-panels
+pack: codetracer
+summary: >-
+  Ctrl+B pins the side panels to their edges, and again puts them back: the layout's shape — its rows, columns, stacks and their tabs — as it was; Ctrl+Shift+B runs a build: the palette lists the build tasks.
+
+stage:
+  - use: record-program
+    with: { program: calc }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 180s }
+  - wait: { until: call-trace.loaded, timeout: 120s }
+  - expect: { at: 'editor[file="main.py"]', assert: "stopped-at(1)" }
+  - click: { at: 'editor[file="main.py"]/line[number="1"]', anchor: text-start }
+  - expect: { at: 'editor[file="main.py"]', focused: true }
+  - expect: { at: layout, stacks: 5 }
+  - chord: Ctrl+B
+  - expect: { at: layout, stacks: { lt: 5 } }
+  - chord: Ctrl+B
+  - expect: { at: layout, stacks: 5 }
+  - chord: Ctrl+Shift+B
+  - wait: { until: { at: omnibox, present: true }, timeout: 15s }
+  - expect: { at: omnibox, query: ":build: " }

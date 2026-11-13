@@ -1,0 +1,55 @@
+scenario: 1
+name: layout/plat70b-table-cells-cut-and-reveal
+pack: codetracer
+summary: >-
+  In the table panes of a recording whose values are far wider than any pane,
+  the cells cut are exactly the cells drawn cut, and the state and call-trace
+  panes do not scroll sideways. Resting the pointer on a cut cell shows its
+  whole text in a tooltip after half a second, wrapped at 80 columns, and on
+  a cell that fits shows none; a press on the cut cell's … opens its row's
+  whole text under it without moving the debugger, and again closes it;
+  Ctrl+K Ctrl+I opens and closes a pressed variable's detail.
+
+stage:
+  - use: record-program
+    with: { program: wide_lines/main.py }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 180s }
+  - wait: { until: call-trace.loaded, timeout: 120s }
+  - click: { at: 'call-trace/call[name="main"]', anchor: name }
+    settle: false
+  - wait: { until: { at: 'editor[file="main.py"]', assert: "stopped-at(25)" }, timeout: 60s }
+  - wait: { until: replay-idle, timeout: 60s }
+  - key: F10
+    settle: false
+  - wait: { until: { at: 'editor[file="main.py"]', assert: "stopped-at(26)" }, timeout: 60s }
+  - wait: { until: replay-idle, timeout: 60s }
+  - key: F10
+    settle: false
+  - wait: { until: { at: 'editor[file="main.py"]', assert: "stopped-at(27)" }, timeout: 60s }
+  - wait: { until: replay-idle, timeout: 60s }
+  - wait: { until: { at: 'table-pane[pane="variables"]', assert: has-cut }, timeout: 60s }
+  - expect: { at: 'table-pane[pane="variables"]', assert: cuts-drawn, sideways: false }
+  - expect: { at: 'table-pane[pane="event-log"]', assert: has-cut }
+  - expect: { at: 'table-pane[pane="event-log"]', assert: cuts-drawn }
+  - expect: { at: 'table-pane[pane="call-trace"]', assert: has-cut, sideways: false }
+  - hover: { at: 'table-pane[pane="event-log"]/table-cell[cell="CUT_CELL"]', anchor: text-start, for: 250ms }
+  - expect: { at: table-tooltip, absent: true }
+  - hover: { at: 'table-pane[pane="event-log"]/table-cell[cell="CUT_CELL"]', anchor: text-start, for: 700ms }
+  - expect: { at: table-tooltip, text: { contains: "<<LEFT-EDGE>>" }, widest: { le: 80 } }
+  - hover: { at: 'table-pane[pane="event-log"]/table-cell[cell="FIT_CELL"]', anchor: text-start, for: 900ms }
+  - expect: { at: table-tooltip, absent: true }
+  - click: { at: 'table-pane[pane="event-log"]/table-cell[cell="CUT_CELL"]', anchor: ellipsis }
+  - wait: { until: { at: row-detail, present: true }, timeout: 10s }
+  - expect: { at: row-detail, count: { le: 10 }, text: { contains: "<<LEFT-EDGE>>" } }
+  - expect: { at: 'editor[file="main.py"]', assert: "stopped-at(27)" }
+  - click: { at: 'table-pane[pane="event-log"]/table-cell[cell="CUT_CELL"]', anchor: ellipsis }
+  - wait: { until: { at: row-detail, absent: true }, timeout: 10s }
+  - click: { at: 'table-pane[pane="variables"]/table-cell[cell="variables|WIDE_SOURCE|value"]', anchor: text-start }
+  - chord: Ctrl+K Ctrl+I
+  - wait: { until: { at: row-detail, present: true }, timeout: 10s }
+  - expect: { at: row-detail, text: { contains: "<<LEFT-EDGE>>" } }
+  - chord: Ctrl+K Ctrl+I
+  - wait: { until: { at: row-detail, absent: true }, timeout: 10s }

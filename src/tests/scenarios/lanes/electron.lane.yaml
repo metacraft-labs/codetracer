@@ -97,4 +97,35 @@ applicable:
   - ../agent-activity-deepreview/evidence-cards.yaml
   - ../agent-activity-deepreview/evidence-open-review.yaml
   - ../browser/materialized-replay.yaml
+  # --- pw4 ---
+  - ../keymaps/plat68b-alt-d-opens-debug.yaml
+  - ../keymaps/plat68b-alt-e-focuses-event-log.yaml
+  - ../keymaps/plat68b-alt-opens-menu.yaml
+  - ../keymaps/plat68b-call-trace-search-enter.yaml
+  - ../keymaps/plat68b-f10-steps-once.yaml
+  - ../keymaps/plat68b-find-widget-keys.yaml
+  - ../keymaps/plat68b-letter-steps-read-only.yaml
+  - ../keymaps/plat68b-tracepoint-editor-keys.yaml
+  - ../keymaps/plat68b-user-keybindings.yaml
+  - ../keymaps/plat68c-ctrl-k-prefix-waits.yaml
+  - ../keymaps/plat68c-escape-layer-stack.yaml
+  - ../keymaps/plat68c-f-keys-in-call-trace.yaml
+  - ../keymaps/plat68c-f-keys-in-editor.yaml
+  - ../keymaps/plat68c-f12-inert-in-edit-mode.yaml
+  - ../keymaps/plat68c-later-user-row-wins-a.yaml
+  - ../keymaps/plat68c-later-user-row-wins-b.yaml
+  - ../keymaps/plat68c-shared-keybindings.yaml
+  - ../keymaps/plat68c-user-enter-precedence.yaml
+  - ../layout/layout-resilience-corrupt-json.yaml
+  - ../layout/layout-resilience-missing-root.yaml
+  - ../layout/layout-resilience-missing-type.yaml
+  - ../layout/layout-resilience-valid.yaml
+  - ../layout/plat70i-deep-call-scrolls.yaml
+  - ../layout/plat70i-remembered-wide-column-scrolls.yaml
+  - ../layout/plat71-cut-location-keeps-line.yaml
+  - ../layout/plat70a-build-output-hscroll.yaml
+  - ../macro-expansion/language-dynamic-menu-nim.yaml
+  - ../macro-expansion/language-dynamic-menu-python.yaml
+  - ../macro-expansion/static-block-stepping.yaml
+  - ../multi-replay/tabbed-replay-sessions-isolated.yaml
 unsupported: []

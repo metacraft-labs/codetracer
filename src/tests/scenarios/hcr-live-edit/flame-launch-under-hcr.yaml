@@ -1,0 +1,31 @@
+scenario: 1
+name: hcr-live-edit/flame-launch-under-hcr
+pack: codetracer
+summary: >-
+  In Edit mode on the flame project's workspace, "Launch Under Live Edit
+  (HCR)…" from the palette starts the coordinator and the flame, the panel
+  reaches session-ready, and three typed edits each answer "applied". (The
+  launch's provenance — process ancestry, the launch record — is the demo's
+  stage-side check.)
+
+stage:
+  - use: hcr-flame
+    with: { platform: linux, arm: green }
+  - use: open-project
+    with: { folder: $project }
+
+steps:
+  - wait: { until: settled, timeout: 120s }
+  - chord: Ctrl+P
+  - wait: { until: { at: omnibox, present: true }, timeout: 15s }
+  - type: ":Launch Under"
+  - wait: { until: { at: 'omnibox/option[label="Launch Under Live Edit (HCR)…"]', present: true }, timeout: 15s }
+  - click: { at: 'omnibox/option[label="Launch Under Live Edit (HCR)…"]' }
+    settle: false
+  - wait: { until: { at: live-edit-panel, status: session-ready }, timeout: 180s }
+  - flow: live-edit
+    with: { edit: "rise_speed=2.7" }
+  - flow: live-edit
+    with: { edit: "rise_speed=5.4" }
+  - flow: live-edit
+    with: { edit: "rise_speed=9.0" }

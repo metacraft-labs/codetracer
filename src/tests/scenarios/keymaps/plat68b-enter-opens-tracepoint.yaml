@@ -1,0 +1,20 @@
+scenario: 1
+name: keymaps/plat68b-enter-opens-tracepoint
+pack: codetracer
+summary: >-
+  Enter in the read-only editor opens a tracepoint editor on the caret's line.
+
+stage:
+  - use: record-program
+    with: { program: calc }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 180s }
+  - wait: { until: call-trace.loaded, timeout: 120s }
+  - expect: { at: 'editor[file="main.py"]', assert: "stopped-at(1)" }
+  - click: { at: 'editor[file="main.py"]/line[number="1"]', anchor: text-start }
+  - expect: { at: 'editor[file="main.py"]', focused: true }
+  - expect: { at: tracepoint-editor, absent: true }
+  - key: Enter
+  - wait: { until: { at: 'tracepoint-editor[line="1"]', present: true }, timeout: 20s }

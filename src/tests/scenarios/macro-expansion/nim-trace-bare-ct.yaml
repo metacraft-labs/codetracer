@@ -1,0 +1,35 @@
+scenario: 1
+name: macro-expansion/nim-trace-bare-ct
+pack: codetracer
+summary: >-
+  The View menu's "Trace Static Block at Cursor" opens the trace nimsuggest
+  writes (a bare .ct in its nimcache) as a recording of its own, in a new
+  session tab showing the traced .nim file — with no "No trace found" or
+  "Could not open the Nim trace" refusal.
+
+stage:
+  - use: nim-project
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - wait: { until: editor.loaded, timeout: 60s }
+  - expect: { at: session-strip, count: 1 }
+  - click: { at: 'editor[file="tracing.nim"]/line[number="17"]', anchor: text-start }
+  - expect: { at: 'editor[file="tracing.nim"]', assert: "caret-at(17)" }
+  - click: { at: menu-bar }
+  - hover: { at: 'menu-bar/menu[label="View"]', for: 500ms }
+  - wait: { until: { at: 'menu-bar/menu-item[label="Trace Static Block at Cursor"]', present: true }, timeout: 10s }
+  # Along the open folder's first entry, then down its column: a pointer
+  # crossing the folders below View would open another.
+  - hover: { at: 'menu-bar/menu-item[label="Filesystem"]', for: 300ms }
+  - click: { at: 'menu-bar/menu-item[label="Trace Static Block at Cursor"]' }
+    settle: false
+  - wait: { until: { at: session-strip, count: 2 }, timeout: 180s }
+  - wait: { until: replay-idle, timeout: 120s }
+  - expect:
+      at: 'editor[file="tracing.nim"]'
+      active: true
+      assert: "stopped-within(18, 21)"
+  - expect: { at: status-line, assert: "never-notifies(\"No trace found\")" }
+  - expect: { at: status-line, assert: "never-notifies(\"Could not open the Nim trace\")" }

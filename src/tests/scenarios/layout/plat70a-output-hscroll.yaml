@@ -1,0 +1,62 @@
+# Not yet run: some expected values here (stack counts, stop lines, the track press's column,
+# a search result's text) are read from probe screenshots or estimated, and must be
+# confirmed by the first run before this scenario goes into a lane.
+scenario: 1
+name: layout/plat70a-output-hscroll
+pack: codetracer
+summary: >-
+  Terminal Output's line view gets a horizontal bar for a line wider than
+  the pane, its thumb in proportion and clear of the vertical scrubber; the
+  horizontal wheel and Shift+wheel scroll it, a press on the track centres
+  the column under it, a held thumb follows the pointer back, and Right and
+  Left move the view six columns — none of it moving the debugger.
+
+stage:
+  - use: record-program
+    with: { program: wide_lines/main.py }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 180s }
+  - wait: { until: call-trace.loaded, timeout: 120s }
+  - expect: { at: 'editor[file="main.py"]', assert: "stopped-at(1)" }
+  - click: { at: 'pane-tab[label="TERMINAL OUTPUT"]' }
+  - wait: { until: { at: terminal-output, count: { gt: 0 } }, timeout: 60s }
+  - expect:
+      at: terminal-output
+      text: { contains: "<<LEFT-EDGE>> the quick brown fox jumps over the lazy dog, 0123456789 the quick brown fox jumps over the lazy dog, 0123456789 the quick brown fox jumps over the lazy dog, 0123456789 the quick brown fox jumps over the lazy dog, 0123456789 <<RIGHT-EDGE>>" }
+  - expect:
+      at: 'h-scrubber[pane="terminalOutput"]'
+      overflows: true
+      left: 0
+      thumb-proportional: true
+      clear-of-vertical: true
+  - wheel: { at: terminal-output, direction: right, amount: 1 }
+  - expect: { at: 'h-scrubber[pane="terminalOutput"]', left: { gt: 0 } }
+  - wheel: { at: terminal-output, direction: left, amount: 4 }
+  - expect: { at: 'h-scrubber[pane="terminalOutput"]', left: 0 }
+  - press: Shift
+  - wheel: { at: terminal-output, direction: down, amount: 1 }
+  - release: Shift
+  - expect: { at: 'h-scrubber[pane="terminalOutput"]', left: { gt: 0 } }
+  - wheel: { at: terminal-output, direction: left, amount: 4 }
+  - expect: { at: 'h-scrubber[pane="terminalOutput"]', left: 0 }
+  - click: { at: 'h-scrubber[pane="terminalOutput"]', anchor: track(0.8) }
+  - expect: { at: 'h-scrubber[pane="terminalOutput"]', centre: { ge: 0.78 } }
+  - expect: { at: 'h-scrubber[pane="terminalOutput"]', centre: { le: 0.82 } }
+  - drag:
+      from: { at: 'h-scrubber[pane="terminalOutput"]', anchor: thumb }
+      to: { at: 'h-scrubber[pane="terminalOutput"]', anchor: start }
+  - expect: { at: 'h-scrubber[pane="terminalOutput"]', centre: { lt: 0.78 } }
+  - wheel: { at: terminal-output, direction: left, amount: 4 }
+  - expect: { at: 'h-scrubber[pane="terminalOutput"]', left: 0 }
+  - click: { at: terminal-output, anchor: lines-button }
+  - expect: { at: terminal-output, focused: true }
+  - key: Right
+  - expect: { at: 'h-scrubber[pane="terminalOutput"]', left-columns: 6 }
+  - key: Right
+  - expect: { at: 'h-scrubber[pane="terminalOutput"]', left-columns: 12 }
+  - key: Left
+  - expect: { at: 'h-scrubber[pane="terminalOutput"]', left-columns: 6 }
+  - wait: { until: replay-idle, timeout: 60s }
+  - expect: { at: 'editor[file="main.py"]', assert: "stopped-at(1)" }

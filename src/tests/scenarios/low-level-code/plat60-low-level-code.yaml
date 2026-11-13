@@ -1,0 +1,37 @@
+scenario: 1
+name: low-level-code/plat60-low-level-code
+pack: codetracer
+summary: >-
+  On the noir_space_ship recording, Alt+1 opens the Low Level Code listing
+  with the execution pointer on the current step; an instruction's
+  right-click menu offers Go to Source Line, Show Source Line, Copy
+  Instruction and Copy Source Location; and a click on an instruction of
+  another line moves the debugger to that line.
+
+stage:
+  - use: record-program
+    with: { program: noir_space_ship }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 180s }
+  - wait: { until: call-trace.loaded, timeout: 120s }
+  - expect: { at: 'editor[file="main.nr"]', assert: "stopped-at(13)" }
+  - chord: Alt+1
+  - wait: { until: { at: 'low-level-code/instruction[offset="StepId(6)"]', present: true }, timeout: 60s }
+  - expect: { at: low-level-code, count: { gt: 1 }, sync: "sync on", stepping: "steps by line" }
+  - expect: { at: low-level-code, assert: "pointer-at(\"StepId(6)\")" }
+  - expect: { at: 'low-level-code/source-line[number="13"]', active: true }
+  - click: { at: 'low-level-code/instruction[offset="StepId(6)"]', button: right }
+  - wait: { until: { at: context-menu, present: true }, timeout: 15s }
+  - expect: { at: context-menu, count: 4 }
+  - expect: { at: context-menu, assert: "offers(\"Go to Source Line\")" }
+  - expect: { at: context-menu, assert: "offers(\"Show Source Line\")" }
+  - expect: { at: context-menu, assert: "offers(\"Copy Instruction\")" }
+  - expect: { at: context-menu, assert: "offers(\"Copy Source Location\")" }
+  - key: Esc
+  - wait: { until: { at: context-menu, absent: true }, timeout: 10s }
+  - click: { at: 'low-level-code/instruction[offset="StepId(670)"]' }
+  - wait: { until: { at: 'editor[file="main.nr"]', assert: "stopped-at(15)" }, timeout: 60s }
+  - wait: { until: replay-idle, timeout: 60s }
+  - expect: { at: low-level-code, assert: "pointer-at(\"StepId(670)\")" }

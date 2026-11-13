@@ -1,0 +1,29 @@
+scenario: 1
+name: keymaps/plat68c-later-user-row-wins-b
+pack: codetracer
+summary: >-
+  Two user rows bind Ctrl+Alt+J: with their order swapped, the later row, Step Over, fires.
+
+stage:
+  - use: record-program
+    with: { program: calc }
+  - use: plant-config
+    with:
+      file: keybindings.json
+      content: |
+        [
+          { "key": "ctrl+alt+j", "command": "debugger.step-into" },
+          { "key": "ctrl+alt+j", "command": "debugger.step-over" },
+        ]
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 180s }
+  - wait: { until: call-trace.loaded, timeout: 120s }
+  - expect: { at: 'editor[file="main.py"]', assert: "stopped-at(1)" }
+  - click: { at: 'editor[file="main.py"]/line[number="1"]', anchor: text-start }
+  - chord: Ctrl+Alt+J
+    settle: false
+  - wait: { until: { at: 'editor[file="main.py"]', assert: "stopped-at(2)" }, timeout: 60s }
+  - wait: { until: replay-idle, timeout: 60s }
+  - expect: { at: 'editor[file="main.py"]', assert: "stopped-at(2)" }

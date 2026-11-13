@@ -1,0 +1,33 @@
+scenario: 1
+name: keymaps/plat68b-alt-opens-menu
+pack: codetracer
+summary: >-
+  Alt pressed and released alone opens the program menu with every folder's access key underlined; the open menu owns the arrows; Alt again closes it.
+
+stage:
+  - use: record-program
+    with: { program: calc }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 180s }
+  - wait: { until: call-trace.loaded, timeout: 120s }
+  - expect: { at: 'editor[file="main.py"]', assert: "stopped-at(1)" }
+  - click: { at: 'editor[file="main.py"]/line[number="1"]', anchor: text-start }
+  - expect: { at: 'editor[file="main.py"]', focused: true }
+  - expect: { at: menu-bar, open: false }
+  - key: Alt
+  - expect: { at: menu-bar, open: true }
+  - expect: { at: 'menu-bar/menu[label="File"]', mnemonic: F }
+  - expect: { at: 'menu-bar/menu[label="Edit"]', mnemonic: i }
+  - expect: { at: 'menu-bar/menu[label="View"]', mnemonic: w }
+  - expect: { at: 'menu-bar/menu[label="Build"]', mnemonic: B }
+  - expect: { at: 'menu-bar/menu[label="Reset"]', mnemonic: R }
+  - expect: { at: 'menu-bar/menu[label="Debug"]', mnemonic: D }
+  - expect: { at: 'menu-bar/menu[label="Help"]', mnemonic: H }
+  - expect: { at: 'menu-bar/menu[label="File"]', highlighted: true }
+  - key: Down
+  - expect: { at: 'menu-bar/menu[label="File"]', highlighted: false }
+  - expect: { at: 'editor[file="main.py"]', assert: "stopped-at(1)" }
+  - key: Alt
+  - expect: { at: menu-bar, open: false }

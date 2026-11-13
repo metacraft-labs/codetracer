@@ -1,0 +1,56 @@
+scenario: 1
+name: keymaps/plat68c-cua-letters
+pack: codetracer
+summary: >-
+  The letters under CUA: in the read-only editor n steps over and p steps
+  back; with the call trace focused n steps; Ctrl+E makes the editor writable
+  and n then types an n while the debugger stays; Ctrl+E again and n steps;
+  in the find widget n is typed into the query.
+
+stage:
+  - use: record-program
+    with: { program: calc }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 180s }
+  - wait: { until: call-trace.loaded, timeout: 120s }
+  - click: { at: 'editor[file="main.py"]/line[number="1"]', anchor: text-start }
+  - key: n
+    settle: false
+  - wait: { until: { at: 'editor[file="main.py"]', assert: "stopped-at(2)" }, timeout: 60s }
+  - wait: { until: replay-idle, timeout: 60s }
+  - key: p
+    settle: false
+  - wait: { until: { at: 'editor[file="main.py"]', assert: "stopped-at(1)" }, timeout: 60s }
+  - wait: { until: replay-idle, timeout: 60s }
+  - expect: { at: 'editor[file="main.py"]/line[number="1"]', text: "#!/usr/bin/env python3" }
+  - chord: Alt+C
+  - expect: { at: call-trace, focused: true }
+  - key: n
+    settle: false
+  - wait: { until: { at: 'editor[file="main.py"]', assert: "stopped-at(2)" }, timeout: 60s }
+  - wait: { until: replay-idle, timeout: 60s }
+  - click: { at: 'editor[file="main.py"]/line[number="2"]', anchor: text-start }
+  - chord: Ctrl+E
+  - wait: { until: { at: 'editor[file="main.py"]', read-only: false }, timeout: 20s }
+  - wait: { until: settled, timeout: 30s }
+  - click: { at: 'editor[file="main.py"]/line[number="2"]', anchor: caret(1) }
+  - key: n
+  - wait: { until: { at: 'editor[file="main.py"]/line[number="2"]', text: { matches: '^n"""calc' } }, timeout: 10s }
+  - wait: { until: replay-idle, timeout: 60s }
+  - expect: { at: 'editor[file="main.py"]', assert: "stopped-at(2)" }
+  - chord: Ctrl+E
+  - wait: { until: { at: 'editor[file="main.py"]', read-only: true }, timeout: 20s }
+  - wait: { until: settled, timeout: 30s }
+  - click: { at: 'editor[file="main.py"]/line[number="1"]', anchor: text-start }
+  - key: n
+    settle: false
+  - wait: { until: { at: 'editor[file="main.py"]', assert: "stopped-at(29)" }, timeout: 60s }
+  - wait: { until: replay-idle, timeout: 60s }
+  - chord: Ctrl+F
+  - wait: { until: { at: 'editor[file="main.py"]', find-focused: true }, timeout: 10s }
+  - key: n
+  - expect: { at: 'editor[file="main.py"]', find-query: { contains: "n" }, find-focused: true }
+  - wait: { until: replay-idle, timeout: 60s }
+  - expect: { at: 'editor[file="main.py"]', assert: "stopped-at(29)" }

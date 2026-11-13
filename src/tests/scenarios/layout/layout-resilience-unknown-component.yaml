@@ -1,0 +1,30 @@
+scenario: 1
+name: layout/layout-resilience-unknown-component
+pack: codetracer
+summary: >-
+  A saved Edit-mode layout with a component type the window never registered comes up without it: the window is whole and the unknown tab is gone.
+
+stage:
+  - use: plant-config
+    with:
+      file: default_edit_layout.json
+      content: |
+        { "settings": { "constrainDragToContainer": true, "reorderEnabled": true },
+          "dimensions": { "borderWidth": 4, "headerHeight": 32 },
+          "root": { "type": "row", "content": [
+            { "type": "stack", "size": "20%", "activeItemIndex": 0, "content": [
+              { "type": "component", "componentType": "genericUiComponent",
+                "componentState": { "id": 0, "label": "filesystemComponent-0", "content": 9 }, "title": "FILES" } ] },
+            { "type": "stack", "size": "80%", "activeItemIndex": 0, "content": [
+              { "type": "component", "componentType": "componentTypeThatWasNeverRegistered",
+                "componentState": { "id": 0, "label": "ghostComponent-0", "content": 23 }, "title": "GHOST" } ] } ] } }
+  - use: open-project
+    with: { folder: test-programs }
+
+steps:
+  - wait: { until: { at: layout, present: true }, timeout: 120s }
+  - wait: { until: settled, timeout: 60s }
+  - expect: { at: layout, stacks: { gt: 0 } }
+  - expect: { at: 'pane-tab[label="FILES"]', present: true }
+  - expect: { at: 'pane-tab[label="GHOST"]', absent: true }
+  - expect: { at: 'pane-tab[label="TESTS"]', absent: true }

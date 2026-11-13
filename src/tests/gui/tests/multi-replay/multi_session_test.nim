@@ -4,7 +4,8 @@
 ## recording scenarios.
 ##
 ## Replicates key assertions from the Playwright GUI tests:
-##   - ``src/tests/gui/tests/multi-replay/comprehensive-tabbed-replay.spec.ts``
+##   - ``src/tests/scenarios/multi-replay/tabbed-replay-sessions-isolated.yaml``
+##     (the desktop's comprehensive tabbed-replay case, as a scenario)
 ##   - ``src/tests/gui/tests/replay-session/replay-session-scoping.spec.ts``
 ##
 ## Instead of verifying DOM elements, these tests verify the DATA exposed

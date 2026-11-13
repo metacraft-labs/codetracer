@@ -1,0 +1,17 @@
+scenario: 1
+name: layout/layout-resilience-valid
+pack: codetracer
+summary: >-
+  Edit mode with no saved layout of its own comes up with the default layout: its stacks and its tabs.
+
+stage:
+
+  - use: open-project
+    with: { folder: test-programs }
+
+steps:
+  - wait: { until: { at: layout, present: true }, timeout: 120s }
+  - wait: { until: settled, timeout: 60s }
+  - expect: { at: layout, stacks: { gt: 0 } }
+  - expect: { at: 'pane-tab[label="FILES"]', present: true }
+

@@ -1,0 +1,26 @@
+scenario: 1
+name: layout/plat71-cut-location-keeps-line
+pack: codetracer
+summary: >-
+  The Event Log's location column, remembered narrower than its text and
+  shown from the Columns menu, loses its middle: each cut location keeps the
+  file's start and the line number's digits at its end.
+
+stage:
+  - use: record-program
+    with: { program: wide_lines/main.py }
+  - use: plant-state
+    with: { file: table-columns, content: "event-log.location=6\n" }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 180s }
+  - wait: { until: event-log.loaded, timeout: 120s }
+  - wait: { until: settled, timeout: 60s }
+  - click: { at: event-log/columns-button }
+  - wait: { until: { at: 'event-log/columns-menu/column-option[name="location"]', present: true }, timeout: 10s }
+  - click: { at: 'event-log/columns-menu/column-option[name="location"]', anchor: check }
+  - wait: { until: { at: 'table-pane[pane="event-log"]', assert: "column-cut(\"location\")" }, timeout: 30s }
+  - expect:
+      at: 'table-pane[pane="event-log"]'
+      assert: 'cut-column-matches("location", "^main.py:[0-9]+$", "^[^…]+…[^…]*[0-9]$")'

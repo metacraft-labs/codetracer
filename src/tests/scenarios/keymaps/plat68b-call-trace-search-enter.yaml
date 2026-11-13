@@ -1,0 +1,25 @@
+scenario: 1
+name: keymaps/plat68b-call-trace-search-enter
+pack: codetracer
+summary: >-
+  In the Call Trace's search box a real Enter searches (it is the field's,
+  not the pane's "activate the row"), and letters typed there are
+  characters: the box holds report_total and the debugger has not moved.
+
+stage:
+  - use: record-program
+    with: { program: py_calltrace_collapse/main.py }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 180s }
+  - wait: { until: call-trace.loaded, timeout: 120s }
+  - expect: { at: 'editor[file="main.py"]', assert: "stopped-at(1)" }
+  - click: { at: 'search-box[pane="call-trace"]' }
+  - expect: { at: 'search-box[pane="call-trace"]', focused: true }
+  - type: report_total
+  - expect: { at: 'search-box[pane="call-trace"]', value: report_total, focused: true }
+  - expect: { at: 'editor[file="main.py"]', assert: "stopped-at(1)" }
+  - key: Enter
+  - wait: { until: { at: 'search-box[pane="call-trace"]/search-result[text="#4 - stepId(13): report_total"]', present: true }, timeout: 30s }
+  - expect: { at: 'search-box[pane="call-trace"]', focused: true }

@@ -1,0 +1,38 @@
+scenario: 1
+name: layout/plat70i-remembered-wide-column-scrolls
+pack: codetracer
+summary: >-
+  A remembered Event Log output column wider than the pane (written in the
+  terminal's own form) makes its columns scroll: the body scrolls sideways,
+  a sideways wheel moves it with the header following, and the palette's
+  View: Scroll Right and View: Scroll Left move it.
+
+stage:
+  - use: record-program
+    with: { program: wide_lines/main.py }
+  - use: plant-state
+    with: { file: table-columns, content: "event-log.output=400\n" }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 180s }
+  - wait: { until: { at: 'table-pane[pane="event-log"]', fit: scroll }, timeout: 120s }
+  - wait: { until: settled, timeout: 60s }
+  - expect: { at: 'table-pane[pane="event-log"]', sideways: true, wider: true, scroll-left: 0 }
+  - wheel: { at: 'table-pane[pane="event-log"]', direction: right, amount: 1 }
+  - expect: { at: 'table-pane[pane="event-log"]', scroll-left: { gt: 0 }, header-follows: true }
+  - wheel: { at: 'table-pane[pane="event-log"]', direction: left, amount: 10 }
+  - expect: { at: 'table-pane[pane="event-log"]', scroll-left: 0 }
+  - click: { at: 'table-pane[pane="event-log"]' }
+  - chord: Ctrl+P
+  - wait: { until: { at: omnibox, present: true }, timeout: 15s }
+  - type: ":ScrollRight"
+  - wait: { until: { at: 'omnibox/option[label="View: Scroll Right"]', present: true }, timeout: 15s }
+  - key: Enter
+  - wait: { until: { at: 'table-pane[pane="event-log"]', scroll-left: { gt: 0 } }, timeout: 10s }
+  - chord: Ctrl+P
+  - wait: { until: { at: omnibox, present: true }, timeout: 15s }
+  - type: ":ScrollLeft"
+  - wait: { until: { at: 'omnibox/option[label="View: Scroll Left"]', present: true }, timeout: 15s }
+  - key: Enter
+  - wait: { until: { at: 'table-pane[pane="event-log"]', scroll-left: 0 }, timeout: 10s }

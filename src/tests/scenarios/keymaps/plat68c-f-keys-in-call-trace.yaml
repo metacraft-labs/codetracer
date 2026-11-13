@@ -1,0 +1,23 @@
+scenario: 1
+name: keymaps/plat68c-f-keys-in-call-trace
+pack: codetracer
+summary: >-
+  With the focus in the call trace (Alt+C), outside the editor, F10, Shift+F10, F11 and Shift+F11 each
+  dispatch once: each forward step lands one stop on, and its reverse step
+  lands back at the start (a key run twice would not).
+
+stage:
+  - use: record-program
+    with: { program: calc }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 180s }
+  - wait: { until: call-trace.loaded, timeout: 120s }
+  - expect: { at: 'editor[file="main.py"]', assert: "stopped-at(1)" }
+  - chord: Alt+C
+  - expect: { at: call-trace, focused: true }
+  - flow: step-and-back
+    with: { file: main.py, forward: F10, reverse: Shift+F10, there: "2", back: "1" }
+  - flow: step-and-back
+    with: { file: main.py, forward: F11, reverse: Shift+F11, there: "2", back: "1" }

@@ -1,0 +1,29 @@
+scenario: 1
+name: low-level-code/plat60-native-low-level-code
+pack: codetracer
+summary: >-
+  On an rr recording of the native sudoku solver, Alt+1 shows the function's
+  machine code at numeric offsets under "Originating address: 0x…", the
+  header says a step goes by instruction, and with the focus in the listing
+  F10 and Shift+F10 step one instruction and back.
+
+stage:
+  - use: record-program
+    with: { program: ../codetracer-native-test-programs/c/sudoku_solver/main.c, backend: rr }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 300s }
+  - chord: Alt+1
+  - wait: { until: { at: low-level-code, count: { gt: 10 } }, timeout: 120s }
+  - expect: { at: low-level-code, address: { matches: "^Originating address: 0x[0-9A-Fa-f]+$" } }
+  - wait: { until: { at: low-level-code, stepping: "steps by instruction" }, timeout: 30s }
+  - expect: { at: low-level-code, assert: "all-offsets-match(\"^[0-9]+$\")" }
+  - click: { at: low-level-code, anchor: header }
+  - expect: { at: low-level-code, focused: true }
+  - key: F10
+  - wait: { until: replay-idle, timeout: 60s }
+  - expect: { at: low-level-code, stepping: "steps by instruction" }
+  - chord: Shift+F10
+  - wait: { until: replay-idle, timeout: 60s }
+  - expect: { at: low-level-code, focused: true }

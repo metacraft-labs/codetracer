@@ -1,0 +1,47 @@
+# Not yet run: some expected values here (stack counts, stop lines, the track press's column,
+# a search result's text) are read from probe screenshots or estimated, and must be
+# confirmed by the first run before this scenario goes into a lane.
+scenario: 1
+name: keymaps/plat64-input-routing
+pack: codetracer
+summary: >-
+  A user keymap rebinds a chord and a Ctrl+press: Ctrl+Alt+J steps over; a
+  Ctrl+click on a call-trace row runs Continue (to the recording's end, where
+  a second Continue moves nothing) instead of going to the call; a plain
+  click goes to the call; and the toolbar shows Ctrl+Alt+J for Step Over.
+
+stage:
+  - use: record-program
+    with: { program: calc }
+  - use: plant-config
+    with:
+      file: keybindings.json
+      content: |
+        // one keymap for every front-end
+        [
+          { "key": "ctrl+alt+j", "command": "debugger.step-over" },
+          { "key": "ctrl+click", "command": "debugger.continue",
+            "when": "paneKind == calltrace && elementKind == row" },
+        ]
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 180s }
+  - wait: { until: call-trace.loaded, timeout: 120s }
+  - expect: { at: 'editor[file="main.py"]', assert: "stopped-at(1)" }
+  - chord: Ctrl+Alt+J
+    settle: false
+  - wait: { until: { at: 'editor[file="main.py"]', assert: "stopped-at(2)" }, timeout: 60s }
+  - wait: { until: replay-idle, timeout: 60s }
+  - click: { at: 'call-trace/call[name="add", arguments="(left=2, right=3)"]', modifiers: [Ctrl] }
+    settle: false
+  - wait: { until: { at: 'editor[file="main.py"]', assert: "stopped-at(107)" }, timeout: 60s }
+  - wait: { until: replay-idle, timeout: 60s }
+  - key: F5
+  - wait: { until: replay-idle, timeout: 60s }
+  - expect: { at: 'editor[file="main.py"]', assert: "stopped-at(107)" }
+  - click: { at: 'call-trace/call[name="add", arguments="(left=2, right=3)"]' }
+    settle: false
+  - wait: { until: { at: 'editor[file="main.py"]', assert: "stopped-at(29)" }, timeout: 60s }
+  - hover: { at: 'toolbar/toolbar-button[label="next-image"]', for: 1s }
+  - expect: { at: 'toolbar/toolbar-button[label="next-image"]', tooltip: "Next (Ctrl+Alt+J)", tooltip-shown: true }

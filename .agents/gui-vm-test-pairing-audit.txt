@@ -221,7 +221,7 @@ that the VM tests live under `views/`, not `build/`.
 | `tabbed-replay.spec.ts` | `multi-replay/multi_session_test.nim` | PAIRED | tab bar / switch / close |
 | `real-tab-switching.spec.ts` | `multi-replay/multi_session_test.nim` | PARTIAL | switchSession covered; "real" tab semantics not |
 | `multi-trace-load.spec.ts` | `multi-replay/multi_session_test.nim` | PARTIAL | session-data-model covered; load lifecycle not |
-| `comprehensive-tabbed-replay.spec.ts` | `multi-replay/multi_session_test.nim` | PARTIAL | |
+| `scenarios/multi-replay/tabbed-replay-sessions-isolated.yaml` | `multi-replay/multi_session_test.nim` | PARTIAL | |
 | `three-trace-types.spec.ts` | `integration/language_smoke_test.nim` | PARTIAL | |
 
 #### `multi-window/` — 3 specs, 17 tests
