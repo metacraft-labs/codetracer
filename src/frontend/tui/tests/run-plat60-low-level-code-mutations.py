@@ -205,8 +205,8 @@ ARMS = [
               '    BaseRow(chords: "Alt+1", operation: "view.low-level-code", whenText: "frontEnd == desktop", table: G),')],
      [(TBL, TBL_OPEN), (PTY, None)],
      "Alt+1 is the desktop's alone again"),
-    ("KM2", [(SCOPES, '                    "lowLevelCode", "verification", "pixelHistory"]',
-              '                    "verification", "pixelHistory"]')],
+    ("KM2", [(SCOPES, '                    "lowLevelCode", "verification", "pixelHistory",',
+              '                    "verification", "pixelHistory",')],
      [(TBL, TBL_XREF)],
      "the focused listing is not a list pane: the list keys are not its"),
     # ---- the GPUI leaf, window and editor ----------------------------------
