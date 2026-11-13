@@ -103,7 +103,7 @@ proc argsJson(a: PaneOpArgs; operation: string): JsonNode =
       result["text"] = %a.text
   of "history.seek-to-tick":
     result["tick"] = %a.tick
-  of "frame-viewer.go-to-frame":
+  of "frame-viewer.go-to-frame", "low-level.go-to-source-line":
     result["index"] = %a.index
   else: discard
 

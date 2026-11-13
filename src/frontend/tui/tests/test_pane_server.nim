@@ -1026,6 +1026,48 @@ suite "§E9 and HSF-E11: a project session, and Edit mode's generated C":
       let stepped = rt.app.lowLevelAct(LowLevelAct(kind: llaStep,
         operation: "debugger.step-over"))
       check "no replay" in stepped.note
+    # THROUGH THE PROTOCOL: the anchored row's hotspot, pressed as an editor
+    # presses it, moves the editor's cursor to the Nim line — `source/show`
+    # carries the position (§E7), not only the file. The cursor is put
+    # elsewhere first, so the move is the press's.
+    discard srv.request("source/cursor", %*{"session": sid,
+      "file": project / "tiny.nim", "line": 1, "column": 1})
+    let (_, full) = srv.request("pane/resize", %*{"session": sid,
+      "pane": "lowLevelCode", "width": 100, "height": 16})
+    var spot: JsonNode = nil
+    for n in full.notes("pane/content"):
+      for r in n{"params", "rows"}.getElems:
+        for h in r{"hotspots"}.getElems:
+          if h{"operation"}.getStr == "low-level.go-to-source-line" and
+             h{"args", "index"}.getInt(-1) == anchored:
+            spot = h
+    checkpoint("the anchored row's hotspot: " &
+               (if spot.isNil: "none in " & $full.notes("pane/content").len &
+                  " pane/content" else: $spot))
+    check not spot.isNil
+    if not spot.isNil:
+      let (went, wentNotes) = srv.request("operation/run", %*{"session": sid,
+        "pane": "lowLevelCode", "operation": spot{"operation"}.getStr,
+        "args": spot{"args"}})
+      checkpoint("press: " & $went & "\n" & $wentNotes.notes("source/show"))
+      check went{"result", "ok"}.getBool
+      let shows = wentNotes.notes("source/show")
+      check shows.len == 1
+      if shows.len == 1:
+        let p = shows[0]{"params"}
+        check p{"file"}.getStr == project / "tiny.nim"
+        check p{"line"}.getInt == zebraLine
+        check p{"column"}.getInt == 1
+    # A file opened from the Files pane is shown where the editor left it:
+    # no position.
+    let (_, opened2) = srv.request("operation/run", %*{"session": sid,
+      "pane": "fileTree", "operation": "file-tree.open",
+      "args": {"path": project / "broken.nim"}})
+    let opens = opened2.notes("source/show")
+    check opens.len == 1
+    for n in opens:
+      check n{"params", "file"}.getStr == project / "broken.nim"
+      check not n{"params"}.hasKey("line")
     # A file that does not compile: the compiler's error, in the pane.
     discard srv.request("source/cursor", %*{"session": sid,
       "file": project / "broken.nim", "line": 1, "column": 1})

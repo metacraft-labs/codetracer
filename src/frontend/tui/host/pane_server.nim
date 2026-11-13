@@ -142,6 +142,10 @@ type
       ## A file a pane's row asked to open (`file-tree.open`), to be shown in
       ## the editor's source window even when it is the stop's own file —
       ## which the terminal already shows, and so does not count as viewed.
+    showAt: tuple[line, column: int]
+      ## Where in `showRequest` the editor's cursor goes (`source/show`'s
+      ## `line` and `column`, 1-based, the column in UTF-8 bytes); 0 for
+      ## no position — a file opened, not a place in it.
     sourceRows: int
       ## The source window's height the stop's panes were last built for
       ## (`resyncViewports`): 0 at the open, before the editor reports one.
@@ -331,6 +335,9 @@ proc wireServices(srv: PaneServer; s: ServerSession) =
     else:
       s.tui.lowLevelAct(rt, act)
   let opener = proc(path: string; line, col: int): string =
+    # A Problems or Build Output row names a place: the editor goes there.
+    s.showRequest = path
+    s.showAt = (line: max(0, line), column: max(0, col))
     if rt.app.modes.product == pmEdit or s.tui.isNil:
       rt.openWorkingFileAt(path, line, col)
     else:
@@ -771,8 +778,16 @@ proc publish(srv: PaneServer; s: ServerSession; fullPanes: seq[PaneKind] = @[];
     s.viewedSent = viewed
     if show.len == 0:
       show = viewed
+  let at = s.showAt
+  s.showAt = (line: 0, column: 0)
   if show.len > 0:
-    result.add notification("source/show", %*{"session": s.id, "file": show})
+    var params = %*{"session": s.id, "file": show}
+    # The place in it, when a pane named one (§E7): an editor that reads
+    # only `file` (before 2026-11-13) still shows the file.
+    if at.line > 0:
+      params["line"] = %at.line
+      params["column"] = %max(1, at.column)
+    result.add notification("source/show", params)
 
 proc resyncViewports(s: ServerSession; pane = paneEditor;
                      opened = false): bool {.discardable.} =
@@ -854,6 +869,26 @@ proc applyCursor(s: ServerSession) =
       s.app.editSession.activateBuffer(at)
       s.app.editSession.activeBuffer().moveCaretTo(c.line - 1, max(0, c.column - 1))
 
+proc editCaret(s: ServerSession): tuple[file: string; line, column: int] =
+  ## Edit mode's caret: the active buffer's file (absolute), its 1-based line
+  ## and its 1-based UTF-8 byte column — the protocol's position encoding.
+  ## Empty outside Edit mode or with no buffer.
+  if s.app.modes.product != pmEdit or s.app.editSession.isNil:
+    return
+  let buf = s.app.editSession.activeBuffer()
+  if buf.isNil or buf.path.len == 0:
+    return
+  let file = if buf.path.isAbsolute: buf.path else: s.root / buf.path
+  let line = buf.caretLine
+  var column = 1
+  if line >= 1 and line <= buf.lines.len:
+    # The caret's column is in grapheme clusters; a rune offset is the
+    # protocol's byte column for every line without combining sequences.
+    let text = buf.lines[line - 1]
+    let at = text.runeOffset(buf.caretColumn)
+    column = (if at < 0: text.len else: at) + 1
+  (file: file, line: line, column: column)
+
 proc runOperation(srv: PaneServer; s: ServerSession; params: JsonNode): JsonNode =
   ## `operation/run`: a catalogued operation, or a pane operation from a
   ## hotspot, applied to the session as a key or a click is.
@@ -886,6 +921,12 @@ proc runOperation(srv: PaneServer; s: ServerSession; params: JsonNode): JsonNode
   # answered with a silent success: codetracer-pm issue 2026-11-12.)
   s.app.notification = ""
   s.applyCursor()
+  # An operation that moves Edit mode's caret to another place — a press on
+  # an instruction of the compiled C, a Problems row, a Find in Files result
+  # — moves the editor's cursor there (`source/show` with the position): the
+  # editor holds the source, so the caret the server moved is otherwise a
+  # caret nobody sees.
+  let caretBefore = s.editCaret()
   if isPaneOp:
     let args = paneArgsOf(params{"args"})
     discard s.rt.runPaneOperation(name, args, outcome)
@@ -930,6 +971,13 @@ proc runOperation(srv: PaneServer; s: ServerSession; params: JsonNode): JsonNode
   if not s.vcs.applyClick(s.rt, outcome.paneClick) and
      not s.tests.applyClick(s.rt, outcome.paneClick) and not s.tui.isNil:
     s.tui.applyOutcome(s.rt, outcome)
+  let caretAfter = s.editCaret()
+  # (Not for `file-tree.open`: a file opened is shown where the editor
+  # left it, not at the top the edit session's buffer starts at.)
+  if caretAfter.file.len > 0 and caretAfter != caretBefore and
+     name != "file-tree.open":
+    s.showRequest = caretAfter.file
+    s.showAt = (line: caretAfter.line, column: caretAfter.column)
   let detail = if outcome.detail.len > 0: outcome.detail else: s.app.notification
   %*{"ok": true, "operation": text, "detail": detail}
 

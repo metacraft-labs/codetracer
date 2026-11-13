@@ -10275,7 +10275,9 @@ const
     ("file-tree.toggle-folder", "Expand or collapse this folder"),
     ("tests.run-suite", "Run the project's tests"),
     ("tests.refresh-test", "Record this test again"),
-    ("tests.open-test", "Open this test's recording")]
+    ("tests.open-test", "Open this test's recording"),
+    ("low-level.go-to-source-line", "Go to this instruction's source line"),
+    ("low-level.toggle-sync", "Turn source syncing on or off")]
     ## The operations a hosted pane's rows offer: what a click on the same
     ## cells of the terminal's pane does (`routeMouseReport`,
     ## `routePaneClick`), named so an editor can bind them.
@@ -10413,6 +10415,31 @@ proc hostedHotspots*(rt: TuiRuntime; pane: PaneKind;
         of tpOpen:
           result[r].addRun(c, "tests.open-test",
                            PaneOpArgs(path: rt.app.tests.rows[t.row].testId))
+        else: discard
+  of paneLowLevelCode:
+    # PLAT-60 / §E13: an instruction goes to the source line it came from,
+    # as a press on the terminal's row does (`routePaneClick`) — the
+    # debugger's move in Debug mode, the edited file's caret in Edit mode's
+    # compiled C, which the editor is told with its position
+    # (`source/show`); the header's `sync on` toggles syncing. Like Test
+    # Results, the pane paints from its area's first row
+    # (`lowLevelPaneScreen` hands it the rows under its strip). Until
+    # 2026-11-13 these rows offered nothing, so a press in an editor's Low
+    # Level Code pane did nothing.
+    if not rt.app.lowLevel.loaded:
+      return
+    let rows = CellArea(col: 0, row: 0, width: width, height: height)
+    var g = newStyledGrid(width, height)
+    let screen = paintLowLevelCode(g, rows, rt.app.lowLevel)
+    for r in 0 ..< height:
+      for c in 0 ..< width:
+        let t = rt.app.lowLevel.lowLevelTargetAt(screen, rows, r, c)
+        case t.kind
+        of ltInstruction:
+          result[r].addRun(c, "low-level.go-to-source-line",
+                           PaneOpArgs(index: int64(t.index)))
+        of ltSync:
+          result[r].addRun(c, "low-level.toggle-sync", PaneOpArgs())
         else: discard
   of paneState:
     if rt.app.variables.isEmpty:
