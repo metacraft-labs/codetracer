@@ -73,6 +73,10 @@ build_gpui() {
 	nim c "${nim_common[@]}" --path:"${ga_src}" --path:"${dvs_src}" --path:"${dga_src}" \
 		--nimcache:"${nimcache}/scenario-guiassert" \
 		-o:"${bin}/dvs-guiassert-codetracer" "${S}/bindings/guiassert/dvs_guiassert_codetracer.nim"
+	# what the binding reads off saved frames (a run's stills), for working on it
+	nim c "${nim_common[@]}" --path:"${ga_src}" --path:"${dvs_src}" --path:"${dga_src}" \
+		--nimcache:"${nimcache}/scenario-guiassert-surface" \
+		-o:"${bin}/ct-gui-surface" "${S}/bindings/guiassert/ct_gui_surface.nim"
 }
 
 build_playwright() {

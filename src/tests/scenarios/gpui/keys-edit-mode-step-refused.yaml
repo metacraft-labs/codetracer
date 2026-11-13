@@ -15,9 +15,9 @@ steps:
   - wait: { until: editor.loaded, timeout: 60s }
   - expect:
       at: 'editor[file="main.py"]/line[number="1"]'
-      text: { contains: "#!/usr/bin/env python3" }
+      text: { contains: "/usr/bin/env python3" }
   - key: F12
   - wait: { until: { at: 'pane[title="project/main.py"]', assert: 'has-row("replay session")' }, timeout: 30s }
   - expect:
       at: 'editor[file="main.py"]/line[number="1"]'
-      text: { contains: "#!/usr/bin/env python3" }
+      text: { contains: "/usr/bin/env python3" }

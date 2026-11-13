@@ -80,7 +80,8 @@ proc windowSize(width, height: int): (int, int) =
   if w <= MaxCells and h <= MaxCells:
     w *= CellW
     h *= CellH
-  (w, h)
+  # within the private display (2048 x 1536)
+  (min(w, 2000), min(h, 1500))
 
 proc launchGpui(ctx: GuiContext; s: StageState) =
   let (w, h) = windowSize(s.launch.width, s.launch.height)
@@ -98,6 +99,30 @@ proc launchGpui(ctx: GuiContext; s: StageState) =
   ctx.env["LD_LIBRARY_PATH"] = lib.join(":")
   ctx.env.del("LD_PRELOAD")
   if getEnv("CT_GUI_BINDING_DEBUG").len > 0: ctx.env["CODETRACER_GPUI_GESTURE_TRACE"] = "1"
+  # The pointer's shapes are the cursor theme's: a window on a display with
+  # no theme it can load keeps the X server's own `X` cursor whatever it
+  # asks for. So the window gets a theme that exists here, named outright
+  # (the person's XCURSOR_THEME may name one this display cannot find), and
+  # without one the pointer's shape is declared unreadable.
+  var dirs = getEnv("XCURSOR_PATH").split(':')
+  dirs.add "/run/current-system/sw/share/icons"
+  var theme, themeDir = ""
+  for want in ["Adwaita", "default", ""]:
+    for d in dirs:
+      if d.len == 0 or not dirExists(d) or theme.len > 0: continue
+      if want.len > 0:
+        if dirExists(d / want / "cursors"): (theme = want; themeDir = d)
+      else:
+        for kind, sub in walkDir(d):
+          if theme.len == 0 and kind in {pcDir, pcLinkToDir} and dirExists(sub / "cursors"):
+            theme = sub.extractFilename
+            themeDir = d
+    if theme.len > 0: break
+  if theme.len > 0:
+    ctx.env["XCURSOR_PATH"] = themeDir
+    ctx.env["XCURSOR_THEME"] = theme
+    ctx.env["XCURSOR_SIZE"] = "24"
+  ctx.state["$cursorTheme"] = %theme
   let cwd = getCurrentDir()
   setCurrentDir(s.launch.workDir)
   # The window is named after what it shows (`<program> — CodeTracer`).
@@ -180,6 +205,7 @@ type EditorRow = object
   textLeft: int
 
 proc wordsL(ctx: GuiContext; f: Frame; x, y, w, h: int; psm = 6): seq[Word]
+proc normLabel(s: string): string
 
 proc editorRows(ctx: GuiContext; f: Frame; b: EditorBox): seq[EditorRow] =
   ## The editor's rows: the gutter's numbers read as a column, the row
@@ -275,18 +301,45 @@ proc inkRuns(f: Frame; y0, y1, x0, x1: int): seq[(int, int)] =
   if start >= 0: result.add (start, min(x1, f.image.width) - 1)
 
 proc codeLeft(f: Frame; b: EditorBox; rows: seq[EditorRow]; numbersRight: int): int =
-  ## Column 0 of the code: the leftmost text any row starts with, a fold
-  ## chevron (a narrow mark before the text, in its own lane) excepted.
-  result = high(int)
+  ## Column 0 of the code: where the rows' text starts most often (a file's
+  ## top-level lines), the least of the starts at or right of it. A fold
+  ## chevron is drawn in its own lane a few pixels left of column 0, so a
+  ## row's first ink further left than that is the chevron, not code (a
+  ## narrow letter such as `x` at column 0 is not mistaken for one).
+  var starts: seq[(int, int)]       ## each row's first ink run
+  var counts = initCountTable[int]()
   for r in rows:
     let band0 = r.y + r.h div 5
     let band1 = r.y + r.h - r.h div 5
     let runs = inkRuns(f, band0, band1, numbersRight + 4, b.right - 4)
     if runs.len == 0: continue
-    var first = runs[0]
-    if runs.len > 1 and first[1] - first[0] <= 9 and runs[1][0] - first[1] >= 3:
-      first = runs[1]
-    result = min(result, first[0])
+    starts.add runs[0]
+    counts.inc runs[0][0]
+  if starts.len == 0: return numbersRight + 20
+  # the commonest start, counting starts a pixel apart as one
+  var best = -1
+  var bestN = 0
+  for x, _ in counts:
+    var n = 0
+    for x2, c in counts:
+      if abs(x2 - x) <= 1: n += c
+    if n > bestN or (n == bestN and x < best):
+      best = x
+      bestN = n
+  result = high(int)
+  for (x0, x1) in starts:
+    if x0 >= best - 3: result = min(result, x0)
+  # one row only, or no row at the commonest start: a narrow mark with a gap
+  # after it is the chevron
+  if bestN <= 1:
+    result = high(int)
+    for r in rows:
+      let runs = inkRuns(f, r.y + r.h div 5, r.y + r.h - r.h div 5, numbersRight + 4, b.right - 4)
+      if runs.len == 0: continue
+      var first = runs[0]
+      if runs.len > 1 and first[1] - first[0] <= 7 and runs[1][0] - first[1] >= 5:
+        first = runs[1]
+      result = min(result, first[0])
   if result == high(int): result = numbersRight + 20
 
 proc readCode(ctx: GuiContext; f: Frame; b: EditorBox; rows: var seq[EditorRow]; left: int) =
@@ -314,7 +367,8 @@ proc readCode(ctx: GuiContext; f: Frame; b: EditorBox; rows: var seq[EditorRow];
       # code face's advance says (an indent inside the line, `x  = 1`)
       if text.len > 0:
         let gap = int(round(float(p.x - lastRight) / 9.792))
-        text.add repeat(' ', max(1, gap))
+        # (none when the engine split one word with no blank between)
+        text.add repeat(' ', max(0, gap))
       text.add p.text
       lastRight = p.x + p.w
     r.text = text
@@ -615,6 +669,18 @@ proc paneBoxes(ctx: GuiContext; f: Frame): seq[PaneBox] =
         let band = PaneTab(x0: x, x1: bx1, y0: y, y1: by1, band: true, cut: cut)
         found.add band
         strips.mgetOrPut(y, @[]).add band
+        if cut[0] < 0:
+          # the band stops at the selected tab, which is drawn on the box's
+          # own ground beside it (the selected tab last in its strip)
+          let ym2 = y + 8
+          let c2 = f.rgb(bx1 + 2, ym2)
+          if not f.isGround(g, bx1 + 2, ym2) and not near(c2, cb, 2):
+            var xr = bx1 + 2
+            while xr + 1 < w and near(f.rgb(xr + 1, ym2), c2, 2): inc xr
+            if xr - bx1 >= 30:
+              let sel = PaneTab(x0: bx1 + 1, x1: xr, y0: y, y1: by1, active: true)
+              found.add sel
+              strips.mgetOrPut(y, @[]).add sel
         continue
       if tabH < 16 or tabH > 34: continue
       let tab = PaneTab(x0: x0, x1: x1, y0: y, y1: y1,
@@ -691,7 +757,12 @@ proc paneBoxes(ctx: GuiContext; f: Frame): seq[PaneBox] =
       var letters = 0
       for ch in t.label:
         if ch in Letters: inc letters
-      if first.isSourceName or (letters >= 2 and t.label == t.label.toUpperAscii): captions = true
+      # (a docked pane revealed over the window names itself in its own case:
+      # `Find in Files`)
+      let known = t.label.len > 0 and
+                  t.label.normLabel != t.label.toUpperAscii.splitWhitespace.join(" ")
+      if first.isSourceName or known or (letters >= 2 and t.label == t.label.toUpperAscii):
+        captions = true
     if not captions: continue
     # boxes: the body under each tab, followed to the ground around it
     var seen: seq[int]
@@ -700,7 +771,10 @@ proc paneBoxes(ctx: GuiContext; f: Frame): seq[PaneBox] =
       if f.isGround(g, t.x0 + 2, yb): continue
       var l = t.x0 + 2
       while l > 0 and not f.isGround(g, l - 1, yb): dec l
-      if l in seen: continue
+      var again = false
+      for s0 in seen:
+        if abs(s0 - l) <= 4: again = true
+      if again: continue
       seen.add l
       var r = t.x0 + 2
       while r + 1 < w and not f.isGround(g, r + 1, yb): inc r
@@ -711,6 +785,14 @@ proc paneBoxes(ctx: GuiContext; f: Frame): seq[PaneBox] =
         if t2.x0 >= l - 2 and t2.x0 < r: box.tabs.add t2
       result.add box
   result.sort(proc (a, b: PaneBox): int = cmp((a.stripTop, a.left), (b.stripTop, b.left)))
+  var unique: seq[PaneBox]
+  for b in result:
+    var dup = false
+    for u in unique:
+      if abs(u.left - b.left) <= 4 and abs(u.right - b.right) <= 4 and
+         abs(u.bottom - b.bottom) <= 4 and abs(u.top - b.top) <= 4: dup = true
+    if not dup: unique.add b
+  result = unique
 
 proc footerDocks(ctx: GuiContext; f: Frame): seq[PaneTab] =
   ## The footer's dock labels: the panes pinned to the window's bottom edge,
@@ -874,6 +956,12 @@ proc readCallTrace(ctx: GuiContext; f: Frame; t: var Tree; b: PaneBox) =
                                      "depth": depth, "text": r.text},
                     @[("name", name)])
     n.unreadable["selected"] = "the selected call and the current call are drawn alike"
+    # where the callee's name is drawn, for the `name` anchor (a press on the
+    # arguments acts on the argument under it)
+    for wd in r.words:
+      if wd.text.len > 0 and name.split(' ')[0] in wd.text:
+        n.props["$name"] = %(wd.x + min(wd.w div 2, 12))
+        break
     t.add(pane, n)
   pane.props["count"] = %calls.len
 
@@ -1024,15 +1112,23 @@ proc overlays(f: Frame; boxes: seq[PaneBox]): seq[Overlay] =
       # the left side (below a rounded corner, a few pixels further left):
       # down the border colour
       var lx = -1
-      for dx in -10 .. 10:
-        # a side that starts at this edge, not a line running on through it
-        # (the focused box's outline)
-        if lx < 0 and x + dx >= 0 and y + 10 < h and near(f.rgb(x + dx, y + 10), c, 2) and
-           not near(f.rgb(x + dx, y - 2), c, 2): lx = x + dx
+      var probe = y + 10
+      # the side is looked for a little below the corner, and further down
+      # when a highlighted first entry covers it there (a menu's selected row
+      # is drawn over its border)
+      for py in [y + 10, y + 32, y + 56]:
+        if lx >= 0: break
+        for dx in -10 .. 10:
+          # a side that starts at this edge, not a line running on through it
+          # (the focused box's outline)
+          if lx < 0 and x + dx >= 0 and py < h and near(f.rgb(x + dx, py), c, 2) and
+             not near(f.rgb(x + dx, y - 2), c, 2):
+            lx = x + dx
+            probe = py
       if lx < 0:
         x = x1 + 1
         continue
-      var y1 = y + 10
+      var y1 = probe
       while y1 + 1 < h and near(f.rgb(lx, y1 + 1), c, 2): inc y1
       if y1 - y < 14:
         x = x1 + 1
@@ -1336,12 +1432,17 @@ proc readPanes(ctx: GuiContext; f: Frame; t: var Tree) =
     for d in docks: stderr.writeLine "dock ", d.label, " ", d.x0, "..", d.x1
 
 proc readSurface*(ctx: GuiContext; f: Frame): Tree =
-  result.root = node("window", 0, 0, fl(f.image.width), fl(f.image.height), %*{"mode": "debug"})
+  # a replay names its position (`main.py:1#1`) on the status line; an Edit
+  # window names none
+  let mode = if ctx.statusLocation(f).contains('#'): "debug" else: "edit"
+  result.root = node("window", 0, 0, fl(f.image.width), fl(f.image.height), %*{"mode": mode})
   result.root.visible = true
   result.root.unreadable["title"] = "the window title is not drawn in the window"
   # the pointer is drawn by the X server, not in the window's pixels: its
   # shape is asked of the server (the cursor's image, through XFixes)
   try:
+    if ctx.state{"$cursorTheme"}.getStr("").len == 0:
+      raise newException(ValueError, "no cursor theme on this machine: the window draws the X server's own cursor")
     let shape = ctx.pointerShape()
     if shape.len > 0: result.root.props["pointer"] = %shape
     else: result.root.unreadable["pointer"] = "the pointer's image is none of the known shapes"
@@ -1370,9 +1471,12 @@ proc readSurface*(ctx: GuiContext; f: Frame): Tree =
     var current = pointerRow(f, b, rows)
     var caret = caretRow(f, b, rows)
     if caret == 0 and ctx.running:
-      # the caret may be between blinks: look once more
-      let again = ctx.grab()
-      caret = caretRow(again, b, rows)
+      # the caret may be between blinks (the off phase is about half a
+      # second): look again over most of a blink period
+      for attempt in 0 ..< 4:
+        if caret != 0: break
+        sleep(150)
+        caret = caretRow(ctx.grab(), b, rows)
     let ed = node("editor", fl(b.left), fl(b.top), fl(b.right - b.left), fl(b.bottom - b.top),
                   %*{"file": b.file, "active": true, "focused": caret > 0,
                      "current-line": current, "caret-line": caret,
@@ -1482,6 +1586,9 @@ proc ctGuiBinding*(): GuiBinding =
         of "text-start": return some((x0 + 3, midY))
         of "text-end": return some((max(x0 + 3, x1 - 3), midY))
         of "expander": return some((x0 + 6, midY))
+        of "name":
+          let nx = n.props{"$name"}.getInt(-1)
+          return (if nx >= 0: some((nx, midY)) else: none((int, int)))
         else: return none((int, int))
       let midY = int(n.y + n.h / 2)
       let left = n.props{"codeLeft"}.getInt(int(n.x) + 110)

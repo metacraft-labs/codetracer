@@ -13,6 +13,8 @@ stage:
 steps:
   - wait: { until: replay-idle, timeout: 120s }
   - expect: { at: 'pane[title="Build Output"]', absent: true }
+  # with the focus off the editor (whose own Ctrl+O opens a file)
+  - click: { at: 'pane-tab[label="Event Log"]' }
   - chord: Ctrl+O
   - wait: { until: { at: 'pane[title="Build Output"]', present: true }, timeout: 30s }
   - key: Esc

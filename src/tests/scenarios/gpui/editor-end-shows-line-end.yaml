@@ -7,7 +7,7 @@ summary: >-
 
 stage:
   - use: record-program
-    with: { program: wide_lines }
+    with: { program: wide_lines/main.py }
   - use: open-recording
     with: { width: 1440, height: 900 }
 
