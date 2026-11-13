@@ -91,4 +91,23 @@ applicable:
   - ../terminal/build-tasks-lone-file.yaml
   - ../terminal/build-tasks-lone-file-declared-task.yaml
   - ../terminal/low-level-code-beside-the-source.yaml
+  - ../terminal/clicks-call-trace-menu.yaml
+  - ../terminal/clicks-dock-label-menu-unpin.yaml
+  - ../terminal/clicks-files-menu-in-a-recording.yaml
+  - ../terminal/clicks-points-pane-from-the-omnibox.yaml
+  - ../terminal/find-in-files-lists-and-opens.yaml
+  - ../terminal/nim-tracing-constant-from-the-menu.yaml
+  - ../terminal/nim-tracing-refused-on-a-proc.yaml
+  - ../terminal/nim-tracing-without-nimsuggest.yaml
+  - ../terminal/origin-vim-keys.yaml
+  - ../terminal/panes-tab-click-says-nothing.yaml
+  - ../terminal/problems-after-a-failed-build.yaml
+  - ../terminal/terminal-output-click-goes-to-the-line.yaml
+  - ../terminal/terminal-output-scrubber-shows-the-end.yaml
+  - ../terminal/top-bar-transport-controls-click.yaml
+  - ../terminal/vcs-pane-in-edit-mode.yaml
+  - ../terminal/vcs-pane-lists-the-working-tree.yaml
+  - ../terminal/vcs-pane-outside-a-repository.yaml
+  - ../terminal/welcome-open-folder.yaml
+  - ../terminal/welcome-record-new-trace.yaml
 unsupported: []
