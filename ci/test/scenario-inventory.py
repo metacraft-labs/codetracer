@@ -33,6 +33,21 @@ COUNTS = os.path.join(ROOT, "src/tests/scenarios/inventory/COUNTS")
 # with its reason, in that file).
 NEW = os.path.join(ROOT, "src/tests/scenarios/inventory/new-scenarios.tsv")
 SCENARIOS = os.path.join(ROOT, "src/tests/scenarios")
+# The VS Code flavour's scenarios live beside its binding, in the extension's
+# repository: a row names them `codetracer-vscode-extension:<path>`, checked
+# against the sibling checkout when it has them (an older checkout, from
+# before the extension had scenarios, cannot say).
+EXTENSION_PREFIX = "codetracer-vscode-extension:"
+EXTENSION = os.environ.get("CODETRACER_VSCODE_EXTENSION_DIR") or os.path.join(
+    os.path.dirname(ROOT), "codetracer-vscode-extension")
+
+
+def scenario_exists(s):
+    if s.startswith(EXTENSION_PREFIX):
+        if not os.path.isdir(os.path.join(EXTENSION, "test", "scenarios")):
+            return True
+        return os.path.isfile(os.path.join(EXTENSION, s[len(EXTENSION_PREFIX):]))
+    return os.path.isfile(os.path.join(SCENARIOS, s))
 CLASSES = ("user-level", "split", "lower-tier")
 
 
@@ -107,7 +122,7 @@ def main():
             problems.append(f"{r['path']}: {r['class']}, but no scenario ports it")
         for s in sc:
             named.add(s)
-            if not os.path.isfile(os.path.join(SCENARIOS, s)):
+            if not scenario_exists(s):
                 problems.append(f"{r['path']}: names {s}, which does not exist")
     if os.path.isfile(NEW):
         with open(NEW, newline="") as fh:
