@@ -141,6 +141,13 @@ suite "PLAT-59 on a real terminal: the Visual Replay panes":
       sess.send("l")
       s = sess.waitScreenAny(["1x >", "Frame 59 / 59"])
       if s.join("\n").contains("1x >"):
+        # Playback seen is not playback that has moved yet: on a loaded host
+        # Space can land while frame 1 is still shown, and the check below
+        # then reads a pause as no movement. Pause once it has moved.
+        var later: seq[string] = @[]
+        for f in 2 .. 59:
+          later.add "Frame " & $f & " / 59"
+        discard sess.waitScreenAny(later)
         sess.send(" ")
       s = sess.waitScreen("paused")
       ck s.rowWith("Frame 1 / 59") < 0   # it moved
@@ -151,8 +158,11 @@ suite "PLAT-59 on a real terminal: the Visual Replay panes":
       s = sess.waitScreen("its history and its shader")
       let status = s[Rows - 1]
       ck status.contains("pixel ")
-      # Pixel History lists the draw calls that wrote it.
-      s = sess.waitScreen("Draw ")
+      # Pixel History lists the draw calls that wrote it. Its rows are waited
+      # for by their own words: "Draw " is also the frame viewer's title,
+      # which is on screen before the history has been asked for, so on a
+      # loaded host a wait for it returned before any row was drawn.
+      s = sess.waitScreen("GEID ")
       ck s.join("\n").contains("GEID ")
       ck s.join("\n").contains("Passed")
       sess.send("q")
