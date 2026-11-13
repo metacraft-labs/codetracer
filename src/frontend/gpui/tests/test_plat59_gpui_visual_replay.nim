@@ -197,8 +197,11 @@ suite "PLAT-59: the Visual Replay panes in the GPUI window":
         $Mid & "/" & $GlSceneFrames
       ck plan.imageQuads == programQuads(Mid)
       ck plan.imageHeld == size
-      # The last, by End.
-      let endOps = Show & ",visual:key:video:End,visual:wait"
+      # The last, by End. `visual:key` names the key as GPUI's keystroke
+      # does (`end`, `right`, lower case): since the player's keys are keymap
+      # rows the op goes through the window's router, whose key names are
+      # `gpui_keys`', and a capitalised `End` names no key there.
+      let endOps = Show & ",visual:key:video:end,visual:wait"
       let last = windowPlan(endOps)
       ck last.first(VideoPlayerAttribute).attr(
         VideoPlayerAttribute) == $(GlSceneFrames - 1) & "/" & $GlSceneFrames
@@ -234,7 +237,7 @@ suite "PLAT-59: the Visual Replay panes in the GPUI window":
       ck quads[1] == "#000000"
 
     test "the picker's loupe, a pick, the pixel's history and its navigation":
-      let pick = Show & ",visual:key:video:End,visual:wait," &
+      let pick = Show & ",visual:key:video:end,visual:wait," &
                  "visual:key:video:p,visual:pixel:40:50:hover"
       let hover = windowPlan(pick)
       ck hover.first("data-ct-visual-picker").attr("data-ct-visual-picker") ==
@@ -289,7 +292,7 @@ suite "PLAT-59: the Visual Replay panes in the GPUI window":
       ck "u_color" in source
 
     test "the desktop's keys on the focused Video Player":
-      let keys = Show & ",visual:key:video:Right,visual:wait"
+      let keys = Show & ",visual:key:video:right,visual:wait"
       ck windowPlan(keys).first(VideoPlayerAttribute).attr(
         VideoPlayerAttribute) == "1/" & $GlSceneFrames
       # One press, one step, through the pane's listeners: a pane armed twice
@@ -297,8 +300,8 @@ suite "PLAT-59: the Visual Replay panes in the GPUI window":
       let delivered = Show & ",visual:deliver:right,visual:wait"
       ck windowPlan(delivered).first(VideoPlayerAttribute).attr(
         VideoPlayerAttribute) == "1/" & $GlSceneFrames
-      let draw = keys & ",visual:key:video:Left,visual:wait," &
-                 "visual:key:video:Right:shift,visual:wait"
+      let draw = keys & ",visual:key:video:left,visual:wait," &
+                 "visual:key:video:right:shift,visual:wait"
       let plan = windowPlan(draw)
       ck "Draw 0 / 3" in plan.first("data-ct-visual-title").attr(
         "data-ct-visual-title")
