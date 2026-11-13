@@ -79,6 +79,11 @@ proc removeListener(e: JsObject; ev: cstring; f: proc(ev: JsObject);
                     capture = false) {.importjs: "#.removeEventListener(#, #, #)".}
 proc rectOf(e: JsObject): JsObject {.importjs: "#.getBoundingClientRect()".}
 proc nowMs(): float {.importjs: "Date.now()@".}
+proc eventTimeMs(ev: JsObject): float {.importjs:
+  "(Date.now() - Math.max(0, performance.now() - (#.timeStamp || performance.now())))".}
+  ## When the event happened, on `Date.now()`'s clock: a loaded renderer
+  ## runs the handler late, and a double press's halves are counted by when
+  ## the user pressed, as the platform counts them.
 proc jsNum(v: JsObject): float {.importjs: "Number(#)".}
 proc isNilOrUndef(v: JsObject): bool {.importjs: "(# == null)".}
 proc callFn(f: JsObject; a: JsObject): JsObject {.importjs: "#(#)".}
@@ -1275,7 +1280,7 @@ proc onMouseDown(ed: SharedEditor; ev: JsObject) =
     return
   let mods = pointerModsOf(ev.ctrlKey.to(bool) or ev.metaKey.to(bool),
                            ev.altKey.to(bool), ev.shiftKey.to(bool))
-  let press = PointerPress(timeMs: int64(nowMs()), button: pb, mods: mods,
+  let press = PointerPress(timeMs: int64(eventTimeMs(ev)), button: pb, mods: mods,
     hit: PointerHit(element: h.pe, line: h.line1, offset: h.offset,
                     displayColumn: columnAt(ed.lineText(h.line1),
                                             h.offset - ed.offsetAt(h.line1, 1)) + 1,
