@@ -249,3 +249,9 @@ src/frontend/viewmodel/tests/unit/plat32-history-mutation-control.sha256	src/fro
 src/frontend/viewmodel/tests/unit/plat33-collab-mutation-control.sha256	src/frontend/viewmodel/editor/operations.nim	f28dfaefe805c8a0f6958bb2c1ff272574299ed5e1de841a2dc3ad88f68a93cb	81f5945815c45a6d7c910335f266d9e526efc488962f3fcd11927de2b1e35719
 src/frontend/viewmodel/tests/unit/plat68-keymaps-mutation-control.sha256	src/frontend/viewmodel/editor/operations.nim	f28dfaefe805c8a0f6958bb2c1ff272574299ed5e1de841a2dc3ad88f68a93cb	81f5945815c45a6d7c910335f266d9e526efc488962f3fcd11927de2b1e35719
 src/tests/scenarios/plat66-pack-mutation-control.sha256	src/tests/scenarios/bindings/playwright/codetracer-binding.ts	352e3a8153c7b8324784212f54a33fe4edace5a9902d86f248657832ca12278a	dbd9234037496403a569e64d8206c33bc68792d69b6aab326bdff262c68a96b3
+
+# 2026-11-13, the settings suites derive their per-setting counts: the scrollbar
+# model suite (a grading suite of plat70h) now states every setting's word count
+# in an exhaustive table and tallies its sweep apart. plat70h owes a re-grade for
+# that suite's bytes only.
+src/frontend/tui/tests/plat70h-scrollbar-mutation-control.sha256	src/frontend/viewmodel/tests/unit/test_plat70h_scrollbar_model.nim	fd1b8b348e828f54dc05004c746a91f040e1068b98a5f0a6650e98f672a3727a	3a0689bc490459eb4cbddf7fd3075630474fdc4eab1561b290e315f87af61349

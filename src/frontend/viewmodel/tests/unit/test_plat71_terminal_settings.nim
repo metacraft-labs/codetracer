@@ -25,44 +25,85 @@ template ck(cond: untyped) =
   inc CHECKS
   check(cond)
 
+func terminalWords(which: LayoutSetting): seq[string] =
+  ## §5.3's settings and their words, as this suite reads the spec; empty for
+  ## a setting the terminal does not own. Production's `isTerminalSetting`
+  ## and `settingValues` are checked against it, not derived from it.
+  ## No `else`: a new `LayoutSetting` does not compile until it is entered
+  ## here as the terminal's or not, so neither the ownership check nor the
+  ## counts below can pass it by.
+  case which
+  of lsModernUnicode: @["off", "on", "auto"]
+  of lsGlyphs: @["auto", "ascii", "basic", "extended"]
+  of lsAmbiguousWidth: @["auto", "narrow", "wide"]
+  of lsColors: @["auto", "truecolor", "256", "16", "mono"]
+  of lsTerminalProbe: @["on", "off"]
+  of lsReduceMotion: @["auto", "on", "off"]
+  of lsPointerShapes: @["auto", "on", "off"]
+  of lsScreenReader: @["auto", "on", "off"]
+  of lsTerminalHints: @["on", "off"]
+  of lsFocusHighlight, lsLiveResize, lsOverflowMarkers, lsScrollbarThickness,
+     lsScrollbarFade, lsScrollbarTrack, lsScrollbarClick,
+     lsMultiClickInterval, lsWordSeparators: @[]
+
+func ownedByTerminal(which: LayoutSetting): bool =
+  terminalWords(which).len > 0
+
+var sweptAssertions = 0
+template swept(cond: untyped) =
+  ## One assertion of the per-setting sweep. Tallied apart from `CHECKS`
+  ## because its number follows the settings, and is checked against
+  ## `ExpectedSweptAssertions` rather than a hand-kept constant.
+  inc sweptAssertions
+  check(cond)
+
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads this spelling
 # as the suite's RUNTIME assertion count.
-const ExpectedAssertions = 207
+const ExpectedAssertions = 26
+  ## The assertions whose number does not depend on how many settings there
+  ## are. The sweep in the first case is not in it: until 2026-11-13 it was,
+  ## and a new terminal setting (`screen-reader`) turned the suite red until
+  ## the number and the suite's own list of terminal settings were edited by
+  ## hand.
 
-const TerminalSettings = [lsModernUnicode, lsGlyphs, lsAmbiguousWidth,
-                          lsColors, lsTerminalProbe, lsReduceMotion,
-                          lsPointerShapes, lsTerminalHints]
+const ExpectedSweptAssertions = block:
+  ## Derived from `terminalWords`: a terminal setting costs one check of its
+  ## words, one of its ownership, six for every word and one for a refused
+  ## word; any other setting costs one check that the terminal does not own it.
+  var n = 0
+  for which in LayoutSetting:
+    let words = terminalWords(which).len
+    n += (if words > 0: 3 + 6 * words else: 1)
+  n
 
 suite "PLAT-71: the terminal settings":
 
   test "§5.3's words, in every text form":
-    ck settingValues(lsGlyphs) == @["auto", "ascii", "basic", "extended"]
-    ck settingValues(lsModernUnicode) == @["off", "on", "auto"]
-    ck settingValues(lsAmbiguousWidth) == @["auto", "narrow", "wide"]
-    ck settingValues(lsColors) == @["auto", "truecolor", "256", "16", "mono"]
-    ck settingValues(lsTerminalProbe) == @["on", "off"]
-    ck settingValues(lsReduceMotion) == @["auto", "on", "off"]
-    ck settingValues(lsPointerShapes) == @["auto", "on", "off"]
-    for which in TerminalSettings:
-      ck which.isTerminalSetting
+    var owned = 0
+    for which in LayoutSetting:
+      if not ownedByTerminal(which):
+        swept not which.isTerminalSetting
+        continue
+      inc owned
+      swept settingValues(which) == terminalWords(which)
+      swept which.isTerminalSetting
       for value in settingValues(which):
         let flag = parseSettingFlag("--" & $which & "=" & value)
-        ck flag.isFlag and flag.ok and flag.setting == which and
+        swept flag.isFlag and flag.ok and flag.setting == which and
            flag.word == value
         let line = parseSetLine(":set " & $which & " " & value)
-        ck line.isSet and line.ok and line.value == value
+        swept line.isSet and line.ok and line.value == value
         let target = parseSettingCommandTarget(settingCommandTarget(which,
                                                                     value))
-        ck target.ok and target.value == value
+        swept target.ok and target.value == value
         var s = defaultLayoutSettings()
-        ck s.assignValue(which, value)
-        ck s.valueText(which) == value
+        swept s.assignValue(which, value)
+        swept s.valueText(which) == value
         let back = decodeLayoutSettings(encodeLayoutSettings(s))
-        ck back.ok and back.settings.valueText(which) == value
-      ck not parseSettingFlag("--" & $which & "=sideways").ok
-    for which in LayoutSetting:
-      if which notin TerminalSettings:
-        ck not which.isTerminalSetting
+        swept back.ok and back.settings.valueText(which) == value
+      swept not parseSettingFlag("--" & $which & "=sideways").ok
+    # The sweep saw §5.3's settings, not an empty table.
+    ck owned >= 9
 
   test "modern-unicode: off by default, auto a value, owned by the terminal":
     let d = defaultLayoutSettings()
@@ -112,9 +153,13 @@ suite "PLAT-71: the terminal settings":
       let t = parseSettingCommandTarget(e.target)
       if t.ok and t.setting.isTerminalSetting:
         inc windowLabels
-    ck terminalLabels == 3 + 4 + 3 + 5 + 2 + 3 + 3 + 2
+    var listed = 0
+    for which in LayoutSetting:
+      listed += terminalWords(which).len
+    ck terminalLabels == listed
     ck windowLabels == 0
 
   test "assertion count":
-    echo "CHECKS: " & $CHECKS
+    echo "CHECKS: " & $(CHECKS + sweptAssertions)
     check CHECKS == ExpectedAssertions
+    check sweptAssertions == ExpectedSweptAssertions

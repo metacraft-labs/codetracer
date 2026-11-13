@@ -26,9 +26,54 @@ template ck(cond: untyped) =
   inc CHECKS
   check(cond)
 
+func listedWords(which: LayoutSetting): int =
+  ## How many words each setting lists, stated here independently of
+  ## `settingValues` so the sweep below can catch a list that grew or shrank.
+  ## No `else`: a new `LayoutSetting` does not compile until it is entered
+  ## here, so the sweep and its count can never silently pass it by.
+  case which
+  of lsFocusHighlight, lsLiveResize, lsOverflowMarkers: 2
+  of lsScrollbarThickness: 4
+  of lsScrollbarFade, lsScrollbarTrack, lsScrollbarClick: 2
+  # The terminal's settings (Terminal-Adaptation §5.3).
+  of lsModernUnicode: 3
+  of lsGlyphs: 4
+  of lsAmbiguousWidth: 3
+  of lsColors: 5
+  of lsTerminalProbe: 2
+  of lsReduceMotion: 3
+  of lsPointerShapes: 3
+  of lsScreenReader: 3
+  of lsTerminalHints: 2
+  # The editor pointer's.
+  of lsMultiClickInterval: 4
+  of lsWordSeparators: 2
+
+var sweptAssertions = 0
+template swept(cond: untyped) =
+  ## One assertion of the per-setting sweep. Tallied apart from `CHECKS`
+  ## because its number follows the settings, and is checked against
+  ## `ExpectedSweptAssertions` rather than a hand-kept constant.
+  inc sweptAssertions
+  check(cond)
+
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads this spelling
 # as the suite's RUNTIME assertion count.
-const ExpectedAssertions = 1129
+const ExpectedAssertions = 762
+  ## The assertions whose number does not depend on how many settings there
+  ## are. The settings sweep is not in it: until 2026-11-13 this constant
+  ## also counted the sweep's assertions, so every new setting turned the
+  ## suite red until the number was bumped by hand (most recently
+  ## `screen-reader`).
+
+const ExpectedSweptAssertions = block:
+  ## The sweep's assertions, derived from `listedWords`: one for the list's
+  ## length, then seven for every word. A new setting raises both sides; a
+  ## sweep that skips a setting or a word, or loses a check, raises only this.
+  var n = 0
+  for which in LayoutSetting:
+    n += 1 + 7 * listedWords(which)
+  n
 
 const On = DefaultScrollbarOptions
 
@@ -203,31 +248,27 @@ suite "PLAT-70 Part H: paging toward the pointer":
 suite "PLAT-70 Part H: the scrollbar settings":
 
   test "every value of every setting round-trips through every form":
-    var forms = 0
+    var forms, listed = 0
     for which in LayoutSetting:
-      ck settingValues(which).len >= 2
+      swept settingValues(which).len == listedWords(which)
+      listed += listedWords(which)
       for value in settingValues(which):
         let sl = parseSetLine(":set " & $which & " " & value)
-        ck sl.isSet and sl.ok and sl.setting == which and sl.value == value
+        swept sl.isSet and sl.ok and sl.setting == which and sl.value == value
         let flag = parseSettingFlag("--" & $which & "=" & value)
-        ck flag.isFlag and flag.ok and flag.word == value
+        swept flag.isFlag and flag.ok and flag.word == value
         let target = parseSettingCommandTarget(settingCommandTarget(which, value))
-        ck target.ok and target.setting == which and target.value == value
+        swept target.ok and target.setting == which and target.value == value
         var s = defaultLayoutSettings()
-        ck s.assignValue(which, value)
-        ck s.valueText(which) == value
+        swept s.assignValue(which, value)
+        swept s.valueText(which) == value
         let back = decodeLayoutSettings(encodeLayoutSettings(s))
-        ck back.ok and back.settings == s
-        ck settingCommandLabel(which, value).endsWith(": " & value)
+        swept back.ok and back.settings == s
+        swept settingCommandLabel(which, value).endsWith(": " & value)
         inc forms
-    # PLAT-71 added the terminal settings (Terminal-Adaptation §5.3):
-    # `modern-unicode` became off | on | auto, and glyphs (4), ambiguous-width
-    # (3), colors (5), terminal-probe (2), reduce-motion (3) and
-    # terminal-hints (2) joined.
-    # pointer-shapes (3) came with the pointer's shape; the editor pointer's
-    # multi-click-interval (4 listed) and word-separators (2).
-    # screen-reader (3: auto | on | off) came with PLAT-72's mode.
-    ck forms == 2 + 2 + 2 + 4 + 2 + 2 + 2 + 3 + 4 + 3 + 5 + 2 + 3 + 3 + 3 + 2 + 4 + 2
+    ck forms == listed
+    # Every setting offers a choice of at least two words.
+    ck listed >= 2 * (LayoutSetting.high.ord + 1)
 
   test "the defaults are §7.1's":
     let d = defaultLayoutSettings()
@@ -256,4 +297,6 @@ suite "PLAT-70 Part H: the scrollbar settings":
 
 suite "PLAT-70 Part H: assertion count":
   test "every assertion ran":
+    echo "CHECKS: " & $(CHECKS + sweptAssertions)
     check CHECKS == ExpectedAssertions
+    check sweptAssertions == ExpectedSweptAssertions
