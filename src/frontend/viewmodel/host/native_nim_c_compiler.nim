@@ -21,15 +21,19 @@
 ## source, reused by the next compile of the same file so Nim's own cache
 ## makes it faster; nothing is written into the project.
 
-import std/[algorithm, hashes, os, osproc, streams, strutils, times]
+import std/[algorithm, os, osproc, streams, strutils, times]
 
 import ./native_state
+import ./nim_c_compile_plan
+export nim_c_compile_plan
+  # The compile itself — arguments, nimcache name, the error a refusal
+  # quotes — is shared with the desktop's main process, which runs the same
+  # compile through node (`index/nim_c_listing`).
 
 const
   NimEnvVar = "CODETRACER_NIM"
     ## The compiler to run; else `nim` on the PATH (the tracer's variable:
     ## one compiler for both).
-  ListingsDir = "nim-c-listings"
   DefaultTimeoutMs = 120_000
 
 type
@@ -63,17 +67,9 @@ proc findNim(): string =
 proc cacheOf*(source: string): string =
   ## The scratch nimcache of `source`: one per file, named so a person can
   ## tell which (`<stem>-<hash of the path>`).
-  nativeStateRoot() / ListingsDir /
-    (source.extractFilename.changeFileExt("") & "-" &
-     toHex(hash(source).uint32))
+  nativeStateRoot() / NimCListingsDir / cacheNameOf(source)
 
 proc running*(c: NimCCompile): bool = c.phase == nccRunning
-
-proc compileArgumentsOf*(source, cache: string): seq[string] =
-  ## `nim c`'s arguments for `source`'s C. `--hints:off` keeps the output to
-  ## the errors a refusal quotes.
-  @["c", "--compileOnly", "--lineDir:on", "--sourcemap:on", "--hints:off",
-    "--nimcache:" & cache, source]
 
 proc fail(c: NimCCompile; message: string) =
   c.phase = nccFailed
@@ -140,17 +136,6 @@ proc drain(c: NimCCompile) =
         break
       for i in 0 ..< n:
         c.output.add buf[i]
-
-proc errorLineOf(output: string): string =
-  ## The compiler's first `Error:` line, else its last line.
-  var last = ""
-  for raw in output.splitLines():
-    let l = raw.strip
-    if "Error:" in l:
-      return l
-    if l.len > 0:
-      last = l
-  last
 
 proc settle(c: NimCCompile; code: int) =
   if code != 0:
