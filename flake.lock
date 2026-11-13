@@ -7822,11 +7822,11 @@
     "nim-agents": {
       "flake": false,
       "locked": {
-        "lastModified": 1794539376,
-        "narHash": "sha256-+wTH0jQP1W3HAaF/Oqi7qaivcqsWMOXJ7ls6YTNd1WI=",
+        "lastModified": 1794591485,
+        "narHash": "sha256-PUadgMLOwf7KSrQczB5eDrn4L67+IFbFN6wl2uachZk=",
         "owner": "metacraft-labs",
         "repo": "nim-agents",
-        "rev": "dc60650f13a7898cff71b8c9bbd4c46c6a0d8cc1",
+        "rev": "b2c97c530406d68e215e26b28fc43a2dd02ce090",
         "type": "github"
       },
       "original": {
