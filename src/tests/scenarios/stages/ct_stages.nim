@@ -753,16 +753,64 @@ proc hcrFlame*(s: StageState; platform, edit, arm: string) =
     " > " & quoteShell(work / "patched.log") & " 2>&1"
   if arm in ["green", "harness-launches"]:
     # "Launch Under Live Edit (HCR)" runs the workspace's launch
-    # configuration: a scratch workspace holding the flame project's derived
-    # `.vscode/launch.json`, opened in Edit mode by `open-project $project`.
+    # configuration: a scratch workspace holding the flame project's launch
+    # configuration, opened in Edit mode by `open-project $project`. It is
+    # derived as the original test derived it (`flame_launch_under_hcr.spec.ts`):
+    # `${workspaceFolder}` is the flame project, only this host's entry is
+    # kept, and its session directory and output files are this run's. The
+    # engine and the coordinator are the ones found above when the checked-in
+    # names are not built here.
     let launchJson = flame / ".vscode" / "launch.json"
     if not fileExists(launchJson):
       raise newException(IOError, "hcr-flame: prerequisite missing: the flame project's " &
-                         "derived launch configuration: " & launchJson)
+                         "launch configuration: " & launchJson)
+    let parsed = parseJson(readFile(launchJson).replace("${workspaceFolder}", flame))
+    var chosen: JsonNode = nil
+    for c in parsed["configurations"]:
+      if c.hasKey("hcr") and c["hcr"]{"platform"}.getStr == "linux": chosen = c
+    if chosen.isNil:
+      raise newException(IOError, "hcr-flame: the flame project's launch configuration has no linux HCR entry")
+    if not fileExists(chosen["program"].getStr): chosen["program"] = %engine
+    if not fileExists(chosen["hcr"]["coordinator"].getStr): chosen["hcr"]["coordinator"] = %driver
+    chosen["hcr"]["sessionDir"] = %(work / "session")
+    chosen["env"]["CT_H2_TICKFILE"] = %ticks
+    chosen["env"]["CT_H2_OUT"] = %(work / "shots")
+    var only = newJArray()
+    only.add chosen
+    parsed["configurations"] = only
     let ws = s.root / "hcr-workspace"
     createDir(ws / ".vscode")
-    copyFile(launchJson, ws / ".vscode" / "launch.json")
+    writeFile(ws / ".vscode" / "launch.json", pretty(parsed))
     s.launch.project = ws
+    return
+  if arm == "live-edit":
+    # The Live Edit panel types into a running session: the session
+    # coordinator listening, the patched flame dialled in, and the session's
+    # `ready` file written after their handshake (`flame_live_edit_loop.spec.ts`
+    # starts them in the same order beside the window).
+    let session = work / "session"
+    createDir(session)
+    s.launch.env["CODETRACER_HCR_SESSION_DIR"] = session
+    for k in ["CODETRACER_HCR_DRIVER", "CODETRACER_HCR_EDIT", "CODETRACER_HCR_WAIT_FOR",
+              "CODETRACER_HCR_MARKER", "CODETRACER_HCR_MARKER_TIMEOUT_MS", "CODETRACER_HCR_SOCKET"]:
+      s.launch.env.del(k)
+    let loop = "rm -f " & quoteShell(socket) & "; " &
+      quoteShell(driver) & " --socket " & quoteShell(socket) &
+      " --target-symbol _ZN5flame8FlameSim15advanceExistingEv --session --session-dir " &
+      quoteShell(session) & " --session-idle-timeout-ms 300000 > " &
+      quoteShell(work / "driver.log") & " 2>&1 & " &
+      "for i in $(seq 1 600); do [ -S " & quoteShell(socket) & " ] && break; sleep 0.1; done; " &
+      "CT_H2_FRAMES=18000 CT_H2_MAX_FPS=60 CT_H2_TICKFILE=" & quoteShell(ticks) &
+      " REPRO_HCR_AGENT_SOCKET=" & quoteShell(socket) &
+      " exec " & quoteShell(engine) & " --headless --path " & quoteShell(flame) & " --scene " & FlameScene &
+      " > " & quoteShell(work / "patched.log") & " 2>&1"
+    discard startProcess("/bin/sh", args = ["-c", loop], options = {})
+    let deadline = epochTime() + 100.0
+    while not fileExists(session / "ready"):
+      if epochTime() > deadline:
+        raise newException(IOError, "hcr-flame: the live-edit session never became ready (" &
+                           work / "driver.log" & ")")
+      sleep(200)
     return
   discard startProcess("/bin/sh", args = ["-c", watcher], options = {})
 

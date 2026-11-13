@@ -169,7 +169,7 @@ const ROLES: Record<string, { affordances: string[]; properties: string[] }> = {
   "shortcut-row": { affordances: [], properties: ["action", "chord"] },
   "binding-row": { affordances: [], properties: ["operation", "key", "layer", "shadowed-by", "text"] },
   "dialog-button": { affordances: ["click"], properties: ["label", "enabled"] },
-  "low-level-code": { affordances: ["click", "focusable"], properties: ["count", "sync", "stepping", "address", "focused"] },
+  "low-level-code": { affordances: ["click", "focusable"], properties: ["count", "sync", "stepping", "address", "focused", "pointer"] },
   instruction: { affordances: ["click", "context-click"],
                  properties: ["offset", "name", "source", "active", "executing", "focused"] },
   "source-line": { affordances: [], properties: ["number", "active"] },
@@ -178,9 +178,9 @@ const ROLES: Record<string, { affordances: string[]; properties: string[] }> = {
                                "thumb-proportional", "clear-of-vertical"] },
   "table-pane": { affordances: ["click", "wheel"],
                   properties: ["pane", "fit", "sideways", "wider", "scroll-left", "header-follows"] },
-  "table-cell": { affordances: ["click", "context-click"],
+  "table-cell": { affordances: ["click", "context-click", "drop-target"],
                   properties: ["cell", "column", "text", "full", "cut", "drawn-cut"] },
-  "column-header": { affordances: ["click"], properties: ["column", "label", "cells"] },
+  "column-header": { affordances: ["click", "drag-source"], properties: ["column", "label", "cells"] },
   "table-tooltip": { affordances: [], properties: ["text", "widest"] },
   "row-detail": { affordances: [], properties: ["text", "count"] },
   "live-edit-panel": { affordances: [], properties: ["status", "detail"] },
@@ -371,7 +371,7 @@ function readSurface(): any {
         };
         const opt = node("column-option", o, {
           name, shown: check?.getAttribute("aria-pressed") === "true",
-        }, [["name", name]]);
+        }, [["name", name], ["arguments", text(r.querySelector(".call-args"))]]);
         opt.anchors = { check: centre(check), handle: centre(handle) };
         cm.children.push(opt);
       }
@@ -603,7 +603,7 @@ function readSurface(): any {
           || r.classList.contains("event-selected"),
         expanded: !!r.querySelector(".toggle-call .collapse-call-img"),
         arguments: text(r.querySelector(".call-args")),
-      }, [["name", name]]);
+      }, [["name", name], ["arguments", text(r.querySelector(".call-args"))]]);
       const points: Record<string, { x: number; y: number }> = {};
       if (toggle && vis(toggle)) {
         const tb = toggle.getBoundingClientRect();
@@ -986,7 +986,7 @@ function readSurfacePw1(root: any): void {
           diagnostic: text(r.querySelector(".agent-test-row-diagnostic")),
           "recording-failed": !!r.querySelector(".agent-test-row-recording-failed"),
           expanded: !!r.querySelector(".agent-test-row-details"),
-        }, [["name", name]]);
+        }, [["name", name], ["arguments", text(r.querySelector(".call-args"))]]);
         if (rh) row.anchors = { points: { header: centre(rh) } };
         for (const b of Array.from(r.querySelectorAll(".agent-test-row-actions button")) as HTMLElement[]) row.children.push(button(b));
         card.children.push(row);
@@ -1803,7 +1803,10 @@ function readSurfacePw4(root: any): void {
       }
     }
     v.props.count = v.children.filter((c: any) => c.role === "instruction").length;
-    v.anchors = { points: stepping ? { header: centre(stepping) } : {} };
+    const pointer = llc.querySelector(".low-level-code-instruction.execution-pointer");
+    v.props.pointer = text(pointer?.querySelector(".low-level-code-instruction-offset"));
+    v.anchors = { points: { ...(stepping ? { header: centre(stepping) } : {}),
+                            ...(pointer ? { pointer: centre(pointer) } : {}) } };
     add(v);
   }
 

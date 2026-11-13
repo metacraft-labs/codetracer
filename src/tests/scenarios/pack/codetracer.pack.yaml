@@ -1185,11 +1185,13 @@ roles:
   low-level-code:
     # `focused`: the keyboard focus is in its pane (a press on its header
     # focuses the pane without moving the debugger, as a press on a row would).
-    properties: { count: int, sync: text, stepping: text, address: text, focused: bool }
+    # `pointer`: the offset of the instruction the replay is at.
+    properties: { count: int, sync: text, stepping: text, address: text, focused: bool, pointer: text }
     children: { instruction: many, source-line: many }
     affordances: [click, focusable]
-    # `header`: the header's stepping note.
-    anchors: [header]
+    # `header`: the header's stepping note; `pointer`: the instruction the
+    # replay is at (a press there selects it and moves nothing).
+    anchors: [header, pointer]
     assertions:
       pointer-at(offset): "some instruction: instruction.offset == offset and instruction.executing"
       all-offsets-match(re): "every instruction: instruction.offset matches re"
@@ -1253,6 +1255,8 @@ roles:
     assertions:
       cuts-drawn: "every table-cell: table-cell.cut == table-cell.drawn-cut"
       has-cut: "some table-cell: table-cell.cut"
+      # Every cell of this column shows some text.
+      column-filled(col): "every table-cell: table-cell.column != col or table-cell.text != \"\""
       # A cell of this column is cut.
       column-cut(col): "some table-cell: table-cell.column == col and table-cell.cut"
       # Every cut cell of this column: its whole text and the text drawn.
@@ -1269,13 +1273,15 @@ roles:
       # The pane's model cut it; the browser draws it cut.
       cut: bool
       drawn-cut: bool
-    affordances: [click, context-click]
+    affordances: [click, context-click, drop-target]
     anchors: [ellipsis, text-start]
 
   column-header:
     keys: [column]
+    # `cells`: its width in 8-pixel cells, the unit the native front-ends
+    # remember it in.
     properties: { column: text, label: text, cells: int }
-    affordances: [click]
+    affordances: [click, drag-source]
     anchors: [separator]
 
   # A table cell's tooltip (the whole text of a cut cell the pointer rests
