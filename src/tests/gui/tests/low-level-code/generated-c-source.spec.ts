@@ -77,9 +77,14 @@ function decodeVlq(segment: string): number[] {
 }
 
 /**
- * The 1-based C lines whose FIRST mapped segment names `nimFile` (by its
+ * The 1-based C lines ANY of whose mapped segments names `nimFile` (by its
  * file name) at 1-based `nimLine` — what a reader of the map attributes each
- * C line to.
+ * C line to. Every segment, not the first: CodeTracer's compiler records a
+ * zero-width segment wherever it starts emitting a node, so one C line names
+ * many Nim lines in emission order and its first is arbitrary: the
+ * `nimln_(60);{` that opens nim_sudoku_solver's `var testBoards` names ninety
+ * positions, line 1 first and line 60 among them. The product attributes a
+ * line the same way (`nim_c_producer.mapRowsOf`).
  */
 function mapLinesFor(mapText: string, nimFile: string, nimLine: number): Set<number> {
   const map = JSON.parse(mapText);
@@ -89,18 +94,14 @@ function mapLinesFor(mapText: string, nimFile: string, nimLine: number): Set<num
   let origLine = 0;
   const groups = String(map.mappings ?? "").split(";");
   groups.forEach((group, i) => {
-    let first = true;
     for (const seg of group.split(",")) {
       if (seg.length === 0) continue;
       const f = decodeVlq(seg);
       if (f.length < 4) continue;
       src += f[1];
       origLine += f[2];
-      if (first) {
-        first = false;
-        if (path.basename(sources[src] ?? "") === nimFile && origLine + 1 === nimLine) {
-          lines.add(i + 1);
-        }
+      if (path.basename(sources[src] ?? "") === nimFile && origLine + 1 === nimLine) {
+        lines.add(i + 1);
       }
     }
   });
@@ -314,27 +315,12 @@ test.setTimeout(600_000);
  * `nimcache/@m<module>.nim.c` — and the View menu's two items over it.
  */
 async function generatedCOfStop(page: Page, expectDirectives: boolean) {
-  let stop = await nimStop(page);
+  // The replay's first stop, asked about as it is: its line has C
+  // (`checkAnchoredRow` asserts that the C file attributes some to it).
+  const stop = await nimStop(page);
+  console.log(`# the first Nim stop: ${stop.path}:${stop.line}`);
   const folder = await page.evaluate(() => String((window as any).data.trace.outputFolder));
   const cFileOf = (nim: string) => path.join(folder, "nimcache", "@m" + path.basename(nim) + ".c");
-  // A stop on a line its C file attributes no C to is stepped past (F10): the
-  // spec asks about a line that HAS C. CodeTracer's compiler writes one such
-  // line at a module's first stop — `nimln_(60);{` of nim_sudoku_solver, whose
-  // map names ninety Nim positions at column 0, the first of them line 1 — and
-  // a reader of the map, this spec's or the product's, attributes that C row
-  // to line 1.
-  for (let step = 0; step < 10; step++) {
-    const c = cFileOf(stop.path);
-    if (fs.existsSync(c) && expectedCLines(c, path.basename(stop.path), stop.line).size > 0) break;
-    await editorShows(page, stop.path);
-    await page.keyboard.press("F10");
-    const from = `${stop.path}:${stop.line}`;
-    await expect.poll(async () => {
-      const at = await nimStop(page);
-      return `${at.path}:${at.line}`;
-    }, { timeout: 60_000 }).not.toBe(from);
-    stop = await nimStop(page);
-  }
   await editorShows(page, stop.path);
   await caretAt(page, stop.line);
   await runMenuItem(page, "View Generated C Source");
