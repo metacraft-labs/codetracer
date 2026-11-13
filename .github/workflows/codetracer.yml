@@ -6255,6 +6255,12 @@ jobs:
             # the lock, as for the trace-format pair above.
             codetracer-visual-replay=6b2e8a88ed6bc4faec0bdc969314ca2771527c04
             codetracer-native-backend=a4189eeda28eb953c9e837baa8ed8024c2f8b625
+            # The desktop scenario lane's recorders and recordings: the BEAM
+            # recorder at repro.lock's pin, and the example recordings (not a
+            # build input, so not in the lock) at the commit their scenarios
+            # were measured against.
+            codetracer-beam-recorder=cbe8cb86f4038c8e6c798c556e301771482ddc8c
+            codetracer-example-recordings=87f64e3eb365d879f065784ae85ff035668c8720
             runquota=dev
 
       - name: Stage codetracer-trace-format into libs/
@@ -6354,8 +6360,9 @@ jobs:
       # resolve against those clones, so the former per-sibling resolve/clone
       # steps (and the trace-format symlink) are no longer needed.
 
-      - name: Clone codetracer-snapshot-codecs sibling (macOS)
-        if: matrix.platform == 'macos'
+      - name: Clone codetracer-snapshot-codecs sibling
+        # Both legs: the macOS Playwright suite needs it, and so does the
+        # desktop scenario lane on nixos (MCR and visual-replay scenarios).
         # codetracer-visual-replay's config.nims threads
         # ``--path:../codetracer-snapshot-codecs/src`` into the Nim
         # compile.  The build aborts with ``cannot open file:
@@ -6368,8 +6375,9 @@ jobs:
           gh-token: ${{ steps.ci_token.outputs.token }}
           submodules: 'false'
 
-      - name: Clone codetracer-image-diff sibling (macOS)
-        if: matrix.platform == 'macos'
+      - name: Clone codetracer-image-diff sibling
+        # Both legs: the macOS Playwright suite needs it, and so does the
+        # desktop scenario lane on nixos (MCR and visual-replay scenarios).
         # Companion sibling to codetracer-snapshot-codecs threaded via
         # the same ``config.nims`` --path; without it ST-M3 test
         # imports break the visual-replay build.
@@ -6387,8 +6395,9 @@ jobs:
       # step is therefore no longer needed; the visual-replay sibling builds
       # below still drive each sibling's own ``nix develop`` flake.
 
-      - name: Build ct-mcr via codetracer-native-recorder nix develop (macOS)
-        if: matrix.platform == 'macos'
+      - name: Build ct-mcr via codetracer-native-recorder nix develop
+        # Both legs: the macOS Playwright suite needs it, and so does the
+        # desktop scenario lane on nixos (MCR and visual-replay scenarios).
         # The macOS Playwright suite needs ct_cli/ct_cli built from
         # the codetracer-native-recorder sibling.  Use the recorder's
         # own ``nix develop`` shell + its ``just build-ct-mcr`` target
@@ -6470,8 +6479,9 @@ jobs:
           PATH="$PATH:/usr/bin" \
             nix develop --no-write-lock-file --command just build-ct-mcr
 
-      - name: Build ct_gfx_player via codetracer-visual-replay nix develop (macOS)
-        if: matrix.platform == 'macos'
+      - name: Build ct_gfx_player via codetracer-visual-replay nix develop
+        # Both legs: the macOS Playwright suite needs it, and so does the
+        # desktop scenario lane on nixos (MCR and visual-replay scenarios).
         # The Playwright suite's visual-replay specs
         # ``requireExecutable(ct_gfx_player)`` at module-load time.
         # ``codetracer-visual-replay``'s ``just build`` target wraps
@@ -6740,6 +6750,34 @@ jobs:
       # failure it guards against, the pane emptying after a jump, is one a
       # reader hits immediately, so it should be reported even when an earlier
       # spec in the suite has already gone red.
+      - name: Native replay, the BEAM recorder and the GL recording for the desktop scenario lane
+        # What the lane's native, BEAM and visual-replay scenarios record and
+        # replay with, each built in its own repository's dev shell, as
+        # scripts/detect-siblings.sh (run by codetracer's shellHook) then finds
+        # them: ct-native-replay and rr in codetracer-native-backend's
+        # target/debug (`just ensure-ct-native-replay`); the BEAM recorder in
+        # its target/debug, with elixir and erl from ITS dev shell on PATH
+        # (codetracer's dev shell has neither); the gl_scene visual recording
+        # at test-logs/tui-fixtures/visual-gl-scene, where the visual-replay
+        # stages look first, made by ct-mcr in codetracer-visual-replay's
+        # shell (EGL/GLES2 and Mesa). ct-mcr and ct_gfx_player are built by
+        # the two steps above; the JS recorder by the step before them.
+        if: ${{ !cancelled() && matrix.platform == 'nixos' }}
+        run: |
+          set -euo pipefail
+          nix develop .#devShells.x86_64-linux.default --command just ensure-ct-native-replay
+          test -x ../codetracer-native-backend/target/debug/ct-native-replay
+          # shellcheck disable=SC2016 # expanded by the inner bash, inside the recorder's shell
+          (cd ../codetracer-beam-recorder && nix develop --no-write-lock-file --command bash -c '
+            set -euo pipefail
+            cargo build --locked
+            (cd rebar3_codetracer && rebar3 compile)
+            dirname "$(command -v elixir)" >>"$GITHUB_PATH"
+            dirname "$(command -v erl)" >>"$GITHUB_PATH"')
+          nix develop ../codetracer-visual-replay --no-write-lock-file --command \
+            bash scripts/record-visual-replay-fixture.sh
+          test -f test-logs/tui-fixtures/visual-gl-scene/gfx_stream/gfx_frames.idx
+
       - name: Scenarios — the desktop lane
         # The real `ct` → Electron through DemoVideoScript-Playwright's arm
         # with CodeTracer's Playwright binding, under Xvfb at 2560x1440, 96 dpi.

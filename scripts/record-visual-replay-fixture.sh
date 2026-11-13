@@ -80,6 +80,20 @@ mkdir -p "$out" "$work/frames"
 	export LIBGL_ALWAYS_SOFTWARE="${LIBGL_ALWAYS_SOFTWARE:-1}"
 	export EGL_PLATFORM="${EGL_PLATFORM:-surfaceless}"
 	export LP_NUM_THREADS="${LP_NUM_THREADS:-1}"
+	# Mesa, not whichever EGL vendor libglvnd tries first: on a host with an
+	# NVIDIA driver, NVIDIA's vendor library is first and cannot initialise a
+	# surfaceless display under the recorder (eglInitialize EGL_NOT_INITIALIZED,
+	# measured with codetracer-native-recorder 63dd179), so the program exits 1
+	# and the recording has no graphics.
+	if [ -z "${__EGL_VENDOR_LIBRARY_FILENAMES:-}" ]; then
+		for vendor in /run/opengl-driver/share/glvnd/egl_vendor.d/50_mesa.json \
+			/usr/share/glvnd/egl_vendor.d/50_mesa.json; do
+			if [ -f "$vendor" ]; then
+				export __EGL_VENDOR_LIBRARY_FILENAMES="$vendor"
+				break
+			fi
+		done
+	fi
 	exec "$mcr" record --interpose \
 		--checkpoint-interval "${CT_VISUAL_FIXTURE_CHECKPOINT_MS:-250}" \
 		-o "$out/trace.ct" -- "$work/gl_scene" "$work/frames/gl_scene"
