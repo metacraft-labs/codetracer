@@ -421,9 +421,12 @@ ARMS = [
         "  scrubberModel(vm.lineCount, vm.visibleTop(st, rows), rows,\n",
         "  scrubberModel(min(rows, vm.lineCount), vm.visibleTop(st, rows), rows,\n",
         G_SCRUB, "GPUI's scrubber spans the rows drawn"),
+    # G4 RE-AIMED 2026-11-13: `106bc7e3e0` sends the press through the pointer
+    # keymap (`pressElement`), whose operation jumps to the write it carries;
+    # same defect.
     Arm("G4", GMAIN,
-        "  of ghWrite:\n    return terminalJump(r, hit.write)\n",
-        "  of ghWrite:\n    return terminalJump(r, hit.write + 1)\n",
+        "    return pressElement(r, paneTerminalOutput, ekRow, \"\",\n                        ContextTarget(pane: paneTerminalOutput,\n                                      index: int64(hit.write)))\n",
+        "    return pressElement(r, paneTerminalOutput, ekRow, \"\",\n                        ContextTarget(pane: paneTerminalOutput,\n                                      index: int64(hit.write + 1)))\n",
         G_CLICK, "a GPUI press lands on the next write"),
     Arm("G5", GMAIN,
         "  of ghViewLines, ghViewScreen:\n    vm.setView(if hit.kind == ghViewLines: tvLines else: tvScreen)\n",
