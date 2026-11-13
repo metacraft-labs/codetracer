@@ -91,7 +91,6 @@ src/frontend/tui/tests/plat70d-grep-mutation-control.sha256	src/frontend/tui/hos
 src/frontend/tui/tests/plat70e-origin-mutation-control.sha256	src/frontend/tui/app/runtime.nim	cf49c5c00db6777abcafb2360192c7348849432ac560f56d5a2970f4bb68a59a	745fee32e0bbc92d22443f415809389446e7802595d9845b2c55301ac678e105
 src/frontend/tui/tests/plat70e-origin-mutation-control.sha256	src/frontend/tui/host/tui_session.nim	d7e7b5a3d745e45b41262c2b035a277ff625ac1cae486260fcb1aaf9b0f5367b	a9ea791e49006488ac348b14e02a4255f0d521e9444766a8aff5219e8c969bee
 src/frontend/tui/tests/plat70f-pointer-mutation-control.sha256	src/frontend/tui/app/runtime.nim	cf49c5c00db6777abcafb2360192c7348849432ac560f56d5a2970f4bb68a59a	745fee32e0bbc92d22443f415809389446e7802595d9845b2c55301ac678e105
-src/frontend/viewmodel/tests/unit/plat36-vim-import-mutation-control.sha256	src/frontend/tui/app/runtime.nim	cf49c5c00db6777abcafb2360192c7348849432ac560f56d5a2970f4bb68a59a	745fee32e0bbc92d22443f415809389446e7802595d9845b2c55301ac678e105
 src/frontend/viewmodel/tests/unit/plat68-keymaps-mutation-control.sha256	src/frontend/tui/app/runtime.nim	cf49c5c00db6777abcafb2360192c7348849432ac560f56d5a2970f4bb68a59a	745fee32e0bbc92d22443f415809389446e7802595d9845b2c55301ac678e105
 
 # 2026-11-12, edit-mode services and debugger controls for editor-hosted
