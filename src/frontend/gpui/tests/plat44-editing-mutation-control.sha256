@@ -4,7 +4,7 @@
 # scan (§39a).
 799810535b136c0f8216207a218bd83e0703a046ed46c439bdf9b015d50270ca  src/frontend/gpui/app/gpui_keys.nim
 82c6f1ba8a318c2cce37531504b07ac8f35b12ce5d65477eeee9e08fcd4e08bf  src/frontend/gpui/app/edit_arm.nim
-53824dcec0e694e93da069c1b7c3357a717531b4f8e99f19a1548d0a34ac2450  src/frontend/gpui/main.nim
+6c182e680e9ef5737e5e74549c1711034c1b0b4431b08fc5ffe737f6ea9aa657  src/frontend/gpui/main.nim
 5e2ecebd37257c6a00fdbe281a00a1d94c1b125133fceed2a5daaffba7b5aae0  src/frontend/gpui/tests/test_gpui_edit_arm.nim
 14c295c7ffd34d78bde88f7bd2f490d2e5341bfd6fb7a0e39f48fea4b67e9428  src/frontend/gpui/tests/test_plat44_shipped_writes.nim
 4b2956068d87cf7363f425b6ec5a71812753de69911859df42935de37a6e3fb4  src/frontend/tui/tests/test_plat44_both_arms_write.nim
