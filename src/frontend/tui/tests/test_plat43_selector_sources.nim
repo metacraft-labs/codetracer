@@ -141,8 +141,12 @@ suite "PLAT-43: one selector, two front-ends":
   test "both native hosts read the preference through loadKeymapPreference":
     # PLAT-68: through `sessionKeymap`, which adds the `--keymap` flag's
     # precedence over the stored value and calls `loadKeymapPreference` for
-    # the stored half — still one reader, in the shared host module.
-    ck names(src("src/frontend/tui/main.nim"), "sessionKeymap")
+    # the stored half — still one reader, in the shared host module. The
+    # terminal reads it in `host/edit_services.wireEditServices`, which its
+    # entry point and the pane server's sessions share; the entry point
+    # reaches the preference only through that call.
+    ck names(src("src/frontend/tui/host/edit_services.nim"), "sessionKeymap")
+    ck names(src("src/frontend/tui/main.nim"), "wireEditServices")
     ck names(src("src/frontend/gpui/main.nim"), "sessionKeymap")
     let pref = src("src/frontend/viewmodel/host/keymap_preference.nim")
     let sessionAt = pref.find("proc sessionKeymap")
