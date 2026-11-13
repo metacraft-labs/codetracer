@@ -77,6 +77,49 @@ use origin_classifier::{Classification, Lang as ClassifierLang, PatternSet, pars
 /// budget bounds the whole walk.
 pub const RR_PER_HOP_WALL_CLOCK_MS: u32 = 1_500;
 const RR_UI_TEST_PER_HOP_ENV: &str = "CT_RR_ORIGIN_PER_HOP_WALL_CLOCK_MS";
+
+/// How many reverse continues one hop may always re-issue, however slowly
+/// the replay answers them (spec §6.3, "Per-hop cap").
+pub const RR_PER_HOP_MIN_REISSUES: u64 = 8;
+
+/// The per-hop cap, measured against how fast THIS replay answers. A fixed
+/// wall-clock cap made the chain's length depend on the host's load: where a
+/// reverse continue took a second, the cap allowed one re-issue and a
+/// three-hop chain ended at its first hop. The cap is therefore the larger of
+/// its wall-clock value and [`RR_PER_HOP_MIN_REISSUES`] times the slowest
+/// reverse continue the hop has issued, so a slow host spends more time on a
+/// hop instead of giving up on it. The request's wall-clock budget still
+/// bounds the whole walk.
+#[derive(Debug, Clone, Copy)]
+pub struct HopReissueCap {
+    cap_ms: u64,
+    slowest_reverse_continue_ms: u64,
+}
+
+impl HopReissueCap {
+    pub fn new(cap_ms: u32) -> Self {
+        HopReissueCap {
+            cap_ms: u64::from(cap_ms),
+            slowest_reverse_continue_ms: 0,
+        }
+    }
+
+    /// Note how long one reverse continue took.
+    pub fn record_reverse_continue(&mut self, elapsed_ms: u64) {
+        self.slowest_reverse_continue_ms = self.slowest_reverse_continue_ms.max(elapsed_ms);
+    }
+
+    /// The cap in effect: the wall-clock value, or more on a slow replay.
+    pub fn effective_cap_ms(&self) -> u64 {
+        self.cap_ms
+            .max(self.slowest_reverse_continue_ms.saturating_mul(RR_PER_HOP_MIN_REISSUES))
+    }
+
+    /// May the hop, `elapsed_ms` into it, re-issue another reverse continue?
+    pub fn allows_reissue(&self, elapsed_ms: u64) -> bool {
+        elapsed_ms < self.effective_cap_ms()
+    }
+}
 const RR_UI_TEST_PER_HOP_MAX_MS: u32 = 10_000;
 
 /// Default `max_hops` for the RR backend (spec §6.3 — half of M2's 16).
@@ -392,6 +435,7 @@ fn walk_rr_origin_chain(
         // instruction's source line does not target `current_var_name`
         // (spec §6.3 "stack-slot reuse / aliasing guard").
         let hop_started = WallClockDeadline::new(per_hop_cap_ms);
+        let mut hop_cap = HopReissueCap::new(per_hop_cap_ms);
         // The cap bounds the RE-ISSUES (spec §6.3, "Per-hop cap"): a stop
         // that is not a usable write is re-issued only while the hop is
         // within its cap. A write found by a reverse continue that itself
@@ -402,15 +446,17 @@ fn walk_rr_origin_chain(
         // still bounds the query between hops.
         let mut reissue = false;
         let validated = loop {
-            if reissue && hop_started.exceeded() {
+            if reissue && !hop_cap.allows_reissue(hop_started.elapsed_ms()) {
                 break ValidatedHop::OutOfBudget;
             }
             reissue = true;
-            let raw = match wp_guard
+            let issued_at_ms = hop_started.elapsed_ms();
+            let answer = wp_guard
                 .session
                 .stable
-                .dispatch_replay_query(ReplayQuery::ReverseContinue)
-            {
+                .dispatch_replay_query(ReplayQuery::ReverseContinue);
+            hop_cap.record_reverse_continue(hop_started.elapsed_ms().saturating_sub(issued_at_ms));
+            let raw = match answer {
                 Ok(r) => r,
                 Err(e) => {
                     drop(wp_guard); // defensive watchpoint cleanup on error.
@@ -578,7 +624,7 @@ fn walk_rr_origin_chain(
                 terminator = Terminator::new(TerminatorKind::OutOfBudget);
                 terminator.expression = format!(
                     "rr per-hop wall-clock cap ({} ms) tripped; documentation: spec §6.3",
-                    per_hop_cap_ms
+                    hop_cap.effective_cap_ms()
                 );
                 terminator.source_line = Some(format!(
                     "elided assignment for `{}` — see {}",
@@ -1026,6 +1072,47 @@ mod tests {
         // pushes the RR default up to 16 trips this test).
         const _ASSERT_DEFAULTS_DIFFER: () = assert!(RR_DEFAULT_MAX_HOPS < crate::task::DEFAULT_ORIGIN_MAX_HOPS);
         assert!(RR_DEFAULT_MAX_HOPS < crate::task::DEFAULT_ORIGIN_MAX_HOPS);
+    }
+
+    #[test]
+    fn the_per_hop_cap_scales_with_how_fast_the_replay_answers() {
+        // A fast replay (reverse continues of 100 ms): the wall-clock cap
+        // decides, as before — 14 re-issues fit, the 15th does not.
+        let mut fast = HopReissueCap::new(RR_PER_HOP_WALL_CLOCK_MS);
+        let mut elapsed = 0;
+        let mut issued = 0;
+        while fast.allows_reissue(elapsed) {
+            fast.record_reverse_continue(100);
+            elapsed += 100;
+            issued += 1;
+        }
+        assert_eq!(fast.effective_cap_ms(), u64::from(RR_PER_HOP_WALL_CLOCK_MS));
+        assert_eq!(issued, 15);
+
+        // A loaded host (reverse continues of 1,200 ms): the fixed cap
+        // allowed ONE re-issue, and a three-hop chain ended at its first
+        // hop. The cap now follows the replay's speed, so the hop still
+        // gets its minimum number of re-issues.
+        let mut slow = HopReissueCap::new(RR_PER_HOP_WALL_CLOCK_MS);
+        let mut elapsed = 0;
+        let mut issued = 0;
+        while slow.allows_reissue(elapsed) {
+            slow.record_reverse_continue(1_200);
+            elapsed += 1_200;
+            issued += 1;
+        }
+        assert_eq!(issued, RR_PER_HOP_MIN_REISSUES);
+        assert!(slow.effective_cap_ms() > u64::from(RR_PER_HOP_WALL_CLOCK_MS));
+
+        // CONTROL: the fixed wall-clock cap this replaces, under the same
+        // load, lets the hop issue only two reverse continues.
+        let mut elapsed = 0;
+        let mut issued = 0;
+        while elapsed < u64::from(RR_PER_HOP_WALL_CLOCK_MS) {
+            elapsed += 1_200;
+            issued += 1;
+        }
+        assert_eq!(issued, 2);
     }
 
     #[test]
