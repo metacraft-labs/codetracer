@@ -217,6 +217,17 @@ proc hopAriaLabel*(hop: OriginHop; index: int): string =
     of okUnknown:         "unknown"
   fmt"hop {index + 1}: {kindLabel} at step {hop.stepId}"
 
+proc frameTransitionLabel*(transition: FrameTransition): string =
+  ## A hop's call crossing as the side panel prints it:
+  ## "↘ into helper" (a parameter pass), "↗ back to main" (a return).
+  case transition.kind
+  of ftkParameterPass:
+    "↘ into " & (if transition.toFunction.len > 0: transition.toFunction
+                 else: "the callee")
+  of ftkReturnCapture:
+    "↗ back to " & (if transition.toFunction.len > 0: transition.toFunction
+                    else: "the caller")
+
 const LowConfidenceBelow* = 0.7
   ## A hop whose confidence is below this is a low-confidence hop
   ## (Value-Origin-Tracking.md §3.2.2, "Side panel"; §13.6 holds an ambiguous
@@ -470,6 +481,13 @@ when defined(js):
       confidence.textContent =
         cstring("confidence " & hopConfidenceLabel(hop.confidence))
       li.appendChild(confidence)
+      if hop.frameTransition.isSome:
+        # The hop crosses a call (spec §4.1 `FrameTransition`): ↘ into the
+        # callee for a parameter pass, ↗ back to the caller for a return.
+        let transition = document.createElement(cstring"span")
+        transition.setAttribute(cstring"class", cstring"ct-origin-frame-transition")
+        transition.textContent = cstring(frameTransitionLabel(hop.frameTransition.get))
+        li.appendChild(transition)
       if isLowConfidence(hop.confidence):
         let low = document.createElement(cstring"span")
         low.setAttribute(cstring"class", cstring"ct-origin-low-confidence")

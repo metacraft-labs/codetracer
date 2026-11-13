@@ -40,11 +40,20 @@
     margin: 0
     padding: 0
 
+  // A hop's `path:line` can be longer than the panel is wide (an absolute
+  // path, a VS Code State webview): the row wraps, so the hop's confidence,
+  // its call crossing and its operands stay in view.
   li
     display: flex
+    flex-wrap: wrap
     align-items: center
     gap: 0.35em
     padding: 0.2em 0
+
+    > button
+      max-width: 100%
+      text-align: left
+      overflow-wrap: anywhere
 
 
   footer
@@ -68,6 +77,11 @@
   margin-left: 0.5em
   font-size: 0.75rem
   font-variant-numeric: tabular-nums
+
+.ct-origin-frame-transition
+  margin-left: 0.5em
+  font-size: 0.75rem
+  font-style: italic
 
 .ct-origin-low-confidence
   margin-left: 0.5em

@@ -8,7 +8,8 @@
 ## `confidence`: the cross-thread hop the RR backend tags with 0.6 (§6.3
 ## "Cross-thread guard") read the same as a 1.0 hop. Each hop row now carries
 ## `confidence <n>`, and a hop below 0.7 also the `!` glyph with the visible
-## label `low confidence`.
+## label `low confidence`. A hop that crosses a call names the crossing
+## (`↘ into <callee>`, `↗ back to <caller>`).
 ##
 ## ## What is real
 ##
@@ -89,6 +90,28 @@ block sidePanel:
     ck rows[2].querySelectorAll(".ct-origin-low-confidence").len == 0
     # The accessible name still says what the hop is.
     ck $rows[1].getAttribute("aria-label") == "hop 2: cross-thread copy at step 15"
+
+block frameTransitions:
+  # A hop that crosses a call says so, in words, with its direction: before
+  # this only its accessible name told a parameter pass from a copy.
+  var into = hop(okParameterPass, 3, 1.0)
+  into.frameTransition = some(FrameTransition(kind: ftkParameterPass,
+                                              fromFunction: "main",
+                                              toFunction: "helper"))
+  var back = hop(okReturnCapture, 7, 1.0)
+  back.frameTransition = some(FrameTransition(kind: ftkReturnCapture,
+                                              fromFunction: "helper",
+                                              toFunction: "main"))
+  let rows = drawnHops(OriginChain(
+    queryVariable: "local", queryStepId: 40,
+    hops: @[hop(okTrivialCopy, 9, 1.0), into, back],
+    terminator: Terminator(kind: tkwLiteral, expression: "99")))
+  ck rows.len == 3
+  if rows.len == 3:
+    ck rows[0].querySelectorAll(".ct-origin-frame-transition").len == 0
+    ck rows[1].querySelectorAll(".ct-origin-frame-transition").len == 1
+    ck "↘ into helper" in rows[1].text
+    ck "↗ back to main" in rows[2].text
 
 echo "CHECKS: ", checks
 if failedChecks > 0:
