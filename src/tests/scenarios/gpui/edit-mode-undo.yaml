@@ -8,7 +8,7 @@ summary: >-
 
 stage:
   - use: write-project
-    with: { files: { doc.txt: "def calc(n):\n    total = 0\n    for i in range(n):\n        total += i\n    return total\n" } }
+    with: { files: { doc.txt: "def count(n):\n    total = 0\n    for i in range(n):\n        total += i\n    return total\n" } }
   - use: open-project
     with: { folder: $project, file: doc.txt, width: 1280, height: 800 }
 
@@ -16,12 +16,12 @@ steps:
   - wait: { until: editor.loaded, timeout: 60s }
   - expect:
       at: 'editor[file="doc.txt"]/line[number="1"]'
-      text: { contains: "def calc(n):" }
+      text: { contains: "def count(n):" }
   - type: "X"
   - type: "Y"
   - chord: Ctrl+Z
   - chord: Ctrl+S
   - expect:
       at: 'editor[file="doc.txt"]/line[number="1"]'
-      text: { contains: "def calc(n):" }
+      text: { contains: "def count(n):" }
   - expect: { at: 'editor[file="doc.txt"]', assert: 'lacks-text("read-only")' }

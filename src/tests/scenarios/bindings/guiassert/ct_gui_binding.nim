@@ -303,45 +303,31 @@ proc inkRuns(f: Frame; y0, y1, x0, x1: int): seq[(int, int)] =
   if start >= 0: result.add (start, min(x1, f.image.width) - 1)
 
 proc codeLeft(f: Frame; b: EditorBox; rows: seq[EditorRow]; numbersRight: int): int =
-  ## Column 0 of the code: where the rows' text starts most often (a file's
-  ## top-level lines), the least of the starts at or right of it. A fold
-  ## chevron is drawn in its own lane a few pixels left of column 0, so a
-  ## row's first ink further left than that is the chevron, not code (a
-  ## narrow letter such as `x` at column 0 is not mistaken for one).
-  var starts: seq[(int, int)]       ## each row's first ink run
-  var counts = initCountTable[int]()
+  ## Column 0 of the code: the leftmost text any row starts with, a fold
+  ## chevron excepted. The chevrons are drawn in a lane of their own left of
+  ## column 0, so a narrow mark with a gap after it, met at the same place on
+  ## two or more rows, is that lane; a lone narrow first letter (`x` of
+  ## `xprint(1)`) is code.
+  var firsts: seq[seq[(int, int)]]
+  var narrow = initCountTable[int]()
   for r in rows:
-    let band0 = r.y + r.h div 5
-    let band1 = r.y + r.h - r.h div 5
-    let runs = inkRuns(f, band0, band1, numbersRight + 4, b.right - 4)
-    if runs.len == 0: continue
-    starts.add runs[0]
-    counts.inc runs[0][0]
-  if starts.len == 0: return numbersRight + 20
-  # the commonest start, counting starts a pixel apart as one
-  var best = -1
-  var bestN = 0
-  for x, _ in counts:
-    var n = 0
-    for x2, c in counts:
-      if abs(x2 - x) <= 1: n += c
-    if n > bestN or (n == bestN and x < best):
-      best = x
-      bestN = n
+    let runs = inkRuns(f, r.y + r.h div 5, r.y + r.h - r.h div 5, numbersRight + 4, b.right - 4)
+    firsts.add runs
+    if runs.len > 1 and runs[0][1] - runs[0][0] <= 9 and runs[1][0] - runs[0][1] >= 3:
+      narrow.inc runs[0][0]
+  var lane = -1
+  for x, n in narrow:
+    var near = 0
+    for x2, n2 in narrow:
+      if abs(x2 - x) <= 1: near += n2
+    if near >= 2 and (lane < 0 or x < lane): lane = x
   result = high(int)
-  for (x0, x1) in starts:
-    if x0 >= best - 3: result = min(result, x0)
-  # one row only, or no row at the commonest start: a narrow mark with a gap
-  # after it is the chevron
-  if bestN <= 1:
-    result = high(int)
-    for r in rows:
-      let runs = inkRuns(f, r.y + r.h div 5, r.y + r.h - r.h div 5, numbersRight + 4, b.right - 4)
-      if runs.len == 0: continue
-      var first = runs[0]
-      if runs.len > 1 and first[1] - first[0] <= 7 and runs[1][0] - first[1] >= 5:
-        first = runs[1]
-      result = min(result, first[0])
+  for runs in firsts:
+    if runs.len == 0: continue
+    var first = runs[0]
+    if lane >= 0 and abs(first[0] - lane) <= 1 and first[1] - first[0] <= 9 and runs.len > 1:
+      first = runs[1]
+    result = min(result, first[0])
   if result == high(int): result = numbersRight + 20
 
 proc readCode(ctx: GuiContext; f: Frame; b: EditorBox; rows: var seq[EditorRow]; left: int) =
