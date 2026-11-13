@@ -1,0 +1,25 @@
+scenario: 1
+name: tests-pane/editor-run-test-opens-a-new-tab
+pack: codetracer
+summary: >-
+  The editor's "Run test" beside test_passes records the test and opens the
+  recording in a new session tab; the edit session stays in the first.
+
+stage:
+  - use: project-fixture
+    with: { name: noir-suite }
+  - use: open-project
+    with: { folder: $project }
+
+steps:
+  - wait: { until: { at: 'pane-tab[label="TESTS"]', present: true }, timeout: 120s }
+  - wait: { until: settled, timeout: 30s }
+  - click: 'pane-tab[label="TESTS"]'
+  - wait: { until: { at: test-results, count: 2 }, timeout: 120s }
+  - click: 'pane-tab[label="src/main.nr"]'
+  - wait: { until: { at: 'editor[file="main.nr"]/panel-button[label="Run test_passes"]', present: true }, timeout: 60s }
+  - click: 'editor[file="main.nr"]/panel-button[label="Run test_passes"]'
+    settle: false
+  - wait: { until: { at: session-strip, count: 2 }, timeout: 300s }
+  - wait: { until: replay-idle, timeout: 120s }
+  - expect: { at: window, mode: debug }

@@ -1,0 +1,31 @@
+scenario: 1
+name: tests-pane/palette-tests-run-records-the-selected-row
+pack: codetracer
+summary: >-
+  A click on test_passes' name selects that row (and not the other); the
+  palette's "Tests: Run" then records it and opens the recording in a new
+  session tab.
+
+stage:
+  - use: project-fixture
+    with: { name: noir-suite }
+  - use: open-project
+    with: { folder: $project }
+
+steps:
+  - wait: { until: { at: 'pane-tab[label="TESTS"]', present: true }, timeout: 120s }
+  - wait: { until: settled, timeout: 30s }
+  - click: 'pane-tab[label="TESTS"]'
+  - wait: { until: { at: test-results, count: 2 }, timeout: 120s }
+  - expect: { at: 'test-results/test-row[name="test_passes"]', selected: false }
+  - click: { at: 'test-results/test-row[name="test_passes"]', anchor: name }
+  - wait: { until: { at: 'test-results/test-row[name="test_passes"]', selected: true }, timeout: 15s }
+  - expect: { at: 'test-results/test-row[name="test_fails"]', selected: false }
+  - chord: Ctrl+P
+  - wait: { until: { at: omnibox, present: true }, timeout: 15s }
+  - type: ":Tests: Run"
+  - wait: { until: { at: 'omnibox/option[label="Tests: Run"]', present: true }, timeout: 15s }
+  - click: 'omnibox/option[label="Tests: Run"]'
+    settle: false
+  - wait: { until: { at: session-strip, count: 2 }, timeout: 300s }
+  - wait: { until: replay-idle, timeout: 120s }

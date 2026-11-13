@@ -1,0 +1,22 @@
+scenario: 1
+name: vcs/heading-opens-the-full-file
+pack: codetracer
+summary: >-
+  A click on the file name in a whole-commit document's heading opens the
+  file itself in an editor tab, not another diff.
+
+stage:
+  - use: project-fixture
+    with: { name: vcs-document }
+  - use: open-project
+    with: { folder: $project }
+
+steps:
+  - wait: { until: { at: 'pane-tab[label="VCS"]', present: true }, timeout: 120s }
+  - wait: { until: settled, timeout: 30s }
+  - click: 'pane-tab[label="VCS"]'
+  - wait: { until: { at: 'vcs/commit[message="touch both files"]', present: true }, timeout: 60s }
+  - click: { at: 'vcs/commit[message="touch both files"]', anchor: header }
+  - wait: { until: { at: 'diff-section[path="lib/helper.py"]', editors: 1 }, timeout: 30s }
+  - click: { at: 'diff-section[path="lib/helper.py"]', anchor: link }
+  - wait: { until: { at: 'editor[file="helper.py"]', present: true }, timeout: 30s }

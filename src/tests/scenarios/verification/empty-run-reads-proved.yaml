@@ -1,0 +1,24 @@
+scenario: 1
+name: verification/empty-run-reads-proved
+pack: codetracer
+summary: >-
+  An empty run that exits 0 reads "proved": the exit code reaches the
+  classifier.
+
+stage:
+  - use: fixture-project
+    with: { name: verno-proved }
+  - use: open-project
+    with: { folder: $project }
+
+steps:
+  - wait: { until: { at: window, mode: edit }, timeout: 120s }
+  - wait: { until: settled, timeout: 30s }
+  - chord: Ctrl+p
+  - type: ":Verification"
+  - wait: { until: { at: omnibox, assert: "offers(command, Verification)" }, timeout: 15s }
+  - key: Enter
+  - wait: { until: { at: verification-panel, present: true }, timeout: 30s }
+  - click: 'verification-panel/panel-button[label="Run"]'
+    settle: false
+  - wait: { until: { at: verification-panel, status: { matches: "^proved — " } }, timeout: 60s }

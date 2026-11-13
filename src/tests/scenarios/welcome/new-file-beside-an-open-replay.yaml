@@ -1,0 +1,38 @@
+scenario: 1
+name: welcome/new-file-beside-an-open-replay
+pack: codetracer
+summary: >-
+  With a replay open, the session strip's "+" opens a welcome tab; its "New
+  file" gives that tab a writable, empty untitled editor that takes typing,
+  and switching back to the replay's tab shows its main.py editor and its
+  event log as they were.
+
+stage:
+  - use: record-program
+    with: { program: py_console_logs/main.py }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - wait: { until: { at: 'editor[file="main.py"]', present: true }, timeout: 60s }
+  - wait: { until: { at: 'editor[file="main.py"]', assert: 'shows-text("print")' }, timeout: 60s }
+  - click: 'pane-tab[label="EVENT LOG"]'
+  - wait: { until: event-log.loaded, timeout: 60s }
+  - wait: { until: { at: event-log, assert: 'has-output("1. print using")' }, timeout: 60s }
+
+  - click: 'session-strip/session-add'
+  - wait: { until: { at: 'welcome/welcome-action[label="New file"]', present: true }, timeout: 30s }
+  - expect: { at: session-strip, count: 2 }
+  - click: 'welcome/welcome-action[label="New file"]'
+  - wait: { until: { at: welcome, present: false }, timeout: 30s }
+  - wait: { until: { at: 'editor[file="#untitled0"]', present: true }, timeout: 30s }
+  - expect: { at: 'editor[file="#untitled0"]', read-only: false, active: true }
+  - click: 'editor[file="#untitled0"]'
+  - type: "new_file_marker = 1"
+  - wait: { until: { at: 'editor[file="#untitled0"]', assert: 'shows-text("new_file_marker = 1")' }, timeout: 15s }
+
+  - click: 'session-strip/session-tab[#1]'
+  - wait: { until: { at: 'editor[file="main.py"]', active: true }, timeout: 30s }
+  - wait: { until: { at: 'editor[file="main.py"]', assert: 'shows-text("print")' }, timeout: 30s }
+  - click: 'pane-tab[label="EVENT LOG"]'
+  - wait: { until: { at: event-log, assert: 'has-output("1. print using")' }, timeout: 30s }

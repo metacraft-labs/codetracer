@@ -1,0 +1,39 @@
+scenario: 1
+name: value-origin/c-cross-thread-copy
+pack: codetracer
+summary: >-
+  In an rr recording of a C program whose writer thread stores 99 that the
+  main thread then loads into `local`, stopped at the printf, `local`'s chain
+  under its row ends at 99, and in the side panel one hop is a cross-thread
+  copy with confidence 0.6, flagged "! low confidence".
+
+stage:
+  - use: record-program
+    with: { program: src/db-backend/tests/fixtures/origin/c/cross_thread_copy/main.c, backend: rr }
+  # rr walks each hop with reverse continues; on a loaded machine one can take
+  # longer than the 1.5 s the chain allows a hop by default.
+  - use: front-end-options
+    with: { env: { CT_RR_ORIGIN_PER_HOP_WALL_CLOCK_MS: "10000" } }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 180s }
+  - click: 'toolbar/toolbar-button[label="run-to-entry-image"]'
+    settle: false
+  - wait: { until: replay-idle, timeout: 120s }
+  - wait: { until: { at: 'editor[file="main.c"]', current-line: { gt: 0 } }, timeout: 120s }
+  - click: { at: 'editor[file="main.c"]/line[number="43"]', anchor: glyph }
+  - click: 'toolbar/toolbar-button[label="continue-image"]'
+    settle: false
+  - wait: { until: { at: 'editor[file="main.c"]', current-line: 43 }, timeout: 120s }
+  - wait: { until: { at: variables, assert: 'value-of("local", "99")' }, timeout: 120s }
+
+  - click: { at: 'variables/variable[name="local"]', anchor: name, button: right }
+  - wait: { until: { at: context-menu, assert: 'offers("Show value origin")' }, timeout: 15s }
+  - click: 'context-menu/menu-item[label="Show value origin"]'
+  - wait: { until: { at: 'variables/variable[name="local"]/origin-chain', terminator: { contains: "99" } }, timeout: 120s }
+  - wheel: { at: variables, direction: down, amount: 10 }
+  - wait: { until: { at: 'variables/variable[name="local"]/origin-chain/panel-button[label="Show in side panel"]', geometry: { visible: true } }, timeout: 15s }
+  - click: 'variables/variable[name="local"]/origin-chain/panel-button[label="Show in side panel"]'
+  - wait: { until: { at: origin-panel, count: { gt: 0 } }, timeout: 120s }
+  - expect: { at: origin-panel, assert: 'has-low-confidence("CrossThreadCopy", 0.6)' }

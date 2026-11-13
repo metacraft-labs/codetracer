@@ -38,6 +38,8 @@ roles:
       # default, pointer, text, col-resize, row-resize, grab, grabbing,
       # not-allowed.
       pointer: text
+      # pw8: how many diff tabs (`Diff: …`) the layout holds.
+      diff-tabs: int
     assertions:
       has-pane(t): "layout-tabs contains t"
       lacks-pane(t): "not (layout-tabs contains t)"
@@ -100,6 +102,13 @@ roles:
       table-tooltip: optional
       row-detail: optional
       live-edit-panel: optional
+      # pw8
+      origin-panel: optional
+      splitter: many
+      verification-panel: optional
+      test-results: optional
+      process-tree: optional
+      diff-section: many
 
   # The strip of session tabs: one tab per open recording or editing session.
   session-strip:
@@ -177,7 +186,11 @@ roles:
       find-matches: text
       # pw4: the keyboard focus is in the find widget.
       find-focused: bool
-    children: { line: many }
+      # pw8: every value box drawn beside the code, as `name=value`
+      flow-values: lines
+    # pw8: `panel-button`: the "Run test" control beside a test, named by
+    # its title ("Run test_passes").
+    children: { line: many, flow-value: many, panel-button: many }
     affordances: [click, context-click, wheel, focusable, text-entry]
     assertions:
       stopped-at(n): "current-line == n"
@@ -272,10 +285,14 @@ roles:
       last-shown: int
       # The visible column titles, in order.
       columns: lines
-    children: { event: many, event-marker: many, columns-button: optional, columns-menu: optional }
+    # pw8: `text-field[label="Find event"]`, its search field.
+    children: { event: many, event-marker: many, columns-button: optional, columns-menu: optional, text-field: optional }
     affordances: [wheel, focusable]
     assertions:
       has-output(text): "some event: event.text contains text"
+      # pw8: a correlation marker of this boundary, its chip drawn so and its
+      # direction shown.
+      has-marker(boundary, chip): "some event-marker: event-marker.boundary == boundary and event-marker.chip == chip and event-marker.direction"
       # More rows than the first window shows: paging has something to fetch.
       pages-remain: "last-shown < total"
       shows-all: "last-shown == total"
@@ -300,7 +317,11 @@ roles:
       count: int
       watch: text
       focused: bool
-    children: { variable: many }
+      # pw8: the pane draws a tab strip (it is one list of variables and
+      # watches, with none).
+      tab-strip: bool
+    # pw8: `text-field[label="watch"]`, the watch input.
+    children: { variable: many, text-field: optional }
     affordances: [wheel, focusable]
     assertions:
       has-variable(name): "some variable: variable.name == name"
@@ -310,7 +331,8 @@ roles:
       loaded: "count(variable) > 0"
 
   variable:
-    keys: [name]
+    # pw8: `watch`: a watch's row, told apart from a variable of the same name.
+    keys: [name, watch]
     properties:
       name: text
       type: text
@@ -318,9 +340,16 @@ roles:
       expanded: bool
       # The row offers its value's origin (the badge that opens the chain).
       origin-badge: bool
+      # pw8: a watch's row, one the recording cannot answer, and the row's
+      # whole text as drawn.
+      watch: bool
+      invalid: bool
+      text: text
+    # pw8: the chain the row expands under itself.
+    children: { origin-chain: optional }
     affordances: [click, double-click, context-click]
-    # `name`: the variable's name.
-    anchors: [expander, name]
+    # `name`: the variable's name; `value`: its value cell.
+    anchors: [expander, name, value]
 
   # The breakpoints and tracepoints list.
   breakpoints:
@@ -356,7 +385,8 @@ roles:
 
   # The scratchpad: values the user pinned.
   scratchpad:
-    properties: { count: int }
+    # `chains`: the origin chains pinned to it.
+    properties: { count: int, chains: int }
     children: { scratch-entry: many }
 
   scratch-entry:
@@ -366,6 +396,8 @@ roles:
       value: text
       # The value is an evaluation error (drawn as one).
       error: bool
+      # A pinned `value`, or a pinned origin `chain`.
+      kind: "enum{value,chain}"
     affordances: [click, context-click]
 
   # The status line at the bottom of the window.
@@ -466,6 +498,9 @@ roles:
   welcome:
     properties:
       heading: text
+      # pw8: the parts of the screen that are drawn (`welcome-left-panel`,
+      # `recent-traces`, …)
+      sections: lines
       # --- terminal --- what the screen says, row by row
       text: lines
     children: { welcome-action: many, recent: many }
@@ -478,8 +513,10 @@ roles:
     affordances: [click]
 
   recent:
-    keys: [name]
-    properties: { name: text, detail: text }
+    keys: [name, kind]
+    # `kind`: a recent trace or folder; `detail`: a trace's age (`5 min ago`);
+    # `tooltip-shown`: its tooltip is on screen.
+    properties: { name: text, detail: text, kind: "enum{trace,folder}", tooltip-shown: bool, tooltip: text }
     affordances: [click, double-click]
 
 
@@ -504,8 +541,29 @@ roles:
   # header (`commit`: the abbreviated commit and the file count), its stats
   # (`+16 -10`), the Unified Diff / Open File toggle, and the changed files.
   vcs:
-    properties: { title: text, commit: text, stats: text, count: int, unified-diff: bool, error: text }
-    children: { changed-file: many, diff-toggle: optional }
+    # pw8: `commits`: the commit history's rows; `no-repo`: it says the
+    # folder is not a repository.
+    # `branch-picker`: the branch picker is drawn; `review-extras`: a
+    # review's trace selector or stats are.
+    properties: { title: text, commit: text, stats: text, count: int, unified-diff: bool, error: text, commits: int,
+                  no-repo: bool, branch-picker: bool, review-extras: bool }
+    children: { changed-file: many, diff-toggle: optional, commit: many }
+
+  # A commit of the history; `toggle` expands it to its files, `header`
+  # opens its whole-commit document.
+  commit:
+    keys: [message]
+    properties: { message: text, expanded: bool }
+    children: { commit-file: many }
+    affordances: [click]
+    anchors: [toggle, header]
+
+  # A file an expanded commit changed; its View Diff button shows on hover.
+  commit-file:
+    keys: [name]
+    properties: { name: text }
+    children: { panel-button: many }
+    affordances: [click]
 
   changed-file:
     keys: [name]
@@ -521,7 +579,38 @@ roles:
   # A unified-diff view a review opened, headed by its file's path.
   diff-view:
     keys: [file]
-    properties: { file: text, text: lines }
+    # pw8: `hunks`: its `@@` dividers; `added` / `removed`: the lines marked
+    # so; `selected-hunks`: the lines marked selected; `toolbar`: the hunk
+    # toolbar's count ("1 hunk selected"), "" when it is away.
+    # `line-numbers` / `old-line-numbers`: the numbers in the new and the
+    # old revision's gutter; `token-colours`: how many syntax colours the
+    # new revision's lines are drawn in.
+    properties: { file: text, text: lines, hunks: int, added: int, removed: int, selected-hunks: int, toolbar: text,
+                  line-numbers: lines, old-line-numbers: lines, token-colours: int }
+    # The hunk toolbar's buttons: "Copy as patch" (then "Copied!"), "Clear".
+    children: { hunk: many, panel-button: many, expand-boundary: many }
+
+  # A collapsed run of unchanged lines; a click shows more of it.
+  # `direction`: which way it shows more (`above`, `below`); `n`: its place
+  # among the boundaries of that direction.
+  expand-boundary:
+    keys: [direction, n]
+    properties: { n: int, direction: text, hidden: int }
+    affordances: [click]
+
+  # A whole-commit document's section for one file, under its heading
+  # (`link`: the heading's file name, which opens the file); `offset`: how far
+  # below the document's top it starts.
+  diff-section:
+    keys: [path]
+    properties: { path: text, offset: int, editors: int }
+    affordances: [click]
+    anchors: [link]
+
+  hunk:
+    keys: [number]
+    properties: { number: int, text: text }
+    affordances: [click]
 
   # --- terminal ---
   # Any pane of the layout, by the label of its tab in front: what it shows,
@@ -793,9 +882,17 @@ roles:
       diagnostic: text
       recording-failed: bool
       expanded: bool
+      # pw8 (the Test Results pane): the test has a recording; the row is the
+      # selected one; what its ⏵ does (`record-and-open`, `open-existing`)
+      # and says (its title).
+      recorded: bool
+      selected: bool
+      open-mode: text
+      open-title: text
     children: { panel-button: many }
     affordances: [click]
-    anchors: [header]
+    # `name`: the test's name (pw8: a click there selects the row).
+    anchors: [header, name]
 
   # An evidence tool call's card, named by its dataset's file name.
   evidence-card:
@@ -872,7 +969,9 @@ roles:
       count: int
       # Where the chain ends (a literal, an input), as drawn.
       terminator: text
-    children: { origin-hop: many }
+      # pw8: each hop's text, nearest first (`c = b`).
+      hops: lines
+    children: { origin-hop: many, panel-button: many }
     assertions:
       has-hop(classification): "some origin-hop: origin-hop.classification == classification"
       has-frame-transition: "some origin-hop: origin-hop.frame-transition == true"
@@ -881,7 +980,8 @@ roles:
       loaded: "count(origin-hop) > 0"
 
   origin-hop:
-    keys: [number]
+    # pw8: `file`: the file the hop happened in (side panel), e.g. `lib.rs`.
+    keys: [number, file]
     properties:
       # 1 for the hop nearest the value.
       number: int
@@ -895,9 +995,109 @@ roles:
       frame-transition: bool
       # Operand snapshots shown under an expanded Computational hop.
       operands: int
+      file: text
+      # pw8: the operands are shown, and what they say (`a = 10`).
+      operands-shown: bool
+      operand-values: lines
+      # The hop is flagged low-confidence, and how (`! low confidence`).
+      low-confidence: bool
+      low-confidence-text: text
+      # A cross-process hop's badge (the boundary it crossed).
+      badge: text
+      # The pointer's shape over the hop.
+      pointer: text
     affordances: [click]
     # `expander`: the chevron that shows a Computational hop's operands.
     anchors: [expander]
+
+  # pw8: the Origin Chain side panel: the chain of the query it shows, its
+  # breadcrumbs (one per query, or per recording the chain crossed) and its
+  # footer's buttons.
+  origin-panel:
+    properties:
+      count: int
+      # Each hop's location (`main.py:11`), nearest first.
+      hops: lines
+      terminator: text
+      crumbs: lines
+      focused: bool
+      # "Select a value to see its origin." is shown instead of a chain.
+      empty: bool
+    children: { origin-hop: many, breadcrumb: many, panel-button: many }
+    affordances: [click, focusable]
+    assertions:
+      # Some hop carries this cross-process badge.
+      has-badge(b): "some origin-hop: origin-hop.badge == b"
+      # A hop of this kind, at this confidence, flagged low-confidence.
+      has-low-confidence(kind, c): "some origin-hop: origin-hop.classification == kind and origin-hop.confidence == c and origin-hop.low-confidence and origin-hop.low-confidence-text contains \"low confidence\""
+      # A walked breadcrumb (not a placeholder) whose label contains t.
+      reached(t): "some breadcrumb: breadcrumb.label contains t and not breadcrumb.placeholder"
+    sync:
+      loaded: "count(origin-hop) > 0"
+
+  breadcrumb:
+    keys: [label]
+    # `current`: the query the panel shows; `placeholder`: a recording the
+    # chain reached that owns no hop.
+    properties: { label: text, current: bool, placeholder: bool }
+    affordances: [click]
+
+  # A value drawn beside the code at a step (the editor's flow values).
+  flow-value:
+    keys: [name]
+    properties: { name: text, value: text }
+    affordances: [click, context-click]
+
+  # The Verification pane: a run of the project's Verno action and its
+  # findings, by kind. `phase`: idle, running, cancelled, finished; `run`: the
+  # Run control's label ("" when it offers none); `stop`: the Stop control is
+  # shown; `payload`: whether the run's report was found and attached.
+  verification-panel:
+    properties:
+      phase: text
+      outcome: text
+      payload: text
+      status: text
+      command: text
+      run: text
+      stop: bool
+      groups: lines
+      count: int
+    # `panel-button[label="Run"]`, `panel-button[label="Stop"]`.
+    children: { finding: many, panel-button: many }
+
+  finding:
+    keys: [title]
+    properties: { kind: text, title: text, message: text, location: text }
+    affordances: [click, context-click]
+
+  # The processes of a multi-process session, one row per recording; a
+  # click on a row makes that recording the one the panes show.
+  process-tree:
+    properties: { active: text, roles: lines }
+    children: { process: many }
+
+  process:
+    # `name`: the recording's role in the session (`frontend-js`, `backend`).
+    keys: [name]
+    properties: { name: text, title: text, active: bool }
+    affordances: [click]
+
+  # The Test Results pane: its headline ("2 tests, not run yet"), its ▶
+  # (`panel-button[label="Run"]`) and one row per test; each row's ⟳ and ⏵
+  # are `panel-button[label="Refresh"]` and `panel-button[label="Open"]`.
+  # `failure`: why a run faulted; `absence`: why no run can start here.
+  test-results:
+    properties: { headline: text, count: int, failure: text, absence: text }
+    children: { test-row: many, panel-button: many }
+
+  # A divider between panes of the layout; dragged to resize them.
+  # `vertical`: a vertical bar between panes side by side.
+  # `n`: its place among the dividers of that orientation, in document order.
+  splitter:
+    keys: [orientation, n]
+    properties: { orientation: "enum{vertical,horizontal}", n: int }
+    affordances: [click, drag-source]
 
   # The hover card an editor shows over a symbol, with its command links.
   hover-card:
@@ -922,6 +1122,9 @@ roles:
       # The row shows the crossing's direction.
       direction: bool
     affordances: [click]
+    # pw8: `chip`: the boundary's chip, where a click jumps to the recording
+    # on the other side.
+    anchors: [chip]
 
   # The in-document find (Ctrl+F), when open: its query and how many matches
   # it found (`2 of 12`: the current one, of all).
@@ -1133,7 +1336,9 @@ stages:
     summary: >-
       Record a test program (a path under the repository's test-programs, or
       a named fixture) once, kept for the lane, and remember it as the
-      recording the next `open-recording` opens.
+      recording the next `open-recording` opens. `$project/<file>` records a
+      file of the stage's own project folder instead, afresh (a scenario may
+      edit and re-record it).
     params: { program: text, backend: text }
   nim-project:
     summary: >-
@@ -1155,8 +1360,11 @@ stages:
       already shows them ignores it.
     params: { recording: text, tick: int, width: int, height: int, deployment: text, panes: text }
   open-project:
-    summary: Start the front-end in Edit mode on a project folder (a path under test-programs, or `$project` for the stage's own).
-    params: { folder: text, file: text, width: int, height: int }
+    summary: >-
+      Start the front-end in Edit mode on a project folder (a path under
+      test-programs, or `$project` for the stage's own); `from-inside: true`
+      starts it as `ct edit .` from a shell in that folder.
+    params: { folder: text, file: text, width: int, height: int, from-inside: bool }
   open-review:
     summary: >-
       Start the front-end on a DeepReview dataset (`ct review <dataset>`; a
@@ -1199,7 +1407,10 @@ stages:
       Noir crate with a passing and a failing test; `noir-constraints`: a
       Noir circuit for the Constraints pane; `vcs-repo`: a git repository
       with a modified, an added and an untracked file; `verno-type-error`,
-      `verno-counterexample`: a Verno package with a recorded verifier run).
+      `verno-counterexample`: a Verno package with a recorded verifier run;
+      `verno-run`, `verno-held`, `verno-proved`: the type-error package under
+      its own name, its run replayed to the end, held in flight, or empty and
+      exiting 0).
       `write-project` may add
       files to it.
     params: { name: text }
@@ -1257,6 +1468,26 @@ stages:
       CodeTracer worktree scenario (`AGENT_HARBOR_M7_BASE_URL`, and its
       optional key, scenario and mock agent); fails, naming it, when none is
       configured.
+    params: {}
+  read-only-file:
+    summary: >-
+      Make a file of the stage's project folder read-only on disk (after it
+      was recorded): saving it fails, as it does for a file the user may not
+      write.
+    params: { file: text }
+  materialized-recording:
+    summary: >-
+      Produce a recording from this tree with the repository's own recorders
+      (`scripts/materialize-recording.sh <name>`; `cross-process-three-trace`
+      is the account-balance demo: a browser's JavaScript and WebAssembly and
+      a Node server, one session) and remember it as the recording the next
+      `open-recording` opens.
+    params: { name: text }
+  known-recording:
+    summary: >-
+      Import the recording the stage prepared into this run's list of
+      recordings, as an earlier session leaves the recordings a user opened
+      (the welcome screen lists it among the recent traces).
     params: {}
   copy-project:
     summary: >-

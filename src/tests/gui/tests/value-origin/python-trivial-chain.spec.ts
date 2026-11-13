@@ -2,7 +2,12 @@
  * M5 — Playwright spec for the Python `simple_trivial_chain` Value
  * Origin fixture.
  *
- * Covers M5 verification entries:
+ * The three-hop chain, the hop that seeks the editor and the side panel's
+ * keys are the scenarios `src/tests/scenarios/value-origin/python-chain-*`
+ * and `python-side-panel-keyboard.yaml`; the axe-core scan stays here, a
+ * privileged observation no scenario step can make.
+ *
+ * Covered M5 verification entries:
  *
  *   - e2e_origin_python_trivial_chain_renders_three_hops
  *   - e2e_origin_python_click_hop_seeks_editor
@@ -26,7 +31,6 @@
  * `origin_python_dap_test.rs::require_python_recorder`) the spec
  * SKIPs itself with the same reason.
  */
-import * as fs from "node:fs";
 import type { Page } from "@playwright/test";
 import { AxeBuilder } from "@axe-core/playwright";
 import { expect, readyOnEntryTest as readyOnEntry, test } from "../../lib/fixtures";
@@ -48,16 +52,6 @@ test.beforeAll(() => {
   const reason = pythonSpecSkipReason();
   test.skip(reason !== null, reason ?? "");
 });
-
-/** The source lines of the fixture, 1-based: the hop lines are found by
- *  their text, not hard-coded, so an edit to the comment header cannot
- *  silently move them. */
-const fixtureLines = fs.readFileSync(fixtureSource, "utf-8").split("\n");
-function lineOf(text: string): number {
-  const index = fixtureLines.findIndex((l) => l.trim() === text);
-  if (index < 0) throw new Error(`fixture has no line \`${text}\``);
-  return index + 1;
-}
 
 /** ANSWERS.md, as the in-row chain draws it (`lhs = rhs` per hop, newest
  *  first, then the terminator). */
@@ -81,54 +75,6 @@ async function stepToPrintC(page: Page, layout: LayoutPage): Promise<void> {
   }
   expect(cVisible, "stepping to the print(c) line must surface local `c`").toBe(true);
 }
-
-async function fixtureEditor(layout: LayoutPage) {
-  const editorTabs = await layout.editorTabs(true);
-  const editor = editorTabs.find((e) => e.fileName === "main.py");
-  expect(editor, "the fixture editor tab must be open").toBeDefined();
-  return editor!;
-}
-
-test("e2e_origin_python_trivial_chain_renders_three_hops", async ({ ctPage }) => {
-  await readyOnEntry(ctPage);
-  const layout = new LayoutPage(ctPage);
-  const origin = new OriginChainPanePageObject(ctPage);
-  await stepToPrintC(ctPage, layout);
-
-  // ---- Right-click `c` → "Show value origin": the chain under the row ----
-  await origin.showValueOriginInPlace("c");
-
-  // Three hops + the terminator, per fixture ANSWERS.md.
-  await expect(origin.expandedChainHops("c")).toHaveText(EXPECTED_HOPS, { timeout: 15_000 });
-  await expect(origin.inlineChainTerminator("c")).toBeVisible();
-  await expect(origin.inlineChainTerminator("c")).toHaveText("10");
-
-  // The same entry again collapses it.
-  await origin.rightClickRow("c");
-  await origin.clickShowValueOriginMenuItem();
-  await expect(origin.inlineChain("c")).toBeHidden({ timeout: 15_000 });
-});
-
-test("e2e_origin_python_click_hop_seeks_editor", async ({ ctPage }) => {
-  await readyOnEntry(ctPage);
-  const layout = new LayoutPage(ctPage);
-  const origin = new OriginChainPanePageObject(ctPage);
-  await stepToPrintC(ctPage, layout);
-
-  await origin.showValueOriginInPlace("c");
-  await expect(origin.expandedChainHops("c")).toHaveText(EXPECTED_HOPS, { timeout: 15_000 });
-
-  // Click hop 1 (`b = a`): the editor's execution line moves to that
-  // assignment.
-  const editor = await fixtureEditor(layout);
-  const beforeLine = await editor.highlightedLineNumber();
-  expect(beforeLine, "at the print(c) line").toBe(lineOf("print(c)"));
-  await origin.clickHop("c", 1);
-  await expect.poll(() => editor.highlightedLineNumber(), {
-    message: "clicking hop `b = a` seeks the editor to its line",
-    timeout: 15_000,
-  }).toBe(lineOf("b = a"));
-});
 
 test("e2e_origin_python_trivial_chain_a11y", async ({ ctPage }) => {
   await readyOnEntry(ctPage);
@@ -166,44 +112,3 @@ test("e2e_origin_python_trivial_chain_a11y", async ({ ctPage }) => {
   ).toEqual([]);
 });
 
-test("e2e_origin_keyboard_navigation", async ({ ctPage }) => {
-  // Verifies the host-installed keyboard handlers of the side panel (see
-  // `ui/state.nim::ensureOriginSidePanelHost::onKey`):
-  //   ↓ / ↑  → focusNextHop / focusPrevHop  (changes `panel.focusedHop`)
-  //   Enter  → enterHop → OriginChainVM.onSeekToHop
-  //   →      → expandFocusedOperands
-  //   ←      → collapseFocusedOperands
-  //   Esc    → dismissPanel + closeSidePanel  (host hides)
-  // The panel is opened the way the State Pane opens it: the row's
-  // in-place chain, then its "Show in side panel".
-  await readyOnEntry(ctPage);
-  const layout = new LayoutPage(ctPage);
-  const origin = new OriginChainPanePageObject(ctPage);
-  await stepToPrintC(ctPage, layout);
-
-  await origin.showValueOriginInPlace("c");
-  await origin.openInSidePanel("c");
-  await expect(origin.sidePanelHops()).toHaveCount(3, { timeout: 15_000 });
-  await expect(origin.sidePanelTerminator()).toContainText("10");
-
-  const editor = await fixtureEditor(layout);
-  expect(await editor.highlightedLineNumber(), "at the print(c) line").toBe(lineOf("print(c)"));
-
-  // Walk the chain: ↓ ↓ focuses hop 1, → / ← expand and collapse its
-  // operands (none on a trivial copy), ↑ focuses hop 0, Enter seeks it —
-  // hop 0 is `c = b`, so the editor moves to that line.
-  await origin.keyboardNavigate("ArrowDown");
-  await origin.keyboardNavigate("ArrowDown");
-  await origin.keyboardNavigate("ArrowRight");
-  await origin.keyboardNavigate("ArrowLeft");
-  await origin.keyboardNavigate("ArrowUp");
-  await origin.keyboardNavigate("Enter");
-  await expect.poll(() => editor.highlightedLineNumber(), {
-    message: "Enter on the focused hop (`c = b`) seeks the editor to it",
-    timeout: 15_000,
-  }).toBe(lineOf("c = b"));
-
-  // Esc dismisses the panel.
-  await origin.keyboardNavigate("Escape");
-  await expect(origin.sidePanel()).toBeHidden({ timeout: 5_000 });
-});

@@ -1,0 +1,30 @@
+scenario: 1
+name: edit-mode/ctrl-f5-round-trips-the-bar
+pack: codetracer
+summary: >-
+  Editing a Noir crate, Ctrl+F5 switches to Debug mode, whose bar has the
+  stepping controls and no Build or Run; Ctrl+F5 again brings the edit bar
+  back, and a second round trip does the same.
+
+stage:
+  - use: project-fixture
+    with: { name: noir-build }
+  - use: open-project
+    with: { folder: $project }
+
+steps:
+  - wait: { until: { at: 'edit-toolbar/panel-button[label="Build"]', present: true }, timeout: 120s }
+  - wait: { until: settled, timeout: 30s }
+  - chord: Ctrl+F5
+  - wait: { until: { at: 'toolbar/toolbar-button[label="next-image"]', present: true }, timeout: 30s }
+  - expect: { at: edit-toolbar, present: false }
+  - chord: Ctrl+F5
+  - wait: { until: { at: 'edit-toolbar/panel-button[label="Build"]', present: true }, timeout: 30s }
+  - expect: { at: 'toolbar/toolbar-button[label="next-image"]', present: false }
+  - expect: { at: 'edit-toolbar/panel-button[label="Run"]', enabled: true }
+  - chord: Ctrl+F5
+  - wait: { until: { at: 'toolbar/toolbar-button[label="next-image"]', present: true }, timeout: 30s }
+  - expect: { at: edit-toolbar, present: false }
+  - chord: Ctrl+F5
+  - wait: { until: { at: 'edit-toolbar/panel-button[label="Build"]', present: true }, timeout: 30s }
+  - expect: { at: 'toolbar/toolbar-button[label="next-image"]', present: false }

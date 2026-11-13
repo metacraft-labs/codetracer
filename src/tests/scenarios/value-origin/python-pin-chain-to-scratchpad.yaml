@@ -1,0 +1,36 @@
+scenario: 1
+name: value-origin/python-pin-chain-to-scratchpad
+pack: codetracer
+summary: >-
+  "Pin to scratchpad" in the side panel showing `result`'s chain puts one
+  chain card for `result` in the Scratchpad pane.
+
+stage:
+  - use: record-program
+    with: { program: src/db-backend/tests/fixtures/origin/python/computational_origin/main.py }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - click: 'toolbar/toolbar-button[label="run-to-entry-image"]'
+    settle: false
+  - wait: { until: replay-idle, timeout: 60s }
+  - wait: { until: { at: 'editor[file="main.py"]', current-line: { gt: 0 } }, timeout: 60s }
+  - click: { at: 'editor[file="main.py"]/line[number="10"]', anchor: glyph }
+  - click: 'toolbar/toolbar-button[label="continue-image"]'
+    settle: false
+  - wait: { until: { at: 'editor[file="main.py"]', current-line: 10 }, timeout: 60s }
+  - wait: { until: { at: variables, assert: 'value-of("result", "42")' }, timeout: 60s }
+
+  - click: { at: 'variables/variable[name="result"]', anchor: name, button: right }
+  - wait: { until: { at: context-menu, assert: 'offers("Show value origin")' }, timeout: 15s }
+  - click: 'context-menu/menu-item[label="Show value origin"]'
+  - wait: { until: { at: 'variables/variable[name="result"]/origin-chain/panel-button[label="Show in side panel"]', present: true }, timeout: 30s }
+  - wheel: { at: variables, direction: down, amount: 10 }
+  - wait: { until: { at: 'variables/variable[name="result"]/origin-chain/panel-button[label="Show in side panel"]', geometry: { visible: true } }, timeout: 15s }
+  - click: 'variables/variable[name="result"]/origin-chain/panel-button[label="Show in side panel"]'
+  - wait: { until: { at: origin-panel, count: 1 }, timeout: 30s }
+  - click: 'origin-panel/panel-button[label="Pin to scratchpad"]'
+  - click: 'pane-tab[label="SCRATCHPAD"]'
+  - wait: { until: { at: scratchpad, chains: 1 }, timeout: 15s }
+  - expect: { at: 'scratchpad/scratch-entry[expression="result"]', kind: chain }

@@ -71,7 +71,7 @@ function runStageCli(args: string[]): any {
 // --- what this binding can deliver --------------------------------------------
 
 const ROLES: Record<string, { affordances: string[]; properties: string[] }> = {
-  window: { affordances: [], properties: ["title", "mode", "layout-tabs", "front-tabs", "strip-tabs"] },
+  window: { affordances: [], properties: ["title", "mode", "layout-tabs", "front-tabs", "strip-tabs", "pointer", "diff-tabs"] },
   "session-strip": { affordances: [], properties: ["count", "active"] },
   "session-tab": { affordances: ["click", "context-click"], properties: ["title", "active"] },
   "pane-tab": { affordances: ["click", "context-click", "drag-source"], properties: ["label", "active"] },
@@ -85,7 +85,9 @@ const ROLES: Record<string, { affordances: string[]; properties: string[] }> = {
                  "selections", "selected-text", "selection-count", "font-family", "font-size",
                  "find-shown", "find-query", "find-matches",
                  // pw4
-                 "find-focused"],
+                 "find-focused",
+                 // pw8
+                 "flow-values"],
   },
   line: {
     affordances: ["click", "double-click", "context-click"],
@@ -95,10 +97,10 @@ const ROLES: Record<string, { affordances: string[]; properties: string[] }> = {
   "call-trace": { affordances: ["wheel", "focusable"], properties: ["count", "focused"] },
   call: { affordances: ["click", "double-click", "context-click"],
           properties: ["name", "current", "selected", "expanded", "arguments"] },
-  "event-log": { affordances: ["wheel", "focusable"], properties: ["count", "total", "focused", "last-shown", "columns"] },
+  "event-log": { affordances: ["wheel", "focusable"], properties: ["count", "total", "focused", "last-shown", "columns", "search"] },
   event: { affordances: ["click", "double-click", "context-click"], properties: ["text", "kind", "current", "future"] },
-  variables: { affordances: ["wheel", "focusable"], properties: ["count", "focused"] },
-  variable: { affordances: ["click", "double-click", "context-click"], properties: ["name", "type", "value"] },
+  variables: { affordances: ["wheel", "focusable"], properties: ["count", "focused", "tab-strip"] },
+  variable: { affordances: ["click", "double-click", "context-click"], properties: ["name", "type", "value", "origin-badge", "watch", "invalid", "text"] },
   "status-line": { affordances: [], properties: ["message", "location", "build-status", "notifications"] },
   omnibox: { affordances: ["click", "text-entry", "focusable"], properties: ["query", "focused", "count", "labels"] },
   option: { affordances: ["click"], properties: ["label", "detail", "selected", "kind"] },
@@ -107,10 +109,12 @@ const ROLES: Record<string, { affordances: string[]; properties: string[] }> = {
   "terminal-output": { affordances: ["click", "wheel", "focusable"], properties: ["text", "count", "focused"] },
   filesystem: { affordances: ["wheel", "focusable"], properties: ["count", "focused", "loading"] },
   // --- pw2 ---
-  vcs: { affordances: [], properties: ["title", "commit", "stats", "count", "unified-diff", "error"] },
+  vcs: { affordances: [], properties: ["title", "commit", "stats", "count", "unified-diff", "error", "commits", "no-repo",
+                                     "branch-picker", "review-extras"] },
   "changed-file": { affordances: ["click"], properties: ["name", "status", "status-kind", "stats", "coverage", "selected"] },
   "diff-toggle": { affordances: ["click"], properties: ["unified"] },
-  "diff-view": { affordances: [], properties: ["file", "text"] },
+  "diff-view": { affordances: [], properties: ["file", "text", "hunks", "added", "removed", "selected-hunks", "toolbar",
+                                               "line-numbers", "old-line-numbers", "token-colours"] },
   "columns-button": { affordances: ["click"], properties: ["label"] },
   "columns-menu": { affordances: [], properties: [] },
   "column-option": { affordances: ["click", "drag-source", "drop-target"], properties: ["name", "shown"] },
@@ -139,7 +143,8 @@ const ROLES: Record<string, { affordances: string[]; properties: string[] }> = {
   "test-run-card": { affordances: ["click"], properties: ["title", "status", "running", "expanded", "rows", "statuses"] },
   "agent-message": { affordances: [], properties: ["index", "text"] },
   "test-row": { affordances: ["click"], properties: ["name", "status", "outcome", "has-actions", "output", "diagnostic",
-                                                     "recording-failed", "expanded"] },
+                                                     "recording-failed", "expanded", "recorded", "selected", "open-mode",
+                                                     "open-title"] },
   "evidence-card": { affordances: [], properties: ["dataset", "path", "kind", "shape", "has-shape", "command", "note",
                                                    "output", "has-actions", "state"] },
   "agent-settings": { affordances: ["wheel"], properties: ["scroll-top", "overflow"] },
@@ -150,7 +155,7 @@ const ROLES: Record<string, { affordances: string[]; properties: string[] }> = {
   "caption-progress": { affordances: ["click"], properties: ["text"] },
   "edit-toolbar": { affordances: [], properties: [] },
   "editor-hover": { affordances: [], properties: ["text"] },
-  welcome: { affordances: [], properties: ["heading"] },
+  welcome: { affordances: [], properties: ["heading", "sections", "text"] },
   // --- pw4 ---
   "session-add": { affordances: ["click"], properties: [] },
   "menu-bar": { affordances: ["click"], properties: ["open"] },
@@ -181,6 +186,29 @@ const ROLES: Record<string, { affordances: string[]; properties: string[] }> = {
   "live-edit-panel": { affordances: [], properties: ["status", "detail"] },
   "text-field": { affordances: ["click", "text-entry", "focusable"], properties: ["label", "value", "focused"] },
   "welcome-action": { affordances: ["click"], properties: ["label"] },
+  // --- pw8 ---
+  "origin-chain": { affordances: [], properties: ["count", "hops", "terminator"] },
+  "origin-hop": { affordances: ["click"], properties: ["number", "text", "file", "classification", "confidence", "low-confidence",
+                                                     "low-confidence-text", "badge", "line", "frame-transition", "operands",
+                                                     "operands-shown", "operand-values", "pointer"] },
+  "origin-panel": { affordances: ["click", "focusable"], properties: ["count", "hops", "terminator", "crumbs", "focused", "empty"] },
+  breadcrumb: { affordances: ["click"], properties: ["label", "current", "placeholder"] },
+  scratchpad: { affordances: [], properties: ["count", "chains"] },
+  "scratch-entry": { affordances: ["click", "context-click"], properties: ["expression", "value", "error", "kind"] },
+  recent: { affordances: ["click", "double-click"], properties: ["name", "detail", "kind", "tooltip-shown", "tooltip"] },
+  "flow-value": { affordances: ["click", "context-click"], properties: ["name", "value"] },
+  splitter: { affordances: ["click", "drag-source"], properties: ["orientation", "n"] },
+  "verification-panel": { affordances: [], properties: ["phase", "outcome", "payload", "status", "command", "run", "stop", "groups", "count"] },
+  finding: { affordances: ["click", "context-click"], properties: ["kind", "title", "message", "location"] },
+  "process-tree": { affordances: [], properties: ["active", "roles"] },
+  "test-results": { affordances: [], properties: ["headline", "count", "failure", "absence"] },
+  commit: { affordances: ["click"], properties: ["message", "expanded"] },
+  "commit-file": { affordances: ["click"], properties: ["name"] },
+  hunk: { affordances: ["click"], properties: ["number", "text"] },
+  "expand-boundary": { affordances: ["click"], properties: ["n", "direction", "hidden"] },
+  "diff-section": { affordances: ["click"], properties: ["path", "offset", "editors"] },
+  process: { affordances: ["click"], properties: ["name", "title", "active"] },
+  "event-marker": { affordances: ["click"], properties: ["boundary", "chip", "key-value", "direction"] },
 };
 
 // --- the surface: one read of the DOM ------------------------------------------
@@ -1120,6 +1148,487 @@ function readSurfacePw1(root: any): void {
   }
 }
 
+
+// --- pw8: value origin, the scratchpad, the welcome screen's lists, the
+// program menu, the editor's flow values and the pointer's shape -----------
+//
+// Runs IN THE PAGE, in the same evaluation as `readSurface`, on the tree it
+// returned. Reads only.
+function readSurfacePw8(root: any): void {
+  const vis = (el: Element | null): boolean => {
+    if (!el) return false;
+    const r = (el as HTMLElement).getBoundingClientRect();
+    if (r.width <= 0 || r.height <= 0) return false;
+    const cs = getComputedStyle(el as HTMLElement);
+    return cs.visibility !== "hidden" && cs.display !== "none";
+  };
+  const text = (el: Element | null | undefined) => ((el?.textContent ?? "").replace(/\s+/g, " ").trim());
+  const node = (role: string, el: Element | null, props: Record<string, unknown>,
+                keys: Array<[string, string]> = []): any => {
+    const r = el ? (el as HTMLElement).getBoundingClientRect() : { left: 0, top: 0, width: 0, height: 0 };
+    return { role, keys, props, x: r.left, y: r.top, w: r.width, h: r.height,
+             visible: el ? vis(el) : false, children: [] as any[] };
+  };
+  const centre = (el: Element) => {
+    const r = (el as HTMLElement).getBoundingClientRect();
+    return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+  };
+  const active = document.activeElement;
+  const within = (el: Element | null) => !!(el && active && (el === active || el.contains(active)));
+  // Shown where a user can aim at it: drawn, its centre inside the window,
+  // and the element there is it (a row scrolled out of its pane is in the
+  // DOM, drawn, and out of reach).
+  const shown = (el: Element | null): boolean => {
+    if (!vis(el)) return false;
+    const r = (el as HTMLElement).getBoundingClientRect();
+    const cx = r.left + r.width / 2, cy = r.top + r.height / 2;
+    if (cx < 0 || cy < 0 || cx > window.innerWidth || cy > window.innerHeight) return false;
+    // what a press there would land on
+    const hit = document.elementFromPoint(cx, cy);
+    return !!hit && (hit === el || el!.contains(hit) || hit.contains(el));
+  };
+  const button = (b: HTMLElement, label?: string) => {
+    const l = label ?? (text(b) || b.getAttribute("title") || b.getAttribute("aria-label") || "");
+    return node("panel-button", b, {
+      label: l, enabled: !b.classList.contains("disabled") && !(b as HTMLButtonElement).disabled,
+      active: b.classList.contains("active"), title: b.getAttribute("title") ?? "",
+    }, [["label", l]]);
+  };
+  // The kind a hop's label names (`hop 1: cross-thread copy at step 4`), in
+  // the pack's spelling (the VS Code panel's `TrivialCopy`, …).
+  const KINDS: Record<string, string> = {
+    "trivial copy": "TrivialCopy", "field access": "FieldAccess", "index access": "IndexAccess",
+    "computational expression": "Computational", "function call": "FunctionCall", literal: "Literal",
+    "return capture": "ReturnCapture", "parameter pass": "ParameterPass",
+    "cross-thread copy": "CrossThreadCopy", unknown: "Unknown",
+  };
+
+  // the State pane's rows: the origin badge, the value cell (where a press
+  // focuses the row), and the chain expanded under the row
+  const vs = root.children.find((c: any) => c.role === "variables");
+  if (vs) {
+    const rows = Array.from(document.querySelectorAll("div[id^='stateComponent'] [data-variable-name]")) as HTMLElement[];
+    for (const v of vs.children) {
+      const row = rows.find((r) => r.getAttribute("data-variable-name") === v.props.name && vis(r));
+      if (!row) continue;
+      const badge = row.querySelector("button.ct-origin-badge") as HTMLElement | null;
+      v.props["origin-badge"] = !!badge && vis(badge);
+      const cell = row.querySelector("[data-ct-cell$='|value']") as HTMLElement | null;
+      v.anchors = { points: { ...(v.anchors?.points ?? {}),
+                              ...(cell && vis(cell) ? { value: centre(cell) } : {}),
+                              ...(row.querySelector(".value-name") ? { name: centre(row.querySelector(".value-name")!) } : {}) } };
+      v.props.watch = row.classList.contains("value-watch");
+      v.keys = [...(v.keys ?? []), ["watch", String(v.props.watch)]];
+      v.props.invalid = row.classList.contains("watch-invalid");
+      v.props.text = text(row);
+      const chain = row.querySelector(".ct-origin-inline-chain") as HTMLElement | null;
+      if (chain && vis(chain)) {
+        const hops = (Array.from(chain.querySelectorAll(".ct-origin-inline-chain-hop")) as HTMLElement[]).filter((h) => vis(h));
+        const oc = node("origin-chain", chain, {
+          count: hops.length, hops: hops.map((h) => text(h)),
+          terminator: text(chain.querySelector(".ct-origin-inline-chain-terminator")),
+        });
+        hops.forEach((h, i) => {
+          const hn = node("origin-hop", h, {
+            number: i + 1, text: text(h), file: "", pointer: getComputedStyle(h).cursor,
+          }, [["number", String(i + 1)], ["file", ""]]);
+          hn.visible = shown(h);
+          oc.children.push(hn);
+        });
+        const side = chain.querySelector("button.ct-origin-show-in-side-panel") as HTMLElement | null;
+        if (side && vis(side)) {
+          const sb = button(side);
+          sb.visible = shown(side);
+          oc.children.push(sb);
+        }
+        v.children.push(oc);
+      }
+    }
+  }
+
+  // how many diff tabs the layout holds ("Diff: main.nim (77220c)", …)
+  root.props["diff-tabs"] = (Array.from(document.querySelectorAll(".lm_tab .lm_title")) as HTMLElement[])
+    .filter((t) => /^Diff:/.test(text(t))).length;
+
+  // the status line's box is the status bar as drawn (`#status`), when the
+  // element the shared reader found is laid out with no height
+  const sl = root.children.find((c: any) => c.role === "status-line");
+  // (or, failing that, the footer row that holds the bottom strip)
+  let statusBar = document.querySelector("#status") as HTMLElement | null;
+  if (!statusBar || statusBar.getBoundingClientRect().height <= 0) {
+    statusBar = null;
+    for (let a = document.querySelector("#auto-hide-bottom-strip")?.parentElement ?? null; a; a = a.parentElement) {
+      const r = a.getBoundingClientRect();
+      if (r.height > 0 && r.width >= window.innerWidth / 2) { statusBar = a; break; }
+    }
+  }
+  if (sl && sl.h <= 0 && statusBar && vis(statusBar)) {
+    const r = statusBar.getBoundingClientRect();
+    Object.assign(sl, { x: r.left, y: r.top, w: r.width, h: r.height, visible: true });
+  }
+
+  // the State pane's watch input, and whether the pane draws a tab strip
+  const stc = document.querySelector("div[id^='stateComponent']") as HTMLElement | null;
+  if (vs && stc) {
+    vs.props["tab-strip"] = !!stc.querySelector(".state-tabs");
+    const wi = stc.querySelector("input[id^='watch-'], textarea[id^='watch-']") as HTMLInputElement | null;
+    if (wi && vis(wi)) {
+      vs.children.push(node("text-field", wi, { label: "watch", value: wi.value ?? "", focused: within(wi) },
+                            [["label", "watch"]]));
+    }
+  }
+
+  // the side panel (`ui/isonim_origin_chain.renderPanelDom`)
+  const panel = document.querySelector("aside#ct-origin-chain-side-panel") as HTMLElement | null;
+  if (panel && vis(panel)) {
+    const hops = Array.from(panel.querySelectorAll("section > ol > li.ct-origin-hop")) as HTMLElement[];
+    const crumbs = Array.from(panel.querySelectorAll("nav > button")) as HTMLElement[];
+    const op = node("origin-panel", panel, {
+      count: hops.length,
+      hops: hops.map((h) => text(h.querySelector("button"))),
+      terminator: text(panel.querySelector(".ct-origin-terminator-row")),
+      crumbs: crumbs.map((c) => text(c)),
+      focused: within(panel),
+      empty: !!panel.querySelector(".ct-origin-side-empty"),
+    });
+    hops.forEach((h, i) => {
+      const label = (h.getAttribute("aria-label") ?? "").replace(/^hop \d+:\s*/, "").replace(/\s+at step.*$/, "");
+      const conf = /confidence\s+([\d.]+)/.exec(text(h.querySelector(".ct-origin-hop-confidence")));
+      const details = h.querySelector("details") as HTMLDetailsElement | null;
+      const hb = h.querySelector("button") as HTMLElement | null;
+      const hopFile = text(hb).replace(/:\d+$/, "").split("/").pop() ?? "";
+      const hn = node("origin-hop", h, {
+        number: i + 1, text: text(hb), file: hopFile, classification: KINDS[label] ?? label,
+        confidence: conf ? parseFloat(conf[1]) : 0,
+        "low-confidence": !!h.querySelector(".ct-origin-low-confidence"),
+        "low-confidence-text": text(h.querySelector(".ct-origin-low-confidence")),
+        badge: text(h.querySelector(".ct-origin-cross-process-badge")),
+        line: parseInt((/:(\d+)$/.exec(text(hb)) ?? ["", "0"])[1], 10),
+        "frame-transition": label === "parameter pass" || label === "return capture",
+        operands: details ? details.querySelectorAll(":scope > div").length : 0,
+        "operands-shown": !!details?.open,
+        "operand-values": details?.open ? (Array.from(details.querySelectorAll(":scope > div")) as HTMLElement[]).map((d) => text(d)) : [],
+      }, [["number", String(i + 1)], ["file", hopFile]]);
+      const summary = details?.querySelector("summary") as HTMLElement | null;
+      hn.anchors = { points: { ...(summary && shown(summary) ? { expander: centre(summary) } : {}) } };
+      hn.visible = shown(hb ?? h);
+      op.children.push(hn);
+    });
+    crumbs.forEach((c) => {
+      const l = text(c);
+      op.children.push(node("breadcrumb", c, {
+        label: l, current: c.getAttribute("aria-current") === "step",
+        placeholder: c.getAttribute("data-placeholder") === "true",
+      }, [["label", l]]));
+    });
+    for (const b of Array.from(panel.querySelectorAll("footer button")) as HTMLElement[]) {
+      if (vis(b)) op.children.push(button(b));
+    }
+    root.children.push(op);
+  }
+
+  // the Scratchpad: its values and the chains pinned to it
+  // (Each reader below leaves a role another reader already drew alone.)
+  const has = (role: string) => root.children.some((c: any) => c.role === role);
+  const sp = document.querySelector("div[id^='scratchpadComponent']") as HTMLElement | null;
+  if (sp && vis(sp) && !has("scratchpad")) {
+    const values = (Array.from(sp.querySelectorAll(".value-components-container > *")) as HTMLElement[]).filter((e) => vis(e));
+    const chains = (Array.from(sp.querySelectorAll(".scratchpad-chain-view")) as HTMLElement[]).filter((e) => vis(e));
+    const s = node("scratchpad", sp, { count: values.length + chains.length, chains: chains.length });
+    for (const v of values) {
+      const expr = text(v.querySelector(".value-name")).replace(/:$/, "");
+      const val = text(v.querySelector(".value-expanded-text") ?? v.querySelector(".value-view"));
+      s.children.push(node("scratch-entry", v, { expression: expr, value: val, kind: "value",
+        error: !!v.querySelector(".error-trace") || /^<error/.test(val) }, [["expression", expr]]));
+    }
+    for (const c of chains) {
+      const label = text(c.querySelector(".scratchpad-chain-label"));
+      const expr = label.split(":")[0].trim();
+      s.children.push(node("scratch-entry", c, { expression: expr, value: label, kind: "chain", error: false },
+                           [["expression", expr]]));
+    }
+    root.children.push(s);
+  }
+
+  // the welcome screen's sections and its recent traces and folders
+  const w = root.children.find((c: any) => c.role === "welcome");
+  const ws = document.querySelector(".welcome-screen") as HTMLElement | null;
+  if (w && ws) {
+    const recentsDrawn = w.children.some((c: any) => c.role === "recent");
+    w.props.sections = (Array.from(ws.querySelectorAll(
+      ".welcome-left-panel, .welcome-right-panel, .recent-traces-title, .recent-folders-title, .recent-folders, .recent-traces")) as HTMLElement[])
+      .filter((e) => vis(e)).map((e) => Array.from(e.classList).find((c) => /^(welcome|recent)-/.test(c)) ?? "");
+    w.props.text = (Array.from(ws.querySelectorAll(".recent-traces-title, .recent-folders-title, .empty-state-text, .welcome-text, .start-option")) as HTMLElement[])
+      .filter((e) => vis(e)).map((e) => text(e));
+    for (const t of Array.from(ws.querySelectorAll(".recent-trace")) as HTMLElement[]) {
+      if (!vis(t) || recentsDrawn) continue;
+      const name = text(t.querySelector(".recent-trace-title-content"));
+      const tip = t.parentElement?.querySelector(".recent-trace-tooltip, [class*='recent-trace-tooltip']") as HTMLElement | null;
+      w.children.push(node("recent", t, {
+        name, detail: text(t.querySelector(".recent-trace-title-time")), kind: "trace",
+        "tooltip-shown": !!tip && vis(tip), tooltip: tip && vis(tip) ? text(tip) : "",
+      }, [["name", name], ["kind", "trace"]]));
+    }
+    for (const f of Array.from(ws.querySelectorAll(".recent-folder")) as HTMLElement[]) {
+      if (!vis(f) || recentsDrawn) continue;
+      const name = text(f.querySelector(".recent-folder-name") ?? f);
+      w.children.push(node("recent", f, { name, detail: "", kind: "folder", "tooltip-shown": false, tooltip: "" },
+                           [["name", name], ["kind", "folder"]]));
+    }
+  }
+
+  // the editor's flow values (`isonim_flow_inline_view`): each value box
+  // drawn beside the code, by the variable it shows
+  for (const ed of root.children.filter((c: any) => c.role === "editor")) {
+    const comp = (Array.from(document.querySelectorAll("div[id^='editorComponent']")) as HTMLElement[]).find((c) => {
+      const r = (c.closest(".lm_item_container") ?? c).getBoundingClientRect();
+      return Math.abs(r.left - ed.x) < 1 && Math.abs(r.top - ed.y) < 1;
+    });
+    if (!comp) continue;
+    // the editor's "Run test" controls beside its tests, named by their title
+    // ("Run test_passes")
+    for (const t of Array.from(comp.querySelectorAll(".editor-test-action")) as HTMLElement[]) {
+      if (vis(t)) ed.children.push(button(t, t.getAttribute("title") ?? text(t)));
+    }
+    if (ed.children.some((c: any) => c.role === "flow-value")) continue;
+    const seen = new Set<string>();
+    const values: string[] = [];
+    for (const b of Array.from(comp.querySelectorAll("[class*='-value-box']")) as HTMLElement[]) {
+      if (!vis(b) || !/^flow-[a-z]+-value-box-/.test(b.id)) continue;
+      const name = b.id.replace(/^flow-[a-z]+-value-box-\d+-\d+-(before-|after-)?/, "");
+      values.push(`${name}=${text(b)}`);
+      if (seen.has(name)) continue;
+      seen.add(name);
+      ed.children.push(node("flow-value", b, { name, value: text(b) }, [["name", name]]));
+    }
+    ed.props["flow-values"] = values;
+  }
+
+  // the pointer's shape where it rests: the cursor the innermost hovered
+  // element draws (what a user sees, Pointer-Affordances.md §4)
+  const hovered = Array.from(document.querySelectorAll(":hover"));
+  const top = hovered[hovered.length - 1] as HTMLElement | undefined;
+  root.props.pointer = top ? getComputedStyle(top).cursor : "default";
+
+  // the VCS panel's history (edit mode) and its "not a repository" message
+  const vcsNode = root.children.find((c: any) => c.role === "vcs");
+  if (vcsNode) {
+    const vc = document.querySelector(".vcs-container") as HTMLElement | null;
+    vcsNode.props.commits = vc ? (Array.from(vc.querySelectorAll(".vcs-commit-entry, .vcs-commit-item")) as HTMLElement[]).filter((e) => vis(e)).length : 0;
+    const nr = vc?.querySelector(".vcs-no-repo-message") as HTMLElement | null;
+    vcsNode.props["no-repo"] = !!nr && vis(nr) && text(nr).length > 0;
+  }
+
+  // the Verification pane (`isonim_verification_view`)
+  const vp = (Array.from(document.querySelectorAll(".ct-verification-panel")) as HTMLElement[]).find((e) => vis(e));
+  if (vp) {
+    const runB = vp.querySelector(".ct-verification-run") as HTMLElement | null;
+    const stopB = vp.querySelector(".ct-verification-cancel") as HTMLElement | null;
+    const rows = Array.from(vp.querySelectorAll("[data-ct-verification-row]")) as HTMLElement[];
+    const pv = node("verification-panel", vp, {
+      phase: vp.getAttribute("data-ct-verification-phase") ?? "",
+      outcome: vp.getAttribute("data-ct-verification-outcome") ?? "",
+      payload: vp.getAttribute("data-ct-verification-payload") ?? "",
+      status: text(vp.querySelector(".ct-verification-status")),
+      command: text(vp.querySelector(".ct-verification-command")),
+      run: runB && vis(runB) ? text(runB) : "",
+      stop: !!stopB && vis(stopB),
+      groups: (Array.from(vp.querySelectorAll(".ct-verification-group-heading")) as HTMLElement[]).map((g) => text(g)),
+      count: rows.length,
+    });
+    for (const r of rows) {
+      const title = text(r.querySelector(".ct-verification-row-title"));
+      pv.children.push(node("finding", r, {
+        kind: text(r.querySelector(".ct-verification-row-kind")), title,
+        message: text(r.querySelector(".ct-verification-row-message")),
+        location: r.getAttribute("data-ct-verification-location") ?? "",
+      }, [["title", title]]));
+    }
+    if (runB && vis(runB)) pv.children.push(button(runB, "Run"));
+    if (stopB && vis(stopB)) pv.children.push(button(stopB, "Stop"));
+    root.children.push(pv);
+  }
+
+  // the process tree of a multi-process session (`isonim_process_tree_view`)
+  const ptEntries = (Array.from(document.querySelectorAll(".ct-process-tree-entry")) as HTMLElement[]).filter((e) => vis(e));
+  if (ptEntries.length > 0 && !has("process-tree")) {
+    const pt = node("process-tree", ptEntries[0].closest("[class*='ct-process-tree']:not(.ct-process-tree-entry)") ?? ptEntries[0],
+                    { active: "", roles: [] as string[] });
+    for (const e of ptEntries) {
+      const role = e.getAttribute("data-process-role") ?? "";
+      const act = e.classList.contains("active") || e.getAttribute("aria-selected") === "true";
+      if (act) pt.props.active = role;
+      (pt.props.roles as string[]).push(role);
+      pt.children.push(node("process", e, { name: role, title: text(e.querySelector(".ct-process-tree-name")), active: act },
+                            [["name", role]]));
+    }
+    root.children.push(pt);
+  }
+
+  // the event log's correlation markers: where a request, a response or a
+  // realm crossing joins this recording to another
+  const el = root.children.find((c: any) => c.role === "event-log");
+  if (el) {
+    // its search field ("Find event")
+    const sf = document.querySelector("div[id^='eventLogComponent'] .eventLog-search-field") as HTMLInputElement | null;
+    if (sf && vis(sf)) {
+      el.props.search = sf.value ?? "";
+      el.children.push(node("text-field", sf, { label: "Find event", value: sf.value ?? "", focused: within(sf) },
+                            [["label", "Find event"]]));
+    }
+    for (const r of Array.from(document.querySelectorAll("div.event-log-marker-rows div.marker-row")) as HTMLElement[]) {
+      if (!vis(r)) continue;
+      const boundary = r.getAttribute("data-boundary-id") ?? "";
+      const chip = r.querySelector("span.marker-boundary-chip") as HTMLElement | null;
+      const m = node("event-marker", r, {
+        boundary, chip: text(chip), "key-value": r.getAttribute("data-key-value") ?? "",
+        direction: !!r.querySelector("span.marker-direction-icon"),
+      }, [["boundary", boundary]]);
+      if (chip && vis(chip)) m.anchors = { points: { chip: centre(chip) } };
+      el.children.push(m);
+    }
+  }
+
+  // the Test Results pane (`isonim_test_results_view`)
+  const trp = (Array.from(document.querySelectorAll(".test-results")) as HTMLElement[]).find((e) => vis(e) &&
+    e.querySelector(".test-results-headline"));
+  if (trp) {
+    const fail = trp.querySelector(".test-results-failure") as HTMLElement | null;
+    const abs = trp.querySelector(".test-results-absence") as HTMLElement | null;
+    const rows = (Array.from(trp.querySelectorAll(".test-results-row")) as HTMLElement[]).filter((r) => vis(r));
+    const tp = node("test-results", trp, {
+      headline: text(trp.querySelector(".test-results-headline")), count: rows.length,
+      failure: fail && !fail.classList.contains("hidden") ? text(fail) : "",
+      absence: abs && !abs.classList.contains("hidden") ? text(abs) : "",
+    });
+    const runB = trp.querySelector(".test-results-run-btn") as HTMLElement | null;
+    if (runB && vis(runB)) tp.children.push(button(runB, "Run"));
+    for (const r of rows) {
+      const name = text(r.querySelector(".test-results-name"));
+      const state = Array.from(r.classList).find((c) => c !== "test-results-row" && c !== "selected") ?? "";
+      const open = r.querySelector(".test-results-open-btn") as HTMLElement | null;
+      const refresh = r.querySelector(".test-results-refresh-btn") as HTMLElement | null;
+      const tr = node("test-row", r, {
+        name, status: state,
+        outcome: /passed|failed|errored|running/.test(state) ? state.replace(/.*(passed|failed|errored|running).*/, "$1") : "",
+        "has-actions": !!open || !!refresh,
+        recorded: (r.getAttribute("data-ct-recording-id") ?? "") !== "",
+        selected: r.classList.contains("selected") || r.getAttribute("data-ct-selected") === "true",
+        "open-mode": open?.getAttribute("data-ct-open-mode") ?? "",
+        "open-title": open?.getAttribute("title") ?? "",
+      }, [["name", name]]);
+      if (refresh && vis(refresh)) tr.children.push(button(refresh, "Refresh"));
+      if (open && vis(open)) tr.children.push(button(open, "Open"));
+      const nm = r.querySelector(".test-results-name") as HTMLElement | null;
+      if (nm) tr.anchors = { points: { name: centre(nm) } };
+      tp.children.push(tr);
+    }
+    root.children.push(tp);
+  }
+
+  // the VCS panel's commit history: each commit, its expand control and,
+  // once expanded, its files with their View Diff button (shown on hover)
+  if (vcsNode) {
+    const vc = document.querySelector(".vcs-container") as HTMLElement | null;
+    for (const e of (Array.from(vc?.querySelectorAll(".vcs-commit-entry") ?? []) as HTMLElement[])) {
+      if (!vis(e)) continue;
+      const msg = text(e.querySelector(".vcs-commit-msg"));
+      const tg = e.querySelector(".vcs-commit-toggle") as HTMLElement | null;
+      const hd = e.querySelector(".vcs-commit-msg") as HTMLElement | null;
+      const c = node("commit", e, { message: msg, expanded: !!tg && tg.classList.contains("vcs-commit-toggle-open") },
+                     [["message", msg]]);
+      c.anchors = { points: { ...(tg && vis(tg) ? { toggle: centre(tg) } : {}), ...(hd && vis(hd) ? { header: centre(hd) } : {}) } };
+      for (const f of Array.from(e.querySelectorAll(".vcs-accordion-file")) as HTMLElement[]) {
+        const name = text(f.querySelector(".vcs-accordion-file-name"));
+        if (!name || !vis(f)) continue;
+        const cf = node("commit-file", f, { name }, [["name", name]]);
+        const db = f.querySelector(".vcs-file-diff-btn") as HTMLElement | null;
+        if (db && vis(db)) cf.children.push(button(db, "View Diff"));
+        c.children.push(cf);
+      }
+      vcsNode.children.push(c);
+    }
+    vcsNode.props["branch-picker"] = !!vc?.querySelector(".vcs-branch-picker") && vis(vc!.querySelector(".vcs-branch-picker"));
+    vcsNode.props["review-extras"] = !!vc?.querySelector(".vcs-review-trace-selector, .vcs-review-trace-select, .vcs-review-stats");
+  }
+  // a unified diff tab: its hunks (the `@@` dividers, where a click selects
+  // one), its added and removed lines, and the hunk toolbar
+  for (const dv of root.children.filter((c: any) => c.role === "diff-view")) {
+    const d = (Array.from(document.querySelectorAll(".unified-diff-container")) as HTMLElement[]).find((x) => {
+      const r = x.getBoundingClientRect();
+      return Math.abs(r.left - dv.x) < 1 && Math.abs(r.top - dv.y) < 1;
+    });
+    if (!d) continue;
+    const body = d.querySelector(".monaco-editor.modified-in-monaco-diff-editor") ?? d;
+    const orig = d.querySelector(".monaco-editor.original-in-monaco-diff-editor");
+    const headers = (Array.from(body.querySelectorAll(".view-line")) as HTMLElement[])
+      .filter((l) => /@@\s-\d+,\d+\s\+\d+,\d+\s@@/.test((l.textContent ?? "").replace(/\u00a0/g, " ")))
+      .sort((a, b) => a.getBoundingClientRect().top - b.getBoundingClientRect().top);
+    dv.props.hunks = headers.length;
+    dv.props.added = body.querySelectorAll(".view-overlays .ct-diff-line-added").length;
+    dv.props.removed = orig ? orig.querySelectorAll(".view-overlays .ct-diff-line-removed").length : 0;
+    dv.props["selected-hunks"] = d.querySelectorAll(".view-overlays .ct-diff-hunk-selected").length;
+    const tb = d.querySelector(".hunk-toolbar") as HTMLElement | null;
+    dv.props.toolbar = tb && vis(tb) ? text(tb.querySelector(".hunk-toolbar-count")) : "";
+    headers.forEach((h, i) => {
+      dv.children.push(node("hunk", h, { number: i + 1, text: text(h) }, [["number", String(i + 1)]]));
+    });
+    const nums = (el: Element | null) => (Array.from(el?.querySelectorAll(".margin-view-overlays .line-numbers") ?? []) as HTMLElement[])
+      .map((n) => (n.textContent ?? "").replace(/\u00a0/g, " ").trim().replace(/\s+/g, " ")).filter((t) => t !== "");
+    dv.props["line-numbers"] = nums(body);
+    dv.props["old-line-numbers"] = nums(orig);
+    // the syntax colours drawn (Monaco's `mtk<n>` token classes)
+    dv.props["token-colours"] = new Set((Array.from(body.querySelectorAll(".view-line span span")) as HTMLElement[])
+      .map((n) => Array.from(n.classList).find((c) => /^mtk\d+$/.test(c)) ?? "").filter((c) => c)).size;
+    const perDirection: Record<string, number> = {};
+    for (const b of (Array.from(body.querySelectorAll(".ct-diff-expand-boundary")) as HTMLElement[]).filter((x) => vis(x))) {
+      const direction = b.getAttribute("data-ct-expand") ?? "";
+      perDirection[direction] = (perDirection[direction] ?? 0) + 1;
+      dv.children.push(node("expand-boundary", b, {
+        n: perDirection[direction], direction,
+        hidden: parseInt(b.getAttribute("data-ct-hidden") ?? "0", 10) || 0,
+      }, [["direction", direction], ["n", String(perDirection[direction])]]));
+    }
+    if (tb && vis(tb)) {
+      for (const b of Array.from(tb.querySelectorAll(".hunk-toolbar-button")) as HTMLElement[]) {
+        if (vis(b)) dv.children.push(button(b, b.classList.contains("hunk-toolbar-button-subtle") ? "Clear" : text(b)));
+      }
+    }
+  }
+
+  // a whole-commit document's sections: one per file, under its heading
+  const docScroller = (Array.from(document.querySelectorAll(".unified-diff-document-sections")) as HTMLElement[]).find((e) => vis(e));
+  if (docScroller) {
+    const top = docScroller.getBoundingClientRect().top;
+    for (const sec of Array.from(docScroller.querySelectorAll(".unified-diff-document-section")) as HTMLElement[]) {
+      const p = sec.getAttribute("data-path") ?? "";
+      const st = sec.getBoundingClientRect().top - top;
+      const ds = node("diff-section", sec, { path: p, offset: Math.round(st), editors: sec.querySelectorAll(
+        ".monaco-editor.modified-in-monaco-diff-editor").length }, [["path", p]]);
+      const link = sec.querySelector(".unified-diff-file-header-link") as HTMLElement | null;
+      if (link && vis(link)) ds.anchors = { points: { link: centre(link) } };
+      root.children.push(ds);
+    }
+  }
+
+  // the program's terminal output (`isonim_terminal_output_view`)
+  const term = document.querySelector("div[id^='terminalComponent']") as HTMLElement | null;
+  if (term && vis(term) && !has("terminal-output")) {
+    const lines = (Array.from(term.querySelectorAll(".terminal-line")) as HTMLElement[]).map((l) => text(l));
+    root.children.push(node("terminal-output", term, { text: lines, count: lines.length }));
+  }
+
+  // GoldenLayout's dividers, where a user drags to resize the panes
+  const nth: Record<string, number> = {};
+  for (const s of Array.from(document.querySelectorAll(".lm_splitter")) as HTMLElement[]) {
+    if (!vis(s)) continue;
+    const orientation = s.classList.contains("lm_vertical") ? "horizontal" : "vertical";
+    nth[orientation] = (nth[orientation] ?? 0) + 1;
+    root.children.push(node("splitter", s, { orientation, n: nth[orientation] },
+                            [["orientation", orientation], ["n", String(nth[orientation])]]));
+  }
+}
+
 // The readers that extend `readSurface`'s tree, run in the same page
 // evaluation (one read of the DOM).
 // --- pw4: the program menu, the layout's shape, tracepoint editors, the Call
@@ -1434,7 +1943,7 @@ function readSurfacePw4(root: any): void {
   }
 }
 
-const SURFACE_EXTENSIONS: Array<(root: any) => void> = [readSurfacePw1, readSurfacePw4];
+const SURFACE_EXTENSIONS: Array<(root: any) => void> = [readSurfacePw1, readSurfacePw4, readSurfacePw8];
 
 // --- the binding ----------------------------------------------------------------
 
@@ -1469,7 +1978,9 @@ async function launchElectron(ctx: Ctx, launch: any): Promise<void> {
   } else if (launch.project) {
     // `ct edit` takes ONE path (`ct/launch/launch.nim`): the file, when the
     // stage names one (its folder is the project), else the folder.
-    args.push("edit", launch.file ? path.join(launch.project, launch.file) : launch.project);
+    // pw8: `ct edit .` from inside the folder (`open-project` `from-inside`)
+    const dot = !!launch.fromInside;
+    args.push("edit", dot ? "." : launch.file ? path.join(launch.project, launch.file) : launch.project);
   }
   // (launch.welcome: no arguments — the welcome screen)
   env.CODETRACER_CALLER_PID = String(process.pid);
@@ -1493,9 +2004,19 @@ async function launchElectron(ctx: Ctx, launch: any): Promise<void> {
   if (!page) throw new Error("Electron opened no editor window");
   await page.waitForLoadState("domcontentloaded");
   // the window at the size the stage asked for
-  await app.evaluate(({ BrowserWindow }: any, size: any) => {
-    for (const w of BrowserWindow.getAllWindows()) w.setContentSize(size.width, size.height);
-  }, { width, height });
+  // (A multi-recording session can navigate its window while it loads, which
+  // destroys the context this runs in: try again.)
+  for (let attempt = 0; ; attempt++) {
+    try {
+      await app.evaluate(({ BrowserWindow }: any, size: any) => {
+        for (const w of BrowserWindow.getAllWindows()) w.setContentSize(size.width, size.height);
+      }, { width, height });
+      break;
+    } catch (e) {
+      if (attempt >= 4 || !/context was destroyed|navigation/i.test(String(e))) throw e;
+      await new Promise((r) => setTimeout(r, 1000));
+    }
+  }
   ctx.page = page;
   ctx.context = app.context();
 }

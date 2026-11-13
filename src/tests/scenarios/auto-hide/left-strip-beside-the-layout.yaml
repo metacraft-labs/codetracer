@@ -1,0 +1,30 @@
+scenario: 1
+name: auto-hide/left-strip-beside-the-layout
+pack: codetracer
+summary: >-
+  A pane pinned to the left edge gets a strip tab beside the layout — left
+  of every pane still in it, overlapping none — and a pane pinned to the
+  bottom gets its tab inside the status bar's footer, not a strip of its own.
+
+stage:
+  - use: record-program
+    with: { program: py_console_logs/main.py }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - wait: { until: { at: window, strip-tabs: { count: 4 } }, timeout: 30s }
+  - click: { at: 'pane-tab[label="VARIABLES"]' }
+  - click: { at: 'pane-tab[label="VARIABLES"]', button: right }
+  - wait: { until: { at: 'context-menu/menu-item[label="Pin to Left"]', present: true }, timeout: 15s }
+  - click: { at: 'context-menu/menu-item[label="Pin to Left"]' }
+  - wait: { until: { at: 'strip-tab[label="VARIABLES"]', present: true }, timeout: 15s }
+  - expect: { at: 'strip-tab[label="VARIABLES"]', edge: left }
+  - expect: { at: 'strip-tab[label="VARIABLES"]', geometry: { left-of: 'pane-tab[label="EVENT LOG"]' } }
+  - expect: { at: 'strip-tab[label="VARIABLES"]', geometry: { left-of: 'pane-tab[label="CALLTRACE"]' } }
+  - click: { at: 'pane-tab[label="EVENT LOG"]' }
+  - click: { at: 'pane-tab[label="EVENT LOG"]', button: right }
+  - wait: { until: { at: 'context-menu/menu-item[label="Pin to Bottom"]', present: true }, timeout: 15s }
+  - click: { at: 'context-menu/menu-item[label="Pin to Bottom"]' }
+  - wait: { until: { at: 'strip-tab[label="EVENT LOG"]', present: true }, timeout: 15s }
+  - expect: { at: 'strip-tab[label="EVENT LOG"]', edge: bottom, geometry: { inside: status-line } }

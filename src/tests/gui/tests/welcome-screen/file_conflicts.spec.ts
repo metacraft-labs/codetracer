@@ -1,3 +1,9 @@
+// A failed save on Ctrl+R is the scenario
+// `src/tests/scenarios/re-record/ctrl-r-failed-save-says-so.yaml`. The cases
+// below stay: the external changes need a writer outside the app mid-run,
+// which a scenario cannot have, and the re-record success and burst cases do
+// not hold reliably yet (codetracer-pm
+// issues/2026-11-13-ctrl-r-in-a-replays-edit-mode-does-not-reliably-re-record.md).
 import { test, expect } from "../../lib/fixtures";
 import * as fs from "node:fs";
 import * as os from "node:os";
@@ -204,8 +210,6 @@ const cleanFixture = makeFixtureDir("ct-file-watch-clean-", 'print("initial")\n'
 const dirtyFixture = makeFixtureDir("ct-file-watch-dirty-", 'print("initial")\n');
 const reRecordFixture = makeFixtureDir(
   "ct-re-record-", 'print("initial")\n');
-const readOnlyFixture = makeFixtureDir(
-  "ct-re-record-readonly-", 'print("initial")\n');
 const burstFixture = makeFixtureDir(
   "ct-re-record-burst-", 'print("initial")\n');
 
@@ -371,48 +375,5 @@ test.describe("Re-record while one is already running", () => {
     // And the gate reopens afterwards, so re-recording is not a one-shot.
     await expect.poll(async () => pendingReRecordIsSet(ctPage), { timeout: 30_000 })
       .toBe(false);
-  });
-});
-
-test.describe("Re-record when the save fails", () => {
-  test.use({ launchMode: "trace", sourcePath: readOnlyFixture.file });
-
-  test("a failed save aborts loudly instead of hanging", async ({ ctPage }) => {
-    test.setTimeout(180_000);
-    // A root-owned run can write to a 0444 file, so the failure cannot be
-    // provoked; skipping is honest, silently passing would not be.
-    const uid = typeof process.getuid === "function" ? process.getuid() : -1;
-    test.skip(uid === 0, "cannot make a file unwritable as root");
-
-    await ctPage.waitForSelector(".lm_goldenlayout", { timeout: 15_000 });
-    await recordNotifications(ctPage);
-
-    const originalRecordingId = await currentRecordingId(ctPage);
-    await expect.poll(async () => activeEditorValue(ctPage), { timeout: 20_000 })
-      .toContain("initial");
-
-    await enterEditMode(ctPage);
-    await setActiveEditorValue(ctPage, 'print("never reaches disk")\n');
-    await expect.poll(async () => activeEditorValue(ctPage), { timeout: 10_000 })
-      .toContain("never reaches disk");
-
-    fs.chmodSync(readOnlyFixture.file, 0o444);
-    try {
-      await ctPage.keyboard.press("Control+R");
-
-      // The save fails, so the re-record must fail *visibly* rather than
-      // leave the queue armed with nothing left to drain it.
-      await expect.poll(async () => seenErrors(ctPage), { timeout: 30_000 })
-        .not.toEqual([]);
-      await expect.poll(async () => pendingReRecordIsSet(ctPage), { timeout: 30_000 })
-        .toBe(false);
-
-      const seen = await seenNotifications(ctPage);
-      expect(seen.filter((entry) => entry.includes("Building/recording a new trace")))
-        .toEqual([]);
-      expect(await currentRecordingId(ctPage)).toBe(originalRecordingId);
-    } finally {
-      fs.chmodSync(readOnlyFixture.file, 0o644);
-    }
   });
 });

@@ -1,0 +1,27 @@
+scenario: 1
+name: edit-mode/welcome-new-tab-open-folder
+pack: codetracer
+summary: >-
+  From the welcome screen, "+" opens a second welcome tab, whose Open Folder
+  (the dialog answered with a git repository) makes that tab an edit session
+  named after the folder, with its Files and VCS panes filled.
+
+stage:
+  - use: project-fixture
+    with: { name: git-lazy-tree }
+  - use: front-end-options
+    with: { env: { CODETRACER_TEST_OPEN_FOLDER_DIALOG_PATH: $project } }
+  - use: open-welcome
+
+steps:
+  - wait: { until: { at: 'welcome/welcome-action[label="Open folder"]', present: true }, timeout: 60s }
+  - wait: { until: settled, timeout: 30s }
+  - click: 'session-strip/session-add'
+  - wait: { until: { at: session-strip, count: 2 }, timeout: 30s }
+  - wait: { until: { at: 'welcome/welcome-action[label="Open folder"]', present: true }, timeout: 30s }
+  - click: 'welcome/welcome-action[label="Open folder"]'
+  - wait: { until: { at: 'filesystem/file-node[name="README.md"]', present: true }, timeout: 60s }
+  - expect: { at: welcome, present: false }
+  - expect: { at: session-strip, active: project-git-lazy-tree }
+  - click: 'pane-tab[label="VCS"]'
+  - wait: { until: { at: vcs, commits: { gt: 0 } }, timeout: 30s }

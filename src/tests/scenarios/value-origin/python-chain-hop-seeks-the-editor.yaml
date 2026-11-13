@@ -1,0 +1,34 @@
+scenario: 1
+name: value-origin/python-chain-hop-seeks-the-editor
+pack: codetracer
+summary: >-
+  With `c`'s chain expanded under its row at `print(c)`, the pointer over a
+  hop is a hand, and a click on the hop `b = a` moves the replay to that
+  assignment (line 10).
+
+stage:
+  - use: record-program
+    with: { program: src/db-backend/tests/fixtures/origin/python/simple_trivial_chain/main.py }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - click: 'toolbar/toolbar-button[label="run-to-entry-image"]'
+    settle: false
+  - wait: { until: replay-idle, timeout: 60s }
+  - wait: { until: { at: 'editor[file="main.py"]', current-line: { gt: 0 } }, timeout: 60s }
+  - click: { at: 'editor[file="main.py"]/line[number="12"]', anchor: glyph }
+  - click: 'toolbar/toolbar-button[label="continue-image"]'
+    settle: false
+  - wait: { until: { at: 'editor[file="main.py"]', current-line: 12 }, timeout: 60s }
+  - wait: { until: { at: variables, assert: 'value-of("c", "10")' }, timeout: 60s }
+
+  - click: { at: 'variables/variable[name="c"]', anchor: name, button: right }
+  - wait: { until: { at: context-menu, assert: 'offers("Show value origin")' }, timeout: 15s }
+  - click: 'context-menu/menu-item[label="Show value origin"]'
+  - wait: { until: { at: 'variables/variable[name="c"]/origin-chain', hops: [c = b, b = a, a = 10] }, timeout: 30s }
+  - hover: { at: 'variables/variable[name="c"]/origin-chain/origin-hop[number="2"]', for: 300ms }
+  - expect: { at: window, pointer: pointer }
+  - click: 'variables/variable[name="c"]/origin-chain/origin-hop[number="2"]'
+    settle: false
+  - wait: { until: { at: 'editor[file="main.py"]', current-line: 10 }, timeout: 30s }

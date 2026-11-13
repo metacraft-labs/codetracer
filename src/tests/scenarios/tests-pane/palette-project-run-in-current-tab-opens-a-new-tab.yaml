@@ -1,0 +1,26 @@
+scenario: 1
+name: tests-pane/palette-project-run-in-current-tab-opens-a-new-tab
+pack: codetracer
+summary: >-
+  The palette's "Project: Run in Current Tab" from the edit session still
+  opens a new session tab: an editing session is never replaced.
+
+stage:
+  - use: project-fixture
+    with: { name: noir-suite }
+  - use: open-project
+    with: { folder: $project }
+
+steps:
+  - wait: { until: { at: 'pane-tab[label="TESTS"]', present: true }, timeout: 120s }
+  - wait: { until: settled, timeout: 30s }
+  - click: 'pane-tab[label="TESTS"]'
+  - wait: { until: { at: test-results, count: 2 }, timeout: 120s }
+  - chord: Ctrl+P
+  - wait: { until: { at: omnibox, present: true }, timeout: 15s }
+  - type: ":Project: Run in Current Tab"
+  - wait: { until: { at: 'omnibox/option[label="Project: Run in Current Tab"]', present: true }, timeout: 15s }
+  - click: 'omnibox/option[label="Project: Run in Current Tab"]'
+    settle: false
+  - wait: { until: { at: session-strip, count: 2 }, timeout: 300s }
+  - wait: { until: replay-idle, timeout: 120s }

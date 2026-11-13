@@ -1,0 +1,22 @@
+scenario: 1
+name: edit-mode/noir-edit-toolbar
+pack: codetracer
+summary: >-
+  Editing a Noir crate, the top bar is the edit bar: Build and Run, enabled,
+  naming `nargo compile` and `nargo trace`, and none of the stepping
+  controls.
+
+stage:
+  - use: project-fixture
+    with: { name: noir-build }
+  - use: open-project
+    with: { folder: $project }
+
+steps:
+  - wait: { until: { at: 'edit-toolbar/panel-button[label="Build"]', present: true }, timeout: 120s }
+  - wait: { until: settled, timeout: 30s }
+  - expect: { at: window, mode: edit }
+  - expect: { at: 'edit-toolbar/panel-button[label="Build"]', enabled: true, title: { contains: nargo compile } }
+  - expect: { at: 'edit-toolbar/panel-button[label="Run"]', enabled: true, title: { contains: nargo trace } }
+  - expect: { at: 'toolbar/toolbar-button[label="next-image"]', present: false }
+  - expect: { at: 'toolbar/toolbar-button[label="continue-image"]', present: false }

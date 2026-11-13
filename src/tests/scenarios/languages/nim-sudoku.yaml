@@ -1,0 +1,36 @@
+scenario: 1
+name: languages/nim-sudoku
+pack: codetracer
+summary: >-
+  The Nim sudoku solver's rr recording opens a .nim file and fills the event
+  log, whose output says "Solved"; the call trace holds the Nim runtime's
+  NimMain entries, and the Variables pane lists variables.
+
+stage:
+  - use: record-program
+    with: { program: nim_sudoku_solver/main.nim, backend: rr }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 180s }
+  - wait: { until: { at: window, front-tabs: { contains: ".nim" } }, timeout: 120s }
+
+  - beat: event-log
+    steps:
+      - click: 'pane-tab[label="EVENT LOG"]'
+      - wait: { until: event-log.loaded, timeout: 120s }
+      - click: 'event-log/text-field[label="Find event"]'
+      - type: Solved
+      - wait: { until: { at: event-log, assert: 'has-output("Solved")' }, timeout: 60s }
+
+  - beat: call-trace
+    steps:
+      - click: 'pane-tab[label="CALLTRACE"]'
+      - wait: { until: call-trace.loaded, timeout: 120s }
+      - wait: { until: { at: call-trace, assert: 'has-call-containing("NimMain")' }, timeout: 60s }
+
+  - beat: variables
+    steps:
+      - click: 'pane-tab[label="VARIABLES"]'
+      - wait: { until: variables.loaded, timeout: 120s }
+      - expect: { at: variables, count: { gt: 0 } }

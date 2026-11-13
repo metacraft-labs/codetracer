@@ -1,0 +1,35 @@
+scenario: 1
+name: languages/rust-sudoku
+pack: codetracer
+summary: >-
+  The Rust sudoku solver's rr recording opens main.rs and fills the event log, whose
+  output says "Solved"; a click on the call trace's main::main call moves the replay
+  into main.rs.
+
+stage:
+  - use: record-program
+    with: { program: rs_sudoku_solver/main.rs, backend: rr }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 180s }
+  - wait: { until: { at: 'editor[file="main.rs"]', present: true }, timeout: 120s }
+
+  - beat: event-log
+    steps:
+      - click: 'pane-tab[label="EVENT LOG"]'
+      - wait: { until: event-log.loaded, timeout: 120s }
+      - click: 'event-log/text-field[label="Find event"]'
+      - type: Solved
+      - wait: { until: { at: event-log, assert: 'has-output("Solved")' }, timeout: 60s }
+
+  - beat: call-trace
+    steps:
+      - click: 'pane-tab[label="CALLTRACE"]'
+      - wait: { until: call-trace.loaded, timeout: 120s }
+      - wait: { until: { at: 'call-trace/call[name="main::main"]', present: true }, timeout: 60s }
+      - click: { at: 'call-trace/call[name="main::main"]', anchor: name }
+      - wait: { until: { at: 'call-trace/call[name="main::main"]', current: true }, timeout: 60s }
+      - wait: { until: replay-idle, timeout: 120s }
+      - expect: { at: 'editor[file="main.rs"]', active: true }
+

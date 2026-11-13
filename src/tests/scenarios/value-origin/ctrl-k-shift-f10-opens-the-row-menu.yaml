@@ -1,0 +1,37 @@
+scenario: 1
+name: value-origin/ctrl-k-shift-f10-opens-the-row-menu
+pack: codetracer
+summary: >-
+  With `c`'s value pressed, Ctrl+K Shift+F10 opens the row's menu with "Show
+  value origin" and Esc closes it; Shift+F10 alone is reverse step over in
+  Debug mode — the replay leaves `print(c)` and no menu opens.
+
+stage:
+  - use: record-program
+    with: { program: src/db-backend/tests/fixtures/origin/python/simple_trivial_chain/main.py }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - click: 'toolbar/toolbar-button[label="run-to-entry-image"]'
+    settle: false
+  - wait: { until: replay-idle, timeout: 60s }
+  - wait: { until: { at: 'editor[file="main.py"]', current-line: { gt: 0 } }, timeout: 60s }
+  - click: { at: 'editor[file="main.py"]/line[number="12"]', anchor: glyph }
+  - click: 'toolbar/toolbar-button[label="continue-image"]'
+    settle: false
+  - wait: { until: { at: 'editor[file="main.py"]', current-line: 12 }, timeout: 60s }
+  - wait: { until: { at: variables, assert: 'value-of("c", "10")' }, timeout: 60s }
+  - wait: { until: replay-idle, timeout: 60s }
+
+  - click: { at: 'variables/variable[name="c"]', anchor: value }
+  - chord: Ctrl+K Shift+F10
+  - wait: { until: { at: context-menu, assert: 'offers("Show value origin")' }, timeout: 15s }
+  - key: Esc
+  - wait: { until: { at: context-menu, present: false }, timeout: 15s }
+  - click: { at: 'variables/variable[name="c"]', anchor: value }
+  - chord: Shift+F10
+    settle: false
+  - wait: { until: { at: 'editor[file="main.py"]', current-line: 11 }, timeout: 30s }
+  - wait: { until: replay-idle, timeout: 30s }
+  - expect: { at: context-menu, present: false }

@@ -1,0 +1,25 @@
+scenario: 1
+name: tests-pane/palette-open-recordings-in-the-current-tab
+pack: codetracer
+summary: >-
+  The palette's "Tests: Open Recordings in the Current Tab" sets the
+  project's choice and says so: test recordings open in the current tab.
+
+stage:
+  - use: project-fixture
+    with: { name: noir-suite }
+  - use: open-project
+    with: { folder: $project }
+
+steps:
+  - wait: { until: { at: 'pane-tab[label="TESTS"]', present: true }, timeout: 120s }
+  - wait: { until: settled, timeout: 30s }
+  - click: 'pane-tab[label="TESTS"]'
+  - wait: { until: { at: test-results, count: 2 }, timeout: 120s }
+  - chord: Ctrl+P
+  - wait: { until: { at: omnibox, present: true }, timeout: 15s }
+  - type: ":Open Recordings in the Current"
+  - wait: { until: { at: 'omnibox/option[label="Tests: Open Recordings in the Current Tab"]', present: true }, timeout: 15s }
+  - click: 'omnibox/option[label="Tests: Open Recordings in the Current Tab"]'
+    settle: false
+  - wait: { until: { at: status-line, notifications: { contains: test recordings open in the current tab } }, timeout: 15s }

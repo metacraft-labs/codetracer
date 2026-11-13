@@ -1,0 +1,37 @@
+scenario: 1
+name: tests-pane/refresh-records-then-open-opens-a-new-tab
+pack: codetracer
+summary: >-
+  A row's ⟳ records the test and stays in the edit session; its ⏵ then
+  opens that recording in a new session tab (saying so in its title) and,
+  pressed again from the edit tab, shows the tab it already has.
+
+stage:
+  - use: project-fixture
+    with: { name: noir-suite }
+  - use: open-project
+    with: { folder: $project }
+
+steps:
+  - wait: { until: { at: 'pane-tab[label="TESTS"]', present: true }, timeout: 120s }
+  - wait: { until: settled, timeout: 30s }
+  - click: 'pane-tab[label="TESTS"]'
+  - wait: { until: { at: test-results, count: 2 }, timeout: 120s }
+  - expect: { at: 'test-results/test-row[name="test_passes"]', recorded: false }
+  - click: 'test-results/test-row[name="test_passes"]/panel-button[label="Refresh"]'
+    settle: false
+  - wait: { until: { at: 'test-results/test-row[name="test_passes"]', recorded: true }, timeout: 300s }
+  - expect: { at: session-strip, count: 1 }
+  - expect: { at: test-results, failure: "" }
+  - expect: { at: 'test-results/test-row[name="test_passes"]', open-mode: open-existing, open-title: { matches: 'Opens in a new tab\.$' } }
+  - click: 'test-results/test-row[name="test_passes"]/panel-button[label="Open"]'
+    settle: false
+  - wait: { until: { at: session-strip, count: 2 }, timeout: 120s }
+  - wait: { until: replay-idle, timeout: 120s }
+  - click: 'session-strip/session-tab[#1]'
+  - wait: { until: { at: test-results, count: 2 }, timeout: 30s }
+  - expect: { at: 'test-results/test-row[name="test_passes"]', open-title: { matches: 'Opens in the tab it already has\.$' } }
+  - click: 'test-results/test-row[name="test_passes"]/panel-button[label="Open"]'
+    settle: false
+  - wait: { until: replay-idle, timeout: 120s }
+  - expect: { at: session-strip, count: 2 }

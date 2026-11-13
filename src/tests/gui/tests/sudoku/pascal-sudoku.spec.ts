@@ -6,6 +6,11 @@ import * as helpers from "../../lib/language-smoke-test-helpers";
  * RR-based trace with `$main` as entry point (Free Pascal convention).
  *
  * Port of ui-tests/Tests/ProgramSpecific/PascalSudokuTests.cs
+ *
+ * The rest of this suite (editor, event log, call trace, output) is the
+ * scenario `src/tests/scenarios/languages/pascal-sudoku.yaml`. The flow value stays here: no flow
+ * value is drawn in main on an rr recording (codetracer-pm
+ * issues/2026-11-13-rr-rust-and-pascal-sudoku-show-no-flow-values-at-main.md).
  */
 test.describe("PascalSudoku", () => {
   test.use({
@@ -13,23 +18,7 @@ test.describe("PascalSudoku", () => {
     launchMode: "trace",
   });
 
-  test("editor loads sudoku.pas", async ({ ctPage }) => {
-    await helpers.assertEditorLoadsFile(ctPage, "sudoku.pas");
-  });
-
-  test("event log populated", async ({ ctPage }) => {
-    await helpers.assertEventLogPopulated(ctPage);
-  });
-
-  test("call trace navigation to $main", async ({ ctPage }) => {
-    await helpers.assertCallTraceNavigation(ctPage, "$main", "sudoku.pas");
-  });
-
   test("variable inspection boards", async ({ ctPage }) => {
     await helpers.assertFlowValueVisible(ctPage, "boards");
-  });
-
-  test("output contains Solved", async ({ ctPage }) => {
-    await helpers.assertEventLogContainsText(ctPage, "Solved");
   });
 });

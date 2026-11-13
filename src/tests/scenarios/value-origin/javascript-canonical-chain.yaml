@@ -1,0 +1,30 @@
+scenario: 1
+name: value-origin/javascript-canonical-chain
+pack: codetracer
+summary: >-
+  Stopped at the line that prints `c` in the JavaScript trivial chain, the row
+  menu's "Show value origin" on `c` expands its chain under the row:
+  `c = b`, `b = a`, `a = 10`, ending at 10.
+
+stage:
+  - use: record-program
+    with: { program: src/db-backend/tests/fixtures/origin/javascript/simple_trivial_chain/main.js }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - click: 'toolbar/toolbar-button[label="run-to-entry-image"]'
+    settle: false
+  - wait: { until: replay-idle, timeout: 60s }
+  - wait: { until: { at: 'editor[file="main.js"]', current-line: { gt: 0 } }, timeout: 60s }
+  - click: { at: 'editor[file="main.js"]/line[number="7"]', anchor: glyph }
+  - click: 'toolbar/toolbar-button[label="continue-image"]'
+    settle: false
+  - wait: { until: { at: 'editor[file="main.js"]', current-line: 7 }, timeout: 60s }
+  - wait: { until: { at: variables, assert: 'value-of("c", "10")' }, timeout: 60s }
+
+  - click: { at: 'variables/variable[name="c"]', anchor: name, button: right }
+  - wait: { until: { at: context-menu, assert: 'offers("Show value origin")' }, timeout: 15s }
+  - click: 'context-menu/menu-item[label="Show value origin"]'
+  - wait: { until: { at: 'variables/variable[name="c"]/origin-chain', hops: [c = b, b = a, a = 10] }, timeout: 30s }
+  - expect: { at: 'variables/variable[name="c"]/origin-chain', terminator: "10" }

@@ -1,0 +1,51 @@
+scenario: 1
+name: value-origin/python-breadcrumbs-push-and-pop
+pack: codetracer
+summary: >-
+  In `receive`, `local`'s chain starts `local = p` and ends at 7. Its side
+  panel has one breadcrumb; seeking its first hop and asking for `p`'s origin
+  in the side panel pushes a second, and a click on the first breadcrumb pops
+  back to one.
+
+stage:
+  - use: record-program
+    with: { program: src/db-backend/tests/fixtures/origin/python/parameter_pass/main.py }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - click: 'toolbar/toolbar-button[label="run-to-entry-image"]'
+    settle: false
+  - wait: { until: replay-idle, timeout: 60s }
+  - wait: { until: { at: 'editor[file="main.py"]', current-line: { gt: 0 } }, timeout: 60s }
+  - click: { at: 'editor[file="main.py"]/line[number="9"]', anchor: glyph }
+  - click: 'toolbar/toolbar-button[label="continue-image"]'
+    settle: false
+  - wait: { until: { at: 'editor[file="main.py"]', current-line: 9 }, timeout: 60s }
+  - wait: { until: { at: variables, assert: 'value-of("local", "7")' }, timeout: 60s }
+
+  - click: { at: 'variables/variable[name="local"]', anchor: name, button: right }
+  - wait: { until: { at: context-menu, assert: 'offers("Show value origin")' }, timeout: 15s }
+  - click: 'context-menu/menu-item[label="Show value origin"]'
+  - wait: { until: { at: 'variables/variable[name="local"]/origin-chain', count: { gt: 0 } }, timeout: 30s }
+  - expect: { at: 'variables/variable[name="local"]/origin-chain/origin-hop[number="1"]', text: local = p }
+  - expect: { at: 'variables/variable[name="local"]/origin-chain', terminator: "7" }
+  - wheel: { at: variables, direction: down, amount: 10 }
+  - wait: { until: { at: 'variables/variable[name="local"]/origin-chain/panel-button[label="Show in side panel"]', geometry: { visible: true } }, timeout: 15s }
+  - click: 'variables/variable[name="local"]/origin-chain/panel-button[label="Show in side panel"]'
+  - wait: { until: { at: origin-panel, crumbs: { count: 1 } }, timeout: 30s }
+
+  - click: 'origin-panel/origin-hop[number="1"]'
+    settle: false
+  - wait: { until: { at: variables, assert: 'value-of("p", "7")' }, timeout: 30s }
+  - wait: { until: replay-idle, timeout: 30s }
+  - click: { at: 'variables/variable[name="p"]', anchor: name, button: right }
+  - wait: { until: { at: context-menu, assert: 'offers("Show value origin")' }, timeout: 15s }
+  - click: 'context-menu/menu-item[label="Show value origin"]'
+  - wait: { until: { at: 'variables/variable[name="p"]/origin-chain/panel-button[label="Show in side panel"]', present: true }, timeout: 30s }
+  - wheel: { at: variables, direction: down, amount: 10 }
+  - wait: { until: { at: 'variables/variable[name="p"]/origin-chain/panel-button[label="Show in side panel"]', geometry: { visible: true } }, timeout: 15s }
+  - click: 'variables/variable[name="p"]/origin-chain/panel-button[label="Show in side panel"]'
+  - wait: { until: { at: origin-panel, crumbs: { count: 2 } }, timeout: 30s }
+  - click: 'origin-panel/breadcrumb[#1]'
+  - wait: { until: { at: origin-panel, crumbs: { count: 1 } }, timeout: 30s }

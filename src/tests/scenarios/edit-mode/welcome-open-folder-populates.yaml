@@ -1,0 +1,26 @@
+scenario: 1
+name: edit-mode/welcome-open-folder-populates
+pack: codetracer
+summary: >-
+  On the welcome screen, Open Folder (the folder dialog answered with a git
+  repository) enters Edit mode on it: the welcome screen goes, the Files pane
+  lists README.md and src, and the VCS pane shows the repository's branch
+  and history.
+
+stage:
+  - use: project-fixture
+    with: { name: git-lazy-tree }
+  - use: front-end-options
+    with: { env: { CODETRACER_TEST_OPEN_FOLDER_DIALOG_PATH: $project } }
+  - use: open-welcome
+
+steps:
+  - wait: { until: { at: 'welcome/welcome-action[label="Open folder"]', present: true }, timeout: 60s }
+  - wait: { until: settled, timeout: 30s }
+  - click: 'welcome/welcome-action[label="Open folder"]'
+  - wait: { until: { at: 'filesystem/file-node[name="README.md"]', present: true }, timeout: 60s }
+  - expect: { at: welcome, present: false }
+  - expect: { at: 'filesystem/file-node[name="src"]', present: true }
+  - click: 'pane-tab[label="VCS"]'
+  - wait: { until: { at: vcs, commits: { gt: 0 } }, timeout: 30s }
+  - expect: { at: vcs, no-repo: false }

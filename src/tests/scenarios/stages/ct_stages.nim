@@ -17,7 +17,7 @@
 ## reads or writes the user's CodeTracer state (codetracer `AGENTS.md`,
 ## "Tests never touch your real CodeTracer state").
 
-import std/[json, os, osproc, strutils, times, tables]
+import std/[json, os, osproc, streams, strtabs, strutils, times, tables]
 
 import ../../../frontend/tui/tests/fixtures/fixture_provider
 import ../../../frontend/tui/tests/fixtures/plat65_nim_project
@@ -45,6 +45,7 @@ type
     review*: string         ## a review dataset (`ct review <PATH>`), or ""
     flags*: seq[string]     ## extra command-line options (`front-end-options`)
     welcome*: bool          ## start on the welcome screen (nothing open)
+    fromInside*: bool       ## Edit mode started as `ct edit .` from the project folder
     env*: OrderedTable[string, string]
 
   StageState* = ref object
@@ -255,6 +256,29 @@ proc fixtureProject*(s: StageState; name: string) =
       if f.extractFilename == "verno":
         setFilePermissions(f, {fpUserRead, fpUserWrite, fpUserExec})
     s.launch.env["PATH"] = (s.root / "verno-bin") & ":" & getEnv("PATH")
+  of "verno-run", "verno-held", "verno-proved":
+    # pw8: PLAT-63's `typeerr` package under its own name (a finding's
+    # location is spelled from the package's parent, `typeerr/src/main.nr`)
+    # with the replaying `verno` first on PATH: `verno-held` leaves the
+    # `hold` file that keeps a run in flight; `verno-proved` replays an empty
+    # run that exits 0.
+    let run = writeTypeErrRun()
+    let pkg = s.root / "typeerr"
+    removeDir(pkg)
+    copyDir(run.root, pkg)
+    copyDir(run.bin, s.root / "verno-bin")
+    run.removeRun()
+    let script = s.root / "verno-bin" / "verno"
+    setFilePermissions(script, {fpUserRead, fpUserWrite, fpUserExec})
+    if name == "verno-held":
+      writeFile(s.root / "verno-bin" / "hold", "")
+    if name == "verno-proved":
+      writeFile(s.root / "verno-bin" / "recorded-output.txt", "")
+      writeFile(script, readFile(script).replace("\nexit 1\n", "\nexit 0\n"))
+    s.launch.env["PATH"] = (s.root / "verno-bin") & ":" & getEnv("PATH")
+    s.launch.project = pkg
+    s.launch.workDir = pkg
+    return
   of "vcs-repo":
     # PLAT-47's git repository: a commit, then a modified, an added (staged)
     # and an untracked file (`scripts/plat47-vcs-fixture.sh`).
@@ -482,6 +506,95 @@ proc projectFixture*(s: StageState; name: string) =
     tasks("  nargo:", "    command: \"cat nargo.txt >&2; exit 1\"", "    default: true",
           "  tsc:", "    command: \"cat tsc.txt; exit 2\"",
           "  gcc:", "    command: \"cat gcc.txt >&2; exit 1\"")
+  of "vcs-two-hunks":
+    # A git repository whose newest commit rewrites two regions of src/main.nim
+    # twenty lines apart: its diff has added, removed and context lines in
+    # TWO hunks.
+    proc mainNim(first, last: string): string =
+      result = "proc main() =\n  echo \"" & first & "\"\n"
+      for i in 0 ..< 20: result.add "  echo \"filler " & $i & "\"\n"
+      result.add "  echo \"" & last & "\"\n  echo \"unchanged\"\n"
+    proc git(args: varargs[string]) =
+      let (output, code) = execCmdEx("git " & @args.quoteShellCommand, workingDir = root)
+      if code != 0:
+        raise newException(IOError, "project-fixture " & name & ": git " & @args.join(" ") & ": " & output)
+    createDir(root / "src")
+    writeFile(root / "README.md", "# VCS diff fixture\n")
+    writeFile(root / "src" / "main.nim", mainNim("first", "tail"))
+    git("init", ".")
+    for (k, v) in [("user.email", "tests@codetracer.invalid"), ("user.name", "CodeTracer Tests"),
+                   ("commit.gpgsign", "false")]:
+      git("config", k, v)
+    git("add", ".")
+    git("commit", "-m", "initial")
+    writeFile(root / "src" / "main.nim", mainNim("second", "TAIL"))
+    git("add", ".")
+    git("commit", "-m", "change the greeting")
+  of "vcs-history", "vcs-document":
+    # `vcs-history`: src/app.nim's history — a baseline, a commit that edits
+    # line 20 of 41, then one that rewrites the file; `vcs-document`: one
+    # commit touching both src/main.nim and lib/helper.py, 120 lines each.
+    proc git(args: varargs[string]) =
+      let (output, code) = execCmdEx("git " & @args.quoteShellCommand, workingDir = root)
+      if code != 0:
+        raise newException(IOError, "project-fixture " & name & ": git " & @args.join(" ") & ": " & output)
+    proc commitAll(message: string) =
+      git("add", ".")
+      git("commit", "-m", message)
+    git("init", ".")
+    for (k, v) in [("user.email", "tests@codetracer.invalid"), ("user.name", "CodeTracer Tests"),
+                   ("commit.gpgsign", "false")]:
+      git("config", k, v)
+    if name == "vcs-history":
+      proc appNim(tag: string): string =
+        result = "proc main() =\n"
+        for i in 1 .. 40:
+          result.add(if i == 20: "  echo \"" & tag & " 20\"\n" else: "  echo \"alpha " & $i & "\"\n")
+      createDir(root / "src")
+      writeFile(root / "src" / "app.nim", appNim("alpha"))
+      commitAll("baseline")
+      writeFile(root / "src" / "app.nim", appNim("beta"))
+      commitAll("edit the middle")
+      writeFile(root / "src" / "app.nim", "proc main() =\n  echo \"the file was rewritten\"\n")
+      commitAll("replace the file")
+    else:
+      proc numbered(prefix, word: string): string =
+        for i in 0 ..< 120: result.add prefix & word & " " & $i & "\n"
+      createDir(root / "src")
+      createDir(root / "lib")
+      writeFile(root / "src" / "main.nim", numbered("echo \"", "before\""))
+      writeFile(root / "lib" / "helper.py", numbered("print('", "before')"))
+      commitAll("initial")
+      writeFile(root / "src" / "main.nim", numbered("echo \"", "after\""))
+      writeFile(root / "lib" / "helper.py", numbered("print('", "after')"))
+      commitAll("touch both files")
+  of "noir-suite":
+    # A Noir crate with one passing and one failing test and the inputs its
+    # program runs with (Prover.toml). A passing `ct test run` publishes a
+    # certificate: both certificate stores are this run's own.
+    createDir(root / "src")
+    writeFile(root / "Nargo.toml", "[package]\nname = \"desktop_suite\"\ntype = \"bin\"\n" &
+      "authors = [\"\"]\n\n[dependencies]\n")
+    writeFile(root / "src" / "main.nr", "fn main(x: Field, y: pub Field) {\n    assert(x != y);\n}\n\n" &
+      "#[test]\nfn test_passes() {\n    main(1, 2);\n}\n\n#[test]\nfn test_fails() {\n    main(1, 1);\n}\n")
+    writeFile(root / "Prover.toml", "x = \"1\"\ny = \"2\"\n")
+    for (k, d) in [("TEST_CERTIFICATES_DIR", "certificates-user"), ("TEST_CERTIFICATES_SYSTEM_DIR", "certificates-system")]:
+      createDir(s.root / d)
+      s.launch.env[k] = s.root / d
+  of "git-lazy-tree":
+    # A committed git repository whose folders the Files pane lists one level
+    # per load: `src` and `src/db` each arrive as a "Loading..." stub that a
+    # user's expand fills in (`index/files.FilesystemLoadDepth`).
+    writeFile(root / "README.md", "# Edit mode fixture\n")
+    createDir(root / "src" / "db")
+    writeFile(root / "src" / "main.nim", "proc main() =\n  echo \"edit mode\"\n")
+    writeFile(root / "src" / "db" / "store.nim", "proc store() =\n  echo \"lazy child\"\n")
+    for args in [@["init", "."], @["config", "user.email", "tests@codetracer.invalid"],
+                 @["config", "user.name", "CodeTracer Tests"], @["config", "commit.gpgsign", "false"],
+                 @["add", "."], @["commit", "-m", "initial"]]:
+      let (output, code) = execCmdEx("git " & args.quoteShellCommand, workingDir = root)
+      if code != 0:
+        raise newException(IOError, "project-fixture git-lazy-tree: git " & args.join(" ") & ": " & output)
   else:
     raise newException(ValueError, "project-fixture: unknown project '" & name & "'")
   s.launch.project = root
@@ -706,13 +819,93 @@ proc beamRecording*(s: StageState; language: string) =
       $code & "\n" & output)
   s.launch.recording = if language == "erlang": erlangOut else: elixirOut
 
+# --- pw8: recordings a previous session left -------------------------------
+
+proc knownRecording*(s: StageState) =
+  ## The prepared recording, imported into this run's own list of recordings
+  ## (`$CODETRACER_HOME`), as an earlier session leaves the recordings a user
+  ## opened: the welcome screen lists it as a recent trace. The import is the
+  ## one the desktop's binding makes before it opens a recording
+  ## (`ct host --trace-path`, which imports and, with no client, exits).
+  if s.launch.recording.len == 0:
+    raise newException(ValueError, "known-recording: no recording prepared — call record-program first")
+  let ct = findCtBinary()
+  if ct.len == 0: raise newException(IOError, "known-recording: `ct` is not built")
+  var env = newStringTable(modeCaseSensitive)
+  for k, v in envPairs():
+    if k notin ["CODETRACER_TRACE_ID", "CODETRACER_RECORDING_ID", "CODETRACER_CALLER_PID",
+                "CODETRACER_PREFIX", "LD_PRELOAD"]:
+      env[k] = v
+  for k, v in s.launch.env: env[k] = v
+  env["CODETRACER_IN_UI_TEST"] = "1"
+  let p = startProcess(ct, workingDir = repo() / "src",
+    args = ["host", "--trace-path", s.launch.recording, "0", "--port=0", "--idle-timeout=1ms",
+            "--backend-socket-port=0", "--frontend-socket=0"],
+    env = env, options = {poStdErrToStdOut})
+  let output = p.outputStream.readAll()
+  discard p.waitForExit(60_000)
+  p.close()
+  if "imported as trace id" notin output:
+    raise newException(IOError, "known-recording: `ct host` did not import " &
+                       s.launch.recording & ":\n" & output)
+
+proc recordProjectFile*(s: StageState; rel, backend: string): string =
+  ## A recording of a file in this run's own project folder (`$project/…`),
+  ## made with `ct record` into the run's root and never cached: the
+  ## scenario may edit and re-record that file.
+  if s.launch.project.len == 0:
+    raise newException(ValueError, "record-program: no project folder for $project/" & rel)
+  if rel.contains("..") or rel.isAbsolute:
+    raise newException(ValueError, "record-program: '" & rel & "' is not a path inside the project")
+  let ct = findCtBinary()
+  if ct.len == 0: raise newException(IOError, "record-program: `ct` is not built")
+  let dest = s.root / "project-recording"
+  removeDir(dest)
+  createDir(dest.parentDir)
+  let cmd = quoteShell(ct) & " record " &
+            (if backend.len > 0: "--backend " & quoteShell(backend) & " " else: "") &
+            "-o " & quoteShell(dest) & " " & quoteShell(s.launch.project / rel)
+  let (output, code) = execCmdEx(cmd, workingDir = s.launch.project)
+  if code != 0:
+    raise newException(IOError, "record-program $project/" & rel & ": `ct record` exited " & $code & "\n" & output)
+  if isUsableTraceDir(dest): return dest
+  for kind, path in walkDir(dest):
+    if kind == pcDir and isUsableTraceDir(path): return path
+  raise newException(IOError, "record-program $project/" & rel & ": no recording in " & dest)
+
+proc readOnlyFile*(s: StageState; rel: string) =
+  ## A file of this run's project folder made read-only on disk (after it
+  ## was recorded): a save to it fails, as it does on a file a user may not
+  ## write.
+  if rel.contains("..") or rel.isAbsolute or s.launch.project.len == 0:
+    raise newException(ValueError, "read-only-file: '" & rel & "' is not a file of the project")
+  setFilePermissions(s.launch.project / rel, {fpUserRead, fpGroupRead, fpOthersRead})
+
+proc materializedRecording*(s: StageState; name: string) =
+  ## A recording `scripts/materialize-recording.sh` produces from this tree
+  ## (`cross-process-three-trace`: the account-balance demo's three
+  ## recordings and their session), as the recording to open.
+  if name.len == 0 or name.contains('/') or name.contains(".."):
+    raise newException(ValueError, "materialized-recording: '" & name & "' is not a fixture id")
+  let (output, code) = execCmdEx(quoteShell(repo() / "scripts" / "materialize-recording.sh") & " " &
+                                 quoteShell(name), workingDir = repo())
+  let lines = output.strip.splitLines
+  let dir = if lines.len > 0: lines[^1].strip else: ""
+  if code != 0 or dir.len == 0 or not dirExists(dir):
+    raise newException(IOError, "materialized-recording " & name & ": exited " & $code & "\n" & output)
+  s.launch.recording = dir
+
 proc runStage*(s: StageState; use: string; args: JsonNode) =
   ## One stage call. `open-recording` / `open-project` only DECIDE the launch;
   ## the binding starts its own front-end from `s.launch` afterwards.
   s.stagesRun.add use
   case use
   of "record-program":
-    s.launch.recording = s.recordProgram(argStr(args, "program"), argStr(args, "backend"))
+    let program = argStr(args, "program")
+    if program.startsWith("$project/"):
+      s.launch.recording = s.recordProjectFile(program["$project/".len .. ^1], argStr(args, "backend"))
+    else:
+      s.launch.recording = s.recordProgram(program, argStr(args, "backend"))
   of "nim-project":
     s.nimProject()
   of "open-recording":
@@ -736,6 +929,9 @@ proc runStage*(s: StageState; use: string; args: JsonNode) =
     s.launch.recording = ""
     s.launch.file = argStr(args, "file")
     s.launch.workDir = folder
+    # pw8: `from-inside: true` starts `ct edit .` with the folder as the
+    # working directory, as a user does from a shell in it.
+    s.launch.fromInside = not args.isNil and args{"from-inside"}.getBool(false)
     s.launch.width = argInt(args, "width", s.launch.width)
     s.launch.height = argInt(args, "height", s.launch.height)
   of "open-review":
@@ -800,6 +996,13 @@ proc runStage*(s: StageState; use: string; args: JsonNode) =
     s.copyProject(argStr(args, "folder"))
   of "saved-layout":
     s.savedLayout(argStr(args, "file"), argStr(args, "ops"))
+  # --- pw8 ---
+  of "known-recording":
+    s.knownRecording()
+  of "read-only-file":
+    s.readOnlyFile(argStr(args, "file"))
+  of "materialized-recording":
+    s.materializedRecording(argStr(args, "name"))
   of "start-from-layout":
     let layout = argStr(args, "layout")
     let src = currentSourcePath().parentDir.parentDir / "fixtures" / "layouts" / layout
@@ -825,6 +1028,7 @@ proc toJson*(s: StageState): JsonNode =
      "file": s.launch.file, "workDir": s.launch.workDir, "width": s.launch.width,
      "height": s.launch.height, "tick": s.launch.tick, "keymap": s.launch.keymap,
      "review": s.launch.review, "flags": s.launch.flags, "welcome": s.launch.welcome,
+     "fromInside": s.launch.fromInside,
      "env": env}
 
 proc removeStage*(s: StageState) =
@@ -851,6 +1055,7 @@ proc loadFrom*(path: string): StageState =
   result.launch.keymap = j["keymap"].getStr
   result.launch.review = j{"review"}.getStr
   result.launch.welcome = j{"welcome"}.getBool
+  result.launch.fromInside = j{"fromInside"}.getBool
   for k, v in j["env"]: result.launch.env[k] = v.getStr
   for f in j{"flags"}.getElems: result.launch.flags.add f.getStr
   for u in j{"stagesRun"}.getElems: result.stagesRun.add u.getStr

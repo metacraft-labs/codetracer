@@ -1,0 +1,23 @@
+scenario: 1
+name: welcome/welcome-screen-parts
+pack: codetracer
+summary: >-
+  Started with nothing open, the window shows the welcome screen: its left
+  and right panels, the Recent folders and Recent traces sections with their
+  titles, and start options to open a folder and to record.
+
+stage:
+  - use: open-welcome
+
+steps:
+  - wait: { until: { at: welcome, present: true }, timeout: 60s }
+  - wait: { until: settled, timeout: 30s }
+  - expect: { at: welcome, sections: { contains: welcome-left-panel } }
+  - expect: { at: welcome, sections: { contains: welcome-right-panel } }
+  - expect: { at: welcome, sections: { contains: recent-folders } }
+  - expect: { at: welcome, sections: { contains: recent-traces-title } }
+  - expect: { at: welcome, text: { contains: Recent traces } }
+  - expect: { at: welcome, text: { contains: Recent folders } }
+  - expect: { at: welcome, text: { subsequence: [Recent folders, Recent traces] } }
+  - expect: { at: 'welcome/welcome-action[label="Open folder"]', present: true }
+  - expect: { at: 'welcome/welcome-action[label="Record new trace"]', present: true }

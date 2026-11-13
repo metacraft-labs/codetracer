@@ -140,4 +140,62 @@ applicable:
   - ../breakpoints/column-breakpoint-replaces-the-lines-column.yaml
   - ../breakpoints/shift-f9-column-breakpoint-from-the-gutter-side.yaml
   - ../languages/erlang-canonical-flow.yaml
+  # --- pw8 ---
+  - ../auto-hide/left-strip-beside-the-layout.yaml
+  - ../cross-process/event-log-markers-jump-across.yaml
+  - ../edit-mode/ct-edit-dot-from-the-folder.yaml
+  - ../edit-mode/ctrl-f5-round-trips-the-bar.yaml
+  - ../edit-mode/files-fill-lazy-folders-and-open.yaml
+  - ../edit-mode/noir-edit-toolbar.yaml
+  - ../edit-mode/replay-ctrl-f5-round-trips-the-bar.yaml
+  - ../edit-mode/tabs-keep-their-own-bar.yaml
+  - ../edit-mode/welcome-new-tab-open-folder.yaml
+  - ../edit-mode/welcome-open-folder-populates.yaml
+  - ../languages/nim-sudoku.yaml
+  - ../languages/pascal-sudoku.yaml
+  - ../languages/python-sudoku.yaml
+  - ../languages/ruby-sudoku.yaml
+  - ../languages/rust-sudoku.yaml
+  - ../launch-config/menu-lists-launch-configurations.yaml
+  - ../launch-config/ruby-fibonacci-records-and-opens.yaml
+  - ../re-record/ctrl-r-failed-save-says-so.yaml
+  - ../tests-pane/context-menu-re-record-opens-a-new-tab.yaml
+  - ../tests-pane/editor-run-test-opens-a-new-tab.yaml
+  - ../tests-pane/open-without-a-recording-records-and-enters.yaml
+  - ../tests-pane/palette-open-recordings-in-the-current-tab.yaml
+  - ../tests-pane/palette-project-run-in-current-tab-opens-a-new-tab.yaml
+  - ../tests-pane/palette-tests-run-records-the-selected-row.yaml
+  - ../tests-pane/refresh-records-then-open-opens-a-new-tab.yaml
+  - ../tests-pane/run-paints-one-pass-and-one-fail.yaml
+  - ../tests-pane/toolbar-run-saves-then-records-the-project.yaml
+  - ../value-origin/c-cross-thread-copy.yaml
+  - ../value-origin/ctrl-k-shift-f10-opens-the-row-menu.yaml
+  - ../value-origin/ctrl-shift-o-toggles-the-chain-in-place.yaml
+  - ../value-origin/javascript-canonical-chain.yaml
+  - ../value-origin/pointer-shapes.yaml
+  - ../value-origin/python-breadcrumbs-push-and-pop.yaml
+  - ../value-origin/python-chain-expands-under-the-row.yaml
+  - ../value-origin/python-chain-hop-seeks-the-editor.yaml
+  - ../value-origin/python-computational-operands.yaml
+  - ../value-origin/python-pin-chain-to-scratchpad.yaml
+  - ../value-origin/python-side-panel-keyboard.yaml
+  - ../value-origin/ruby-canonical-chain.yaml
+  - ../vcs/commit-opens-its-whole-document.yaml
+  - ../vcs/diff-tab-colours-the-whole-file.yaml
+  - ../vcs/expand-shows-hidden-context.yaml
+  - ../vcs/file-under-commit-scrolls-the-document.yaml
+  - ../vcs/heading-opens-the-full-file.yaml
+  - ../vcs/hunks-select-and-copy-as-patch.yaml
+  - ../vcs/view-diff-opens-a-diff-tab.yaml
+  - ../vcs/view-diff-twice-focuses-the-tab.yaml
+  - ../vcs/view-mode-toggle-keeps-the-history.yaml
+  - ../verification/bare-project-offers-no-run.yaml
+  - ../verification/empty-run-reads-proved.yaml
+  - ../verification/held-run-is-live-and-stops.yaml
+  - ../verification/offers-verify-with-verno.yaml
+  - ../verification/run-lists-findings-and-opens-the-source.yaml
+  - ../watch/typed-watches-in-the-browser.yaml
+  - ../welcome/new-file-beside-an-open-replay.yaml
+  - ../welcome/recent-trace-age-and-tooltip.yaml
+  - ../welcome/welcome-screen-parts.yaml
 unsupported: []

@@ -1,0 +1,38 @@
+scenario: 1
+name: tests-pane/toolbar-run-saves-then-records-the-project
+pack: codetracer
+summary: >-
+  The edit bar's Run saves the edited main.nr first, records the project's
+  program and opens it in a new session tab; Run again from the edit tab
+  reuses that tab.
+
+stage:
+  - use: project-fixture
+    with: { name: noir-suite }
+  - use: open-project
+    with: { folder: $project }
+
+steps:
+  - wait: { until: { at: 'pane-tab[label="TESTS"]', present: true }, timeout: 120s }
+  - wait: { until: settled, timeout: 30s }
+  - click: 'pane-tab[label="TESTS"]'
+  - wait: { until: { at: test-results, count: 2 }, timeout: 120s }
+  - click: 'pane-tab[label="src/main.nr"]'
+  - click: { at: 'editor[file="main.nr"]/line[number="1"]', anchor: text-start }
+  - chord: Ctrl+Home
+  - type: "// the project's run"
+  - key: Enter
+  - wait: { until: { at: 'editor[file="main.nr"]', assert: 'shows-text("// the project")' }, timeout: 15s }
+  - wait: { until: { at: 'edit-toolbar/panel-button[label="Run"]', enabled: true }, timeout: 60s }
+  - click: 'edit-toolbar/panel-button[label="Run"]'
+    settle: false
+  - wait: { until: { at: session-strip, count: 2 }, timeout: 300s }
+  - wait: { until: replay-idle, timeout: 120s }
+  - click: 'session-strip/session-tab[#1]'
+  - wait: { until: { at: 'pane-tab[label="src/main.nr"]', present: true }, timeout: 30s }
+  - wait: { until: { at: 'edit-toolbar/panel-button[label="Run"]', enabled: true }, timeout: 60s }
+  - click: 'edit-toolbar/panel-button[label="Run"]'
+    settle: false
+  - wait: { until: { at: window, mode: debug }, timeout: 300s }
+  - wait: { until: replay-idle, timeout: 120s }
+  - expect: { at: session-strip, count: 2 }
