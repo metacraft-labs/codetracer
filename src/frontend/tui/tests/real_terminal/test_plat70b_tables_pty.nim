@@ -290,8 +290,12 @@ suite "PLAT-70 Part B on a real terminal: the table panes":
         sess.hover(r, cellCol + 1)
         var changed = false
         if cut:
-          # A cut cell's tooltip, waited for (the host is loaded) …
-          let deadline = getMonoTime() + initDuration(milliseconds = 5000)
+          # A cut cell's tooltip, waited for (the host is loaded) … 5 s was
+          # not enough at a load average near 100 on 24 cores: measured
+          # 2026-11-13, the tooltip arrived after the deadline on one or two
+          # cells in most runs, and on none in a run at load 60. The wait ends
+          # as soon as the tooltip is drawn, so only a missing one pays it.
+          let deadline = getMonoTime() + initDuration(milliseconds = 15000)
           while getMonoTime() < deadline and not changed:
             sleep(100)
             changed = sess.snap().tooltipUnder()
