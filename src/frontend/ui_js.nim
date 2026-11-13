@@ -765,6 +765,21 @@ proc nimSpecificViewItems(data: Data): seq[MenuNode] =
       aTraceStaticBlockAtCursor)
   ]
 
+var editModeLang = LangUnknown
+  ## The language of the project Edit mode opened (`onNoTrace`), which
+  ## `effectiveTraceLang` answers while no recording is loaded.
+
+proc editProjectLang(lang: Lang; filenames: seq[string]): Lang =
+  ## The Edit-mode project's language: the one the main process classified,
+  ## else Nim when the project holds a Nim source (the classification reads a
+  ## save's project, which a folder opened for the first time has not got).
+  if lang != LangUnknown:
+    return lang
+  for f in filenames:
+    if f.endsWith(".nim"):
+      return LangNim
+  LangUnknown
+
 proc effectiveTraceLang(data: Data): Lang =
   ## Resolve the language of the currently loaded trace defensively.
   ##
@@ -776,7 +791,10 @@ proc effectiveTraceLang(data: Data): Lang =
   ## reflects reality on traces that were recorded before that
   ## upstream classifier fix landed.
   if data.trace.isNil:
-    return LangUnknown
+    # Edit mode has no recording: its project's language, so View Generated
+    # C Source — which compiles the edited file then (Generated-Code-Listing
+    # §13.4, HSF-E11) — is in the menu of a Nim project too.
+    return editModeLang
   if data.trace.lang != LangUnknown:
     return data.trace.lang
   let program = $data.trace.program
@@ -3311,6 +3329,7 @@ proc onTraceLoaded(
     # traceKind=cstring,
     dontAskAgain=bool,
     sourcemapPaths=seq[cstring],
+    generatedCPaths=seq[cstring],
     macroSourcemapPath=cstring,
     visualReplayAvailable=bool,
     visualReplayPlayerUrl=cstring,
@@ -3357,6 +3376,14 @@ proc onTraceLoaded(
     data.activeSession.sourcemap = await loadFrontendSourcemap(response.sourcemapPaths, readFileUtf8)
   else:
     data.activeSession.sourcemap = FrontendSourcemap(loaded: false)
+  # The nimcache's C files and their maps, which View Generated C Source
+  # reads from disk when the replay does not serve them (§13.4).
+  data.activeSession.nimcacheFiles = @[]
+  if data.trace.lang == LangNim:
+    # (Absent from a host whose index predates the field.)
+    if not seqIsNil(response.generatedCPaths):
+      for p in response.generatedCPaths: data.activeSession.nimcacheFiles.add p
+    for p in response.sourcemapPaths: data.activeSession.nimcacheFiles.add p
 
   # S6: Track whether a macro sourcemap is available for this trace.
   # The backend loads the macro_sourcemap files during trace setup and handles
@@ -3888,6 +3915,12 @@ proc onNoTrace(
   data.homedir = response.home
   data.services.debugger.paths = response.filenames
   data.services.debugger.functions = response.functions
+  editModeLang =
+    if data.startOptions.edit:
+      editProjectLang(response.lang,
+                      if seqIsNil(response.filenames): @[]
+                      else: response.filenames)
+    else: LangUnknown
   data.ui.menuNode = data.webTechMenu(baseName(response.path))
 
   # A NEW PROJECT ASKS FOR LSP AGAIN.
@@ -5279,6 +5312,10 @@ proc configureIPC(data: Data) =
     # AND WHAT SETTLES THE PROJECT'S RUN (Edit-Mode-Toolbar.md §9.4). See
     # `onProgramRunSettled`.
     "program-run-settled"
+    # Edit mode's View Generated C Source: the main process compiled the
+    # edited Nim file to C (`index/nim_c_listing`). See
+    # `generated_code.onNimCListingCompiled`.
+    "nim-c-listing-compiled"
     # The Verification pane's run (`index/verification_runner`).
     "verification-running"
     "verification-output"
@@ -6390,7 +6427,7 @@ var actions*: array[ClientAction, ClientActionHandler] = [
   proc(actionData: JsObject) = # aViewGeneratedCSource
     data.viewGeneratedCAtCaret(),
   aViewDisassembly: proc(actionData: JsObject) = # aViewDisassembly
-    data.openLowLevelCode(),
+    generated_code.showDisassembly(data),
   aTraceMacroAtCursor: proc(actionData: JsObject) = # aTraceMacroAtCursor
     ## Nim's compile-time tracing at the active editor's caret
     ## (`trace_macro.startNimTrace`, through the shared ViewModel).

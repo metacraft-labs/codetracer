@@ -2046,6 +2046,7 @@ test-frontend-js:
   ct_user_state_stage_sandbox frontend-js bash "$0" || :
   ct_export_scratch_codetracer_home frontend-js
   nim_sourcemap_test="$(mktemp "${TMPDIR:-/tmp}/codetracer-nim-sourcemap-test.XXXXXX.js")"
+  nim_c_listing_test="$(mktemp "${TMPDIR:-/tmp}/codetracer-nim-c-listing-test.XXXXXX.js")"
   frontend_lang_test="$(mktemp "${TMPDIR:-/tmp}/codetracer-frontend-lang-test.XXXXXX.js")"
   scratchpad_dispatch_test="$(mktemp "${TMPDIR:-/tmp}/codetracer-scratchpad-add-dispatch-test.XXXXXX.js")"
   target_axes_js_test="$(mktemp "${TMPDIR:-/tmp}/codetracer-target-axes-js-test.XXXXXX.js")"
@@ -2061,11 +2062,17 @@ test-frontend-js:
   run_to_cursor_test="$(mktemp "${TMPDIR:-/tmp}/codetracer-run-to-cursor-test.XXXXXX.js")"
   html_sinks_probe="$(mktemp "${TMPDIR:-/tmp}/codetracer-html-sinks-probe.XXXXXX.js")"
   dap_refusal_test="$(mktemp "${TMPDIR:-/tmp}/codetracer-dap-refusal-test.XXXXXX.js")"
-  trap '_ct_rc=$?; rm -f "$nim_sourcemap_test" "$frontend_lang_test" "$scratchpad_dispatch_test" "$target_axes_js_test" "$ipc_registry_test" "$monaco_operations_test" "$desktop_list_operations_test" "$shortcut_presets_test" "$shortcut_dialog_test" "$debug_toolbar_tooltips_test" "$component_registry_binding_test" "$component_ids_across_sessions_test" "$stop_command_test" "$run_to_cursor_test" "$html_sinks_probe" "$dap_refusal_test"; ct_remove_scratch_codetracer_home frontend-js; ct_user_state_guard_exit frontend-js "$_ct_rc"' EXIT
+  trap '_ct_rc=$?; rm -f "$nim_sourcemap_test" "$nim_c_listing_test" "$frontend_lang_test" "$scratchpad_dispatch_test" "$target_axes_js_test" "$ipc_registry_test" "$monaco_operations_test" "$desktop_list_operations_test" "$shortcut_presets_test" "$shortcut_dialog_test" "$debug_toolbar_tooltips_test" "$component_registry_binding_test" "$component_ids_across_sessions_test" "$stop_command_test" "$run_to_cursor_test" "$html_sinks_probe" "$dap_refusal_test"; ct_remove_scratch_codetracer_home frontend-js; ct_user_state_guard_exit frontend-js "$_ct_rc"' EXIT
   echo "Running Nim Source Map V3 frontend tests..."
   nim -d:nodejs -d:chronicles_enabled=off -d:ctIndex -d:server \
     --out:"$nim_sourcemap_test" js src/frontend/tests/nim_sourcemap_test.nim
   node "$nim_sourcemap_test"
+  # Edit mode's View Generated C Source: the main process compiles a Nim file
+  # to C with the `nim` on PATH (Generated-Code-Listing.md §13.4).
+  echo "Running the desktop's Nim-to-C listing compile tests..."
+  nim -d:nodejs -d:chronicles_enabled=off -d:ctIndex -d:server \
+    --out:"$nim_c_listing_test" js src/frontend/tests/nim_c_listing_test.nim
+  node "$nim_c_listing_test"
   echo "Running frontend language mapping tests..."
   nim -d:nodejs -d:chronicles_enabled=off -d:ctRenderer -d:ctInExtension \
     --out:"$frontend_lang_test" js src/frontend/tests/frontend_lang_test.nim
@@ -6080,6 +6087,12 @@ plat60-capture-electron *args:
 # (`src/tests/visual/answers/plat60-native-low-level-code.electron.json`).
 plat60-native-capture-electron *args:
   bash scripts/plat60-native-capture-electron.sh "$@"
+
+# View > View Generated C Source and View Disassembly in the real desktop app
+# (Generated-Code-Listing.md §13.4): a stock-Nim recording (GENC_STOCK_NIM),
+# a `ct record` recording and Edit mode.
+generated-c-desktop *args:
+  bash scripts/generated-c-desktop.sh "$@"
 
 # The §30a arm: the two answer producers are independent readers.
 plat35-answer-independence:

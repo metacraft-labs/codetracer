@@ -402,6 +402,11 @@ proc configureIpcMain* =
     # `CODETRACER::program-run-settled` (`index/traces.onRunProgram`,
     # Edit-Mode-Toolbar.md §9.4).
     "run-program"
+    # Edit mode's View Generated C Source: the edited Nim file compiled to C,
+    # answered with `CODETRACER::nim-c-listing-compiled`
+    # (`index/traces.onNimCListingCompile` over `index/nim_c_listing`,
+    # Generated-Code-Listing.md §13.4).
+    "nim-c-listing-compile"
     "restart-subsystem"
 
     # welcome screen options

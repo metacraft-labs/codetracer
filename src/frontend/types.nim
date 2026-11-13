@@ -2092,6 +2092,11 @@ type
     savedLayoutConfig*: GoldenLayoutResolvedConfig
     # Nim-to-C sourcemap for ViewTargetSource (S3).
     sourcemap*: FrontendSourcemap
+    # The generated C of a `ct record` Nim recording and its Source Map v3
+    # files, on disk in `<trace>/nimcache/` (`index/nim_sourcemap_paths`):
+    # where View Generated C Source reads what the replay does not serve
+    # (`ui/generated_code`, Generated-Code-Listing §13.4).
+    nimcacheFiles*: seq[cstring]
     # S6: Whether a macro sourcemap was found for this trace.
     # The actual macro expansion resolution happens in the backend;
     # this flag lets the frontend know that ALT+E expansion is available.

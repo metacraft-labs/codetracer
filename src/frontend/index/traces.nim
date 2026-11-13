@@ -1,4 +1,4 @@
-import nim_sourcemap_paths
+import nim_sourcemap_paths, nim_c_listing
 import
   std / [ async, jsffi, strutils, sequtils, strformat, os, json, jsconsole ],
   electron_vars, files, config, debugger,
@@ -623,11 +623,14 @@ proc loadTrace*(main: js, trace: Trace, config: Config, helpers: Helpers): Futur
   # For Nim traces, locate every module sourcemap so the renderer can load them
   # for ViewTargetSource line synchronization between Nim and C code.
   var sourcemapPaths: seq[cstring] = @[]
+  var generatedCPaths: seq[cstring] = @[]
   var macroSourcemapPath = cstring""
   if trace.lang == LangNim:
     sourcemapPaths = findSourcemapPaths(trace.outputFolder)
     if sourcemapPaths.len > 0:
       infoPrint "index: found sourcemaps at ", $sourcemapPaths
+    # And the C files they map, for View Generated C Source (§13.4).
+    generatedCPaths = findNimcacheCPaths(trace.outputFolder)
     macroSourcemapPath = findMacroSourcemapPath(trace.outputFolder)
     if macroSourcemapPath.len > 0:
       infoPrint "index: found macro sourcemap at ", $macroSourcemapPath
@@ -652,6 +655,7 @@ proc loadTrace*(main: js, trace: Trace, config: Config, helpers: Helpers): Futur
     rawDiffIndex: startOptions.rawDiffIndex,
     dontAskAgain: dontAskAgain,
     sourcemapPaths: sourcemapPaths,
+    generatedCPaths: generatedCPaths,
     macroSourcemapPath: macroSourcemapPath,
     visualReplayAvailable: visualReplayAvailable,
     visualReplayPlayerUrl: visualReplayPlayerUrl,
@@ -2198,3 +2202,38 @@ proc onRunTestSuite*(sender: JsObject,
   finally:
     if eventsPath.len > 0:
       removeFileQuietly(eventsPath)
+
+proc onNimCListingCompile*(sender: JsObject; request: JsObject) {.async.} =
+  ## `CODETRACER::nim-c-listing-compile` {source, requestId}: compile, then
+  ## answer the asking tab with `CODETRACER::nim-c-listing-compiled`
+  ## {requestId, source, compiled, cFiles, message} — on every exit. (Not
+  ## `ok`: a `js{}` key of that name, with `results` imported here, reached
+  ## the renderer as `invalid` — measured.)
+  let source =
+    if request.isNil or request.source.isNil or request.source.isUndefined: ""
+    else: $request.source.to(cstring)
+  let requestId =
+    if request.isNil or request.requestId.isNil or request.requestId.isUndefined: 0
+    else: request.requestId.to(int)
+  var outcome: NimCListingOutcome
+  if source.len == 0:
+    outcome = NimCListingOutcome(message: "no Nim file was named to compile")
+  else:
+    # A save the renderer started just before asking is on its way to disk,
+    # and the compile must read it (Run waits the same way).
+    var waited = 0
+    while files.savesInFlight > 0 and waited < 10_000:
+      await asyncSleep(20)
+      waited += 20
+    let nim = nimCListingCompiler()
+    infoPrint "index: nim-c-listing: ", nim, " c --compileOnly ", source
+    outcome = await compileNimCListing(nim, source, nimCListingCacheOf(source))
+    if not outcome.ok:
+      warnPrint "index: nim-c-listing: ", outcome.message
+  var cFiles: seq[cstring] = @[]
+  for f in outcome.cFiles:
+    cFiles.add cstring(f)
+  mainWindow.webContents.send "CODETRACER::nim-c-listing-compiled",
+    answerFor(request, js{requestId: requestId, source: cstring(source),
+                          compiled: outcome.ok, cFiles: cFiles,
+                          message: cstring(outcome.message)})

@@ -123,7 +123,17 @@ proc main(): Future[void] {.async.} =
       let cPath = sm.cSources[pair[0]]
       doAssert sm.cToNim[cPath][pair[1]][1] == 3
     )
-    doAssert cases == 6
+    await runCase("a recording's nimcache C files are offered with their maps", proc(): Future[void] {.async.} =
+      # View Generated C Source's candidates (Generated-Code-Listing §13.4):
+      # the module C files, not their maps, objects or depfiles.
+      write(cstring(cache / "@mmain.nim.c.o"), cstring"object")
+      write(cstring(cache / "@mmain.nim.c.d"), cstring"depfile")
+      let cPaths = findNimcacheCPaths(scratch)
+      doAssert cPaths == @[cstring(second), cstring(first)],
+        "expected the two module C files, sorted, got " & $cPaths
+      doAssert findNimcacheCPaths(cstring($scratch / "absent")).len == 0
+    )
+    doAssert cases == 7
     if failures > 0:
       failProcess()
   finally:
