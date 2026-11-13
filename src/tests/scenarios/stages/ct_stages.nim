@@ -454,7 +454,7 @@ proc stubAgent*(s: StageState; agent: string) =
   let script =
     case agent
     of "refusing": repo() / "src/tests/gui/tests/agent-activity/fixtures/acp-refusing-agent.js"
-    of "replay": repo() / "src/tests/gui/tests/agent-activity-deepreview/fixtures/acp-replay-agent.js"
+    of "replay", "live": repo() / "src/tests/gui/tests/agent-activity-deepreview/fixtures/acp-replay-agent.js"
     else: raise newException(ValueError, "stub-agent: unknown agent '" & agent & "'")
   let node = findExe("node")
   if node.len == 0:
@@ -465,6 +465,14 @@ proc stubAgent*(s: StageState; agent: string) =
     "#!/bin/sh\nexec " & quoteShell(node) & " " & quoteShell(script) & " \"$@\"\n")
   s.launch.env["PATH"] = dir & ":" & getEnv("PATH")
   s.launch.env["CT_FAKE_ACP_LOG"] = dir / "methods.log"
+  if agent == "live":
+    # The native front-ends speak ACP themselves and start the agent the
+    # environment names: the replay agent's live session, which answers a
+    # prompt with the review-evidence turn, streamed.
+    createDir(dir / "evidence")
+    s.launch.env["CODETRACER_AGENT_ACP_COMMAND"] = node
+    s.launch.env["CODETRACER_AGENT_ACP_ARGS"] = script & " --evidence --evidence-dir=" &
+      (dir / "evidence") & " --live-delay-ms=50 --prompt-log=" & (dir / "prompts.jsonl")
 
 proc reviewDataset*(s: StageState; variant: string) =
   ## A review dataset (`deepreview/fixtures/sample-review.json`), written into

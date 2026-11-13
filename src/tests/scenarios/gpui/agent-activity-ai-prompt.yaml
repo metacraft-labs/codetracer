@@ -1,0 +1,25 @@
+scenario: 1
+name: gpui/agent-activity-ai-prompt
+pack: codetracer
+summary: >-
+  `/ai <prompt>` typed into the omnibox starts the agent's session: the
+  Agent Activity pane shows the user's turn and then the agent's streamed
+  answer (the review evidence it collected), and the replay does not move.
+
+stage:
+  - use: record-program
+    with: { program: calc }
+  - use: stub-agent
+    with: { agent: live }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - click: { at: 'pane-tab[label="Agent Activity"]' }
+  - wait: { until: { at: 'pane[title="Agent Activity"]', present: true }, timeout: 30s }
+  - chord: Ctrl+P
+  - type: "/ai collect the review"
+  - key: Enter
+  - wait: { until: { at: 'pane[title="Agent Activity"]', assert: 'has-row("collect the review")' }, timeout: 60s }
+  - wait: { until: { at: 'pane[title="Agent Activity"]', assert: 'has-row("Collected review evidence")' }, timeout: 60s }
+  - expect: { at: replay-position, tick: 1 }

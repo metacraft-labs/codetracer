@@ -34,6 +34,7 @@ build_dir="${CT_SCENARIO_BUILD:-${root}/build}"
 dvs_src="${DVS_SRC:-${ws}/DemoVideoScript/src}"
 dta_src="${DVS_TERMASSERT_SRC:-${ws}/DemoVideoScript-TermAssert/src}"
 dga_src="${DVS_GUIASSERT_SRC:-${ws}/DemoVideoScript-GuiAssert/src}"
+ga_src="${GUIASSERT_SRC:-${ws}/GuiAssert/src}"
 dpw_root="${DVS_PLAYWRIGHT_ROOT:-${ws}/DemoVideoScript-Playwright}"
 
 require() {
@@ -69,7 +70,7 @@ build_terminal() {
 
 build_gpui() {
 	require "DemoVideoScript-GuiAssert" "${dga_src}/demo_video_script_guiassert.nim"
-	nim c "${nim_common[@]}" --path:../GuiAssert/src --path:"${dvs_src}" --path:"${dga_src}" \
+	nim c "${nim_common[@]}" --path:"${ga_src}" --path:"${dvs_src}" --path:"${dga_src}" \
 		--nimcache:"${nimcache}/scenario-guiassert" \
 		-o:"${bin}/dvs-guiassert-codetracer" "${S}/bindings/guiassert/dvs_guiassert_codetracer.nim"
 }

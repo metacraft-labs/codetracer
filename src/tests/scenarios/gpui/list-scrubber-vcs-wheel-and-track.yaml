@@ -1,0 +1,72 @@
+scenario: 1
+name: gpui/list-scrubber-vcs-wheel-and-track
+pack: codetracer
+summary: >-
+  A VCS pane with more rows than it holds scrolls under the wheel without
+  being focused first, and a press at the end of its scrubber's track shows
+  its last rows; a press at the track's start brings back the first.
+
+stage:
+  - use: record-program
+    with: { program: calc }
+  - use: fixture-project
+    with: { name: vcs-repo }
+  - use: write-project
+    with:
+      files:
+        extra-01.txt: "1\n"
+        extra-02.txt: "2\n"
+        extra-03.txt: "3\n"
+        extra-04.txt: "4\n"
+        extra-05.txt: "5\n"
+        extra-06.txt: "6\n"
+        extra-07.txt: "7\n"
+        extra-08.txt: "8\n"
+        extra-09.txt: "9\n"
+        extra-10.txt: "10\n"
+        extra-11.txt: "11\n"
+        extra-12.txt: "12\n"
+        extra-13.txt: "13\n"
+        extra-14.txt: "14\n"
+        extra-15.txt: "15\n"
+        extra-16.txt: "16\n"
+        extra-17.txt: "17\n"
+        extra-18.txt: "18\n"
+        extra-19.txt: "19\n"
+        extra-20.txt: "20\n"
+        extra-21.txt: "21\n"
+        extra-22.txt: "22\n"
+        extra-23.txt: "23\n"
+        extra-24.txt: "24\n"
+        extra-25.txt: "25\n"
+        extra-26.txt: "26\n"
+        extra-27.txt: "27\n"
+        extra-28.txt: "28\n"
+        extra-29.txt: "29\n"
+        extra-30.txt: "30\n"
+        extra-31.txt: "31\n"
+        extra-32.txt: "32\n"
+        extra-33.txt: "33\n"
+        extra-34.txt: "34\n"
+        extra-35.txt: "35\n"
+        extra-36.txt: "36\n"
+        extra-37.txt: "37\n"
+        extra-38.txt: "38\n"
+        extra-39.txt: "39\n"
+        extra-40.txt: "40\n"
+  - use: open-recording
+    with: { width: 1440, height: 700 }
+
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - click: { at: 'pane-tab[label="VCS"]' }
+  - wait: { until: { at: 'pane[title="VCS"]', assert: 'has-row("WORKING TREE (43)")' }, timeout: 30s }
+  - expect: { at: 'pane[title="VCS"]', assert: 'lacks-row("extra-40.txt")' }
+  - wheel: { at: 'pane[title="VCS"]', direction: down, amount: 30 }
+  - wait: { until: { at: 'pane[title="VCS"]', assert: 'lacks-row("WORKING TREE (43)")' }, timeout: 20s }
+  - wheel: { at: 'pane[title="VCS"]', direction: up, amount: 30 }
+  - wait: { until: { at: 'pane[title="VCS"]', assert: 'has-row("WORKING TREE (43)")' }, timeout: 20s }
+  - click: { at: 'pane[title="VCS"]', anchor: scrubber-end }
+  - wait: { until: { at: 'pane[title="VCS"]', assert: 'has-row("extra-40.txt")' }, timeout: 20s }
+  - click: { at: 'pane[title="VCS"]', anchor: scrubber-start }
+  - wait: { until: { at: 'pane[title="VCS"]', assert: 'has-row("WORKING TREE (43)")' }, timeout: 20s }

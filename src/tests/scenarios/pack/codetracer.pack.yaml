@@ -700,6 +700,8 @@ roles:
       hbar: bool
     children: { row: many }
     affordances: [click, wheel, context-click, drop-target]
+    # The two ends of its list scrubber's track (a pane whose rows overflow).
+    anchors: [scrubber-start, scrubber-end]
     assertions:
       shows(t): "text contains t"
       has-row(t): "some row: row.text contains t"
@@ -1792,7 +1794,9 @@ stages:
       Put a stand-in for the Agent Activity pane's agent first on the
       front-end's PATH (`refusing`: refuses the first prompt, answers the
       next, holds a prompt marked to be held; `replay`: replays a review's
-      session).
+      session; `live`: the replay agent's live session, which answers a
+      prompt with a streamed review-evidence turn, named to the front-ends
+      that start their agent themselves).
     params: { agent: text }
   review-dataset:
     summary: >-
