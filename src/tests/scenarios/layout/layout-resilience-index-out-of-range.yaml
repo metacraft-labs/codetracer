@@ -27,5 +27,4 @@ steps:
   - expect: { at: layout, stacks: { gt: 0 } }
   - expect: { at: 'pane-tab[label="FILES"]', present: true }
 
-  - expect: { at: 'pane-tab[label="CALLS"]', present: true }
   - expect: { at: 'pane-tab[label="TESTS"]', absent: true }

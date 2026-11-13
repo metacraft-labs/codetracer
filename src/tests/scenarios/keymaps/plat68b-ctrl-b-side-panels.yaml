@@ -1,6 +1,3 @@
-# Not yet run: some expected values here (stack counts, stop lines, the track press's column,
-# a search result's text) are read from probe screenshots or estimated, and must be
-# confirmed by the first run before this scenario goes into a lane.
 scenario: 1
 name: keymaps/plat68b-ctrl-b-side-panels
 pack: codetracer
@@ -18,11 +15,11 @@ steps:
   - expect: { at: 'editor[file="main.py"]', assert: "stopped-at(1)" }
   - click: { at: 'editor[file="main.py"]/line[number="1"]', anchor: text-start }
   - expect: { at: 'editor[file="main.py"]', focused: true }
-  - expect: { at: layout, stacks: 5 }
+  - expect: { at: layout, stacks: 5, shape: "row(column(stack[FILES,VCS,TESTS]) stack[calc/main.py] column(row(stack[VARIABLES,SCRATCHPAD] stack[CALLTRACE,AGENT ACTIVITY]) stack[EVENT LOG,TERMINAL OUTPUT]))" }
   - chord: Ctrl+B
   - expect: { at: layout, stacks: { lt: 5 } }
   - chord: Ctrl+B
-  - expect: { at: layout, stacks: 5 }
+  - expect: { at: layout, stacks: 5, shape: "row(column(stack[FILES,VCS,TESTS]) stack[calc/main.py] column(row(stack[VARIABLES,SCRATCHPAD] stack[CALLTRACE,AGENT ACTIVITY]) stack[EVENT LOG,TERMINAL OUTPUT]))" }
   - chord: Ctrl+Shift+B
   - wait: { until: { at: omnibox, present: true }, timeout: 15s }
   - expect: { at: omnibox, query: ":build: " }

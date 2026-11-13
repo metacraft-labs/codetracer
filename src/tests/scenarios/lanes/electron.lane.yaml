@@ -198,4 +198,17 @@ applicable:
   - ../welcome/new-file-beside-an-open-replay.yaml
   - ../welcome/recent-trace-age-and-tooltip.yaml
   - ../welcome/welcome-screen-parts.yaml
+  # --- pw4 (2) ---
+  - ../keymaps/plat68b-enter-opens-tracepoint.yaml
+  - ../keymaps/plat68c-cua-letters.yaml
+  - ../keymaps/plat68c-rebound-step-over.yaml
+  - ../layout/layout-resilience-unknown-component.yaml
+  - ../layout/plat45-desktop-remembers-own.yaml
+  - ../layout/plat70i-wide-lines-fit.yaml
+  - ../macro-expansion/nim-trace-bare-ct.yaml
+  - ../keymaps/plat68b-ctrl-b-side-panels.yaml
+  - ../layout/layout-resilience-index-out-of-range.yaml
+  - ../layout/plat70a-output-hscroll.yaml
+  - ../layout/plat70b-table-cells-cut-and-reveal.yaml
+  - ../layout/plat70b-remembered-index-width.yaml
 unsupported: []

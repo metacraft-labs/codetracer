@@ -19,8 +19,8 @@ steps:
   - chord: Ctrl+P
   - wait: { until: { at: omnibox, present: true }, timeout: 15s }
   - type: ":Live Edit"
-  - wait: { until: { at: 'omnibox/option[label="Live Edit (HCR)"]', present: true }, timeout: 15s }
-  - click: { at: 'omnibox/option[label="Live Edit (HCR)"]' }
+  - wait: { until: { at: 'omnibox/option[label="Live Edit (HCR)…"]', present: true }, timeout: 15s }
+  - click: { at: 'omnibox/option[label="Live Edit (HCR)…"]' }
   - wait: { until: { at: live-edit-panel, status: waiting }, timeout: 15s }
   - flow: live-edit
     with: { edit: "rise_speed=2.7" }

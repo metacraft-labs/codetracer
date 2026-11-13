@@ -1,0 +1,30 @@
+scenario: 1
+name: layout/plat70b-remembered-index-width
+pack: codetracer
+summary: >-
+  The Event Log's column widths are the one remembered document the
+  terminal and the GPUI window share: an index column remembered 6 cells
+  wide (in the terminal's own form) opens 6 cells wide; a drag on its
+  header's separator to the right widens it, and a drag far to the left
+  stops at the 3-cell minimum.
+
+stage:
+  - use: record-program
+    with: { program: wide_lines/main.py }
+  - use: plant-state
+    with: { file: table-columns, content: "event-log.#=6\n" }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 180s }
+  - wait: { until: event-log.loaded, timeout: 120s }
+  - wait: { until: settled, timeout: 60s }
+  - expect: { at: 'table-pane[pane="event-log"]/column-header[column="#"]', cells: 6 }
+  - drag:
+      from: { at: 'table-pane[pane="event-log"]/column-header[column="#"]', anchor: separator }
+      to: { at: 'table-pane[pane="event-log"]/table-cell[cell="event-log|1|output"]', anchor: text-start }
+  - expect: { at: 'table-pane[pane="event-log"]/column-header[column="#"]', cells: { gt: 6 } }
+  - drag:
+      from: { at: 'table-pane[pane="event-log"]/column-header[column="#"]', anchor: separator }
+      to: { at: 'table-pane[pane="event-log"]/table-cell[cell="event-log|1|#"]', anchor: text-start }
+  - expect: { at: 'table-pane[pane="event-log"]/column-header[column="#"]', cells: 3 }

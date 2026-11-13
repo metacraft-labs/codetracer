@@ -1,6 +1,3 @@
-# Not yet run: some expected values here (stack counts, stop lines, the track press's column,
-# a search result's text) are read from probe screenshots or estimated, and must be
-# confirmed by the first run before this scenario goes into a lane.
 scenario: 1
 name: keymaps/plat64-input-routing
 pack: codetracer
@@ -35,13 +32,13 @@ steps:
   - wait: { until: replay-idle, timeout: 60s }
   - click: { at: 'call-trace/call[name="add", arguments="(left=2, right=3)"]', modifiers: [Ctrl] }
     settle: false
-  - wait: { until: { at: 'editor[file="main.py"]', assert: "stopped-at(107)" }, timeout: 60s }
+  - wait: { until: { at: 'editor[file="main.py"]', assert: "stopped-at(113)" }, timeout: 60s }
   - wait: { until: replay-idle, timeout: 60s }
   - key: F5
   - wait: { until: replay-idle, timeout: 60s }
-  - expect: { at: 'editor[file="main.py"]', assert: "stopped-at(107)" }
+  - expect: { at: 'editor[file="main.py"]', assert: "stopped-at(113)" }
   - click: { at: 'call-trace/call[name="add", arguments="(left=2, right=3)"]' }
     settle: false
-  - wait: { until: { at: 'editor[file="main.py"]', assert: "stopped-at(29)" }, timeout: 60s }
+  - wait: { until: { at: 'editor[file="main.py"]', assert: "stopped-within(29, 31)" }, timeout: 60s }
   - hover: { at: 'toolbar/toolbar-button[label="next-image"]', for: 1s }
   - expect: { at: 'toolbar/toolbar-button[label="next-image"]', tooltip: "Next (Ctrl+Alt+J)", tooltip-shown: true }

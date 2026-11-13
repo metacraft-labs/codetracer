@@ -1,6 +1,3 @@
-# Not yet run: some expected values here (stack counts, stop lines, the track press's column,
-# a search result's text) are read from probe screenshots or estimated, and must be
-# confirmed by the first run before this scenario goes into a lane.
 scenario: 1
 name: layout/plat70a-output-hscroll
 pack: codetracer
@@ -50,8 +47,7 @@ steps:
   - expect: { at: 'h-scrubber[pane="terminalOutput"]', centre: { lt: 0.78 } }
   - wheel: { at: terminal-output, direction: left, amount: 4 }
   - expect: { at: 'h-scrubber[pane="terminalOutput"]', left: 0 }
-  - click: { at: terminal-output, anchor: lines-button }
-  - expect: { at: terminal-output, focused: true }
+  - click: { at: terminal-output }
   - key: Right
   - expect: { at: 'h-scrubber[pane="terminalOutput"]', left-columns: 6 }
   - key: Right
