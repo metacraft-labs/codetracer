@@ -83,7 +83,9 @@ const ROLES: Record<string, { affordances: string[]; properties: string[] }> = {
                  "first-visible", "last-visible", "text",
                  // pw2
                  "selections", "selected-text", "selection-count", "font-family", "font-size",
-                 "find-shown", "find-query", "find-matches"],
+                 "find-shown", "find-query", "find-matches",
+                 // pw4
+                 "find-focused"],
   },
   line: {
     affordances: ["click", "double-click", "context-click"],
@@ -102,7 +104,7 @@ const ROLES: Record<string, { affordances: string[]; properties: string[] }> = {
   option: { affordances: ["click"], properties: ["label", "detail", "selected", "kind"] },
   "context-menu": { affordances: [], properties: ["count"] },
   "menu-item": { affordances: ["click"], properties: ["label", "enabled", "shortcut", "hint"] },
-  "terminal-output": { affordances: ["wheel", "focusable"], properties: ["text", "count"] },
+  "terminal-output": { affordances: ["click", "wheel", "focusable"], properties: ["text", "count", "focused"] },
   filesystem: { affordances: ["wheel", "focusable"], properties: ["count", "focused", "loading"] },
   // --- pw2 ---
   vcs: { affordances: [], properties: ["title", "commit", "stats", "count", "unified-diff", "error"] },
@@ -122,7 +124,7 @@ const ROLES: Record<string, { affordances: string[]; properties: string[] }> = {
   sidebar: { affordances: [], properties: ["edge", "minimal", "toggle", "zone-visible", "mode-buttons"] },
   "docked-panel": { affordances: [], properties: ["edge"] },
   "panel-button": { affordances: ["click"], properties: ["label", "enabled", "active", "title"] },
-  "build-panel": { affordances: [], properties: ["verdict", "idle", "count", "text", "where", "state", "located"] },
+  "build-panel": { affordances: ["wheel"], properties: ["verdict", "idle", "count", "text", "where", "state", "located"] },
   "build-line": { affordances: ["click"], properties: ["text", "stream", "severity", "located", "italic", "colour", "styled"] },
   "problems-panel": { affordances: [], properties: ["count", "errors", "warnings", "empty", "groups", "where"] },
   problem: { affordances: ["click"], properties: ["message", "path", "location", "severity"] },
@@ -149,6 +151,35 @@ const ROLES: Record<string, { affordances: string[]; properties: string[] }> = {
   "edit-toolbar": { affordances: [], properties: [] },
   "editor-hover": { affordances: [], properties: ["text"] },
   welcome: { affordances: [], properties: ["heading"] },
+  // --- pw4 ---
+  "session-add": { affordances: ["click"], properties: [] },
+  "menu-bar": { affordances: ["click"], properties: ["open"] },
+  menu: { affordances: ["click"], properties: ["label", "open", "mnemonic", "highlighted"] },
+  layout: { affordances: [], properties: ["stacks", "shape"] },
+  "tracepoint-editor": { affordances: ["click", "text-entry", "focusable"],
+                         properties: ["line", "text", "focused", "rows", "fits"] },
+  "search-box": { affordances: ["click", "text-entry", "focusable"], properties: ["pane", "value", "focused"] },
+  "search-result": { affordances: ["click"], properties: ["text"] },
+  "shortcuts-dialog": { affordances: [], properties: ["scope"] },
+  "shortcut-row": { affordances: [], properties: ["action", "chord"] },
+  "binding-row": { affordances: [], properties: ["operation", "key", "layer", "shadowed-by", "text"] },
+  "dialog-button": { affordances: ["click"], properties: ["label", "enabled"] },
+  "low-level-code": { affordances: ["click", "focusable"], properties: ["count", "sync", "stepping", "address", "focused"] },
+  instruction: { affordances: ["click", "context-click"],
+                 properties: ["offset", "name", "source", "active", "executing", "focused"] },
+  "source-line": { affordances: [], properties: ["number", "active"] },
+  "h-scrubber": { affordances: ["click", "drag-source", "drop-target"],
+                  properties: ["pane", "content", "viewport", "left", "thumb-px", "track-px", "overflows", "at-end", "centre", "left-columns",
+                               "thumb-proportional", "clear-of-vertical"] },
+  "table-pane": { affordances: ["click", "wheel"],
+                  properties: ["pane", "fit", "sideways", "wider", "scroll-left", "header-follows"] },
+  "table-cell": { affordances: ["click", "context-click"],
+                  properties: ["cell", "column", "text", "full", "cut", "drawn-cut"] },
+  "column-header": { affordances: ["click"], properties: ["column", "label", "cells"] },
+  "table-tooltip": { affordances: [], properties: ["text", "widest"] },
+  "row-detail": { affordances: [], properties: ["text", "count"] },
+  "live-edit-panel": { affordances: [], properties: ["status", "detail"] },
+  "text-field": { affordances: ["click", "text-entry", "focusable"], properties: ["label", "value", "focused"] },
   "welcome-action": { affordances: ["click"], properties: ["label"] },
 };
 
@@ -275,6 +306,8 @@ function readSurface(): any {
       "find-shown": findShown,
       "find-query": findShown ? (fi?.value ?? "") : "",
       "find-matches": findShown ? text(fw!.querySelector(".matchesCount")) : "",
+      // pw4
+      "find-focused": findShown && within(fw),
     };
   }
   // The event log's footer (`Rows <first> to <last> of <total>`), its visible
@@ -1089,7 +1122,319 @@ function readSurfacePw1(root: any): void {
 
 // The readers that extend `readSurface`'s tree, run in the same page
 // evaluation (one read of the DOM).
-const SURFACE_EXTENSIONS: Array<(root: any) => void> = [readSurfacePw1];
+// --- pw4: the program menu, the layout's shape, tracepoint editors, the Call
+// Trace search box, the keyboard shortcuts dialog, Low Level Code, Terminal
+// Output's line view and the output panes' horizontal bars, the table panes'
+// cells, the Live Edit panel, the session strip's "+" --------------------------
+//
+// Runs IN THE PAGE, in the same evaluation as `readSurface` (see
+// `SURFACE_EXTENSIONS`), on the tree it returned. Reads only.
+function readSurfacePw4(root: any): void {
+  const vis = (el: Element | null): boolean => {
+    if (!el) return false;
+    const r = (el as HTMLElement).getBoundingClientRect();
+    if (r.width <= 0 || r.height <= 0) return false;
+    const cs = getComputedStyle(el as HTMLElement);
+    return cs.visibility !== "hidden" && cs.display !== "none" && cs.opacity !== "0";
+  };
+  const text = (el: Element | null | undefined) => ((el?.textContent ?? "").replace(/\s+/g, " ").trim());
+  const node = (role: string, el: Element | null, props: Record<string, unknown>,
+                keys: Array<[string, string]> = [], extra: Partial<any> = {}): any => {
+    const r = el ? (el as HTMLElement).getBoundingClientRect() : { left: 0, top: 0, width: 0, height: 0 };
+    return { role, keys, props, x: r.left, y: r.top, w: r.width, h: r.height,
+             visible: el ? vis(el) : false, children: [], ...extra };
+  };
+  const centre = (el: Element | null) => {
+    if (!el) return undefined;
+    const b = el.getBoundingClientRect();
+    return { x: b.left + b.width / 2, y: b.top + b.height / 2 };
+  };
+  const active = document.activeElement;
+  const within = (el: Element | null) => !!(el && active && (el === active || el.contains(active)));
+  const add = (n: any) => root.children.push(n);
+
+  // the session strip's "+"
+  const strip = root.children.find((c: any) => c.role === "session-strip");
+  const plus = document.querySelector("#session-tab-bar .session-tab-add");
+  if (strip && plus && vis(plus)) strip.children.push(node("session-add", plus, {}));
+
+  // the program menu: the main-menu button, its folders and its entries
+  const nav = document.querySelector("#navigation-menu");
+  if (nav) {
+    const button = nav.querySelector("#menu-root");
+    const main = nav.querySelector("#menu-main");
+    const bar = node("menu-bar", button ?? nav, { open: !!main && vis(main) });
+    for (const it of Array.from(nav.querySelectorAll(".menu-node-container > .ct-menu-item")) as HTMLElement[]) {
+      if (!vis(it)) continue;
+      const label = text(it.querySelector(".ct-menu-item-label"));
+      if (!label) continue;
+      const highlighted = it.classList.contains("ct-menu-item--active") ||
+        (it.parentElement?.classList.contains("menu-active-node") ?? false);
+      if (it.classList.contains("menu-folder")) {
+        bar.children.push(node("menu", it, {
+          label, open: false, mnemonic: text(it.querySelector(".ct-menu-mnemonic")), highlighted,
+        }, [["label", label]]));
+      } else {
+        bar.children.push(node("menu-item", it, {
+          label, enabled: !it.classList.contains("ct-menu-item--disabled"),
+          shortcut: text(it.querySelector(".ct-menu-item-sublabel")), hint: "",
+        }, [["label", label]]));
+      }
+    }
+    // A folder is open while a nested panel shows its entries: the folder on
+    // the highlighted path at each depth.
+    if (Array.from(nav.querySelectorAll(".menu-nested-elements")).some((n) => vis(n))) {
+      for (const f of bar.children) if (f.role === "menu" && f.props.highlighted) f.props.open = true;
+    }
+    add(bar);
+  }
+
+  // the layout's shape: rows, columns and stacks with their tabs, in order
+  const glRoot = document.querySelector(".lm_goldenlayout > .lm_item");
+  if (glRoot) {
+    const walk = (el: Element): string => {
+      const kids = Array.from(el.children).filter((c) => c.classList.contains("lm_item"));
+      if (el.classList.contains("lm_stack")) {
+        const tabs = Array.from(el.querySelectorAll(":scope > .lm_header .lm_title"))
+          .map((t) => (t.textContent ?? "").trim());
+        return `stack[${tabs.join(",")}]`;
+      }
+      const kind = el.classList.contains("lm_row") ? "row"
+        : el.classList.contains("lm_column") ? "column" : "item";
+      return `${kind}(${kids.map(walk).join(" ")})`;
+    };
+    add(node("layout", glRoot, {
+      stacks: document.querySelectorAll(".lm_goldenlayout .lm_stack").length, shape: walk(glRoot),
+    }));
+  }
+
+  // tracepoint editors (a `.trace` zone holding a Monaco instance)
+  for (const z of Array.from(document.querySelectorAll(".monaco-editor .trace")) as HTMLElement[]) {
+    if (!vis(z)) continue;
+    const ed = z.querySelector(".monaco-editor") as HTMLElement | null;
+    const lines = ed ? (Array.from(ed.querySelectorAll(".view-lines > .view-line")) as HTMLElement[])
+      .sort((a, b) => a.getBoundingClientRect().top - b.getBoundingClientRect().top)
+      .map((l) => (l.textContent ?? "").replace(/ /g, " ")) : [];
+    const zb = z.getBoundingClientRect();
+    const eb = ed?.getBoundingClientRect();
+    // The expression editor's host is `edit-trace-<owner>-<line>`
+    // (`ui/trace.nim`); the zone itself names no line.
+    const lineAttr = z.getAttribute("data-line") ??
+      (z.querySelector("[id^='edit-trace-']")?.id.split("-").pop() ?? "0");
+    const line = parseInt(lineAttr, 10) || 0;
+    const rowH = (ed?.querySelector(".view-lines > .view-line") as HTMLElement | null)?.getBoundingClientRect().height ?? 0;
+    add(node("tracepoint-editor", ed ?? z, {
+      line, text: lines, focused: within(z), rows: lines.length,
+      fits: !!eb && rowH > 0 && eb.height >= lines.length * rowH - 1 && zb.height >= eb.height - 1,
+    }, [["line", String(line)]]));
+  }
+
+  // the call trace's search box and its results
+  const ctSearch = document.querySelector(".calltrace-search-input") as HTMLInputElement | null;
+  if (ctSearch && vis(ctSearch)) {
+    const sb = node("search-box", ctSearch, {
+      pane: "call-trace", value: ctSearch.value, focused: document.activeElement === ctSearch,
+    }, [["pane", "call-trace"]]);
+    const comp = ctSearch.closest("div[id^='calltraceComponent']") ?? document;
+    for (const r of Array.from(comp.querySelectorAll(".search-result")) as HTMLElement[]) {
+      if (!vis(r)) continue;
+      const t = text(r);
+      sb.children.push(node("search-result", r, { text: t }, [["text", t]]));
+    }
+    add(sb);
+  }
+
+  // the keyboard shortcuts dialog
+  const kb = document.querySelector("#keyboard-shortcuts-dialog");
+  if (kb && vis(kb)) {
+    const d = node("shortcuts-dialog", kb, {
+      scope: kb.querySelector(".kb-reference")?.getAttribute("data-kb-scope") ?? "",
+    });
+    for (const r of Array.from(kb.querySelectorAll("[data-kb-action]")) as HTMLElement[]) {
+      const a = r.getAttribute("data-kb-action") ?? "";
+      d.children.push(node("shortcut-row", r, { action: a, chord: text(r.querySelector(".kb-chord")) }, [["action", a]]));
+    }
+    for (const r of Array.from(kb.querySelectorAll("[data-kb-ref-operation]")) as HTMLElement[]) {
+      const op = r.getAttribute("data-kb-ref-operation") ?? "";
+      const key = r.getAttribute("data-kb-ref-key") ?? "";
+      d.children.push(node("binding-row", r, {
+        operation: op, key, layer: r.getAttribute("data-kb-ref-layer") ?? "",
+        "shadowed-by": r.getAttribute("data-kb-ref-shadowed-by") ?? "", text: text(r),
+      }, [["operation", op], ["key", key]]));
+    }
+    const close = kb.querySelector("[data-kb-close]");
+    if (close) d.children.push(node("dialog-button", close, { label: "Close", enabled: true }, [["label", "Close"]]));
+    add(d);
+  }
+
+  // the Low Level Code view
+  const llc = Array.from(document.querySelectorAll(".low-level-code")).find((e) => vis(e)) as HTMLElement | undefined;
+  if (llc) {
+    const stepping = llc.querySelector(".low-level-code-stepping");
+    const v = node("low-level-code", llc, {
+      count: 0, focused: within(llc.closest("[data-scope-kind='pane']") ?? llc),
+      sync: text(llc.querySelector(".low-level-code-sync")),
+      stepping: text(llc.querySelector(".low-level-code-stepping")),
+      address: text(llc.querySelector(".low-level-code-address")),
+    });
+    for (const row of Array.from(llc.querySelectorAll(".low-level-code-instructions > div")) as HTMLElement[]) {
+      if (row.classList.contains("low-level-code-source-line")) {
+        const n = parseInt(text(row.querySelector(".low-level-code-source-line-number")), 10) || 0;
+        v.children.push(node("source-line", row, { number: n, active: row.classList.contains("active-source-line") },
+                             [["number", String(n)]]));
+      } else if (row.classList.contains("low-level-code-instruction")) {
+        const offset = text(row.querySelector(".low-level-code-instruction-offset"));
+        v.children.push(node("instruction", row, {
+          offset, name: text(row.querySelector(".low-level-code-instruction-name")),
+          source: text(row.querySelector(".low-level-code-instruction-source")),
+          active: row.classList.contains("active-instruction"),
+          executing: row.classList.contains("execution-pointer"),
+          focused: within(row),
+        }, [["offset", offset]]));
+      }
+    }
+    v.props.count = v.children.filter((c: any) => c.role === "instruction").length;
+    v.anchors = { points: stepping ? { header: centre(stepping) } : {} };
+    add(v);
+  }
+
+  // Terminal Output (its line view)
+  const to = Array.from(document.querySelectorAll(".isonim-terminal-output")).find((e) => vis(e)) as HTMLElement | undefined;
+  if (to) {
+    const lines = (Array.from(to.querySelectorAll("pre .terminal-line")) as HTMLElement[]).map((l) => text(l));
+    const pane = to.closest("[data-scope-kind='pane']") ?? to;
+    const lb = to.querySelector(".terminal-view-button[data-view]");
+    add(node("terminal-output", to.querySelector("pre") ?? to, {
+      text: lines, count: lines.length, focused: within(pane),
+    }, [], { anchors: { points: lb ? { "lines-button": centre(lb) } : {} } }));
+  }
+
+  // the horizontal bars of the output panes
+  // A character's width in the pane a bar scrolls: its widest line's drawn
+  // width over its length (the panes draw one monospace font).
+  const charWidthOf = (bar: Element): number => {
+    const pane = bar.closest("[data-scope-kind='pane']") ?? bar.parentElement;
+    let best = 0, len = 0;
+    for (const l of Array.from(pane?.querySelectorAll("pre .terminal-line, .build-stdout, .build-stderr") ?? []) as HTMLElement[]) {
+      const t = (l.textContent ?? "").length;
+      if (t > len) { len = t; best = l.scrollWidth; }
+    }
+    return len > 0 && best > 0 ? best / len : 1;
+  };
+  for (const tr of Array.from(document.querySelectorAll("[data-ct-hscrubber]")) as HTMLElement[]) {
+    if (!vis(tr) || tr.style.display === "none") continue;
+    const pane = tr.getAttribute("data-ct-hscrubber") ?? "";
+    const thumb = tr.querySelector(".ct-hscrubber-thumb") as HTMLElement | null;
+    const b = tr.getBoundingClientRect();
+    const thumbPx = Number(thumb?.getAttribute("data-ct-thumb-px") ?? 0);
+    const thumbLeft = Number(thumb?.getAttribute("data-ct-thumb-left") ?? 0);
+    const content = Number(tr.getAttribute("data-ct-hscrub-content") ?? 0);
+    const viewport = Number(tr.getAttribute("data-ct-hscrub-viewport") ?? 0);
+    const vbar = document.querySelector(`[data-ct-list-scrubber='${pane}']`)?.getBoundingClientRect();
+    const midY = b.top + b.height / 2;
+    add(node("h-scrubber", tr, {
+      pane, content, viewport,
+      left: Number(tr.getAttribute("data-ct-hscrub-left") ?? 0),
+      "thumb-px": thumbPx, "track-px": Math.round(b.width),
+      overflows: content > viewport,
+      "at-end": content > 0 && Number(tr.getAttribute("data-ct-hscrub-left") ?? 0) + viewport >= content - 1,
+      centre: content > 0
+        ? Math.round(((Number(tr.getAttribute("data-ct-hscrub-left") ?? 0) + viewport / 2) / content) * 100) / 100 : 0,
+      "left-columns": Math.round(Number(tr.getAttribute("data-ct-hscrub-left") ?? 0) / charWidthOf(tr)),
+      "thumb-proportional": content > 0 &&
+        thumbPx === Math.min(Math.round(b.width), Math.max(20, Math.round((b.width * viewport) / content))),
+      "clear-of-vertical": !vbar || (vbar.bottom <= b.top + 0.5 && b.right <= vbar.left + 0.5),
+    }, [["pane", pane]], {
+      anchors: {
+        track: { left: b.left, width: b.width, midY },
+        points: { thumb: { x: b.left + thumbLeft + thumbPx / 2, y: midY }, start: { x: b.left + 2, y: midY } },
+      },
+    }));
+  }
+
+  // the table panes: fit or scroll, and their cells
+  const cellNode = (c: HTMLElement) => {
+    const id = c.getAttribute("data-ct-cell") ?? "";
+    const r = c.getBoundingClientRect();
+    return node("table-cell", c, {
+      cell: id, column: id.split("|").pop() ?? "",
+      text: c.getAttribute("data-ct-text") ?? (c.textContent ?? "").trim(),
+      full: c.getAttribute("data-ct-full") ?? "",
+      cut: c.hasAttribute("data-ct-cut"), "drawn-cut": c.scrollWidth > c.clientWidth + 1,
+    }, [["cell", id]], {
+      anchors: { points: { ellipsis: { x: r.right - 3, y: r.top + r.height / 2 },
+                           "text-start": { x: r.left + 4, y: r.top + r.height / 2 } } },
+    });
+  };
+  const tablePane = (pane: string, comp: Element | null, scroller: HTMLElement | null, fitEl: Element | null) => {
+    if (!comp || !vis(comp)) return undefined;
+    const ox = scroller ? getComputedStyle(scroller).overflowX : "";
+    const tp = node("table-pane", comp, {
+      pane, fit: fitEl?.getAttribute("data-ct-fit") ?? "",
+      sideways: ox === "auto" || ox === "scroll",
+      wider: !!scroller && scroller.scrollWidth > scroller.clientWidth + 1,
+      "scroll-left": scroller ? Math.round(scroller.scrollLeft) : 0,
+      "header-follows": true,
+    }, [["pane", pane]]);
+    for (const c of Array.from(comp.querySelectorAll("[data-ct-cell]")) as HTMLElement[]) {
+      if (c.offsetParent === null || c.clientWidth <= 0) continue;
+      tp.children.push(cellNode(c));
+    }
+    add(tp);
+    return tp;
+  };
+  const elTable = tablePane("event-log", document.querySelector("div[id^='eventLogComponent']"),
+    document.querySelector(".eventLog-scroll-body") as HTMLElement | null,
+    document.querySelector(".eventLog-dense-table"));
+  if (elTable) {
+    const h = document.querySelector(".eventLog-column-header .eventLog-text") as HTMLElement | null;
+    const c = document.querySelector(".eventLog-rows td.eventLog-text") as HTMLElement | null;
+    if (h && c) elTable.props["header-follows"] =
+      Math.abs(h.getBoundingClientRect().left - c.getBoundingClientRect().left) <= 1;
+    for (const hd of Array.from(document.querySelectorAll(".eventLog-column-header .eventLog-index")) as HTMLElement[]) {
+      if (!vis(hd)) continue;
+      const g = hd.querySelector(".eventLog-column-grip");
+      elTable.children.push(node("column-header", hd, {
+        column: "#", label: text(hd), cells: Math.round(hd.getBoundingClientRect().width / 8),
+      }, [["column", "#"]], { anchors: { points: g ? { separator: centre(g) } : {} } }));
+    }
+  }
+  tablePane("call-trace", document.querySelector("div[id^='calltraceComponent']"),
+    document.querySelector(".local-calltrace-view") as HTMLElement | null,
+    document.querySelector(".local-calltrace-view"));
+  tablePane("variables", document.querySelector("div[id^='stateComponent']"),
+    document.querySelector(".isonim-state .value-components-container") as HTMLElement | null, null);
+
+  // a cut cell's tooltip and a row's detail
+  const tip = Array.from(document.querySelectorAll(".ct-table-tooltip")).find((e) => vis(e)) as HTMLElement | undefined;
+  if (tip) {
+    const lines = (Array.from(tip.querySelectorAll(".ct-table-tooltip-line")) as HTMLElement[])
+      .map((l) => l.textContent ?? "");
+    add(node("table-tooltip", tip, { text: lines, widest: Math.max(0, ...lines.map((l) => l.length)) }));
+  }
+  const detail = Array.from(document.querySelectorAll(".ct-table-detail")).find((e) => vis(e)) as HTMLElement | undefined;
+  if (detail) {
+    const lines = (Array.from(detail.querySelectorAll(".ct-table-detail-line")) as HTMLElement[])
+      .map((l) => l.textContent ?? "");
+    add(node("row-detail", detail, { text: lines, count: lines.length }));
+  }
+
+  // the Live Edit (HCR) panel
+  const le = Array.from(document.querySelectorAll(".hcr-live-edit-panel")).find((e) => vis(e)) as HTMLElement | undefined;
+  if (le) {
+    const p = node("live-edit-panel", le, {
+      status: text(le.querySelector("[data-hcr-live-edit-status]")),
+      detail: text(le.querySelector("[data-hcr-live-edit-detail]")),
+    });
+    const input = le.querySelector("[data-hcr-live-edit-input]") as HTMLInputElement | null;
+    if (input) p.children.push(node("text-field", input, {
+      label: "edit", value: input.value ?? "", focused: document.activeElement === input,
+    }, [["label", "edit"]]));
+    add(p);
+  }
+}
+
+const SURFACE_EXTENSIONS: Array<(root: any) => void> = [readSurfacePw1, readSurfacePw4];
 
 // --- the binding ----------------------------------------------------------------
 
@@ -1309,6 +1654,12 @@ const binding = {
   async anchor(ctx: Ctx, n: any, anchor: string): Promise<{ x: number; y: number } | undefined> {
     // a point a reader measured for a named anchor (`expander`, …)
     if (n.anchors?.points?.[anchor]) return n.anchors.points[anchor];
+    // pw4: `track(f)`, the point at fraction f of a horizontal bar's track
+    const f = /^track\(([\d.]+)\)$/.exec(anchor);
+    if (f && n.anchors?.track) {
+      const t = n.anchors.track;
+      return { x: t.left + Math.floor(t.width * parseFloat(f[1])), y: t.midY };
+    }
     const p = await textAnchor(n, anchor);
     // pw2: never aim into the margin when the code is scrolled horizontally
     if (p && n.anchors?.contentLeft !== undefined && /^(text-start|text-end|column\(|caret\()/.test(anchor)) {

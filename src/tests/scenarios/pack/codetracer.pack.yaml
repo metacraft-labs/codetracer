@@ -89,11 +89,22 @@ roles:
       caption-progress: optional
       edit-toolbar: optional
       editor-hover: optional
+      # --- pw4 ---
+      layout: optional
+      tracepoint-editor: many
+      search-box: many
+      shortcuts-dialog: optional
+      low-level-code: optional
+      h-scrubber: many
+      table-pane: many
+      table-tooltip: optional
+      row-detail: optional
+      live-edit-panel: optional
 
   # The strip of session tabs: one tab per open recording or editing session.
   session-strip:
     properties: { count: int, active: text }
-    children: { session-tab: many }
+    children: { session-tab: many, session-add: optional }
     assertions:
       has-tab(title): "some session-tab: session-tab.title contains title"
       has-tab-matching(pattern): "some session-tab: session-tab.title matches pattern"
@@ -164,6 +175,8 @@ roles:
       find-shown: bool
       find-query: text
       find-matches: text
+      # pw4: the keyboard focus is in the find widget.
+      find-focused: bool
     children: { line: many }
     affordances: [click, context-click, wheel, focusable, text-entry]
     assertions:
@@ -333,8 +346,11 @@ roles:
 
   # The program's terminal output.
   terminal-output:
-    properties: { text: lines, count: int }
-    affordances: [wheel, focusable]
+    properties: { text: lines, count: int, focused: bool }
+    affordances: [click, wheel, focusable]
+    # `lines-button`: the Lines/Screen toggle's Lines button (a press there
+    # focuses the pane without jumping to an event, as a press on a line does).
+    anchors: [lines-button]
     assertions:
       shows(t): "text contains t"
 
@@ -368,6 +384,7 @@ roles:
       says(t): "message contains t"
       lacks(t): "not (message contains t)"
       notifies(t): "notifications contains t"
+      never-notifies(t): "not (notifications contains t)"
       # No build verdict or progress ("Build succeeded", "Building…").
       no-build-shown: "not (build-status contains \"Build\")"
 
@@ -412,11 +429,21 @@ roles:
   # The application menu (the desktop's in-window menu, the terminal's and
   # the GPUI window's top-bar menus).
   menu-bar:
-    children: { menu: many }
+    # `open`: the menu's folders are drawn. A click is the main-menu button.
+    # `menu-item`s: the entries of the open folders.
+    properties: { open: bool }
+    children: { menu: many, menu-item: many }
+    affordances: [click]
+    assertions:
+      offers(label): "some menu-item: menu-item.label == label"
+      lacks(label): "none menu-item: menu-item.label == label"
+      shows-chord(label, chord): "some menu-item: menu-item.label == label and menu-item.shortcut == chord"
 
   menu:
     keys: [label]
-    properties: { label: text, open: bool }
+    # `mnemonic`: the underlined access key; `highlighted`: the keyboard's
+    # highlight is on it.
+    properties: { label: text, open: bool, mnemonic: text, highlighted: bool }
     affordances: [click]
 
   # A dialog or notification asking the user something, or telling them.
@@ -647,6 +674,7 @@ roles:
       # Lines with a file location (clickable).
       located: int
     children: { build-line: many, panel-button: many }
+    affordances: [wheel]
     assertions:
       shows(t): "some build-line: build-line.text contains t"
       lacks(t): "none build-line: build-line.text contains t"
@@ -900,6 +928,167 @@ roles:
   find-field:
     properties: { query: text, count: text }
 
+  # --- pw4 ---
+  # The session strip's "+": a new, empty session.
+  session-add:
+    properties: {}
+    affordances: [click]
+
+  # The pane layout's shape: its stacks and, in order, their tabs.
+  layout:
+    properties: { stacks: int, shape: text }
+
+  # A tracepoint's expression editor, opened on an editor line.
+  tracepoint-editor:
+    keys: [line]
+    properties:
+      line: int
+      text: lines
+      focused: bool
+      # The rows of the expression drawn, and whether the editor's zone holds
+      # them all (it grows and shrinks with the expression).
+      rows: int
+      fits: bool
+    affordances: [click, text-entry, focusable]
+
+  # A pane's search box and what it found.
+  search-box:
+    keys: [pane]
+    properties: { pane: text, value: text, focused: bool }
+    children: { search-result: many }
+    affordances: [click, text-entry, focusable]
+
+  search-result:
+    keys: [text]
+    properties: { text: text }
+    affordances: [click]
+
+  # The keyboard shortcuts dialog: the stepping rows and the shortcut
+  # reference (every live row, and what shadows what).
+  shortcuts-dialog:
+    properties: { scope: text }
+    children: { shortcut-row: many, binding-row: many, dialog-button: many }
+
+  shortcut-row:
+    keys: [action]
+    properties: { action: text, chord: text }
+
+  binding-row:
+    keys: [operation, key]
+    properties: { operation: text, key: text, layer: text, shadowed-by: text, text: text }
+
+  # The Low Level Code view: a recording's instructions under their source
+  # lines.
+  low-level-code:
+    # `focused`: the keyboard focus is in its pane (a press on its header
+    # focuses the pane without moving the debugger, as a press on a row would).
+    properties: { count: int, sync: text, stepping: text, address: text, focused: bool }
+    children: { instruction: many, source-line: many }
+    affordances: [click, focusable]
+    # `header`: the header's stepping note.
+    anchors: [header]
+    assertions:
+      pointer-at(offset): "some instruction: instruction.offset == offset and instruction.executing"
+      all-offsets-match(re): "every instruction: instruction.offset matches re"
+
+  instruction:
+    keys: [offset]
+    properties: { offset: text, name: text, source: text, active: bool, executing: bool, focused: bool }
+    affordances: [click, context-click]
+
+  source-line:
+    keys: [number]
+    properties: { number: int, active: bool }
+
+  # An output pane's horizontal bar, in columns: the line's width, the view's,
+  # the first column shown, and the thumb.
+  h-scrubber:
+    keys: [pane]
+    properties:
+      pane: text
+      content: int
+      viewport: int
+      left: int
+      thumb-px: int
+      track-px: int
+      # The line is wider than the view.
+      overflows: bool
+      # The view shows the line's end.
+      at-end: bool
+      # Where the view's middle is, as a fraction of the line (0.5: the
+      # line's middle), to two places; and the first column shown, in
+      # characters.
+      centre: number
+      left-columns: int
+      # The thumb is viewport/content of the track, 20 px at least.
+      thumb-proportional: bool
+      # The corner: the pane's vertical scrubber stops above the bar, and the
+      # bar stops left of it.
+      clear-of-vertical: bool
+    affordances: [click, drag-source, drop-target]
+    # `track(f)`: the point at fraction f of the track; `thumb`: the thumb's
+    # middle; `start`: the track's first pixel.
+    anchors: [track(f), thumb, start]
+
+  # A table pane (Event Log, Call Trace, Variables): whether its columns fit
+  # or scroll, and its cells.
+  table-pane:
+    keys: [pane]
+    properties:
+      pane: text
+      # `fit` or `scroll`, as the pane decided.
+      fit: text
+      # The body scrolls sideways (overflow-x auto or scroll).
+      sideways: bool
+      # The body is wider than the pane.
+      wider: bool
+      scroll-left: int
+      # The output column's title is over its cells.
+      header-follows: bool
+    children: { table-cell: many, column-header: many }
+    affordances: [click, wheel]
+    assertions:
+      cuts-drawn: "every table-cell: table-cell.cut == table-cell.drawn-cut"
+      has-cut: "some table-cell: table-cell.cut"
+      # A cell of this column is cut.
+      column-cut(col): "some table-cell: table-cell.column == col and table-cell.cut"
+      # Every cut cell of this column: its whole text and the text drawn.
+      cut-column-matches(col, whole, drawn): "every table-cell: table-cell.column != col or not table-cell.cut or (table-cell.full matches whole and table-cell.text matches drawn)"
+
+  table-cell:
+    keys: [cell]
+    properties:
+      cell: text
+      column: text
+      # The text drawn and the whole text.
+      text: text
+      full: text
+      # The pane's model cut it; the browser draws it cut.
+      cut: bool
+      drawn-cut: bool
+    affordances: [click, context-click]
+    anchors: [ellipsis, text-start]
+
+  column-header:
+    keys: [column]
+    properties: { column: text, label: text, cells: int }
+    affordances: [click]
+    anchors: [separator]
+
+  # A table cell's tooltip (the whole text of a cut cell the pointer rests
+  # on), its lines as wrapped and the widest of them in characters.
+  table-tooltip:
+    properties: { text: lines, widest: int }
+
+  # A row's detail, opened under it: the row's whole text.
+  row-detail:
+    properties: { text: lines, count: int }
+
+  # The Live Edit (HCR) panel: where a typed edit's answer stays.
+  live-edit-panel:
+    properties: { status: text, detail: text }
+    children: { text-field: optional }
+
 sync:
   # The implicit condition after every input: the window handled it and the
   # screen stopped changing.
@@ -913,6 +1102,31 @@ sync:
   # pw1: the Agent Activity pane's agent (the `stub-agent` stand-in) was
   # asked to open its session.
   agent-session-open: ~
+
+flows:
+  # --- pw4 ---
+  # One edit typed into the Live Edit panel, answered "applied" with no
+  # restart.
+  live-edit(edit):
+    - click: { at: 'live-edit-panel/text-field[label="edit"]' }
+    - chord: Ctrl+A
+    - type: "${edit}"
+    - key: Enter
+      settle: false
+    - wait: { until: { at: live-edit-panel, status: applied }, timeout: 300s }
+    - expect: { at: live-edit-panel, detail: { contains: "no restart" } }
+  # A forward stepping key and its reverse: one stop on, then back where it
+  # started (a key dispatched twice would not come back).
+  step-and-back(file, forward, reverse, there, back):
+    - chord: "${forward}"
+      settle: false
+    - wait: { until: { at: 'editor[file="${file}"]', assert: "stopped-at(${there})" }, timeout: 60s }
+    - wait: { until: replay-idle, timeout: 60s }
+    - chord: "${reverse}"
+      settle: false
+    - wait: { until: { at: 'editor[file="${file}"]', assert: "stopped-at(${back})" }, timeout: 60s }
+    - wait: { until: replay-idle, timeout: 60s }
+    - expect: { at: 'editor[file="${file}"]', assert: "stopped-at(${back})" }
 
 stages:
   record-program:
@@ -1058,3 +1272,12 @@ stages:
       `merge:<pane>:<beside>`, comma-separated, panes by their layout names
       (`eventLog`, `agentActivity`, …) — the arrangement a user left it in.
     params: { file: text, ops: text }
+  # --- pw4 ---
+  hcr-flame:
+    summary: >-
+      Prepare the hot-code-reload flame demo (codetracer-flame-demo, a
+      patchable Godot engine, its GDExtension and the HCR coordinator driver)
+      and hand the window its CODETRACER_HCR_* settings; `platform` names the
+      platform the arm is for, and an `edit` the Apply Edit command applies.
+      Fails naming the missing prerequisite.
+    params: { platform: text, edit: text, arm: text }

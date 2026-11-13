@@ -577,6 +577,82 @@ proc savedLayout*(s: StageState; file, ops: string) =
   createDir(path.parentDir)
   writeFile(path, $saveLayout(layout))
 
+const
+  FlameScene = "res://scenes/hcr2_probe.tscn"
+  FlamePatchAt = 120
+
+proc hcrFlame*(s: StageState; platform, edit, arm: string) =
+  ## The hot-code-reload flame demo, prepared for a window whose palette runs
+  ## "Apply Edit & Hot-Reload" (`src/tests/gui/tests/hcr-apply-edit/
+  ## flame-hcr-driver.ts` resolves the same paths). The window gets the
+  ## CODETRACER_HCR_* settings; a watcher started here runs the patched flame
+  ## against the coordinator socket once the command opens it, which is what
+  ## the demo's own harness did beside the test. A missing piece fails the
+  ## stage, named.
+  let want = if platform.len > 0: platform.toLowerAscii else: "linux"
+  when not defined(windows):
+    if want == "windows":
+      raise newException(IOError, "hcr-flame: the Windows arm (the Windows " &
+        "HCR driver, its .pdb and .dll) needs a Windows host; this is " & hostOS)
+  if arm.len > 0 and arm notin ["green", "harness-launches", "live-edit"]:
+    raise newException(ValueError, "hcr-flame: unknown arm '" & arm & "'")
+  let workspace = repo().parentDir
+  let flame = getEnv("CODETRACER_FLAME_DEMO_REPO", workspace / "codetracer-flame-demo")
+  let engineRepo = workspace / "codetracer-engine-godot"
+  var engine = ""
+  for cand in [engineRepo / "bin" / "godot.linuxbsd.template_debug.x86_64.hcrq",
+               engineRepo / "bin" / "godot.linuxbsd.template_debug.x86_64.hcrgpu"]:
+    if fileExists(cand) and engine.len == 0: engine = cand
+  if engine.len == 0:
+    raise newException(IOError, "hcr-flame: prerequisite missing: no patchable Godot engine under " &
+                       engineRepo / "bin" & " (codetracer-engine-godot, built with its HCR target)")
+  let driver = getEnv("CODETRACER_HCR_DRIVER", flame / "artifacts" / "h3-driver" / "hcr_patch_driver")
+  for (what, where) in [
+      ("the flame demo checkout (codetracer-flame-demo)", flame),
+      ("the imported Godot project (`just import` in the flame demo)", flame / ".godot"),
+      ("the patchable FlameField GDExtension (`just gdext-hcr`)",
+       flame / "bin" / "libflamefield.macos.template_debug.so"),
+      ("the prebuilt HCR coordinator driver", driver),
+      ("the apply-edit command", flame / "scripts" / "ct_hcr_apply_edit.py")]:
+    if not (fileExists(where) or dirExists(where)):
+      raise newException(IOError, "hcr-flame: prerequisite missing: " & what & ": " & where)
+  let work = s.root / "hcr"
+  createDir(work)
+  let socket = "/tmp" / ("ct-hcr-" & $getCurrentProcessId() & ".sock")
+  let ticks = work / "ticks-patched.log"
+  writeFile(ticks, "")
+  for (k, v) in [("CODETRACER_HCR_APPLY_EDIT_CMD", flame / "scripts" / "ct_hcr_apply_edit.py"),
+                 ("CODETRACER_HCR_DRIVER", driver),
+                 ("CODETRACER_HCR_EDIT", (if edit.len > 0: edit else: "rise_speed=5.4")),
+                 ("CODETRACER_HCR_WAIT_FOR", ticks),
+                 ("CODETRACER_HCR_MARKER", "CT_H2 frame=" & $FlamePatchAt & " "),
+                 ("CODETRACER_HCR_MARKER_TIMEOUT_MS", "180000"),
+                 ("CODETRACER_HCR_SOCKET", socket),
+                 ("CODETRACER_HCR_REPORT", work / "apply-edit-report.json")]:
+    s.launch.env[k] = v
+  # The patched flame, started when the command the user runs opens the
+  # coordinator's socket (and not before: the coordinator waits to read the
+  # flame's own frame line before it publishes).
+  let watcher = "for i in $(seq 1 1200); do [ -S " & quoteShell(socket) & " ] && break; sleep 0.1; done; " &
+    "[ -S " & quoteShell(socket) & " ] || exit 0; " &
+    "CT_H2_FRAMES=360 CT_H2_TICKFILE=" & quoteShell(ticks) & " REPRO_HCR_AGENT_SOCKET=" & quoteShell(socket) &
+    " exec " & quoteShell(engine) & " --headless --path " & quoteShell(flame) & " --scene " & FlameScene &
+    " > " & quoteShell(work / "patched.log") & " 2>&1"
+  if arm in ["green", "harness-launches"]:
+    # "Launch Under Live Edit (HCR)" runs the workspace's launch
+    # configuration: a scratch workspace holding the flame project's derived
+    # `.vscode/launch.json`, opened in Edit mode by `open-project $project`.
+    let launchJson = flame / ".vscode" / "launch.json"
+    if not fileExists(launchJson):
+      raise newException(IOError, "hcr-flame: prerequisite missing: the flame project's " &
+                         "derived launch configuration: " & launchJson)
+    let ws = s.root / "hcr-workspace"
+    createDir(ws / ".vscode")
+    copyFile(launchJson, ws / ".vscode" / "launch.json")
+    s.launch.project = ws
+    return
+  discard startProcess("/bin/sh", args = ["-c", watcher], options = {})
+
 proc runStage*(s: StageState; use: string; args: JsonNode) =
   ## One stage call. `open-recording` / `open-project` only DECIDE the launch;
   ## the binding starts its own front-end from `s.launch` afterwards.
@@ -677,6 +753,8 @@ proc runStage*(s: StageState; use: string; args: JsonNode) =
     if not fileExists(src):
       raise newException(IOError, "start-from-layout: no layout fixture " & src)
     copyFile(src, s.launch.env["CODETRACER_TUI_LAYOUT_DIR"] / layout.extractFilename)
+  of "hcr-flame":
+    s.hcrFlame(argStr(args, "platform"), argStr(args, "edit"), argStr(args, "arm"))
   else:
     raise newException(KeyError, "the CodeTracer pack has no stage '" & use & "'")
 
