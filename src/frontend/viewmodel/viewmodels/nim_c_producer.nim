@@ -43,11 +43,21 @@
 ## (https://sourcemaps.info/spec.html; codetracer-nim `compiler/cgen.nim`),
 ## and `ct record` compiles every Nim program that way
 ## (`ct/trace/recorder_dispatch.nim`). The map is the same artefact in
-## another form: each generated line's first mapped segment names the Nim
-## position it came from, and a run of lines naming the same Nim line is
-## one anchor, as a directive's run is (`mapRowsOf`, `nimCListing`'s
-## `mapText`). A file with directives is read by them; one without is read
-## by its map.
+## another form: each generated line's segments name the Nim positions it
+## came from, and a run of lines naming the same Nim lines is one anchor, as
+## a directive's run is (`mapRowsOf`, `nimCListing`'s `mapText`). A file with
+## directives is read by them; one without is read by its map.
+##
+## A LINE NAMES EVERY NIM LINE ITS SEGMENTS NAME, not the first one. The
+## fork records a zero-width annotation wherever it starts emitting a node,
+## so the C of one statement often carries dozens at the same column: the
+## `nimln_(60);{` that opens a `var` whose literal spans lines 60–69 names
+## 60–69, the type's declaration lines, and more, in emission order. The
+## first segment is therefore arbitrary (there it is line 1), and the row
+## belongs to all of them. Which comes FIRST matters only for the row's
+## cross-reference: the line the fork's own stack-trace call on the row
+## names (`nimln_(N)` / `nimlf_(N, …)`) when there is one, else the first
+## named (`primaryLineOf`).
 ##
 ## ## WHICH C FILE
 ##
@@ -56,7 +66,7 @@
 ## module's own C file is the one whose DIRECTIVES name `S` most
 ## (`nimCFileFor`); the debugger's stop names one directly
 ## (`StopLocation.cPath`), which the host prefers when it has it.
-import std/[json, strutils, tables]
+import std/[algorithm, json, strutils, tables]
 
 import ./generated_code_vm
 import ./generated_code_anchors
@@ -144,10 +154,13 @@ proc decodeVlq(s: string; i: var int; ok: var bool): int =
     shift += 5
   if (value and 1) == 1: -(value shr 1) else: value shr 1
 
-proc mapRowsOf*(mapText: string): seq[tuple[path: string, line: int]] =
-  ## Per generated line of a Source Map v3, the Nim position its first mapped
-  ## segment names (`line` 1-based; 0 for a line with no mapped segment).
-  ## Empty when `mapText` is not a version-3 map.
+type MappedPosition* = tuple[path: string, line: int]
+  ## A Nim position a generated line came from (`line` 1-based).
+
+proc mapRowsOf*(mapText: string): seq[seq[MappedPosition]] =
+  ## Per generated line of a Source Map v3, the distinct Nim positions its
+  ## mapped segments name, in the order they first appear (empty for a line
+  ## with no mapped segment). Empty when `mapText` is not a version-3 map.
   if not mapText.strip.startsWith("{"):
     return
   var doc: JsonNode
@@ -172,7 +185,7 @@ proc mapRowsOf*(mapText: string): seq[tuple[path: string, line: int]] =
   # across lines; the column resets on each line.
   var source, origLine = 0
   for lineText in mappings.split(';'):
-    var row = (path: "", line: 0)
+    var row: seq[MappedPosition] = @[]
     for segment in lineText.split(','):
       if segment.len == 0:
         continue
@@ -185,9 +198,62 @@ proc mapRowsOf*(mapText: string): seq[tuple[path: string, line: int]] =
       origLine += decodeVlq(segment, i, ok)
       if not ok:
         return @[]
-      if row.line == 0 and source >= 0 and source < sources.len:
-        row = (path: sources[source], line: origLine + 1)
+      if source >= 0 and source < sources.len:
+        let at = (path: sources[source], line: origLine + 1)
+        if at notin row:
+          row.add at
     result.add row
+
+proc stackTraceLineOf(text: string): int =
+  ## The Nim line the fork's stack-trace call on a C line names —
+  ## `nimln_(N)` or `nimlf_(N, "<file>")` — or 0.
+  for call in ["nimln_(", "nimlf_("]:
+    let at = text.find(call)
+    if at >= 0:
+      var i = at + call.len
+      var n = 0
+      while i < text.len and text[i] in Digits:
+        n = n * 10 + (ord(text[i]) - ord('0'))
+        inc i
+      if n > 0:
+        return n
+  0
+
+proc regionsOf(positions: seq[MappedPosition]; text: string): seq[SourceRegion] =
+  ## A generated line's positions as source regions: the primary position
+  ## first, alone (the stack-trace call's line when the line names it, else
+  ## the first named — the module header explains why; a row's
+  ## cross-reference is its first region's start), then the others,
+  ## consecutive lines of one file merged.
+  var primary = if positions.len > 0: positions[0] else: (path: "", line: 0)
+  let named = stackTraceLineOf(text)
+  if named > 0:
+    for p in positions:
+      if p.line == named:
+        primary = p
+        break
+  if primary.line > 0:
+    result.add SourceRegion(path: primary.path, startLine: primary.line,
+                            endLine: primary.line)
+  # Per file in first-appearance order, its lines sorted, runs merged.
+  var files: seq[string] = @[]
+  for p in positions:
+    if p.path notin files:
+      files.add p.path
+  for f in files:
+    var lines: seq[int] = @[]
+    for p in positions:
+      if p.path == f and p.line notin lines and p != primary:
+        lines.add p.line
+    lines.sort()
+    var k = 0
+    while k < lines.len:
+      var last = k
+      while last + 1 < lines.len and lines[last + 1] == lines[last] + 1:
+        inc last
+      result.add SourceRegion(path: f, startLine: lines[k],
+                              endLine: lines[last])
+      k = last + 1
 
 proc nimCListing*(cText, sourcePath: string;
                   mapText = ""): GeneratedListing =
@@ -210,19 +276,20 @@ proc nimCListing*(cText, sourcePath: string;
   if directives.len == 0 and mapText.len > 0:
     # A run is a stretch of lines whose first segments name one Nim line.
     let mapped = mapRowsOf(mapText)
+    let n = min(count, mapped.len)
     var i = 0
-    while i < min(count, mapped.len):
-      let at = mapped[i]
-      if at.line <= 0:
+    while i < n:
+      if mapped[i].len == 0:
         inc i
         continue
+      let regions = regionsOf(mapped[i], lines[i])
       var last = i
-      while last + 1 < min(count, mapped.len) and mapped[last + 1] == at:
+      while last + 1 < n and mapped[last + 1].len > 0 and
+            regionsOf(mapped[last + 1], lines[last + 1]) == regions:
         inc last
       result.anchors.add MappingAnchor(
         generatedFirst: i, generatedLast: last, fidelity: mfCoarse,
-        sources: @[SourceRegion(path: at.path, startLine: at.line,
-                                endLine: at.line)])
+        sources: regions)
       i = last + 1
     return
   for k, d in directives:
@@ -244,8 +311,10 @@ proc directiveCount*(cText, sourcePath: string; mapText = ""): int =
       inc result
   if result == 0 and mapText.len > 0:
     for a in nimCListing(cText, sourcePath, mapText).anchors:
-      if a.sources[0].path == sourcePath:
-        inc result
+      for r in a.sources:
+        if r.path == sourcePath:
+          inc result
+          break
 
 proc nimCFileFor*(sourcePath: string;
                   candidates: openArray[tuple[path, text: string]]): string =

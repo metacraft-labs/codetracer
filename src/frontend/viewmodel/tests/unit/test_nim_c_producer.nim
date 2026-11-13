@@ -85,9 +85,11 @@ suite "the Nim producer reads the generated C's line directives":
     # `AAAA` keeps it), line 3 unmapped, line 4 from /a.nim:3.
     let map = """{"version": 3, "file": "@ma.nim.c", "sources": ["/a.nim"],
                   "names": [], "mappings": ";AACA;AAAA;;AACA"}"""
-    check mapRowsOf(map) == @[(path: "", line: 0), (path: "/a.nim", line: 2),
-                              (path: "/a.nim", line: 2), (path: "", line: 0),
-                              (path: "/a.nim", line: 3)]
+    check mapRowsOf(map) == @[newSeq[MappedPosition](),
+                              @[(path: "/a.nim", line: 2)],
+                              @[(path: "/a.nim", line: 2)],
+                              newSeq[MappedPosition](),
+                              @[(path: "/a.nim", line: 3)]]
     let c = "#include \"nimbase.h\"\nint a;\nint b;\n\nint c;\n"
     let l = nimCListing(c, "/a.nim", map)
     check l.anchors.len == 2
@@ -103,6 +105,30 @@ suite "the Nim producer reads the generated C's line directives":
     check nimCFileFor("/a.nim", [(path: "x.nim.c", text: c, map: ""),
                                  (path: "a.nim.c", text: c, map: map)]) == "a.nim.c"
     check mapPathOf("/c/@ma.nim.c") == "/c/@ma.nim.c.map"
+
+  test "a C line names every Nim line its segments name; its own call's first":
+    # The fork piles zero-width segments at one column as it emits a node:
+    # this line's run lines 1, 60, 61, 62 in that order (`AAAA`, then `AA2DA`
+    # +59, then `AACA` +1 twice), and its text names line 60 — the
+    # statement the row's C is for (codetracer's `nim_sudoku_solver`, whose
+    # `nimln_(60);{` carries 90 such segments, the first naming line 1).
+    let map = """{"version": 3, "sources": ["/s.nim"], "names": [],
+                  "mappings": "AAAA,AA2DA,AACA,AACA"}"""
+    check mapRowsOf(map) == @[@[(path: "/s.nim", line: 1), (path: "/s.nim", line: 60),
+                                (path: "/s.nim", line: 61), (path: "/s.nim", line: 62)]]
+    let l = nimCListing("\tnimln_(60);{\n", "/s.nim", map)
+    check l.anchors.len == 1
+    # The call's line first, alone (the row's cross-reference); the rest
+    # merged by file.
+    check l.anchors[0].sources == @[
+      SourceRegion(path: "/s.nim", startLine: 60, endLine: 60),
+      SourceRegion(path: "/s.nim", startLine: 1, endLine: 1),
+      SourceRegion(path: "/s.nim", startLine: 61, endLine: 62)]
+    check validate(l.anchors, l.support).len == 0
+    # Without a call on the line, the first named position leads.
+    let plain = nimCListing("\t{\n", "/s.nim", map)
+    check plain.anchors[0].sources[0] ==
+      SourceRegion(path: "/s.nim", startLine: 1, endLine: 1)
 
   test "the module's own C file is the one whose directives name it most":
     let own = Excerpt
@@ -195,6 +221,41 @@ suite "the Nim producer reads the generated C's line directives":
                found = true
            check found
            check validate(l.anchors, l.support).len == 0
+       # A statement whose C is one line carrying many positions (a literal
+       # over three lines): the statement's line finds it, and it leads.
+       let literal = dir / "literal.nim"
+       writeFile(literal, "proc main() =\n" &
+                          "  var b: array[2, array[2, int]] = [[1, 2],\n" &
+                          "                                    [3, 4]]\n" &
+                          "  echo b[1][0]\n" &
+                          "main()\n")
+       let lc = newNimCCompile()
+       check lc.startNimCCompile(literal)
+       check lc.waitNimCCompile()
+       var lits: seq[tuple[path, text, map: string]] = @[]
+       for f in lc.cFiles:
+         let m = mapPathOf(f)
+         lits.add (path: f, text: readFile(f),
+                   map: (if fileExists(m): readFile(m) else: ""))
+       let litC = nimCFileFor(literal, lits)
+       check litC.len > 0
+       for cand in lits:
+         if cand.path == litC:
+           let ll = nimCListing(cand.text, literal, cand.map)
+           var covers2 = false
+           for a in ll.anchors:
+             for r in a.sources:
+               if r.path == literal and r.startLine <= 2 and 2 <= r.endLine:
+                 covers2 = true
+           check covers2
+           if cand.map.len > 0:
+             # The fork's form: the row whose call names line 2 leads with it.
+             let rows = cand.text.splitLines()
+             for a in ll.anchors:
+               if "nimln_(2)" in rows[a.generatedFirst]:
+                 check a.sources[0] == SourceRegion(path: literal,
+                                                    startLine: 2, endLine: 2)
+           check validate(ll.anchors, ll.support).len == 0
        # A file that does not compile is refused with the compiler's error.
        let broken = dir / "broken.nim"
        writeFile(broken, "let x: int = \"text\"\n")
