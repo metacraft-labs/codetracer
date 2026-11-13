@@ -122,7 +122,7 @@ proc endCase(name: string) =
 
 const
   Source = "def main():\n    x = 1\n    if x:\n        y = 2\n\n    return x\nprint(main())\n"
-  ExpectedChecks = 99
+  ExpectedChecks = 100
     ## Written from a run. See the end of `main`.
 
 proc fresh(text = Source; readOnly = false; model = bkCua;
@@ -314,6 +314,16 @@ proc caseClicksAndDrags() {.async.} =
   ck ed.doc.state.primaryHead == ed.offsetAt(2, 5),
     "the caret is at line 2 column 5 (" & $ed.positionAt(ed.doc.state.primaryHead) & ")"
   ck ed.hasTextFocus, "a click focuses the editor"
+  # A click on the middle of a character puts the caret after it, as
+  # Monaco does (the scenario pack aims its text anchors there).
+  # (Line 3, so the browser does not count it as the first click's second.)
+  let base = rectOf(ed.root.querySelector(cstring".lines-content"))
+  let mx = num(base.left) + (ed.xOfByteCol(3, 4) + ed.xOfByteCol(3, 5)) / 2
+  await ctMouse("click", mx, ed.pointOf(3, 4).y, "left", 1)
+  await settle()
+  ck ed.doc.state.primaryHead == ed.offsetAt(3, 6),
+    "a press on the middle of `i` puts the caret after it (" &
+    $ed.positionAt(ed.doc.state.primaryHead) & ")"
   # A double click selects the word (`return` on line 6).
   p = ed.pointOf(6, 6)
   await ctMouse("click", p.x, p.y, "left", 1)

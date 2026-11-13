@@ -975,7 +975,9 @@ proc runCoreStep*(ed: SharedEditor; source: string;
   ed.ensureIndex()
   if ed.primaryOffset != beforeHead or ed.doc.state.selection != beforeSel or
      ed.doc.timeline.version != beforeV:
-    ed.revealOffset(ed.primaryOffset)
+    # A find's move is revealed by the find itself, centred when the match
+    # was off-screen (`afterFindMove`), as Monaco's find widget does.
+    if source != "find": ed.revealOffset(ed.primaryOffset)
     ed.fireCursor(source)
   ed.requestRender()
 
@@ -1110,7 +1112,8 @@ type
     pe: PointerElement
     zoneId: int
 
-proc hitAt(ed: SharedEditor; clientX, clientY: float; target: JsObject): Hit =
+proc hitAt(ed: SharedEditor; clientX, clientY: float; target: JsObject;
+           caretTie = true): Hit =
   ed.ensureIndex()
   let rootRect = rectOf(ed.root)
   let y = clientY - jsNum(rootRect.top) + float(ed.scrollTop)
@@ -1158,14 +1161,16 @@ proc hitAt(ed: SharedEditor; clientX, clientY: float; target: JsObject): Hit =
           found = true
           # A press on the middle of a character: Monaco places the caret
           # after it (the browser's caret position rounds the tie to the
-          # left). Measured against the drawn boundaries either side.
+          # left, and a mouse event's coordinates are whole pixels, so the
+          # middle is taken to within one). Measured against the drawn
+          # boundaries either side.
           let xr = clientX - jsNum(rectOf(ed.linesContent).left)
-          if byteCol < lt.len:
+          if caretTie and byteCol < lt.len:
             var nextCol = byteCol + 1
             while nextCol < lt.len and (ord(lt[nextCol]) and 0xC0) == 0x80: inc nextCol
             let a = ed.xOfByteCol(result.line1, byteCol)
             let b = ed.xOfByteCol(result.line1, nextCol)
-            if b > a and xr >= (a + b) / 2 - 0.5: byteCol = nextCol
+            if b > a and xr >= (a + b) / 2 - 1.0: byteCol = nextCol
     if not found:
       # Past the end of the line, or between spans: by x.
       let x = clientX - jsNum(rectOf(ed.linesContent).left)
@@ -1235,7 +1240,14 @@ proc hasTextFocus*(ed: SharedEditor): bool =
   not ed.textarea.isNil and docActive() == ed.textarea
 
 proc onMouseDown(ed: SharedEditor; ev: JsObject) =
-  let h = ed.hitAt(jsNum(ev.clientX), jsNum(ev.clientY), ev.target)
+  # The press is counted, and a double or triple press selects the word or
+  # line, at the character under the pointer; a single press that places
+  # the caret places it as Monaco does, after a character pressed on its
+  # middle (`tied`). Counting on the one keeps a double press's two halves
+  # at the same place.
+  let h = ed.hitAt(jsNum(ev.clientX), jsNum(ev.clientY), ev.target,
+                   caretTie = false)
+  let tied = ed.hitAt(jsNum(ev.clientX), jsNum(ev.clientY), ev.target)
   if h.targetType in [mtContentWidget, mtOverlayWidget, mtContentViewZone,
                       mtScrollbar]:
     ed.fire("mouseDown", ed.mouseEventOf(ev, h))
@@ -1272,10 +1284,15 @@ proc onMouseDown(ed: SharedEditor; ev: JsObject) =
   var action: PointerAction
   discard ed.runCoreStep("mouse", proc(d: var EditingDocument): EditingOutcome =
     action = ed.pointer.pressEditor(d, press)
+    if action.fresh and action.operation == poCaret and tied.offset != h.offset:
+      d.state.selection = caretSelection(tied.offset)
+      d.state.pointerAnchor = PointerAnchor(
+        unit: puCharacter, first: tied.offset, last: tied.offset,
+        selection: d.state.selection)
     eoMoved)
   # The desktop's handlers decide the debugger's half (breakpoints, jumps,
   # the menu), as they do for Monaco.
-  ed.fire("mouseDown", ed.mouseEventOf(ev, h))
+  ed.fire("mouseDown", ed.mouseEventOf(ev, (if action.count <= 1: tied else: h)))
   if pb == pbLeft:
     ed.focusEditor()
     discard ev.preventDefault()
