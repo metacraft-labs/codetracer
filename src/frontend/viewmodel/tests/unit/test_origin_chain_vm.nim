@@ -1789,3 +1789,45 @@ suite "M86 — the origin badge and Pin to scratchpad, through the production br
     check originVM.loading.val
     check originVM.rejectChainAnswer("req-3")
     check not originVM.loading.val
+
+suite "a Computational hop's operands are shown as values":
+  # The replay sends each operand snapshot's value as a ValueRecordWithType
+  # (`db-backend/src/value.rs`). The side panel printed that record verbatim
+  # (`a = {"i":10,"kind":"Int","typ":{…}}`); a reader sees the value.
+  proc snapshot(name: string; value: JsonNode): JsonNode =
+    %*{"name": name, "value": value, "sourceStep": 7}
+  let intTyp = %*{"kind": 7, "lang_type": "Int", "specific_info": {"kind": "None"}}
+
+  test "an Int operand reads as its number, with its language type":
+    let op = parseOperandSnapshot(snapshot("a", %*{"kind": "Int", "i": 10, "typ": intTyp}))
+    check op.name == "a"
+    check op.value == "10"
+    check op.typeName == "Int"
+    check op.sourceStep == 7
+
+  test "strings, booleans, sequences and references read as values":
+    check parseOperandSnapshot(snapshot("s", %*{"kind": "String", "text": "hi", "typ": intTyp})).value == "\"hi\""
+    check parseOperandSnapshot(snapshot("b", %*{"kind": "Bool", "b": true, "typ": intTyp})).value == "true"
+    check parseOperandSnapshot(snapshot("xs", %*{"kind": "Sequence", "is_slice": false, "typ": intTyp,
+      "elements": [{"kind": "Int", "i": 1, "typ": intTyp}, {"kind": "Int", "i": 2, "typ": intTyp}]})).value == "[1, 2]"
+    check parseOperandSnapshot(snapshot("p", %*{"kind": "Reference", "address": 4096, "mutable": false,
+      "typ": intTyp, "dereferenced": {"kind": "Int", "i": 5, "typ": intTyp}})).value == "5"
+
+  test "a value already sent as text is kept as it is":
+    check parseOperandSnapshot(snapshot("a", %"10")).value == "10"
+
+  test "the whole chain's Computational hop carries the rendered operands":
+    let chain = parseOriginChain(%*{
+      "queryVariable": "result", "queryStepId": 9,
+      "hops": [{"kind": "computational", "confidence": 1.0, "stepId": 9,
+                "location": {"path": "main.py", "line": 9, "rrTicks": 9},
+                "targetExpr": "result", "sourceExpr": "a + b", "sourceText": "result = a + b",
+                "truncatedOperands": false,
+                "operandSnapshots": [snapshot("a", %*{"kind": "Int", "i": 10, "typ": intTyp}),
+                                     snapshot("b", %*{"kind": "Int", "i": 32, "typ": intTyp})]}],
+      "terminator": {"kind": "computational", "expression": "a + b"},
+      "truncated": false, "confidence": 1.0})
+    check chain.hops.len == 1
+    check chain.hops[0].operandSnapshots.len == 2
+    check chain.hops[0].operandSnapshots[0].value == "10"
+    check chain.hops[0].operandSnapshots[1].value == "32"

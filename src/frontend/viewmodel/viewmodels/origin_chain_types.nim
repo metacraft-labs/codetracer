@@ -460,19 +460,48 @@ proc parseOriginLocation*(j: JsonNode): OriginLocation =
   result.line = j{"line"}.getInt(0)
   result.rrTicks = uint64(j{"rrTicks"}.getInt(0))
 
+proc operandValueText*(v: JsonNode): string =
+  ## The text of an operand's value as the replay sends it: a
+  ## `ValueRecordWithType` (`db-backend/src/value.rs`, tagged by `kind`).
+  ## A string is already the text. Before this, the record itself was shown —
+  ## `a = {"i":10,"kind":"Int","typ":{…}}` under a Computational hop.
+  if v.isNil or v.kind == JNull: return ""
+  if v.kind == JString: return v.getStr
+  if v.kind != JObject: return $v
+  proc items(key: string): string =
+    var parts: seq[string]
+    for e in v{key}.getElems: parts.add operandValueText(e)
+    parts.join(", ")
+  let typeName = v{"typ"}{"lang_type"}.getStr(v{"typ"}{"langType"}.getStr(""))
+  case v{"kind"}.getStr("")
+  of "Int": $v{"i"}
+  of "Float": $v{"f"}
+  of "Bool": (if v{"b"}.getBool: "true" else: "false")
+  of "String": "\"" & v{"text"}.getStr & "\""
+  of "Char": "'" & v{"c"}.getStr & "'"
+  of "Raw": v{"r"}.getStr
+  of "Error": "<error: " & v{"msg"}.getStr & ">"
+  of "None": "nil"
+  of "Sequence": "[" & items("elements") & "]"
+  of "Tuple": "(" & items("elements") & ")"
+  of "Struct": typeName & "(" & items("field_values") & ")"
+  of "Variant": v{"discriminator"}.getStr & "(" & operandValueText(v{"contents"}) & ")"
+  of "Reference": operandValueText(v{"dereferenced"})
+  else: $v
+
 proc parseOperandSnapshot*(j: JsonNode): OperandSnapshot =
   if j.isNil or j.kind != JObject:
     return OperandSnapshot()
   result.name = j{"name"}.getStr("")
-  let val = j{"value"}
-  if not val.isNil and val.kind != JNull:
-    if val.kind == JString:
-      result.value = val.getStr
-    else:
-      result.value = $val
-  let typeNode = j{"value"}{"typ"}{"langType"}
+  result.value = operandValueText(j{"value"})
+  # The record's type is `typ.lang_type` on the wire (`TypeRecord` is not
+  # renamed), `langType` in older payloads.
+  let typeNode = j{"value"}{"typ"}{"lang_type"}
+  let legacyType = j{"value"}{"typ"}{"langType"}
   if not typeNode.isNil and typeNode.kind == JString:
     result.typeName = typeNode.getStr
+  elif not legacyType.isNil and legacyType.kind == JString:
+    result.typeName = legacyType.getStr
   result.sourceStep = int64(j{"sourceStep"}.getInt(0))
 
 proc parseFrameTransition*(j: JsonNode): Option[FrameTransition] =
