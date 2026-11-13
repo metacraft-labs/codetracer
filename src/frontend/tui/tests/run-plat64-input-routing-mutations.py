@@ -223,8 +223,8 @@ ARMS = [
              '    BaseRow(chords: "Click", operation: "vcs.toggle-commit",')],
      [(UNIT, None)],
      "§5.1: a Points row declares another pane's operation"),
-    ("V5", [(KEYROUTER, "  syncVideoPickerLayer()\n  let path = desktopScopePath()",
-             "  let path = desktopScopePath()")],
+    ("V5", [(KEYROUTER, "  syncVideoPickerLayer()\n  # A widget of the shared editor that owns keys while it is open (the",
+             "  # A widget of the shared editor that owns keys while it is open (the")],
      [(VPSPEC, None)],
      "the desktop never pushes the picker's layer: Escape does not cancel it"),
     # ---- the top bar, a tab's pin and a docked label ----------------------------

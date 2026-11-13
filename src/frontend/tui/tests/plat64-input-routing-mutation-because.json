@@ -1,4 +1,8 @@
 {
+  "B1": "UserTakesIt in rt.app.notification",
+  "B2": "not rt.dockedOpen(pane)",
+  "B3": "\"pointer Click -> session-tabs.activate\" in plain.trace",
+  "B4": "\"press session-tabs.new\" in plain.trace",
   "D1": "sess.atRecordingEnd",
   "D2": "\"pointer Ctrl+Click -> debugger.continue\" in r.trace",
   "D3": "sess.atRecordingEnd",
@@ -35,5 +39,8 @@
   "V5": "Error: expect(locator).toHaveCount(expected) failed",
   "W1": "Error: expect(received).toEqual(expected) // deep equality",
   "W2": "Error: expect(received).toEqual(expected) // deep equality",
-  "W3": "Error: expect(received).toBe(expected) // Object.is equality"
+  "W3": "pressCalltrace(vm, op, readerOf(text))",
+  "W4": "Error: expect(received).toEqual(expected) // deep equality",
+  "W5": "FAIL  [click] src/frontend/viewmodel/views/isonim_event_log_view.nim: 7 site(s), the ledger allows 6 (lines 493,522,602,688,735,833,838)",
+  "W6": "Error: expect(received).toEqual(expected) // deep equality"
 }
