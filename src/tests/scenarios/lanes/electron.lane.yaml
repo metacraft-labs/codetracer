@@ -141,6 +141,7 @@ applicable:
   - ../breakpoints/shift-f9-column-breakpoint-from-the-gutter-side.yaml
   - ../breakpoints/conditional-column-breakpoint.yaml
   - ../languages/erlang-canonical-flow.yaml
+  - ../breakpoints/column-tracepoint-does-not-stop.yaml
   # --- pw8 ---
   - ../auto-hide/left-strip-beside-the-layout.yaml
   - ../cross-process/event-log-markers-jump-across.yaml

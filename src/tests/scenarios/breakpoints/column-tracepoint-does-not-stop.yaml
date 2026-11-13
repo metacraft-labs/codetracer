@@ -2,8 +2,10 @@ scenario: 1
 name: breakpoints/column-tracepoint-does-not-stop
 pack: codetracer
 summary: >-
-  A tracepoint added from the editor's menu at the caret on `var b` is stored
-  at that column, and Continue does not stop there.
+  A tracepoint added from the editor's context menu at a mid-line caret
+  (`var b`, line 1 column 12), with `log(a)` run by its Run button, logs a's
+  value into the Event Log, and Continue does not stop at it: the replay
+  goes on past line 1.
 
 stage:
   - use: record-program
@@ -19,7 +21,12 @@ steps:
   - click: { at: 'editor[file="program.js"]/line[number="1"]', anchor: caret(12), button: right }
   - wait: { until: { at: context-menu, present: true }, timeout: 10s }
   - click: 'context-menu/menu-item[label="Add tracepoint"]'
-  - expect: { at: 'editor[file="program.js"]/line[number="1"]', tracepoint: true }
+  - wait: { until: { at: 'tracepoint-editor[line="1"]', focused: true }, timeout: 20s }
+  - type: "log(a)"
+  - click: { at: 'tracepoint-editor[line="1"]', anchor: run }
+    settle: false
+  - wait: { until: event-log.loaded, timeout: 60s }
+  - expect: { at: event-log, assert: 'has-output("a=1")' }
   - click: 'toolbar/toolbar-button[label="continue-image"]'
     settle: false
   - wait: { until: replay-idle, timeout: 60s }

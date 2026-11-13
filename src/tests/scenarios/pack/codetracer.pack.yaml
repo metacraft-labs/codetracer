@@ -1381,6 +1381,8 @@ roles:
       rows: int
       fits: bool
     affordances: [click, text-entry, focusable]
+    # pw5: `run`, the editor's Run button (▷).
+    anchors: [run]
 
   # A pane's search box and what it found.
   search-box:

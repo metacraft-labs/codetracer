@@ -2947,7 +2947,36 @@ function readSurfacePw5Review(root: any): void {
 }
 // --- end pw5 deepreview ---
 
-const SURFACE_EXTENSIONS: Array<(root: any) => void> = [readSurfacePw1, readSurfacePw3, readSurfacePw4, readSurfacePw8, readSurfacePw7, readSurfacePw5Review];
+// --- pw5: the tracepoint editor's Run button --------------------------------
+// The tracepoint editor's ▷ (`#trace-run-button`, `ui/trace.nim`), as the
+// `run` anchor of the `tracepoint-editor` node `readSurfacePw4` read for the
+// same zone. Reads only.
+function readSurfacePw5(root: any): void {
+  const vis = (el: Element | null): boolean => {
+    if (!el) return false;
+    const r = (el as HTMLElement).getBoundingClientRect();
+    return r.width > 0 && r.height > 0 && getComputedStyle(el as HTMLElement).visibility !== "hidden";
+  };
+  const editors: any[] = [];
+  const walk = (n: any) => {
+    if (n.role === "tracepoint-editor") editors.push(n);
+    for (const c of n.children ?? []) walk(c);
+  };
+  walk(root);
+  for (const z of Array.from(document.querySelectorAll(".monaco-editor .trace")) as HTMLElement[]) {
+    if (!vis(z)) continue;
+    const lineAttr = z.getAttribute("data-line") ??
+      (z.querySelector("[id^='edit-trace-']")?.id.split("-").pop() ?? "0");
+    const line = String(parseInt(lineAttr, 10) || 0);
+    const run = z.querySelector("#trace-run-button") as HTMLElement | null;
+    const n = editors.find((e) => (e.keys ?? []).some((k: any) => k[0] === "line" && k[1] === line));
+    if (!n || !run || !vis(run)) continue;
+    const b = run.getBoundingClientRect();
+    n.anchors = { ...(n.anchors ?? {}), points: { ...(n.anchors?.points ?? {}), run: { x: b.left + b.width / 2, y: b.top + b.height / 2 } } };
+  }
+}
+
+const SURFACE_EXTENSIONS: Array<(root: any) => void> = [readSurfacePw1, readSurfacePw3, readSurfacePw4, readSurfacePw8, readSurfacePw7, readSurfacePw5Review, readSurfacePw5];
 
 // --- the binding ----------------------------------------------------------------
 
