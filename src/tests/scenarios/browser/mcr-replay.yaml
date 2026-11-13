@@ -21,6 +21,8 @@ steps:
     steps:
       - click: { at: 'pane-tab[label="EVENT LOG"]' }
       - wait: { until: event-log.loaded, timeout: 60s }
+      # The program prints its boards last: the end of the log.
+      - wheel: { at: event-log, direction: down, amount: 30 }
       - wait: { until: { at: event-log, assert: "has-output(Solved)" }, timeout: 30s }
 
   - beat: call-trace

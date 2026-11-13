@@ -1264,6 +1264,20 @@ stages:
       there) into the run's own project folder; `open-project` with `folder:
       $project` then edits the copy, never the repository's files.
     params: { folder: text }
+  # --- pw5 ---
+  portable-recording:
+    summary: >-
+      A portable MCR recording made on another platform (`platform`: a folder
+      of codetracer-example-recordings/mcr, e.g. linux-x86_64, macos-arm64),
+      laid out as a recording folder with its source and binaries, as the
+      recording the next `open-recording` opens.
+    params: { platform: text }
+  beam-recording:
+    summary: >-
+      The BEAM recorder's canonical_flow program (`language`: elixir or
+      erlang), recorded with the recorder's own fixture script, as the
+      recording the next `open-recording` opens.
+    params: { language: text }
   saved-layout:
     summary: >-
       Write a saved layout into the front-end's state directory (`file`: the

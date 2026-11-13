@@ -14,7 +14,7 @@ steps:
   - wait: { until: replay-idle, timeout: 180s }
   - click: 'pane-tab[label="CALLTRACE"]'
   - wait: { until: { at: 'call-trace/call[name="main"]', present: true }, timeout: 120s }
-  - click: 'call-trace/call[name="main"]'
+  - click: { at: 'call-trace/call[name="main"]', anchor: name }
     settle: false
   - wait: { until: { at: 'call-trace/call[name="main"]', selected: true }, timeout: 30s }
   - wait: { until: replay-idle, timeout: 60s }

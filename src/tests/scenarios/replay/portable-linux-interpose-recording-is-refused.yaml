@@ -1,0 +1,17 @@
+scenario: 1
+name: replay/portable-linux-interpose-recording-is-refused
+pack: codetracer
+summary: >-
+  The portable MCR recording made on Linux x86-64 (codetracer-example-recordings,
+  a program that recorded four threads, opened through `ct host` in a browser)
+  is refused by the replay in Linux x86-64 trace mode, and the user is told
+  why in the replay's own words, not shown a stopped location.
+
+stage:
+  - use: portable-recording
+    with: { platform: linux-x86_64 }
+  - use: open-recording
+    with: { deployment: web }
+
+steps:
+  - wait: { until: { at: status-line, notifications: { contains: "error: trace mode" } }, timeout: 300s }

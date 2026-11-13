@@ -8,8 +8,8 @@ summary: >-
   with final_result = 94; and Next moves the line.
 
 stage:
-  - use: record-program
-    with: { program: ../codetracer-beam-recorder/test-programs/elixir/canonical_flow/lib/canonical_flow.ex }
+  - use: beam-recording
+    with: { language: elixir }
   - use: open-recording
 
 steps:
@@ -27,9 +27,6 @@ steps:
   - wait: { until: { at: call-trace, assert: 'has-call-containing("CanonicalFlow")' }, timeout: 30s }
   - wait: { until: event-log.loaded, timeout: 30s }
   - click: 'toolbar/toolbar-button[label="step-in-image"]'
-    settle: false
-  - wait: { until: replay-idle, timeout: 60s }
-  - click: 'toolbar/toolbar-button[label="next-image"]'
     settle: false
   - wait: { until: { at: variables, assert: 'has-variable("a")' }, timeout: 60s }
   - click: 'toolbar/toolbar-button[label="next-image"]'

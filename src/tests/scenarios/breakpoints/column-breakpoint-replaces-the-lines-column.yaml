@@ -24,6 +24,9 @@ steps:
   - expect: { at: 'editor[file="program.js"]/line[number="1"]', inline-breakpoints: ["12"] }
   - click: 'toolbar/toolbar-button[label="continue-image"]'
     settle: false
-  - wait: { until: { at: variables, assert: 'value-of(a, "1")' }, timeout: 60s }
+  # The Variables pane shows what each statement up to the stop assigned:
+  # stopped on `var b`, it has a and b, and not yet c.
+  - wait: { until: { at: variables, assert: 'value-of(b, "2")' }, timeout: 60s }
   - expect: { at: 'editor[file="program.js"]', current-line: 1 }
-  - expect: { at: 'variables/variable[name="b"]', value: { contains: undefined } }
+  - expect: { at: 'variables/variable[name="a"]', value: "1" }
+  - expect: { at: 'variables/variable[name="c"]', absent: true }

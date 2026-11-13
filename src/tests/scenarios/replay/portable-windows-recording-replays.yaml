@@ -1,0 +1,16 @@
+scenario: 1
+name: replay/portable-windows-recording-replays
+pack: codetracer
+summary: >-
+  A portable MCR recording made on Windows x86-64 (codetracer-example-recordings),
+  opened through `ct host` in a browser on another platform, replays: the
+  status bar shows a location in the recorded program's source.
+
+stage:
+  - use: portable-recording
+    with: { platform: windows-x86_64 }
+  - use: open-recording
+    with: { deployment: web }
+
+steps:
+  - wait: { until: { at: status-line, location: { contains: "source.c:" } }, timeout: 300s }

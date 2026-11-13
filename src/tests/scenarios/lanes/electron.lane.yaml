@@ -128,4 +128,16 @@ applicable:
   - ../macro-expansion/language-dynamic-menu-python.yaml
   - ../macro-expansion/static-block-stepping.yaml
   - ../multi-replay/tabbed-replay-sessions-isolated.yaml
+  # --- pw5 ---
+  - ../command-palette/symbol-choice-by-click-focuses-editor.yaml
+  - ../command-palette/symbol-choice-by-enter-focuses-editor.yaml
+  - ../call-trace/move-keeps-selection.yaml
+  - ../ct-host/files-pane-survives-session-sync.yaml
+  - ../browser/mcr-replay.yaml
+  - ../replay/portable-linux-interpose-recording-is-refused.yaml
+  - ../breakpoints/column-breakpoint-stops-at-its-column.yaml
+  - ../breakpoints/glyph-breakpoint-is-line-only.yaml
+  - ../breakpoints/column-breakpoint-replaces-the-lines-column.yaml
+  - ../breakpoints/shift-f9-column-breakpoint-from-the-gutter-side.yaml
+  - ../languages/erlang-canonical-flow.yaml
 unsupported: []

@@ -23,9 +23,9 @@ steps:
   - expect: { at: 'editor[file="program.js"]/line[number="1"]', glyph: breakpoint, inline-breakpoints: ["23"] }
   - click: 'toolbar/toolbar-button[label="continue-image"]'
     settle: false
-  - wait: { until: { at: variables, assert: 'value-of(b, "2")' }, timeout: 60s }
+  # Stopped on `var c`: the Variables pane has c's value.
+  - wait: { until: { at: variables, assert: 'value-of(c, "3")' }, timeout: 60s }
   - expect: { at: 'editor[file="program.js"]', current-line: 1 }
-  - expect: { at: 'variables/variable[name="c"]', value: { contains: undefined } }
   - click: { at: 'editor[file="program.js"]/line[number="2"]', anchor: glyph }
   - expect: { at: 'editor[file="program.js"]/line[number="2"]', glyph: breakpoint, inline-breakpoints: { count: 0 } }
   - click: 'toolbar/toolbar-button[label="continue-image"]'

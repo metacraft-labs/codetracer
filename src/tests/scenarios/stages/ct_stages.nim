@@ -653,6 +653,59 @@ proc hcrFlame*(s: StageState; platform, edit, arm: string) =
     return
   discard startProcess("/bin/sh", args = ["-c", watcher], options = {})
 
+# --- pw5 ----------------------------------------------------------------------
+
+proc portableRecording*(s: StageState; platform: string) =
+  ## A portable MCR recording made on another machine
+  ## (`codetracer-example-recordings/mcr/<platform>/trace-portable.ct`, the
+  ## sibling checkout), laid out as a recording folder the way it arrives on a
+  ## user's machine: the container as `trace.ct`, the recorded program's source
+  ## as `files/source.c`, and the binaries it bundles. It is the recording the
+  ## next `open-recording` opens.
+  if platform.len == 0 or platform.contains('/') or platform.contains(".."):
+    raise newException(ValueError, "portable-recording: '" & platform & "' is not a platform name")
+  let src = repo().parentDir / "codetracer-example-recordings" / "mcr" / platform
+  let portable = src / "trace-portable.ct"
+  if not fileExists(portable):
+    raise newException(IOError, "portable-recording: prerequisite missing: " & portable &
+      " (the codetracer-example-recordings sibling checkout, with its LFS files)")
+  let dest = s.root / ("portable-" & platform)
+  removeDir(dest)
+  createDir(dest / "files")
+  copyFile(portable, dest / "trace.ct")
+  let source = src / "source.c"
+  if fileExists(source):
+    let real = if symlinkExists(source): expandSymlink(source).absolutePath(src) else: source
+    copyFile(real, dest / "files" / "source.c")
+  if dirExists(src / "binaries"):
+    copyDir(src / "binaries", dest / "binaries")
+  s.launch.recording = dest
+
+proc beamRecording*(s: StageState; language: string) =
+  ## The BEAM recorder's canonical_flow fixture for `language` (elixir or
+  ## erlang), recorded by the recorder's own fixture script
+  ## (`codetracer-beam-recorder/scripts/prepare-beam-fixtures.sh`): an Erlang
+  ## module is run as `erl -s canonical_flow main`, which `ct record` (it
+  ## runs a `.erl` as an escript, through `main/1`) cannot do. It is the
+  ## recording the next `open-recording` opens.
+  if language notin ["elixir", "erlang"]:
+    raise newException(ValueError, "beam-recording: unknown language '" & language & "'")
+  let recorder = repo().parentDir / "codetracer-beam-recorder"
+  let script = recorder / "scripts" / "prepare-beam-fixtures.sh"
+  if not fileExists(script):
+    raise newException(IOError, "beam-recording: prerequisite missing: " & script)
+  let elixirOut = s.root / "beam" / "elixir-canonical-flow"
+  let erlangOut = s.root / "beam" / "erlang-canonical-flow"
+  createDir(s.root / "beam")
+  let skip = if language == "erlang": "PREPARE_BEAM_FIXTURES_SKIP_ELIXIR=1 "
+             else: "PREPARE_BEAM_FIXTURES_SKIP_ERLANG=1 "
+  let (output, code) = execCmdEx(skip & "FORCE=1 bash " & quoteShell(script) & " " &
+    quoteShell(elixirOut) & " " & quoteShell(erlangOut), workingDir = recorder)
+  if code != 0:
+    raise newException(IOError, "beam-recording " & language & ": the fixture script exited " &
+      $code & "\n" & output)
+  s.launch.recording = if language == "erlang": erlangOut else: elixirOut
+
 proc runStage*(s: StageState; use: string; args: JsonNode) =
   ## One stage call. `open-recording` / `open-project` only DECIDE the launch;
   ## the binding starts its own front-end from `s.launch` afterwards.
@@ -755,6 +808,11 @@ proc runStage*(s: StageState; use: string; args: JsonNode) =
     copyFile(src, s.launch.env["CODETRACER_TUI_LAYOUT_DIR"] / layout.extractFilename)
   of "hcr-flame":
     s.hcrFlame(argStr(args, "platform"), argStr(args, "edit"), argStr(args, "arm"))
+  # --- pw5 ---
+  of "portable-recording":
+    s.portableRecording(argStr(args, "platform"))
+  of "beam-recording":
+    s.beamRecording(argStr(args, "language"))
   else:
     raise newException(KeyError, "the CodeTracer pack has no stage '" & use & "'")
 
