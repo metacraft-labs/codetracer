@@ -70,6 +70,8 @@ test.describe("codetracer-ci dev shell entry", () => {
           cwd: codetracerCiDir,
           env,
           encoding: "utf-8",
+          timeout: 60_000,
+          killSignal: "SIGKILL",
         });
         expect(control.status, "direnv must refuse an unallowed .envrc").not.toBe(0);
         expect(control.stderr).toContain("is blocked");
@@ -81,12 +83,20 @@ test.describe("codetracer-ci dev shell entry", () => {
       }
 
       const { command, args } = codetracerCiDevShellCommand(codetracerCiDir, ["dotnet", "--version"], env);
+      // Bounded below the test's 900 s: a synchronous child blocks the
+      // worker, so the test's own timeout cannot end a hung one.
       const result = childProcess.spawnSync(command, args, {
         cwd: codetracerCiDir,
         env,
         encoding: "utf-8",
         maxBuffer: 64 * 1024 * 1024,
+        timeout: 840_000,
+        killSignal: "SIGKILL",
       });
+      expect(
+        result.error?.message ?? "",
+        `${command} ${args.join(" ")} did not finish within 840 s and was killed`,
+      ).not.toContain("ETIMEDOUT");
       expect(
         result.status,
         `${command} ${args.join(" ")} failed:\n${result.stderr}`,

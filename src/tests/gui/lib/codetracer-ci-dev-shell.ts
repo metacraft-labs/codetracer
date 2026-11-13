@@ -103,5 +103,15 @@ export function codetracerCiDevShellCommand(
       `cannot enter the sibling ${sibling}: \`nix\` is not on PATH`,
     );
   }
-  return { command: nix, args: ["develop", flakeDir, "--command", ...argv] };
+  // `DOTNET_LTTng=0`: the .NET runtime otherwise loads LTTng-UST at start-up,
+  // and under an `LD_PRELOAD` command-trace shim (agent-harbor's, on the
+  // workstations that run agents) the two deadlock: `dotnet --version`
+  // waits on a futex forever and ignores SIGTERM (measured 2026-11-13, see
+  // codetracer-pm issues/2026-11-13-dotnet-deadlocks-at-start-up-under-an-
+  // ld-preload-shim-with-lttng-ust.md). Nothing here reads LTTng traces.
+  // `env` execs the command, so the spawned pid is still the command's.
+  return {
+    command: nix,
+    args: ["develop", flakeDir, "--command", "env", "DOTNET_LTTng=0", ...argv],
+  };
 }
