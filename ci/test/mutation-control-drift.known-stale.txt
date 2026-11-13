@@ -113,7 +113,6 @@ src/frontend/viewmodel/tests/unit/plat68-keymaps-mutation-control.sha256	src/fro
 # and Files controls and the debugger controls' strip. Each harness that
 # digests those bytes owes a re-grade (codetracer-pm HSF-R1).
 src/frontend/tui/tests/build-residuals-mutation-control.sha256	src/frontend/tui/main.nim	c718692afdbc9bf13b270706c2d948623576040ca6c27b1df6679004439cf1c3	66283c44fe09ff1389f0e769ef48637ce573781972c014e30c9c16b1da8606ce
-src/frontend/tui/tests/plat45-layout-mutation-control.sha256	src/frontend/tui/main.nim	c718692afdbc9bf13b270706c2d948623576040ca6c27b1df6679004439cf1c3	66283c44fe09ff1389f0e769ef48637ce573781972c014e30c9c16b1da8606ce
 src/frontend/tui/tests/plat48-topbar-mutation-control.sha256	src/frontend/tui/main.nim	c718692afdbc9bf13b270706c2d948623576040ca6c27b1df6679004439cf1c3	66283c44fe09ff1389f0e769ef48637ce573781972c014e30c9c16b1da8606ce
 src/frontend/tui/tests/plat49-chrome-mutation-control.sha256	src/frontend/tui/main.nim	c718692afdbc9bf13b270706c2d948623576040ca6c27b1df6679004439cf1c3	66283c44fe09ff1389f0e769ef48637ce573781972c014e30c9c16b1da8606ce
 src/frontend/tui/tests/plat50-clicks-mutation-control.sha256	src/frontend/tui/main.nim	c718692afdbc9bf13b270706c2d948623576040ca6c27b1df6679004439cf1c3	66283c44fe09ff1389f0e769ef48637ce573781972c014e30c9c16b1da8606ce
@@ -140,7 +139,6 @@ src/frontend/viewmodel/tests/unit/plat68-keymaps-mutation-control.sha256	src/fro
 # agents commits it was rebased over. The entries already stale on agents 38974dd6d0f
 # before this change (69 new, 11 moved again) are not this change's and are left as they
 # were.
-src/frontend/tui/tests/plat45-layout-mutation-control.sha256	src/frontend/tui/app/views/shell.nim	09454097889294a4861a5eca9cccd9be16d9ba5244ab683a49daf7a8b33bd686	2ffb13fa4541be85cde288716f6194d877ab06069ee57f2b4386f3edc9e7afae
 src/frontend/tui/tests/plat46-design-mutation-control.sha256	src/frontend/tui/app/theme/capabilities.nim	40c50a6a381d64a02ff7b1894488fdf9c20f2919acdcf6c645d48cbcce0f0e27	f1f2c84a36ed368523f503701d3a0700b16a9fd1aa5c4c6d9c93c713fe54e38b
 src/frontend/tui/tests/plat46-design-mutation-control.sha256	src/frontend/tui/app/views/shell.nim	09454097889294a4861a5eca9cccd9be16d9ba5244ab683a49daf7a8b33bd686	2ffb13fa4541be85cde288716f6194d877ab06069ee57f2b4386f3edc9e7afae
 src/frontend/tui/tests/plat46-design-mutation-control.sha256	src/frontend/tui/host/terminal_probe.nim	9fce287d64b7aec99d425bd446199a4e2897c7b2c06189beb1ffd33246b77a2b	124b9e0d5977013726b504dd51c62c291de43270ba8932fde09594388fffd9fb
@@ -206,7 +204,6 @@ ci/test/plat70c-find-mutation-control.sha256	src/frontend/gpui/main.nim	53824dce
 ci/test/plat70i-fit-mutation-control.sha256	src/frontend/gpui/main.nim	53824dcec0e694e93da069c1b7c3357a717531b4f8e99f19a1548d0a34ac2450	6c182e680e9ef5737e5e74549c1711034c1b0b4431b08fc5ffe737f6ea9aa657
 ci/test/plat70i-fit-mutation-control.sha256	src/frontend/ui/key_router.nim	10f74deb0c4af256c5391f5ccef0a94917899b0f111edc53da17ad65e11455da	3583637c8cc7b3c78204fe88dffac1458fa016a8d65a9e7c2e358307046c13db
 src/frontend/tui/tests/build-residuals-mutation-control.sha256	src/frontend/gpui/main.nim	53824dcec0e694e93da069c1b7c3357a717531b4f8e99f19a1548d0a34ac2450	6c182e680e9ef5737e5e74549c1711034c1b0b4431b08fc5ffe737f6ea9aa657
-src/frontend/tui/tests/plat45-layout-mutation-control.sha256	src/frontend/gpui/main.nim	53824dcec0e694e93da069c1b7c3357a717531b4f8e99f19a1548d0a34ac2450	6c182e680e9ef5737e5e74549c1711034c1b0b4431b08fc5ffe737f6ea9aa657
 src/frontend/tui/tests/plat47-parity-mutation-control.sha256	src/frontend/gpui/main.nim	53824dcec0e694e93da069c1b7c3357a717531b4f8e99f19a1548d0a34ac2450	6c182e680e9ef5737e5e74549c1711034c1b0b4431b08fc5ffe737f6ea9aa657
 src/frontend/tui/tests/plat48-topbar-mutation-control.sha256	src/frontend/gpui/main.nim	53824dcec0e694e93da069c1b7c3357a717531b4f8e99f19a1548d0a34ac2450	6c182e680e9ef5737e5e74549c1711034c1b0b4431b08fc5ffe737f6ea9aa657
 src/frontend/tui/tests/plat49-chrome-mutation-control.sha256	src/frontend/gpui/main.nim	53824dcec0e694e93da069c1b7c3357a717531b4f8e99f19a1548d0a34ac2450	6c182e680e9ef5737e5e74549c1711034c1b0b4431b08fc5ffe737f6ea9aa657
