@@ -116,8 +116,8 @@ ARMS = [
              "    discard c")],
      [(PTY, PTY_PROC)],
      "the terminal's chords run no trace"),
-    ("T2", [(TUI_MAIN, "      let recorded = pollRecording() or advanceNimTrace(rt, edit, openNimTrace)",
-             "      let recorded = pollRecording()")],
+    ("T2", [(TUI_MAIN, "      let recorded = pollRecording() or advanceNimTrace(rt, edit, openNimTrace) or",
+             "      let recorded = pollRecording() or")],
      [(PTY, PTY_MAIN)],
      "the terminal never polls a trace, and nothing opens"),
     ("C1", [(CLICKS, "  # The Nim trace entries close the menu, as on the desktop.\n"
