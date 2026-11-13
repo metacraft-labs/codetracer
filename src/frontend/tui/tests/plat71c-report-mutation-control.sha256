@@ -2,8 +2,8 @@
 # subjects AND the suites the arms are graded by.
 # Refreshed with --record-control-hashes, gated by the
 # needle scan.
-ed7fe9ca43ecce5c1006220de2e59cd0b4b5772faae01823ae22415a16f19ddf  src/frontend/tui/app/theme/terminal_report.nim
-f2d39d86c7594525c18b9c688ddea1d0a32e2a205792a2deee76c82ad2ca00f2  src/frontend/tui/app/runtime.nim
-82344b5c0d18daf110e89c48bb567663d6dcf387a393aa67300a9ee98f24cff8  src/frontend/tui/app/tests/test_plat71_terminal_profile.nim
+81e926e3dd54e3e5d83c565557a568d127f7b943bb1775d1351770c5eb5bf285  src/frontend/tui/app/theme/terminal_report.nim
+745fee32e0bbc92d22443f415809389446e7802595d9845b2c55301ac678e105  src/frontend/tui/app/runtime.nim
+47d1c433c9838314c782aa53510815f5fdf60c93486b1da9a63f1f9719f04c2a  src/frontend/tui/app/tests/test_plat71_terminal_profile.nim
 9edc7f757e3705bb01d7d93990a74c6dd73529a6d19ccb88e1a97a1a4f703c99  src/frontend/tui/tests/real_terminal/test_plat71_terminal_pty.nim
 0007aaf532a43e5d5aa55031759552bc048dee43170920b8ed3c71d912356804  src/frontend/tui/tests/test_plat71_glyph_table.nim
