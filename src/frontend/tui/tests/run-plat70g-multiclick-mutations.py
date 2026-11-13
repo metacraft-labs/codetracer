@@ -174,14 +174,14 @@ ARMS = [
      [(PLAN, PLAN_COUNT)], "GPUI ignoring click_count: a platform count of 1 on a fast second press"),
     ("G2", [(LEAVES, "  EditorGutterPx* = 110", "  EditorGutterPx* = 110\n  GutterBreakpointX* = 62")],
      [(PLAN, "*::the source gate: GPUI's lanes are the shared map's")], "GPUI's gutter reading its own pixel constants"),
-    ("D1", [(EDITOR, "        else:\n          toggleBreakpoint(editorPointStore(), $self.name, line)\n    elif targetType in [MouseTargetGutterLineNumbers,",
-             "        else:\n          discard setTimeout(proc() = toggleBreakpoint(editorPointStore(), $self.name, line), 15000)\n    elif targetType in [")],
+    ("D1", [(EDITOR, "        of poToggleBreakpoint:\n          toggleBreakpoint(editorPointStore(), $self.name, line)",
+             "        of poToggleBreakpoint:\n          discard setTimeout(proc() = toggleBreakpoint(editorPointStore(), $self.name, line), 15000)")],
      [(SPEC, SPEC_GLYPH)], "the desktop's glyph toggle moved off the press"),
     ("D2", [(APPEARANCE, "    let lineHtml = cstring\"<div class='gutter-line'>\" & lineText & cstring\"</div>\"",
              "    let lineHtml = cstring\"<div class='gutter-line' onmousedown='event.stopPropagation()'>\" & lineText & cstring\"</div>\"")],
      [(SPEC, SPEC_GLYPH)], "the desktop's stopPropagation guard left on the number"),
-    ("D3", [(EDITOR, "    elif cast[bool](e.event.ctrlKey) and cast[bool](e.event.altKey):\n      try:\n        let targetToken = self.getTokenFromPosition(e.target.position)",
-             "    elif cast[bool](e.event.altKey) and not cast[bool](e.event.ctrlKey):\n      toggleBreakpoint(editorPointStore(), $self.name, cast[int](e.target.position.lineNumber))\n    elif cast[bool](e.event.ctrlKey) and cast[bool](e.event.altKey):\n      try:\n        let targetToken = self.getTokenFromPosition(e.target.position)")],
+    ("D3", [(EDITOR, "    elif pressed in {poLineJump, poCallJump} and not e.target.position.isNil:",
+             "    elif cast[bool](e.event.altKey) and not cast[bool](e.event.ctrlKey) and not e.target.position.isNil:\n      toggleBreakpoint(editorPointStore(), $self.name, cast[int](e.target.position.lineNumber))\n    elif pressed in {poLineJump, poCallJump} and not e.target.position.isNil:")],
      [(SPEC, SPEC_ALT)], "the Alt+click breakpoint restored on the desktop"),
 ]
 
