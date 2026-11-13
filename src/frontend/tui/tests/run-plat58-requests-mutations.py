@@ -184,8 +184,10 @@ ARMS = [
              "        discard r.menu")],
      [(TBL, None)],
      "N.5: a right press on a row opens no menu"),
-    ("T6", [(RUNTIME, "          position: t.position, nowMs: rt.scrollbars.clockMs), outcome)",
-             "          position: t.position, nowMs: 0), outcome)")],
+    # T6 RE-AIMED 2026-11-13: `106bc7e3e0` moved the press into the pointer
+    # keymap's `requests.select` operation; same defect.
+    ("T6", [(RUNTIME, "      position: int(c.target.index), nowMs: rt.scrollbars.clockMs), outcome)",
+             "      position: int(c.target.index), nowMs: 0), outcome)")],
      [(TBL, None)],
      "N.4: every press is judged at time 0 (a late press goes to the handler)"),
     ("T7", [(RUNTIME, "                  ask(rt.runRequestsKeyOperation(c.name, outcome)))",
