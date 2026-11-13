@@ -111,7 +111,9 @@ proc launchGpui(ctx: GuiContext; s: StageState) =
     for d in dirs:
       if d.len == 0 or not dirExists(d) or theme.len > 0: continue
       if want.len > 0:
-        if dirExists(d / want / "cursors"): (theme = want; themeDir = d)
+        if dirExists(d / want / "cursors"):
+          theme = want
+          themeDir = d
       else:
         for kind, sub in walkDir(d):
           if theme.len == 0 and kind in {pcDir, pcLinkToDir} and dirExists(sub / "cursors"):
@@ -872,6 +874,20 @@ proc normLabel(s: string): string =
   for k in PaneKind:
     if desktopTabTitle(k) == drawn or desktopTabTitle(k).replace(" ", "") == drawn.replace(" ", ""):
       return gpuiPaneName(k)
+  # an inactive tab's dim caption loses a letter to the engine now and then
+  # (`VCS` read `\CS`): the one caption a single character away, when only
+  # one is (and the caption is long enough for one letter not to decide it)
+  let flat = drawn.replace(" ", "")
+  var close: seq[PaneKind]
+  if flat.len >= 3:
+    for k in PaneKind:
+      let want = desktopTabTitle(k).replace(" ", "")
+      if want.len == flat.len:
+        var diff = 0
+        for i in 0 ..< want.len:
+          if want[i] != flat[i]: inc diff
+        if diff == 1: close.add k
+  if close.len == 1: return gpuiPaneName(close[0])
   drawn
 
 proc rowNode(role: string; b: PaneBox; r: TextRow; props: JsonNode;
@@ -931,7 +947,14 @@ proc readCallTrace(ctx: GuiContext; f: Frame; t: var Tree; b: PaneBox) =
       if hashAt < 0 and i > 0 and tk.len >= 2 and tk[0] == '#': hashAt = i
     if hashAt > 0:
       var nameToks = toks[0 ..< hashAt]
-      if nameToks.len > 1 and nameToks[0].len <= 2: nameToks.delete(0)
+      # the toggle before the callee reads as a stray glyph or two
+      while nameToks.len > 1:
+        var alnum = 0
+        for ch in nameToks[0]:
+          if ch in Letters + Digits + {'<', '_'}: inc alnum
+        if nameToks[0].len <= 2 or alnum == 0 or (alnum == 1 and nameToks[0].len <= 4):
+          nameToks.delete(0)
+        else: break
       name = nameToks.join(" ")
     else:
       let (ok, parsed) = parseCallRow(r.text)
@@ -1235,7 +1258,13 @@ proc readOverlays(ctx: GuiContext; f: Frame; t: var Tree; boxes: seq[PaneBox]) =
       t.add(t.root, d)
       let ground = f.rgb(o.x1 - 3, o.y1 - 3)
       for r in rows:
-        let (lbl, hint) = splitHint(r)
+        var (lbl, hint) = splitHint(r)
+        # a folder's arrow after its label (`File >`) is no part of it
+        for arrow in [" >", " ›", " »", ">", "›", "»"]:
+          if lbl.endsWith(arrow) and lbl.len > arrow.len:
+            lbl = lbl[0 ..< lbl.len - arrow.len].strip
+            break
+        if hint in [">", "›", "»"]: hint = ""
         let sel = not near(f.rgb(o.x0 + 3, (r.y0 + r.y1) div 2), ground, 3)
         let it = node("dropdown-item", fl(o.x0), fl(r.y0 - 3), fl(o.x1 - o.x0), fl(r.y1 - r.y0 + 6),
                       %*{"label": lbl, "shortcut": hint, "selected": sel}, @[("label", lbl)])
@@ -1274,7 +1303,14 @@ proc statusMessage(ctx: GuiContext; f: Frame; docks: seq[PaneTab]): string =
   for w in ws:
     if w.x >= left and w.x + w.w <= right: parts.add w
   parts.sort(proc (a, b: Word): int = cmp(a.x, b.x))
-  for p in parts:
+  # the test-certificate indicator (`No certificates`, `2 certificates`)
+  # stands before the location; it is no note
+  var cut = parts.len
+  for i, p in parts:
+    if p.text.toLowerAscii.startsWith("certificate"):
+      cut = max(0, i - 1)
+      break
+  for p in parts[0 ..< cut]:
     if result.len > 0: result.add " "
     result.add p.text
 
@@ -1313,7 +1349,10 @@ proc barSeparators(f: Frame; x1: int): seq[int] =
     if best >= 14 and best <= 20 and (result.len == 0 or x - result[^1] > 3): result.add x
 
 proc readToolbar(ctx: GuiContext; f: Frame; t: var Tree; omniLeft: int; overlays: seq[Overlay]) =
-  let seps = f.barSeparators(if omniLeft > 0: omniLeft else: f.image.width div 2)
+  var seps = f.barSeparators(if omniLeft > 0: omniLeft else: f.image.width div 2)
+  # the menu button's own edges (lit while it is hovered or open) are thin
+  # lines too, left of the groups: the groups' separators are the last ones
+  if seps.len > BarGroupLabels.len: seps = seps[seps.len - BarGroupLabels.len .. ^1]
   if getEnv("CT_GUI_BINDING_DEBUG").len > 0: stderr.writeLine "bar separators ", seps
   if seps.len != BarGroupLabels.len: return
   let bar = node("toolbar", fl(seps[0]), 0, fl(omniLeft - seps[0]), fl(TopBarH))
