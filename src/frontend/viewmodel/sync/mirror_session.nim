@@ -32,7 +32,7 @@ import ../session_vm
 import ../viewmodels/[debug_controls_vm, action_sink, calltrace_vm, state_vm,
                       event_log_vm, terminal_output_vm, scratchpad_vm,
                       trace_log_vm, flow_vm, point_list_vm,
-                      filesystem_vm]
+                      filesystem_vm, origin_chain_vm]
 import action_relay, sync_subscriber, transport
 
 when defined(js):
@@ -160,6 +160,7 @@ proc relayActions(m: MirrorSession; relays: RelayFilter) =
   if not s.pointListVM.isNil: s.pointListVM.actionSink = sink
   if not s.fileTreeVM.isNil: s.fileTreeVM.actionSink = sink
   if not s.requestPanelVM.isNil: s.requestPanelVM.actionSink = sink
+  if not s.originChainVM.isNil: s.originChainVM.actionSink = sink
   # The breakpoints are the store's, not a panel's (`sdk/breakpoints`).
   if not s.store.isNil: s.store.actionSink = sink
 
@@ -168,10 +169,16 @@ proc createMirrorSession*(
     debugCommandsFor: proc(session: SessionViewModel): DebugCommands = nil;
     relayActions = false;
     relays: RelayFilter = nil;
-    localOwners: openArray[string] = []
+    localOwners: openArray[string] = [];
+    originChain = false
 ): MirrorSession =
   ## A mirror over `channel`. It follows the session the host activates, or
   ## the one `switchTo` names.
+  ##
+  ## `originChain`: the mirror shows the primary's Origin Chain (its side
+  ## panel, the chain asked for last) — a VS Code State panel, whose host
+  ## asks for the chain (`vscode_host.showValueOrigin`). Off for a mirror
+  ## whose own page builds and asks for its chain (`ct host`).
   ##
   ## `debugCommandsFor` gives the toolbar the host's own commands, for a host
   ## that drives the replay itself while another process owns the session
@@ -196,6 +203,8 @@ proc createMirrorSession*(
     if not debugCommandsFor.isNil:
       m.session.debugCommands = debugCommandsFor(m.session)
     m.session.initializePanelViewModels()
+    if originChain:
+      m.session.attachOriginChainVM(createOriginChainVM(m.session.store))
     if relayActions:
       m.relayActions(relays)
   m.subscriber = createSyncSubscriber(m.session, localOwners)

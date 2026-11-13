@@ -37,6 +37,7 @@ import ../sdk/breakpoints            # `requestBreakpoints`
 import ../collab/[codec, reducer, session_core, types as collab_types]
 import ../viewmodels/[
   calltrace_vm,
+  origin_chain_vm,
   debug_controls_vm,
   editor_vm,
   event_log_vm,
@@ -380,6 +381,25 @@ proc applyAction*(session: SessionViewModel; msg: JsonNode): bool =
     except CatchableError, AssertionDefect:
       return false
     session.store.requestBreakpoints(path, specs)
+
+  of "originChain":
+    # A hop clicked in a mirror's side panel: the chain is the primary's
+    # (the mirror shows the primary's `activeChain`), so the hop is found
+    # there by the step it names, and sought over the primary's connection.
+    let v = session.originChainVM
+    if v.isNil: return false
+    case action
+    of "seekToHop":
+      let chain = v.activeChain.val
+      if chain.isNone: return false
+      let stepId = a.arg("stepId", -1'i64)
+      let rrTicks = a.arg("rrTicks", 0'u64)
+      for hop in chain.get.hops:
+        if hop.stepId == stepId and hop.location.rrTicks == rrTicks:
+          v.onSeekToHop(hop)
+          return true
+      return false
+    else: return false
 
   of "pointList":
     let v = session.pointListVM

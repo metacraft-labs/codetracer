@@ -38,6 +38,11 @@ import ../viewmodel/views/[isonim_state_view, isonim_calltrace_view,
                            isonim_flow_view, isonim_point_list_view,
                            isonim_filesystem_view, isonim_request_panel_view]
 import ../viewmodel/views/pane_measure_dom
+import ../viewmodel/viewmodels/origin_chain_vm
+import isonim/core/[signals, computation]
+import std/dom as dom
+from ../ui/isonim_origin_chain import OriginChainPanel, newOriginChainPanel,
+                                     renderPanelDom
 
 const PanelKinds* = ["state", "calltrace", "eventLog", "terminalOutput",
                      "scratchpad", "traceLog", "flow", "pointList",
@@ -80,6 +85,39 @@ proc renderPanel(kind: string; s: SessionViewModel): dom_api.Element =
     renderRequestPanel[WebRenderer, dom_api.Element](r, s.requestPanelVM)
   else: nil
 
+proc mountOriginSidePanel(vm: OriginChainVM) =
+  ## The Origin Chain side panel (Value-Origin §3.2.2) over the State
+  ## panel, as the desktop draws it over its editor zone
+  ## (`ui/state.renderOriginSidePanelDomReactive`): shown while the
+  ## session's side panel is open and holds a chain. The chain is the
+  ## host's (`vscode_host.showValueOrigin`), mirrored here; a hop clicked
+  ## in it is sought by the host (`OriginChainVM.actionSink`).
+  if vm.isNil:
+    return
+  let host = dom.document.createElement(cstring"aside")
+  host.setAttribute(cstring"id", cstring"ct-origin-chain-side-panel")
+  host.setAttribute(cstring"class", cstring"ct-origin-chain-side-panel")
+  host.setAttribute(cstring"aria-label", cstring"Value origin chain panel")
+  host.setAttribute(cstring"role", cstring"complementary")
+  # The webview is the panel: the chain takes all of it, not the desktop's
+  # strip at the window's edge.
+  host.style.setProperty(cstring"top", cstring"0")
+  host.style.setProperty(cstring"width", cstring"100%")
+  host.style.setProperty(cstring"max-width", cstring"none")
+  host.style.display = cstring"none"
+  dom.document.body.appendChild(host)
+  var panel = newOriginChainPanel()
+  createEffect proc() =
+    let open = vm.sidePanelOpen.val
+    let chain = vm.activeChain.val
+    if open and chain.isSome:
+      host.style.display = cstring"block"
+      renderPanelDom(host, vm, panel)
+    else:
+      host.style.display = cstring"none"
+      while not host.firstChild.isNil:
+        host.removeChild(host.firstChild)
+
 var activeMirror: MirrorSession
   ## This webview's mirror; one per page.
 
@@ -99,7 +137,7 @@ proc mountVsCodePanel*(kind: string; root: dom_api.Element): MirrorSession =
   ## Mirror the host's session over this webview's channel and mount panel
   ## `kind` into `root`.
   let mirror = createMirrorSession(newWebviewSyncChannel(),
-                                   relayActions = true)
+                                   relayActions = true, originChain = true)
   # The DOM reports a pane's size on every resize and scroll; the reports
   # are debounced on the browser's timer (Viewport-Driven-Loading V2,
   # Pattern 6) before they travel to the host.
@@ -120,6 +158,8 @@ proc mountVsCodePanel*(kind: string; root: dom_api.Element): MirrorSession =
       # replay for that window: the Call Trace's rows as it scrolls, the
       # Event Log's page (codetracer-vscode-extension#37, #40). The webview
       # lives as long as the panel, so the observer is never stopped.
+      if kind == "state":
+        mountOriginSidePanel(mirror.session.originChainVM)
       let pane = measuredPaneOf(kind)
       if pane.isSome:
         discard startMeasuringPane(root, pane.get, mirror.session)

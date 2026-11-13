@@ -39,6 +39,7 @@ import ../viewmodel/sync/[sync_host, transport, webview_transport]
 import ../viewmodel/viewmodels/[calltrace_vm, debug_controls_vm,
                                 filesystem_vm, flow_vm, flow_line_values,
                                 scratchpad_vm, state_vm, trace_log_vm]
+import ../viewmodel/viewmodels/[origin_chain_vm, origin_chain_bridges]
 import ../../common/lang as common_lang
 
 const TracepointRunRefused* = "the replay refused to run the tracepoint"
@@ -174,6 +175,16 @@ proc openSession*(host: VsCodeHost; id, traceFolder: string;
       debugger.store.applyCompleteMove(
         if event.hasKey("data"): event["data"] else: event)
       debugger.attach(trace)
+      # The Origin Chain the State panel shows (Value-Origin §3.2): the
+      # session's own, wired to its State pane and Scratchpad as the
+      # desktop's is (`ui/state.createSessionOriginChainVM`), before the
+      # session is published, so the panels mirror it.
+      let session = debugger.session
+      if session.originChainVM.isNil and not session.stateVM.isNil:
+        let origin = createOriginChainVM(session.store)
+        wireOriginChainBridges(session.stateVM, origin,
+          proc(): ScratchpadVM = session.scratchpadVM)
+        session.attachOriginChainVM(origin)
       # The panels mark the call the debugger is in after every move, as on
       # the desktop.
       debugger.session.calltraceVM.followDebuggerCall()

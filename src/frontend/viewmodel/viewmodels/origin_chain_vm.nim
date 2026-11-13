@@ -45,6 +45,7 @@ import ../backend/backend_service
 import ../store/[replay_data_store, types]
 from ../store/stop_timeline import stopIdentityOf
 import origin_chain_types
+import ./action_sink
 
 type
   RowChain* = object
@@ -139,6 +140,10 @@ type
       ## populated; Esc / "close" affordances clear it.
 
     # -- Wiring --
+    actionSink*: ActionSink
+      ## A MIRROR's sink (`sync/mirror_session`): a hop clicked in a mirrored
+      ## side panel is sought by the primary, whose connection to the replay
+      ## the mirror does not have (a VS Code panel's webview).
     onSeekProc*: proc(stepId: int64; location: Location)
       ## Optional bridge installed by the host so `onSeekToHop` can
       ## reuse the existing `ct/history-jump` / `ct/goto-ticks` wiring.
@@ -399,6 +404,9 @@ proc onSeekToHop*(vm: OriginChainVM; hop: OriginHop) =
   ## Invoke the host-provided seek bridge (spec §3.3 "Click a hop").
   ## Falls back to a `ct/history-jump` payload via the backend
   ## directly when no host bridge is installed (e.g. in unit tests).
+  if vm.actionSink.forwards("originChain", "seekToHop",
+      %*{"stepId": hop.stepId, "rrTicks": hop.location.rrTicks}):
+    return
   if not vm.onSeekProc.isNil:
     let loc = Location(file: hop.location.path, line: hop.location.line)
     vm.onSeekProc(hop.stepId, loc)

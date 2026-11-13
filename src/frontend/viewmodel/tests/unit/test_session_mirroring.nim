@@ -41,7 +41,8 @@ import ../../viewmodels/[calltrace_vm, debug_controls_vm, event_log_vm,
                          filesystem_vm, pixel_history_vm, request_panel_vm,
                          terminal_output_model,
                          terminal_output_vm, visual_replay_client,
-                         state_vm, step_list_vm, origin_chain_vm]
+                         state_vm, step_list_vm, origin_chain_vm,
+                         origin_chain_types]
 import ../../viewport
 import ./in_memory_transport
 
@@ -877,6 +878,69 @@ suite "a mirror whose panels act on the primary (a VS Code webview)":
       link.settle()
       ck mirror.session.calltraceVM.actionSink.isNil
       ck mirror.session.stateVM.actionSink.isNil
+      mirror.dispose()
+      host.dispose()
+      done()
+
+  test "the State panel shows the host's Origin Chain, and its hops are sought there":
+    # VS Code's host asks for the chain (`vscode_host.showValueOrigin`) on its
+    # own session's OriginChainVM; the State webview draws the side panel from
+    # its mirror. Without `originChain` the mirror had no OriginChainVM, the
+    # registry did not carry it, and the panel never showed a chain. A hop
+    # clicked in the mirror's panel is sought on the host's connection: the
+    # mirror's own backend is inert.
+    proc hop(line: int; ticks: uint64; step: int64): OriginHop =
+      OriginHop(kind: okTrivialCopy, targetExpr: "c", sourceExpr: "b",
+                location: OriginLocation(path: "main.py", line: line,
+                                         rrTicks: ticks),
+                stepId: step, confidence: 1.0)
+    createRoot proc(done: proc()) =
+      let (primary, mock) = newPrimary()
+      primary.attachOriginChainVM(createOriginChainVM(primary.store))
+      let host = newSyncHost(manual)
+      host.addPrimary("s1", primary)
+      let link = newInMemoryLink()
+      host.attach(link.a)
+      # CONTROL: a mirror that is not asked to show the chain has none.
+      let plainLink = newInMemoryLink()
+      host.attach(plainLink.a)
+      let plain = createMirrorSession(plainLink.b, relayActions = true)
+      ck plain.session.originChainVM.isNil
+      let mirror = createMirrorSession(link.b, relayActions = true,
+                                       originChain = true)
+      link.settle()
+      plainLink.settle()
+      let origin = mirror.session.originChainVM
+      ck not origin.isNil
+
+      primary.originChainVM.activeChain.val = some(OriginChain(
+        queryVariable: "c",
+        hops: @[hop(11, 110, 7), hop(10, 100, 5), hop(9, 90, 3)],
+        terminator: Terminator(expression: "10")))
+      primary.originChainVM.sidePanelOpen.val = true
+      link.settle()
+      ck origin.sidePanelOpen.val
+      ck origin.activeChain.val.isSome
+      if origin.activeChain.val.isSome:
+        let chain = origin.activeChain.val.get
+        ck chain.hops.len == 3
+        ck chain.terminator.expression == "10"
+        mock.clearReceivedCommands()
+        origin.onSeekToHop(chain.hops[1])
+        link.settle()
+        let jump = mock.findCommand("ct/history-jump")
+        ck jump.isSome
+        if jump.isSome:
+          ck jump.get.args["rrTicks"].getInt == 100
+          ck jump.get.args["line"].getInt == 10
+
+      # A hop the primary's chain does not hold is not sought.
+      mock.clearReceivedCommands()
+      origin.onSeekToHop(hop(4, 40, 99))
+      link.settle()
+      ck mock.findCommand("ct/history-jump").isNone
+
+      plain.dispose()
       mirror.dispose()
       host.dispose()
       done()
