@@ -117,7 +117,6 @@ src/frontend/viewmodel/tests/unit/plat29-async-mutation-control.sha256	src/front
 # operations and chromium runner gained the shared editor's paths; the
 # reachability census lists the palette's new entries. The harnesses below owe
 # a re-grade for those bytes only.
-src/frontend/viewmodel/tests/unit/plat27-coordinate-mutation-control.sha256	src/frontend/viewmodel/editor/wrap.nim	af398208606cd9ed937c76d01b24b1940701b744654921cb9c0c5f90afcc2e2a	052fae1a6f0523639c55708e9e2e0c4fce245d57e688d92b418153348371e6e7
 src/frontend/viewmodel/tests/unit/plat28-decoration-mutation-control.sha256	src/frontend/viewmodel/editor/operations.nim	f28dfaefe805c8a0f6958bb2c1ff272574299ed5e1de841a2dc3ad88f68a93cb	81f5945815c45a6d7c910335f266d9e526efc488962f3fcd11927de2b1e35719
 src/frontend/viewmodel/tests/unit/plat28-decoration-mutation-control.sha256	src/frontend/viewmodel/editor/wrap.nim	af398208606cd9ed937c76d01b24b1940701b744654921cb9c0c5f90afcc2e2a	052fae1a6f0523639c55708e9e2e0c4fce245d57e688d92b418153348371e6e7
 src/frontend/viewmodel/tests/unit/plat30-vocabulary-mutation-control.sha256	src/frontend/viewmodel/editor/operations.nim	f28dfaefe805c8a0f6958bb2c1ff272574299ed5e1de841a2dc3ad88f68a93cb	81f5945815c45a6d7c910335f266d9e526efc488962f3fcd11927de2b1e35719
