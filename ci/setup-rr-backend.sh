@@ -140,6 +140,21 @@ require_locked_checkout() {
 	echo "Reusing already-provided codetracer-native-backend at $dir (verified at $head)"
 }
 
+# True when this job's git environment already carries a credential for
+# https://github.com/metacraft-labs/ (setup-dev-env exports it as numbered
+# GIT_CONFIG_KEY_n/VALUE_n; the key is matched case-insensitively, as git does).
+job_wide_credential() {
+	local i key
+	for ((i = 0; i < ${GIT_CONFIG_COUNT:-0}; i++)); do
+		key="GIT_CONFIG_KEY_${i}"
+		key="${!key-}"
+		if [[ ${key,,} == "http.https://github.com/metacraft-labs/.extraheader" ]]; then
+			return 0
+		fi
+	done
+	return 1
+}
+
 clone_rr_backend() {
 	local ref="$1"
 
@@ -164,14 +179,21 @@ clone_rr_backend() {
 	# Clean up any previous clone (self-hosted runners reuse workspaces)
 	rm -rf "$CLONE_DIR"
 
-	# Rewrite all GitHub URL styles to authenticated HTTPS.
-	git config --global --replace-all url."https://x-access-token:${GH_TOKEN}@github.com/".insteadOf "git@github.com:" || true
-	git config --global --replace-all url."https://x-access-token:${GH_TOKEN}@github.com/".insteadOf "ssh://git@github.com/" || true
-	git config --global --replace-all url."https://x-access-token:${GH_TOKEN}@github.com/".insteadOf "https://github.com/" || true
+	# One credential per request. When the job already authorises
+	# https://github.com/metacraft-labs/ (setup-dev-env's job-wide
+	# GIT_CONFIG_KEY_n extraHeader), clone over plain HTTPS and let that header
+	# authenticate: embedding a token in the URL as well made GitHub refuse the
+	# clone ("Invalid username or token", CI run 43624654566). Only without a
+	# job-wide credential does the token go into the URLs, as before.
+	local base="https://github.com/"
+	if ! job_wide_credential; then
+		base="https://x-access-token:${GH_TOKEN}@github.com/"
+		git config --global --replace-all url."${base}".insteadOf "git@github.com:" || true
+		git config --global --replace-all url."${base}".insteadOf "ssh://git@github.com/" || true
+		git config --global --replace-all url."${base}".insteadOf "https://github.com/" || true
+	fi
 
-	git clone \
-		"https://x-access-token:${GH_TOKEN}@github.com/metacraft-labs/codetracer-native-backend.git" \
-		"$CLONE_DIR"
+	git clone "${base}metacraft-labs/codetracer-native-backend.git" "$CLONE_DIR"
 
 	(
 		cd "$CLONE_DIR"
@@ -190,8 +212,8 @@ clone_rr_backend() {
 		for url in $(git config --get-regexp '^submodule\..*\.url$' | grep -E 'git@github\.com:|https://github\.com/' | cut -d' ' -f1); do
 			old_url=$(git config --get "$url")
 			new_url=$(echo "$old_url" |
-				sed "s|git@github.com:|https://x-access-token:${GH_TOKEN}@github.com/|" |
-				sed "s|https://github.com/|https://x-access-token:${GH_TOKEN}@github.com/|")
+				sed "s|git@github.com:|${base}|" |
+				sed "s|https://github.com/|${base}|")
 			echo "Rewriting submodule URL: $url"
 			git config "$url" "$new_url"
 		done
