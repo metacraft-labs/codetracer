@@ -915,6 +915,12 @@ proc deliverDapResponse*(fanOut: DapApi; responseDap: DapApi; raw: JsObject) =
   var body = raw["body"]
   var requestId = cstring""
   when not defined(ctInExtension):
+    if jsHasOwn(raw, cstring"success") and not raw["success"].to(bool):
+      # A refusal reaches its subscribers as an answer with nothing in it;
+      # the reason is only in the frame, so the log is where it can be read.
+      console.warn(cstring"dap: request refused: ", command, cstring" ",
+                   raw["message"])
+  when not defined(ctInExtension):
     if isTrackedCommand(command) and jsHasOwn(raw, cstring"request_seq"):
       # A frame with no body (a bare refusal) still answers its request, and
       # must say which one — or it would be taken for an answer about the

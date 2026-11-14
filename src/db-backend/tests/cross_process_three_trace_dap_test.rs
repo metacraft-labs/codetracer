@@ -585,3 +585,116 @@ fn a_marker_lookup_resolves_a_counterpart_in_a_sibling_recording() {
     );
     assert_eq!(counterpart.get("keyValue").and_then(|v| v.as_str()), Some("req-0001"));
 }
+
+/// Send one `ct/` request naming the recording by the session's thread id,
+/// as the renderer does after a process switch, and return its response.
+fn routed_ct_request(
+    client: &mut DapStdioTestClient,
+    command: &str,
+    mut arguments: serde_json::Value,
+    thread_id: i64,
+) -> db_backend::dap::Response {
+    if let Some(obj) = arguments.as_object_mut() {
+        obj.insert("threadId".to_string(), serde_json::json!(thread_id));
+    }
+    let request = client.dap_client_mut().request(command, arguments);
+    client.send_message(&request).expect("send the routed request");
+    match client
+        .read_until_response_msg(command, Duration::from_secs(60))
+        .expect("a response to the routed request")
+    {
+        DapMessage::Response(r) => r,
+        other => panic!("expected a response to {command}, got {other:?}"),
+    }
+}
+
+/// The panes of a switched-to recording are answered about that recording.
+///
+/// After the user picks another process, the renderer stamps that
+/// recording's thread id on every request (`dap.nim` `dispatchCtRequest`).
+/// The `ct/` argument types refuse unknown fields, and the router passed
+/// the routing field through, so `ct/load-locals`, `ct/load-flow` and
+/// `ct/load-calltrace-section` were all refused ("unknown field
+/// `threadId`"): the Variables pane said "No variables" and the call
+/// trace kept the previous recording's calls.
+#[test]
+fn requests_routed_to_a_switched_recording_are_answered_about_it() {
+    let manifest = recording_root().join("session.toml");
+    let server_source = source_root().join("backend/server.js");
+
+    let mut client = DapStdioTestClient::start().expect("start db-backend");
+    client
+        .initialize_and_launch_session(&manifest)
+        .expect("launch the three-trace session");
+
+    let source = std::fs::read_to_string(&server_source).expect("read the demo server source");
+    let line = source
+        .lines()
+        .position(|l| l.contains("const balance = payload.balance"))
+        .map(|idx| idx as u32 + 1)
+        .expect("the demo server must bind `balance` from the request payload");
+    let entries = list_processes(&mut client);
+    let backend_thread = thread_id_for_role(&entries, ROLE_BACKEND);
+    assert_ne!(
+        backend_thread,
+        thread_id_for_role(&entries, ROLE_FRONTEND_JS),
+        "the recordings have thread ids of their own"
+    );
+
+    client
+        .set_breakpoint_on_thread(&server_source, line, backend_thread)
+        .expect("set a breakpoint in the server recording");
+    let location = client
+        .continue_to_breakpoint_on_thread(backend_thread)
+        .expect("run to the balance binding");
+
+    let locals = routed_ct_request(
+        &mut client,
+        "ct/load-locals",
+        serde_json::json!({
+            "rrTicks": location.rr_ticks.0,
+            "countBudget": 3000,
+            "minCountLimit": 50,
+            "lang": "javascript",
+            "watchExpressions": [],
+            "depthLimit": -1,
+        }),
+        backend_thread,
+    );
+    assert!(locals.success, "ct/load-locals refused: {:?}", locals.message);
+    let names: Vec<String> = locals
+        .body
+        .get("locals")
+        .and_then(|l| l.as_array())
+        .map(|l| {
+            l.iter()
+                .filter_map(|v| v.get("expression").and_then(|e| e.as_str()).map(str::to_string))
+                .collect()
+        })
+        .unwrap_or_default();
+    assert!(
+        names.iter().any(|n| n == "balance"),
+        "the server recording's locals at the binding include `balance`; got {names:?}"
+    );
+
+    let calltrace = routed_ct_request(
+        &mut client,
+        "ct/load-calltrace-section",
+        serde_json::json!({
+            "location": serde_json::to_value(&location).expect("serialise the location"),
+            "startCallLineIndex": 0,
+            "depth": 10,
+            "height": 20,
+            "rawIgnorePatterns": "",
+            "autoCollapsing": true,
+            "optimizeCollapse": true,
+            "renderCallLineIndex": 0,
+        }),
+        backend_thread,
+    );
+    assert!(
+        calltrace.success,
+        "ct/load-calltrace-section refused: {:?}",
+        calltrace.message
+    );
+}
