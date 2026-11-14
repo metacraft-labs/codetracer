@@ -858,6 +858,24 @@ proc focusOnButton(): bool {.importjs: """
   ## A button, link or `role="button"` row holds the focus.  The file tree's
   ## anchors are left out: the tree answers `Enter` through the keymap.
 
+proc monacoWouldAnswer(name: string; ev: JsObject): bool =
+  ## Whether `name` is a shortcut — a chord with Ctrl, Alt or Meta, or a
+  ## function key — pressed with the caret in a Monaco editor. Plain and
+  ## Shift'ed keys are the text's (typing, the caret's moves) and stay
+  ## Monaco's; so does a key an input method is composing.
+  if focusedMonaco().isNil:
+    return false
+  if ev.isComposing.to(bool):
+    return false
+  let parts = name.split('+')
+  let key = parts[^1]
+  if key in ModifierKeys:
+    return false
+  for m in parts[0 ..< parts.high]:
+    if m in ["Ctrl", "Alt", "Meta", "Cmd", "Super"]:
+      return true
+  key.len >= 2 and key[0] == 'F' and key[1 .. ^1].allCharsInSet({'0' .. '9'})
+
 proc routeKey(name: string; ev: JsObject) =
   ## One canonical key through the router, run once, the event stopped when
   ## it was run.
@@ -930,6 +948,16 @@ proc routeKey(name: string; ev: JsObject) =
     let note = deskRouter.inertNote(res, facts, path, nmNormal)
     if note.len > 0:
       showInertNote(note)
+      handled = true
+    elif monacoWouldAnswer(name, ev):
+      # A shortcut no keymap binds is not Monaco's either (Input-Routing
+      # §11a): Monaco's stock keybinding service would answer it in the
+      # editor (F7 / Shift+F7 moving to the next / previous occurrence of
+      # the word under the caret, which the CUA base gives to the diff
+      # editor only), a behaviour no keymap lists and no user row can
+      # rebind.
+      # Stopped here, before Monaco's own listener; a chord a keymap binds
+      # reaches Monaco through `runMonaco`, by operation name.
       handled = true
   of erCharacter:
     discard
