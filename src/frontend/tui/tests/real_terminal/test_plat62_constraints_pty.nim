@@ -143,14 +143,29 @@ proc rowShows(line: string; want: JsonNode): bool =
         line.contains(" " & want["count"].getStr & " ")
   what and (want["where"].getStr.len == 0 or line.contains(want["where"].getStr))
 
+proc settled(sess: var TuiTestSession): Snapshot
+
 proc rowsMatch(sess: var TuiTestSession; headRow, col: int;
                wants: JsonNode): int =
   ## How many of the desktop's rows the screen shows, in its order, read under
   ## the headline as a user reads them: wheeling on when the next is not in view.
+  ##
+  ## A row that never shows stops the wheeling at the END OF THE LIST — when
+  ## wheels no longer change the settled screen — rather than after a fixed
+  ## sixty wheels. Without that, a pane that draws no row as wanted (a lost
+  ## place, say) costs sixty wheels and snapshots for every one of the
+  ## fifty-five rows, which on a loaded host outran the mutation harness's
+  ## hour per suite (plat62's N5) while the answer was known after the first.
+  ## A loaded host paints a wheel late, so the end is three wheels in a row
+  ## that leave the screen as it was, each given a second to paint and
+  ## settle; once the end is reached, a later row is looked for on that
+  ## screen only, since the rows are read in order and none is below it.
   var s = sess.snap()
   var r = headRow + 1
+  var atEnd = false
   for want in wants:
     var found = false
+    var unchanged = 0
     for _ in 0 .. 60:
       var at = r
       while at < Rows and not s.text(at).rowShows(want):
@@ -159,9 +174,22 @@ proc rowsMatch(sess: var TuiTestSession; headRow, col: int;
         r = at + 1
         found = true
         break
+      if atEnd:
+        break
+      let before = s.screenText()
       sess.wheel(headRow + 1, col)
       s = sess.snap()
       r = headRow + 1
+      if s.screenText() == before:
+        sleep(1000)
+        s = sess.settled()
+      if s.screenText() == before:
+        inc unchanged
+        if unchanged >= 3:
+          atEnd = true
+          break
+      else:
+        unchanged = 0
     if found:
       inc result
     else:

@@ -255,8 +255,19 @@ ARMS = [
      [(PLAN, None)],
      "K68: a GPUI row menu's entries do nothing"),
     # ---- the desktop ----------------------------------------------------------------
-    ("D1", [(DESKTOP_VIEW, '  result = proc() = discard vm.activateRow(captured)',
-             '  result = proc() = discard captured')],
+    # Re-aimed after 702190afba7: the view no longer holds a row's press
+    # handler (`onRowPress`). A press is the pointer row
+    # `constraints.go-to-source`, performed on the row's own
+    # `data-constraint-index`, so a row drawn without it opens nothing. Both
+    # row shapes (a function's and an opcode's) lose it, as both lost the
+    # handler before.
+    ("D1", [(DESKTOP_VIEW, 'title = rowTitle(row), `data-constraint-index` = $index):\n'
+                           '      span(class = "constraints-name"):',
+             'title = rowTitle(row)):\n      span(class = "constraints-name"):'),
+            (DESKTOP_VIEW, 'title = rowTitle(row), `data-constraint-index` = $index):\n'
+                           '      span(class = "low-level-code-instruction-offset"):',
+             'title = rowTitle(row)):\n'
+             '      span(class = "low-level-code-instruction-offset"):')],
      [(VMU, None)],
      "K67: a press on a desktop row opens nothing"),
     ("D2", [(DESKTOP_HOST, '    if measured.hasReport: sourcesJson(noirSourcesUnder(folder)) else: "[]"',
