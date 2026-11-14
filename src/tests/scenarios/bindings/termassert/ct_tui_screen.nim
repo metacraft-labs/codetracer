@@ -17,7 +17,7 @@
 ## The reader is a pure function of the screen (`ScreenGrid`), so it is
 ## exercised by `test_ct_tui_screen.nim` on captured screens as well as live.
 
-import std/[json, strutils, options, tables, sequtils]
+import std/[algorithm, json, strutils, options, tables, sequtils]
 from std/sequtils import anyIt
 from std/unicode import Rune, toRunes, runeLen, `$`, strip
 import demo_video_script/surface
@@ -131,7 +131,9 @@ proc boxes*(g: ScreenGrid): seq[Box] =
   ## The layout's boxes. A box starts at a strip row — the row of pane-tab
   ## labels at its top — and spans the columns between two edges (`▏`) or the
   ## screen's sides; it ends at the next strip row in the same columns, or at
-  ## the status line.
+  ## the status line. A box docked under two or more of row 1's column spans
+  ## (an Event Log under both Variables and Call Trace) is as wide as all of
+  ## them: its strip and its content cross the edge between them.
   let last = g.height - 1
   # column segments of the first body row: edges split it
   var edges: seq[int] = @[]
@@ -143,6 +145,13 @@ proc boxes*(g: ScreenGrid): seq[Box] =
     if e > prev: spans.add (prev, e)
     prev = e + 1
   if prev < g.width: spans.add (prev, g.width)
+  # the grounds row 1's tabs are drawn on: a later strip's tabs are drawn on
+  # the same ones (an unfocused strip can have the content's ground)
+  var tabGrounds: seq[string]
+  for (a, b) in spans:
+    for l in g.labelsIn(1, a, b):
+      if g.rows[1][l.col].bg notin tabGrounds: tabGrounds.add g.rows[1][l.col].bg
+  var perSpan: seq[seq[int]]
   for (a, b) in spans:
     # strips within this column span: row 1, and any later row whose text in
     # the span starts with a label and whose row above is not text of the
@@ -159,16 +168,59 @@ proc boxes*(g: ScreenGrid): seq[Box] =
       # need not show: then the strip is a band of one ground, end to end)
       # (a box has a row of content under its strip: the row right under a
       # strip — a docked pane's query field, say — never starts another)
-      if strips[^1] != r - 1 and
-         t.startsWith(" ") and t.len > 1 and t[1] in {'A'..'Z'} and
-         first.bg != content.bg and
+      if strips[^1] == r - 1 or not (t.startsWith(" ") and t.len > 1 and t[1] in {'A'..'Z'}):
+        continue
+      var isStrip = first.bg != content.bg and
          (g.rows[r][a].bg == g.rows[1][a].bg or
-          (g.rows[r][a].bg == g.rows[r][b - 1].bg and g.rows[r][b - 1].bg != content.bg)):
-        strips.add r
-    for i, s in strips:
-      let bottom = if i + 1 < strips.len: strips[i + 1] else: last
-      result.add Box(left: a, right: b, strip: s, bottom: bottom,
-                     labels: g.labelsIn(s, a, b))
+          (g.rows[r][a].bg == g.rows[r][b - 1].bg and g.rows[r][b - 1].bg != content.bg))
+      if not isStrip and a > 0:
+        # a focused pane's strip: one band of the focus ground from the edge
+        # before it (which a content row's highlight never covers) to the
+        # span's end, where the row above shows another ground; its first
+        # tab, when active, sits on its own ground inside the band
+        let band = g.rows[r][b - 1].bg
+        isStrip = first.bg != content.bg and g.rows[r][a - 1].bg == band and
+                  g.rows[r][a - 1].text == BoxEdge and band != g.rows[r - 1][b - 1].bg
+      if not isStrip:
+        # an unfocused strip on the content's own ground: its first tab is
+        # drawn on one of the grounds row 1's tabs are drawn on
+        isStrip = first.bg != content.bg and first.bg in tabGrounds
+      if isStrip: strips.add r
+    perSpan.add strips
+  # a strip that crosses the edge at its span's right (no edge glyph on the
+  # strip row or the row under it) is one box with the spans it reaches; it
+  # also ends the box above it in each of them
+  var reach = newSeq[seq[(int, int)]](spans.len)   # (strip row, last span index)
+  var covered = newSeq[seq[int]](spans.len)        # strip rows owned by a span to the left
+  for i in 0 ..< spans.len:
+    for r in perSpan[i]:
+      if r == 1: continue
+      var j = i
+      while j + 1 < spans.len and r + 1 < last and
+            g.rows[r][spans[j][1]].text != BoxEdge and
+            g.rows[r + 1][spans[j][1]].text != BoxEdge:
+        inc j
+      if j > i:
+        reach[i].add (r, j)
+        for k in i + 1 .. j:
+          covered[k].add r
+          if r notin perSpan[k]: perSpan[k].add r
+  for i, (a, b) in spans:
+    var strips = perSpan[i]
+    strips.sort()
+    for k, s in strips:
+      if s in covered[i]: continue
+      var right = b
+      var bottom = if k + 1 < strips.len: strips[k + 1] else: last
+      for (r, j) in reach[i]:
+        if r == s:
+          right = spans[j][1]
+          # it ends where the first of the spans it covers has its next strip
+          for jj in i + 1 .. j:
+            for s2 in perSpan[jj]:
+              if s2 > s and s2 < bottom: bottom = s2
+      result.add Box(left: a, right: right, strip: s, bottom: bottom,
+                     labels: g.labelsIn(s, a, right))
 
 proc activeLabel*(b: Box): string =
   for l in b.labels:
@@ -288,7 +340,11 @@ proc readList(g: ScreenGrid; b: Box; t: var Tree; root: SurfaceNode;
   t.add(root, pane)
   var n = 0
   for r in b.strip + 1 ..< b.bottom:
-    let text = g.rowText(r, b.left, b.right).strip
+    var text = g.rowText(r, b.left, b.right).strip
+    # the pane's scrollbar track and the box's edges at the row's end are not
+    # the row's text (the track shows once the pane has scrolled or focused)
+    while text.len > 0 and (text.endsWith("▕") or text.endsWith(BoxEdge)):
+      text = text[0 ..< text.len - "▕".len].strip
     if text.len == 0: continue
     var props = newJObject()
     var keyVal = text

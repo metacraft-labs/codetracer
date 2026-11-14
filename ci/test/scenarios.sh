@@ -33,6 +33,7 @@ build_dir="${CT_SCENARIO_BUILD:-${root}/build}"
 
 dvs_src="${DVS_SRC:-${ws}/DemoVideoScript/src}"
 dta_src="${DVS_TERMASSERT_SRC:-${ws}/DemoVideoScript-TermAssert/src}"
+ta_src="${TERM_ASSERT_SRC:-${ws}/TermAssert/src}"
 dga_src="${DVS_GUIASSERT_SRC:-${ws}/DemoVideoScript-GuiAssert/src}"
 dpw_root="${DVS_PLAYWRIGHT_ROOT:-${ws}/DemoVideoScript-Playwright}"
 
@@ -61,7 +62,7 @@ build_stage() {
 
 build_terminal() {
 	require "DemoVideoScript-TermAssert" "${dta_src}/demo_video_script_termassert.nim"
-	nim c "${nim_common[@]}" --path:../TermAssert/src --path:../TermAssertClient/src \
+	nim c "${nim_common[@]}" --path:"${ta_src}" --path:../TermAssertClient/src \
 		--path:../nim-libvterm/src --path:../nim-pty/src --path:"${dvs_src}" --path:"${dta_src}" \
 		--nimcache:"${nimcache}/scenario-termassert" \
 		-o:"${bin}/dvs-termassert-codetracer" "${S}/bindings/termassert/dvs_termassert_codetracer.nim"

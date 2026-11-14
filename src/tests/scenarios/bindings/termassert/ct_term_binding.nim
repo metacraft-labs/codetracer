@@ -9,6 +9,8 @@
 ##   only.
 ## * Conditions: `replay-idle` — the top bar says the replay is paused and the
 ##   status line names where it is.
+## * Actions (`act:` steps): `write-file` and `make-read-only` change a file
+##   of the stage's project folder, as another program would.
 ## * The binding resolver: `../../resolver/ct_resolver.nim`, the shared
 ##   keymap router built as the terminal builds it, at the scope the screen
 ##   shows.
@@ -245,4 +247,21 @@ proc ctTermBinding*(): TermBinding =
       else:
         if anchor.startsWith("column(") and anchor.endsWith(")"):
           some((row, textCol + parseInt(anchor[7 .. ^2]) - 1))
-        else: none((int, int)))
+        else: none((int, int)),
+    act: proc (ctx: TermContext; use: string; args: JsonNode) =
+      # --- terminal --- the pack's actions: changes another program makes
+      # in the stage's project folder while the front-end runs
+      let s = ctx.stageState()
+      let file = args{"file"}.getStr
+      if file.len == 0 or file.isAbsolute or file.contains(".."):
+        raise newException(ValueError, use & ": '" & file &
+                           "' is not a file inside the stage's project folder")
+      let path = s.launch.project / file
+      case use
+      of "write-file":
+        createDir(path.parentDir)
+        writeFile(path, args{"content"}.getStr)
+      of "make-read-only":
+        setFilePermissions(path, getFilePermissions(path) - {fpUserWrite, fpGroupWrite, fpOthersWrite})
+      else:
+        raise newException(ValueError, "the terminal binding performs no action '" & use & "'"))

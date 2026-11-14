@@ -281,7 +281,7 @@ proc fixtureProject*(s: StageState; name: string) =
   ## One of the repository's fixture projects (the ones its suites build
   ## with), written into this run's project folder; `write-project` may add
   ## files to it afterwards.
-  let root = s.root / "project"
+  var root = s.root / "project"
   createDir(root)
   proc put(rel, content: string) =
     createDir((root / rel).parentDir)
@@ -301,7 +301,11 @@ proc fixtureProject*(s: StageState; name: string) =
     # recorded run of the real verifier; its header in
     # `plat63_verno_projects.nim` says why it stands in), first on PATH.
     let run = if name == "verno-type-error": writeTypeErrRun() else: writeCounterexampleRun()
+    # the package keeps its own folder name: Verno names its findings'
+    # files under it (`typeerr/src/main.nr`), and the window opens them
+    # relative to the folder that holds the package
     removeDir(root)
+    root = s.root / run.root.lastPathPart
     copyDir(run.root, root)
     copyDir(run.bin, s.root / "verno-bin")
     run.removeRun()
@@ -383,6 +387,34 @@ proc visualRecording*(s: StageState) =
   if skip.len > 0:
     raise newException(IOError, "visual-recording: " & skip)
   s.launch.recording = visualFixtureFolder()
+  # Visual Replay is licensed. The run's state is its own, so it carries no
+  # user's license: the user here holds the test entitlement the product's
+  # license helper issues (`ct-native-replay license
+  # generate-visual-replay-test-license`, as the desktop's suites do).
+  var helper = getEnv("CODETRACER_CT_NATIVE_REPLAY_CMD")
+  if helper.len == 0:
+    let player = getEnv("CODETRACER_CT_GFX_PLAYER_CMD")
+    if player.len > 0 and fileExists(player.parentDir / "ct-native-replay"):
+      helper = player.parentDir / "ct-native-replay"
+  if helper.len == 0: helper = findExe("ct-native-replay")
+  if helper.len == 0:
+    raise newException(IOError, "visual-recording: ct-native-replay (the license " &
+      "helper) is not found: set CODETRACER_CT_NATIVE_REPLAY_CMD")
+  let license = s.root / "visual-replay.license.dat"
+  let envFile = s.root / "visual-replay.env"
+  let (output, code) = execCmdEx(quoteShellCommand([helper, "license",
+    "generate-visual-replay-test-license", "--license-file", license,
+    "--env-file", envFile]))
+  if code != 0:
+    raise newException(IOError, "visual-recording: the test license: " & output)
+  for line in readFile(envFile).splitLines:
+    let l = line.strip
+    if not l.startsWith("export "): continue
+    let eq = l.find('=')
+    if eq < 0: continue
+    var v = l[eq + 1 .. ^1]
+    if v.len >= 2 and v[0] == '\'' and v[^1] == '\'': v = v[1 .. ^2]
+    s.launch.env[l[7 ..< eq]] = v
 
 proc visualReplayCapable*(s: StageState) =
   ## The prepared recording, copied into the run and given the graphics

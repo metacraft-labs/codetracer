@@ -243,3 +243,6 @@ src/frontend/tui/tests/plat62-constraints-mutation-control.sha256	src/frontend/v
 # Monaco (the editor, the key router, the diff view kept on Monaco). The
 # harnesses below owe a re-grade for those bytes only.
 ci/test/plat70i-fit-mutation-control.sha256	src/frontend/ui/key_router.nim	3583637c8cc7b3c78204fe88dffac1458fa016a8d65a9e7c2e358307046c13db	8280c990f6bdb88b9ceb5d2c2cb6cba8bdad7a0cc37ac171ce451d5f8a7b0c4e
+src/tests/scenarios/plat66-pack-mutation-control.sha256	ci/test/scenarios.sh	dfd0c6930df0862ca8968de0cc3c79b2137998516a39961ce4100cec52b74cc8	a3c2bf0be61b0e9b9fa7878b0e1d77d7aa2a39eb50fd63bac41bf71971d368b6
+src/tests/scenarios/plat66-pack-mutation-control.sha256	src/tests/scenarios/bindings/termassert/ct_term_binding.nim	516f20d67699ea3c05237b8eb1609c8b058be419e3a2b46b3d05159091fdc788	515a2d280888746f9ee2b87c3946deb8b5dd87eda30ce79f14e0b1a661e78084
+src/tests/scenarios/plat66-pack-mutation-control.sha256	src/tests/scenarios/bindings/termassert/ct_tui_screen.nim	d5bb3105be8f708c2885f26e8a675e8a88a3e0a4272e62bb3db4ff23526a6808	58e174ccca218d7ad4daa5cee414c80687f8e5ab74b3af2440ab182d047e15d7
