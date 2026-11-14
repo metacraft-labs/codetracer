@@ -44,7 +44,7 @@ PART B (deliverables 8-11, and the future-output issue):
   | claim | arms |
   |---|---|
   | the drop zones are GoldenLayout's, ported | H1 (a surface tie goes to the later area), H2 / H6 (a tab's left half is its first third), H3 (the joining middle is half the body), H4 / H5 (the drag measures with the pane still in), B6 / B7 (1016 never adopted), B17 (a pixel decided half a cell off), B13 (pinned colour flags skip the pointer's questions), W3 (no placeholder in the window) |
-  | the focus highlight | B3 / B14 (no focused strip), B4 (the louder token), B5 (a bare flag taken), B16 (a remembered preference ignored), W1 (the window's focused strip on the unfocused ground), W2 (a press moves no focus) |
+  | the focus highlight | B3 / B14 (no focused strip), B4 (the louder token), B5 (a bare flag taken), B16 (a remembered preference ignored), W1 (the window's focused strip on the unfocused ground), W2 (a press moves no focus), W6 (a press in the editor's text moves the keys but leaves the strip where it was) |
   | live reflow | B1 / B15 (nothing re-laid-out while held), B2 (every motion commits), W5 (the window draws the committed arrangement) |
   | the Welcome Screen on a new tab | B10 (the + opens the omnibar), B11 (Record new trace refused), B12 (a recording made outside the state root), W4 (the window's + opens nothing) |
   | the future keeps its colour, dimmed | B8 (future output at full strength), B9 (not the desktop's 0.5 composite) |
@@ -313,6 +313,8 @@ Z_PIXEL = "without 1016 a report is its cell's centre; with 1016 it is its pixel
 Z_RECORD = "Record new trace runs a real ct record and opens the recording in the tab"
 Z_COMPOSITE = "the desktop's colours, a click landing at the desktop's tick"
 W_FOCUS = "one strip on the focus colour; a press moves it; the command turns it off, remembered"
+W_EDITOR_FOCUS = ("a press in the editor's text, after another pane had the focus, "
+                  "moves the strip to the editor")
 W_LIVE = "held 80 px along, the panes have moved; nothing is written until the release"
 W_DROP = "the carried pane is out of the arrangement; the placeholder; the outer band"
 W_WELCOME = "the + opens it: the desktop's start options in its order, the recent panels"
@@ -362,7 +364,7 @@ CASE_SUITE = {
     B_FUTURE: TOUT, B_PROBE: CAPRES,
     Z_FOCUS: PTYB, Z_EDGES: PTYB, Z_LIVE: PTYB, Z_PIXEL: PTYB, Z_RECORD: PTYB,
     Z_COMPOSITE: TOUTPTY,
-    W_FOCUS: GPLANB, W_LIVE: GPLANB, W_DROP: GPLANB, W_WELCOME: GPLANB,
+    W_FOCUS: GPLANB, W_EDITOR_FOCUS: GPLANB, W_LIVE: GPLANB, W_DROP: GPLANB, W_WELCOME: GPLANB,
     N_STATE: SCRUBT, N_FILES: SCRUBT, N_VCS: SCRUBT, N_WHEEL: SCRUBT,
     N_PRESS: SCRUBT, Y_HISTORY: PTY,
     Q_VCS_DRAW: GPLANM71, Q_VCS_MOVE: GPLANM71, Q_FILES_DRAW: GPLANM71,
@@ -737,6 +739,13 @@ ARMS += [
         "    if pressedPane.len > 0 and (pressedPane != gFocusPane or not gFocusShown):\n",
         "    if false:\n",
         W_FOCUS, "a press in the window moves no focus"),
+    # W6 (2026-11-14): a press in the editor's text reaches the editor's
+    # row before the window root, so the editor must show the focus it
+    # takes; without the redraw the strip stays on the pane pressed before.
+    Arm("W6", GMAIN,
+        "      traceGesture(\"focus \" & $paneEditor)\n      discard drawArrangement(r)\n",
+        "      traceGesture(\"focus \" & $paneEditor)\n",
+        W_EDITOR_FOCUS, "a press in the editor's text leaves the focus strip on the pane pressed before"),
     Arm("W3", GMAIN,
         "      let gapAt = if ph.found and ph.stackPath == n.path: ph.index else: -1\n",
         "      let gapAt = -1\n",
