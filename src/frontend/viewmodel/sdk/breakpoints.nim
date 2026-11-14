@@ -141,6 +141,34 @@ func plannedEnabled*(held: openArray[BreakpointSpec]; line: int;
     plan.add s
   if found: some(plan) else: none(seq[BreakpointSpec])
 
+func conditionTarget*(held: openArray[BreakpointSpec];
+                      line, column: int): Option[BreakpointSpec] =
+  ## The breakpoint "Edit breakpoint condition" is about: the column
+  ## breakpoint at `column` when the line has one there, else the line's
+  ## breakpoint (whatever its column); `none` when the line has none.
+  if column >= 2:
+    for sp in held:
+      if sp.line == line and sp.column == column:
+        return some(sp)
+  breakpointAt(held, line)
+
+func plannedCondition*(held: openArray[BreakpointSpec]; line, column: int;
+                       condition: string): Option[seq[BreakpointSpec]] =
+  ## `conditionTarget`'s breakpoint with `condition` ("" clears it), its line,
+  ## column and armed state kept, every other breakpoint as it is; `none` when
+  ## the line has no breakpoint (Breakpoints-And-Tracepoints.md § Conditional
+  ## breakpoints).
+  let target = conditionTarget(held, line, column)
+  if target.isNone:
+    return none(seq[BreakpointSpec])
+  var plan: seq[BreakpointSpec] = @[]
+  for sp in held:
+    var s = sp
+    if s.line == line and s.column == target.get.column:
+      s.condition = condition
+    plan.add s
+  some(plan)
+
 proc setBreakpointsArgs*(path: string; plan: openArray[BreakpointSpec]): JsonNode =
   ## The `setBreakpoints` arguments for `path`'s planned set: the ARMED
   ## breakpoints only, each with its column (M1), condition (M9) and log
@@ -269,6 +297,18 @@ proc setBreakpointEnabled*(store: ReplayDataStore; path: string; line: int;
   ## Arm or disarm the breakpoint on `line`; false (nothing sent) when the
   ## line has none.
   let plan = plannedEnabled(store.heldBreakpoints(path), line, enabled)
+  if plan.isNone:
+    return false
+  store.requestBreakpoints(path, plan.get)
+  true
+
+proc setBreakpointCondition*(store: ReplayDataStore; path: string;
+                             line, column: int; condition: string): bool =
+  ## Give the breakpoint at `line` (the column breakpoint at `column` when
+  ## there is one) `condition`, or clear it with ""; false (nothing sent) when
+  ## the line has none (`plannedCondition`).
+  let plan = plannedCondition(store.heldBreakpoints(path), line, column,
+                              condition)
   if plan.isNone:
     return false
   store.requestBreakpoints(path, plan.get)

@@ -1076,6 +1076,7 @@ proc updateGlyphMarks*(self: EditorViewComponent) =
   let firstLine = if self.isExpansion: self.tabInfo.location.expansionFirstLine else: 1
   var decorations: seq[DeltaDecoration] = @[]
   var seen: seq[int] = @[]
+  let held = breakpointsInFile($self.path)
   proc mark(realLine: int) =
     if realLine in seen:
       return
@@ -1093,10 +1094,24 @@ proc updateGlyphMarks*(self: EditorViewComponent) =
       of emNone:
         if traced: cstring"gutter-glyph-tracepoint" else: cstring""
     if class.len > 0:
-      decorations.add(DeltaDecoration(
-        `range`: newMonacoRange(line, 1, line, 1),
-        options: js{glyphMarginClassName: class, stickiness: 1}))
-  for sp in breakpointsInFile($self.path):
+      # A breakpoint with a condition says so, in the mark and on hover
+      # (Breakpoints-And-Tracepoints.md § Conditional breakpoints).
+      var condition = ""
+      for sp in held:
+        if sp.line == realLine and sp.condition.len > 0:
+          condition = sp.condition
+      if condition.len > 0 and class != cstring"gutter-glyph-tracepoint":
+        decorations.add(DeltaDecoration(
+          `range`: newMonacoRange(line, 1, line, 1),
+          options: js{
+            glyphMarginClassName: class & cstring" gutter-glyph-conditional",
+            glyphMarginHoverMessage: js{value: cstring("Breakpoint condition: " & condition)},
+            stickiness: 1}))
+      else:
+        decorations.add(DeltaDecoration(
+          `range`: newMonacoRange(line, 1, line, 1),
+          options: js{glyphMarginClassName: class, stickiness: 1}))
+  for sp in held:
     mark(sp.line)
   # A `JsAssoc[int, _]`'s keys come back as JavaScript strings.
   for key, _ in self.traces:

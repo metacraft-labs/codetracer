@@ -12,6 +12,8 @@ import
   ../../common/[ ct_event, review_source_paths ]
 
 from welcome_screen import resetView
+from breakpoint_condition_dialog import showBreakpointConditionDialog
+from std/os import extractFilename
 
 proc findTRNode(node: js): js =
   ## The table row `node` is in (or is).
@@ -555,11 +557,16 @@ proc applyColumnBreakpointDecorations*(self: EditorViewComponent) =
           if endColumn <= column:
             endColumn = column + 1
       let hoverText = cstring("Column breakpoint at line " & $line &
-                              ", column " & $b.column)
+                              ", column " & $b.column &
+                              (if b.condition.len > 0: ", when " & b.condition
+                               else: ""))
       newDecorations.add(DeltaDecoration(
         `range`: newMonacoRange(line, column, line, endColumn),
         options: js{
-          inlineClassName: cstring"ct-column-breakpoint-marker",
+          inlineClassName:
+            (if b.condition.len > 0:
+               cstring"ct-column-breakpoint-marker ct-breakpoint-conditional"
+             else: cstring"ct-column-breakpoint-marker"),
           stickiness: 1,
           hoverMessage: js{value: hoverText}}))
   self.columnBreakpointDecorations = self.monacoEditor.deltaDecorations(
@@ -1838,6 +1845,25 @@ proc createContextMenuItems(self: EditorViewComponent, ev: js): seq[ContextMenuI
       hint: displayedChord(aInlineBreakpoint),
       handler: proc(e: Event) =
         self.toggleInlineBreakpointAt(path, line, inlineColumn))
+
+    # Breakpoints-And-Tracepoints.md § Conditional breakpoints: on a line
+    # with a breakpoint, its condition — the column breakpoint at the press
+    # when there is one, else the line's (`sdk/breakpoints.conditionTarget`).
+    let conditioned = conditionTarget(breakpointsInFile($path), line, inlineColumn)
+    if conditioned.isSome:
+      let target = conditioned.get
+      let location =
+        if target.column >= 2:
+          ($path).extractFilename & ":" & $line & ", column " & $target.column
+        else: ($path).extractFilename & ":" & $line
+      contextMenu &= ContextMenuItem(
+        name: "Edit breakpoint condition",
+        hint: "",
+        handler: proc(e: Event) =
+          showBreakpointConditionDialog(cstring(location),
+            cstring(target.condition), proc(condition: cstring) =
+              discard setBreakpointCondition(editorPointStore(), $path, line,
+                                             target.column, $condition)))
 
     # Delete Breakpoints in file: offered when THIS file holds one, and it
     # deletes this file's breakpoints only.

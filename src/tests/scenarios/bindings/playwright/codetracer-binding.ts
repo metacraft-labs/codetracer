@@ -168,6 +168,7 @@ const ROLES: Record<string, { affordances: string[]; properties: string[] }> = {
   "shortcuts-dialog": { affordances: [], properties: ["scope"] },
   "shortcut-row": { affordances: [], properties: ["action", "chord"] },
   "binding-row": { affordances: [], properties: ["operation", "key", "layer", "shadowed-by", "text"] },
+  dialog: { affordances: [], properties: ["title", "message"] },
   "dialog-button": { affordances: ["click"], properties: ["label", "enabled"] },
   "low-level-code": { affordances: ["click", "focusable"], properties: ["count", "sync", "stepping", "address", "focused", "pointer"] },
   instruction: { affordances: ["click", "context-click"],
@@ -1773,6 +1774,26 @@ function readSurfacePw4(root: any): void {
     }
     const close = kb.querySelector("[data-kb-close]");
     if (close) d.children.push(node("dialog-button", close, { label: "Close", enabled: true }, [["label", "Close"]]));
+    add(d);
+  }
+
+  // a product dialog (`[data-ct-dialog]`): its title, its message, its
+  // buttons and its text fields — the breakpoint condition dialog is one
+  for (const dl of Array.from(document.querySelectorAll("[data-ct-dialog]")) as HTMLElement[]) {
+    if (!vis(dl)) continue;
+    const title = text(dl.querySelector("[data-ct-dialog-title]"));
+    const d = node("dialog", dl, { title, message: text(dl.querySelector("[data-ct-dialog-message]")) },
+                   [["title", title]]);
+    for (const b of Array.from(dl.querySelectorAll("[data-ct-dialog-button]")) as HTMLButtonElement[]) {
+      const label = text(b);
+      d.children.push(node("dialog-button", b, { label, enabled: !b.disabled }, [["label", label]]));
+    }
+    for (const f of Array.from(dl.querySelectorAll("input")) as HTMLInputElement[]) {
+      const label = f.getAttribute("aria-label") ?? "";
+      d.children.push(node("text-field", f, {
+        label, value: f.value ?? "", focused: document.activeElement === f,
+      }, [["label", label]]));
+    }
     add(d);
   }
 
