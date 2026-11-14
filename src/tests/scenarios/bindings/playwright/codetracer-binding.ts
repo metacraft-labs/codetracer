@@ -97,7 +97,7 @@ const ROLES: Record<string, { affordances: string[]; properties: string[] }> = {
   "call-trace": { affordances: ["wheel", "focusable"], properties: ["count", "focused"] },
   call: { affordances: ["click", "double-click", "context-click"],
           properties: ["name", "current", "selected", "expanded", "arguments"] },
-  "event-log": { affordances: ["wheel", "focusable"], properties: ["count", "total", "focused", "last-shown", "columns", "search"] },
+  "event-log": { affordances: ["click", "wheel", "focusable"], properties: ["count", "total", "focused", "last-shown", "columns", "search"] },
   event: { affordances: ["click", "double-click", "context-click"], properties: ["text", "kind", "current", "future"] },
   variables: { affordances: ["wheel", "focusable"], properties: ["count", "focused", "tab-strip"] },
   variable: { affordances: ["click", "double-click", "context-click"], properties: ["name", "type", "value", "origin-badge", "watch", "invalid", "text"] },
@@ -116,7 +116,7 @@ const ROLES: Record<string, { affordances: string[]; properties: string[] }> = {
   "diff-view": { affordances: [], properties: ["file", "text", "hunks", "added", "removed", "selected-hunks", "toolbar",
                                                "line-numbers", "old-line-numbers", "token-colours"] },
   "columns-button": { affordances: ["click"], properties: ["label"] },
-  "columns-menu": { affordances: [], properties: [] },
+  "columns-menu": { affordances: ["click"], properties: [] },
   "column-option": { affordances: ["click", "drag-source", "drop-target"], properties: ["name", "shown"] },
   "file-node": { affordances: ["click", "double-click", "context-click"], properties: ["name", "kind", "expanded", "selected"] },
   // --- pw1 ---
@@ -197,7 +197,6 @@ const ROLES: Record<string, { affordances: string[]; properties: string[] }> = {
   scratchpad: { affordances: [], properties: ["count", "chains"] },
   "scratch-entry": { affordances: ["click", "context-click"], properties: ["expression", "value", "error", "kind"] },
   recent: { affordances: ["click", "double-click"], properties: ["name", "detail", "kind", "tooltip-shown", "tooltip"] },
-  "flow-value": { affordances: ["click", "context-click"], properties: ["name", "value"] },
   splitter: { affordances: ["click", "drag-source"], properties: ["orientation", "n"] },
   "verification-panel": { affordances: [], properties: ["phase", "outcome", "payload", "status", "command", "run", "stop", "groups", "count"] },
   finding: { affordances: ["click", "context-click"], properties: ["kind", "title", "message", "location"] },
@@ -213,7 +212,32 @@ const ROLES: Record<string, { affordances: string[]; properties: string[] }> = {
   "diff-section": { affordances: ["click"], properties: ["path", "offset", "editors"] },
   process: { affordances: ["click"], properties: ["name", "title", "active"] },
   "event-marker": { affordances: ["click"], properties: ["boundary", "chip", "key-value", "direction"] },
+  // --- pw3 ---
+  "key-router": { affordances: [], properties: ["last-operation", "operations"] },
+  dropdown: { affordances: [], properties: ["level", "name", "count"] },
+  "dropdown-item": { affordances: ["click"], properties: ["label", "selected", "checked"] },
+  scrubber: { affordances: ["drag-source", "drop-target"], properties: ["first", "visible-rows", "total"] },
+  "video-player": { affordances: ["click", "focusable", "drag-source", "drop-target"],
+                    properties: ["frame", "draw", "rate", "picking", "error", "starting", "transport-enabled",
+                                 "last-frame", "focused"] },
+  "frame-image": { affordances: ["click"], properties: ["geid", "frame", "quads", "width", "height"] },
+  "pixel-history": { affordances: ["click"], properties: ["count", "pixel", "draws", "last-draw"] },
+  "history-entry": { affordances: ["click"], properties: ["geid", "draw", "result", "selected", "title"] },
+  "shader-debug": { affordances: [], properties: ["source", "current", "variables", "registers", "step"] },
+  "flow-value": { affordances: ["click", "context-click"], properties: ["name", "side", "line", "value", "cut", "clipped", "single-line", "cap", "shown"] },
+  "loop-control": { affordances: ["click"], properties: ["iteration", "total", "slider-width"] },
+  popup: { affordances: ["click"], properties: ["text", "value", "type", "anchored"] },
 };
+
+// pw3: properties this batch reads on roles declared above.
+ROLES["event-log"].properties.push("first-shown", "rows", "dimmed", "dimmed-tail", "first-in-view", "last-in-view");
+ROLES.event.properties.push("selected");
+ROLES.filesystem.properties.push("error");
+ROLES["file-node"].properties.push("depth");
+ROLES["columns-button"].properties.push("focused");
+ROLES["column-option"].properties.push("outline");
+ROLES.line.properties.push("flow", "flow-names");
+ROLES["pane-tab"].properties.push("stack");
 
 // --- the surface: one read of the DOM ------------------------------------------
 
@@ -1397,18 +1421,6 @@ function readSurfacePw8(root: any): void {
     for (const t of Array.from(comp.querySelectorAll(".editor-test-action")) as HTMLElement[]) {
       if (vis(t)) ed.children.push(button(t, t.getAttribute("title") ?? text(t)));
     }
-    if (ed.children.some((c: any) => c.role === "flow-value")) continue;
-    const seen = new Set<string>();
-    const values: string[] = [];
-    for (const b of Array.from(comp.querySelectorAll("[class*='-value-box']")) as HTMLElement[]) {
-      if (!vis(b) || !/^flow-[a-z]+-value-box-/.test(b.id)) continue;
-      const name = b.id.replace(/^flow-[a-z]+-value-box-\d+-\d+-(before-|after-)?/, "");
-      values.push(`${name}=${text(b)}`);
-      if (seen.has(name)) continue;
-      seen.add(name);
-      ed.children.push(node("flow-value", b, { name, value: text(b) }, [["name", name]]));
-    }
-    ed.props["flow-values"] = values;
   }
 
   // the pointer's shape where it rests: the cursor the innermost hovered
@@ -1675,6 +1687,407 @@ function readSurfacePw8(root: any): void {
     nth[orientation] = (nth[orientation] ?? 0) + 1;
     root.children.push(node("splitter", s, { orientation, n: nth[orientation] },
                             [["orientation", orientation], ["n", String(nth[orientation])]]));
+  }
+}
+
+// --- pw3: the event log's footer, rows, Filter list and scrubber; the Files
+// pane's name field; the key router's trace; the visual-replay panes ---------
+//
+// Runs IN THE PAGE, in the same evaluation as `readSurface` (see
+// `SURFACE_EXTENSIONS`), on the tree it returned. Reads only.
+function readSurfacePw3(root: any): void {
+  const vis = (el: Element | null): boolean => {
+    if (!el) return false;
+    const r = (el as HTMLElement).getBoundingClientRect();
+    if (r.width <= 0 || r.height <= 0) return false;
+    const cs = getComputedStyle(el as HTMLElement);
+    return cs.visibility !== "hidden" && cs.display !== "none";
+  };
+  const text = (el: Element | null | undefined) => ((el?.textContent ?? "").replace(/\s+/g, " ").trim());
+  const node = (role: string, el: Element | null, props: Record<string, unknown>,
+                keys: Array<[string, string]> = []): any => {
+    const r = el ? (el as HTMLElement).getBoundingClientRect() : { left: 0, top: 0, width: 0, height: 0 };
+    return { role, keys, props, x: r.left, y: r.top, w: r.width, h: r.height,
+             visible: el ? vis(el) : false, children: [] as any[] };
+  };
+  const num = (s: string | null | undefined) => {
+    const n = parseInt((s ?? "").replace(/[^\d-]/g, ""), 10);
+    return Number.isFinite(n) ? n : 0;
+  };
+  const outlined = (el: Element | null) => {
+    if (!el) return false;
+    const cs = getComputedStyle(el as HTMLElement);
+    return cs.outlineStyle !== "none" && parseFloat(cs.outlineWidth || "0") > 0;
+  };
+  const active = document.activeElement;
+  const within = (el: Element | null) => !!(el && active && (el === active || el.contains(active)));
+  const find = (role: string) => root.children.find((c: any) => c.role === role);
+
+  // A pane tab's title: where a user aims to bring the pane forward (the
+  // middle of a narrow tab can be its pin or close button).
+  for (const t of root.children.filter((c: any) => c.role === "pane-tab")) {
+    const el = (Array.from(document.querySelectorAll(".lm_tab")) as HTMLElement[]).find((e) => {
+      const r = e.getBoundingClientRect();
+      return Math.abs(r.left - t.x) < 1 && Math.abs(r.top - t.y) < 1;
+    });
+    // the labels of every tab in its stack
+    t.props.stack = (Array.from(el?.closest(".lm_stack")?.querySelectorAll(".lm_tab .lm_title") ?? []) as HTMLElement[])
+      .map((x) => text(x));
+    const ti = el?.querySelector(".lm_title") as HTMLElement | null;
+    if (!ti) continue;
+    const r = ti.getBoundingClientRect();
+    if (r.width > 0) {
+      t.anchors = t.anchors ?? {};
+      t.anchors.points = { ...(t.anchors.points ?? {}), title: { x: r.left + Math.min(r.width / 2, 12), y: r.top + r.height / 2 } };
+    }
+  }
+
+  // The key router's trace (`window.__ctKeyTrace`), read only: the operation
+  // the router ran for the last key it resolved, and how many it has run.
+  const trace = (window as any).__ctKeyTrace;
+  if (Array.isArray(trace)) {
+    const kr = node("key-router", null, {
+      "last-operation": String(trace.length > 0 ? trace[trace.length - 1] : ""), operations: trace.length,
+    });
+    kr.visible = true;
+    root.children.push(kr);
+  }
+
+  // The event log: the footer's range and count (`Rows X to Y of Z`), the
+  // drawn rows and their dimming, the rows inside the scroll body, the
+  // Filter button and list, the scrubber.
+  const el = find("event-log");
+  const elComp = document.querySelector("div[id^='eventLogComponent']") as HTMLElement | null;
+  if (el && elComp) {
+    const footer = elComp.querySelector(".data-tables-footer");
+    const input = footer?.querySelector(".data-tables-footer-input") as HTMLInputElement | null;
+    const count = footer?.querySelector(".data-tables-footer-rows-count");
+    // the count's text may carry words around the number ("of 80")
+    if (count) el.props.total = num(count.textContent);
+    el.props["first-shown"] = num(input?.value);
+    const rowsLabel = footer?.querySelector(".data-tables-footer-info, .data-tables-footer-label") ?? footer?.firstElementChild;
+    if (rowsLabel && vis(rowsLabel)) {
+      const r = rowsLabel.getBoundingClientRect();
+      el.anchors = { ...(el.anchors ?? {}), points: { ...(el.anchors?.points ?? {}), footer: { x: r.left + Math.min(r.width / 2, 10), y: r.top + r.height / 2 } } };
+    }
+    const rows = (Array.from(elComp.querySelectorAll(".eventLog-dense-table tbody tr")) as HTMLElement[])
+      .filter((tr) => !tr.querySelector("td.dataTables_empty, td.dt-empty"));
+    el.props.rows = rows.map((r) => text(r.querySelector(".eventLog-text") ?? r));
+    const dim = rows.map((r) => r.classList.contains("future"));
+    el.props.dimmed = dim.filter((d) => d).length;
+    const firstDim = dim.indexOf(true);
+    el.props["dimmed-tail"] = firstDim < 0 || dim.slice(firstDim).every((d) => d);
+    const body = elComp.querySelector(".eventLog-scroll-body") as HTMLElement | null;
+    const inView: number[] = [];
+    if (body) {
+      const bb = body.getBoundingClientRect();
+      for (const r of rows) {
+        const rb = r.getBoundingClientRect();
+        const pos = parseInt(r.dataset.position ?? "", 10);
+        if (Number.isFinite(pos) && rb.bottom > bb.top + 1 && rb.top < bb.bottom - 1) inView.push(pos + 1);
+      }
+    }
+    inView.sort((a, b) => a - b);
+    el.props["first-in-view"] = inView.length ? inView[0] : 0;
+    el.props["last-in-view"] = inView.length ? inView[inView.length - 1] : 0;
+    for (const ev of el.children) {
+      if (ev.role !== "event") continue;
+      const r = rows.find((x) => text(x.querySelector(".eventLog-text") ?? x) === ev.props.text);
+      ev.props.selected = !!r && r.classList.contains("selected");
+    }
+    // the Columns button's focus, and the key-focus outline of each option
+    const cb = el.children.find((c: any) => c.role === "columns-button");
+    const btn = elComp.querySelector(".eventLog-columns-button");
+    if (cb) cb.props.focused = !!btn && btn === active;
+    const cm = el.children.find((c: any) => c.role === "columns-menu");
+    const menu = elComp.querySelector(".eventLog-columns-menu") as HTMLElement | null;
+    if (cm && menu) {
+      const mb = menu.getBoundingClientRect();
+      cm.anchors = { points: { corner: { x: mb.right - 3, y: mb.top + 2 } } };
+      const opts = Array.from(menu.querySelectorAll(".eventLog-column-option")) as HTMLElement[];
+      for (const o of opts) {
+        const name = o.getAttribute("data-column") ?? text(o.querySelector(".eventLog-column-title"));
+        const opt = cm.children.find((c: any) => c.props.name === name);
+        if (!opt) continue;
+        const check = o.querySelector(".eventLog-column-check");
+        const handle = o.querySelector(".eventLog-column-handle");
+        opt.props.outline = outlined(o) ? "row" : outlined(check) ? "check" : outlined(handle) ? "handle" : "none";
+      }
+    }
+    const filterBtn = elComp.querySelector("#category-image") as HTMLElement | null;
+    if (filterBtn && vis(filterBtn)) {
+      el.children.push(node("panel-button", filterBtn, {
+        label: "Filter", enabled: true, active: false, title: filterBtn.getAttribute("title") ?? "",
+      }, [["label", "Filter"]]));
+    }
+    const filter = document.querySelector("#category-image-list") as HTMLElement | null;
+    if (filter && vis(filter)) {
+      const dd = node("dropdown", filter, { level: 1, name: "Filter", count: 0 }, [["level", "1"], ["name", "Filter"]]);
+      for (const row of Array.from(filter.querySelectorAll(":scope > li > label")) as HTMLElement[]) {
+        const label = text(row.querySelector(".ct-checkmark-label"));
+        dd.children.push(node("dropdown-item", row, {
+          label, shortcut: "", folder: false, selected: outlined(row) || within(row),
+          checked: row.querySelector(".ct-checkmark")?.getAttribute("data-state") === "checked",
+        }, [["label", label]]));
+      }
+      dd.props.count = dd.children.length;
+      el.children.push(dd);
+    }
+    const scrub = elComp.querySelector(".ct-list-scrubber") as HTMLElement | null;
+    if (scrub && vis(scrub)) {
+      const thumb = scrub.querySelector(".ct-list-scrubber-thumb") as HTMLElement | null;
+      const sb = scrub.getBoundingClientRect();
+      const tb = thumb?.getBoundingClientRect();
+      const sn = node("scrubber", scrub, {
+        first: num(scrub.getAttribute("data-ct-scrub-first")),
+        "visible-rows": num(scrub.getAttribute("data-ct-scrub-visible")),
+        total: num(scrub.getAttribute("data-ct-scrub-total")),
+      });
+      sn.anchors = {
+        points: tb ? { thumb: { x: tb.left + tb.width / 2, y: tb.top + tb.height / 2 } } : {},
+        track: { x: sb.left + sb.width / 2, top: sb.top, height: sb.height, thumb: tb ? tb.height : 0 },
+      };
+      el.children.push(sn);
+    }
+  }
+
+  // The Files pane: each node's depth, the name field of a Create or Rename
+  // (a `text-field` labelled `name`), and its refusal.
+  const fsn = find("filesystem");
+  const fsComp = document.querySelector("div[id^='filesystemComponent']") as HTMLElement | null;
+  if (fsn && fsComp) {
+    for (const fn of fsn.children) {
+      if (fn.role !== "file-node") continue;
+      const a = (Array.from(fsComp.querySelectorAll("a.jstree-anchor")) as HTMLElement[])
+        .find((x) => text(x) === fn.props.name);
+      let depth = 0;
+      for (let li = a?.closest("li")?.parentElement?.closest("li.jstree-node"); li; li = li.parentElement?.closest("li.jstree-node")) depth++;
+      fn.props.depth = depth;
+    }
+    const err = fsComp.querySelector(".filesystem-name-error") ?? document.querySelector(".filesystem-name-error");
+    fsn.props.error = err && vis(err) ? text(err) : "";
+    for (const f of Array.from(document.querySelectorAll(".filesystem-name-input")) as HTMLInputElement[]) {
+      if (!vis(f)) continue;
+      fsn.children.push(node("text-field", f, { label: "name", value: f.value, focused: f === active },
+                             [["label", "name"]]));
+    }
+  }
+
+  // The editors' omniscience flow: each line's branch colour (`flow-taken` /
+  // `flow-not-taken`) and the names its flow chips draw; every value chip
+  // (`flow-value`, by its variable and side); a loop header's control; and
+  // the typed-value popup a chip opens.
+  for (const ed of root.children.filter((c: any) => c.role === "editor")) {
+    const comp = (Array.from(document.querySelectorAll("div[id^='editorComponent']")) as HTMLElement[])
+      .find((c) => {
+        const b = ((c.closest(".lm_item_container") as HTMLElement | null) ?? c).getBoundingClientRect();
+        return vis(c) && Math.abs(b.left - ed.x) < 1 && Math.abs(b.top - ed.y) < 1 && Math.abs(b.width - ed.w) < 1;
+      });
+    if (!comp) continue;
+    const flowRows = (Array.from(comp.querySelectorAll(".view-overlays .flow-taken, .view-overlays .flow-not-taken")) as HTMLElement[])
+      .map((e) => ({ top: e.getBoundingClientRect().top, kind: e.classList.contains("flow-taken") ? "taken" : "not-taken" }));
+    const widgets = (Array.from(comp.querySelectorAll(".contentWidgets [widgetid^='ct-flow-']")) as HTMLElement[]);
+    for (const ln of ed.children.filter((c: any) => c.role === "line")) {
+      const hit = flowRows.find((r) => Math.abs(r.top - ln.y) < 3);
+      ln.props.flow = hit ? hit.kind : "none";
+      const names: string[] = [];
+      for (const w of widgets) {
+        const id = w.getAttribute("widgetid") ?? "";
+        if (Number(id.slice(id.lastIndexOf("-") + 1)) !== ln.props.number) continue;
+        for (const n of Array.from(w.querySelectorAll(".ct-omni-name")) as HTMLElement[]) names.push(text(n));
+      }
+      ln.props["flow-names"] = names;
+    }
+    for (const w of widgets) {
+      const id = w.getAttribute("widgetid") ?? "";
+      const lineNo = Number(id.slice(id.lastIndexOf("-") + 1));
+      for (const pill of Array.from(w.querySelectorAll(".ct-omni-value")) as HTMLElement[]) {
+        const eye = pill.querySelector(".flow-view-more-button") as HTMLElement | null;
+        const boxes = Array.from(pill.querySelectorAll("[class*='-value-box']")) as HTMLElement[];
+        for (const b of boxes) {
+          if (!vis(b)) continue;
+          const bid = b.id ?? "";
+          const dual = /-value-dual/.test(b.className);
+          const side = !dual ? "single" : b.classList.contains("flow-dual-value-before") ? "before" : "after";
+          const name = bid.replace(/^flow-[a-z]+-value-box-\d+-\d+-(before-|after-)?/, "");
+          const cs = getComputedStyle(b);
+          const lh = parseFloat(cs.lineHeight) || parseFloat(cs.fontSize) * 1.3 || 19;
+          const fv = node("flow-value", b, {
+            name, side, line: lineNo, value: text(b), cut: !!eye && vis(eye),
+            // the box cuts what does not fit with an ellipsis, on one line
+            clipped: cs.textOverflow === "ellipsis" && cs.whiteSpace === "nowrap" && cs.overflowX === "hidden",
+            "single-line": pill.getBoundingClientRect().height <= lh * 1.6,
+            cap: b.style.maxWidth ?? "",
+          }, [["name", name], ["side", side], ["line", String(lineNo)]]);
+          // on screen: inside the editor's code area, not scrolled off it
+          const cr = (comp.querySelector(".monaco-scrollable-element.editor-scrollable") ?? comp).getBoundingClientRect();
+          const bb = b.getBoundingClientRect();
+          fv.props.shown = bb.left >= cr.left - 1 && bb.right <= cr.right + 1 && bb.top >= cr.top - 1 && bb.bottom <= cr.bottom + 1;
+          fv.visible = fv.visible && fv.props.shown;
+          if (eye && vis(eye)) {
+            const r = eye.getBoundingClientRect();
+            fv.anchors = { points: { eye: { x: r.left + r.width / 2, y: r.top + r.height / 2 } } };
+          }
+          ed.children.push(fv);
+        }
+      }
+    }
+    // every value box drawn beside the code, as `name=value` (pw8)
+    ed.props["flow-values"] = ed.children.filter((c: any) => c.role === "flow-value" && c.visible)
+      .map((c: any) => `${c.props.name}=${c.props.value}`);
+    const lc = (Array.from(comp.querySelectorAll(".flow-multiline-value-container")) as HTMLElement[])
+      .find((c) => c.querySelector(".flow-loop-textarea") && vis(c));
+    if (lc) {
+      const field = lc.querySelector(".flow-loop-textarea") as HTMLTextAreaElement | null;
+      const base = lc.querySelector(".flow-loop-slider .noUi-base") as HTMLElement | null;
+      const pts: Record<string, { x: number; y: number }> = {};
+      for (const [k, sel] of [["forward", ".flow-loop-button.forward"], ["backward", ".flow-loop-button.backward"]]) {
+        const e = lc.querySelector(sel) as HTMLElement | null;
+        if (e && vis(e)) { const r = e.getBoundingClientRect(); pts[k] = { x: r.left + r.width / 2, y: r.top + r.height / 2 }; }
+      }
+      const n = node("loop-control", lc, {
+        iteration: num(field?.value), total: num(text(lc.querySelector(".flow-parallel-loop-iteration-end"))),
+        "slider-width": base ? Math.round(base.getBoundingClientRect().width) : 0,
+      });
+      n.anchors = { points: pts };
+      ed.children.push(n);
+    }
+  }
+  // tippy's root has no box of its own; its `.tippy-box` is what is drawn
+  const tip = (Array.from(document.querySelectorAll("[data-tippy-root]")) as HTMLElement[])
+    .find((t) => vis(t) || vis(t.querySelector(".tippy-box")));
+  if (tip) {
+    // the chip whose box the popup belongs to (tippy's own state on its box)
+    let anchored = "none";
+    for (const b of Array.from(document.querySelectorAll("[class*='-value-box']")) as any[]) {
+      if (b._tippy?.state?.isVisible) {
+        anchored = /-value-dual/.test(b.className)
+          ? (b.classList.contains("flow-dual-value-before") ? "before" : "after") : "single";
+      }
+    }
+    root.children.push(node("popup", tip, {
+      title: "", text: text(tip).length ? [text(tip)] : [],
+      value: text(tip.querySelector(".value-expanded-text")), type: text(tip.querySelector(".value-type")),
+      anchored,
+    }));
+  }
+
+  // The visual-replay panes.
+  const vp = document.querySelector(".video-player-component") as HTMLElement | null;
+  if (vp && vis(vp)) {
+    const shown = (sel: string) => { const e = vp.querySelector(sel); return e && vis(e) ? e : null; };
+    const transport = vp.querySelector(".video-player-transport");
+    const scope = vp.closest("[data-scope-kind='pane']") ?? vp;
+    const range = vp.querySelector(".video-player-scrub-range") as HTMLInputElement | null;
+    const v = node("video-player", vp, {
+      frame: text(vp.querySelector(".video-player-frame-label")),
+      draw: text(vp.querySelector(".video-player-draw-label")),
+      rate: text(vp.querySelector(".video-player-rate-badge")),
+      picking: vp.classList.contains("picker-active"),
+      error: text(shown(".video-player-error")),
+      starting: !!shown(".video-player-startup"),
+      "transport-enabled": !!transport && !transport.classList.contains("disabled"),
+      "last-frame": range ? num(range.getAttribute("max")) : 0,
+      focused: within(scope),
+    });
+    const fl = vp.querySelector(".video-player-frame-label") as HTMLElement | null;
+    if (fl && vis(fl)) {
+      const r = fl.getBoundingClientRect();
+      v.anchors = { points: { label: { x: r.left + r.width / 2, y: r.top + r.height / 2 } } };
+    }
+    if (range && vis(range)) {
+      // the scrub bar: its thumb where its value is, and its track
+      const rb = range.getBoundingClientRect();
+      const max = num(range.getAttribute("max")) || 1;
+      const f = Math.min(1, Math.max(0, Number(range.value) / max));
+      v.anchors = v.anchors ?? { points: {} };
+      v.anchors.points["scrub-thumb"] = { x: rb.left + 8 + f * (rb.width - 16), y: rb.top + rb.height / 2 };
+      v.anchors.range = { left: rb.left + 8, width: rb.width - 16, y: rb.top + rb.height / 2 };
+    }
+    for (const b of Array.from(vp.querySelectorAll("button.video-player-button")) as HTMLButtonElement[]) {
+      if (!vis(b)) continue;
+      const label = (b.getAttribute("title") ?? b.getAttribute("aria-label") ?? "").trim();
+      v.children.push(node("toolbar-button", b, {
+        label, enabled: !b.disabled, tooltip: "", "tooltip-chord": "", "tooltip-shown": false,
+      }, [["label", label]]));
+    }
+    const img = shown(".video-player-image") as HTMLImageElement | null;
+    if (img) {
+      const src = decodeURIComponent(img.getAttribute("src") ?? "");
+      const m = /GEID\s+(\d+)\s+frame\s+(\d+)/i.exec(src);
+      // the colour of each quadrant's centre in the drawn image (its natural
+      // size), Q0..Q3: bottom for 0 and 1, right for 1 and 3
+      const quads: string[] = [];
+      const w = img.naturalWidth, h = img.naturalHeight;
+      if (img.complete && w > 0 && h > 0) {
+        try {
+          const c = document.createElement("canvas");
+          c.width = w; c.height = h;
+          const g = c.getContext("2d")!;
+          g.drawImage(img, 0, 0);
+          for (const q of [0, 1, 2, 3]) {
+            const d = g.getImageData(q % 2 === 1 ? (3 * w) / 4 : w / 4, q >= 2 ? h / 4 : (3 * h) / 4, 1, 1).data;
+            quads.push("#" + [d[0], d[1], d[2]].map((x) => x.toString(16).padStart(2, "0")).join(""));
+          }
+        } catch { /* a tainted or undecoded image: no colours */ }
+      }
+      const fi = node("frame-image", img, {
+        geid: m ? parseInt(m[1], 10) : 0, frame: m ? parseInt(m[2], 10) : 0, quads, width: w, height: h,
+      });
+      const ib = img.getBoundingClientRect();
+      fi.anchors = { image: { x: ib.left, y: ib.top, w: ib.width, h: ib.height, nw: w, nh: h } };
+      v.children.push(fi);
+    }
+    root.children.push(v);
+  }
+  const ph = document.querySelector(".pixel-history-component") as HTMLElement | null;
+  if (ph && vis(ph)) {
+    const entries = Array.from(ph.querySelectorAll(".pixel-history-entry")) as HTMLElement[];
+    const p = node("pixel-history", ph, {
+      count: entries.length, pixel: text(ph.querySelector(".pixel-history-pixel")),
+      draws: entries.map((e) => (/\d+/.exec(text(e.querySelector(".pixel-history-draw"))) ?? [""])[0]),
+    });
+    p.props["last-draw"] = p.props.draws.length ? p.props.draws[p.props.draws.length - 1] : "";
+    const lastE = entries[entries.length - 1];
+    if (lastE && vis(lastE)) {
+      const r = lastE.getBoundingClientRect();
+      p.anchors = { points: { "last-entry": { x: r.left + r.width / 2, y: r.top + r.height / 2 } } };
+    }
+    for (const e of entries) {
+      const geid = num(e.getAttribute("data-geid")) || num(/GEID\s+(\d+)/.exec(text(e))?.[1]);
+      p.children.push(node("history-entry", e, {
+        geid, draw: text(e.querySelector(".pixel-history-draw")), result: text(e.querySelector(".pixel-history-pass")),
+        selected: e.classList.contains("selected") || e.classList.contains("active"),
+        title: e.getAttribute("title") ?? "",
+      }, [["geid", String(geid)]]));
+    }
+    root.children.push(p);
+  }
+  // a values table's rows ("name type value"), whatever element draws them
+  const tableRows = (t: Element | null): string[] => {
+    if (!t) return [];
+    const rows = (Array.from(t.querySelectorAll("tr, .shader-debug-value-row, [role='row']")) as HTMLElement[])
+      .map((r) => text(r)).filter((x) => x.length > 0);
+    if (rows.length) return rows;
+    return (Array.from(t.children) as HTMLElement[]).map((r) => text(r)).filter((x) => x.length > 0);
+  };
+  const sd = document.querySelector(".shader-debug-component") as HTMLElement | null;
+  if (sd && vis(sd)) {
+    const s = node("shader-debug", sd, {
+      source: (Array.from(sd.querySelectorAll(".shader-debug-source-line")) as HTMLElement[]).map((c) => text(c)),
+      current: text(sd.querySelector(".shader-debug-source-line.current")),
+      variables: tableRows(sd.querySelector(".shader-debug-variables-table")),
+      registers: tableRows(sd.querySelector(".shader-debug-registers-table")),
+      step: text(sd.querySelector(".shader-debug-step-label")),
+    });
+    for (const b of Array.from(sd.querySelectorAll("button")) as HTMLButtonElement[]) {
+      if (!vis(b)) continue;
+      const label = text(b) || b.getAttribute("title") || b.getAttribute("aria-label") ||
+        (Array.from(b.classList).find((c) => c.startsWith("shader-debug-")) ?? "").replace(/^shader-debug-/, "");
+      s.children.push(node("panel-button", b, { label, enabled: !b.disabled, active: false, title: b.getAttribute("title") ?? "" },
+                           [["label", label]]));
+    }
+    root.children.push(s);
   }
 }
 
@@ -2015,9 +2428,23 @@ function readSurfacePw4(root: any): void {
   }
 }
 
-const SURFACE_EXTENSIONS: Array<(root: any) => void> = [readSurfacePw1, readSurfacePw4, readSurfacePw8];
+const SURFACE_EXTENSIONS: Array<(root: any) => void> = [readSurfacePw1, readSurfacePw3, readSurfacePw4, readSurfacePw8];
 
 // --- the binding ----------------------------------------------------------------
+
+// pw3: a visual recording's graphics stream (`gfx_stream/`) is a companion of
+// the recording folder that `ct host --trace-path` does not import; it goes
+// beside the imported trace, where the product looks for it.
+function copyCompanionGfxStream(recording: string, home: string | undefined, id: string): void {
+  const source = path.join(recording, "gfx_stream");
+  if (!home || !fs.existsSync(source)) return;
+  const data = path.join(home, "data");
+  const target = fs.existsSync(path.join(data, `trace-${id}`)) && !fs.existsSync(path.join(data, id))
+    ? path.join(data, `trace-${id}`, "gfx_stream") : path.join(data, id, "gfx_stream");
+  fs.mkdirSync(path.dirname(target), { recursive: true });
+  fs.cpSync(source, target, { recursive: true, force: true });
+  if (fs.existsSync(`${source}.ctfs`)) fs.copyFileSync(`${source}.ctfs`, `${target}.ctfs`);
+}
 
 async function launchElectron(ctx: Ctx, launch: any): Promise<void> {
   const env: Record<string, string> = {};
@@ -2045,6 +2472,7 @@ async function launchElectron(ctx: Ctx, launch: any): Promise<void> {
     const m = /imported as trace id\s+([0-9a-fA-F-]{36})/.exec(`${r.stdout}\n${r.stderr}`);
     if (!m) throw new Error(`ct host did not import ${launch.recording}: ${r.stderr || r.stdout}`);
     env.CODETRACER_RECORDING_ID = m[1];
+    copyCompanionGfxStream(launch.recording, env.CODETRACER_HOME, m[1]);
   } else if (launch.review) {
     // a review dataset, as a user opens one (`ct review <PATH>`)
     args.push("review", launch.review);
@@ -2146,8 +2574,21 @@ async function launchHosted(ctx: Ctx, launch: any): Promise<void> {
   const height = launch.height || 1000;
   const url = `http://localhost:${httpPort}/?ct_session=${secret}`;
   const deadline = Date.now() + 180_000;
+  let gfxCopied = !fs.existsSync(path.join(launch.recording, "gfx_stream"));
   for (;;) {
     if (host.exitCode !== null) throw new Error(`ct host exited ${host.exitCode}: ${output.join("").slice(-2000)}`);
+    if (!gfxCopied) {
+      // pw3: the graphics stream goes beside the trace once it is imported
+      const m = /imported as trace id\s+([0-9a-fA-F-]{36})/.exec(output.join(""));
+      if (m) {
+        copyCompanionGfxStream(launch.recording, env.CODETRACER_HOME, m[1]);
+        gfxCopied = true;
+      } else {
+        if (Date.now() > deadline) throw new Error(`ct host never imported ${launch.recording}: ${output.join("").slice(-2000)}`);
+        await new Promise((r) => setTimeout(r, 200));
+        continue;
+      }
+    }
     try {
       await new Promise<void>((resolve, reject) => {
         const sock = net.connect(httpPort, "127.0.0.1", () => { sock.end(); resolve(); });
@@ -2263,6 +2704,26 @@ const binding = {
     if (f && n.anchors?.track) {
       const t = n.anchors.track;
       return { x: t.left + Math.floor(t.width * parseFloat(f[1])), y: t.midY };
+    }
+    // pw3: the point of a scrubber's track where its thumb's centre sits
+    // when the window starts `p`% of the way down the list
+    // pw3: `pixel(x,y)`: the centre of the image's source pixel (x, y)
+    const px = /^pixel\((\d+),\s*(\d+)\)$/.exec(anchor);
+    if (px && n.anchors?.image?.nw) {
+      const im = n.anchors.image;
+      return { x: im.x + ((parseInt(px[1], 10) + 0.5) * im.w) / im.nw, y: im.y + ((parseInt(px[2], 10) + 0.5) * im.h) / im.nh };
+    }
+    // pw3: `scrub(p)`: the Video Player's scrub bar, p% along
+    const sc = /^scrub\((\d+)\)$/.exec(anchor);
+    if (sc && n.anchors?.range) {
+      const r = n.anchors.range;
+      return { x: r.left + (Math.min(100, parseInt(sc[1], 10)) / 100) * r.width, y: r.y };
+    }
+    const at = /^at\((\d+)\)$/.exec(anchor);
+    if (at && n.role === "scrubber" && n.anchors?.track) {
+      const t = n.anchors.track;
+      const f = Math.min(100, parseInt(at[1], 10)) / 100;
+      return { x: t.x, y: t.top + t.thumb / 2 + f * (t.height - t.thumb) };
     }
     const p = await textAnchor(n, anchor);
     // pw2: never aim into the margin when the code is scrolled horizontally

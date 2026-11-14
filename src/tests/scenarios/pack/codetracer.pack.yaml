@@ -110,6 +110,11 @@ roles:
       process-tree: optional
       diff-section: many
       trace-results: many
+      # pw3
+      key-router: optional
+      video-player: optional
+      pixel-history: optional
+      shader-debug: optional
 
   # The strip of session tabs: one tab per open recording or editing session.
   session-strip:
@@ -130,10 +135,12 @@ roles:
   # clicks to bring a pane forward.
   pane-tab:
     keys: [label]
-    properties: { label: text, active: bool }
+    # pw3: `stack`, the labels of every tab in the same stack.
+    properties: { label: text, active: bool, stack: lines }
     affordances: [click, context-click, drag-source]
-    # `close`: the tab's close button.
-    anchors: [close]
+    # `close`: the tab's close button; `title`: its title (pw3), where a
+    # click on a narrow tab brings it forward rather than pinning it.
+    anchors: [close, title]
 
   # The transport controls of a replay session (step, continue, reverse, …)
   # and the edit-mode toolbar.
@@ -191,7 +198,7 @@ roles:
       flow-values: lines
     # pw8: `panel-button`: the "Run test" control beside a test, named by
     # its title ("Run test_passes").
-    children: { line: many, flow-value: many, panel-button: many }
+    children: { line: many, flow-value: many, panel-button: many, loop-control: optional }
     affordances: [click, context-click, wheel, focusable, text-entry]
     assertions:
       stopped-at(n): "current-line == n"
@@ -203,6 +210,8 @@ roles:
       dims-one-of(a, b): "(some x of line: x.number == a and x.dimmed) != (some y of line: y.number == b and y.dimmed)"
       # --- terminal ---
       lacks-text(t): "none line: line.text contains t"
+      # pw3: some line on screen carries a branch colour of the flow.
+      has-branch-colours: "some line: line.flow != \"none\""
     sync:
       # The editor has a document and has drawn it.
       loaded: "count(line) > 0"
@@ -231,6 +240,10 @@ roles:
       # squiggle under its text.
       diagnostic: "enum{none,error,warning,info}"
       squiggle: "enum{none,error,warning,info}"
+      # pw3: the omniscience flow's branch colour on the line (a branch the
+      # run took or did not take), and the names its flow chips draw.
+      flow: "enum{taken,not-taken,none}"
+      flow-names: lines
     affordances: [click, double-click, context-click]
     # `gutter`: the breakpoint lane; `text-start` / `text-end`: the first and
     # last character of the line's text; `column(c)`: the c-th character
@@ -286,9 +299,33 @@ roles:
       last-shown: int
       # The visible column titles, in order.
       columns: lines
-    # pw8: `text-field[label="Find event"]`, its search field.
-    children: { event: many, event-marker: many, columns-button: optional, columns-menu: optional, text-field: optional }
-    affordances: [wheel, focusable]
+      # pw3: the first row shown, as the footer reports it (`Rows <n> to …`).
+      first-shown: int
+      # The text of every drawn row, in order; how many of them are dimmed
+      # (after the replay's position), and whether the dimmed ones are
+      # exactly the rows after the last undimmed one.
+      rows: lines
+      dimmed: int
+      dimmed-tail: bool
+      # The first and last row (1-based, in the whole log) inside the scroll
+      # body.
+      first-in-view: int
+      last-in-view: int
+    children:
+      event: many
+      event-marker: many
+      columns-button: optional
+      columns-menu: optional
+      # pw8: `text-field[label="Find event"]`, its search field.
+      text-field: optional
+      # pw3: the Filter button, its list, and the scrubber beside the rows.
+      panel-button: many
+      dropdown: many
+      scrubber: optional
+    affordances: [click, wheel, focusable]
+    # pw3: `footer`, the footer's "Rows" label: a press in the pane that is
+    # on no row.
+    anchors: [footer]
     assertions:
       has-output(text): "some event: event.text contains text"
       # pw8: a correlation marker of this boundary, its chip drawn so and its
@@ -297,6 +334,11 @@ roles:
       # More rows than the first window shows: paging has something to fetch.
       pages-remain: "last-shown < total"
       shows-all: "last-shown == total"
+      # pw3: the footer's first row is the first row inside the scroll body.
+      footer-starts-in-view: "first-shown == first-in-view"
+      # Scrolled to the end: the footer reads "… to <total> of <total>" and
+      # the log's last row is inside the scroll body.
+      at-end: "last-shown == total and last-in-view == total"
     sync:
       loaded: "count(event) > 0"
 
@@ -310,6 +352,8 @@ roles:
       current: bool
       # A row past the replay's position (drawn dimmed).
       future: bool
+      # pw3: the row the list has selected.
+      selected: bool
     affordances: [click, double-click, context-click]
 
   # The state pane: the variables at the replay's position.
@@ -365,13 +409,16 @@ roles:
   # The files pane.
   filesystem:
     # `loading`: the pane shows its loading state instead of a tree.
-    properties: { count: int, focused: bool, loading: bool }
-    children: { file-node: many }
+    # pw3: `error`, the name field's refusal ("… already exists"); a Create
+    # or Rename puts a `text-field` (label `name`) in the tree.
+    properties: { count: int, focused: bool, loading: bool, error: text }
+    children: { file-node: many, text-field: many }
     affordances: [wheel, focusable]
 
   file-node:
     keys: [name]
-    properties: { name: text, kind: "enum{file,folder}", expanded: bool, selected: bool }
+    # `depth`: 0 for the tree's roots, one more per folder it is inside.
+    properties: { name: text, kind: "enum{file,folder}", expanded: bool, selected: bool, depth: int }
     affordances: [click, double-click, context-click]
 
   # The program's terminal output.
@@ -528,15 +575,20 @@ roles:
   # The event log's Columns button and the menu it opens: one option per
   # column, shown or hidden by its check box, reordered by its handle.
   columns-button:
-    properties: { label: text }
+    properties: { label: text, focused: bool }
     affordances: [click]
 
   columns-menu:
     children: { column-option: many }
+    affordances: [click]
+    # pw3: `corner`, the menu's top-right corner: its background, no option.
+    anchors: [corner]
 
   column-option:
     keys: [name]
-    properties: { name: text, shown: bool }
+    # pw3: `outline`, which part of the row shows the key-focus outline: the
+    # whole row, its check box, its drag handle, or none.
+    properties: { name: text, shown: bool, outline: "enum{row,check,handle,none}" }
     affordances: [click, drag-source, drop-target]
     anchors: [check, handle]
 
@@ -659,23 +711,27 @@ roles:
   # A box shown over the window that is not a menu: an event's whole content,
   # a value's history, a detail row, a tooltip.
   popup:
-    properties: { title: text, text: lines }
+    # pw3: a typed value's popup (a flow chip's): the value as expanded, its
+    # type, and the side of the chip it belongs to.
+    properties: { title: text, text: lines, value: text, type: text, anchored: "enum{single,before,after,none}" }
     affordances: [click]
     assertions:
       shows(t): "text contains t"
 
   # One level of the program menu, open: the first under the menu button,
   # every entered folder to its right.
+  # pw3: also a pane's dropdown list, by `name` (the event log's Filter).
   dropdown:
-    keys: [level]
-    properties: { level: int, count: int }
+    keys: [level, name]
+    properties: { level: int, name: text, count: int }
     children: { dropdown-item: many }
     assertions:
       offers(label): "some dropdown-item: dropdown-item.label == label"
 
   dropdown-item:
     keys: [label]
-    properties: { label: text, shortcut: text, folder: bool, selected: bool }
+    # pw3: `checked`, a check-box item's state.
+    properties: { label: text, shortcut: text, folder: bool, selected: bool, checked: bool }
     affordances: [click]
 
   # A label of the footer's auto-hide panels (Build, Problems, …): a click
@@ -1046,12 +1102,6 @@ roles:
     properties: { label: text, current: bool, placeholder: bool }
     affordances: [click]
 
-  # A value drawn beside the code at a step (the editor's flow values).
-  flow-value:
-    keys: [name]
-    properties: { name: text, value: text }
-    affordances: [click, context-click]
-
   # The Verification pane: a run of the project's Verno action and its
   # findings, by kind. `phase`: idle, running, cancelled, finished; `run`: the
   # Run control's label ("" when it offers none); `stop`: the Stop control is
@@ -1118,6 +1168,123 @@ roles:
     keys: [orientation, n]
     properties: { orientation: "enum{vertical,horizontal}", n: int }
     affordances: [click, drag-source]
+
+  # --- pw3 ---
+  # The key router's own trace of the operations it ran (the desktop keeps
+  # it as `__ctKeyTrace`): what a key DID, where the screen shows nothing.
+  key-router:
+    properties:
+      # The operation the router ran for the last key it resolved.
+      last-operation: text
+      # How many operations it has run.
+      operations: int
+    assertions:
+      # The last operation the router ran is not `op`.
+      last-is-not(op): "last-operation != op"
+
+  # A list's scrubber: the bar beside it whose thumb is the window on screen.
+  scrubber:
+    properties:
+      # The first row the window shows (0-based), how many it shows, and the
+      # list's length, as the scrubber knows them.
+      first: int
+      visible-rows: int
+      total: int
+    # The thumb is dragged along the track (a drop on the track's point).
+    affordances: [drag-source, drop-target]
+    # `thumb`: the thumb's centre; `at(p)`: where the thumb's centre is when
+    # the window starts p% of the way down the list.
+    anchors: [thumb, at(p)]
+
+  # A value chip of the omniscience flow (the editor's flow values): a
+  # variable's value on a line, or one side of a before/after (dual) chip. A
+  # locator by `name` alone names the variable's only chip.
+  flow-value:
+    keys: [name, side, line]
+    properties:
+      name: text
+      side: "enum{single,before,after}"
+      line: int
+      value: text
+      # The value was cut short: the chip carries its eye ("view more").
+      cut: bool
+      # It clips a value longer than it with an ellipsis, on one line, and is
+      # capped at `cap` (the width set on it, `30ch`).
+      clipped: bool
+      single-line: bool
+      cap: text
+      # It is on screen, inside the editor's code area (not scrolled off it).
+      shown: bool
+    affordances: [click]
+    # `eye`: the chip's "view more" button.
+    anchors: [eye]
+
+  # A loop header's control in the flow: the iteration shown, of how many,
+  # and its slider's width.
+  loop-control:
+    properties: { iteration: int, total: int, slider-width: number }
+    affordances: [click]
+    anchors: [forward, backward]
+
+  # The Video Player pane of a visual recording.
+  video-player:
+    properties:
+      # "Frame 2 / 4", "Draw 1 / 3", "1× ▶", "Paused", as the player shows them.
+      frame: text
+      draw: text
+      rate: text
+      # The pixel picker is on.
+      picking: bool
+      error: text
+      # The player is still starting.
+      starting: bool
+      transport-enabled: bool
+      # The scrub bar's last frame.
+      last-frame: int
+      focused: bool
+    children: { toolbar-button: many, frame-image: optional }
+    affordances: [click, focusable, drag-source, drop-target]
+    # `label`: the frame label ("Frame 2 / 4"), where a press focuses the
+    # player without picking a pixel; `scrub-thumb`: the scrub bar's thumb;
+    # `scrub(p)`: the scrub bar, p% along.
+    anchors: [label, scrub-thumb, scrub(p)]
+
+  # The frame the player shows.
+  frame-image:
+    # `quads`: the colour (`#rrggbb`) at the centre of each quadrant of the
+    # drawn image, Q0..Q3 (bottom-left, bottom-right, top-left, top-right);
+    # `width`, `height`: the image's own size.
+    properties: { geid: int, frame: int, quads: lines, width: int, height: int }
+    affordances: [click]
+    # `pixel(x,y)`: where the image's source pixel (x, y) is on screen.
+    anchors: ["pixel(x, y)"]
+
+  # The Pixel History pane: the draw calls that touched the picked pixel.
+  pixel-history:
+    # `draws`: each row's draw call, in order; `last-draw`: the last row's.
+    properties: { count: int, pixel: text, draws: lines, last-draw: text }
+    children: { history-entry: many }
+    affordances: [click]
+    # `last-entry`: the last row.
+    anchors: [last-entry]
+
+  history-entry:
+    keys: [geid]
+    properties: { geid: int, draw: text, result: text, selected: bool, title: text }
+    affordances: [click]
+
+  # The Shader Debug pane: the shader's source, the current step and its
+  # values.
+  shader-debug:
+    properties:
+      source: lines
+      # The text of the source line the current step is on.
+      current: text
+      # "name type value" per row.
+      variables: lines
+      registers: lines
+      step: text
+    children: { panel-button: many }
 
   # The hover card an editor shows over a symbol, with its command links.
   hover-card:
@@ -1365,6 +1532,8 @@ stages:
       recording the next `open-recording` opens. `$project/<file>` records a
       file of the stage's own project folder instead, afresh (a scenario may
       edit and re-record it).
+      recording the next `open-recording` opens. `$project/<file>` records a
+      program `write-project` wrote, into this run only.
     params: { program: text, backend: text }
   nim-project:
     summary: >-
@@ -1450,6 +1619,14 @@ stages:
       Write a file into the front-end's state directory before it starts (a
       saved layout document, the stored keymap preference).
     params: { file: text, content: text }
+  visual-replay-capable:
+    summary: >-
+      Give the prepared recording (a copy, in the run) the graphics stream of a
+      visual recording, so it opens with the Video Player, Pixel History and
+      Shader Debug panes; the player is the one
+      `CODETRACER_VISUAL_REPLAY_FAKE_PLAYER` (a `front-end-options` env)
+      selects.
+    params: {}
   visual-recording:
     summary: >-
       The visual fixture's GL scene recording (a program that drew frames),

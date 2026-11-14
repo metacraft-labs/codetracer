@@ -331,6 +331,23 @@ proc visualRecording*(s: StageState) =
     raise newException(IOError, "visual-recording: " & skip)
   s.launch.recording = visualFixtureFolder()
 
+proc visualReplayCapable*(s: StageState) =
+  ## The prepared recording, copied into the run and given the graphics
+  ## stream a visual recording carries (`gfx_stream/gfx_commands.dat`), so
+  ## CodeTracer opens it as a visual-replay-capable trace. The player that
+  ## answers it is the one `CODETRACER_VISUAL_REPLAY_FAKE_PLAYER` selects
+  ## (set with `front-end-options { env: … }`). The shared recording is never
+  ## changed.
+  if s.launch.recording.len == 0:
+    raise newException(ValueError,
+      "visual-replay-capable: no recording — call record-program first")
+  let dest = s.root / "visual-recording"
+  removeDir(dest)
+  copyDir(s.launch.recording, dest)
+  createDir(dest / "gfx_stream")
+  writeFile(dest / "gfx_stream" / "gfx_commands.dat", "")
+  s.launch.recording = dest
+
 proc frontEndOptions*(s: StageState; options: JsonNode; term: string;
                       env: JsonNode = nil) =
   ## Command-line options the front-end starts with (`name: value` becomes
@@ -1011,6 +1028,8 @@ proc runStage*(s: StageState; use: string; args: JsonNode) =
     s.plantState(argStr(args, "file"), argStr(args, "content"))
   of "visual-recording":
     s.visualRecording()
+  of "visual-replay-capable":
+    s.visualReplayCapable()
   of "request-session":
     s.requestSession()
   of "fixture-project":

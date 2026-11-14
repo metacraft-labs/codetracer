@@ -248,7 +248,7 @@ src/frontend/viewmodel/tests/unit/plat30-vocabulary-mutation-control.sha256	src/
 src/frontend/viewmodel/tests/unit/plat32-history-mutation-control.sha256	src/frontend/viewmodel/editor/operations.nim	f28dfaefe805c8a0f6958bb2c1ff272574299ed5e1de841a2dc3ad88f68a93cb	81f5945815c45a6d7c910335f266d9e526efc488962f3fcd11927de2b1e35719
 src/frontend/viewmodel/tests/unit/plat33-collab-mutation-control.sha256	src/frontend/viewmodel/editor/operations.nim	f28dfaefe805c8a0f6958bb2c1ff272574299ed5e1de841a2dc3ad88f68a93cb	81f5945815c45a6d7c910335f266d9e526efc488962f3fcd11927de2b1e35719
 src/frontend/viewmodel/tests/unit/plat68-keymaps-mutation-control.sha256	src/frontend/viewmodel/editor/operations.nim	f28dfaefe805c8a0f6958bb2c1ff272574299ed5e1de841a2dc3ad88f68a93cb	81f5945815c45a6d7c910335f266d9e526efc488962f3fcd11927de2b1e35719
-src/tests/scenarios/plat66-pack-mutation-control.sha256	src/tests/scenarios/bindings/playwright/codetracer-binding.ts	352e3a8153c7b8324784212f54a33fe4edace5a9902d86f248657832ca12278a	e9dedba8f821707161035a7f7f3bfbce7a181a4c55f530e568742d674aec3df3
+src/tests/scenarios/plat66-pack-mutation-control.sha256	src/tests/scenarios/bindings/playwright/codetracer-binding.ts	352e3a8153c7b8324784212f54a33fe4edace5a9902d86f248657832ca12278a	6631c73381e34532af1d5e50ea633c271c296e4c2f2f2aad05fd29e4d75f4be1
 
 # 2026-11-13, the settings suites derive their per-setting counts: the scrollbar
 # model suite (a grading suite of plat70h) now states every setting's word count
