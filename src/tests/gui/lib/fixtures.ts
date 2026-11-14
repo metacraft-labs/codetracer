@@ -2333,8 +2333,10 @@ export const test = base.extend<
 
       // RR-based tests need more time: compile + rr/ttd record + Electron + UI.
       // TTD (Windows) recording has much higher overhead than RR.
+      // A floor, never a cut: a spec that set a longer timeout of its own
+      // (`c-cross-thread-copy.spec.ts`: 240 s) used to be cut to 120 s here.
       if (needsRR) {
-        test.setTimeout(process.platform === "win32" ? 720_000 : 120_000);
+        test.setTimeout(Math.max(testInfo.timeout, process.platform === "win32" ? 720_000 : 120_000));
       }
 
       switch (launchMode) {
@@ -2642,8 +2644,15 @@ export async function readyOnEntryTest(p: Page): Promise<void> {
 async function settleFocusAfterEntry(p: Page): Promise<void> {
   const neutral = p.locator("#status-base #file-info-status");
   if (await neutral.isVisible().catch(() => false)) {
-    await neutral.click({ timeout: 5_000 });
-    return;
+    // Not part of the readiness contract (above), so a click that a loaded
+    // host does not deliver in time falls back to the blur below instead of
+    // failing a spec whose stop has already arrived (seen under stress-ng:
+    // `locator.click: Timeout 5000ms exceeded` after a ready entry).
+    const clicked = await neutral
+      .click({ timeout: 5_000 })
+      .then(() => true)
+      .catch(() => false);
+    if (clicked) return;
   }
   await p.evaluate(() => {
     const focused = document.activeElement as HTMLElement | null;
