@@ -242,4 +242,5 @@ applicable:
   - ../files/noir-files-panel-opens-a-file-once.yaml
   - ../languages/c-sudoku-call-trace-to-main.yaml
   - ../hcr-apply-edit/apply-edit-unconfigured.yaml
+  - ../visual-replay/keyboard-shortcuts.yaml
 unsupported: []
