@@ -1,0 +1,42 @@
+scenario: 1
+name: visual-replay/keyboard-focus-scope
+pack: codetracer
+summary: >-
+  The Video Player's keys are scoped to it: with the caret in the source
+  editor, F10 still steps the replay, and Left moves the caret, not the
+  player's frame (it stays at Frame 1); back in the player, Right steps it to
+  Frame 2.
+
+stage:
+  - use: record-program
+    with: { program: py_console_logs/main.py }
+  - use: visual-replay-capable
+  - use: front-end-options
+    with: { env: { CODETRACER_VISUAL_REPLAY_FAKE_PLAYER: ready } }
+  - use: open-recording
+    with: { deployment: web }
+
+steps:
+  - wait: { until: replay-idle, timeout: 360s }
+  - wait: { until: editor.loaded, timeout: 300s }
+  - wait: { until: call-trace.loaded, timeout: 120s }
+  - wait: { until: { at: 'pane-tab[label="VIDEO PLAYER"]', present: true }, timeout: 60s }
+  - click: { at: 'pane-tab[label="VIDEO PLAYER"]', anchor: title }
+  - wait: { until: { at: video-player/frame-image, present: true }, timeout: 60s }
+  - click: { at: video-player, anchor: label }
+  - key: Home
+  - key: Right
+  - wait: { until: { at: video-player, frame: { matches: "^Frame 1 /" } }, timeout: 10s }
+  - click: { at: 'editor[file="main.py"]/line[number="6"]', anchor: text-end }
+  - expect: { at: 'editor[file="main.py"]', focused: true }
+  - key: Left
+  - expect: { at: video-player, frame: { matches: "^Frame 1 /" } }
+  - expect: { at: key-router, assert: 'last-is-not("video-player.step-frame-back")' }
+  - key: F10
+    settle: false
+  - wait: { until: { at: key-router, last-operation: { matches: "next|step" } }, timeout: 30s }
+  - wait: { until: replay-idle, timeout: 60s }
+  - expect: { at: video-player, frame: { matches: "^Frame 1 /" } }
+  - click: { at: video-player, anchor: label }
+  - key: Right
+  - wait: { until: { at: video-player, frame: { matches: "^Frame 2 /" } }, timeout: 10s }
