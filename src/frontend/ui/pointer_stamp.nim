@@ -23,7 +23,7 @@ type
   JsEv {.importc: "Event".} = ref object
 
 const
-  PointerBindings: array[267, PointerBinding] = [
+  PointerBindings: array[268, PointerBinding] = [
     (cstring".ct-origin-inline-chain-hop", hkRow, false),
     (cstring".ct-origin-inline-chain-terminator", hkNone, false),
     (cstring".ct-origin-hop", hkRow, false),
@@ -39,6 +39,9 @@ const
     (cstring".agent-test-run-header", hkControl, false),
     (cstring".agent-test-row-header", hkControl, false),
     (cstring".agent-user-copy-button", hkControl, false),
+    # The Agent Activity playback bar's buttons (their stylesheet said
+    # `cursor: pointer` itself, which PA-1 leaves to pointer.styl alone).
+    (cstring".ah-playback-button", hkControl, false),
     (cstring".agent-msg-thumb", hkControl, false),
     (cstring".agent-diff-unified-btn", hkControl, false),
     (cstring".agent-diff-file-row", hkControl, false),

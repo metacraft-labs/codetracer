@@ -40,6 +40,7 @@ import ../../stories/agent_harbor_playback
 import ../../viewmodel/input/element_press
 import ../app/gpui_keys
 import ../../../common/key_names
+import ../../../common/pointer_shape
 import ./ah_theme
 
 export agent_harbor_playback
@@ -90,7 +91,7 @@ proc drawPlaybackBar*(r: GpuiRenderer; host: GpuiElement; pb: AhPlayback;
                            ("flex-shrink", "0"), ("rounded", $ControlRadiusPx & "px"),
                            ("border-width", "1px"), ("border-color", p.borderPrimary),
                            ("background", p.secondary),
-                           ("cursor", "pointer")])
+                           ("cursor", cursorOf(hkControl))])
     let label = pb.controlLabel(control)
     let drawn = if compact: pb.compactControlLabel(control) else: label
     r.appendChild(b, r.text(drawn, CaptionPx, p.textLabel, shrink = false))
