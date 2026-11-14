@@ -69,9 +69,6 @@ src/frontend/viewmodel/tests/unit/plat33-collab-mutation-control.sha256	ci/lib/t
 # agents commits it was rebased over. The entries already stale on agents 38974dd6d0f
 # before this change (69 new, 11 moved again) are not this change's and are left as they
 # were.
-src/frontend/tui/tests/plat46-design-mutation-control.sha256	src/frontend/tui/app/theme/capabilities.nim	40c50a6a381d64a02ff7b1894488fdf9c20f2919acdcf6c645d48cbcce0f0e27	f1f2c84a36ed368523f503701d3a0700b16a9fd1aa5c4c6d9c93c713fe54e38b
-src/frontend/tui/tests/plat46-design-mutation-control.sha256	src/frontend/tui/app/views/shell.nim	09454097889294a4861a5eca9cccd9be16d9ba5244ab683a49daf7a8b33bd686	2ffb13fa4541be85cde288716f6194d877ab06069ee57f2b4386f3edc9e7afae
-src/frontend/tui/tests/plat46-design-mutation-control.sha256	src/frontend/tui/host/terminal_probe.nim	9fce287d64b7aec99d425bd446199a4e2897c7b2c06189beb1ffd33246b77a2b	124b9e0d5977013726b504dd51c62c291de43270ba8932fde09594388fffd9fb
 src/frontend/tui/tests/plat71a-glyphs-mutation-control.sha256	src/frontend/tui/app/tests/test_plat71_terminal_profile.nim	82344b5c0d18daf110e89c48bb567663d6dcf387a393aa67300a9ee98f24cff8	47d1c433c9838314c782aa53510815f5fdf60c93486b1da9a63f1f9719f04c2a
 src/frontend/tui/tests/plat71a-glyphs-mutation-control.sha256	src/frontend/tui/app/views/glyph_table.nim	15e734b9ee8043749c6f3cb17d36fd4d984ed69b32113b9f74c7e83a1843ae6b	55bf6277bdf57ce65709fbfc0f0b19cf5f5f4810fbdf25323268b24a4de27a51
 src/frontend/tui/tests/plat71a-glyphs-mutation-control.sha256	src/frontend/tui/app/views/scrollbar_styles.nim	c75cccb6eb5b15bdfe8dc3cc661c24f3333209a4b6e0bcf87211d5b925013b6e	006af6b962ebf9c4737a70b2b3b51971cdec937a6cc1d2340e071ae48a2ae938
