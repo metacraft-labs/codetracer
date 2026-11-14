@@ -1,0 +1,33 @@
+scenario: 1
+name: value-origin/rust-trivial-chain
+pack: codetracer
+summary: >-
+  In a Rust recording of the trivial chain, stopped at the println!, `c`'s
+  chain under its row is `c = b`, `b = a`, `a = 10`, ending at 10.
+
+stage:
+  - use: record-program
+    with: { program: src/db-backend/tests/fixtures/origin/rust/simple_trivial_chain/main.rs, backend: rr }
+  # rr walks each hop with reverse continues; on a loaded machine one can take
+  # longer than the 1.5 s the chain allows a hop by default.
+  - use: front-end-options
+    with: { env: { CT_RR_ORIGIN_PER_HOP_WALL_CLOCK_MS: "10000" } }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 180s }
+  - click: 'toolbar/toolbar-button[label="run-to-entry-image"]'
+    settle: false
+  - wait: { until: replay-idle, timeout: 120s }
+  - wait: { until: { at: 'editor[file="main.rs"]', current-line: { gt: 0 } }, timeout: 120s }
+  - click: { at: 'editor[file="main.rs"]/line[number="8"]', anchor: glyph }
+  - click: 'toolbar/toolbar-button[label="continue-image"]'
+    settle: false
+  - wait: { until: { at: 'editor[file="main.rs"]', current-line: 8 }, timeout: 120s }
+  - wait: { until: { at: variables, assert: 'value-of("c", "10")' }, timeout: 120s }
+
+  - click: { at: 'variables/variable[name="c"]', anchor: name, button: right }
+  - wait: { until: { at: context-menu, assert: 'offers("Show value origin")' }, timeout: 15s }
+  - click: 'context-menu/menu-item[label="Show value origin"]'
+  - wait: { until: { at: 'variables/variable[name="c"]/origin-chain', hops: [c = b, b = a, a = 10] }, timeout: 120s }
+  - expect: { at: 'variables/variable[name="c"]/origin-chain', terminator: "10" }

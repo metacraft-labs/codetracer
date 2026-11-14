@@ -1729,3 +1729,23 @@ stages:
       platform the arm is for, and an `edit` the Apply Edit command applies.
       Fails naming the missing prerequisite.
     params: { platform: text, edit: text, arm: text }
+
+# Changes outside the application during a run (an `act:` step).
+actions:
+  write-file:
+    summary: >-
+      Another program (a second editor, a formatter, a `git checkout`) writes a
+      file of the stage's project folder (`file`, relative to it) with
+      `content`; the application is not told.
+    params: { file: text, content: text }
+  make-read-only:
+    summary: >-
+      A file of the stage's project folder (`file`) loses its write permission
+      on disk, as when another user or tool locks it.
+    params: { file: text }
+  run-product:
+    summary: >-
+      The user runs the product again from a shell (`args`, in `cwd`;
+      `$project` is the stage's project folder): a second process, which hands
+      its request to the window that is open and exits.
+    params: { args: lines, cwd: text }

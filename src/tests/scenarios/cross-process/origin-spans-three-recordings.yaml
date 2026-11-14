@@ -1,0 +1,44 @@
+scenario: 1
+name: cross-process/origin-spans-three-recordings
+pack: codetracer
+summary: >-
+  In the backend recording, stopped at `const balance = payload.balance;`,
+  the side panel of balance's origin has breadcrumbs for all three
+  recordings and a hop badged with the account-balance boundary; a click on
+  the frontend-wasm breadcrumb makes that recording active, and the panel
+  stays, unchanged.
+
+stage:
+  - use: materialized-recording
+    with: { name: cross-process-three-trace }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 180s }
+  - wait: { until: { at: 'process-tree/process[name="backend"]', present: true }, timeout: 60s }
+  - click: 'process-tree/process[name="backend"]'
+    settle: false
+  - wait: { until: { at: process-tree, active: backend }, timeout: 30s }
+  - wait: { until: { at: 'editor[file="server.js"]', present: true }, timeout: 60s }
+  - wait: { until: replay-idle, timeout: 60s }
+  - wheel: { at: 'editor[file="server.js"]', direction: down, amount: 25 }
+  - wait: { until: { at: 'editor[file="server.js"]/line[number="72"]', present: true }, timeout: 15s }
+  - click: { at: 'editor[file="server.js"]/line[number="72"]', anchor: glyph }
+  - click: 'toolbar/toolbar-button[label="continue-image"]'
+    settle: false
+  - wait: { until: { at: 'editor[file="server.js"]', current-line: 72 }, timeout: 60s }
+  - wait: { until: { at: variables, assert: 'has-variable("balance")' }, timeout: 60s }
+
+  - click: { at: 'variables/variable[name="balance"]', anchor: name, button: right }
+  - wait: { until: { at: context-menu, assert: 'offers("Show value origin")' }, timeout: 15s }
+  - click: 'context-menu/menu-item[label="Show value origin"]'
+  - wait: { until: { at: 'variables/variable[name="balance"]/origin-chain/panel-button[label="Show in side panel"]', present: true }, timeout: 60s }
+  - wheel: { at: variables, direction: down, amount: 10 }
+  - wait: { until: { at: 'variables/variable[name="balance"]/origin-chain/panel-button[label="Show in side panel"]', geometry: { visible: true } }, timeout: 15s }
+  - click: 'variables/variable[name="balance"]/origin-chain/panel-button[label="Show in side panel"]'
+  - wait: { until: { at: origin-panel, assert: 'reached("frontend-wasm")' }, timeout: 60s }
+  - expect: { at: origin-panel, assert: ['reached("backend")', 'reached("frontend-js")', 'has-badge("account-balance")'] }
+  - click: 'origin-panel/breadcrumb[label="frontend-wasm"]'
+    settle: false
+  - wait: { until: { at: process-tree, active: frontend-wasm }, timeout: 30s }
+  - expect: { at: origin-panel, assert: ['reached("backend")', 'reached("frontend-js")', 'reached("frontend-wasm")'] }

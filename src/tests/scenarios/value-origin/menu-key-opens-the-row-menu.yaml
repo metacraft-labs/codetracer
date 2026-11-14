@@ -1,0 +1,29 @@
+scenario: 1
+name: value-origin/menu-key-opens-the-row-menu
+pack: codetracer
+summary: >-
+  With `c`'s value pressed, the Menu key opens the row's own menu, offering
+  "Show value origin"; Esc closes it.
+
+stage:
+  - use: record-program
+    with: { program: src/db-backend/tests/fixtures/origin/python/simple_trivial_chain/main.py }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - click: 'toolbar/toolbar-button[label="run-to-entry-image"]'
+    settle: false
+  - wait: { until: replay-idle, timeout: 60s }
+  - wait: { until: { at: 'editor[file="main.py"]', current-line: { gt: 0 } }, timeout: 60s }
+  - click: { at: 'editor[file="main.py"]/line[number="12"]', anchor: glyph }
+  - click: 'toolbar/toolbar-button[label="continue-image"]'
+    settle: false
+  - wait: { until: { at: 'editor[file="main.py"]', current-line: 12 }, timeout: 60s }
+  - wait: { until: { at: variables, assert: 'value-of("c", "10")' }, timeout: 60s }
+  - wait: { until: replay-idle, timeout: 60s }
+  - click: { at: 'variables/variable[name="c"]', anchor: value }
+  - key: Menu
+  - wait: { until: { at: context-menu, assert: 'offers("Show value origin")' }, timeout: 15s }
+  - key: Esc
+  - wait: { until: { at: context-menu, present: false }, timeout: 15s }

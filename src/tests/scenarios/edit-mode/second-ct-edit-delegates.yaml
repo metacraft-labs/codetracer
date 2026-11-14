@@ -1,0 +1,23 @@
+scenario: 1
+name: edit-mode/second-ct-edit-delegates
+pack: codetracer
+summary: >-
+  With the welcome window open, `ct edit .` run from a shell inside a git
+  repository hands the folder to that window, which enters Edit mode on it
+  with its Files and VCS panes filled; the second process exits.
+
+stage:
+  - use: project-fixture
+    with: { name: git-lazy-tree }
+  - use: front-end-options
+    with: { env: { CODETRACER_NEW_TRACE_POLICY: tab } }
+  - use: open-welcome
+
+steps:
+  - wait: { until: { at: welcome, present: true }, timeout: 60s }
+  - wait: { until: settled, timeout: 30s }
+  - act: { use: run-product, with: { args: [edit, .], cwd: $project } }
+  - wait: { until: { at: 'filesystem/file-node[name="README.md"]', present: true }, timeout: 60s }
+  - expect: { at: welcome, present: false }
+  - click: 'pane-tab[label="VCS"]'
+  - wait: { until: { at: vcs, commits: { gt: 0 } }, timeout: 30s }

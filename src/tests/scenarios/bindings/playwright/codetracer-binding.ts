@@ -2463,6 +2463,9 @@ async function launchElectron(ctx: Ctx, launch: any): Promise<void> {
   if (process.env.CT_LD_LIBRARY_PATH) {
     env.LD_LIBRARY_PATH = [process.env.CT_LD_LIBRARY_PATH, env.LD_LIBRARY_PATH ?? ""].filter((s) => s).join(":");
   }
+  // (what an `act` step's second process of the product starts with)
+  ctx.state.appEnv = env;
+  ctx.state.launch = launch;
   const args: string[] = [];
   if (launch.recording) {
     // the recording folder, imported the way `ct host --trace-path` imports one
@@ -2732,6 +2735,39 @@ const binding = {
     }
     void ctx;
     return p;
+  },
+
+  // `act` steps: a change outside the application, during the run
+  // (DemoVideoScript-pm spec/Proposal-Outside-Actions.md). None of these
+  // touches the application: they are another program writing a file of the
+  // stage's project, its permissions changing, and a second process of the
+  // product started from a shell, which hands its arguments to the open
+  // window and exits.
+  async act(ctx: Ctx, use: string, args: Record<string, unknown>): Promise<void> {
+    const launch = ctx.state.launch ?? {};
+    const project: string = launch.project || launch.workDir || "";
+    const inProject = (rel: unknown): string => {
+      const r = String(rel ?? "");
+      if (!project) throw new Error(`${use}: the stage prepared no project folder`);
+      if (!r || path.isAbsolute(r) || r.split(/[\\/]/).includes("..")) {
+        throw new Error(`${use}: '${r}' is not a path inside the project`);
+      }
+      return path.join(project, r);
+    };
+    if (use === "write-file") {
+      fs.writeFileSync(inProject(args.file), String(args.content ?? ""), "utf8");
+    } else if (use === "make-read-only") {
+      fs.chmodSync(inProject(args.file), 0o444);
+    } else if (use === "run-product") {
+      const cwd = String(args.cwd ?? "$project").replace("$project", project) || project;
+      const env: Record<string, string> = { ...(ctx.state.appEnv ?? process.env) };
+      for (const k of ["CODETRACER_TRACE_ID", "CODETRACER_RECORDING_ID", "CODETRACER_CALLER_PID"]) delete env[k];
+      const r = spawnSync(ctBin, (args.args as string[]) ?? [], { cwd, env, encoding: "utf-8", timeout: 60_000 });
+      if (r.error) throw new Error(`run-product: ${r.error.message}`);
+      if (r.status !== 0) throw new Error(`run-product: ct exited ${r.status}: ${(r.stderr || r.stdout || "").trim().slice(-2000)}`);
+    } else {
+      throw new Error(`the CodeTracer pack has no action '${use}'`);
+    }
   },
 
   async close(ctx: Ctx): Promise<void> {

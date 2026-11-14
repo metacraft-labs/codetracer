@@ -164,6 +164,13 @@ applicable:
   - ../re-record/ctrl-r-burst-starts-one-recorder.yaml
   - ../tracepoints/results-grid-jumps-and-stays.yaml
   - ../cross-process/process-tree-switches-the-recording.yaml
+  - ../cross-process/origin-spans-three-recordings.yaml
+  - ../cross-process/origin-hops-seek-across-recordings.yaml
+  - ../value-origin/rust-trivial-chain.yaml
+  - ../file-conflicts/clean-buffer-reloads.yaml
+  - ../file-conflicts/dirty-buffer-asks.yaml
+  - ../edit-mode/second-ct-edit-delegates.yaml
+  - ../value-origin/menu-key-opens-the-row-menu.yaml
   - ../tests-pane/context-menu-re-record-opens-a-new-tab.yaml
   - ../tests-pane/editor-run-test-opens-a-new-tab.yaml
   - ../tests-pane/open-without-a-recording-records-and-enters.yaml

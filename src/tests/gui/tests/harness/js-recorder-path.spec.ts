@@ -58,7 +58,6 @@ test("cross-tracer specs collect when recording prerequisites are missing", () =
   const gui = path.resolve(__dirname, "../..");
   const result = spawnSync(process.execPath, [
     require.resolve("@playwright/test/cli"), "test", "--list", "--reporter=list",
-    "tests/value-origin/cross-tracer-process-tree.spec.ts",
     "tests/value-origin/cross-tracer-three-recording.spec.ts",
     "tests/value-origin/event-log-correlation-markers-three-trace.spec.ts",
   ], {
@@ -71,8 +70,7 @@ test("cross-tracer specs collect when recording prerequisites are missing", () =
   });
   expect(result.error).toBeUndefined();
   expect(result.status, result.stdout + result.stderr).toBe(0);
-  for (const name of ["cross-tracer-process-tree", "cross-tracer-three-recording",
-    "event-log-correlation-markers-three-trace"]) {
+  for (const name of ["cross-tracer-three-recording", "event-log-correlation-markers-three-trace"]) {
     expect(result.stdout).toContain(name + ".spec.ts");
   }
   expect(result.stdout).not.toContain("0 tests");
