@@ -7426,37 +7426,64 @@ async fn test_real_rr_flow_returns_steps() {
                             loops.len()
                         ),
                     );
-                    // Verify every step has a non-null `position` field with
-                    // meaningful content, and that variable value fields are
-                    // present on each step.
+                    // Verify every step has a `position` naming a line of
+                    // `calculate_sum`, and that variable value fields are
+                    // present on each step.  The lines run from its first
+                    // statement to its closing brace (the line after the tail
+                    // expression): rr stops at the epilogue there too.
+                    let calculate_sum_body = {
+                        let body = calculate_sum_body_lines()?;
+                        *body.start()..=*body.end() + 1
+                    };
                     for (i, step) in steps.iter().enumerate() {
                         let position = step.get("position");
                         assert!(
                             position.is_some(),
                             "step {i} should have a 'position' field, got: {step}"
                         );
-                        // Position must be non-null and contain a `line` field
-                        // (all FlowStep positions include at minimum a line number).
+                        // `FlowStep::position` is `task::Position(pub i64)`, a
+                        // serde newtype struct, so it serialises as the bare
+                        // 1-based line number rather than an object.  The flow
+                        // was requested for `calculate_sum`, so every step
+                        // must land on a line of its body.
                         let pos = position.unwrap();
+                        let line = pos.as_i64().unwrap_or_else(|| {
+                            panic!("step {i} position should be a line number, got: {pos}")
+                        });
                         assert!(
-                            !pos.is_null(),
-                            "step {i} position should not be null, got: {step}"
+                            calculate_sum_body.contains(&line),
+                            "step {i} position {line} should be a line of calculate_sum, \
+                             from its first statement to its closing brace \
+                             ({}..={}), got: {step}",
+                            calculate_sum_body.start(),
+                            calculate_sum_body.end()
                         );
-                        assert!(
-                            pos.get("line").is_some(),
-                            "step {i} position should have a 'line' field, got: {pos}"
-                        );
-                        // Each step should carry variable values in at least
-                        // one of the known value fields.
-                        let has_values = step.get("values").is_some()
-                            || step.get("before_values").is_some()
-                            || step.get("after_values").is_some();
-                        assert!(
-                            has_values,
-                            "step {i} should have 'values', 'before_values', or \
-                             'after_values' field, got: {step}"
-                        );
+                        // Each step carries its variable values.  `FlowStep`
+                        // serialises camelCase, so they are `beforeValues` and
+                        // `afterValues`, each a map of name to value.
+                        for field in ["beforeValues", "afterValues"] {
+                            assert!(
+                                step.get(field).is_some_and(Value::is_object),
+                                "step {i} should have a '{field}' object, got: {step}"
+                            );
+                        }
                     }
+                    // `main` calls `calculate_sum(x, y)` with x = 10 and
+                    // y = 32, so the flow must show those argument values.
+                    let shows_argument = |name: &str, expected: &str| {
+                        steps.iter().any(|step| {
+                            step.get("afterValues")
+                                .and_then(|values| values.get(name))
+                                .and_then(|value| value.get("i"))
+                                .and_then(Value::as_str)
+                                == Some(expected)
+                        })
+                    };
+                    assert!(
+                        shows_argument("a", "10") && shows_argument("b", "32"),
+                        "the flow of calculate_sum should show its arguments a = 10 \
+                         and b = 32, got steps: {steps:?}"
+                    );
                 }
             }
             Err(e) => {
