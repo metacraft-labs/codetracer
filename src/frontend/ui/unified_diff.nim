@@ -53,7 +53,6 @@ import
   ui_imports, session_viewmodels
 
 import std/strformat
-import ./shared_diff_editor, ./shared_editor_flag
 import isonim/core/signals
 import git_cli
 import flow_line_styles
@@ -1067,16 +1066,12 @@ proc initEditor(self: UnifiedDiffComponent) =
   let diffOptions = reviewDiffEditorOptions(
     theme, diffContextLineCount(pair), self.data.ui.fontSize,
     codeFontFamily(self.data.ui))
-  # The developer setting `sharedEditor`: the diff on the shared editor
-  # (`shared_diff_editor`), behind the same diff-editor API.
-  self.diffEditor =
-    if sharedEditorEnabled(self.data.config):
-      newSharedDiffEditor(document.getElementById(hostId).toJs, diffOptions,
-                          self.data.ui.fontSize, $codeFontFamily(self.data.ui),
-                          darkTheme = theme != cstring"codetracerWhite",
-                          language = pair.language)
-    else:
-      udCreateDiffEditor(hostId, diffOptions)
+  # Monaco's diff editor, under the developer setting `sharedEditor` too: the
+  # shared editor's diff (`shared_diff_editor`) does not yet do what the
+  # review and the VCS panel use of it — hidden unchanged regions and their
+  # boundaries, word-level marks, highlighted deleted lines, the flow's values
+  # (docs/shared-editor-parity.md, "The unified-diff view").
+  self.diffEditor = udCreateDiffEditor(hostId, diffOptions)
 
   # Two real models, each with the language resolved from the reviewed file.
   self.originalModel = udCreateModel(

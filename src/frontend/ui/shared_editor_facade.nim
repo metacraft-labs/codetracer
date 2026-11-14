@@ -243,6 +243,10 @@ proc buildModel(ed: SharedEditor): JsObject =
       o["inlineClassName"] = cstring(e.options.inlineClassName)
       o["glyphMarginClassName"] = cstring(e.options.glyphMarginClassName)
       o["isWholeLine"] = e.options.isWholeLine
+      if e.options.hoverMessage.len > 0:
+        let hm = jsNew()
+        hm["value"] = cstring(e.options.hoverMessage)
+        o["hoverMessage"] = hm
       d["options"] = o
       acc.jsPush(d)
     acc
@@ -259,6 +263,11 @@ proc buildModel(ed: SharedEditor): JsObject =
         o["className"] = cstring(e.options.className)
         o["inlineClassName"] = cstring(e.options.inlineClassName)
         o["glyphMarginClassName"] = cstring(e.options.glyphMarginClassName)
+        o["isWholeLine"] = e.options.isWholeLine
+        if e.options.hoverMessage.len > 0:
+          let hm = jsNew()
+          hm["value"] = cstring(e.options.hoverMessage)
+          o["hoverMessage"] = hm
         d["options"] = o
         acc.jsPush(d)
     acc
@@ -303,9 +312,24 @@ proc layoutInfoJs(ed: SharedEditor): JsObject =
   result["decorationsWidth"] = 26
   result["contentLeft"] = ed.gutterPx
   result["contentWidth"] = max(0, ed.width - ed.gutterPx - 14)
-  result["minimap"] = jsNew()
+  # Monaco's `EditorLayoutInfo.minimap` (the desktop reads `minimapWidth`
+  # and `minimapLeft` from here: the tracepoint editor's and the flow
+  # slider's widths). No minimap is drawn: width 0, at the right edge.
+  let mm = jsNew()
+  mm["renderMinimap"] = 0
+  mm["minimapWidth"] = 0
+  mm["minimapLeft"] = max(0, ed.width - 14)
+  mm["minimapHeightIsEditorHeight"] = false
+  mm["minimapIsSampling"] = false
+  mm["minimapScale"] = 1
+  mm["minimapLineHeight"] = 1
+  mm["minimapCanvasInnerWidth"] = 0
+  mm["minimapCanvasInnerHeight"] = 0
+  mm["minimapCanvasOuterWidth"] = 0
+  mm["minimapCanvasOuterHeight"] = 0
+  result["minimap"] = mm
   result["minimapWidth"] = 0
-  result["minimapLeft"] = ed.width
+  result["minimapLeft"] = max(0, ed.width - 14)
   result["verticalScrollbarWidth"] = 14
   result["horizontalScrollbarHeight"] = 10
 
@@ -371,11 +395,22 @@ proc runCommand*(ed: SharedEditor; command: string; payload: JsObject): bool =
   discard ed.applyNamedOp(op, source = "keyboard")
   true
 
+var currentThemeName = ""
+  ## The name `monaco.editor.setTheme` was last called with.
+proc currentThemeNameJs(): cstring = cstring(currentThemeName)
+
 proc facadeOf*(ed: SharedEditor): JsObject =
   ## The editor's Monaco-shaped face. Built once; `ed.facade` keeps it.
   if not ed.facade.isNil: return ed.facade
   let f = jsNew()
   ed.facade = f
+  # Monaco's theme service, as far as the desktop reads it
+  # (`trace.getCurrentMonacoTheme`: `_themeService._theme.themeName`): the
+  # theme `monaco.editor.setTheme` last named, else this editor's own.
+  let themeService = jsNew()
+  {.emit: ["Object.defineProperty(", themeService, ", '_theme', { get: () => ({ themeName: ",
+           "(", currentThemeNameJs, ")() || (", ed.darkTheme, " ? 'codetracerDark' : 'codetracerWhite') }) });"].}
+  f["_themeService"] = themeService
   ed.model = buildModel(ed)
   f["__ctShared"] = true
   f["__ctSharedEditorId"] = ed.id
@@ -658,6 +693,7 @@ proc installMonacoGlobals*() =
     for ed in sharedEditors:
       if not ed.disposed: result.jsPush(facadeOf(ed))
   let themes = proc(name: cstring) =
+    currentThemeName = $name
     let dark = not ($name).toLowerAscii.contains("white") and
                not ($name).toLowerAscii.contains("light") and $name != "vs"
     for ed in sharedEditors: ed.setDarkTheme(dark)
@@ -682,9 +718,33 @@ proc installMonacoGlobals*() =
     const origModels = me.getModels ? me.getModels.bind(me) : (() => []);
     me.getModels = function() { return origModels().concat(""", listModels, """()); };
     const origMarkers = me.setModelMarkers ? me.setModelMarkers.bind(me) : null;
+    // A shared model's markers, per owner, as Monaco's marker service keeps
+    // them: the editor draws the union, and getModelMarkers answers them.
+    const sharedMarkers = globalThis.__ctSharedMarkers = globalThis.__ctSharedMarkers || new Map();
     me.setModelMarkers = function(model, owner, ms) {
-      if (model && model.__ctShared) { """, markers, """(model, owner, ms); return; }
+      if (model && model.__ctShared) {
+        let byOwner = sharedMarkers.get(model);
+        if (!byOwner) { byOwner = new Map(); sharedMarkers.set(model, byOwner); }
+        byOwner.set(String(owner), Array.from(ms || []).map((m) => Object.assign({}, m,
+          { owner: String(owner), resource: model.uri })));
+        const all = [];
+        for (const list of byOwner.values()) all.push(...list);
+        """, markers, """(model, owner, all); return; }
       if (origMarkers) return origMarkers(model, owner, ms);
+    };
+    const origGetMarkers = me.getModelMarkers ? me.getModelMarkers.bind(me) : (() => []);
+    me.getModelMarkers = function(filter) {
+      const f = filter || {};
+      const out = Array.from(origGetMarkers(f) || []);
+      for (const [model, byOwner] of sharedMarkers) {
+        if (model.isDisposed && model.isDisposed()) continue;
+        if (f.resource && String(f.resource) !== String(model.uri)) continue;
+        for (const [owner, list] of byOwner) {
+          if (f.owner && f.owner !== owner) continue;
+          out.push(...list);
+        }
+      }
+      return out;
     };
     const origTheme = me.setTheme ? me.setTheme.bind(me) : null;
     me.setTheme = function(name) { """, themes, """(String(name));

@@ -615,6 +615,20 @@ proc render*(ed: SharedEditor) =
     $jsStr(ed.options["renderLineHighlight"]) != "none"
   # ---- write: the lines, the gutter and the overlay rows ----------------
   ed.linesLayer.clearChildren()
+  # Monaco's text and overlay layers have a box: a page that asks whether
+  # `.view-lines` is visible (a zero-height box is not), or presses its
+  # middle, finds it over the drawn text: as wide as the view or the widest
+  # line, and from the document's start to the end of the text or of the
+  # view, whichever comes first.
+  let layerH = cstring($max(1, min(ed.contentHeight, ed.scrollTop + ed.height)) & "px")
+  let layerW = cstring($max(max(1, ed.width - ed.gutterPx), ed.contentWidthPx) & "px")
+  for layer in [ed.linesLayer, ed.overlays]:
+    layer.setStyle("height", layerH)
+    layer.setStyle("width", layerW)
+  # Monaco's view zones are as wide as what scrolls (`ViewZones.render`:
+  # `max(scrollWidth, contentWidth)`), so a zone's `width: 100%` content (a
+  # tracepoint editor, its results table) fits the view, not the 1e6 px box.
+  ed.zonesLayer.setStyle("width", layerW)
   ed.marginOverlays.clearChildren()
   ed.glyphLayer.clearChildren()
   ed.overlays.clearChildren()
@@ -1218,7 +1232,7 @@ proc mouseEventOf(ed: SharedEditor; ev: JsObject; h: Hit): JsObject =
   let t = jsNew()
   t["type"] = h.targetType
   t["element"] = h.element
-  if h.line1 > 0:
+  if h.line1 > 0 and h.targetType notin [mtOverlayWidget, mtContentWidget]:
     let p = jsNew()
     p["lineNumber"] = h.line1
     p["column"] = h.column
@@ -1555,7 +1569,13 @@ proc buildFindWidget(ed: SharedEditor) =
     b.addListener("click", proc(ev: JsObject) =
       discard ev.stopPropagation()
       discard ed.findCommand(theOp))
-  w.addListener("mousedown", proc(ev: JsObject) = discard ev.stopPropagation())
+  # A press on the widget is not the editor's, but Monaco still reports it
+  # to the editor's mouse-down listeners, as an overlay widget with no
+  # position (the desktop's handlers guard on that).
+  w.addListener("mousedown", proc(ev: JsObject) =
+    let h = ed.hitAt(jsNum(ev.clientX), jsNum(ev.clientY), ev.target)
+    ed.fire("mouseDown", ed.mouseEventOf(ev, h))
+    discard ev.stopPropagation())
 
 # ---------------------------------------------------------------------------
 # Construction
@@ -1591,6 +1611,14 @@ proc measureHost(ed: SharedEditor) =
   let r = rectOf(ed.host)
   let w = int(jsNum(r.width))
   let h = int(jsNum(r.height))
+  # A hidden host (a tab behind another) measures 0 x 0: the editor lays out
+  # to nothing and draws no lines, as Monaco's `automaticLayout` does, so a
+  # page reading the drawn lines reads the editor on screen.
+  if (w != ed.width or h != ed.height) and (w == 0 or h == 0):
+    ed.width = 0
+    ed.height = 0
+    ed.render()
+    return
   if w > 0 and h > 0 and (w != ed.width or h != ed.height):
     ed.width = w
     ed.height = h

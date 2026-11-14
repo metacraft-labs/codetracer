@@ -2267,6 +2267,9 @@ proc createMonacoEditorIn(host: JsObject; options: MonacoEditorOptions): MonacoE
   ## Monaco on `host` itself: the element need not be in the document yet —
   ## with `automaticLayout` the editor sizes itself once it is laid out.
 
+proc setPageMonacoTheme(name: cstring) {.importjs:
+  "(globalThis.monaco && globalThis.monaco.editor && globalThis.monaco.editor.setTheme && globalThis.monaco.editor.setTheme(#))".}
+
 proc createSourceEditorIn(self: EditorViewComponent; host: JsObject;
                           options: MonacoEditorOptions): MonacoEditor =
   ## The source editor of this pane: Monaco, or — under the developer
@@ -2277,6 +2280,12 @@ proc createSourceEditorIn(self: EditorViewComponent; host: JsObject;
   if self.editorView == ViewSource and not self.isExpansion and
      sharedEditorEnabled(self.data.config):
     installMonacoGlobals()
+    # What `monaco.editor.create(host, {theme})` does: the theme is the
+    # page's. Monaco's colour variables (`--vscode-*`), which the shared
+    # editor and the flow's widgets paint with, follow it; without a Monaco
+    # editor ever created they would stay Monaco's default light theme's.
+    if not options.theme.isNil and options.theme.len > 0:
+      setPageMonacoTheme(options.theme)
     let ed = newSharedEditor(host, $options.value, $self.name,
       $options.language, options.readOnly, self.data.ui.fontSize,
       $codeFontFamily(self.data.ui),

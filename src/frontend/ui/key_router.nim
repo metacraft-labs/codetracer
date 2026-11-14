@@ -629,7 +629,11 @@ proc routeSharedEditorKey(name: string; ev: JsObject): bool =
   let applied = ed.applyKeyName(name)
   if applied.outcome == eoIgnored and applied.resolution == erNothing:
     return false
-  traceOperation("shared-editor:" & name & " -> " & applied.operations.join(","))
+  # A typed character is text, not an operation the desktop traces (Monaco's
+  # typing leaves `__ctKeyTrace` empty too); every other key the document
+  # ran is traced as the document's.
+  if applied.resolution != erCharacter:
+    traceOperation("shared-editor:" & name & " -> " & applied.operations.join(","))
   discard ev.preventDefault()
   discard ev.stopImmediatePropagation()
   true
@@ -840,6 +844,11 @@ proc stop(ev: JsObject) =
   discard ev.preventDefault()
   discard ev.stopImmediatePropagation()
 
+proc focusInsideEditorZone(): bool {.importjs:
+  "(() => { const a = document.activeElement; return !!(a && a.closest && a.closest('[data-ct-target=\"zone\"]')); })()".}
+  ## The focus is in something an editor hosts in a view zone (a tracepoint
+  ## editor): its keys are its own.
+
 proc routeKey(name: string; ev: JsObject) =
   ## One canonical key through the router, run once, the event stopped when
   ## it was run.
@@ -852,6 +861,17 @@ proc routeKey(name: string; ev: JsObject) =
   let sharedText = textFocusedSharedEditor()
   if not sharedText.isNil and not sharedText.keyInterceptor.isNil and
      sharedText.keyInterceptor(name):
+    stop(ev)
+    return
+  # Monaco's `closeFindWidget` (Escape while the find widget is open and the
+  # editor has the keys): the shared editor's open find closes, its match
+  # kept selected.
+  let sharedFocus = focusedSharedEditor()
+  if not sharedFocus.isNil and name == "Esc" and sharedFocus.find.open and
+     not focusInsideEditorZone() and
+     not menuIsOpen() and not contextMenuIsOpen():
+    traceOperation("find.close")
+    sharedFocus.closeFindWidget(restore = false)
     stop(ev)
     return
   if not menuIsOpen() and not contextMenuIsOpen() and
