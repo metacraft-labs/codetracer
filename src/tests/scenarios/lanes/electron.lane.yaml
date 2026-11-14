@@ -276,4 +276,6 @@ applicable:
   - ../deepreview/trace-context-chooses-the-run.yaml
   - ../deepreview/values-beside-the-diff.yaml
   - ../deepreview/view-toggle-chooses-diff-or-file.yaml
+  - ../keymaps/plat64-input-routing.yaml
+  - ../low-level-code/plat60-low-level-code.yaml
 unsupported: []

@@ -37,7 +37,7 @@ steps:
   - key: F5
   - wait: { until: replay-idle, timeout: 60s }
   - expect: { at: 'editor[file="main.py"]', assert: "stopped-at(113)" }
-  - click: { at: 'call-trace/call[name="add", arguments="(left=2, right=3)"]' }
+  - click: { at: 'call-trace/call[name="add", arguments="(left=2, right=3)"]', anchor: name }
     settle: false
   - wait: { until: { at: 'editor[file="main.py"]', assert: "stopped-within(29, 31)" }, timeout: 60s }
   - hover: { at: 'toolbar/toolbar-button[label="next-image"]', for: 1s }
