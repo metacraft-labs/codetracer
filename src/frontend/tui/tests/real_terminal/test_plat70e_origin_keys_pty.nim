@@ -213,24 +213,51 @@ proc focusVariables(sess: var TuiTestSession; next = F6) =
   raise newException(AssertionFailedError,
                      "F6 never focused the Variables pane:\n" & sess.snap().dump)
 
+proc selectedVarsRow(s: Snapshot): int =
+  ## The screen row the Variables pane draws on the selection ground, -1
+  ## when none is.
+  let (tr, left) = s.findRow(" Variables ")
+  if tr < 0: return -1
+  let (_, right0) = s.findRow(" Call Trace ")
+  let right = if right0 > left: right0 else: Cols
+  for r in tr + 1 ..< Rows - 1:
+    for c in left ..< right:
+      if s.selected(r, c): return r
+  -1
+
 proc selectVariable(sess: var TuiTestSession; name: string; down = Down;
                     first = Home): (int, int) =
   ## `Home` (the first row), then `Down` until `name`'s row is the selected
   ## one; its (row, column).
-  if first.len > 0: sess.key(first)
-  for i in 0 ..< 40:
-    # A loaded host paints the moved cursor late: give each key up to a
-    # second to show before reading where the cursor is.
-    let deadline = getMonoTime() + initDuration(milliseconds = 1000)
-    var s = sess.snap()
-    while true:
-      let (r, c) = s.varsFind(name & " ")
-      if r >= 0 and s.selected(r, c):
-        return (r, c)
-      if getMonoTime() >= deadline: break
+  ##
+  ## ONE KEY PER MOVE THE SCREEN SHOWS. A loaded host paints a moved cursor
+  ## late; reading the cursor a fixed time after a key and pressing `Down`
+  ## again when it had not moved yet sent two keys for one row, and at a load
+  ## average near 90 on 24 cores that stepped past `name` and never came back
+  ## (measured 2026-11-14: "never selected value" in one baseline run in
+  ## three). Each key now waits for the selected row to change — or `name`
+  ## to be the selected one — before the next is sent.
+  proc settle(sess: var TuiTestSession; before: int): Snapshot =
+    let deadline = getMonoTime() + initDuration(milliseconds = 5000)
+    result = sess.snap()
+    while getMonoTime() < deadline:
+      let (r, c) = result.varsFind(name & " ")
+      if (r >= 0 and result.selected(r, c)) or
+         result.selectedVarsRow() != before:
+        return
       sleep(50)
-      s = sess.snap()
+      result = sess.snap()
+  if first.len > 0:
+    let before = sess.snap().selectedVarsRow()
+    sess.key(first)
+    discard sess.settle(before)
+  for i in 0 ..< 40:
+    let s = sess.snap()
+    let (r, c) = s.varsFind(name & " ")
+    if r >= 0 and s.selected(r, c):
+      return (r, c)
     sess.key(down)
+    discard sess.settle(s.selectedVarsRow())
   raise newException(AssertionFailedError,
                      "never selected " & name & ":\n" & sess.snap().dump)
 
