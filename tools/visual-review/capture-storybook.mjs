@@ -12,7 +12,7 @@ import { requireFreshStorybookStatic } from "./storybook-freshness.mjs";
 // render check's own definition (`just storybook-check-render`), not a
 // second one. A capture is taken only after that readiness and only of a
 // story its judge passes; a story it fails is REFUSED, its image not written.
-import { loadStoryDeclarations, renderAndJudge } from "../../storybook/scripts/story-render-judge.mjs";
+import { loadStoryDeclarations, renderAndJudge, storyUrl } from "../../storybook/scripts/story-render-judge.mjs";
 import { readVerdicts, writeVerdicts } from "./capture-verdicts.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -167,6 +167,8 @@ const viewFamilies = {
   "agent-harbor": Object.keys(agentHarborViews),
   "agent-harbor-fleet": Object.keys(agentHarborViews).filter((v) => v.startsWith("agent-harbor-fleet-")),
   "agent-harbor-ref": Object.keys(agentHarborViews).filter((v) => v.startsWith("agent-harbor-ref-")),
+  // The playback stories (`--moments` captures them at their named moments).
+  "agent-harbor-playback": Object.keys(agentHarborViews).filter((v) => v.endsWith("-playback")),
   "agent-harbor-session-tabs": sessionTabsExports.map((name) => `agent-harbor-${kebab(name)}`),
 };
 
@@ -366,6 +368,15 @@ async function main() {
   if (regionsDeclaration && !Array.isArray(regionsDeclaration.regions)) {
     throw new Error(`${regionsArg}: no "regions" array`);
   }
+  // `--moments`: each selected PLAYBACK story at each of its scenario's
+  // named moments (the `moments` its declaration lists, from the scenario
+  // itself: tools/stories/emit_storybook_stories.nim), opened by the
+  // StoryBook global `moment`, instead of at its first frame; a selected
+  // story that is not a playback story is skipped. The capture id names the
+  // moment: `<view>-at-<moment>-<size>-<theme>`, which the GPUI story
+  // capture (`ci/test/ctf_p1b_gpui_story_capture.nim` with
+  // `CTF_P1B_MOMENTS=1`) uses for the same story at the same moment.
+  const atMoments = hasArg("--moments");
   const listViews = hasArg("--list-views");
   const port = Number(argValue("--port") ?? "6106");
 
@@ -440,25 +451,34 @@ async function main() {
       const viewThemes = selectedThemes.length > 0
         ? selectedThemes
         : view.themes ?? ["dark"];
+      // "" is the first frame; with `--moments`, a playback story's named
+      // moments instead (and nothing for any other story).
+      const declared = declarations.get(view.storyId);
+      const viewMoments = atMoments ? (declared?.moments ?? []) : [""];
+      if (atMoments && declared && viewMoments.length === 0) {
+        console.error(`skipped ${viewName}: not a playback story, so it has no named moments`);
+      }
+      for (const moment of viewMoments)
       for (const [sizeName, viewport] of viewSizes)
       for (const theme of viewThemes) {
+        const viewAt = moment ? `${viewName}-at-${moment}` : viewName;
         const captureId = view.themes || theme !== "dark"
-          ? `${viewName}-${sizeName}-${theme}`
-          : `${viewName}-${sizeName}`;
+          ? `${viewAt}-${sizeName}-${theme}`
+          : `${viewAt}-${sizeName}`;
         const screenshotPath = join(outDir, `${captureId}.png`);
-        const story = declarations.get(view.storyId);
+        const story = declared;
         if (!story) {
           throw new Error(`${captureId}: story ${view.storyId} is not declared in storybook/stories/generated/stories.json (run just storybook-stories)`);
         }
         const page = await browser.newPage({ viewport });
-        const url = `http://127.0.0.1:${port}/iframe.html?id=${view.storyId}&viewMode=story&globals=theme:${theme}`;
+        const url = storyUrl(`http://127.0.0.1:${port}`, view.storyId, theme, moment);
         // The render check's readiness (StoryBook's render event after the
         // play check, no pending mount, network and DOM quiet twice) and its
         // verdict. Until 2026-11-06 this waited only for some visible text
         // and 750 ms, and shot panels whose data had not arrived: empty
         // panels and windows that the render check, waiting for the story,
         // passed.
-        const { observed, failures } = await renderAndJudge(page, `http://127.0.0.1:${port}`, story, theme);
+        const { observed, failures } = await renderAndJudge(page, `http://127.0.0.1:${port}`, story, theme, { moment });
         if (failures.length > 0) {
           await page.close();
           // No image of a story the judge fails, and none left behind from an
@@ -466,7 +486,7 @@ async function main() {
           // the capture is missing, and the PNG check fails on it.
           rmSync(screenshotPath, { force: true });
           verdicts[basename(screenshotPath)] = {
-            storyId: view.storyId, size: sizeName, theme, viewport, verdict: "refused",
+            storyId: view.storyId, size: sizeName, theme, viewport, ...(moment ? { moment } : {}), verdict: "refused",
             failures, judgedAt: new Date().toISOString(),
           };
           refused.push({ captureId, failures });
@@ -541,7 +561,7 @@ async function main() {
         // (tools/visual-review/check-storybook-captures.mjs): it must be these bytes,
         // and it must show something inside each content box.
         verdicts[basename(screenshotPath)] = {
-          storyId: view.storyId, size: sizeName, theme, viewport, verdict: "pass",
+          storyId: view.storyId, size: sizeName, theme, viewport, ...(moment ? { moment } : {}), verdict: "pass",
           kind: observed.page.kind, state: story.state ?? "data",
           contentBoxes: observed.page.contentBoxes,
           sha256: createHash("sha256").update(readFileSync(screenshotPath)).digest("hex"),
@@ -583,6 +603,21 @@ async function main() {
                 const { element, rect } = visible[chosen];
                 out[region.name] = { x: rect.x, y: rect.y, w: rect.width, h: rect.height };
                 if (region.pick) out[region.name].index = chosen;
+                // An `elision` region also records whether its line of text is
+                // cut: wider than the element's content box. The text's own
+                // width comes from a Range over it, which measures the laid
+                // out glyphs, overflow included
+                // (https://drafts.csswg.org/cssom-view/#dom-range-getboundingclientrect);
+                // `text-overflow: ellipsis` only paints the cut.
+                if (region.elision) {
+                  const style = getComputedStyle(element);
+                  const content = rect.width -
+                    ["paddingLeft", "paddingRight", "borderLeftWidth", "borderRightWidth"]
+                      .reduce((sum, k) => sum + (parseFloat(style[k]) || 0), 0);
+                  const range = document.createRange();
+                  range.selectNodeContents(element);
+                  out[region.name].cut = range.getBoundingClientRect().width > content + 0.01;
+                }
                 // A `fill` region also records the colour the browser
                 // composites behind the element: its own background over
                 // its ancestors', each `rgba()` blended over the one below
@@ -603,10 +638,10 @@ async function main() {
               }
             }
             return out;
-          }, regionsDeclaration.regions.map(({ name, web, fill, pick }) => ({ name, web, fill: Boolean(fill), pick })));
+          }, regionsDeclaration.regions.map(({ name, web, fill, pick, elision }) => ({ name, web, fill: Boolean(fill), pick, elision })));
           writeFileSync(
             join(outDir, `${captureId}.regions.json`),
-            `${JSON.stringify({ renderer: "web", story: view.storyId, theme, viewport, regions }, null, 2)}\n`,
+            `${JSON.stringify({ renderer: "web", story: view.storyId, ...(moment ? { moment } : {}), theme, viewport, regions }, null, 2)}\n`,
           );
         }
         const htmlPath = join(dumpDir, `${captureId}.html`);
@@ -931,6 +966,7 @@ async function main() {
           size: sizeName,
           theme,
           storyId: view.storyId,
+          ...(moment ? { moment } : {}),
           brief: view.brief,
           screenshotPath,
           htmlPath,

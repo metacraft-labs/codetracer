@@ -22,8 +22,12 @@
 ##                         [--width=<px>] [--height=<px>]
 ##                         [--regions=<declaration.json> --regions-out=<file>]
 ##                         [--moment=<name>] [--quit-after-ms=<n>] [--list]
+##   codetracer-gpui-story --story=<storybook id> --list-moments
 ##
-## `--list` prints every story id of the section and exits. A playback story
+## `--list` prints every story id of the section and exits. `--list-moments`
+## prints the named moments of the story's playback scenario, one a line in
+## time order (nothing for a story that is not a playback story), and exits:
+## the CTF-P1c capture path opens each of them with `--moment`. A playback story
 ## (`stories/agent_harbor_playback.nim`) plays on IsoNim's `RealClock`, with
 ## the host's playback bar under it (`ah_playback_bar.nim`: play / pause,
 ## step, the previous and next named moment, rewind, and where the playback
@@ -84,7 +88,7 @@ type
     mode: DesignMode
     width, height: int
     quitAfterMs: uint32
-    list: bool
+    list, listMoments: bool
 
   RegionPick = enum
     rpNone        ## no `pick`: the first match, and no index reported
@@ -117,7 +121,8 @@ var gWindow: StoryWindow
 proc usage(): string =
   "usage: codetracer-gpui-story --story=<storybook id> [--theme=dark|light] " &
   "[--width=<px>] [--height=<px>] [--regions=<declaration.json> " &
-  "--regions-out=<file>] [--moment=<name>] [--quit-after-ms=<n>] [--list]"
+  "--regions-out=<file>] [--moment=<name>] [--quit-after-ms=<n>] [--list] " &
+  "[--list-moments]"
 
 proc parseCommand(args: seq[string]): StoryCommand =
   ## Raises `ValueError` with the sentence to print for a bad command line.
@@ -143,6 +148,7 @@ proc parseCommand(args: seq[string]): StoryCommand =
     of "--moment": result.moment = value
     of "--quit-after-ms": result.quitAfterMs = uint32(positive(value, "--quit-after-ms"))
     of "--list": result.list = true
+    of "--list-moments": result.listMoments = true
     else: raise newException(ValueError, "unknown argument " & arg)
   if not result.list and result.storyId.len == 0:
     raise newException(ValueError, "--story is required")
@@ -209,13 +215,13 @@ proc readRegions(probes: seq[RegionProbe]; viewportHeight: int): JsonNode =
   result = newJObject()
   for probe in probes:
     if probe.elements.len == 0: continue
-    var shown: seq[tuple[x, y, w, h: float]]
+    var shown: seq[tuple[x, y, w, h: float; el: GpuiElement]]
     for i, el in probe.elements:
       var x, y, w, h: float
       if not layoutBounds(el, x, y, w, h):
         if i == 0: return nil
         continue
-      if w > 0 and h > 0: shown.add (x, y, w, h)
+      if w > 0 and h > 0: shown.add (x, y, w, h, el)
       if probe.pick == rpNone: break
     var chosen = if shown.len > 0: 0 else: -1
     if probe.pick == rpLastWhole:
@@ -226,6 +232,15 @@ proc readRegions(probes: seq[RegionProbe]; viewportHeight: int): JsonNode =
     let b = shown[chosen]
     result[probe.name] = %*{"x": b.x, "y": b.y, "w": b.w, "h": b.h}
     if probe.pick != rpNone: result[probe.name]["index"] = %chosen
+    # A line of text the view says needs `text-px` (`textWidth`, the face's
+    # kerned advances, as GPUI sets them) is cut when laid out narrower: GPUI
+    # elides it (`text-overflow: ellipsis`). The web side measures its text
+    # itself; the layout check compares the two (`elision`).
+    let need = getAttribute(b.el, "data-ah-text-px")
+    if need.endsWith("px"):
+      try:
+        result[probe.name]["cut"] = %(b.w + 0.01 < parseFloat(need[0 ..< ^2]))
+      except ValueError: discard
 
 proc writeRegions(regions: JsonNode) =
   let c = gWindow.cmd
@@ -305,6 +320,11 @@ proc run(cmd: StoryCommand): int =
     for story in section.stories: echo storybookId(section, story)
     return 0
   gWindow = StoryWindow(cmd: cmd, story: findStory(section, cmd.storyId))
+  if cmd.listMoments:
+    if isPlaybackStory(gWindow.story.surface, gWindow.story.fixture):
+      for name in playbackScenario(playbackScenarioNameOf(gWindow.story.fixture)).momentNames:
+        echo name
+    return 0
   if cmd.moment.len > 0 and not isPlaybackStory(gWindow.story.surface, gWindow.story.fixture):
     raise newException(ValueError, "--moment names a moment of a playback story; " &
                        cmd.storyId & " is not one")

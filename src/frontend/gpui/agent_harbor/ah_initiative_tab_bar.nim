@@ -35,6 +35,9 @@ const
   TabInnerGapPx = 6
   TabTitlePx = BodyLargePx    ## the bar's 1rem, as the session strip's
   TabMinPx = 128              ## every initiative tab's `min-width: 8rem`
+  TitleMinPx = 80             ## its title's `min-width: 5rem`
+  CompactTitleMinPx = 40      ## 2.5rem on a compact bar
+  CompactRecordingsMarginPx = 4 ## `.ah-bar-compact .ah-tab-recordings` margin-left
   InactiveTabMaxPx = 256      ## an inactive tab's `max-width: 16rem`
   InitiativeTabMaxPx = 384    ## the active one's (24rem): it holds its recordings
   RecordingButtonGapPx = 2
@@ -42,6 +45,8 @@ const
   ElsewhereMenuPx = 608       ## `.ah-elsewhere-menu`: 38rem, at most 100vw - 1rem
   BarGapPx = 4
   BarChipGapPx = 8            ## the bar's `+N` chip: 6px margin, "+" 2px more
+  AddMarginPx = 2             ## "+" (`.ah-initiative-tab-bar .session-tab-add`):
+                              ## margin-left 0.125rem, after a tab as after the chip
   InboxStepPx = 25
   InboxPositionPx = 72        ## `.ah-inbox-position` min-width: 4.5rem
   InboxPositionPadPx = 4      ## and its `padding: 0 0.25rem`, inside that minimum
@@ -57,22 +62,45 @@ const EllipsisUnits = 672.0
   ## browser sets a fallback glyph 10.07px wide at 12px, and the M's 10.37px
   ## stands for it.)
 
-proc recordingButtonWidth(rb: RecordingButton): float =
-  ## Its number in tabular figures and its state suffix (`.ah-rec-button`),
-  ## 4px in on each side inside its 1px outline (the box is border-box
-  ## sized, as the web's is), at least 18px.
-  let label = $rb.number & stateSuffix(rb.state)
-  var words = textWidth(label, CaptionPx, tabular = true)
-  if Ellipsis in label:
-    words += float(CaptionPx) * EllipsisUnits / 1000.0 - textWidth("M", CaptionPx)
-  max(18.0, 8.0 + 2.0 + words)
+proc setPx(words: float): float =
+  ## The box GPUI sets a run of text in: its width rounded UP to a whole pixel
+  ## (gpui measures a text element as its shaped line's width, `.ceil()`ed:
+  ## `gpui-pre` 0.3.5 `elements/text.rs`). A browser gives the same words their
+  ## exact width, so each run of text in a GPUI row is up to a pixel wider
+  ## than the web's (`tabSetOverhead`).
+  ceil(words)
 
-proc recordingsWidth(buttons: RecordingButtons): float =
-  ## The switcher beside `n/m`: the tab's 6px gap, the buttons 2px apart
-  ## (`.ah-rec-switch`: a gap BETWEEN items, so one fewer than the buttons
-  ## unless `+N` follows them), and `+N`.
+proc recordingButtonWords(rb: RecordingButton): float =
+  ## Its number in tabular figures and its state suffix (`.ah-rec-button`).
+  let label = $rb.number & stateSuffix(rb.state)
+  result = textWidth(label, CaptionPx, tabular = true)
+  if Ellipsis in label:
+    result += float(CaptionPx) * EllipsisUnits / 1000.0 - textWidth("M", CaptionPx)
+
+proc recordingButtonWidth(rb: RecordingButton): float =
+  ## Its words 4px in on each side inside its 1px outline (the box is
+  ## border-box sized, as the web's is), at least 18px.
+  max(18.0, 8.0 + 2.0 + recordingButtonWords(rb))
+
+proc titleMinPx(vm: InitiativeTabStripVM): int =
+  ## The narrowest an initiative tab's title gets: `min-width: 5rem`, and
+  ## `2.5rem` on a compact bar (`.ah-initiative-tab-bar .session-tab-label`,
+  ## `.ah-bar-compact`). The 4.5rem this used to follow is a rule the
+  ## stylesheet's indentation had nested where it matches nothing, so the
+  ## browser never applied it.
+  if vm.compact: CompactTitleMinPx else: TitleMinPx
+
+proc recordingsMarginPx(vm: InitiativeTabStripVM): int =
+  ## `.ah-bar-compact .ah-tab-recordings`: 0.25rem more before the recording
+  ## buttons on a compact bar.
+  if vm.compact: CompactRecordingsMarginPx else: 0
+
+proc recordingsWidth(vm: InitiativeTabStripVM; buttons: RecordingButtons): float =
+  ## The switcher beside `n/m`: the tab's 6px gap (and a compact bar's
+  ## margin), the buttons 2px apart (`.ah-rec-switch`: a gap BETWEEN items,
+  ## so one fewer than the buttons unless `+N` follows them), and `+N`.
   if buttons.buttons.len == 0: return 0.0
-  result = float(TabInnerGapPx)
+  result = float(TabInnerGapPx + recordingsMarginPx(vm))
   for rb in buttons.buttons: result += recordingButtonWidth(rb)
   result += float(RecordingButtonGapPx * (buttons.buttons.len - 1))
   # `.ah-rec-more`: 4px in on each side, no outline, 2px after the last button.
@@ -89,9 +117,33 @@ proc initiativeTabContent(vm: InitiativeTabStripVM; tab: StripTab): float =
   result = float(2 * TabPadPx + MarkPx + TabInnerGapPx) + textWidth(tab.title, TabTitlePx)
   if tab.kind == stkInitiative:
     result += float(TabInnerGapPx) + textWidth(tab.progressText, CaptionPx, tabular = true)
-    if tab.active: result += recordingsWidth(vm.recordingButtonsOf(tab.id))
+    if tab.active: result += recordingsWidth(vm, vm.recordingButtonsOf(tab.id))
   elif tab.session.originShort.len > 0:
     result += float(TabInnerGapPx) + textWidth(tab.session.originShort, CaptionPx)
+
+proc tabSetOverhead(vm: InitiativeTabStripVM; tab: StripTab): float =
+  ## How much wider than the browser's GPUI sets a tab's runs of text: each
+  ## run's whole-pixel box (`setPx`) less its exact width, over the title,
+  ## `n/m` or the origin, and the active tab's recording buttons and `+N`.
+  ## `drawBarTab` takes it out of the tab's right padding, so the tab keeps
+  ## the web's width (and every place after it the web's place) while its
+  ## title keeps the room GPUI sets its words in. Without it the title lost
+  ## the difference and GPUI cut it ("Telemetry upload retri…": 188px for
+  ## words that take 188.3, the `n/m` beside it set in 20px for 19.3) where
+  ## the browser drew it whole.
+  proc over(words: float): float = setPx(words) - words
+  result = over(textWidth(tab.title, TabTitlePx))
+  if tab.kind == stkInitiative:
+    result += over(textWidth(tab.progressText, CaptionPx, tabular = true))
+    if tab.active:
+      let buttons = vm.recordingButtonsOf(tab.id)
+      for rb in buttons.buttons:
+        # Its box, at least 18px: its words and 10px, set in GPUI.
+        let words = recordingButtonWords(rb)
+        result += max(18.0, 10.0 + setPx(words)) - max(18.0, 10.0 + words)
+      if buttons.hidden > 0: result += over(textWidth("+" & $buttons.hidden, CaptionPx))
+  elif tab.session.originShort.len > 0:
+    result += over(textWidth(tab.session.originShort, CaptionPx))
 
 proc pxOf(v: float): string =
   ## A length in CSS pixels, to a hundredth.
@@ -109,12 +161,12 @@ proc initiativeTabWidth*(vm: InitiativeTabStripVM; tab: StripTab; barPx = 0): fl
 
 proc initiativeTabMinWidth(vm: InitiativeTabStripVM; tab: StripTab): float =
   ## The narrowest a tab shrinks to when the bar is full: its name at its
-  ## `min-width: 4.5rem` beside everything else it holds, and never under
+  ## minimum (`titleMinPx`) beside everything else it holds, and never under
   ## `min-width: 8rem`.
-  result = float(2 * TabPadPx + MarkPx + TabInnerGapPx + 72)
+  result = float(2 * TabPadPx + MarkPx + TabInnerGapPx + titleMinPx(vm))
   if tab.kind == stkInitiative:
     result += float(TabInnerGapPx) + textWidth(tab.progressText, CaptionPx, tabular = true)
-    if tab.active: result += recordingsWidth(vm.recordingButtonsOf(tab.id))
+    if tab.active: result += recordingsWidth(vm, vm.recordingButtonsOf(tab.id))
   result = max(result, float(TabMinPx))
 
 proc drawRecordingButton(r: GpuiRenderer; p: AhPalette; vm: InitiativeTabStripVM;
@@ -165,14 +217,17 @@ proc drawBarTab(r: GpuiRenderer; p: AhPalette; vm: InitiativeTabStripVM;
   # `flex: 0 1 auto` over the tab's natural width, down to `min-width:
   # 8rem`: the bar's own flex layout shrinks a full bar's tabs (in
   # proportion to their widths, CSS Flexbox §9.7), as the web bar does; the
-  # name keeps 4.5rem of itself (its own `min-width`).
+  # name keeps 5rem of itself (2.5rem when compact; its own `min-width`).
   # The flex basis is the content's whole width, the cap its `max-width`.
   result = r.box(pairs = [("flex-basis", pxOf(basisPx)), ("max-width", pxOf(widthPx)),
                           ("min-width", pxOf(minPx)),
                           ("height", $StripTabPx & "px"), ("items", "center"),
                           ("gap", $TabInnerGapPx & "px"),
                           ("padding-left", $TabPadPx & "px"),
-                          ("padding-right", $TabPadPx & "px"),
+                          # Less GPUI's whole-pixel text boxes' overhead,
+                          # so the title keeps its words (`tabSetOverhead`).
+                          ("padding-right",
+                           pxOf(max(0.0, float(TabPadPx) - tabSetOverhead(vm, tab)))),
                           ("rounded", $ControlRadiusPx & "px"), ("flex-shrink", "1"),
                           ("overflow", "hidden"), ("cursor", cursorOf(hkControl))])
   if tab.active: r.setStyle(result, "background", p.activeTab)
@@ -196,8 +251,15 @@ proc drawBarTab(r: GpuiRenderer; p: AhPalette; vm: InitiativeTabStripVM;
     r.appendChild(result, r.mark(p.markOf(tab.session.attention)))
   let title = r.text(tab.title, TabTitlePx,
                      if tab.active: p.activeTabText else: p.textCaption,
-                     pairs = [("flex-grow", "1"), ("min-width", "72px")])
+                     pairs = [("flex-grow", "1"), ("min-width", $titleMinPx(vm) & "px")])
   r.tag(title, "label", tab.title)
+  # What its words take, set (`textWidth`): a title laid out narrower is
+  # cut, which the story host reports (`text-px`, the layout check's
+  # `elision`).
+  r.tag(title, "text-px", pxOf(textWidth(tab.title, TabTitlePx)))
+  # The bar's own tab titles, the active one `true` (the layout check's
+  # `bar-active-tab-label`: a title cut in one host and whole in the other).
+  r.tag(title, "bar-tab-label", $tab.active)
   r.appendChild(result, title)
   if tab.kind == stkInitiative:
     # The active tab's figures, readable on Light's raised fill:
@@ -206,12 +268,14 @@ proc drawBarTab(r: GpuiRenderer; p: AhPalette; vm: InitiativeTabStripVM;
                           if tab.active: p.activeRowQuiet else: p.textCaption,
                           shrink = false, tabular = true)
     r.tag(progress, "progress", tab.progressText)
+    r.tag(progress, "bar-tab-progress", $tab.active)
     r.appendChild(result, progress)
     if tab.active:
       let buttons = vm.recordingButtonsOf(id)
       if buttons.buttons.len > 0:
         let switcher = r.box(pairs = [("gap", $RecordingButtonGapPx & "px"),
-                                      ("items", "center"), ("flex-shrink", "0")])
+                                      ("items", "center"), ("flex-shrink", "0"),
+                                      ("margin-left", $recordingsMarginPx(vm) & "px")])
         r.tag(switcher, "recordings", $buttons.buttons.len)
         for rb in buttons.buttons: r.appendChild(switcher, r.drawRecordingButton(p, vm, id, rb))
         if buttons.hidden > 0:
@@ -548,8 +612,12 @@ proc drawInitiativeTabBar*(r: GpuiRenderer; host: GpuiElement;
     # What the rest of the line takes, as drawn here: "+", the chip with its
     # 12px, and -- unless the bar is stacked -- the controls group (the
     # elsewhere control and the inbox), 4px apart.
-    var controlsPx = 26 + BarGapPx
-    if overflow.len > 0: controlsPx += overflowChipWidth(overflow.len, true) + BarChipGapPx
+    # "+" with its margin and the gap before it; after a chip, the chip and
+    # the gap before it, and the chip's distance to "+" (`BarChipGapPx`,
+    # which already holds "+"'s own margin).
+    var controlsPx = 26 + AddMarginPx + BarGapPx
+    if overflow.len > 0:
+      controlsPx += overflowChipWidth(overflow.len, true) + BarChipGapPx - AddMarginPx
     if not vm.stacked:
       controlsPx += inboxWidth(vm)
       if vm.elsewhereCount > 0: controlsPx += ControlsGapPx + elsewhereWidth(vm)
@@ -577,7 +645,8 @@ proc drawInitiativeTabBar*(r: GpuiRenderer; host: GpuiElement;
       # 8px from "+"; filled only while its menu is open.
       let chip = r.drawOverflowChip(p, overflow.len, waits, proc() =
         target.overflowOpen.val = not target.overflowOpen.val, open = vm.overflowOpen.val)
-      r.setStyle(chip, "margin-right", $(BarChipGapPx - BarGapPx) & "px")
+      # The chip's margin and the gap, with "+"'s own margin after them.
+      r.setStyle(chip, "margin-right", $(BarChipGapPx - BarGapPx - AddMarginPx) & "px")
       r.tag(chip, "bar-overflow", $overflow.len)
       r.appendChild(line, chip)
       chipRight = x + overflowChipWidth(overflow.len, waits > 0)
@@ -588,9 +657,12 @@ proc drawInitiativeTabBar*(r: GpuiRenderer; host: GpuiElement;
       # right-aligned under it (`right: 0`), unless the bar is stacked.
       elsewhereRight = widthPx - 8 -
         (if vm.state.val in {asReady, asError}: inboxWidth(vm) + ControlsGapPx else: 0)
-  # "+" right after the last tab.
+  # "+" right after the last tab, `AddMarginPx` beyond the bar's gap: drawn
+  # without it, "+" sat 2px left of the web's after a tab (the chip's margin
+  # had absorbed it after a `+N` chip, so only a bar with no overflow showed it).
   let add = r.box(pairs = [("width", "26px"), ("height", "26px"), ("rounded", "13px"),
                            ("items", "center"), ("justify", "center"),
+                           ("margin-left", $AddMarginPx & "px"),
                            ("background", p.tertiary), ("flex-shrink", "0")])
   r.tag(add, "add", "+")
   r.tag(add, "bar-add", "+")

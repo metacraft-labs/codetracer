@@ -4,12 +4,12 @@
                       0 of 3 milestones · 0%
  ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
  ● 1 in progress  ● 2 planned
- Telemetry upload retries: the specification
- is under review.
+ Telemetry upload retries: failed uploads
+ are retried with exponential backoff.
  CURRENT TR-M0: Specification
  IN PROGRESS (1)
  ● TR-M0   Specification
-   CURRENT 0/2 deliverables ·
+   CURRENT 1/2 deliverables ·
            Tests: 1 pending
  PLANNED (2)
  ● TR-M1   Retry queue
@@ -53,4 +53,4 @@
                                              
                                              
                                              
-  ▶   ›   «   »   ↺   first frame      +0:00
+ ▶ › « » ↺  first frame                +0:00

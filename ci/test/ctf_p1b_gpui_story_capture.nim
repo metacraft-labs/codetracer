@@ -27,7 +27,17 @@
 ##   CTF_P1B_STORY_BIN, CTF_P1B_GPUI_LD_LIBRARY_PATH, CTF_P1B_REGIONS (the
 ##   declaration), CTF_P1B_OUT; optional CTF_P1B_ONLY (comma-separated
 ##   substrings of the story ids to keep), CTF_P1B_SIZES (default `laptop,sidebar`),
-##   CTF_P1B_THEMES (default `dark,light`).
+##   CTF_P1B_THEMES (default `dark,light`), CTF_P1B_MOMENTS.
+##
+## With `CTF_P1B_MOMENTS=1` (CTF-P1c, `just ctf-p1c-gpui-captures`) it
+## captures each PLAYBACK story at each named moment of its scenario instead
+## of each story at its first frame: the host lists a story's moments
+## (`--list-moments`, from the scenario itself; a story that is not a
+## playback story lists none and is not captured) and opens each with
+## `--moment=<name>`, paused there. The capture id names the moment,
+## `agent-harbor-<story>-at-<moment>-<size>-<theme>`, as the web capture's
+## (`capture-storybook.mjs --moments`) does, so the two captures of one story
+## at one moment pair by name.
 ##
 ## A capture that produces no settled frame at its size, or no regions, fails
 ## the run by name; nothing is skipped.
@@ -65,6 +75,18 @@ let outDir = need("CTF_P1B_OUT")
 let only = listOf("CTF_P1B_ONLY", "")
 let sizes = listOf("CTF_P1B_SIZES", "laptop,sidebar")
 let themes = listOf("CTF_P1B_THEMES", "dark,light")
+let atMoments = getEnv("CTF_P1B_MOMENTS") == "1"
+
+proc momentsOf(story: string): seq[string] =
+  ## The named moments the host lists for `story` (none for a story that is
+  ## not a playback story). A host that cannot list them fails the run.
+  let (listing, rc) = execCmdEx(quoteShellCommand(
+    ["env", "LD_LIBRARY_PATH=" & libs, bin, "--story=" & story, "--list-moments"]))
+  if rc != 0:
+    quit("ctf_p1b_gpui_story_capture: " & bin & " --story=" & story &
+         " --list-moments exited " & $rc & ":\n" & listing, 1)
+  for line in listing.splitLines:
+    if line.strip.len > 0: result.add line.strip
 
 # The stories, from the host itself (the section's declaration).
 let (listing, listRc) = execCmdEx(quoteShellCommand(
@@ -90,14 +112,25 @@ for s in sizes:
 for th in themes:
   if th notin ["dark", "light"]: quit("ctf_p1b_gpui_story_capture: unknown theme " & th, 2)
 
+var shots: seq[(string, string)]
+  ## Each (story, moment) to capture; "" is the story's first frame.
+for id in stories:
+  if atMoments:
+    for moment in momentsOf(id): shots.add (id, moment)
+  else:
+    shots.add (id, "")
+if shots.len == 0:
+  quit("ctf_p1b_gpui_story_capture: no playback story among the selected stories", 1)
+
 createDir(outDir)
 let t = newSwayTarget(2560, 1440, floatingAppIds = @[AppId])
 t.start()
 var failed: seq[string]
 var captured = 0
 try:
-  for id in stories:
-    let view = ViewPrefix & id[StoryIdPrefix.len .. ^1]
+  for (id, moment) in shots:
+    let view = ViewPrefix & id[StoryIdPrefix.len .. ^1] &
+               (if moment.len > 0: "-at-" & moment else: "")
     for (sizeName, w, h) in Sizes:
       if sizeName notin sizes: continue
       for theme in themes:
@@ -108,7 +141,8 @@ try:
         echo "=== ", captureId
         let argv = @[bin, "--story=" & id, "--theme=" & theme, "--width=" & $w,
                      "--height=" & $h, "--regions=" & regionsDecl,
-                     "--regions-out=" & regionsOut, "--quit-after-ms=600000"]
+                     "--regions-out=" & regionsOut, "--quit-after-ms=600000"] &
+                    (if moment.len > 0: @["--moment=" & moment] else: @[])
         let p = t.spawn(@["/bin/sh", "-c", "exec \"$0\" \"$@\" >" &
                           quoteShell(outDir / (captureId & ".run.log")) & " 2>&1"] & argv,
           extraEnv = [("LD_LIBRARY_PATH", libs),
@@ -148,6 +182,7 @@ try:
           failed.add captureId & " (did not close)"
 finally:
   t.stop()
-echo "ctf_p1b_gpui_story_capture: ", captured, " captures of ", stories.len, " stories"
+echo "ctf_p1b_gpui_story_capture: ", captured, " captures of ", stories.len, " stories",
+  (if atMoments: " at " & $shots.len & " (story, moment) pairs" else: "")
 if failed.len > 0:
   quit("ctf_p1b_gpui_story_capture: no frame or no regions for " & failed.join(", "), 1)

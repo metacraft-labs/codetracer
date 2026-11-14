@@ -43,12 +43,14 @@
 ## (the GPUI `data-ah-*` attributes, the terminal's `AhNode` facts, the web
 ## views' classes and text): which tabs a strip draws, their labels,
 ## attention and the active one, `+N`; the list's tree nodes with their
-## counts and its rows with their states; the initiative bar's tabs and
-## `n/m`, its recording buttons and their states, the sessions started
-## elsewhere and the inbox; the Initiatives panel's rows, current
-## milestones and session lines; the progress panel's headline, status
-## groups and milestones; the fleet's filter counts and rows; and each bar's
-## readout (the moment and the time). They are compared:
+## counts and its rows with their states; the initiative bar's tabs with
+## their `n/m` and state, its recording buttons and their states, the
+## sessions started elsewhere and the inbox; the Initiatives panel's rows,
+## current milestones and session lines; the progress panel's headline,
+## status groups and milestones with their deliverable and test counts; the
+## fleet's filter counts and rows with a failed row's reason and the
+## activity lines each row shows; and each bar's readout (the moment and the
+## time). They are compared:
 ##
 ##   1. at the first frame, then at every named moment going forward (the web
 ##      by its Next button, GPUI by Play on its clock then Pause, the
@@ -67,11 +69,18 @@
 ##      by definition (Step moves the head to the next entry's time, Rewind
 ##      returns to the first frame, Play and Pause change the state).
 ##
+## And every named moment must change what it names: `MomentChanges`, written
+## by hand from the scenarios' scripts, lists the surfaces each moment's
+## entries change, and a story over such a surface must show other facts
+## (less the bar's readout) than at the moment before; every moment names a
+## surface of a story over its scenario.
+##
 ## THE ORACLE IS NOT ONE HOST AGAINST ITSELF. At every moment the three hosts
 ## are held to each other, and at the moments `SpotChecks` names the facts
 ## written out by hand from the scenario's script
 ## (nim-agents-isonim-viewmodels `playback_scenarios.nim`) must appear in each
-## host's drawing. So a host that draws another state disagrees with the
+## host's drawing, and those written `!<fact>` must not (a failed row's reason
+## said a second time as its activity line). So a host that draws another state disagrees with the
 ## other two, and a defect all three share (the playback, a viewmodel, a
 ## story constructor) fails the hand-written facts.
 ##
@@ -178,7 +187,9 @@ proc drawnFacts[N](view: N; surface: string): seq[string] =
   of "agent-harbor-initiative-tabs":
     for t in view.all("tab"):
       let progress = t.fact("progress")
+      let state = t.attr("state")
       result.add "tab " & t.fact("label") & (if progress.len > 0: " | " & progress else: "") &
+                 (if state.len > 0: " [" & state & "]" else: "") &
                  activeMark(t.attr("active"))
     for b in view.all("recording"):
       result.add "recording " & b.attr("recording") & " " & b.attr("recording-state") &
@@ -197,7 +208,8 @@ proc drawnFacts[N](view: N; surface: string): seq[string] =
     for g in view.all("group"): result.add "group " & g.attr("group")
     for m in view.all("milestone"):
       result.add "milestone " & m.attr("milestone") &
-                 (if m.attr("current") == "true": " current" else: "")
+                 (if m.attr("current") == "true": " current" else: "") &
+                 " | " & m.fact("meta")
   of "agent-harbor-fleet":
     var counts: seq[string]
     for f in view.all("filter-count"): counts.add f.attr("filter-count")
@@ -205,6 +217,10 @@ proc drawnFacts[N](view: N; surface: string): seq[string] =
     for row in view.all("row"):
       result.add "row " & row.fact("title") & " | " & row.fact("status") & " [" &
                  row.attr("category") & "]"
+      # Why a failed row failed, and the activity lines it shows: the
+      # reason once, as the failure (never again as an activity line).
+      for f in row.all("failure"): result.add "failure " & f.attr("failure")
+      for a in row.all("activity"): result.add "activity " & a.attr("activity")
   else: result.add "no reading for surface " & surface
 
 proc barFacts[N](root: N): string =
@@ -261,8 +277,10 @@ proc webFacts(view: MockNode; surface: string): seq[string] =
     for t in view.byClass("ah-tab"):
       if t.hasClass("ah-tab-notice"): continue
       let progress = t.textOf("ah-tab-progress")
+      let state = t.tokenAfter("ah-ist-")
       result.add "tab " & t.textOf(SessionTabLabelClass) &
                  (if progress.len > 0: " | " & progress else: "") &
+                 (if state.len > 0: " [" & state & "]" else: "") &
                  (if t.hasClass("active"): " active" else: "")
     for b in view.byClass("ah-rec-button"):
       var number = ""
@@ -289,8 +307,16 @@ proc webFacts(view: MockNode; surface: string): seq[string] =
     result.add "headline " & view.textOf("ah-fleet-summary")
     for g in view.byClass("ah-progress-group-name"): result.add "group " & g.textContent
     for m in view.byClass("ah-milestone"):
+      var meta = ""
+      # The meta line's words in drawing order (the failing count between
+      # the text before and after it), without the CURRENT tag.
+      for host in m.byClass("ah-milestone-meta"):
+        for ch in host.children:
+          if ch.hasClass("ah-milestone-meta-text") or ch.hasClass("ah-milestone-tests-failing"):
+            meta.add ch.textContent
       result.add "milestone " & m.textOf("ah-milestone-id") &
-                 (if m.hasClass("ah-milestone-current"): " current" else: "")
+                 (if m.hasClass("ah-milestone-current"): " current" else: "") &
+                 " | " & meta
   of "agent-harbor-fleet":
     var counts: seq[string]
     for f in view.byClass("ah-fleet-filter-count"): counts.add f.textContent
@@ -298,6 +324,8 @@ proc webFacts(view: MockNode; surface: string): seq[string] =
     for row in view.byClass("ah-fleet-row"):
       result.add "row " & row.textOf("ah-fleet-row-title") & " | " &
                  row.textOf("ah-fleet-status-label") & " [" & row.tokenAfter("ah-fleet-cat-") & "]"
+      for f in row.byClass("ah-fleet-row-failure"): result.add "failure " & f.textContent
+      for a in row.byClass("ah-fleet-activity-line"): result.add "activity " & a.textContent
   else: result.add "no reading for surface " & surface
 
 proc webBarFacts(bar: MockNode): string =
@@ -501,15 +529,18 @@ let SpotChecks: seq[SpotCheck] = @[
   # The initiative bar over initiative-run: its n/m and its recordings,
   # numbered in the order they appeared, the first active.
   ("agent-harbor-initiative-tabs", "", @[
-    "tab Telemetry upload retries | 0/3 active"]),
+    "tab Telemetry upload retries | 0/3 [working] active"]),
   ("agent-harbor-initiative-tabs", "trace-loading", @[
-    "tab Telemetry upload retries | 1/3 active", "recording 1 loading active"]),
+    "tab Telemetry upload retries | 1/3 [working] active", "recording 1 loading active"]),
   ("agent-harbor-initiative-tabs", "trace-ready", @["recording 1 ready active"]),
   ("agent-harbor-initiative-tabs", "recording-fails", @[
     "recording 1 ready active", "recording 2 failed"]),
   ("agent-harbor-initiative-tabs", "recording-reloaded", @[
-    "tab Telemetry upload retries | 2/3 active",
+    "tab Telemetry upload retries | 2/3 [working] active",
     "recording 1 ready active", "recording 2 ready", "recording 3 ready"]),
+  # The plan done and the session ended: the initiative's tab ends.
+  ("agent-harbor-initiative-tabs", "session-ends", @[
+    "tab Telemetry upload retries | 3/3 [ended] active"]),
   # The Initiatives panel over front-ends: the route cache's progress and
   # current milestone move at +210 s.
   ("agent-harbor-initiatives", "", @[
@@ -518,23 +549,102 @@ let SpotChecks: seq[SpotCheck] = @[
   ("agent-harbor-initiatives", "milestone-done", @[
     "initiative Route cache on the new storage layer | 2/4" & Dot &
       "50% | current RC-M2: Core change [working]"]),
-  # The progress panel over initiative-run.
+  # The progress panel over initiative-run: each milestone's deliverables
+  # and tests move with its status (one of two deliverables done and the
+  # test pending while in progress, failing while blocked, both done and
+  # passing once completed), so a completed milestone never reads 0/2.
   ("agent-harbor-initiative-progress", "", @[
-    "headline 0 of 3 milestones" & Dot & "0%", "milestone TR-M0 current"]),
+    "headline 0 of 3 milestones" & Dot & "0%",
+    "milestone TR-M0 current | 1/2 deliverables" & Dot & "Tests: 1 pending"]),
+  ("agent-harbor-initiative-progress", "specification-done", @[
+    "headline 1 of 3 milestones" & Dot & "33%",
+    "milestone TR-M0 | 2/2 deliverables" & Dot & "Tests: 1 passing",
+    "!milestone TR-M0 | 0/2 deliverables" & Dot & "Tests: 1 pending"]),
   ("agent-harbor-initiative-progress", "milestone-blocked", @[
-    "headline 1 of 3 milestones" & Dot & "33%", "milestone TR-M1 current"]),
+    "headline 1 of 3 milestones" & Dot & "33%",
+    "milestone TR-M1 current | 1/2 deliverables" & Dot & "Tests: 1 failing"]),
   ("agent-harbor-initiative-progress", "plan-done", @[
     "headline 3 of 3 milestones" & Dot & "100%"]),
   # The fleet: a row per session, its status following the session.
   ("agent-harbor-fleet", "", @["row " & Config & " | needs input [needs-input]"]),
-  ("agent-harbor-fleet", "migration-fails", @["row " & Migration & " | failed [failed]"]),
+  # A failed row says why once, as its failure; its activity line is the
+  # next thing it did, not the same words again.
+  ("agent-harbor-fleet", "migration-fails", @["row " & Migration & " | failed [failed]",
+    "failure error: the migration test failed", "activity Ran just test",
+    "!activity error: the migration test failed"]),
   ("agent-harbor-fleet", "port-completes", @["row " & Port & " | completed [ended]"])]
 
+proc momentName(moment: string): string =
+  if moment.len == 0: "the first frame" else: moment
+
+# What each named moment changes, written out by hand from the scenarios'
+# scripts (nim-agents-isonim-viewmodels `playback_scenarios.nim`): the
+# surfaces whose drawing the moment's entries must visibly change. A moment
+# names at least one surface of a story over its scenario, and every story
+# whose surface it names must show something else than at the moment before
+# (its facts, less the bar's readout), or the moment is one a reader cannot
+# see happen.
+const
+  Strip = "agent-harbor-session-tabs"
+  List = "agent-harbor-session-list"
+  Panel = "agent-harbor-initiatives"
+  Fleet = "agent-harbor-fleet"
+  Bar = "agent-harbor-initiative-tabs"
+  Progress = "agent-harbor-initiative-progress"
+
+let MomentChanges: seq[tuple[moment: string; surfaces: seq[string]]] = @[
+  # front-ends: a session's state moves its tab, its row in the list and in
+  # the fleet, and its line in the route cache's Initiatives row when it
+  # works for the route cache (the migration, the port).
+  ("new-session", @[Strip, List, Fleet]),
+  ("port-asks", @[Strip, List, Fleet, Panel]),
+  ("bench-asks", @[Strip, List, Fleet]),
+  ("port-answered", @[Strip, List, Fleet, Panel]),
+  ("migration-fails", @[Strip, List, Fleet, Panel]),
+  ("config-answered", @[Strip, List, Fleet]),
+  ("milestone-done", @[Panel]),
+  ("importer-ends", @[Strip, List, Fleet]),
+  ("port-completes", @[Strip, List, Fleet, Panel]),
+  ("importer-removed", @[Strip, List, Fleet]),
+  # initiative-run: milestones move the bar's n/m and the progress panel;
+  # recordings move the bar's recording buttons; the session's end ends the
+  # initiative's tab.
+  ("specification-done", @[Bar, Progress]),
+  ("trace-loading", @[Bar]),
+  ("trace-ready", @[Bar]),
+  ("recording-fails", @[Bar]),
+  ("milestone-blocked", @[Progress]),
+  ("second-trace-ready", @[Bar]),
+  ("queue-done", @[Bar, Progress]),
+  ("recording-reloaded", @[Bar]),
+  ("plan-done", @[Bar, Progress]),
+  ("session-ends", @[Bar])]
+
+proc changesOf(moment: string): seq[string] =
+  for c in MomentChanges:
+    if c.moment == moment: return c.surfaces
+
+proc momentChangeProblems(story: CodeTracerStory;
+                          seen: seq[(string, seq[string])]): seq[string] =
+  ## Every moment of `seen` (the web's facts at each moment going forward,
+  ## the bar's readout first) that names the story's surface and shows the
+  ## same as the moment before it.
+  for i in 1 .. seen.high:
+    let (name, facts) = seen[i]
+    if story.surface notin changesOf(name): continue
+    if facts[1 .. ^1] == seen[i - 1][1][1 .. ^1]:
+      result.add storybookId(section, story) & " at " & name & ": shows the same as at " &
+        momentName(seen[i - 1][0]) & ", though the moment changes it"
+
 proc spotProblems(surface, moment: string; facts: seq[string]): seq[string] =
+  ## A fact written `!<fact>` must NOT be shown.
   for spot in SpotChecks:
     if spot.surface != surface or spot.moment != moment: continue
     for want in spot.facts:
-      if want notin facts: result.add "the hand-written fact '" & want & "' is not shown"
+      if want.startsWith("!"):
+        if want[1 .. ^1] in facts:
+          result.add "the hand-written fact '" & want[1 .. ^1] & "' is shown, and must not be"
+      elif want notin facts: result.add "the hand-written fact '" & want & "' is not shown"
 
 proc spotMomentsOf(surface: string): seq[string] =
   for spot in SpotChecks:
@@ -543,9 +653,6 @@ proc spotMomentsOf(surface: string): seq[string] =
 # ---------------------------------------------------------------------------
 # Comparing the hosts
 # ---------------------------------------------------------------------------
-
-proc momentName(moment: string): string =
-  if moment.len == 0: "the first frame" else: moment
 
 proc hostsFacts(h: Hosts; at: string; problems: var seq[string]): array[Host, seq[string]] =
   ## Every host's facts now; a problem naming `at` for each host whose facts
@@ -677,6 +784,7 @@ suite "CTF-P1c: the three hosts agree at every named moment":
           inc steps
         compare(name, "played forward")
         seen.add (name, h.factsOf(hWeb))
+      failures.add momentChangeProblems(story, seen)
       # Backward, by each host's Previous control: a seek backwards rebuilds.
       for i in countdown(names.high - 1, 0):
         h.clickWeb(pcPrevious)
@@ -700,6 +808,17 @@ suite "CTF-P1c: the three hosts agree at every named moment":
           failures.add storybookId(section, story) & " at " & momentName(name) &
                        ": opened there, the web shows another state than when it played there"
         o.dispose()
+    # Every moment names a surface of a story over its scenario.
+    for story in playbackStories():
+      let scenario = playbackScenarioNameOf(story.fixture)
+      for name in playbackScenario(scenario).momentNames:
+        var named = false
+        for other in playbackStories():
+          if playbackScenarioNameOf(other.fixture) == scenario and
+              other.surface in changesOf(name):
+            named = true
+        if not named:
+          failures.add scenario & " at " & name & ": the moment names no playback story's surface"
     if failures.len > 0:
       echo "Playback stories whose hosts disagree (" & $failures.len & "):\n  " &
         failures.join("\n  ")
@@ -836,6 +955,37 @@ suite "CTF-P1c: the comparison can fail":
     ck spotProblems(story.surface, "", facts[0 .. ^2]).len +
        spotProblems(story.surface, "", facts[1 .. ^1]).len > 0
     h.dispose()
+
+  test "a fact that must not be shown is reported when it is":
+    # The failed row's reason said again as its activity line, as the fleet
+    # showed it before the viewmodel left that line out.
+    let twice = @["row " & Migration & " | failed [failed]",
+                  "failure error: the migration test failed",
+                  "activity error: the migration test failed", "activity Ran just test"]
+    let problems = spotProblems("agent-harbor-fleet", "migration-fails", twice)
+    ck problems.len == 1
+    ck problems.join(" ").contains("'activity error: the migration test failed' is shown, and must not be")
+
+  test "a moment that changes nothing it names is reported":
+    # The same facts at two moments: the second one names the story's
+    # surface, so it is reported, naming the story and the moment; a moment
+    # that names another surface is not.
+    let story = playbackStories()[0]
+    var h = mount(story)
+    let facts = h.factsOf(hWeb)
+    h.dispose()
+    var named, other = ""
+    for c in MomentChanges:
+      if story.surface in c.surfaces and named.len == 0: named = c.moment
+      if story.surface notin c.surfaces and other.len == 0: other = c.moment
+    ck named.len > 0 and other.len > 0
+    let problems = momentChangeProblems(story, @[("", facts), (named, facts)])
+    ck problems.len == 1
+    ck problems.join(" ").contains(storybookId(section, story) & " at " & named)
+    ck momentChangeProblems(story, @[("", facts), (other, facts)]).len == 0
+    var moved = facts
+    moved[^1] = moved[^1] & " (moved)"
+    ck momentChangeProblems(story, @[("", facts), (named, moved)]).len == 0
 
 suite "CTF-P1c: a press on a bar's button is routed":
   # Input-Routing-And-Keymaps.md §5.1: the bars hold no handler that decides

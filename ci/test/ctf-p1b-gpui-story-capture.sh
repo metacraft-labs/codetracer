@@ -20,12 +20,21 @@
 # shell. The layout test that reads these captures is
 # `src/tests/visual/agent_harbor/test_ctf_p1b_gpui_capture_matches_web_layout.nim`
 # (`just ctf-p1b-gpui-captures` runs both).
+#
+# With `CTF_P1B_MOMENTS=1` (CTF-P1c, `just ctf-p1c-gpui-captures`): each
+# playback story at each named moment of its scenario instead, into
+# `build/ctf-p1c/gpui/` (`CTF_P1C_GPUI_OUT` overrides), read by
+# `test_ctf_p1c_gpui_capture_matches_web_layout_at_moments.nim`.
 set -euo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 WS="$(cd "${root}/.." && pwd)"
 ISONIM_GPUI="$(cd "${ISONIM_GPUI_DIR:-${WS}/isonim-gpui}" && pwd)"
 GUI_ASSERT="$(cd "${GUI_ASSERT_DIR:-${WS}/GuiAssert}" && pwd)"
-OUT="${CTF_P1B_GPUI_OUT:-${root}/build/ctf-p1b/gpui}"
+if [ "${CTF_P1B_MOMENTS:-}" = 1 ]; then
+	OUT="${CTF_P1C_GPUI_OUT:-${root}/build/ctf-p1c/gpui}"
+else
+	OUT="${CTF_P1B_GPUI_OUT:-${root}/build/ctf-p1b/gpui}"
+fi
 fail() {
 	echo "FAIL: $*" >&2
 	exit 1
@@ -52,7 +61,7 @@ AGENT_HARBOR_FIXTURES=synthetic nim c --hints:off --warnings:off --mm:orc -d:rel
 	CTF_P1B_STORY_BIN="${root}/build/bin/codetracer-gpui-story" \
 		CTF_P1B_GPUI_LD_LIBRARY_PATH="$(cat "${OUT}/gpui.ld-path")" \
 		CTF_P1B_REGIONS="${root}/src/tests/visual/agent-harbor-regions.json" \
-		CTF_P1B_OUT="${OUT}" CTF_P1B_ONLY="${1:-}" \
+		CTF_P1B_OUT="${OUT}" CTF_P1B_ONLY="${1:-}" CTF_P1B_MOMENTS="${CTF_P1B_MOMENTS:-}" \
 		nix develop --command nim c -r --hints:off --warnings:off --path:src \
 		--nimcache:"${root}/build/nimcache/ctf_p1b_gpui_story_capture" \
 		-o:"${root}/build/ctf_p1b_gpui_story_capture" \

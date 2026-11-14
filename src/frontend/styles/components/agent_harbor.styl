@@ -2198,10 +2198,6 @@ AH_MARK = 0.5rem
 .ah-ms-seg.ah-ms-planned
   background: by-mode(colors-ui-icon-primary-subtle, colors-ui-border-primary)
 
-
-  .session-tab.ah-initiative-tab .session-tab-label
-    min-width: 4.5rem
-
 // The selected initiative in Dark: an action-colour tint over the panel,
 // distinct from every band, light enough that the status colours on it keep
 // their contrast; the focus bar a little wider.
@@ -2558,6 +2554,30 @@ AH_MARK = 0.5rem
   overflow: hidden
   text-overflow: ellipsis
 
+.ah-playback-moment
+  min-width: 0
+  overflow: hidden
+  text-overflow: ellipsis
+
 .ah-playback-time
+  flex-shrink: 0
   color: colors-ui-text-primary-caption
   font-variant-numeric: tabular-nums
+
+// A button shows its word; on a bar under PlaybackCompactBelowPx (720px,
+// 45rem: `stories/agent_harbor_playback.nim`) its glyph alone, so the readout
+// keeps room for the moment at the sidebar's 360px. The bar spans the
+// viewport, so the viewport's width is the bar's; the query stops just short
+// of 45rem (719.98px) because the rule is "narrower than".
+.ah-playback-glyph
+  display: none
+
+@media (max-width: 44.99875rem)
+  .ah-playback-button
+    padding: 0 0.375rem
+
+  .ah-playback-word
+    display: none
+
+  .ah-playback-glyph
+    display: inline

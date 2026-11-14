@@ -458,8 +458,15 @@ export const plays = {
   // body (fixed along the canvas's bottom), not inside the story's root.
   "agent-harbor-playback": async () => {
     const bar = await waitFor(document, ".ah-playback");
-    const buttons = [...bar.querySelectorAll(".ah-playback-button")].map((b) => b.textContent);
+    // Each button's accessible name is its word, whichever of its word and
+    // its glyph the bar's width shows (`.ah-playback-glyph` under 720px).
+    const buttons = [...bar.querySelectorAll(".ah-playback-button")].map((b) => b.getAttribute("aria-label"));
     expect(buttons).toEqual(["Play", "Step", "\u25c0 Moment", "Moment \u25b6", "Rewind"]);
+    const shown = [...bar.querySelectorAll(".ah-playback-button")].map((b) =>
+      [...b.children].filter((c) => getComputedStyle(c).display !== "none").map((c) => c.textContent).join(""));
+    expect(shown).toEqual(window.innerWidth < 720
+      ? ["\u25b6", "\u203a", "\u00ab", "\u00bb", "\u21ba"]
+      : ["Play", "Step", "\u25c0 Moment", "Moment \u25b6", "Rewind"]);
     const moment = () => document.querySelector(".ah-playback .ah-playback-moment")?.textContent;
     const time = () => document.querySelector(".ah-playback .ah-playback-time")?.textContent;
     const opened = new URLSearchParams(window.location.search).get("globals") ?? "";
@@ -468,12 +475,19 @@ export const plays = {
       expect(time()).toBe("+0:00");
     }
     // The next named moment, then back: a seek backwards rebuilds from the
-    // first frame, so the readout returns to where it was.
+    // first frame, so the readout returns to where it was. A story opened at
+    // a named moment goes the other way round, back and then forward again:
+    // the scenario's last moment has no next one, and every moment has one
+    // before it (the first frame, before the first). Either way the story is
+    // left where it was opened, which the moment captures rely on.
     const before = moment();
-    document.querySelector(".ah-playback-next").click();
-    await waitUntil(() => moment() !== before, "the next named moment");
+    const [away, back] = opened.includes("moment:")
+      ? [".ah-playback-previous", ".ah-playback-next"]
+      : [".ah-playback-next", ".ah-playback-previous"];
+    document.querySelector(away).click();
+    await waitUntil(() => moment() !== before, "the moment " + (opened.includes("moment:") ? "before" : "after") + " " + before);
     expect(moment()).not.toBe("between moments");
-    document.querySelector(".ah-playback-previous").click();
+    document.querySelector(back).click();
     await waitUntil(() => moment() === before, "the seek back to " + before);
   },
 

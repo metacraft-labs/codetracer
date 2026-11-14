@@ -4269,6 +4269,9 @@ jobs:
         # each capture's laid-out regions against the committed web record
         # (`src/tests/visual/agent-harbor-web-regions.json`) within PLAT-35's
         # pane-rectangle tolerance; a missing or blank capture fails by name.
+        # CTF-P1c: the same for each playback story at each named moment of
+        # its scenario (`build/ctf-p1c/gpui/`), against the committed
+        # `src/tests/visual/agent-harbor-web-regions-at-moments.json`.
         if: ${{ !cancelled() }}
         run: nix develop .#devShells.x86_64-linux.default --command just ctf-p1b-gpui-captures
 
@@ -4299,6 +4302,7 @@ jobs:
             build/plat69/
             build/plat35/gpui-window/
             build/ctf-p1b/
+            build/ctf-p1c/
             build/real-emulators/out/
             src/tests/visual/plat45-gpui-arrangement.json
             src/tests/visual/plat47-gpui-window.json

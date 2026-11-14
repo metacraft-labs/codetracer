@@ -67,9 +67,10 @@ proc tabCellsOf(vm: InitiativeTabStripVM; tab: StripTab): int =
         if tab.active: ActiveTabMaxCells else: InactiveTabMaxCells)
 
 proc tabMinCellsOf(vm: InitiativeTabStripVM; tab: StripTab): int =
-  ## A tab never shrinks below its title's first 9 cells (72px) and the
-  ## parts it cannot lose.
-  result = 1 + 2 + 9 + 1
+  ## A tab never shrinks below its title's first 10 cells (`min-width:
+  ## 5rem`, 80px; 5 cells, 2.5rem, on a compact bar, as the web's
+  ## `.ah-bar-compact`) and the parts it cannot lose.
+  result = 1 + 2 + (if vm.compact: 5 else: 10) + 1
   if tab.kind == stkInitiative:
     result += 1 + widthOf(tab.progressText)
     if tab.active: result += recordingsCells(vm.recordingButtonsOf(tab.id))

@@ -1295,6 +1295,11 @@ suite "CTF-P1b: the round-2 layout checks can fail":
     # synthetic fleet given the running status, served through the
     # production `SnapshotDataSource` seam. Its error-level line is then on
     # a row with no failure line.
+    # A failed row shows its reason once, as its failure line, so the line
+    # the reason was read from is no activity line under it (the fleet
+    # viewmodel leaves it out); an error-level line under a failure line is
+    # an OLDER, different error. Every other failed session is given one,
+    # oldest in its history, so that case is on screen too.
     var snapshot = fixtureSnapshot()
     var id = ""
     for s in snapshot.sessions.mitems:
@@ -1304,6 +1309,9 @@ suite "CTF-P1b: the round-2 layout checks can fail":
         if id.len > 0:
           s.status = fsRunning
           s.rawStatus = "running"
+      elif s.status == fsFailed:
+        s.recent.insert(FleetActivity(kind: fakLog, level: "error",
+                                      text: "error: an earlier attempt failed"), 0)
     ck id.len > 0
     # Tall enough for every row of the fleet, so both cases are on screen.
     const Tall = 240

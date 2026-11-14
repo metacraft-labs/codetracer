@@ -62,7 +62,25 @@
     "whichever dropdown is open). It hangs from its chip, `bar-overflow`: the",
     "layout test holds its right edge to the chip's on each side, shifted only",
     "as far as the window requires. `strip-overflow-menu` and `strip-overflow`",
-    "are the session strip's menu and chip, held to the same rule."
+    "are the session strip's menu and chip, held to the same rule.",
+    "",
+    "`bar-active-tab-label`, `-progress` and `-recordings` are the initiative bar's",
+    "active tab's title, its `n/m` and its recording buttons. They are compared as",
+    "pane rectangles only, not in pixels: GPUI sets each run of text in a box its",
+    "width rounded up to a whole pixel, so a row of runs differs from the browser's",
+    "by up to a pixel a run. What must agree exactly is whether the title is cut",
+    "(`elision`, below): two hosts can give the tab the same width and still cut",
+    "its title in one and not the other. `playback-readout` and",
+    "`playback-moment` are the story hosts' playback bar's readout and the moment",
+    "it names, whose width (`px`) is what the bar left it: a moment cut to two",
+    "letters on one side, or dropped, is a different width from the whole one.",
+    "",
+    "A region with `elision` is a line of text, and each side also reports whether",
+    "it is cut (`cut`: its words wider than its box; the browser measures them",
+    "with a Range, GPUI from the width the view says they take, `data-ah-text-px`).",
+    "`same`: cut on both sides or on neither -- a box can be the same width on",
+    "both sides within every tolerance and still cut the words on one (a 0.2px",
+    "shortfall elides a title). `never`: cut on neither side."
   ],
   "schemaVersion": 1,
   "regions": [
@@ -443,6 +461,46 @@
       "px": [
         "h"
       ]
+    },
+    {
+      "name": "bar-active-tab-label",
+      "web": ".ah-initiative-tab-bar .session-tab.ah-tab:not(.ah-tab-notice).active .session-tab-label",
+      "gpui": {
+        "data-ah-bar-tab-label": "true"
+      },
+      "elision": "same"
+    },
+    {
+      "name": "playback-readout",
+      "web": ".ah-playback .ah-playback-readout",
+      "gpui": {
+        "data-ah-playback-readout": ""
+      }
+    },
+    {
+      "name": "playback-moment",
+      "web": ".ah-playback .ah-playback-moment",
+      "gpui": {
+        "data-ah-playback-moment": ""
+      },
+      "px": [
+        "w"
+      ],
+      "elision": "never"
+    },
+    {
+      "name": "bar-active-tab-progress",
+      "web": ".ah-initiative-tab-bar .session-tab.ah-tab:not(.ah-tab-notice).active .ah-tab-progress",
+      "gpui": {
+        "data-ah-bar-tab-progress": "true"
+      }
+    },
+    {
+      "name": "bar-active-tab-recordings",
+      "web": ".ah-initiative-tab-bar .session-tab.ah-tab:not(.ah-tab-notice).active .ah-tab-recordings",
+      "gpui": {
+        "data-ah-recordings": ""
+      }
     }
   ]
 }

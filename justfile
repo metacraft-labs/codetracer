@@ -5886,9 +5886,14 @@ plat35-capture-gpui-window *view: tui-prereqs
 # regions with the committed web record (PLAT-35's pane-rectangle tolerance)
 # and fails on a missing or blank capture. Needs no recording. The report is
 # `build/ctf-p1b/parity/report.md`; `tools/visual-review/parity-pairs.sh
-# --agent-harbor` adds the side-by-side images.
+# --agent-harbor` adds the side-by-side images. The lane also holds CTF-P1c's
+# layout test at the playback stories' named moments, so the moment captures
+# (`build/ctf-p1c/gpui/`, `CTF_P1B_MOMENTS=1`) are taken here too: a lane run
+# over a stale or missing half would fail or pass on captures this run did
+# not take.
 ctf-p1b-gpui-captures:
   bash ci/test/ctf-p1b-gpui-story-capture.sh
+  CTF_P1B_MOMENTS=1 bash ci/test/ctf-p1b-gpui-story-capture.sh
   bash ci/lib/run-nim-test-lane.sh agent-harbor-gpui-captures
 
 # CTF-P1b: every Agent Harbor story on a REAL TERMINAL — the terminal story
@@ -5929,6 +5934,28 @@ ctf-p1b-tui-story story="--list" theme="dark": tui-prereqs
 # `--no-build` reuses a fresh StoryBook.
 ctf-p1b-web-captures *args:
   bash ci/test/ctf-p1b-web-capture.sh {{args}}
+
+# CTF-P1c: the web arm at the playback stories' named moments — each playback
+# story of the Agent Harbor section in StoryBook, opened at each named moment
+# of its scenario (the `moment` global), both themes, laptop and sidebar, into
+# `build/ctf-p1c/web/`, and the browser's regions into the committed
+# `src/tests/visual/agent-harbor-web-regions-at-moments.json`. Re-take and
+# commit it after changing a web view, a playback story, a scenario or the
+# region declaration. `--no-build` reuses a fresh StoryBook.
+ctf-p1c-web-captures *args:
+  bash ci/test/ctf-p1b-web-capture.sh --moments {{args}}
+
+# CTF-P1c: the GPUI arm at the same moments — each playback story as a REAL
+# GPUI window opened at each named moment (`codetracer-gpui-story --moment`),
+# both themes, laptop and sidebar, into `build/ctf-p1c/gpui/` — then the
+# `agent-harbor-gpui-captures` lane, whose
+# `test_ctf_p1c_gpui_capture_matches_web_layout_at_moments` runs CTF-P1b's
+# layout check over each moment's capture against that moment's web record.
+# The lane holds CTF-P1b's test too, so this is `ctf-p1b-gpui-captures`,
+# which takes both halves. The report is `build/ctf-p1c/parity/report.md`;
+# `tools/visual-review/parity-pairs.sh --agent-harbor-moments` adds the
+# side-by-side images.
+ctf-p1c-gpui-captures: ctf-p1b-gpui-captures
 
 # PLAT-69: the GPUI window as a normal desktop window — its top bar is the
 # title bar — as GuiAssert scenarios on a headless sway (`PLAT69_TARGET=gnome`

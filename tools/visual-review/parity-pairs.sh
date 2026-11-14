@@ -28,19 +28,34 @@
 # web capture of the same story, theme and size, as `<id>.web.png`,
 # `<id>.tui.png` and `<id>.side-by-side.png` (web on the left) in <out-dir>
 # (default `build/ctf-p1b/parity-tui`).
+#
+# parity-pairs.sh --agent-harbor-moments [out-dir] — CTF-P1c: the same as
+# `--agent-harbor` for the playback stories at each named moment: every GPUI
+# capture `build/ctf-p1c/gpui/<id>.png` (`CTF_P1B_MOMENTS=1
+# ci/test/ctf-p1b-gpui-story-capture.sh`, `CTF_P1C_GPUI_OUT` overrides)
+# beside the web capture of the same story, moment, theme and size,
+# `build/ctf-p1c/web/<id>.png` (`ci/test/ctf-p1b-web-capture.sh --moments`,
+# `CTF_P1C_WEB_OUT` overrides), in <out-dir> (default `build/ctf-p1c/parity`,
+# where the CTF-P1c layout test writes its report).
 set -euo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-if [ "${1:-}" = "--agent-harbor" ] || [ "${1:-}" = "--agent-harbor-tui" ]; then
+if [ "${1:-}" = "--agent-harbor" ] || [ "${1:-}" = "--agent-harbor-tui" ] ||
+	[ "${1:-}" = "--agent-harbor-moments" ]; then
+	web_dir="${CTF_P1B_WEB_OUT:-${root}/build/ctf-p1b/web}"
 	if [ "${1}" = "--agent-harbor-tui" ]; then
 		gpui_dir="${CTF_P1B_TUI_OUT:-${root}/build/ctf-p1b/tui}"
 		arm=tui
 		out="${2:-${root}/build/ctf-p1b/parity-tui}"
+	elif [ "${1}" = "--agent-harbor-moments" ]; then
+		gpui_dir="${CTF_P1C_GPUI_OUT:-${root}/build/ctf-p1c/gpui}"
+		web_dir="${CTF_P1C_WEB_OUT:-${root}/build/ctf-p1c/web}"
+		arm=gpui
+		out="${2:-${root}/build/ctf-p1c/parity}"
 	else
 		gpui_dir="${CTF_P1B_GPUI_OUT:-${root}/build/ctf-p1b/gpui}"
 		arm=gpui
 		out="${2:-${root}/build/ctf-p1b/parity}"
 	fi
-	web_dir="${CTF_P1B_WEB_OUT:-${root}/build/ctf-p1b/web}"
 	mkdir -p "${out}"
 	# One imagemagick for every pair: a `nix shell` per pair costs a second
 	# each, over hundreds of pairs.

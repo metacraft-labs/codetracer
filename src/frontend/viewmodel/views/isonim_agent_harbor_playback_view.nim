@@ -47,12 +47,22 @@ proc appendRendered[R, N](r: R; host, child: N) =
 
 proc renderPlaybackButton[R](r: R; pb: AhPlayback; control: PlaybackControl): auto =
   ## One control: a button carrying its control's operation, which a press
-  ## on it runs through the router (see the header).
-  ui(r):
-    button(class = PlaybackButtonClass & " ah-playback-" & $control,
+  ## on it runs through the router (see the header). It holds both its word
+  ## and its glyph (`compactControlLabel`); the stylesheet shows the glyph
+  ## alone on a bar under `PlaybackCompactBelowPx` (`.ah-playback`'s media
+  ## query), and the word stays the button's accessible name. A press on
+  ## either reaches the button, whose operation the listener reads.
+  mixin setAttribute
+  var b: typeof(r.createElement("button"))
+  result = ui(r):
+    button(ref = b, class = PlaybackButtonClass & " ah-playback-" & $control,
            title = controlTitle(control),
            `data-ct-operation` = operationOf(control)):
-      text pb.controlLabel(control)
+      span(class = "ah-playback-word"):
+        text pb.controlLabel(control)
+      span(class = "ah-playback-glyph"):
+        text pb.compactControlLabel(control)
+  r.setAttribute(b, "aria-label", pb.controlLabel(control))
 
 proc renderAgentHarborPlaybackBar*[R, N](r: R; pb: AhPlayback): N =
   ## The bar; redrawn whenever `pb.changed` moves.
@@ -68,6 +78,8 @@ proc renderAgentHarborPlaybackBar*[R, N](r: R; pb: AhPlayback): N =
     r.setAttribute(bar, "class", AgentHarborPlaybackClass & " ah-playback-" & pb.stateLabel)
     for control in PlaybackControl:
       r.appendRendered(bar, renderPlaybackButton(r, pb, control))
+    # The moment shrinks first and is cut with an ellipsis, so the box the
+    # layout check measures (`playback-moment`) is the part drawn.
     let readout = ui(r):
       span(class = "ah-playback-readout"):
         span(class = "ah-playback-moment"):

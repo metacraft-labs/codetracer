@@ -254,6 +254,30 @@ proc controlLabel*(pb: AhPlayback; control: PlaybackControl): string =
   of pcNext: "Moment \xE2\x96\xB6"
   of pcRewind: "Rewind"
 
+const
+  PlaybackCompactBelowPx* = 720
+    ## A playback bar narrower than this draws each control as one glyph
+    ## (`compactControlLabel`), in every host: the web's bar under 45rem
+    ## (`.ah-playback`'s media query), GPUI's under 720px, the terminal's
+    ## under 90 cells (8px a cell). With the words, the five buttons take
+    ## about 320px, and at the sidebar's 360px the moment the readout names
+    ## had no room left (one host cut it to two letters, another dropped it).
+
+proc playbackBarIsCompact*(widthPx: int): bool =
+  ## Whether a bar `widthPx` wide draws its controls as glyphs.
+  widthPx < PlaybackCompactBelowPx
+
+proc compactControlLabel*(pb: AhPlayback; control: PlaybackControl): string =
+  ## A button's glyph on a compact bar, the same in every host; its word
+  ## (`controlLabel`) stays its accessible name and its tooltip says what it
+  ## does (`controlTitle`).
+  case control
+  of pcPlay: (if pb.playing: "\xE2\x80\x96" else: "\xE2\x96\xB6")   # ‖ / ▶
+  of pcStep: "\xE2\x80\xBA"                                         # ›
+  of pcPrevious: "\xC2\xAB"                                         # «
+  of pcNext: "\xC2\xBB"                                             # »
+  of pcRewind: "\xE2\x86\xBA"                                       # ↺
+
 proc controlTitle*(control: PlaybackControl): string =
   ## A button's tooltip.
   case control

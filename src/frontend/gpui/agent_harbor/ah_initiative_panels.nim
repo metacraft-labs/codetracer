@@ -32,6 +32,7 @@ const
   MilestoneBarOrder* = [mscCompleted, mscInProgress, mscPartial, mscBlocked,
                         mscPlanned, mscOther]
   BarPx = 6                ## `.ah-ms-bar` height: 0.375rem
+  BarRadius = "3px"        ## `.ah-ms-bar` border-radius: 0.1875rem
   SessionIndentPx = 20     ## `.ah-initiative-sessions` padding-left: 1.25rem
   WidePanelPx = 960        ## `@container ah-initiatives (min-width: 60rem)`
   WideInfoMaxPx = 576      ## the wide row's first column: `minmax(0, 36rem)`
@@ -119,7 +120,7 @@ proc drawMilestoneBar*(r: GpuiRenderer; p: AhPalette;
                                              ("items", if labelled: "stretch" else: "center")])
   r.tag(result, "milestone-bar", statusCountsText(counts))
   let bar = r.box(pairs = [("height", $BarPx & "px"), ("flex-grow", "1"),
-                           ("rounded", "3px"), ("overflow", "hidden"), ("gap", "1px")])
+                           ("rounded", BarRadius), ("overflow", "hidden"), ("gap", "1px")])
   if not labelled: r.setStyle(bar, "max-width", "580px")
   let legend = r.box(pairs = [("gap", $LegendGapPx & "px"), ("items", "center"),
                               ("height", $LegendPx & "px"), ("flex-shrink", "0")])
@@ -134,6 +135,7 @@ proc drawMilestoneBar*(r: GpuiRenderer; p: AhPalette;
   # value, and a bar with no milestones is still drawn.
   r.tag(bar, "ms-bar", "track")
   var flow: seq[FlowItem]
+  var segments: seq[GpuiElement]
   for status in MilestoneBarOrder:
     let n = counts[status]
     if n == 0: continue
@@ -141,6 +143,7 @@ proc drawMilestoneBar*(r: GpuiRenderer; p: AhPalette;
                              ("min-width", "2px"), ("background", p.segmentOf(status))])
     r.tag(seg, "segment", $status & ":" & $n)
     r.appendChild(bar, seg)
+    segments.add seg
     let item = r.box(pairs = [("gap", "4px"), ("items", "center"), ("flex-shrink", "0")])
     let words = $n & (if labelled: " " & $status else: "")
     r.appendChild(item, r.mark(p.markOf(status)))
@@ -153,6 +156,17 @@ proc drawMilestoneBar*(r: GpuiRenderer; p: AhPalette;
                         exactPx: float(MarkPx + 4) + textWidth(words, CaptionPx, tabular = true))
     else:
       r.appendChild(legend, item)
+  # The bar's ends are round (`.ah-ms-bar`: `border-radius: 0.1875rem;
+  # overflow: hidden`, which the browser clips its segments to). GPUI clips
+  # a child to its parent's bounds but not to its rounded corners, so a
+  # single segment filling the bar -- every milestone completed -- was drawn
+  # square, one colour edge to edge: the end segments carry the corners
+  # themselves.
+  if segments.len > 0:
+    r.styles(segments[0], [("border-top-left-radius", BarRadius),
+                           ("border-bottom-left-radius", BarRadius)])
+    r.styles(segments[^1], [("border-top-right-radius", BarRadius),
+                            ("border-bottom-right-radius", BarRadius)])
   r.appendChild(result, bar)
   let legendEl = if flow.len > 0: r.flowLines(flow, availPx, LegendGapPx, LegendPx, LegendGapPx)
                  else: legend

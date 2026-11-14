@@ -366,7 +366,7 @@ test_lane_description() {
 	tui-real-emulators) echo "CodeTracer TUI in REAL terminal emulators (kitty, xterm, Ghostty, Alacritty on Xvfb; foot on GuiAssert's headless sway; tmux in kitty): personas captured and compared, the profile, the glyph test card read by OCR and pixels, OSC 52 against the profile" ;;
 	gpui-shell) echo "PLAT-20 GPUI shell: the dock projection against gpui-kit's own fixtures, and the shell/leaf split through the real isonim-gpui shim" ;;
 	gpui-native) echo "GPUI suites over an rr recording of a native program (need rr, ct-native-replay, codetracer-native-test-programs and build/bin/codetracer-gpui; run by the rr CI job)" ;;
-	agent-harbor-gpui-captures) echo "CTF-P1b: the GPUI window captures of the Agent Harbor stories against the committed web layout record (just ctf-p1b-gpui-captures takes the captures on headless sway first)" ;;
+	agent-harbor-gpui-captures) echo "CTF-P1b and CTF-P1c: the GPUI window captures of the Agent Harbor stories, and of the playback stories at each named moment, against the committed web layout records (just ctf-p1b-gpui-captures takes both sets of captures on headless sway first)" ;;
 	ui-selection) echo 'PLAT-1 --ui front-end selection, end to end: the real launcher, the real ct, the real TUI and a real ct host server' ;;
 	ct-host-admission) echo 'ct host admission, session isolation and lifetime, end to end: the real ct host refuses a client without its session secret or from a foreign origin, gives every client its own replay and session, and leaves no process behind when it is signalled or killed; and it refuses a trace container it cannot read with one error line naming the reason' ;;
 	ct-host-manifest) echo 'ct host --manifest slice selection, end to end: the real ct host opens the mcr_slices slice the replay start (or CODETRACER_START_SLICE_KEY) names, refuses one it does not list' ;;
@@ -2357,6 +2357,11 @@ test_lane_files() {
 		# committed web record, so it is not in `gpui-shell`, whose recipe opens
 		# no window. `just ctf-p1b-gpui-captures` captures first and then runs
 		# this lane; the `gpui-window-captures` CI job runs that recipe.
+		# CTF-P1c's `test_ctf_p1c_gpui_capture_matches_web_layout_at_moments.nim`
+		# is the same check over the playback stories at each named moment
+		# (`build/ctf-p1c/gpui/`, which the same recipe takes); the shared
+		# judge, `ctf_layout_judge.nim`, is not a `test_*` file and runs alone
+		# in no lane.
 		_tlf_glob src/tests/visual/agent_harbor 'test_*.nim'
 		;;
 

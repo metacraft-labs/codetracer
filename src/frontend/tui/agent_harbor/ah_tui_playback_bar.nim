@@ -11,8 +11,11 @@
 ## playback's control (`applyControl`); the story host redraws the screen
 ## when the playback says its readout changed (`AhPlayback.changed`).
 ##
-## On a narrow terminal (under `WideBarCols`) the buttons are drawn as one
-## glyph each, so the readout keeps room.
+## On a narrow terminal (under `WideBarCols`, the shared
+## `PlaybackCompactBelowPx` at 8px a cell) the buttons are drawn as one glyph
+## each (`compactControlLabel`, the web's and GPUI's glyphs), one cell apart,
+## so the readout keeps room for the moment: at the sidebar's 45 cells the
+## glyphs with a cell of padding each left the longest moments 16 cells.
 ##
 ## Facts (`AhNode`): `playback` (the playback's state: playing, paused,
 ## ended) on the bar, `playback-control` and `button` (what it draws) on each
@@ -24,20 +27,11 @@ import ./ah_tui_canvas
 export agent_harbor_playback
 
 const
-  WideBarCols* = 90
-    ## From this width the buttons carry their words.
+  WideBarCols* = PlaybackCompactBelowPx div 8
+    ## From this width (90 cells) the buttons carry their words.
   PlaybackKeys* = [(" ", pcPlay), ("n", pcStep), ("[", pcPrevious), ("]", pcNext),
                    ("0", pcRewind)]
     ## The terminal's key for each control.
-
-proc compactLabel(pb: AhPlayback; control: PlaybackControl): string =
-  ## One narrow glyph per control.
-  case control
-  of pcPlay: (if pb.playing: "\xE2\x80\x96" else: "\xE2\x96\xB6")   # ‖ / ▶
-  of pcStep: "\xE2\x80\xBA"                                         # ›
-  of pcPrevious: "\xC2\xAB"                                         # «
-  of pcNext: "\xC2\xBB"                                             # »
-  of pcRewind: "\xE2\x86\xBA"                                       # ↺
 
 proc controlOfKey*(token: string): (bool, PlaybackControl) =
   ## The control a key stands for.
@@ -56,12 +50,12 @@ proc drawPlaybackBar*(c: var AhCanvas; pb: AhPlayback; row: int) =
   let wide = c.cols >= WideBarCols
   var col = 1
   for control in PlaybackControl:
-    let label = if wide: pb.controlLabel(control) else: pb.compactLabel(control)
-    let shown = " " & label & " "
+    let label = if wide: pb.controlLabel(control) else: pb.compactControlLabel(control)
+    let shown = if wide: " " & label & " " else: label
     let w = widthOf(shown)
     if col + w > c.cols: break
     discard c.put(row, col, shown, c.p.textLabel, bg = c.tone.chip)
-    discard c.node(bar, row, col + 1, widthOf(label), 1,
+    discard c.node(bar, row, col + (if wide: 1 else: 0), widthOf(label), 1,
                    [("playback-control", $control), ("button", label)])
     c.target(row, col, w, 1, pb.controlAction(control))
     col += w + 1

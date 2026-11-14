@@ -4,7 +4,7 @@
 # and the gate is the layout test that reads it
 # (`test_ctf_p1b_gpui_capture_matches_web_layout.nim`). Running this in CI
 # would only re-take the record the test compares against.
-# ctf-p1b-web-capture.sh [--no-build] — CTF-P1b's WEB arm of the GPUI/web
+# ctf-p1b-web-capture.sh [--no-build] [--moments] — CTF-P1b's WEB arm of the GPUI/web
 # layout comparison: every Agent Harbor story in StoryBook, both themes, at
 # the laptop and sidebar sizes, shot by `tools/visual-review/capture-storybook.mjs
 # --regions` into `build/ctf-p1b/web/` (`CTF_P1B_WEB_OUT` overrides), and the
@@ -32,14 +32,45 @@
 #
 # The images stay in the git-ignored build tree; the side-by-side pairs are
 # `tools/visual-review/parity-pairs.sh --agent-harbor`.
+#
+# `--moments` (CTF-P1c, `just ctf-p1c-web-captures`): the playback stories
+# instead, each at every named moment of its scenario (`capture-storybook.mjs
+# --moments`, capture ids `<view>-at-<moment>-<size>-<theme>`), into
+# `build/ctf-p1c/web/` (`CTF_P1C_WEB_OUT` overrides) and the committed
+# sibling record `src/tests/visual/agent-harbor-web-regions-at-moments.json`,
+# which `test_ctf_p1c_gpui_capture_matches_web_layout_at_moments.nim` reads.
+# The first-frame record above is left as it is.
 set -euo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "${root}"
-OUT="${CTF_P1B_WEB_OUT:-${root}/build/ctf-p1b/web}"
-RECORD="${root}/src/tests/visual/agent-harbor-web-regions.json"
 DECL="${root}/src/tests/visual/agent-harbor-regions.json"
 build=1
-[ "${1:-}" = "--no-build" ] && build=0
+moments=0
+for arg in "$@"; do
+	case "${arg}" in
+	--no-build) build=0 ;;
+	--moments) moments=1 ;;
+	*)
+		echo "ctf-p1b-web-capture: unknown argument ${arg}" >&2
+		exit 2
+		;;
+	esac
+done
+if [ "${moments}" = 1 ]; then
+	OUT="${CTF_P1C_WEB_OUT:-${root}/build/ctf-p1c/web}"
+	RECORD="${root}/src/tests/visual/agent-harbor-web-regions-at-moments.json"
+	views=(--view agent-harbor-playback --moments)
+	milestone=CTF-P1c
+	reader=test_ctf_p1c_gpui_capture_matches_web_layout_at_moments.nim
+	what="each Agent Harbor playback story at each named moment of its scenario"
+else
+	OUT="${CTF_P1B_WEB_OUT:-${root}/build/ctf-p1b/web}"
+	RECORD="${root}/src/tests/visual/agent-harbor-web-regions.json"
+	views=(--view agent-harbor-session-tabs --view agent-harbor-fleet)
+	milestone=CTF-P1b
+	reader=test_ctf_p1b_gpui_capture_matches_web_layout.nim
+	what="each region of each Agent Harbor story"
+fi
 if [ "${build}" = 1 ]; then
 	just storybook-build
 fi
@@ -52,33 +83,39 @@ grep -q '"fixtureSet\\": \\"synthetic\\"' storybook/dist/components.js || {
 	exit 1
 }
 mkdir -p "${OUT}"
+# A re-take starts from no regions: the record below is merged from every
+# regions file in OUT, so one left from an earlier run of a story or moment
+# that no longer exists would otherwise be recorded as if it had been taken.
+rm -f "${OUT}"/*.regions.json
 for size in laptop sidebar; do
 	node tools/visual-review/capture-storybook.mjs --no-build --font-render-hinting none \
-		--view agent-harbor-session-tabs --view agent-harbor-fleet \
+		"${views[@]}" \
 		--size "${size}" --theme dark --theme light \
 		--out "${OUT}" --regions "${DECL}"
 done
-node - "${OUT}" "${RECORD}" <<'EOF'
+node - "${OUT}" "${RECORD}" "${milestone}" "${reader}" "${what}" <<'EOF'
 // Merge every `<capture id>.regions.json` into the committed record, sorted
 // by id so a re-take that changes nothing changes no byte.
 const { readdirSync, readFileSync, writeFileSync } = require("node:fs");
 const { join } = require("node:path");
-const [outDir, record] = process.argv.slice(2);
+const [outDir, record, milestone, reader, what] = process.argv.slice(2);
 const captures = {};
 let fixtureSet = null;
 for (const name of readdirSync(outDir).filter((n) => n.endsWith(".regions.json")).sort()) {
   const doc = JSON.parse(readFileSync(join(outDir, name), "utf8"));
   if (doc.renderer !== "web") throw new Error(`${name}: not a web capture`);
-  captures[name.slice(0, -".regions.json".length)] = { viewport: doc.viewport, regions: doc.regions };
+  captures[name.slice(0, -".regions.json".length)] = {
+    ...(doc.moment ? { moment: doc.moment } : {}), viewport: doc.viewport, regions: doc.regions,
+  };
 }
 if (Object.keys(captures).length === 0) throw new Error(`no web regions in ${outDir}`);
 writeFileSync(record, `${JSON.stringify({
   _comment: [
-    "CTF-P1b: where the browser laid out each region of each Agent Harbor story",
+    `${milestone}: where the browser laid out ${what}`,
     "(src/tests/visual/agent-harbor-regions.json), in CSS pixels of the capture's",
     "viewport. WRITTEN by ci/test/ctf-p1b-web-capture.sh from StoryBook over the",
     "synthetic fixture set, text at the face's own advances (no font hinting);",
-    "read by test_ctf_p1b_gpui_capture_matches_web_layout.nim.",
+    `read by ${reader}.`,
     "Do not edit by hand: re-take it.",
   ],
   schemaVersion: 1,

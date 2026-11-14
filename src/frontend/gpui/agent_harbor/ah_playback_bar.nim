@@ -21,10 +21,16 @@
 ## (`viewmodel/input/element_press`) — and performs it. Nothing here decides
 ## what a press does.
 ##
+## Under `PlaybackCompactBelowPx` (the sidebar's 360px) each button draws
+## its glyph (`compactControlLabel`) instead of its word, as the web's and the
+## terminal's bars do, so the readout keeps room for the moment.
+##
 ## Facts (`data-ah-*`) for a reader of the render plan: `playback` (the
 ## playback's state: playing, paused, ended) on the bar, `playback-control`
-## and `button` (its word) on each button, `playback-moment` and
-## `playback-time` on the readout.
+## and `button` (what it draws: its word, or its glyph when compact) on each button, `playback-readout` on the readout,
+## and `playback-moment` and `playback-time` in it.
+
+import std/strutils
 
 import isonim/core/computation
 
@@ -73,17 +79,21 @@ proc drawPlaybackBar*(r: GpuiRenderer; host: GpuiElement; pb: AhPlayback;
                            ("overflow", "hidden"), ("background", p.ground),
                            ("border-top-width", "1px"), ("border-color", p.borderPrimary)])
   r.tag(bar, "playback", pb.stateLabel)
+  let compact = playbackBarIsCompact(widthPx)
+  # `.ah-playback-button`'s `padding: 0 0.5rem`, `0 0.375rem` when compact.
+  let pad = if compact: "6px" else: "8px"
   for control in PlaybackControl:
     let b = r.box(pairs = [("height", "20px"), ("items", "center"), ("justify", "center"),
-                           ("padding-left", "8px"), ("padding-right", "8px"),
+                           ("padding-left", pad), ("padding-right", pad),
                            ("flex-shrink", "0"), ("rounded", $ControlRadiusPx & "px"),
                            ("border-width", "1px"), ("border-color", p.borderPrimary),
                            ("background", p.secondary),
                            ("cursor", "pointer")])
     let label = pb.controlLabel(control)
-    r.appendChild(b, r.text(label, CaptionPx, p.textLabel, shrink = false))
+    let drawn = if compact: pb.compactControlLabel(control) else: label
+    r.appendChild(b, r.text(drawn, CaptionPx, p.textLabel, shrink = false))
     r.tag(b, "playback-control", $control)
-    r.tag(b, "button", label)
+    r.tag(b, "button", drawn)
     r.setAttribute(b, OperationAttribute, operationOf(control))
     if press != nil:
       r.listenForPress(b, operationOf(control), press)
@@ -91,8 +101,11 @@ proc drawPlaybackBar*(r: GpuiRenderer; host: GpuiElement; pb: AhPlayback;
   let readout = r.box(pairs = [("flex-grow", "1"), ("min-width", "0px"), ("gap", "8px"),
                                ("padding-left", "8px"), ("overflow", "hidden"),
                                ("items", "center")])
+  r.tag(readout, "playback-readout", pb.readout)
   let moment = r.text(pb.momentLabel, CaptionPx, p.textBody)
   r.tag(moment, "playback-moment", pb.momentLabel)
+  # What its words take: narrower, it is cut (the layout check's `elision`).
+  r.tag(moment, "text-px", formatFloat(textWidth(pb.momentLabel, CaptionPx), ffDecimal, 2) & "px")
   r.appendChild(readout, moment)
   let time = r.text(pb.elapsedLabel, CaptionPx, p.textCaption, shrink = false,
                     tabular = true)

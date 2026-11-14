@@ -102,8 +102,13 @@ export function loadStoryDeclarations(repoRoot) {
   return JSON.parse(readFileSync(join(repoRoot, "storybook", "stories", "generated", "stories.json"), "utf8"));
 }
 
-export function storyUrl(baseUrl, storyId, theme) {
-  return `${baseUrl.replace(/\/$/, "")}/iframe.html?id=${storyId}&viewMode=story&globals=theme:${theme}`;
+// `moment` (optional) opens a playback story at one of its scenario's named
+// moments: the StoryBook global `moment` (`.storybook/preview.js`), a second
+// `key:value` pair in the same `globals` parameter, `;`-separated
+// (https://storybook.js.org/docs/essentials/toolbars-and-globals#setting-globals-via-url).
+export function storyUrl(baseUrl, storyId, theme, moment = "") {
+  const globals = moment ? `theme:${theme};moment:${moment}` : `theme:${theme}`;
+  return `${baseUrl.replace(/\/$/, "")}/iframe.html?id=${storyId}&viewMode=story&globals=${globals}`;
 }
 
 // --- In the page: what the story drew ----------------------------------------
@@ -581,12 +586,13 @@ export async function inspectRenderedStory(page, story, observed) {
 // `opts.beforeGoto(page)` runs after the watchers are installed (the render
 // check's plants route the bundle there); `opts.afterInspect(page, observed)`
 // runs on the settled page before the verdict (the render check's screenshot).
+// `opts.moment` opens a playback story at that named moment (`storyUrl`).
 export async function renderAndJudge(page, baseUrl, story, theme, opts = {}) {
-  const { timeoutMs = 90000, beforeGoto, afterInspect } = opts;
+  const { timeoutMs = 90000, beforeGoto, afterInspect, moment = "" } = opts;
   const observed = await watchStoryPage(page);
   try {
     if (beforeGoto) await beforeGoto(page);
-    await page.goto(storyUrl(baseUrl, story.id, theme), { waitUntil: "load", timeout: timeoutMs });
+    await page.goto(storyUrl(baseUrl, story.id, theme, moment), { waitUntil: "load", timeout: timeoutMs });
     await settleStory(page, observed, { timeoutMs });
     await inspectRenderedStory(page, story, observed);
     if (afterInspect) await afterInspect(page, observed);
