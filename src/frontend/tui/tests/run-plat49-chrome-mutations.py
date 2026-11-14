@@ -139,7 +139,10 @@ TUISESSION = "src/frontend/tui/host/tui_session.nim"
 SESSDRIVER = "src/frontend/tui/host/session_driver.nim"
 NATIVEHOST = "src/frontend/tui/host/native_host.nim"
 GPUILEAVES = "src/frontend/gpui/app/leaves.nim"
-GESTURES = "src/frontend/gpui/window_gestures.nim"
+# `window_gestures.nim` left the subjects 2026-11-14: since `24a718a9f2` a
+# label click is a press of the label (`layout.toggle-docked-pane`, decided in
+# `gpui/main.nim` from the committed layout), and the direction the gesture
+# computes no longer decides anything (FT11, re-aimed below, SURVIVED there).
 # `ui/event_log.nim` and `ui/calltrace.nim` are no longer subjects: the
 # desktop draws both panes through the ONE generic view each
 # (`1c18341dd`, `730399e0e`) and decodes the call trace with the shared
@@ -185,7 +188,7 @@ SUBJECTS = [TOPBAR, SHELL, BINDING, RUNTIME, ROLES, STATUS, VARS, TUIMAIN,
             GPUIMAIN, PRODMODE, CARET,
             CALLVM, EVLOGVM, STORE, INTERACT, LAYMODEL, HOVER, SESSTABS,
             CALLVIEW, EVLOGVIEW, TUISESSION, NATIVEHOST, GPUILEAVES,
-            GESTURES, SESSDRIVER, OMNISRC,
+            SESSDRIVER, OMNISRC,
             FOOTERINFO, TUIAPP, DESKEVLOGVIEW, GPUISHELL, GLHIT]
 SUITES = [VMU, T1, REF, PROF, PTY, GPLAN, DESKTOP_GATE,
           VMU2, T2, REF2, PTY2, GPLAN2, DESKTOP_GATE_B]
@@ -943,9 +946,14 @@ ARMS = [
         "      # the pointer rested on a label, a dismissal due after it left.\n      let hoverChanged = false or\n",
         P2_HOVER,
         "the terminal's loop never runs the hover's clock"),
-    Arm("FT11", GESTURES,
-        "        let cmd = if layout.docked[at].open: cmdCloseDocked(was.source)\n                  else: cmdOpenDocked(was.source)\n",
-        "        let cmd = cmdCloseDocked(was.source)\n",
+    # FT11 RE-AIMED 2026-11-14: `24a718a9f2` routes a label's click through
+    # the pointer keymap; `layout.toggle-docked-pane` in the window docks the
+    # pane open or closes it. Graded in `window_gestures.nim` after that
+    # change it SURVIVED (no case noticed): the code it mutated no longer
+    # decides. Same defect, in the code that now carries it.
+    Arm("FT11", GPUIMAIN,
+        "    applyGestureCommand(r, if open: cmdCloseDocked(c.target.pane)\n                           else: cmdOpenDocked(c.target.pane))\n",
+        "    applyGestureCommand(r, cmdCloseDocked(c.target.pane))\n",
         G2_DOCK,
         "a GPUI label click never docks its pane open"),
     # FT12 RE-AIMED 2026-10-17: the desktop's layout runs directly into its
