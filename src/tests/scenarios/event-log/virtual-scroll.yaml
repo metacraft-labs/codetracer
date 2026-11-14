@@ -1,0 +1,87 @@
+scenario: 1
+name: event-log/virtual-scroll
+pack: codetracer
+summary: >-
+  The Event Log's virtual scroll keeps the footer, the rows on screen and the
+  scroll position in step to the very end of a 70-event log: scrolled to the
+  end, the footer reads "… to N of N" and the last event is in view; a drag
+  of the scrubber through 40% to 80% settles on the 80% window, drawn and
+  described; and the same gestures, repeated three times, read the same every time.
+
+stage:
+  - use: record-program
+    with: { program: noir_space_ship }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 180s }
+  - click: 'pane-tab[label="EVENT LOG"]'
+  - wait: { until: { at: event-log, total: 70 }, timeout: 120s }
+  - wait: { until: settled }
+  - expect: { at: event-log, assert: pages-remain }
+  - beat: to-the-end-and-back-1
+    steps:
+      - wheel: { at: event-log, direction: down, amount: 60 }
+      - wait: { until: { at: event-log, assert: at-end }, timeout: 30s }
+      - expect: { at: event-log, first-shown: 58, first-in-view: 58 }
+      - wheel: { at: event-log, direction: up, amount: 60 }
+      - wait: { until: { at: event-log, first-shown: 1 }, timeout: 30s }
+      - expect: { at: event-log, assert: footer-starts-in-view }
+  - beat: scrub-to-eighty-percent-1
+    steps:
+      - drag:
+          from: { at: event-log/scrubber, anchor: thumb }
+          via: [{ at: event-log/scrubber, anchor: at(40) }]
+          to: { at: event-log/scrubber, anchor: at(80) }
+      - wait: { until: settled }
+      # 80% of the way through the positions the first row can take: row 47
+      # of 70, with 13 rows on screen.
+      - expect: { at: event-log, first-shown: { ge: 44 } }
+      - expect: { at: event-log, first-shown: { le: 50 } }
+      - expect: { at: event-log, assert: footer-starts-in-view }
+      - wheel: { at: event-log, direction: up, amount: 60 }
+      - wait: { until: { at: event-log, first-shown: 1 }, timeout: 30s }
+  - beat: to-the-end-and-back-2
+    steps:
+      - wheel: { at: event-log, direction: down, amount: 60 }
+      - wait: { until: { at: event-log, assert: at-end }, timeout: 30s }
+      - expect: { at: event-log, first-shown: 58, first-in-view: 58 }
+      - wheel: { at: event-log, direction: up, amount: 60 }
+      - wait: { until: { at: event-log, first-shown: 1 }, timeout: 30s }
+      - expect: { at: event-log, assert: footer-starts-in-view }
+  - beat: scrub-to-eighty-percent-2
+    steps:
+      - drag:
+          from: { at: event-log/scrubber, anchor: thumb }
+          via: [{ at: event-log/scrubber, anchor: at(40) }]
+          to: { at: event-log/scrubber, anchor: at(80) }
+      - wait: { until: settled }
+      # 80% of the way through the positions the first row can take: row 47
+      # of 70, with 13 rows on screen.
+      - expect: { at: event-log, first-shown: { ge: 44 } }
+      - expect: { at: event-log, first-shown: { le: 50 } }
+      - expect: { at: event-log, assert: footer-starts-in-view }
+      - wheel: { at: event-log, direction: up, amount: 60 }
+      - wait: { until: { at: event-log, first-shown: 1 }, timeout: 30s }
+  - beat: to-the-end-and-back-3
+    steps:
+      - wheel: { at: event-log, direction: down, amount: 60 }
+      - wait: { until: { at: event-log, assert: at-end }, timeout: 30s }
+      - expect: { at: event-log, first-shown: 58, first-in-view: 58 }
+      - wheel: { at: event-log, direction: up, amount: 60 }
+      - wait: { until: { at: event-log, first-shown: 1 }, timeout: 30s }
+      - expect: { at: event-log, assert: footer-starts-in-view }
+  - beat: scrub-to-eighty-percent-3
+    steps:
+      - drag:
+          from: { at: event-log/scrubber, anchor: thumb }
+          via: [{ at: event-log/scrubber, anchor: at(40) }]
+          to: { at: event-log/scrubber, anchor: at(80) }
+      - wait: { until: settled }
+      # 80% of the way through the positions the first row can take: row 47
+      # of 70, with 13 rows on screen.
+      - expect: { at: event-log, first-shown: { ge: 44 } }
+      - expect: { at: event-log, first-shown: { le: 50 } }
+      - expect: { at: event-log, assert: footer-starts-in-view }
+      - wheel: { at: event-log, direction: up, amount: 60 }
+      - wait: { until: { at: event-log, first-shown: 1 }, timeout: 30s }
