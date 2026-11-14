@@ -59,6 +59,8 @@ proc textOf(e: JsObject): cstring {.importjs: "(#.textContent)".}
 proc styleOf(e: JsObject; prop: cstring): cstring {.importjs:
   "getComputedStyle(#).getPropertyValue(#)".}
 proc rectOf(e: JsObject): JsObject {.importjs: "#.getBoundingClientRect()".}
+proc newDivEl(): JsObject {.importjs: "document.createElement('div')@".}
+proc getComputed(e: JsObject; prop: cstring): JsObject {.importjs: "getComputedStyle(#).getPropertyValue(#)".}
 proc num(v: JsObject): float {.importjs: "Number(#)".}
 proc jsNew(): JsObject {.importjs: "({})@".}
 proc newJsArray(): JsObject {.importjs: "([])@".}
@@ -122,7 +124,7 @@ proc endCase(name: string) =
 
 const
   Source = "def main():\n    x = 1\n    if x:\n        y = 2\n\n    return x\nprint(main())\n"
-  ExpectedChecks = 100
+  ExpectedChecks = 102
     ## Written from a run. See the end of `main`.
 
 proc fresh(text = Source; readOnly = false; model = bkCua;
@@ -381,6 +383,26 @@ proc caseDecorationsAndZones() {.async.} =
   await settle()
   let chip = ed.root.querySelector(cstring(".view-line[data-line=\"4\"] .flow-chip"))
   ck not isNull(chip) and $textOf(chip) == "x = 1"
+  # A content widget at EXACT sits on its line (Monaco's
+  # `ContentWidgetPositionPreference.EXACT`, the flow's value chips); one
+  # whose line is not drawn is hidden, whatever `display` the page gives it.
+  proc widgetAt(line: int; id: cstring): JsObject =
+    let node = newDivEl()
+    node.textContent = id
+    node.style.display = cstring"flex"
+    result = js{getId: proc(): cstring = id, getDomNode: proc(): JsObject = node,
+                getPosition: proc(): JsObject =
+                  js{position: js{lineNumber: line, column: 1}, preference: toJs(@[0])}}
+  let near = widgetAt(3, cstring"near")
+  let far = widgetAt(5000, cstring"far")
+  discard facadeOf(ed).addContentWidget(near)
+  discard facadeOf(ed).addContentWidget(far)
+  await settle()
+  let nearNode = near.getDomNode()
+  ck num(rectOf(nearNode).top) == num(rectOf(viewLine(3)).top),
+    "an EXACT widget is on its line, not under it"
+  ck str(getComputed(far.getDomNode(), cstring"visibility")) == "hidden",
+    "a widget whose line is not drawn is hidden"
   endCase("decorations and view zones through Monaco's API, following the text")
 
 proc caseFolding() {.async.} =

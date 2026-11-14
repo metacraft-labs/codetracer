@@ -755,27 +755,29 @@ proc render*(ed: SharedEditor) =
     if (hl0 + 1) in lines:
       carets.add (hl0 + 1, ed.xOfByteCol(hl0 + 1, head - ed.index.lineStart(hl0)),
                   head == ed.primaryOffset)
-  type WidgetPlace = tuple[node: JsObject; show: bool; x: float; top: int; above: bool]
+  # Monaco's `ContentWidgetPositionPreference`: EXACT (0) at the line,
+  # ABOVE (1) over it, BELOW (2) under it; the first listed is used.
+  type WidgetPlace = tuple[node: JsObject; show: bool; x: float; top: int; pref: int]
   var places: seq[WidgetPlace] = @[]
   for w in ed.widgets:
     if w.overlay or w.node.isNil or not hasFn(w.widget, "getPosition"):
       continue
     let p = callMethod0(w.widget, "getPosition")
     if isNilOrUndef(p) or isNilOrUndef(p["position"]):
-      places.add (w.node, false, 0.0, 0, false)
+      places.add (w.node, false, 0.0, 0, 0)
       continue
     let line1 = int(jsNum(p["position"]["lineNumber"]))
     let col = int(jsNum(p["position"]["column"]))
     if line1 notin lines:
-      places.add (w.node, false, 0.0, 0, false)
+      places.add (w.node, false, 0.0, 0, 0)
       continue
     let lt = ed.lineText(line1)
-    var above = false
+    var preference = 0
     let pref = p["preference"]
-    if not isNilOrUndef(pref) and jsLen(pref) > 0 and int(jsNum(pref[0])) == 1:
-      above = true
+    if not isNilOrUndef(pref) and jsLen(pref) > 0:
+      preference = int(jsNum(pref[0]))
     places.add (w.node, true, ed.xOfByteCol(line1, byteColumnOf(lt, col)),
-                lay.topOfLine(line1), above)
+                lay.topOfLine(line1), preference)
   # The find session's matches on the drawn lines (Monaco's `findMatch`
   # and `currentFindMatch`), the shared session's own spans.
   if ed.find.open and ed.doc.state.search.pattern.len > 0:
@@ -812,16 +814,23 @@ proc render*(ed: SharedEditor) =
     ed.cursorsLayer.appendChild(el)
   for w in places:
     if not w.show:
-      w.node.setStyle("display", "none")
+      # Monaco moves a widget off the view and hides it; `display` is left
+      # alone (the page sets it, `!important`, on the flow's widgets).
+      w.node.setStyle("visibility", "hidden")
+      w.node.setStyle("top", "-1000px")
       continue
-    w.node.setStyle("display", "block")
+    w.node.setStyle("visibility", "inherit")
     w.node.setStyle("position", "absolute")
     w.node.setStyle("left", cstring($w.x & "px"))
-    if w.above:
+    case w.pref
+    of 1:
       w.node.setStyle("top", cstring($w.top & "px"))
       w.node.setStyle("transform", "translateY(-100%)")
-    else:
+    of 2:
       w.node.setStyle("top", cstring($(w.top + ed.lineHeight) & "px"))
+      w.node.setStyle("transform", "none")
+    else:
+      w.node.setStyle("top", cstring($w.top & "px"))
       w.node.setStyle("transform", "none")
   # Zones: positioned under their anchor lines.
   for z in ed.zones:
