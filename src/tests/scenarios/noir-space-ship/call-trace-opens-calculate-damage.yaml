@@ -1,0 +1,33 @@
+scenario: 1
+name: noir-space-ship/call-trace-opens-calculate-damage
+pack: codetracer
+summary: >-
+  Activating the first calculate_damage call in the call trace opens
+  shield.nr stopped on the function's definition, line 22, with the flow's
+  values drawn beside its lines;
+  Next and Reverse Next then move from it and back.
+
+stage:
+  - use: record-program
+    with: { program: noir_space_ship }
+  - use: open-recording
+    with: { width: 2400, height: 1300 }
+
+steps:
+  - wait: { until: replay-idle, timeout: 180s }
+  - click: 'pane-tab[label="CALLTRACE"]'
+  - wait: { until: call-trace.loaded, timeout: 60s }
+  - wait: { until: { at: 'call-trace/call[name="calculate_damage", arguments="(initial_shield=0x2710, remaining_shield=0x2710, mass=0x64)"]', present: true }, timeout: 60s }
+  - click: { at: 'call-trace/call[name="calculate_damage", arguments="(initial_shield=0x2710, remaining_shield=0x2710, mass=0x64)"]', anchor: name }
+    settle: false
+  - wait: { until: { at: 'editor[file="shield.nr"]', current-line: 22 }, timeout: 60s }
+  - wait: { until: replay-idle, timeout: 60s }
+  - expect: { at: 'editor[file="shield.nr"]', active: true }
+  - wait: { until: { at: 'editor[file="shield.nr"]/flow-value[line="27", name="damage"]', present: true }, timeout: 60s }
+  - click: 'toolbar/toolbar-button[label="next-image"]'
+    settle: false
+  - wait: { until: { at: 'editor[file="shield.nr"]', current-line: { gt: 22 } }, timeout: 60s }
+  - wait: { until: replay-idle, timeout: 60s }
+  - click: 'toolbar/toolbar-button[label="reverse-next-image"]'
+    settle: false
+  - wait: { until: { at: 'editor[file="shield.nr"]', current-line: 22 }, timeout: 60s }

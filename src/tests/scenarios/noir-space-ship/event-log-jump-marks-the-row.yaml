@@ -1,0 +1,30 @@
+scenario: 1
+name: noir-space-ship/event-log-jump-marks-the-row
+pack: codetracer
+summary: >-
+  Clicking an event-log row jumps to it and marks that row as the event the
+  replay is at — the first row on screen, a middle one and the last one.
+
+stage:
+  - use: record-program
+    with: { program: noir_space_ship }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 180s }
+  - click: 'pane-tab[label="EVENT LOG"]'
+  - wait: { until: event-log.loaded, timeout: 60s }
+  - wait: { until: settled, timeout: 30s }
+  - click: 'event-log/event[text="stdout: Positive Test Case"]'
+    settle: false
+  - wait: { until: { at: 'event-log/event[text="stdout: Positive Test Case"]', current: true }, timeout: 60s }
+  - wait: { until: replay-idle, timeout: 60s }
+  - click: 'event-log/event[text="stdout: Shield status 100% 10000"]'
+    settle: false
+  - wait: { until: { at: 'event-log/event[text="stdout: Shield status 100% 10000"]', current: true }, timeout: 60s }
+  - expect: { at: 'event-log/event[text="stdout: Positive Test Case"]', current: false }
+  - wait: { until: replay-idle, timeout: 60s }
+  - click: 'event-log/event[text="stdout: Shield status 80% 8000"]'
+    settle: false
+  - wait: { until: { at: 'event-log/event[text="stdout: Shield status 80% 8000"]', current: true }, timeout: 60s }
+  - expect: { at: 'event-log/event[text="stdout: Shield status 100% 10000"]', current: false }

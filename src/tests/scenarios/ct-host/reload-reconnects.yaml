@@ -1,0 +1,24 @@
+scenario: 1
+name: ct-host/reload-reconnects
+pack: codetracer
+summary: >-
+  Reloading a `ct host` page in the browser brings the layout back with the
+  event log populated again: the page reconnects to its session.
+
+stage:
+  - use: record-program
+    with: { program: noir_space_ship }
+  - use: open-recording
+    with: { deployment: web }
+
+steps:
+  - wait: { until: call-trace.loaded, timeout: 360s }
+  - click: 'pane-tab[label="EVENT LOG"]'
+  - wait: { until: event-log.loaded, timeout: 60s }
+  - expect: { at: event-log, assert: 'has-output("Positive Test Case")' }
+  - reload: main
+  - wait: { until: call-trace.loaded, timeout: 360s }
+  - wait: { until: { at: 'pane-tab[label="EVENT LOG"]', present: true }, timeout: 60s }
+  - click: 'pane-tab[label="EVENT LOG"]'
+  - wait: { until: event-log.loaded, timeout: 120s }
+  - expect: { at: event-log, assert: 'has-output("Positive Test Case")' }

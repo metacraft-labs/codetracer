@@ -1,0 +1,27 @@
+scenario: 1
+name: noir-space-ship/enter-chooses-the-highlighted-row
+pack: codetracer
+summary: >-
+  In an expanded call's context menu, Enter with no row highlighted chooses
+  nothing; Down then Enter chooses Collapse Call Children, which closes the
+  menu and collapses the call.
+
+stage:
+  - use: record-program
+    with: { program: noir_space_ship }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 180s }
+  - click: 'pane-tab[label="CALLTRACE"]'
+  - wait: { until: call-trace.loaded, timeout: 60s }
+  - wait: { until: { at: 'call-trace/call[name="main"]', expanded: true }, timeout: 60s }
+  - click: { at: 'call-trace/call[name="main"]', anchor: name, button: right }
+  - wait: { until: { at: context-menu, present: true }, timeout: 30s }
+  - key: Enter
+  - expect: { at: context-menu, present: true }
+  - key: Down
+  - expect: { at: context-menu, assert: 'highlights("Collapse Call Children")' }
+  - key: Enter
+  - wait: { until: { at: context-menu, absent: true }, timeout: 10s }
+  - wait: { until: { at: 'call-trace/call[name="main"]', expanded: false }, timeout: 30s }

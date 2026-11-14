@@ -46,6 +46,7 @@ type
     flags*: seq[string]     ## extra command-line options (`front-end-options`)
     welcome*: bool          ## start on the welcome screen (nothing open)
     fromInside*: bool       ## Edit mode started as `ct edit .` from the project folder
+    extra*: seq[string]     ## more recordings the front-end knows of (its recent traces)
     env*: OrderedTable[string, string]
 
   StageState* = ref object
@@ -1169,6 +1170,12 @@ proc runStage*(s: StageState; use: string; args: JsonNode) =
     s.portableRecording(argStr(args, "platform"))
   of "beam-recording":
     s.beamRecording(argStr(args, "language"))
+  # --- pw6 ---
+  of "add-recording":
+    # A further recording, made the way `record-program` makes one, that the
+    # front-end lists among its recent traces (it is imported into this run's
+    # trace store before the front-end starts) without opening it.
+    s.launch.extra.add s.recordProgram(argStr(args, "program"), argStr(args, "backend"))
   else:
     raise newException(KeyError, "the CodeTracer pack has no stage '" & use & "'")
 
@@ -1182,7 +1189,7 @@ proc toJson*(s: StageState): JsonNode =
      "height": s.launch.height, "tick": s.launch.tick, "keymap": s.launch.keymap,
      "review": s.launch.review, "flags": s.launch.flags, "welcome": s.launch.welcome,
      "fromInside": s.launch.fromInside,
-     "env": env}
+     "extra": s.launch.extra, "env": env}
 
 proc removeStage*(s: StageState) =
   ## The run's scratch root, removed when the run ends.
@@ -1211,4 +1218,5 @@ proc loadFrom*(path: string): StageState =
   result.launch.fromInside = j{"fromInside"}.getBool
   for k, v in j["env"]: result.launch.env[k] = v.getStr
   for f in j{"flags"}.getElems: result.launch.flags.add f.getStr
+  for f in j{"extra"}.getElems: result.launch.extra.add f.getStr
   for u in j{"stagesRun"}.getElems: result.stagesRun.add u.getStr

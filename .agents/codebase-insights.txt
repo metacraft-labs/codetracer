@@ -8572,3 +8572,13 @@ ONE ROUTER ON EVERY FRONT-END (2026-10-12, PLAT-68 Phase B).
 - Pushes to `agents` start no codetracer.yml run at all (push triggers: main, dev, stable,
   cloud); only workflow_dispatch exercises it there (codetracer-pm
   issues/2026-09-30-agents-branch-has-no-ci.md).
+
+## Desktop scenarios: space ship, tabs, languages (pw6, 2026-11-14)
+- Every session tab keeps its own pane components in one document (`session-container-<n>`); a document-wide `querySelector("div[id^='calltraceComponent']")` returns tab 0's hidden one. The Playwright binding reads the call trace, event log, state and files panes from the component that is visible.
+- The noir_space_ship event log's rows read `stdout: <text>`; only ~13 rows are inside the scroll body at 1600x1000, and a click aimed at a row outside it lands elsewhere — pick rows the body shows.
+- The default layout's editor column is narrow: flow values beside long lines are drawn past its right edge (the pw3 reader marks them not `shown`). Maximise the editor's stack from its tab's context menu ("Maximise container", then "Minimise container") to reach them.
+- A loop's iteration control is drawn in a view zone ABOVE its header line, not on it; the field is the `loop-control` role's `field` anchor.
+- The call-trace search's result box shows ~3 rows; results below need scrolling.
+- Language recordings (Circom, Leo, Cadence, Aiken, Cairo, Miden) stop at the function's first line with no variables; step once before reading the state pane. The Cairo recorder needs `CAIRO_CORELIB_DIR` = a corelib/src matching its cairo-lang (2.17.0-rc.4 at codetracer-cairo-recorder 34c0511).
+- `add-recording` (stage) imports a further recording into the run's trace store before the window starts, so the welcome screen's Recent traces list it — the user's way to open a second recording in a "+" tab.
+

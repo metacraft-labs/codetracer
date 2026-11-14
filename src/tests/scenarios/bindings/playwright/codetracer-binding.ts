@@ -286,6 +286,18 @@ ROLES["columns-button"].properties.push("focused");
 ROLES["column-option"].properties.push("outline");
 ROLES.line.properties.push("flow", "flow-names");
 ROLES["pane-tab"].properties.push("stack");
+// --- pw6 ---
+ROLES.variable.properties.push("history");
+ROLES["menu-item"].properties.push("highlighted");
+ROLES.problem.properties.push("selected");
+ROLES["flow-value"].properties.push("iteration");
+ROLES["loop-control"].properties.push("focused");
+ROLES["loop-control"].affordances.push("text-entry", "focusable");
+Object.assign(ROLES, {
+  breakpoints: { affordances: [], properties: ["count", "locations"] },
+  point: { affordances: ["click", "context-click"], properties: ["location", "kind", "enabled"] },
+  "call-argument": { affordances: ["click", "context-click"], properties: ["name", "value"] },
+});
 
 // --- the surface: one read of the DOM ------------------------------------------
 
@@ -457,7 +469,7 @@ function readSurface(): any {
   // The files pane: its tree's nodes (jstree anchors), and whether it shows
   // its loading overlay instead of a tree.
   function readFilesystem(root: any): void {
-    const comp = document.querySelector("div[id^='filesystemComponent']") as HTMLElement | null;
+    const comp = (Array.from(document.querySelectorAll("div[id^='filesystemComponent']")).find((e) => vis(e)) ?? null) as HTMLElement | null;
     if (!comp || !vis(comp)) return;
     const overlay = comp.querySelector(".filesystem-loading-overlay");
     const tree = comp.querySelector(".filesystem");
@@ -659,7 +671,9 @@ function readSurface(): any {
   }
 
   // call trace
-  const ctComp = document.querySelector("div[id^='calltraceComponent']") as HTMLElement | null;
+  // (every session tab has its own pane components: the shown tab's are the
+  // ones on screen, here and for the event log, the state and files panes)
+  const ctComp = (Array.from(document.querySelectorAll("div[id^='calltraceComponent']")).find((e) => vis(e)) ?? null) as HTMLElement | null;
   if (ctComp && vis(ctComp)) {
     const rowsEl = Array.from(ctComp.querySelectorAll(".calltrace-call-line")) as HTMLElement[];
     const ct = node("call-trace", ctComp, { count: rowsEl.length, focused: within(ctComp) });
@@ -698,7 +712,7 @@ function readSurface(): any {
   }
 
   // event log
-  const elComp = document.querySelector("div[id^='eventLogComponent']") as HTMLElement | null;
+  const elComp = (Array.from(document.querySelectorAll("div[id^='eventLogComponent']")).find((e) => vis(e)) ?? null) as HTMLElement | null;
   if (elComp && vis(elComp)) {
     const rowsEl = Array.from(elComp.querySelectorAll(".eventLog-dense-table tbody tr")) as HTMLElement[];
     const footer = text(elComp.querySelector(".data-tables-footer-info"));
@@ -720,7 +734,7 @@ function readSurface(): any {
   }
 
   // variables (the state pane)
-  const stComp = document.querySelector("div[id^='stateComponent']") as HTMLElement | null;
+  const stComp = (Array.from(document.querySelectorAll("div[id^='stateComponent']")).find((e) => vis(e)) ?? null) as HTMLElement | null;
   if (stComp && vis(stComp)) {
     const rowsEl = Array.from(stComp.querySelectorAll("[data-variable-name]")) as HTMLElement[];
     const vs = node("variables", stComp, { count: rowsEl.length, focused: within(stComp) });
@@ -1347,7 +1361,7 @@ function readSurfacePw8(root: any): void {
   }
 
   // the State pane's watch input, and whether the pane draws a tab strip
-  const stc = document.querySelector("div[id^='stateComponent']") as HTMLElement | null;
+  const stc = (Array.from(document.querySelectorAll("div[id^='stateComponent']")).find((e) => vis(e)) ?? null) as HTMLElement | null;
   if (vs && stc) {
     vs.props["tab-strip"] = !!stc.querySelector(".state-tabs");
     const wi = stc.querySelector("input[id^='watch-'], textarea[id^='watch-']") as HTMLInputElement | null;
@@ -1805,7 +1819,7 @@ function readSurfacePw3(root: any): void {
   // drawn rows and their dimming, the rows inside the scroll body, the
   // Filter button and list, the scrubber.
   const el = find("event-log");
-  const elComp = document.querySelector("div[id^='eventLogComponent']") as HTMLElement | null;
+  const elComp = (Array.from(document.querySelectorAll("div[id^='eventLogComponent']")).find((e) => vis(e)) ?? null) as HTMLElement | null;
   if (el && elComp) {
     const footer = elComp.querySelector(".data-tables-footer");
     const input = footer?.querySelector(".data-tables-footer-input") as HTMLInputElement | null;
@@ -1902,7 +1916,7 @@ function readSurfacePw3(root: any): void {
   // The Files pane: each node's depth, the name field of a Create or Rename
   // (a `text-field` labelled `name`), and its refusal.
   const fsn = find("filesystem");
-  const fsComp = document.querySelector("div[id^='filesystemComponent']") as HTMLElement | null;
+  const fsComp = (Array.from(document.querySelectorAll("div[id^='filesystemComponent']")).find((e) => vis(e)) ?? null) as HTMLElement | null;
   if (fsn && fsComp) {
     for (const fn of fsn.children) {
       if (fn.role !== "file-node") continue;
@@ -1966,6 +1980,8 @@ function readSurfacePw3(root: any): void {
             clipped: cs.textOverflow === "ellipsis" && cs.whiteSpace === "nowrap" && cs.overflowX === "hidden",
             "single-line": pill.getBoundingClientRect().height <= lh * 1.6,
             cap: b.style.maxWidth ?? "",
+            // pw6: the loop iteration it is from
+            iteration: b.getAttribute("iteration") === null ? -1 : parseInt(b.getAttribute("iteration") ?? "", 10),
           }, [["name", name], ["side", side], ["line", String(lineNo)]]);
           // on screen: inside the editor's code area, not scrolled off it
           const cr = (comp.querySelector(".monaco-scrollable-element.editor-scrollable") ?? comp).getBoundingClientRect();
@@ -1996,7 +2012,13 @@ function readSurfacePw3(root: any): void {
       const n = node("loop-control", lc, {
         iteration: num(field?.value), total: num(text(lc.querySelector(".flow-parallel-loop-iteration-end"))),
         "slider-width": base ? Math.round(base.getBoundingClientRect().width) : 0,
+        // pw6: the keyboard is in its iteration field
+        focused: !!field && document.activeElement === field,
       });
+      if (field && vis(field)) {
+        const r = field.getBoundingClientRect();
+        pts.field = { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+      }
       n.anchors = { points: pts };
       ed.children.push(n);
     }
@@ -2362,6 +2384,155 @@ function readSurfacePw7(root: any): void {
   if (et) root.children.push(node("edit-toolbar-strip", et, { shown: vis(et) }));
 }
 
+// --- pw6: the Breakpoints & Tracepoints pane, a variable's value history, a
+// call's arguments, the session tabs' close buttons, the keyboard's row of a
+// context menu, the PROBLEMS row's highlight, the event the replay jumped to ---
+//
+// Runs IN THE PAGE, after `readSurfacePw1`, on the same tree. Reads only.
+function readSurfacePw6(root: any): void {
+  const vis = (el: Element | null): boolean => {
+    if (!el) return false;
+    const r = (el as HTMLElement).getBoundingClientRect();
+    if (r.width <= 0 || r.height <= 0) return false;
+    const cs = getComputedStyle(el as HTMLElement);
+    return cs.visibility !== "hidden" && cs.display !== "none";
+  };
+  const text = (el: Element | null | undefined) => ((el?.textContent ?? "").replace(/\s+/g, " ").trim());
+  const node = (role: string, el: Element | null, props: Record<string, unknown>,
+                keys: Array<[string, string]> = []): any => {
+    const r = el ? (el as HTMLElement).getBoundingClientRect() : { left: 0, top: 0, width: 0, height: 0 };
+    return { role, keys, props, x: r.left, y: r.top, w: r.width, h: r.height,
+             visible: el ? vis(el) : false, children: [] as any[] };
+  };
+  const centre = (el: Element) => {
+    const r = (el as HTMLElement).getBoundingClientRect();
+    return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+  };
+  // A location as a reader names it: the file's base name and the line.
+  const shortLocation = (loc: string) => {
+    const m = /^(.*?)(?::(\d+))?$/.exec(loc.trim());
+    const file = (m?.[1] ?? loc).split("/").pop() ?? "";
+    return m?.[2] ? `${file}:${m[2]}` : file;
+  };
+
+  // each session tab's close button
+  const strip = root.children.find((c: any) => c.role === "session-strip");
+  if (strip) {
+    const tabs = Array.from(document.querySelectorAll("#session-tab-bar .session-tab")) as HTMLElement[];
+    for (const t of strip.children.filter((c: any) => c.role === "session-tab")) {
+      const el = tabs.find((e) => {
+        const b = e.getBoundingClientRect();
+        return Math.abs(b.left - t.x) < 1 && Math.abs(b.top - t.y) < 1;
+      });
+      const c = el?.querySelector(".session-tab-close") as HTMLElement | null;
+      if (c && vis(c)) t.anchors = { ...(t.anchors ?? {}), points: { ...(t.anchors?.points ?? {}), close: centre(c) } };
+    }
+  }
+
+  // the Breakpoints & Tracepoints pane (`isonim_point_list_view.nim`)
+  const pl = (Array.from(document.querySelectorAll(".point-list-component")) as HTMLElement[]).find((e) => vis(e));
+  if (pl && !root.children.some((c: any) => c.role === "breakpoints")) {
+    const rows = (Array.from(pl.querySelectorAll(".point-list-row")) as HTMLElement[]).filter((r) => vis(r));
+    const bp = node("breakpoints", pl, { count: rows.length, locations: [] as string[] });
+    for (const r of rows) {
+      const location = shortLocation(text(r.querySelector(".point-list-location")));
+      const kind = text(r.querySelector(".point-list-kind")).toLowerCase().includes("trace") ? "tracepoint" : "breakpoint";
+      bp.props.locations.push(location);
+      bp.children.push(node("point", r, { location, kind, enabled: !r.classList.contains("disabled") },
+                            [["location", location]]));
+    }
+    root.children.push(bp);
+  }
+
+  // a variable's value history: the toggle beside its value, and the rows it
+  // opened (`isonim_state_view.nim`: `.ct-history-inline-row`, its tick and
+  // its value)
+  const vars = root.children.find((c: any) => c.role === "variables");
+  if (vars) {
+    const stComp = (Array.from(document.querySelectorAll("div[id^='stateComponent']")).find((e) => vis(e)) ?? null);
+    for (const v of vars.children) {
+      const row = (Array.from(stComp?.querySelectorAll(`[data-variable-name]`) ?? []) as HTMLElement[])
+        .find((r) => r.getAttribute("data-variable-name") === v.props.name && vis(r));
+      if (!row) continue;
+      const toggle = row.querySelector(".value-history-button") as HTMLElement | null;
+      const history = (Array.from(row.querySelectorAll(".ct-history-inline-row")) as HTMLElement[])
+        .filter((h) => vis(h))
+        .map((h) => `${text(h.querySelector(".history-location"))} ${text(h.querySelector(".history-value"))}`.trim());
+      v.props.history = history;
+      if (toggle) v.anchors = { ...(v.anchors ?? {}), points: { ...(v.anchors?.points ?? {}), history: centre(toggle) } };
+    }
+  }
+
+  // the event log's selected row is the event the replay jumped to
+  // (`eventLog-selected` / `event-selected`, as the event-log page object
+  // reads it)
+  const el = root.children.find((c: any) => c.role === "event-log");
+  if (el) {
+    const rows = Array.from(document.querySelectorAll("div[id^='eventLogComponent'] .eventLog-dense-table tbody tr")) as HTMLElement[];
+    for (const ev of el.children.filter((c: any) => c.role === "event")) {
+      const r = rows.find((e) => {
+        const b = e.getBoundingClientRect();
+        return Math.abs(b.left - ev.x) < 1 && Math.abs(b.top - ev.y) < 1;
+      });
+      if (r && /(^|\s)(eventLog-selected|event-selected|selected)(\s|$)/.test(r.className)) ev.props.current = true;
+    }
+  }
+
+  // the PROBLEMS row the panel highlights (`problems-row-selected`)
+  const pp = root.children.find((c: any) => c.role === "problems-panel");
+  if (pp) {
+    const rows = Array.from(document.querySelectorAll(".problems-panel .problems-row")) as HTMLElement[];
+    for (const pr of pp.children.filter((c: any) => c.role === "problem")) {
+      const r = rows.find((e) => {
+        const b = e.getBoundingClientRect();
+        return Math.abs(b.left - pr.x) < 1 && Math.abs(b.top - pr.y) < 1;
+      });
+      pr.props.selected = !!r && r.classList.contains("problems-row-selected");
+      if (pr.props.location && !pr.keys.some((k: any) => k[0] === "location")) pr.keys.push(["location", pr.props.location]);
+    }
+  }
+
+  // the open context menu's keyboard row (`.ct-menu-item--active`)
+  const cm = root.children.find((c: any) => c.role === "context-menu");
+  if (cm) {
+    for (const it of cm.children) {
+      const el = (Array.from(document.querySelectorAll(".vakata-context li, #context-menu-container .context-menu-item, #context-menu-container li")) as HTMLElement[])
+        .find((e) => {
+          const r = e.getBoundingClientRect();
+          return Math.abs(r.left - it.x) < 1 && Math.abs(r.top - it.y) < 1;
+        });
+      it.props.highlighted = !!el && (el.classList.contains("ct-menu-item--active") || el.classList.contains("vakata-context-hover"));
+    }
+  }
+
+  // a call's arguments (`.call-args .call-arg`): the name and the value drawn
+  const ctComp = (Array.from(document.querySelectorAll("div[id^='calltraceComponent']")).find((e) => vis(e)) ?? null);
+  const ct = root.children.find((c: any) => c.role === "call-trace");
+  if (ct && ctComp) {
+    const lines = Array.from(ctComp.querySelectorAll(".calltrace-call-line")) as HTMLElement[];
+    for (const call of ct.children) {
+      const r = lines.find((l) => {
+        const b = l.getBoundingClientRect();
+        return Math.abs(b.left - call.x) < 1 && Math.abs(b.top - call.y) < 1;
+      });
+      if (!r) continue;
+      // the pack keys a call by its name and its arguments, as drawn: two
+      // calls of one function are told apart by what they were passed
+      if (call.props.arguments && !call.keys.some((k: any) => k[0] === "arguments")) {
+        call.keys.push(["arguments", call.props.arguments]);
+      }
+      for (const a of Array.from(r.querySelectorAll(".call-args .call-arg")) as HTMLElement[]) {
+        if (!vis(a)) continue;
+        const name = text(a.querySelector(".call-arg-name")).replace(/[=:]\s*$/, "");
+        call.children.push(node("call-argument", a, { name, value: text(a.querySelector(".call-arg-text")) },
+                                [["name", name]]));
+      }
+    }
+  }
+
+
+}
+
 // The readers that extend `readSurface`'s tree, run in the same page
 // evaluation (one read of the DOM).
 // --- pw4: the program menu, the layout's shape, tracepoint editors, the Call
@@ -2664,10 +2835,10 @@ function readSurfacePw4(root: any): void {
       }, [["column", "#"]], { anchors: { points: g ? { separator: centre(g) } : {} } }));
     }
   }
-  tablePane("call-trace", document.querySelector("div[id^='calltraceComponent']"),
+  tablePane("call-trace", (Array.from(document.querySelectorAll("div[id^='calltraceComponent']")).find((e) => vis(e)) ?? null),
     document.querySelector(".local-calltrace-view") as HTMLElement | null,
     document.querySelector(".local-calltrace-view"));
-  tablePane("variables", document.querySelector("div[id^='stateComponent']"),
+  tablePane("variables", (Array.from(document.querySelectorAll("div[id^='stateComponent']")).find((e) => vis(e)) ?? null),
     document.querySelector(".isonim-state .value-components-container") as HTMLElement | null, null);
 
   // a cut cell's tooltip and a row's detail
@@ -2976,7 +3147,7 @@ function readSurfacePw5(root: any): void {
   }
 }
 
-const SURFACE_EXTENSIONS: Array<(root: any) => void> = [readSurfacePw1, readSurfacePw3, readSurfacePw4, readSurfacePw8, readSurfacePw7, readSurfacePw5Review, readSurfacePw5];
+const SURFACE_EXTENSIONS: Array<(root: any) => void> = [readSurfacePw1, readSurfacePw3, readSurfacePw4, readSurfacePw8, readSurfacePw7, readSurfacePw5Review, readSurfacePw5, readSurfacePw6];
 
 // --- the binding ----------------------------------------------------------------
 
@@ -3015,6 +3186,17 @@ async function launchElectron(ctx: Ctx, launch: any): Promise<void> {
   ctx.state.appEnv = env;
   ctx.state.launch = launch;
   const args: string[] = [];
+  // pw6: the further recordings the stage made (`add-recording`), imported
+  // into this run's trace store the way `ct host --trace-path` imports one,
+  // so the window lists them among its recent traces
+  for (const extra of launch.extra ?? []) {
+    const r = spawnSync(ctBin, ["host", "--trace-path", extra, "0", "--port=0",
+      "--idle-timeout=1ms", "--backend-socket-port=0", "--frontend-socket=0"],
+      { cwd: srcDir, env, encoding: "utf-8", timeout: 60_000 });
+    if (!/imported as trace id/.test(`${r.stdout}\n${r.stderr}`)) {
+      throw new Error(`ct host did not import ${extra}: ${r.stderr || r.stdout}`);
+    }
+  }
   if (launch.recording) {
     // the recording folder, imported the way `ct host --trace-path` imports one
     const r = spawnSync(ctBin, ["host", "--trace-path", launch.recording, "0", "--port=0",

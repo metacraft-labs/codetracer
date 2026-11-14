@@ -1,0 +1,24 @@
+scenario: 1
+name: languages/move-column-breakpoint
+pack: codetracer
+summary: >-
+  In a Move recording, a click at line 18, column 28 then Shift+F9 sets a
+  column breakpoint there (its marker drawn at that column), and Continue from the
+  entry stops on line 18.
+
+stage:
+  - use: record-program
+    with: { program: move_example/sources/flow_test.move }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 180s }
+  - wait: { until: { at: 'editor[file="flow_test.move"]/line[number="18"]', present: true }, timeout: 60s }
+  - click: { at: 'editor[file="flow_test.move"]/line[number="18"]', anchor: caret(28) }
+  - chord: Shift+F9
+  - wait: { until: { at: 'editor[file="flow_test.move"]/line[number="18"]', inline-breakpoints: ["28"] }, timeout: 30s }
+  - click: 'toolbar/toolbar-button[label="continue-image"]'
+    settle: false
+  - wait: { until: { at: 'editor[file="flow_test.move"]', current-line: 18 }, timeout: 60s }
+  - wait: { until: replay-idle, timeout: 60s }
+  - expect: { at: status-line, location: { matches: "flow_test.move:18#" } }

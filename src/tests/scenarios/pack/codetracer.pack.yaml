@@ -142,6 +142,8 @@ roles:
     keys: [title]
     properties: { title: text, active: bool }
     affordances: [click, context-click]
+    # pw6: `close`: the tab's close button (a strip of two or more tabs).
+    anchors: [close]
 
   # A pane's tab in the layout (Editor, Call Trace, Event Log, …): what a user
   # clicks to bring a pane forward.
@@ -296,9 +298,16 @@ roles:
       depth: int
       # The call's arguments as drawn (`a=1, b=2`).
       arguments: text
+    children: { call-argument: many }
     affordances: [click, double-click, context-click]
     # `name`: the call's name, where a click activates it.
     anchors: [expander, name]
+
+  # pw6: one argument of a call, as the call trace draws it.
+  call-argument:
+    keys: [name]
+    properties: { name: text, value: text }
+    affordances: [click, context-click]
 
   # The event log: the recording's output and events, in order.
   event-log:
@@ -409,19 +418,25 @@ roles:
       watch: bool
       invalid: bool
       text: text
+      # pw6: the value history opened under it, one row per value it held
+      # (`<tick> <value>`).
+      history: lines
     # pw8: the chain the row expands under itself.
     children: { origin-chain: optional }
     affordances: [click, double-click, context-click]
-    # `name`: the variable's name; `value`: its value cell.
-    anchors: [expander, name, value]
+    # `name`: the variable's name; `value`: its value cell; `history`: its
+    # value-history toggle.
+    anchors: [expander, name, value, history]
 
   # The breakpoints and tracepoints list.
   breakpoints:
-    properties: { count: int }
+    # pw6: `locations`: every row's location (`shield.nr:26`), in order.
+    properties: { count: int, locations: lines }
     children: { point: many }
 
   point:
     keys: [location]
+    # `location`: the file's base name and the line (`shield.nr:26`).
     properties: { location: text, kind: "enum{breakpoint,tracepoint}", enabled: bool }
     affordances: [click, context-click]
 
@@ -521,12 +536,16 @@ roles:
       disabled-rows-say-why: "every menu-item: menu-item.enabled or menu-item.hint != \"\""
       # No row prints an HTML entity instead of the character.
       no-raw-entities: "none menu-item: menu-item.label matches \"&(lt|gt|amp);\" or menu-item.hint matches \"&(lt|gt|amp);\""
+      # pw6: exactly one row, this one; the keyboard's row is this one / none.
+      offers-only(a): "count == 1 and some menu-item: menu-item.label == a"
+      highlights(label): "some menu-item: menu-item.label == label and menu-item.highlighted"
+      highlights-none: "none menu-item: menu-item.highlighted"
 
   menu-item:
     keys: [label]
     # `hint`: the row's second column — a hint, or why a disabled row is
-    # disabled.
-    properties: { label: text, enabled: bool, shortcut: text, hint: text }
+    # disabled. pw6: `highlighted`: the keyboard's row.
+    properties: { label: text, enabled: bool, shortcut: text, hint: text, highlighted: bool }
     affordances: [click]
 
   # The application menu (the desktop's in-window menu, the terminal's and
@@ -870,10 +889,14 @@ roles:
     children: { problem: many, panel-button: many }
     assertions:
       has-problem-at(path, location, severity): "some problem: problem.path contains path and problem.location contains location and problem.severity == severity"
+      # pw6: the highlighted row is exactly the one at this place.
+      highlights-only(path, location): "(some problem: problem.selected and problem.path contains path and problem.location contains location) and (every problem: not problem.selected or problem.location contains location)"
 
   problem:
-    keys: [message]
-    properties: { message: text, path: text, location: text, severity: "enum{error,warning,info}" }
+    # pw6: a message two rows share is told apart by where it is;
+    # `selected`: the row the panel highlights.
+    keys: [message, location]
+    properties: { message: text, path: text, location: text, severity: "enum{error,warning,info}", selected: bool }
     affordances: [click]
 
   # Find in Files.
@@ -1256,16 +1279,20 @@ roles:
       cap: text
       # It is on screen, inside the editor's code area (not scrolled off it).
       shown: bool
-    affordances: [click]
+      # pw6: the loop iteration the value is from (-1 outside a loop).
+      iteration: int
+    affordances: [click, context-click]
     # `eye`: the chip's "view more" button.
     anchors: [eye]
 
   # A loop header's control in the flow: the iteration shown, of how many,
   # and its slider's width.
   loop-control:
-    properties: { iteration: int, total: int, slider-width: number }
-    affordances: [click]
-    anchors: [forward, backward]
+    # pw6: `focused`: the keyboard is in its iteration field.
+    properties: { iteration: int, total: int, slider-width: number, focused: bool }
+    affordances: [click, text-entry, focusable]
+    # pw6: `field`: the iteration field ("iteration [N] from M").
+    anchors: [forward, backward, field]
 
   # The Video Player pane of a visual recording.
   video-player:
@@ -2068,6 +2095,14 @@ stages:
       platform the arm is for, and an `edit` the Apply Edit command applies.
       Fails naming the missing prerequisite.
     params: { platform: text, edit: text, arm: text }
+
+  # --- pw6 ---
+  add-recording:
+    summary: >-
+      Record another program (as `record-program` does) that the front-end
+      lists among its recent traces when it starts, without opening it: what
+      a user who recorded it earlier finds on the welcome screen.
+    params: { program: text, backend: text }
 
 # Changes outside the application during a run (an `act:` step).
 actions:

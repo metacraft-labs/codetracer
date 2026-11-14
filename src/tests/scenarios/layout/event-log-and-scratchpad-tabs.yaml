@@ -1,0 +1,28 @@
+scenario: 1
+name: layout/event-log-and-scratchpad-tabs
+pack: codetracer
+summary: >-
+  Clicking the Event Log's tab brings it forward with the recording's
+  events, the Scratchpad's tab brings the scratchpad forward, and the Event
+  Log's tab brings the events back.
+
+stage:
+  - use: record-program
+    with: { program: noir_space_ship }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 180s }
+  - wait: { until: { at: 'pane-tab[label="EVENT LOG"]', present: true }, timeout: 60s }
+  - wait: { until: settled, timeout: 30s }
+  - click: 'pane-tab[label="EVENT LOG"]'
+  - wait: { until: event-log.loaded, timeout: 60s }
+  - expect: { at: 'pane-tab[label="EVENT LOG"]', active: true }
+  - expect: { at: event-log, assert: 'has-output("Damage:")' }
+  - click: 'pane-tab[label="SCRATCHPAD"]'
+  - wait: { until: { at: scratchpad, present: true }, timeout: 30s }
+  - expect: { at: 'pane-tab[label="SCRATCHPAD"]', active: true }
+  - click: 'pane-tab[label="EVENT LOG"]'
+  - wait: { until: event-log.loaded, timeout: 60s }
+  - expect: { at: 'pane-tab[label="EVENT LOG"]', active: true }
+  - expect: { at: event-log, assert: 'has-output("Damage:")' }

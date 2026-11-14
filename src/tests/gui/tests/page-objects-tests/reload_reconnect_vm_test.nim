@@ -1,9 +1,9 @@
 ## reload_reconnect_vm_test.nim
 ##
 ## Headless contract companion for:
-##   page-objects-tests/reload_reconnect.spec.ts
+##   src/tests/scenarios/ct-host/reload-reconnects.yaml
 ##
-## The browser test exercises a host/Electron reload boundary: `ct host`
+## The browser scenario exercises a host/Electron reload boundary: `ct host`
 ## must replay the one-shot `ct/complete-move` DAP event to a freshly
 ## reconnected browser client so editor_service.onCompleteMove can reopen
 ## the source tab.  That cache/replay state is owned by the host bootstrap

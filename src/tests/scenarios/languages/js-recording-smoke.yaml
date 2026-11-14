@@ -1,0 +1,35 @@
+scenario: 1
+name: languages/js-recording-smoke
+pack: codetracer
+summary: >-
+  A JavaScript recording opens at its entry in flow_test.js, with its events in the
+  event log, its locals in the state pane and the compute call in the call trace;
+  Continue and Next move the replay.
+
+stage:
+  - use: record-program
+    with: { program: js_flow_test/flow_test.js }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 180s }
+  - expect: { at: window, title: { contains: CodeTracer } }
+  - wait: { until: { at: status-line, location: { matches: "flow_test.js:[0-9]+#" } }, timeout: 60s }
+  - wait: { until: { at: 'editor[file="flow_test.js"]', present: true }, timeout: 60s }
+  - click: 'pane-tab[label="EVENT LOG"]'
+  - wait: { until: event-log.loaded, timeout: 60s }
+  - click: 'pane-tab[label="CALLTRACE"]'
+  - wait: { until: call-trace.loaded, timeout: 60s }
+  - wait: { until: { at: 'call-trace/call[name="compute"]', present: true }, timeout: 60s }
+  - click: { at: 'call-trace/call[name="compute"]', anchor: name }
+    settle: false
+  - wait: { until: replay-idle, timeout: 60s }
+  - click: 'toolbar/toolbar-button[label="next-image"]'
+    settle: false
+  - wait: { until: replay-idle, timeout: 60s }
+  - wait: { until: variables.loaded, timeout: 60s }
+  - expect: { at: status-line, location: { matches: "flow_test.js:[0-9]+#" } }
+  - click: 'toolbar/toolbar-button[label="continue-image"]'
+    settle: false
+  - wait: { until: replay-idle, timeout: 60s }
+  - expect: { at: status-line, location: { matches: "flow_test.js:[0-9]+#" } }

@@ -319,7 +319,7 @@ test.describe("MCR visual replay real recording GUI integration", () => {
     // Space / K toggles play; the rate badge flips from "Paused" to a
     // direction arrow and back.  The action hook is the canonical
     // invocation point: it bypasses focus scoping (which is tested in
-    // ``video-player-keyboard-focus-scope.spec.ts``).
+    // the scenario ``src/tests/scenarios/visual-replay/keyboard-focus-scope.yaml``).
     //
     // Earlier in the spec, the pixel-history source-jump path
     // dispatched ``ct/seek-to-geid`` and the resulting

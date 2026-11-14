@@ -23,47 +23,6 @@ test.describe("ProgramAgnostic", () => {
   test.setTimeout(90_000);
   test.use({ sourcePath: "noir_space_ship/", launchMode: "trace" });
 
-  test("view menu opens event log and scratchpad", async ({ ctPage }) => {
-    const layout = new LayoutPage(ctPage);
-    await layout.waitForAllComponentsLoaded();
-    await layout.waitForTraceLoaded();
-
-    // Verify Event Log component exists
-    const eventLogs = await layout.eventLogTabs(true);
-    expect(eventLogs.length).toBeGreaterThan(0);
-    const eventLog = eventLogs[0];
-
-    // Click on Event Log tab button to ensure it's selected. Use the
-    // layered `clickTab()` helper (TabObject.clickTab) so we tolerate
-    // the Xvfb "outside of the viewport" rejection — GoldenLayout tab
-    // titles are positioned beyond Playwright's perceived viewport in
-    // headless runs even when they are physically visible.
-    await eventLog.clickTab();
-    expect(await eventLog.isVisible()).toBe(true);
-
-    // Verify Event Log has loaded content (not just an empty container)
-    await retry(async () => {
-      const rows = await eventLog.root
-        .locator("table.dataTable tbody tr")
-        .count();
-      return rows > 0;
-    });
-
-    // Verify Scratchpad component exists
-    const scratchpads = await layout.scratchpadTabs(true);
-    expect(scratchpads.length).toBeGreaterThan(0);
-    const scratchpad = scratchpads[0];
-
-    // Click on Scratchpad tab button to make it visible (layered
-    // click — same rationale as above).
-    await scratchpad.clickTab();
-    expect(await scratchpad.isVisible()).toBe(true);
-
-    // Verify we can switch back to Event Log
-    await eventLog.clickTab();
-    expect(await eventLog.isVisible()).toBe(true);
-  });
-
   // TODO(skipped): Command palette does not find "Mac Classic Theme" command.
   //   Theme switching via command palette is either not implemented or the command names differ.
   //   Hypothesis: The command palette may use different command names (e.g. "Theme: Mac Classic")

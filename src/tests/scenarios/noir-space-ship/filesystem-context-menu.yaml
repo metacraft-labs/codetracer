@@ -1,0 +1,23 @@
+scenario: 1
+name: noir-space-ship/filesystem-context-menu
+pack: codetracer
+summary: >-
+  Right-clicking main.nr in the Files tree (source folders › src) offers
+  Create, Rename, Delete and Edit.
+
+stage:
+  - use: record-program
+    with: { program: noir_space_ship }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 180s }
+  - click: 'pane-tab[label="FILES"]'
+  - wait: { until: { at: filesystem, present: true }, timeout: 60s }
+  - wait: { until: { at: 'filesystem/file-node[name="main.nr"]', present: true }, timeout: 60s }
+  - click: { at: 'filesystem/file-node[name="main.nr"]', button: right }
+  - wait: { until: { at: context-menu, present: true }, timeout: 30s }
+  - expect: { at: context-menu, assert: "offers(Create)" }
+  - expect: { at: context-menu, assert: "offers(Rename)" }
+  - expect: { at: context-menu, assert: "offers(Delete)" }
+  - expect: { at: context-menu, assert: "offers(Edit)" }

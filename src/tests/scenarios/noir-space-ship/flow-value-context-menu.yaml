@@ -1,0 +1,22 @@
+scenario: 1
+name: noir-space-ship/flow-value-context-menu
+pack: codetracer
+summary: >-
+  A flow value's context menu offers Jump to value, Add value to scratchpad
+  and Add all values to scratchpad.
+
+stage:
+  - use: record-program
+    with: { program: noir_space_ship }
+  - use: open-recording
+    with: { width: 2400, height: 1300 }
+
+steps:
+  - wait: { until: replay-idle, timeout: 180s }
+  - wait: { until: { at: 'editor[file="main.nr"]/flow-value[line="38", name="asteroid_masses_negative"]', present: true }, timeout: 60s }
+  - click: { at: 'editor[file="main.nr"]/flow-value[line="38", name="asteroid_masses_negative"]', button: right }
+  - wait: { until: { at: context-menu, present: true }, timeout: 30s }
+  - expect: { at: context-menu, count: 3 }
+  - expect: { at: context-menu, assert: 'offers("Jump to value")' }
+  - expect: { at: context-menu, assert: 'offers("Add value to scratchpad")' }
+  - expect: { at: context-menu, assert: 'offers("Add all values to scratchpad")' }

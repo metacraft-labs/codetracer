@@ -110,8 +110,7 @@ interface ScenarioOp {
  * 2026-09-21 on the `calc` recording: the first step-in advances `rrTicks`
  * 0 -> 1 and leaves `line` at 1, so "the stopped line changed" is not a
  * postcondition — it is a postcondition that is false for a step that
- * genuinely happened. `real-tab-switching.spec.ts` reads the same field for
- * the same reason, and `stepping-through-views.spec.ts` records the rule:
+ * genuinely happened. `stepping-through-views.spec.ts` records the rule:
  * *"the line may wrap back on loops, but ticks always advance forward"*.
  *
  * `ProgramState` itself, and the entry settle, live in `lib/session-settle.ts`,

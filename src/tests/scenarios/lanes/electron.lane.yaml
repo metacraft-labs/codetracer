@@ -310,4 +310,43 @@ applicable:
   - ../keymaps/plat64-input-routing.yaml
   - ../low-level-code/plat60-low-level-code.yaml
   - ../formatted-view/step-in-out.yaml
+  # --- pw6 ---
+  - ../ct-host/value-history-loads-on-a-host-page.yaml
+  - ../ct-host/flow-jump-to-value-on-a-host-page.yaml
+  - ../ct-host/reload-reconnects.yaml
+  - ../multi-replay/closing-the-first-tab-keeps-the-second.yaml
+  - ../multi-replay/load-answer-reaches-the-tab-that-asked.yaml
+  - ../multi-replay/stepping-one-tab-moves-only-it.yaml
+  - ../multi-replay/tab-switch-restores-the-first-session.yaml
+  - ../multi-replay/second-recording-in-a-new-tab.yaml
+  - ../noir-space-ship/opens-on-main-nr.yaml
+  - ../noir-space-ship/call-trace-opens-calculate-damage.yaml
+  - ../noir-space-ship/event-log-jump-marks-the-row.yaml
+  - ../noir-space-ship/step-controls-recover-from-reverse.yaml
+  - ../noir-space-ship/filesystem-context-menu.yaml
+  - ../noir-space-ship/call-trace-context-menus.yaml
+  - ../noir-space-ship/escape-closes-the-call-trace-menu.yaml
+  - ../noir-space-ship/context-menu-keys-walk-the-rows.yaml
+  - ../noir-space-ship/enter-chooses-the-highlighted-row.yaml
+  - ../noir-space-ship/flow-value-context-menu.yaml
+  - ../noir-space-ship/loop-iteration-jump.yaml
+  - ../noir-space-ship/loop-control-shows-one-iteration.yaml
+  - ../noir-space-ship/flow-value-to-scratchpad.yaml
+  - ../noir-space-ship/call-argument-to-scratchpad.yaml
+  - ../noir-space-ship/call-trace-search-results-jump.yaml
+  - ../layout/event-log-and-scratchpad-tabs.yaml
+  - ../point-list/breakpoint-rows-follow-the-gutter.yaml
+  - ../problems/failed-build-rows-filters-and-press.yaml
+  - ../video-player/keys-drive-the-player.yaml
+  - ../languages/aiken-recording-smoke.yaml
+  - ../languages/cadence-recording-smoke.yaml
+  - ../languages/cadence-column-breakpoint.yaml
+  - ../languages/cairo-recording-smoke.yaml
+  - ../languages/cairo-column-breakpoint.yaml
+  - ../languages/circom-recording-smoke.yaml
+  - ../languages/js-recording-smoke.yaml
+  - ../languages/leo-recording-smoke.yaml
+  - ../languages/masm-recording-smoke.yaml
+  - ../languages/move-recording-smoke.yaml
+  - ../languages/move-column-breakpoint.yaml
 unsupported: []

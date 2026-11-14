@@ -1,0 +1,27 @@
+scenario: 1
+name: noir-space-ship/call-trace-context-menus
+pack: codetracer
+summary: >-
+  A call's context menu offers only the children toggle that applies
+  (Collapse Call Children for an expanded call), and an argument's offers
+  only "Add value to scratchpad".
+
+stage:
+  - use: record-program
+    with: { program: noir_space_ship }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 180s }
+  - click: 'pane-tab[label="CALLTRACE"]'
+  - wait: { until: call-trace.loaded, timeout: 60s }
+  - wait: { until: { at: 'call-trace/call[name="main"]', present: true }, timeout: 60s }
+  - expect: { at: 'call-trace/call[name="main"]', expanded: true }
+  - click: { at: 'call-trace/call[name="main"]', anchor: name, button: right }
+  - wait: { until: { at: context-menu, present: true }, timeout: 30s }
+  - expect: { at: context-menu, assert: 'offers-only("Collapse Call Children")' }
+  - key: Esc
+  - wait: { until: { at: context-menu, absent: true }, timeout: 10s }
+  - click: { at: 'call-trace/call[name="main"]/call-argument[name="initial_shield"]', button: right }
+  - wait: { until: { at: context-menu, present: true }, timeout: 30s }
+  - expect: { at: context-menu, assert: 'offers-only("Add value to scratchpad")' }
