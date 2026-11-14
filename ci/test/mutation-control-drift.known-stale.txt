@@ -103,7 +103,6 @@ src/frontend/viewmodel/tests/unit/plat33-collab-mutation-control.sha256	src/fron
 # model suite (a grading suite of plat70h) now states every setting's word count
 # in an exhaustive table and tallies its sweep apart. plat70h owes a re-grade for
 # that suite's bytes only.
-src/frontend/tui/tests/plat70h-scrollbar-mutation-control.sha256	src/frontend/viewmodel/tests/unit/test_plat70h_scrollbar_model.nim	fd1b8b348e828f54dc05004c746a91f040e1068b98a5f0a6650e98f672a3727a	3a0689bc490459eb4cbddf7fd3075630474fdc4eab1561b290e315f87af61349
 
 # 2026-11-14, conditional breakpoints (Edit breakpoint condition, the condition dialog,
 # the planner): these harnesses owe a re-grade for these bytes.
@@ -204,7 +203,6 @@ src/frontend/tui/tests/plat58-requests-mutation-control.sha256	src/frontend/tui/
 src/frontend/tui/tests/plat65-nim-tracing-mutation-control.sha256	src/frontend/tui/app/runtime.nim	745fee32e0bbc92d22443f415809389446e7802595d9845b2c55301ac678e105	a7a3bb422082c3ce0dbfd6321695a4a8876ce902281ec4c17f02c3bc4e1bbeb8
 src/frontend/tui/tests/plat70a-hscroll-mutation-control.sha256	src/frontend/tui/app/runtime.nim	745fee32e0bbc92d22443f415809389446e7802595d9845b2c55301ac678e105	a7a3bb422082c3ce0dbfd6321695a4a8876ce902281ec4c17f02c3bc4e1bbeb8
 src/frontend/tui/tests/plat70g-multiclick-mutation-control.sha256	src/frontend/tui/app/runtime.nim	745fee32e0bbc92d22443f415809389446e7802595d9845b2c55301ac678e105	a7a3bb422082c3ce0dbfd6321695a4a8876ce902281ec4c17f02c3bc4e1bbeb8
-src/frontend/tui/tests/plat70h-scrollbar-mutation-control.sha256	src/frontend/tui/app/runtime.nim	745fee32e0bbc92d22443f415809389446e7802595d9845b2c55301ac678e105	a7a3bb422082c3ce0dbfd6321695a4a8876ce902281ec4c17f02c3bc4e1bbeb8
 src/frontend/tui/tests/plat59-visual-replay-mutation-control.sha256	src/frontend/tui/app/runtime.nim	52552bf14e7f181c899c07150155a158ac6d24da4f5575d948f85d629fce4ac4	a7a3bb422082c3ce0dbfd6321695a4a8876ce902281ec4c17f02c3bc4e1bbeb8
 src/frontend/tui/tests/plat63-verification-mutation-control.sha256	src/frontend/tui/app/runtime.nim	52552bf14e7f181c899c07150155a158ac6d24da4f5575d948f85d629fce4ac4	a7a3bb422082c3ce0dbfd6321695a4a8876ce902281ec4c17f02c3bc4e1bbeb8
 src/frontend/tui/tests/plat61-shell-mutation-control.sha256	src/frontend/tui/app/runtime.nim	52552bf14e7f181c899c07150155a158ac6d24da4f5575d948f85d629fce4ac4	a7a3bb422082c3ce0dbfd6321695a4a8876ce902281ec4c17f02c3bc4e1bbeb8
@@ -331,3 +329,6 @@ src/frontend/tui/tests/plat72-screen-reader-mutation-control.sha256	src/frontend
 src/frontend/viewmodel/tests/unit/plat68-keymaps-mutation-control.sha256	src/frontend/tui/main.nim	66283c44fe09ff1389f0e769ef48637ce573781972c014e30c9c16b1da8606ce	82a88f3f2c8697dc6edab12b1b2be1b458357d4f5be0597552709fceabf7593c
 src/tests/scenarios/plat66-pack-mutation-control.sha256	ci/test/scenarios.sh	a3c2bf0be61b0e9b9fa7878b0e1d77d7aa2a39eb50fd63bac41bf71971d368b6	df4540b12d21f6ff47a229a01f9fbfdeafc89fb804b912bbf1ad3ac1f630e7e1
 src/tests/scenarios/plat66-pack-mutation-control.sha256	src/tests/scenarios/bindings/termassert/ct_tui_screen.nim	552b9da23ab44d96c08e50302adf410e90bbf42da5082bfc5e63fd7cf8282262	255a2526134d381474f695d7fd979d939f84bcbce60d0cffb1893725869e1816
+# plat70h was graded at 56862a458e4; its runtime moved on agents after that
+# (eec6949f68, a move drawn in flight): a re-grade of the arms whose needles sit in it.
+src/frontend/tui/tests/plat70h-scrollbar-mutation-control.sha256	src/frontend/tui/app/runtime.nim	9f6ceffe6b6685c2accdce1080bd0d79d6355dbe8235135b4e163a554a5aa58b	a7a3bb422082c3ce0dbfd6321695a4a8876ce902281ec4c17f02c3bc4e1bbeb8
