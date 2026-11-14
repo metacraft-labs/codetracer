@@ -227,4 +227,5 @@ applicable:
   - ../flow/window-handoff.yaml
   - ../visual-replay/keymap-rows.yaml
   - ../visual-replay/keyboard-focus-scope.yaml
+  - ../visual-replay/additive-tabs.yaml
 unsupported: []

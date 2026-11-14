@@ -1,0 +1,30 @@
+scenario: 1
+name: visual-replay/additive-tabs
+pack: codetracer
+summary: >-
+  Opening a visual-replay-capable recording adds the Video Player, Pixel
+  History and Shader Debug tabs to the user's layout — once each, in the
+  VARIABLES stack (one instance each) — and keeps the editor, VARIABLES, CALLTRACE, EVENT LOG and
+  TERMINAL OUTPUT panes; the retired Frame Viewer is not shown.
+
+stage:
+  - use: record-program
+    with: { program: py_console_logs/main.py }
+  - use: visual-replay-capable
+  - use: front-end-options
+    with: { env: { CODETRACER_VISUAL_REPLAY_FAKE_PLAYER: ready } }
+  - use: open-recording
+    with: { deployment: web }
+
+steps:
+  - wait: { until: replay-idle, timeout: 360s }
+  - wait: { until: editor.loaded, timeout: 300s }
+  - wait: { until: call-trace.loaded, timeout: 120s }
+  - wait: { until: { at: 'pane-tab[label="VIDEO PLAYER"]', present: true }, timeout: 60s }
+  - expect: { at: 'pane-tab[label="PIXEL HISTORY"]', present: true }
+  - expect: { at: 'pane-tab[label="SHADER DEBUG"]', present: true }
+  - expect: { at: 'pane-tab[label="VIDEO PLAYER"]', stack: { contains: "VARIABLES" } }
+  - expect: { at: 'pane-tab[label="PIXEL HISTORY"]', stack: { contains: "VARIABLES" } }
+  - expect: { at: 'pane-tab[label="SHADER DEBUG"]', stack: { contains: "VARIABLES" } }
+  - expect: { at: window, assert: ['has-pane("VARIABLES")', 'has-pane("CALLTRACE")', 'has-pane("EVENT LOG")', 'has-pane("TERMINAL OUTPUT")', 'lacks-pane("FRAME VIEWER")'] }
+  - expect: { at: 'pane-tab[label="py_console_logs/main.py"]', present: true }
