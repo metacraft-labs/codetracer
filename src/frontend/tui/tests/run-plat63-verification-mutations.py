@@ -255,8 +255,11 @@ ARMS = [
              '  of "aVerificationX": GpuiMenuRoute(kind: gmrPane, pane: paneVerification)')],
      [(PLAN, PLAN_RUN)],
      "GPUI's View › Verification opens nothing"),
-    ("M2", [(GPUI_MAIN, "      opened = verificationGoTo(r, vm.activateLine(session, hit.key))",
-             "      discard vm.activateLine(session, hit.key)")],
+    # The press runs `verification.go-to-source` (PLAT-64's pointer keymap),
+    # whose binding is where the window now opens the finding's file.
+    ("M2", [(GPUI_MAIN, "    gVerificationOpened = verificationGoTo(r,\n"
+                        "      gVerification.vm.activateLine(gVerification.session, c.target.token))",
+             "    discard gVerification.vm.activateLine(gVerification.session, c.target.token)")],
      [(PLAN, PLAN_RUN)],
      "a GPUI press on a finding opens no file"),
     ("M3", [(GPUI_MAIN, "    of \"list.focus-last\": vm.moveSelection(session, 1, toEnd = true)",
