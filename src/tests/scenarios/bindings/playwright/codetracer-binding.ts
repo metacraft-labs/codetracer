@@ -243,7 +243,7 @@ const ROLES: Record<string, { affordances: string[]; properties: string[] }> = {
   "caption-bar": { affordances: [], properties: ["seam", "buttons", "placeholder", "opaque", "fixed"] },
   "caption-logo": { affordances: ["click"], properties: ["has-image"] },
   "caption-controls": { affordances: [], properties: ["buttons"] },
-  "caption-omnibox": { affordances: ["click", "text-entry", "focusable"], properties: ["value", "focused", "enabled"] },
+  "caption-omnibox": { affordances: ["click", "text-entry", "focusable"], properties: ["value", "focused", "enabled", "dimmed", "inert"] },
   "caption-tabs": { affordances: [], properties: ["shown"] },
   "menu-row": { affordances: ["click"], properties: ["label", "active", "folder"] },
   "session-overflow-menu": { affordances: [], properties: ["count"] },
@@ -2344,7 +2344,15 @@ function readSurfacePw7(root: any): void {
     }
     if (controls && vis(controls)) cap.children.push(node("caption-controls", controls, { buttons: controls.querySelectorAll("button").length }));
     if (omni && vis(omni)) {
-      cap.children.push(node("caption-omnibox", omni, { value: omni.value, focused: omni === active, enabled: !omni.disabled }));
+      // `dimmed` / `inert`: drawn faded and ignoring the pointer, as the
+      // caption's controls are while a welcome screen is up
+      // (welcome_screen.styl); read from the prompt's host.
+      const dh = (omni.closest("#debug") ?? omni) as HTMLElement;
+      const dcs = getComputedStyle(dh);
+      cap.children.push(node("caption-omnibox", omni, {
+        value: omni.value, focused: omni === active, enabled: !omni.disabled,
+        dimmed: parseFloat(dcs.opacity) < 1, inert: dcs.pointerEvents === "none",
+      }));
     }
     const bar = document.querySelector("#session-tab-bar") as HTMLElement | null;
     if (bar && vis(bar)) {

@@ -1638,7 +1638,9 @@ roles:
     properties: { buttons: int }
 
   caption-omnibox:
-    properties: { value: text, focused: bool, enabled: bool }
+    # `dimmed` / `inert`: drawn faded and ignoring the pointer (while a
+    # welcome screen is up there is no trace for it to act on).
+    properties: { value: text, focused: bool, enabled: bool, dimmed: bool, inert: bool }
     affordances: [click, text-entry, focusable]
 
   # The session tabs' area: the overflow chevron and the `+` (new tab).

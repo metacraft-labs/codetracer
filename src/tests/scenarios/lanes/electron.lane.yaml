@@ -277,6 +277,7 @@ applicable:
   - ../search/fif-match-case-and-regex.yaml
   - ../search/ctrl-shift-f-seeds-field-from-selection.yaml
   - ../search/grep-alone-opens-field-on-selection.yaml
+  - ../session-chrome/new-tab-opens-welcome-under-intact-caption.yaml
   # --- pw5 deepreview ---
   - ../deepreview/boundary-drag-reveals-what-it-crosses.yaml
   - ../deepreview/boundary-is-operable-from-the-keyboard.yaml
