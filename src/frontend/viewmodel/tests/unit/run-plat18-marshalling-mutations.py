@@ -609,24 +609,28 @@ ARMS = [
 # sample figures 18/510 -> 20/540. M1-M7 were re-collected from that tree and
 # pasted verbatim; M8 and M9 quote row counts and did not move. M6's and M7's
 # undercharges are unchanged (45,604 and 60,008 bytes).
+# RE-COLLECTED 2026-11-14 for the desktop's pointer routing (702190afba7):
+# the State view draws each element's identity as data attributes instead
+# of holding click handlers, so the wire sizes M1 - M7 quote moved by those
+# bytes alone. Every arm still died on the same refusals.
 BECAUSE: dict = {
     # --- the probe's refusals: COUNTS, quoted verbatim ----------------------
     # Several arms are told apart by WHICH refusals fired together and by the
     # SIZE of the disagreement, so the clauses are ` && `-joined and the
     # numbers are kept. See `derived_because` for why that is the opposite of
     # §17a's usual rule here and why it is right.
-    'M1': 'decode returned 305 byte(s) of 0 && decode returned 3913 byte(s) of 0 && decode returned 492625 byte(s) of 0 && decode returned 6009 byte(s) of 0 && wire/meter disagree on EXPAND: meter 554724 byte(s), wire 1047349 && wire/meter disagree on MOUNT: meter 2679 byte(s), wire 8688',
-    'M2': 'frame size disagreed with frameBytesFor 164 time(s) && frame size disagreed with frameBytesFor 19 time(s) && frame size disagreed with frameBytesFor 24 time(s) && frame size disagreed with frameBytesFor 34223 time(s)',
+    'M1': 'decode returned 316 byte(s) of 0 && decode returned 3949 byte(s) of 0 && decode returned 574261 byte(s) of 0 && decode returned 6301 byte(s) of 0 && wire/meter disagree on EXPAND: meter 618350 byte(s), wire 1192611 && wire/meter disagree on MOUNT: meter 2891 byte(s), wire 9192',
+    'M2': 'frame size disagreed with frameBytesFor 178 time(s) && frame size disagreed with frameBytesFor 20 time(s) && frame size disagreed with frameBytesFor 26 time(s) && frame size disagreed with frameBytesFor 38425 time(s)',
     # M3 is M2's set PLUS the cross-check's, and that is what separates them:
     # M2 breaks the size predicate alone, M3 stops measuring the bytes at all.
-    'M3': 'frame size disagreed with frameBytesFor 164 time(s) && frame size disagreed with frameBytesFor 19 time(s) && frame size disagreed with frameBytesFor 24 time(s) && frame size disagreed with frameBytesFor 34223 time(s) && wire/meter disagree on EXPAND: meter 554724 byte(s), wire 1047349 && wire/meter disagree on MOUNT: meter 2679 byte(s), wire 8688',
-    'M4': 'decode returned 0 byte(s) of 305 && decode returned 0 byte(s) of 3913 && decode returned 0 byte(s) of 492625 && decode returned 0 byte(s) of 6009',
-    'M5': 'structural figures not stable across samples (20/540 vs 20/541)',
+    'M3': 'frame size disagreed with frameBytesFor 178 time(s) && frame size disagreed with frameBytesFor 20 time(s) && frame size disagreed with frameBytesFor 26 time(s) && frame size disagreed with frameBytesFor 38425 time(s) && wire/meter disagree on EXPAND: meter 618350 byte(s), wire 1192611 && wire/meter disagree on MOUNT: meter 2891 byte(s), wire 9192',
+    'M4': 'decode returned 0 byte(s) of 316 && decode returned 0 byte(s) of 3949 && decode returned 0 byte(s) of 574261 && decode returned 0 byte(s) of 6301',
+    'M5': 'structural figures not stable across samples (21/564 vs 21/565)',
     # M6 and M7 print the same SENTENCE and different totals: on the EXPAND
     # each undercharges four bytes per operation, so 45,604 bytes is 11,401
     # element creations and 60,008 is 15,002 appends (2026-10-26 figures).
-    'M6': 'wire/meter disagree on EXPAND: meter 1047349 byte(s), wire 1001745 && wire/meter disagree on MOUNT: meter 8688 byte(s), wire 8468',
-    'M7': 'wire/meter disagree on EXPAND: meter 1047349 byte(s), wire 987341 && wire/meter disagree on MOUNT: meter 8688 byte(s), wire 8400',
+    'M6': 'wire/meter disagree on EXPAND: meter 1192611 byte(s), wire 1142207 && wire/meter disagree on MOUNT: meter 9192 byte(s), wire 8956',
+    'M7': 'wire/meter disagree on EXPAND: meter 1192611 byte(s), wire 1125403 && wire/meter disagree on MOUNT: meter 9192 byte(s), wire 8880',
     # M8 counts three elements per row; M9 wires no rows at all.
     'M8': 'COLLAPSE drew 6 row(s), expected 2 && EXPAND drew 1806 row(s), expected 602 && MOUNT drew 6 row(s), expected 2 && STEP drew 1806 row(s), expected 602',
     'M9': 'COLLAPSE drew 0 row(s), expected 2 && EXPAND drew 0 row(s), expected 602 && MOUNT drew 0 row(s), expected 2 && STEP drew 0 row(s), expected 602',
