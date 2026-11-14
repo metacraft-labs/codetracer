@@ -221,4 +221,5 @@ applicable:
   - ../event-log/static-across-jumps.yaml
   - ../event-log/virtual-scroll.yaml
   - ../filesystem/context-menu-edit.yaml
+  - ../filesystem/open-recorded-source.yaml
 unsupported: []
