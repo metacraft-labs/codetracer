@@ -40,8 +40,6 @@
 # (plat17, plat33, plat34 owe a re-grade for those bytes only), and the pointer
 # suite now replays the captured kitty and xterm personas (plat70f; its pty
 # arms are the ones that read that suite).
-src/frontend/viewmodel/tests/unit/plat17-wasm-mutation-control.sha256	ci/lib/test-lane-files.sh	feedef38b5f5f7395de6375746e1efc61a4f7c0f8cf76181af01727b52c7076a	0837fd79d21f0ec4601131b521643b7e349d7bce090827639a34ac606d5c98f5
-src/frontend/viewmodel/tests/unit/plat17-wasm-mutation-control.sha256	justfile	8523a6bfda763a72db546c06514ab3a32d204e1601db24b58f66e268f6e37e66	f4ef411c943dae0015825aec1eabd103fdc644b886a0dac1a39e83d2fd561792
 src/frontend/viewmodel/tests/unit/plat33-collab-mutation-control.sha256	.github/workflows/codetracer.yml	8b1cc3bfc2d6432b299e692de49c710886c95c0fac58b0c5cc3d420e6cf402d9	6150fc4fc44be0e34ff11e81a03094310098485e1c2752507bb4ed609303fa63
 src/frontend/viewmodel/tests/unit/plat33-collab-mutation-control.sha256	justfile	8523a6bfda763a72db546c06514ab3a32d204e1601db24b58f66e268f6e37e66	f4ef411c943dae0015825aec1eabd103fdc644b886a0dac1a39e83d2fd561792
 src/frontend/viewmodel/tests/unit/plat33-collab-mutation-control.sha256	ci/lib/test-lane-files.sh	feedef38b5f5f7395de6375746e1efc61a4f7c0f8cf76181af01727b52c7076a	0837fd79d21f0ec4601131b521643b7e349d7bce090827639a34ac606d5c98f5
