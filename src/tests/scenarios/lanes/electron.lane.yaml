@@ -160,6 +160,10 @@ applicable:
   - ../launch-config/menu-lists-launch-configurations.yaml
   - ../launch-config/ruby-fibonacci-records-and-opens.yaml
   - ../re-record/ctrl-r-failed-save-says-so.yaml
+  - ../re-record/ctrl-r-saves-and-records-anew.yaml
+  - ../re-record/ctrl-r-burst-starts-one-recorder.yaml
+  - ../tracepoints/results-grid-jumps-and-stays.yaml
+  - ../cross-process/process-tree-switches-the-recording.yaml
   - ../tests-pane/context-menu-re-record-opens-a-new-tab.yaml
   - ../tests-pane/editor-run-test-opens-a-new-tab.yaml
   - ../tests-pane/open-without-a-recording-records-and-enters.yaml

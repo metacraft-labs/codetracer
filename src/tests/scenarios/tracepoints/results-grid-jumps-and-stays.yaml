@@ -1,0 +1,41 @@
+scenario: 1
+name: tracepoints/results-grid-jumps-and-stays
+pack: codetracer
+summary: >-
+  A tracepoint `log(a)` on a JavaScript loop's line lists one row per
+  iteration; a click on a row's tick moves the replay to that iteration (the
+  Variables pane shows the value the row logged), and the grid stays drawn,
+  with every row, for a second jump from another row's value.
+
+stage:
+  - use: write-project
+    with: { files: { program.js: "for (let i = 0; i < 5; i++) { var a = i; }\nvar d = 1;\n" } }
+  - use: record-program
+    with: { program: $project/program.js }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - wait: { until: { at: 'editor[file="program.js"]', present: true }, timeout: 60s }
+  - click: { at: 'editor[file="program.js"]/line[number="1"]', anchor: text-start }
+  - key: Enter
+  - wait: { until: { at: 'tracepoint-editor[line="1"]', focused: true }, timeout: 20s }
+  - type: log(a)
+  - chord: Ctrl+Enter
+    settle: false
+  - wait: { until: { at: 'trace-results[line="1"]', count: { ge: 3 } }, timeout: 60s }
+  - expect: { at: 'trace-results[line="1"]', shown: true }
+  - expect: { at: 'trace-results[line="1"]/trace-row[n="3"]', values: a=2 }
+
+  - click: { at: 'trace-results[line="1"]/trace-row[n="3"]', anchor: ticks }
+    settle: false
+  - wait: { until: replay-idle, timeout: 60s }
+  - wait: { until: { at: 'editor[file="program.js"]', current-line: 1 }, timeout: 30s }
+  - wait: { until: { at: variables, assert: 'value-of("a", "2")' }, timeout: 30s }
+  - expect: { at: 'trace-results[line="1"]', shown: true, count: { ge: 3 } }
+
+  - click: { at: 'trace-results[line="1"]/trace-row[n="4"]', anchor: values }
+    settle: false
+  - wait: { until: replay-idle, timeout: 60s }
+  - wait: { until: { at: variables, assert: 'value-of("a", "3")' }, timeout: 30s }
+  - expect: { at: 'trace-results[line="1"]', shown: true, count: { ge: 3 } }

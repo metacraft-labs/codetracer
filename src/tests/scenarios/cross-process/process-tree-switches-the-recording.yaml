@@ -1,0 +1,22 @@
+scenario: 1
+name: cross-process/process-tree-switches-the-recording
+pack: codetracer
+summary: >-
+  The account-balance session's process tree lists frontend-js,
+  frontend-wasm and backend, opened on frontend-js; a click on backend makes
+  it the active recording, opens server.js and loads the backend's locals.
+
+stage:
+  - use: materialized-recording
+    with: { name: cross-process-three-trace }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 180s }
+  - wait: { until: { at: process-tree, roles: { unordered: [frontend-js, frontend-wasm, backend] } }, timeout: 60s }
+  - expect: { at: process-tree, active: frontend-js }
+  - click: 'process-tree/process[name="backend"]'
+    settle: false
+  - wait: { until: { at: process-tree, active: backend }, timeout: 30s }
+  - wait: { until: { at: 'editor[file="server.js"]', present: true }, timeout: 60s }
+  - wait: { until: { at: variables, assert: 'has-variable("http")' }, timeout: 60s }

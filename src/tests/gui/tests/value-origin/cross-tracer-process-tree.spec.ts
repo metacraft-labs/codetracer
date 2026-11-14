@@ -60,51 +60,13 @@ test.beforeAll(() => {
 const processEntry = (page: import("@playwright/test").Page, role: string) =>
   page.locator(`.ct-process-tree-entry[data-process-role="${role}"]`);
 
-test("process_tree_lists_every_recording_and_switches_the_active_one", async ({
-  ctPage,
-}) => {
-  await readyOnEntry(ctPage);
-  const layout = new LayoutPage(ctPage);
-
-  // The tree is built from the `ct/listProcesses` payload the backend
-  // dispatches at session load, i.e. from `session.toml` — not from
-  // anything the renderer invents.
-  for (const role of ["frontend-js", "frontend-wasm", "backend"]) {
-    await expect(
-      processEntry(ctPage, role),
-      `process tree must render the ${role} entry`,
-    ).toHaveCount(1, { timeout: 30_000 });
-  }
-  // The session opens on its first `[[trace]]`, which is `frontend-js`.
-  await expect(processEntry(ctPage, "frontend-js")).toHaveClass(/\bactive\b/);
-
-  // Switching rotates the active row AND moves the replay cursor into
-  // the selected recording, which is what opens its source.
-  await processEntry(ctPage, "backend").click();
-  await expect(processEntry(ctPage, "backend")).toHaveClass(/\bactive\b/, {
-    timeout: 15_000,
-  });
-  await expect(processEntry(ctPage, "frontend-js")).not.toHaveClass(/\bactive\b/);
-
-  let backendEditor = null as Awaited<ReturnType<typeof layout.editorTabs>>[number] | null;
-  for (let attempt = 0; attempt < 30; attempt++) {
-    const tabs = await layout.editorTabs(true);
-    backendEditor = tabs.find((e) => e.fileName === "server.js") ?? null;
-    if (backendEditor) break;
-    await ctPage.waitForTimeout(1_000);
-  }
-  expect(
-    backendEditor,
-    "switching to the backend process must open server.js in the editor",
-  ).toBeTruthy();
-
-  // The State Pane must now show the *backend* recording's locals —
-  // proof the switch re-routed the backend, not just the highlight.
-  await expect(
-    ctPage.locator(`div[id^='stateComponent'] [data-variable-name="http"]`).first(),
-    "the backend recording's module-scope locals must load after the switch",
-  ).toBeVisible({ timeout: 30_000 });
-});
+// The process tree listing the three recordings and switching to the
+// backend's, with its locals, is the scenario
+// `src/tests/scenarios/cross-process/process-tree-switches-the-recording.yaml`.
+// The test below stays until the backend's chain from `balance` owns hops in
+// the WebAssembly recording (its frontend-wasm breadcrumb is a placeholder
+// today: codetracer-pm
+// issues/2026-11-14-the-account-balance-chain-ends-with-a-placeholder-frontend-wasm-span.md).
 
 test("origin_chain_panel_spans_all_three_recordings", async ({ ctPage }) => {
   await readyOnEntry(ctPage);

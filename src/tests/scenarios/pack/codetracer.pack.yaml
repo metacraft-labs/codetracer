@@ -109,6 +109,7 @@ roles:
       test-results: optional
       process-tree: optional
       diff-section: many
+      trace-results: many
 
   # The strip of session tabs: one tab per open recording or editing session.
   session-strip:
@@ -412,6 +413,9 @@ roles:
       # shows now.
       build-status: text
       notifications: lines
+      # View > Notifications, while open: every notice the bar was given,
+      # newest first, the dismissed ones included.
+      history: lines
     assertions:
       says(t): "message contains t"
       lacks(t): "not (message contains t)"
@@ -1090,6 +1094,22 @@ roles:
   test-results:
     properties: { headline: text, count: int, failure: text, absence: text }
     children: { test-row: many, panel-button: many }
+
+  # A tracepoint's results grid under its editor line: `shown` while the grid
+  # is drawn; one `trace-row` per hit (its tick and what the code logged),
+  # and its Run button (`panel-button[label="Run"]`).
+  trace-results:
+    keys: [line]
+    properties: { line: int, shown: bool, count: int }
+    children: { trace-row: many, panel-button: many }
+
+  # `ticks` / `values`: the row's tick cell and its logged value, where a click
+  # jumps the replay to that hit.
+  trace-row:
+    keys: [n]
+    properties: { n: int, ticks: text, values: text }
+    affordances: [click]
+    anchors: [ticks, values]
 
   # A divider between panes of the layout; dragged to resize them.
   # `vertical`: a vertical bar between panes side by side.

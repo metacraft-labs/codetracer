@@ -101,7 +101,7 @@ const ROLES: Record<string, { affordances: string[]; properties: string[] }> = {
   event: { affordances: ["click", "double-click", "context-click"], properties: ["text", "kind", "current", "future"] },
   variables: { affordances: ["wheel", "focusable"], properties: ["count", "focused", "tab-strip"] },
   variable: { affordances: ["click", "double-click", "context-click"], properties: ["name", "type", "value", "origin-badge", "watch", "invalid", "text"] },
-  "status-line": { affordances: [], properties: ["message", "location", "build-status", "notifications"] },
+  "status-line": { affordances: [], properties: ["message", "location", "build-status", "notifications", "history"] },
   omnibox: { affordances: ["click", "text-entry", "focusable"], properties: ["query", "focused", "count", "labels"] },
   option: { affordances: ["click"], properties: ["label", "detail", "selected", "kind"] },
   "context-menu": { affordances: [], properties: ["count"] },
@@ -202,6 +202,9 @@ const ROLES: Record<string, { affordances: string[]; properties: string[] }> = {
   "verification-panel": { affordances: [], properties: ["phase", "outcome", "payload", "status", "command", "run", "stop", "groups", "count"] },
   finding: { affordances: ["click", "context-click"], properties: ["kind", "title", "message", "location"] },
   "process-tree": { affordances: [], properties: ["active", "roles"] },
+  dialog: { affordances: [], properties: ["title", "message"] },
+  "trace-results": { affordances: [], properties: ["line", "shown", "count"] },
+  "trace-row": { affordances: ["click"], properties: ["n", "ticks", "values"] },
   "test-results": { affordances: [], properties: ["headline", "count", "failure", "absence"] },
   commit: { affordances: ["click"], properties: ["message", "expanded"] },
   "commit-file": { affordances: ["click"], properties: ["name"] },
@@ -1075,6 +1078,9 @@ function readSurfacePw1(root: any): void {
     sl.props["build-status"] = text(document.querySelector("#status .build-status-text"));
     sl.props.notifications = (Array.from(document.querySelectorAll(
       "#active-notifications .status-notification .notification-message")) as HTMLElement[]).map((n) => text(n));
+    // pw8: View > Notifications, when open: every notice this bar was given
+    sl.props.history = (Array.from(document.querySelectorAll(
+      "#notifications-container .notification-message")) as HTMLElement[]).map((n) => text(n));
   }
 
   // the edit-mode toolbar's Build and Run
@@ -1612,6 +1618,48 @@ function readSurfacePw8(root: any): void {
     }
   }
 
+  // a tracepoint's results grid (`ui/trace.nim`): its rows' ticks and logged
+  // values, and its Run button, per editor line
+  for (const tr of Array.from(document.querySelectorAll("[id^='trace-'] .chart-table")) as HTMLElement[]) {
+    const zone = tr.closest(".trace") as HTMLElement | null;
+    if (!zone) continue;
+    // (the zone names no line; its expression editor's host is
+    // `edit-trace-<owner>-<line>`, as the tracepoint-editor reader reads it)
+    const lineAttr = zone.getAttribute("data-line") ??
+      (zone.querySelector("[id^='edit-trace-']")?.id.split("-").pop() ?? "0");
+    const line = parseInt(lineAttr, 10) || 0;
+    const shownGrid = vis(tr) && !tr.classList.contains("hidden");
+    const rows = (Array.from(tr.querySelectorAll(".trace-table tbody tr")) as HTMLElement[]).filter((r) => vis(r) &&
+      r.querySelector("td.direct-location-rr-ticks"));
+    const res = node("trace-results", zone, { line, shown: shownGrid, count: rows.length }, [["line", String(line)]]);
+    rows.forEach((r, i) => {
+      const tick = r.querySelector("td.direct-location-rr-ticks") as HTMLElement;
+      const vals = r.querySelector("td.trace-values") as HTMLElement | null;
+      const rn = node("trace-row", r, { n: i + 1, ticks: text(tick), values: text(vals) }, [["n", String(i + 1)]]);
+      rn.anchors = { points: { ticks: centre(tick), ...(vals ? { values: centre(vals.firstElementChild ?? vals) } : {}) } };
+      res.children.push(rn);
+    });
+    const runB = zone.querySelector("#trace-run-button") as HTMLElement | null;
+    if (runB && vis(runB)) res.children.push(button(runB, "Run"));
+    root.children.push(res);
+  }
+
+  // a modal dialog (`role="dialog"`: the file-conflict dialog, …): its
+  // heading, its text and its buttons
+  if (!has("dialog")) {
+    for (const dlg of Array.from(document.querySelectorAll("[role='dialog']")) as HTMLElement[]) {
+      if (!vis(dlg)) continue;
+      const title = text(dlg.querySelector("h1, h2, h3, .dialog-title"));
+      const dn = node("dialog", dlg, { title, message: text(dlg.querySelector("p")) }, [["title", title]]);
+      for (const b of Array.from(dlg.querySelectorAll("button")) as HTMLElement[]) {
+        if (!vis(b)) continue;
+        const l = text(b);
+        dn.children.push(node("dialog-button", b, { label: l, enabled: !(b as HTMLButtonElement).disabled }, [["label", l]]));
+      }
+      root.children.push(dn);
+    }
+  }
+
   // the program's terminal output (`isonim_terminal_output_view`)
   const term = document.querySelector("div[id^='terminalComponent']") as HTMLElement | null;
   if (term && vis(term) && !has("terminal-output")) {
@@ -1980,7 +2028,8 @@ async function launchElectron(ctx: Ctx, launch: any): Promise<void> {
   env.CODETRACER_IN_UI_TEST = "1";
   env.CODETRACER_TEST = "1";
   env.CT_HMR = "0";
-  env.CODETRACER_NEW_TRACE_POLICY = "window";
+  // (a stage may choose the policy, `front-end-options` env)
+  env.CODETRACER_NEW_TRACE_POLICY = launch.env?.CODETRACER_NEW_TRACE_POLICY ?? "window";
   env.CODETRACER_ELECTRON_ARGS = ["--no-sandbox", "--no-zygote", "--disable-gpu",
     "--disable-gpu-compositing", "--disable-dev-shm-usage", "--in-process-gpu",
     "--ozone-platform-hint=x11"].join(" ");
@@ -2042,6 +2091,16 @@ async function launchElectron(ctx: Ctx, launch: any): Promise<void> {
     }
   }
   ctx.page = page;
+  // `CT_SCENARIO_APP_LOG=<file>`: the application's own output — the main
+  // process's stdout/stderr and the window's console — appended to a file,
+  // for diagnosing a run. Read only; off unless asked for.
+  const appLog = process.env.CT_SCENARIO_APP_LOG;
+  if (appLog) {
+    const put = (tag: string, line: string) => fs.appendFileSync(appLog, `[${tag}] ${line}\n`);
+    app.process()?.stdout?.on("data", (c: Buffer) => put("main", c.toString().trimEnd()));
+    app.process()?.stderr?.on("data", (c: Buffer) => put("main!", c.toString().trimEnd()));
+    page.on("console", (m: any) => put(`console.${m.type()}`, m.text()));
+  }
   ctx.context = app.context();
 }
 
