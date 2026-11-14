@@ -9,3 +9,12 @@ for shape in default pointer text col-resize row-resize grab grabbing not-allowe
   body[data-pointer-gesture=\"{shape}\"],
   body[data-pointer-gesture=\"{shape}\"] *
     cursor: unquote(shape) !important
+
+// A divider's drag handle is the part of the divider the pointer actually
+// rests on. GoldenLayout's own stylesheet gives it `ew-resize` / `ns-resize`,
+// which covered the shape the divider is stamped with (`col-resize` /
+// `row-resize`, `ui/pointer_stamp.nim`): it takes its divider's shape instead.
+// It is here, not in golden_layout.styl, because this sheet is the only one
+// that may say `cursor` (PA-1; test_plat70f_pointer_shapes.nim's source gate).
+.lm_splitter .lm_drag_handle
+  cursor: inherit !important

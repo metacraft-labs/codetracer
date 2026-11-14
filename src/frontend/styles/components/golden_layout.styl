@@ -158,13 +158,6 @@ TAB_CORNER_RADIUS = 0.375rem
   height: 0.125rem !important
   background-color: colors-ui-surface-primary-default
 
-// The drag handle is the part of a divider the pointer actually rests on.
-// GoldenLayout's own stylesheet gives it `ew-resize` / `ns-resize`, which
-// covered the shape the divider is stamped with (`col-resize` / `row-resize`,
-// `ui/pointer_stamp.nim`): it takes its divider's shape instead.
-.lm_splitter .lm_drag_handle
-  cursor: inherit !important
-
 .lm_splitter.lm_horizontal .lm_drag_handle
   //left: -5px
   left: 0 !important

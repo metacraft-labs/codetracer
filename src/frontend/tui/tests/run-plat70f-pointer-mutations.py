@@ -99,6 +99,9 @@ PTY_VT = "*::a silent peer with TERM=vt220 is never sent OSC 22"
 PTY_OFF = "*::--pointer-shapes=off asks nothing and writes nothing"
 PTY_TMUX_OFF = "*::a silent wrapped query: nothing sent, and the remedy reported"
 PTY_TMUX_ON = "*::an answered wrapped query: every sequence wrapped"
+PTY_REMEDY = "*::the remedy names allow-passthrough only when tmux reports it off"
+  # PA-7's remedy line is asserted here since the wrapped query moved after
+  # the fence (62e804a6e3): "a silent wrapped query" checks the query alone.
 PTY_HOP = "*::a press on a hop seeks to its tick, with the cursor on it"
 PLAN_SHAPES = "*::the render plan carries each element's shape"
 PLAN_HOLD = "*::during a tab drag the window's override is the gesture's"
@@ -200,8 +203,8 @@ ARMS = [
               "  discard d.pointer.resumeBytes")],
      [(PTY, PTY_STOP)],
      "§5.4: the continue does not show the shape again"),
-    ("P13", [(PROBE, "  if flags.pointerQueryWanted and not env.term.toLowerAscii.startsWith(\"vt\"):",
-              "  if flags.pointerQueryWanted:")],
+    ("P13", [(PROBE, "  if flags.pointerQueryWanted and not env.term.toLowerAscii.startsWith(\"vt\") and\n     env.tmux.len == 0:",
+              "  if flags.pointerQueryWanted and\n     env.tmux.len == 0:")],
      [(PTY, PTY_VT)],
      "PA-5: a vt220 is asked"),
     ("P14", [(CAPS, "  not flags.noMouse and\n    (flags.choices.pointerShapes.isNone or",
@@ -210,7 +213,7 @@ ARMS = [
      "§5.6: --pointer-shapes=off still asks"),
     ("P15", [(OSC, "    return PointerCaps(dialect: pdOff, source: \"tmux\", remedy: PointerRemedy)",
               "    return PointerCaps(dialect: pdOff, source: \"tmux\")")],
-     [(PTY, PTY_TMUX_OFF)],
+     [(PTY, PTY_REMEDY)],
      "PA-7: no remedy line"),
     ("P16", [(OSC, "  elif shape == psColResize and caps.columnAlias: \"ew-resize\"",
               "  elif false: \"ew-resize\"")],

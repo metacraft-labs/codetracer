@@ -23,7 +23,7 @@
   "P12": "after ==",
   "P13": "not sess.transcriptBytes().contains(Osc)",
   "P14": "not sess.transcriptBytes().contains(Osc)",
-  "P15": "report.transcriptBytes().contains(\"allow-passthrough\")",
+  "P15": "off.contains(\"allow-passthrough on` in tmux\")",
   "P16": "\"ew-resize\" in shapes",
   "P17": "sess.waitLast(proc (last: string): bool =",
   "P2": "\"grabbing\" notin shapes",
