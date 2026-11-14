@@ -1,0 +1,12 @@
+# Control digests for run-plat67-shared-editor-mutations.py — the
+# subjects AND the suites the arms are graded by.
+# Refreshed with --record-control-hashes, gated by the
+# needle scan.
+f6002b33eb80e8b30c12d91fccede74389ae60b5bf135bda5e1d4e51fff3a9db  src/frontend/view_vocabulary/editor_dom_frame.nim
+bdd2169ebdfe0bc0a3ec135bba80cfd9bf7fc6ca0b91c5e660473d1a91affd60  src/frontend/ui/shared_editor.nim
+959b510f2655810eb112e2ca767bad996b9e98648173b4c25d05b26d66c5adbe  src/frontend/ui/shared_editor_facade.nim
+79f0b8886442e4d47801f3752e59ebea1a9780fdf1a3a00466632c7fbece3572  src/frontend/ui/shared_editor_lsp.nim
+d8aeaecdc9eaca42c833755605092dc84dda504ac2f7f10b283ad1f196daec2a  src/frontend/ui/shared_diff_editor.nim
+5cb67510ae823f2cecb0c050ad749cd3e84174b3a99548ca9b2d0a9b0d8a80c1  src/frontend/viewmodel/tests/unit/test_editor_dom_frame.nim
+a0e7d5fa318fb5691e1fab2775d1c2625dff9899e12be498b2137232f6f8e442  src/frontend/tests/shared_editor_chromium_test.nim
+6ee86d9f93ba309e0f3a18944843ec2d160281737e811587b4aad253fc631c11  src/frontend/tests/shared_editor_lsp_chromium_test.nim
