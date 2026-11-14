@@ -377,7 +377,7 @@ when defined(js):
       if outcome.copied.len > 0:
         writeRequestUrl(cstring(outcome.copied))
 
-  proc rowMenuItems(vm: RequestPanelVM; index: int): seq[ContextMenuItem] =
+  proc rowMenuItems*(vm: RequestPanelVM; index: int): seq[ContextMenuItem] =
     ## PLAT-58: the row's context menu, the ViewModel's entries
     ## (`RequestPanelVM.rowMenu`) — the same the terminal's and GPUI's panes
     ## show. A disabled entry carries its reason on the row.
@@ -387,15 +387,8 @@ when defined(js):
         disabled: not e.enabled, disabledReason: cstring(e.reason),
         handler: rowMenuHandler(vm, index, e.action))
 
-  proc wireRowMenu(row: isonim_dom.Element; vm: RequestPanelVM; index: int) =
-    ## A right press selects the row and opens its menu.
-    isonim_dom.addEventListener(isonim_dom.Node(row), cstring"contextmenu",
-      proc(ev: isonim_dom.Event) =
-        ev.preventMenuDefault()
-        ev.stopMenuPropagation()
-        vm.selectRequest(index)
-        showContextMenu(rowMenuItems(vm, index), ev.eventClientX(),
-                        ev.eventClientY()))
+  # A right press is the pointer row `context-menu.open`, performed by the
+  # front-end (`input/dom_pane_presses`) with the items below.
 
 proc renderRow[R, N](r: R; vm: RequestPanelVM; req: RequestRecord;
                      index: int; selected: bool): N =
@@ -424,9 +417,6 @@ proc renderRow[R, N](r: R; vm: RequestPanelVM; req: RequestRecord;
         text durationText(req)
       tdiv(class = "request-col-size"):
         text formatSize(req.responseSize)
-  when defined(js):
-    when N is isonim_dom.Element:
-      wireRowMenu(result, vm, index)
 
 when defined(js):
   proc keepSelectedRequestVisible(body: isonim_dom.Element) {.importjs: """

@@ -24,6 +24,7 @@
 ## and ids (`FlowValue`, `OmniscientLoopControls`, the noir-space-ship loop
 ## tests). Each proc says which of its names are load-bearing.
 
+import ../input/press_menu
 import std/strutils
 import ./field_keys
 
@@ -70,6 +71,15 @@ when defined(js):
     {.importjs: "((e) => (e.target && e.target.value != null) ? String(e.target.value) : '')(#)".}
   proc evPreventDefault(ev: isonim_dom.Event) {.importjs: "#.preventDefault()".}
   proc evStopPropagation(ev: isonim_dom.Event) {.importjs: "#.stopPropagation()".}
+
+proc menuOf(handler: FlowInputHandler): ElementMenu =
+  ## A chip's right press, as the menu it carries (`input/press_menu`): the
+  ## host's handler, told the press as a `FlowInput`; it opened a menu when it
+  ## asked to keep the browser's (`prevent`).
+  result = proc(x, y: int; ctrl, shift: bool): bool =
+    let input = FlowInput(button: 2, ctrl: ctrl, shift: shift, x: x, y: y)
+    handler(input)
+    input.prevent
 
 proc listen*[R, N](r: R; node: N; event: string; handler: FlowInputHandler;
                    stop = false) =
@@ -254,8 +264,8 @@ proc bindFlowChipBox[R, N](r: R; node: N; box: FlowChipBox;
       carried = false)
   if not handlers.onBoxContext.isNil:
     let act = handlers.onBoxContext
-    listen(r, node, "contextmenu", proc(input: FlowInput) =
-      act(box.side, box.id, input))
+    bindPressMenu(r, node, menuOf(proc(input: FlowInput) =
+      act(box.side, box.id, input)))
   if not handlers.onBoxHover.isNil:
     let act = handlers.onBoxHover
     listen(r, node, "mouseover", proc(input: FlowInput) =
@@ -281,7 +291,8 @@ proc renderFlowVariableChip*[R, N](r: R; flowMode, name: string;
   if showName:
     let nameNode = renderFlowValueName[R, N](r, name)
     bindPress[R, N](r, nameNode, FlowJumpToStep, handlers.onNamePress)
-    listen(r, nameNode, "contextmenu", handlers.onNameContext)
+    if not handlers.onNameContext.isNil:
+      bindPressMenu(r, nameNode, menuOf(handlers.onNameContext))
     r.appendChild(result, nameNode)
   for i, box in boxes:
     if i > 0:

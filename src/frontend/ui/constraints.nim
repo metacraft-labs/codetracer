@@ -23,7 +23,7 @@ import
 # for. `noteSourceEdited` replaces it because that is the proc this module
 # actually calls; `markStale` is reached through it, inside the viewmodel,
 # where the rule about which edits count can be driven by a headless lane.
-from ../viewmodel/viewmodels/constraints_vm import
+from ../viewmodel/viewmodels/constraints_vm import selectRow,
   ConstraintsVM, createConstraintsVM, setReport, setAbsence, noteSourceEdited,
   NoirSourceFile, ConstraintReport
 from ../viewmodel/viewmodels/constraints_answer import ConstraintsOnlyAsk,
@@ -196,3 +196,14 @@ method register*(self: ConstraintsComponent, api: MediatorWithSubscribers) =
 registerElementOperation("constraints.go-to-source", proc(p: ElementPress): bool =
   pressConstraints(constraintsVMForHost(cast[dom_api.Element](p.element)),
                    "constraints.go-to-source", readerOf(p.element)))
+
+# A right press on a row selects it and opens its menu (K68): the pointer row
+# `context-menu.open`, performed for this pane with the items its view
+# projects (`rowMenuItems`, the ViewModel's entries).
+registerPaneOperation("context-menu.open", "constraints", proc(p: ElementPress): bool =
+  let index = intAttributeOf(p.element, "data-constraint-index")
+  let vm = constraintsVMForHost(cast[dom_api.Element](p.element))
+  if vm.isNil or index < 0:
+    return false
+  vm.selectRow(index)
+  p.showMenuAt(rowMenuItems(vm, index)))

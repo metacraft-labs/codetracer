@@ -21,6 +21,7 @@
 ## `renderTopbar` is what the menu shell puts in its toolbar host: this panel
 ## or the edit-mode toolbar, chosen by `DebugControlsVM.topbarSurface`.
 
+import ../input/press_menu
 import std/[options, strutils]
 
 import isonim/core/[signals, computation]
@@ -137,19 +138,12 @@ template isHistoryDomElement(N: typedesc): bool =
 
 proc bindHistoryContextMenu[R, N](r: R; button: N;
                                  vm: DebugControlsVM; kind: HistoryListKind) =
-  ## Native contextmenu events are separate from click events in IsoNim.
-  ## Suppress the browser menu and leave left-click navigation untouched.
-  when isHistoryDomElement(N):
-    isonim_dom.addEventListener(isonim_dom.Node(button), cstring"contextmenu",
-      proc(ev: isonim_dom.Event) =
-        ev.historyPreventDefault()
-        ev.historyStopPropagation()
-        vm.openHistoryMenu(kind))
-  elif N is MockNode:
-    r.addEventListener(button, "contextmenu", proc(ev: MockEvent) =
-      ev.preventDefault()
-      ev.stopPropagation()
-      vm.openHistoryMenu(kind))
+  ## A history button carries its menu (`input/press_menu`): a right press
+  ## opens the list of the places it goes back or forward to; a left press
+  ## still navigates.
+  bindPressMenu(r, button, proc(x, y: int; ctrl, shift: bool): bool =
+    vm.openHistoryMenu(kind)
+    true)
 
 proc bindHistoryMenuDismissal[R, N](r: R; host, back, forward: N;
                                    vm: DebugControlsVM) =

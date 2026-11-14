@@ -63,6 +63,7 @@ import
   ../lib/[ jslib, logging ],
   ./auto_hide_panel_config
 from std/options import isSome, get
+import ../viewmodel/input/dom_pointer
 from ../headless_app/desktop_panes import paneOfContent
 # Node type comes from kdom; do not import dom.Node which conflicts.
 
@@ -497,6 +498,29 @@ proc pinPanel*(
   # narrower container; defer so the flex reflow is done first.
   deferredUpdateGLSize()
   dispatchLayoutUpdated()
+
+proc labelsOf(container: dom_api.Element): seq[JsObject] {.importjs:
+  "Array.from(#.querySelectorAll('[data-ct-strip-index]'))".}
+
+proc setStripMenu(container: dom_api.Element;
+                  menu: proc(index: int; x: int; y: int)) =
+  ## What a right press on each of a strip's labels opens (its callbacks'
+  ## `onContextMenu`, built with the strip's panels): the strip's views draw
+  ## the labels and their `data-ct-strip-index` and open no menu themselves;
+  ## the right press is the pointer row `context-menu.open`, which opens the
+  ## menu each label carries (`dom_pointer.setPressMenu`).
+  if menu.isNil:
+    return
+  let labels = labelsOf(container)
+  for i in 0 ..< labels.len:
+    # By index, not `for label in`: the loop's `lent` element cannot be
+    # captured by `closureScope` under the test lanes' memory model.
+    let label = labels[i]
+    closureScope:
+      let index = intAttributeOf(label, "data-ct-strip-index")
+      setPressMenu(label, proc(event: JsObject): bool =
+        menu(index, event.clientX.to(int), event.clientY.to(int))
+        true)
 
 proc markAutoHidePaneScope(host: Element; content: int) =
   ## A pane shown from the auto-hide state names its kind for the DOM pointer
@@ -1988,6 +2012,7 @@ when defined(js):
     renderAutoHideSideStripInto(
       r, container, records, model.collapsed, callbacks,
       revealed = isEdgeRevealed(edge), revealClosing = isEdgeRevealClosing(edge))
+    setStripMenu(container, callbacks.onContextMenu)
     if footprint(dom_api.getAttribute(container, cstring"class")) != before:
       deferredUpdateGLSize()
 else:
@@ -2085,6 +2110,7 @@ when defined(js):
           ], x, y))
     let r = WebRenderer()
     renderAutoHideBottomStripInto(r, container, records, callbacks)
+    setStripMenu(container, callbacks.onContextMenu)
 else:
   proc requestAutoHideBottomStripRender*(containerId: cstring) =
     discard

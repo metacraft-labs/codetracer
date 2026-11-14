@@ -139,6 +139,7 @@ proc renderSideStripTab[R, N](
     tdiv(ref = tabEl,
          class = cls,
          `data-ct-panel-key` = tab.key,
+         `data-ct-strip-index` = $index,
          role = "button", tabindex = "0",
          onclick = proc() = callbacks.invokeSelect(index)):
       span(class = AutoHideSideStripTabLabelClass):
@@ -167,11 +168,6 @@ proc renderSideStripTab[R, N](
       isonim_dom.addEventListener(isonim_dom.Node(tabEl), cstring"mouseleave",
         proc(ev: isonim_dom.Event) =
           callbacks.invokeHoverLeave(index))
-      isonim_dom.addEventListener(isonim_dom.Node(tabEl), cstring"contextmenu",
-        proc(ev: isonim_dom.Event) =
-          ev.preventDefault()
-          ev.stopPropagation()
-          callbacks.invokeContextMenu(index, ev.eventClientX(), ev.eventClientY()))
 
 proc renderCollapsedLine[R, N](
     r: R;

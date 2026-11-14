@@ -215,26 +215,56 @@ proc pressPixelHistory*(vm: PixelHistoryVM; operation: string;
   vm.selectEntry(index)
   true
 
+type
+  PaneVMs* = object
+    ## The ViewModels of the panes a DOM host mounts: a session's (the
+    ## desktop, a VS Code panel) or an embedder's own (BlockTracer's Call
+    ## Trace, Values and Event Log). A pane the host does not mount is nil.
+    calltrace*: CalltraceVM
+    eventLog*: EventLogVM
+    state*: StateVM
+    fileTree*: FilesystemVM
+    pointList*: PointListVM
+    terminalOutput*: TerminalOutputVM
+    searchResults*: SearchResultsVM
+    lowLevelCode*: LowLevelCodeVM
+    requests*: RequestPanelVM
+
+proc paneVMsOf*(session: SessionViewModel): PaneVMs =
+  if session.isNil:
+    return
+  PaneVMs(calltrace: session.calltraceVM, eventLog: session.eventLogVM,
+          state: session.stateVM, fileTree: session.fileTreeVM,
+          pointList: session.pointListVM,
+          terminalOutput: session.terminalOutputVM,
+          searchResults: session.searchResultsVM,
+          lowLevelCode: session.lowLevelCodeVM,
+          requests: session.requestPanelVM)
+
+proc performPanePress*(vms: PaneVMs; operation: string;
+                       attr: AttributeReader): bool =
+  ## Performs `operation` on the element `attr` describes, over `vms`; false
+  ## when it is not one of `SessionPressOperations`, its pane is not mounted,
+  ## or the element is not one it acts on.
+  case operation.split('.')[0]
+  of "calltrace": pressCalltrace(vms.calltrace, operation, attr)
+  of "event-log": pressEventLog(vms.eventLog, operation, attr)
+  of "variables": pressState(vms.state, operation, attr)
+  of "file-tree": pressFileTree(vms.fileTree, operation, attr)
+  of "point-list": pressPointList(vms.pointList, operation, attr)
+  of "terminal-output":
+    pressTerminalOutput(vms.terminalOutput, operation, attr)
+  of "search": pressSearchResults(vms.searchResults, operation, attr)
+  of "requests": pressRequests(vms.requests, operation, attr)
+  of "low-level": pressLowLevel(vms.lowLevelCode, operation, attr)
+  else: false
+
 proc performSessionPress*(session: SessionViewModel; operation: string;
                           attr: AttributeReader): bool =
-  ## Performs `operation` on the element `attr` describes, over `session`'s
-  ## ViewModels; false when it is not one of `SessionPressOperations` or the
-  ## element is not one it acts on.
+  ## `performPanePress` over `session`'s ViewModels.
   if session.isNil:
     return false
-  let pane = operation.split('.')[0]
-  case pane
-  of "calltrace": pressCalltrace(session.calltraceVM, operation, attr)
-  of "event-log": pressEventLog(session.eventLogVM, operation, attr)
-  of "variables": pressState(session.stateVM, operation, attr)
-  of "file-tree": pressFileTree(session.fileTreeVM, operation, attr)
-  of "point-list": pressPointList(session.pointListVM, operation, attr)
-  of "terminal-output":
-    pressTerminalOutput(session.terminalOutputVM, operation, attr)
-  of "search": pressSearchResults(session.searchResultsVM, operation, attr)
-  of "requests": pressRequests(session.requestPanelVM, operation, attr)
-  of "low-level": pressLowLevel(session.lowLevelCodeVM, operation, attr)
-  else: false
+  performPanePress(paneVMsOf(session), operation, attr)
 
 proc pressVcs*(vm: VCSVM; callbacks: VCSCallbacks; operation: string;
                attr: AttributeReader): bool =

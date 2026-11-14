@@ -177,7 +177,7 @@ when defined(js):
       if outcome.copied.len > 0:
         writeConstraintText(cstring(outcome.copied))
 
-  proc rowMenuItems(vm: ConstraintsVM; index: int): seq[ContextMenuItem] =
+  proc rowMenuItems*(vm: ConstraintsVM; index: int): seq[ContextMenuItem] =
     ## The row's context menu, the ViewModel's entries (`rowMenu`) — the same
     ## the terminal's and GPUI's panes show.
     for e in vm.rowMenu(index):
@@ -186,15 +186,8 @@ when defined(js):
         disabled: not e.enabled, disabledReason: cstring(e.reason),
         handler: rowMenuHandler(vm, index, e.action))
 
-  proc wireRowMenu(row: isonim_dom.Element; vm: ConstraintsVM; index: int) =
-    ## A right press selects the row and opens its menu.
-    isonim_dom.addEventListener(isonim_dom.Node(row), cstring"contextmenu",
-      proc(ev: isonim_dom.Event) =
-        ev.preventMenuDefault()
-        ev.stopMenuPropagation()
-        vm.selectRow(index)
-        showContextMenu(rowMenuItems(vm, index), ev.eventClientX(),
-                        ev.eventClientY()))
+  # A right press is the pointer row `context-menu.open`, performed by the
+  # front-end (`input/dom_pane_presses`) with the items below.
 
 # A row's press (select it and open its source) is the pointer row
 # `constraints.go-to-source`, performed by the front-end on the row's
@@ -218,9 +211,6 @@ proc renderRow[R, N](r: R; vm: ConstraintsVM; row: ConstraintRow;
         text count
       span(class = "constraints-where"):
         text where
-  when defined(js):
-    when N is isonim_dom.Element:
-      wireRowMenu(result, vm, index)
 
 proc renderOpcode[R, N](r: R; vm: ConstraintsVM; row: ConstraintRow;
                         index: int; selected: bool): N =
@@ -238,9 +228,6 @@ proc renderOpcode[R, N](r: R; vm: ConstraintsVM; row: ConstraintRow;
         text args
       span(class = "constraints-where"):
         text where
-  when defined(js):
-    when N is isonim_dom.Element:
-      wireRowMenu(result, vm, index)
 
 proc renderFunctions[R, N](r: R; vm: ConstraintsVM; into: N) =
   ## ONE FUNCTION per block: its count row, then its opcodes — the rows of

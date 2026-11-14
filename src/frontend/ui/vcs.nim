@@ -1092,4 +1092,12 @@ for operation in ["vcs.open-file-diff", "vcs.toggle-commit"]:
       let (component, vm) = vcsOfPress(p)
       if vm.isNil:
         return false
-      pressVcs(vm, component.vcsCallbacks(), op, readerOf(p.element)))
+      result = pressVcs(vm, component.vcsCallbacks(), op, readerOf(p.element))
+      if result:
+        # Both elements sit inside one with a press of its own — a file's
+        # View Diff button in the file's row, a commit's expander in its
+        # header — and their press is not also that row's (the file
+        # opened, the commit's diff shown). The press is performed on the
+        # element as it bubbles (`dom_pointer`), so stopping it here keeps
+        # it from the row.
+        discard p.event.stopPropagation())

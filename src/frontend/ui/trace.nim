@@ -819,9 +819,15 @@ proc registerTraceTableEvents(self: TraceComponent) {.importjs: """
       }
     });
 
-    table.off("contextmenu", "tr");
-    table.on("contextmenu", "tr", function(event) {
-      handleTraceTableContextMenu(self, event);
+    // A row's right press is the pointer row `context-menu.open`, which opens
+    // the menu the table carries (`dom_pointer.setPressMenu`'s convention):
+    // the row is the press's target.
+    table.each(function() {
+      this.__ctPressMenu = function(event) {
+        handleTraceTableContextMenu(self, event);
+        return true;
+      };
+      this.setAttribute("data-ct-press-menu", "");
     });
   })(#);
 """.}

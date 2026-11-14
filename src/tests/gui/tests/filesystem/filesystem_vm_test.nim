@@ -1341,9 +1341,11 @@ proc childrenListOf(row: MockNode): MockNode =
       return child
   nil
 
-proc rightClick(row: MockNode): MockEvent =
-  result = MockEvent(`type`: "contextmenu", target: row, currentTarget: row)
-  row.fireEventWith("contextmenu", result)
+proc rightClick(vm: FilesystemVM; row: MockNode) =
+  ## A right press on the row is the pointer row `context-menu.open`; the
+  ## front-end opens the menu of the row's `data-ct-path`
+  ## (`input/dom_pane_presses` with `fileTreeMenuItems`), which is this.
+  discard vm.openFileTreeMenu(row.attributes.getOrDefault("data-ct-path", ""))
 
 proc press(node: MockNode; key: string) =
   node.fireEventWith("keydown", MockEvent(`type`: "keydown", key: key,
@@ -1537,15 +1539,13 @@ suite "Files context menu":
       let panel = renderFilesystemPanel[MockRenderer, MockNode](MockRenderer(), vm)
       let row = findRow(panel, "main.nr")
       check not row.isNil
-      let ev = rightClick(row)
-      check ev.defaultPrevented
-      check ev.propagationStopped
+      rightClick(vm, row)
       check vm.lastContextMenu.labels == MenuOrder
       check vm.lastContextMenu.entry("Create").disabledReason ==
         ReadOnlySourcesReason
       check not vm.lastContextMenu.entry("Edit").disabled
       # A folder row's menu is the folder's.
-      discard rightClick(findRow(panel, "src"))
+      rightClick(vm, findRow(panel, "src"))
       check vm.lastContextMenu.entry("Edit").disabled
       dispose()
 
@@ -1567,7 +1567,7 @@ suite "Files context menu":
       let (vm, calls) = filesVM(store, editMode = true)
       vm.expandPath("/proj")
       let panel = renderFilesystemPanel[MockRenderer, MockNode](MockRenderer(), vm)
-      discard rightClick(findRow(panel, "src"))
+      rightClick(vm, findRow(panel, "src"))
       vm.lastContextMenu.entry("Create").run()
       let srcRow = findRow(panel, "src")
       let list = childrenListOf(srcRow)
@@ -1613,7 +1613,7 @@ suite "Files context menu":
       vm.expandPath("/proj")
       vm.expandPath("/proj/src")
       let panel = renderFilesystemPanel[MockRenderer, MockNode](MockRenderer(), vm)
-      discard rightClick(findRow(panel, "lib.nr"))
+      rightClick(vm, findRow(panel, "lib.nr"))
       vm.lastContextMenu.entry("Rename").run()
       check findRow(panel, "lib.nr").isNil
       let input = findOverlay(panel, "filesystem-name-input")

@@ -90,6 +90,8 @@ const
     # its expander the toggle.
     ("calltrace", ".toggle-call", "toggle"),
     ("calltrace", ".call-text", "row"),
+    # A call's argument (K23): its right press opens the argument's menu.
+    ("calltrace", ".call-arg", "value"),
     # The event log (K24 - K26): a row, a column header (not its resize
     # grip), and the parts of a row with presses of their own.
     ("eventLog", "[data-ct-column-separator]", ""),
@@ -99,8 +101,14 @@ const
     ("eventLog", "tr[data-position]", "row"),
     # The variables (K27): a compound value's expander.
     ("state", ".value-expand-button", "row"),
+    # The rest of a variable's row (K28): a right press opens its menu; a
+    # plain press on it is nothing (the expander is the row's toggle).
+    ("state", "[data-variable-name]", "value"),
     # Files (K17, K18): a node's anchor.
+    ("fileTree", ".filesystem-name-field", ""),
     ("fileTree", ".jstree-anchor", "row"),
+    # The rest of a node's row (K19): a right press opens its menu.
+    ("fileTree", "li.jstree-node", "value"),
     # Points (K31).
     ("pointList", "[data-point-index]", "row"),
     # Terminal Output (K32): a fragment, and a line past its text.
@@ -127,11 +135,22 @@ const
     ("pixelHistory", "[data-pixel-history-index]", "row"),
     # An inline value a view marks as one (`data-ct-element-kind`).
     ("*", "[data-ct-element-kind=\"value\"]", "value"),
+    # An element that carries its own menu (`setPressMenu`): an inline value
+    # in the editor (K36), a toolbar button's history.
+    ("*", "[data-ct-press-menu]", "value"),
     # Any other control: a button with a press of its own, or an element
     # carrying its operation. (A link inside a row is the row's:
     # `routePointerPress` leaves a modified press on it to the browser.)
     ("*", "button, [role=\"button\"], [data-ct-operation]", "button"),
   ]
+
+const
+  ChromePane* = "layout"
+    ## The scope of a press outside every pane — the layout's chrome (a pane's
+    ## tab, an auto-hide strip's label: K7, K42) and the toolbar: an element
+    ## there is a press's only when it carries a menu (`setPressMenu`).
+  ChromeMenuSelector = "[data-ct-press-menu]"
+  ChromeTabSelector = ".lm_tab, [data-ct-strip-index]"
 
 var procedures = initTable[string, ElementProc]()
 var hitTests = initTable[string, HitTest]()
@@ -172,12 +191,22 @@ proc registerElementOperation*(operation: string; run: ElementProc) =
   ## registration wins (a renderer re-imported by a hot reload).
   procedures[operation] = run
 
-proc hasElementOperation*(operation: string): bool =
-  procedures.hasKey(operation)
+proc registerPaneOperation*(operation, pane: string; run: ElementProc) =
+  ## The procedure for `operation` on an element of the pane `pane` only: an
+  ## operation every pane names alike but each performs on its own elements
+  ## (`context-menu.open` opens that pane's menu for the element pressed).
+  procedures[operation & "@" & pane] = run
+
+proc hasElementOperation*(operation: string; pane = ""): bool =
+  procedures.hasKey(operation & "@" & pane) or procedures.hasKey(operation)
 
 proc runElementOperation*(operation: string; press: ElementPress): bool =
-  ## Performs `operation` on the element pressed; false when the desktop has
-  ## no procedure for it or the procedure declined.
+  ## Performs `operation` on the element pressed — its pane's procedure when
+  ## the pane has one, else the operation's; false when there is none or the
+  ## procedure declined.
+  let scoped = operation & "@" & press.pane
+  if procedures.hasKey(scoped):
+    return procedures[scoped](press)
   if not procedures.hasKey(operation):
     return false
   procedures[operation](press)
@@ -232,6 +261,43 @@ proc intAttributeOf*(element: JsObject; name: string; default = -1): int =
     n = n * 10 + (ord(text[i]) - ord('0'))
     inc i
   sign * n
+
+# ---------------------------------------------------------------------------
+# An element's own menu
+# ---------------------------------------------------------------------------
+
+type
+  PressMenu* = proc(event: JsObject): bool {.closure.}
+    ## Opens the menu at the press `event` (its coordinates, its target, its
+    ## modifiers); false when it opened none (Shift held over the editor area
+    ## leaves the browser its own menu), so the press is left alone.
+
+proc setPressMenu*(element: JsObject; menu: PressMenu) {.importjs:
+  "((e, m) => { e.__ctPressMenu = m; e.setAttribute('data-ct-press-menu', ''); })(#, #)".}
+  ## What a right press on `element` opens, for an element whose menu its host
+  ## builds from state the element alone does not carry (a pane's tab, an
+  ## auto-hide strip's label, an inline value, a toolbar button): the host
+  ## hands the menu here instead of listening for the press itself, and the
+  ## press is the pointer row `context-menu.open` like any other
+  ## (`openPressMenu`).
+
+proc pressMenuOf(element: JsObject): JsObject {.importjs: """
+  ((e) => { const c = e && e.closest ? e.closest('[data-ct-press-menu]') : null;
+            return c && c.__ctPressMenu ? c.__ctPressMenu : null; })(#)""".}
+proc callPressMenu(menu: JsObject; event: JsObject): bool {.importjs: "!!(#(#))".}
+
+proc openPressMenu(p: ElementPress): bool =
+  ## `context-menu.open` on an element that carries its menu (`setPressMenu`),
+  ## at the press, else the menu registered for its pane (`registerPaneMenu`:
+  ## the session tabs' strip); a pane whose elements each open their own
+  ## menu registers its procedure with `registerPaneOperation`, which comes
+  ## first.
+  let menu = pressMenuOf(p.element)
+  if menu.isNil:
+    return openPaneMenu(p)
+  callPressMenu(menu, p.event)
+
+registerElementOperation("context-menu.open", openPressMenu)
 
 # ---------------------------------------------------------------------------
 # The one listener
@@ -302,6 +368,18 @@ const
     ## content widgets, which re-render under a press) and that the press must
     ## not reach (it would move Monaco's caret).
 
+proc performPendingPress(ev: JsObject)
+
+proc listenOnce(element: JsObject; kind: cstring; handler: proc(ev: JsObject)) {.
+  importjs: "#.addEventListener(#, #, {once: true})".}
+
+proc performAtElement(element: JsObject; ev: JsObject) =
+  ## The pressed element's own bubble listener for this one press, after the
+  ## handlers it already carries. (Left behind when a descendant stopped the
+  ## press, it runs once on the element's next press, which is not the
+  ## pending one, and does nothing.)
+  listenOnce(element, ev["type"].to(cstring), performPendingPress)
+
 proc routePointerPress(ev: JsObject; gestureKey: string; onDown = false) =
   ## **A PRESS ON A PANE'S ELEMENT, THROUGH THE ROUTER** (Input-Routing §5.1):
   ## the element under the press and its kind (`domElementAt`), its pane from
@@ -317,12 +395,23 @@ proc routePointerPress(ev: JsObject; gestureKey: string; onDown = false) =
   if resolver.isNil:
     return
   var path = scopeChainOf(ev.target)
+  var hit: ElementHit
   if path.innermostPane < 0:
     # A pane shown outside the layout (the auto-hide overlay's) names its
     # kind for presses only (`data-ct-pane`): it is not a key scope.
     let host = closestOrNull(ev.target, cstring"[data-ct-pane]")
+    let menuEl = if gestureKey == "RightClick":
+                   closestOrNull(ev.target, cstring(ChromeMenuSelector))
+                 else: nil
     if not host.isNil:
       path.add pane(attributeOf(host, "data-ct-pane"))
+    elif not menuEl.isNil:
+      # A right press outside every pane (K7, K42, the toolbar) on an element
+      # that carries a menu: in the scope `ChromePane`, a `tab` for a pane's
+      # tab or a strip's label, a `value` otherwise.
+      path.add pane(ChromePane)
+      hit = ElementHit(element: menuEl,
+        kind: if matchesJs(menuEl, cstring(ChromeTabSelector)): "tab" else: "value")
     elif not closestOrNull(ev.target, cstring"[data-ct-operation]").isNil:
       # An element carrying its operation outside every pane (a popup on
       # the document's body): its press is routed with no pane.
@@ -330,8 +419,7 @@ proc routePointerPress(ev: JsObject; gestureKey: string; onDown = false) =
     else:
       return
   let paneKind = path[path.innermostPane].paneKind
-  var hit = ElementHit()
-  if hitTests.hasKey(paneKind):
+  if hit.kind.len == 0 and hitTests.hasKey(paneKind):
     hit = hitTests[paneKind](ev.target, ev)
   for test in everyPaneHitTests:
     if hit.kind.len > 0: break
@@ -342,9 +430,11 @@ proc routePointerPress(ev: JsObject; gestureKey: string; onDown = false) =
     return
   let pressedOnDown = hit.pressDown or not closestOrNull(ev.target,
     cstring("[" & PressDownAttribute & "=\"down\"]")).isNil
-  if onDown != pressedOnDown:
+  if onDown != pressedOnDown and gestureKey in ["Click", "DoubleClick"]:
     # An element pressed on the press is routed then, and not again by its
-    # click; every other element by its click only.
+    # click; every other element by its click only. That is the primary
+    # button's: a right press on such an element (an inline value's menu)
+    # is its `contextmenu`, as on any other.
     return
   let mods = modifiersOf(ev)
   if not linkUnder(ev.target).isNil and (mods != {} or gestureKey != "Click"):
@@ -361,7 +451,7 @@ proc routePointerPress(ev: JsObject; gestureKey: string; onDown = false) =
     return
   let res = outcome.resolution
   let press = ElementPress(element: hit.element, event: ev, pane: paneKind)
-  if hasElementOperation(outcome.operation):
+  if hasElementOperation(outcome.operation, paneKind):
     if onDown:
       # Performed now, and the press goes no further: its click may never
       # come, and what lies under the element (Monaco) must not take the
@@ -369,21 +459,31 @@ proc routePointerPress(ev: JsObject; gestureKey: string; onDown = false) =
       if not tracer.isNil: tracer(outcome.operation)
       if runElementOperation(outcome.operation, press):
         discard ev.stopImmediatePropagation()
-    elif outcome.byRow and res.layer.startsWith("user:"):
+    elif (outcome.byRow and res.layer.startsWith("user:")) or
+         outcome.operation == "context-menu.open":
       # A user's row takes the press here, in the capture phase: nothing
-      # else may answer it.
+      # else may answer it. So does an element's menu, as the views' own
+      # menus did: nothing observes a right press, and an editor underneath
+      # (Monaco's own menu) must not answer it too.
       if not tracer.isNil: tracer(outcome.operation)
       if runElementOperation(outcome.operation, press):
         stop(ev)
     else:
       # The base's row, or the operation a button carries, is performed when
-      # the press has reached the window again (`performPendingPress`), where
-      # the view's own handler used to run: what observes the press on its
-      # way (a pane's gesture tracking, as the Requests pane's detail split
-      # does) sees it first, and an element that answers it itself stops it
-      # there. No link is followed.
-      discard ev.preventDefault()
+      # the press bubbles back to the element pressed (`performPendingPress`),
+      # where the view's own handler used to run: what observes the press on
+      # its way down (a pane's gesture tracking, as the Requests pane's detail
+      # split does in the capture phase) sees it first, and a descendant that
+      # answers it itself stops it there. Performed there, before the
+      # handlers of the elements around it, a procedure whose element sits
+      # inside another with a press of its own (a VCS file's View Diff button
+      # inside the file's row) can keep the press from it, as the view's
+      # handler did. The window's bubble listener performs it when the
+      # element's listener did not run. No link is followed.
+      if not linkUnder(ev.target).isNil:
+        discard ev.preventDefault()
       pending = PendingPress(event: ev, operation: outcome.operation, press: press)
+      performAtElement(hit.element, ev)
   elif outcome.byRow and not fallback.isNil and fallback(res, press):
     stop(ev)
 
@@ -395,7 +495,8 @@ proc performPendingPress(ev: JsObject) =
   let p = pending
   pending = PendingPress()
   if not tracer.isNil: tracer(p.operation)
-  discard runElementOperation(p.operation, p.press)
+  if runElementOperation(p.operation, p.press):
+    discard ev.preventDefault()
 
 proc routeWindowGesture(ev: JsObject; gestureKey: string) =
   ## A gesture that is the WINDOW's, wherever it lands — the mouse's side

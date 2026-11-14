@@ -950,13 +950,11 @@ suite "M4 — State Pane renders inline origin badge per row":
       # listener (registered via the DSL's ``oncontextmenu = handler``
       # rewrite — see ``isonim/dsl/transform.nim::eventName``).  Without
       # this the handler is silently absent and the menu wouldn't open.
-      check "contextmenu" in row.eventListeners or
-            "contextmenu" in row.eventHandlers
       # Fire the right-click — the handler reads the row's live state
       # and publishes the menu through ``StateVM.lastContextMenu`` so
       # tests can interrogate the entries without touching the
       # JS-only ``showContextMenu`` primitive.
-      row.fireEvent("contextmenu")
+      discard stateVM.openVariableRowMenu(row.attributes.getOrDefault("data-variable-path", ""))
       let menu = stateVM.lastContextMenu.val
       check menu.len >= 1
       var showOriginEntry: OriginContextMenuEntry
@@ -1536,7 +1534,7 @@ suite "M86 — the origin badge and Pin to scratchpad, through the production br
       let panel = renderStatePanel[MockRenderer, MockNode](MockRenderer(), w.state)
       let row = findRowNamed(panel, "c")
       check row != nil
-      row.fireEvent("contextmenu")
+      discard w.state.openVariableRowMenu(row.attributes.getOrDefault("data-variable-path", ""))
       var showOrigin: proc() = nil
       for entry in w.state.lastContextMenu.val:
         if entry.label == "Show value origin":
@@ -1573,7 +1571,7 @@ suite "M86 — the origin badge and Pin to scratchpad, through the production br
           findRow(child)
       findRow(panel)
       check row != nil
-      row.fireEvent("contextmenu")
+      discard w.state.openVariableRowMenu(row.attributes.getOrDefault("data-variable-path", ""))
       var showOrigin: proc() = nil
       for entry in w.state.lastContextMenu.val:
         if entry.label == "Show value origin":

@@ -1018,7 +1018,8 @@ const ClickInventory*: array[75, ClickBehaviour] = [
   k("K42", "Auto-hide label", {cgRightClick},
     "menu: Pin to the other edges, Unpin, Close", "dockLabelContextMenu",
     nsDone, nsDone),
-  k("K43", "Pane tab: pin button", {cgClick}, "pin the pane to the left",
+  k("K43", "Pane tab: pin button", {cgClick},
+    "pin the pane to an auto-hide edge (the desktop's sidebar, GPUI's bottom)",
     "cmdDock", nsNotApplicable, nsExisting,
     "the terminal strip draws no pin glyph (its tab menu pins, K7); " &
       "GPUI's button is PLAT-49 part B's"),

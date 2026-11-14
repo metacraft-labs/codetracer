@@ -10,7 +10,11 @@
  *   * a press on a call's text runs `calltrace.go-to-call` (the debugger goes
  *     to that call), on its toggle `calltrace.toggle-call` (its children show),
  *     on an Event Log column's header `event-log.sort`, on an event's row
- *     `event-log.jump` — each read off
+ *     `event-log.jump`, and a right press on a call `context-menu.open` (the
+ *     call's own menu, opened by the desktop's procedure, not the view), and a
+ *     right press on an inline value in the editor (K36) `context-menu.open`
+ *     with the value's own menu (Jump to value, Add all values to
+ *     scratchpad) — each read off
  *     `window.__ctKeyTrace`, every operation the router ran, beside the
  *     product's own state;
  *   * with a user's `keybindings.json` that REMOVES the base's row for a press
@@ -137,6 +141,26 @@ test.describe("the desktop's presses are the pointer keymap's rows", () => {
     await expect.poll(() => keyTrace(ctPage), { timeout: 30_000 })
       .toEqual(["event-log.sort"]);
 
+    // A right press on a call: the pointer row `context-menu.open`, performed
+    // by the desktop's procedure for the Call Trace — the call's own menu.
+    await clearTrace(ctPage);
+    await (await otherCall(ctPage)).click({ button: "right" });
+    const menu = ctPage.locator("#context-menu-container");
+    await expect(menu).toBeVisible({ timeout: 30_000 });
+    await expect(menu).toContainText(/Call Children/);
+    expect(await keyTrace(ctPage)).toEqual(["context-menu.open"]);
+    await ctPage.keyboard.press("Escape");
+    await expect(menu).toBeHidden({ timeout: 30_000 });
+
+    // A right press on a pane's tab: the layout's chrome, the tab's own menu.
+    await clearTrace(ctPage);
+    await ctPage.locator(".lm_tab").first().click({ button: "right" });
+    await expect(menu).toBeVisible({ timeout: 30_000 });
+    await expect(menu).toContainText("Pin to Left");
+    expect(await keyTrace(ctPage)).toEqual(["context-menu.open"]);
+    await ctPage.keyboard.press("Escape");
+    await expect(menu).toBeHidden({ timeout: 30_000 });
+
     // An event's row: the Event Log's row runs `event-log.jump`.
     const event = ctPage.locator(".eventLog-row[data-position]").last();
     await expect(event).toBeVisible({ timeout: 30_000 });
@@ -144,6 +168,50 @@ test.describe("the desktop's presses are the pointer keymap's rows", () => {
     await event.click();
     await expect.poll(() => keyTrace(ctPage), { timeout: 30_000 })
       .toEqual(["event-log.jump"]);
+  });
+});
+
+const InlineValues =
+  ".flow-parallel-value-box:not(.flow-std-default-box), " +
+  ".flow-inline-value-box:not(.flow-std-default-box), " +
+  ".flow-multiline-value-box:not(.flow-std-default-box)";
+
+test.describe("a right press on an inline value is the pointer keymap's row", () => {
+  useKeybindings(keybindingsFile("[]\n"));
+  test.use({
+    sourcePath: recording("calc"),
+    launchMode: "trace-folder",
+    codetracerPrefixOverride: prefix,
+  });
+
+  test("the value's menu opens through context-menu.open (K36)", async ({ ctPage }) => {
+    await ctPage.waitForSelector(".calltrace-view .call-text", { timeout: 120_000 });
+    await settled(ctPage);
+    // The editor shows the line's values once the flow for the current
+    // function arrives; step over until it shows one (the first lines of a
+    // module may hold none).
+    const values = ctPage.locator(InlineValues);
+    for (let i = 0; i < 6 && (await values.count()) === 0; i++) {
+      try {
+        await values.first().waitFor({ state: "visible", timeout: 20_000 });
+      } catch {
+        await ctPage.keyboard.press("F10");
+        await settled(ctPage);
+      }
+    }
+    const value = values.first();
+    await expect(value).toBeVisible({ timeout: 60_000 });
+    await value.scrollIntoViewIfNeeded();
+
+    await clearTrace(ctPage);
+    await value.click({ button: "right" });
+    const menu = ctPage.locator("#context-menu-container");
+    await expect(menu).toBeVisible({ timeout: 30_000 });
+    await expect(menu).toContainText("Jump to value");
+    await expect(menu).toContainText("Add all values to scratchpad");
+    expect(await keyTrace(ctPage)).toEqual(["context-menu.open"]);
+    await ctPage.keyboard.press("Escape");
+    await expect(menu).toBeHidden({ timeout: 30_000 });
   });
 });
 

@@ -275,11 +275,13 @@ when defined(js):
         if not run.isNil:
           run())
 
-  proc showFileTreeMenu(vm: FilesystemVM; path: string; ev: isonim_dom.Event) =
-    var items: seq[ContextMenuItem] = @[]
+  proc fileTreeMenuItems*(vm: FilesystemVM; path: string): seq[ContextMenuItem] =
+    ## A node's menu (`FilesystemVM.openFileTreeMenu`) as the shared
+    ## right-click menu's items. A right press anywhere on the row (its
+    ## whole-row band, icon or label) is the pointer row `context-menu.open`,
+    ## performed by the front-end with these (`input/dom_pane_presses`).
     for entry in vm.openFileTreeMenu(path):
-      items.add toContextMenuItem(entry)
-    showContextMenu(items, ev.eventClientX(), ev.eventClientY())
+      result.add toContextMenuItem(entry)
 
 # This module's own names for the two event calls. Generic code that called
 # `preventDefault` would leave it an open symbol (kdom and mock_dom both
@@ -294,23 +296,6 @@ template isDomElement(N: typedesc): bool =
 proc fsPreventDefault(ev: MockEvent) = ev.preventDefault()
 proc fsStopPropagation(ev: MockEvent) = ev.stopPropagation()
 
-proc bindRowContextMenu[R, N](r: R; vm: FilesystemVM; row: N; path: string) =
-  ## A right-click anywhere on the row (its whole-row band, icon or label)
-  ## opens that row's menu. The browser's own menu is suppressed, and the
-  ## event stops at the row so an enclosing folder's row does not open its
-  ## menu on top. A factory, so each row's closure owns its own `path`.
-  mixin addEventListener
-  when isDomElement(N):
-    isonim_dom.addEventListener(isonim_dom.Node(row), cstring"contextmenu",
-      proc(ev: isonim_dom.Event) =
-        ev.fsPreventDefault()
-        ev.fsStopPropagation()
-        showFileTreeMenu(vm, path, ev))
-  elif N is MockNode:
-    r.addEventListener(row, "contextmenu", proc(ev: MockEvent) =
-      ev.fsPreventDefault()
-      ev.fsStopPropagation()
-      discard vm.openFileTreeMenu(path))
 
 proc renderNameField[R, N](r: R; vm: FilesystemVM;
                            edit: FileTreeNameEdit): N =
@@ -414,6 +399,7 @@ proc renderEntry[R, N](r: R; vm: FilesystemVM; entry: FilesystemEntryNode;
   var anchor, children: N
   let row = ui(r):
     li(class = jstreeNodeClass(entry, expandedFlag, isLast), id = nodeId,
+       `data-ct-path` = entry.path,
        role = "treeitem", `aria-selected` = "false",
        `aria-level` = $level,
        `aria-labelledby` = (if nodeId.len > 0: nodeId & "_anchor" else: ""),
@@ -440,7 +426,6 @@ proc renderEntry[R, N](r: R; vm: FilesystemVM; entry: FilesystemEntryNode;
   # anchor's `data-ct-path` / `data-ct-folder` (on a DOM front-end
   # `input/pane_presses`, run by `input/dom_pointer`, which also keeps the
   # `#` link from being followed).
-  bindRowContextMenu[R, N](r, vm, row, entry.path)
   # The name field, when Create or Rename is open on this row. Reading
   # `nameEdit` here makes the panel's render effect follow it.
   let edit = vm.nameEdit.val

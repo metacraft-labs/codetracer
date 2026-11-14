@@ -147,23 +147,20 @@ when defined(js):
         verificationSourceOpener(outcome.activation,
           vm.sourceCandidates(outcome.activation.file))
 
-  proc wireRowMenu(row: isonim_dom.Element; key: string) =
-    ## A right press selects the line and opens its menu: the ViewModel's
-    ## entries (`VerificationVM.rowMenu`), the terminal's and GPUI's too.
-    isonim_dom.addEventListener(isonim_dom.Node(row), cstring"contextmenu",
-      proc(ev: isonim_dom.Event) =
-        ev.preventMenuDefault()
-        ev.stopMenuPropagation()
-        let vm = liveVerificationVM
-        if vm.isNil:
-          return
-        vm.selectLine(key)
-        var items: seq[ContextMenuItem] = @[]
-        for e in vm.rowMenu(liveCounterexampleVM, key):
-          items.add ContextMenuItem(name: cstring(e.label), hint: cstring"",
-            disabled: not e.enabled, disabledReason: cstring(e.reason),
-            handler: rowMenuHandler(key, e.action))
-        showContextMenu(items, ev.eventClientX(), ev.eventClientY()))
+  proc verificationRowMenuItems*(key: string): seq[ContextMenuItem] =
+    ## A line's menu: the ViewModel's entries (`VerificationVM.rowMenu`), the
+    ## terminal's and GPUI's too, with the line selected. A right press is
+    ## the pointer row `context-menu.open`, performed by the front-end
+    ## (`ui/verification`).
+    let vm = liveVerificationVM
+    if vm.isNil:
+      return
+    vm.selectLine(key)
+    for e in vm.rowMenu(liveCounterexampleVM, key):
+      result.add ContextMenuItem(name: cstring(e.label), hint: cstring"",
+        disabled: not e.enabled, disabledReason: cstring(e.reason),
+        handler: rowMenuHandler(key, e.action))
+
 
 proc noModelNote(model: VerificationPanelModel): string =
   ## The sentence shown when a payload arrived, was believed, and carries no
@@ -288,18 +285,8 @@ proc renderVerificationPanelTree[R, N](r: R; mdl: VerificationPanelModel;
                   pre(class = "ct-verification-row-excerpt",
                       `data-ct-verification-excerpt` = "true"):
                     text row.excerpt
-  when defined(js):
-    when N is isonim_dom.Element:
-      # The rows' right press: the shared menu, wired on the DOM rows (the
-      # headless tree has no events to wire).
-      if not findings.isNil:
-        for g in 0 ..< findings.childNodes.len:
-          let group = findings.childNodes[g]
-          for i in 1 ..< group.childNodes.len:
-            let row = isonim_dom.Element(group.childNodes[i])
-            let key = $row.getAttribute(cstring"data-ct-verification-key")
-            if key.len > 0:
-              wireRowMenu(row, key)
+  # A line's right press is the pointer row `context-menu.open`, performed by
+  # the front-end with `verificationRowMenuItems` (`ui/verification`).
 
 proc renderVerificationPanel*[R, N](r: R; model: VerificationPanelModel): N =
   ## The pure render, from a plain record, with inert controls.

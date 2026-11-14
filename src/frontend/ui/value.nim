@@ -11,6 +11,7 @@ import ./presented_value
 # that control; the window's pointer listener runs it when a press resolves to
 # it (`bindElementOperation`).
 import ../viewmodel/input/element_operations
+import ../viewmodel/input/dom_pointer
 
 let ATOM_KINDS = {
   Int, Float, String, CString, Char, Bool, Enum, Enum16, Enum32,
@@ -491,20 +492,20 @@ proc renderHistoryTableDom*(self: ValueComponent, expression: cstring, chart: Ch
       closureScope: # Each history row owns its listeners and origin-badge callbacks.
         let historyEvent = self.state.valueHistory[key].results[eventIndex]
         let locationNode = newElement(cstring"div", cstring"history-location")
-        locationNode.addEventListener(cstring"contextmenu", proc(ev: Event) =
-          ev.preventDefault()
-          self.historyContextAction(historyEvent, ev)
-        )
+        # A right press is the pointer row `context-menu.open`, which opens
+        # the menu the entry carries (`dom_pointer.setPressMenu`).
+        setPressMenu(cast[JsObject](locationNode), proc(ev: JsObject): bool =
+          self.historyContextAction(historyEvent, cast[Event](ev))
+          true)
         locationNode.appendText(cstring($historyEvent.location.rrTicks))
         locationElement.appendChild(locationNode)
 
         let valueNode = newElement(cstring"div", cstring"history-value")
         bindPressOperation(valueNode.toJs, "history.seek-to-tick",
           proc(p: PressInfo) = self.historyClick(historyEvent.location))
-        valueNode.addEventListener(cstring"contextmenu", proc(ev: Event) =
-          ev.preventDefault()
-          self.historyContextAction(historyEvent, ev)
-        )
+        setPressMenu(cast[JsObject](valueNode), proc(ev: JsObject): bool =
+          self.historyContextAction(historyEvent, cast[Event](ev))
+          true)
         valueNode.appendText(statePanelValue(historyEvent.value).root.text)
 
         # Value Origin Tracking (M4 deliverable §3.2.3 + Gap 1) —
@@ -1076,19 +1077,22 @@ proc renderValueRowDom(
   )
 
   let atomParent = newElement(cstring"div", atomClass)
-  atomParent.addEventListener(cstring"contextmenu", proc(ev: Event) =
+  # A right press is the pointer row `context-menu.open`, which opens the
+  # menu the value carries (`dom_pointer.setPressMenu`).
+  setPressMenu(cast[JsObject](atomParent), proc(jev: JsObject): bool =
+    let ev = cast[Event](jev)
     # `preventDefault` used to be conditional on the extension, so everywhere
     # else — the State pane, the value tooltips drawn over the editor — the
     # browser menu opened on top of ours.  The third sibling of the leak fixed
     # in `ui/editor.nim`; see the comment there, including why Shift stands
     # down rather than being suppressed.
     if cast[bool](ev.toJs.shiftKey):
-      return
-    ev.preventDefault()
+      return false
     let contextMenu = self.createContextMenuItems(value, ev)
     let e = ev.toJs
     if contextMenu != []:
       showContextMenu(contextMenu, cast[int](e.x), cast[int](e.y))
+    true
   )
 
   let nameContainer = newElement(cstring"div", cstring"value-name-container")

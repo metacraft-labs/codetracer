@@ -337,12 +337,7 @@ when defined(js):
     if not addToScratchpadHook.isNil:
       addToScratchpadHook(name, text)
 
-  proc showMenu(ev: isonim_dom.Event; items: seq[ContextMenuItem]) =
-    ev.preventDefault()
-    ev.stopPropagation()
-    showContextMenu(items, ev.eventClientX(), ev.eventClientY())
-
-  proc calltraceRowContextItems(vm: CalltraceVM; item: proc(): CallLine):
+  proc calltraceRowContextItems*(vm: CalltraceVM; item: proc(): CallLine):
       seq[ContextMenuItem] =
     let line = item()
     let toggleName =
@@ -362,7 +357,7 @@ when defined(js):
     # auto-collapse (`autoCollapsing` is false on every load), so the entry
     # could change nothing — measured on this desktop, deep in a recording.
 
-  proc callArgContextItems(argName, argText: string):
+  proc callArgContextItems*(argName, argText: string):
       seq[ContextMenuItem] =
     result.add(ContextMenuItem(
       name: cstring"Add value to scratchpad",
@@ -587,7 +582,7 @@ proc renderCallArg[R, N](r: R; line: proc(): CallLine;
         text (if index > 0: ", " else: "")
       tdiv(class = "call-arg",
            id = "call-arg-" & $line().index & "-" & arg().name,
-           `data-arg-name` = arg().name):
+           `data-arg-name` = arg().name, `data-arg-text` = arg().text):
         tdiv(class = "call-arg-header",
              id = "call-arg-header-" & $line().index & "-" & arg().name):
           tdiv(class = "call-arg-name",
@@ -707,20 +702,9 @@ proc renderCallLineRow*[R, N](r: R; vm: CalltraceVM;
   indexEach[CallArg, R, N](r, argsHost,
     proc(): seq[CallArg] = argsForRow(vm, item),
     proc(arg: proc(): CallArg, index: int): N =
-      let slot = renderCallArg[R, N](r, item, arg, index)
-      when defined(js):
-        when N is isonim_dom.Element:
-          isonim_dom.addEventListener(isonim_dom.Node(slot),
-            cstring"contextmenu",
-            proc(ev: isonim_dom.Event) =
-              showMenu(ev, callArgContextItems(arg().name, arg().text)))
-      slot)
+      renderCallArg[R, N](r, item, arg, index))
   when defined(js):
     when N is isonim_dom.Element:
-      isonim_dom.addEventListener(isonim_dom.Node(callTextEl),
-        cstring"contextmenu",
-        proc(ev: isonim_dom.Event) =
-          showMenu(ev, calltraceRowContextItems(vm, item)))
       if not links.isNil:
         attachRowLinkClicks(row)
   row

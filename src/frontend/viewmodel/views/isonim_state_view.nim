@@ -444,23 +444,24 @@ proc buildVariableRowContextMenu*(vm: StateVM;
         action: switchProcessAction(stateVM, switchTo),
       )
 
-proc onShowVariableRowContextMenu*(vm: StateVM;
-                                   item: proc(): VariableViewState):
-    proc() =
-  ## Renderer-agnostic ``contextmenu`` handler used by the Mock-side row.
-  ##
-  ## Builds the menu via ``buildVariableRowContextMenu`` and publishes it
-  ## through ``StateVM.lastContextMenu`` so headless tests can inspect
-  ## the entries and invoke the action.  The Web-side wiring lives in
-  ## ``wireRowContextMenu`` (JS-only) which additionally forwards the
-  ## menu into ``showContextMenu`` and handles ``preventDefault`` on the
-  ## browser event.
-  let getRow = item
-  let stateVM = vm
-  result = proc() =
-    let row = getRow()
-    let menu = buildVariableRowContextMenu(stateVM, row)
-    stateVM.lastContextMenu.val = menu
+proc variableRowOf*(vm: StateVM; path: string): VariableViewState =
+  ## The shown row whose variable is at `path` (the row a press names by its
+  ## `data-variable-path`); a row with an empty path when none is shown.
+  for row in getStateViewState(vm).variables:
+    if row.path == path:
+      return row
+
+proc openVariableRowMenu*(vm: StateVM; path: string): seq[OriginContextMenuEntry] =
+  ## The row's right-click menu (`buildVariableRowContextMenu`), published
+  ## through ``StateVM.lastContextMenu`` so headless tests can inspect the
+  ## entries and invoke the action. A right press on the row is the pointer
+  ## row `context-menu.open`; a DOM front-end performs it with
+  ## `variableRowMenuItems` (`input/dom_pane_presses`).
+  let row = vm.variableRowOf(path)
+  if row.path.len == 0:
+    return
+  result = buildVariableRowContextMenu(vm, row)
+  vm.lastContextMenu.val = result
 
 when defined(js):
   # JS bindings used by the row context-menu wiring.  ``preventDefault``
@@ -494,38 +495,13 @@ when defined(js):
           act(),
     )
 
-  proc wireRowContextMenu*(vm: StateVM;
-                           row: isonim_dom.Element;
-                           item: proc(): VariableViewState) =
-    ## Wire the JS-side ``contextmenu`` event on a single State-Pane
-    ## row (M4 deliverable §3.1).  Mirrors the legacy
-    ## ``ValueComponent`` shape in ``ui/value.nim:1131``:
-    ##
-    ##   1. ``preventDefault()`` cancels the browser's native menu.
-    ##   2. The renderer-agnostic ``buildVariableRowContextMenu`` is
-    ##      reused so the menu items (labels + actions) match the
-    ##      Mock-side handler in lock-step.
-    ##   3. Each entry is adapted to the legacy ``ContextMenuItem``
-    ##      shape and forwarded to ``showContextMenu`` — the same
-    ##      primitive ``ValueComponent.renderValueRowDom`` uses for the
-    ##      value-hover row's right-click menu.
-    let stateVM = vm
-    let getRow = item
-    isonim_dom.addEventListener(isonim_dom.Node(row), cstring"contextmenu",
-      proc(ev: isonim_dom.Event) =
-        ev.rcPreventDefault()
-        ev.rcStopPropagation()
-        let row = getRow()
-        let menu = buildVariableRowContextMenu(stateVM, row)
-        # Publish through the renderer-agnostic signal too so any
-        # observer (test hooks, future telemetry) sees the same menu
-        # the user will interact with.
-        stateVM.lastContextMenu.val = menu
-        var legacy: seq[ContextMenuItem] = @[]
-        for entry in menu:
-          legacy.add(toLegacyContextMenuItem(entry))
-        if legacy.len > 0:
-          showContextMenu(legacy, ev.eventClientX(), ev.eventClientY()))
+  proc variableRowMenuItems*(vm: StateVM; path: string): seq[ContextMenuItem] =
+    ## The row's menu as the shared right-click menu's items: the
+    ## renderer-agnostic `openVariableRowMenu`, each entry adapted to the
+    ## legacy ``ContextMenuItem`` shape that ``showContextMenu`` draws — the
+    ## same primitive ``ui/value.nim`` uses on the value-hover row.
+    for entry in openVariableRowMenu(vm, path):
+      result.add(toLegacyContextMenuItem(entry))
 
 # ---------------------------------------------------------------------------
 # In-row expanded-chain helpers (spec §3.2.1 collapsed → expanded).
@@ -795,12 +771,11 @@ proc renderVariableRow*[R, N](r: R; vm: StateVM;
   var chainContainer, historyContainer: N
   var expandSlot, nameTypeSlot, valueTypeSlot: N
   let onBadgeClick = onToggleOriginBadge(vm, item, BadgeEvent(r))
-  let onRowContextMenu = onShowVariableRowContextMenu(vm, item)
   let row = ui(r):
     tdiv(class = rowClass(item),
          `data-variable-name` = item().name,
-         padding_left = rowPaddingLeft(item, 16),
-         oncontextmenu = onRowContextMenu):
+         `data-variable-path` = item().path,
+         padding_left = rowPaddingLeft(item, 16)):
       tdiv(class = atomOrCompoundClass(item)):
         tdiv(class = "value-name-container"):
           # Slots for the parts a row shows only sometimes: `show` below puts
@@ -937,11 +912,6 @@ proc renderVariableRow*[R, N](r: R; vm: StateVM;
         if h.len > 0 and
            not isonim_dom.isNodeNil(isonim_dom.Node(historyContainer)):
           scrollNodeToBottom(historyContainer))
-      # Wire the right-click context menu on the row's outer element so
-      # the spec §3.1 entry-point "right-click → Show value origin"
-      # surfaces through ``showContextMenu`` — the same primitive
-      # ``ui/value.nim`` uses on the value-hover row.
-      wireRowContextMenu(vm, row, item)
   row
 
 # ---------------------------------------------------------------------------

@@ -161,7 +161,7 @@ when defined(js):
       if outcome.copied.len > 0:
         writeClipboard(cstring(outcome.copied))
 
-  proc rowMenuItems(vm: LowLevelCodeVM; index: int): seq[ContextMenuItem] =
+  proc rowMenuItems*(vm: LowLevelCodeVM; index: int): seq[ContextMenuItem] =
     ## PLAT-60: an instruction's context menu, the ViewModel's entries
     ## (`LowLevelCodeVM.rowMenu`) — the same the terminal's and GPUI's panes
     ## open.
@@ -170,15 +170,8 @@ when defined(js):
         disabled: not e.enabled, disabledReason: cstring(e.reason),
         handler: rowMenuHandler(vm, index, e.action))
 
-  proc wireRowMenu(row: isonim_dom.Element; vm: LowLevelCodeVM; index: int) =
-    ## A right press selects the instruction and opens its menu.
-    isonim_dom.addEventListener(isonim_dom.Node(row), cstring"contextmenu",
-      proc(ev: isonim_dom.Event) =
-        ev.preventMenuDefault()
-        ev.stopMenuPropagation()
-        vm.selectInstruction(index)
-        showContextMenu(rowMenuItems(vm, index), ev.eventClientX(),
-                        ev.eventClientY()))
+  # A right press is the pointer row `context-menu.open`, performed by the
+  # front-end (`input/dom_pane_presses`) with the items below.
 
 proc renderLowLevelRow*[R, N](r: R; vm: LowLevelCodeVM;
                               row: LowLevelRowView): N =
@@ -216,9 +209,6 @@ proc renderLowLevelRow*[R, N](r: R; vm: LowLevelCodeVM;
         span(class = "low-level-code-instruction-count"):
           text row.countText
       r.appendChild(item, countSpan)
-    when defined(js):
-      when N is isonim_dom.Element:
-        wireRowMenu(item, vm, row.index)
 
 # ---------------------------------------------------------------------------
 # The panel

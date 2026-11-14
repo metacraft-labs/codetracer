@@ -154,6 +154,13 @@ else
 	bash "${gate}" "${t}" | tail -3
 fi
 
+t="$(make_tree menu)"
+cat >>"${t}/src/frontend/viewmodel/views/isonim_low_level_code_view.nim" <<'NIM'
+proc planted(row: Node) =
+  row.addEventListener("contextmenu", proc(ev: Event) = discard)
+NIM
+expect_red menu click
+
 t="$(make_tree stale)"
 echo "src/frontend/ui/key_chords_gone.nim case 3" >>"${t}/ci/test/input-routing-gate-ledger.txt"
 expect_red stale ledger

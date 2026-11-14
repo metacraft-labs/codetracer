@@ -66,7 +66,7 @@ import
 from isonim/web/dom_api import nil
 import isonim/web/web_renderer
 import ./panel_host
-import ../viewmodel/input/dom_pointer
+import ../viewmodel/input/[dom_pointer, dom_pane_presses]
 from ../viewmodel/session_vm import SessionViewModel
 import std/options
 import ../viewmodel/viewmodels/verification_vm
@@ -348,3 +348,13 @@ registerElementOperation("verification.go-to-source", proc(p: ElementPress): boo
   verificationHandlersFor(verificationVMInstance,
                           counterexampleVMInstance).onActivate(key)
   true)
+
+# A right press on a finding selects it and opens its menu (K65): the pointer
+# row `context-menu.open`, performed for this pane with the items its view
+# projects (`verificationRowMenuItems`, the ViewModel's entries).
+registerPaneOperation("context-menu.open", "verification", proc(p: ElementPress): bool =
+  let key = attributeOf(p.element, "data-ct-verification-key")
+  if key.len == 0:
+    return false
+  initVerificationVM()
+  p.showMenuAt(verificationRowMenuItems(key)))

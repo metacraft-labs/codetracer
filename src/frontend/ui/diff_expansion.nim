@@ -58,6 +58,7 @@
 
 import ui_imports
 import ../viewmodel/views/field_keys
+import ../viewmodel/input/dom_pointer
 import ../viewmodel/views/dismissals
 
 import ../viewmodel/viewmodels/diff_expansion_menu
@@ -375,16 +376,17 @@ proc bindBoundaryHandlers(element: Node; diffEditor: js; hostId: string) =
     else:
       discard)
 
-  element.dxAddListener(cstring"contextmenu", proc(e: js) =
-    # Monaco's editor context menu would otherwise open over the boundary and
-    # offer nothing about it.
-    dxPreventDefault(e)
-    dxStopPropagation(e)
+  # A right press is the pointer row `context-menu.open`, which opens the
+  # menu the boundary carries (`dom_pointer.setPressMenu`) — before Monaco's
+  # editor context menu, which would open over the boundary and offer
+  # nothing about it.
+  setPressMenu(cast[JsObject](element), proc(e: JsObject): bool =
     let (regions, index) = regionOf()
     if index < 0:
-      return
+      return false
     openBoundaryMenu(regions, index, directionOfElement(),
-                     dxEventX(e), dxEventY(e)))
+                     dxEventX(cast[js](e)), dxEventY(cast[js](e)))
+    true)
 
   # A press on the handle is Monaco's own click-to-expand; the only thing to do
   # here is dismiss a menu that is still open, and give the handle focus so the

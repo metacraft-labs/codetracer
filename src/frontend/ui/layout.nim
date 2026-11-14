@@ -36,6 +36,7 @@ import kdom except Location
 # The panel host (Shared-DOM-Front-Ends D4): the factory below mounts the
 # converted panes into the container it creates, and disposes them with it.
 import ./panel_host
+import ../viewmodel/input/dom_pointer
 from ./session_viewmodels import tabScopedKey
 from ./pane_host_lookup import findPaneHost
 from isonim/web/dom_api import nil
@@ -172,8 +173,9 @@ proc addPanelTransferContextMenu(tab: GoldenTab, contentItem: GoldenContentItem)
   if tabElement.isNil or tabElement.isUndefined:
     return
 
-  tabElement.addEventListener(cstring"contextmenu", proc(event: JsObject) =
-    event.preventDefault()
+  # A right press on the tab is the pointer row `context-menu.open`, which
+  # opens the menu the tab carries (`dom_pointer.setPressMenu`).
+  setPressMenu(cast[JsObject](tabElement), proc(event: JsObject): bool =
     let x = event.clientX.to(int)
     let y = event.clientY.to(int)
     let capturedItem = contentItem
@@ -216,7 +218,8 @@ proc addPanelTransferContextMenu(tab: GoldenTab, contentItem: GoldenContentItem)
         knownOtherWindows = await requestWindowList()
       discard refreshWindows()
     else:
-      showContextMenu(items, x, y))
+      showContextMenu(items, x, y)
+    true)
 
 let commonContextMenuOptions: seq[ContextMenuOption] = @[
   ContextMenuOption(
