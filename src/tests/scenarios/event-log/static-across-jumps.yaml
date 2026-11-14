@@ -1,0 +1,39 @@
+scenario: 1
+name: event-log/static-across-jumps
+pack: codetracer
+summary: >-
+  The Event Log is static: after jumps through the call trace (into the
+  second status_report, then a calculate_damage) it lists the same rows, in
+  the same order, with the same text. Only the dimming moves: at the entry
+  every row is dimmed; after the jumps the rows after the new position are
+  dimmed and the ones at or before it are not.
+
+stage:
+  - use: record-program
+    with: { program: noir_space_ship }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 180s }
+  - click: 'pane-tab[label="EVENT LOG"]'
+  - wait: { until: event-log.loaded, timeout: 60s }
+  - wait: { until: settled }
+  # Control: the log holds its rows before the jumps; at the entry every
+  # row is after the position, so every row is dimmed.
+  - expect: { at: event-log, rows: ["stdout: Positive Test Case", "stdout: ----- iteration 0 -----", "stdout: Damage: 100", "stdout: Regenerated 100 energy", "stdout: Shield status 100% 10000", "stdout: ----- iteration 1 -----", "stdout: Damage: 2000", "stdout: Regenerated 1000 energy", "stdout: Shield status 90% 9000", "stdout: ----- iteration 2 -----", "stdout: Damage: 2000", "stdout: Regenerated 1000 energy", "stdout: Shield status 80% 8000", "stdout: ----- iteration 3 -----", "stdout: Damage: 2000", "stdout: Regenerated 1000 energy", "stdout: Shield status 70% 7000", "stdout: ----- iteration 4 -----", "stdout: Damage: 3000", "stdout: Regenerated 1000 energy", "stdout: Shield status 50% 5000", "stdout: ----- iteration 5 -----", "stdout: Damage: 2500", "stdout: Regenerated 1000 energy", "stdout: Shield status 35% 3500", "stdout: ----- iteration 6 -----", "stdout: Damage: 3250", "stdout: Regenerated 1000 energy", "stdout: Shield status 12% 1250", "stdout: ----- iteration 7 -----", "stdout: Damage: 1232", "stdout: Regenerated 1000 energy", "stdout: Shield status 10% 1018"] }
+  - expect: { at: event-log, dimmed: 33, dimmed-tail: true }
+  - click: 'pane-tab[label="CALLTRACE"]'
+  - wait: { until: call-trace.loaded, timeout: 60s }
+  - click: { at: 'call-trace/call[name="status_report", arguments="(iteration=1, initial_shield=0x2710, remaining_shield=0x2328, damage=0x7d0, regenerated_shield=0x3e8)"]', anchor: name }
+  - wait: { until: { at: 'call-trace/call[name="status_report", arguments="(iteration=1, initial_shield=0x2710, remaining_shield=0x2328, damage=0x7d0, regenerated_shield=0x3e8)"]', current: true }, timeout: 60s }
+  - wait: { until: replay-idle, timeout: 60s }
+  - click: { at: 'call-trace/call[name="calculate_damage", arguments="(initial_shield=0x2710, remaining_shield=0x2328, mass=0xc8)"]', anchor: name }
+  - wait: { until: { at: 'call-trace/call[name="calculate_damage", arguments="(initial_shield=0x2710, remaining_shield=0x2328, mass=0xc8)"]', current: true }, timeout: 60s }
+  - wait: { until: replay-idle, timeout: 60s }
+  - click: 'pane-tab[label="EVENT LOG"]'
+  - wait: { until: settled }
+  # The same rows; the dimming now divides them at the new position.
+  - expect: { at: event-log, rows: ["stdout: Positive Test Case", "stdout: ----- iteration 0 -----", "stdout: Damage: 100", "stdout: Regenerated 100 energy", "stdout: Shield status 100% 10000", "stdout: ----- iteration 1 -----", "stdout: Damage: 2000", "stdout: Regenerated 1000 energy", "stdout: Shield status 90% 9000", "stdout: ----- iteration 2 -----", "stdout: Damage: 2000", "stdout: Regenerated 1000 energy", "stdout: Shield status 80% 8000", "stdout: ----- iteration 3 -----", "stdout: Damage: 2000", "stdout: Regenerated 1000 energy", "stdout: Shield status 70% 7000", "stdout: ----- iteration 4 -----", "stdout: Damage: 3000", "stdout: Regenerated 1000 energy", "stdout: Shield status 50% 5000", "stdout: ----- iteration 5 -----", "stdout: Damage: 2500", "stdout: Regenerated 1000 energy", "stdout: Shield status 35% 3500", "stdout: ----- iteration 6 -----", "stdout: Damage: 3250", "stdout: Regenerated 1000 energy", "stdout: Shield status 12% 1250", "stdout: ----- iteration 7 -----", "stdout: Damage: 1232", "stdout: Regenerated 1000 energy", "stdout: Shield status 10% 1018"] }
+  - expect: { at: event-log, dimmed-tail: true }
+  - expect: { at: event-log, dimmed: { lt: 33 } }
+  - expect: { at: event-log, dimmed: { gt: 0 } }

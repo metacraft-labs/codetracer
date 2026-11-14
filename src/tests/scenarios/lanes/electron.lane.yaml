@@ -218,4 +218,5 @@ applicable:
   - ../layout/plat70b-remembered-index-width.yaml
   # --- pw3 ---
   - ../event-log/dropdowns-close-on-escape.yaml
+  - ../event-log/static-across-jumps.yaml
 unsupported: []
