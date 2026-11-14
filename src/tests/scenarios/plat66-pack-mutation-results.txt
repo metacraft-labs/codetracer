@@ -1,5 +1,6 @@
-# plat66 pack mutation results — 2026-11-14 10:55:11 +0200
-# measured against f41943a6566 (the subjects at the control digests)
+# plat66 pack mutation results — 2026-11-14 21:48:20 +0200
+# measured against 50ff222d44d (the subjects at the control digests), before its rebase
+# over agents commits that moved only codetracer-binding.ts among the subjects (ledgered)
 
 T1   KILLED                         the terminal binding misreads the line the replay is stopped on
        | step 1.4: 'editor[file="tracing.nim"]' does not satisfy stopped-within(18, 21)
