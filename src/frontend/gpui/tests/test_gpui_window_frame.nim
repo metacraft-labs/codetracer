@@ -95,7 +95,12 @@ import ../replay_ops
 # RE-COUNTED 2026-09-23: 535 → 555, by the second route above — PLAT-44 added
 # two non-test files under `src/frontend/gpui/app/` (`edit_arm.nim`,
 # `gpui_keys.nim`), 2 x 10 assertions in the registry scan.
-const ExpectedAssertions = 903
+const ExpectedAssertions = 921
+  ## 2026-11-14 (the Agent Harbor playback stories): 903 -> 921. Two more
+  ## scanned source files, at 1 + 8 = 9 per file: `agent_harbor/
+  ## ah_playback_bar.nim` (the GPUI story host's playback bar), and
+  ## `host/trace_nimcache.nim` (generated C from a trace's nimcache,
+  ## `13835eca3`), whose re-count was owed.
   ## 2026-11-09 (re-count owed by two earlier changes): 885 -> 903. Two more
   ## scanned source files, `visual_replay_leaf.nim` (Visual Replay in the
   ## GPUI window, `cc03748d1`) and `window_pointer.nim` (the pointer's shape,
