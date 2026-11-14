@@ -137,7 +137,10 @@ WINCLICKS = "src/frontend/gpui/window_clicks.nim"
 GPUIMAIN = "src/frontend/gpui/main.nim"
 GPUILEAVES = "src/frontend/gpui/app/leaves.nim"
 DESKEDITOR = "src/frontend/ui/editor.nim"
-DESKEVLOGVIEW = "src/frontend/viewmodel/views/isonim_event_log_view.nim"
+# The desktop's pane presses: since `702190afba` the procedures the pointer
+# keymap runs on a DOM front-end. They replace the Event Log view's own
+# header handler, which DL1 used to mutate in `isonim_event_log_view.nim`.
+PANEPRESSES = "src/frontend/viewmodel/input/pane_presses.nim"
 EVENTLOGVM = "src/frontend/viewmodel/viewmodels/event_log_vm.nim"
 CALLTRACEVM = "src/frontend/viewmodel/viewmodels/calltrace_vm.nim"
 VCSDETAILS = "src/frontend/viewmodel/host/native_vcs_details.nim"
@@ -196,9 +199,9 @@ SUBJECTS = [PANECLICKS, RUNTIME, TUISESSION, HSESSION, STORE, NATIVEHOST,
             MOUSE, BINDING, SHELL, ROLES, TOPBAR, CTXMENU,
             FILETREE, POINTLIST, GLYPHS, CLI, TUIAPP, TUIMAIN, CHROME,
             WINTOP, WINCLICKS, GPUIMAIN, GPUILEAVES, DESKEDITOR, GRENDERER,
-            DESKEVLOGVIEW, EVENTLOGVM, CALLTRACEVM, VCSDETAILS, VCSSOURCE,
+            EVENTLOGVM, CALLTRACEVM, VCSDETAILS, VCSSOURCE,
             EVENTLOGVIEW, SCRATCHPANE, EVENTDB, DAPHANDLER, SHIMAPP, SHIMCLIP,
-            SDKBP, SESSDRIVER, FILETREEMENU]
+            SDKBP, SESSDRIVER, FILETREEMENU, PANEPRESSES]
 SUITES = [VMU, COLVM, REF, T1, PTYK, PTYC, GPLAN, G69, GEDIT, VFILES, IGT,
           ENGT, SHIMT, CLIPT, DESKTOP_GATE]
 
@@ -486,9 +489,12 @@ ARMS = [
         '  onTarget("variables.toggle-expand"):\n    discard rt.app.variables.toggleNode(c.target.path)\n',
         '  onTarget("variables.toggle-expand"):\n    discard c.target.path\n',
         K_VALUE, "a value click expands nothing"),
+    # RT12, RT32, RT34 RE-AIMED 2026-11-13: `106bc7e3e0` moved a press on a
+    # pane's element into the pointer keymap's operations (`onTarget`); same
+    # defects, in the code that now carries them.
     Arm("RT12", RUNTIME,
-        "    rt.app.points.selected = i\n",
-        "    rt.app.points.selected = i - 1\n",
+        "    rt.app.points.selected = int(c.target.index)\n",
+        "    rt.app.points.selected = int(c.target.index) - 1\n",
         S_POINT, "the point above the click is selected"),
     Arm("RT13", RUNTIME,
         "  of caClosePane: rt.layout(cmdRemovePane(target.pane))\n",
@@ -819,9 +825,12 @@ ARMS = [
     # ViewModel (`1c18341dd`); the DataTables header handler DL1 mutated is
     # gone, and the desktop's header click is the view's `onHeaderClick`.
     # The shared reversal rule itself is EV1's.
-    Arm("DL1", DESKEVLOGVIEW,
-        "  result = proc() = vm.sortBy(vm.order().clickedHeader(col))\n",
-        "  result = proc() = vm.sortBy(EventLogOrder(column: col, ascending: true))\n",
+    # DL1 RE-AIMED 2026-11-14: `702190afba` moved the header's click out of
+    # the view into the pointer keymap's `event-log.sort` procedure
+    # (`input/pane_presses`); same defect.
+    Arm("DL1", PANEPRESSES,
+        "    vm.sortBy(vm.order().clickedHeader(column))\n",
+        "    vm.sortBy(EventLogOrder(column: column, ascending: true))\n",
         D_DESKTOP, "the desktop's second header click does not reverse the order"),
     Arm("HS5", SDKBP,
         "  result.add BreakpointSpec(line: line, column: max(0, column),\n",
@@ -910,8 +919,8 @@ ARMS = [
         "    let added = b.dispatch(cmdActivateTab(pane))\n",
         K_POINTS, "the View menu cannot open a pane the arrangement lacks"),
     Arm("RT32", RUNTIME,
-        "      outcome.requestClick(PaneClickRequest(kind: pcVcsCommit,\n                                            index: t.index))\n",
-        "      outcome.requestClick(PaneClickRequest(kind: pcVcsCommit,\n                                            index: t.index + 1))\n",
+        "    outcome.requestClick(PaneClickRequest(kind: pcVcsCommit,\n                                          index: int(c.target.index)))\n",
+        "    outcome.requestClick(PaneClickRequest(kind: pcVcsCommit,\n                                          index: int(c.target.index) + 1))\n",
         K_VCS, "a commit click opens the commit below it"),
     Arm("RT33", RUNTIME,
         "      outcome.awaitsOrigin = true\n    else:\n      outcome.awaitsMove = true\n",
@@ -926,8 +935,8 @@ ARMS = [
         "      outcome.originRetry = line\n",
         K_VALUE, "`:origin` waits for a move again (the freeze)"),
     Arm("RT34", RUNTIME,
-        "        outcome.requestClick(PaneClickRequest(kind: pcScratchpadAdd,\n                                              values: @[(v.name, v.value)]))\n",
-        "        outcome.requestClick(PaneClickRequest(kind: pcScratchpadAdd,\n                                              values: @[]))\n",
+        "    outcome.requestClick(PaneClickRequest(kind: pcScratchpadAdd,\n                                          values: @[(c.target.expression,\n                                                     c.target.text)]))\n",
+        "    outcome.requestClick(PaneClickRequest(kind: pcScratchpadAdd,\n                                          values: @[]))\n",
         K_SCRATCH, "Ctrl+click on an inline value pins nothing"),
     Arm("RT35", RUNTIME,
         "    if hit.arg >= 0 and hit.arg < call.args.len:\n",
@@ -1011,17 +1020,19 @@ ARMS = [
         "    orderEventLog(r, vm.order.clickedHeader(shown[c.target.index]))\n",
         "    orderEventLog(r, RecordedEventOrder)\n",
         G_ORDER, "GPUI's header click keeps the recorded order"),
+    # GM17 - GM19 RE-AIMED 2026-11-13: `106bc7e3e0` moved the presses into
+    # the pointer keymap's operations; same defects.
     Arm("GM17", GPUIMAIN,
-        "    session.scratchpadVM.removeValue(int(c.index))\n",
+        "    vm.removeValue(int(c.target.index))\n",
         "    discard\n",
         G_SCRATCH, "GPUI's close button removes nothing"),
     Arm("GM18", GPUIMAIN,
-        "    elif c.button == gbLeft and c.ctrl:\n      gSession.addToScratchpad(v.name, v.value)\n",
-        "    elif c.button == gbLeft and c.ctrl:\n      discard\n",
+        "  onTarget(\"scratchpad.add-value\"):\n    gSession.addToScratchpad(c.target.expression, c.target.text)\n",
+        "  onTarget(\"scratchpad.add-value\"):\n    discard\n",
         G_FLOW, "GPUI's Ctrl+click on a value pins nothing"),
     Arm("GM19", GPUIMAIN,
-        '      copyToClipboard(gSession.getCurrentFile(), "the path")\n',
-        '      copyToClipboard("", "the path")\n',
+        '    copyToClipboard(gSession.getCurrentFile(), "the path"))\n',
+        '    copyToClipboard("", "the path"))\n',
         G_SWEEP, "GPUI's footer copies nothing"),
     Arm("GM20", GPUIMAIN,
         "          openContextMenuAt(r, dockLabelContextMenu(k, strip.edge), x, y)\n",
