@@ -223,4 +223,5 @@ applicable:
   - ../filesystem/context-menu-edit.yaml
   - ../filesystem/open-recorded-source.yaml
   - ../flow/branch-colors.yaml
+  - ../flow/loop-controls.yaml
 unsupported: []
