@@ -91,7 +91,6 @@ src/frontend/tui/tests/plat70d-grep-mutation-control.sha256	src/frontend/tui/hos
 src/frontend/tui/tests/plat70e-origin-mutation-control.sha256	src/frontend/tui/app/runtime.nim	cf49c5c00db6777abcafb2360192c7348849432ac560f56d5a2970f4bb68a59a	745fee32e0bbc92d22443f415809389446e7802595d9845b2c55301ac678e105
 src/frontend/tui/tests/plat70e-origin-mutation-control.sha256	src/frontend/tui/host/tui_session.nim	d7e7b5a3d745e45b41262c2b035a277ff625ac1cae486260fcb1aaf9b0f5367b	a9ea791e49006488ac348b14e02a4255f0d521e9444766a8aff5219e8c969bee
 src/frontend/tui/tests/plat70f-pointer-mutation-control.sha256	src/frontend/tui/app/runtime.nim	cf49c5c00db6777abcafb2360192c7348849432ac560f56d5a2970f4bb68a59a	745fee32e0bbc92d22443f415809389446e7802595d9845b2c55301ac678e105
-src/frontend/viewmodel/tests/unit/plat68-keymaps-mutation-control.sha256	src/frontend/tui/app/runtime.nim	cf49c5c00db6777abcafb2360192c7348849432ac560f56d5a2970f4bb68a59a	745fee32e0bbc92d22443f415809389446e7802595d9845b2c55301ac678e105
 
 # 2026-11-12, edit-mode services and debugger controls for editor-hosted
 # panes: Edit mode's host services moved out of the terminal's main.nim into
@@ -110,7 +109,6 @@ src/frontend/tui/tests/plat61-shell-mutation-control.sha256	src/frontend/tui/mai
 src/frontend/tui/tests/plat62-constraints-mutation-control.sha256	src/frontend/tui/main.nim	c718692afdbc9bf13b270706c2d948623576040ca6c27b1df6679004439cf1c3	66283c44fe09ff1389f0e769ef48637ce573781972c014e30c9c16b1da8606ce
 src/frontend/tui/tests/plat64-input-routing-mutation-control.sha256	src/frontend/tui/app/runtime.nim	b686bf1719f262b5ffb19d11df42282e3b4ffb7f67bd9a9bbfec6f05faf4a26a	745fee32e0bbc92d22443f415809389446e7802595d9845b2c55301ac678e105
 src/frontend/tui/tests/plat70f-pointer-mutation-control.sha256	src/frontend/tui/main.nim	c718692afdbc9bf13b270706c2d948623576040ca6c27b1df6679004439cf1c3	66283c44fe09ff1389f0e769ef48637ce573781972c014e30c9c16b1da8606ce
-src/frontend/viewmodel/tests/unit/plat68-keymaps-mutation-control.sha256	src/frontend/tui/main.nim	c718692afdbc9bf13b270706c2d948623576040ca6c27b1df6679004439cf1c3	66283c44fe09ff1389f0e769ef48637ce573781972c014e30c9c16b1da8606ce
 
 # 2026-11-12, the terminal front-end's screen-reader mode (Terminal-Adaptation §9.4) and the
 # two report fixes beside it (§4.5: the wrapped OSC 22 query after the fence and the
@@ -165,8 +163,6 @@ src/frontend/tui/tests/plat71e-emulators-mutation-control.sha256	src/frontend/tu
 src/frontend/tui/tests/plat71e-emulators-mutation-control.sha256	src/frontend/tui/tests/test_capture_terminal_persona.nim	fa4f013097edc9f821e9a3bf2d15d22963804623c7a8ac4da06c3f9734a88e9f	56a499761bbdb89d711cdf91c858910ca6a0bd998e3529e839235e2011717ff4
 src/frontend/tui/tests/plat71e-emulators-mutation-control.sha256	src/frontend/tui/tests/test_plat71_terminal_round.nim	70d8d8949d9daf8874a7ee7727829bedfec5278a55d9a5a2985b88899010c877	de39d06b8d13abac52e13e71cf3def7430d93406fefbfc516f62598e2c1830c0
 src/frontend/tui/tests/plat71e-emulators-mutation-control.sha256	tools/capture-terminal-persona/capture_terminal_persona.nim	93e5db1b789b7fe14fb801a815d54c7023fa00c98dac66cf3ee3ced94011c2d9	5b25572b95cc498e09c8fb111be303102dfdf3aa676c7b3eaed675ac90a71470
-src/frontend/viewmodel/tests/unit/plat68-keymaps-mutation-control.sha256	src/frontend/tui/app/theme/capabilities.nim	40c50a6a381d64a02ff7b1894488fdf9c20f2919acdcf6c645d48cbcce0f0e27	f1f2c84a36ed368523f503701d3a0700b16a9fd1aa5c4c6d9c93c713fe54e38b
-src/frontend/viewmodel/tests/unit/plat68-keymaps-mutation-control.sha256	src/frontend/tui/host/terminal_driver.nim	aa8ee3e6d22efb11fdb811e0fe2080d4abfdd3b9f9d2a5c4f0ce475672c269e4	d77bf3cc513b081176dd9e7c51dbdd18de454f8664782d3644cef2a0d4a478a8
 
 # 2026-11-12, the scenario pack (src/tests/scenarios): the GPUI editor re-wires
 # its rows' clicks after the hover redraw that shows the scrollbar
@@ -198,7 +194,6 @@ src/frontend/tui/tests/plat70d-grep-mutation-control.sha256	src/frontend/gpui/ma
 src/frontend/tui/tests/plat70e-origin-mutation-control.sha256	src/frontend/gpui/main.nim	53824dcec0e694e93da069c1b7c3357a717531b4f8e99f19a1548d0a34ac2450	6c182e680e9ef5737e5e74549c1711034c1b0b4431b08fc5ffe737f6ea9aa657
 src/frontend/tui/tests/plat70e-origin-mutation-control.sha256	src/frontend/ui/key_router.nim	10f74deb0c4af256c5391f5ccef0a94917899b0f111edc53da17ad65e11455da	3583637c8cc7b3c78204fe88dffac1458fa016a8d65a9e7c2e358307046c13db
 src/frontend/tui/tests/plat70f-pointer-mutation-control.sha256	src/frontend/gpui/main.nim	53824dcec0e694e93da069c1b7c3357a717531b4f8e99f19a1548d0a34ac2450	6c182e680e9ef5737e5e74549c1711034c1b0b4431b08fc5ffe737f6ea9aa657
-src/frontend/viewmodel/tests/unit/plat68-keymaps-mutation-control.sha256	src/frontend/gpui/main.nim	53824dcec0e694e93da069c1b7c3357a717531b4f8e99f19a1548d0a34ac2450	6c182e680e9ef5737e5e74549c1711034c1b0b4431b08fc5ffe737f6ea9aa657
 src/frontend/tui/tests/build-residuals-mutation-control.sha256	src/frontend/ui_js.nim	6e353eae20dbbe5d56e07ee5a399af74b855412473dd87e79df97f2ec978493b	d50ad0bc1eb27d8d9fd80e69951520a4392a5c90bb02705a735e8cb735211fac
 src/frontend/tui/tests/plat53-test-results-mutation-control.sha256	src/frontend/ui_js.nim	6e353eae20dbbe5d56e07ee5a399af74b855412473dd87e79df97f2ec978493b	d50ad0bc1eb27d8d9fd80e69951520a4392a5c90bb02705a735e8cb735211fac
 src/frontend/tui/tests/plat63-verification-mutation-control.sha256	src/frontend/ui_js.nim	6e353eae20dbbe5d56e07ee5a399af74b855412473dd87e79df97f2ec978493b	d50ad0bc1eb27d8d9fd80e69951520a4392a5c90bb02705a735e8cb735211fac
@@ -237,7 +232,6 @@ src/frontend/viewmodel/tests/unit/plat28-decoration-mutation-control.sha256	src/
 src/frontend/viewmodel/tests/unit/plat30-vocabulary-mutation-control.sha256	src/frontend/viewmodel/editor/operations.nim	f28dfaefe805c8a0f6958bb2c1ff272574299ed5e1de841a2dc3ad88f68a93cb	81f5945815c45a6d7c910335f266d9e526efc488962f3fcd11927de2b1e35719
 src/frontend/viewmodel/tests/unit/plat32-history-mutation-control.sha256	src/frontend/viewmodel/editor/operations.nim	f28dfaefe805c8a0f6958bb2c1ff272574299ed5e1de841a2dc3ad88f68a93cb	81f5945815c45a6d7c910335f266d9e526efc488962f3fcd11927de2b1e35719
 src/frontend/viewmodel/tests/unit/plat33-collab-mutation-control.sha256	src/frontend/viewmodel/editor/operations.nim	f28dfaefe805c8a0f6958bb2c1ff272574299ed5e1de841a2dc3ad88f68a93cb	81f5945815c45a6d7c910335f266d9e526efc488962f3fcd11927de2b1e35719
-src/frontend/viewmodel/tests/unit/plat68-keymaps-mutation-control.sha256	src/frontend/viewmodel/editor/operations.nim	f28dfaefe805c8a0f6958bb2c1ff272574299ed5e1de841a2dc3ad88f68a93cb	81f5945815c45a6d7c910335f266d9e526efc488962f3fcd11927de2b1e35719
 src/tests/scenarios/plat66-pack-mutation-control.sha256	src/tests/scenarios/bindings/playwright/codetracer-binding.ts	352e3a8153c7b8324784212f54a33fe4edace5a9902d86f248657832ca12278a	6631c73381e34532af1d5e50ea633c271c296e4c2f2f2aad05fd29e4d75f4be1
 
 # 2026-11-13, the settings suites derive their per-setting counts: the scrollbar
@@ -258,3 +252,5 @@ src/frontend/tui/tests/plat70b-table-mutation-control.sha256	src/frontend/gpui/m
 src/frontend/viewmodel/tests/unit/plat34-front-end-mutation-control.sha256	src/frontend/gpui/main.nim	6c182e680e9ef5737e5e74549c1711034c1b0b4431b08fc5ffe737f6ea9aa657	c877a4378ca59b26178847f58a7cbde74cf13ef639fd37cfa9c8f80f2f302ff9
 src/frontend/viewmodel/tests/unit/plat34-front-end-mutation-control.sha256	src/frontend/tui/app/runtime.nim	745fee32e0bbc92d22443f415809389446e7802595d9845b2c55301ac678e105	6a710a3399799246c1f06628b0b206fd78e0a1a205e7edcb74e555c90161c7b3
 src/frontend/viewmodel/tests/unit/plat36-vim-import-mutation-control.sha256	src/frontend/tui/app/runtime.nim	745fee32e0bbc92d22443f415809389446e7802595d9845b2c55301ac678e105	6a710a3399799246c1f06628b0b206fd78e0a1a205e7edcb74e555c90161c7b3
+src/frontend/viewmodel/tests/unit/plat68-keymaps-mutation-control.sha256	src/frontend/gpui/main.nim	6c182e680e9ef5737e5e74549c1711034c1b0b4431b08fc5ffe737f6ea9aa657	c877a4378ca59b26178847f58a7cbde74cf13ef639fd37cfa9c8f80f2f302ff9
+src/frontend/viewmodel/tests/unit/plat68-keymaps-mutation-control.sha256	src/frontend/tui/app/runtime.nim	745fee32e0bbc92d22443f415809389446e7802595d9845b2c55301ac678e105	6a710a3399799246c1f06628b0b206fd78e0a1a205e7edcb74e555c90161c7b3
