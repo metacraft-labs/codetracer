@@ -48,7 +48,6 @@ src/frontend/viewmodel/tests/unit/plat33-collab-mutation-control.sha256	ci/lib/t
 src/frontend/tui/tests/plat50-clicks-mutation-control.sha256	src/db-backend/src/dap_handler.rs	47e58e86d78147889e9bd3b6f2a8c2972ef1bea0c2c2c2bac428b6eb76c24555	98fc556946929000619231672219791a054bbbeef7d675bb3722b0870a9e37f0
 src/frontend/tui/tests/plat51-parity-mutation-control.sha256	src/db-backend/src/dap_handler.rs	47e58e86d78147889e9bd3b6f2a8c2972ef1bea0c2c2c2bac428b6eb76c24555	98fc556946929000619231672219791a054bbbeef7d675bb3722b0870a9e37f0
 src/frontend/tui/tests/plat50-clicks-mutation-control.sha256	src/frontend/ui/editor.nim	2e42e67692b31246b27e54ccf32a4b2090b7b9145f5795831015547fb8f7887b	9e377e95c784963ea9965a829b037090eee002ef5ca13d50766c80a21078eed9
-src/frontend/tui/tests/plat60-low-level-code-mutation-control.sha256	src/frontend/ui/editor.nim	0cbbca1d7be9ca81bd06be4d59e81fc5cf72b7794da220ba5a739a51fe5bcd24	9e377e95c784963ea9965a829b037090eee002ef5ca13d50766c80a21078eed9
 
 # 2026-11-12, editor-hosted pane resizes (codetracer fa60c169dc, 750b177f0e): the
 # pane server follows a resized pane's viewport instead of rebuilding the stop,
@@ -208,7 +207,6 @@ src/frontend/tui/tests/plat43-selector-mutation-control.sha256	src/frontend/tui/
 src/frontend/tui/tests/plat55-problems-mutation-control.sha256	src/frontend/tui/app/runtime.nim	745fee32e0bbc92d22443f415809389446e7802595d9845b2c55301ac678e105	9f6ceffe6b6685c2accdce1080bd0d79d6355dbe8235135b4e163a554a5aa58b
 src/frontend/tui/tests/plat57-find-in-files-mutation-control.sha256	src/frontend/tui/app/runtime.nim	745fee32e0bbc92d22443f415809389446e7802595d9845b2c55301ac678e105	9f6ceffe6b6685c2accdce1080bd0d79d6355dbe8235135b4e163a554a5aa58b
 src/frontend/tui/tests/plat58-requests-mutation-control.sha256	src/frontend/tui/app/runtime.nim	745fee32e0bbc92d22443f415809389446e7802595d9845b2c55301ac678e105	9f6ceffe6b6685c2accdce1080bd0d79d6355dbe8235135b4e163a554a5aa58b
-src/frontend/tui/tests/plat60-low-level-code-mutation-control.sha256	src/frontend/tui/app/runtime.nim	745fee32e0bbc92d22443f415809389446e7802595d9845b2c55301ac678e105	9f6ceffe6b6685c2accdce1080bd0d79d6355dbe8235135b4e163a554a5aa58b
 src/frontend/tui/tests/plat65-nim-tracing-mutation-control.sha256	src/frontend/tui/app/runtime.nim	745fee32e0bbc92d22443f415809389446e7802595d9845b2c55301ac678e105	9f6ceffe6b6685c2accdce1080bd0d79d6355dbe8235135b4e163a554a5aa58b
 src/frontend/tui/tests/plat70a-hscroll-mutation-control.sha256	src/frontend/tui/app/runtime.nim	745fee32e0bbc92d22443f415809389446e7802595d9845b2c55301ac678e105	9f6ceffe6b6685c2accdce1080bd0d79d6355dbe8235135b4e163a554a5aa58b
 src/frontend/tui/tests/plat70g-multiclick-mutation-control.sha256	src/frontend/tui/app/runtime.nim	745fee32e0bbc92d22443f415809389446e7802595d9845b2c55301ac678e105	9f6ceffe6b6685c2accdce1080bd0d79d6355dbe8235135b4e163a554a5aa58b
@@ -237,9 +235,6 @@ src/tests/scenarios/plat66-pack-mutation-control.sha256	src/tests/scenarios/bind
 # a re-grade of the arms whose needles sit in them.
 ci/test/plat70i-fit-mutation-control.sha256	src/frontend/gpui/main.nim	6c182e680e9ef5737e5e74549c1711034c1b0b4431b08fc5ffe737f6ea9aa657	c877a4378ca59b26178847f58a7cbde74cf13ef639fd37cfa9c8f80f2f302ff9
 ci/test/plat70i-fit-mutation-control.sha256	src/frontend/viewmodel/views/isonim_event_log_view.nim	2a619263f94bccfd4559444eb1cf3ddb42f8c2924d923a4573036586a4a206ee	f49a9e23ba6434f08360950768487dad63a9fedd4703de6521d6d223f23cfda7
-src/frontend/tui/tests/plat60-low-level-code-mutation-control.sha256	src/frontend/viewmodel/views/isonim_low_level_code_view.nim	311730f8c7131814f9e11d58e618c37983a025b104da77307c3aaf7f14fb22e9	efdc4537b69d3f243da39f93f2ac218aab72ec4af8e61bd94990fad61fe178b2
-src/frontend/tui/tests/plat60-low-level-code-mutation-control.sha256	src/frontend/viewmodel/keymap/scope_path.nim	f210fd11da1b4244ab8fcf5e4c7eae15fd329a0855f2df5b86a7b265ea766f5f	473c8c6a77041157de5750481c2e46c5a5d3dbe6bd2f749fd0f1f762a8a0b973
-src/frontend/tui/tests/plat60-low-level-code-mutation-control.sha256	src/frontend/gpui/main.nim	6c182e680e9ef5737e5e74549c1711034c1b0b4431b08fc5ffe737f6ea9aa657	c877a4378ca59b26178847f58a7cbde74cf13ef639fd37cfa9c8f80f2f302ff9
 src/frontend/tui/tests/plat63-verification-mutation-control.sha256	src/frontend/viewmodel/views/isonim_verification_view.nim	8cf082c5a25b48d358e59d85771af2c96960d9703611f7c8fcd29d2a9ab2d3d1	f9bd585e9b685d1398479a44de419daad7de246d7ce5aa133802b1f057d1e111
 src/frontend/tui/tests/plat63-verification-mutation-control.sha256	src/frontend/headless_app/pane_clicks.nim	5cc0eda3977591ff1ec5cd12a2952e504945d9d4d44bbb0bcd326091d066330c	5714112e36bc517ef919a226c1b6ad8ae588015cfef1fafa37ebc72ae1cf32e9
 src/frontend/tui/tests/plat63-verification-mutation-control.sha256	src/frontend/tui/app/runtime.nim	52552bf14e7f181c899c07150155a158ac6d24da4f5575d948f85d629fce4ac4	9f6ceffe6b6685c2accdce1080bd0d79d6355dbe8235135b4e163a554a5aa58b
@@ -254,3 +249,6 @@ src/frontend/tui/tests/plat65-nim-tracing-mutation-control.sha256	src/frontend/g
 src/frontend/tui/tests/plat61-shell-mutation-control.sha256	src/frontend/tui/app/runtime.nim	52552bf14e7f181c899c07150155a158ac6d24da4f5575d948f85d629fce4ac4	9f6ceffe6b6685c2accdce1080bd0d79d6355dbe8235135b4e163a554a5aa58b
 src/frontend/tui/tests/plat61-shell-mutation-control.sha256	src/frontend/gpui/main.nim	6c182e680e9ef5737e5e74549c1711034c1b0b4431b08fc5ffe737f6ea9aa657	c877a4378ca59b26178847f58a7cbde74cf13ef639fd37cfa9c8f80f2f302ff9
 src/frontend/tui/tests/plat61-shell-mutation-control.sha256	src/frontend/ui/key_router.nim	3583637c8cc7b3c78204fe88dffac1458fa016a8d65a9e7c2e358307046c13db	8280c990f6bdb88b9ceb5d2c2cb6cba8bdad7a0cc37ac171ce451d5f8a7b0c4e
+# plat70i: the Event Log's model moved after its grade (82b3e7e9c13, an Event
+# Log boundary chip goes to the other side of the crossing): a re-grade of the arms whose needles sit in it.
+ci/test/plat70i-fit-mutation-control.sha256	src/frontend/viewmodel/viewmodels/event_log_vm.nim	26158d77dd8f6e58b67e9b9edb89f1e3b01ace21df15e569811687402e479b02	95728ef45dc23d02341b5c8939c6f2ae5d595841fd9fb8594d958976b5bee55d
