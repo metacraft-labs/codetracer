@@ -101,7 +101,6 @@ src/frontend/tui/tests/plat64-input-routing-mutation-control.sha256	src/frontend
 # 2026-11-12, a ct host page's own panes: the event log's counterpart lookup
 # and its jump take the page's connection to the replay (event_log_vm.nim).
 # Every harness below owes a re-grade for these bytes.
-src/frontend/viewmodel/tests/unit/hsf-sdk-mutation-control.sha256	src/frontend/viewmodel/viewmodels/event_log_vm.nim	93e1f0b645ec65ce358e4dbe169dca8dfb1ce70264d3aed2bcfe34698cf45c72	26158d77dd8f6e58b67e9b9edb89f1e3b01ace21df15e569811687402e479b02
 
 # 2026-11-13, a point evidence region maps as a point (reconcile.nim) and its example case
 # (test_editor_async_examples.nim): plat29 owes a re-grade for those bytes.
