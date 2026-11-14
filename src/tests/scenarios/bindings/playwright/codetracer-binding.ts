@@ -225,7 +225,7 @@ const ROLES: Record<string, { affordances: string[]; properties: string[] }> = {
   "pixel-history": { affordances: ["click"], properties: ["count", "pixel", "draws", "last-draw"] },
   "history-entry": { affordances: ["click"], properties: ["geid", "draw", "result", "selected", "title"] },
   "shader-debug": { affordances: [], properties: ["source", "current", "variables", "registers", "step"] },
-  "flow-value": { affordances: ["click", "context-click"], properties: ["name", "side", "line", "value", "cut", "clipped", "single-line", "cap", "shown"] },
+  "flow-value": { affordances: ["click", "context-click"], properties: ["name", "side", "line", "value", "cut", "clipped", "single-line", "cap", "shown", "eye-shown"] },
   "loop-control": { affordances: ["click"], properties: ["iteration", "total", "slider-width"] },
   popup: { affordances: ["click"], properties: ["text", "value", "type", "anchored"] },
   // --- pw7 ---
@@ -1975,7 +1975,8 @@ function readSurfacePw3(root: any): void {
           const er = eye && vis(eye) ? eye.getBoundingClientRect() : null;
           const inside = (x0: number, x1: number) => x0 >= cr.left - 1 && x1 <= cr.right + 1 &&
             bb.top >= cr.top - 1 && bb.bottom <= cr.bottom + 1;
-          fv.props.shown = er ? inside(er.left, er.right) : inside(bb.left, Math.min(bb.right, bb.left + 16));
+          fv.props.shown = inside(bb.left, Math.min(bb.right, bb.left + 16));
+          fv.props["eye-shown"] = !!er && inside(er.left, er.right);
           fv.visible = fv.visible && fv.props.shown;
           fv.anchors = { points: { start: { x: bb.left + Math.min(bb.width / 2, 8), y: bb.top + bb.height / 2 } } };
           if (eye && vis(eye)) {

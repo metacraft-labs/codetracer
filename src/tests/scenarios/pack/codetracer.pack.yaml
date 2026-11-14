@@ -1254,9 +1254,10 @@ roles:
       clipped: bool
       single-line: bool
       cap: text
-      # What a user aims at is on screen, inside the editor's code area (the
-      # eye of a cut value, else the start of the box), not scrolled off it.
+      # The start of the box, and the chip's eye, are on screen: inside the
+      # editor's code area, not scrolled off it.
       shown: bool
+      eye-shown: bool
     affordances: [click, context-click]
     # `eye`: the chip's "view more" button; `start`: the start of its box.
     anchors: [eye, start]

@@ -16,8 +16,8 @@ steps:
   - wait: { until: replay-idle, timeout: 300s }
   - wait: { until: { at: 'editor[file="main.c"]/flow-value[name="test_boards", side="single"]', present: true }, timeout: 120s }
   # The chip sits right of the code: scroll the editor to it.
-  - wheel: { at: 'editor[file="main.c"]', direction: right, amount: 1 }
-  - wait: { until: { at: 'editor[file="main.c"]/flow-value[name="test_boards", side="single"]', shown: true }, timeout: 30s }
+  - wheel: { at: 'editor[file="main.c"]', direction: right, amount: 8 }
+  - wait: { until: { at: 'editor[file="main.c"]/flow-value[name="test_boards", side="single"]', eye-shown: true }, timeout: 30s }
   - expect: { at: 'editor[file="main.c"]/flow-value[name="test_boards", side="single"]', cut: true, cap: "30ch", clipped: true, single-line: true }
   - click: { at: 'editor[file="main.c"]/flow-value[name="test_boards", side="single"]', anchor: eye }
   - wait: { until: { at: popup, anchored: single }, timeout: 30s }
