@@ -15,6 +15,7 @@
 import ../editing_core
 import ../keymap/editing_keymap
 import ./click_counter
+from ../editor/editor_state import toggleIn
 
 export click_counter
 
@@ -23,6 +24,9 @@ type
     peText = "text"
     peGutterGlyph = "gutter-glyph"
     peGutterLineNumber = "gutter-line-number"
+    peFoldToggle = "fold-toggle"
+      ## A foldable line's chevron in the gutter (the shared editor's
+      ## `data-ct-target="fold"`).
 
   PointerButton* = enum
     pbLeft = "left"
@@ -63,6 +67,7 @@ type
     poLineJump = "debugger.jump-to-line"
     poCallJump = "debugger.jump-to-call"
     poContextMenu = "context-menu.open"
+    poToggleFold = "editor.toggle-fold"
 
   PointerRow* = object
     element*: PointerElement
@@ -110,7 +115,7 @@ type
 
 const
   AnyCount = high(int)
-  EditorPointerRows*: array[31, PointerRow] = [
+  EditorPointerRows*: array[32, PointerRow] = [
     # MC.2: the text, unmodified.
     PointerRow(element: peText, mods: pmNone, button: pbLeft, minCount: 1,
                maxCount: 1, operation: poCaret),
@@ -185,6 +190,10 @@ const
                minCount: 1, maxCount: AnyCount, operation: poContextMenu),
     PointerRow(element: peGutterLineNumber, mods: pmShift, button: pbRight,
                minCount: 1, maxCount: AnyCount, operation: poContextMenu),
+    # A foldable line's chevron folds or unfolds that line's block (VS Code's
+    # folding lane). Its presses are not counted, as the glyph column's are.
+    PointerRow(element: peFoldToggle, mods: pmNone, button: pbLeft,
+               minCount: 1, maxCount: AnyCount, operation: poToggleFold),
   ]
 
 func pointerOperation*(element: PointerElement; mods: PointerMods;
@@ -248,8 +257,10 @@ proc pressEditor*(g: var EditorPointerState; d: var EditingDocument;
     position: p.hit.offset, platformCount: p.platformCount))
   if observed.duplicate:
     return PointerAction(effect: pfNone, count: observed.count, fresh: false)
-  # MC.5: glyph presses are not counted, so each press is the row's only count.
-  let count = if p.hit.element == peGutterGlyph: 1 else: observed.count
+  # MC.5: glyph (and fold chevron) presses are not counted, so each press is
+  # the row's only count.
+  let count = if p.hit.element in {peGutterGlyph, peFoldToggle}: 1
+              else: observed.count
   let op = pointerOperation(p.hit.element, p.mods, p.button, count)
   result = PointerAction(count: count, operation: op, fresh: true)
   let keep = p.mods in {pmAlt, pmShiftAlt}
@@ -326,6 +337,12 @@ proc pressEditor*(g: var EditorPointerState; d: var EditingDocument;
     if not inside:
       d.state.selection = caretSelection(p.hit.offset)
     result.effect = pfContextMenu
+  of poToggleFold:
+    # The pressed line's block, folded or unfolded on the document; the
+    # caret stays where it is. Nothing is left for the front-end but to draw.
+    if p.hit.line >= 1:
+      d.state.folded.toggleIn(p.hit.line - 1)
+    result.effect = pfNone
 
 proc dragEditor*(g: var EditorPointerState; d: var EditingDocument; hit: PointerHit;
                  nowMs: int64): bool =

@@ -470,3 +470,40 @@ suite "the settings":
     check v.wordSeparators == UsualWordSeparators
     check v.assignValue(lsWordSeparators, "_-")
     check v.wordSeparators == "_-"
+
+suite "the fold chevron (the shared editor's folding lane)":
+  # A press on a foldable line's chevron is the pointer table's row
+  # `editor.toggle-fold`, done on the document: the shared editor's
+  # `onMouseDown` toggled the fold itself before, outside the table.
+  test "a press on the chevron folds the line's block, again unfolds it":
+    var d = doc()
+    var g: EditorPointerState
+    d.state.selection = caretSelection(d.off(3, 0))
+    let a = g.press(d, 1000, 1, 0, element = peFoldToggle)
+    check a.operation == poToggleFold
+    check a.effect == pfNone
+    check d.state.folded == @[0]
+    # The caret stays where it was: the chevron is no press of the text.
+    check d.state.selection.mainRange.head == d.off(3, 0)
+    # A second press, however soon, is another toggle (presses on the
+    # chevron are not counted, as the glyph column's are not).
+    let b = g.press(d, 1100, 1, 0, element = peFoldToggle)
+    check b.operation == poToggleFold
+    check d.state.folded.len == 0
+
+  test "a modified or a right press on the chevron has no row":
+    var d = doc()
+    var g: EditorPointerState
+    check g.press(d, 1000, 1, 0, element = peFoldToggle, mods = pmCtrl).operation == poNone
+    check g.press(d, 3000, 1, 0, element = peFoldToggle, button = pbRight).operation == poNone
+    check d.state.folded.len == 0
+
+  test "a chevron that names no line does nothing":
+    var d = doc()
+    var g: EditorPointerState
+    discard g.press(d, 1000, 0, 0, element = peFoldToggle)
+    check d.state.folded.len == 0
+
+  test "the row is in the table every front-end reads":
+    check pointerOperation(peFoldToggle, pmNone, pbLeft, 1) == poToggleFold
+    check pointerOperation(peFoldToggle, pmNone, pbLeft, 5) == poToggleFold

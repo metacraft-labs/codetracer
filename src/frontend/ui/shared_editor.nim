@@ -1158,7 +1158,14 @@ proc hitAt(ed: SharedEditor; clientX, clientY: float; target: JsObject;
         of "glyph": result.targetType = mtGutterGlyphMargin; result.pe = peGutterGlyph
         of "number": result.targetType = mtGutterLineNumbers; result.pe = peGutterLineNumber
         of "decorations": result.targetType = mtGutterLineDecorations; result.pe = peGutterLineNumber
-        of "fold": result.targetType = mtGutterLineDecorations; result.pe = peGutterLineNumber
+        of "fold":
+          # A line's fold chevron (Monaco's folding lane): the pointer
+          # table's `peFoldToggle`. A chevron on a line that no longer folds
+          # names no line, so its press does nothing, as it always did.
+          result.targetType = mtGutterLineDecorations
+          result.pe = peFoldToggle
+          if not isFoldable(ed.index, ed.doc.state.doc, result.line1 - 1):
+            result.line1 = 0
         of "zone": result.targetType = mtContentViewZone
         of "widget": result.targetType = mtContentWidget
         of "overlay-widget": result.targetType = mtOverlayWidget
@@ -1285,22 +1292,6 @@ proc onMouseDown(ed: SharedEditor; ev: JsObject) =
            of 1: pbMiddle
            of 2: pbRight
            else: pbLeft
-  # The fold chevron: Monaco's folding lane toggles the fold.
-  var node = ev.target
-  if not isNilOrUndef(node) and hasFn(node, "getAttribute") and
-     $jsStr(node.getAttribute(cstring"data-ct-target")) == "fold" and pb == pbLeft:
-    let line0 = h.line1 - 1
-    if isFoldable(ed.index, ed.doc.state.doc, line0):
-      if line0 in ed.doc.state.folded:
-        var kept: seq[int] = @[]
-        for f in ed.doc.state.folded:
-          if f != line0: kept.add f
-        ed.doc.state.folded = kept
-      else:
-        ed.doc.state.folded.add line0
-      ed.render()
-    discard ev.preventDefault()
-    return
   let mods = pointerModsOf(ev.ctrlKey.to(bool) or ev.metaKey.to(bool),
                            ev.altKey.to(bool), ev.shiftKey.to(bool))
   let press = PointerPress(timeMs: int64(eventTimeMs(ev)), button: pb, mods: mods,
@@ -1318,6 +1309,13 @@ proc onMouseDown(ed: SharedEditor; ev: JsObject) =
         unit: puCharacter, first: tied.offset, last: tied.offset,
         selection: d.state.selection)
     eoMoved)
+  if h.pe == peFoldToggle:
+    # A fold chevron's press is the table's (`editor.toggle-fold`, done on
+    # the document above, or no row for it): it is no press of the text or
+    # of the debugger's, and it does not move the focus.
+    ed.render()
+    discard ev.preventDefault()
+    return
   # The desktop's handlers decide the debugger's half (breakpoints, jumps,
   # the menu), as they do for Monaco.
   ed.fire("mouseDown", ed.mouseEventOf(ev, (if action.count <= 1: tied else: h)))
