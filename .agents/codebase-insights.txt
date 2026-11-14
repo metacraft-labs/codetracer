@@ -8544,3 +8544,19 @@ ONE ROUTER ON EVERY FRONT-END (2026-10-12, PLAT-68 Phase B).
 - (pw7) Alt+click in the desktop editor adds a cursor; a column breakpoint is set with the caret at the column and Shift+F9. Hovering a program-menu folder is CSS `:hover` only (`ui/menu.nim` `activeNodeClass`): it opens the folder but never sets `menu-active-node`, which marks the keyboard's highlight.
 - (pw7) Crystal recordings enter through Crystal's own `main.cr` (the runtime's `main`), so the call trace's `main` opens main.cr, not the program's file. Go's sudoku recording has five threads and MCR replay refuses it (XMR-B1): record it with `--backend rr`.
 - (pw7) Flow values beside a narrow editor are drawn past its right edge and take no click: give a scenario that clicks them a wide window (`open-recording` width 2400).
+
+## Desktop scenarios: more than one client (2026-11-14)
+
+- A scenario with two clients declares them under `clients:` (`a: { open: stage }` is the page
+  the stage opened; `b: { open: host-page, isolation: separate }` is a second browser on the same
+  `ct host`) and addresses every step with `as:` (lint L13). `reload: <client>` and
+  `duplicate: { client, name }` are client actions; with no `clients:` the one client is `main`
+  (`reload: main`). The Playwright arm opens a separate client as a new browser context, a shared
+  one or a duplicate as a tab of the same context (a duplicate starts with a copy of the tab's
+  sessionStorage, which is what makes `ct host` see the original's client id).
+- The arm waits for the page's `load` event after opening, duplicating or reloading a client
+  (DemoVideoScript-Playwright c20cfb5). Waiting only for DOMContentLoaded let the binding read
+  the page while the app was still starting, and a reloaded `ct host` page stayed blank in fast
+  mode (no editor, no call trace) in two of four runs.
+- `expect: { …, holds: 2s }` reads again and again for the span: the check that the other client
+  did not move, which a single read straight after the step cannot make.

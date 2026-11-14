@@ -1816,6 +1816,12 @@ roles:
       # what has the keyboard focus (`tag.class …`)
       focus: text
 
+# A second client of the application (scenarios with more than one client:
+# DemoVideoScript-pm spec/Proposal-Multiple-Clients.md). `host-page` is one
+# more browser page on the `ct host` the stage started.
+clients:
+  host-page: ~
+
 sync:
   # The implicit condition after every input: the window handled it and the
   # screen stopped changing.

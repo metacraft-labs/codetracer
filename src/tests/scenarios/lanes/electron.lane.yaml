@@ -18,6 +18,8 @@ applicable:
   - ../command-palette/find-symbol-reopens-palette.yaml
   - ../command-palette/finds-files-and-menu-items.yaml
   - ../ct-host/breakpoint-stops-continue-and-a-cleared-one-does-not.yaml
+  - ../ct-host/two-clients-step-independently.yaml
+  - ../ct-host/duplicated-tab-gets-its-own-session.yaml
   - ../debug-controls/disabled-control-tooltip-stays-inert.yaml
   - ../debug-controls/every-tooltip-names-its-chord.yaml
   - ../debug-controls/tooltip-chord-does-what-the-control-does.yaml
