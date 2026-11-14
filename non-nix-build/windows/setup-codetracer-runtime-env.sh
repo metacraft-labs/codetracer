@@ -187,6 +187,16 @@ export CODETRACER_REPO_ROOT_PATH="$ROOT_DIR"
 # nim.exe places on the current drive and NIM_SIDE_OUTPUTS_IGNORE excludes.
 CT_TUP_NIM_CACHE_ROOT="$("${BASH:-bash}" "$ROOT_DIR/ci/lib/nim-cache-root.sh" --tup "$ROOT_DIR")"
 export CT_TUP_NIM_CACHE_ROOT
+# And the tup rules' Cargo target base (ci/lib/tup-cargo-target.sh). This file
+# prepares the shell, so an inherited value is dropped rather than checked. A
+# refusal is reported and leaves both unset; tup then stops with the remedy.
+unset CT_TUP_CARGO_TARGET_BASE CT_TUP_CARGO_TARGET_IGNORE
+if _ct_tup_cargo_env="$("${BASH:-bash}" "$ROOT_DIR/ci/lib/tup-cargo-target.sh" --export "$ROOT_DIR")"; then
+	eval "$_ct_tup_cargo_env"
+else
+	echo "no Cargo target base for tup (see above); a plain tup will refuse." >&2
+fi
+unset _ct_tup_cargo_env
 # The build dir this helper lays out `public` and `config` under, and finds `ct` in. An
 # explicit CODETRACER_PREFIX still wins (Build-Outputs-And-Path-Resolution.md §3.1), but it is
 # not exported: `ct` resolves its own prefix from its location.

@@ -308,6 +308,36 @@ NIM_SIDE_OUTPUTS_IGNORE = ^(([A-Za-z]:)?[/\\]tmp[/\\]ct-nim-cache[/\\].*|([A-Za-
 # For the same reason no rule declares the file, whichever directory the
 # compiler in the shell writes it to.
 NIM_MACRO_SOURCEMAP_IGNORE = ^.*[/\\]macro_sourcemap_[^/\\]*\.json$
+# THE CARGO TARGETS ARE THIS CHECKOUT'S AND THIS COMPILER'S. The rules used to
+# build into host-global roots (`<tmp>/codetracer/<crate>_target`), and every
+# measured consequence came from sharing them: E0514 when another checkout's
+# rustc 1.96 metadata met this checkout's 1.89; one checkout running another
+# checkout's build script and missing the emulator library it should have
+# deployed; `.cargo-lock` unopenable because another account owned the root;
+# macOS /tmp cleanup emptying an `out/` a produced binary loaded from.
+# (codetracer-pm issues/2026-10-05-ui-tup-cargo-targets-collide-across-
+# workspaces-and-compilers.md; the contract is spec/Testing/
+# UI-Cargo-Output-Ownership.md.)
+#
+# `ci/lib/tup-cargo-target.sh` selects, creates or reopens the base
+# `<checkout>/build/tup-cargo-targets/rustc-<release>-<digest of the resolved
+# rustc>/` and refuses anything it cannot prove is that checkout's and that
+# compiler's. It yields two values, imported here:
+#
+#   CT_TUP_CARGO_TARGET_BASE    the absolute base, native spelling;
+#   CT_TUP_CARGO_TARGET_IGNORE  the same base as a Tup ignore-regex prefix
+#                               (separator-agnostic, bracket-escaped,
+#                               ending in a separator).
+#
+# `import`, like the Nim cache root above, so the commands carry the value as
+# text (Windows, `tup generate`) and a change reparses. There is NO default:
+# a missing value stops the parse. A fallback would have to be a root that
+# nobody proved is this checkout's, which is the defect. The entry points
+# (scripts/build-once.sh, scripts/build.sh, ci/build/dev.sh, the dev shell,
+# non-nix-build/env.sh, and env.sh through
+# non-nix-build/windows/setup-codetracer-runtime-env.sh) set both; a plain
+# `tup` elsewhere gets them from the remedy in the error below.
+#
 # Cargo writes CACHEDIR.TAG (and other metadata) into a temp directory whose
 # name is `<target_dir><RANDOM>` (e.g. `db_backend_targetF5RTUl/`) while
 # preparing the target dir, then atomically renames it to `<target_dir>`.
@@ -315,15 +345,18 @@ NIM_MACRO_SOURCEMAP_IGNORE = ^.*[/\\]macro_sourcemap_[^/\\]*\.json$
 # or tup reports the transient writes as undeclared outputs. The patterns
 # below intentionally allow either `target/...` (final layout) or
 # `target<6-char-suffix>/...` (cargo's atomic-prep layout).
-BACKEND_MANAGER_CARGO_IGNORE_OUTPUTS = ^(([A-Za-z]:)?[/\\]tmp[/\\]codetracer[/\\]backend_manager_target[A-Za-z0-9]*[/\\].*|$(WINDOWS_RUSTC_TMP_IGNORE)|$(WINDOWS_CARGO_HOME_IGNORE))$
-DB_BACKEND_CARGO_IGNORE_OUTPUTS = ^(([A-Za-z]:)?[/\\]tmp[/\\]codetracer[/\\]db_backend_target[A-Za-z0-9]*[/\\].*|$(WINDOWS_RUSTC_TMP_IGNORE)|$(WINDOWS_RUSTC_PIPE_IGNORE)|$(WINDOWS_CARGO_HOME_IGNORE)|$(NIM_FFI_CACHE_IGNORE))$
-VIRTUALIZATION_LAYERS_CARGO_IGNORE_OUTPUTS = ^(([A-Za-z]:)?[/\\]tmp[/\\]codetracer[/\\]virtualization_layers_target[A-Za-z0-9]*[/\\].*|$(WINDOWS_RUSTC_TMP_IGNORE)|$(WINDOWS_CARGO_HOME_IGNORE))$
-
-ifeq (@(TUP_PLATFORM),win32)
-CARGO_TARGET_BASE = C:/tmp/codetracer
-else
-CARGO_TARGET_BASE = /tmp/codetracer
+import CT_TUP_CARGO_TARGET_BASE=
+import CT_TUP_CARGO_TARGET_IGNORE=
+ifeq ($(CT_TUP_CARGO_TARGET_BASE),)
+error CT_TUP_CARGO_TARGET_BASE is unset, so the Cargo rules have no target directory this checkout owns. Run just build-once, or in the checkout: eval "`bash ci/lib/tup-cargo-target.sh --export .`"
 endif
+ifeq ($(CT_TUP_CARGO_TARGET_IGNORE),)
+error CT_TUP_CARGO_TARGET_IGNORE is unset, so tup cannot exclude the Cargo target writes. In the checkout: eval "`bash ci/lib/tup-cargo-target.sh --export .`"
+endif
+CARGO_TARGET_BASE = $(CT_TUP_CARGO_TARGET_BASE)
+BACKEND_MANAGER_CARGO_IGNORE_OUTPUTS = ^($(CT_TUP_CARGO_TARGET_IGNORE)backend_manager_target[A-Za-z0-9]*[/\\].*|$(WINDOWS_RUSTC_TMP_IGNORE)|$(WINDOWS_CARGO_HOME_IGNORE))$
+DB_BACKEND_CARGO_IGNORE_OUTPUTS = ^($(CT_TUP_CARGO_TARGET_IGNORE)db_backend_target[A-Za-z0-9]*[/\\].*|$(WINDOWS_RUSTC_TMP_IGNORE)|$(WINDOWS_RUSTC_PIPE_IGNORE)|$(WINDOWS_CARGO_HOME_IGNORE)|$(NIM_FFI_CACHE_IGNORE))$
+VIRTUALIZATION_LAYERS_CARGO_IGNORE_OUTPUTS = ^($(CT_TUP_CARGO_TARGET_IGNORE)virtualization_layers_target[A-Za-z0-9]*[/\\].*|$(WINDOWS_RUSTC_TMP_IGNORE)|$(WINDOWS_CARGO_HOME_IGNORE))$
 
 ifeq (@(TUP_PLATFORM),win32)
 TSC = tsc.cmd
@@ -654,8 +687,9 @@ ifeq (@(TUP_PLATFORM),win32)
 endif
 ifeq (@(TUP_PLATFORM),linux)
 # The emulator library travels with the binary, which searches its own directory
-# first (src/db-backend/build.rs): the target directory is machine-wide, and
-# another checkout's build rewrites the copy in it.
+# first (src/db-backend/build.rs). The target directory was machine-wide when
+# that was written, and another checkout's build rewrote the copy in it; it is
+# per checkout now, but the binary still must not load from a build directory.
 !debug_rust_cargo_db_backend = |> \
     cargo build --locked $(RUST_WINDOWS_LINKER_CONFIG) $(DB_BACKEND_CARGO_FEATURES) --target-dir $(CARGO_TARGET_BASE)/db_backend_target && \
     cp $(CARGO_TARGET_BASE)/db_backend_target/debug/replay-server$(EXE_SUFFIX) %1o && \

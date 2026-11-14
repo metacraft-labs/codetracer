@@ -124,7 +124,7 @@ BUILD_SIBLINGS="${SUITE_ROOT}/scripts/build-siblings.sh"
 # Every contract this suite claims to check. A suite that silently runs fewer
 # assertions than it advertises is a suite that stops protecting anything, so
 # the count is asserted at the end and has to be changed deliberately.
-EXPECTED_ASSERTIONS=146
+EXPECTED_ASSERTIONS=159
 
 ASSERTIONS=0
 FAILURES=0
@@ -1663,6 +1663,197 @@ else
 	# shellcheck disable=SC2086 # one line per file, see BARE_ROOTS above
 	bad "every tup entry point sets CT_TUP_NIM_CACHE_ROOT from nim-cache-root.sh --tup" \
 		"missing in:" ${TUP_ENTRY_MISSING}
+fi
+
+# ---------------------------------------------------------------------------
+section "the tup Cargo targets belong to one checkout and one compiler"
+# ---------------------------------------------------------------------------
+#
+# THE CLUSTER. `src/Tuprules.tup` built every crate into a host-global root,
+# `/tmp/codetracer/<crate>_target` (`C:/tmp/...` on Windows). Every measured
+# consequence came from sharing it: E0514 when one checkout's rustc 1.96
+# metadata met another's 1.89; one checkout running ANOTHER checkout's build
+# script, fresh by mtime, so the emulator library was never deployed
+# (2026-11-05); `.cargo-lock` unopenable because another account owned the
+# root (2026-10-27). codetracer-pm
+# issues/2026-10-05-ui-tup-cargo-targets-collide-across-workspaces-and-compilers.md,
+# contract spec/Testing/UI-Cargo-Output-Ownership.md.
+#
+# `ci/lib/tup-cargo-target.sh` is the one cause; the rules import its two
+# values and refuse without them. The contracts below grade the helper on real
+# directories (distinct per checkout, re-entered by the same one, distinct per
+# compiler, and every refusal the spec lists), then the sites.
+#
+# THE COMPILER IS A STUB, and that is the one mock here. The helper reads three
+# things from it: the path it resolves to, `rustc -vV` and `--print sysroot`.
+# A script printing two different release/sysroot texts at two different paths
+# is a genuine pair of distinct identities as far as the helper can tell, which
+# is exactly what is being graded. It is a stub because this suite runs on the
+# lint runner, which has no Rust toolchain; the real-compiler measurement is
+# the concurrent two-worktree `just build-once` recorded with the change.
+CARGO_LIB="${SUITE_ROOT}/ci/lib/tup-cargo-target.sh"
+STUB_RUSTC_DIR="${TEST_ROOT}/stub-rustc"
+mkdir -p "${STUB_RUSTC_DIR}/1.89" "${STUB_RUSTC_DIR}/1.96"
+for rel in 1.89 1.96; do
+	cat >"${STUB_RUSTC_DIR}/${rel}/rustc" <<STUB
+#!/usr/bin/env bash
+case "\$1" in
+-vV) printf 'rustc ${rel}.0 (stub)\nbinary: rustc\nhost: x86_64-unknown-linux-gnu\nrelease: ${rel}.0\n' ;;
+--print) printf '%s\n' "${STUB_RUSTC_DIR}/${rel}/sysroot" ;;
+*) exit 2 ;;
+esac
+STUB
+	chmod +x "${STUB_RUSTC_DIR}/${rel}/rustc"
+done
+CK_CA="${TEST_ROOT}/cargo-checkouts/alpha"
+CK_CB="${TEST_ROOT}/cargo-checkouts/beta"
+mkdir -p "${CK_CA}/src" "${CK_CB}/src"
+
+# `env -u` both values: an ambient one (this suite may run inside a prepared
+# dev shell) would be refused as "supplied by someone else" and turn every
+# contract red for the wrong reason.
+cargo_base_for() { # <checkout> <rustc release>
+	env -u CT_TUP_CARGO_TARGET_BASE -u CT_TUP_CARGO_TARGET_IGNORE \
+		RUSTC="${STUB_RUSTC_DIR}/$2/rustc" bash "${CARGO_LIB}" "$1" 2>&1
+}
+first_line() { printf '%s\n' "$1" | sed -n 1p; }
+
+CB_A="$(cargo_base_for "${CK_CA}" 1.89)"
+CB_B="$(cargo_base_for "${CK_CB}" 1.89)"
+CB_A2="$(cargo_base_for "${CK_CA}" 1.89)"
+CB_A96="$(cargo_base_for "${CK_CA}" 1.96)"
+BASE_A="$(first_line "${CB_A}")"
+if [[ ${BASE_A} == "${CK_CA}"/build/tup-cargo-targets/rustc-1.89.0-* && -d ${BASE_A} &&
+	"$(first_line "${CB_B}")" == "${CK_CB}"/build/tup-cargo-targets/rustc-1.89.0-* &&
+	${CB_A2} == "${CB_A}" ]]; then
+	ok "each checkout gets its own Cargo target base inside it, and re-enters the same one"
+else
+	bad "each checkout gets its own Cargo target base inside it, and re-enters the same one" \
+		"alpha: ${CB_A}" "beta: ${CB_B}" "alpha again: ${CB_A2}"
+fi
+BASE_A96="$(first_line "${CB_A96}")"
+if [[ ${BASE_A96} == "${CK_CA}"/build/tup-cargo-targets/rustc-1.96.0-* &&
+	${BASE_A96} != "${BASE_A}" && -d ${BASE_A96} ]]; then
+	ok "...and another compiler in the same checkout gets a different base (the E0514 case)"
+else
+	bad "...and another compiler in the same checkout gets a different base (the E0514 case)" \
+		"1.89: ${BASE_A}" "1.96: ${CB_A96}"
+fi
+
+# The ignore expression must cover a write into this checkout's base and NOT
+# the same write into another's, or the Windows exclusion would be either
+# broken or a host-wide hole again. `sed` turns the Tupfile spelling `[/\\]`
+# (kept verbatim by tup in a variable, measured) into the ERE `[/\]`.
+IGNORE_A="$(printf '%s\n' "${CB_A}" | sed -n 2p)"
+IGNORE_ERE="^$(printf '%s' "${IGNORE_A}" | sed 's/\[\/\\\\\]/[\/\\]/g')db_backend_target[A-Za-z0-9]*[/\\].*\$"
+if printf '%s\n' "${BASE_A}/db_backend_target/debug/replay-server" | grep -Eq -- "${IGNORE_ERE}" &&
+	printf '%s\n' "${BASE_A}/db_backend_targetF5RTUl/CACHEDIR.TAG" | grep -Eq -- "${IGNORE_ERE}" &&
+	! printf '%s\n' "$(first_line "${CB_B}")/db_backend_target/debug/replay-server" | grep -Eq -- "${IGNORE_ERE}"; then
+	ok "the ignore expression covers this base's target writes and not another checkout's"
+else
+	bad "the ignore expression covers this base's target writes and not another checkout's" \
+		"expression: ${IGNORE_A}" "as ERE: ${IGNORE_ERE}"
+fi
+
+# THE REFUSALS. Each must say no on stderr, print nothing on stdout (so a
+# caller cannot eval half an answer), and exit non-zero.
+cargo_refuses() { # <desc> <fragment> <checkout> [env assignments...]
+	local desc="$1" fragment="$2" checkout="$3" out err status
+	shift 3
+	out="$(env -u CT_TUP_CARGO_TARGET_BASE -u CT_TUP_CARGO_TARGET_IGNORE "$@" \
+		RUSTC="${STUB_RUSTC_DIR}/1.89/rustc" bash "${CARGO_LIB}" "${checkout}" 2>"${TEST_ROOT}/cargo-err")"
+	status=$?
+	err="$(cat "${TEST_ROOT}/cargo-err")"
+	if [[ ${status} -ne 0 && -z ${out} && ${err} == *"${fragment}"* ]]; then
+		ok "${desc}"
+	else
+		bad "${desc}" "status: ${status}" "stdout: ${out}" "stderr: ${err}"
+	fi
+}
+
+cargo_refuses "a base supplied by the environment for another checkout is refused" \
+	"already set to a different base" "${CK_CA}" \
+	CT_TUP_CARGO_TARGET_BASE="$(first_line "${CB_B}")"
+
+printf 'x\n' >"${BASE_A}/stray"
+cargo_refuses "an unknown object in the base is refused" "unexpected entry" "${CK_CA}"
+rm -f "${BASE_A}/stray"
+
+ln -s /tmp "${BASE_A}/db_backend_target"
+cargo_refuses "a target directory that is a link is refused" "not a plain directory" "${CK_CA}"
+rm -f "${BASE_A}/db_backend_target"
+
+cp "${BASE_A}/.ct-tup-cargo-owner" "${TEST_ROOT}/marker-saved"
+sed -i.bak "s|^checkout=.*|checkout=${CK_CB}|" "${BASE_A}/.ct-tup-cargo-owner"
+cargo_refuses "a base whose owner marker names another checkout is refused" \
+	"different checkout or compiler" "${CK_CA}"
+cp "${TEST_ROOT}/marker-saved" "${BASE_A}/.ct-tup-cargo-owner"
+rm -f "${BASE_A}/.ct-tup-cargo-owner.bak"
+
+CK_CL="${TEST_ROOT}/cargo-checkouts/linked"
+mkdir -p "${CK_CL}/src" "${TEST_ROOT}/cargo-elsewhere"
+ln -s "${TEST_ROOT}/cargo-elsewhere" "${CK_CL}/build"
+cargo_refuses "a build directory that is a link out of the checkout is refused" \
+	"is a symbolic link" "${CK_CL}"
+if [[ -z "$(ls -A "${TEST_ROOT}/cargo-elsewhere")" ]]; then
+	ok "...and nothing was created through it"
+else
+	bad "...and nothing was created through it" "$(ls -A "${TEST_ROOT}/cargo-elsewhere")"
+fi
+
+# After every refusal above was undone, the same checkout re-enters cleanly.
+if [[ "$(cargo_base_for "${CK_CA}" 1.89)" == "${CB_A}" ]]; then
+	ok "...and once the foreign objects are gone the same base is re-entered"
+else
+	bad "...and once the foreign objects are gone the same base is re-entered" \
+		"$(cargo_base_for "${CK_CA}" 1.89)"
+fi
+
+# AND THE SITES. Source text, comments dropped, as above.
+TUP_CARGO_BARE="$(grep -nE '[/\]tmp[/\]codetracer|tmp\[/\\\\\]codetracer' <<<"${TUP_RULE_LINES}" || true)"
+# shellcheck disable=SC2016 # Tup source text, not expansions
+if [[ -z ${TUP_CARGO_BARE} ]] &&
+	grep -qxF 'CARGO_TARGET_BASE = $(CT_TUP_CARGO_TARGET_BASE)' <<<"${TUP_RULE_LINES}" &&
+	grep -qxF 'import CT_TUP_CARGO_TARGET_BASE=' <<<"${TUP_RULE_LINES}" &&
+	grep -qxF 'import CT_TUP_CARGO_TARGET_IGNORE=' <<<"${TUP_RULE_LINES}" &&
+	grep -A1 -xF 'ifeq ($(CT_TUP_CARGO_TARGET_BASE),)' <<<"${TUP_RULE_LINES}" | grep -q '^error ' &&
+	grep -A1 -xF 'ifeq ($(CT_TUP_CARGO_TARGET_IGNORE),)' <<<"${TUP_RULE_LINES}" | grep -q '^error '; then
+	ok "src/Tuprules.tup takes its Cargo target base only from the helper, and refuses without it"
+else
+	bad "src/Tuprules.tup takes its Cargo target base only from the helper, and refuses without it" \
+		"host-global spellings (line numbers exclude comments):" "${TUP_CARGO_BARE:-<none>}" \
+		"$(grep -n 'CARGO_TARGET_BASE\|CT_TUP_CARGO' <<<"${TUP_RULE_LINES}" | head -12)"
+fi
+
+# Every --target-dir under that base, and every Cargo ignore built from the
+# helper's expression: a rule added with its own root would pass the check above.
+TD_ALL="$(grep -o -- '--target-dir [^ ]*' <<<"${TUP_RULE_LINES}" | wc -l)"
+# shellcheck disable=SC2016 # Tup source text
+TD_ROOTED="$(grep -o -- '--target-dir $(CARGO_TARGET_BASE)/[a-z_]*_target' <<<"${TUP_RULE_LINES}" | wc -l)"
+IGN_ALL="$(grep -c '^[A-Z_]*_CARGO_IGNORE_OUTPUTS = ' <<<"${TUP_RULE_LINES}" || true)"
+# shellcheck disable=SC2016 # Tup source text
+IGN_ROOTED="$(grep -c '^[A-Z_]*_CARGO_IGNORE_OUTPUTS = ^($(CT_TUP_CARGO_TARGET_IGNORE)[a-z_]*_target\[A-Za-z0-9\]\*' <<<"${TUP_RULE_LINES}" || true)"
+if [[ ${TD_ALL} -gt 0 && ${TD_ALL} -eq ${TD_ROOTED} && ${IGN_ALL} -gt 0 && ${IGN_ALL} -eq ${IGN_ROOTED} ]]; then
+	ok "every Cargo rule builds under the base and every Cargo ignore is built from the helper's expression"
+else
+	bad "every Cargo rule builds under the base and every Cargo ignore is built from the helper's expression" \
+		"--target-dir: ${TD_ROOTED} of ${TD_ALL} under \$(CARGO_TARGET_BASE)" \
+		"ignores: ${IGN_ROOTED} of ${IGN_ALL} from \$(CT_TUP_CARGO_TARGET_IGNORE)"
+fi
+
+TUP_CARGO_ENTRY_MISSING=""
+for entry in scripts/build-once.sh scripts/build.sh ci/build/dev.sh \
+	nix/shells/ci-base.nix non-nix-build/env.sh \
+	non-nix-build/windows/setup-codetracer-runtime-env.sh; do
+	grep -Eq 'tup-cargo-target\.sh"? --export' "${SUITE_ROOT}/${entry}" 2>/dev/null ||
+		TUP_CARGO_ENTRY_MISSING="${TUP_CARGO_ENTRY_MISSING} ${entry}"
+done
+if [[ -z ${TUP_CARGO_ENTRY_MISSING} ]]; then
+	ok "every tup entry point sets the Cargo target base through tup-cargo-target.sh"
+else
+	# shellcheck disable=SC2086 # one line per file, see BARE_ROOTS above
+	bad "every tup entry point sets the Cargo target base through tup-cargo-target.sh" \
+		"missing in:" ${TUP_CARGO_ENTRY_MISSING}
 fi
 
 # ---------------------------------------------------------------------------

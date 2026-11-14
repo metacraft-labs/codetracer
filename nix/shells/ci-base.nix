@@ -796,6 +796,17 @@ with pkgs;
       # the Tuprules fallback, which would rebuild every Nim target once.
       # ci/lib/nim-cache-root.sh holds the scheme.
       export CT_TUP_NIM_CACHE_ROOT="$(bash "$ROOT_PATH/ci/lib/nim-cache-root.sh" --tup "$ROOT_PATH")"
+      # And the tup rules' Cargo target base (ci/lib/tup-cargo-target.sh),
+      # which they refuse to run without. Preparing the shell is this hook's
+      # job, so an inherited value is dropped first rather than checked; a
+      # refusal leaves both unset, and tup then stops with the remedy.
+      unset CT_TUP_CARGO_TARGET_BASE CT_TUP_CARGO_TARGET_IGNORE
+      if _ct_tup_cargo_env="$(bash "$ROOT_PATH/ci/lib/tup-cargo-target.sh" --export "$ROOT_PATH")"; then
+        eval "$_ct_tup_cargo_env"
+      else
+        echo "codetracer dev shell: no Cargo target base for tup (see above); a plain tup will refuse." >&2
+      fi
+      unset _ct_tup_cargo_env
     fi
 
     # Materialized Python origin-DAP tests must not depend on a runner-global

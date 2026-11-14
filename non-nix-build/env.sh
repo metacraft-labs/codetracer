@@ -87,6 +87,16 @@ export CODETRACER_BUILD_DIR="${CODETRACER_BUILD_DIR:-$_ct_build_dir}"
 # `.../non-nix-build/..`; the helper normalises it.)
 CT_TUP_NIM_CACHE_ROOT="$("${BASH:-bash}" "$ROOT_DIR/ci/lib/nim-cache-root.sh" --tup "$ROOT_DIR")"
 export CT_TUP_NIM_CACHE_ROOT
+# And the tup rules' Cargo target base (ci/lib/tup-cargo-target.sh). This file
+# prepares the shell, so an inherited value is dropped rather than checked. A
+# refusal is reported and leaves both unset; tup then stops with the remedy.
+unset CT_TUP_CARGO_TARGET_BASE CT_TUP_CARGO_TARGET_IGNORE
+if _ct_tup_cargo_env="$("${BASH:-bash}" "$ROOT_DIR/ci/lib/tup-cargo-target.sh" --export "$ROOT_DIR")"; then
+	eval "$_ct_tup_cargo_env"
+else
+	echo "no Cargo target base for tup (see above); a plain tup will refuse." >&2
+fi
+unset _ct_tup_cargo_env
 export CODETRACER_LD_LIBRARY_PATH="${CODETRACER_LD_LIBRARY_PATH:-}"
 
 export PATH=$DEPS_DIR/nim/bin:$ROOT_DIR/node_modules/.bin:$BIN_DIR:$CARGO_HOME/bin:$CODETRACER_BUILD_DIR/bin:$PATH

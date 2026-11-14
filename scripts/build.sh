@@ -233,6 +233,15 @@ if [ -z "$CT_BUILD_HOST" ]; then
 		CT_TUP_NIM_CACHE_ROOT="$(bash "$REPO_ROOT/ci/lib/nim-cache-root.sh" --tup "$REPO_ROOT")"
 		export CT_TUP_NIM_CACHE_ROOT
 	fi
+	# And the Cargo target base, for the same reason; the helper refuses a
+	# value in this environment that is not this checkout's and compiler's.
+	if [ -f "$REPO_ROOT/ci/lib/tup-cargo-target.sh" ]; then
+		if ! ct_tup_cargo_env="$(bash "$REPO_ROOT/ci/lib/tup-cargo-target.sh" --export "$REPO_ROOT")"; then
+			echo "build: no Cargo target base this checkout owns (see above); not starting tup monitor." >&2
+			exit 1
+		fi
+		eval "$ct_tup_cargo_env"
+	fi
 	cd src
 	"${TUP:-tup}" monitor -a
 	cd ..

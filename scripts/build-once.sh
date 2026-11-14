@@ -780,6 +780,22 @@ if [ -f "$CT_ROOT/ci/lib/nim-cache-root.sh" ]; then
 	export CT_TUP_NIM_CACHE_ROOT
 fi
 
+# The Cargo target base of the tup rules: this checkout's, keyed on the
+# compiler, and created or reopened only after ci/lib/tup-cargo-target.sh has
+# checked that it is (codetracer-pm spec/Testing/UI-Cargo-Output-Ownership.md).
+# Unlike the Nim root it is NOT reassigned: a value already in the environment
+# is passed to the helper, which refuses one that names another checkout or
+# compiler, so a stale shell stops here instead of building into someone
+# else's target. src/Tuprules.tup has no fallback; both tup passes below parse
+# with these two values.
+if [ -f "$CT_ROOT/ci/lib/tup-cargo-target.sh" ]; then
+	if ! ct_tup_cargo_env="$("${BASH:-bash}" "$CT_ROOT/ci/lib/tup-cargo-target.sh" --export "$CT_ROOT")"; then
+		echo "build-once: no Cargo target base this checkout owns (see above); not building." >&2
+		exit 1
+	fi
+	eval "$ct_tup_cargo_env"
+fi
+
 # tup's dependency tracking is a FUSE mount, and libfuse can only obtain
 # /dev/fuse through a setuid helper at a path compiled into the binary. When
 # that helper is missing, tup reports a mount timeout three layers away from
