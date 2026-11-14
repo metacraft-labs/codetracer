@@ -23,6 +23,10 @@ when defined(js):
   import isonim/web/web_renderer
   import isonim/web/dom_api as isonim_dom
   from ../lib/jslib import windowSetTimeout
+  import std/jsffi
+  import kdom except Location
+  import ../context_menu_item
+  from ../viewmodel/views/context_menu_bridge import showContextMenu
 
   proc requestSessionTabsRender*(data: Data)
 
@@ -138,6 +142,32 @@ when defined(js):
         requestSessionTabsRender(data),
         50))
 
+  when not defined(ctWeb):
+    proc tabElement(index: int): kdom.Element =
+      kdom.document.getElementById(cstring(fmt"session-tab-{index}"))
+
+    proc installOpenInNewWindowMenus(data: Data; count: int) =
+      ## Multi-Window-Tab-Management.md §"Multi-Window Behavior" (3): a
+      ## right-click on a session tab offers "Open in New Window", which asks
+      ## the main process for a secondary window on that session
+      ## (`CODETRACER::open-new-window`, `index/window.onOpenNewWindow`).
+      ## The tabs are rebuilt on every render, so each render binds its own.
+      ## Desktop only: the web build has no second window (`capMultiWindow`).
+      for i in 0 ..< count:
+        let el = tabElement(i)
+        if el.isNil:
+          continue
+        let index = i
+        el.addEventListener(cstring"contextmenu", proc(ev: kdom.Event) =
+          ev.preventDefault()
+          let x = cast[JsObject](ev).clientX.to(int)
+          let y = cast[JsObject](ev).clientY.to(int)
+          showContextMenu(@[ContextMenuItem(
+            name: cstring"Open in New Window", hint: cstring"",
+            handler: proc(e: kdom.Event) =
+              data.ipc.send(cstring"CODETRACER::open-new-window",
+                            js{sessionId: index}))], x, y))
+
   proc renderIsoNimSessionTabs*(data: Data) =
     ## Build the session tab bar DOM using IsoNim WebRenderer and
     ## render directly into `#session-tab-bar`.
@@ -164,6 +194,8 @@ when defined(js):
       sessionTabCallbacks(data))
     if overflowWasOpen:
       container.addClass(cstring"overflow-open")
+    when not defined(ctWeb):
+      installOpenInNewWindowMenus(data, records.len)
 
   proc requestSessionTabsRender*(data: Data) =
     ## Refresh the direct IsoNim tab-bar mount after explicit session state

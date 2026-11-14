@@ -160,9 +160,19 @@ type
 # M21: "Send to Window" context menu on GL tabs
 # ---------------------------------------------------------------------------
 
+when not defined(ctWeb):
+  proc noOtherWindows(): JsObject {.importjs: "({windows: []})".}
+  var knownOtherWindows = noOtherWindows()
+    ## The other windows of the last `CODETRACER::list-windows` answer.
+
 proc addPanelTransferContextMenu(tab: GoldenTab, contentItem: GoldenContentItem) =
-  ## Attach a right-click context menu to a GL tab element that offers
-  ## pin (left/bottom/right), close, and maximise actions.
+  ## Attach a right-click context menu to a GL tab element: pin
+  ## (left/bottom/right), close and maximise, and on the desktop the
+  ## Multi-Window-Tab-Management.md §"Panel Transfer" entries — "Send to:
+  ## <window>" for each other window of this session, and "Send to New
+  ## Window" (`panel_transfer.buildSendToWindowMenuItems`). `f214d703bc9`
+  ## replaced the transfer menu with the pin menu and left the transfer
+  ## entries without a caller; they are offered again beside the pin ones.
   let tabElement = tab.element
   if tabElement.isNil or tabElement.isUndefined:
     return
@@ -176,7 +186,7 @@ proc addPanelTransferContextMenu(tab: GoldenTab, contentItem: GoldenContentItem)
     let maxLabel =
       if cast[bool](stack.isMaximised): cstring"Minimise container"
       else: cstring"Maximise container"
-    showContextMenu(@[
+    var items = @[
       ContextMenuItem(name: cstring"Pin to Left", hint: cstring"",
         handler: proc(ev: kdom.Event) =
           pinPanel(data.ui.layout, capturedItem, AutoHideEdge.Left)),
@@ -194,7 +204,20 @@ proc addPanelTransferContextMenu(tab: GoldenTab, contentItem: GoldenContentItem)
           let s = cast[js](capturedItem.parent)
           if cast[bool](s.isMaximised): s.minimise()
           else: s.maximise())
-    ], x, y))
+    ]
+    when not defined(ctWeb):
+      # The transfer entries follow the pin ones. The other windows come
+      # from the main process, asynchronously, so the menu opens at once with
+      # the windows known from the last answer, and asks again for the next
+      # one: a menu must not wait on an IPC round trip (or on a main process
+      # that never answers) to appear. "Send to New Window" needs no list.
+      showContextMenu(items & buildSendToWindowMenuItems(capturedItem,
+          panel_transfer.currentSessionId, knownOtherWindows), x, y)
+      proc refreshWindows() {.async.} =
+        knownOtherWindows = await requestWindowList()
+      discard refreshWindows()
+    else:
+      showContextMenu(items, x, y))
 
 let commonContextMenuOptions: seq[ContextMenuOption] = @[
   ContextMenuOption(
