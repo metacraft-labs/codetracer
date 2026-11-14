@@ -295,7 +295,7 @@ and the specs live under `src/tests/gui/tests/` (the config's `testDir`). Write 
 there: `just test-e2e`, `just test-gui` and `just test-gui-prebuilt` all run
 `npx playwright test` from `src/tests/gui/`, so a spec anywhere else is run by no recipe and no
 CI lane. Spec arguments are relative to `src/tests/gui/`, e.g.
-`just test-e2e tests/sudoku/rust-sudoku.spec.ts`.
+`just test-e2e tests/sudoku/pascal-sudoku.spec.ts`.
 
 The tests launch the real Electron app via the `ct` binary at `$CODETRACER_E2E_CT_PATH` when
 that is set (CI points it at the nix build), otherwise at `$CODETRACER_BUILD_DIR/bin/ct` (the

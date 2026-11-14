@@ -9,8 +9,8 @@ import * as helpers from "../../lib/language-smoke-test-helpers";
  *
  * The rest of this suite (editor, event log, call trace, output) is the
  * scenario `src/tests/scenarios/languages/pascal-sudoku.yaml`. The flow value stays here: no flow
- * value is drawn in main on an rr recording (codetracer-pm
- * issues/2026-11-13-rr-rust-and-pascal-sudoku-show-no-flow-values-at-main.md).
+ * value is drawn yet: the flow renderer fails on main's nested loops (codetracer-pm
+ * issues/2026-11-14-the-flow-renderer-fails-on-the-pascal-sudoku-mains-nested-loops.md).
  */
 test.describe("PascalSudoku", () => {
   test.use({

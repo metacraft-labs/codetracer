@@ -4,7 +4,7 @@ pack: codetracer
 summary: >-
   The Rust sudoku solver's rr recording opens main.rs and fills the event log, whose
   output says "Solved"; a click on the call trace's main::main call moves the replay
-  into main.rs.
+  into main.rs, where main's flow shows the boards it builds (test_boards).
 
 stage:
   - use: record-program
@@ -33,3 +33,6 @@ steps:
       - wait: { until: replay-idle, timeout: 120s }
       - expect: { at: 'editor[file="main.rs"]', active: true }
 
+  - beat: flow
+    steps:
+      - wait: { until: { at: 'editor[file="main.rs"]/flow-value[name="test_boards", side="after", line="137"]', present: true }, timeout: 180s }

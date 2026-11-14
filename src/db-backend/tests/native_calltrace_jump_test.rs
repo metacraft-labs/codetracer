@@ -1534,3 +1534,42 @@ fn c_rr_inline_low_level_code_lists_native_function_instructions() {
 fn c_mcr_inline_low_level_code_lists_native_function_instructions() {
     native_inline_low_level_listing(Recorder::Mcr, "c_mcr_inline_low_level_code");
 }
+
+/// A click on `main`'s call-trace row of the Rust sudoku solver's rr
+/// recording, and `main`'s flow from there. `main` opens with a large
+/// `vec![[[u8; 9]; 9]; …]` literal; in the desktop no value was drawn beside
+/// it or any later line of `main`.
+#[test]
+fn rust_rr_sudoku_main_flows_after_its_call_trace_row_is_activated() {
+    let name = "rust_rr_sudoku_main_flows_after_its_call_trace_row_is_activated";
+    let Some(mut session) = open_session_for(
+        name,
+        Recorder::Rr,
+        Language::Rust,
+        "../../../test-programs/rs_sudoku_solver/main.rs",
+        &[],
+    ) else {
+        return;
+    };
+    let client = session.runner.client();
+    let root = row_of(client, "main::main");
+    let moved = activate_row(client, &root);
+    println!("JUMP line={} ticks={}", moved.location.line, moved.location.rr_ticks.0);
+    let body = client
+        .load_flow(ct_dap_client::types::flow::LoadFlowArguments {
+            flow_mode: ct_dap_client::types::flow::FlowMode::Call,
+            location: moved.location.clone(),
+        })
+        .expect("ct/load-flow");
+    let flow = FlowData::from_event_body(&body).expect("parse the flow");
+    println!(
+        "FLOW {:?}",
+        flow.steps.iter().take(12).map(|s| (s.line, s.after_values.keys().cloned().collect::<Vec<_>>())).collect::<Vec<_>>()
+    );
+    assert!(
+        flow.steps.iter().any(|step| step.after_values.contains_key("test_boards")),
+        "main's flow shows test_boards: {} steps",
+        flow.steps.len()
+    );
+    session.runner.finish().expect("disconnect failed");
+}
