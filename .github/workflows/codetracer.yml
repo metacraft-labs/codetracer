@@ -6283,7 +6283,7 @@ jobs:
             # recorder at repro.lock's pin, and the example recordings (not a
             # build input, so not in the lock) at the commit their scenarios
             # were measured against.
-            codetracer-beam-recorder=cbe8cb86f4038c8e6c798c556e301771482ddc8c
+            codetracer-beam-recorder=e8ba8f7b77ac609faca152b7139b19ed4db7cffb
             codetracer-example-recordings=87f64e3eb365d879f065784ae85ff035668c8720
             # The HCR flame scenarios' demo, and reprobuild (repro.lock's pin) for the
             # HCR coordinator driver, the patchable-profile emitter and the in-target
