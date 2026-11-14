@@ -4196,13 +4196,15 @@ impl MaterializedReplaySession {
             // one's origin. Where the variable was merely first seen here (a
             // module's `__doc__`, which the program never assigns) there is no
             // recorded write at all; where its value really changed, the change
-            // has an unknown source.
+            // has an unknown source. So does a value a recorder captured where
+            // it crossed a module boundary (`is_boundary_binding_name`): no line
+            // assigns it, yet it was written, outside the source.
             if classifier_lang
                 .and_then(|lang| parse_assignment(&line_text, lang))
                 .is_some_and(|ast| !ast.targets_variable(&current_var_name))
                 && !line_mutates_variable(&line_text, &current_var_name)
             {
-                if first_sighting {
+                if first_sighting && !is_boundary_binding_name(&current_var_name) {
                     // Seen first at this frame's start, under a name the frame never
                     // assigns: a global, written by an enclosing frame. Its origin is
                     // there.
@@ -4229,7 +4231,14 @@ impl MaterializedReplaySession {
                     operand_snapshots: Vec::new(),
                     truncated_operands: false,
                     confidence: 0.0,
-                    classification_provenance: Some("built-in: the line assigns another variable".to_string()),
+                    classification_provenance: Some(
+                        if is_boundary_binding_name(&current_var_name) {
+                            "built-in: a value recorded where it crossed a module boundary"
+                        } else {
+                            "built-in: the line assigns another variable"
+                        }
+                        .to_string(),
+                    ),
                     correlation_transition: None,
                 });
                 terminator = Terminator::new(TerminatorKind::UnknownSource);
@@ -6648,3 +6657,44 @@ mod event_stdout_tests {
         }
     }
 }
+
+/// Whether `name` is the binding a recorder gave a value it captured where
+/// the value crossed a module boundary, rather than a name in the program.
+///
+/// The WebAssembly recorders name the values crossing an export or import
+/// `<label>:arg<n>` and `<label>:ret<n>` (`boundaryBindingName` in the
+/// instrumenter's `recorder-runtime/browser_session.js`): the boundary is
+/// positional, so the position is all a recording can say. No source line
+/// assigns such a name, and the step the recorder put it on is the
+/// boundary itself. So the rule that a variable first seen on another
+/// variable's line has no recorded write (a module's `__doc__`) does not
+/// apply: the value has an origin the source does not show, and the chain
+/// names that hop with an unknown source rather than claiming the
+/// recording's start.
+pub(crate) fn is_boundary_binding_name(name: &str) -> bool {
+    let Some((label, slot)) = name.rsplit_once(':') else {
+        return false;
+    };
+    let digits = slot.strip_prefix("arg").or_else(|| slot.strip_prefix("ret"));
+    !label.is_empty() && digits.is_some_and(|d| !d.is_empty() && d.bytes().all(|b| b.is_ascii_digit()))
+}
+
+#[cfg(test)]
+mod boundary_binding_name_tests {
+    use super::is_boundary_binding_name;
+
+    #[test]
+    fn the_webassembly_recorders_boundary_names_are_recognised() {
+        for name in ["compute_balance:ret0", "compute_balance:arg1", "import #4:arg0", "f:ret12"] {
+            assert!(is_boundary_binding_name(name), "{name}");
+        }
+    }
+
+    #[test]
+    fn program_names_are_not_boundary_names() {
+        for name in ["__doc__", "balance", "Foo::BAR", "x:y", ":ret0", "f:ret", "f:retx", "f:arg-1", "a.b"] {
+            assert!(!is_boundary_binding_name(name), "{name}");
+        }
+    }
+}
+
