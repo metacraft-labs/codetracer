@@ -151,6 +151,7 @@ const
     ("preferences.keymap-emacs", "aKeymapEmacs"),
     ("preferences.keymap-vim", "aKeymapVim"),
     ("preferences.keymap-kakoune", "aKeymapKakoune"),
+    ("view.toggle-formatted-source", "aToggleFormattedSourceView"),
     ("session.debug", "aDebug"),
     ("editor.toggle-breakpoint", "aBreakpoint"),
     ("editor.delete-breakpoint", "aDeleteBreakpoint"),

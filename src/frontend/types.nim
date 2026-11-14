@@ -229,6 +229,10 @@ type
 
   DebuggerService* = ref object of Service
     location*: Location
+    formattedSourceView*: bool
+      ## The replay steps by a minified source's formatted view (its source
+      ## map's lines) and the editor follows it
+      ## (`ui/formatted_source_view`).
     locals*:  seq[Variable] # the locals while stepping
     registerState*: JsAssoc[cstring, cstring]
     watchExpressions*:    seq[cstring]
