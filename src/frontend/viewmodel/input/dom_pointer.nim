@@ -20,7 +20,9 @@
 ##     a base row performed when the press bubbles back to the window): the press's scope
 ##     from the DOM (`data-scope-kind` / `data-scope-id`), the element and its
 ##     kind, the gesture with its modifiers, resolved by the host's router and
-##     performed here.
+##     performed here. A button's primary press with no row of its own runs
+##     the operation the button carries (`data-ct-operation`; `element_press`),
+##     as `pressElement` does on the terminal and in the GPUI window.
 ##
 ## So a pane's view draws its elements and their identity (`data-*` attributes)
 ## and nothing else: what a press on them does is the keymap's row and the
@@ -37,6 +39,9 @@ when not defined(js):
 import std/[jsffi, strutils, tables]
 import ../keymap/[scope_path, editing_keymap]
 import ../../../common/key_names
+import ./element_press
+
+export element_press.OperationAttribute
 
 type
   ElementPress* = object
@@ -186,7 +191,7 @@ proc intAttributeOf*(element: JsObject; name: string; default = -1): int =
 # ---------------------------------------------------------------------------
 
 type
-  PointerResolver* = proc(path: ScopePath; gesture: string): EditingResolution
+  PointerResolver* = PressResolver
     ## The host's router over the pointer keymap: the user's rows, then the
     ## base's (`KeymapRouter.routePointer`).
   PointerFallback* = proc(res: EditingResolution; press: ElementPress): bool
@@ -272,29 +277,34 @@ proc routePointerPress(ev: JsObject; gestureKey: string) =
   let mods = modifiersOf(ev)
   if not linkUnder(ev.target).isNil and (mods != {} or gestureKey != "Click"):
     return
-  path.add elementOfAttributes(hit.kind, "")
-  var res = resolver(path, chordName(mods, gestureKey))
-  if res.kind != erOperation and mods != {}:
-    res = resolver(path, gestureKey)
-  if res.kind != erOperation:
+  # The row for the press, else — a button's primary press with no row of
+  # its own — the operation the button carries (`data-ct-operation`,
+  # `element_press`): §5.1's `pressElement`, as the terminal and the GPUI
+  # window decide it.
+  let outcome = resolveElementPress(resolver, path, hit.kind,
+                                    attributeOf(hit.element, OperationAttribute),
+                                    mods, gestureKey)
+  if outcome.operation.len == 0:
     return
+  let res = outcome.resolution
   let press = ElementPress(element: hit.element, event: ev, pane: paneKind)
-  if hasElementOperation(res.operation):
-    if res.layer.startsWith("user:"):
+  if hasElementOperation(outcome.operation):
+    if outcome.byRow and res.layer.startsWith("user:"):
       # A user's row takes the press here, in the capture phase: nothing
       # else may answer it.
-      if not tracer.isNil: tracer(res.operation)
-      if runElementOperation(res.operation, press):
+      if not tracer.isNil: tracer(outcome.operation)
+      if runElementOperation(outcome.operation, press):
         stop(ev)
     else:
-      # The base's row is performed when the press has reached the window
-      # again (`performPendingPress`), where the view's own handler used to
-      # run: what observes the press on its way (a pane's gesture tracking,
-      # as the Requests pane's detail split does) sees it first, and an
-      # element that answers it itself stops it there. No link is followed.
+      # The base's row, or the operation a button carries, is performed when
+      # the press has reached the window again (`performPendingPress`), where
+      # the view's own handler used to run: what observes the press on its
+      # way (a pane's gesture tracking, as the Requests pane's detail split
+      # does) sees it first, and an element that answers it itself stops it
+      # there. No link is followed.
       discard ev.preventDefault()
-      pending = PendingPress(event: ev, operation: res.operation, press: press)
-  elif not fallback.isNil and fallback(res, press):
+      pending = PendingPress(event: ev, operation: outcome.operation, press: press)
+  elif outcome.byRow and not fallback.isNil and fallback(res, press):
     stop(ev)
 
 proc performPendingPress(ev: JsObject) =
@@ -318,6 +328,12 @@ proc onPointerContextMenu(ev: JsObject) =
 
 proc onPointerAuxClick(ev: JsObject) =
   if ev.button.to(int) == 1: routePointerPress(ev, "MiddleClick")
+
+proc domPointerRoutingInstalled*(): bool =
+  ## Whether this window's pointer listener is installed (a host that mounts
+  ## a surface into a page another host may already route, as StoryBook's
+  ## story chrome, installs the base rows only when nothing did).
+  installed
 
 proc installDomPointerRouting*(resolve: PointerResolver;
                                onUnperformed: PointerFallback = nil;

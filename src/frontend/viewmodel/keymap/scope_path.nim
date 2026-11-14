@@ -119,6 +119,16 @@ const
     ## The scope a press on the native top bar and its session-tab strip is
     ## routed in (`paneKind == topBar` to a pointer row's `when`): the bar is
     ## no pane, but its elements are pressed like a pane's.
+  BreakpointConditionScope* = "breakpointCondition"
+    ## The scope a press on the desktop's "Edit breakpoint condition"
+    ## dialog is routed in (`ui/breakpoint_condition_dialog`): no pane, but
+    ## its OK and Cancel are buttons carrying their operations.
+  StoryPlaybackScope* = "storyPlayback"
+    ## The scope a press on a story host's playback chrome is routed in (the
+    ## bar under an Agent Harbor playback story, `stories/agent_harbor_playback`):
+    ## no pane, but its controls are buttons carrying their operations.
+  NonPaneScopes* = [TopBarScope, BreakpointConditionScope, StoryPlaybackScope]
+    ## The scopes a press names in `paneKind` that are not panes.
 
 func element*(kind: ElementKind; id: string; paneKind = ""): ScopeElement =
   ScopeElement(kind: kind, id: id, paneKind: paneKind)

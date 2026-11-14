@@ -65,6 +65,15 @@ proc installPanePointerRoutingWith*(perform: proc(operation: string;
         perform(op, readerOf(p.element)))
   installBasePointerRouting(baseRouter())
 
+proc installBaseElementRouting*() =
+  ## A page with no keymap of its own whose presses are buttons carrying
+  ## their operations (StoryBook's story chrome, `storybook_components`):
+  ## every press through the base keymap's pointer rows, performed by the
+  ## procedures the page registered (`registerElementOperation`). A page
+  ## whose presses are routed already keeps its router.
+  if not domPointerRoutingInstalled():
+    installBasePointerRouting(baseRouter())
+
 proc installPanePointerRouting*(session: proc(): SessionViewModel) =
   ## A DOM host that mounts the session's panes without a keymap of its own
   ## (a VS Code panel's webview, a page embedding the views): every press on
