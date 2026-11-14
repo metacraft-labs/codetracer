@@ -1,0 +1,29 @@
+scenario: 1
+name: breakpoints/tracepoint-error-reads-as-text
+pack: codetracer
+summary: >-
+  A tracepoint that names a variable not yet in scope (`log(b)` on line 1 of
+  `var a = 1; var b = 2; …`, evaluated before `var b` runs) logs its error
+  into the Event Log as text, `b=<error: No such symbol …>`, not as the
+  markup the replay used to send.
+
+stage:
+  - use: record-program
+    with: { program: js_column_breakpoints/program.js }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - click: 'toolbar/toolbar-button[label="run-to-entry-image"]'
+    settle: false
+  - wait: { until: { at: 'editor[file="program.js"]', current-line: 1 }, timeout: 60s }
+  - wait: { until: replay-idle, timeout: 60s }
+  - click: { at: 'editor[file="program.js"]/line[number="1"]', anchor: text-start, button: right }
+  - wait: { until: { at: context-menu, present: true }, timeout: 10s }
+  - click: 'context-menu/menu-item[label="Add tracepoint"]'
+  - wait: { until: { at: 'tracepoint-editor[line="1"]', focused: true }, timeout: 20s }
+  - type: "log(b)"
+  - click: { at: 'tracepoint-editor[line="1"]', anchor: run }
+    settle: false
+  - wait: { until: event-log.loaded, timeout: 60s }
+  - expect: { at: event-log, assert: 'has-output("b=<error: No such symbol")' }
