@@ -323,6 +323,17 @@ proc syncContextMenuLayer() =
   elif not open and at >= 0:
     discard deskRouter.popLayer(deskRouter.stack.layers[at].token)
 
+proc tracepointEditorHasFocus(editor: EditorViewComponent): bool =
+  ## Whether the caret is in one of `editor`'s tracepoint editors (the
+  ## Monaco instance `ui/trace` opens under a line).
+  if editor.traces.isNil:
+    return false
+  for _, trace in editor.traces:
+    if not trace.isNil and not trace.monacoEditor.isNil and
+       trace.monacoEditor.hasTextFocus():
+      return true
+  false
+
 proc runAction(action: string): bool =
   ## A `ClientAction` by name, through the table every desktop surface
   ## (menu, toolbar) calls. Answers whether there was one to run.
@@ -725,6 +736,14 @@ proc runDesktopOperation(res: EditingResolution): NativeKind =
     # The desktop's `Enter` on a line of the read-only editor
     # (`EditorViewComponent.onEnter`): the tracepoint editor on that line.
     let editor = focusedEditorView()
+    if not editor.isNil and tracepointEditorHasFocus(editor):
+      # `Ctrl+Enter` / `Alt+T` typed INTO a tracepoint editor (`Enter` there
+      # is the field's): its Run, as the editor says ("Press Ctrl+Enter to
+      # run the trace", the Run button's tooltip; CUA-Keymap.md §5, "run
+      # tracepoints"). Toggling here moved the caret to the editor's line and
+      # closed the tracepoint editor the user had just typed into.
+      discard runAction("aCollectEnabledTracepointResults")
+      return nkHandled
     if not editor.isNil:
       if not editor.monacoEditor.hasTextFocus():
         editor.monacoEditor.toJs.focus()
