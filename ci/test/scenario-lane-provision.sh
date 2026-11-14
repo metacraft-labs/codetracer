@@ -7,7 +7,7 @@
 # shellHook) then finds them. Run from the codetracer checkout.
 #
 #   native  ct-native-replay and rr in codetracer-native-backend's
-#           target/debug (`just ensure-ct-native-replay`); the BEAM recorder
+#           target/debug (built in that repository's shell); the BEAM recorder
 #           in its target/debug, with elixir and erl from ITS dev shell
 #           appended to $GITHUB_PATH (codetracer's dev shell has neither);
 #           the gl_scene visual recording at
@@ -26,7 +26,11 @@ set -euo pipefail
 ws="$(cd .. && pwd)"
 
 native() {
-	nix develop .#devShells.x86_64-linux.default --command just ensure-ct-native-replay
+	# The binary only, in the backend's own shell. `just ensure-ct-native-replay`
+	# runs `just build` inside that shell, which has no `just` (exit 127 in CI,
+	# run 43599944806), and builds every target of the workspace besides.
+	(cd "$ws/codetracer-native-backend" && nix develop --no-write-lock-file --command \
+		cargo build --bin ct-native-replay)
 	test -x "$ws/codetracer-native-backend/target/debug/ct-native-replay"
 	# shellcheck disable=SC2016 # expanded by the inner bash, in the recorder's shell
 	(cd "$ws/codetracer-beam-recorder" && nix develop --no-write-lock-file --command bash -c '

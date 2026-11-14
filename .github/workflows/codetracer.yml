@@ -6780,20 +6780,30 @@ jobs:
         if: ${{ !cancelled() && matrix.platform == 'nixos' }}
         run: bash ci/test/scenario-lane-provision.sh native
 
-      - name: Cache the patchable Godot engine for the HCR flame scenarios
+      - name: Restore the patchable Godot engine for the HCR flame scenarios
         # Byte-identical when rebuilt from the same tree (its build script), so
-        # its revision, reprobuild's and the flags are the whole key.
+        # its revision, reprobuild's and the flags are the whole key. Restore and
+        # save are separate: actions/cache saves only when the whole job passes.
+        id: hcr-godot
         if: ${{ !cancelled() && matrix.platform == 'nixos' }}
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: ${{ github.workspace }}/../codetracer-engine-godot/bin/godot.linuxbsd.template_debug.x86_64.hcrgpu
           key: hcr-godot-c2b72fd205bcb509cca8513a2627ae18d9809562-reprobuild-9dbf4e710d7cc0b9a79a4bcd54c931afb6849dd0-vulkan-hcrgpu
 
       - name: The HCR flame demo for the desktop scenario lane
+        id: hcr-flame
         if: ${{ !cancelled() && matrix.platform == 'nixos' }}
         env:
           HCR_ENGINE_REV: c2b72fd205bcb509cca8513a2627ae18d9809562
         run: bash ci/test/scenario-lane-provision.sh hcr
+
+      - name: Save the patchable Godot engine
+        if: ${{ !cancelled() && matrix.platform == 'nixos' && steps.hcr-flame.outcome == 'success' && steps.hcr-godot.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ github.workspace }}/../codetracer-engine-godot/bin/godot.linuxbsd.template_debug.x86_64.hcrgpu
+          key: ${{ steps.hcr-godot.outputs.cache-primary-key }}
 
       - name: Scenarios — the desktop lane
         # The real `ct` → Electron through DemoVideoScript-Playwright's arm
