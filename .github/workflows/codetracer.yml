@@ -6281,6 +6281,11 @@ jobs:
             # were measured against.
             codetracer-beam-recorder=cbe8cb86f4038c8e6c798c556e301771482ddc8c
             codetracer-example-recordings=87f64e3eb365d879f065784ae85ff035668c8720
+            # The HCR flame scenarios' demo, and reprobuild (repro.lock's pin) for the
+            # HCR coordinator driver, the patchable-profile emitter and the in-target
+            # agent the patchable Godot links.
+            codetracer-flame-demo=220d7abd236c610b69f2d3900a0c0d2eae884416
+            reprobuild=9dbf4e710d7cc0b9a79a4bcd54c931afb6849dd0
             runquota=dev
 
       - name: Stage codetracer-trace-format into libs/
@@ -6797,6 +6802,63 @@ jobs:
           nix develop ../codetracer-visual-replay --no-write-lock-file --command \
             bash scripts/record-visual-replay-fixture.sh
           test -f test-logs/tui-fixtures/visual-gl-scene/gfx_stream/gfx_frames.idx
+
+      - name: Cache the patchable Godot engine for the HCR flame scenarios
+        # 18 min to build from source at -j8; the build script says the engine
+        # is byte-identical when rebuilt from the same tree, so its revision,
+        # reprobuild's (the profile and the agent it links) and the build
+        # flags are the whole key.
+        if: ${{ !cancelled() && matrix.platform == 'nixos' }}
+        uses: actions/cache@v4
+        with:
+          path: ${{ github.workspace }}/../codetracer-engine-godot/bin/godot.linuxbsd.template_debug.x86_64.hcrgpu
+          key: hcr-godot-c2b72fd205bcb509cca8513a2627ae18d9809562-reprobuild-9dbf4e710d7cc0b9a79a4bcd54c931afb6849dd0-vulkan-hcrgpu
+
+      - name: The HCR flame demo for the desktop scenario lane
+        # What the hcr-flame stage (src/tests/scenarios/stages/ct_stages.nim)
+        # opens: ../codetracer-flame-demo with its patchable GDExtension and
+        # imported project, the coordinator driver at its
+        # artifacts/h3-driver/hcr_patch_driver, and a patchable Godot under
+        # ../codetracer-engine-godot/bin. Each piece is built in its own
+        # repository's dev shell, as the flame demo's README and Justfile
+        # build them; the engine only on a cache miss. The engine is
+        # metacraft-labs/codetracer-godot, branch codetracer, which the flame
+        # demo expects under the name codetracer-engine-godot.
+        if: ${{ !cancelled() && matrix.platform == 'nixos' }}
+        run: |
+          set -euo pipefail
+          ws="${{ github.workspace }}/.."
+          engine_rev=c2b72fd205bcb509cca8513a2627ae18d9809562
+          engine="$ws/codetracer-engine-godot"
+          if [ "$(git -C "$engine" rev-parse HEAD 2>/dev/null || true)" != "$engine_rev" ]; then
+            mkdir -p "$engine"
+            git -C "$engine" init -q
+            git -C "$engine" fetch -q --depth 1 https://github.com/metacraft-labs/codetracer-godot "$engine_rev"
+            git -C "$engine" checkout -q --force FETCH_HEAD
+          fi
+          # shellcheck disable=SC2016 # the single-quoted scripts expand inside the repositories' shells
+          (cd "$ws/reprobuild" && nix develop --no-write-lock-file --command bash -c '
+            set -euo pipefail
+            nim c -d:release --hints:off --warnings:off --outdir:../codetracer-flame-demo/artifacts/h3-driver scripts/hcr_patch_driver.nim
+            nim c -d:release --hints:off --warnings:off --outdir:build/bin scripts/hcr_patchable_profile.nim')
+          bin="$engine/bin/godot.linuxbsd.template_debug.x86_64.hcrgpu"
+          if [ ! -x "$bin" ]; then
+            (cd "$engine" && JOBS=8 VULKAN=yes EXTRA_SUFFIX=hcrgpu REPROBUILD_DIR="$ws/reprobuild" \
+              scripts/build-hcr-patchable-linux.sh)
+          fi
+          # shellcheck disable=SC2016 # expanded by the inner bash, in the flame demo's shell
+          (cd "$ws/codetracer-flame-demo" && git submodule update --init --depth 1 third_party/godot-cpp &&
+            nix develop --no-write-lock-file --command bash -c '
+              set -euo pipefail
+              cmake -S gdextension -B gdextension/build-hcr -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+                -DGODOTCPP_TARGET=template_debug -DGODOTCPP_BUILD_PROFILE="$PWD/gdextension/build_profile.json" \
+                -DFLAME_HCR_PATCHABLE=ON -DFLAME_HCR_PROFILE_TOOL="$PWD/../reprobuild/build/bin/hcr_patchable_profile"
+              cmake --build gdextension/build-hcr -j 8
+              just import')
+          test -x "$bin"
+          test -x "$ws/codetracer-flame-demo/artifacts/h3-driver/hcr_patch_driver"
+          test -f "$ws/codetracer-flame-demo/bin/libflamefield.macos.template_debug.so"
+          test -d "$ws/codetracer-flame-demo/.godot"
 
       - name: Scenarios — the desktop lane
         # The real `ct` → Electron through DemoVideoScript-Playwright's arm

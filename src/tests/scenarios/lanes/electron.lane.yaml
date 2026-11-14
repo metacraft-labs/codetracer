@@ -20,6 +20,9 @@ applicable:
   - ../ct-host/breakpoint-stops-continue-and-a-cleared-one-does-not.yaml
   - ../ct-host/two-clients-step-independently.yaml
   - ../ct-host/duplicated-tab-gets-its-own-session.yaml
+  - ../hcr-apply-edit/flame-hcr-apply-edit.yaml
+  - ../hcr-live-edit/flame-launch-under-hcr.yaml
+  - ../hcr-live-edit/flame-live-edit-loop.yaml
   - ../debug-controls/disabled-control-tooltip-stays-inert.yaml
   - ../debug-controls/every-tooltip-names-its-chord.yaml
   - ../debug-controls/tooltip-chord-does-what-the-control-does.yaml
