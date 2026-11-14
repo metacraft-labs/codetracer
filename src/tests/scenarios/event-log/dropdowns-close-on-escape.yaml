@@ -1,0 +1,79 @@
+scenario: 1
+name: event-log/dropdowns-close-on-escape
+pack: codetracer
+summary: >-
+  Escape closes the Event Log's Columns menu — straight after opening it,
+  after a click on a column name, after a click on its background, and after
+  moving through it with the keys (where the key-focus outline is on the row,
+  then on its drag handle) — and its Filter list, and the key router runs no
+  operation for that Escape, so the list's selection is not also cleared.
+  With nothing open, Escape on the pane is still the pane's
+  (`list.clear-selection`).
+
+stage:
+  - use: record-program
+    with: { program: py_long_event_log/main.py }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - wait: { until: { at: event-log, total: 80 }, timeout: 120s }
+  - click: 'pane-tab[label="EVENT LOG"]'
+  # Control: with nothing open, Escape on the pane is the pane's.
+  - click: { at: event-log, anchor: footer }
+  - key: Esc
+  - wait: { until: { at: key-router, last-operation: "list.clear-selection" }, timeout: 10s }
+  - expect: { at: key-router, operations: 1 }
+
+  - beat: columns-after-opening
+    steps:
+      - click: event-log/columns-button
+      - wait: { until: { at: event-log/columns-menu, present: true }, timeout: 10s }
+      - key: Esc
+      - wait: { until: { at: event-log/columns-menu, absent: true }, timeout: 10s }
+      - expect: { at: event-log/columns-button, focused: true }
+      - expect: { at: key-router, operations: 1 }
+
+  - beat: columns-after-a-column-click
+    steps:
+      - click: event-log/columns-button
+      - wait: { until: { at: event-log/columns-menu, present: true }, timeout: 10s }
+      # A click on a column's name, twice (back as it was): the focus
+      # leaves the menu for the pane behind it.
+      - click: 'event-log/columns-menu/column-option[name="kind"]'
+      - click: 'event-log/columns-menu/column-option[name="kind"]'
+      - expect: { at: event-log/columns-menu, present: true }
+      - key: Esc
+      - wait: { until: { at: event-log/columns-menu, absent: true }, timeout: 10s }
+      - expect: { at: event-log/columns-button, focused: true }
+      - expect: { at: key-router, operations: 1 }
+
+  - beat: columns-after-a-background-click
+    steps:
+      - click: event-log/columns-button
+      - wait: { until: { at: event-log/columns-menu, present: true }, timeout: 10s }
+      - click: { at: event-log/columns-menu, anchor: corner }
+      - expect: { at: event-log/columns-menu, present: true }
+      - key: Esc
+      - wait: { until: { at: event-log/columns-menu, absent: true }, timeout: 10s }
+      - expect: { at: key-router, operations: 1 }
+
+  - beat: filter
+    steps:
+      - click: 'event-log/panel-button[label="Filter"]'
+      - wait: { until: { at: 'event-log/dropdown[name="Filter"]', present: true }, timeout: 10s }
+      - key: Esc
+      - wait: { until: { at: 'event-log/dropdown[name="Filter"]', absent: true }, timeout: 10s }
+      - expect: { at: key-router, operations: 1 }
+
+  - beat: columns-key-focus
+    steps:
+      - click: event-log/columns-button
+      - wait: { until: { at: event-log/columns-menu, present: true }, timeout: 10s }
+      - key: Down
+      - wait: { until: { at: 'event-log/columns-menu/column-option[name="#"]', outline: row }, timeout: 10s }
+      - key: Right
+      - wait: { until: { at: 'event-log/columns-menu/column-option[name="#"]', outline: handle }, timeout: 10s }
+      - key: Esc
+      - wait: { until: { at: event-log/columns-menu, absent: true }, timeout: 10s }
+      - expect: { at: key-router, last-operation: "list.clear-selection" }

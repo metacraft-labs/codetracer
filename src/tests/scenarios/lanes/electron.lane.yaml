@@ -216,4 +216,6 @@ applicable:
   - ../layout/plat70a-output-hscroll.yaml
   - ../layout/plat70b-table-cells-cut-and-reveal.yaml
   - ../layout/plat70b-remembered-index-width.yaml
+  # --- pw3 ---
+  - ../event-log/dropdowns-close-on-escape.yaml
 unsupported: []
