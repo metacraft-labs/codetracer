@@ -464,9 +464,27 @@ proc readStatus(g: ScreenGrid; t: var Tree; root: SurfaceNode) =
   t.add(root, node("status-line", 0, fl(r), fl(g.width), 1,
                    %*{"message": text, "location": location, "mode": mode}))
 
+proc paneName*(caption: string): string =
+  ## The pack's name for a pane the terminal draws under `caption`: the
+  ## canonical pane names every binding uses (the GPUI window's
+  ## `gpui/app/pane_names.gpuiPaneName`), so one scenario names a pane the
+  ## same way on every front-end. The terminal's tab captions
+  ## (`tui/app/layout/cells.terminalPaneName`) and its footer's auto-hide
+  ## labels map back to them; a file's tab keeps its file label.
+  case caption
+  of "Build & Run", "BUILD", "BUILD OUTPUT": "Build Output"
+  of "PROBLEMS": "Problems"
+  of "FIND IN FILES", "SEARCH RESULTS": "Find in Files"
+  of "REQUESTS": "Requests"
+  of "TERMINAL": "Terminal Output"
+  of "SHELL": "Shell"
+  of "TEST RESULTS": "Tests"
+  else: caption
+
 proc addPaneTab(t: var Tree; b: Box; l: tuple[label: string, col: int, active: bool]) =
+  let label = paneName(l.label)
   t.add(t.root, node("pane-tab", fl(l.col), fl(b.strip), fl(l.label.runeLen), 1,
-                     %*{"label": l.label, "active": l.active}, @[("label", l.label)]))
+                     %*{"label": label, "active": l.active}, @[("label", label)]))
 
 
 # --- terminal -------------------------------------------------------------------
@@ -624,7 +642,7 @@ proc readPanes(g: ScreenGrid; t: var Tree; root: SurfaceNode) =
   ## Files, Build, VCS, Constraints, …) as well as the ones it does.
   for b0 in g.boxes():
     var b = b0
-    let title = b.activeLabel
+    let title = paneName(b.activeLabel)
     if title.len == 0: continue
     # a pane docked across the whole width (Find in Files, Build, Problems):
     # its strip has no divider, so its rows are the screen's whole width
@@ -688,7 +706,7 @@ proc readPanes(g: ScreenGrid; t: var Tree; root: SurfaceNode) =
         t.add(row, node("cell", fl(cell.col), fl(r), fl(cell.width), 1,
                         %*{"text": cell.text}, @[("text", cell.text)]))
     var labels: seq[string]
-    for l in b.labels: labels.add l.label
+    for l in b.labels: labels.add paneName(l.label)
     pane.props = %*{"title": title, "text": lines, "count": n, "tabs": labels, "hbar": hbar}
 
 proc readFiles(g: ScreenGrid; t: var Tree; root: SurfaceNode) =
@@ -726,7 +744,7 @@ proc readDockLabels(g: ScreenGrid; t: var Tree; root: SurfaceNode) =
     let c = g.findCol(r, " " & label & " ")
     if c >= 0:
       t.add(root, node("dock-label", fl(c + 1), fl(r), fl(label.len), 1,
-                       %*{"label": label}, @[("label", label)]))
+                       %*{"label": paneName(label)}, @[("label", paneName(label))]))
 
 proc readChrome*(g: ScreenGrid; t: var Tree; root: SurfaceNode) =
   ## The program menu's root button and the transport controls (row 0).

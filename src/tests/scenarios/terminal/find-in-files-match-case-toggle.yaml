@@ -16,14 +16,14 @@ steps:
   - chord: Ctrl+P
   - type: ":grep Scale"
   - key: Enter
-  - wait: { until: { at: 'pane[title="FIND IN FILES"]', assert: 'has-row("4 results in 2 files")' }, timeout: 30s }
+  - wait: { until: { at: 'pane[title="Find in Files"]', assert: 'has-row("4 results in 2 files")' }, timeout: 30s }
   - chord: Ctrl+P
   - type: ":grep Scale"
   - chord: Alt+c
   - wait: { until: { at: status-line, assert: 'says("Match Case on")' }, timeout: 20s }
-  - wait: { until: { at: 'pane[title="FIND IN FILES"]', assert: "has-row(\"No results for \\\"Scale\\\"\")" }, timeout: 20s }
+  - wait: { until: { at: 'pane[title="Find in Files"]', assert: "has-row(\"No results for \\\"Scale\\\"\")" }, timeout: 20s }
   - chord: Alt+c
   - wait: { until: { at: status-line, assert: 'says("Match Case off")' }, timeout: 20s }
-  - wait: { until: { at: 'pane[title="FIND IN FILES"]', assert: 'has-row("4 results in 2 files")' }, timeout: 20s }
+  - wait: { until: { at: 'pane[title="Find in Files"]', assert: 'has-row("4 results in 2 files")' }, timeout: 20s }
   - chord: Alt+r
   - wait: { until: { at: status-line, assert: 'says("Use Regular Expression on")' }, timeout: 20s }

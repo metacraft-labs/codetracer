@@ -12,16 +12,16 @@ stage:
     with: { width: 200, height: 50 }
 steps:
   - wait: { until: replay-idle, timeout: 120s }
-  - expect: { at: 'dock-label[label="BUILD"]', present: true }
-  - expect: { at: 'dock-label[label="PROBLEMS"]', present: true }
-  - expect: { at: 'dock-label[label="FIND IN FILES"]', present: true }
-  - expect: { at: 'dock-label[label="REQUESTS"]', present: true }
-  - expect: { at: 'pane[title="BUILD"]', absent: true }
-  - click: { at: 'dock-label[label="BUILD"]' }
-  - wait: { until: { at: 'pane[title="BUILD"]', present: true }, timeout: 10s }
-  - expect: { at: 'pane[title="BUILD"]', assert: 'shows("No build has run.")' }
+  - expect: { at: 'dock-label[label="Build Output"]', present: true }
+  - expect: { at: 'dock-label[label="Problems"]', present: true }
+  - expect: { at: 'dock-label[label="Find in Files"]', present: true }
+  - expect: { at: 'dock-label[label="Requests"]', present: true }
+  - expect: { at: 'pane[title="Build Output"]', absent: true }
+  - click: { at: 'dock-label[label="Build Output"]' }
+  - wait: { until: { at: 'pane[title="Build Output"]', present: true }, timeout: 10s }
+  - expect: { at: 'pane[title="Build Output"]', assert: 'shows("No build has run.")' }
   - expect: { at: status-line, assert: 'lacks("openDocked")' }
   - move: { at: 'editor[file="main.py"]' }
-  - expect: { at: 'pane[title="BUILD"]', present: true }
-  - click: { at: 'dock-label[label="BUILD"]' }
-  - wait: { until: { at: 'pane[title="BUILD"]', absent: true }, timeout: 10s }
+  - expect: { at: 'pane[title="Build Output"]', present: true }
+  - click: { at: 'dock-label[label="Build Output"]' }
+  - wait: { until: { at: 'pane[title="Build Output"]', absent: true }, timeout: 10s }

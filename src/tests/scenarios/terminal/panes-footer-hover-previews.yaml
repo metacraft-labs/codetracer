@@ -11,9 +11,9 @@ stage:
     with: { width: 200, height: 50 }
 steps:
   - wait: { until: replay-idle, timeout: 120s }
-  - expect: { at: 'pane[title="BUILD"]', absent: true }
-  - hover: { at: 'dock-label[label="BUILD"]', for: 1s }
-  - wait: { until: { at: 'pane[title="BUILD"]', present: true }, timeout: 5s }
-  - expect: { at: 'pane[title="BUILD"]', assert: 'shows("No build has run.")' }
+  - expect: { at: 'pane[title="Build Output"]', absent: true }
+  - hover: { at: 'dock-label[label="Build Output"]', for: 1s }
+  - wait: { until: { at: 'pane[title="Build Output"]', present: true }, timeout: 5s }
+  - expect: { at: 'pane[title="Build Output"]', assert: 'shows("No build has run.")' }
   - move: { at: 'editor[file="main.py"]' }
-  - wait: { until: { at: 'pane[title="BUILD"]', absent: true }, timeout: 5s }
+  - wait: { until: { at: 'pane[title="Build Output"]', absent: true }, timeout: 5s }

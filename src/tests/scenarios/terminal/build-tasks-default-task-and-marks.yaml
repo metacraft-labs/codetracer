@@ -27,7 +27,7 @@ steps:
   - chord: Ctrl+P
   - type: ":build"
   - key: Enter
-  - wait: { until: { at: 'pane[title="Build & Run"]', assert: 'has-row("build failed (exit code 1)")' }, timeout: 120s }
+  - wait: { until: { at: 'pane[title="Build Output"]', assert: 'has-row("build failed (exit code 1)")' }, timeout: 120s }
   - expect: { at: status-line, assert: 'says("build FAILED (exit 1): gcc -Wall -fdiagnostics-color=always -c src/main.c")' }
   - chord: Ctrl+P
   - type: ":e src/main.c"

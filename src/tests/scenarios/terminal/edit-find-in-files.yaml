@@ -20,10 +20,10 @@ steps:
   - type: ":grep print('main')"
   - key: Enter
   - wait:
-      until: { at: 'pane[title="FIND IN FILES"]', text: { contains: "1 result in 1 file" } }
+      until: { at: 'pane[title="Find in Files"]', text: { contains: "1 result in 1 file" } }
       timeout: 30s
-  - expect: { at: 'pane[title="FIND IN FILES"]', assert: 'lacks-row("needs a recording")' }
-  - expect: { at: 'pane[title="FIND IN FILES"]', assert: 'has-row("main.py · 1 match")' }
+  - expect: { at: 'pane[title="Find in Files"]', assert: 'lacks-row("needs a recording")' }
+  - expect: { at: 'pane[title="Find in Files"]', assert: 'has-row("main.py · 1 match")' }
   - key: F4
   - wait: { until: { at: status-line, message: { contains: "main.py:1" } }, timeout: 30s }
   - expect: { at: status-line, message: { contains: "opened " } }

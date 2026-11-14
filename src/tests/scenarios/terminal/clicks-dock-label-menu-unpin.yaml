@@ -12,7 +12,7 @@ stage:
     with: { width: 200, height: 50 }
 steps:
   - wait: { until: replay-idle, timeout: 120s }
-  - click: { at: 'dock-label[label="BUILD"]', button: right }
+  - click: { at: 'dock-label[label="Build Output"]', button: right }
   - wait: { until: { at: 'context-menu/menu-item[label="Unpin"]', present: true }, timeout: 10s }
   - expect: { at: 'context-menu/menu-item[label="Pin to Right"]', geometry: { below: 'context-menu/menu-item[label="Pin to Left"]' } }
   - expect: { at: 'context-menu/menu-item[label="Pin to Top"]', geometry: { below: 'context-menu/menu-item[label="Pin to Right"]' } }
@@ -20,4 +20,4 @@ steps:
   - expect: { at: 'context-menu/menu-item[label="Close"]', geometry: { below: 'context-menu/menu-item[label="Unpin"]' } }
   - expect: { at: context-menu, assert: 'lacks("Pin to Bottom")' }
   - click: { at: 'context-menu/menu-item[label="Unpin"]' }
-  - wait: { until: { at: 'dock-label[label="BUILD"]', absent: true }, timeout: 10s }
+  - wait: { until: { at: 'dock-label[label="Build Output"]', absent: true }, timeout: 10s }

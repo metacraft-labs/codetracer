@@ -21,6 +21,6 @@ steps:
   - expect: { at: 'editor[file="alpha.nim"]', assert: 'shows-text("echo 1")' }
   - expect: { at: 'pane-tab[label="the working tree"]', present: true }
   - expect: { at: 'pane-tab[label="Files"]', present: true }
-  - expect: { at: 'pane-tab[label="Build & Run"]', present: true }
+  - expect: { at: 'pane-tab[label="Build Output"]', present: true }
   - expect: { at: 'pane-tab[label="Call Trace"]', absent: true }
-  - expect: { at: 'pane[title="Build & Run"]', assert: 'shows("No build has run.")' }
+  - expect: { at: 'pane[title="Build Output"]', assert: 'shows("No build has run.")' }

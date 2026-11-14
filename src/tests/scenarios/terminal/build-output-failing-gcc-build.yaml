@@ -17,10 +17,10 @@ steps:
   - chord: Ctrl+P
   - type: ":build gcc -Wall -fdiagnostics-color=always -c src/main.c -o /dev/null"
   - key: Enter
-  - wait: { until: { at: 'pane[title="Build & Run"]', assert: 'has-row("build failed (exit code 1)")' }, timeout: 120s }
+  - wait: { until: { at: 'pane[title="Build Output"]', assert: 'has-row("build failed (exit code 1)")' }, timeout: 120s }
   - expect: { at: status-line, assert: 'says("✗ Build failed: 2 errors, 1 warning")' }
-  - expect: { at: 'pane[title="Build & Run"]', assert: 'has-row("src/main.c:5:17: error: expected")' }
-  - click: { at: 'pane[title="Build & Run"]/row[text="src/main.c:5:17: error: expected ‘;’ befor›"]', anchor: text-start, button: right }
+  - expect: { at: 'pane[title="Build Output"]', assert: 'has-row("src/main.c:5:17: error: expected")' }
+  - click: { at: 'pane[title="Build Output"]/row[text="src/main.c:5:17: error: expected ‘;’ befor›"]', anchor: text-start, button: right }
   - expect: { at: context-menu, absent: true }
-  - click: { at: 'pane[title="Build & Run"]/row[text="src/main.c:5:17: error: expected ‘;’ befor›"]', anchor: text-start }
+  - click: { at: 'pane[title="Build Output"]/row[text="src/main.c:5:17: error: expected ‘;’ befor›"]', anchor: text-start }
   - wait: { until: { at: status-line, assert: 'says("opened src/main.c:5:17")' }, timeout: 20s }

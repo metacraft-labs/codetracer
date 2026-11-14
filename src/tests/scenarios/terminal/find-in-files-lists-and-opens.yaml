@@ -17,12 +17,12 @@ steps:
   - chord: Ctrl+P
   - type: ":grep scale"
   - key: Enter
-  - wait: { until: { at: 'pane[title="FIND IN FILES"]', assert: 'has-row("4 results in 2 files")' }, timeout: 30s }
+  - wait: { until: { at: 'pane[title="Find in Files"]', assert: 'has-row("4 results in 2 files")' }, timeout: 30s }
   - expect:
-      at: 'pane[title="FIND IN FILES"]'
+      at: 'pane[title="Find in Files"]'
       assert: ['has-row("26  scaled = extra.scale(total, 4)")', 'has-row("4  def scale(value, factor):")']
   - expect: { at: replay-position, tick: 1 }
-  - click: { at: 'pane[title="FIND IN FILES"]/row[text="4  def scale(value, factor):"]', anchor: text-start }
+  - click: { at: 'pane[title="Find in Files"]/row[text="4  def scale(value, factor):"]', anchor: text-start }
   - wait: { until: { at: 'editor[file="extra.py"]', assert: 'shows-text("def scale(value, factor):")' }, timeout: 20s }
   - expect: { at: replay-position, tick: 1 }
   - chord: Ctrl+P

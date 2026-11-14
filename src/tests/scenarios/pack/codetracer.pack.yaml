@@ -148,6 +148,11 @@ roles:
   # A pane's tab in the layout (Editor, Call Trace, Event Log, …): what a user
   # clicks to bring a pane forward.
   pane-tab:
+    # The terminal and GPUI bindings name a built-in pane's tab by its
+    # canonical pane name ("Call Trace", "Build Output", "Find in Files",
+    # "Problems", "Requests", …: the GPUI window's `gpuiPaneName`), whatever
+    # caption the front-end draws, so one scenario reads on both; a file's
+    # tab by its file label.
     keys: [label]
     # pw3: `stack`, the labels of every tab in the same stack.
     properties: { label: text, active: bool, stack: lines }
@@ -712,6 +717,7 @@ roles:
   # row by row. The panes no other role reads (Problems, Find in Files,
   # Build, VCS, Constraints, Requests, …) are read through it.
   pane:
+    # `title`: the canonical name of its active tab (see `pane-tab`).
     keys: [title]
     properties:
       title: text
@@ -776,6 +782,7 @@ roles:
   # A label of the footer's auto-hide panels (Build, Problems, …): a click
   # docks its pane.
   dock-label:
+    # `label`: the canonical pane name (see `pane-tab`), not the caption.
     keys: [label]
     properties: { label: text }
     affordances: [click, context-click]

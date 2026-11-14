@@ -16,13 +16,13 @@ steps:
   - wait: { until: replay-idle, timeout: 120s }
   - type: ":grep scale"
   - key: Enter
-  - wait: { until: { at: 'pane[title="FIND IN FILES"]', assert: 'has-row("4 results in 2 files")' }, timeout: 30s }
+  - wait: { until: { at: 'pane[title="Find in Files"]', assert: 'has-row("4 results in 2 files")' }, timeout: 30s }
   - expect: { at: replay-position, tick: 1 }
   - type: ":grep"
   - key: Enter
   - wait: { until: { at: omnibox, query: ":grep scale" }, timeout: 10s }
   - type: "result"
   - key: Enter
-  - wait: { until: { at: 'pane[title="FIND IN FILES"]', assert: 'has-row("result")' }, timeout: 30s }
-  - expect: { at: 'pane[title="FIND IN FILES"]', assert: 'lacks-row("4 results in 2 files")' }
+  - wait: { until: { at: 'pane[title="Find in Files"]', assert: 'has-row("result")' }, timeout: 30s }
+  - expect: { at: 'pane[title="Find in Files"]', assert: 'lacks-row("4 results in 2 files")' }
   - expect: { at: replay-position, tick: 1 }
