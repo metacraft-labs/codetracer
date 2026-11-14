@@ -243,4 +243,5 @@ applicable:
   - ../languages/c-sudoku-call-trace-to-main.yaml
   - ../hcr-apply-edit/apply-edit-unconfigured.yaml
   - ../visual-replay/keyboard-shortcuts.yaml
+  - ../visual-replay/pixel-history-entries.yaml
 unsupported: []
