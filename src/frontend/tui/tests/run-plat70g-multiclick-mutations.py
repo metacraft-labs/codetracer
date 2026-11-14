@@ -113,8 +113,11 @@ ARMS = [
     ("O4", [(OPS, "    env.rowStartOffset(env.displayRowOf(offset))", "    env.lineStartOf(line)")],
      [(VMU, None)], "the line drag in logical lines above the anchor"),
     # ---- the rows --------------------------------------------------------------
-    ("P1", [(POINTER, "  let count = if p.hit.element == peGutterGlyph: 1 else: observed.count",
-             "  let count = observed.count"),
+    # P1's first needle re-aimed at da425061d2, which made the fold chevron's
+    # presses uncounted beside the glyph column's; the arm still counts the
+    # glyph column's presses (and only those), the defect it plants.
+    ("P1", [(POINTER, "  let count = if p.hit.element in {peGutterGlyph, peFoldToggle}: 1\n              else: observed.count",
+             "  let count = if p.hit.element in {peFoldToggle}: 1\n              else: observed.count"),
             (POINTER, "    PointerRow(element: peGutterGlyph, mods: pmNone, button: pbLeft,\n               minCount: 1, maxCount: AnyCount, operation: poToggleBreakpoint),",
              "    PointerRow(element: peGutterGlyph, mods: pmNone, button: pbLeft,\n               minCount: 1, maxCount: 1, operation: poToggleBreakpoint),")],
      [(VMU, None)], "a gutter press counted: one toggle on a double press"),
