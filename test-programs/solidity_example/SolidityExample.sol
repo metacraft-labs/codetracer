@@ -52,9 +52,9 @@ contract SolidityExample {
     // Constructor
     // -----------------------------------------------------------------------
 
-    constructor(string memory _name, string memory _symbol) {
-        name = _name;
-        symbol = _symbol;
+    constructor() {
+        name = "Example Token";
+        symbol = "EXT";
     }
 
     // -----------------------------------------------------------------------
@@ -135,7 +135,7 @@ contract SolidityExample {
     ///   3. _transfer(alice → bob, 200) — emits Transfer(alice → bob, 200)
     ///
     /// Final balances: alice = 800, bob = 700, totalSupply = 1500.
-    function runExample(address alice, address bob) public {
+    function run() public { address alice = address(uint160(0xA11CE)); address bob = address(uint160(0xB0B));
         _mint(alice, 1000);
         _mint(bob, 500);
         _transfer(alice, bob, 200);

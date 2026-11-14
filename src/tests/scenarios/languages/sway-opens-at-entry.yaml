@@ -1,0 +1,20 @@
+scenario: 1
+name: languages/sway-opens-at-entry
+pack: codetracer
+summary: >-
+  A Sway recording opens at its entry in main.sw: the status line names the
+  file, the state pane shows the line it stopped on, and the event log has
+  the program's events.
+
+stage:
+  - use: record-program
+    with: { program: sway_example }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 240s }
+  - expect: { at: window, title: { contains: CodeTracer } }
+  - wait: { until: { at: status-line, location: { contains: "main.sw:" } }, timeout: 60s }
+  - wait: { until: { at: variables, code-line: { contains: " | " } }, timeout: 60s }
+  - click: 'pane-tab[label="EVENT LOG"]'
+  - wait: { until: event-log.loaded, timeout: 60s }

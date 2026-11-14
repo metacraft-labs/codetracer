@@ -280,6 +280,20 @@ applicable:
   - ../search/ctrl-shift-f-seeds-field-from-selection.yaml
   - ../search/grep-alone-opens-field-on-selection.yaml
   - ../session-chrome/new-tab-opens-welcome-under-intact-caption.yaml
+  - ../status-bar/edit-session-no-debugger-timeout.yaml
+  - ../languages/solidity-opens-at-entry.yaml
+  - ../languages/solidity-call-trace-and-stepping.yaml
+  - ../breakpoints/solidity-column-breakpoint-at-caret.yaml
+  - ../languages/sway-opens-at-entry.yaml
+  - ../languages/sway-call-trace-and-stepping.yaml
+  - ../languages/wasm-opens-at-entry-and-steps.yaml
+  - ../languages/wasm-continue-runs-to-the-end.yaml
+  - ../streaming/streamed-recording-call-trace-lists-every-burst.yaml
+  - ../streaming/call-trace-entry-opens-its-function.yaml
+  - ../streaming/stepping-in-fibonacci-shows-its-locals.yaml
+  - ../session-chrome/overflowing-session-tabs-list-in-chevron.yaml
+  - ../session-chrome/menu-highlights-on-hover-and-closes-outside.yaml
+  - ../shell/recorded-build-marks-and-opens-recording.yaml
   # --- pw5 deepreview ---
   - ../deepreview/boundary-drag-reveals-what-it-crosses.yaml
   - ../deepreview/boundary-is-operable-from-the-keyboard.yaml

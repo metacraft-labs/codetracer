@@ -1,0 +1,9 @@
+[[package]]
+name = "std"
+version = "0.70.3"
+source = "registry+std?0.70.3#QmUXZ3gSz5vB6tLn14oVMQ2ibpEPrPJbz2XCsu6ReKHAwX!"
+
+[[package]]
+name = "sway_example"
+source = "member"
+dependencies = ["std"]

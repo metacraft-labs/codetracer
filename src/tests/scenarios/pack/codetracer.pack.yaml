@@ -507,6 +507,8 @@ roles:
       says(t): "message contains t"
       lacks(t): "not (message contains t)"
       notifies(t): "notifications contains t"
+      # pw7: no notice the status bar shows now says `t`.
+      notifies-nothing-of(t): "not (notifications contains t)"
       never-notifies(t): "not (notifications contains t)"
       # No build verdict or progress ("Build succeeded", "Building…").
       no-build-shown: "not (build-status contains \"Build\")"

@@ -1,0 +1,26 @@
+scenario: 1
+name: session-chrome/menu-highlights-on-hover-and-closes-outside
+pack: codetracer
+summary: >-
+  A click on the logo opens the program menu; it stays open while the pointer
+  moves over it, the folder under the pointer opens (without taking the
+  keyboard's highlight), and a click outside it closes it.
+
+stage:
+  - use: record-program
+    with: { program: py_console_logs/main.py }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - click: menu-bar
+  - wait: { until: { at: menu-bar, open: true }, timeout: 10s }
+  - expect: { at: 'menu-bar/menu[label="File"]', present: true }
+  - hover: { at: 'menu-bar/menu[label="View"]', for: 300ms }
+  # The pointer resting on View opens it (a hover is CSS `:hover`, not the
+  # keyboard's highlight): its entries are shown and the menu stays open.
+  - wait: { until: { at: 'menu-bar/menu-item[label="Filesystem"]', present: true }, timeout: 5s }
+  - expect: { at: 'menu-bar/menu[label="View"]', highlighted: false }
+  - expect: { at: menu-bar, open: true }
+  - click: 'editor[file="main.py"]'
+  - wait: { until: { at: menu-bar, open: false }, timeout: 10s }

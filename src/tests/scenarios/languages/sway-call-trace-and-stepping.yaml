@@ -1,0 +1,30 @@
+scenario: 1
+name: languages/sway-call-trace-and-stepping
+pack: codetracer
+summary: >-
+  In the Sway recording the call trace lists `main` and the `add` calls it
+  makes; from the entry at main.sw line 15 Next moves the replay to line 16,
+  and Continue runs on to line 25.
+
+stage:
+  - use: record-program
+    with: { program: sway_example }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 240s }
+  - click: 'pane-tab[label="CALLTRACE"]'
+  - wait: { until: { at: call-trace, assert: 'has-call("main")' }, timeout: 60s }
+  - expect:
+      at: call-trace
+      assert:
+        - 'has-call("main")'
+        - 'has-call("add")'
+  - wait: { until: { at: status-line, location: { matches: "main\\.sw:15#" } }, timeout: 60s }
+  - click: 'toolbar/toolbar-button[label="next-image"]'
+    settle: false
+  - wait: { until: { at: status-line, location: { matches: "main\\.sw:16#" } }, timeout: 60s }
+  - wait: replay-idle
+  - click: 'toolbar/toolbar-button[label="continue-image"]'
+    settle: false
+  - wait: { until: { at: status-line, location: { matches: "main\\.sw:25#" } }, timeout: 60s }

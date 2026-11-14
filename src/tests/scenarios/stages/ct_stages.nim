@@ -130,13 +130,19 @@ proc ctRecord(s: StageState; program, backend, lang, dest: string; workDir = "";
 proc buildSbf(crate: string): string =
   ## A Solana program crate compiled to SBF the way its author builds it
   ## (`cargo build-sbf`, which the Solana recorder's documentation expects),
-  ## and the program (`target/deploy/<crate>.so`) `ct record` then records.
+  ## and the program `ct record` then records: the UNSTRIPPED ELF under
+  ## `target/sbpf-solana-solana/release/`. The `target/deploy/` copy that
+  ## `cargo build-sbf` advertises for deployment has had `llvm-objcopy
+  ## --strip-all` run over it — same code, no DWARF — and a recording of it
+  ## maps every step to line 1 of `main`: no calls, no source.
   let (output, code) = execCmdEx("cargo build-sbf", workingDir = crate)
   if code != 0:
     raise newException(IOError, "record-program " & crate &
                        ": `cargo build-sbf` exited " & $code & "\n" & output)
-  for kind, path in walkDir(crate / "target" / "deploy"):
-    if kind == pcFile and path.endsWith(".so"): return path
+  for dir in [crate / "target" / "sbpf-solana-solana" / "release",
+              crate / "target" / "deploy"]:
+    for kind, path in walkDir(dir):
+      if kind in {pcFile, pcLinkToFile} and path.endsWith(".so"): return path
   raise newException(IOError, "record-program " & crate & ": `cargo build-sbf` made no .so")
 
 proc buildStylusWasm(crate: string): string =

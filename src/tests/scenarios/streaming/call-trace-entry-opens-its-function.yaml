@@ -1,0 +1,20 @@
+scenario: 1
+name: streaming/call-trace-entry-opens-its-function
+pack: codetracer
+summary: >-
+  Activating the first `burst_activity` call in the call trace of a streamed
+  recording shows main.py in the editor, stopped within the function
+  (lines 19-27).
+
+stage:
+  - use: record-program
+    with: { program: py_streaming_test/main.py }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 180s }
+  - click: 'pane-tab[label="CALLTRACE"]'
+  - wait: { until: { at: call-trace, assert: 'has-call-with(burst_activity, phase1)' }, timeout: 60s }
+  - click: { at: 'call-trace/call[name="burst_activity", arguments="(label=\"phase1\", count=3)"]', anchor: name }
+    settle: false
+  - wait: { until: { at: 'editor[file="main.py"]', assert: 'stopped-within(19, 27)' }, timeout: 60s }
