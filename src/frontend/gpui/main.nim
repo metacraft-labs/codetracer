@@ -11929,8 +11929,18 @@ proc pressEditorAt(r: GpuiRenderer; c: GPaneClick; path: string;
     hit: editorHitAt(dp[], c.line, c.x, onGutter), documentId: path,
     platformCount: (if c.clickCount > 0: c.clickCount else: NoPlatformCount)))
   if result.effect in {pfSelected, pfContextMenu}:
-    if gFocusPane != $paneEditor:
+    # A press in the text gives the editor the keys AND shows it: the strip
+    # and outline move to the editor as for a press on any other pane
+    # (PLAT-51 part B, `windowPointer`). This runs from the row's listener,
+    # BEFORE the window root sees the press; had it only moved the keys, the
+    # root's check would find the editor already focused and redraw nothing,
+    # leaving the outline on the pane pressed before (a tab, a list) while
+    # the keys went to the editor.
+    if gFocusPane != $paneEditor or not gFocusShown:
+      gFocusShown = true
       focusWindowPane(r, $paneEditor)
+      traceGesture("focus " & $paneEditor)
+      discard drawArrangement(r)
     gTextDrag = gEditorPointer.held
     traceGesture("press count " & $result.count & " " & $result.operation)
     redrawAfterPointer(r, path)

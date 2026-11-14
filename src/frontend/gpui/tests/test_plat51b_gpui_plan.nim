@@ -46,7 +46,9 @@ template ck(cond: untyped) =
   check(cond)
 
 const
-  ExpectedAssertions = 69
+  ExpectedAssertions = 74
+    ## 69 -> 74 (2026-11-14): a press in the editor's text moves the focus
+    ## strip off the pane pressed before it, five checks.
     ## 63 -> 69: checked-recorder refusal and subprocess-selection controls.
     ## 32 -> 33 (2026-10-17): the focus case asserts that NOTHING is outlined
     ## before the first press (the desktop's behaviour since the redesign),
@@ -199,6 +201,36 @@ suite "PLAT-51 part B GPUI: the focus highlight":
                   @["--focus-highlight=on"]).focusedStrips().len == 1
     ck windowPlan(pressIn("calltrace"), "",
                   @["--focus-highlight=off"]).focusedStrips().len == 0
+
+  test "a press in the editor's text, after another pane had the focus, moves the strip to the editor":
+    # `click:code:` is delivered as a real press is: to the editor's text
+    # row first (which selects and takes the keys), then to the window
+    # root. The root used to see the editor already focused and redraw
+    # nothing, so the strip stayed on the pane pressed before while the
+    # keys went to the editor (`ci/test/plat47_gpui_window.py`'s VCS frame,
+    # read off a real window, failed on it). A press on the call trace
+    # first, so the strip is shown and is somewhere else.
+    var g: JsonNode
+    discard windowPlan("wait:1", g)
+    let (x, y) = centre(g.tabsNode("calltrace")["body"])
+    let ops = "press:" & $x & ":" & $y & ",release:" & $x & ":" & $y
+    let beforePlan = windowPlan(ops)
+    let before = beforePlan.focusedStrips()
+    ck before.len == 1
+    if before.len == 1:
+      ck "Call Trace" in before[0].attr("data-ct-tabs")
+    # A line the editor draws (not a sticky scope header over it).
+    var line = ""
+    for n in beforePlan.nodesWith("data-ct-row"):
+      if line.len == 0 and n.attr("data-ct-sticky-line").len == 0:
+        line = n.attr("data-ct-row")
+    let after = windowPlan(ops & ",click:code:" & line & "@1").focusedStrips()
+    ck after.len == 1
+    if after.len == 1:
+      ck "Call Trace" notin after[0].attr("data-ct-tabs")
+      var editorLabels: seq[string]
+      for l in g.tabsNode("editor")["labels"]: editorLabels.add l.getStr
+      ck after[0].attr("data-ct-tabs") == editorLabels.join(",")
 
 suite "PLAT-51 part B GPUI: live reflow while a divider is dragged":
 
