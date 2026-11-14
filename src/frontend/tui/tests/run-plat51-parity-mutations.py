@@ -481,9 +481,11 @@ ARMS = [
         Y_CARET, "the framer drops Alt's ESC: a real terminal's Alt+T is a bare t"),
     # T15 RE-AIMED 2026-10-12 (PLAT-68 Phase B): an Alt chord is the key
     # alone when the router resolves it to nothing.
+    # T15 RE-AIMED 2026-11-13: the bare key is now handed to
+    # `handleTokenUnwatched` (the screen-reader mode's split); same defect.
     Arm("T15", RUNTIME,
-        "     rt.probeKey(rt.lastKey).kind == erNothing:\n    return rt.handleToken(token[1 .. 1], nowMs)\n",
-        "     false:\n    return rt.handleToken(token[1 .. 1], nowMs)\n",
+        "     rt.probeKey(rt.lastKey).kind == erNothing:\n    return rt.handleTokenUnwatched(token[1 .. 1], nowMs)\n",
+        "     false:\n    return rt.handleTokenUnwatched(token[1 .. 1], nowMs)\n",
         P_CARET, "an unbound Alt+<char> is swallowed instead of being the character"),
     Arm("T9", RUNTIME,
         "    if isMouse and event.shift:\n",
