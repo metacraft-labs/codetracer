@@ -1,0 +1,28 @@
+scenario: 1
+name: hcr-apply-edit/apply-edit-unconfigured
+pack: codetracer
+summary: >-
+  With an apply-edit command configured but no coordinator driver and no
+  running target, running "Apply Edit & Hot-Reload" from the command palette
+  is refused on screen by name: the notification says "refused:
+  not-configured" and names the variable that is missing first,
+  CODETRACER_HCR_DRIVER.
+
+stage:
+  - use: record-program
+    with: { program: py_console_logs/main.py }
+  - use: front-end-options
+    with: { env: { CODETRACER_HCR_APPLY_EDIT_CMD: "codetracer-flame-demo/scripts/ct_hcr_apply_edit.py" } }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - wait: { until: editor.loaded, timeout: 60s }
+  - expect: { at: status-line, notifications: { count: 0 } }
+  - chord: Ctrl+p
+  - expect: { at: omnibox, focused: true }
+  - type: ":Apply Edit"
+  - wait: { until: { at: 'omnibox/option[label="Apply Edit & Hot-Reload"]', kind: command }, timeout: 15s }
+  - click: 'omnibox/option[label="Apply Edit & Hot-Reload"]'
+  - wait: { until: { at: status-line, notifications: { contains: "refused: not-configured" } }, timeout: 60s }
+  - expect: { at: status-line, notifications: { contains: "CODETRACER_HCR_DRIVER" } }

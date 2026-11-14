@@ -241,4 +241,5 @@ applicable:
   - ../debug-controls/noir-next-and-f10-step.yaml
   - ../files/noir-files-panel-opens-a-file-once.yaml
   - ../languages/c-sudoku-call-trace-to-main.yaml
+  - ../hcr-apply-edit/apply-edit-unconfigured.yaml
 unsupported: []
