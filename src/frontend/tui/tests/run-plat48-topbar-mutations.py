@@ -637,9 +637,12 @@ ARMS = [
         "the window presses the tree's pins through a revealed pane"),
     # GW10 RE-AIMED 2026-10-17: the pin is a tab icon since the redesign,
     # and its press docks through one conditional command (pin or close).
+    # GW10 RE-AIMED 2026-11-14: the pin icon is a button pressed through the
+    # pointer keymap (`24a718a9f2`); its `layout.pin-pane-bottom` operation
+    # docks the pane. Same defect.
     Arm("GW10", GPUIMAIN,
-        "          applyGestureCommand(r, if onPin: cmdDock(k, leBottom)\n",
-        "          applyGestureCommand(r, if onPin: cmdDock(k, leRight)\n",
+        "    applyGestureCommand(r, cmdDock(c.target.pane, leBottom))\n",
+        "    applyGestureCommand(r, cmdDock(c.target.pane, leRight))\n",
         W_PIN,
         "the pin button docks the pane to the right edge, not the footer"),
 ]
