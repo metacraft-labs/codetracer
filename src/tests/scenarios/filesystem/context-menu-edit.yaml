@@ -1,0 +1,67 @@
+scenario: 1
+name: filesystem/context-menu-edit
+pack: codetracer
+summary: >-
+  In Edit mode the Files pane's context menu offers Create, Rename, Delete and
+  Edit. Create makes NEW.md and the tree reloads with the expanded src folder
+  still open; renaming README.md onto NEW.md is refused ("already exists")
+  and leaves it; renaming it to README2.md moves it in the tree; and the
+  opened folder's own row says why it cannot be renamed or deleted.
+
+stage:
+  - use: write-project
+    with: { files: { "README.md": "readme\n", "src/main.nim": "echo 1\n" } }
+  - use: open-project
+    with: { folder: $project }
+
+steps:
+  - wait: { until: { at: 'filesystem/file-node[name="README.md"]', present: true }, timeout: 120s }
+  - wait: { until: settled }
+  - click: 'filesystem/file-node[name="src"]'
+  - wait: { until: { at: 'filesystem/file-node[name="main.nim"]', present: true }, timeout: 30s }
+
+  - beat: create
+    steps:
+      - click: { at: 'filesystem/file-node[name="README.md"]', button: right }
+      - wait: { until: { at: context-menu, present: true }, timeout: 10s }
+      - expect: { at: context-menu, count: 4 }
+      - expect: { at: context-menu, assert: ['offers("Create")', 'offers("Rename")', 'offers("Delete")', 'offers("Edit")'] }
+      - click: 'context-menu/menu-item[label="Create"]'
+      - wait: { until: { at: 'filesystem/text-field[label="name"]', focused: true }, timeout: 10s }
+      - type: NEW.md
+      - key: Enter
+      - wait: { until: { at: 'filesystem/file-node[name="NEW.md"]', present: true }, timeout: 30s }
+      - wait: { until: { at: 'filesystem/file-node[name="main.nim"]', present: true }, timeout: 30s }
+      - expect: { at: 'filesystem/file-node[name="Loading..."]', absent: true }
+
+  - beat: rename-refused-then-done
+    steps:
+      - key: Esc
+      - click: { at: 'filesystem/file-node[name="README.md"]', button: right }
+      - wait: { until: { at: context-menu, present: true }, timeout: 10s }
+      - click: 'context-menu/menu-item[label="Rename"]'
+      - wait: { until: { at: 'filesystem/text-field[label="name"]', value: "README.md" }, timeout: 10s }
+      - chord: Ctrl+a
+      - type: NEW.md
+      - key: Enter
+      - wait: { until: { at: filesystem, error: { contains: "already exists" } }, timeout: 10s }
+      # Cancelled, the refused rename leaves README.md as it was.
+      - key: Esc
+      - wait: { until: { at: 'filesystem/file-node[name="README.md"]', present: true }, timeout: 10s }
+      - expect: { at: 'filesystem/text-field[label="name"]', absent: true }
+      - click: { at: 'filesystem/file-node[name="README.md"]', button: right }
+      - wait: { until: { at: context-menu, present: true }, timeout: 10s }
+      - click: 'context-menu/menu-item[label="Rename"]'
+      - wait: { until: { at: 'filesystem/text-field[label="name"]', value: "README.md" }, timeout: 10s }
+      - chord: Ctrl+a
+      - type: README2.md
+      - key: Enter
+      - wait: { until: { at: 'filesystem/file-node[name="README2.md"]', present: true }, timeout: 30s }
+      - wait: { until: { at: 'filesystem/file-node[name="README.md"]', absent: true }, timeout: 30s }
+
+  - beat: opened-folder-says-why
+    steps:
+      - click: { at: 'filesystem/file-node[name="project"]', button: right }
+      - wait: { until: { at: context-menu, present: true }, timeout: 10s }
+      - expect: { at: 'context-menu/menu-item[label="Rename"]', enabled: false }
+      - expect: { at: 'context-menu/menu-item[label="Rename"]', hint: { contains: "The opened folder cannot be renamed or deleted from the tree" } }
