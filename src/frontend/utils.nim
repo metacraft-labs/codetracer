@@ -343,12 +343,38 @@ proc makeErrorsComponent*(data: Data): ErrorsComponent =
     data.registerComponent(result, Content.BuildErrors)
 
 
+proc carriedNotifications*(notifications: seq[Notification]): seq[Notification] =
+  ## The notifications a rebuilt status bar keeps from the one it replaces.
+  ##
+  ## Loading a trace rebuilds the layout, and with it the status bar. A notice
+  ## raised just before (a Ctrl+R refused because a recording is under way,
+  ## while that recording finishes and its trace loads) vanished with the old
+  ## bar a fraction of a second after it appeared, instead of staying its
+  ## dismiss time. Each keeps its place in the history; a shown one loses the
+  ## old bar's dismiss timer, whose redraw would reach a bar no longer on
+  ## screen, and the new bar arms its own when it draws it.
+  for notification in notifications:
+    if notification.hasTimeout:
+      windowClearTimeout(notification.timeoutId)
+      notification.hasTimeout = false
+    result.add(notification)
+
+var notificationsAcrossLayoutReset: seq[Notification] = @[]
+  ## What `renderer.resetLayoutState` kept of the status bar it threw away,
+  ## for the bar `createUIComponents` builds next.
+
+proc keepStatusNotificationsAcrossReset*(status: StatusComponent) =
+  ## Called by `renderer.resetLayoutState` before it replaces `data.ui`.
+  notificationsAcrossLayoutReset =
+    if status.isNil: @[] else: carriedNotifications(status.notifications)
+
 proc makeStatusComponent*(
   data: Data,
   build: BuildComponent,
   errors: ErrorsComponent,
   searchResults: SearchResultsComponent): StatusComponent =
 
+  let previous = data.ui.status
   result = StatusComponent(
     build: build,
     errors: errors,
@@ -371,6 +397,11 @@ proc makeStatusComponent*(
       lastAction: cstring"",
       operationCount: 0,
     ))
+  if not previous.isNil:
+    result.notifications = carriedNotifications(previous.notifications)
+  elif notificationsAcrossLayoutReset.len > 0:
+    result.notifications = notificationsAcrossLayoutReset
+  notificationsAcrossLayoutReset = @[]
   data.ui.status = result
   when defined(ctRenderer):
     data.registerComponent(result, Content.Status)
@@ -487,6 +518,24 @@ proc sourceRevisionSource*(self: EditorService; location: types.Location): cstri
     self.sourceRevisionCache[key]
   else:
     cstring""
+
+proc forgetSourceRevisions*(self: EditorService; previous, loaded: cstring) =
+  ## A different recording was loaded into this tab: drop the source
+  ## revisions kept for the one it replaces.
+  ##
+  ## The cache is keyed by path, generation and digest, and a fresh
+  ## recording's stops carry generation 0 and no digest, so the key of a stop
+  ## in `main.py` is the same in every recording of `main.py`. A save made
+  ## while the old recording was open stores the old text under that key
+  ## (`renderer.reloadOpenFileFromDisk` keeps it so the old recording keeps
+  ## showing what it ran), and a Ctrl+R recording of the saved file then
+  ## showed that old text at its first stop, over the new source it had just
+  ## loaded. `previous` and `loaded` are the recordings' output folders; a
+  ## reload of the same recording keeps its revisions.
+  if previous == loaded:
+    return
+  self.sourceRevisionCache = JsAssoc[cstring, cstring]{}
+  self.pendingDiskSourceByPath = JsAssoc[cstring, cstring]{}
 
 # lowLevel: enum TODO
 proc tabLoad*(self: EditorService, location: types.Location, editorView: EditorView, lang: Lang, forceReload: bool = false): Future[TabInfo] {.async.} =

@@ -3341,6 +3341,9 @@ proc onTraceLoaded(
   hideWelcomeScreenSurface()
 
   normalizeTraceProgramForUi(response.trace)
+  data.services.editor.forgetSourceRevisions(
+    if data.trace.isNil: cstring"" else: data.trace.outputFolder,
+    response.trace.outputFolder)
   data.trace = response.trace
   requestSessionTabsRender(data)
   data.setEditorsReadOnlyState(true)
@@ -4370,9 +4373,12 @@ proc onSavedFile(sender: js, response: jsobject(name=cstring)) =
       var label = $response.name
       if tokens.len >= 2:
         label = tokens[1]
-      editor.contentItem.setTitle(cstring(label))
-      editor.contentItem.config.componentState.label = response.name
-      editor.contentItem.config.componentState.fullPath = response.name
+      # An editor the layout does not hold as a GoldenLayout item (one an
+      # IsoNim pane mounted) has no `contentItem` and no title to refresh.
+      if not editor.contentItem.isNil:
+        editor.contentItem.setTitle(cstring(label))
+        editor.contentItem.config.componentState.label = response.name
+        editor.contentItem.config.componentState.fullPath = response.name
   except:
     cerror "saved-file: could not refresh the editor tab for " &
       $response.name & ": " & getCurrentExceptionMsg()

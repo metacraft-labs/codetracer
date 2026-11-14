@@ -479,6 +479,7 @@ proc resetLayoutState*(data: Data) =
   let pageLoaded = data.ui.pageLoaded
   let initEventReceived = data.ui.initEventReceived
   let fontSize = data.ui.fontSize
+  keepStatusNotificationsAcrossReset(data.ui.status)
 
   data.ui = Components(
     editors: JsAssoc[cstring, EditorViewComponent]{},

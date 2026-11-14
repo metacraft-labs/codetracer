@@ -1145,6 +1145,13 @@ test_lane_files() {
 		# for the closed tab reaches no tab, and every request a tab sends names
 		# the replay the Backend Manager answered for it beside the tab's id.
 		echo src/frontend/tests/tab_session_ids_test.nim
+		# `source_revisions_across_recordings_test.nim`: a recording loaded in
+		# place of another (Ctrl+R) does not show the replaced recording's
+		# source at its stops.
+		echo src/frontend/tests/source_revisions_across_recordings_test.nim
+		# `status_notifications_across_reload_test.nim`: a notice on screen when
+		# a trace load rebuilds the layout stays on the rebuilt status bar.
+		echo src/frontend/tests/status_notifications_across_reload_test.nim
 		# `low_level_code_markup_dom_test.nim`: a source line in the Low Level
 		# Code pane is text in a real DOM, whatever markup it contains (HSF-D3).
 		echo src/frontend/tests/low_level_code_markup_dom_test.nim
