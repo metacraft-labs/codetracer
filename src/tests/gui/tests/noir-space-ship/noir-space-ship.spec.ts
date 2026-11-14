@@ -61,6 +61,41 @@ async function navigateToShieldEditor(layout: LayoutPage): Promise<EditorPane> {
   return shieldEditor;
 }
 
+/**
+ * Finds a call trace entry by function name, expanding all entries if needed.
+ */
+async function requireCallTraceEntry(
+  callTrace: CallTracePane,
+  functionName: string,
+): Promise<CallTraceEntry> {
+  let located: CallTraceEntry | null = null;
+
+  await retry(
+    async () => {
+      callTrace.invalidateEntries();
+      located = await callTrace.findEntry(functionName, true);
+      if (located) {
+        return true;
+      }
+
+      const allEntries = await callTrace.getEntries(true);
+      for (const entry of allEntries) {
+        try {
+          await entry.expandChildren();
+        } catch {
+          // entry may be scrolled out of viewport
+        }
+      }
+      return false;
+    },
+    { maxAttempts: 20, delayMs: 200 },
+  );
+
+  if (!located) {
+    throw new Error(`Call trace entry '${functionName}' was not found.`);
+  }
+  return located;
+}
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
