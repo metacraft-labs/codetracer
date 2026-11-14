@@ -1409,6 +1409,12 @@ proc jumpToCounterpartOf*(vm: EventLogVM; row: MarkerEventRow) =
   ## recordings never declared — resolves to an empty set and the
   ## click does nothing, which is the honest outcome: there is no
   ## other side to go to.
+  # A mirror's chip (a VS Code panel): the lookup and the jump take the
+  # primary's connection to the replay, which the mirror does not have. The
+  # row is named by what the primary's own copy of it carries.
+  if vm.actionSink.forwards("eventLog", "jumpToCounterpartOf",
+      %*{"markerId": row.markerId, "eventIndex": row.eventIndex}):
+    return
   let vmRef = vm
   vm.requestCounterparts(row, proc(counterparts: seq[MarkerEventRow]) =
     if counterparts.len == 0:

@@ -243,6 +243,14 @@ proc applyAction*(session: SessionViewModel; msg: JsonNode): bool =
     of "setSelectedKinds": v.setSelectedKinds(a.arg("kinds", newSeq[bool]()))
     of "setFilterInput": v.setFilterInput(a.arg("raw", ""))
     of "dismissToast": v.dismissToast(a.arg("workspaceId", ""))
+    of "jumpToCounterpartOf":
+      let markerId = a.arg("markerId", -1)
+      let eventIndex = a.arg("eventIndex", -1)
+      for row in v.markerRows.val:
+        if row.markerId == markerId and row.eventIndex == eventIndex:
+          v.jumpToCounterpartOf(row)
+          return true
+      return false
     # Kept for mirrors that predate the `viewport` action.
     of "setPageSize":
       v.setViewport(v.viewport.val.withRows(a.arg("size", 0)))

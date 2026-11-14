@@ -940,6 +940,18 @@ suite "a mirror whose panels act on the primary (a VS Code webview)":
       link.settle()
       ck mock.findCommand("ct/history-jump").isNone
 
+      # An Event Log boundary chip clicked in the mirror: its counterpart is
+      # looked up on the primary's connection (the mirror's is inert).
+      let marker = MarkerEventRow(eventIndex: 3, markerId: 1,
+                                  boundaryId: "account-balance",
+                                  keyValue: "req-0001", stepId: 17)
+      primary.eventLogVM.markerRows.val = @[marker]
+      link.settle()
+      mock.clearReceivedCommands()
+      mirror.session.eventLogVM.jumpToCounterpartOf(marker)
+      link.settle()
+      drainPlatformCallbacks()
+      ck mock.findCommand("ct/pairIndexLookup").isSome
       plain.dispose()
       mirror.dispose()
       host.dispose()

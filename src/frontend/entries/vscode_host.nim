@@ -26,7 +26,7 @@
 when not defined(js):
   {.error: "entries/vscode_host runs in the VS Code extension host (JS).".}
 
-import std/[asyncjs, json, jsffi, strutils, tables]
+import std/[asyncjs, json, jsffi, options, strutils, tables]
 
 import isonim/core/[signals, computation, owner, async_compat]
 
@@ -185,6 +185,24 @@ proc openSession*(host: VsCodeHost; id, traceFolder: string;
         wireOriginChainBridges(session.stateVM, origin,
           proc(): ScratchpadVM = session.scratchpadVM)
         session.attachOriginChainVM(origin)
+      # A session of several recordings (a `session.toml`): requests reach a
+      # recording by the thread id they carry (`ct/listProcesses` names each
+      # recording's), so a boundary chip whose counterpart is in another
+      # recording moves the debugger there by routing its jump to that
+      # recording's thread, and VS Code follows the stop into it.
+      onComplete(debugger.backend.send("ct/listProcesses", newJObject()),
+        proc(response: JsonNode) =
+          if responseSucceeded(response):
+            session.applyListProcessesResponse(response),
+        proc(message: string) = discard)
+      if not session.eventLogVM.isNil:
+        session.eventLogVM.onSwitchProcessProc = proc(recordingId: string) =
+          let entry = session.entryForRecording(recordingId)
+          if entry.isSome and entry.get.routingThreadId != 0:
+            var where = session.store.debugger.val
+            where.threadId = uint32(entry.get.routingThreadId)
+            session.store.debugger.val = where
+          session.onSwitchProcess(recordingId)
       # The panels mark the call the debugger is in after every move, as on
       # the desktop.
       debugger.session.calltraceVM.followDebuggerCall()
