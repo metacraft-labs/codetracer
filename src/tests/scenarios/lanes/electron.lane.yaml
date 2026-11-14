@@ -225,4 +225,5 @@ applicable:
   - ../flow/branch-colors.yaml
   - ../flow/loop-controls.yaml
   - ../flow/window-handoff.yaml
+  - ../visual-replay/keymap-rows.yaml
 unsupported: []
