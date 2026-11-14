@@ -17,10 +17,8 @@ steps:
   - wait: { until: ready, timeout: 60s }
   - wait: { until: { at: 'editor[file="find.txt"]', assert: 'shows-text("foo bar foobar")' }, timeout: 20s }
   - click: { at: 'editor[file="find.txt"]/line[number="1"]', anchor: text-start }
-  - key: g
-  - key: g
-  - key: g
-  - key: "*"
+  - chord: g g
+  - chord: g *
   - wait: { until: settled, timeout: 10s }
   - key: i
   - type: "#"
