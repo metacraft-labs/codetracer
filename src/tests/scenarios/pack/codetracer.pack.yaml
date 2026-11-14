@@ -1340,10 +1340,12 @@ roles:
   # A cross-process boundary in the event log: where a request, a response or
   # a realm crossing joins this recording to another.
   event-marker:
-    keys: [boundary]
+    # A boundary fires more than once in a recording (a call and its
+    # return): its key's value tells the firings apart.
+    keys: [boundary, key-value]
     properties:
       boundary: text
-      # The boundary's chip, as drawn (`[account-balance-with-wasm]`).
+      # The boundary's chip, as drawn (`[account-balance]`).
       chip: text
       # The correlation key's value.
       key-value: text
