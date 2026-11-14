@@ -315,6 +315,12 @@ lint_step "shellcheck: sibling cargo locks guard" \
 lint_step "contract suite: the sibling Cargo.lock guard runs on agents" \
 	bash ci/test/sibling-cargo-locks-workflow-test.sh
 
+# GitHub refuses a workflow file of 512,000 bytes or more, and the refusal shows
+# only on the run page: every push starts a run that fails at once and runs no
+# job (codetracer.yml at 513,291 bytes, 2026-11-14).
+lint_step "workflow files stay under GitHub's size limit" \
+	bash ci/test/workflow-file-size-test.sh
+
 # Not covered by the `ci/**/*.sh` glob above, and it runs in the deploy lane on
 # every push to `cloud`, where a shell defect would surface as a deploy failure
 # rather than as a lint one.

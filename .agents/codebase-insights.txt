@@ -8560,3 +8560,15 @@ ONE ROUTER ON EVERY FRONT-END (2026-10-12, PLAT-68 Phase B).
   mode (no editor, no call trace) in two of four runs.
 - `expect: { …, holds: 2s }` reads again and again for the span: the check that the other client
   did not move, which a single read straight after the step cannot make.
+
+## .github/workflows/codetracer.yml is close to GitHub's size limit (2026-11-14)
+
+- GitHub refuses a workflow file of 512,000 bytes or more. The refusal is visible only on the
+  run page ("This run likely failed because of a workflow file issue"): every push starts a run
+  that fails in 0 s with no job. codetracer.yml reached 513,291 bytes in 53c81398d5e (run
+  43599200128); b94c18d393a moved two provisioning steps into ci/test/scenario-lane-provision.sh
+  (508,864 bytes). `ci/test/workflow-file-size-test.sh` (in ci/lint/bash.sh) now fails first.
+  Put a new step's logic in a script under ci/, not inline, and keep comments in the scripts.
+- Pushes to `agents` start no codetracer.yml run at all (push triggers: main, dev, stable,
+  cloud); only workflow_dispatch exercises it there (codetracer-pm
+  issues/2026-09-30-agents-branch-has-no-ci.md).
