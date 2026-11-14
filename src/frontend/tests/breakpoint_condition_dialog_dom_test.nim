@@ -6,7 +6,9 @@
 ## one pointer listener (`viewmodel/input/dom_pointer`) and the router, and
 ## runs the operation the button carries (`breakpoint-condition.apply`,
 ## `breakpoint-condition.cancel`); the field's Enter and Escape are the
-## field's own keys, and Escape elsewhere closes it through `dismissals`.
+## field's own keys, and Escape elsewhere closes it through `dismissals`. A
+## press on the backdrop is an `overlay` element's, carrying
+## `breakpoint-condition.cancel`, routed the same way.
 ##
 ## The presses are real `MouseEvent`s dispatched on the buttons, the keys
 ## real `KeyboardEvent`s on the field. The router is the shipped
@@ -44,6 +46,9 @@ proc query(selector: cstring): JsObject {.importjs: "document.querySelector(#)".
 proc click(el: JsObject) {.importjs: """
   #.dispatchEvent(new window.MouseEvent('click', { bubbles: true,
     cancelable: true, button: 0 }))""".}
+proc mouseDown(el: JsObject) {.importjs: """
+  #.dispatchEvent(new window.MouseEvent('mousedown', { bubbles: true,
+    cancelable: true, button: 0 }))""".}
 proc keyDown(el: JsObject; key: cstring) {.importjs: """
   #.dispatchEvent(new window.KeyboardEvent('keydown', { bubbles: true,
     cancelable: true, key: # }))""".}
@@ -74,17 +79,29 @@ proc show(condition = "x > 1") =
 proc field(): JsObject = query(cstring".breakpoint-condition-input")
 proc okButton(): JsObject = query(cstring"[data-action='apply']")
 proc cancelButton(): JsObject = query(cstring"[data-action='cancel']")
+proc backdrop(): JsObject = query(cstring".breakpoint-condition-dialog-backdrop")
 
 proc routeWith(router: KeymapRouter) =
   installDomPointerRouting(routerResolver(router,
     SessionFacts(product: pmDebug, replayLoaded: true)))
 
 suite "the breakpoint condition dialog's presses and keys are routed":
-  test "CONTROL: with no pointer listener, OK does nothing":
+  test "CONTROL: with no pointer listener, OK and the backdrop do nothing":
     applied = @[]
     show()
     okButton().click()
+    backdrop().mouseDown()
     ck applied.len == 0
+    ck breakpointConditionDialogOpen()
+    closeBreakpointConditionDialog()
+    # ... and a row for the backdrop's press takes that one.
+    let backdropRow = initKeymapRouter(bkCua, Desktop, user = parseUserKeymap(
+      """[ { "key": "click", "command": "debugger.continue",
+             "when": "paneKind == breakpointCondition && elementKind == overlay" } ]"""))
+    ck backdropRow.errors.len == 0
+    routeWith(backdropRow)
+    show()
+    backdrop().mouseDown()
     ck breakpointConditionDialogOpen()
     closeBreakpointConditionDialog()
     ck not breakpointConditionDialogOpen()
@@ -119,6 +136,20 @@ suite "the breakpoint condition dialog's presses and keys are routed":
     ck applied == @["b"]
     ck not breakpointConditionDialogOpen()
 
+  test "a press on the backdrop cancels; one on the dialog does not":
+    applied = @[]
+    show()
+    query(cstring".breakpoint-condition-dialog").mouseDown()
+    field().mouseDown()
+    ck breakpointConditionDialogOpen()
+    # A text selection dragged out of the field, released on the backdrop:
+    # its click lands on the backdrop, and is no press of it.
+    backdrop().click()
+    ck breakpointConditionDialogOpen()
+    backdrop().mouseDown()
+    ck not breakpointConditionDialogOpen()
+    ck applied.len == 0
+
   test "Escape on the window closes it, through dismissals":
     applied = @[]
     show()
@@ -138,6 +169,16 @@ suite "the breakpoint condition dialog's presses and keys are routed":
     show()
     okButton().click()
     ck applied.len == 0
+    ck breakpointConditionDialogOpen()
+    closeBreakpointConditionDialog()
+    # ... and a row for the backdrop's press takes that one.
+    let backdropRow = initKeymapRouter(bkCua, Desktop, user = parseUserKeymap(
+      """[ { "key": "click", "command": "debugger.continue",
+             "when": "paneKind == breakpointCondition && elementKind == overlay" } ]"""))
+    ck backdropRow.errors.len == 0
+    routeWith(backdropRow)
+    show()
+    backdrop().mouseDown()
     ck breakpointConditionDialogOpen()
     closeBreakpointConditionDialog()
     # The base again: OK is OK.

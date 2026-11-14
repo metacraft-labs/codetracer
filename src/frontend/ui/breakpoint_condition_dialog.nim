@@ -8,7 +8,7 @@
 ## the location are set as TEXT (`value`, `textContent`), never as markup.
 ##
 ## INPUT (Input-Routing-And-Keymaps.md §5.1, §6). The dialog holds no press
-## handler: it is the `breakpointCondition` scope (`data-ct-pane`), OK and
+## handler: its backdrop is the `breakpointCondition` scope (`data-ct-pane`), OK and
 ## Cancel are buttons carrying their operations (`data-ct-operation`:
 ## `breakpoint-condition.apply`, `breakpoint-condition.cancel`), and the
 ## window's one pointer listener (`viewmodel/input/dom_pointer`, installed by
@@ -17,7 +17,9 @@
 ## module registers for the operation. The field's Enter and Escape are the
 ## field's own keys (§6), read through the one decoder
 ## (`field_keys.fieldKeyOf`); Escape anywhere else in the window closes the
-## dialog through `dismissals`, as every transient surface does.
+## dialog through `dismissals`, as every transient surface does. A press on
+## the backdrop is an `overlay` element's, carrying
+## `breakpoint-condition.cancel`, so it is routed like the buttons.
 
 const
   BreakpointConditionApply* = "breakpoint-condition.apply"
@@ -34,8 +36,7 @@ when defined(js):
 
   const BreakpointConditionDialogMarkup* = """
     <div class="breakpoint-condition-dialog" role="dialog" aria-modal="true"
-         data-ct-dialog data-ct-pane="breakpointCondition"
-         aria-labelledby="breakpoint-condition-title">
+         data-ct-dialog aria-labelledby="breakpoint-condition-title">
       <h2 id="breakpoint-condition-title" data-ct-dialog-title>Breakpoint condition</h2>
       <p class="breakpoint-condition-location" data-ct-dialog-message></p>
       <input type="text" class="breakpoint-condition-input" aria-label="condition"
@@ -53,8 +54,6 @@ when defined(js):
     ## constants the router and the procedures use.
 
   static:
-    doAssert ("data-ct-pane=\"" & BreakpointConditionScope & "\"") in
-      BreakpointConditionDialogMarkup
     doAssert ("data-ct-operation=\"" & BreakpointConditionApply & "\"") in
       BreakpointConditionDialogMarkup
     doAssert ("data-ct-operation=\"" & BreakpointConditionCancel & "\"") in
@@ -118,6 +117,17 @@ when defined(js):
       proc(p: ElementPress): bool = confirmBreakpointCondition())
     registerElementOperation(BreakpointConditionCancel,
       proc(p: ElementPress): bool = cancelBreakpointCondition())
+    # A press on the backdrop, outside the dialog, cancels: the backdrop is an
+    # `overlay` element carrying `breakpoint-condition.cancel`, named by this
+    # hit test (no selector can tell the backdrop from the dialog on it), and
+    # pressed on the press, as it always was, so a text selection dragged out
+    # of the field and released over the backdrop does not cancel.
+    registerHitTest(BreakpointConditionScope, proc(target, ev: JsObject): ElementHit =
+      if not openOverlay.isNil and target == openOverlay.toJs:
+        ElementHit(element: target, kind: "overlay",
+                   operation: BreakpointConditionCancel, pressDown: true)
+      else:
+        ElementHit())
 
   proc breakpointConditionDialogOpen*(): bool =
     not openOverlay.isNil
@@ -130,6 +140,9 @@ when defined(js):
     closeBreakpointConditionDialog()
     let overlay = kdom.document.createElement(cstring"div")
     overlay.class = cstring"breakpoint-condition-dialog-backdrop"
+    # The backdrop is the dialog's scope: its buttons and the backdrop itself
+    # are pressed in it.
+    overlay.setAttribute(cstring"data-ct-pane", cstring(BreakpointConditionScope))
     overlay.innerHTML = cstring(BreakpointConditionDialogMarkup)
     let o = overlay.toJs
     let locationEl = o.querySelector(cstring".breakpoint-condition-location")
@@ -151,10 +164,6 @@ when defined(js):
       if answer:
         e.preventDefault()
         e.stopPropagation())
-    # A press on the backdrop, outside the dialog, cancels.
-    o.addEventListener(cstring"mousedown", proc(e: JsObject) =
-      if e.target == o:
-        closeBreakpointConditionDialog())
 
     kdom.document.body.appendChild(overlay)
     openOverlay = overlay
