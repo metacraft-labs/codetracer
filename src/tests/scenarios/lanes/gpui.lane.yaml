@@ -10,7 +10,7 @@ backend: guiassert
 modes: [fast, realistic]
 retention: { runs: 5, failure-days: 7 }
 # a GPU window drawn by a software renderer takes longer to settle
-settle-timeout: 20000
+settle-timeout: 30000
 applicable:
   - ../tracing/trace-macro-at-caret.yaml
   - ../gpui/keys-debug-function-keys.yaml

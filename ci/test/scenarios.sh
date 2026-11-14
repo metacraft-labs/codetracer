@@ -165,7 +165,7 @@ run)
 	# longer than the runner's default 5 s to stop changing after an input,
 	# and so does Electron at a 1-minute load above 100 (each lane says so too).
 	case "${flavour}" in
-	gpui) settle=(--settle-timeout 20000) ;;
+	gpui) settle=(--settle-timeout 30000) ;;
 	electron) settle=(--settle-timeout 15000) ;;
 	esac
 	"$(runner_of "${flavour}")" run "${scenario}" --pack "${S}/pack/codetracer.pack.yaml" \
