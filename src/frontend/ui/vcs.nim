@@ -36,6 +36,8 @@ from ../viewmodel/viewmodels/review_session import
 
 from isonim/web/dom_api as isonim_dom_api import nil
 import ../viewmodel/input/dom_pointer
+from ../viewmodel/input/dom_pane_presses import readerOf
+from ../viewmodel/input/pane_presses import pressVcs
 from std/jsffi import JsObject
 import isonim/web/web_renderer
 import ./panel_host
@@ -1083,18 +1085,11 @@ proc vcsOfPress(p: ElementPress): tuple[component: VCSComponent, vm: VCSVM] =
     return
   (component, ensureVCSVM(component))
 
-registerElementOperation("vcs.open-file-diff", proc(p: ElementPress): bool =
-  let (component, vm) = vcsOfPress(p)
-  let target = attributeOf(p.element, "data-ct-vcs-file-diff")
-  if vm.isNil or target.len == 0:
-    return false
-  invokeOpenFileDiff(component.vcsCallbacks(), target)
-  true)
-
-registerElementOperation("vcs.toggle-commit", proc(p: ElementPress): bool =
-  let (component, vm) = vcsOfPress(p)
-  let index = intAttributeOf(p.element, "data-ct-vcs-commit-toggle")
-  if vm.isNil or index < 0:
-    return false
-  vm.invokeToggleCommitExpand(component.vcsCallbacks(), index, true, false)
-  true)
+for operation in ["vcs.open-file-diff", "vcs.toggle-commit"]:
+  closureScope:
+    let op = operation
+    registerElementOperation(op, proc(p: ElementPress): bool =
+      let (component, vm) = vcsOfPress(p)
+      if vm.isNil:
+        return false
+      pressVcs(vm, component.vcsCallbacks(), op, readerOf(p.element)))

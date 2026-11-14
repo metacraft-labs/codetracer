@@ -24,6 +24,9 @@ import ../viewmodels/[calltrace_vm, event_log_vm, state_vm, filesystem_vm,
                       low_level_code_vm, request_panel_vm, constraints_vm,
                       pixel_history_vm]
 from ../views/isonim_request_panel_view import pressAndActivateRow
+from ../views/isonim_vcs_view import VCSCallbacks, invokeOpenFileDiff,
+  invokeToggleCommitExpand
+from ../viewmodels/vcs_vm import VCSVM
 import isonim/core/signals
 
 const
@@ -223,4 +226,26 @@ proc performSessionPress*(session: SessionViewModel; operation: string;
   of "search": pressSearchResults(session.searchResultsVM, operation, attr)
   of "requests": pressRequests(session.requestPanelVM, operation, attr)
   of "low-level": pressLowLevel(session.lowLevelCodeVM, operation, attr)
+  else: false
+
+proc pressVcs*(vm: VCSVM; callbacks: VCSCallbacks; operation: string;
+               attr: AttributeReader): bool =
+  ## K34, K53: a changed file's diff button opens that diff; a commit's
+  ## expander expands it. Over the pane's ViewModel and its host's callbacks
+  ## (the desktop's `ui/vcs` finds both from the element pressed).
+  if vm.isNil:
+    return false
+  case operation
+  of "vcs.open-file-diff":
+    let target = attr("data-ct-vcs-file-diff")
+    if target.len == 0:
+      return false
+    invokeOpenFileDiff(callbacks, target)
+    true
+  of "vcs.toggle-commit":
+    let index = intOf(attr, "data-ct-vcs-commit-toggle")
+    if index < 0:
+      return false
+    vm.invokeToggleCommitExpand(callbacks, index, true, false)
+    true
   else: false
