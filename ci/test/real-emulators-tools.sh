@@ -15,6 +15,8 @@
 #                 (DejaVu), so every emulator draws the same font and a
 #                 persona's cell size is a property of the terminal, not of
 #                 whatever fonts the host has.
+#   roots/        one out-link (a GC root) per package, so what versions.txt
+#                 names stays in the store while the lane runs.
 set -uo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 out="${1:-${root}/build/real-emulators/tools}"
@@ -44,7 +46,13 @@ for entry in "${packages[@]}"; do
 	progs="${entry#*:}"
 	# The outputs a user would install (`util-linux`'s programs are in its
 	# `bin` output, which is one of them).
-	if ! paths="$(cd "${root}" && nix build --no-link --print-out-paths \
+	# Each package is built with an out-link under OUT/roots, which is a GC
+	# root: built with --no-link, a package is unreferenced the moment the
+	# build returns, a concurrent garbage collection can delete it before the
+	# suite starts, and the dangling bin/ link then lets PATH resolve the
+	# program to whatever other build the host has (a host's kitty answering
+	# with its own version, read as a persona that moved).
+	if ! paths="$(cd "${root}" && nix build --out-link "${out}/roots/${pkg}" --print-out-paths \
 		--inputs-from . "nixpkgs#${pkg}" 2>"${out}/${pkg}.log")" ||
 		[ -z "${paths}" ]; then
 		echo "${pkg}: nix build nixpkgs#${pkg} failed ($(tail -1 "${out}/${pkg}.log"))" >>"${out}/missing.txt"
