@@ -67,9 +67,6 @@ src/frontend/viewmodel/tests/unit/plat33-collab-mutation-control.sha256	ci/lib/t
 # agents commits it was rebased over. The entries already stale on agents 38974dd6d0f
 # before this change (69 new, 11 moved again) are not this change's and are left as they
 # were.
-src/frontend/tui/tests/plat71a-glyphs-mutation-control.sha256	src/frontend/tui/app/tests/test_plat71_terminal_profile.nim	82344b5c0d18daf110e89c48bb567663d6dcf387a393aa67300a9ee98f24cff8	47d1c433c9838314c782aa53510815f5fdf60c93486b1da9a63f1f9719f04c2a
-src/frontend/tui/tests/plat71a-glyphs-mutation-control.sha256	src/frontend/tui/app/views/glyph_table.nim	15e734b9ee8043749c6f3cb17d36fd4d984ed69b32113b9f74c7e83a1843ae6b	55bf6277bdf57ce65709fbfc0f0b19cf5f5f4810fbdf25323268b24a4de27a51
-src/frontend/tui/tests/plat71a-glyphs-mutation-control.sha256	src/frontend/tui/app/views/scrollbar_styles.nim	c75cccb6eb5b15bdfe8dc3cc661c24f3333209a4b6e0bcf87211d5b925013b6e	006af6b962ebf9c4737a70b2b3b51971cdec937a6cc1d2340e071ae48a2ae938
 src/frontend/tui/tests/plat71d-mux-mutation-control.sha256	src/frontend/tui/app/tests/test_plat71_terminal_profile.nim	82344b5c0d18daf110e89c48bb567663d6dcf387a393aa67300a9ee98f24cff8	47d1c433c9838314c782aa53510815f5fdf60c93486b1da9a63f1f9719f04c2a
 
 # 2026-11-12, the scenario pack (src/tests/scenarios): the GPUI editor re-wires
