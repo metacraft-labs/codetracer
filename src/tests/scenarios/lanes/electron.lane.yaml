@@ -351,4 +351,5 @@ applicable:
   - ../languages/move-recording-smoke.yaml
   - ../languages/move-column-breakpoint.yaml
   - ../flow/eye-icon-dual.yaml
+  - ../flow/eye-icon.yaml
 unsupported: []
