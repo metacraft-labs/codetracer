@@ -83,7 +83,7 @@ const
     "F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "F9", "F10", "F11",
     "F12", "Alt", "Menu",
     "Click", "DoubleClick", "TripleClick", "QuadrupleClick", "MiddleClick",
-    "RightClick"]
+    "RightClick", "BackClick", "ForwardClick"]
     ## Every canonical non-character key name. Closed: `normalizeChord`
     ## refuses anything that is neither one of these nor one printable
     ## character.
@@ -101,7 +101,9 @@ const
     ## `Click` and its siblings are POINTER GESTURES: a binding's "key" can be
     ## one (`Ctrl+Click`), so a modifier click is data, resolved by the one
     ## resolver and rebound like any chord (Input-Routing-And-Keymaps.md §5.1).
-    ## No keyboard decoder produces them.
+    ## No keyboard decoder produces them. `BackClick` and `ForwardClick` are
+    ## the mouse's side buttons (`MouseEvent.button` 3 and 4, the platform's
+    ## Back and Forward).
 
   KeyAliases = {
     "escape": "Esc", "esc": "Esc", "return": "Enter", "enter": "Enter",
@@ -115,7 +117,8 @@ const
     "alt": "Alt", "menu": "Menu", "contextmenu": "Menu", "apps": "Menu",
     "application": "Menu", "click": "Click", "doubleclick": "DoubleClick",
     "tripleclick": "TripleClick", "quadrupleclick": "QuadrupleClick",
-    "middleclick": "MiddleClick", "rightclick": "RightClick"}.toTable
+    "middleclick": "MiddleClick", "rightclick": "RightClick",
+    "backclick": "BackClick", "forwardclick": "ForwardClick"}.toTable
     ## Spellings `normalizeChord` accepts for a key, lower-cased: this
     ## product's own, VS Code's (`escape`, `pageup`), and GPUI's.
 
@@ -254,7 +257,7 @@ func isPointerChord*(name: string): bool =
   let at = name.rfind('+')
   let key = if at < 0: name else: name[at + 1 .. ^1]
   key in ["Click", "DoubleClick", "TripleClick", "QuadrupleClick",
-          "MiddleClick", "RightClick"]
+          "MiddleClick", "RightClick", "BackClick", "ForwardClick"]
 
 func isPrintableKey*(name: string): bool =
   ## Whether a canonical key name is a single printable character.

@@ -33,6 +33,9 @@ const
   ButtonElementKind* = "button"
     ## `elementKind` of a control with a press of its own (`dom_pointer`'s
     ## `HitRules`' last rule).
+  ElementKindAttribute* = "data-ct-element-kind"
+    ## An element's kind, drawn by a view whose element is not a button (an
+    ## inline value is `value`), for the pointer rows' `elementKind`.
 
 type
   PressResolver* = proc(path: ScopePath; gesture: string): EditingResolution
@@ -49,11 +52,12 @@ type
 
 func carriedOperationRuns*(elementKind, gestureKey: string): bool =
   ## Whether a press with no row of its own runs the operation the element
-  ## carries: a button's primary press. `gestureKey` is the gesture without
-  ## its modifiers (`Click`, not `Ctrl+Click`). A double click is not another
-  ## press of the button: the DOM delivers each of its presses as a `click`
-  ## already, and a second run would be a run the user did not ask for.
-  elementKind == ButtonElementKind and gestureKey == "Click"
+  ## carries: the primary press of an element (a button, an inline value).
+  ## `gestureKey` is the gesture without its modifiers (`Click`, not
+  ## `Ctrl+Click`). A double click is not another press of the element: the
+  ## DOM delivers each of its presses as a `click` already, and a second run
+  ## would be a run the user did not ask for.
+  elementKind.len > 0 and elementKind != "none" and gestureKey == "Click"
 
 proc resolveElementPress*(resolve: PressResolver; path: ScopePath;
                           elementKind, carried: string; mods: KeyModifiers;

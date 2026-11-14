@@ -16,7 +16,8 @@
 ##     registered by the host (`registerElementOperation`): the session's panes
 ##     by `dom_pane_presses`, the desktop's own panes by their `ui/` modules;
 ##   * `installDomPointerRouting` — the ONE listener per window for `click`,
-##     `dblclick`, `contextmenu` and `auxclick` (resolved in the capture phase,
+##     `dblclick`, `contextmenu` and `auxclick`, and `mousedown` for the
+##     mouse's side buttons (resolved in the capture phase,
 ##     a base row performed when the press bubbles back to the window): the press's scope
 ##     from the DOM (`data-scope-kind` / `data-scope-id`), the element and its
 ##     kind, the gesture with its modifiers, resolved by the host's router and
@@ -64,6 +65,18 @@ type
     kind*: string
       ## `elementKind` to a pointer row's `when`; empty when nothing under the
       ## press is an element of the pane.
+    operation*: string
+      ## The operation the element carries, when a view's own hit test
+      ## (`registerHitTest`) names it; empty: read off the element's
+      ## `data-ct-operation`.
+    pressDown*: bool
+      ## The element is pressed on the press, not on its click (as an element
+      ## marked `data-ct-press="down"` is).
+
+  HitTest* = proc(target, event: JsObject): ElementHit {.closure.}
+    ## A view's own hit test (§5.3) for the presses in its pane, for an element
+    ## no selector can name — a part of a cell's text, a surface's backdrop.
+    ## An empty `kind` leaves the press to the selectors.
 
   HitRule = tuple[pane, selector, kind: string]
     ## At a node of the walk up from the press, in the pane `pane` ("*": any
@@ -112,13 +125,30 @@ const
     # History entry.
     ("videoPlayer", ".video-player-stage", "value"),
     ("pixelHistory", "[data-pixel-history-index]", "row"),
-    # Any other control: a button with a press of its own. (A link inside a
-    # row is the row's: `routePointerPress` leaves a modified press on it to
-    # the browser.)
-    ("*", "button, [role=\"button\"]", "button"),
+    # An inline value a view marks as one (`data-ct-element-kind`).
+    ("*", "[data-ct-element-kind=\"value\"]", "value"),
+    # Any other control: a button with a press of its own, or an element
+    # carrying its operation. (A link inside a row is the row's:
+    # `routePointerPress` leaves a modified press on it to the browser.)
+    ("*", "button, [role=\"button\"], [data-ct-operation]", "button"),
   ]
 
 var procedures = initTable[string, ElementProc]()
+var hitTests = initTable[string, HitTest]()
+var everyPaneHitTests: seq[HitTest] = @[]
+
+proc registerHitTest*(pane: string; test: HitTest) =
+  ## `pane`'s own hit test, asked before the selectors; the last registration
+  ## wins. `"*"`: a hit test asked in every pane (after the pane's own), for a
+  ## part every pane of a kind draws (a table cell's `…`); each is kept.
+  if pane == "*":
+    everyPaneHitTests.add test
+  else:
+    hitTests[pane] = test
+
+proc elementOperationProcedure*(operation: string): ElementProc =
+  ## The procedure registered for `operation`; nil when none is.
+  procedures.getOrDefault(operation)
 
 proc registerElementOperation*(operation: string; run: ElementProc) =
   ## The desktop's procedure for `operation` on a pressed element. The last
@@ -248,7 +278,14 @@ proc stop(ev: JsObject) =
   discard ev.preventDefault()
   discard ev.stopImmediatePropagation()
 
-proc routePointerPress(ev: JsObject; gestureKey: string) =
+const
+  PressDownAttribute* = "data-ct-press"
+    ## `down` on an element pressed on the press itself, not on its click:
+    ## one on a surface that swallows the click (Monaco's view zones and
+    ## content widgets, which re-render under a press) and that the press must
+    ## not reach (it would move Monaco's caret).
+
+proc routePointerPress(ev: JsObject; gestureKey: string; onDown = false) =
   ## **A PRESS ON A PANE'S ELEMENT, THROUGH THE ROUTER** (Input-Routing §5.1):
   ## the element under the press and its kind (`domElementAt`), its pane from
   ## the scope the DOM carries, the gesture with its modifiers — resolved by
@@ -267,12 +304,30 @@ proc routePointerPress(ev: JsObject; gestureKey: string) =
     # A pane shown outside the layout (the auto-hide overlay's) names its
     # kind for presses only (`data-ct-pane`): it is not a key scope.
     let host = closestOrNull(ev.target, cstring"[data-ct-pane]")
-    if host.isNil:
+    if not host.isNil:
+      path.add pane(attributeOf(host, "data-ct-pane"))
+    elif not closestOrNull(ev.target, cstring"[data-ct-operation]").isNil:
+      # An element carrying its operation outside every pane (a popup on
+      # the document's body): its press is routed with no pane.
+      path.add pane("none")
+    else:
       return
-    path.add pane(attributeOf(host, "data-ct-pane"))
   let paneKind = path[path.innermostPane].paneKind
-  let hit = domElementAt(ev.target, paneKind)
+  var hit = ElementHit()
+  if hitTests.hasKey(paneKind):
+    hit = hitTests[paneKind](ev.target, ev)
+  for test in everyPaneHitTests:
+    if hit.kind.len > 0: break
+    hit = test(ev.target, ev)
   if hit.kind.len == 0:
+    hit = domElementAt(ev.target, paneKind)
+  if hit.kind.len == 0:
+    return
+  let pressedOnDown = hit.pressDown or not closestOrNull(ev.target,
+    cstring("[" & PressDownAttribute & "=\"down\"]")).isNil
+  if onDown != pressedOnDown:
+    # An element pressed on the press is routed then, and not again by its
+    # click; every other element by its click only.
     return
   let mods = modifiersOf(ev)
   if not linkUnder(ev.target).isNil and (mods != {} or gestureKey != "Click"):
@@ -281,15 +336,23 @@ proc routePointerPress(ev: JsObject; gestureKey: string) =
   # its own — the operation the button carries (`data-ct-operation`,
   # `element_press`): §5.1's `pressElement`, as the terminal and the GPUI
   # window decide it.
-  let outcome = resolveElementPress(resolver, path, hit.kind,
-                                    attributeOf(hit.element, OperationAttribute),
+  let carried = if hit.operation.len > 0: hit.operation
+                else: attributeOf(hit.element, OperationAttribute)
+  let outcome = resolveElementPress(resolver, path, hit.kind, carried,
                                     mods, gestureKey)
   if outcome.operation.len == 0:
     return
   let res = outcome.resolution
   let press = ElementPress(element: hit.element, event: ev, pane: paneKind)
   if hasElementOperation(outcome.operation):
-    if outcome.byRow and res.layer.startsWith("user:"):
+    if onDown:
+      # Performed now, and the press goes no further: its click may never
+      # come, and what lies under the element (Monaco) must not take the
+      # press. Its default stays: the press still moves the focus.
+      if not tracer.isNil: tracer(outcome.operation)
+      if runElementOperation(outcome.operation, press):
+        discard ev.stopImmediatePropagation()
+    elif outcome.byRow and res.layer.startsWith("user:"):
       # A user's row takes the press here, in the capture phase: nothing
       # else may answer it.
       if not tracer.isNil: tracer(outcome.operation)
@@ -316,6 +379,41 @@ proc performPendingPress(ev: JsObject) =
   pending = PendingPress()
   if not tracer.isNil: tracer(p.operation)
   discard runElementOperation(p.operation, p.press)
+
+proc routeWindowGesture(ev: JsObject; gestureKey: string) =
+  ## A gesture that is the WINDOW's, wherever it lands — the mouse's side
+  ## buttons (`BackClick`, `ForwardClick`): resolved in the scope the press
+  ## is in, with no element, and performed by the procedure registered for
+  ## the operation (a user's row naming another operation: the host's
+  ## dispatch).
+  if resolver.isNil:
+    return
+  let path = scopeChainOf(ev.target)
+  let mods = modifiersOf(ev)
+  var res = resolver(path, chordName(mods, gestureKey))
+  if res.kind != erOperation and mods != {}:
+    res = resolver(path, gestureKey)
+  if res.kind != erOperation:
+    return
+  let press = ElementPress(element: ev.target, event: ev, pane: "")
+  if hasElementOperation(res.operation):
+    if not tracer.isNil: tracer(res.operation)
+    if runElementOperation(res.operation, press):
+      stop(ev)
+  elif not fallback.isNil and fallback(res, press):
+    stop(ev)
+
+proc onPointerDown(ev: JsObject) =
+  # `MouseEvent.button` 3 and 4: the platform's Back and Forward
+  # (https://w3c.github.io/uievents/#dom-mouseevent-button). Taken on the
+  # press, as the buttons always were here; a browser may not deliver their
+  # `auxclick`. A primary press on an element pressed on the press
+  # (`PressDownAttribute`) is its click.
+  case ev.button.to(int)
+  of 0: routePointerPress(ev, "Click", onDown = true)
+  of 3: routeWindowGesture(ev, "BackClick")
+  of 4: routeWindowGesture(ev, "ForwardClick")
+  else: discard
 
 proc onPointerClick(ev: JsObject) =
   if ev.button.to(int) == 0: routePointerPress(ev, "Click")
@@ -351,6 +449,7 @@ proc installDomPointerRouting*(resolve: PointerResolver;
            "window.addEventListener('dblclick', ", onPointerDoubleClick, ", true);",
            "window.addEventListener('contextmenu', ", onPointerContextMenu, ", true);",
            "window.addEventListener('auxclick', ", onPointerAuxClick, ", true);",
+           "window.addEventListener('mousedown', ", onPointerDown, ", true);",
            "window.addEventListener('click', ", performPendingPress, ", false);",
            "window.addEventListener('dblclick', ", performPendingPress, ", false);",
            "window.addEventListener('contextmenu', ", performPendingPress, ", false);",

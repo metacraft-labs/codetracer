@@ -84,6 +84,10 @@ const
     BaseRow(chords: "Ctrl+Click", operation: "scratchpad.add-value",
             whenText: "paneKind == editor && elementKind == value",
             table: PointerTable),
+    # ... and on a value of the Flow pane's chips, as on the editor's.
+    BaseRow(chords: "Ctrl+Click", operation: "scratchpad.add-value",
+            whenText: "paneKind == flow && elementKind == value",
+            table: PointerTable),
 
     # --- The Visual Replay panes (K72, K73): a press on the Video Player's
     # frame picks the pixel under it, on a Pixel History row goes to its draw
@@ -99,6 +103,14 @@ const
     # --- Every element with a menu (K7, K19, K22, K28, K59, K62, K65, K68) ---
     BaseRow(chords: "RightClick", operation: "context-menu.open",
             whenText: "elementKind != none && paneKind != eventLog",
+            table: PointerTable),
+
+    # --- The mouse's side buttons: Back and Forward move through the debug
+    # history, wherever the pointer is (the desktop's `aHistoryBack` /
+    # `aHistoryForward`, which `ui/shortcuts` bound to the buttons itself).
+    BaseRow(chords: "BackClick", operation: "navigation.back",
+            table: PointerTable),
+    BaseRow(chords: "ForwardClick", operation: "navigation.forward",
             table: PointerTable),
 
     # --- A pane's tab (K5) -------------------------------------------------

@@ -1178,6 +1178,13 @@ test_lane_files() {
 		# pointer listener and the router as StoryBook wires it; a user's row
 		# takes the press.
 		echo src/frontend/tests/story_playback_bar_dom_test.nim
+		# `element_operations_dom_test.nim`: an element carrying its operation
+		# with the procedure bound to it, pressed through the window's one
+		# pointer listener — on its click, on its press inside Monaco, outside
+		# every pane, as an inline value (Ctrl+Click the scratchpad's), the
+		# mouse's side buttons as pointer rows, a cut cell's `…`; a user's row
+		# takes each over.
+		echo src/frontend/tests/element_operations_dom_test.nim
 		# `event_log_scroll_area_dom_test.nim`: the Event Log's scroll area is as
 		# tall as the whole log, in a real DOM, whatever the table's fit does.
 		echo src/frontend/tests/event_log_scroll_area_dom_test.nim
