@@ -325,8 +325,3 @@ proc performPlaybackOperation*(pb: AhPlayback; operation: string): bool =
   if not known or pb.isNil: return false
   discard pb.applyControl(control)
   true
-
-proc controlAction*(pb: AhPlayback; control: PlaybackControl): proc() =
-  ## A button's click handler, built in a proc of its own so each closure
-  ## owns its control (a closure made in a loop would share the loop's).
-  result = proc() = discard pb.applyControl(control)

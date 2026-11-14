@@ -33,6 +33,10 @@ import ./ah_tui_initiative_panels
 import ./ah_tui_fleet_panel
 import ./ah_tui_playback_bar
 import nim_everywhere/async_compat
+import ../../viewmodel/input/element_press
+import ../../viewmodel/keymap/[base_keymaps, context_keys, editing_keymap,
+                               keymap_router, scope_path, user_keymap]
+import ../../../common/key_names
 
 export agent_harbor_stories, codetracer_stories, emit_storybook_stories, ah_tui_canvas
 
@@ -70,6 +74,12 @@ type
       ## `playback.changed` when the screen was last drawn.
     canvas*: AhCanvas
       ## The last `draw`.
+    router*: KeymapRouter
+      ## The story host's router: the base keymap, a user's rows over it. A
+      ## playback control's key and a press on its button resolve here.
+    lastOperation*: string
+      ## The operation the last routed key or press resolved to ("" for
+      ## none), whether or not this host performs it.
     view*: AhNode
       ## The view's own root in it, the node carrying `surface`.
 
@@ -95,6 +105,32 @@ const PinGlyph* = "\xE2\x9A\xB2"
   ## ⚲ (U+26B2): the panel tab's pin (dock to an edge). The web draws the
   ## app's pin icon there; a terminal has no picture, and this narrow glyph
   ## — a round head on a stem — is the nearest a monospace font holds.
+
+const
+  TerminalDelivery = KeyDelivery(frontEnd: feTerminal, platform: hostPlatform(),
+                                 keyProtocol: kpLegacy)
+    ## The story host reads its keys as bytes (`key_names.keyName`).
+
+let PlaybackScopePath = @[element(ekWindow, "window"), pane(StoryPlaybackScope)]
+  ## Where the playback chrome's keys and presses resolve.
+
+proc draw*(m: AhTuiMount)
+
+proc pressPlayback*(m: AhTuiMount; operation: string): bool {.discardable.} =
+  ## **A PRESS ON A PLAYBACK BUTTON** (Input-Routing-And-Keymaps.md §5.1),
+  ## from its target (the hit test): resolved by the story host's router in
+  ## the `storyPlayback` scope — a user's row for the press first — else the
+  ## operation the button carries. A playback operation runs, and the screen
+  ## is drawn again; any other is inert here.
+  if m.isNil or m.playback.isNil: return false
+  let outcome = resolveElementPress(routerResolver(m.router, SessionFacts()),
+                                    PlaybackScopePath,
+                                    ButtonElementKind, operation, {}, "Click")
+  m.lastOperation = outcome.operation
+  if not m.playback.performPlaybackOperation(outcome.operation):
+    return false
+  m.draw()
+  true
 
 proc drawFrame(c: var AhCanvas; title: string): int =
   ## The panel's frame header: the window's ground with the panel's tab at
@@ -137,14 +173,15 @@ proc draw*(m: AhTuiMount) =
   of "agent-harbor-initiative-progress": c.drawProgressPanel(m.progress, top, 0, m.cols, h)
   else: discard
   if not m.playback.isNil:
-    c.drawPlaybackBar(m.playback, m.rows - 1)
+    c.drawPlaybackBar(m.playback, m.rows - 1, (proc(operation: string) =
+      m.pressPlayback(operation)), routerKeyOf(m.router))
     m.drawnAt = m.playback.changed.val
   m.view = c.root.first("surface")
   m.canvas = c
 
 proc mountAgentHarborStoryTui*(surface, fixture: string; cols, rows: int;
                                mode = dmDark; frameTitle = ""; clock: ClockBase = nil;
-                               moment = ""): AhTuiMount =
+                               moment = ""; keymap = UserKeymap()): AhTuiMount =
   ## Builds the story's viewmodel and draws it at `cols` × `rows`. A
   ## `frameTitle` frames it as a panel. Raises `ValueError` for a surface
   ## with no terminal rendering, and (from the story constructors) for a
@@ -155,7 +192,8 @@ proc mountAgentHarborStoryTui*(surface, fixture: string; cols, rows: int;
     raise newException(ValueError, "no terminal rendering for the Agent Harbor surface " &
                        surface & " (story fixture " & fixture & ")")
   result = AhTuiMount(surface: surface, fixture: fixture, cols: cols, rows: rows,
-                      mode: mode, frameTitle: frameTitle)
+                      mode: mode, frameTitle: frameTitle,
+                      router: initKeymapRouter(bkCua, TerminalDelivery, user = keymap))
   if isPlaybackStory(surface, fixture):
     result.playback = newAhPlayback(surface, fixture,
                                     if clock.isNil: ClockBase(newRealClock()) else: clock)
@@ -176,12 +214,13 @@ proc mountAgentHarborStoryTui*(surface, fixture: string; cols, rows: int;
   result.draw()
 
 proc mountStory*(story: CodeTracerStory; cols, rows: int; mode: DesignMode;
-                 clock: ClockBase = nil; moment = ""): AhTuiMount =
+                 clock: ClockBase = nil; moment = "";
+                 keymap = UserKeymap()): AhTuiMount =
   ## `mountAgentHarborStoryTui` for a declared story, framed when it is a
   ## panel story.
   mountAgentHarborStoryTui(story.surface, story.fixture, cols, rows, mode,
                            if story.kind == "panel": frameTitleOf(story) else: "",
-                           clock, moment)
+                           clock, moment, keymap)
 
 proc idle*(m: AhTuiMount): bool =
   ## Between inputs: a playback story's real clock fires its due timers
@@ -196,13 +235,21 @@ proc idle*(m: AhTuiMount): bool =
   false
 
 proc playbackKey*(m: AhTuiMount; token: string): bool =
-  ## A playback control's key (`PlaybackKeys`): the control runs and the
-  ## screen is drawn again (true), whether or not it moved the playback, so
-  ## a reader waiting for the next frame always gets one.
+  ## A key while a playback story is shown, ROUTED (Input-Routing-And-Keymaps.md
+  ## §4): decoded to its canonical name (`key_names.keyName`, the terminal's
+  ## byte decoder) and resolved by the story host's router in the
+  ## `storyPlayback` scope — the base's rows for the controls (`overlay_rows`:
+  ## space, `n`, `[`, `]`, `0`), a user's over them. A key that resolves to a
+  ## playback operation runs it, and the screen is drawn again (true), whether
+  ## or not it moved the playback, so a reader waiting for the next frame
+  ## always gets one.
   if m.playback.isNil: return false
-  let (known, control) = controlOfKey(token)
-  if not known: return false
-  discard m.playback.applyControl(control)
+  let name = keyName(token)
+  if name.len == 0: return false
+  let res = m.router.route(SessionFacts(), PlaybackScopePath, nmNormal, name, 0)
+  m.lastOperation = if res.kind == erOperation: res.operation else: ""
+  if res.kind != erOperation or not m.playback.performPlaybackOperation(res.operation):
+    return false
   m.draw()
   true
 

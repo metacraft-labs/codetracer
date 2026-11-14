@@ -61,6 +61,15 @@ const
             whenText: "paneKind == terminalOutput && !textInputFocus",
             table: PaneTablePrefix & "terminalOutput"),
 
+    # --- A story host's playback chrome: the terminal story host's keys for
+    # its controls (a terminal bar's buttons are one glyph wide), the same
+    # under every base.
+    BaseRow(chords: "Space", operation: "story-playback.play", table: StoryPlaybackTable),
+    BaseRow(chords: "n", operation: "story-playback.step", table: StoryPlaybackTable),
+    BaseRow(chords: "[", operation: "story-playback.previous", table: StoryPlaybackTable),
+    BaseRow(chords: "]", operation: "story-playback.next", table: StoryPlaybackTable),
+    BaseRow(chords: "0", operation: "story-playback.rewind", table: StoryPlaybackTable),
+
     # --- The Video Player (Visual-Replay.md § Keyboard Shortcuts): its keys
     # while it has the focus, the same under every base, as the desktop's
     # player always had them.

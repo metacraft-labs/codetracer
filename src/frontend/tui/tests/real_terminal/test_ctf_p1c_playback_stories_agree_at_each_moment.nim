@@ -1027,6 +1027,40 @@ suite "CTF-P1c: a press on a bar's button is routed":
     ck m.playback.source.position > before
     m.dispose()
 
+  test "CONTROL: a user's row takes over a key and a press in the terminal host":
+    let story = playbackStories()[0]
+    let rebound = parseUserKeymap("""[
+      { "key": "n", "command": "debugger.continue",
+        "when": "paneKind == storyPlayback" },
+      { "key": "click", "command": "debugger.continue",
+        "when": "paneKind == storyPlayback && elementKind == button" } ]""")
+    ck rebound.errors.len == 0
+    var m = mountStory(story, LaptopCols, LaptopRows, dmDark, newTestClock(), "",
+                       keymap = rebound)
+    ck not m.handleInput("n")
+    ck m.lastOperation == "debugger.continue"
+    var step: AhNode
+    for b in m.canvas.root.first("playback").all("playback-control"):
+      if b.attr("playback-control") == $pcStep: step = b
+    ck not step.isNil
+    discard m.handleInput("\x1b[<0;" & $(step.col + 1) & ";" & $(step.row + 1) & "M")
+    ck m.lastOperation == "debugger.continue"
+    ck m.playback.source.position == 0
+    m.dispose()
+    # The same key and press with no user row step the playback, each
+    # through its row: the key's (`overlay_rows`), the button's operation.
+    m = mountStory(story, LaptopCols, LaptopRows, dmDark, newTestClock(), "")
+    ck m.handleInput("n")
+    ck m.lastOperation == "story-playback.step"
+    let afterKey = m.playback.source.position
+    ck afterKey > 0
+    for b in m.canvas.root.first("playback").all("playback-control"):
+      if b.attr("playback-control") == $pcStep: step = b
+    discard m.handleInput("\x1b[<0;" & $(step.col + 1) & ";" & $(step.row + 1) & "M")
+    ck m.lastOperation == "story-playback.step"
+    ck m.playback.source.position > afterKey
+    m.dispose()
+
 suite "CTF-P1c: the playback bars' buttons keep their names at every width":
   # At the sidebar's 360px (45 cells) every host draws each control as a
   # glyph (`compactControlLabel`). Each button must still name its control

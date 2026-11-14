@@ -96,6 +96,9 @@ const
     ## Pushed while the terminal's magnifier is open over the frame (the
     ## picker's keyboard stage): the arrows move the picked pixel, `Enter`
     ## picks it.
+  StoryPlaybackTable* = PaneTablePrefix & "storyPlayback"
+    ## A story host's playback chrome (the bar under an Agent Harbor
+    ## playback story): its keys, while a playback story is shown.
   PointerTable* = "pointer"
     ## The rows whose key is a pointer gesture (`pointer_rows`). Never on a
     ## scope path: only `keymap_router.routePointer` consults it.
@@ -597,6 +600,14 @@ const
     # The Video Player's own keys (Visual-Replay.md § Keyboard Shortcuts): its
     # pane's table while it has the focus, the picker's and the magnifier's
     # layers while they are open (`overlay_rows`).
+    # A story host's playback chrome (`stories/agent_harbor_playback`): the
+    # controls its buttons carry, and the terminal story host's keys for them
+    # (`overlay_rows`).
+    op("story-playback.play", StoryPlaybackTable, "Playback: Play / Pause"),
+    op("story-playback.step", StoryPlaybackTable, "Playback: Step"),
+    op("story-playback.previous", StoryPlaybackTable, "Playback: Previous Moment"),
+    op("story-playback.next", StoryPlaybackTable, "Playback: Next Moment"),
+    op("story-playback.rewind", StoryPlaybackTable, "Playback: Rewind"),
     op("video-player.toggle-play", VideoPlayerTable, "Video: Play / Pause"),
     op("video-player.rewind", VideoPlayerTable, "Video: Rewind"),
     op("video-player.fast-forward", VideoPlayerTable, "Video: Fast Forward"),
