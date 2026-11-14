@@ -739,6 +739,16 @@ proc interactive(command: TuiCommand): int =
   let projectRoot = getCurrentDir()
   app.projectRoot = projectRoot
   let rt = newTuiRuntime(app, negotiation.caps, size.cols, size.rows)
+  # A MOVE IN FLIGHT IS DRAWN AS ONE. Sending a move blocks this loop until
+  # the replay answers (the native backend's request, then `pumpMove`), so the
+  # frame painted just before it is sent says what the replay is doing and
+  # the badge never reads PAUSED over the stop being left. Skipped when the
+  # next key is already waiting (that key's frame replaces it before a
+  # terminal could show it). Reset to PAUSED once the token is applied.
+  rt.moveStarting = proc(action: KeyAction) =
+    if not driver.inputPending():
+      app.replayStatus = statusWhileMoving(action)
+      paint(driver, rt)
   # Opening a replay gives its editor the keyboard. Seed this before the
   # layout binding copies the focus; restoring a saved layout then keeps it
   # only while the editor is visible. Empty shells keep projection order.
@@ -1627,6 +1637,8 @@ proc interactive(command: TuiCommand): int =
         if not vcs.applyClick(rt, outcome.paneClick) and
            not tests.applyClick(rt, outcome.paneClick):
           session.applyOutcome(rt, outcome)
+        # the move (if the token made one) has been drawn at its stop
+        app.replayStatus = esPaused
         # V6: THE VCS HISTORY FOLLOWS ITS LIST. The token may have scrolled the
         # pane, revealed its tab or committed an arrangement that resized it;
         # a list that now reaches the last commit read reads more at once.

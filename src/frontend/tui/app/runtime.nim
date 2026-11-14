@@ -486,6 +486,9 @@ type
   TuiRuntime* = ref object
     ## The running front-end's state, minus the terminal and minus the process.
     app*: TuiApp
+    moveStarting*: proc(action: KeyAction) {.closure.}
+      ## Called just before a move is sent to the replay (the host paints the
+      ## move in flight: `TuiApp.replayStatus`); nil for none.
     imageCapability*: ImageCapability
       ## PLAT-59: the image decision for this terminal
       ## (`image_capability.resolveImageCapability`), resolved by the host —
@@ -1196,6 +1199,20 @@ proc movesTheDebugger*(action: KeyAction): bool =
      kaJumpToStart, kaJumpToEnd, kaSeekToTick, kaHistoryBack, kaHistoryForward,
      kaValueOrigin, kaReverseOrigin: true
   else: false
+
+proc statusWhileMoving*(action: KeyAction): ExecutionStatus =
+  ## The top bar's badge while the move `action` sent is in flight
+  ## (§3.3.1's statuses): a step backwards is REVERSING, a jump to a tick, a
+  ## call or a history entry is SEEKING, any other move STEPPING.
+  case action
+  of kaReverseStepOver, kaReverseStepInto, kaReverseStepOut, kaReverseContinue,
+     kaReverseOrigin:
+    esReversing
+  of kaPrevCall, kaNextCall, kaPrevMutation, kaNextMutation, kaJumpToStart,
+     kaJumpToEnd, kaSeekToTick, kaHistoryBack, kaHistoryForward, kaValueOrigin:
+    esSeeking
+  else:
+    esStepping
 
 proc refreshMenuForKeymap*(rt: TuiRuntime)
   ## FORWARD-DECLARED for `:keys`; defined with the top bar below.
@@ -2110,6 +2127,13 @@ proc runCommandLine(rt: TuiRuntime; line: string; outcome: var RuntimeOutcome;
       context.file = rt.app.tracepointAt.path
       context.line = rt.app.tracepointAt.line
     rt.app.tracepointAt = ("", 0)
+  # A COMMAND THAT MOVES (`:next`, `:goto 900`) is a move in flight too.
+  if not rt.moveStarting.isNil:
+    let parsed = parseCommand(line)
+    if parsed.status == csOk:
+      let (bound, action) = keyActionFor(parsed.kind)
+      if bound and movesTheDebugger(action):
+        rt.moveStarting(action)
   let ran = runCommand(rt.dispatcher, context, line)
   outcome.detail = ran.message
   var text = describeOutcome(ran)
@@ -7106,6 +7130,8 @@ proc performAction(rt: TuiRuntime; action: KeyAction;
       return
   if rt.applyLocalAction(action, outcome):
     return
+  if movesTheDebugger(action) and not rt.moveStarting.isNil:
+    rt.moveStarting(action)
   let dispatch = dispatchAction(rt.dispatcher, rt.context, action)
   outcome.detail = dispatch.detail
   rt.note(dispatch.detail)

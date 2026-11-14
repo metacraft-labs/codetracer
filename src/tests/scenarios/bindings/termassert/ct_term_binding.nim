@@ -7,8 +7,8 @@
 ##   pty under TermAssert, with the run's isolated state.
 ## * The surface: the screen, read by `ct_tui_screen` — cells and colours
 ##   only.
-## * Conditions: `replay-idle` — the top bar says the replay is paused and the
-##   status line names where it is.
+## * Conditions: `replay-idle` — the top bar says the replay is paused (not
+##   a move in flight) and the screen has gone quiet.
 ## * Actions (`act:` steps): `write-file` and `make-read-only` change a file
 ##   of the stage's project folder, as another program would.
 ## * The binding resolver: `../../resolver/ct_resolver.nim`, the shared
@@ -139,6 +139,13 @@ proc launchTui(ctx: TermContext; s: StageState) =
   ctx.width = w
   ctx.height = h
 
+proc screenQuiet(ctx: TermContext): bool =
+  ## The application wrote nothing for two windows of 60 ms — the runner's
+  ## own settle rule, read inside a condition that is about to be believed.
+  for _ in 0 ..< 2:
+    if ctx.sess.drainOutput(60) != 0: return false
+  true
+
 proc keyProtocolOf(ctx: TermContext): KeyProtocol =
   ## The key reporting the application turned on, read off the bytes it wrote
   ## to its terminal (nim-termctl's `KittyPushDisambiguateSeq` /
@@ -180,10 +187,14 @@ proc ctTermBinding*(): TermBinding =
     condition: proc (ctx: TermContext; name: string): Option[bool] =
       case name
       of "replay-idle":
-        # the top bar's trace summary: the replay is paused at a tick
+        # the top bar's trace summary: the replay is paused at a tick (the
+        # badge reads STEPPING / REVERSING / SEEKING from the frame that
+        # answers a move's key until the frame that draws its stop) — on a
+        # screen that has gone quiet, so a key just sent has been read and
+        # its in-flight frame drawn before PAUSED is believed
         let top = ctx.grid().rowText(0)
         some(top.contains("[ct]") and top.contains("tick: ") and top.contains("[PAUSED]") and
-             not top.contains("trace: - "))
+             not top.contains("trace: - ") and ctx.screenQuiet())
       of "ready":
         # --- terminal --- the front-end drew its first frame: the status
         # row carries the product mode

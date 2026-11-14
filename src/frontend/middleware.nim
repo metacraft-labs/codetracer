@@ -139,6 +139,29 @@ when not defined(ctInExtension):
   var requestFailureNoticesInstalled = false
     ## Whether the one `onCtRequestFailed` observer below is installed.
 
+proc testStopDelayMs(): int =
+  ## TEST-ONLY: how long to hold a replay's `ct/complete-move` before the
+  ## window takes it — `CODETRACER_TEST_DELAY_STOP_MS`, read only in the
+  ## Electron renderer and only when `CODETRACER_IN_UI_TEST` is set, so no
+  ## user's session ever waits on it. The scenario pack sets it (stage
+  ## `delay-stop-drawing`) to widen the window between "the replay answered"
+  ## and "the window shows the stop" from one frame to a measurable one: a
+  ## sync condition that fires early (`replay-idle` before the stop is drawn)
+  ## is then observable. The status stays busy meanwhile, as it is while any
+  ## move is in flight.
+  when defined(ctInExtension) or defined(ctInCentralExtensionContext):
+    0
+  else:
+    var ms = 0
+    {.emit: """
+    if (typeof process !== "undefined" && process.env &&
+        process.env.CODETRACER_IN_UI_TEST) {
+      const n = parseInt(process.env.CODETRACER_TEST_DELAY_STOP_MS || "0", 10);
+      if (n > 0) `ms` = n;
+    }
+    """.}
+    ms
+
 proc setupMiddlewareApis*(dapApi: DapApi, viewsApi: MediatorWithSubscribers) {.exportc.}=
   ## Connect one replay session's DAP API to its views mediator, both ways.
   ## Called once for EVERY tab's session (`ui_js.configureSessionMiddleware`),
@@ -222,7 +245,7 @@ proc setupMiddlewareApis*(dapApi: DapApi, viewsApi: MediatorWithSubscribers) {.e
   # in sync with the backend's serde shape.
   dapApi.on(CtUpdatedHttpRequests, proc(kind: CtEventKind, value: JsObject) =
     viewsApi.emit(CtUpdatedHttpRequests, value))
-  dapApi.on(CtCompleteMove, proc(kind: CtEventKind, value: MoveState) =
+  proc applyCompleteMove(value: MoveState) =
     cdebug "[PIPELINE] middleware.CtCompleteMove: received from dapApi, rrTicks=" &
       $value.location.rrTicks &
       ", emitting to viewsApi"
@@ -282,6 +305,13 @@ proc setupMiddlewareApis*(dapApi: DapApi, viewsApi: MediatorWithSubscribers) {.e
       # The same session's run state as its status bar above (`owner`).
       owner.status.stableBusy = false
       owner.status.hasStarted = true
+  dapApi.on(CtCompleteMove, proc(kind: CtEventKind, value: MoveState) =
+    # TEST-ONLY (`testStopDelayMs`): the answer held before it is drawn.
+    let held = testStopDelayMs()
+    if held > 0:
+      discard windowSetTimeout(proc() = applyCompleteMove(value), held)
+    else:
+      applyCompleteMove(value)
   )
 
   dapApi.on(CtLoadedTerminal, proc(kind: CtEventKind, value: seq[ProgramEvent]) = viewsApi.emit(CtLoadedTerminal, value))

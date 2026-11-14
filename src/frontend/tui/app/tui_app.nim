@@ -380,6 +380,12 @@ type
     traceName*: string
     tick*: int
     totalTicks*: int
+    replayStatus*: ExecutionStatus
+      ## The top bar's status badge: `esPaused` at a stop, and what the
+      ## replay is doing (`esStepping`, `esReversing`, `esSeeking`) while a
+      ## move the user asked for is in flight — the frame `main.nim` paints
+      ## between sending the move and drawing its stop, so the screen never
+      ## says PAUSED over a stop the replay has already left.
     menu*: MenuVM
       ## PLAT-48. The program menu — the shared tree, the shared state.
     omnibar*: OmnibarVM
@@ -671,7 +677,7 @@ proc shellModel*(app: TuiApp; width, height: int): ShellModel =
   let selected = selectProfile(width, height)
   var header = initHeaderModel(
     traceName = (if app.traceName.len > 0: app.traceName else: "-"),
-    tick = app.tick, totalTicks = app.totalTicks)
+    status = app.replayStatus, tick = app.tick, totalTicks = app.totalTicks)
   let active = app.shell.activeSlot()
   if not active.isNil:
     header.traceName = (if active.title.len > 0: active.title else: $active.id)

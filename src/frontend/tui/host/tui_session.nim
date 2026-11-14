@@ -2160,6 +2160,20 @@ proc applyPaneClick(s: TuiSession; rt: TuiRuntime; c: PaneClickRequest) =
     s.refresh(rt)
     s.noteWhere(rt)
 
+proc testStopDelayMs(): int =
+  ## TEST-ONLY: how long to hold a move's answer before drawing its stop —
+  ## `CODETRACER_TEST_DELAY_STOP_MS`, read only when `CODETRACER_IN_UI_TEST`
+  ## is set, so no user's session ever waits on it. The scenario pack sets
+  ## it (stage `delay-stop-drawing`) to widen the window between "the
+  ## replay answered" and "the window shows the stop" from one frame to a
+  ## measurable one: a sync condition that fires early (`replay-idle`
+  ## before the stop is drawn) is then observable instead of hidden in that
+  ## frame. The window keeps showing the move in flight meanwhile.
+  if getEnv("CODETRACER_IN_UI_TEST").len == 0:
+    return 0
+  try: max(0, parseInt(getEnv("CODETRACER_TEST_DELAY_STOP_MS", "0")))
+  except ValueError: 0
+
 proc applyOutcome*(s: TuiSession; rt: TuiRuntime; outcome: RuntimeOutcome) =
   ## What the host does with one token's outcome. The session-level half —
   ## settling a move, going to a call, toggling its children, waiting for an
@@ -2212,6 +2226,9 @@ proc applyOutcome*(s: TuiSession; rt: TuiRuntime; outcome: RuntimeOutcome) =
       s.applyOutcome(rt, again)
   elif outcome.awaitsMove:
     s.pumpMove()
+    let held = testStopDelayMs()
+    if held > 0:
+      os.sleep(held)
     rt.app.viewedFile = ""
     s.refresh(rt)
   elif outcome.refreshesSession:

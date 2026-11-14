@@ -8582,3 +8582,10 @@ ONE ROUTER ON EVERY FRONT-END (2026-10-12, PLAT-68 Phase B).
 - Language recordings (Circom, Leo, Cadence, Aiken, Cairo, Miden) stop at the function's first line with no variables; step once before reading the state pane. The Cairo recorder needs `CAIRO_CORELIB_DIR` = a corelib/src matching its cairo-lang (2.17.0-rc.4 at codetracer-cairo-recorder 34c0511).
 - `add-recording` (stage) imports a further recording into the run's trace store before the window starts, so the welcome screen's Recent traces list it — the user's way to open a second recording in a "+" tab.
 
+||||||| parent of e00113e8ef6 (wip)
+||||||| parent of d67952a20a2 (wip)
+
+## `replay-idle` and the in-flight move (scenario pack, 2026-11-12)
+- The terminal front-end handles a move synchronously (`tui_session.applyOutcome` blocks in `pumpMove` until `ct/complete-move`, then `refresh` rebuilds the header tick and the editor stop together), so before this there was NO frame between "key read" and "stop drawn": the badge said `[PAUSED]` throughout. `main.nim` now paints one frame before `applyOutcome` for every `awaitsMove` outcome (unless the next key is already waiting) with `TuiApp.replayStatus` = `runtime.statusWhileMoving(action)` — `[STEPPING]`, `[REVERSING]` or `[SEEKING]` — and resets it to `esPaused` after. The badge is wider than `[PAUSED]`, so the top bar re-lays out for that frame.
+- The terminal binding's `replay-idle` = `[PAUSED]` + tick on row 0 AND the pty quiet for 2x60 ms (`screenQuiet`): a key sent with `settle: false` is otherwise not yet read when the condition is first polled, and the old `[PAUSED]` frame answers for it.
+- Test-only hook `CODETRACER_TEST_DELAY_STOP_MS` (honoured only with `CODETRACER_IN_UI_TEST` set): the terminal sleeps after `pumpMove` before `refresh`; the desktop renderer defers the whole `ct/complete-move` handler in `middleware.setupMiddlewareApis` with `setTimeout` (status stays `stableBusy`). Set by the pack stage `delay-stop-drawing`; used by `tests/replay-idle-means-the-stop-is-shown.yaml`, which is what kills the pack harness's T4/P2 arms (an early `replay-idle`).

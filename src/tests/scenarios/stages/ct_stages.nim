@@ -451,6 +451,22 @@ proc frontEndOptions*(s: StageState; options: JsonNode; term: string;
     for k, v in env:
       s.launch.env[k] = v.getStr.replace("$project", s.launch.project)
 
+proc delayStopDrawing*(s: StageState; ms: int) =
+  ## THE ONE STAND-IN in the pack's stages: the front-end holds each move's
+  ## answer `ms` milliseconds before it draws the stop
+  ## (`CODETRACER_TEST_DELAY_STOP_MS`, honoured only with
+  ## `CODETRACER_IN_UI_TEST` set — the terminal's `tui_session.applyOutcome`,
+  ## the desktop's `middleware` on `ct/complete-move`). It changes nothing a
+  ## sync condition is allowed to rely on — the window still shows the move
+  ## in flight until it draws the stop — and widens the gap between the two
+  ## from one frame to one a scenario can observe, so a `replay-idle` that
+  ## fires before the stop is shown fails its scenario instead of passing by
+  ## luck of scheduling.
+  if ms <= 0:
+    raise newException(ValueError, "delay-stop-drawing: ms must be positive")
+  s.launch.env["CODETRACER_IN_UI_TEST"] = "1"
+  s.launch.env["CODETRACER_TEST_DELAY_STOP_MS"] = $ms
+
 proc dropRecordedFile*(s: StageState; name: string) =
   ## The prepared recording, copied into this run's root without the
   ## recorded source file `name`: a recording that lacks one of its files.
@@ -1173,6 +1189,8 @@ proc runStage*(s: StageState; use: string; args: JsonNode) =
     s.fixtureProject(argStr(args, "name"))
   of "drop-recorded-file":
     s.dropRecordedFile(argStr(args, "name"))
+  of "delay-stop-drawing":
+    s.delayStopDrawing(argInt(args, "ms", 0))
   of "front-end-options":
     s.frontEndOptions(if args.isNil: nil else: args{"options"}, argStr(args, "term"),
                       if args.isNil: nil else: args{"env"})

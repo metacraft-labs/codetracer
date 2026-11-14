@@ -98,8 +98,8 @@ ARMS = [
     ("T4", [(TERM_BIND,
              '        some(top.contains("[ct]") and top.contains("tick: ") and top.contains("[PAUSED]") and',
              "        some(true or")],
-     # at launch the terminal front-end draws the stop with its first frame;
-     # a new session opened by the trace is where an early `replay-idle` shows
+     # IDLE's `delay-stop-drawing` holds a step's stop three seconds behind
+     # the in-flight badge: an early `replay-idle` reads the old line
      [("terminal", IDLE), ("terminal", EXAMPLE)],
      "the terminal's replay-idle fires before the window shows the stop"),
     ("P1", [(PW_BIND,

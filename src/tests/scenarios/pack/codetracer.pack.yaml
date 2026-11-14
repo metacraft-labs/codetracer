@@ -1966,6 +1966,13 @@ stages:
       `TERM`), with these environment variables (`$project` in a value is
       the stage's project folder).
     params: { options: record, term: text, env: record }
+  delay-stop-drawing:
+    summary: >-
+      Test-only: the front-end holds each move's answer `ms` milliseconds
+      before it draws the stop, showing the move in flight meanwhile — so a
+      sync condition that fires before the stop is shown is caught rather
+      than hidden in one frame. The pack's one stand-in.
+    params: { ms: int }
   drop-recorded-file:
     summary: >-
       Copy the prepared recording into the run's root without its recorded
