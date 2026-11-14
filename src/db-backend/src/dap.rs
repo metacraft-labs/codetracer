@@ -381,11 +381,21 @@ pub enum DapMessage {
 #[derive(Debug, Clone)]
 pub struct DapClient {
     pub seq: i64,
+    /// The DAP thread id this client's `stopped` events name. A recording
+    /// served alone is thread [`crate::dap_handler::REPLAYED_THREAD_ID`];
+    /// one recording of a session (`session.toml`) is that thread
+    /// composed with its slot (`session_handler::compose_thread_id`), the
+    /// id `threads` lists it under, so a client follows a stop into the
+    /// recording that stopped.
+    pub stopped_thread_id: i64,
 }
 
 impl Default for DapClient {
     fn default() -> Self {
-        DapClient { seq: 1 }
+        DapClient {
+            seq: 1,
+            stopped_thread_id: i64::from(crate::dap_handler::REPLAYED_THREAD_ID),
+        }
     }
 }
 
@@ -452,9 +462,10 @@ impl DapClient {
     pub fn stopped_event(&mut self, reason: &str) -> DapResult<DapMessage> {
         let body = StoppedEventBody {
             reason: reason.to_string(),
-            // The replayed process is always DAP thread 1
-            // (`dap_handler::REPLAYED_THREAD_ID`); it is the one that stopped.
-            thread_id: Some(i64::from(crate::dap_handler::REPLAYED_THREAD_ID)),
+            // The replayed process is DAP thread 1
+            // (`dap_handler::REPLAYED_THREAD_ID`), composed with the
+            // recording's slot in a session; it is the one that stopped.
+            thread_id: Some(self.stopped_thread_id),
             all_threads_stopped: Some(true),
             hit_breakpoint_ids: Some(vec![]),
             description: None,
@@ -669,7 +680,10 @@ impl DapClient {
     }
 
     pub fn with_seq(seq: i64) -> DapClient {
-        DapClient { seq }
+        DapClient {
+            seq,
+            ..DapClient::default()
+        }
     }
 }
 

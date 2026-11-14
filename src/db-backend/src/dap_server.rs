@@ -902,6 +902,13 @@ fn setup_session(
             )
             .into()
         })?;
+        let mut handler = handler;
+        // Its stops name the thread `threads` lists it under, so a client
+        // (VS Code's call stack and editor) follows a stop into this
+        // recording rather than showing the first recording's.
+        if let Some(composed) = compose_thread_id(idx as TraceSlot, crate::dap_handler::REPLAYED_THREAD_ID) {
+            handler.dap_client.stopped_thread_id = composed;
+        }
         handlers.push(handler);
     }
     let session = SessionHandler::new(manifest, handlers)

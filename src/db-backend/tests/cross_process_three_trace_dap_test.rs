@@ -698,3 +698,51 @@ fn requests_routed_to_a_switched_recording_are_answered_about_it() {
         calltrace.message
     );
 }
+
+/// A move into a sibling recording reports its stop as THAT recording's
+/// thread.
+///
+/// A client follows a `stopped` event to the thread it names: VS Code
+/// focuses that thread and shows its top frame. Every recording's handler
+/// named thread 1, the first recording's, so a jump the Event Log's
+/// boundary chip routed into the server recording moved the server's
+/// replay while VS Code went on showing the browser's stop. The server
+/// recording's stop must name the thread `ct/listProcesses` gives it.
+#[test]
+fn a_stop_in_a_sibling_recording_names_that_recordings_thread() {
+    let manifest = recording_root().join("session.toml");
+
+    let mut client = DapStdioTestClient::start().expect("start db-backend");
+    client
+        .initialize_and_launch_session(&manifest)
+        .expect("launch the three-trace session");
+
+    let entries = list_processes(&mut client);
+    let backend_thread = thread_id_for_role(&entries, ROLE_BACKEND);
+    assert_ne!(backend_thread, 1, "the server recording is not the session's first");
+
+    // The step the server received the browser's request at (the
+    // `recv account-balance` firing; see the fixture's ANSWERS.md).
+    let request = client.dap_client_mut().request(
+        "ct/goto-ticks",
+        serde_json::json!({ "threadId": backend_thread, "ticks": 43 }),
+    );
+    client.send_message(&request).expect("send ct/goto-ticks");
+
+    let mut named = Vec::new();
+    loop {
+        match client.read_until_event_msg("stopped", Duration::from_secs(60)) {
+            Ok(DapMessage::Event(e)) => {
+                let thread = e.body.get("threadId").and_then(|t| t.as_i64());
+                named.push(thread);
+                if thread == Some(backend_thread) {
+                    break;
+                }
+            }
+            Ok(other) => panic!("expected a stopped event, got {other:?}"),
+            Err(err) => panic!(
+                "no stop named the server recording's thread {backend_thread}; stops named {named:?}: {err}"
+            ),
+        }
+    }
+}
