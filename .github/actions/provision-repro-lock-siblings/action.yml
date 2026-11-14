@@ -183,6 +183,17 @@ inputs:
       The GitHub App private key (the CI_TOKEN_PROVIDER_PRIVATE_KEY secret).
       See app-id.
     required: true
+  test-siblings:
+    description: >
+      Members of the lock's develop set that are not build inputs but that a
+      job's tests run against, comma-separated, cloned at the lock's pins with
+      the build inputs: the scenario lanes name the scenario runner and their
+      backend (DemoVideoScript, DemoVideoScript-TermAssert,
+      DemoVideoScript-GuiAssert with GuiAssert, DemoVideoScript-Playwright),
+      which `ci/test/scenarios.sh` builds from `../<name>`. Names only; the
+      revisions come from repro.lock, as for every other entry.
+    required: false
+    default: ""
 
 runs:
   using: composite
@@ -237,6 +248,10 @@ runs:
           # shell, and a nix-darwin runner has no grep or sed on its PATH
           # here.
           build_inputs="$(ci/repro-lock-build-input-siblings.sh repro.lock)"
+          test_siblings="${{ inputs.test-siblings }}"
+          if [ -n "${test_siblings}" ]; then
+            build_inputs="${build_inputs},${test_siblings}"
+          fi
           echo "Provisioning the lock's build-input siblings: ${build_inputs}"
           siblings_root="$(cd .. && pwd)"
           nix develop .#ci --command \

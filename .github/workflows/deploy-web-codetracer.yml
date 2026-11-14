@@ -439,6 +439,7 @@ jobs:
             # isonim-gpui again 2026-11-09, after the flake.lock re-pin ffbaf94f3;
             # isonim-gpui again 2026-11-11, after cfdda1ce1; isonim-tui again
             # 2026-11-12 (its web driver reads the browser's capabilities).
+            # nim-agents 2026-11-14, after flake.lock moved it (7736bcea7ff).
             isonim=b5cc28aee4781a71eeec34b14b4c27ba2cd68e67
             isonim-tui=8e43ce06f7f078530c7a8585c210ad7648fa0051
             isonim-gpui=9833561d1be64a20ddce7ccf2bece2f1f0ae4db9
@@ -447,7 +448,7 @@ jobs:
             nim-pty=2845abd58dd2073475177301590c8b51aa5c9094
             nim-acp=d0fcc8beb97db7132cd22db7abaf49bbbbaf08c4
             nim-agent-harbor=8d8024331ac46cae7f52bf9bff19f635e70f82f5
-            nim-agents=25c3bf7dd9ad060744452824fc44c62db08287eb
+            nim-agents=b2c97c530406d68e215e26b28fc43a2dd02ce090
             # THE REPROBUILD-PACKAGES CATALOG, pinned to the revision the
             # locked reprobuild (flake.lock `reprobuild`, 372aece6) is tested
             # against: its own `.github/sibling-repos` pins

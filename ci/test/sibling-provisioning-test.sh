@@ -517,7 +517,16 @@ readonly REPRO_LOCK="$REPO_ROOT/repro.lock"
 # 2026-11-05-codetracer-imports-nim-agents-isonim-viewmodels-without-declaring-it.md).
 # ci/test/nim-config-siblings-pinned-test.sh now fails a sibling the Nim
 # configs read and the lock does not pin.
-readonly LOCK_DECLARED_DEPS='isonim,isonim-tui,codetracer-trace-format-nim,nim-everywhere,nim-agent-harbor,nim-agents,nim-agents-isonim-viewmodels,nim-acp,test-certificates-tools,io-mon,nim-stackable-hooks,codetracer-image-diff,isonim-render-serve,nim-termctl,nim-pty,nim-shm-queue,isonim-gpui,isonim-freya,isonim-cocoa,reprobuild-packages,TermAssert,TermAssertClient,codetracer-beam-recorder,codetracer-ci,codetracer-evm-recorder,codetracer-js-recorder,codetracer-launcher,codetracer-native-backend,codetracer-native-recorder,codetracer-native-test-programs,codetracer-observability-cli,codetracer-observability-e2e,codetracer-observability-grafana,codetracer-observability-jaeger,codetracer-private-recordings,codetracer-python-recorder,codetracer-ruby-recorder,codetracer-test-mirror,codetracer-trace-format,codetracer-visual-replay,codetracer-vscode-extension,codetracer-wasm-instrumenter,codetracer-wasm-recorder,isonim-examples,metacraft-github-actions,ngx-isonim,nim-faststreams,nim-libvterm,nim-shm-gset,nim-stew,reprobuild,runquota,tree-sitter-aiken,tree-sitter-nim,infra,isonim-platform'
+#
+# 19 -> 24 (2026-11-14): the scenario pack's runner and backends —
+# DemoVideoScript, DemoVideoScript-TermAssert, DemoVideoScript-GuiAssert,
+# DemoVideoScript-Playwright and GuiAssert. `ci/test/scenarios.sh` builds them
+# from `../<name>` at the revisions the lock pins, and the scenario jobs check
+# them out (`provision-repro-lock-siblings` with `extra-siblings`). They are
+# test dependencies, like infra: in the develop set, not in the build-input
+# subset. The lock had declared them since the pack landed (a0efd649434), and
+# this list had not followed.
+readonly LOCK_DECLARED_DEPS='isonim,isonim-tui,codetracer-trace-format-nim,nim-everywhere,nim-agent-harbor,nim-agents,nim-agents-isonim-viewmodels,nim-acp,test-certificates-tools,io-mon,nim-stackable-hooks,codetracer-image-diff,isonim-render-serve,nim-termctl,nim-pty,nim-shm-queue,isonim-gpui,isonim-freya,isonim-cocoa,reprobuild-packages,TermAssert,TermAssertClient,codetracer-beam-recorder,codetracer-ci,codetracer-evm-recorder,codetracer-js-recorder,codetracer-launcher,codetracer-native-backend,codetracer-native-recorder,codetracer-native-test-programs,codetracer-observability-cli,codetracer-observability-e2e,codetracer-observability-grafana,codetracer-observability-jaeger,codetracer-private-recordings,codetracer-python-recorder,codetracer-ruby-recorder,codetracer-test-mirror,codetracer-trace-format,codetracer-visual-replay,codetracer-vscode-extension,codetracer-wasm-instrumenter,codetracer-wasm-recorder,isonim-examples,metacraft-github-actions,ngx-isonim,nim-faststreams,nim-libvterm,nim-shm-gset,nim-stew,reprobuild,runquota,tree-sitter-aiken,tree-sitter-nim,infra,isonim-platform,DemoVideoScript,DemoVideoScript-TermAssert,DemoVideoScript-GuiAssert,DemoVideoScript-Playwright,GuiAssert'
 # The build-input subset of that set (members that are also solved packages,
 # i.e. what `repro.nim` `uses` from source), as
 # `ci/repro-lock-build-input-siblings.sh` derives it from the lock. This is

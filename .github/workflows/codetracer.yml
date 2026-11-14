@@ -3882,6 +3882,8 @@ jobs:
         with:
           app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
           private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+          # The scenario lane builds its runner and backend from these (ci/test/scenarios.sh).
+          test-siblings: DemoVideoScript,DemoVideoScript-TermAssert
 
       - name: Build ct and replay-server
         # `test_fixture_corpus.nim` (Tier 1) opens real recorded traces through
@@ -4212,6 +4214,8 @@ jobs:
         with:
           app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
           private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+          # The scenario lane builds its runner and backend from these (ci/test/scenarios.sh).
+          test-siblings: DemoVideoScript,DemoVideoScript-GuiAssert,GuiAssert
 
       - name: Build ct and replay-server
         # `ct record` records the `calc` and `call_pages` fixtures the
@@ -6382,6 +6386,8 @@ jobs:
         with:
           app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
           private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+          # The scenario lane builds its runner and backend from these (ci/test/scenarios.sh).
+          test-siblings: DemoVideoScript,DemoVideoScript-Playwright
 
       # NOTE: codetracer-trace-format, codetracer-trace-format-nim,
       # codetracer-native-recorder, codetracer-visual-replay and
