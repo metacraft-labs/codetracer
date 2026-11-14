@@ -276,6 +276,32 @@ proc applyControl*(pb: AhPlayback; control: PlaybackControl): bool =
     pb.rewind()
     moved
 
+const PlaybackOperationPrefix* = "story-playback."
+  ## The namespace of the operations a playback control carries.
+
+func operationOf*(control: PlaybackControl): string =
+  ## The operation a control's button carries (`story-playback.step`): a
+  ## press on it is routed like any element's (Input-Routing-And-Keymaps.md
+  ## §5.1), so a story host's view draws the name and holds no handler.
+  PlaybackOperationPrefix & $control
+
+func controlOfOperation*(operation: string): (bool, PlaybackControl) =
+  ## The control `operation` names; false for any other operation.
+  for control in PlaybackControl:
+    if operation == operationOf(control): return (true, control)
+  (false, pcPlay)
+
+proc performPlaybackOperation*(pb: AhPlayback; operation: string): bool =
+  ## A story host's procedure for a press its router resolved to
+  ## `operation`: the control it names, applied. False, and nothing done,
+  ## for an operation that names no control (a user's row binding the
+  ## press to something the story host does not perform) or with no
+  ## playback.
+  let (known, control) = controlOfOperation(operation)
+  if not known or pb.isNil: return false
+  discard pb.applyControl(control)
+  true
+
 proc controlAction*(pb: AhPlayback; control: PlaybackControl): proc() =
   ## A button's click handler, built in a proc of its own so each closure
   ## owns its control (a closure made in a loop would share the loop's).

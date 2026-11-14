@@ -115,6 +115,7 @@ import viewmodel/views/[isonim_agent_harbor_session_tabs_view,
                         isonim_agent_harbor_initiatives_view,
                         isonim_agent_harbor_initiative_tabs_view,
                         isonim_agent_harbor_playback_view]
+import stories/dom_playback_presses
 import ../ct_test/contracts as ct_test_contracts
 
 type
@@ -1800,6 +1801,10 @@ proc hostPlayback(surface, fixture: string): AhPlayback =
   if isPlaybackStory(surface, fixture): newAhPlayback(surface, fixture, newRealClock())
   else: nil
 
+var shownPlayback: AhPlayback
+  ## The playback whose bar is on the page (StoryBook shows one story at a
+  ## time); nil when none is. The bar's presses act on it.
+
 proc mountPlaybackChrome(pb: AhPlayback; options: string): DisposeProc =
   ## The story host's chrome under a playback story: the playback bar along
   ## the bottom of the canvas (`isonim_agent_harbor_playback_view.nim`),
@@ -1807,6 +1812,11 @@ proc mountPlaybackChrome(pb: AhPlayback; options: string): DisposeProc =
   ## `moment` StoryBook global: `?id=<story>&globals=moment:<name>`).
   if pb.isNil: return proc() = discard
   pb.openAtMoment(storyOption(options, "moment"))
+  shownPlayback = pb
+  # A press on the bar is routed (Input-Routing-And-Keymaps.md §5.1): its
+  # buttons carry their controls' operations, performed on the playback on
+  # the page (`stories/dom_playback_presses`).
+  routePlaybackPresses(proc(): AhPlayback = shownPlayback)
   var rootDisposer: proc()
   var bar: isonim_dom.Element
   createRoot proc(dispose: proc()) =
@@ -1814,6 +1824,7 @@ proc mountPlaybackChrome(pb: AhPlayback; options: string): DisposeProc =
     bar = renderAgentHarborPlaybackBar[WebRenderer, isonim_dom.Element](WebRenderer(), pb)
     discard isonim_dom.appendChild(isonim_dom.Node(documentBody()), isonim_dom.Node(bar))
   return proc() =
+    if shownPlayback == pb: shownPlayback = nil
     pb.dispose()
     if rootDisposer != nil: rootDisposer()
     if bar != nil: isonim_dom.remove(isonim_dom.Node(bar))

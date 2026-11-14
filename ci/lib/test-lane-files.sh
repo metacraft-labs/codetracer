@@ -1167,6 +1167,17 @@ test_lane_files() {
 		# Front-Ends D10), a plain click on a shared row's link is the row's
 		# click and does not navigate; a modified click is the browser's.
 		echo src/frontend/tests/row_links_dom_test.nim
+		# `breakpoint_condition_dialog_dom_test.nim`: the "Edit breakpoint
+		# condition" dialog's OK and Cancel are buttons carrying their
+		# operations, pressed through the window's one pointer listener and
+		# the router (a user's row takes the press); its field's Enter and
+		# Escape are the field's, and Escape elsewhere is a dismissal.
+		echo src/frontend/tests/breakpoint_condition_dialog_dom_test.nim
+		# `story_playback_bar_dom_test.nim`: the web story host's playback
+		# bar's buttons carry their operations, pressed through the page's one
+		# pointer listener and the router as StoryBook wires it; a user's row
+		# takes the press.
+		echo src/frontend/tests/story_playback_bar_dom_test.nim
 		# `event_log_scroll_area_dom_test.nim`: the Event Log's scroll area is as
 		# tall as the whole log, in a real DOM, whatever the table's fit does.
 		echo src/frontend/tests/event_log_scroll_area_dom_test.nim

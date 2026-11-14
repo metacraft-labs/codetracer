@@ -7,9 +7,19 @@
 ## playback is at. 28px high (the web's 1.75rem), along the window's bottom;
 ## the story above it is that much shorter.
 ##
-## It is the story host's tooling, not a product view. Each button calls the
-## playback's control (`applyControl`), and the bar redraws when the
-## playback says its readout changed (`AhPlayback.changed`).
+## It is the story host's tooling, not a product view. The bar redraws when
+## the playback says its readout changed (`AhPlayback.changed`).
+##
+## A press on a button is ROUTED (Input-Routing-And-Keymaps.md §5.1): each
+## button carries its control's operation (`data-ct-operation`,
+## `story-playback.step`, …), and its one pointer listener is the hit test
+## (§5.3 — GPUI's shim delivers a press to the element under the pointer, as
+## `gpui/window_clicks.nim`'s rows are pressed): it names the button's
+## operation and the modifiers held, and hands them to the story host's
+## `PlaybackPress`, which resolves the press through its router — a user's
+## row for the press first, else the operation the button carries
+## (`viewmodel/input/element_press`) — and performs it. Nothing here decides
+## what a press does.
 ##
 ## Facts (`data-ah-*`) for a reader of the render plan: `playback` (the
 ## playback's state: playing, paused, ended) on the bar, `playback-control`
@@ -19,17 +29,43 @@
 import isonim/core/computation
 
 import ../../stories/agent_harbor_playback
+import ../../viewmodel/input/element_press
+import ../app/gpui_keys
+import ../../../common/key_names
 import ./ah_theme
 
 export agent_harbor_playback
+
+type
+  PlaybackPress* = proc(operation: string; mods: KeyModifiers)
+    ## The story host's route for a press on a bar's button: `operation` is
+    ## the one the button carries, `mods` the modifiers held.
 
 const
   PlaybackBarPx* = 28
     ## The bar's height: `.ah-playback`'s 1.75rem.
 
+proc modifiersOf(ev: GpuiEvent): KeyModifiers =
+  ## The modifiers a press was made with, as the keymap spells them.
+  var names: seq[string] = @[]
+  if gmControl in ev.modifiers: names.add "control"
+  if gmShift in ev.modifiers: names.add "shift"
+  if gmAlt in ev.modifiers: names.add "alt"
+  if gmPlatform in ev.modifiers: names.add "platform"
+  keyModifiersOfGpui(names)
+
+proc listenForPress(r: GpuiRenderer; button: GpuiElement; operation: string;
+                    press: PlaybackPress) =
+  ## The button's hit test: a primary press on it is handed to `press` with
+  ## the operation the button carries. A proc of its own so each closure owns
+  ## its operation.
+  r.addEventListener(button, "mousedown", proc(ev: GpuiEvent) =
+    press(operation, modifiersOf(ev)))
+
 proc drawPlaybackBar*(r: GpuiRenderer; host: GpuiElement; pb: AhPlayback;
-                      p: AhPalette; widthPx: int) =
-  ## The bar as the playback is now, into `host` (cleared first).
+                      p: AhPalette; widthPx: int; press: PlaybackPress) =
+  ## The bar as the playback is now, into `host` (cleared first); a press on
+  ## a button goes to `press`.
   r.clearChildren(host)
   let bar = r.box(pairs = [("width", $widthPx & "px"), ("height", $PlaybackBarPx & "px"),
                            ("flex-shrink", "0"), ("items", "center"), ("gap", "4px"),
@@ -48,7 +84,9 @@ proc drawPlaybackBar*(r: GpuiRenderer; host: GpuiElement; pb: AhPlayback;
     r.appendChild(b, r.text(label, CaptionPx, p.textLabel, shrink = false))
     r.tag(b, "playback-control", $control)
     r.tag(b, "button", label)
-    r.addEventListener(b, "click", pb.controlAction(control))
+    r.setAttribute(b, OperationAttribute, operationOf(control))
+    if press != nil:
+      r.listenForPress(b, operationOf(control), press)
     r.appendChild(bar, b)
   let readout = r.box(pairs = [("flex-grow", "1"), ("min-width", "0px"), ("gap", "8px"),
                                ("padding-left", "8px"), ("overflow", "hidden"),
@@ -64,8 +102,8 @@ proc drawPlaybackBar*(r: GpuiRenderer; host: GpuiElement; pb: AhPlayback;
   r.appendChild(host, bar)
 
 proc mountPlaybackBar*(r: GpuiRenderer; host: GpuiElement; pb: AhPlayback;
-                       p: AhPalette; widthPx: int) =
+                       p: AhPalette; widthPx: int; press: PlaybackPress) =
   ## Draws the bar and redraws it whenever the playback's readout changes.
   createRenderEffect proc() =
     discard pb.changed.val
-    drawPlaybackBar(r, host, pb, p, widthPx)
+    drawPlaybackBar(r, host, pb, p, widthPx, press)

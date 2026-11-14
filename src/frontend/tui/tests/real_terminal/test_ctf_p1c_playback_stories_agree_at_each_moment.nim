@@ -14,8 +14,11 @@
 ##
 ##   * WEB — the web views (`viewmodel/views/isonim_agent_harbor_*_view.nim`)
 ##     and the web host's playback bar (`isonim_agent_harbor_playback_view`),
-##     rendered on IsoNim's `MockRenderer` and driven by clicks on the bar's
-##     buttons. This is the StoryBook mount (`storybook_components.nim`'s
+##     rendered on IsoNim's `MockRenderer` and driven by presses on the bar's
+##     buttons, resolved as the page's one pointer listener resolves them
+##     (`viewmodel/input/element_press`: the router over the base keymap,
+##     then the operation the button carries) and performed by the story
+##     host's procedure (`performPlaybackOperation`). This is the StoryBook mount (`storybook_components.nim`'s
 ##     `mountAgentHarborVM` and `mountPlaybackChrome`) minus the browser: the
 ##     same story constructor over the same playback, the same generic view
 ##     instantiated for the mock DOM instead of `WebRenderer`, the strip told
@@ -25,9 +28,10 @@
 ##     runs.
 ##   * GPUI — `gpui/agent_harbor/ah_stories.mountAgentHarborStoryGpui`, the
 ##     GPUI story host's mount, in a real isonim-gpui shadow tree (the shim
-##     in process; no window), driven by clicks dispatched through the shim
-##     at its playback bar (`ah_playback_bar.nim`), and once by Play with its
-##     clock advanced to the moment, then Pause.
+##     in process; no window), driven by presses (`mousedown`) dispatched
+##     through the shim at its playback bar (`ah_playback_bar.nim`), which the
+##     story host routes through its router (`ah_stories.playbackPresses`),
+##     and once by Play with its clock advanced to the moment, then Pause.
 ##   * TERMINAL — `tui/agent_harbor/ah_tui_stories.mountStory`, the terminal
 ##     story host's mount, driven by its keys (`n` step, `[` and `]` the
 ##     previous and next named moment), redrawn as the host redraws it
@@ -101,6 +105,10 @@ import ../../../gpui/agent_harbor/ah_stories
 import ../../../viewmodel/views/[isonim_agent_harbor_session_tabs_view,
   isonim_agent_harbor_initiatives_view, isonim_agent_harbor_initiative_tabs_view,
   isonim_agent_harbor_fleet_view, isonim_agent_harbor_playback_view]
+import ../../../viewmodel/input/element_press
+import ../../../viewmodel/keymap/[base_keymaps, context_keys, editing_keymap,
+                                  keymap_router, scope_path]
+from ../../../../common/key_names import kpNative
 from ../../../viewmodel/views/isonim_session_tabs_view import SessionTabLabelClass
 
 const
@@ -393,17 +401,33 @@ proc factsOf(h: Hosts; host: Host): seq[string] =
 
 # The hosts' controls, each driven as its host's reader drives it.
 
+let webRouter = initKeymapRouter(bkCua, KeyDelivery(frontEnd: feWeb,
+  platform: pkLinux, keyProtocol: kpNative))
+  ## StoryBook's: the base keymap's pointer rows (`installBaseElementRouting`).
+
 proc clickWeb(h: Hosts; control: PlaybackControl) =
+  ## A press on the web bar's button, as the page's one pointer listener
+  ## resolves it (`dom_pointer` calls `resolveElementPress`) and StoryBook's
+  ## procedure performs it.
   let found = h.web.bar.byClass("ah-playback-" & $control)
   doAssert found.len == 1, "the web bar draws no " & $control & " button"
-  found[0].fireEvent("click")
+  let outcome = resolveElementPress(routerResolver(webRouter, SessionFacts()),
+    @[element(ekWindow, "window"), pane(StoryPlaybackScope)], ButtonElementKind,
+    found[0].attributes.getOrDefault(OperationAttribute, ""), {}, "Click")
+  doAssert h.web.pb.performPlaybackOperation(outcome.operation),
+    "a press on the web bar's " & $control & " button ran " & outcome.operation
+
+proc gpuiButton(h: Hosts; control: PlaybackControl): GpuiElement =
+  for b in h.gpui.bar.all("playback-control"):
+    if b.attr("playback-control") == $control: result = b
+  doAssert not result.isNil, "the GPUI bar draws no " & $control & " button"
 
 proc clickGpui(h: Hosts; control: PlaybackControl) =
-  var target: GpuiElement
-  for b in h.gpui.bar.all("playback-control"):
-    if b.attr("playback-control") == $control: target = b
-  doAssert not target.isNil, "the GPUI bar draws no " & $control & " button"
-  gpui_renderer.fireEvent(target, "click")
+  ## A primary press on the GPUI bar's button, through the shim, as a window
+  ## delivers one (`mousedown`, the left button).
+  doAssert gpui_renderer.fireEvent(h.gpuiButton(control), "mousedown",
+    GpuiEvent(kind: gekPointerDown)) > 0,
+    "the GPUI bar's " & $control & " button heard no press"
 
 proc keyTui(h: Hosts; key: string) =
   doAssert h.tui.handleInput(key), "the terminal host did not take the key " & key
@@ -812,6 +836,44 @@ suite "CTF-P1c: the comparison can fail":
     ck spotProblems(story.surface, "", facts[0 .. ^2]).len +
        spotProblems(story.surface, "", facts[1 .. ^1]).len > 0
     h.dispose()
+
+suite "CTF-P1c: a press on a bar's button is routed":
+  # Input-Routing-And-Keymaps.md §5.1: the bars hold no handler that decides
+  # what a press does. A user's row for a press on a playback button takes
+  # it over, so the press does not move the playback; a bar whose button ran
+  # its control itself would move it here.
+  test "CONTROL: a user's row for the press takes it over in the GPUI host":
+    let story = playbackStories()[0]
+    gpui_reset_tree()
+    let rebound = parseUserKeymap(
+      """[ { "key": "click", "command": "debugger.continue",
+             "when": "paneKind == storyPlayback && elementKind == button" } ]""")
+    ck rebound.errors.len == 0
+    var m = gr.mountAgentHarborStoryGpui(story.surface, story.fixture, LaptopW, LaptopH,
+                                         dmDark, "", newTestClock(), "",
+                                         keymap = rebound)
+    var step: GpuiElement
+    for b in m.bar.all("playback-control"):
+      if b.attr("playback-control") == $pcStep: step = b
+    ck not step.isNil
+    ck gpui_renderer.fireEvent(step, "mousedown", GpuiEvent(kind: gekPointerDown)) > 0
+    ck m.playback.source.position == 0
+    m.dispose()
+    # The same press with no user row steps the playback.
+    gpui_reset_tree()
+    m = gr.mountAgentHarborStoryGpui(story.surface, story.fixture, LaptopW, LaptopH,
+                                     dmDark, "", newTestClock(), "")
+    step = nil
+    for b in m.bar.all("playback-control"):
+      if b.attr("playback-control") == $pcStep: step = b
+    ck gpui_renderer.fireEvent(step, "mousedown", GpuiEvent(kind: gekPointerDown)) > 0
+    ck m.playback.source.position > 0
+    # A modified press with no row of its own is the plain press.
+    let before = m.playback.source.position
+    ck gpui_renderer.fireEvent(step, "mousedown",
+      GpuiEvent(kind: gekPointerDown, modifiers: {gmControl})) > 0
+    ck m.playback.source.position > before
+    m.dispose()
 
 suite "CTF-P1c: assertion count":
   test "every assertion ran":

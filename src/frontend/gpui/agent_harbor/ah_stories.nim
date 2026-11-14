@@ -24,8 +24,13 @@ import ./ah_initiative_tab_bar
 import ./ah_initiative_panels
 import ./ah_fleet_panel
 import ./ah_playback_bar
+import ../../viewmodel/input/element_press
+import ../../viewmodel/keymap/[base_keymaps, context_keys, editing_keymap,
+                               keymap_router,
+                               scope_path, user_keymap]
+import ../../../common/key_names
 
-export agent_harbor_stories, ah_theme, ah_playback_bar
+export agent_harbor_stories, ah_theme, ah_playback_bar, user_keymap
 
 const
   GpuiAgentHarborSurfaces* = [
@@ -63,6 +68,28 @@ type
 
 proc hasGpuiRendering*(surface: string): bool =
   surface in GpuiAgentHarborSurfaces
+
+proc playbackPresses*(keymap: UserKeymap; pb: AhPlayback): PlaybackPress =
+  ## **THE STORY HOST'S ROUTE FOR A PRESS ON ITS PLAYBACK BAR**
+  ## (Input-Routing-And-Keymaps.md §5.1): the press is resolved in the
+  ## `storyPlayback` scope by the window's router — the base keymap with
+  ## `keymap` (a user's `keybindings.json` rows) laid over it — and a
+  ## user's row for the press takes it; a primary press with no row runs
+  ## the operation the button carries (`element_press`). The story host
+  ## performs only the playback's own operations (`performPlaybackOperation`):
+  ## a press resolved to any other is inert.
+  # GPUI's three keys (`edit_arm.GpuiDelivery`): it receives keys, not bytes.
+  let router = initKeymapRouter(bkCua, KeyDelivery(frontEnd: feGpui,
+                                                   platform: hostPlatform(),
+                                                   keyProtocol: kpNative),
+                                user = keymap)
+  let resolve = routerResolver(router, SessionFacts())
+  result = proc(operation: string; mods: KeyModifiers) =
+    let outcome = resolveElementPress(resolve,
+                                      @[element(ekWindow, "window"),
+                                        pane(StoryPlaybackScope)],
+                                      ButtonElementKind, operation, mods, "Click")
+    discard pb.performPlaybackOperation(outcome.operation)
 
 proc drawFrame(r: GpuiRenderer; p: AhPalette; title: string;
                widthPx, heightPx: int): tuple[frame, body: GpuiElement] =
@@ -115,7 +142,8 @@ proc drawFrame(r: GpuiRenderer; p: AhPalette; title: string;
 proc mountAgentHarborStoryGpui*(r: GpuiRenderer; surface, fixture: string;
                                 widthPx, heightPx: int; mode = dmDark;
                                 frameTitle = ""; clock: ClockBase = nil;
-                                moment = ""): AhStoryMount =
+                                moment = "";
+                                keymap = UserKeymap()): AhStoryMount =
   ## Builds the story's viewmodel and mounts its GPUI view, `widthPx` ×
   ## `heightPx`. A `frameTitle` frames it as a panel. Raises `ValueError` for
   ## a surface with no GPUI rendering, and (from the story constructors) for
@@ -124,7 +152,8 @@ proc mountAgentHarborStoryGpui*(r: GpuiRenderer; surface, fixture: string;
   ## A playback story plays on `clock` (a `RealClock` when nil; a test or a
   ## capture passes a `TestClock`), opens at `moment` (its first frame when
   ## ""), and has the host's playback bar under it: the story is drawn
-  ## `PlaybackBarPx` shorter, the bar along the bottom.
+  ## `PlaybackBarPx` shorter, the bar along the bottom. A press on the bar
+  ## is routed under `keymap`'s rows over the base's (`playbackPresses`).
   if not hasGpuiRendering(surface):
     raise newException(ValueError, "no GPUI rendering for the Agent Harbor surface " &
                        surface & " (story fixture " & fixture & ")")
@@ -202,7 +231,7 @@ proc mountAgentHarborStoryGpui*(r: GpuiRenderer; surface, fixture: string;
                          surface)
     if not pb.isNil:
       m.bar = r.createElement("div")
-      r.mountPlaybackBar(m.bar, pb, p, widthPx)
+      r.mountPlaybackBar(m.bar, pb, p, widthPx, playbackPresses(keymap, pb))
   if not outer.isNil:
     r.appendChild(outer, m.root)
     r.appendChild(outer, m.bar)

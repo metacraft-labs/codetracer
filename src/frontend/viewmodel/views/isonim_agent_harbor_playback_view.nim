@@ -8,20 +8,34 @@
 ## bottom of the canvas (`.ah-playback`, `agent_harbor.styl`), and the story's
 ## frame is that much shorter (`.ct-storybook-playback`,
 ## `storybook/stories/lib/surfaces.js`), as the GPUI and terminal story hosts
-## draw their bars under the story. Each button calls the playback's control
-## (`agent_harbor_playback.controlAction`); the bar redraws when the playback
-## says its readout changed (`AhPlayback.changed`).
+## draw their bars under the story. The bar redraws when the playback says
+## its readout changed (`AhPlayback.changed`).
+##
+## A press on a button is routed (Input-Routing-And-Keymaps.md §5.1): the bar
+## is the `storyPlayback` scope (`data-ct-pane`), each button carries its
+## control's operation (`data-ct-operation`, `story-playback.step`, …), and
+## the page's one pointer listener (`viewmodel/input/dom_pointer`) resolves
+## the press through the pointer keymap — a user's row for the press first —
+## and runs the story host's procedure for the operation
+## (`storybook_components` registers `performPlaybackOperation`). The bar
+## holds no handler of its own.
 ##
 ## A renderer-generic IsoNim view, like the Agent Harbor views beside it, so
-## the agreement test drives the same bar with the same clicks on IsoNim's
-## `MockRenderer`.
+## the agreement test renders the same bar on IsoNim's `MockRenderer` and
+## presses it as the page's listener does (`viewmodel/input/element_press`).
 
 import isonim/core/[signals, computation]
 import isonim/dsl/[ui, components]
 
 import ../../stories/agent_harbor_playback
+from ../keymap/scope_path import StoryPlaybackScope
+from ../input/element_press import OperationAttribute
 
 export signals, computation, components, agent_harbor_playback
+
+static:
+  # The DSL spells the attribute literally; it is the one the listener reads.
+  doAssert OperationAttribute == "data-ct-operation"
 
 const
   AgentHarborPlaybackClass* = "ah-playback"
@@ -32,11 +46,12 @@ proc appendRendered[R, N](r: R; host, child: N) =
   r.appendChild(host, child)
 
 proc renderPlaybackButton[R](r: R; pb: AhPlayback; control: PlaybackControl): auto =
-  ## One control, a proc of its own so each closure owns its control.
+  ## One control: a button carrying its control's operation, which a press
+  ## on it runs through the router (see the header).
   ui(r):
     button(class = PlaybackButtonClass & " ah-playback-" & $control,
            title = controlTitle(control),
-           onclick = pb.controlAction(control)):
+           `data-ct-operation` = operationOf(control)):
       text pb.controlLabel(control)
 
 proc renderAgentHarborPlaybackBar*[R, N](r: R; pb: AhPlayback): N =
@@ -45,7 +60,8 @@ proc renderAgentHarborPlaybackBar*[R, N](r: R; pb: AhPlayback): N =
   var bar: N
   let host = ui(r):
     tdiv(ref = bar, class = AgentHarborPlaybackClass, role = "toolbar",
-         title = "Playback: " & pb.source.scenario.title)
+         title = "Playback: " & pb.source.scenario.title,
+         `data-ct-pane` = StoryPlaybackScope)
   createRenderEffect proc() =
     discard pb.changed.val
     r.clearChildren(bar)
