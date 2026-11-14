@@ -41,6 +41,9 @@ P_PROFILE = "*::the profile per persona, every axis with its source"
 P_WIDE = "*::TA-5, TA-8: a terminal measured ambiguous-WIDE gets the safe glyphs"
 P_RESTORE = "*::TA-3, TA-10: an interactive session, its screen and its restore"
 P_TYPED = "*::TA-4 and the F3 rule: typed-ahead keys survive, a late CSI 1;5R is a key"
+DX1 = "*::§4.3 DECXCPR: a marked report is a reply, an unmarked CSI 1;5R a key from the start"
+DX2 = "*::§4.3 DECXCPR: no marked report by the fence asks plain CPR again, fenced"
+P_SILENT = "*::§4.3 DECXCPR: a terminal that never answers cannot swallow Ctrl+F3"
 P_SIGNALS = "*::TA-10: SIGHUP and a crash reset every mode; a stop resets them, then takes the terminal again"
 
 # (id, [(subject, find, replace), ...], [(suite, filter), ...], what it breaks)
@@ -49,8 +52,10 @@ ARMS = [
              '  bytes.add SyncOffBytes')],
      [(ROUND, ROUNDQ)],
      "TA-3: the width probe's row is not erased in the round's write"),
-    ("B2", [(PROBE, "    probe.cprAnswers.add max(0, col - 1)",
-             "    discard col")],
+    ("B2", [(PROBE, "parseMarkedCpr(token)\n    probe.cprAnswers.add max(0, col - 1)",
+             "parseMarkedCpr(token)\n    discard col"),
+            (PROBE, "= parseCpr(token)\n    probe.cprAnswers.add max(0, col - 1)",
+             "= parseCpr(token)\n    discard col")],
      [(PTY, P_WIDE), (ROUND, F3)],
      "TA-5: the cursor reports are ignored and narrow assumed"),
     ("B3", [(CAPS, "    return (explicit.value == acWide, explicit.source,",
@@ -77,16 +82,16 @@ ARMS = [
              "      discard token")],
      [(PTY, P_TYPED)],
      "TA-4: keys typed while the round waits are dropped"),
-    ("B9", [(PROBE, "\n  result.add widthProbeBytes(cols)[0]\n  result.add Da1Query",
-             "\n  result.add Da1Query\n  result.add widthProbeBytes(cols)[0]")],
+    ("B9", [(PROBE, "\n  result.add widthProbeBytes(cols, marked = cprMarked)[0]\n  result.add Da1Query",
+             "\n  result.add Da1Query\n  result.add widthProbeBytes(cols, marked = cprMarked)[0]")],
      [(ROUND, ROUNDQ), (PTY, P_PROFILE)],
      "§4.2: the fence moved before the width probe (its answers lost)"),
     ("B10", [(CAPS, "    let on = probe.sync2026 in {1, 2, 3}",
               "    let on = probe.sync2026 in {1, 2, 3} or syncByIdentity(identity)")],
      [(PROFILE, TA2)],
      "§5.2: a negative DECRQM answer loses to the identity list"),
-    ("B11", [(PROBE, "  probe.cprAnswers.len < probe.cprExpected",
-              "  true")],
+    ("B11", [(PROBE, "  if probe.replyWindowClosed or probe.cprAnswers.len >= probe.cprExpected:",
+              "  if probe.replyWindowClosed:")],
      [(ROUND, F3), (PTY, P_TYPED)],
      "§4.3's F3 rule: a CSI 1;5R after the probe is still taken as a reply"),
     ("B12", [(CAPS, "    if identity.known and (globMatch(scope.glob, identity.name) or",
@@ -110,6 +115,23 @@ ARMS = [
               "    if false:")],
      [(PTY, P_SIGNALS)],
      "TA-10: after a stop no whole frame is painted (the screen the user returns to is stale)"),
+    # ---- §4.3 DECXCPR and its plain-CPR fallback round --------------------------
+    ("B17", [(PROBE, "  result.add widthProbeBytes(cols, marked = cprMarked)[0]",
+              "  result.add widthProbeBytes(cols)[0]")],
+     [(ROUND, ROUNDQ), (PTY, P_SILENT)],
+     "§4.3: the width probe asks plain CPR, so a silent terminal's window swallows Ctrl+F3"),
+    ("B18", [(PROBE, "    return probe.cprFallbackAsked and not probe.cprFallbackFenced",
+              "    return true")],
+     [(ROUND, DX1), (PTY, P_SILENT)],
+     "§4.3: an unmarked CSI 1;5R taken as a reply while a DECXCPR round waits"),
+    ("B19", [(PROBE, "  probe.cprMarked and probe.answered and not probe.cprFallbackAsked and",
+              "  false and probe.answered and not probe.cprFallbackAsked and")],
+     [(ROUND, DX2), (PTY, P_PROFILE)],
+     "§4.3: no fallback round, so a terminal without DECXCPR is never measured"),
+    ("B20", [(PROBE, "      probe.cprFallbackFenced = true\n    probe.answered = true",
+              "      discard\n    probe.answered = true")],
+     [(ROUND, DX2)],
+     "§4.3: the fallback round's fence not seen, so Ctrl+F3 stays a reply after it"),
 ]
 
 

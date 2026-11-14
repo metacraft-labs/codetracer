@@ -32,6 +32,10 @@
 ##   * `afterFence` — what is written once the fence has come back: inside
 ##     tmux, Pointer-Affordances §5.2's wrapped OSC 22 query, which the binary
 ##     writes then too (`terminal_probe.pointerQueryAfterFence`); "" elsewhere;
+##   * `cprFallback` — when the round asked DECXCPR and the fence came back
+##     with no marked cursor report, the binary asks the widths again with
+##     plain CPR and a fence of its own (§4.3); so does this tool, and the
+##     plain reports land here (`[]` when the round was not needed);
 ##   * `replies` — every reply token, in arrival order, verbatim;
 ##   * `answers` — the same tokens keyed by the question they answer
 ##     (`xtversion`, `da2`, `da1`, `decrqm.<mode>`, `cpr` in order, `osc11`,
@@ -191,6 +195,7 @@ proc main() =
   writeAll(tty, roundBytes)
   var replies = ""
   var fenceAt = -1.0
+  var fallbackAsked = false
   let hardStop = start + initDuration(milliseconds = opts.timeoutMs)
   while getMonoTime() < hardStop:
     var waitMs = int((hardStop - getMonoTime()).inMilliseconds)
@@ -210,6 +215,15 @@ proc main() =
           # As the binary does: the wrapped query, now, in a write of its own.
           if afterFence.len > 0:
             writeAll(tty, afterFence)
+          # As the binary does: no marked cursor report before the fence, so
+          # the plain-CPR fallback round (§4.3).
+          var marked = 0
+          for u in tokens(replies):
+            if u.startsWith("\x1b[?") and u.endsWith("R"): inc marked
+          if roundBytes.contains(MarkedCursorReportQuery) and marked == 0 and
+             cprCountFor(env, cols) > 0:
+            writeAll(tty, cprFallbackQueries(cols))
+            fallbackAsked = true
           break
   writeAll(tty, "\x1b[?25h\x1b[?1049l")
   discard tcSetAttr(tty, TCSAFLUSH, addr saved)
@@ -217,6 +231,8 @@ proc main() =
 
   var answers = newJObject()
   var cpr = newJArray()
+  var cprFallback = newJArray()
+  var fallbackFenced = false
   var late = newJArray()
   var decrqm = newJObject()
   var fenceSeen = false
@@ -225,6 +241,12 @@ proc main() =
     replyList.add %t
     let key = keyOf(t)
     if fenceSeen:
+      if fallbackAsked and not fallbackFenced and key == "cpr":
+        cprFallback.add %t
+        continue
+      if fallbackAsked and not fallbackFenced and key == "da1":
+        fallbackFenced = true
+        continue
       if key == "osc22" and afterFence.len > 0 and not answers.hasKey("osc22"):
         answers["osc22"] = %t
       else:
@@ -243,6 +265,8 @@ proc main() =
         answers[key] = %t
   answers["decrqm"] = decrqm
   answers["cpr"] = cpr
+  if roundBytes.contains(MarkedCursorReportQuery):
+    answers["cprFallback"] = cprFallback
   answers["late"] = late
   var envJ = newJObject()
   for n in EnvNames:

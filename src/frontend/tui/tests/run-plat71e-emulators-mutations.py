@@ -46,6 +46,7 @@ R_CAPTURED = ("*::the captured personas: their round is this round, and "
 C_REFILE = ("*::every committed persona: its replies re-split and re-filed "
             "as committed")
 P_BYTES = "*::the peer answers each question with the bytes its terminal sent"
+P_PROFILE = "*::the profile per persona, every axis with its source"
 
 ARMS = [
     ("E1", [(PROFILE, '    "…", "▕", "\\u{1FB87}", "⏮", "中",',
@@ -68,6 +69,10 @@ ARMS = [
     ("E5", [(CAPTURE, "          j += 2", "          j += 1")],
      [(CAPTURE_SUITE, C_REFILE)],
      "§13.1: the capture cuts a DCS / OSC answer before its string terminator"),
+    ("E8", [(PEER, "        if fences == 1 and MarkedCprQuery in result.queries and",
+             "        if false and MarkedCprQuery in result.queries and")],
+     [(PTY, P_PROFILE)],
+     "§4.3 / §13.2: the peer leaves the binary's plain-CPR fallback round unanswered"),
     ("E6", [(READINGS, "  (ok, what)", "  (true, what)")],
      [(LANE, "xterm")],
      "§13.4: a block or Legacy Computing cell read as its shape whatever is drawn "

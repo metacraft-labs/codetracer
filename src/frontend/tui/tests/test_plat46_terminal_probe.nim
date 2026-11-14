@@ -22,7 +22,7 @@ import ../host/terminal_probe
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count, and inside a `const` block the
 # declaration is invisible to it.
-const ExpectedAssertions = 48
+const ExpectedAssertions = 61
 
 var countedAssertions = 0
 
@@ -40,6 +40,9 @@ proc frame(bytes: string; expect: bool; kitty = false): seq[string] =
     let (complete, token) = f.feed(b)
     if complete:
       result.add token
+    if f.extra.len > 0:
+      result.add f.extra     # the byte that broke a held introducer (§4.3)
+      f.extra = ""
 
 suite "PLAT-46: the start-up query round":
 
@@ -76,10 +79,18 @@ suite "PLAT-46: the start-up query round":
     ck tokens.len == 4
     for t in tokens:
       ck isReplyToken(t)
-    # OUTSIDE the round, `ESC ]` keeps meaning Alt+`]`: the ESC is dropped and
-    # the byte honoured, so a late-typed Alt key is never swallowed.
-    let keys = frame("\x1b]", expect = false)
-    ck keys == @["]"]
+    # OUTSIDE the round, `ESC ]` is HELD (§4.3): nothing is delivered until
+    # the next byte, or `EscDelayMs` with none, says whether an answer
+    # follows. Alone it is still Alt+`]` — the byte honoured, the ESC
+    # dropped — so a late-typed Alt key is never swallowed.
+    var held = initInputFramer()
+    for b in "\x1b]": discard held.feed(b)
+    ck held.holdsStringIntro
+    ck held.escDue(held.escSinceMs + EscDelayMs)
+    ck held.introKey == "]"
+    # Followed by a byte that begins no answer, it is that key, then the byte.
+    ck frame("\x1b]x", expect = false) == @["]", "x"]
+    ck frame("\x1bPq", expect = false) == @["P", "q"]
     # A BEL-terminated OSC is a whole token too (xterm answers in the query's
     # own terminator).
     ck frame("\x1b]11;rgb:1e/1e/2e\x07", expect = true).len == 1
@@ -95,8 +106,32 @@ suite "PLAT-46: the start-up query round":
     ck tokens == @[late]
     # tmux answers with an empty selection field, in BEL.
     ck frame("\x1b]52;;WlFYSg==\x07", expect = false, kitty = true).len == 1
-    # Without the protocol, outside the round, it stays Alt+`]` and text.
-    ck frame(late, expect = false)[0] == "]"
+    # Without the protocol, outside the round, it is an answer too (§4.3):
+    # framed whole, and dropped by the loop as a string — never text.
+    ck frame(late, expect = false) == @[late]
+
+  test "§4.3: an answer outside the reply window is framed whole and never typed":
+    # A DECRQSS answer arriving after the window (a slow link, or a terminal
+    # that answered after the fence) once reached the document as `P1$r…`.
+    let late = "\x1bP1$r48:2:1:2:3m\x1b\\"
+    let tokens = frame(late, expect = false)
+    ck tokens == @[late]
+    ck isStringToken(tokens[0])
+    ck frame("\x1bP>|kitty(0.44.0)\x1b\\", expect = false).len == 1
+    ck frame("\x1b]11;rgb:1e/1e/2e\x07", expect = false).len == 1
+    ck frame("\x1b_Gi=31;OK\x1b\\", expect = false).len == 1
+    # Split across two reads, the answer is still one token.
+    var f = initInputFramer()
+    var got: seq[string] = @[]
+    for part in ["\x1bP1$r48:2", ":1:2:3m\x1b\\"]:
+      for b in part:
+        let (complete, token) = f.feed(b)
+        if complete: got.add token
+    ck got == @[late]
+    # Keys are not strings: an Alt chord, a CSI key, a lone byte.
+    ck not isStringToken("\x1bp")
+    ck not isStringToken("\x1b[1;5R")
+    ck not isStringToken("P")
 
   test "each answer lands in the probe":
     var p = TerminalProbe()

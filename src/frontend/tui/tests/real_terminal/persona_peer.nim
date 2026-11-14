@@ -54,6 +54,11 @@ type
     widths*: seq[int]
       ## The width the terminal advances for each width-probe glyph, in the
       ## order the binary prints them (P1 … P6); a missing entry, no report.
+    decxcpr*: Decxcpr
+      ## Whether the terminal answers DECXCPR (`CSI ? 6 n`, §4.3). Where it
+      ## was not measured (`dxUnknown`) the peer answers only plain CPR, so
+      ## the binary's plain-CPR fallback round is what measures the widths —
+      ## the binary is correct either way.
     kittyKeyboard*: bool
     pointerReply*: string
       ## The answer to OSC 22's query, `1,0,…`; "" answers nothing.
@@ -81,12 +86,14 @@ const
   KnownQueries* = [
     "\x1b]11;?\x1b\\", "\x1bP+q524742;5463\x1b\\", "\x1bP$qm\x1b\\",
     "\x1b[?1016$p", "\x1b[16t", "\x1b[?u", "\x1b[>q", "\x1b[>c",
-    "\x1b[?2026$p", "\x1b[?2027$p", "\x1b[6n", "\x1b[c", WrappedPointerQuery, PointerQuery]
+    "\x1b[?2026$p", "\x1b[?2027$p", "\x1b[6n", "\x1b[?6n", "\x1b[c",
+    WrappedPointerQuery, PointerQuery]
     ## Every question of the start-up round (`host/terminal_probe`).
   Da1Query* = "\x1b[c"
   AfterFenceWaitMs* = 1500
     ## How long after the fence the peer waits for the wrapped OSC 22 query.
   CprQuery* = "\x1b[6n"
+  MarkedCprQuery* = "\x1b[?6n"
 
 proc epochTimeMs*(): int64 =
   ## Wall-clock milliseconds, for the peer's deadline.
@@ -121,6 +128,10 @@ proc answerFor*(p: Persona; query: string; cprIndex: int): string =
   of "\x1b[6n":
     (if cprIndex < p.widths.len: "\x1b[1;" & $(p.widths[cprIndex] + 1) & "R"
      else: "")
+  of "\x1b[?6n":
+    (if p.decxcpr == dxYes and cprIndex < p.widths.len:
+       "\x1b[?1;" & $(p.widths[cprIndex] + 1) & "R"
+     else: "")
   of PointerQuery, WrappedPointerQuery:
     (if p.pointerReply.len > 0: "\x1b]22;" & p.pointerReply & "\x1b\\" else: "")
   of "\x1b[c": p.da1
@@ -134,6 +145,7 @@ proc serve*(sess: var TuiTestSession; p: Persona; timeoutMs = 20000;
   ## trip, as it does over a slow link.
   var at = fromByte
   var cpr = 0
+  var fences = 0
   let deadline = epochTimeMs() + timeoutMs
   var pending = ""
   while epochTimeMs() < deadline:
@@ -146,9 +158,9 @@ proc serve*(sess: var TuiTestSession; p: Persona; timeoutMs = 20000;
       at = pos + q.len
       result.queries.add q
       let a = p.answerFor(q, cpr)
-      if q == CprQuery:
+      if q in [CprQuery, MarkedCprQuery]:
         inc cpr
-        inc result.cursorReports
+        if a.len > 0: inc result.cursorReports
       if a.len > 0:
         pending.add a
         result.answered.add a
@@ -157,6 +169,15 @@ proc serve*(sess: var TuiTestSession; p: Persona; timeoutMs = 20000;
           if p.delayMs > 0:
             sleep(p.delayMs)
           sess.send(pending)
+          pending = ""
+        inc fences
+        # §4.3: a round that asked DECXCPR and got no marked report is
+        # followed, after the fence, by the plain-CPR fallback round with a
+        # fence of its own. The peer answers that one too.
+        if fences == 1 and MarkedCprQuery in result.queries and
+           result.cursorReports == 0 and p.widths.len > 0 and p.da1.len > 0:
+          cpr = 0
+          continue
         # Inside tmux the binary asks the outer terminal about pointer
         # shapes AFTER the fence (`terminal_probe.pointerQueryAfterFence`):
         # a persona with an answer waits for that query and answers it, as
@@ -204,9 +225,11 @@ proc fromCapture*(c: CapturedPersona): Persona =
     if a.len > 0:
       let (ok, m, ps) = parseDecrqm(a)
       if ok and m == mode: result.modes[mode] = ps
-  for i in 0 ..< c.cprCount:
-    let (_, _, col) = parseCpr(c.answerFor("cpr", i))
-    result.widths.add col - 1
+  result.decxcpr = c.decxcpr
+  for reply in c.widthReplies:
+    let (marked, _, mcol) = parseMarkedCpr(reply)
+    let (_, _, col) = parseCpr(reply)
+    result.widths.add (if marked: mcol else: col) - 1
   let ptr22 = c.answerFor("osc22")
   if ptr22.len > 0:
     result.pointerReply = stringBody(ptr22, "\x1b]22;")

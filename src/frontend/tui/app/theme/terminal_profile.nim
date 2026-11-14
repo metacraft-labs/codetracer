@@ -353,6 +353,19 @@ proc parseCpr*(token: string): (bool, int, int) =
   except ValueError:
     (false, 0, 0)
 
+proc parseMarkedCpr*(token: string): (bool, int, int) =
+  ## DECXCPR's answer, `CSI ? <row> ; <col> R`, with the page some terminals
+  ## add (`CSI ? r ; c ; p R`) → `(ok, row, col)`.
+  if not (token.len >= 7 and token.startsWith("\x1b[?") and token[^1] == 'R'):
+    return (false, 0, 0)
+  let parts = token[3 ..< token.len - 1].split(';')
+  if parts.len notin [2, 3]:
+    return (false, 0, 0)
+  try:
+    (true, parseInt(parts[0]), parseInt(parts[1]))
+  except ValueError:
+    (false, 0, 0)
+
 proc versionAtLeast*(have, want: string): bool =
   ## Dotted numeric comparison; a missing component is 0. A version that is
   ## not numeric at all is NOT at least anything (an unknown version cannot
