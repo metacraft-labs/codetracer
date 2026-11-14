@@ -222,4 +222,5 @@ applicable:
   - ../event-log/virtual-scroll.yaml
   - ../filesystem/context-menu-edit.yaml
   - ../filesystem/open-recorded-source.yaml
+  - ../flow/branch-colors.yaml
 unsupported: []

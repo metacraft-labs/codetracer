@@ -1,0 +1,77 @@
+scenario: 1
+name: flow/branch-colors
+pack: codetracer
+summary: >-
+  Inside classify() of a recorded JavaScript program, the `if (value % 2 ===
+  0)` branch colours (taken / not taken) are painted and stay painted across
+  four steps, across re-activating the editor's tab and after one more step.
+
+stage:
+  - use: write-project
+    with:
+      files:
+        program.js: |
+          function classify(value) {
+            if (value % 2 === 0) {
+              return "even";
+            } else {
+              return "odd";
+            }
+          }
+
+          function main() {
+            let total = 0;
+            const labels = [];
+            for (let index = 0; index < 10; index++) {
+              if (index > 0) {
+                total += index;
+              } else {
+                total += 100;
+              }
+              labels.push(classify(index));
+            }
+            return total;
+          }
+
+          main();
+  - use: record-program
+    with: { program: $project/program.js }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 180s }
+  - wait: { until: { at: 'editor[file="program.js"]', active: true }, timeout: 60s }
+  # Into classify(), as a user gets there: a breakpoint on its `if`.
+  - click: { at: 'editor[file="program.js"]/line[number="2"]', anchor: glyph }
+  - wait: { until: { at: 'editor[file="program.js"]/line[number="2"]', glyph: breakpoint }, timeout: 10s }
+  - click: 'toolbar/toolbar-button[label="continue-image"]'
+    settle: false
+  - wait: { until: replay-idle, timeout: 60s }
+  - wait: { until: { at: 'editor[file="program.js"]', current-line: 2 }, timeout: 60s }
+  - wait: { until: { at: 'editor[file="program.js"]', assert: has-branch-colours }, timeout: 60s }
+  - beat: survives-stepping
+    steps:
+      - click: 'toolbar/toolbar-button[label="next-image"]'
+        settle: false
+      - wait: { until: replay-idle, timeout: 60s }
+      - wait: { until: { at: 'editor[file="program.js"]', assert: has-branch-colours }, timeout: 30s }
+      - click: 'toolbar/toolbar-button[label="next-image"]'
+        settle: false
+      - wait: { until: replay-idle, timeout: 60s }
+      - wait: { until: { at: 'editor[file="program.js"]', assert: has-branch-colours }, timeout: 30s }
+      - click: 'toolbar/toolbar-button[label="next-image"]'
+        settle: false
+      - wait: { until: replay-idle, timeout: 60s }
+      - wait: { until: { at: 'editor[file="program.js"]', assert: has-branch-colours }, timeout: 30s }
+      - click: 'toolbar/toolbar-button[label="next-image"]'
+        settle: false
+      - wait: { until: replay-idle, timeout: 60s }
+      - wait: { until: { at: 'editor[file="program.js"]', assert: has-branch-colours }, timeout: 30s }
+  - beat: survives-tab-activation
+    steps:
+      - click: { at: 'pane-tab[label="project/program.js"]', anchor: title }
+      - wait: { until: { at: 'editor[file="program.js"]', assert: has-branch-colours }, timeout: 30s }
+      - click: 'toolbar/toolbar-button[label="next-image"]'
+        settle: false
+      - wait: { until: replay-idle, timeout: 60s }
+      - wait: { until: { at: 'editor[file="program.js"]', assert: has-branch-colours }, timeout: 30s }
