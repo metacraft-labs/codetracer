@@ -83,6 +83,77 @@ proc planted[R, N](r: R; vm: PointListVM): N =
 NIM
 expect_red click click
 
+t="$(make_tree compare-cstring)"
+cat >>"${t}/src/frontend/ui/planted.nim" <<'NIM'
+proc planted(e: JsObject): bool = e.key.to(cstring) == cstring"Enter"
+NIM
+expect_red compare-cstring compare
+
+t="$(make_tree compare-cstring-call)"
+cat >>"${t}/src/frontend/ui/planted.nim" <<'NIM'
+proc planted(key: cstring): bool = key == cstring("Escape")
+NIM
+expect_red compare-cstring-call compare
+
+t="$(make_tree case-cstring)"
+cat >>"${t}/src/frontend/ui/planted.nim" <<'NIM'
+proc planted(key: cstring) =
+  case key
+  of cstring"Enter": discard
+  else: discard
+NIM
+expect_red case-cstring case
+
+# A press-DOWN handler carrying behaviour: the `click` check's twin.
+t="$(make_tree press)"
+cat >>"${t}/src/frontend/ui/planted.nim" <<'NIM'
+proc planted(el: Element; vm: PointListVM) =
+  el.addEventListener(cstring"mousedown", proc(ev: Event) = vm.selectPoint(some(0)))
+NIM
+expect_red press press
+
+t="$(make_tree press-dsl)"
+cat >>"${t}/src/frontend/viewmodel/views/isonim_point_list_view.nim" <<'NIM'
+proc planted[R, N](r: R; vm: PointListVM): N =
+  ui(r):
+    tdiv(onmousedown = proc() = vm.selectPoint(some(0))):
+      discard
+NIM
+expect_red press-dsl press
+
+t="$(make_tree press-pointerdown)"
+cat >>"${t}/src/frontend/gpui/planted.nim" <<'NIM'
+proc planted(r: GpuiRenderer; el: GpuiElement; vm: PointListVM) =
+  r.addEventListener(el, "pointerdown", proc() = vm.selectPoint(some(0)))
+NIM
+expect_red press-pointerdown press
+
+# A reason outside the closed set is no reason.
+t="$(make_tree press-bad-reason)"
+cat >>"${t}/src/frontend/ui/planted.nim" <<'NIM'
+proc planted(el: Element; vm: PointListVM) =
+  el.addEventListener(cstring"mousedown", proc(ev: Event) = vm.selectPoint(some(0)))  # ir1-gate: convenient
+NIM
+expect_red press-bad-reason press
+
+# The legal press-down listeners stay legal: a GPUI listener that only
+# reports the element pressed to the router, and a drag's start.
+t="$(make_tree press-legal)"
+cat >>"${t}/src/frontend/gpui/planted.nim" <<'NIM'
+proc planted(r: GpuiRenderer; el: GpuiElement; press: proc(op: string)) =
+  r.addEventListener(el, "mousedown", proc(ev: GpuiEvent) = press("x.y"))  # ir1-gate: hit test
+proc plantedDrag(el: Element; s: Scrubber) =
+  el.addEventListener(cstring"mousedown", proc(ev: Event) = s.begin(ev))  # ir1-gate: gesture
+NIM
+if bash "${gate}" "${t}" >/dev/null 2>&1; then
+	pass=$((pass + 1))
+	echo "  ok   press-legal: a reported press and a drag's start pass"
+else
+	fail=$((fail + 1))
+	echo "  FAIL press-legal: a reported press or a drag's start is red"
+	bash "${gate}" "${t}" | tail -3
+fi
+
 t="$(make_tree stale)"
 echo "src/frontend/ui/key_chords_gone.nim case 3" >>"${t}/ci/test/input-routing-gate-ledger.txt"
 expect_red stale ledger

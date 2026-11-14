@@ -182,7 +182,7 @@ proc wireOne(r: GpuiRenderer; el: GpuiElement; c: GPaneClick;
       click.y = int(p.y)
       click.clickCount = p.clickCount
     onClick(click)
-  for name in ["mousedown", "contextmenu", "auxdown"]:
+  for name in ["mousedown", "contextmenu", "auxdown"]:  # ir1-gate: hit test (reports the row to onClick)
     r.addEventListener(el, name, handler)
 
 proc wireWindowClicks*(r: GpuiRenderer; nodes: var seq[SnapshotNode];

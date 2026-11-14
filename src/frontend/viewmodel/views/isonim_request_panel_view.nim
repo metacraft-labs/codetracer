@@ -477,7 +477,7 @@ when defined(js):
         }
       };
       panel.addEventListener('click', click, true);
-      panel.addEventListener('mousedown', down, true);
+      panel.addEventListener('mousedown', down, true);  // ir1-gate: gesture (a double click's continuation)
       panel.addEventListener('pointermove', move, true);
       panel.addEventListener('pointerleave', leave, true);
       for (const event of ['contextmenu', 'wheel', 'keydown', 'pointercancel'])
@@ -643,7 +643,7 @@ proc renderRequestPanel*[R, N](r: R; vm: RequestPanelVM): N =
         when N is isonim_dom.Element:
           let capturePanel = panelRef
           let capturePct = detailHeightPct
-          isonim_dom.addEventListener(isonim_dom.Node(handle), cstring"mousedown",
+          isonim_dom.addEventListener(isonim_dom.Node(handle), cstring"mousedown",  # ir1-gate: gesture (the split's resize drag)
             proc(e: isonim_dom.Event) =
               e.preventDragDefault()
               let h = capturePanel.elemHeight

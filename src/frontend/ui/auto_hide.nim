@@ -1106,7 +1106,7 @@ proc setupDockedResizeHandles*() =
     let container = document.getElementById(containerId)
     if handle.isNil or container.isNil:
       return
-    handle.addEventListener(cstring"mousedown", proc(ev: Event) =
+    handle.addEventListener(cstring"mousedown", proc(ev: Event) =  # ir1-gate: gesture (the docked panel's resize drag)
       let mouseEv = cast[JsObject](ev)
       dockedResizing = true
       dockedResizeIsLeft = isLeft
@@ -1153,7 +1153,7 @@ proc setupDockedResizeHandles*() =
   let bottomHandle = document.getElementById(cstring"auto-hide-docked-bottom-resize")
   let bottomContainer = document.getElementById(cstring"auto-hide-docked-bottom")
   if not bottomHandle.isNil and not bottomContainer.isNil:
-    bottomHandle.addEventListener(cstring"mousedown", proc(ev: Event) =
+    bottomHandle.addEventListener(cstring"mousedown", proc(ev: Event) =  # ir1-gate: gesture (the bottom panel's resize drag)
       let mouseEv = cast[JsObject](ev)
       dockedBottomResizing = true
       dockedBottomResizeStartY = mouseEv.clientY.to(int)
@@ -1204,7 +1204,7 @@ proc setupOverlayResizeHandle*() =
   let handle = document.getElementById(cstring"auto-hide-overlay-resize")
   if handle.isNil:
     return
-  handle.addEventListener(cstring"mousedown", proc(ev: Event) =
+  handle.addEventListener(cstring"mousedown", proc(ev: Event) =  # ir1-gate: gesture (the resize drag)
     let mouseEv = cast[JsObject](ev)
     let overlayEl = document.getElementById(cstring"auto-hide-overlay")
     if overlayEl.isNil:
@@ -2104,7 +2104,7 @@ when defined(js):
       (function(e) { const t = e && e.target;
         return !!(t && t.closest &&
           t.closest('.auto-hide-tablist-menu, .auto-hide-tablist-button')); })(#)""".}
-    kdom.document.addEventListener(cstring"mousedown", proc(ev: kdom.Event) =
+    kdom.document.addEventListener(cstring"mousedown", proc(ev: kdom.Event) =  # ir1-gate: outside press (closes the tab lists)
       if not inTabList(ev): closeTabLists(), true)
     registerDismissal(proc(): bool =
       closeTabLists()

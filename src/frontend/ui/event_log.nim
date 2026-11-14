@@ -293,7 +293,7 @@ proc setupFilterDropdown(host: Element; vm: EventLogVM) =
       container = document.createElement(cstring"div")
       container.setAttribute(cstring"id", cstring FilterDropdownContainerId)
       container.setAttribute(cstring"class", cstring"dropdown-container")
-      container.addEventListener(cstring"mousedown", proc(e: Event) =
+      container.addEventListener(cstring"mousedown", proc(e: Event) =  # ir1-gate: propagation
         e.preventDefault())
       document.body.appendChild(container)
     var rows: seq[FilterTagRow] = @[]
@@ -450,7 +450,7 @@ proc setupColumnGrips(host: Element; vm: EventLogVM) =
   ## pointer's distance from the cell's left, in cells, never under the
   ## minimum; the release remembers the widths. Capture phase, so the header
   ## cell's own click (it orders the log) never sees the press.
-  cast[JsObject](host).listenCapture(cstring"mousedown", proc(ev: Event) =
+  cast[JsObject](host).listenCapture(cstring"mousedown", proc(ev: Event) =  # ir1-gate: gesture (the column resize drag)
     let grip = closestGrip(cast[Element](cast[JsObject](ev).target))
     if grip.isNil: return
     let (known, col) = parseEventLogColumn(

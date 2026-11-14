@@ -244,7 +244,7 @@ proc drawSuggest(st: LspState) =
     row.setAttribute(cstring"aria-selected", cstring($(i == st.selected)))
     row.textContent = cstring(it.label & (if it.detail.len > 0: "  " & it.detail else: ""))
     let idx = i
-    row.addEventListener(cstring"mousedown", proc(ev: JsObject) =
+    row.addEventListener(cstring"mousedown", proc(ev: JsObject) =  # ir1-gate: focus (the list's active item)
       discard ev.preventDefault()
       st.selected = idx
       st.drawSuggest())
@@ -650,4 +650,3 @@ proc installSharedEditorLsp*(ed: SharedEditor; target: LspTarget;
       else: discard
       nil
     ed.actionsTable[id] = action
-

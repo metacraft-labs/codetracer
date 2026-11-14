@@ -358,7 +358,7 @@ proc renderNameField[R, N](r: R; vm: FilesystemVM;
         cancelIfStillShown(input, proc() =
           if vm.nameEdit.val.kind != fneNone:
             vm.cancelNameEdit()))
-    for eventName in [cstring"click", cstring"dblclick", cstring"mousedown",
+    for eventName in [cstring"click", cstring"dblclick", cstring"mousedown",  # ir1-gate: propagation
                       cstring"contextmenu"]:
       # The field sits inside the row: a click in it is not a click on the
       # row, and a right-click in it edits text rather than opening the

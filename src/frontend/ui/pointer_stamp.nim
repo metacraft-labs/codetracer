@@ -418,7 +418,7 @@ proc installPointerStamp*() =
       elif record.target.isElement and record.target.matches(everySelector):
         stampTree(record.target))
   observer.observeAll(documentRoot)
-  listen("mousedown", proc(e: JsEv) =
+  listen("mousedown", proc(e: JsEv) =  # ir1-gate: gesture (the pointer shape of a drag)
     setGesture(dragGestureAt(e.evTarget)))
   listen("mousemove", proc(e: JsEv) =
     if not query(DragProxy).isNil:

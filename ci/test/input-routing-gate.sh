@@ -21,6 +21,32 @@
 #            performed by the front-end's procedure on the element its hit
 #            test found (§5.1; the desktop's `ui/desktop_elements`), so a view
 #            that handles a press itself is a behaviour no keymap can rebind.
+#   press    a press-DOWN handler: a `mousedown` / `pointerdown` / `auxdown`
+#            listener, or `onmousedown =` / `onpointerdown =`. The same
+#            behaviour as `click`, spelled on the other half of the press, so
+#            it is counted the same way — unless the line names, with
+#            `ir1-gate: <reason>`, one of the closed set of things a press-down
+#            listener may legitimately do without being a press's behaviour:
+#              hit test       it only reports the element pressed (and the
+#                             modifiers, the point) to the router, which
+#                             decides what the press does (§5.3; GPUI's shim
+#                             delivers a press to the element under it, so
+#                             there the listener IS the hit test);
+#              gesture        it begins a §5.2 gesture — a drag, a scrub, a
+#                             resize, a text selection — whose machine owns
+#                             the rest;
+#              propagation    it only stops the press propagating or cancels
+#                             its default (focus theft, a text selection);
+#              outside press  it closes a transient surface (a menu, a
+#                             dropdown, a popover) when the press lands
+#                             OUTSIDE it, as `dismissals` closes one on Escape;
+#              focus          it only moves or records focus (a list's
+#                             active item is its focus);
+#              activity       it only notes that the user did something (an
+#                             idle timer), whatever the press does;
+#              dispatch       it is no listener: it names the event a test
+#                             or a replay DISPATCHES at an element.
+#            A reason outside the set is no reason: the line is counted.
 #
 # DECLARED: a decoder's job is exactly to spell key names, so the modules that
 # turn a device's bytes or events into canonical names are named here and not
@@ -65,15 +91,23 @@ NAMES = (r"Up|Down|Left|Right|Enter|Return|Esc|Escape|Tab|Backspace|Delete|Home"
          r"|backspace|delete|home|end|pageup|pagedown|space|arrowup|arrowdown"
          r"|arrowleft|arrowright|[A-Za-z]|\s")
 KEY = r"(?:(?:Ctrl|Shift|Alt|Meta|Cmd|ctrl|shift|alt)\+)*(?:%s)" % NAMES
-OF_ARM = re.compile(r'^\s*of\s+c?"(?:%s)"\s*(?:,\s*c?"(?:%s)"\s*)*(?::|,?\s*$)' % (KEY, KEY))
+# A key-name literal as Nim spells it: `"Enter"`, `c"Enter"`, `cstring"Enter"`,
+# `cstring("Enter")` (the last two missed the gate until 2026-11-14: the
+# breakpoint condition dialog compared `key == cstring"Enter"` unseen).
+LIT = r'(?:(?:c|cstring)?"(?:%s)"|cstring\(\s*"(?:%s)"\s*\))' % (KEY, KEY)
+OF_ARM = re.compile(r'^\s*of\s+%s\s*(?:,\s*%s\s*)*(?::|,?\s*$)' % (LIT, LIT))
 CASE = re.compile(r'^\s*(?:(?:let|var)\s.*=\s*)?case\s+(.+?)\s*$')
 KEYISH = re.compile(r'(?i)(^|[\s.(])(key|keyname|keyof|token|chord|lowerkey|name|lower|k)\b|\.key\b|keyOf\(|keyCode')
 COMPARE = re.compile(
-    r'(?:\bkey\w*|\bname|\.key|keyOf\([^)]*\))\s*(?:==|!=)\s*c?"(?:%s)"'
-    r'|(?:\bkey\w*|\.key)\s+(?:in|notin)\s+\[\s*c?"(?:%s)"'
-    r'|\bkeyCode\s*(?:==|!=)|\.which\s*(?:==|!=)' % (KEY, KEY))
+    r'(?:\bkey\w*|\bname|\.key(?:\.to\(cstring\))?|keyOf\([^)]*\))\s*(?:==|!=)\s*%s'
+    r'|%s\s*(?:==|!=)\s*(?:\bkey\w*|\.key\b|\$\w+\.key\b)'
+    r'|(?:\bkey\w*|\.key)\s+(?:in|notin)\s+\[\s*%s'
+    r'|\bkeyCode\s*(?:==|!=)|\.which\s*(?:==|!=)' % (LIT, LIT, LIT))
 LISTEN = re.compile(r'''["']key(?:down|up|press)["']''')
 CLICK = re.compile(r'''\bon(?:click|dblclick|contextmenu|auxclick)\s*=|["'](?:click|dblclick|contextmenu|auxclick)["']''')
+PRESS_DOWN = re.compile(r'''["'](?:mousedown|pointerdown|auxdown)["']|\bon(?:mousedown|pointerdown)\s*=''')
+PRESS_REMOVAL = re.compile(r'removeEventListener|unlisten')
+PRESS_REASONS = re.compile(r'ir1-gate: (?:hit test|gesture|propagation|outside press|focus|activity|dispatch)\b')
 FIELD_LISTEN = "KeyDownEvent"  # a field's own keys, read through `field_keys`
 QUIET = "ir1-gate: not a key"
 
@@ -117,6 +151,10 @@ for top in SCANNED:
                     if CLICK.search(line):
                         counts[(rel, "click")] += 1
                         where[(rel, "click")].append(number)
+                    if (PRESS_DOWN.search(line) and not PRESS_REMOVAL.search(line)
+                            and not PRESS_REASONS.search(line)):
+                        counts[(rel, "press")] += 1
+                        where[(rel, "press")].append(number)
 
 ledger = {}
 path = os.path.join(root, "ci/test/input-routing-gate-ledger.txt")

@@ -438,7 +438,7 @@ when defined(js):
       const valueOf = function(event) {
         return Number((event.target && event.target.value) || 0);
       };
-      el.addEventListener("pointerdown", function(event) {
+      el.addEventListener("pointerdown", function(event) {  // ir1-gate: gesture (the scrub)
         onScrub(valueOf(event), 0);
       });
       el.addEventListener("input", function(event) {

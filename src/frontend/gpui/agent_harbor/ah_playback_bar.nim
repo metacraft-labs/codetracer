@@ -67,7 +67,7 @@ proc listenForPress(r: GpuiRenderer; button: GpuiElement; operation: string;
   ## The button's hit test: a primary press on it is handed to `press` with
   ## the operation the button carries. A proc of its own so each closure owns
   ## its operation.
-  r.addEventListener(button, "mousedown", proc(ev: GpuiEvent) =
+  r.addEventListener(button, "mousedown", proc(ev: GpuiEvent) =  # ir1-gate: hit test
     press(operation, modifiersOf(ev)))
 
 proc drawPlaybackBar*(r: GpuiRenderer; host: GpuiElement; pb: AhPlayback;

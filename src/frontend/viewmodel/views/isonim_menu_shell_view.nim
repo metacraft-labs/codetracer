@@ -257,7 +257,7 @@ proc renderMenuShell*[R, N](
             id = NavigationMenuId,
             tabindex = "0",
             onblur = proc() = callbacks.invokeNavBlur(),
-            onmousedown = proc() = callbacks.invokeNavMouseDown()):
+            onmousedown = proc() = callbacks.invokeNavMouseDown()):  # ir1-gate: focus (records the focused element)
           button(
               class = "ct-button-image-md-secondary ct-button-no-border",
               id = MenuRootId,

@@ -100,7 +100,7 @@ when defined(js):
     false
   proc eventTarget(ev: dom_api.Event): dom_api.Element {.importjs: "#.target".}
   proc closestElement(node: dom_api.Element; selector: cstring): dom_api.Element {.importjs: "#.closest(#)".}
-  proc addDocumentMouseDownListener(handler: proc(ev: dom_api.Event) {.closure.}) {.importjs: "document.addEventListener('mousedown', #, true)".}
+  proc addDocumentMouseDownListener(handler: proc(ev: dom_api.Event) {.closure.}) {.importjs: "document.addEventListener('mousedown', #, true)".}  # ir1-gate: outside press
   proc eventKeyCode(ev: dom_api.Event): int {.importjs: "(#.keyCode || 0)".}
   proc stopPropagation(ev: dom_api.Event) {.importcpp: "#.stopPropagation()".}
   proc focusElement(node: dom_api.Element) {.importcpp: "#.focus()".}
@@ -586,7 +586,7 @@ when defined(js):
       return
     let main = dom_api.getElementById(dom_api.document, cstring"menu-main")
     if not dom_api.isNodeNil(dom_api.Node(main)):
-      dom_api.addEventListener(dom_api.Node(main), cstring"mousedown",
+      dom_api.addEventListener(dom_api.Node(main), cstring"mousedown",  # ir1-gate: propagation
         proc(ev: dom_api.Event) =
           ev.stopPropagation())
       dom_api.addEventListener(dom_api.Node(main), cstring"mouseover",

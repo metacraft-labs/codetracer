@@ -1572,7 +1572,7 @@ proc buildFindWidget(ed: SharedEditor) =
                     (".ct-replace-all", "find.replace-all")]:
     let b = w.querySelector(cstring(sel))
     let theOp = op
-    b.addListener("mousedown", proc(ev: JsObject) =
+    b.addListener("mousedown", proc(ev: JsObject) =  # ir1-gate: propagation
       discard ev.preventDefault()
       discard ev.stopPropagation())
     b.addListener("click", proc(ev: JsObject) =
@@ -1581,7 +1581,7 @@ proc buildFindWidget(ed: SharedEditor) =
   # A press on the widget is not the editor's, but Monaco still reports it
   # to the editor's mouse-down listeners, as an overlay widget with no
   # position (the desktop's handlers guard on that).
-  w.addListener("mousedown", proc(ev: JsObject) =
+  w.addListener("mousedown", proc(ev: JsObject) =  # ir1-gate: hit test (to the editor's mouse-down)
     let h = ed.hitAt(jsNum(ev.clientX), jsNum(ev.clientY), ev.target)
     ed.fire("mouseDown", ed.mouseEventOf(ev, h))
     discard ev.stopPropagation())
@@ -1887,7 +1887,7 @@ proc newSharedEditor*(host: JsObject; text, path, language: string;
   ed.buildFindWidget()
   ed.measureFont()
   # Listeners.
-  root.addListener("mousedown", proc(ev: JsObject) = ed.onMouseDown(ev))
+  root.addListener("mousedown", proc(ev: JsObject) = ed.onMouseDown(ev))  # ir1-gate: hit test (onMouseDown: editor_pointer)
   root.addListener("mousemove", proc(ev: JsObject) = ed.onMouseMove(ev))
   root.addListener("mouseup", proc(ev: JsObject) = ed.onMouseUp(ev))
   root.addListener("contextmenu", proc(ev: JsObject) = ed.onContextMenu(ev))

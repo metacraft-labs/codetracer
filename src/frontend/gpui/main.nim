@@ -4878,8 +4878,8 @@ proc armPointer(r: GpuiRenderer; root: GpuiElement) =
   if gShell.isNil:
     return
   let handler = pointerHandler(r)
-  for name in ["mousedown", "mousemove", "mouseup", "wheel", "contextmenu",
-               "auxdown"]:
+  for name in ["mousedown", "mousemove", "mouseup", "wheel", "contextmenu",  # ir1-gate: hit test (the window root's pointer router)
+               "auxdown"]:  # ir1-gate: hit test
     r.addEventListener(root, name, handler)
   # A REPLAY window's keys: the editor pane takes focus (the pane the focus
   # outline marks) and `Esc` cancels a gesture. Not while the input probe
@@ -15199,8 +15199,8 @@ proc runWindowOp(r: GpuiRenderer; op: string; release = true): string =
                  else: gekPointerDown
       let name = case button
                  of "right": "contextmenu"
-                 of "middle": "auxdown"
-                 else: "mousedown"
+                 of "middle": "auxdown"  # ir1-gate: dispatch
+                 else: "mousedown"  # ir1-gate: dispatch
       # AS A REAL PRESS BUBBLES: the shim delivers a dispatched event to one
       # node, and GPUI delivers a press to every element under the pointer,
       # innermost first — so the row, then each of its ancestors, up to (not

@@ -170,7 +170,7 @@ proc bindHistoryMenuDismissal[R, N](r: R; host, back, forward: N;
         focusHistoryControl(anchor)
         true
       let doc = isonim_dom.Node(isonim_dom.document)
-      isonim_dom.addEventListener(doc, cstring"pointerdown", outside)
+      isonim_dom.addEventListener(doc, cstring"pointerdown", outside)  # ir1-gate: outside press
       registerDismissal(escape)
       onCleanup proc() =
         isonim_dom.removeEventListener(doc, cstring"pointerdown", outside)

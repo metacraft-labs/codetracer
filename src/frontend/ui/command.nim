@@ -568,7 +568,9 @@ when defined(js):
     input.addEventListener(cstring"blur", proc(ev: Event) =
       input.markFieldClicked(false))
 
-    input.addEventListener(cstring"mousedown", proc(ev: Event) =
+    # A press in the field keeps the palette's input focused (and its first
+    # result selected, `search`); what a press DOES in it is the field's own.
+    input.addEventListener(cstring"mousedown", proc(ev: Event) =  # ir1-gate: focus
       input.markFieldClicked(true)
       input.focusElement()
       self.data.search(SearchFileRealTime, "".cstring))

@@ -327,7 +327,7 @@ proc setupDropdownDismissListeners() =
         }
       }
 
-      document.addEventListener('mousedown', function (ev) {
+      document.addEventListener('mousedown', function (ev) {  // ir1-gate: outside press
         var target = ev.target;
         if (!target || !target.closest) { return; }
         closeOpenMenus(function (container) {
@@ -1127,7 +1127,7 @@ proc setupClickToFocusListeners() =
       }
     }
 
-    document.addEventListener('mousedown', function (ev) {
+    document.addEventListener('mousedown', function (ev) {  // ir1-gate: focus (the docked panel's focus mark)
       var target = ev.target;
       if (!target || !target.closest) return;
 
@@ -2405,7 +2405,7 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
 
       let tabEl = cast[Element](tab.element)
       if not tabEl.isNil:
-        tabEl.addEventListener(cstring"mousedown", proc(ev: Event) =
+        tabEl.addEventListener(cstring"mousedown", proc(ev: Event) =  # ir1-gate: gesture (the tab drag)
           activeDraggedItem = genericContentItem
         )
 

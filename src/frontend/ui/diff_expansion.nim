@@ -389,7 +389,7 @@ proc bindBoundaryHandlers(element: Node; diffEditor: js; hostId: string) =
   # A press on the handle is Monaco's own click-to-expand; the only thing to do
   # here is dismiss a menu that is still open, and give the handle focus so the
   # keyboard path continues from where the mouse left off.
-  element.dxAddListener(cstring"mousedown", proc(e: js) =
+  element.dxAddListener(cstring"mousedown", proc(e: js) =  # ir1-gate: outside press (closes an open menu, focuses the handle)
     if dxHasOpenMenu():
       dxCloseMenus()
     dxFocus(element))
