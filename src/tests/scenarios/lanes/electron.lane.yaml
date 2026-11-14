@@ -249,6 +249,29 @@ applicable:
   - ../visual-replay/step-updates-video-player.yaml
   - ../visual-replay/shader-debug-source-and-values.yaml
   - ../visual-replay/player-failure-shows-error.yaml
+  - ../languages/noir-opens-at-entry.yaml
+  - ../languages/c-sudoku-shows-source-and-output.yaml
+  - ../languages/d-sudoku-call-trace-to-main.yaml
+  - ../languages/d-sudoku-shows-source-and-output.yaml
+  - ../languages/fortran-sudoku-event-log-populated.yaml
+  - ../languages/go-sudoku-call-trace-to-main.yaml
+  - ../languages/go-sudoku-shows-source-and-output.yaml
+  - ../languages/polkavm-opens-at-entry.yaml
+  - ../languages/polkavm-call-trace-and-stepping.yaml
+  - ../languages/lean-sudoku-event-log-populated.yaml
+  - ../languages/stylus-opens-at-entry.yaml
+  - ../languages/stylus-call-trace-and-stepping.yaml
+  - ../debug-controls/statement-step-over-one-statement.yaml
+  - ../debug-controls/statement-step-back-one-statement.yaml
+  - ../requests/row-menu-filters-and-double-click-goes-to-handler.yaml
+  - ../requests/double-click-survives-detail-opening.yaml
+  - ../requests/detail-controls-do-not-move-the-replay.yaml
+  - ../requests/press-on-opened-detail-is-not-activation.yaml
+  - ../search/grep-lists-matching-lines-by-file.yaml
+  - ../search/fif-row-opens-file-and-f4-walks.yaml
+  - ../search/fif-match-case-and-regex.yaml
+  - ../search/ctrl-shift-f-seeds-field-from-selection.yaml
+  - ../search/grep-alone-opens-field-on-selection.yaml
   # --- pw5 deepreview ---
   - ../deepreview/boundary-drag-reveals-what-it-crosses.yaml
   - ../deepreview/boundary-is-operable-from-the-keyboard.yaml

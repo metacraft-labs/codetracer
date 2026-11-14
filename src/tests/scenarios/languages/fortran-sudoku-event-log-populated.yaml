@@ -1,0 +1,18 @@
+scenario: 1
+name: languages/fortran-sudoku-event-log-populated
+pack: codetracer
+summary: >-
+  A Fortran Sudoku solver recording opens and its event log lists the program's
+  events.
+
+stage:
+  - use: record-program
+    with: { program: fortran_sudoku_solver/sudoku.f90 }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 240s }
+  - click: 'pane-tab[label="EVENT LOG"]'
+  - wait: { until: event-log.loaded, timeout: 120s }
+  - click: 'pane-tab[label="CALLTRACE"]'
+  - wait: { until: call-trace.loaded, timeout: 120s }

@@ -1,0 +1,37 @@
+scenario: 1
+name: search/fif-match-case-and-regex
+pack: codetracer
+summary: >-
+  Match Case runs the search again case-sensitively (`Scale` is nowhere);
+  in the panel's field Alt+C turns it back off and the rows return, and
+  Alt+R turns on regular expressions: `sc[a]le\b` lists exactly the lines
+  where `scale` ends a word.
+
+stage:
+  - use: record-program
+    with: { program: multi_root/app/main.py }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - wait: { until: editor.loaded, timeout: 60s }
+  - chord: Ctrl+p
+  - type: ":grep Scale"
+  - key: Enter
+  - wait: { until: { at: find-in-files, count: 4 }, timeout: 30s }
+  - click: 'find-in-files/fif-option[name="case"]'
+  - expect: { at: 'find-in-files/fif-option[name="case"]', on: true }
+  - wait: { until: { at: find-in-files, count: 0 }, timeout: 30s }
+  - expect: { at: find-in-files, prompt: 'No results for "Scale"' }
+  - click: find-in-files/search-field
+  - expect: { at: find-in-files/search-field, focused: true }
+  - chord: Alt+c
+  - expect: { at: 'find-in-files/fif-option[name="case"]', on: false }
+  - wait: { until: { at: find-in-files, count: 4 }, timeout: 30s }
+  - chord: Alt+r
+  - expect: { at: 'find-in-files/fif-option[name="regex"]', on: true }
+  - chord: Ctrl+a
+  - type: 'sc[a]le\b'
+  - key: Enter
+  - wait: { until: { at: find-in-files, count: 2 }, timeout: 30s }
+  - expect: { at: find-in-files, rows: ["app/main.py:26", "pkg/extra.py:4"], highlights: { count: 2 } }

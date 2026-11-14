@@ -1,0 +1,24 @@
+scenario: 1
+name: languages/polkavm-call-trace-and-stepping
+pack: codetracer
+summary: >-
+  In a PolkaVM recording the call trace lists `main`; Next moves the replay
+  from the blob's line 1 to line 4, and Continue runs on.
+
+stage:
+  - use: record-program
+    with: { program: ../codetracer-polkavm-recorder/test-programs/rust/flow_test.polkavm, lang: polkavm }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 240s }
+  - click: 'pane-tab[label="CALLTRACE"]'
+  - wait: { until: { at: call-trace, assert: 'has-call-containing("main")' }, timeout: 60s }
+  - wait: { until: { at: status-line, location: { matches: "flow_test\\.polkavm:1#" } }, timeout: 60s }
+  - click: 'toolbar/toolbar-button[label="next-image"]'
+    settle: false
+  - wait: { until: { at: status-line, location: { matches: "flow_test\\.polkavm:4#" } }, timeout: 60s }
+  - wait: replay-idle
+  - click: 'toolbar/toolbar-button[label="continue-image"]'
+    settle: false
+  - wait: replay-idle

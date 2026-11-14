@@ -1,0 +1,19 @@
+scenario: 1
+name: languages/polkavm-opens-at-entry
+pack: codetracer
+summary: >-
+  A PolkaVM recording opens at its entry in flow_test.polkavm: the status line names the
+  file, the state pane shows the line it stopped on and the VM's registers.
+
+stage:
+  - use: record-program
+    with: { program: ../codetracer-polkavm-recorder/test-programs/rust/flow_test.polkavm, lang: polkavm }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 240s }
+  - expect: { at: window, title: { contains: CodeTracer } }
+  - wait: { until: { at: status-line, location: { contains: "flow_test.polkavm:" } }, timeout: 60s }
+  - wait: { until: { at: variables, code-line: { contains: " | " } }, timeout: 60s }
+  - wait: { until: { at: variables, assert: 'has-variable("SP")' }, timeout: 60s }
+  - expect: { at: variables, assert: 'has-variable("RA")' }

@@ -1,0 +1,31 @@
+scenario: 1
+name: search/grep-lists-matching-lines-by-file
+pack: codetracer
+summary: >-
+  `:grep scale` in the omnibox closes it and shows Find in Files with every
+  line of the recording's sources that holds `scale`, any case, grouped by
+  file (app/main.py: lines 26, 27, 28; pkg/extra.py: line 4), each row
+  highlighting the match, and the panel's field holding the query.
+
+stage:
+  - use: record-program
+    with: { program: multi_root/app/main.py }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - wait: { until: editor.loaded, timeout: 60s }
+  - chord: Ctrl+p
+  - expect: { at: omnibox, focused: true }
+  - type: ":grep scale"
+  - key: Enter
+  - wait: { until: { at: omnibox, absent: true }, timeout: 10s }
+  - wait: { until: { at: find-in-files, count: 4 }, timeout: 30s }
+  - expect:
+      at: find-in-files
+      rows: ["app/main.py:26", "app/main.py:27", "app/main.py:28", "pkg/extra.py:4"]
+      groups: ["app/main.py 3 matches", "pkg/extra.py 1 match"]
+      highlights: { count: 4 }
+      query: scale
+  - expect: { at: 'find-in-files/fif-match[location="app/main.py:26"]', highlight: { matches: "^[Ss]cale$" } }
+  - expect: { at: 'find-in-files/fif-match[location="pkg/extra.py:4"]', highlight: { matches: "^[Ss]cale$" } }

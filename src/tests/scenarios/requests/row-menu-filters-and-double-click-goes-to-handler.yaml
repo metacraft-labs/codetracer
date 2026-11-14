@@ -1,0 +1,45 @@
+scenario: 1
+name: requests/row-menu-filters-and-double-click-goes-to-handler
+pack: codetracer
+summary: >-
+  A recording whose program served eight requests docks its Requests panel by
+  itself with rows 02 to 09. A row's menu offers Go to Handler, Copy URL,
+  Filter by Method, Filter by Status and Clear Filters; filtering by PUT
+  leaves only request 08 and Clear Filters restores all eight; and a double
+  click on request 04 moves the replay to its handler (line 13, step 20).
+
+stage:
+  - use: request-session
+  - use: open-recording
+
+steps:
+  - wait: { until: { at: requests, present: true }, timeout: 120s }
+  - wait: settled
+  - wait: { until: { at: requests, count: 8 }, timeout: 120s }
+  - expect:
+      at: requests/request-row[id="02"]
+      present: true
+  - expect: { at: 'requests/request-row[id="09"]', present: true }
+  - wheel: { at: requests, direction: down, amount: 5 }
+  - click: { at: 'requests/request-row[id="08"]', button: right }
+  - wait: { until: { at: context-menu, present: true }, timeout: 10s }
+  - expect:
+      at: context-menu
+      assert:
+        - 'offers("Go to Handler")'
+        - 'offers("Copy URL")'
+        - 'offers("Filter by Method: PUT")'
+        - 'offers("Filter by Status: 5xx")'
+        - 'offers("Clear Filters")'
+      count: 5
+  - click: 'context-menu/menu-item[label="Filter by Method: PUT"]'
+  - wait: { until: { at: requests, count: 1 }, timeout: 30s }
+  - expect: { at: 'requests/request-row[id="08"]', method: PUT }
+  - click: { at: 'requests/request-row[id="08"]', button: right }
+  - wait: { until: { at: context-menu, present: true }, timeout: 10s }
+  - click: 'context-menu/menu-item[label="Clear Filters"]'
+  - wait: { until: { at: requests, count: 8 }, timeout: 30s }
+  - wheel: { at: requests, direction: up, amount: 5 }
+  - click: { at: 'requests/request-row[id="04"]', count: 2 }
+    settle: false
+  - wait: { until: { at: status-line, location: { matches: ":13#20$" } }, timeout: 60s }

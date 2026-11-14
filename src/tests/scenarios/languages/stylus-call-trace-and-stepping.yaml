@@ -1,0 +1,26 @@
+scenario: 1
+name: languages/stylus-call-trace-and-stepping
+pack: codetracer
+summary: >-
+  In a Stylus contract transaction the call trace lists its calls (`fund`,
+  `user_entrypoint`); from the entry at lib.rs line 49 Next moves the
+  replay to line 38, and Continue runs on to line 45.
+
+stage:
+  - use: record-program
+    with: { program: stylus_fund_tracker, stylus-trace: evm_trace.json }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 240s }
+  - click: 'pane-tab[label="CALLTRACE"]'
+  - wait: { until: { at: call-trace, assert: 'has-call("fund")' }, timeout: 60s }
+  - expect: { at: call-trace, assert: 'has-call("user_entrypoint")' }
+  - wait: { until: { at: status-line, location: { matches: "lib\\.rs:49#" } }, timeout: 60s }
+  - click: 'toolbar/toolbar-button[label="next-image"]'
+    settle: false
+  - wait: { until: { at: status-line, location: { matches: "lib\\.rs:38#" } }, timeout: 60s }
+  - wait: replay-idle
+  - click: 'toolbar/toolbar-button[label="continue-image"]'
+    settle: false
+  - wait: { until: { at: status-line, location: { matches: "lib\\.rs:45#" } }, timeout: 60s }

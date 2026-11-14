@@ -1,0 +1,21 @@
+scenario: 1
+name: languages/c-sudoku-shows-source-and-output
+pack: codetracer
+summary: >-
+  A C Sudoku solver recording opens on its source, main.c, and its event log
+  holds the program's output, "Solved" among it.
+
+stage:
+  - use: record-program
+    with: { program: c_sudoku_solver/main.c }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 240s }
+  - wait: { until: { at: 'editor[file="main.c"]', present: true }, timeout: 120s }
+  - click: 'pane-tab[label="EVENT LOG"]'
+  - wait: { until: event-log.loaded, timeout: 120s }
+  # The program's output comes after the loader's reads: find it.
+  - click: 'search-box[pane="event-log"]'
+  - type: Solved
+  - wait: { until: { at: event-log, assert: 'has-output("Solved")' }, timeout: 120s }

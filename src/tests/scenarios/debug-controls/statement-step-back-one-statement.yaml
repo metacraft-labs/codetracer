@@ -1,0 +1,41 @@
+scenario: 1
+name: debug-controls/statement-step-back-one-statement
+pack: codetracer
+summary: >-
+  After two statement step-overs reach `var c = a + b;` on line 2, a
+  statement step-back (Alt+Shift+F10) goes back one statement, to `var b`
+  on line 1, and a second one to `var a`, still on line 1.
+
+stage:
+  - use: write-project
+    with:
+      files:
+        program.js: "var a = 1; var b = 2;\nvar c = a + b;\n"
+  - use: record-program
+    with: { program: $project/program.js }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - click: 'toolbar/toolbar-button[label="run-to-entry-image"]'
+    settle: false
+  - wait: { until: { at: 'editor[file="program.js"]', current-line: 1 }, timeout: 60s }
+  - wait: replay-idle
+  - wait: { until: { at: status-line, location: { matches: "program\\.js:1#[0-9]+$" } }, timeout: 30s }
+  - chord: { bound: debugger.step-over-statement }
+    settle: false
+  - wait: replay-idle
+  - chord: { bound: debugger.step-over-statement }
+    settle: false
+  - wait: { until: { at: 'editor[file="program.js"]', current-line: 2 }, timeout: 60s }
+  - wait: replay-idle
+  - chord: { bound: debugger.reverse-step-over-statement }
+    settle: false
+  - wait: { until: { at: 'editor[file="program.js"]', current-line: 1 }, timeout: 60s }
+  - wait: replay-idle
+  - wait: { until: { at: status-line, location: { matches: "program\\.js:1#[0-9]+$" } }, timeout: 30s }
+  - chord: { bound: debugger.reverse-step-over-statement }
+    settle: false
+  - wait: replay-idle
+  - wait: { until: { at: status-line, location: { matches: "program\\.js:1#[0-9]+$" } }, timeout: 30s }
+  - expect: { at: 'editor[file="program.js"]', current-line: 1 }

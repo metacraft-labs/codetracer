@@ -205,7 +205,8 @@ test.describe("status bar render stability", () => {
     // Step, which changes `StatusBaseModel.locationText` (the text is
     // `path:line#rrTicks`, so even a same-line hop moves it) and therefore
     // forces the status bar to redraw with new content.  Driven through the
-    // same statement-granularity surface `statement_step_over.spec.ts`
+    // same statement-granularity surface the statement step-over scenario
+    // (`src/tests/scenarios/debug-controls/statement-step-over-one-statement.yaml`)
     // uses, and asserted to exist rather than optional-chained away, so a
     // missing wiring fails here instead of silently making this test a
     // no-op.
