@@ -560,13 +560,18 @@ proc applyColumnBreakpointDecorations*(self: EditorViewComponent) =
                               ", column " & $b.column &
                               (if b.condition.len > 0: ", when " & b.condition
                                else: ""))
+      # Computed here, not inside `js{…}`: the literal builds a closure, and `b`
+      # is a `lent` loop variable, which a closure cannot capture (the Nix
+      # build's compiler refuses it: "cannot be captured as it would violate
+      # memory safety").
+      let markerClass =
+        if b.condition.len > 0:
+          cstring"ct-column-breakpoint-marker ct-breakpoint-conditional"
+        else: cstring"ct-column-breakpoint-marker"
       newDecorations.add(DeltaDecoration(
         `range`: newMonacoRange(line, column, line, endColumn),
         options: js{
-          inlineClassName:
-            (if b.condition.len > 0:
-               cstring"ct-column-breakpoint-marker ct-breakpoint-conditional"
-             else: cstring"ct-column-breakpoint-marker"),
+          inlineClassName: markerClass,
           stickiness: 1,
           hoverMessage: js{value: hoverText}}))
   self.columnBreakpointDecorations = self.monacoEditor.deltaDecorations(
