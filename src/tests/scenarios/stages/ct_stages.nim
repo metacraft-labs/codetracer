@@ -102,14 +102,72 @@ proc resolveProgram(program: string): string =
     return "test-programs" / program
   program
 
-proc recordProgram*(s: StageState; program, backend: string): string =
+proc ctRecord(s: StageState; program, backend, lang, dest: string; workDir = "";
+              stylusTrace = ""): string =
+  ## `ct record` of `program` into `dest` — the binary, subcommand and
+  ## options a user records with (`--backend`, `--lang`) — and the recording
+  ## it made. A missing recorder is a failed stage, named by `ct record`.
+  removeDir(dest)
+  createDir(dest.parentDir)
+  let ct = findCtBinary()
+  if ct.len == 0: raise newException(IOError, "record-program: `ct` is not built")
+  let cmd = quoteShell(ct) & " record " &
+            (if backend.len > 0: "--backend " & quoteShell(backend) & " " else: "") &
+            (if lang.len > 0: "--lang " & quoteShell(lang) & " " else: "") &
+            (if stylusTrace.len > 0: "--stylus-trace " & quoteShell(stylusTrace) & " " else: "") &
+            "-o " & quoteShell(dest) & " " & quoteShell(program)
+  let (output, code) = execCmdEx(cmd, workingDir = workDir)
+  if code != 0:
+    raise newException(IOError, "record-program " & program & ": `ct record` exited " &
+                       $code & "\n" & output)
+  if isUsableTraceDir(dest): return dest
+  for kind, path in walkDir(dest):
+    if kind == pcDir and isUsableTraceDir(path): return path
+  raise newException(IOError, "record-program " & program & ": no recording in " & dest)
+
+proc buildSbf(crate: string): string =
+  ## A Solana program crate compiled to SBF the way its author builds it
+  ## (`cargo build-sbf`, which the Solana recorder's documentation expects),
+  ## and the program (`target/deploy/<crate>.so`) `ct record` then records.
+  let (output, code) = execCmdEx("cargo build-sbf", workingDir = crate)
+  if code != 0:
+    raise newException(IOError, "record-program " & crate &
+                       ": `cargo build-sbf` exited " & $code & "\n" & output)
+  for kind, path in walkDir(crate / "target" / "deploy"):
+    if kind == pcFile and path.endsWith(".so"): return path
+  raise newException(IOError, "record-program " & crate & ": `cargo build-sbf` made no .so")
+
+proc buildStylusWasm(crate: string): string =
+  ## A Stylus contract crate built as `ct arb deploy` builds it for
+  ## debugging (`cargo build --target wasm32-unknown-unknown`, with DWARF),
+  ## and the module that build made.
+  let (output, code) = execCmdEx("cargo build --target wasm32-unknown-unknown",
+                                 workingDir = crate)
+  if code != 0:
+    raise newException(IOError, "record-program " & crate &
+                       ": `cargo build --target wasm32-unknown-unknown` exited " & $code & "\n" & output)
+  for kind, path in walkDir(crate / "target" / "wasm32-unknown-unknown" / "debug"):
+    if kind == pcFile and path.endsWith(".wasm"): return path
+  raise newException(IOError, "record-program " & crate & ": the build made no .wasm")
+
+proc recordProgram*(s: StageState; program, backend: string; lang = "";
+                    stylusTrace = ""): string =
   ## A recording of `program`, through the fixture corpus: a cached recording
   ## when this build can read one made from the same sources, else `ct record`
   ## — the binary and subcommand a user records with. A missing recorder is a
   ## failed stage, named; never a scenario that silently passes.
+  ##
+  ## `lang` is `ct record
+  ## --lang`, for a target only the user's word identifies (a PolkaVM or
+  ## Solana program). `stylusTrace` (a file in the program's folder) is a
+  ## Stylus transaction's EVM trace (`ct record --stylus-trace`): the
+  ## program, a contract crate, is built to WebAssembly and replayed against
+  ## it.
   let rel = resolveProgram(program)
   var name = rel.replace("test-programs/", "").replace("/", "_").replace(".", "_")
   if backend.len > 0: name.add "_" & backend
+  if lang.len > 0: name.add "_" & lang
+  if stylusTrace.len > 0: name.add "_stylus"
   var spec: FixtureSpec
   var declared = false
   for d in DeclaredFixtures:
@@ -125,27 +183,22 @@ proc recordProgram*(s: StageState; program, backend: string): string =
                          probe: FixtureProbe(kind: pkNargo),
                          buildHint: "build the recorder for this language",
                          blockedOn: "")
-      if not (rel.endsWith(".nr") or dirExists(repo() / rel)):
+      let full = if rel.isAbsolute: rel else: repo() / rel
+      let noir = rel.endsWith(".nr") or fileExists(full / "Nargo.toml")
+      if not noir or lang.len > 0:
         # Not a Noir project: there is no probe for this recorder, so record
         # directly and let `ct record` name what is missing.
         let dest = fixtureCacheRoot(repo()) / (name & "-scenario")
         if isUsableTraceDir(dest) and cachedRecordingRefusal(dest).len == 0:
           return dest
-        removeDir(dest)
-        createDir(dest.parentDir)
-        let ct = findCtBinary()
-        if ct.len == 0: raise newException(IOError, "record-program: `ct` is not built")
-        let cmd = quoteShell(ct) & " record " &
-                  (if backend.len > 0: "--backend " & quoteShell(backend) & " " else: "") &
-                  "-o " & quoteShell(dest) & " " & quoteShell(repo() / rel)
-        let (output, code) = execCmdEx(cmd)
-        if code != 0:
-          raise newException(IOError, "record-program " & rel & ": `ct record` exited " &
-                             $code & "\n" & output)
-        if isUsableTraceDir(dest): return dest
-        for kind, path in walkDir(dest):
-          if kind == pcDir and isUsableTraceDir(path): return path
-        raise newException(IOError, "record-program " & rel & ": no recording in " & dest)
+        # A Solana crate is compiled to SBF first: `ct record` records the
+        # compiled program.
+        if stylusTrace.len > 0:
+          return s.ctRecord(buildStylusWasm(full), backend, lang, dest,
+                            stylusTrace = full / stylusTrace)
+        let target = if lang == "solana" and fileExists(full / "Cargo.toml"): buildSbf(full)
+                     else: full
+        return s.ctRecord(target, backend, lang, dest)
   let resolved = resolveFixture(spec)
   if resolved.outcome != foRecorded:
     raise newException(IOError, "record-program: " &
@@ -970,7 +1023,8 @@ proc runStage*(s: StageState; use: string; args: JsonNode) =
     if program.startsWith("$project/"):
       s.launch.recording = s.recordProjectFile(program["$project/".len .. ^1], argStr(args, "backend"))
     else:
-      s.launch.recording = s.recordProgram(program, argStr(args, "backend"))
+      s.launch.recording = s.recordProgram(program, argStr(args, "backend"), argStr(args, "lang"),
+                                           argStr(args, "stylus-trace"))
   of "nim-project":
     s.nimProject()
   of "open-recording":

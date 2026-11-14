@@ -115,6 +115,13 @@ roles:
       video-player: optional
       pixel-history: optional
       shader-debug: optional
+      # pw7
+      shell: optional
+      caption-bar: optional
+      value-actions: optional
+      notification-history: optional
+      welcome-view: optional
+      edit-toolbar-strip: optional
 
   # The strip of session tabs: one tab per open recording or editing session.
   session-strip:
@@ -260,6 +267,8 @@ roles:
     assertions:
       has-call(name): "some call: call.name == name"
       has-call-containing(text): "some call: call.name contains text"
+      # pw7: a call of `name` whose arguments, as drawn, contain `args`.
+      has-call-with(name, args): "some call: call.name == name and call.arguments contains args"
       # A row is marked selected.
       has-selected-call: "some call: call.selected"
       # pw1: the current-call mark is on exactly the named call / on no row.
@@ -368,6 +377,8 @@ roles:
       # pw8: the pane draws a tab strip (it is one list of variables and
       # watches, with none).
       tab-strip: bool
+      # pw7: the source line the pane shows above the values (`17 | …`).
+      code-line: text
     # pw8: `text-field[label="watch"]`, the watch input.
     children: { variable: many, text-field: optional }
     affordances: [wheel, focusable]
@@ -413,8 +424,9 @@ roles:
   filesystem:
     # `loading`: the pane shows its loading state instead of a tree.
     # pw3: `error`, the name field's refusal ("… already exists"); a Create
-    # or Rename puts a `text-field` (label `name`) in the tree.
-    properties: { count: int, focused: bool, loading: bool, error: text }
+    # or Rename puts a `text-field` (label `name`) in the tree. pw7: `empty`,
+    # the pane shows its "nothing here" overlay instead of a tree.
+    properties: { count: int, focused: bool, loading: bool, error: text, empty: bool }
     children: { file-node: many, text-field: many }
     affordances: [wheel, focusable]
 
@@ -861,7 +873,23 @@ roles:
 
   # Find in Files.
   find-in-files:
-    properties: { count: int, text: text, where: text }
+    properties:
+      count: int
+      text: text
+      where: text
+      # pw7: the search the rows answer (the field's text), its options,
+      # the rows as `<folder>/<file>:<line>` in order, each file group as
+      # `<folder>/<file> <n> match(es)`, the matched text each row
+      # highlights, the selected row, and the prompt shown with no rows.
+      query: text
+      match-case: bool
+      regex: bool
+      rows: lines
+      groups: lines
+      highlights: lines
+      selected: text
+      prompt: text
+    children: { fif-match: many, fif-option: many, search-field: optional }
 
   # The Agent Activity pane.
   agent-activity:
@@ -1024,6 +1052,11 @@ roles:
       # Its table's header and body are drawn (the body empty for none).
       header: bool
       body: bool
+      list-height: int
+    # pw7 (desktop): the rows by their `#`, and the detail a selected row
+    # opens; `list-height` is the table body's height in pixels.
+    children: { request-row: many, request-detail: optional, resize-handle: optional }
+    affordances: [wheel]
 
   # The Origin Chain of a value: how it came to be, hop by hop, back to where
   # it was made (Value-Origin-Tracking), as the State panel shows it.
@@ -1488,6 +1521,121 @@ roles:
     properties: { status: text, detail: text }
     children: { text-field: optional }
 
+  # --- pw7 -----------------------------------------------------------------
+  # The actions offered beside a value under the pointer (its `+`, which adds
+  # it to the scratchpad).
+  value-actions:
+    children: { panel-button: many }
+
+  # A row of Find in Files, by where it is (`app/main.py:26`).
+  fif-match:
+    keys: [location]
+    properties: { location: text, line: int, highlight: text, selected: bool }
+    affordances: [click, double-click]
+
+  # One of Find in Files' option toggles (`case`, `word`, `regex`).
+  fif-option:
+    keys: [name]
+    properties: { name: text, on: bool }
+    affordances: [click]
+
+  # A pane's own search field: its text, and how much of it is selected.
+  search-field:
+    properties: { value: text, focused: bool, selected-text: text }
+    affordances: [click, text-entry, focusable]
+
+  # A request of the Requests panel, by its `#`.
+  request-row:
+    keys: [id]
+    properties: { id: text, method: text, url: text, status: text, selected: bool }
+    # drop-target: where the list/detail handle is dragged to.
+    affordances: [click, double-click, context-click, drop-target]
+
+  # The detail of the selected request: its tabs and which is in front.
+  request-detail:
+    properties: { active-tab: text, tabs: lines }
+    children: { detail-tab: many }
+    affordances: [click]
+
+  detail-tab:
+    keys: [label]
+    properties: { label: text, active: bool }
+    affordances: [click]
+
+  # The handle between a pane's list and its detail: dragged, it resizes them.
+  resize-handle:
+    affordances: [drag-source]
+
+  # The Shell pane: its state (`running`), its status words and its rows.
+  shell:
+    properties: { state: text, status: text, text: lines, count: int }
+    children: { shell-row: many }
+    affordances: [click, focusable, text-entry]
+    assertions:
+      shows(t): "text contains t"
+      has-mark(m): "some shell-row: shell-row.mark == m"
+
+  # One output line of the shell: its text, its recording mark (`start` on a
+  # recording's first line, `range` on the next, `none`) and the glyph its
+  # gutter draws.
+  shell-row:
+    keys: [text, mark]
+    properties: { text: text, mark: text, gutter: text }
+    affordances: [click]
+    # `gutter`: the row's mark column, where a click opens its recording.
+    anchors: [gutter]
+
+  # The caption bar: the logo (the menu button), the debug controls, the
+  # omnibox and the session tabs, laid out in one row. `seam` is the gap in
+  # pixels between its bottom and the content below it; `buttons`: the debug
+  # controls drawn; `placeholder`: the omnibox's empty text.
+  caption-bar:
+    properties: { seam: int, buttons: int, placeholder: text, opaque: bool, fixed: bool }
+    children: { caption-logo: optional, caption-controls: optional, caption-omnibox: optional,
+                caption-tabs: optional, session-overflow-menu: optional }
+
+  caption-logo:
+    properties: { has-image: bool }
+    affordances: [click]
+
+  caption-controls:
+    properties: { buttons: int }
+
+  caption-omnibox:
+    properties: { value: text, focused: bool, enabled: bool }
+    affordances: [click, text-entry, focusable]
+
+  # The session tabs' area: the overflow chevron and the `+` (new tab).
+  caption-tabs:
+    properties: { shown: int }
+    children: { panel-button: many }
+
+  # A row of a menu the caption bar opens (the session tabs' overflow list).
+  menu-row:
+    keys: [label]
+    properties: { label: text, active: bool, folder: bool }
+    affordances: [click]
+
+  # The session tabs that do not fit, listed by the overflow chevron.
+  session-overflow-menu:
+    properties: { count: int }
+    children: { menu-row: many }
+
+  # The status bar's notification history: every notice it has shown.
+  notification-history:
+    properties: { text: lines, count: int }
+    assertions:
+      never-says(t): "not (text contains t)"
+
+  # The view a welcome tab shows under the caption bar (the welcome screen's
+  # host, as wide as the window).
+  welcome-view:
+    properties: {}
+
+  # The edit-mode commands' toolbar.
+  edit-toolbar-strip:
+    properties: { shown: bool }
+
 sync:
   # The implicit condition after every input: the window handled it and the
   # screen stopped changing.
@@ -1533,11 +1681,13 @@ stages:
       Record a test program (a path under the repository's test-programs, or
       a named fixture) once, kept for the lane, and remember it as the
       recording the next `open-recording` opens. `$project/<file>` records a
-      file of the stage's own project folder instead, afresh (a scenario may
-      edit and re-record it).
-      recording the next `open-recording` opens. `$project/<file>` records a
-      program `write-project` wrote, into this run only.
-    params: { program: text, backend: text }
+      program `write-project` wrote, into this run only. `lang` is `ct record
+      --lang`, for a target only the user's word identifies (`polkavm`,
+      `solana`; a Solana crate is compiled with `cargo build-sbf` first).
+      `stylus-trace` (a file in the program's folder) is a Stylus
+      transaction's EVM trace: the contract crate is built to WebAssembly and
+      recorded against it (`ct record --stylus-trace`).
+    params: { program: text, backend: text, lang: text, stylus-trace: text }
   nim-project:
     summary: >-
       Write the Nim compile-time tracing project (a macro, a static block, a

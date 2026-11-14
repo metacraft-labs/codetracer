@@ -99,7 +99,7 @@ const ROLES: Record<string, { affordances: string[]; properties: string[] }> = {
           properties: ["name", "current", "selected", "expanded", "arguments"] },
   "event-log": { affordances: ["click", "wheel", "focusable"], properties: ["count", "total", "focused", "last-shown", "columns", "search"] },
   event: { affordances: ["click", "double-click", "context-click"], properties: ["text", "kind", "current", "future"] },
-  variables: { affordances: ["wheel", "focusable"], properties: ["count", "focused", "tab-strip"] },
+  variables: { affordances: ["wheel", "focusable"], properties: ["count", "focused", "tab-strip", "code-line"] },
   variable: { affordances: ["click", "double-click", "context-click"], properties: ["name", "type", "value", "origin-badge", "watch", "invalid", "text"] },
   "status-line": { affordances: [], properties: ["message", "location", "build-status", "notifications", "history"] },
   omnibox: { affordances: ["click", "text-entry", "focusable"], properties: ["query", "focused", "count", "labels"] },
@@ -107,7 +107,7 @@ const ROLES: Record<string, { affordances: string[]; properties: string[] }> = {
   "context-menu": { affordances: [], properties: ["count"] },
   "menu-item": { affordances: ["click"], properties: ["label", "enabled", "shortcut", "hint"] },
   "terminal-output": { affordances: ["click", "wheel", "focusable"], properties: ["text", "count", "focused"] },
-  filesystem: { affordances: ["wheel", "focusable"], properties: ["count", "focused", "loading"] },
+  filesystem: { affordances: ["wheel", "focusable"], properties: ["count", "focused", "loading", "empty"] },
   // --- pw2 ---
   vcs: { affordances: [], properties: ["title", "commit", "stats", "count", "unified-diff", "error", "commits", "no-repo",
                                      "branch-picker", "review-extras"] },
@@ -132,7 +132,8 @@ const ROLES: Record<string, { affordances: string[]; properties: string[] }> = {
   "build-line": { affordances: ["click"], properties: ["text", "stream", "severity", "located", "italic", "colour", "styled"] },
   "problems-panel": { affordances: [], properties: ["count", "errors", "warnings", "empty", "groups", "where"] },
   problem: { affordances: ["click"], properties: ["message", "path", "location", "severity"] },
-  "find-in-files": { affordances: [], properties: ["count", "text", "where"] },
+  "find-in-files": { affordances: [], properties: ["count", "text", "where", "query", "match-case", "regex", "rows", "groups",
+                                                   "highlights", "selected", "prompt"] },
   "agent-activity": {
     affordances: [],
     properties: ["text", "conversation", "messages", "busy", "notice", "notices", "roll-up", "conversation-first",
@@ -227,6 +228,28 @@ const ROLES: Record<string, { affordances: string[]; properties: string[] }> = {
   "flow-value": { affordances: ["click", "context-click"], properties: ["name", "side", "line", "value", "cut", "clipped", "single-line", "cap", "shown"] },
   "loop-control": { affordances: ["click"], properties: ["iteration", "total", "slider-width"] },
   popup: { affordances: ["click"], properties: ["text", "value", "type", "anchored"] },
+  // --- pw7 ---
+  "value-actions": { affordances: [], properties: [] },
+  "fif-match": { affordances: ["click", "double-click"], properties: ["location", "line", "highlight", "selected"] },
+  "fif-option": { affordances: ["click"], properties: ["name", "on"] },
+  "search-field": { affordances: ["click", "text-entry", "focusable"], properties: ["value", "focused", "selected-text"] },
+  requests: { affordances: ["wheel"], properties: ["count", "header", "body", "list-height"] },
+  "request-row": { affordances: ["click", "double-click", "context-click", "drop-target"], properties: ["id", "method", "url", "status", "selected"] },
+  "request-detail": { affordances: ["click"], properties: ["active-tab", "tabs"] },
+  "detail-tab": { affordances: ["click"], properties: ["label", "active"] },
+  "resize-handle": { affordances: ["drag-source"], properties: [] },
+  shell: { affordances: ["click", "focusable", "text-entry"], properties: ["state", "status", "text", "count"] },
+  "shell-row": { affordances: ["click"], properties: ["text", "mark", "gutter"] },
+  "caption-bar": { affordances: [], properties: ["seam", "buttons", "placeholder", "opaque", "fixed"] },
+  "caption-logo": { affordances: ["click"], properties: ["has-image"] },
+  "caption-controls": { affordances: [], properties: ["buttons"] },
+  "caption-omnibox": { affordances: ["click", "text-entry", "focusable"], properties: ["value", "focused", "enabled"] },
+  "caption-tabs": { affordances: [], properties: ["shown"] },
+  "menu-row": { affordances: ["click"], properties: ["label", "active", "folder"] },
+  "session-overflow-menu": { affordances: [], properties: ["count"] },
+  "notification-history": { affordances: [], properties: ["text", "count"] },
+  "welcome-view": { affordances: [], properties: [] },
+  "edit-toolbar-strip": { affordances: [], properties: ["shown"] },
 };
 
 // pw3: properties this batch reads on roles declared above.
@@ -2091,6 +2114,229 @@ function readSurfacePw3(root: any): void {
   }
 }
 
+// --- pw7: flow values and the scratchpad, Find in Files' rows and options,
+// the Requests panel's rows and detail, the Shell pane, the caption bar and
+// its menu, the notification history ----------------------------------------
+//
+// Runs IN THE PAGE, in the same evaluation as `readSurface`. Reads only.
+function readSurfacePw7(root: any): void {
+  const vis = (el: Element | null): boolean => {
+    if (!el) return false;
+    const r = (el as HTMLElement).getBoundingClientRect();
+    if (r.width <= 0 || r.height <= 0) return false;
+    const cs = getComputedStyle(el as HTMLElement);
+    return cs.visibility !== "hidden" && cs.display !== "none";
+  };
+  const text = (el: Element | null | undefined) => ((el?.textContent ?? "").replace(/\s+/g, " ").trim());
+  const node = (role: string, el: Element | null, props: Record<string, unknown>,
+                keys: Array<[string, string]> = []): any => {
+    const r = el ? (el as HTMLElement).getBoundingClientRect() : { left: 0, top: 0, width: 0, height: 0 };
+    return { role, keys, props, x: r.left, y: r.top, w: r.width, h: r.height,
+             visible: el ? vis(el) : false, children: [] as any[] };
+  };
+  const has = (el: Element | null | undefined, cls: string) => !!el && el.classList.contains(cls);
+  const centre = (el: Element) => {
+    const r = (el as HTMLElement).getBoundingClientRect();
+    return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+  };
+  const active = document.activeElement;
+  const button = (b: HTMLElement, label: string) => node("panel-button", b, {
+    label, enabled: !has(b, "disabled") && !(b as HTMLButtonElement).disabled, active: has(b, "active"),
+    title: b.getAttribute("title") ?? "",
+  }, [["label", label]]);
+
+  // the state pane's code line (the source line it shows above the values)
+  const vars = root.children.find((c: any) => c.role === "variables");
+  if (vars) vars.props["code-line"] = text(document.querySelector("#code-state-line-0"));
+
+  // the files pane's "nothing here" overlay
+  const fs = root.children.find((c: any) => c.role === "filesystem");
+  if (fs) {
+    const comp = document.querySelector("div[id^='filesystemComponent']");
+    const ov = comp?.querySelector(".filesystem-empty-overlay") ?? null;
+    fs.props.empty = !!ov && !has(ov, "hidden") && vis(ov);
+  }
+
+  // the event log's search field ("Find event"): a user filters the log by typing there
+  const elSearch = (Array.from(document.querySelectorAll(".eventLog-search-field")) as HTMLInputElement[]).find((e) => vis(e));
+  if (elSearch) {
+    root.children.push(node("search-box", elSearch, {
+      pane: "event-log", value: elSearch.value, focused: document.activeElement === elSearch,
+    }, [["pane", "event-log"]]));
+  }
+  // the `+` offered beside the value under the pointer
+  const adds = (Array.from(document.querySelectorAll(".add-to-scratchpad-button")) as HTMLElement[]).filter((b) => vis(b));
+  if (adds.length > 0) {
+    const va = node("value-actions", adds[0].parentElement, {});
+    for (const b of adds) va.children.push(button(b, "Add to scratchpad"));
+    root.children.push(va);
+  }
+
+  // Find in Files: its rows, groups, options and field
+  const fif = root.children.find((c: any) => c.role === "find-in-files");
+  const fp = (Array.from(document.querySelectorAll(".fif-panel")) as HTMLElement[]).find((e) => vis(e));
+  if (fif && fp) {
+    const field = fp.querySelector("#fif-input") as HTMLInputElement | null;
+    const rows: string[] = [];
+    const highlights: string[] = [];
+    let selected = "";
+    const groups = Array.from(fp.querySelectorAll(".fif-file-group")) as HTMLElement[];
+    fif.props.groups = groups.map((g) => `${text(g.querySelector(".fif-file-path"))} ${text(g.querySelector(".fif-file-count"))}`);
+    for (const g of groups) {
+      const file = text(g.querySelector(".fif-file-path"));
+      for (const r of Array.from(g.querySelectorAll(".fif-match-row")) as HTMLElement[]) {
+        const line = parseInt(text(r.querySelector(".fif-line-number")), 10) || 0;
+        const location = `${file}:${line}`;
+        const hl = text(r.querySelector(".fif-highlight"));
+        rows.push(location);
+        highlights.push(hl);
+        const sel = has(r, "fif-match-row-selected");
+        if (sel) selected = location;
+        fif.children.push(node("fif-match", r, { location, line, highlight: hl, selected }, [["location", location]]));
+      }
+    }
+    fif.props.rows = rows;
+    fif.props.highlights = highlights;
+    fif.props.selected = selected;
+    fif.props.query = field?.value ?? "";
+    const opt = (cls: string) => fp.querySelector(`.fif-option-${cls}`) as HTMLElement | null;
+    fif.props["match-case"] = has(opt("case"), "fif-option-on");
+    fif.props.regex = has(opt("regex"), "fif-option-on");
+    fif.props.prompt = text(fp.querySelector(".fif-empty-prompt"));
+    for (const name of ["case", "word", "regex"]) {
+      const o = opt(name);
+      if (o && vis(o)) fif.children.push(node("fif-option", o, { name, on: has(o, "fif-option-on") }, [["name", name]]));
+    }
+    if (field && vis(field)) {
+      const st = field.selectionStart ?? 0;
+      const en = field.selectionEnd ?? 0;
+      fif.children.push(node("search-field", field, {
+        value: field.value, focused: field === active, "selected-text": field.value.slice(st, en),
+      }));
+    }
+  }
+
+  // the Requests panel (desktop): rows by `#`, the detail, the handle
+  const rp = (Array.from(document.querySelectorAll(".request-panel")) as HTMLElement[]).find((e) => vis(e));
+  if (rp) {
+    const body = rp.querySelector(".request-table-body") as HTMLElement | null;
+    const bb = body?.getBoundingClientRect();
+    const rows = Array.from(rp.querySelectorAll(".request-row")) as HTMLElement[];
+    let req = root.children.find((c: any) => c.role === "requests");
+    if (!req) {
+      req = node("requests", rp, { count: rows.length, header: !!rp.querySelector(".request-table-header"), body: !!body });
+      root.children.push(req);
+    }
+    req.props["list-height"] = body ? Math.round(body.clientHeight) : 0;
+    for (const r of rows) {
+      const id = text(r.querySelector(".request-col-id"));
+      const n = node("request-row", r, {
+        id, method: text(r.querySelector(".request-col-method")), url: text(r.querySelector(".request-col-url")),
+        status: text(r.querySelector(".request-col-status")), selected: has(r, "selected"),
+      }, [["id", id]]);
+      // a row is on screen only where the list shows it
+      if (bb) {
+        const b = r.getBoundingClientRect();
+        if (b.top < bb.top - 0.5 || b.bottom > bb.bottom + 0.5) n.visible = false;
+      }
+      req.children.push(n);
+    }
+    const det = rp.querySelector(".request-detail") as HTMLElement | null;
+    if (det && vis(det)) {
+      const tabs = Array.from(det.querySelectorAll(".request-detail-tab")) as HTMLElement[];
+      const d = node("request-detail", det, {
+        "active-tab": text(tabs.find((t) => has(t, "request-detail-tab--active"))), tabs: tabs.map((t) => text(t)),
+      });
+      for (const t of tabs) {
+        const l = text(t);
+        d.children.push(node("detail-tab", t, { label: l, active: has(t, "request-detail-tab--active") }, [["label", l]]));
+      }
+      req.children.push(d);
+    }
+    const h = rp.querySelector(".request-detail-resize-handle") as HTMLElement | null;
+    if (h && vis(h)) req.children.push(node("resize-handle", h, {}));
+  }
+
+  // the Shell pane
+  const sh = (Array.from(document.querySelectorAll(".isonim-shell")) as HTMLElement[]).find((e) => vis(e));
+  if (sh) {
+    const rows = Array.from(sh.querySelectorAll(".shell-row")) as HTMLElement[];
+    const texts = rows.map((r) => (r.querySelector(".shell-text")?.textContent ?? "").replace(/\s+$/, ""));
+    const pane = node("shell", sh.querySelector(".shell-rows") ?? sh, {
+      state: sh.getAttribute("data-state") ?? "", status: text(sh.querySelector(".shell-status")),
+      text: texts, count: rows.length,
+    });
+    rows.forEach((r, i) => {
+      const g = r.querySelector(".shell-gutter") as HTMLElement | null;
+      const row = node("shell-row", r, { text: texts[i], mark: r.getAttribute("data-mark") || "none", gutter: text(g) },
+                       [["text", texts[i]], ["mark", r.getAttribute("data-mark") || "none"]]);
+      if (g) row.anchors = { points: { gutter: centre(g) } };
+      pane.children.push(row);
+    });
+    root.children.push(pane);
+  }
+
+  // the caption bar: logo, debug controls, omnibox, session tabs, its menu
+  const menu = document.querySelector("#menu") as HTMLElement | null;
+  if (menu && vis(menu)) {
+    const mb = menu.getBoundingClientRect();
+    const rc = document.querySelector("#root-container") as HTMLElement | null;
+    const cs = getComputedStyle(menu);
+    const controls = document.querySelector("#isonim-debug-controls .isonim-debug-controls") as HTMLElement | null;
+    const omni = document.querySelector("#debug .command-input-field") as HTMLInputElement | null;
+    const cap = node("caption-bar", menu, {
+      seam: rc ? Math.round(Math.abs(rc.getBoundingClientRect().top - mb.bottom)) : -1,
+      buttons: controls ? controls.querySelectorAll("button").length : 0,
+      placeholder: omni?.placeholder ?? "",
+      opaque: !/rgba\(0, 0, 0, 0\)|transparent/.test(cs.backgroundColor),
+      fixed: cs.position === "fixed",
+    });
+    const logo = document.querySelector("#menu-logo-img") as HTMLElement | null;
+    if (logo && vis(logo)) {
+      cap.children.push(node("caption-logo", logo, { "has-image": /url\(/.test(getComputedStyle(logo).backgroundImage) }));
+    }
+    if (controls && vis(controls)) cap.children.push(node("caption-controls", controls, { buttons: controls.querySelectorAll("button").length }));
+    if (omni && vis(omni)) {
+      cap.children.push(node("caption-omnibox", omni, { value: omni.value, focused: omni === active, enabled: !omni.disabled }));
+    }
+    const bar = document.querySelector("#session-tab-bar") as HTMLElement | null;
+    if (bar && vis(bar)) {
+      const tabs = node("caption-tabs", bar, { shown: bar.querySelectorAll(".session-tab").length });
+      const ov = bar.querySelector(".session-tab-overflow") as HTMLElement | null;
+      const add = bar.querySelector(".session-tab-add") as HTMLElement | null;
+      if (ov && vis(ov)) tabs.children.push(button(ov, "More tabs"));
+      if (add && vis(add)) tabs.children.push(button(add, "New tab"));
+      cap.children.push(tabs);
+    }
+    const om = document.querySelector(".session-tab-overflow-menu") as HTMLElement | null;
+    if (om && vis(om)) {
+      const items = Array.from(om.querySelectorAll(".session-tab-overflow-item")) as HTMLElement[];
+      const m = node("session-overflow-menu", om, { count: items.length });
+      for (const it of items) {
+        const l = text(it);
+        m.children.push(node("menu-row", it, { label: l, active: has(it, "active"), folder: false }, [["label", l]]));
+      }
+      cap.children.push(m);
+    }
+    root.children.push(cap);
+  }
+
+  // the welcome screen's host: the view a welcome tab fills under the caption bar
+  const wh = document.querySelector("#welcomeScreen") as HTMLElement | null;
+  if (wh && vis(wh)) root.children.push(node("welcome-view", wh, {}));
+
+  // the status bar's notification history (View › Notifications)
+  const nh = document.querySelector("#notifications-container") as HTMLElement | null;
+  if (nh && vis(nh)) {
+    const msgs = (Array.from(nh.querySelectorAll(".notification-message")) as HTMLElement[]).map((m) => text(m));
+    root.children.push(node("notification-history", nh, { text: msgs, count: msgs.length }));
+  }
+
+  // the edit-mode commands' toolbar
+  const et = document.querySelector('[data-topbar-surface="edit-commands"]') as HTMLElement | null;
+  if (et) root.children.push(node("edit-toolbar-strip", et, { shown: vis(et) }));
+}
+
 // The readers that extend `readSurface`'s tree, run in the same page
 // evaluation (one read of the DOM).
 // --- pw4: the program menu, the layout's shape, tracepoint editors, the Call
@@ -2428,7 +2674,7 @@ function readSurfacePw4(root: any): void {
   }
 }
 
-const SURFACE_EXTENSIONS: Array<(root: any) => void> = [readSurfacePw1, readSurfacePw3, readSurfacePw4, readSurfacePw8];
+const SURFACE_EXTENSIONS: Array<(root: any) => void> = [readSurfacePw1, readSurfacePw3, readSurfacePw4, readSurfacePw8, readSurfacePw7];
 
 // --- the binding ----------------------------------------------------------------
 

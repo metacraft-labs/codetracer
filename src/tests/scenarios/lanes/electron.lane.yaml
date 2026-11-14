@@ -235,4 +235,10 @@ applicable:
   - ../visual-replay/keymap-rows.yaml
   - ../visual-replay/keyboard-focus-scope.yaml
   - ../visual-replay/additive-tabs.yaml
+  # --- pw7 ---
+  - ../files/ruby-replay-lists-its-sources.yaml
+  - ../languages/ada-sudoku-event-log-populated.yaml
+  - ../debug-controls/noir-next-and-f10-step.yaml
+  - ../files/noir-files-panel-opens-a-file-once.yaml
+  - ../languages/c-sudoku-call-trace-to-main.yaml
 unsupported: []

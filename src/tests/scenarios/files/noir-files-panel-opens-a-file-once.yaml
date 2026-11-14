@@ -1,0 +1,22 @@
+scenario: 1
+name: files/noir-files-panel-opens-a-file-once
+pack: codetracer
+summary: >-
+  The Files panel of a Noir replay shows the recording's sources (main.nr
+  under src); clicking main.nr, already open, brings its editor forward
+  without opening a second one.
+
+stage:
+  - use: record-program
+    with: { program: noir_example }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 180s }
+  - wait: { until: { at: 'editor[file="main.nr"]', present: true }, timeout: 60s }
+  - click: 'pane-tab[label="FILES"]'
+  - wait: { until: { at: 'filesystem/file-node[name="main.nr"]', present: true }, timeout: 60s }
+  - expect: { at: filesystem, empty: false, loading: false }
+  - click: 'filesystem/file-node[name="main.nr"]'
+  - wait: { until: { at: 'editor[file="main.nr"]', active: true }, timeout: 30s }
+  - expect: { at: 'pane-tab[label="src/main.nr"]', present: true }
