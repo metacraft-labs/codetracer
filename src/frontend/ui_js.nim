@@ -58,6 +58,7 @@ import
   ui/hcr_live_edit_panel,
   # The developer setting `sharedEditor`: its palette toggle.
   ui/shared_editor_flag,
+  ui/formatted_source_view,
   # THE CONTAINER DEPLOYMENT'S CLIENT — WD1b. `container_boot` performs §6.3's
   # handshake over the socket `startIPC` opens below and installs the platform
   # the server describes; `browser_tab` supplies the ten operations that are
@@ -1935,7 +1936,10 @@ proc refreshCommandPaletteMenuIndex*(data: Data) =
                           (NimTracePaletteLabels[2], aTraceConstantAtCursor),
                           (NimTracePaletteLabels[3], aTraceEval),
                           # The developer setting `sharedEditor`.
-                          (ToggleSharedEditorLabel, aToggleSharedEditor)]:
+                          (ToggleSharedEditorLabel, aToggleSharedEditor),
+                          # A minified source's formatted view.
+                          (ToggleFormattedSourceViewLabel,
+                           aToggleFormattedSourceView)]:
     data.ui.commandPalette.interpreter.commands[cstring(label)] = Command(
       name: cstring(label), kind: ActionCommand, action: action,
       shortcut: displayedChord(action))
@@ -6597,6 +6601,16 @@ var actions*: array[ClientAction, ClientActionHandler] = [
   aKeymapEmacs: proc(actionData: JsObject) = selectDesktopKeymap(bkEmacs),
   aKeymapVim: proc(actionData: JsObject) = selectDesktopKeymap(bkVim),
   aKeymapKakoune: proc(actionData: JsObject) = selectDesktopKeymap(bkKakoune),
+  aToggleFormattedSourceView: proc(actionData: JsObject) = # aToggleFormattedSourceView
+    ## A minified source's formatted view, on or off for this session
+    ## (`ui/formatted_source_view`): the replay server steps by the view's
+    ## lines and the editor follows it from the next stop.
+    let dbg = data.services.debugger
+    let path = $dbg.location.path
+    let t = toggledFormattedView(dbg.formattedSourceView, path)
+    dbg.formattedSourceView = t.on
+    dbg.setActiveSourceView(cstring(t.viewPath))
+    data.viewsApi.infoMessage(cstring(t.notice)),
 ]
 
 data.actions = actions

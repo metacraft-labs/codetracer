@@ -46,6 +46,8 @@ const
     "preferences.toggle-shared-editor", "preferences.keymap-cua",
     "preferences.keymap-emacs", "preferences.keymap-vim",
     "preferences.keymap-kakoune",
+    # the desktop palette's formatted source view
+    "view.toggle-formatted-source",
     "session.debug", "session.load-trace", "session.new-file",
     "session.open-folder", "session.open-recent", "session.record-from-launch",
     "session.save", "session.save-all", "session.save-as",

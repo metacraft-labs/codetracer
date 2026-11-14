@@ -1,0 +1,37 @@
+scenario: 1
+name: formatted-view/step-over
+pack: codetracer
+summary: >-
+  A minified JavaScript program (two statements on its first line) with its
+  source map beside it: after View: Toggle Formatted Source View, Next (F10)
+  advances one line of the formatted source, and the editor follows it
+  (program.src.js line 3, then line 5) instead of skipping the first
+  line's second statement.
+
+stage:
+  - use: write-project
+    with:
+      files:
+        program.js: "var a = 1; var b = 2;\nvar c = a + b;\n"
+        program.js.map: "{\"version\": 3, \"file\": \"program.js\", \"sources\": [\"program.src.js\"], \"names\": [], \"mappings\": \"AAAA,WAEA;AAEA\"}"
+        program.src.js: "var a = 1;\n\nvar b = 2;\n\nvar c = a + b;\n"
+  - use: record-program
+    with: { program: $project/program.js }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 180s }
+  - wait: { until: { at: 'editor[file="program.js"]', current-line: 1 }, timeout: 60s }
+  - chord: Ctrl+p
+  - type: ":Toggle Formatted"
+  - wait: { until: { at: 'omnibox/option[label="View: Toggle Formatted Source View"]', kind: command }, timeout: 15s }
+  - click: 'omnibox/option[label="View: Toggle Formatted Source View"]'
+  - wait: { until: { at: status-line, notifications: { contains: "Formatted source view on" } }, timeout: 30s }
+  - key: F10
+    settle: false
+  - wait: { until: replay-idle, timeout: 60s }
+  - wait: { until: { at: 'editor[file="program.src.js"]', current-line: 3 }, timeout: 60s }
+  - key: F10
+    settle: false
+  - wait: { until: replay-idle, timeout: 60s }
+  - wait: { until: { at: 'editor[file="program.src.js"]', current-line: 5 }, timeout: 60s }

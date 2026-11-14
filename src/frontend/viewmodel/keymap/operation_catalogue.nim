@@ -434,6 +434,8 @@ const
     op("preferences.keymap-emacs", GlobalTable, "Keymap: Emacs"),
     op("preferences.keymap-vim", GlobalTable, "Keymap: Vim"),
     op("preferences.keymap-kakoune", GlobalTable, "Keymap: Kakoune"),
+    # A minified source's formatted view (its source map's), from the palette.
+    op("view.toggle-formatted-source", GlobalTable, "View: Toggle Formatted Source View"),
     op("help.user-manual", GlobalTable, "User Manual"),
     op("help.report-problem", GlobalTable, "Report a Problem"),
     op("help.suggest-feature", GlobalTable, "Suggest a Feature"),

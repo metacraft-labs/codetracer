@@ -1,0 +1,31 @@
+scenario: 1
+name: formatted-view/statement-step-over
+pack: codetracer
+summary: >-
+  Step Over Statement (Alt+F10) composes with the formatted view: from the
+  minified program's first statement it stops on the next formatted
+  statement (program.src.js line 3).
+
+stage:
+  - use: write-project
+    with:
+      files:
+        program.js: "var a = 1; var b = 2;\nvar c = a + b;\n"
+        program.js.map: "{\"version\": 3, \"file\": \"program.js\", \"sources\": [\"program.src.js\"], \"names\": [], \"mappings\": \"AAAA,WAEA;AAEA\"}"
+        program.src.js: "var a = 1;\n\nvar b = 2;\n\nvar c = a + b;\n"
+  - use: record-program
+    with: { program: $project/program.js }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 180s }
+  - wait: { until: { at: 'editor[file="program.js"]', current-line: 1 }, timeout: 60s }
+  - chord: Ctrl+p
+  - type: ":Toggle Formatted"
+  - wait: { until: { at: 'omnibox/option[label="View: Toggle Formatted Source View"]', kind: command }, timeout: 15s }
+  - click: 'omnibox/option[label="View: Toggle Formatted Source View"]'
+  - wait: { until: { at: status-line, notifications: { contains: "Formatted source view on" } }, timeout: 30s }
+  - chord: Alt+F10
+    settle: false
+  - wait: { until: replay-idle, timeout: 60s }
+  - wait: { until: { at: 'editor[file="program.src.js"]', current-line: 3 }, timeout: 60s }

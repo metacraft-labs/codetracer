@@ -1,0 +1,54 @@
+scenario: 1
+name: visual-replay/capture-frames-draws-and-history
+pack: codetracer
+summary: >-
+  The desktop's Visual Replay panes on the gl_scene recording, as the
+  terminal and GPUI front-ends are measured against them: frames 0, 30 (a
+  drag of the scrub bar) and 59 show each quad in gl_scene's colour for that
+  frame; two draw-call steps back from the first frame reach "Draw 1 / 3";
+  picking source pixel (40, 50) of frame 59 gives a Pixel History whose last
+  draw call is 238 (59 × 4 + 2), and a click on it shows "Draw 2 / 3".
+
+stage:
+  - use: visual-recording
+  - use: open-recording
+    with: { deployment: web }
+
+steps:
+  - wait: { until: { at: 'pane-tab[label="VIDEO PLAYER"]', present: true }, timeout: 300s }
+  - click: { at: 'pane-tab[label="VIDEO PLAYER"]', anchor: title }
+  - wait: { until: { at: video-player/frame-image, present: true }, timeout: 180s }
+  - click: { at: video-player, anchor: label }
+  - beat: three-frames
+    steps:
+      - key: Home
+      - wait: { until: { at: video-player/frame-image, quads: ["#643219", "#937b8a", "#c2c4fb", "#f10d6c"] }, timeout: 90s }
+      - expect: { at: video-player, frame: "Frame 0 / 59" }
+      - drag:
+          from: { at: video-player, anchor: scrub-thumb }
+          to: { at: video-player, anchor: scrub(51) }
+      - wait: { until: { at: video-player, frame: "Frame 30 / 59" }, timeout: 90s }
+      - wait: { until: { at: video-player/frame-image, quads: ["#6c6a11", "#9bb382", "#cafcf3", "#f94564"] }, timeout: 90s }
+      - click: { at: video-player, anchor: label }
+      - key: End
+      - wait: { until: { at: video-player, frame: "Frame 59 / 59" }, timeout: 90s }
+      - wait: { until: { at: video-player/frame-image, quads: ["#b87e45", "#e7c7b6", "#161027", "#455998"] }, timeout: 90s }
+  - beat: draw-calls
+    steps:
+      - key: Home
+      - wait: { until: { at: video-player, frame: "Frame 0 / 59" }, timeout: 90s }
+      - chord: Shift+Left
+      - chord: Shift+Left
+      - wait: { until: { at: video-player, draw: "Draw 1 / 3" }, timeout: 60s }
+  - beat: picked-pixel
+    steps:
+      - key: End
+      - wait: { until: { at: video-player, frame: "Frame 59 / 59" }, timeout: 90s }
+      - key: p
+      - wait: { until: { at: video-player, picking: true }, timeout: 10s }
+      - click: { at: video-player/frame-image, anchor: "pixel(40, 50)" }
+      - click: { at: 'pane-tab[label="PIXEL HISTORY"]', anchor: title }
+      - wait: { until: { at: pixel-history, count: { gt: 0 } }, timeout: 300s }
+      - expect: { at: pixel-history, last-draw: "238" }
+      - click: { at: pixel-history, anchor: last-entry }
+      - wait: { until: { at: video-player, draw: "Draw 2 / 3" }, timeout: 60s }

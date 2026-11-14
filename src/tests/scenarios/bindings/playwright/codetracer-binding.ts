@@ -1970,11 +1970,17 @@ function readSurfacePw3(root: any): void {
           // on screen: inside the editor's code area, not scrolled off it
           const cr = (comp.querySelector(".monaco-scrollable-element.editor-scrollable") ?? comp).getBoundingClientRect();
           const bb = b.getBoundingClientRect();
-          fv.props.shown = bb.left >= cr.left - 1 && bb.right <= cr.right + 1 && bb.top >= cr.top - 1 && bb.bottom <= cr.bottom + 1;
+          // what a user aims at is on screen: the eye of a cut value, else the
+          // start of the box
+          const er = eye && vis(eye) ? eye.getBoundingClientRect() : null;
+          const inside = (x0: number, x1: number) => x0 >= cr.left - 1 && x1 <= cr.right + 1 &&
+            bb.top >= cr.top - 1 && bb.bottom <= cr.bottom + 1;
+          fv.props.shown = er ? inside(er.left, er.right) : inside(bb.left, Math.min(bb.right, bb.left + 16));
           fv.visible = fv.visible && fv.props.shown;
+          fv.anchors = { points: { start: { x: bb.left + Math.min(bb.width / 2, 8), y: bb.top + bb.height / 2 } } };
           if (eye && vis(eye)) {
             const r = eye.getBoundingClientRect();
-            fv.anchors = { points: { eye: { x: r.left + r.width / 2, y: r.top + r.height / 2 } } };
+            fv.anchors.points.eye = { x: r.left + r.width / 2, y: r.top + r.height / 2 };
           }
           ed.children.push(fv);
         }

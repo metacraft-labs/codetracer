@@ -1,0 +1,29 @@
+scenario: 1
+name: flow/eye-icon
+pack: codetracer
+summary: >-
+  The long test_boards flow chip of the C sudoku solver is capped at 30ch on
+  a single line and clipped with an ellipsis; its eye opens a typed-value
+  popup (an expanded value and its type) that stays while the pointer moves
+  away and leaves the chip's width alone; a press outside closes it.
+
+stage:
+  - use: record-program
+    with: { program: c_sudoku_solver/main.c }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 300s }
+  - wait: { until: { at: 'editor[file="main.c"]/flow-value[name="test_boards", side="single"]', present: true }, timeout: 120s }
+  # The chip sits right of the code: scroll the editor to it.
+  - wheel: { at: 'editor[file="main.c"]', direction: right, amount: 1 }
+  - wait: { until: { at: 'editor[file="main.c"]/flow-value[name="test_boards", side="single"]', shown: true }, timeout: 30s }
+  - expect: { at: 'editor[file="main.c"]/flow-value[name="test_boards", side="single"]', cut: true, cap: "30ch", clipped: true, single-line: true }
+  - click: { at: 'editor[file="main.c"]/flow-value[name="test_boards", side="single"]', anchor: eye }
+  - wait: { until: { at: popup, anchored: single }, timeout: 30s }
+  - expect: { at: popup, value: { matches: "." }, type: { matches: "." } }
+  - move: { at: 'pane-tab[label="EVENT LOG"]' }
+  - expect: { at: popup, present: true }
+  - expect: { at: 'editor[file="main.c"]/flow-value[name="test_boards", side="single"]', cap: "30ch", clipped: true }
+  - click: 'pane-tab[label="EVENT LOG"]'
+  - wait: { until: { at: popup, absent: true }, timeout: 10s }

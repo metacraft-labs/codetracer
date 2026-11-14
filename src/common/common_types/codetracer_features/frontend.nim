@@ -374,7 +374,12 @@ type
     aKeymapCua,                   # palette: Keymap: CUA
     aKeymapEmacs,                 # palette: Keymap: Emacs
     aKeymapVim,                   # palette: Keymap: Vim
-    aKeymapKakoune                # palette: Keymap: Kakoune
+    aKeymapKakoune,               # palette: Keymap: Kakoune
+    # The formatted view of a minified source (Column-Aware-Navigation M3:
+    # the GUI sends `ct/set-active-source-view` on a view toggle): steps
+    # then move by the formatted source's lines and the editor follows it.
+    # Appended, for the same reason.
+    aToggleFormattedSourceView    # palette: View: Toggle Formatted Source View
 
   InputShortcutMap* = TableLike[langstring, langstring]
 

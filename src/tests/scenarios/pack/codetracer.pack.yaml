@@ -1254,11 +1254,12 @@ roles:
       clipped: bool
       single-line: bool
       cap: text
-      # It is on screen, inside the editor's code area (not scrolled off it).
+      # What a user aims at is on screen, inside the editor's code area (the
+      # eye of a cut value, else the start of the box), not scrolled off it.
       shown: bool
-    affordances: [click]
-    # `eye`: the chip's "view more" button.
-    anchors: [eye]
+    affordances: [click, context-click]
+    # `eye`: the chip's "view more" button; `start`: the start of its box.
+    anchors: [eye, start]
 
   # A loop header's control in the flow: the iteration shown, of how many,
   # and its slider's width.

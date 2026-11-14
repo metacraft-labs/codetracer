@@ -1,0 +1,39 @@
+scenario: 1
+name: flow/eye-icon-dual
+pack: codetracer
+summary: >-
+  On a before/after (dual) flow chip whose value was cut short, the eye
+  opens the AFTER value's typed popup (an expanded value and its type), and a
+  press outside closes it; hovering each half opens that half's typed popup,
+  and moving away hides it.
+
+stage:
+  - use: record-program
+    with: { program: noir_flow_dual_value }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 180s }
+  - wait: { until: { at: 'editor[file="main.nr"]', active: true }, timeout: 60s }
+  - click: 'toolbar/toolbar-button[label="step-in-image"]'
+    settle: false
+  - wait: { until: replay-idle, timeout: 60s }
+  - wait: { until: { at: 'editor[file="main.nr"]/flow-value[name="readings", side="after", line="8"]', cut: true }, timeout: 60s }
+  # The chips sit right of the code: scroll the editor to them.
+  - wheel: { at: 'editor[file="main.nr"]', direction: right, amount: 1 }
+  - wait: { until: { at: 'editor[file="main.nr"]/flow-value[name="readings", side="after", line="8"]', shown: true }, timeout: 30s }
+  - expect: { at: 'editor[file="main.nr"]/flow-value[name="readings", side="before", line="8"]', shown: true }
+  - click: { at: 'editor[file="main.nr"]/flow-value[name="readings", side="after", line="8"]', anchor: eye }
+  - wait: { until: { at: popup, anchored: after }, timeout: 30s }
+  - expect: { at: popup, value: { matches: "." }, type: { matches: "." } }
+  - click: 'pane-tab[label="EVENT LOG"]'
+  - wait: { until: { at: popup, absent: true }, timeout: 10s }
+  - hover: { at: 'editor[file="main.nr"]/flow-value[name="readings", side="before", line="8"]', anchor: start, for: 800ms }
+  - wait: { until: { at: popup, anchored: before }, timeout: 30s }
+  - expect: { at: popup, value: { matches: "." }, type: { matches: "." } }
+  - move: { at: 'pane-tab[label="EVENT LOG"]' }
+  - wait: { until: { at: popup, absent: true }, timeout: 10s }
+  - hover: { at: 'editor[file="main.nr"]/flow-value[name="readings", side="after", line="8"]', anchor: start, for: 800ms }
+  - wait: { until: { at: popup, anchored: after }, timeout: 30s }
+  - move: { at: 'pane-tab[label="EVENT LOG"]' }
+  - wait: { until: { at: popup, absent: true }, timeout: 10s }

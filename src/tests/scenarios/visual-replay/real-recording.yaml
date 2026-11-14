@@ -1,0 +1,56 @@
+scenario: 1
+name: visual-replay/real-recording
+pack: codetracer
+summary: >-
+  On a real GL recording (gl_scene, played by the real ct_gfx_player), the
+  Video Player, Pixel History and Shader Debug tabs are in the layout and the
+  player shows its transport; a drag of the scrub bar moves the frame label;
+  l cycles the rate through 1×, 2×, 4×, 8× and back to 1×; Space plays and
+  pauses; the picker (p) and a click on the frame fill Pixel History and
+  Shader Debug (the shader's source names fragColor); a click on a history
+  row moves the player to that draw call.
+
+stage:
+  - use: visual-recording
+  - use: open-recording
+    with: { deployment: web }
+
+steps:
+  - wait: { until: { at: 'pane-tab[label="VIDEO PLAYER"]', present: true }, timeout: 300s }
+  - expect: { at: 'pane-tab[label="PIXEL HISTORY"]', present: true }
+  - expect: { at: 'pane-tab[label="SHADER DEBUG"]', present: true }
+  - click: { at: 'pane-tab[label="VIDEO PLAYER"]', anchor: title }
+  - wait: { until: { at: video-player/frame-image, present: true }, timeout: 180s }
+  - expect: { at: video-player, transport-enabled: true, error: "", last-frame: 59 }
+  - beat: scrub
+    steps:
+      - click: { at: video-player, anchor: label }
+      - key: Home
+      - wait: { until: { at: video-player, frame: "Frame 0 / 59" }, timeout: 60s }
+      - drag:
+          from: { at: video-player, anchor: scrub-thumb }
+          to: { at: video-player, anchor: scrub(50) }
+      - wait: { until: { at: video-player, frame: { matches: "^Frame (2[5-9]|3[0-5]) / 59$" } }, timeout: 60s }
+  - beat: rate
+    steps:
+      - key: l
+      - wait: { until: { at: video-player, rate: { contains: "1×" } }, timeout: 10s }
+      - key: l
+      - wait: { until: { at: video-player, rate: { contains: "2×" } }, timeout: 10s }
+      - key: l
+      - wait: { until: { at: video-player, rate: { contains: "4×" } }, timeout: 10s }
+      - key: l
+      - wait: { until: { at: video-player, rate: { contains: "8×" } }, timeout: 10s }
+      - key: l
+      - wait: { until: { at: video-player, rate: { contains: "1×" } }, timeout: 10s }
+      - key: Space
+      - wait: { until: { at: video-player, rate: { contains: "Paused" } }, timeout: 10s }
+  - beat: pick-a-pixel
+    steps:
+      - key: p
+      - wait: { until: { at: video-player, picking: true }, timeout: 10s }
+      - click: { at: video-player/frame-image, anchor: "pixel(40, 50)" }
+      - click: { at: 'pane-tab[label="PIXEL HISTORY"]', anchor: title }
+      - wait: { until: { at: pixel-history, count: { gt: 0 } }, timeout: 300s }
+      - click: { at: 'pane-tab[label="SHADER DEBUG"]', anchor: title }
+      - wait: { until: { at: shader-debug, source: { contains: "fragColor" } }, timeout: 120s }
