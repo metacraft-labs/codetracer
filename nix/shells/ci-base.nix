@@ -790,6 +790,12 @@ with pkgs;
       esac
       export CODETRACER_BUILD_DIR="''${CODETRACER_BUILD_DIR:-$_ct_build_dir}"
       export CODETRACER_REPO_ROOT_PATH=$ROOT_PATH
+      # The per-checkout Nim cache root src/Tuprules.tup imports, so a plain
+      # `tup` in this shell compiles into the same caches `just build-once`
+      # does (which recomputes it for its own checkout regardless) instead of
+      # the Tuprules fallback, which would rebuild every Nim target once.
+      # ci/lib/nim-cache-root.sh holds the scheme.
+      export CT_TUP_NIM_CACHE_ROOT="$(bash "$ROOT_PATH/ci/lib/nim-cache-root.sh" --tup "$ROOT_PATH")"
     fi
 
     # Materialized Python origin-DAP tests must not depend on a runner-global

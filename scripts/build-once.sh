@@ -767,6 +767,19 @@ if [ -z "${CT_EMULATOR_EXTRA_NIM_PATHS:-}" ] && [ -d "$PWD/libs/nim-stew/stew" ]
 	export CODETRACER_TRACE_FORMAT_NIM_EXTRA_PATHS="${CODETRACER_TRACE_FORMAT_NIM_EXTRA_PATHS:-$ct_nim_paths_lib}"
 fi
 
+# The Nim caches of the tup rules (src/Tuprules.tup) live under a root that
+# names THIS checkout (`<checkout basename>-<cksum of its path>`), so
+# two worktrees running `just build-once` at the same moment no longer compile
+# into one cache (measured 2026-11-14: "final link failed: bad value" linking
+# ct-test). Computed here from CT_ROOT, and assigned unconditionally: a value
+# inherited from a shell entered in ANOTHER checkout is exactly the collision.
+# A stripped-down fixture tree without the helper leaves it to the Tuprules
+# fallback, which is per checkout too.
+if [ -f "$CT_ROOT/ci/lib/nim-cache-root.sh" ]; then
+	CT_TUP_NIM_CACHE_ROOT="$("${BASH:-bash}" "$CT_ROOT/ci/lib/nim-cache-root.sh" --tup "$CT_ROOT")"
+	export CT_TUP_NIM_CACHE_ROOT
+fi
+
 # tup's dependency tracking is a FUSE mount, and libfuse can only obtain
 # /dev/fuse through a setuid helper at a path compiled into the binary. When
 # that helper is missing, tup reports a mount timeout three layers away from

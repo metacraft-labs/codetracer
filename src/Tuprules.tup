@@ -207,6 +207,60 @@ NIM_FFI_CACHE_IGNORE = (([A-Za-z]:)?[/\\].*[/\\]ctnw[/\\].*|([A-Za-z]:)?[/\\].*[
 # `D:/metacraft-dev-deps/cargo`).
 WINDOWS_CARGO_HOME_IGNORE = (([A-Za-z]:)?[/\\][Uu]sers[/\\][^/\\]+[/\\]\.cargo[/\\].*|.+[/\\]\.?cargo[/\\](registry|git|\.crates.*|\.package-cache.*|\.global-cache.*|bin|env)([/\\].*)?|.+[/\\]\.?cargo[/\\]\.[^/\\]+)
 
+# THE NIM CACHE ROOT IS PER CHECKOUT. Every Nim rule below writes its nimcache
+# under $(NIM_CACHE_ROOT)/%B_<kind>. The `%B_<kind>` part (2026-02-10) keeps the
+# targets of ONE checkout apart; it names the binary, not the tree, so while
+# the root was the host-global `/tmp/ct-nim-cache` two worktrees building `ct`
+# at the same moment wrote one cache, and one of them failed with "final link
+# failed: bad value" linking objects the other had half-written (measured
+# 2026-11-14 by concurrent `just build-once` runs in sibling worktrees).
+#
+# The root is `ci/lib/nim-cache-root.sh`'s `ct_tup_nim_cache_root`:
+# `/tmp/ct-nim-cache/<checkout basename>-<cksum of its absolute path>`, the
+# scheme the test lanes already use. It reaches this file as the environment
+# variable CT_TUP_NIM_CACHE_ROOT, through `import` rather than `export`:
+#
+#   * `import` substitutes the value into the command string at PARSE time, so
+#     the rule needs no shell expansion. Windows tup does not run rules through
+#     a POSIX shell, and `tup generate` (ci/build/dev.sh) bakes the commands
+#     into a script that would otherwise depend on the variable again at run
+#     time.
+#   * tup records the import as a dependency of every Tupfile that includes
+#     this one, so a changed root reparses them and re-runs exactly the
+#     commands whose string changed. An `export` would also re-run every
+#     command, but with commands whose text does not say where they write.
+#   * tup has no absolute "this checkout" variable of its own ($(TUP_CWD) is
+#     relative), and the tracked variant configs (build-*/tup.config) cannot
+#     carry a per-checkout value. The cksum needs a shell, so the entry points
+#     compute it: scripts/build-once.sh, scripts/build.sh (`tup monitor`),
+#     ci/build/dev.sh (`tup generate`), the dev shells (nix/shells/ci-base.nix)
+#     and the non-Nix environments (non-nix-build/env.sh, and env.sh through
+#     non-nix-build/windows/setup-codetracer-runtime-env.sh).
+#
+# UNSET (a plain `tup` from a shell none of those prepared) falls back to a
+# root derived from the directory tup was started in, which is always inside
+# the checkout tup is building: `/tmp/ct-nim-cache/tup-from-pwd/<that path>`.
+# Per checkout and under the Windows exclusion below, never the shared bare
+# root. It differs from the scripted root, so switching between the two
+# rebuilds the Nim targets once; export CT_TUP_NIM_CACHE_ROOT (from
+# `ci/lib/nim-cache-root.sh --tup`) to avoid that. With neither variable set
+# (PowerShell does not export PWD) the parse refuses rather than guess.
+#
+# Whichever root is used, it must stay under `/tmp/ct-nim-cache/`: that is what
+# NIM_SIDE_OUTPUTS_IGNORE excludes on Windows, which is why the helper does not
+# honour a CT_NIM_CACHE_ROOT override. ci/test/stale-artefact-guards-test.sh
+# fails if a rule spells the bare root again.
+import CT_TUP_NIM_CACHE_ROOT=
+ifeq ($(CT_TUP_NIM_CACHE_ROOT),)
+import PWD=
+ifeq ($(PWD),)
+error CT_TUP_NIM_CACHE_ROOT is unset, and so is PWD, so tup cannot place the Nim cache for this checkout. Run just build-once, or export CT_TUP_NIM_CACHE_ROOT set to the output of: bash ci/lib/nim-cache-root.sh --tup <checkout>
+endif
+NIM_CACHE_ROOT = /tmp/ct-nim-cache/tup-from-pwd$(PWD)
+else
+NIM_CACHE_ROOT = $(CT_TUP_NIM_CACHE_ROOT)
+endif
+
 NIM_SIDE_OUTPUTS_IGNORE = ^(([A-Za-z]:)?[/\\]tmp[/\\]ct-nim-cache[/\\].*|([A-Za-z]:)?[/\\].*_linkerArgs\\.txt)$
 
 # The CodeTracer Nim fork's C backend writes a MACRO SOURCEMAP for every
@@ -217,7 +271,7 @@ NIM_SIDE_OUTPUTS_IGNORE = ^(([A-Za-z]:)?[/\\]tmp[/\\]ct-nim-cache[/\\].*|([A-Za-
 # 0b5b5ec5 (the one reprobuild's `nim-fork` package builds) put it beside the
 # binary (`bin/macro_sourcemap_ct.json`); later revisions put it in the
 # nimcache, beside the per-module `.c.map` source maps, which every rule here
-# points at /tmp/ct-nim-cache (already excluded by NIM_SIDE_OUTPUTS_IGNORE).
+# points under $(NIM_CACHE_ROOT) (already excluded by NIM_SIDE_OUTPUTS_IGNORE).
 #
 # That is a side output tup was never told about, and since the `ci` / default
 # dev shells switched `nim` to the fork (ccbb85a0a, landed on dev 2026-09-20)
@@ -343,7 +397,7 @@ endif
 --lineDir:on\
 --hints:off \
 --warnings:off \
---nimcache:/tmp/ct-nim-cache/%B_nim_js\
+--nimcache:$(NIM_CACHE_ROOT)/%B_nim_js\
 --out:%o\
 js %f |> %B.js | $(NIM_SIDE_OUTPUTS_IGNORE)
 
@@ -356,7 +410,7 @@ js %f |> %B.js
 -d:ctIndex\
 -d:nodejs\
 --sourcemap:on\
---nimcache:/tmp/ct-nim-cache/%B_nim_node_index\
+--nimcache:$(NIM_CACHE_ROOT)/%B_nim_node_index\
 --out:%o\
 js %f |> %B.js %B.js.map | $(NIM_SIDE_OUTPUTS_IGNORE)
 
@@ -366,7 +420,7 @@ js %f |> %B.js %B.js.map | $(NIM_SIDE_OUTPUTS_IGNORE)
 --debugInfo:on\
 --lineDir:on\
 --sourcemap:on\
---nimcache:/tmp/ct-nim-cache/%B_nim_node_subwindow\
+--nimcache:$(NIM_CACHE_ROOT)/%B_nim_node_subwindow\
 --out:%o\
 js %f |> %B.js %B.js.map | $(NIM_SIDE_OUTPUTS_IGNORE)
 
@@ -375,7 +429,7 @@ js %f |> %B.js %B.js.map | $(NIM_SIDE_OUTPUTS_IGNORE)
 -d:server\
 -d:nodejs\
 --sourcemap:on\
---nimcache:/tmp/ct-nim-cache/%B_nim_node_index_server\
+--nimcache:$(NIM_CACHE_ROOT)/%B_nim_node_index_server\
 --out:%o \
 js %f |> %B.js %B.js.map | $(NIM_SIDE_OUTPUTS_IGNORE)
 
@@ -393,7 +447,7 @@ js %f |> %o
 --linetrace:on \
 --lineDir:on\
 --debugInfo\
---nimcache:/tmp/ct-nim-cache/%B_test_nimcache2\
+--nimcache:$(NIM_CACHE_ROOT)/%B_test_nimcache2\
 --out:%o\
 js %f |> %B.js | $(NIM_SIDE_OUTPUTS_IGNORE)
 
@@ -437,7 +491,7 @@ endif
 -d:ssl \
 -d:useOpenssl3 \
 $(DYNLIB_OVERRIDE_FLAGS) \
---nimcache:/tmp/ct-nim-cache/%B_c\
+--nimcache:$(NIM_CACHE_ROOT)/%B_c\
 --out:%o\
 c %f |> %o | $(NIM_SIDE_OUTPUTS_IGNORE) $(NIM_MACRO_SOURCEMAP_IGNORE)
 
@@ -458,7 +512,7 @@ $(DYNLIB_OVERRIDE_FLAGS)
 # Standard CodeTracer binary build (e.g. db-backend-record).
 !codetracer = |> $(NIM_SELECTED)\
 $(CODETRACER_FLAGS) \
---nimcache:/tmp/ct-nim-cache/%B_codetracer_binary\
+--nimcache:$(NIM_CACHE_ROOT)/%B_codetracer_binary\
 --out:%o\
 c %f |> %o | $(NIM_SIDE_OUTPUTS_IGNORE) $(NIM_MACRO_SOURCEMAP_IGNORE)
 
@@ -472,7 +526,7 @@ c %f |> %o | $(NIM_SIDE_OUTPUTS_IGNORE) $(NIM_MACRO_SOURCEMAP_IGNORE)
 # only run outside the build sandbox, as a post-materialization step.
 !codetracer_bpf = |> $(NIM_SELECTED)\
 $(CODETRACER_FLAGS) \
---nimcache:/tmp/ct-nim-cache/%B_codetracer_binary\
+--nimcache:$(NIM_CACHE_ROOT)/%B_codetracer_binary\
 --out:%o\
 c %f\
 |> %o | $(NIM_SIDE_OUTPUTS_IGNORE) $(NIM_MACRO_SOURCEMAP_IGNORE)
@@ -498,12 +552,12 @@ c %f\
 --boundChecks:on \
 --stacktrace:on \
 --linetrace:on \
---nimcache:/tmp/ct-nim-cache/%B_ct_test_orc_binary\
+--nimcache:$(NIM_CACHE_ROOT)/%B_ct_test_orc_binary\
 --out:%o\
 c %f |> %o | $(NIM_SIDE_OUTPUTS_IGNORE) $(NIM_MACRO_SOURCEMAP_IGNORE)
 
 !nim_tester = |> ^ %f^ $(NIM_SELECTED) \
---nimcache:/tmp/ct-nim-cache/tester \
+--nimcache:$(NIM_CACHE_ROOT)/tester \
 --warnings:on \
 --hints:on \
 --out:%o\

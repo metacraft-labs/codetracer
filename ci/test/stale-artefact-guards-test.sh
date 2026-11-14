@@ -124,7 +124,7 @@ BUILD_SIBLINGS="${SUITE_ROOT}/scripts/build-siblings.sh"
 # Every contract this suite claims to check. A suite that silently runs fewer
 # assertions than it advertises is a suite that stops protecting anything, so
 # the count is asserted at the end and has to be changed deliberately.
-EXPECTED_ASSERTIONS=142
+EXPECTED_ASSERTIONS=146
 
 ASSERTIONS=0
 FAILURES=0
@@ -1576,6 +1576,93 @@ else
 	# shellcheck disable=SC2086
 	bad "no gate, script or justfile recipe spells a bare /tmp/ct-nim-cache any more" \
 		"still hardcoding a host-global root:" ${BARE_ROOTS}
+fi
+
+# AND THE TUP BUILD. `src/Tuprules.tup` gave every Nim binary its nimcache under
+# `/tmp/ct-nim-cache/%B_<kind>`: the binary in the key, not the checkout. Two
+# worktrees running `just build-once` at once wrote one cache, and one failed
+# "final link failed: bad value" linking ct-test (measured 2026-11-14 by
+# concurrent grading agents). The grep above never saw it: it reads ci/test,
+# scripts and the justfile, and the build rules are in src/.
+#
+# The rules now take the root from CT_TUP_NIM_CACHE_ROOT (a Tup `import`),
+# which the entry points compute with `ci/lib/nim-cache-root.sh --tup`. Four
+# contracts: the helper's tup root is per checkout and stays inside the Windows
+# exclusion; every --nimcache in the rules goes through that root; no rule
+# line spells the bare host-global root; and every entry point that runs tup
+# exports it.
+#
+# Source text again, for the same reason as above: the defect is a spelling.
+# Comment lines are dropped first, because the file's own prose names the old
+# path to explain why it is gone.
+TUPRULES="${SUITE_ROOT}/src/Tuprules.tup"
+
+tup_root_for() {
+	# CT_NIM_CACHE_ROOT is set ON PURPOSE: the tup root must ignore it (a
+	# scratch override would leave the Windows exclusion regex and force a
+	# full rebuild), so an ambient one cannot be allowed to answer here.
+	# shellcheck disable=SC2016 # $1 and $2 are the inner shell's parameters
+	CT_NIM_CACHE_ROOT="${TEST_ROOT}/explicit-cache" bash -c \
+		'source "$1"; ct_tup_nim_cache_root "$2"' _ "${NIMCACHE_LIB}" "$1"
+}
+TUP_ROOT_A="$(tup_root_for "${CK_A}")"
+TUP_ROOT_B="$(tup_root_for "${CK_B}")"
+# The rule's Windows exclusion, as the file spells it, applied to a path the
+# compiler would write. Extracted rather than restated so that tightening the
+# regex without moving the root (or the reverse) fails here, not on Windows.
+NIM_IGNORE_RE="$(sed -n 's/^NIM_SIDE_OUTPUTS_IGNORE = //p' "${TUPRULES}")"
+if [[ -n ${TUP_ROOT_A} && ${TUP_ROOT_A} != "${TUP_ROOT_B}" &&
+	${TUP_ROOT_A} == "$(nimcache_for "${CK_A}")" && -n ${NIM_IGNORE_RE} ]] &&
+	printf '%s\n' "${TUP_ROOT_A}/codetracer_codetracer_binary/@mcodetracer.nim.c" |
+	grep -Eq -- "${NIM_IGNORE_RE}"; then
+	ok "the tup nimcache root is per checkout, ignores an override, and stays inside the Windows exclusion"
+else
+	bad "the tup nimcache root is per checkout, ignores an override, and stays inside the Windows exclusion" \
+		"alpha: ${TUP_ROOT_A}" "beta:  ${TUP_ROOT_B}" "lane:  $(nimcache_for "${CK_A}")" \
+		"NIM_SIDE_OUTPUTS_IGNORE: ${NIM_IGNORE_RE:-<not found>}"
+fi
+
+TUP_RULE_LINES="$(grep -v '^[[:space:]]*#' "${TUPRULES}" 2>/dev/null || true)"
+TUP_NIMCACHE_ALL="$(grep -c -- '--nimcache:' <<<"${TUP_RULE_LINES}" || true)"
+# shellcheck disable=SC2016 # the needle is Tup source text, not an expansion
+TUP_NIMCACHE_ROOTED="$(grep -c -- '--nimcache:$(NIM_CACHE_ROOT)/' <<<"${TUP_RULE_LINES}" || true)"
+if [[ ${TUP_NIMCACHE_ALL} -gt 0 && ${TUP_NIMCACHE_ALL} -eq ${TUP_NIMCACHE_ROOTED} ]]; then
+	ok "every --nimcache in src/Tuprules.tup is under the per-checkout NIM_CACHE_ROOT"
+else
+	bad "every --nimcache in src/Tuprules.tup is under the per-checkout NIM_CACHE_ROOT" \
+		"rooted ${TUP_NIMCACHE_ROOTED} of ${TUP_NIMCACHE_ALL}:" \
+		"$( # shellcheck disable=SC2016 # Tup source text, not an expansion
+			grep -n -- '--nimcache:' "${TUPRULES}" | grep -vF -- '--nimcache:$(NIM_CACHE_ROOT)/'
+		)"
+fi
+
+# The bare root may appear in a rule line only together with a per-checkout
+# component: that is the unset-variable fallback, `.../tup-from-pwd$(PWD)`.
+# shellcheck disable=SC2016 # `$(PWD)` is Tup source text, not an expansion
+TUP_BARE="$(grep -n '/tmp/ct-nim-cache' <<<"${TUP_RULE_LINES}" | grep -vF '$(PWD)' || true)"
+if [[ -z ${TUP_BARE} ]]; then
+	ok "no src/Tuprules.tup rule spells a bare /tmp/ct-nim-cache any more"
+else
+	bad "no src/Tuprules.tup rule spells a bare /tmp/ct-nim-cache any more" \
+		"still hardcoding a host-global root (line numbers exclude comments):" "${TUP_BARE}"
+fi
+
+# Every place that starts tup, or prepares a shell a plain `tup` runs in. A
+# site that drops the export is not a collision (the Tuprules fallback is per
+# checkout) but a full Nim rebuild every time it alternates with the others.
+TUP_ENTRY_MISSING=""
+for entry in scripts/build-once.sh scripts/build.sh ci/build/dev.sh \
+	nix/shells/ci-base.nix non-nix-build/env.sh \
+	non-nix-build/windows/setup-codetracer-runtime-env.sh; do
+	grep -Eq 'CT_TUP_NIM_CACHE_ROOT=.*nim-cache-root\.sh"? --tup' "${SUITE_ROOT}/${entry}" 2>/dev/null ||
+		TUP_ENTRY_MISSING="${TUP_ENTRY_MISSING} ${entry}"
+done
+if [[ -z ${TUP_ENTRY_MISSING} ]]; then
+	ok "every tup entry point sets CT_TUP_NIM_CACHE_ROOT from nim-cache-root.sh --tup"
+else
+	# shellcheck disable=SC2086 # one line per file, see BARE_ROOTS above
+	bad "every tup entry point sets CT_TUP_NIM_CACHE_ROOT from nim-cache-root.sh --tup" \
+		"missing in:" ${TUP_ENTRY_MISSING}
 fi
 
 # ---------------------------------------------------------------------------

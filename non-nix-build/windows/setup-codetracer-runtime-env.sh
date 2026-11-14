@@ -182,6 +182,11 @@ unset _tc_file _gnat_ver _ldc_cand _nim_cand _tool_dirs _d SHIMS_DIR
 # ---------------------------------------------------------------------------
 
 export CODETRACER_REPO_ROOT_PATH="$ROOT_DIR"
+# The per-checkout Nim cache root src/Tuprules.tup imports, for the documented
+# `source ../../env.sh && tup upd`. It stays under /tmp/ct-nim-cache/, which
+# nim.exe places on the current drive and NIM_SIDE_OUTPUTS_IGNORE excludes.
+CT_TUP_NIM_CACHE_ROOT="$("${BASH:-bash}" "$ROOT_DIR/ci/lib/nim-cache-root.sh" --tup "$ROOT_DIR")"
+export CT_TUP_NIM_CACHE_ROOT
 # The build dir this helper lays out `public` and `config` under, and finds `ct` in. An
 # explicit CODETRACER_PREFIX still wins (Build-Outputs-And-Path-Resolution.md §3.1), but it is
 # not exported: `ct` resolves its own prefix from its location.

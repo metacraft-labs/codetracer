@@ -81,6 +81,12 @@ Linux) _ct_build_dir="$ROOT_DIR/src/build-${_ct_config}" ;;
 *) _ct_build_dir="$ROOT_DIR/src/build-${_ct_config}-repro" ;;
 esac
 export CODETRACER_BUILD_DIR="${CODETRACER_BUILD_DIR:-$_ct_build_dir}"
+# The per-checkout Nim cache root src/Tuprules.tup imports (Linux builds
+# through tup here). Assigned, not defaulted: an inherited value names the
+# checkout whose environment this shell was in before. (ROOT_DIR is spelled
+# `.../non-nix-build/..`; the helper normalises it.)
+CT_TUP_NIM_CACHE_ROOT="$("${BASH:-bash}" "$ROOT_DIR/ci/lib/nim-cache-root.sh" --tup "$ROOT_DIR")"
+export CT_TUP_NIM_CACHE_ROOT
 export CODETRACER_LD_LIBRARY_PATH="${CODETRACER_LD_LIBRARY_PATH:-}"
 
 export PATH=$DEPS_DIR/nim/bin:$ROOT_DIR/node_modules/.bin:$BIN_DIR:$CARGO_HOME/bin:$CODETRACER_BUILD_DIR/bin:$PATH

@@ -222,6 +222,17 @@ ct_start_watcher() {
 if [ -z "$CT_BUILD_HOST" ]; then
 	# Legacy tup host. `tup monitor -a` daemonises; start it before the
 	# writers below so it does not miss their first events.
+	#
+	# The monitor's autoupdates parse the Tupfiles with THIS environment, so
+	# it needs the same per-checkout Nim cache root build-once.sh exported to
+	# its own tup runs (src/Tuprules.tup, ci/lib/nim-cache-root.sh). A
+	# different one would rebuild every Nim target on the first autoupdate.
+	# (The contract tests' stripped-down fixture trees have no helper; the
+	# Tuprules fallback is per checkout too.)
+	if [ -f "$REPO_ROOT/ci/lib/nim-cache-root.sh" ]; then
+		CT_TUP_NIM_CACHE_ROOT="$(bash "$REPO_ROOT/ci/lib/nim-cache-root.sh" --tup "$REPO_ROOT")"
+		export CT_TUP_NIM_CACHE_ROOT
+	fi
 	cd src
 	"${TUP:-tup}" monitor -a
 	cd ..
