@@ -26,6 +26,10 @@ import ../viewmodels/[calltrace_vm, event_log_vm, state_vm, filesystem_vm,
 from ../views/isonim_request_panel_view import pressAndActivateRow
 import isonim/core/signals
 
+const
+  CalltraceSearchResultAttribute* = "data-calltrace-search-result"
+    ## A call search result's index, on its row (`isonim_calltrace_view`).
+
 type
   AttributeReader* = proc(name: string): string
     ## An attribute of the element pressed or of the nearest ancestor that
@@ -33,13 +37,15 @@ type
 
 const
   SessionPressOperations* = [
-    "calltrace.go-to-call", "calltrace.toggle-call", "event-log.jump",
+    "calltrace.go-to-call", "calltrace.toggle-call",
+    "calltrace.jump-to-search-result", "event-log.jump",
     "event-log.sort", "variables.toggle-expand", "file-tree.activate",
     "point-list.select", "terminal-output.jump-to-write",
     "search.open-result", "requests.select", "low-level.go-to-source-line",
     "low-level.toggle-sync"]
-    ## The operations this module performs, one per base pointer row of the
-    ## session's panes (`pointer_rows`).
+    ## The operations this module performs: one per base pointer row of the
+    ## session's panes (`pointer_rows`), and the ones their elements carry (a
+    ## call search's result, `calltrace.jump-to-search-result`).
 
 proc intOf(attr: AttributeReader; name: string): int =
   try: parseInt(attr(name)) except ValueError: -1
@@ -47,6 +53,14 @@ proc intOf(attr: AttributeReader; name: string): int =
 proc pressCalltrace*(vm: CalltraceVM; operation: string;
                      attr: AttributeReader): bool =
   ## K20, K21: the call's text goes to the call, its toggle expands it.
+  if operation == "calltrace.jump-to-search-result":
+    # A result of the call search (the view's `data-calltrace-search-result`):
+    # the debugger goes to that result's frame.
+    let result = intOf(attr, CalltraceSearchResultAttribute)
+    if vm.isNil or result < 0:
+      return false
+    vm.jumpToSearchResult(result)
+    return true
   let index = intOf(attr, "data-call-index")
   if vm.isNil or index < 0:
     return false

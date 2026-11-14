@@ -28,6 +28,7 @@ import store/replay_data_store
 import viewmodels/build_output_model
 import viewmodels/state_vm
 import viewmodels/calltrace_vm
+import input/pane_presses
 import viewmodels/debug_controls_vm
 import viewmodels/event_log_vm
 import viewmodels/flow_vm
@@ -2259,6 +2260,13 @@ proc calltraceJumpsSince(mock: MockBackendService; first: int): seq[JsonNode] =
     if mock.receivedCommands[i].command == "ct/calltrace-jump":
       result.add mock.receivedCommands[i].args
 
+proc pressSearchResult(vm: CalltraceVM; row: MockNode): bool =
+  ## A press on a search result as the page's pointer listener performs it
+  ## (Input-Routing-And-Keymaps.md §5.1): the operation the row carries, run
+  ## by its procedure (`pane_presses`) on the row's own attributes.
+  pressCalltrace(vm, row.attributes.getOrDefault("data-ct-operation", ""),
+                 proc(name: string): string = row.attributes.getOrDefault(name, ""))
+
 suite "IsoNim Calltrace Panel — search results":
 
   test "a search result jumps to its own match, not the last one":
@@ -2296,7 +2304,7 @@ suite "IsoNim Calltrace Panel — search results":
 
         # The FIRST row: the case the reporter saw land on the last match.
         let beforeFirst = mock.receivedCommands.len
-        rows[0].fireEvent("mousedown")
+        discard pressSearchResult(vm, rows[0])
         drain()
         let firstJumps = mock.calltraceJumpsSince(beforeFirst)
         check firstJumps.len == 1
@@ -2313,7 +2321,7 @@ suite "IsoNim Calltrace Panel — search results":
         # The MIDDLE row, carrying a source revision, so a shared capture of
         # either neighbour cannot pass for it.
         let beforeMiddle = mock.receivedCommands.len
-        rows[1].fireEvent("mousedown")
+        discard pressSearchResult(vm, rows[1])
         drain()
         let middleJumps = mock.calltraceJumpsSince(beforeMiddle)
         check middleJumps.len == 1

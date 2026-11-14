@@ -21,6 +21,11 @@ import backend/[backend_service, mock_backend]
 import store/[replay_data_store, types]
 import viewmodels/calltrace_vm
 import views/isonim_calltrace_view
+import input/[element_press, pane_presses]
+import keymap/[base_keymaps, context_keys, editing_keymap, keymap_router,
+               scope_path]
+import viewmodels/product_mode
+from ../../../../common/key_names import kpNative
 
 proc byId(node: MockNode; id: string): MockNode =
   if node.isNil: return nil
@@ -150,10 +155,31 @@ suite "the Call Trace panel":
         CalltraceSearchResult(name: "helper", key: "9", rrTicks: 21'u64,
           location: Location(file: "/src/main.py", line: 4))])
       mock.clearReceivedCommands()
-      panel.allByClass("search-result")[0].fireEvent("mousedown")
-      let jump = mock.findCommand("ct/calltrace-jump")
-      check jump.isSome
-      check jump.isSome and jump.get.args["rrTicks"].getInt == 7
+      let results = panel.allByClass("search-result")
+      # CONTROL: the view holds no press handler of its own (a fired press
+      # used to jump here).
+      results[0].fireEvent("mousedown")
+      results[0].fireEvent("click")
+      check mock.findCommand("ct/calltrace-jump").isNone
+      # The press is routed (Input-Routing-And-Keymaps.md §5.1): with no row
+      # of its own it runs the operation the result carries, performed on
+      # the result its index names — what the page's pointer listener does.
+      let router = initKeymapRouter(bkCua, KeyDelivery(frontEnd: feDesktop,
+        platform: pkLinux, keyProtocol: kpNative))
+      for (i, ticks) in [(1, 21), (0, 7)]:
+        mock.clearReceivedCommands()
+        let el = results[i]
+        let outcome = resolveElementPress(
+          routerResolver(router, SessionFacts(product: pmDebug, replayLoaded: true)),
+          @[element(ekWindow, "window"), pane("calltrace")], ButtonElementKind,
+          el.attributes.getOrDefault(OperationAttribute, ""), {}, "Click")
+        check outcome.operation == "calltrace.jump-to-search-result"
+        check el.attributes.getOrDefault("data-ct-press", "") == "down"
+        check pressCalltrace(vm, outcome.operation, proc(name: string): string =
+          el.attributes.getOrDefault(name, ""))
+        let jump = mock.findCommand("ct/calltrace-jump")
+        check jump.isSome
+        check jump.isSome and jump.get.args["rrTicks"].getInt == ticks
       dispose()
 
 suite "the call trace's search answer":

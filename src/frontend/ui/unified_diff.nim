@@ -60,6 +60,7 @@ import flow_loop_slider
 import review_flow_adapter
 import review_flow_selection
 import ../viewmodel/viewmodels/vcs_vm
+import ../viewmodel/input/element_operations
 import ../viewmodel/viewmodels/diff_document
 import ../viewmodel/viewmodels/diff_target
 import ../viewmodel/viewmodels/context_expansion
@@ -650,21 +651,23 @@ proc stepLoopIteration(self: UnifiedDiffComponent; functionKey: string;
     return
 
 proc reviewStepButton(label: cstring; klass: string; enabled: bool;
-                      onStep: proc()): Node =
-  ## One step button of a review's in-editor controls.
+                      operation: string; onStep: proc()): Node =
+  ## One step button of a review's in-editor controls. It carries `operation`
+  ## and the procedure that performs it (`bindElementOperation`): a press on
+  ## it is routed (Input-Routing-And-Keymaps.md §5.1), and a user's row for
+  ## it takes it.
   ##
-  ## `mousedown` rather than `click`: Monaco's own mouse handling on the editor
-  ## can swallow a click that starts inside a view zone, and `mousedown` is what
-  ## `ui/flow.nim`'s value spans listen for as well.
+  ## Pressed on the press, not on its click (`onDown`): Monaco's own mouse
+  ## handling on the editor can swallow a click that starts inside a view
+  ## zone, and the press must not reach Monaco underneath.
   result = document.createElement(cstring"button")
   result.setAttribute(cstring"class", cstring("review-flow-step " & klass))
   result.appendChild(document.createTextNode(label))
   if not enabled:
     result.setAttribute(cstring"disabled", cstring"disabled")
   else:
-    result.addEventListener(cstring"mousedown", proc(e: Event) =
-      e.stopPropagation()
-      onStep())
+    bindElementOperation(result.toJs, operation,
+      proc(p: PressInfo) = onStep(), onDown = true)
 
 proc invocationZoneDom(self: UnifiedDiffComponent;
                        zone: ReviewInvocationZone): Node =
@@ -688,6 +691,7 @@ proc invocationZoneDom(self: UnifiedDiffComponent;
 
   result.appendChild(reviewStepButton(
     cstring"‹", "review-invocation-prev", zone.canStepBack(),
+    "review.previous-invocation",
     proc() = component.stepInvocation(functionKey, -1)))
   let label = document.createElement(cstring"span")
   label.setAttribute(cstring"class",
@@ -697,6 +701,7 @@ proc invocationZoneDom(self: UnifiedDiffComponent;
   result.appendChild(label)
   result.appendChild(reviewStepButton(
     cstring"›", "review-invocation-next", zone.canStepForward(),
+    "review.next-invocation",
     proc() = component.stepInvocation(functionKey, 1)))
 
 proc loopZoneDom(self: UnifiedDiffComponent; zone: ReviewLoopZone): Node =
@@ -735,6 +740,7 @@ proc loopZoneDom(self: UnifiedDiffComponent; zone: ReviewLoopZone): Node =
 
   result.appendChild(reviewStepButton(
     cstring"‹", "review-loop-prev", zone.canStepBack(),
+    "review.previous-iteration",
     proc() = component.stepLoopIteration(functionKey, loopIndex, -1)))
   let label = document.createElement(cstring"span")
   label.setAttribute(cstring"class",
@@ -743,6 +749,7 @@ proc loopZoneDom(self: UnifiedDiffComponent; zone: ReviewLoopZone): Node =
   result.appendChild(label)
   result.appendChild(reviewStepButton(
     cstring"›", "review-loop-next", zone.canStepForward(),
+    "review.next-iteration",
     proc() = component.stepLoopIteration(functionKey, loopIndex, 1)))
   # The drag affordance. Appended even when there is a single pass — the
   # container is dropped again by `ensureFlowLoopSlider`'s zero-range refusal

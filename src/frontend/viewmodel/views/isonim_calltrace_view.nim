@@ -738,7 +738,8 @@ proc searchSummaryText(vm: CalltraceVM): string =
     $vm.backendSearchTotal.val & " matching calls"
 
 proc searchResultJumpHandler(vm: CalltraceVM; index: int): proc() =
-  ## A search result row's `mousedown`: jump to THIS result's frame
+  ## A search result row's Enter (`wireResultKeys`; its press is routed, see
+  ## `renderCalltracePanel`): jump to THIS result's frame
   ## (`CalltraceVM.jumpToSearchResult`). A factory, so each row's closure owns
   ## its index (Nim closures capture variables by reference:
   ## https://nim-lang.org/docs/manual.html#procedures-closures).
@@ -817,9 +818,16 @@ proc renderCalltracePanel*[R, N](r: R; vm: CalltraceVM;
     proc(res: proc(): CalltraceSearchResult; index: int): N =
       var resultEl: N
       result = ui(r):
+        # A press on a result is routed (Input-Routing-And-Keymaps.md §5.1):
+        # it carries `calltrace.jump-to-search-result`, performed on the
+        # result its index names (`pane_presses.pressCalltrace`). Pressed on
+        # the press (`data-ct-press`): the search field's blur closes the
+        # results before a click would land.
         tdiv(ref = resultEl, class = "search-result",
              role = "button", tabindex = "0",
-             onmousedown = searchResultJumpHandler(vm, index)):
+             `data-ct-operation` = "calltrace.jump-to-search-result",
+             `data-ct-press` = "down",
+             `data-calltrace-search-result` = $index):
           text searchResultLabel(res())
       when defined(js):
         when N is isonim_dom.Element:

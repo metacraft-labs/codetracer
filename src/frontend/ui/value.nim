@@ -6,6 +6,11 @@ import
   origin_chain_runtime
 
 import ./presented_value
+# A press on a value's controls is routed (Input-Routing-And-Keymaps.md §5.1):
+# each control carries its operation and the procedure that performs it on
+# that control; the window's pointer listener runs it when a press resolves to
+# it (`bindElementOperation`).
+import ../viewmodel/input/element_operations
 
 let ATOM_KINDS = {
   Int, Float, String, CString, Char, Bool, Enum, Enum16, Enum32,
@@ -494,10 +499,8 @@ proc renderHistoryTableDom*(self: ValueComponent, expression: cstring, chart: Ch
         locationElement.appendChild(locationNode)
 
         let valueNode = newElement(cstring"div", cstring"history-value")
-        valueNode.addEventListener(cstring"mousedown", proc(ev: Event) =
-          if cast[MouseEvent](ev).button == 0:
-            self.historyClick(historyEvent.location)
-        )
+        bindPressOperation(valueNode.toJs, "history.seek-to-tick",
+          proc(p: PressInfo) = self.historyClick(historyEvent.location))
         valueNode.addEventListener(cstring"contextmenu", proc(ev: Event) =
           ev.preventDefault()
           self.historyContextAction(historyEvent, ev)
@@ -760,10 +763,8 @@ proc valueLanguage(self: ValueComponent): Lang =
 proc renderValueHistoryButtonDom(self: ValueComponent, expression: cstring, active: string): Node =
   result = newElement(cstring"button")
   result.setAttribute(cstring"class", cstring(&"value-history-button {active} ct-button-image-xs-secondary ct-ml-2"))
-  result.addEventListener(cstring"mousedown", proc(ev: Event) =
-    if cast[MouseEvent](ev).button == 0:
-      discard self.showHistory(expression)
-  )
+  bindPressOperation(result.toJs, "variables.value-history",
+    proc(p: PressInfo) = discard self.showHistory(expression))
 
   let tooltip = newElement(cstring"div", cstring"custom-tooltip")
   tooltip.appendText(cstring"Toggle history value")
@@ -823,13 +824,16 @@ proc renderExpandButtonDom(
 ): Node =
   result = newElement(cstring"span", cstring("value-expand-button " & fresh))
   result.setAttribute(cstring"title", cstring"Show or hide the value's parts")
-  result.addEventListener(cstring"mousedown", proc(ev: Event) =
-    self.data.focusComponent(self)
-    ev.stopPropagation()
-    capture expression, value, path:
-      discard self.expandNewValues(value, path)
-      discard self.toggleExpanded(value, expression)
-  )
+  # The press must not reach what is under the value (a row's own press).
+  result.addEventListener(cstring"mousedown", proc(ev: Event) =  # ir1-gate: propagation
+    ev.stopPropagation())
+  let expandEl = result.toJs
+  capture expression, value, path:
+    bindPressOperation(expandEl, "variables.toggle-expand",
+      proc(p: PressInfo) =
+        self.data.focusComponent(self)
+        discard self.expandNewValues(value, path)
+        discard self.toggleExpanded(value, expression))
 
   let caretClass =
     if self.uiExpanded(value, expression):
@@ -856,12 +860,13 @@ proc renderLoadMoreButtonDom(self: ValueComponent, value: Value, path: seq[SubPa
   let cPath = path
 
   result = newElement(cstring"button", cstring"value-load-more-button")
-  result.addEventListener(cstring"mousedown", proc(ev: Event) =
-    capture value, cPath:
-      if not self.isOperationRunning:
-        self.isOperationRunning = true
-        discard self.loadMoreValues(value, cPath)
-  )
+  let loadMoreEl = result.toJs
+  capture value, cPath:
+    bindPressOperation(loadMoreEl, "variables.load-more",
+      proc(p: PressInfo) =
+        if not self.isOperationRunning:
+          self.isOperationRunning = true
+          discard self.loadMoreValues(value, cPath))
   result.appendText(cstring"Load More")
 
 proc childPathForExpandedValue(parent: Value, childName: cstring, element: Value, path: seq[SubPath]): seq[SubPath] =
@@ -1089,10 +1094,10 @@ proc renderValueRowDom(
   let nameContainer = newElement(cstring"div", cstring"value-name-container")
   if self.isTooltipValue and expression == self.baseExpression:
     let scratchpadButton = newElement(cstring"div", cstring"add-to-scratchpad-button")
-    scratchpadButton.addEventListener(cstring"mousedown", proc(ev: Event) =
-      self.api.openValueInScratchpad(ValueWithExpression(expression: expression, value: value))
-      self.redraw()
-    )
+    bindPressOperation(scratchpadButton.toJs, "scratchpad.add-value",
+      proc(p: PressInfo) =
+        self.api.openValueInScratchpad(ValueWithExpression(expression: expression, value: value))
+        self.redraw())
     # A plain `title`, not a `.custom-tooltip` child. This button only exists
     # inside the Flow value popup, whose content box scrolls, so a styled
     # tooltip positioned outside it is cropped (see the note on

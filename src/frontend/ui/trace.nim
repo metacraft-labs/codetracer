@@ -16,6 +16,7 @@ from ./editor_points import gutterMarkFor, breakpointsInFile, EditorMark, emNone
   emBreakpointTracepoint,
   emBreakpointDisabled, emTracepoint
 import ./presented_value
+import ../viewmodel/input/element_operations
 from ../lib/monaco_appearance import editorGutterLineHtml
 import ../viewmodel/store/replay_data_store
 from ../viewmodel/viewmodels/timeline_vm import
@@ -1170,7 +1171,7 @@ proc editorLineNumber*(self: EditorViewComponent, path: cstring, line: int, isDe
     runTestHtml =
       cstring"<div class='" & runClass & cstring"' data-runtest-line='" &
       toCString(realLine) & cstring"' title='" & runTitle &
-      cstring"' onmousedown='event.stopPropagation()'></div>"
+      cstring"' onmousedown='event.stopPropagation()'></div>"  # ir1-gate: propagation
 
   let trueLineNumber = if not isDeleteChunk: toCString(realLine) else: toCString(line + lineNumber - 1)
   let klass = if isDeleteChunk: cstring"diff-deleted-gutter" elif line in self.diffAddedLines: cstring"diff-added-gutter" else: cstring""
@@ -1352,10 +1353,15 @@ proc traceChartKindSwitchDom(self: TraceComponent): Node =
 
   result = traceDiv(cstring"select-view-kind")
   result.setAttribute(cstring"tabindex", cstring"0")
-  result.addEventListener(cstring"mousedown", proc(ev: Event) =
-    chart.kindSelectorIsClicked = not chart.kindSelectorIsClicked
-    self.refreshTraceChartKindSwitch()
-  )
+  # A press on the selector or on one of its kinds is routed
+  # (Input-Routing-And-Keymaps.md §5.1): each carries its operation and the
+  # procedure that performs it there (`bindElementOperation`). A press on a
+  # kind is the kind's, not also the selector's, so choosing one closes the
+  # list itself.
+  bindPressOperation(result.toJs, "trace-chart.toggle-kinds",
+    proc(p: PressInfo) =
+      chart.kindSelectorIsClicked = not chart.kindSelectorIsClicked
+      self.refreshTraceChartKindSwitch())
   result.addEventListener(cstring"blur", proc(ev: Event) =
     chart.kindSelectorIsClicked = false
     self.refreshTraceChartKindSwitch()
@@ -1368,42 +1374,49 @@ proc traceChartKindSwitchDom(self: TraceComponent): Node =
   result.appendChild(button)
 
   let dropdown = traceDiv(dropdownClass)
-  dropdown.addEventListener(cstring"mousedown", proc(ev: Event) =
+  dropdown.addEventListener(cstring"mousedown", proc(ev: Event) =  # ir1-gate: propagation
     ev.preventDefault()
   )
   result.appendChild(dropdown)
 
+  proc chosen() =
+    chart.kindSelectorIsClicked = false
+    self.refreshTraceChartKindSwitch()
+
   let tableItem = traceDiv(cstring"dropdown-item")
-  tableItem.addEventListener(cstring"mousedown", proc(ev: Event) =
-    if chart.viewKind != ViewTable:
-      chart.changed = true
-      chart.viewKind = ViewTable
-      chart.line = nil
-      chart.pie = nil
-    chart.redraw()
-  )
+  bindPressOperation(tableItem.toJs, "trace-chart.show-table",
+    proc(p: PressInfo) =
+      if chart.viewKind != ViewTable:
+        chart.changed = true
+        chart.viewKind = ViewTable
+        chart.line = nil
+        chart.pie = nil
+      chosen()
+      chart.redraw())
   tableItem.appendTraceText(cstring"table")
   dropdown.appendChild(tableItem)
 
   let lineItem = traceDiv(cstring"dropdown-item")
-  lineItem.addEventListener(cstring"mousedown", proc(ev: Event) =
-    if chart.viewKind != ViewLine:
-      chart.viewKind = ViewLine
-      chart.pie = nil
-      chart.changed = true
-    chart.redraw()
-  )
+  bindPressOperation(lineItem.toJs, "trace-chart.show-line",
+    proc(p: PressInfo) =
+      if chart.viewKind != ViewLine:
+        chart.viewKind = ViewLine
+        chart.pie = nil
+        chart.changed = true
+      chosen()
+      chart.redraw())
   lineItem.appendTraceText(cstring"line")
   dropdown.appendChild(lineItem)
 
   let pieItem = traceDiv(cstring"dropdown-item")
-  pieItem.addEventListener(cstring"mousedown", proc(ev: Event) =
-    if chart.viewKind != ViewPie:
-      chart.viewKind = ViewPie
-      chart.line = nil
-      chart.changed = true
-    chart.redraw()
-  )
+  bindPressOperation(pieItem.toJs, "trace-chart.show-pie",
+    proc(p: PressInfo) =
+      if chart.viewKind != ViewPie:
+        chart.viewKind = ViewPie
+        chart.line = nil
+        chart.changed = true
+      chosen()
+      chart.redraw())
   pieItem.appendTraceText(cstring"pie")
   dropdown.appendChild(pieItem)
 
@@ -1469,7 +1482,7 @@ proc traceMenuDom(self: TraceComponent): Node =
     else:
       cstring"dropdown-list hidden"
   let dropdown = traceDiv(dropdownClass)
-  dropdown.addEventListener(cstring"mousedown", proc(ev: Event) =
+  dropdown.addEventListener(cstring"mousedown", proc(ev: Event) =  # ir1-gate: propagation
     ev.preventDefault()
   )
   hamburgerContainer.appendChild(dropdown)
