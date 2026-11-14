@@ -29,6 +29,8 @@ import ../ui/[shared_editor, shared_editor_facade, shared_diff_editor]
 import ../viewmodel/editing_core
 import ../viewmodel/keymap/base_keymaps
 import ../tui/app/syntax/token_class
+import ../tui/app/theme/editor_theme
+import ../styles/generated/design_tokens
 
 proc ctPress(selector, key: cstring): Future[void] {.importjs:
   "window.ctPress(#, #)".}
@@ -124,7 +126,7 @@ proc endCase(name: string) =
 
 const
   Source = "def main():\n    x = 1\n    if x:\n        y = 2\n\n    return x\nprint(main())\n"
-  ExpectedChecks = 102
+  ExpectedChecks = 103
     ## Written from a run. See the end of `main`.
 
 proc fresh(text = Source; readOnly = false; model = bkCua;
@@ -162,7 +164,10 @@ proc caseRendersTheDocument() {.async.} =
   ck not isNull(kw), "`def` is a keyword span"
   if not isNull(kw):
     ck $textOf(kw) == "def"
-    ck $styleOf(kw, "color") == hexToRgb(ed.tokenColour(tcKeyword)),
+    # The design system's dark keyword colour, named here rather than read
+    # back from the editor, so a theme the editor got wrong cannot agree
+    # with itself.
+    ck $styleOf(kw, "color") == hexToRgb(DesignTokenHex[tokenClassToken(tcKeyword)][dmDark]),
       "keyword colour " & $styleOf(kw, "color")
   # The gutter: the numbers, the current line's marked active.
   let n1 = ed.root.querySelector(cstring(".margin-view-overlays div[data-line=\"1\"] .line-numbers"))
@@ -209,6 +214,10 @@ proc caseReadOnlyRefusesText() {.async.} =
   await ctPress("", "x")
   await settle()
   ck ed.text == Source, "a read-only document refused the key"
+  # And the core refuses it too, on the path the desktop's router sends a
+  # writable editor's keys down (`applyKey`).
+  discard ed.applyKeyName("x")
+  ck ed.text == Source, "the read-only core refused the key"
   # Moving and selecting still work (Monaco's read-only allows them).
   discard ed.applyKeyName("Shift+Down")
   ck not ed.doc.state.selection.mainRange.isEmpty
