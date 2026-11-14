@@ -1,0 +1,56 @@
+ Initiative Progress  ⚲ ✕
+ INITIATIVE PROGRESS
+ Telemetry upload retries
+                      0 of 3 milestones · 0%
+ ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+ ● 1 in progress  ● 2 planned
+ Telemetry upload retries: the specification
+ is under review.
+ CURRENT TR-M0: Specification
+ IN PROGRESS (1)
+ ● TR-M0   Specification
+   CURRENT 0/2 deliverables ·
+           Tests: 1 pending
+ PLANNED (2)
+ ● TR-M1   Retry queue
+   0/2 deliverables · Tests: 1 pending
+ ● TR-M2   Backoff
+   0/2 deliverables · Tests: 1 pending
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+  ▶   ›   «   »   ↺   first frame      +0:00

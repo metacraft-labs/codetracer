@@ -195,8 +195,12 @@ proc renderInbox[R](r: R; vm: InitiativeTabStripVM): auto =
   let compact = vm.compact
   let positionText = if none: "inbox empty" else: position
   let autoLabel = (if compact: "Auto: " else: "Auto-switch: ") & (if auto: "on" else: "off")
+  # A toolbar (WAI-ARIA `toolbar`: a set of controls): the steps, the
+  # position they read out and the auto-switch toggle. Its `ah-inbox-empty`
+  # modifier is the control's state with nothing waiting, not an empty-state
+  # message of the bar.
   ui(r):
-    tdiv(class = "ah-inbox" & (if none: " ah-inbox-empty" else: ""), role = "group",
+    tdiv(class = "ah-inbox" & (if none: " ah-inbox-empty" else: ""), role = "toolbar",
          title = "Sessions waiting for you"):
       button(class = "ah-inbox-step", title = "Previous session (inbox)",
              onclick = proc() = discard target.stepInbox(-1)):

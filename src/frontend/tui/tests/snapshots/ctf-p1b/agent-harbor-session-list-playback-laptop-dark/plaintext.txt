@@ -1,0 +1,56 @@
+ SESSIONS                                             «
+ 4 sessions · 1 needs input · 3 running
+ playback: sessions from several front-ends, and their
+ initiative's milestones
+ ▾ ● Route cache on the new storage layer 1/4 2 running
+ ● Port the route cache to the new storage layer     9m
+   running CodeTracer · Claude 2.1.0 · host-a
+   Ran just test
+ ● Migrate cached routes without a cold start       14m
+   running CLI · Codex 0.9.4 · host-b
+   Ran just test
+ ▾   No initiative  1 needs input · 1 running
+ ● Answer the question about the config format       1m
+   needs input Telegram · Claude 2.1.0 · host-e
+   Asked a single-choice question
+ ● Profile the importer on the large fixture        19m
+   running TUI · Opencode 0.6.1 · host-d
+   Ran just profile
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+  Play   Step   ◀ Moment   Moment ▶   Rewind   first frame                                                                                                                    +0:00

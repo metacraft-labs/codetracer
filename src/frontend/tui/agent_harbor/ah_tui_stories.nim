@@ -12,6 +12,14 @@
 ## `draw` paints the whole screen afresh from the viewmodel, so a click or a
 ## hover that changes the viewmodel is followed by a `draw` and the screen is
 ## the viewmodel's again; there is no retained drawing to go stale.
+##
+## A playback story (`stories/agent_harbor_playback.nim`) plays on the clock
+## the mount is given (IsoNim's `RealClock` in the story host, a `TestClock`
+## in a test), opens at a named moment when asked, and has the host's
+## playback bar on its last row (`ah_tui_playback_bar.nim`): the story is
+## drawn one row shorter. Its viewmodels move under the screen as the
+## playback delivers entries; `idle` says when the screen must be drawn
+## again.
 
 import std/strutils
 
@@ -23,6 +31,8 @@ import ./ah_tui_session_views
 import ./ah_tui_initiative_tab_bar
 import ./ah_tui_initiative_panels
 import ./ah_tui_fleet_panel
+import ./ah_tui_playback_bar
+import nim_everywhere/async_compat
 
 export agent_harbor_stories, codetracer_stories, emit_storybook_stories, ah_tui_canvas
 
@@ -54,6 +64,10 @@ type
     initiativeTabs*: InitiativeTabStripVM
     initiatives*: InitiativesVM
     progress*: InitiativeProgressVM
+    playback*: AhPlayback
+      ## A playback story's playback (nil for any other story).
+    drawnAt: int
+      ## `playback.changed` when the screen was last drawn.
     canvas*: AhCanvas
       ## The last `draw`.
     view*: AhNode
@@ -111,7 +125,9 @@ proc draw*(m: AhTuiMount) =
     # The caption bar over a panel, as in the shell: the window under the
     # bar is the panel's (the bar paints its own rows), where its popup drops.
     c.area("panel", top, 0, m.cols, m.rows - top, c.tone.body)
-  let h = m.rows - top
+  # A playback story leaves its last row to the host's playback bar.
+  let storyRows = if m.playback.isNil: m.rows else: m.rows - 1
+  let h = storyRows - top
   case m.surface
   of "agent-harbor-fleet": c.drawFleetPanel(m.fleet, top, 0, m.cols, h)
   of "agent-harbor-session-tabs": c.drawSessionTabStrip(m.sessions, top, 0, m.cols)
@@ -120,41 +136,78 @@ proc draw*(m: AhTuiMount) =
   of "agent-harbor-initiatives": c.drawInitiativesPanel(m.initiatives, top, 0, m.cols, h)
   of "agent-harbor-initiative-progress": c.drawProgressPanel(m.progress, top, 0, m.cols, h)
   else: discard
+  if not m.playback.isNil:
+    c.drawPlaybackBar(m.playback, m.rows - 1)
+    m.drawnAt = m.playback.changed.val
   m.view = c.root.first("surface")
   m.canvas = c
 
 proc mountAgentHarborStoryTui*(surface, fixture: string; cols, rows: int;
-                               mode = dmDark; frameTitle = ""): AhTuiMount =
+                               mode = dmDark; frameTitle = ""; clock: ClockBase = nil;
+                               moment = ""): AhTuiMount =
   ## Builds the story's viewmodel and draws it at `cols` × `rows`. A
   ## `frameTitle` frames it as a panel. Raises `ValueError` for a surface
   ## with no terminal rendering, and (from the story constructors) for a
-  ## fixture the surface does not name.
+  ## fixture the surface does not name. A playback story plays on `clock`
+  ## (a `RealClock` when nil) and opens at `moment` (its first frame when
+  ## ""; an unknown name raises `ValueError` naming the moments).
   if not hasTuiRendering(surface):
     raise newException(ValueError, "no terminal rendering for the Agent Harbor surface " &
                        surface & " (story fixture " & fixture & ")")
   result = AhTuiMount(surface: surface, fixture: fixture, cols: cols, rows: rows,
                       mode: mode, frameTitle: frameTitle)
+  if isPlaybackStory(surface, fixture):
+    result.playback = newAhPlayback(surface, fixture,
+                                    if clock.isNil: ClockBase(newRealClock()) else: clock)
+  let pb = result.playback
   case surface
-  of "agent-harbor-fleet": result.fleet = createFleetStoryVM(fixture)
+  of "agent-harbor-fleet": result.fleet = createFleetStoryVM(fixture, pb)
   of "agent-harbor-session-tabs":
-    result.sessions = createSessionTabsStoryVM(fixture)
+    result.sessions = createSessionTabsStoryVM(fixture, pb)
     mountSessionTabStrip(result.sessions, cols)
-  of "agent-harbor-session-list": result.sessions = createSessionListStoryVM(fixture)
+  of "agent-harbor-session-list": result.sessions = createSessionListStoryVM(fixture, pb)
   of "agent-harbor-initiative-tabs":
-    result.initiativeTabs = createInitiativeTabsStoryVM(fixture)
+    result.initiativeTabs = createInitiativeTabsStoryVM(fixture, pb)
     mountInitiativeTabBar(result.initiativeTabs, cols)
-  of "agent-harbor-initiatives": result.initiatives = createInitiativesStoryVM(fixture)
-  of "agent-harbor-initiative-progress": result.progress = createProgressStoryVM(fixture)
+  of "agent-harbor-initiatives": result.initiatives = createInitiativesStoryVM(fixture, pb)
+  of "agent-harbor-initiative-progress": result.progress = createProgressStoryVM(fixture, pb)
   else: discard
+  if not pb.isNil: pb.openAtMoment(moment)
   result.draw()
 
-proc mountStory*(story: CodeTracerStory; cols, rows: int; mode: DesignMode): AhTuiMount =
+proc mountStory*(story: CodeTracerStory; cols, rows: int; mode: DesignMode;
+                 clock: ClockBase = nil; moment = ""): AhTuiMount =
   ## `mountAgentHarborStoryTui` for a declared story, framed when it is a
   ## panel story.
   mountAgentHarborStoryTui(story.surface, story.fixture, cols, rows, mode,
-                           if story.kind == "panel": frameTitleOf(story) else: "")
+                           if story.kind == "panel": frameTitleOf(story) else: "",
+                           clock, moment)
+
+proc idle*(m: AhTuiMount): bool =
+  ## Between inputs: a playback story's real clock fires its due timers
+  ## (through the platform's event loop, which the story host polls only
+  ## here), and the screen is drawn again when the playback moved since the
+  ## last `draw`. True when it was.
+  if m.isNil or m.playback.isNil: return false
+  drainPlatformCallbacks()
+  if m.playback.changed.val != m.drawnAt:
+    m.draw()
+    return true
+  false
+
+proc playbackKey*(m: AhTuiMount; token: string): bool =
+  ## A playback control's key (`PlaybackKeys`): the control runs and the
+  ## screen is drawn again (true), whether or not it moved the playback, so
+  ## a reader waiting for the next frame always gets one.
+  if m.playback.isNil: return false
+  let (known, control) = controlOfKey(token)
+  if not known: return false
+  discard m.playback.applyControl(control)
+  m.draw()
+  true
 
 proc dispose*(m: AhTuiMount) =
+  if m.playback != nil: m.playback.dispose()
   if m.fleet != nil: m.fleet.dispose()
   if m.sessions != nil: m.sessions.dispose()
   if m.initiativeTabs != nil: m.initiativeTabs.dispose()
@@ -184,7 +237,7 @@ proc handleInput*(m: AhTuiMount; token: string): bool =
   ## A press acts on what is under it; motion moves the hover. True when the
   ## screen must be drawn again.
   let (ok, button, row, col, press) = decodeSgrMouse(token)
-  if not ok: return false
+  if not ok: return m.playbackKey(token)
   if (button and 32) != 0:
     # Motion: SGR adds 32 to the button for a motion report (1003).
     result = m.canvas.pointAt(row, col)

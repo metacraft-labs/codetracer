@@ -322,6 +322,29 @@ func agentHarborSection(): CodeTracerStorySection =
             "agent-harbor-progress-error",
             "The server could not be reached",
             state = "error"),
+      # Playback stories (`agent_harbor_playback.nim`): each surface over a
+      # synthetic scenario replayed on a clock, which the story host's chrome
+      # plays, pauses, steps and seeks. Each opens at the scenario's first
+      # frame (a host can open it at a named moment instead).
+      story("SessionTabsPlayback", "Session Tabs: Playback", "view",
+            "agent-harbor-session-tabs", "playback-front-ends", "agent-harbor-playback",
+            "Sessions from several front-ends start, ask, are answered, fail and end; a tab appears mid-run"),
+      story("SessionListPlayback", "Session List: Playback", "view",
+            "agent-harbor-session-list", "playback-front-ends", "agent-harbor-playback",
+            "The sidebar's initiatives tree while its sessions move between states"),
+      story("InitiativeTabsPlayback", "Initiative Tabs: Playback", "view",
+            "agent-harbor-initiative-tabs", "playback-initiative-run", "agent-harbor-playback",
+            "An initiative's milestones move and its recordings appear loading, fail and turn ready"),
+      panel("InitiativesPlayback", "Initiatives: Playback", "agent-harbor-initiatives",
+            "playback-front-ends", "agent-harbor-playback",
+            "The running initiative while its sessions and milestones move"),
+      panel("InitiativeProgressPlayback", "Initiative Progress: Playback",
+            "agent-harbor-initiative-progress", "playback-initiative-run",
+            "agent-harbor-playback",
+            "An initiative's milestones over its run: one blocked and resumed, the plan completed"),
+      panel("FleetPlayback", "Fleet: Playback", "agent-harbor-fleet", "playback-front-ends",
+            "agent-harbor-playback",
+            "The fleet list while sessions start, need input, fail, end and are removed"),
     ])
 
 func panelsSection(): CodeTracerStorySection =

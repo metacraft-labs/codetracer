@@ -452,6 +452,31 @@ export const plays = {
     expect(el.querySelector(".ah-fleet-error-message")?.textContent).toContain("connection refused");
   }),
 
+  // A playback story (src/frontend/stories/agent_harbor_playback.nim): the
+  // host's playback bar under it, at the first frame, whose controls move
+  // the playback and the story with it. The bar lives on the document's
+  // body (fixed along the canvas's bottom), not inside the story's root.
+  "agent-harbor-playback": async () => {
+    const bar = await waitFor(document, ".ah-playback");
+    const buttons = [...bar.querySelectorAll(".ah-playback-button")].map((b) => b.textContent);
+    expect(buttons).toEqual(["Play", "Step", "\u25c0 Moment", "Moment \u25b6", "Rewind"]);
+    const moment = () => document.querySelector(".ah-playback .ah-playback-moment")?.textContent;
+    const time = () => document.querySelector(".ah-playback .ah-playback-time")?.textContent;
+    const opened = new URLSearchParams(window.location.search).get("globals") ?? "";
+    if (!opened.includes("moment:")) {
+      expect(moment()).toBe("first frame");
+      expect(time()).toBe("+0:00");
+    }
+    // The next named moment, then back: a seek backwards rebuilds from the
+    // first frame, so the readout returns to where it was.
+    const before = moment();
+    document.querySelector(".ah-playback-next").click();
+    await waitUntil(() => moment() !== before, "the next named moment");
+    expect(moment()).not.toBe("between moments");
+    document.querySelector(".ah-playback-previous").click();
+    await waitUntil(() => moment() === before, "the seek back to " + before);
+  },
+
   "terminal-output-populated": terminalCheck((el) => {
     expect(el.querySelector(".isonim-terminal-output")).toBeTruthy();
     expect(el.querySelectorAll(".terminal-line").length).toBe(3);

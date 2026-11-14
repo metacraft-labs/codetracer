@@ -78,6 +78,7 @@ const agentHarborViews = {
   "agent-harbor-fleet-empty": "codetracer-agent-harbor--fleet-empty",
   "agent-harbor-fleet-expanded": "codetracer-agent-harbor--fleet-expanded",
   "agent-harbor-fleet-filtered-empty": "codetracer-agent-harbor--fleet-filtered-empty",
+  "agent-harbor-fleet-playback": "codetracer-agent-harbor--fleet-playback",
   "agent-harbor-ref-agent-activity": "codetracer-panels--agent-activity",
   "agent-harbor-ref-test-results": "codetracer-panels--test-results",
   "agent-harbor-ref-vcs": "codetracer-panels--vcs",
@@ -146,6 +147,12 @@ const sessionTabsExports = [
   "InitiativeProgressUnknown",
   "InitiativeProgressLoading",
   "InitiativeProgressError",
+  // The playback stories, each captured at its first frame.
+  "SessionTabsPlayback",
+  "SessionListPlayback",
+  "InitiativeTabsPlayback",
+  "InitiativesPlayback",
+  "InitiativeProgressPlayback",
 ];
 for (const name of sessionTabsExports) {
   agentHarborViews[`agent-harbor-${kebab(name)}`] = `codetracer-agent-harbor--${kebab(name)}`;

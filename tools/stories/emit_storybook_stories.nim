@@ -60,7 +60,9 @@ proc sanitize(s: string): string =
 proc storybookId*(section: CodeTracerStorySection; story: CodeTracerStory): string =
   sanitize(section.title) & "--" & sanitize(startCase(story.exportName))
 
-proc csfModule(section: CodeTracerStorySection): string =
+proc csfModule*(section: CodeTracerStorySection): string =
+  ## The generated StoryBook CSF module of `section`, as `just
+  ## storybook-stories` writes it.
   result = generatedHeader & "\n"
   result.add "import { story } from \"../lib/csf.js\";\n\n"
   result.add "// " & section.description & ".\n"
@@ -75,7 +77,8 @@ proc csfModule(section: CodeTracerStorySection): string =
       (if story.check.len > 0 or story.frameTitle.len > 0: ", " & jsString(story.check) else: "") &
       (if story.frameTitle.len > 0: ", " & jsString(story.frameTitle) else: "") & ");\n"
 
-proc storyIndex(sections: seq[CodeTracerStorySection]): string =
+proc storyIndex*(sections: seq[CodeTracerStorySection]): string =
+  ## The generated `stories.json`, every story StoryBook indexes, by id.
   var stories = newJArray()
   for section in sections:
     for story in section.stories:

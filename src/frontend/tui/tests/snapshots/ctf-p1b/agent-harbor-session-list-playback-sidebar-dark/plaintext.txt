@@ -1,0 +1,56 @@
+ SESSIONS                                  «
+ 4 sessions · 1 needs input · 3 running
+ playback: sessions from several front-ends,
+ and their initiative's milestones
+ ▾ ● Route cache on the new storage la…  1/4
+ ● Port the route cache to the new stor…  9m
+   running CodeTracer · Claude 2.1.0 · host…
+   Ran just test
+ ● Migrate cached routes without a col…  14m
+   running CLI · Codex 0.9.4 · host-b
+   Ran just test
+ ▾   No initiative
+ ● Answer the question about the config…  1m
+   needs input Telegram · Claude 2.1.0 · ho…
+   Asked a single-choice question
+ ● Profile the importer on the large f…  19m
+   running TUI · Opencode 0.6.1 · host-d
+   Ran just profile
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+  ▶   ›   «   »   ↺   first frame      +0:00

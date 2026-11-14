@@ -2509,3 +2509,55 @@ AH_MARK = 0.5rem
 .ah-tab-strip .session-tab-overflow-menu
   max-width: calc(100vw - 0.75rem)
   box-sizing: border-box
+
+// ---------------------------------------------------------------------------
+// The story hosts' playback bar (isonim_agent_harbor_playback_view.nim): the
+// StoryBook host's chrome under a playback story, fixed along the bottom of
+// the canvas; the story's frame ends above it (`.ct-storybook-playback`,
+// storybook/stories/lib/surfaces.js). 1.75rem high, as the GPUI story host's
+// bar (`gpui/agent_harbor/ah_playback_bar.nim`).
+// ---------------------------------------------------------------------------
+
+.ah-playback
+  position: fixed
+  left: 0
+  right: 0
+  bottom: 0
+  height: 1.75rem
+  box-sizing: border-box
+  display: flex
+  align-items: center
+  gap: 0.25rem
+  padding: 0 0.5rem
+  overflow: hidden
+  white-space: nowrap
+  background: colors-ui-surface-primary-default
+  border-top: 0.0625rem solid colors-ui-border-primary
+  color: colors-ui-text-primary-body
+  font-size: ah-rem(type-ui-size-caption-md)
+  z-index: 10
+
+.ah-playback-button
+  flex: 0 0 auto
+  height: 1.25rem
+  padding: 0 0.5rem
+  border: 0.0625rem solid colors-ui-border-primary
+  border-radius: ah-rem(border-border-radius-control)
+  background: colors-ui-surface-primary-secondary
+  font-family: inherit
+  font-size: inherit
+  color: colors-ui-text-primary-label
+  cursor: pointer
+
+.ah-playback-readout
+  flex: 1 1 auto
+  min-width: 0
+  display: flex
+  gap: 0.5rem
+  padding-left: 0.5rem
+  overflow: hidden
+  text-overflow: ellipsis
+
+.ah-playback-time
+  color: colors-ui-text-primary-caption
+  font-variant-numeric: tabular-nums

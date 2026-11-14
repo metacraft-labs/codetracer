@@ -20,7 +20,16 @@
 ## Command line (the runtime's own flags pass through):
 ##
 ##   ah_tui_story_host --story=<storybook id> [--theme=dark|light]
-##                     [--cols=<n>] [--rows=<n>] [--list] [--captures]
+##                     [--moment=<name>] [--cols=<n>] [--rows=<n>]
+##                     [--list] [--captures]
+##
+## A playback story (`stories/agent_harbor_playback.nim`) plays on IsoNim's
+## `RealClock`, its playback bar on the last row (`ah_tui_playback_bar.nim`);
+## a click on a button or its key (space play / pause, `n` step, `[` and `]`
+## the previous and next named moment, `0` rewind) controls it, and the
+## runtime's idle hook pumps the clock and repaints when it moved.
+## `--moment` opens it at one of its scenario's named moments (an unknown
+## name, or a story that is not a playback story, is a usage error, 2).
 ##
 ## `--list` prints every story id of the section and exits; `--captures`
 ## prints the capture name of every story, size and theme
@@ -47,7 +56,7 @@ const
 
 type
   StoryArgs = object
-    story, theme: string
+    story, theme, moment: string
     list, captures: bool
     rest: seq[string]
       ## The snapshot runtime's flags (`--cols`, `--rows`, `--test-ipc`, …).
@@ -57,6 +66,7 @@ proc parseStoryArgs(args: openArray[string]): StoryArgs =
   for arg in args:
     if arg.startsWith("--story="): result.story = arg["--story=".len .. ^1]
     elif arg.startsWith("--theme="): result.theme = arg["--theme=".len .. ^1]
+    elif arg.startsWith("--moment="): result.moment = arg["--moment=".len .. ^1]
     elif arg == "--list": result.list = true
     elif arg == "--captures": result.captures = true
     else: result.rest.add arg
@@ -86,17 +96,29 @@ when isMainModule:
     except KeyError as e:
       stderr.writeLine("app_agent_harbor_story: " & e.msg & " (--list prints them)")
       return 2
+    if a.moment.len > 0:
+      # Checked before the first paint, which must not raise.
+      if not isPlaybackStory(story.surface, story.fixture):
+        stderr.writeLine("app_agent_harbor_story: --moment names a moment of a playback " &
+                         "story; " & a.story & " is not one")
+        return 2
+      let names = playbackScenario(playbackScenarioNameOf(story.fixture)).momentNames
+      if a.moment notin names:
+        stderr.writeLine("app_agent_harbor_story: " & a.story & " has no moment named '" &
+                         a.moment & "' (its moments: " & names.join(", ") & ")")
+        return 2
     let mode = if a.theme == "light": dmLight else: dmDark
     var mount: AhTuiMount = nil
     let build = proc(r: TerminalRenderer; cols, rows, step: int): TerminalNode =
       if mount.isNil or mount.cols != cols or mount.rows != rows:
         if not mount.isNil: mount.dispose()
-        mount = mountStory(story, cols, rows, mode)
+        mount = mountStory(story, cols, rows, mode, moment = a.moment)
       styledRowsTree(r, mount.rowsOf)
     let input = proc(token: string): bool =
       not mount.isNil and mount.handleInput(token)
+    let idle = proc(): bool = not mount.isNil and mount.idle()
     let prologue = proc(cols, rows: int): string = MouseOn
-    result = snapshotAppMain(build, a.rest, input, prologue = prologue)
+    result = snapshotAppMain(build, a.rest, input, prologue = prologue, idle = idle)
     if not mount.isNil: mount.dispose()
 
   quit(main())

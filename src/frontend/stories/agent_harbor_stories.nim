@@ -14,6 +14,44 @@
 
 import nim_agents_isonim_viewmodels/agent_harbor/[data_source, fixture_source,
                                                    fleet_vm, records, synthetic_fleet]
+import ./agent_harbor_playback
+
+export agent_harbor_playback
+
+# ---------------------------------------------------------------------------
+# Playback stories
+# ---------------------------------------------------------------------------
+#
+# A playback story (`agent_harbor_playback.nim`) names its scenario in its
+# fixture, and its constructor below takes the story's `AhPlayback` (built by
+# the host over its clock): the viewmodel is built over the playback's source
+# and nothing else feeds it. Each surface plays the scenario that shows it
+# changing: the sessions, the fleet and the Initiatives panel follow the
+# sessions of `front-ends`; the initiative bar (its recordings) and the
+# Initiative Progress panel (its milestones) follow `initiative-run`.
+
+const playbackFixtures* = [
+  ("agent-harbor-session-tabs", "playback-front-ends"),
+  ("agent-harbor-session-list", "playback-front-ends"),
+  ("agent-harbor-initiative-tabs", "playback-initiative-run"),
+  ("agent-harbor-initiatives", "playback-front-ends"),
+  ("agent-harbor-initiative-progress", "playback-initiative-run"),
+  ("agent-harbor-fleet", "playback-front-ends")]
+  ## Every playback story's surface and fixture.
+
+proc isPlaybackStory*(surface, fixture: string): bool =
+  (surface, fixture) in playbackFixtures
+
+proc playbackSourceOf(surface, fixture: string; playback: AhPlayback): AgentHarborDataSource =
+  ## The playback's source, refusing a playback built for another story (a
+  ## host that built it for the wrong surface or scenario) or none.
+  if playback.isNil:
+    raise newException(ValueError, "the playback story " & surface & "/" & fixture &
+                       " needs its host's playback (agent_harbor_playback.newAhPlayback)")
+  if playback.surface != surface or playback.fixture != fixture:
+    raise newException(ValueError, "the playback built for " & playback.surface & "/" &
+                       playback.fixture & " cannot drive the story " & surface & "/" & fixture)
+  playback.source
 
 const fleetFixtures* = ["snapshot", "needs-input", "failed", "selected",
                         "expanded", "filtered-empty", "loading", "error", "empty"]
@@ -42,13 +80,17 @@ proc fleetStorySource*(fixture: string): AgentHarborDataSource =
   else:
     newFixtureDataSource()
 
-proc createFleetStoryVM*(fixture: string): FleetSnapshotVM =
+proc createFleetStoryVM*(fixture: string; playback: AhPlayback = nil): FleetSnapshotVM =
   ## The viewmodel of the fleet story named by `fixture`: `snapshot` (the
   ## captured fleet), `needs-input` and `failed` (the snapshot under that
   ## filter), `selected` (its first captured session selected), `loading`,
   ## `error`, `empty`. Call inside a reactive root; the caller disposes it.
   ## An unknown fixture raises rather than showing some other state under
-  ## the story's name.
+  ## the story's name. A playback fixture reads `playback`'s source.
+  if isPlaybackStory("agent-harbor-fleet", fixture):
+    result = newFleetSnapshotVM(playbackSourceOf("agent-harbor-fleet", fixture, playback))
+    result.load()
+    return
   if fixture notin fleetFixtures:
     raise newException(ValueError, "no Agent Harbor fleet story fixture named " & fixture)
   let source = fleetStorySource(fixture)
@@ -162,8 +204,15 @@ proc busiestInitiative(source: AgentHarborDataSource): string =
         chosen = initiative.id
   chosen
 
-proc createSessionTabsStoryVM*(fixture: string): SessionTabStripVM =
-  ## The tab strip in the caption bar: one line, or several.
+proc createSessionTabsStoryVM*(fixture: string; playback: AhPlayback = nil): SessionTabStripVM =
+  ## The tab strip in the caption bar: one line, or several. A playback
+  ## fixture: one line, over `playback`'s source.
+  if isPlaybackStory("agent-harbor-session-tabs", fixture):
+    result = newSessionTabStripVM(playbackSourceOf("agent-harbor-session-tabs", fixture,
+                                                   playback), tsmSingleLine,
+                                  tabStripSessionPolicy())
+    result.load()
+    return
   if fixture notin sessionTabsFixtures:
     raise newException(ValueError, "no session tab strip story fixture named " & fixture)
   let source = sessionsStorySource(fixture)
@@ -183,8 +232,17 @@ proc createSessionTabsStoryVM*(fixture: string): SessionTabStripVM =
     result.focusInitiative(busiestInitiative(source))
   else: discard
 
-proc createSessionListStoryVM*(fixture: string): SessionTabStripVM =
-  ## The same tabs as a sidebar list, or docked as a panel.
+proc createSessionListStoryVM*(fixture: string; playback: AhPlayback = nil): SessionTabStripVM =
+  ## The same tabs as a sidebar list, or docked as a panel. A playback
+  ## fixture: the sidebar's initiatives tree in attention order, over
+  ## `playback`'s source.
+  if isPlaybackStory("agent-harbor-session-list", fixture):
+    var listPolicy = tabStripSessionPolicy()
+    listPolicy.order = soAttention
+    result = newSessionTabStripVM(playbackSourceOf("agent-harbor-session-list", fixture,
+                                                   playback), tsmSidebar, listPolicy)
+    result.load()
+    return
   if fixture notin sessionListFixtures:
     raise newException(ValueError, "no session list story fixture named " & fixture)
   let mode = if fixture.startsWith("docked"): tsmDocked else: tsmSidebar
@@ -212,7 +270,11 @@ proc createSessionListStoryVM*(fixture: string): SessionTabStripVM =
   else: discard
   if fixture == "sidebar-collapsed": result.collapsed.val = true
 
-proc createInitiativesStoryVM*(fixture: string): InitiativesVM =
+proc createInitiativesStoryVM*(fixture: string; playback: AhPlayback = nil): InitiativesVM =
+  if isPlaybackStory("agent-harbor-initiatives", fixture):
+    result = newInitiativesVM(playbackSourceOf("agent-harbor-initiatives", fixture, playback))
+    result.load()
+    return
   if fixture notin initiativesFixtures:
     raise newException(ValueError, "no initiatives story fixture named " & fixture)
   let source = sessionsStorySource(fixture, endpoint = "")
@@ -220,11 +282,19 @@ proc createInitiativesStoryVM*(fixture: string): InitiativesVM =
   result.load()
   if fixture == "selected": result.select(busiestInitiative(source))
 
-proc createProgressStoryVM*(fixture: string): InitiativeProgressVM =
+proc createProgressStoryVM*(fixture: string; playback: AhPlayback = nil): InitiativeProgressVM =
   ## One initiative's progress: the one most sessions work on (`current`),
   ## one with a blocked milestone, one receiving a progress event (its
   ## current milestone completes), long names, a plan with no executive
-  ## summary, an initiative the server does not know.
+  ## summary, an initiative the server does not know. A playback fixture:
+  ## the first initiative of `playback`'s scenario.
+  if isPlaybackStory("agent-harbor-initiative-progress", fixture):
+    let source = playbackSourceOf("agent-harbor-initiative-progress", fixture, playback)
+    let initiatives = playback.source.scenario.initiatives
+    result = newInitiativeProgressVM(source,
+      if initiatives.len > 0: initiatives[0].id else: "")
+    result.load()
+    return
   if fixture notin progressFixtures:
     raise newException(ValueError, "no initiative progress story fixture named " & fixture)
   var source = sessionsStorySource(fixture, endpoint = "")
@@ -324,7 +394,7 @@ proc inventedRecordings(count: int): seq[RecordingEntry] =
       error: (if i == 3: "the replay server could not open the trace"
               elif i == 4: "the trace is no longer on the server" else: ""))
 
-proc createInitiativeTabsStoryVM*(fixture: string): InitiativeTabStripVM =
+proc createInitiativeTabsStoryVM*(fixture: string; playback: AhPlayback = nil): InitiativeTabStripVM =
   ## The tab bar with one tab per initiative: `tabs` (the first active, with
   ## its loaded recordings), `popup` (its progress popup shown; with a panel
   ## under the bar, `popup-over-panel`), `elsewhere`
@@ -335,7 +405,13 @@ proc createInitiativeTabsStoryVM*(fixture: string): InitiativeTabStripVM =
   ## invented `overflow-40` (its `+N` menu open over a panel,
   ## `overflow-menu-over-panel`; open from a chip near the window's left
   ## edge, `overflow-menu-near-left`), `long-names`, and `empty`, `loading`,
-  ## `error`.
+  ## `error`. A playback fixture: over `playback`'s source, the recordings
+  ## the source delivers and nothing set by the story.
+  if isPlaybackStory("agent-harbor-initiative-tabs", fixture):
+    result = newInitiativeTabStripVM(playbackSourceOf("agent-harbor-initiative-tabs",
+                                                      fixture, playback))
+    result.load()
+    return
   if fixture notin initiativeTabsFixtures:
     raise newException(ValueError, "no initiative tab bar story fixture named " & fixture)
   let source = sessionsStorySource(fixture, endpoint = "")

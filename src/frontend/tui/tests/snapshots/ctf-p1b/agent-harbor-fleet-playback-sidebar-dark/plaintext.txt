@@ -1,0 +1,56 @@
+ Fleet Snapshot  ⚲ ✕
+ AGENT HARBOR SESSIONS            4 sessions
+ playback: sessions from several front-ends,
+ and their initiative's milestones
+  All 4   Needs input 1   Running 3
+  Queued 0   Failed 0   Ended 0
+ ● Answer the question about the config…  1m
+   needs input Claude 2.1.0 · host-e · 5…
+   Asked a single-choice question
+ ● Port the route cache to the new stor…  9m
+   running Claude 2.1.0 · Route cache on…
+   Ran just test
+ ● Migrate cached routes without a col…  14m
+   running Codex 0.9.4 · Route cache on…
+   Ran just test
+ ● Profile the importer on the large f…  19m
+   running Opencode 0.6.1 · host-d · 5c…
+   Ran just profile
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+  ▶   ›   «   »   ↺   first frame      +0:00

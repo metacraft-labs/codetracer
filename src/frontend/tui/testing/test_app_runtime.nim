@@ -279,6 +279,14 @@ type
     ## is unchanged for all of them — `tests/real_terminal/
     ## test_cross_tier_snapshot_equivalence.nim` is what keeps that true.
 
+  IdleHandler* = proc(): bool {.closure.}
+    ## CTF-P1c. Called each time the runtime's read waits out its 100 ms with
+    ## no input: an app whose model moves on its own (a playback story on a
+    ## real clock) does its due work here and answers whether the frame must
+    ## be repainted. A repaint it causes is a step, as an input's is.
+    ##
+    ## `nil` for every other app, and with it the loop is unchanged.
+
   LinkProvider* = proc(cols, rows: int): seq[PaneHyperlink] {.closure.}
     ## CTUI-6. Where the OSC 8 links go on the frame about to be painted.
     ##
@@ -435,7 +443,8 @@ proc runSnapshotApp*(build: SteppedTreeBuilder; opts: TestAppOptions;
                      input: InputHandler = nil;
                      links: LinkProvider = nil;
                      prologue: FramePrologue = nil;
-                     epilogue: FrameEpilogue = nil): int =
+                     epilogue: FrameEpilogue = nil;
+                     idle: IdleHandler = nil): int =
   ## Paint `build`'s tree at `opts.cols` x `opts.rows` — or, under `--reflow`,
   ## at whatever size the tty reports — then serve the parent until it says to
   ## quit. Returns the process's exit status; the caller is the only thing that
@@ -539,6 +548,9 @@ proc runSnapshotApp*(build: SteppedTreeBuilder; opts: TestAppOptions;
         rows = size.rows
         emit(resizeAckBytes(cols, rows))
         repaint()
+      elif not idle.isNil and idle():
+        inc step
+        repaint()
       continue
     let (complete, token) = framer.feed(char(b))
     if not complete:
@@ -630,7 +642,8 @@ proc snapshotAppMain*(build: SteppedTreeBuilder; args: seq[string];
                       input: InputHandler = nil;
                       links: LinkProvider = nil;
                       prologue: FramePrologue = nil;
-                      epilogue: FrameEpilogue = nil): int =
+                      epilogue: FrameEpilogue = nil;
+                      idle: IdleHandler = nil): int =
   ## `runSnapshotApp` plus argument parsing, as one function of `argv` that
   ## returns a status. Every `apps/*.nim` main block is one call to this.
   ##
@@ -640,7 +653,7 @@ proc snapshotAppMain*(build: SteppedTreeBuilder; args: seq[string];
   ## makes about it.
   try:
     let opts = parseTestAppArgs(args)
-    runSnapshotApp(build, opts, input, links, prologue, epilogue)
+    runSnapshotApp(build, opts, input, links, prologue, epilogue, idle)
   except TestAppUsageError as e:
     stderr.writeLine("snapshot-app: " & e.msg)
     TestAppExitUsage

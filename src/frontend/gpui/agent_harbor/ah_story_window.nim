@@ -21,9 +21,15 @@
 ##   codetracer-gpui-story --story=<storybook id> [--theme=dark|light]
 ##                         [--width=<px>] [--height=<px>]
 ##                         [--regions=<declaration.json> --regions-out=<file>]
-##                         [--quit-after-ms=<n>] [--list]
+##                         [--moment=<name>] [--quit-after-ms=<n>] [--list]
 ##
-## `--list` prints every story id of the section and exits. `--regions` names
+## `--list` prints every story id of the section and exits. A playback story
+## (`stories/agent_harbor_playback.nim`) plays on IsoNim's `RealClock`, with
+## the host's playback bar under it (`ah_playback_bar.nim`: play / pause,
+## step, the previous and next named moment, rewind, and where the playback
+## is); `--moment` opens it at one of its scenario's named moments instead of
+## its first frame (an unknown name is a usage error naming the moments). The
+## window's tick pumps the clock's timers. `--regions` names
 ## the region declaration (`src/tests/visual/agent-harbor-regions.json`): for
 ## each named region, which element of the GPUI views it is (the `data-ah-*`
 ## facts the element must carry). Every element so named is given the
@@ -49,6 +55,7 @@
 import std/[json, os, strutils]
 
 import isonim_gpui/window
+import nim_everywhere/async_compat
 from isonim_gpui/bindings import gpui_launch, gpui_has_window_backend,
   gpui_quit_after_ms, gpui_set_tick, gpui_layout_bounds_reset
 
@@ -73,7 +80,7 @@ const
 
 type
   StoryCommand = object
-    storyId, regionsDecl, regionsOut: string
+    storyId, regionsDecl, regionsOut, moment: string
     mode: DesignMode
     width, height: int
     quitAfterMs: uint32
@@ -110,7 +117,7 @@ var gWindow: StoryWindow
 proc usage(): string =
   "usage: codetracer-gpui-story --story=<storybook id> [--theme=dark|light] " &
   "[--width=<px>] [--height=<px>] [--regions=<declaration.json> " &
-  "--regions-out=<file>] [--quit-after-ms=<n>] [--list]"
+  "--regions-out=<file>] [--moment=<name>] [--quit-after-ms=<n>] [--list]"
 
 proc parseCommand(args: seq[string]): StoryCommand =
   ## Raises `ValueError` with the sentence to print for a bad command line.
@@ -133,6 +140,7 @@ proc parseCommand(args: seq[string]): StoryCommand =
     of "--height": result.height = positive(value, "--height")
     of "--regions": result.regionsDecl = value
     of "--regions-out": result.regionsOut = value
+    of "--moment": result.moment = value
     of "--quit-after-ms": result.quitAfterMs = uint32(positive(value, "--quit-after-ms"))
     of "--list": result.list = true
     else: raise newException(ValueError, "unknown argument " & arg)
@@ -231,10 +239,19 @@ proc writeRegions(regions: JsonNode) =
   writeFile(c.regionsOut, pretty(doc) & "\n")
   echo "codetracer-gpui-story: regions written to ", c.regionsOut
 
+proc pumpClock() =
+  ## A playback story's real clock fires its timers through the platform's
+  ## event loop, which nothing else in this process polls: drain what is
+  ## due, so a playing story moves (its views and bar redraw from their
+  ## render effects).
+  if not gWindow.mount.playback.isNil: drainPlatformCallbacks()
+
 proc regionTick() {.cdecl.} =
-  ## Every `TickMs`: once two consecutive reads of the laid-out regions agree,
-  ## they are the settled layout, and are written once.
-  if gWindow.written: return
+  ## Every `TickMs`: a playing story's clock is pumped; once two consecutive
+  ## reads of the laid-out regions agree, they are the settled layout, and
+  ## are written once.
+  pumpClock()
+  if gWindow.written or gWindow.probes.len == 0: return
   let regions = readRegions(gWindow.probes, gWindow.cmd.height)
   if regions.isNil: return
   let read = $regions
@@ -245,7 +262,7 @@ proc regionTick() {.cdecl.} =
   if gWindow.stableReads >= 1:
     writeRegions(regions)
     gWindow.written = true
-    gpui_set_tick(0, nil)
+    if gWindow.mount.playback.isNil: gpui_set_tick(0, nil)
 
 # ---------------------------------------------------------------------------
 # The window
@@ -267,7 +284,8 @@ proc buildStory(root: GpuiElement) {.cdecl.} =
   r.setStyle(root, "font-family", WindowFontFamily)
   let frameTitle = if story.kind == "panel": frameTitleOf(story) else: ""
   gWindow.mount = r.mountAgentHarborStoryGpui(story.surface, story.fixture,
-                                              c.width, c.height, c.mode, frameTitle)
+                                              c.width, c.height, c.mode, frameTitle,
+                                              moment = c.moment)
   r.appendChild(root, gWindow.mount.root)
   for probe in gWindow.probes.mitems:
     probe.elements.setLen 0
@@ -278,6 +296,7 @@ proc buildStory(root: GpuiElement) {.cdecl.} =
       r.setAttribute(el, LayoutProbeAttribute, probe.name)
   if gWindow.probes.len > 0:
     gpui_layout_bounds_reset()
+  if gWindow.probes.len > 0 or not gWindow.mount.playback.isNil:
     gpui_set_tick(TickMs, regionTick)
 
 proc run(cmd: StoryCommand): int =
@@ -286,6 +305,16 @@ proc run(cmd: StoryCommand): int =
     for story in section.stories: echo storybookId(section, story)
     return 0
   gWindow = StoryWindow(cmd: cmd, story: findStory(section, cmd.storyId))
+  if cmd.moment.len > 0 and not isPlaybackStory(gWindow.story.surface, gWindow.story.fixture):
+    raise newException(ValueError, "--moment names a moment of a playback story; " &
+                       cmd.storyId & " is not one")
+  if cmd.moment.len > 0:
+    # Checked before the window opens: the root builder is a C callback,
+    # which must not raise.
+    let names = playbackScenario(playbackScenarioNameOf(gWindow.story.fixture)).momentNames
+    if cmd.moment notin names:
+      raise newException(ValueError, "the story " & cmd.storyId & " has no moment named '" &
+                         cmd.moment & "' (its moments: " & names.join(", ") & ")")
   if cmd.regionsDecl.len > 0: gWindow.probes = readDeclaration(cmd.regionsDecl)
   let preflight = currentWindowPreflight(gpui_has_window_backend() == 1'u8)
   if preflight.refusal != wpWindowCanOpen:

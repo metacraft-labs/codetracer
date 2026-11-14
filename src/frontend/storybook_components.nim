@@ -113,7 +113,8 @@ import stories/agent_harbor_stories
 import viewmodel/views/isonim_agent_harbor_fleet_view
 import viewmodel/views/[isonim_agent_harbor_session_tabs_view,
                         isonim_agent_harbor_initiatives_view,
-                        isonim_agent_harbor_initiative_tabs_view]
+                        isonim_agent_harbor_initiative_tabs_view,
+                        isonim_agent_harbor_playback_view]
 import ../ct_test/contracts as ct_test_contracts
 
 type
@@ -1783,36 +1784,69 @@ proc mountTerminalOutput(container: isonim_dom.Element; fixture: string): Dispos
 # Agent Harbor
 # ---------------------------------------------------------------------------
 
-proc mountAgentHarborFleet(container: isonim_dom.Element;
-                           fixture: string): DisposeProc =
-  ## The fleet panel over the viewmodel `createFleetStoryVM` builds for the
-  ## story's fixture (`stories/agent_harbor_stories.nim` names them).
+proc storyOption(options, key: string): string =
+  ## One `key=value` of a story's options (`;`-separated: what
+  ## `storybook/stories/lib/csf.js` passes from the story's StoryBook
+  ## globals, e.g. `moment=port-asks`); "" when absent.
+  for part in options.split(';'):
+    let eq = part.find('=')
+    if eq > 0 and part[0 ..< eq].strip == key: return part[eq + 1 .. ^1].strip
+
+proc documentBody(): isonim_dom.Element {.importjs: "(document.body)@".}
+
+proc hostPlayback(surface, fixture: string): AhPlayback =
+  ## A playback story's playback, on the browser's real clock; nil for any
+  ## other story.
+  if isPlaybackStory(surface, fixture): newAhPlayback(surface, fixture, newRealClock())
+  else: nil
+
+proc mountPlaybackChrome(pb: AhPlayback; options: string): DisposeProc =
+  ## The story host's chrome under a playback story: the playback bar along
+  ## the bottom of the canvas (`isonim_agent_harbor_playback_view.nim`),
+  ## after opening the story at the moment its options name (the
+  ## `moment` StoryBook global: `?id=<story>&globals=moment:<name>`).
+  if pb.isNil: return proc() = discard
+  pb.openAtMoment(storyOption(options, "moment"))
   var rootDisposer: proc()
-  var vm: FleetSnapshotVM
+  var bar: isonim_dom.Element
   createRoot proc(dispose: proc()) =
     rootDisposer = dispose
-    vm = createFleetStoryVM(fixture)
-    mountAgentHarborFleetPanel(container, vm)
+    bar = renderAgentHarborPlaybackBar[WebRenderer, isonim_dom.Element](WebRenderer(), pb)
+    discard isonim_dom.appendChild(isonim_dom.Node(documentBody()), isonim_dom.Node(bar))
   return proc() =
-    if vm != nil: vm.dispose()
+    pb.dispose()
     if rootDisposer != nil: rootDisposer()
-    container.innerHTML = ""
+    if bar != nil: isonim_dom.remove(isonim_dom.Node(bar))
 
 proc mountAgentHarborVM[T](container: isonim_dom.Element;
                            build: proc(): T;
-                           mount: proc(container: isonim_dom.Element; vm: T)): DisposeProc =
+                           mount: proc(container: isonim_dom.Element; vm: T);
+                           pb: AhPlayback = nil; options = ""): DisposeProc =
   ## Builds a story's viewmodel in a reactive root and mounts its view; the
-  ## dispose proc tears both down.
+  ## dispose proc tears both down. A playback story (`pb`) also gets the
+  ## host's playback chrome, opened at the moment `options` names.
   var rootDisposer: proc()
   var vm: T
   createRoot proc(dispose: proc()) =
     rootDisposer = dispose
     vm = build()
     mount(container, vm)
+  let chrome = mountPlaybackChrome(pb, options)
   return proc() =
+    chrome()
     if vm != nil: vm.dispose()
     if rootDisposer != nil: rootDisposer()
     container.innerHTML = ""
+
+proc mountAgentHarborFleet(container: isonim_dom.Element;
+                           fixture: string; options = ""): DisposeProc =
+  ## The fleet panel over the viewmodel `createFleetStoryVM` builds for the
+  ## story's fixture (`stories/agent_harbor_stories.nim` names them).
+  let pb = hostPlayback("agent-harbor-fleet", fixture)
+  mountAgentHarborVM(container,
+    proc(): FleetSnapshotVM = createFleetStoryVM(fixture, pb),
+    proc(host: isonim_dom.Element; vm: FleetSnapshotVM) =
+      mountAgentHarborFleetPanel(host, vm), pb, options)
 
 proc addAgentHarborPanelUnder(container: isonim_dom.Element; surface, fixture: string) =
   ## The panel under the caption bar where the story asks for one
@@ -1825,7 +1859,7 @@ proc addAgentHarborPanelUnder(container: isonim_dom.Element; surface, fixture: s
     discard isonim_dom.appendChild(isonim_dom.Node(container), isonim_dom.Node(panel))
 
 proc mountAgentHarborSessionTabs(container: isonim_dom.Element;
-                                 fixture: string): DisposeProc =
+                                 fixture: string; options = ""): DisposeProc =
   ## The strip as CodeTracer draws it: in the caption bar (`#menu`), above an
   ## empty working area (or a panel, `addAgentHarborPanelUnder`). Several
   ## lines let the bar grow.
@@ -1836,13 +1870,14 @@ proc mountAgentHarborSessionTabs(container: isonim_dom.Element;
     "ah-tab-caption" & (if fixture.startsWith("multi-line") or fixture == "focused-initiative":
                           " ah-tab-caption-multiline" else: "")))
   discard isonim_dom.appendChild(isonim_dom.Node(container), isonim_dom.Node(caption))
+  let pb = hostPlayback("agent-harbor-session-tabs", fixture)
   mountAgentHarborVM(caption,
-    proc(): SessionTabStripVM = createSessionTabsStoryVM(fixture),
+    proc(): SessionTabStripVM = createSessionTabsStoryVM(fixture, pb),
     proc(host: isonim_dom.Element; vm: SessionTabStripVM) =
-      mountAgentHarborTabStrip(host, vm))
+      mountAgentHarborTabStrip(host, vm), pb, options)
 
 proc mountAgentHarborInitiativeTabs(container: isonim_dom.Element;
-                                    fixture: string): DisposeProc =
+                                    fixture: string; options = ""): DisposeProc =
   ## The tab bar with initiatives as tabs, in the caption bar; with a panel
   ## under the bar where the story asks for one (`addAgentHarborPanelUnder`).
   addAgentHarborPanelUnder(container, "agent-harbor-initiative-tabs", fixture)
@@ -1850,31 +1885,35 @@ proc mountAgentHarborInitiativeTabs(container: isonim_dom.Element;
   isonim_dom.setAttribute(caption, cstring"id", cstring"menu")
   isonim_dom.setAttribute(caption, cstring"class", cstring"ah-tab-caption")
   discard isonim_dom.appendChild(isonim_dom.Node(container), isonim_dom.Node(caption))
+  let pb = hostPlayback("agent-harbor-initiative-tabs", fixture)
   mountAgentHarborVM(caption,
-    proc(): InitiativeTabStripVM = createInitiativeTabsStoryVM(fixture),
+    proc(): InitiativeTabStripVM = createInitiativeTabsStoryVM(fixture, pb),
     proc(host: isonim_dom.Element; vm: InitiativeTabStripVM) =
-      mountAgentHarborInitiativeTabBar(host, vm))
+      mountAgentHarborInitiativeTabBar(host, vm), pb, options)
 
 proc mountAgentHarborSessionList(container: isonim_dom.Element;
-                                 fixture: string): DisposeProc =
+                                 fixture: string; options = ""): DisposeProc =
+  let pb = hostPlayback("agent-harbor-session-list", fixture)
   mountAgentHarborVM(container,
-    proc(): SessionTabStripVM = createSessionListStoryVM(fixture),
+    proc(): SessionTabStripVM = createSessionListStoryVM(fixture, pb),
     proc(host: isonim_dom.Element; vm: SessionTabStripVM) =
-      mountAgentHarborSessionList(host, vm))
+      mountAgentHarborSessionList(host, vm), pb, options)
 
 proc mountAgentHarborInitiatives(container: isonim_dom.Element;
-                                 fixture: string): DisposeProc =
+                                 fixture: string; options = ""): DisposeProc =
+  let pb = hostPlayback("agent-harbor-initiatives", fixture)
   mountAgentHarborVM(container,
-    proc(): InitiativesVM = createInitiativesStoryVM(fixture),
+    proc(): InitiativesVM = createInitiativesStoryVM(fixture, pb),
     proc(host: isonim_dom.Element; vm: InitiativesVM) =
-      mountAgentHarborInitiativesPanel(host, vm))
+      mountAgentHarborInitiativesPanel(host, vm), pb, options)
 
 proc mountAgentHarborProgress(container: isonim_dom.Element;
-                              fixture: string): DisposeProc =
+                              fixture: string; options = ""): DisposeProc =
+  let pb = hostPlayback("agent-harbor-initiative-progress", fixture)
   mountAgentHarborVM(container,
-    proc(): InitiativeProgressVM = createProgressStoryVM(fixture),
+    proc(): InitiativeProgressVM = createProgressStoryVM(fixture, pb),
     proc(host: isonim_dom.Element; vm: InitiativeProgressVM) =
-      mountAgentHarborProgressPanel(host, vm))
+      mountAgentHarborProgressPanel(host, vm), pb, options)
 
 proc mountTestResults(container: isonim_dom.Element; fixture: string): DisposeProc =
   ## The Test Results pane over a real `ct test run --events` capture (the
@@ -2201,18 +2240,23 @@ proc storyBackendCommands*(): cstring {.exportc.} =
 proc mountCodeTracerStory*(container: isonim_dom.Element;
                            kind: cstring;
                            name: cstring;
-                           fixture: cstring): DisposeProc {.exportc.} =
+                           fixture: cstring;
+                           options: cstring = cstring""): DisposeProc {.exportc.} =
+  ## Mounts one declared story. `options` (`key=value;…`, optional) carries
+  ## the story host's settings for the story: `moment=<name>` opens a
+  ## playback story at that named moment.
   let k = $kind
   let n = $name
   let f = $fixture
+  let o = if options.isNil: "" else: $options
   case k
   of "layout":
     mountLayout(container, n, f)
   of "view", "component":
     case n
-    of "agent-harbor-session-tabs": mountAgentHarborSessionTabs(container, f)
-    of "agent-harbor-initiative-tabs": mountAgentHarborInitiativeTabs(container, f)
-    of "agent-harbor-session-list": mountAgentHarborSessionList(container, f)
+    of "agent-harbor-session-tabs": mountAgentHarborSessionTabs(container, f, o)
+    of "agent-harbor-initiative-tabs": mountAgentHarborInitiativeTabs(container, f, o)
+    of "agent-harbor-session-list": mountAgentHarborSessionList(container, f, o)
     of "debug-shell": mountDebugShell(container, f)
     of "debug-controls": mountDebugControls(container, f)
     else: mountStructure(container, n, f)
@@ -2220,10 +2264,10 @@ proc mountCodeTracerStory*(container: isonim_dom.Element;
     case n
     of "agent-activity": mountAgentActivity(container, f)
     of "agent-workspace": mountAgentWorkspace(container, f)
-    of "agent-harbor-fleet": mountAgentHarborFleet(container, f)
-    of "agent-harbor-session-list": mountAgentHarborSessionList(container, f)
-    of "agent-harbor-initiatives": mountAgentHarborInitiatives(container, f)
-    of "agent-harbor-initiative-progress": mountAgentHarborProgress(container, f)
+    of "agent-harbor-fleet": mountAgentHarborFleet(container, f, o)
+    of "agent-harbor-session-list": mountAgentHarborSessionList(container, f, o)
+    of "agent-harbor-initiatives": mountAgentHarborInitiatives(container, f, o)
+    of "agent-harbor-initiative-progress": mountAgentHarborProgress(container, f, o)
     of "test-results": mountTestResults(container, f)
     of "build": mountBuild(container, f)
     of "calltrace": mountCalltrace(container, f)

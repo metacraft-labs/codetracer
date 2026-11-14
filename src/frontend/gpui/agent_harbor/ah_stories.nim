@@ -23,8 +23,9 @@ import ./ah_session_views
 import ./ah_initiative_tab_bar
 import ./ah_initiative_panels
 import ./ah_fleet_panel
+import ./ah_playback_bar
 
-export agent_harbor_stories, ah_theme
+export agent_harbor_stories, ah_theme, ah_playback_bar
 
 const
   GpuiAgentHarborSurfaces* = [
@@ -53,6 +54,11 @@ type
     initiativeTabs*: InitiativeTabStripVM
     initiatives*: InitiativesVM
     progress*: InitiativeProgressVM
+    playback*: AhPlayback
+      ## A playback story's playback (nil for any other story): its source
+      ## feeds the viewmodel, and the bar under the story controls it.
+    bar*: GpuiElement
+      ## The playback bar's host (nil for any other story).
     dispose*: proc()
 
 proc hasGpuiRendering*(surface: string): bool =
@@ -108,16 +114,32 @@ proc drawFrame(r: GpuiRenderer; p: AhPalette; title: string;
 
 proc mountAgentHarborStoryGpui*(r: GpuiRenderer; surface, fixture: string;
                                 widthPx, heightPx: int; mode = dmDark;
-                                frameTitle = ""): AhStoryMount =
+                                frameTitle = ""; clock: ClockBase = nil;
+                                moment = ""): AhStoryMount =
   ## Builds the story's viewmodel and mounts its GPUI view, `widthPx` ×
   ## `heightPx`. A `frameTitle` frames it as a panel. Raises `ValueError` for
   ## a surface with no GPUI rendering, and (from the story constructors) for
   ## a fixture the surface does not name.
+  ##
+  ## A playback story plays on `clock` (a `RealClock` when nil; a test or a
+  ## capture passes a `TestClock`), opens at `moment` (its first frame when
+  ## ""), and has the host's playback bar under it: the story is drawn
+  ## `PlaybackBarPx` shorter, the bar along the bottom.
   if not hasGpuiRendering(surface):
     raise newException(ValueError, "no GPUI rendering for the Agent Harbor surface " &
                        surface & " (story fixture " & fixture & ")")
   let p = ahPalette(mode)
   var m = AhStoryMount(surface: surface, fixture: fixture)
+  var outer: GpuiElement
+  var heightPx = heightPx
+  if isPlaybackStory(surface, fixture):
+    m.playback = newAhPlayback(surface, fixture,
+                               if clock.isNil: ClockBase(newRealClock()) else: clock)
+    # The window: the story above, the bar below.
+    outer = r.box(column = true, pairs = [("width", $widthPx & "px"),
+                                          ("height", $heightPx & "px"),
+                                          ("background", p.ground)])
+    heightPx = heightPx - PlaybackBarPx
   var host: GpuiElement
   if frameTitle.len > 0:
     let (frame, body) = r.drawFrame(p, frameTitle, widthPx, heightPx)
@@ -140,39 +162,60 @@ proc mountAgentHarborStoryGpui*(r: GpuiRenderer; surface, fixture: string;
   else:
     host = r.createElement("div")
     m.root = host
+    if not outer.isNil:
+      # The story's own area, above the bar: a column as tall as the window
+      # less the bar, holding the story as the window's root holds any other
+      # story, so a caption-bar story keeps its own height instead of
+      # stretching to the area's.
+      m.root = r.box(column = true, pairs = [("width", $widthPx & "px"),
+                                             ("height", $heightPx & "px"),
+                                             ("flex-shrink", "0"),
+                                             ("overflow", "hidden")])
+      r.appendChild(m.root, host)
   m.view = host
   let bodyW = if frameTitle.len > 0: widthPx - 2 * FrameInsetPx else: widthPx
   var rootDisposer: proc()
   createRoot proc(dispose: proc()) =
     rootDisposer = dispose
+    let pb = m.playback
     case surface
     of "agent-harbor-fleet":
-      m.fleet = createFleetStoryVM(fixture)
+      m.fleet = createFleetStoryVM(fixture, pb)
       r.mountFleetPanel(host, m.fleet, p, bodyW)
     of "agent-harbor-session-tabs":
-      m.sessions = createSessionTabsStoryVM(fixture)
+      m.sessions = createSessionTabsStoryVM(fixture, pb)
       r.mountSessionTabStrip(host, m.sessions, p, bodyW)
     of "agent-harbor-session-list":
-      m.sessions = createSessionListStoryVM(fixture)
+      m.sessions = createSessionListStoryVM(fixture, pb)
       r.mountSessionList(host, m.sessions, p, bodyW)
     of "agent-harbor-initiative-tabs":
-      m.initiativeTabs = createInitiativeTabsStoryVM(fixture)
+      m.initiativeTabs = createInitiativeTabsStoryVM(fixture, pb)
       r.mountInitiativeTabBar(host, m.initiativeTabs, p, bodyW)
     of "agent-harbor-initiatives":
-      m.initiatives = createInitiativesStoryVM(fixture)
+      m.initiatives = createInitiativesStoryVM(fixture, pb)
       r.mountInitiativesPanel(host, m.initiatives, p, bodyW)
     of "agent-harbor-initiative-progress":
-      m.progress = createProgressStoryVM(fixture)
+      m.progress = createProgressStoryVM(fixture, pb)
       r.mountProgressPanel(host, m.progress, p, bodyW)
     else:
       raise newException(ValueError, "no GPUI rendering for the Agent Harbor surface " &
                          surface)
+    if not pb.isNil:
+      m.bar = r.createElement("div")
+      r.mountPlaybackBar(m.bar, pb, p, widthPx)
+  if not outer.isNil:
+    r.appendChild(outer, m.root)
+    r.appendChild(outer, m.bar)
+    m.root = outer
+    m.playback.openAtMoment(moment)
   let fleet = m.fleet
   let sessions = m.sessions
   let initiativeTabs = m.initiativeTabs
   let initiatives = m.initiatives
   let progress = m.progress
+  let playback = m.playback
   m.dispose = proc() =
+    if playback != nil: playback.dispose()
     if fleet != nil: fleet.dispose()
     if sessions != nil: sessions.dispose()
     if initiativeTabs != nil: initiativeTabs.dispose()

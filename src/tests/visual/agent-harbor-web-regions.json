@@ -1097,6 +1097,190 @@
         }
       }
     },
+    "agent-harbor-fleet-playback-laptop-dark": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 1432,
+          "h": 832
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 1432,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 1432,
+          "h": 103
+        },
+        "rows": {
+          "x": 4,
+          "y": 143,
+          "w": 1432,
+          "h": 729
+        },
+        "fleet-row-first": {
+          "x": 4,
+          "y": 143,
+          "w": 1432,
+          "h": 48,
+          "index": 0
+        },
+        "fleet-row-last": {
+          "x": 4,
+          "y": 287,
+          "w": 1432,
+          "h": 48,
+          "index": 3
+        }
+      }
+    },
+    "agent-harbor-fleet-playback-laptop-light": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 1432,
+          "h": 832
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 1432,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 1432,
+          "h": 103
+        },
+        "rows": {
+          "x": 4,
+          "y": 143,
+          "w": 1432,
+          "h": 729
+        },
+        "fleet-row-first": {
+          "x": 4,
+          "y": 143,
+          "w": 1432,
+          "h": 48,
+          "index": 0
+        },
+        "fleet-row-last": {
+          "x": 4,
+          "y": 287,
+          "w": 1432,
+          "h": 48,
+          "index": 3
+        }
+      }
+    },
+    "agent-harbor-fleet-playback-sidebar-dark": {
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 352,
+          "h": 832
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 352,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 352,
+          "h": 106
+        },
+        "rows": {
+          "x": 4,
+          "y": 146,
+          "w": 352,
+          "h": 726
+        },
+        "fleet-row-first": {
+          "x": 4,
+          "y": 146,
+          "w": 352,
+          "h": 65,
+          "index": 0
+        },
+        "fleet-row-last": {
+          "x": 4,
+          "y": 341,
+          "w": 352,
+          "h": 65,
+          "index": 3
+        }
+      }
+    },
+    "agent-harbor-fleet-playback-sidebar-light": {
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 352,
+          "h": 832
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 352,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 352,
+          "h": 106
+        },
+        "rows": {
+          "x": 4,
+          "y": 146,
+          "w": 352,
+          "h": 726
+        },
+        "fleet-row-first": {
+          "x": 4,
+          "y": 146,
+          "w": 352,
+          "h": 65,
+          "index": 0
+        },
+        "fleet-row-last": {
+          "x": 4,
+          "y": 341,
+          "w": 352,
+          "h": 65,
+          "index": 3
+        }
+      }
+    },
     "agent-harbor-fleet-selected-laptop-dark": {
       "viewport": {
         "width": 1440,
@@ -2802,6 +2986,238 @@
           "w": 352,
           "h": 43,
           "index": 3
+        },
+        "milestone-bar": {
+          "x": 12,
+          "y": 107,
+          "w": 336,
+          "h": 6
+        },
+        "milestone-legend": {
+          "x": 12,
+          "y": 119,
+          "w": 336,
+          "h": 14
+        }
+      }
+    },
+    "agent-harbor-initiative-progress-playback-laptop-dark": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 1432,
+          "h": 832
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 1432,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 1432,
+          "h": 33
+        },
+        "rows": {
+          "x": 4,
+          "y": 73,
+          "w": 1432,
+          "h": 799
+        },
+        "milestone-row-first": {
+          "x": 4,
+          "y": 205,
+          "w": 1432,
+          "h": 26,
+          "index": 0
+        },
+        "milestone-row-last": {
+          "x": 4,
+          "y": 292,
+          "w": 1432,
+          "h": 26,
+          "index": 2
+        },
+        "milestone-bar": {
+          "x": 12,
+          "y": 81,
+          "w": 1416,
+          "h": 6
+        },
+        "milestone-legend": {
+          "x": 12,
+          "y": 93,
+          "w": 1416,
+          "h": 14
+        }
+      }
+    },
+    "agent-harbor-initiative-progress-playback-laptop-light": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 1432,
+          "h": 832
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 1432,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 1432,
+          "h": 33
+        },
+        "rows": {
+          "x": 4,
+          "y": 73,
+          "w": 1432,
+          "h": 799
+        },
+        "milestone-row-first": {
+          "x": 4,
+          "y": 205,
+          "w": 1432,
+          "h": 26,
+          "index": 0
+        },
+        "milestone-row-last": {
+          "x": 4,
+          "y": 292,
+          "w": 1432,
+          "h": 26,
+          "index": 2
+        },
+        "milestone-bar": {
+          "x": 12,
+          "y": 81,
+          "w": 1416,
+          "h": 6
+        },
+        "milestone-legend": {
+          "x": 12,
+          "y": 93,
+          "w": 1416,
+          "h": 14
+        }
+      }
+    },
+    "agent-harbor-initiative-progress-playback-sidebar-dark": {
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 352,
+          "h": 832
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 352,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 352,
+          "h": 59
+        },
+        "rows": {
+          "x": 4,
+          "y": 99,
+          "w": 352,
+          "h": 773
+        },
+        "milestone-row-first": {
+          "x": 4,
+          "y": 255,
+          "w": 352,
+          "h": 43,
+          "index": 0
+        },
+        "milestone-row-last": {
+          "x": 4,
+          "y": 376,
+          "w": 352,
+          "h": 43,
+          "index": 2
+        },
+        "milestone-bar": {
+          "x": 12,
+          "y": 107,
+          "w": 336,
+          "h": 6
+        },
+        "milestone-legend": {
+          "x": 12,
+          "y": 119,
+          "w": 336,
+          "h": 14
+        }
+      }
+    },
+    "agent-harbor-initiative-progress-playback-sidebar-light": {
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 352,
+          "h": 832
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 352,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 352,
+          "h": 59
+        },
+        "rows": {
+          "x": 4,
+          "y": 99,
+          "w": 352,
+          "h": 773
+        },
+        "milestone-row-first": {
+          "x": 4,
+          "y": 255,
+          "w": 352,
+          "h": 43,
+          "index": 0
+        },
+        "milestone-row-last": {
+          "x": 4,
+          "y": 376,
+          "w": 352,
+          "h": 43,
+          "index": 2
         },
         "milestone-bar": {
           "x": 12,
@@ -6763,6 +7179,222 @@
         }
       }
     },
+    "agent-harbor-initiative-tabs-playback-laptop-dark": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 1440,
+          "h": 34
+        },
+        "active-tab": {
+          "x": 0,
+          "y": 6,
+          "w": 247.609375,
+          "h": 26,
+          "fill": "#3c3c3c"
+        },
+        "add": {
+          "x": 253.609375,
+          "y": 6,
+          "w": 26,
+          "h": 26
+        },
+        "controls": {
+          "x": 1185.15625,
+          "y": 6,
+          "w": 246.84375,
+          "h": 26
+        },
+        "inbox-position": {
+          "x": 1211.96875,
+          "y": 10,
+          "w": 81.046875,
+          "h": 18
+        },
+        "bar-active-tab": {
+          "x": 0,
+          "y": 6,
+          "w": 247.609375,
+          "h": 26
+        },
+        "bar-add": {
+          "x": 253.609375,
+          "y": 6,
+          "w": 26,
+          "h": 26
+        },
+        "caption": {
+          "x": 0,
+          "y": 0,
+          "w": 1440,
+          "h": 34
+        }
+      }
+    },
+    "agent-harbor-initiative-tabs-playback-laptop-light": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 1440,
+          "h": 34
+        },
+        "active-tab": {
+          "x": 0,
+          "y": 6,
+          "w": 247.609375,
+          "h": 26,
+          "fill": "#b5ae9f"
+        },
+        "add": {
+          "x": 253.609375,
+          "y": 6,
+          "w": 26,
+          "h": 26
+        },
+        "controls": {
+          "x": 1185.15625,
+          "y": 6,
+          "w": 246.84375,
+          "h": 26
+        },
+        "inbox-position": {
+          "x": 1211.96875,
+          "y": 10,
+          "w": 81.046875,
+          "h": 18
+        },
+        "bar-active-tab": {
+          "x": 0,
+          "y": 6,
+          "w": 247.609375,
+          "h": 26
+        },
+        "bar-add": {
+          "x": 253.609375,
+          "y": 6,
+          "w": 26,
+          "h": 26
+        },
+        "caption": {
+          "x": 0,
+          "y": 0,
+          "w": 1440,
+          "h": 34
+        }
+      }
+    },
+    "agent-harbor-initiative-tabs-playback-sidebar-dark": {
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 68
+        },
+        "active-tab": {
+          "x": 0,
+          "y": 6,
+          "w": 247.609375,
+          "h": 26,
+          "fill": "#3c3c3c"
+        },
+        "add": {
+          "x": 253.609375,
+          "y": 6,
+          "w": 26,
+          "h": 26
+        },
+        "controls": {
+          "x": 0,
+          "y": 36,
+          "w": 352,
+          "h": 26
+        },
+        "bar-active-tab": {
+          "x": 0,
+          "y": 6,
+          "w": 247.609375,
+          "h": 26
+        },
+        "bar-add": {
+          "x": 253.609375,
+          "y": 6,
+          "w": 26,
+          "h": 26
+        },
+        "caption": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 68
+        }
+      }
+    },
+    "agent-harbor-initiative-tabs-playback-sidebar-light": {
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 68
+        },
+        "active-tab": {
+          "x": 0,
+          "y": 6,
+          "w": 247.609375,
+          "h": 26,
+          "fill": "#b5ae9f"
+        },
+        "add": {
+          "x": 253.609375,
+          "y": 6,
+          "w": 26,
+          "h": 26
+        },
+        "controls": {
+          "x": 0,
+          "y": 36,
+          "w": 352,
+          "h": 26
+        },
+        "bar-active-tab": {
+          "x": 0,
+          "y": 6,
+          "w": 247.609375,
+          "h": 26
+        },
+        "bar-add": {
+          "x": 253.609375,
+          "y": 6,
+          "w": 26,
+          "h": 26
+        },
+        "caption": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 68
+        }
+      }
+    },
     "agent-harbor-initiative-tabs-popup-laptop-dark": {
       "viewport": {
         "width": 1440,
@@ -9417,6 +10049,294 @@
         }
       }
     },
+    "agent-harbor-initiatives-playback-laptop-dark": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 1432,
+          "h": 832
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 1432,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 1432,
+          "h": 33
+        },
+        "rows": {
+          "x": 4,
+          "y": 73,
+          "w": 1432,
+          "h": 799
+        },
+        "initiative-row-first": {
+          "x": 4,
+          "y": 73,
+          "w": 1432,
+          "h": 108,
+          "index": 0
+        },
+        "initiative-row-last": {
+          "x": 4,
+          "y": 73,
+          "w": 1432,
+          "h": 108,
+          "index": 0
+        },
+        "session-line-first": {
+          "x": 640,
+          "y": 85,
+          "w": 788,
+          "h": 18,
+          "index": 0
+        },
+        "session-line-last": {
+          "x": 640,
+          "y": 104,
+          "w": 788,
+          "h": 18,
+          "index": 1
+        },
+        "milestone-bar": {
+          "x": 12,
+          "y": 117,
+          "w": 420,
+          "h": 6
+        },
+        "milestone-legend": {
+          "x": 444,
+          "y": 113,
+          "w": 144,
+          "h": 14
+        }
+      }
+    },
+    "agent-harbor-initiatives-playback-laptop-light": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 1432,
+          "h": 832
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 1432,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 1432,
+          "h": 33
+        },
+        "rows": {
+          "x": 4,
+          "y": 73,
+          "w": 1432,
+          "h": 799
+        },
+        "initiative-row-first": {
+          "x": 4,
+          "y": 73,
+          "w": 1432,
+          "h": 108,
+          "index": 0
+        },
+        "initiative-row-last": {
+          "x": 4,
+          "y": 73,
+          "w": 1432,
+          "h": 108,
+          "index": 0
+        },
+        "session-line-first": {
+          "x": 640,
+          "y": 85,
+          "w": 788,
+          "h": 18,
+          "index": 0
+        },
+        "session-line-last": {
+          "x": 640,
+          "y": 104,
+          "w": 788,
+          "h": 18,
+          "index": 1
+        },
+        "milestone-bar": {
+          "x": 12,
+          "y": 117,
+          "w": 420,
+          "h": 6
+        },
+        "milestone-legend": {
+          "x": 444,
+          "y": 113,
+          "w": 144,
+          "h": 14
+        }
+      }
+    },
+    "agent-harbor-initiatives-playback-sidebar-dark": {
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 352,
+          "h": 832
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 352,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 352,
+          "h": 85
+        },
+        "rows": {
+          "x": 4,
+          "y": 125,
+          "w": 352,
+          "h": 747
+        },
+        "initiative-row-first": {
+          "x": 4,
+          "y": 125,
+          "w": 352,
+          "h": 153,
+          "index": 0
+        },
+        "initiative-row-last": {
+          "x": 4,
+          "y": 125,
+          "w": 352,
+          "h": 153,
+          "index": 0
+        },
+        "session-line-first": {
+          "x": 32,
+          "y": 231,
+          "w": 316,
+          "h": 18,
+          "index": 0
+        },
+        "session-line-last": {
+          "x": 32,
+          "y": 250,
+          "w": 316,
+          "h": 18,
+          "index": 1
+        },
+        "milestone-bar": {
+          "x": 12,
+          "y": 169,
+          "w": 180,
+          "h": 6
+        },
+        "milestone-legend": {
+          "x": 204,
+          "y": 165,
+          "w": 144,
+          "h": 14
+        }
+      }
+    },
+    "agent-harbor-initiatives-playback-sidebar-light": {
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 352,
+          "h": 832
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 352,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 352,
+          "h": 85
+        },
+        "rows": {
+          "x": 4,
+          "y": 125,
+          "w": 352,
+          "h": 747
+        },
+        "initiative-row-first": {
+          "x": 4,
+          "y": 125,
+          "w": 352,
+          "h": 153,
+          "index": 0
+        },
+        "initiative-row-last": {
+          "x": 4,
+          "y": 125,
+          "w": 352,
+          "h": 153,
+          "index": 0
+        },
+        "session-line-first": {
+          "x": 32,
+          "y": 231,
+          "w": 316,
+          "h": 18,
+          "index": 0
+        },
+        "session-line-last": {
+          "x": 32,
+          "y": 250,
+          "w": 316,
+          "h": 18,
+          "index": 1
+        },
+        "milestone-bar": {
+          "x": 12,
+          "y": 169,
+          "w": 180,
+          "h": 6
+        },
+        "milestone-legend": {
+          "x": 204,
+          "y": 165,
+          "w": 144,
+          "h": 14
+        }
+      }
+    },
     "agent-harbor-initiatives-real-plans-laptop-dark": {
       "viewport": {
         "width": 1440,
@@ -11114,6 +12034,242 @@
           "y": 0,
           "w": 359,
           "h": 41
+        }
+      }
+    },
+    "agent-harbor-session-list-playback-laptop-dark": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 448,
+          "h": 872
+        },
+        "head": {
+          "x": 0,
+          "y": 0,
+          "w": 447,
+          "h": 65
+        },
+        "rows": {
+          "x": 0,
+          "y": 98,
+          "w": 447,
+          "h": 774
+        },
+        "active-row": {
+          "x": 0,
+          "y": 348,
+          "w": 447,
+          "h": 60,
+          "fill": "#3c3c3c"
+        },
+        "session-row-first": {
+          "x": 0,
+          "y": 133,
+          "w": 447,
+          "h": 60,
+          "index": 0
+        },
+        "session-row-last": {
+          "x": 0,
+          "y": 348,
+          "w": 447,
+          "h": 60,
+          "index": 3
+        },
+        "list-head": {
+          "x": 0,
+          "y": 0,
+          "w": 447,
+          "h": 65
+        },
+        "list-summary": {
+          "x": 8,
+          "y": 36,
+          "w": 431,
+          "h": 24
+        }
+      }
+    },
+    "agent-harbor-session-list-playback-laptop-light": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 448,
+          "h": 872
+        },
+        "head": {
+          "x": 0,
+          "y": 0,
+          "w": 447,
+          "h": 65
+        },
+        "rows": {
+          "x": 0,
+          "y": 98,
+          "w": 447,
+          "h": 774
+        },
+        "active-row": {
+          "x": 0,
+          "y": 348,
+          "w": 447,
+          "h": 60,
+          "fill": "#c8c2b5"
+        },
+        "session-row-first": {
+          "x": 0,
+          "y": 133,
+          "w": 447,
+          "h": 60,
+          "index": 0
+        },
+        "session-row-last": {
+          "x": 0,
+          "y": 348,
+          "w": 447,
+          "h": 60,
+          "index": 3
+        },
+        "list-head": {
+          "x": 0,
+          "y": 0,
+          "w": 447,
+          "h": 65
+        },
+        "list-summary": {
+          "x": 8,
+          "y": 36,
+          "w": 431,
+          "h": 24
+        }
+      }
+    },
+    "agent-harbor-session-list-playback-sidebar-dark": {
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 872
+        },
+        "head": {
+          "x": 0,
+          "y": 0,
+          "w": 359,
+          "h": 65
+        },
+        "rows": {
+          "x": 0,
+          "y": 98,
+          "w": 359,
+          "h": 774
+        },
+        "active-row": {
+          "x": 0,
+          "y": 348,
+          "w": 359,
+          "h": 60,
+          "fill": "#3c3c3c"
+        },
+        "session-row-first": {
+          "x": 0,
+          "y": 133,
+          "w": 359,
+          "h": 60,
+          "index": 0
+        },
+        "session-row-last": {
+          "x": 0,
+          "y": 348,
+          "w": 359,
+          "h": 60,
+          "index": 3
+        },
+        "list-head": {
+          "x": 0,
+          "y": 0,
+          "w": 359,
+          "h": 65
+        },
+        "list-summary": {
+          "x": 8,
+          "y": 36,
+          "w": 343,
+          "h": 24
+        }
+      }
+    },
+    "agent-harbor-session-list-playback-sidebar-light": {
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 872
+        },
+        "head": {
+          "x": 0,
+          "y": 0,
+          "w": 359,
+          "h": 65
+        },
+        "rows": {
+          "x": 0,
+          "y": 98,
+          "w": 359,
+          "h": 774
+        },
+        "active-row": {
+          "x": 0,
+          "y": 348,
+          "w": 359,
+          "h": 60,
+          "fill": "#c8c2b5"
+        },
+        "session-row-first": {
+          "x": 0,
+          "y": 133,
+          "w": 359,
+          "h": 60,
+          "index": 0
+        },
+        "session-row-last": {
+          "x": 0,
+          "y": 348,
+          "w": 359,
+          "h": 60,
+          "index": 3
+        },
+        "list-head": {
+          "x": 0,
+          "y": 0,
+          "w": 359,
+          "h": 65
+        },
+        "list-summary": {
+          "x": 8,
+          "y": 36,
+          "w": 343,
+          "h": 24
         }
       }
     },
@@ -14299,6 +15455,190 @@
           "x": 228,
           "y": 6,
           "w": 47.6875,
+          "h": 26
+        },
+        "caption": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 34
+        }
+      }
+    },
+    "agent-harbor-session-tabs-playback-laptop-dark": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 1440,
+          "h": 34
+        },
+        "active-tab": {
+          "x": 0,
+          "y": 6,
+          "w": 224,
+          "h": 26,
+          "fill": "#3c3c3c"
+        },
+        "add": {
+          "x": 816,
+          "y": 6,
+          "w": 26,
+          "h": 26
+        },
+        "inactive-tab-first": {
+          "x": 228,
+          "y": 6,
+          "w": 192,
+          "h": 26,
+          "index": 0
+        },
+        "inactive-tab-last": {
+          "x": 620,
+          "y": 6,
+          "w": 192,
+          "h": 26,
+          "index": 2
+        },
+        "caption": {
+          "x": 0,
+          "y": 0,
+          "w": 1440,
+          "h": 34
+        }
+      }
+    },
+    "agent-harbor-session-tabs-playback-laptop-light": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 1440,
+          "h": 34
+        },
+        "active-tab": {
+          "x": 0,
+          "y": 6,
+          "w": 224,
+          "h": 26,
+          "fill": "#b5ae9f"
+        },
+        "add": {
+          "x": 816,
+          "y": 6,
+          "w": 26,
+          "h": 26
+        },
+        "inactive-tab-first": {
+          "x": 228,
+          "y": 6,
+          "w": 192,
+          "h": 26,
+          "index": 0
+        },
+        "inactive-tab-last": {
+          "x": 620,
+          "y": 6,
+          "w": 192,
+          "h": 26,
+          "index": 2
+        },
+        "caption": {
+          "x": 0,
+          "y": 0,
+          "w": 1440,
+          "h": 34
+        }
+      }
+    },
+    "agent-harbor-session-tabs-playback-sidebar-dark": {
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 34
+        },
+        "active-tab": {
+          "x": 0,
+          "y": 6,
+          "w": 224,
+          "h": 26,
+          "fill": "#3c3c3c"
+        },
+        "overflow": {
+          "x": 228,
+          "y": 6,
+          "w": 42.703125,
+          "h": 26
+        },
+        "add": {
+          "x": 282.703125,
+          "y": 6,
+          "w": 26,
+          "h": 26
+        },
+        "strip-overflow": {
+          "x": 228,
+          "y": 6,
+          "w": 42.703125,
+          "h": 26
+        },
+        "caption": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 34
+        }
+      }
+    },
+    "agent-harbor-session-tabs-playback-sidebar-light": {
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 34
+        },
+        "active-tab": {
+          "x": 0,
+          "y": 6,
+          "w": 224,
+          "h": 26,
+          "fill": "#b5ae9f"
+        },
+        "overflow": {
+          "x": 228,
+          "y": 6,
+          "w": 42.703125,
+          "h": 26
+        },
+        "add": {
+          "x": 282.703125,
+          "y": 6,
+          "w": 26,
+          "h": 26
+        },
+        "strip-overflow": {
+          "x": 228,
+          "y": 6,
+          "w": 42.703125,
           "h": 26
         },
         "caption": {

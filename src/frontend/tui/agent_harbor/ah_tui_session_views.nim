@@ -545,14 +545,21 @@ proc drawGroupHeader(c: var AhCanvas; parent: AhNode; vm: SessionTabStripVM;
   let progress = group.progressText
   let place = groupHeaderPlace(cols, col, width, group.title, progress, counts)
   if place.inline: n.tag("inline", "true")
+  # A cut title keeps `StatusWordGap` cells before what follows it (`n/m`,
+  # else the counts), as every cut text on a line does; one cell read as one
+  # phrase (`…storage lay… 1/4`). A whole title keeps the columns' gap.
+  # The counts are cut only between their parts (`2 need input…`, never
+  # `2 need…`); where not even the first part fits they are left out.
+  let countsShown = place.countsW > 0 and elideParts(counts, place.countsW).len > 0
+  let next = if progress.len > 0: place.progressAt
+             elif countsShown: place.countsAt
+             else: -1
   discard c.text(n, row, titleAt, place.titleW, group.title, c.p.textLabel, bold = true,
-                 fact = "title")
+                 fact = "title", before = next)
   if progress.len > 0:
     discard c.text(n, row, place.progressAt, widthOf(progress), progress,
                    c.p.textCaption, fact = "progress")
-  # The counts are cut only between their parts (`2 need input…`, never
-  # `2 need…`); where not even the first part fits they are left out.
-  if place.countsW > 0 and elideParts(counts, place.countsW).len > 0:
+  if countsShown:
     discard c.text(n, row, place.countsAt, place.countsW, counts, c.p.textCaption,
                    fact = "counts", alignRight = cols.flush, byParts = true)
   else:

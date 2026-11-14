@@ -83,6 +83,23 @@ export function injectSurfaceStyles(container) {
       height: 100vh !important;
     }
 
+    /* A playback story ends above the host's playback bar (.ah-playback,
+       fixed along the bottom of the canvas, 1.75rem high). */
+    .ct-storybook-playback .ct-storybook-root-container {
+      height: calc(100vh - 1.75rem) !important;
+    }
+
+    .ct-storybook-playback > .ct-storybook-frame {
+      height: calc(100vh - 1.75rem);
+      min-height: 0;
+      overflow: hidden;
+    }
+
+    /* A sessions sidebar fills the frame above the bar, not the window. */
+    .ct-storybook-playback .ct-storybook-frame > .component-container.ah-session-list {
+      height: calc(100vh - 1.75rem);
+    }
+
     .ct-storybook-karax-root-container {
       top: 2.27em !important;
       height: calc(100vh - 2.27em - 2em) !important;
@@ -1086,9 +1103,13 @@ function renderDefaultDebugLayout(container, fixture) {
   });
 }
 
-export function renderSurface(kind, name, fixture = "populated", displayTitle = null) {
+export function renderSurface(kind, name, fixture = "populated", displayTitle = null, options = "") {
   const container = document.createElement("div");
   container.className = "ct-storybook-surface";
+  // A playback story (`src/frontend/stories/agent_harbor_playback.nim`): the
+  // host's playback bar runs along the bottom of the canvas, and the story's
+  // frame ends above it.
+  if (fixture.startsWith("playback-")) container.classList.add("ct-storybook-playback");
   container.dataset.kind = kind;
   container.dataset.surface = name;
   injectSurfaceStyles(container);
@@ -1101,7 +1122,7 @@ export function renderSurface(kind, name, fixture = "populated", displayTitle = 
   const frame = createAppShell(container, kind, name, displayTitle);
 
   ensureComponentsLoaded().then(() => {
-    const dispose = mountCodeTracerStory(frame, kind, name, fixture);
+    const dispose = mountCodeTracerStory(frame, kind, name, fixture, options);
     container.__dispose = dispose;
   });
 
