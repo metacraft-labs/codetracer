@@ -1,0 +1,33 @@
+scenario: 1
+name: deepreview/diff-tabs-are-documents-headed-by-their-file
+pack: codetracer
+summary: >-
+  Each changed file opens a diff tab of its own — one inline diff editor in
+  the reviewed language's colours, headed by the file's path — and opening a
+  second file keeps the first open: both tabs stay, the second in front with
+  its own hunk (`@@ -0,0 +1,8 @@`), and returning to the first shows its hunk
+  (`@@ -2,5 +2,10 @@`) without opening a third.
+
+stage:
+  - use: open-review
+    with: { dataset: src/tests/gui/tests/deepreview/fixtures/sample-review.json }
+
+steps:
+  - wait: { until: { at: vcs, present: true }, timeout: 120s }
+  - wait: { until: { at: 'review-diff[file="src/main.rs"]', present: true }, timeout: 60s }
+  - wait: { until: settled, timeout: 30s }
+  - expect: { at: 'review-diff[file="src/main.rs"]', geometry: { visible: true }, inline: true, token-kinds: { gt: 1 } }
+  - click: 'vcs/changed-file[name="utils.rs"]'
+  - wait: { until: { at: 'review-diff[file="src/utils.rs"]', present: true }, timeout: 30s }
+  - wait: { until: { at: 'review-diff[file="src/utils.rs"]/hunk-divider', text: { contains: "@@ -0,0 +1,8 @@" } }, timeout: 30s }
+  - expect: { at: 'review-diff[file="src/utils.rs"]', inline: true }
+  - expect: { at: window, assert: 'in-front("Diff: utils.rs")' }
+  - expect: { at: window, assert: 'has-pane("Diff: main.rs")' }
+  - expect: { at: review-state, diff-tabs: 2 }
+  - click: 'vcs/changed-file[name="config.rs"]'
+  - wait: { until: { at: 'review-diff[file="src/config.rs"]', present: true }, timeout: 30s }
+  - expect: { at: 'review-diff[file="src/config.rs"]', inline: true }
+  - click: 'vcs/changed-file[name="main.rs"]'
+  - wait: { until: { at: 'review-diff[file="src/main.rs"]/hunk-divider', text: { contains: "@@ -2,5 +2,10 @@" } }, timeout: 30s }
+  - expect: { at: window, assert: 'in-front("Diff: main.rs")' }
+  - expect: { at: review-state, diff-tabs: 3 }

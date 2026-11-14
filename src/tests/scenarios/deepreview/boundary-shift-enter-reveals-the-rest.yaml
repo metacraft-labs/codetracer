@@ -1,0 +1,25 @@
+scenario: 1
+name: deepreview/boundary-shift-enter-reveals-the-rest
+pack: codetracer
+summary: >-
+  Shift+Enter on a boundary handle reached with Tab from the diff reveals
+  every line the region hides at once: the region is gone and line 25 is
+  shown.
+
+stage:
+  - use: open-review
+    with: { dataset: src/tests/gui/tests/deepreview/fixtures/sample-review.json }
+
+steps:
+  - wait: { until: { at: vcs, present: true }, timeout: 120s }
+  - wait: { until: { at: 'review-diff[file="src/main.rs"]', present: true }, timeout: 60s }
+  - wait: { until: settled, timeout: 30s }
+  - wait: { until: { at: 'review-diff[file="src/main.rs"]', boundaries: 2 }, timeout: 30s }
+  - click: 'review-diff[file="src/main.rs"]/hunk-divider'
+  - key: Tab
+  - key: Tab
+  - wait: { until: { at: 'review-diff[file="src/main.rs"]/review-boundary[direction="above"]', focused: true }, timeout: 10s }
+  - chord: Shift+Enter
+  - wheel: { at: 'review-diff[file="src/main.rs"]', direction: down, amount: 20 }
+  - wait: { until: { at: 'review-diff[file="src/main.rs"]', assert: 'shows-new-line("25")' }, timeout: 30s }
+  - wait: { until: { at: 'review-diff[file="src/main.rs"]', boundaries: 0 }, timeout: 30s }

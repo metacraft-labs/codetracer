@@ -1,0 +1,38 @@
+scenario: 1
+name: deepreview/invocation-selector-switches-the-call
+pack: codetracer
+summary: >-
+  Above each function of a diff tab an in-editor control names which recorded
+  call the values are from (`main: call 1 / 2`, `compute: call 1 / 1 (4
+  called, 1 recorded)`). Revealed, compute's says the same of it. Stepping main's to its second call shows that
+  call's values (42, 84, 903; `<result>` once, not 55) and fewer lines run;
+  stepping back restores the first call's values and lines.
+
+stage:
+  - use: open-review
+    with: { dataset: src/tests/gui/tests/deepreview/fixtures/sample-review.json }
+
+steps:
+  - wait: { until: { at: vcs, present: true }, timeout: 120s }
+  - wait: { until: { at: 'review-diff[file="src/main.rs"]', present: true }, timeout: 60s }
+  - wait: { until: settled, timeout: 30s }
+  - wait: { until: { at: 'review-diff[file="src/main.rs"]/invocation-selector[function="main"]', label: "main: call 1 / 2" }, timeout: 30s }
+  - expect: { at: 'review-diff[file="src/main.rs"]/invocation-selector[function="main"]', geometry: { inside: 'review-diff[file="src/main.rs"]' } }
+  - wait: { until: { at: 'review-diff[file="src/main.rs"]', flow-hit-lines: 4 }, timeout: 30s }
+  - expect: { at: 'review-diff[file="src/main.rs"]', values: { matches: "<result>.*55.*<result>" } }
+  - expect: { at: 'review-diff[file="src/main.rs"]', assert: 'values-lack("42")' }
+  - click: 'review-diff[file="src/main.rs"]/invocation-selector[function="main"]/step-button[direction="next"]'
+  - wait: { until: { at: 'review-diff[file="src/main.rs"]/invocation-selector[function="main"]', label: "main: call 2 / 2" }, timeout: 30s }
+  - wait: { until: { at: 'review-diff[file="src/main.rs"]', values: { contains: "42" } }, timeout: 30s }
+  - expect: { at: 'review-diff[file="src/main.rs"]', values: { contains: "84" } }
+  - expect: { at: 'review-diff[file="src/main.rs"]', values: { contains: "903" } }
+  - expect: { at: 'review-diff[file="src/main.rs"]', values: { contains: "<result>" } }
+  - expect: { at: 'review-diff[file="src/main.rs"]', assert: 'values-lack("<result> 55")' }
+  - wait: { until: { at: 'review-diff[file="src/main.rs"]', flow-hit-lines: { lt: 4 } }, timeout: 30s }
+  - click: 'review-diff[file="src/main.rs"]/invocation-selector[function="main"]/step-button[direction="prev"]'
+  - wait: { until: { at: 'review-diff[file="src/main.rs"]/invocation-selector[function="main"]', label: "main: call 1 / 2" }, timeout: 30s }
+  - wait: { until: { at: 'review-diff[file="src/main.rs"]', values: { contains: "55" } }, timeout: 30s }
+  - wait: { until: { at: 'review-diff[file="src/main.rs"]', flow-hit-lines: 4 }, timeout: 30s }
+  - click: 'review-diff[file="src/main.rs"]/review-boundary[direction="above"]'
+  - wait: { until: { at: 'review-diff[file="src/main.rs"]/review-boundary[direction="above"]', hidden: 2 }, timeout: 30s }
+  - wait: { until: { at: 'review-diff[file="src/main.rs"]/invocation-selector[function="compute"]', label: "compute: call 1 / 1 (4 called, 1 recorded)" }, timeout: 30s }

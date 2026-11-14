@@ -248,4 +248,32 @@ applicable:
   - ../visual-replay/step-updates-video-player.yaml
   - ../visual-replay/shader-debug-source-and-values.yaml
   - ../visual-replay/player-failure-shows-error.yaml
+  # --- pw5 deepreview ---
+  - ../deepreview/boundary-drag-reveals-what-it-crosses.yaml
+  - ../deepreview/boundary-menu-expands-to-the-file-edge.yaml
+  - ../deepreview/boundary-menu-offers-each-direction.yaml
+  - ../deepreview/boundary-menu-opens-from-the-keyboard.yaml
+  - ../deepreview/boundary-press-reveals-ten-lines.yaml
+  - ../deepreview/changed-files-list.yaml
+  - ../deepreview/diff-lines-are-classified.yaml
+  - ../deepreview/diff-tab-is-drawn-like-the-editor.yaml
+  - ../deepreview/diff-tabs-are-documents-headed-by-their-file.yaml
+  - ../deepreview/empty-review.yaml
+  - ../deepreview/expansion-is-per-file-and-per-tab.yaml
+  - ../deepreview/file-click-opens-its-diff.yaml
+  - ../deepreview/full-file-carries-the-review.yaml
+  - ../deepreview/full-file-is-read-only.yaml
+  - ../deepreview/hunk-selection-is-copy-only.yaml
+  - ../deepreview/invocation-selector-switches-the-call.yaml
+  - ../deepreview/loop-control-picks-the-pass.yaml
+  - ../deepreview/loop-slider-drag-picks-the-pass.yaml
+  - ../deepreview/materialized-review.yaml
+  - ../deepreview/no-calltrace-full-file-says-what-is-missing.yaml
+  - ../deepreview/no-calltrace-review.yaml
+  - ../deepreview/review-names-its-changeset.yaml
+  - ../deepreview/review-opens-in-the-editor-layout.yaml
+  - ../deepreview/review-workflow.yaml
+  - ../deepreview/trace-context-chooses-the-run.yaml
+  - ../deepreview/values-beside-the-diff.yaml
+  - ../deepreview/view-toggle-chooses-diff-or-file.yaml
 unsupported: []

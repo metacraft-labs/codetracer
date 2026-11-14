@@ -1,0 +1,32 @@
+scenario: 1
+name: deepreview/expansion-is-per-file-and-per-tab
+pack: codetracer
+summary: >-
+  Revealing lines is remembered per file and per tab: after the upper handle
+  of main.rs reveals ten lines, utils.rs (a new file) has no collapsed region,
+  main.rs still shows its ten lines when brought back, and once its tab is
+  closed, opening main.rs again starts collapsed (12 and 12 hidden).
+
+stage:
+  - use: open-review
+    with: { dataset: src/tests/gui/tests/deepreview/fixtures/sample-review.json }
+
+steps:
+  - wait: { until: { at: vcs, present: true }, timeout: 120s }
+  - wait: { until: { at: 'review-diff[file="src/main.rs"]', present: true }, timeout: 60s }
+  - wait: { until: settled, timeout: 30s }
+  - wait: { until: { at: 'review-diff[file="src/main.rs"]', boundaries: 2 }, timeout: 30s }
+  - click: 'review-diff[file="src/main.rs"]/review-boundary[direction="above"]'
+  - wait: { until: { at: 'review-diff[file="src/main.rs"]/review-boundary[direction="above"]', hidden: 2 }, timeout: 30s }
+  - click: 'vcs/changed-file[name="utils.rs"]'
+  - wait: { until: { at: 'review-diff[file="src/utils.rs"]', present: true }, timeout: 30s }
+  - wait: { until: { at: 'review-diff[file="src/utils.rs"]', added: 8 }, timeout: 30s }
+  - expect: { at: 'review-diff[file="src/utils.rs"]', boundaries: 0 }
+  - click: 'vcs/changed-file[name="main.rs"]'
+  - wait: { until: { at: 'review-diff[file="src/main.rs"]', present: true }, timeout: 30s }
+  - wait: { until: { at: 'review-diff[file="src/main.rs"]/review-boundary[direction="above"]', hidden: 2 }, timeout: 30s }
+  - click: { at: 'pane-tab[label="Diff: main.rs"]', anchor: close }
+  - wait: { until: { at: 'pane-tab[label="Diff: main.rs"]', absent: true }, timeout: 30s }
+  - click: 'vcs/changed-file[name="main.rs"]'
+  - wait: { until: { at: 'review-diff[file="src/main.rs"]', boundaries: 2 }, timeout: 30s }
+  - expect: { at: 'review-diff[file="src/main.rs"]', hidden: ["12", "12"] }

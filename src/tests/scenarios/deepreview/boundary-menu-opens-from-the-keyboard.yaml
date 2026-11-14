@@ -1,0 +1,27 @@
+scenario: 1
+name: deepreview/boundary-menu-opens-from-the-keyboard
+pack: codetracer
+summary: >-
+  Shift+F10 on a boundary handle reached with Tab opens its menu with the
+  first offer ("Expand 10 lines above") focused, and Enter takes it: the menu
+  closes and ten lines are revealed (2 still hidden).
+
+stage:
+  - use: open-review
+    with: { dataset: src/tests/gui/tests/deepreview/fixtures/sample-review.json }
+
+steps:
+  - wait: { until: { at: vcs, present: true }, timeout: 120s }
+  - wait: { until: { at: 'review-diff[file="src/main.rs"]', present: true }, timeout: 60s }
+  - wait: { until: settled, timeout: 30s }
+  - wait: { until: { at: 'review-diff[file="src/main.rs"]', boundaries: 2 }, timeout: 30s }
+  - click: 'review-diff[file="src/main.rs"]/hunk-divider'
+  - key: Tab
+  - key: Tab
+  - wait: { until: { at: 'review-diff[file="src/main.rs"]/review-boundary[direction="above"]', focused: true }, timeout: 10s }
+  - chord: Shift+F10
+  - wait: { until: { at: expand-menu, present: true }, timeout: 30s }
+  - expect: { at: 'expand-menu/expand-option[label="Expand 10 lines above"]', focused: true }
+  - key: Enter
+  - wait: { until: { at: expand-menu, absent: true }, timeout: 30s }
+  - wait: { until: { at: 'review-diff[file="src/main.rs"]/review-boundary[direction="above"]', hidden: 2 }, timeout: 30s }

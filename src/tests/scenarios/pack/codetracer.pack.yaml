@@ -122,6 +122,11 @@ roles:
       notification-history: optional
       welcome-view: optional
       edit-toolbar-strip: optional
+      # --- pw5 deepreview ---
+      review-diff: many
+      expand-menu: optional
+      trace-context: optional
+      review-state: optional
 
   # The strip of session tabs: one tab per open recording or editing session.
   session-strip:
@@ -1635,6 +1640,177 @@ roles:
   # The edit-mode commands' toolbar.
   edit-toolbar-strip:
     properties: { shown: bool }
+
+  # --- pw5 deepreview ---
+  # A review's diff tab as a reader sees it: the inline diff editor of one
+  # file (the modified side, with the old revision's lines drawn into it),
+  # its decorations, the Omniscience band of values beside it, the boundaries
+  # of the regions it keeps collapsed, and the in-editor controls that choose
+  # which call and which loop pass the values are from.
+  review-diff:
+    keys: [file]
+    properties:
+      file: text
+      # One inline (unified) diff editor, not two panes side by side.
+      inline: bool
+      # The Monaco theme every editor of the tab wears (`vs-dark`, …; the
+      # themes, space-separated, when they differ).
+      theme: text
+      # Distinct syntax-token colours in the shown code, and in the old
+      # revision's deleted lines.
+      token-kinds: int
+      deleted-lines: int
+      deleted-token-kinds: int
+      # Whole-line decorations: added and context lines of the new side,
+      # removed and context lines of the old side, the `@@` dividers of each,
+      # and the gutter marks beside added / removed lines.
+      added: int
+      removed: int
+      context-new: int
+      context-old: int
+      hunk-headers: int
+      hunk-headers-old: int
+      gutter-added: int
+      gutter-removed: int
+      # Word-level marks inside partially changed lines; `narrow-marks`: at
+      # least one mark is narrower than the widest line (a word, not a line).
+      word-inserts: int
+      word-deletes: int
+      narrow-marks: bool
+      # The line numbers on screen, in each revision's gutter.
+      new-lines: lines
+      old-lines: lines
+      # The collapsed regions: how many lines each boundary handle says it
+      # hides, the handles, and the first fold band's text.
+      hidden: lines
+      boundaries: int
+      collapsed: text
+      # The execution overlay: lines drawn as run / not run, the value chips
+      # (`<x> 10 <y> 20 …`, in document order), and how they are drawn.
+      flow-hit-lines: int
+      flow-skip-lines: int
+      values: text
+      value-chips: int
+      value-names: int
+      value-boxes: int
+      value-columns: int
+      omni-names: int
+      omni-values: int
+      # chips drawn inside the code text instead of the band beside it
+      values-in-code: int
+      # the spread (px) of the bands' left edges, and columns drawn past the
+      # pane's right edge
+      band-spread: int
+      values-past-edge: int
+      # every band below a changed line carries that line's diff wash, and no
+      # other band paints a background
+      band-washes: bool
+      # px between the gutter's widest number and the code
+      gutter-gap: int
+      # px between the fold band's left edge and the `@@` divider's, and
+      # whether they are filled with one colour
+      fold-divider-offset: int
+      fold-divider-same-fill: bool
+      # the hunk selection toolbar: its count and its actions
+      hunk-selection: text
+      hunk-actions: lines
+      # the old in-text value rendering (`// x = …`) is not drawn
+      comment-values: int
+    children: { review-boundary: many, hunk-divider: optional, invocation-selector: many, review-loop: many }
+    affordances: [wheel]
+    assertions:
+      shows-new-line(n): "new-lines contains n"
+      lacks-new-line(n): "not (new-lines contains n)"
+      shows-old-line(n): "old-lines contains n"
+      offers-no-action(a): "not (hunk-actions contains a)"
+      values-lack(t): "not (values contains t)"
+
+  # One boundary handle of a collapsed region: `above` reveals the region's
+  # topmost hidden lines, `below` its bottom ones.
+  review-boundary:
+    keys: [direction]
+    properties:
+      direction: text
+      hidden: int
+      # its accessible name, and whether a keyboard reaches it (a button in
+      # the tab order)
+      label: text
+      keyboard: bool
+      # drawn with a fill and a resize pointer
+      painted: bool
+      resize-cursor: bool
+      focused: bool
+    affordances: [click, context-click, drag-source, drop-target, focusable]
+    # `down-3`: three lines below the handle, where a drag that reveals three
+    # lines ends
+    anchors: [down-3]
+
+  # The first `@@` divider of a review's diff tab.
+  hunk-divider:
+    properties: { text: text }
+    affordances: [click]
+
+  # The in-editor control above a function: which recorded call of it the
+  # values show (`main: call 1 / 2`).
+  invocation-selector:
+    keys: [function]
+    properties: { function: text, label: text }
+    children: { step-button: many }
+
+  # The in-editor control above a loop: which pass the values show
+  # (`iteration 1 / 3`), stepped or dragged.
+  review-loop:
+    keys: [function]
+    properties: { function: text, label: text, slider: bool, slider-width: int }
+    children: { step-button: many, loop-slider: optional }
+
+  step-button:
+    keys: [direction]
+    properties: { direction: text, enabled: bool }
+    affordances: [click]
+
+  # The loop control's slider: `grip` is its handle, `end` the far end of
+  # its track.
+  loop-slider:
+    properties: { width: int }
+    affordances: [drag-source, drop-target]
+    anchors: [grip, end]
+
+  # The menu a collapsed region's boundary opens.
+  expand-menu:
+    properties: { direction: text, count: int }
+    children: { expand-option: many }
+
+  expand-option:
+    keys: [label]
+    properties: { label: text, focused: bool }
+    affordances: [click]
+
+  # The review's trace-context selector in the VCS panel header.
+  trace-context:
+    properties: { options: lines, value: text, focused: bool }
+    affordances: [click, focusable]
+
+  # What a review leaves on the whole window: the deleted standalone review
+  # panel's elements and test hooks (none), the full-file editors' diff
+  # overlays (added / modified lines), their execution overlay, the diff tabs
+  # and source editors open, and unsaved edits.
+  review-state:
+    properties:
+      legacy-panel: int
+      legacy-hooks: int
+      diff-added-lines: int
+      diff-modified-lines: int
+      flow-lines: int
+      flow-kinds: lines
+      value-chips: int
+      diff-tabs: int
+      source-editors: int
+      unsaved: int
+      # every notification the window shows now, as one text
+      notices: text
+      # what has the keyboard focus (`tag.class …`)
+      focus: text
 
 sync:
   # The implicit condition after every input: the window handled it and the

@@ -8491,6 +8491,13 @@ ONE ROUTER ON EVERY FRONT-END (2026-10-12, PLAT-68 Phase B).
 - On the desktop Monaco sends no `semanticTokens/range` request and no hover on a press; a `semanticTokens/range` the Nim server never answers holds up every request behind it, `workspace/executeCommand` (the macro trace) included, until nimsuggest restarts "due to timeout".
 - The scenario pack's settle (three surface reads 60 ms apart, 5 s) fails under load ~100+ on either editor; a "did not settle" on one side only is not by itself a difference.
 
+## Desktop scenarios: DeepReview's diff tabs (pw5, 2026-11-14)
+- A review's diff tab is read by the binding as `review-diff[file="src/main.rs"]` (not `diff-view`): decorations per side, the value band, `review-boundary[direction]` handles, `invocation-selector[function]` and `review-loop[function]` controls. `loop-control` and `expand-boundary` are other batches' roles with other meanings.
+- Monaco virtualises the diff: line numbers beyond the viewport are not in the DOM, and the boundary widgets are not re-stamped until the editor scrolls. After a press that reveals the last hidden lines, wheel the tab and THEN wait for `boundaries: 0`.
+- Tab order from the `@@` divider: the first call selector's enabled arrow, then the upper boundary handle. Once lines are revealed, the loop control's arrow and its noUiSlider handle come first.
+- The review's loop slider is built when its view zone is laid out (`ensureFlowLoopSliderWhenLaidOut`, a ResizeObserver). The bounded timer it replaced gave up before a zone revealed by an expansion was laid out on a loaded host.
+- A private copy of `src/build-debug` (to run a rebuilt `ui.js`) must live at `<checkout>/src/build-debug`. index.js finds `js-yaml` through the checkout's `node_modules`, and index.html, helpers.js and subwindow.html are relative links into `src/`. Outside a checkout Electron never opens a window. It also needs `src/public/dist` (the webpack bundles, gitignored; copy them from a built checkout); without it the window is blank. `find src/build-debug -xtype l` must print nothing. `src/build-debug` already exists in a worktree (it tracks `tup.config`), so `mv` a copy onto it nests it.
+
 ## Desktop scenarios: value origin, Tests pane, VCS, edit mode, welcome, verification (pw8, 2026-11-13)
 - `.gitignore` ignores every directory named `test-results` (Playwright's output), so a scenario folder of that name is silently untracked: the Tests pane's scenarios live in `src/tests/scenarios/tests-pane/`.
 - Toasts and transient labels go in 2-3 s (`Copied!` after Copy as patch is 2 s, `ui/unified_diff.copySelectedHunks`). On a loaded host an input's settle can outlast them: give the input `settle: false` and wait on the label right after it.

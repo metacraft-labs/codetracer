@@ -12,3 +12,4 @@ stage:
 steps:
   - wait: { until: { at: vcs, present: true }, timeout: 120s }
   - expect: { at: vcs, commit: { contains: "0 files" }, count: 0, stats: "", error: "" }
+  - expect: { at: review-state, diff-tabs: 0, legacy-panel: 0 }

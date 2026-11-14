@@ -1,0 +1,36 @@
+scenario: 1
+name: deepreview/view-toggle-chooses-diff-or-file
+pack: codetracer
+summary: >-
+  The VCS panel's view toggle decides what a click on a changed file opens: in
+  Unified Diff (the default) a diff tab, switched off the file itself (no diff
+  tab for utils.rs), switched back a diff tab again; and switching it either
+  way keeps the selected file selected.
+
+stage:
+  - use: open-review
+    with: { dataset: src/tests/gui/tests/deepreview/fixtures/sample-review.json }
+
+steps:
+  - wait: { until: { at: vcs, present: true }, timeout: 120s }
+  - wait: { until: { at: 'review-diff[file="src/main.rs"]', present: true }, timeout: 60s }
+  - wait: { until: settled, timeout: 30s }
+  - expect: { at: vcs/diff-toggle, unified: true }
+  - click: 'vcs/changed-file[name="utils.rs"]'
+  - wait: { until: { at: 'review-diff[file="src/utils.rs"]', present: true }, timeout: 30s }
+  - expect: { at: 'vcs/changed-file[name="utils.rs"]', selected: true }
+  - click: 'pane-tab[label="Diff: utils.rs"]'
+  - click: { at: 'pane-tab[label="Diff: utils.rs"]', anchor: close }
+  - wait: { until: { at: 'pane-tab[label="Diff: utils.rs"]', absent: true }, timeout: 30s }
+  - click: vcs/diff-toggle
+  - wait: { until: { at: vcs, unified-diff: false }, timeout: 30s }
+  - expect: { at: 'vcs/changed-file[name="utils.rs"]', selected: true }
+  - expect: { at: 'vcs/changed-file[name="main.rs"]', selected: false }
+  - click: 'vcs/changed-file[name="utils.rs"]'
+  - wait: { until: { at: 'editor[file="utils.rs"]', present: true }, timeout: 30s }
+  - expect: { at: window, assert: 'lacks-pane("Diff: utils.rs")' }
+  - click: vcs/diff-toggle
+  - wait: { until: { at: vcs, unified-diff: true }, timeout: 30s }
+  - expect: { at: 'vcs/changed-file[name="utils.rs"]', selected: true }
+  - click: 'vcs/changed-file[name="utils.rs"]'
+  - wait: { until: { at: 'review-diff[file="src/utils.rs"]', present: true }, timeout: 30s }

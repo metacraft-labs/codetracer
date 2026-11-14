@@ -20,4 +20,5 @@ steps:
   - click: { at: 'editor[file="main.rs"]/line[number="1"]', anchor: text-start }
   - type: EDITEDBYTEST
   - expect: { at: 'editor[file="main.rs"]/line[number="1"]', text: "fn main() {" }
-  - expect: { at: 'editor[file="main.rs"]', text: { subsequence: ["fn main() {", "  let x = 10;"] } }
+  - expect: { at: 'editor[file="main.rs"]/line[number="2"]', text: { contains: "let x = 10;" } }
+  - expect: { at: review-state, unsaved: 0 }

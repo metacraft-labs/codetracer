@@ -250,6 +250,31 @@ const ROLES: Record<string, { affordances: string[]; properties: string[] }> = {
   "notification-history": { affordances: [], properties: ["text", "count"] },
   "welcome-view": { affordances: [], properties: [] },
   "edit-toolbar-strip": { affordances: [], properties: ["shown"] },
+  // --- pw5 deepreview ---
+  "review-diff": {
+    affordances: ["wheel"],
+    properties: ["file", "inline", "theme", "token-kinds", "deleted-lines", "deleted-token-kinds", "added",
+                 "removed", "context-new", "context-old", "hunk-headers", "hunk-headers-old", "gutter-added",
+                 "gutter-removed", "word-inserts", "word-deletes", "narrow-marks", "new-lines", "old-lines",
+                 "hidden", "boundaries", "collapsed", "flow-hit-lines", "flow-skip-lines", "values",
+                 "value-chips", "value-names", "value-boxes", "value-columns", "omni-names", "omni-values",
+                 "values-in-code", "band-spread", "values-past-edge", "band-washes", "gutter-gap",
+                 "fold-divider-offset", "fold-divider-same-fill", "hunk-selection", "hunk-actions",
+                 "comment-values"],
+  },
+  "review-boundary": { affordances: ["click", "context-click", "drag-source", "drop-target", "focusable"],
+                       properties: ["direction", "hidden", "label", "keyboard", "painted", "resize-cursor", "focused"] },
+  "hunk-divider": { affordances: ["click"], properties: ["text"] },
+  "invocation-selector": { affordances: [], properties: ["function", "label"] },
+  "review-loop": { affordances: [], properties: ["function", "label", "slider", "slider-width"] },
+  "step-button": { affordances: ["click"], properties: ["direction", "enabled"] },
+  "loop-slider": { affordances: ["drag-source", "drop-target"], properties: ["width"] },
+  "expand-menu": { affordances: [], properties: ["direction", "count"] },
+  "expand-option": { affordances: ["click"], properties: ["label", "focused"] },
+  "trace-context": { affordances: ["click", "focusable"], properties: ["options", "value", "focused"] },
+  "review-state": { affordances: [], properties: ["legacy-panel", "legacy-hooks", "diff-added-lines",
+                                                  "diff-modified-lines", "flow-lines", "flow-kinds", "value-chips",
+                                                  "diff-tabs", "source-editors", "unsaved", "notices", "focus"] },
 };
 
 // pw3: properties this batch reads on roles declared above.
@@ -2674,7 +2699,255 @@ function readSurfacePw4(root: any): void {
   }
 }
 
-const SURFACE_EXTENSIONS: Array<(root: any) => void> = [readSurfacePw1, readSurfacePw3, readSurfacePw4, readSurfacePw8, readSurfacePw7];
+// --- pw5 deepreview ---------------------------------------------------------
+// A review's diff tabs (`ui/unified_diff.nim`, `ui/review_diff_editor.nim`,
+// `ui/diff_expansion.nim`), the boundary menu, the VCS header's trace-context
+// selector, and what a review leaves on the window. Runs IN THE PAGE, in the
+// same evaluation as `readSurface`. Reads only.
+function readSurfacePw5Review(root: any): void {
+  const vis = (el: Element | null): boolean => {
+    if (!el) return false;
+    const r = (el as HTMLElement).getBoundingClientRect();
+    if (r.width <= 0 || r.height <= 0) return false;
+    const cs = getComputedStyle(el as HTMLElement);
+    return cs.visibility !== "hidden" && cs.display !== "none";
+  };
+  const text = (el: Element | null | undefined) => ((el?.textContent ?? "").replace(/[\s ]+/g, " ").trim());
+  const node = (role: string, el: Element | null, props: Record<string, unknown>,
+                keys: Array<[string, string]> = []): any => {
+    const r = el ? (el as HTMLElement).getBoundingClientRect() : { left: 0, top: 0, width: 0, height: 0 };
+    return { role, keys, props, x: r.left, y: r.top, w: r.width, h: r.height,
+             visible: el ? vis(el) : false, children: [] as any[] };
+  };
+  const centre = (el: Element) => {
+    const r = (el as HTMLElement).getBoundingClientRect();
+    return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+  };
+  const all = (el: Element | Document, sel: string) => Array.from(el.querySelectorAll(sel)) as HTMLElement[];
+  const active = document.activeElement;
+  const BODY = ".monaco-editor.modified-in-monaco-diff-editor";
+  const ORIG = ".monaco-editor.original-in-monaco-diff-editor";
+  const tokenKinds = (spans: HTMLElement[]) => new Set(spans.map((s) => /\bmtk\d+\b/.exec(s.className)?.[0])
+    .filter((c) => c !== undefined)).size;
+  const numbers = (side: Element | null) => side
+    ? all(side, ".margin-view-overlays .line-numbers").map((n) => text(n)).filter((t) => t.length > 0)
+    : [];
+
+  for (const d of all(document, ".unified-diff-container")) {
+    if (!vis(d)) continue;
+    const file = text(d.querySelector(".unified-diff-file-header-path"));
+    const body = d.querySelector(BODY) as HTMLElement | null;
+    const orig = d.querySelector(ORIG) as HTMLElement | null;
+    const lines = body?.querySelector(".lines-content > .view-lines") as HTMLElement | null;
+    const themes = Array.from(new Set(all(d, ".monaco-editor").map((e) =>
+      (Array.from(e.classList).find((c) => /^(vs|vs-dark|hc-black|hc-light)$/.test(c)) ?? "")
+        || (Array.from(e.classList).find((c) => /theme/i.test(c)) ?? "")))).sort();
+    const deleted = body ? all(body, ".view-lines.line-delete") : [];
+    const inserts = all(d, ".char-insert");
+    const lineWidths = all(d, ".view-lines .view-line").map((l) => l.offsetWidth);
+    const widest = Math.max(1, ...lineWidths);
+    // the value band: the chips, as one string (spaces normalised, chips
+    // joined by a space), and how it is drawn
+    const values = body ? all(body, ".flow-parallel .review-flow-value") : [];
+    const bands = body ? all(body, ".flow-parallel") : [];
+    const columns = body ? all(body, ".flow-parallel .flow-parallel-values") : [];
+    const paneBox = body?.getBoundingClientRect();
+    const lefts = bands.map((b) => Math.round(b.getBoundingClientRect().left)).filter((x) => x !== 0);
+    let pastEdge = 0;
+    for (const c of columns) {
+      const r = c.getBoundingClientRect();
+      if (r.width > 0 && paneBox && r.right > paneBox.right + 1) pastEdge++;
+    }
+    let washes = true;
+    for (const h of all(d, ".review-flow-band-host")) {
+      const rowBelow = h.classList.contains("review-flow-band-row-below");
+      const changed = h.classList.contains("review-flow-band-added") || h.classList.contains("review-flow-band-removed");
+      const bg = getComputedStyle(h).backgroundColor;
+      const clear = bg === "rgba(0, 0, 0, 0)" || bg === "transparent";
+      if ((rowBelow && changed) === clear) washes = false;
+    }
+    // the gutter: the widest number's glyphs against the code's left edge
+    let gap = -1;
+    if (body) {
+      const firstLine = body.querySelector(".view-lines .view-line");
+      const rights: number[] = [];
+      for (const n of all(body, ".margin-view-overlays .line-numbers")) {
+        if (!text(n)) continue;
+        const range = document.createRange();
+        range.selectNodeContents(n);
+        const rects = Array.from(range.getClientRects());
+        if (rects.length) rights.push(Math.max(...rects.map((r) => r.right)));
+      }
+      if (firstLine && rights.length) gap = Math.round(firstLine.getBoundingClientRect().left - Math.max(...rights));
+    }
+    const fold = body?.querySelector(".diff-hidden-lines .center") as HTMLElement | null;
+    const divider = body?.querySelector(".margin-view-overlays .ct-diff-line-hunk-header") as HTMLElement | null;
+    const foldOffset = fold && divider && vis(fold) && vis(divider)
+      ? Math.round(Math.abs(fold.getBoundingClientRect().left - divider.getBoundingClientRect().left)) : -1;
+    const sameFill = !!(fold && divider) &&
+      getComputedStyle(fold).backgroundColor === getComputedStyle(divider).backgroundColor;
+    const handles = body ? all(body, ".ct-diff-expand-boundary") : [];
+    const rd = node("review-diff", d, {
+      file,
+      inline: !!d.querySelector(".monaco-diff-editor") && !d.querySelector(".monaco-diff-editor.side-by-side"),
+      theme: themes.join(" "),
+      "token-kinds": lines ? tokenKinds(all(lines, "span[class*='mtk']")) : 0,
+      "deleted-lines": deleted.length,
+      "deleted-token-kinds": tokenKinds(deleted.flatMap((z) => all(z, "span[class*='mtk']"))),
+      added: body ? all(body, ".view-overlays .ct-diff-line-added").length : 0,
+      removed: orig ? all(orig, ".view-overlays .ct-diff-line-removed").length : 0,
+      "context-new": body ? all(body, ".view-overlays .ct-diff-line-context").length : 0,
+      "context-old": orig ? all(orig, ".view-overlays .ct-diff-line-context").length : 0,
+      "hunk-headers": body ? all(body, ".view-overlays .ct-diff-line-hunk-header").length : 0,
+      "hunk-headers-old": orig ? all(orig, ".view-overlays .ct-diff-line-hunk-header").length : 0,
+      "gutter-added": body ? all(body, ".margin-view-overlays .ct-diff-gutter-added").length : 0,
+      "gutter-removed": orig ? all(orig, ".margin-view-overlays .ct-diff-gutter-removed").length : 0,
+      "word-inserts": inserts.length,
+      "word-deletes": all(d, ".char-delete").length,
+      "narrow-marks": inserts.length > 0 && Math.min(...inserts.map((n) => n.offsetWidth)) < widest,
+      "new-lines": numbers(body),
+      "old-lines": numbers(orig),
+      hidden: handles.map((h) => h.getAttribute("data-ct-hidden") ?? ""),
+      boundaries: handles.length,
+      collapsed: text(fold),
+      "flow-hit-lines": lines ? all(lines, ".view-line").filter((l) =>
+        l.classList.contains("line-flow-hit") || l.querySelector(".line-flow-hit")).length : 0,
+      "flow-skip-lines": lines ? all(lines, ".line-flow-skip").length : 0,
+      values: values.map((v) => (v.textContent ?? "").replace(/[\s ]+/g, " ")).join(" "),
+      "value-chips": values.length,
+      "value-names": body ? all(body, ".flow-parallel .review-flow-value-name").length : 0,
+      "value-boxes": body ? all(body, ".flow-parallel .review-flow-value-box").length : 0,
+      "value-columns": columns.length,
+      "omni-names": body ? all(body, ".flow-parallel .ct-omni-name").length : 0,
+      "omni-values": body ? all(body, ".flow-parallel .ct-omni-value").length : 0,
+      "values-in-code": lines ? all(lines, ".review-flow-value").length + all(d, ".deepreview-inline-value").length : 0,
+      "band-spread": lefts.length ? Math.max(...lefts) - Math.min(...lefts) : 0,
+      "values-past-edge": pastEdge,
+      "band-washes": washes,
+      "gutter-gap": gap,
+      "fold-divider-offset": foldOffset,
+      "fold-divider-same-fill": sameFill,
+      "hunk-selection": text(d.querySelector(".hunk-toolbar-count")),
+      "hunk-actions": all(d, ".hunk-toolbar-button").map((b) => text(b)),
+      "comment-values": lines ? (/\/\/ \w+ = /.test(lines.innerText ?? "") ? 1 : 0) : 0,
+    }, [["file", file]]);
+    const lineHeight = (body?.querySelector(".view-line") as HTMLElement | null)?.getBoundingClientRect().height ?? 18;
+    for (const h of handles) {
+      if (!vis(h)) continue;
+      const direction = h.getAttribute("data-ct-expand") ?? "";
+      const cs = getComputedStyle(h);
+      const c = centre(h);
+      const b = node("review-boundary", h, {
+        direction,
+        hidden: parseInt(h.getAttribute("data-ct-hidden") ?? "-1", 10),
+        label: h.getAttribute("aria-label") ?? "",
+        keyboard: h.getAttribute("role") === "button" && h.getAttribute("tabindex") === "0",
+        painted: cs.backgroundColor !== "rgba(0, 0, 0, 0)" && cs.backgroundColor !== "transparent",
+        "resize-cursor": /resize/.test(cs.cursor),
+        focused: h === active,
+      }, [["direction", direction]]);
+      b.anchors = { points: { "down-3": { x: c.x, y: c.y + lineHeight * 3 } } };
+      rd.children.push(b);
+    }
+    const hunk = (lines ? all(lines, ".view-line") : []).find((l) => /@@\s-\d+,\d+\s\+\d+,\d+\s@@/.test(
+      (l.textContent ?? "").replace(/ /g, " ")));
+    if (hunk && vis(hunk)) rd.children.push(node("hunk-divider", hunk, { text: text(hunk) }));
+    const steps = (zone: HTMLElement, kind: string, owner: any) => {
+      for (const [dir, cls] of [["prev", `review-${kind}-prev`], ["next", `review-${kind}-next`]]) {
+        const bt = zone.querySelector(`.${cls}`) as HTMLButtonElement | null;
+        if (bt && vis(bt)) owner.children.push(node("step-button", bt, { direction: dir, enabled: !bt.disabled }, [["direction", dir]]));
+      }
+    };
+    for (const z of all(d, ".review-invocation-selector")) {
+      if (!vis(z)) continue;
+      const fn = z.getAttribute("data-function") ?? "";
+      const sel = node("invocation-selector", z, { function: fn, label: text(z.querySelector(".review-invocation-label")) },
+                       [["function", fn]]);
+      steps(z, "invocation", sel);
+      rd.children.push(sel);
+    }
+    for (const z of all(d, ".review-loop-selector")) {
+      if (!vis(z)) continue;
+      const fn = z.getAttribute("data-function") ?? "";
+      const slider = z.querySelector(".flow-loop-slider") as HTMLElement | null;
+      const base = slider?.querySelector(".noUi-base") as HTMLElement | null;
+      const lc = node("review-loop", z, {
+        function: fn, label: text(z.querySelector(".review-loop-label")),
+        slider: !!base && vis(base), "slider-width": slider ? Math.round(slider.getBoundingClientRect().width) : 0,
+      }, [["function", fn]]);
+      steps(z, "loop", lc);
+      if (slider && base && vis(base)) {
+        const grip = slider.querySelector(".noUi-handle") as HTMLElement | null;
+        const s = node("loop-slider", slider, { width: Math.round(slider.getBoundingClientRect().width) });
+        const sr = slider.getBoundingClientRect();
+        const g = grip ? centre(grip) : { x: sr.left, y: sr.top + sr.height / 2 };
+        s.anchors = { points: { grip: g, end: { x: sr.right, y: g.y } } };
+        lc.children.push(s);
+      }
+      rd.children.push(lc);
+    }
+    root.children.push(rd);
+  }
+
+  // the boundary menu (lifted to <body>)
+  const menu = all(document, ".ct-diff-expand-menu").find((m) => vis(m));
+  if (menu) {
+    const items = all(menu, ".ct-diff-expand-menu-item");
+    const m = node("expand-menu", menu, { direction: menu.getAttribute("data-ct-expand") ?? "", count: items.length });
+    for (const it of items) {
+      const label = text(it);
+      m.children.push(node("expand-option", it, { label, focused: it === active }, [["label", label]]));
+    }
+    root.children.push(m);
+  }
+
+  // the trace-context selector of the VCS panel's header
+  const tc = all(document, ".vcs-container .vcs-review-trace-select").find((e) => vis(e)) as HTMLSelectElement | undefined;
+  if (tc) {
+    const opts = Array.from(tc.options);
+    root.children.push(node("trace-context", tc, {
+      options: opts.map((o) => text(o)),
+      value: text(opts[tc.selectedIndex] ?? null),
+      focused: tc === active,
+    }));
+  }
+
+  // what a review leaves on the window
+  if (document.querySelector(".vcs-container .vcs-changed-files")) {
+    const legacy = [".deepreview-container", ".deepreview-file-list", ".deepreview-calltrace",
+      ".deepreview-inline-value", ".deepreview-header", ".deepreview-unified-diff", ".deepreview-slider",
+      ".deepreview-mode-toggle"].reduce((n, sel) => n + document.querySelectorAll(sel).length, 0);
+    const W = window as any;
+    const hooks = ["__deepreviewSetViewMode", "__deepreviewSetExecution", "__deepreviewSetIteration",
+      "__deepreviewSetTraceContext", "__deepreviewExpandAbove", "__deepreviewExpandBelow"]
+      .filter((h) => typeof W[h] === "function").length;
+    const sources = all(document, "[id^='editorComponent']");
+    const flow = sources.flatMap((s) => all(s, "[class*='line-flow']"));
+    const kinds = Array.from(new Set(flow.flatMap((f) => Array.from(f.classList)
+      .filter((c) => /^line-flow-(hit|skip|unknown)$/.test(c))))).sort();
+    const open = W.data?.services?.editor?.open ?? {};
+    let unsaved = 0;
+    try { for (const k of Object.keys(open)) if (open[k] && open[k].changed) unsaved++; } catch { /* none */ }
+    root.children.push(node("review-state", document.body, {
+      "legacy-panel": legacy,
+      "legacy-hooks": hooks,
+      "diff-added-lines": sources.reduce((n, s) => n + s.querySelectorAll(".view-overlays .line-diff-added").length, 0),
+      "diff-modified-lines": sources.reduce((n, s) => n + s.querySelectorAll(".view-overlays .line-diff-modified").length, 0),
+      "flow-lines": flow.length,
+      "flow-kinds": kinds,
+      "value-chips": sources.reduce((n, s) => n + s.querySelectorAll(".review-flow-value").length, 0),
+      "diff-tabs": document.querySelectorAll(".unified-diff-container").length,
+      "source-editors": sources.length,
+      unsaved,
+      notices: all(document, ".status-notification .notification-message, .notification-message")
+        .filter((n) => vis(n)).map((n) => text(n)).join(" | "),
+      focus: active ? `${active.tagName.toLowerCase()}.${Array.from(active.classList).join(".")}` : "",
+    }));
+  }
+}
+// --- end pw5 deepreview ---
+
+const SURFACE_EXTENSIONS: Array<(root: any) => void> = [readSurfacePw1, readSurfacePw3, readSurfacePw4, readSurfacePw8, readSurfacePw7, readSurfacePw5Review];
 
 // --- the binding ----------------------------------------------------------------
 

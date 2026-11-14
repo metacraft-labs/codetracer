@@ -1,0 +1,38 @@
+scenario: 1
+name: deepreview/boundary-press-reveals-ten-lines
+pack: codetracer
+summary: >-
+  A diff tab collapses the lines far from a change, with a visible, draggable
+  handle at each end of the collapsed region (a filled button with a resize
+  pointer, each saying it hides 12 lines; the band says how many are hidden).
+  Pressing the upper handle reveals ten lines (new 14 to 23, old 18; 2 still
+  hidden); pressing it again reveals the rest, and the boundaries are gone.
+
+stage:
+  - use: open-review
+    with: { dataset: src/tests/gui/tests/deepreview/fixtures/sample-review.json }
+
+steps:
+  - wait: { until: { at: vcs, present: true }, timeout: 120s }
+  - wait: { until: { at: 'review-diff[file="src/main.rs"]', present: true }, timeout: 60s }
+  - wait: { until: settled, timeout: 30s }
+  - wait: { until: { at: 'review-diff[file="src/main.rs"]', boundaries: 2 }, timeout: 30s }
+  - expect: { at: 'review-diff[file="src/main.rs"]', hidden: ["12", "12"], collapsed: { matches: "\\d+ hidden lines" } }
+  - expect: { at: 'review-diff[file="src/main.rs"]/review-boundary[direction="above"]', painted: true, resize-cursor: true, hidden: 12 }
+  - expect: { at: 'review-diff[file="src/main.rs"]/review-boundary[direction="below"]', painted: true, resize-cursor: true, hidden: 12 }
+  - expect: { at: 'review-diff[file="src/main.rs"]', new-lines: { subsequence: ["1", "13"] } }
+  - expect: { at: 'review-diff[file="src/main.rs"]', assert: 'shows-new-line("13")' }
+  - expect: { at: 'review-diff[file="src/main.rs"]', assert: 'lacks-new-line("14")' }
+  - expect: { at: 'review-diff[file="src/main.rs"]', assert: 'lacks-new-line("25")' }
+  - click: 'review-diff[file="src/main.rs"]/review-boundary[direction="above"]'
+  - wait: { until: { at: 'review-diff[file="src/main.rs"]/review-boundary[direction="above"]', hidden: 2 }, timeout: 30s }
+  - expect: { at: 'review-diff[file="src/main.rs"]', assert: 'shows-new-line("14")' }
+  - wheel: { at: 'review-diff[file="src/main.rs"]', direction: down, amount: 3 }
+  - wait: { until: { at: 'review-diff[file="src/main.rs"]', assert: 'shows-new-line("23")' }, timeout: 30s }
+  - expect: { at: 'review-diff[file="src/main.rs"]', assert: 'lacks-new-line("24")' }
+  - expect: { at: 'review-diff[file="src/main.rs"]', assert: 'shows-old-line("18")' }
+  - click: 'review-diff[file="src/main.rs"]/review-boundary[direction="above"]'
+  - wheel: { at: 'review-diff[file="src/main.rs"]', direction: down, amount: 20 }
+  - wait: { until: { at: 'review-diff[file="src/main.rs"]', assert: 'shows-new-line("25")' }, timeout: 30s }
+  - expect: { at: 'review-diff[file="src/main.rs"]', assert: 'shows-new-line("24")' }
+  - wait: { until: { at: 'review-diff[file="src/main.rs"]', boundaries: 0 }, timeout: 30s }
