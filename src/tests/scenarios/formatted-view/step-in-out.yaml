@@ -1,0 +1,36 @@
+scenario: 1
+name: formatted-view/step-in-out
+pack: codetracer
+summary: >-
+  Under the formatted view of a minified IIFE, Step In from the call site
+  lands on the callee's formatted line (program.src.js line 2), and Step Out
+  returns to the caller's formatted resume line (line 5, where the recorded
+  source has it on line 4).
+
+stage:
+  - use: write-project
+    with:
+      files:
+        program.js: "(function() {\n  return 1;\n})();\nvar z = 2;\n"
+        program.js.map: "{\"version\": 3, \"file\": \"program.js\", \"sources\": [\"program.src.js\"], \"names\": [], \"mappings\": \"AAAA;AACA;;AAGA\"}"
+        program.src.js: "(function () {\n  return 1;\n})();\n\nvar z = 2;\n"
+  - use: record-program
+    with: { program: $project/program.js }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 180s }
+  - wait: { until: { at: 'editor[file="program.js"]', current-line: 1 }, timeout: 60s }
+  - chord: Ctrl+p
+  - type: ":Toggle Formatted"
+  - wait: { until: { at: 'omnibox/option[label="View: Toggle Formatted Source View"]', kind: command }, timeout: 15s }
+  - click: 'omnibox/option[label="View: Toggle Formatted Source View"]'
+  - wait: { until: { at: status-line, notifications: { contains: "Formatted source view on" } }, timeout: 30s }
+  - click: 'toolbar/toolbar-button[label="step-in-image"]'
+    settle: false
+  - wait: { until: replay-idle, timeout: 60s }
+  - wait: { until: { at: 'editor[file="program.src.js"]', current-line: 2 }, timeout: 60s }
+  - click: 'toolbar/toolbar-button[label="step-out-image"]'
+    settle: false
+  - wait: { until: replay-idle, timeout: 60s }
+  - wait: { until: { at: 'editor[file="program.src.js"]', current-line: 5 }, timeout: 60s }

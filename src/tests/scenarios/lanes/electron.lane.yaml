@@ -309,4 +309,5 @@ applicable:
   - ../deepreview/view-toggle-chooses-diff-or-file.yaml
   - ../keymaps/plat64-input-routing.yaml
   - ../low-level-code/plat60-low-level-code.yaml
+  - ../formatted-view/step-in-out.yaml
 unsupported: []
