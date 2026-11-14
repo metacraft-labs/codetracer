@@ -2018,6 +2018,14 @@ stages:
       next, holds a prompt marked to be held; `replay`: replays a review's
       session).
     params: { agent: text }
+  review-session:
+    summary: >-
+      A review's agent session (the replay agent's: `evidence`, two
+      collections of review evidence, or `test-run`, a `ct test` run of the
+      recorded program), resolved as `ct review` resolves one and handed to
+      the front-end beside its recording; with `live`, the Agent Activity
+      pane's own agent is the replay agent too.
+    params: { run: text, live: bool }
   review-dataset:
     summary: >-
       Write a review dataset (the sample review) into the run's root — plain,

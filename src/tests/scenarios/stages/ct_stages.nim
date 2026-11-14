@@ -29,6 +29,7 @@ import ../../../frontend/viewmodel/tests/unit/build_fixtures/plat56_c_build
 import results
 import ../../../tools/demo_request_session
 import ../../../frontend/tui/tests/fixtures/visual_fixture
+import ../../../ct/review_session
 
 export fixture_provider
 
@@ -498,6 +499,55 @@ proc stubAgent*(s: StageState; agent: string) =
     "#!/bin/sh\nexec " & quoteShell(node) & " " & quoteShell(script) & " \"$@\"\n")
   s.launch.env["PATH"] = dir & ":" & getEnv("PATH")
   s.launch.env["CT_FAKE_ACP_LOG"] = dir / "methods.log"
+
+proc reviewSession*(s: StageState; run: string; live: bool) =
+  ## A review's agent session, resolved the way `ct review` resolves one
+  ## (`ct/review_session.resolveReviewSession`, over the replay agent through
+  ## nim-agents), handed to the front-end with `--review-session`, beside the
+  ## recording it opens. `run`: `evidence` (two collections of review
+  ## evidence, each with its dataset) or `test-run` (a `ct test` run whose
+  ## test is the recording). `live`: the Agent Activity pane's own agent is
+  ## the replay agent too, so a prompt typed there is answered over ACP.
+  ## The replay agent is the suites' documented stand-in (its header says
+  ## why): a production agent cannot hold a known session on demand.
+  let replayAgent = repo() / "src/tests/gui/tests/agent-activity-deepreview/fixtures/acp-replay-agent.js"
+  let sample = repo() / "src/tests/gui/tests/deepreview/fixtures/sample-review.json"
+  let node = findExe("node")
+  if node.len == 0:
+    raise newException(IOError, "review-session: prerequisite missing: `node` is not on PATH")
+  let dir = s.root / "review-session"
+  let evidence = dir / "evidence"
+  createDir(evidence)
+  proc dataset(target, title: string; first, last: int) =
+    var d = parseJson(readFile(sample))
+    d["sessionTitle"] = %title
+    var files = newJArray()
+    for i in first ..< last: files.add d["files"][i]
+    d["files"] = files
+    writeFile(target, $d)
+  dataset(evidence / "iteration-1.json", "Iteration one", 0, 2)
+  dataset(evidence / "iteration-2.json", "Iteration two", 2, 3)
+  let args =
+    case run
+    of "evidence": @[replayAgent, "--evidence", "--evidence-dir=" & evidence]
+    of "test-run":
+      if s.launch.recording.len == 0:
+        raise newException(ValueError, "review-session: test-run needs a recording first (record-program)")
+      @[replayAgent, "--test-run", "--trace-dir=" & s.launch.recording]
+    else: raise newException(ValueError, "review-session: unknown run '" & run & "'")
+  let spec = ReviewSessionRefSpec(sessionId: "session-fixture", backend: "acp",
+                                  workspacePath: dir, agentCommand: node, agentArgs: args)
+  let file = writeResolvedReviewSession(resolveReviewSession(spec), dir)
+  if file.len == 0:
+    raise newException(IOError, "review-session: the session was not written")
+  s.launch.flags.add "--review-session=" & file
+  # the front-end runs outside any repository: the VCS pane then shows the
+  # review a card opens, not the working tree it was started in
+  s.launch.workDir = dir
+  if live:
+    s.launch.env["CODETRACER_AGENT_ACP_COMMAND"] = node
+    s.launch.env["CODETRACER_AGENT_ACP_ARGS"] = replayAgent & " --evidence --evidence-dir=" &
+      evidence & " --live-delay-ms=100"
 
 proc reviewDataset*(s: StageState; variant: string) =
   ## A review dataset (`deepreview/fixtures/sample-review.json`), written into
@@ -1131,6 +1181,9 @@ proc runStage*(s: StageState; use: string; args: JsonNode) =
     s.stubAgent(argStr(args, "agent"))
   of "review-dataset":
     s.reviewDataset(argStr(args, "variant", "plain"))
+  of "review-session":
+    s.reviewSession(argStr(args, "run", "evidence"),
+                    not args.isNil and args{"live"}.getBool(false))
   of "plant-edit-layout":
     s.plantEditLayout(argStr(args, "fixture"))
   of "project-fixture":

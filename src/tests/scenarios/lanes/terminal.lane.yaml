@@ -130,4 +130,7 @@ applicable:
   - ../terminal/visual-replay-video-player.yaml
   - ../terminal/vcs-focus-reports-are-not-keys.yaml
   - ../terminal/vcs-refreshes-when-the-window-regains-focus.yaml
+  - ../terminal/agent-activity-review-opens-in-vcs.yaml
+  - ../terminal/agent-activity-run-card-opens-a-tab.yaml
+  - ../terminal/agent-activity-open-recording-in-this-tab.yaml
 unsupported: []
