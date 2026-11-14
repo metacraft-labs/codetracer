@@ -5,7 +5,7 @@
   "G2": "loupe.attr(\"data-ct-visual-loupe\") == \"40,50\"",
   "G3": "drawAt == \"1/\" & $GlSceneDrawsPerFrame",
   "G4": "\"Draw 2 / 3\" in after.first(\"data-ct-visual-title\").attr(\"data-ct-visual-title\")",
-  "G5": "Unhandled exception: the codetracer-gpui run failed (--report-window-plan --width=1600 --height=1000 --window-ops=visual:show:video,visual:wait,visual:key:video:End,visual:wait <fixture>) [IOError]",
+  "G5": "Unhandled exception: the codetracer-gpui run failed (--report-window-plan --width=1600 --height=1000 --window-ops=visual:show:video,visual:wait,visual:key:video:end,visual:wait <fixture>) [IOError]",
   "G6": "windowPlan(delivered).first(VideoPlayerAttribute).attr(VideoPlayerAttribute) ==",
   "P1": "panes.frameMatchesProgram(0)",
   "P2": "panes.frame.frameDrawCount.val == GlSceneDrawsPerFrame",

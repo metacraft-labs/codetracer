@@ -77,6 +77,9 @@ GPUI_LEAF = "src/frontend/gpui/visual_replay_leaf.nim"
 GPUI_MAIN = "src/frontend/gpui/main.nim"
 VOCAB = "src/frontend/view_vocabulary/pane_views.nim"
 FACTORY = "src/frontend/ui/visual_replay_client_factory.nim"
+# The Video Player's keys are keymap rows since 106bc7e3e, the same on every
+# front-end: the terminal's and the window's `case` over key names is gone.
+OVERLAY = "src/frontend/viewmodel/keymap/overlay_rows.nim"
 
 # Suites.
 VMU = "src/frontend/viewmodel/tests/unit/test_plat59_visual_replay.nim"
@@ -88,7 +91,7 @@ SPEC = "src/tests/gui/tests/frame-viewer/plat59-visual-replay-capture.spec.ts"
 
 SUBJECTS = [PANES, PLAYER, FRAME, HISTORY, CLIENT, PRODUCER, OPEN, CHANNEL, TUI_PANE,
             TUI_PANES, BINDING, RUNTIME, HOST, FRAME_IMAGE, GPUI_LEAF,
-            GPUI_MAIN, VOCAB, FACTORY]
+            GPUI_MAIN, VOCAB, FACTORY, OVERLAY]
 SUITES = [VMU, TBL, PTY, PLAN, SPEC, REFUSAL]
 
 TBL_REFUSED = "*::a recording the engine refuses opens with its graphics, and says why"
@@ -246,8 +249,10 @@ ARMS = [
              "  if true:")],
      [(TBL, TBL_SCRUB)],
      "a held scrubber does not follow the pointer"),
-    ("T8", [(RUNTIME, '  key in ["Space", "k", "K", "j", "J", "l", "L", "Left", "Right",',
-             '  key in ["k", "K", "j", "J", "l", "L", "Left", "Right",')],
+    # The key is the shared row's (`overlay_rows`), which the terminal's
+    # operation table runs; graded, as before, on the terminal.
+    ("T8", [(OVERLAY, '    BaseRow(chords: "Space", operation: "video-player.toggle-play", table: VideoPlayerTable),',
+             '    BaseRow(chords: "Ctrl+Space", operation: "video-player.toggle-play", table: VideoPlayerTable),')],
      # The scrubber case's Space pauses on a session that is playing; the
      # pty suite's Space is skipped when playback already ended by itself, so
      # alone it let this arm survive (measured at 258f46856).
@@ -282,8 +287,10 @@ ARMS = [
     ("G6", [(GPUI_MAIN, "  if pane in gPanesArmed:\n    return", "")],
      [(PLAN, PLAN_KEYS)],
      "every key in the window runs twice: a press of Right steps two frames"),
-    ("G5", [(GPUI_MAIN, '      of "end": action = some(VpaJumpEnd)',
-             '      of "end": action = none(VideoPlayerAction)')],
+    # The key is the shared row's (`overlay_rows`), which the window's
+    # operation table runs; graded, as before, in the GPUI window.
+    ("G5", [(OVERLAY, '    BaseRow(chords: "End", operation: "video-player.jump-end", table: VideoPlayerTable),',
+             '    BaseRow(chords: "Ctrl+End", operation: "video-player.jump-end", table: VideoPlayerTable),')],
      [(PLAN, PLAN_FRAMES)],
      "End is not the GPUI Video Player's"),
     ("W1", [(VOCAB, '  children.add viewText("videoPlayer.frame", title)',
@@ -304,9 +311,9 @@ ARMS = [
 DECLARED_SURVIVORS = {"Z1"}
 
 IN_BINARY = {PANES, PLAYER, FRAME, HISTORY, CLIENT, PRODUCER, TUI_PANE,
-             TUI_PANES, BINDING, RUNTIME, HOST, FRAME_IMAGE, VOCAB}
+             TUI_PANES, BINDING, RUNTIME, HOST, FRAME_IMAGE, VOCAB, OVERLAY}
 IN_GPUI = {PANES, PLAYER, FRAME, HISTORY, CLIENT, PRODUCER, GPUI_LEAF,
-           GPUI_MAIN, VOCAB}
+           GPUI_MAIN, VOCAB, OVERLAY}
 IN_DESKTOP = {FACTORY}
   # The desktop's spec runs the desktop `just build-once` built — neither
   # `$PLAT59_DESKTOP_TEST` (the capture recipe) nor `npx playwright test`
