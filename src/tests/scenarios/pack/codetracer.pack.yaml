@@ -1284,13 +1284,15 @@ roles:
       clipped: bool
       single-line: bool
       cap: text
-      # It is on screen, inside the editor's code area (not scrolled off it).
+      # The start of the box, and the chip's eye, are on screen: inside the
+      # editor's code area, not scrolled off it.
       shown: bool
+      eye-shown: bool
       # pw6: the loop iteration the value is from (-1 outside a loop).
       iteration: int
     affordances: [click, context-click]
-    # `eye`: the chip's "view more" button.
-    anchors: [eye]
+    # `eye`: the chip's "view more" button; `start`: the start of its box.
+    anchors: [eye, start]
 
   # A loop header's control in the flow: the iteration shown, of how many,
   # and its slider's width.
