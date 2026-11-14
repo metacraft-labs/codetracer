@@ -328,6 +328,9 @@ roles:
     anchors: [footer]
     assertions:
       has-output(text): "some event: event.text contains text"
+      # No row's output contains `text` (pw8: a native recording's start-up
+      # reads of its libraries are not shown as their bytes).
+      lacks-output(text): "none event: event.text contains text"
       # pw8: a correlation marker of this boundary, its chip drawn so and its
       # direction shown.
       has-marker(boundary, chip): "some event-marker: event-marker.boundary == boundary and event-marker.chip == chip and event-marker.direction"

@@ -166,7 +166,7 @@ jobs:
           #   native-backend passes (see setup-db-backend-siblings/action.yml).
           siblings: |
             codetracer-native-recorder=${{ github.event.inputs.native_recorder_ref || '63dd179c0b9e844cddb7d7366125e6cb56194b71' }}
-            codetracer-native-backend=${{ github.event.inputs.native_backend_ref || 'a4189eeda28eb953c9e837baa8ed8024c2f8b625' }}
+            codetracer-native-backend=${{ github.event.inputs.native_backend_ref || 'd8f5253a4ff8fb6daaf9de4bf7748d68bc2294bc' }}
             # codetracer-trace-format{,-nim} BY COMMIT, not `=dev`: the two halves of
             # the FFI pair are `/agents` inputs in flake.nix, and trace-format's `dev`
             # tip (051a298, 2026-09-30) predates the FileTable / PathTableKind API that

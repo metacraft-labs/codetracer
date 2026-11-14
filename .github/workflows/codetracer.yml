@@ -6274,7 +6274,7 @@ jobs:
             # Nix lane builds. These are the revs flake.lock and repro.lock lock; refresh them with
             # the lock, as for the trace-format pair above.
             codetracer-visual-replay=6b2e8a88ed6bc4faec0bdc969314ca2771527c04
-            codetracer-native-backend=a4189eeda28eb953c9e837baa8ed8024c2f8b625
+            codetracer-native-backend=d8f5253a4ff8fb6daaf9de4bf7748d68bc2294bc
             # The desktop scenario lane's recorders and recordings: the BEAM
             # recorder at repro.lock's pin, and the example recordings (not a
             # build input, so not in the lock) at the commit their scenarios
@@ -6994,7 +6994,7 @@ jobs:
         # what the script's stale-checkout check can hold a checkout to.
         env:
           GH_TOKEN: ${{ steps.ci_token.outputs.token }}
-          RR_BACKEND_REF: a4189eeda28eb953c9e837baa8ed8024c2f8b625
+          RR_BACKEND_REF: d8f5253a4ff8fb6daaf9de4bf7748d68bc2294bc
         run: ./ci/setup-rr-backend.sh
 
       - name: Assert the ct-native-replay build-siblings builds can start
@@ -7346,7 +7346,7 @@ jobs:
             # Nix lane builds. These are the revs flake.lock and repro.lock lock; refresh them with
             # the lock, as for the trace-format pair above.
             codetracer-visual-replay=6b2e8a88ed6bc4faec0bdc969314ca2771527c04
-            codetracer-native-backend=a4189eeda28eb953c9e837baa8ed8024c2f8b625
+            codetracer-native-backend=d8f5253a4ff8fb6daaf9de4bf7748d68bc2294bc
             codetracer-native-recorder=63dd179c0b9e844cddb7d7366125e6cb56194b71
             codetracer-native-test-programs=dev
             codetracer-visual-replay-fixtures=dev
@@ -7676,7 +7676,7 @@ jobs:
             # `/agents` inputs in flake.nix (7ab073a22), so `=dev` cloned a different tree than the
             # Nix lane builds. These are the revs flake.lock and repro.lock lock; refresh them with
             # the lock, as for the trace-format pair above.
-            codetracer-native-backend=a4189eeda28eb953c9e837baa8ed8024c2f8b625
+            codetracer-native-backend=d8f5253a4ff8fb6daaf9de4bf7748d68bc2294bc
             codetracer-visual-replay=6b2e8a88ed6bc4faec0bdc969314ca2771527c04
 
       - name: Allow direnv in the cloned recorder siblings

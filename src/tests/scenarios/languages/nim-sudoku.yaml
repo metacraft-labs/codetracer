@@ -19,6 +19,9 @@ steps:
     steps:
       - click: 'pane-tab[label="EVENT LOG"]'
       - wait: { until: event-log.loaded, timeout: 120s }
+      # The dynamic loader's reads of the program's libraries are counted,
+      # not printed as their ELF bytes ahead of the program's output.
+      - expect: { at: event-log, assert: 'lacks-output("ELF")' }
       - click: 'event-log/text-field[label="Find event"]'
       - type: Solved
       - wait: { until: { at: event-log, assert: 'has-output("Solved")' }, timeout: 60s }
