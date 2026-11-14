@@ -110,7 +110,9 @@ import term_assert
 
 import ../../testing/dual_snap
 import ../../agent_harbor/ah_tui_stories
+import ../../agent_harbor/[ah_tui_playback_bar, ah_tui_canvas]
 import ../../../gpui/agent_harbor/ah_stories
+import ../../../gpui/agent_harbor/ah_playback_bar
 import ../../../viewmodel/views/[isonim_agent_harbor_session_tabs_view,
   isonim_agent_harbor_initiatives_view, isonim_agent_harbor_initiative_tabs_view,
   isonim_agent_harbor_fleet_view, isonim_agent_harbor_playback_view]
@@ -1024,6 +1026,68 @@ suite "CTF-P1c: a press on a bar's button is routed":
       GpuiEvent(kind: gekPointerDown, modifiers: {gmControl})) > 0
     ck m.playback.source.position > before
     m.dispose()
+
+suite "CTF-P1c: the playback bars' buttons keep their names at every width":
+  # At the sidebar's 360px (45 cells) every host draws each control as a
+  # glyph (`compactControlLabel`). Each button must still name its control
+  # (the web's `aria-label`; GPUI's and the terminal's `accessible-name`,
+  # beside the `button` fact that holds what is drawn) and say what it does (the web's `title`;
+  # `tooltip`), and the terminal's must carry its key: the glyph alone tells
+  # a reader nothing.
+  proc nameProblems(host, size: string; pb: AhPlayback; control: PlaybackControl;
+                    name, tip: string): seq[string] =
+    let at = host & " " & size & " " & $control & ": "
+    if name != pb.controlLabel(control):
+      result.add at & "named '" & name & "', not '" & pb.controlLabel(control) & "'"
+    if tip != controlTitle(control):
+      result.add at & "tooltip '" & tip & "', not '" & controlTitle(control) & "'"
+
+  test "every host's bar names each control and says what it does, laptop and sidebar":
+    let story = playbackStories()[0]
+    var problems: seq[string]
+    # The web: one bar at every width (its stylesheet hides the word below
+    # 45rem); its buttons' names and tooltips are attributes.
+    block:
+      let r = MockRenderer()
+      let pb = newAhPlayback(story.surface, story.fixture, newTestClock())
+      var bar: MockNode
+      createRoot proc(disposeRoot: proc()) =
+        bar = renderAgentHarborPlaybackBar[MockRenderer, MockNode](r, pb)
+      let buttons = bar.byClass(PlaybackButtonClass)
+      ck buttons.len == ord(high(PlaybackControl)) + 1
+      for i, b in buttons:
+        proc attrOf(name: string): string =
+          if b.attributes.hasKey(name): b.attributes[name] else: ""
+        problems.add nameProblems("web", "any", pb, PlaybackControl(i),
+                                  attrOf("aria-label"), attrOf("title"))
+        ck b.textOf("ah-playback-glyph") == pb.compactControlLabel(PlaybackControl(i))
+    # GPUI, laptop and sidebar.
+    for (size, w) in [("laptop", LaptopW), ("sidebar", 360)]:
+      gpui_reset_tree()
+      let pb = newAhPlayback(story.surface, story.fixture, newTestClock())
+      let host = gr.createElement("div")
+      drawPlaybackBar(gr, host, pb, ahPalette(dmDark), w, nil)
+      let buttons = host.all("playback-control")
+      ck buttons.len == ord(high(PlaybackControl)) + 1
+      for b in buttons:
+        let control = parseEnum[PlaybackControl](b.attr("playback-control"))
+        problems.add nameProblems("GPUI", size, pb, control, b.attr("accessible-name"), b.attr("tooltip"))
+        if size == "sidebar": ck b.attr("button") == pb.compactControlLabel(control)
+    # The terminal, 180 and 45 cells.
+    for (size, cols) in [("laptop", LaptopCols), ("sidebar", 45)]:
+      let pb = newAhPlayback(story.surface, story.fixture, newTestClock())
+      var c = newAhCanvas(cols, 3, ahPalette(dmDark))
+      c.drawPlaybackBar(pb, 0)
+      let buttons = c.root.all("playback-control")
+      ck buttons.len == ord(high(PlaybackControl)) + 1
+      for b in buttons:
+        let control = parseEnum[PlaybackControl](b.attr("playback-control"))
+        problems.add nameProblems("terminal", size, pb, control, b.attr("accessible-name"), b.attr("tooltip"))
+        if b.attr("key") != TuiKeys[control]:
+          problems.add "terminal " & size & " " & $control & ": key '" & b.attr("key") & "'"
+        if size == "sidebar": ck b.attr("button") == pb.compactControlLabel(control)
+    for p in problems: echo "  ", p
+    ck problems.len == 0
 
 suite "CTF-P1c: assertion count":
   test "every assertion ran":

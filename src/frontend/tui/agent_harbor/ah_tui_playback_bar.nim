@@ -18,8 +18,8 @@
 ## glyphs with a cell of padding each left the longest moments 16 cells.
 ##
 ## Facts (`AhNode`): `playback` (the playback's state: playing, paused,
-## ended) on the bar, `playback-control` and `button` (what it draws) on each
-## button, `playback-moment` and `playback-time` on the readout.
+## ended) on the bar, `playback-control`, `button` (what it draws),
+## `accessible-name` (its word), `tooltip` and `key` on each button, `playback-moment` and `playback-time` on the readout.
 
 import ../../stories/agent_harbor_playback
 import ./ah_tui_canvas
@@ -55,8 +55,16 @@ proc drawPlaybackBar*(c: var AhCanvas; pb: AhPlayback; row: int) =
     let w = widthOf(shown)
     if col + w > c.cols: break
     discard c.put(row, col, shown, c.p.textLabel, bg = c.tone.chip)
+    # Its name and what it does, whichever it draws (`accessible-name`: its word;
+    # `tooltip`: the control's tooltip, as the web's `title`), and its key.
+    var key = ""
+    for (k, ctl) in PlaybackKeys:
+      if ctl == control: key = k
     discard c.node(bar, row, col + (if wide: 1 else: 0), widthOf(label), 1,
-                   [("playback-control", $control), ("button", label)])
+                   [("playback-control", $control), ("button", label),
+                    ("accessible-name", pb.controlLabel(control)),
+                    ("tooltip", controlTitle(control)),
+                    ("key", key)])
     c.target(row, col, w, 1, pb.controlAction(control))
     col += w + 1
   col += 1

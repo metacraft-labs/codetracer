@@ -27,7 +27,9 @@
 ##
 ## Facts (`data-ah-*`) for a reader of the render plan: `playback` (the
 ## playback's state: playing, paused, ended) on the bar, `playback-control`
-## and `button` (what it draws: its word, or its glyph when compact) on each button, `playback-readout` on the readout,
+## `button` (what it draws: its word, or its glyph when compact),
+## `accessible-name` (its word) and `tooltip` on each button,
+## `playback-readout` on the readout,
 ## and `playback-moment` and `playback-time` in it.
 
 import std/strutils
@@ -94,6 +96,12 @@ proc drawPlaybackBar*(r: GpuiRenderer; host: GpuiElement; pb: AhPlayback;
     r.appendChild(b, r.text(drawn, CaptionPx, p.textLabel, shrink = false))
     r.tag(b, "playback-control", $control)
     r.tag(b, "button", drawn)
+    # Its name and what it does, whichever of its word and glyph it draws:
+    # the word (`accessible-name`, as the web's `aria-label`; `label` is what
+    # a view draws) and the control's tooltip (`tooltip`, as the web's
+    # `title`).
+    r.tag(b, "accessible-name", label)
+    r.tag(b, "tooltip", controlTitle(control))
     r.setAttribute(b, OperationAttribute, operationOf(control))
     if press != nil:
       r.listenForPress(b, operationOf(control), press)
