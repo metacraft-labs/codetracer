@@ -1,0 +1,28 @@
+scenario: 1
+name: visual-replay/player-failure-shows-error
+pack: codetracer
+summary: >-
+  When the visual replay player cannot start, the Video Player says so
+  ("Unable to start the visual replay player."), its transport is disabled,
+  it shows no startup notice and no frame, and the editor, VARIABLES,
+  CALLTRACE, EVENT LOG and TERMINAL OUTPUT panes stay.
+
+stage:
+  - use: record-program
+    with: { program: py_console_logs/main.py }
+  - use: visual-replay-capable
+  - use: front-end-options
+    with: { env: { CODETRACER_VISUAL_REPLAY_FAKE_PLAYER: fail } }
+  - use: open-recording
+    with: { deployment: web }
+
+steps:
+  - wait: { until: replay-idle, timeout: 360s }
+  - wait: { until: editor.loaded, timeout: 300s }
+  - wait: { until: call-trace.loaded, timeout: 120s }
+  - wait: { until: { at: 'pane-tab[label="VIDEO PLAYER"]', present: true }, timeout: 60s }
+  - click: { at: 'pane-tab[label="VIDEO PLAYER"]', anchor: title }
+  - wait: { until: { at: video-player, error: { contains: "Unable to start the visual replay player." } }, timeout: 60s }
+  - expect: { at: video-player, transport-enabled: false, starting: false }
+  - expect: { at: video-player/frame-image, absent: true }
+  - expect: { at: window, assert: ['has-pane("VARIABLES")', 'has-pane("CALLTRACE")', 'has-pane("EVENT LOG")', 'has-pane("TERMINAL OUTPUT")'] }

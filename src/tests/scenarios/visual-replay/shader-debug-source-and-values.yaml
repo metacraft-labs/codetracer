@@ -1,0 +1,39 @@
+scenario: 1
+name: visual-replay/shader-debug-source-and-values
+pack: codetracer
+summary: >-
+  A click on frame 2 debugs the shader at that pixel: Shader Debug shows the
+  source (out_color), the current line on v_uv with v_uv among the variables
+  and %12 among the registers; Step forward moves the current line to base,
+  and base joins the variables.
+
+stage:
+  - use: record-program
+    with: { program: py_console_logs/main.py }
+  - use: visual-replay-capable
+  - use: front-end-options
+    with: { env: { CODETRACER_VISUAL_REPLAY_FAKE_PLAYER: ready } }
+  - use: open-recording
+    with: { deployment: web }
+
+steps:
+  - wait: { until: replay-idle, timeout: 360s }
+  - wait: { until: editor.loaded, timeout: 300s }
+  - wait: { until: call-trace.loaded, timeout: 120s }
+  - wait: { until: { at: 'pane-tab[label="VIDEO PLAYER"]', present: true }, timeout: 60s }
+  - click: { at: 'pane-tab[label="VIDEO PLAYER"]', anchor: title }
+  - wait: { until: { at: video-player/frame-image, present: true }, timeout: 60s }
+  - click: { at: video-player, anchor: label }
+  - wait: { until: { at: video-player, focused: true }, timeout: 10s }
+  - key: Home
+  - key: Right
+  - key: Right
+  - wait: { until: { at: video-player/frame-image, frame: 2 }, timeout: 30s }
+  - click: video-player/frame-image
+  - click: { at: 'pane-tab[label="SHADER DEBUG"]', anchor: title }
+  - wait: { until: { at: shader-debug, source: { contains: "out_color" } }, timeout: 30s }
+  - wait: { until: { at: shader-debug, current: { contains: "v_uv" } }, timeout: 30s }
+  - expect: { at: shader-debug, variables: { contains: "v_uv" }, registers: { contains: "%12" } }
+  - click: 'shader-debug/panel-button[label="Step"]'
+  - wait: { until: { at: shader-debug, current: { contains: "base" } }, timeout: 30s }
+  - expect: { at: shader-debug, variables: { contains: "base" } }

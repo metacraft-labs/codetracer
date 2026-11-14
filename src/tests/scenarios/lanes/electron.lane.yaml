@@ -244,4 +244,8 @@ applicable:
   - ../hcr-apply-edit/apply-edit-unconfigured.yaml
   - ../visual-replay/keyboard-shortcuts.yaml
   - ../visual-replay/pixel-history-entries.yaml
+  - ../visual-replay/video-player-in-production-layout.yaml
+  - ../visual-replay/step-updates-video-player.yaml
+  - ../visual-replay/shader-debug-source-and-values.yaml
+  - ../visual-replay/player-failure-shows-error.yaml
 unsupported: []
