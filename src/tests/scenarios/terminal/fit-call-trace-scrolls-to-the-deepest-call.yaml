@@ -2,8 +2,9 @@ scenario: 1
 name: terminal/fit-call-trace-scrolls-to-the-deepest-call
 pack: codetracer
 summary: >-
-  The wheel scrolls a deep Call Trace down to its last calls, where the
-  deepest call, `reached_the_bottom`, is listed.
+  The wheel scrolls a deep Call Trace down to its last calls, and the
+  horizontal wheel scrolls the pane right until the deepest call,
+  `reached_the_bottom`, shows under its indentation.
 stage:
   - use: record-program
     with: { program: deep_calls/main.py }
@@ -13,4 +14,5 @@ steps:
   - wait: { until: replay-idle, timeout: 120s }
   - wait: call-trace.loaded
   - wheel: { at: call-trace, direction: down, amount: 30 }
+  - wheel: { at: call-trace, direction: right, amount: 40 }
   - wait: { until: { at: 'pane[title="Call Trace"]', assert: 'has-row("reached_the_bottom")' }, timeout: 20s }

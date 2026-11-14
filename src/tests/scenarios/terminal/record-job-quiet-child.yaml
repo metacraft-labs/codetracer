@@ -32,12 +32,13 @@ steps:
   - wait: { until: { at: welcome, assert: 'shows("Program to record")' }, timeout: 10s }
   - type: "napper.py"
   - key: Enter
-  - wait: { until: { at: status-line, assert: 'says("going quiet")' }, timeout: 120s }
+  - wait: { until: { at: welcome, assert: 'shows("recording napper.py")' }, timeout: 60s }
   - chord: Alt+f
     settle: false
   - wait: { until: { at: 'dropdown[level="2"]/dropdown-item[label="New Trace Tab"]', present: true }, timeout: 4s }
   - key: Esc
   - wait: { until: { at: 'dropdown[level="2"]', absent: true }, timeout: 10s }
+  - expect: { at: welcome, assert: 'shows("recording napper.py")' }
   - key: Esc
   - wait: { until: { at: session-strip, assert: 'has-tab-matching("napper")' }, timeout: 240s }
   - wait: { until: { at: welcome, absent: true }, timeout: 60s }

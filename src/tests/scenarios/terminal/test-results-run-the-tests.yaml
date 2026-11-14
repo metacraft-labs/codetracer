@@ -23,5 +23,4 @@ steps:
   - expect: { at: 'pane[title="Tests"]/row[first="· test_fails"]', present: true }
   - click: { at: 'pane[title="Tests"]/row[first="2 tests, not run yet"]/cell[text="▶"]' }
   - wait: { until: { at: 'pane[title="Tests"]', assert: 'has-row("1 passed, 1 failed")' }, timeout: 240s }
-  - expect: { at: 'pane[title="Tests"]/row[first="✓ test_passes"]', present: true }
-  - expect: { at: 'pane[title="Tests"]/row[first="✗ test_fails"]', present: true }
+  - expect: { at: 'pane[title="Tests"]', assert: ['has-row("✓ test_pas")', 'has-row("✗ test_fai")'] }

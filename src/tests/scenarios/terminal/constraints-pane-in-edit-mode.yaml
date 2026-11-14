@@ -5,8 +5,10 @@ summary: >-
   In Edit mode over a Noir circuit, the Constraints pane shows the desktop's
   headline (18 ACIR opcodes, 33 unconstrained) and rows — each function and
   opcode with its count and where it is declared (main at src/main.nr:3,
-  halve's line, the range checks in src/checks.nr:2); a right press on a row
-  opens the desktop's menu (Go to Source, Copy Name, Copy Source Location).
+  halve at src/main.nr:11, the range checks in src/checks.nr:2); a press on
+  halve opens its line, a right press on main opens the desktop's menu (Go to
+  Source, Copy Name, Copy Source Location), and a press on a directive says
+  the compiler generated it.
 stage:
   - use: fixture-project
     with: { name: noir-constraints }
@@ -18,5 +20,18 @@ steps:
   - type: ":constraints"
   - key: Enter
   - wait: { until: { at: 'pane[title="Constraints"]', assert: 'has-row("18 ACIR opcodes, 33 unconstrained")' }, timeout: 120s }
-  - expect: { at: 'pane[title="Constraints"]', assert: ['has-row("src/main.nr:3")', 'has-row("BLACKBOX::RANGE")', 'has-row("src/checks.nr:2")', 'has-row("halve")'] }
-  - click: { at: 'pane[title="Constraints"]', button: right }
+  - click: { at: 'pane-tab[label="Constraints"]', button: right }
+  - wait: { until: { at: 'context-menu/menu-item[label="Maximise container"]', present: true }, timeout: 10s }
+  - click: { at: 'context-menu/menu-item[label="Maximise container"]' }
+  - wait: { until: { at: 'pane[title="Constraints"]/row[first="halve"]', present: true }, timeout: 10s }
+  - expect: { at: 'pane[title="Constraints"]', assert: ['has-row("src/main.nr:3")', 'has-row("BLACKBOX::RANGE")', 'has-row("src/checks.nr:2")', 'has-row("src/main.nr:11")'] }
+  - click: { at: 'pane[title="Constraints"]/row[first="halve"]', anchor: text-start }
+  - wait: { until: { at: status-line, assert: 'says("opened src/main.nr:11")' }, timeout: 20s }
+  - click: { at: 'pane[title="Constraints"]/row[first="main"]', anchor: text-start, button: right }
+  - wait: { until: { at: 'context-menu/menu-item[label="Copy Source Location"]', present: true }, timeout: 10s }
+  - expect: { at: 'context-menu/menu-item[label="Go to Source"]', present: true }
+  - expect: { at: 'context-menu/menu-item[label="Copy Name"]', present: true }
+  - key: Esc
+  - wait: { until: { at: context-menu, absent: true }, timeout: 10s }
+  - click: { at: 'pane[title="Constraints"]/row[first="directive_invert"]', anchor: text-start }
+  - wait: { until: { at: status-line, assert: 'says("the compiler generated this function")' }, timeout: 20s }

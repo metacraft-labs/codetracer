@@ -4,10 +4,10 @@ pack: codetracer
 summary: >-
   In Edit mode over a Verno package, `:verify` opens the Verification pane
   with the declared task; Run lists the findings by kind, word for word
-  (pipeline error (2): Expected type Field, found type u32 at
-  typeerr/src/main.nr:2:20, …), says the run failed before reaching the
-  prover, and a right click on a finding opens its menu (Go to Source, Copy
-  Message, Copy Location).
+  (pipeline error (2): typeerr/src/main.nr:2, Expected type Field, found
+  type u32; then line 1's), says the run failed before reaching the prover; a
+  right click on a finding opens its menu (Go to Source, Copy Message, Copy
+  Location), and a press on the second opens typeerr/src/main.nr at 1:24.
 stage:
   - use: fixture-project
     with: { name: verno-type-error }
@@ -28,5 +28,20 @@ steps:
   - expect:
       at: 'pane[title="Verification"]'
       assert: ['has-row("verno --program-dir . formal-verify -- --rlimit 60")',
-               'has-row("pipeline error  typeerr/src/main.nr:2  Expected type Field, found type u32  typeerr/src/main.nr:2:20")']
+               'has-row("Nothing was proved or disproved about this program.")']
+  - expect:
+      at: 'pane[title="Verification"]'
+      text:
+        subsequence:
+          - "pipeline error (2)"
+          - "pipeline error  typeerr/src/main.nr:2  Expected type Field, found type u32"
+          - "pipeline error  typeerr/src/main.nr:1  expected type u32, found type Field"
   - expect: { at: status-line, assert: 'says("failed before reaching the prover")' }
+  - click: { at: 'pane[title="Verification"]/row[text="pipeline error  typeerr/src/main.nr:2  Expected type Field, found type u32"]', anchor: text-start, button: right }
+  - wait: { until: { at: 'context-menu/menu-item[label="Copy Location"]', present: true }, timeout: 10s }
+  - expect: { at: 'context-menu/menu-item[label="Go to Source"]', present: true }
+  - expect: { at: 'context-menu/menu-item[label="Copy Message"]', present: true }
+  - key: Esc
+  - wait: { until: { at: context-menu, absent: true }, timeout: 10s }
+  - click: { at: 'pane[title="Verification"]/row[text="pipeline error  typeerr/src/main.nr:1  expected type u32, found type Field"]', anchor: text-start }
+  - wait: { until: { at: status-line, assert: 'says("opened typeerr/src/main.nr:1:24")' }, timeout: 20s }

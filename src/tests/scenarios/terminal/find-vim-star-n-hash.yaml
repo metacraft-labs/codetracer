@@ -3,8 +3,9 @@ name: terminal/find-vim-star-n-hash
 pack: codetracer
 summary: >-
   Under Vim in Edit mode, `g g * n #` from the first line of a document of
-  foo/foobar/foo_x words moves the caret to line 2 (`*` whole-word
-  forward, `n` continues, `#` back, `g*` matches inside words).
+  foo/foobar/foo_x words puts the caret where `i #` then types the mark
+  before the `foo` on line 2 (`*` whole-word forward, `n` continues, `#` back, `g*`
+  matches inside words).
 stage:
   - use: write-project
     with: { files: { find.txt: "foo bar foobar\nbaz foo qux\none two three foo\nfoo_x foo\n" } }
@@ -16,8 +17,13 @@ steps:
   - wait: { until: ready, timeout: 60s }
   - wait: { until: { at: 'editor[file="find.txt"]', assert: 'shows-text("foo bar foobar")' }, timeout: 20s }
   - click: { at: 'editor[file="find.txt"]/line[number="1"]', anchor: text-start }
-  - chord: g g
+  - key: g
+  - key: g
   - key: "*"
   - key: "n"
   - key: "#"
-  - wait: { until: { at: 'editor[file="find.txt"]', assert: "caret-at(2)" }, timeout: 10s }
+  - wait: { until: settled, timeout: 10s }
+  - key: i
+  - type: "#"
+  - key: Esc
+  - wait: { until: { at: 'editor[file="find.txt"]/line[number="2"]', text: { contains: "baz #foo qux" } }, timeout: 10s }

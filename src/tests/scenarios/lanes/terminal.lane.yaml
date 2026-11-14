@@ -110,4 +110,24 @@ applicable:
   - ../terminal/vcs-pane-outside-a-repository.yaml
   - ../terminal/welcome-open-folder.yaml
   - ../terminal/welcome-record-new-trace.yaml
+  - ../terminal/clicks-event-log-goto-and-content.yaml
+  - ../terminal/clicks-event-log-order.yaml
+  - ../terminal/constraints-pane-in-edit-mode.yaml
+  - ../terminal/drop-overlay-release-commits-undo-reverts.yaml
+  - ../terminal/find-vim-star.yaml
+  - ../terminal/find-vim-star-n.yaml
+  - ../terminal/find-vim-star-n-hash.yaml
+  - ../terminal/find-vim-g-star.yaml
+  - ../terminal/fit-call-trace-scrolls-to-the-deepest-call.yaml
+  - ../terminal/record-job-quiet-child.yaml
+  - ../terminal/requests-pane.yaml
+  - ../terminal/shell-pane-recorded-build.yaml
+  - ../terminal/tables-show-detail.yaml
+  - ../terminal/test-results-run-the-tests.yaml
+  - ../terminal/top-bar-menu-shows-a-rebinding.yaml
+  - ../terminal/top-bar-omnibox-goes-to-a-tick.yaml
+  - ../terminal/verification-run-lists-findings.yaml
+  - ../terminal/visual-replay-video-player.yaml
+  - ../terminal/vcs-focus-reports-are-not-keys.yaml
+  - ../terminal/vcs-refreshes-when-the-window-regains-focus.yaml
 unsupported: []

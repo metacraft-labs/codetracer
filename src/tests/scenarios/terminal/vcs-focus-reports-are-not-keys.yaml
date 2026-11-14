@@ -1,0 +1,28 @@
+scenario: 1
+name: terminal/vcs-focus-reports-are-not-keys
+pack: codetracer
+summary: >-
+  In Edit mode with the VCS pane shown and the editor holding the keyboard,
+  the terminal window losing and regaining the focus types nothing into the
+  open file: its tab carries no unsaved marker and its first line is as it
+  was, and the VCS pane still lists the working tree.
+requires: [termassert]
+stage:
+  - use: fixture-project
+    with: { name: vcs-repo }
+  - use: open-project
+    with: { folder: $project, file: notes.txt, width: 200, height: 50 }
+steps:
+  - wait: { until: ready, timeout: 60s }
+  - wait: { until: { at: 'editor[file="notes.txt"]/line[number="1"]', text: "first line" }, timeout: 30s }
+  - click: { at: 'pane-tab[label="VCS"]' }
+  - wait: { until: { at: 'pane[title="VCS"]', assert: 'has-row("WORKING TREE (3)")' }, timeout: 30s }
+  - click: { at: 'editor[file="notes.txt"]/line[number="2"]', anchor: text-end }
+  - ext: termassert.window-focus
+    with: { focused: false }
+  - ext: termassert.window-focus
+    with: { focused: true }
+  - wait: { until: { at: 'pane[title="VCS"]', assert: 'has-row("WORKING TREE (3)")' }, timeout: 30s }
+  - expect: { at: 'editor[file="notes.txt"]/line[number="2"]', text: "an edit the index has not seen" }
+  - expect: { at: 'editor[file="notes.txt"]/line[number="1"]', text: "first line" }
+  - expect: { at: 'pane-tab[label="notes.txt ●"]', absent: true }

@@ -24,6 +24,7 @@ steps:
   - wait: { until: replay-idle, timeout: 120s }
   - expect: { at: replay-position, tick: 1 }
   - click: { at: 'menu-bar/menu[label="Menu"]' }
+  - wait: { until: { at: 'dropdown[level="1"]/dropdown-item[label="Debug"]', present: true }, timeout: 10s }
   - click: { at: 'dropdown[level="1"]/dropdown-item[label="Debug"]' }
   - wait: { until: { at: 'dropdown[level="2"]', present: true }, timeout: 10s }
   - expect: { at: 'dropdown[level="2"]/dropdown-item[label="Step Over"]', shortcut: "Ctrl+N" }

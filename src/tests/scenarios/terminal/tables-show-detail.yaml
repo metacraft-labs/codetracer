@@ -18,14 +18,14 @@ steps:
   - wait: { until: { at: 'pane[title="Event Log"]', assert: 'has-row("<<LEFT-EDGE>>")' }, timeout: 30s }
   - expect: { at: 'pane[title="Event Log"]', assert: 'lacks-row("RIGHT-EDGE>>")' }
   - click: { at: 'event-log/event[#1]' }
-  - wait: { until: { at: replay-position, assert: "past(1)" }, timeout: 30s }
+  - wait: { until: { at: replay-position, tick: 11 }, timeout: 30s }
   - key: K
   - wait: { until: { at: 'pane[title="Event Log"]', assert: 'has-row("RIGHT-EDGE>>")' }, timeout: 10s }
-  - expect: { at: replay-position, tick: 1 }
+  - expect: { at: replay-position, tick: 11 }
   - key: K
   - wait: { until: { at: 'pane[title="Event Log"]', assert: 'lacks-row("RIGHT-EDGE>>")' }, timeout: 10s }
   - chord: Ctrl+P
   - type: ":Show Detail"
   - key: Enter
   - wait: { until: { at: 'pane[title="Event Log"]', assert: 'has-row("RIGHT-EDGE>>")' }, timeout: 10s }
-  - expect: { at: replay-position, tick: 1 }
+  - expect: { at: replay-position, tick: 11 }

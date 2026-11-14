@@ -23,4 +23,4 @@ steps:
   - expect: { at: 'omnibox/option[label="apply_op"]', detail: "main.py:61" }
   - key: Enter
   - wait: { until: { at: 'editor[file="main.py"]', assert: "shows-line(61)" }, timeout: 30s }
-  - expect: { at: replay-position, assert: "before(42)" }
+  - wait: { until: { at: replay-position, assert: "before(42)" }, timeout: 30s }
