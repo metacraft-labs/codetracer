@@ -157,11 +157,7 @@ fn test_origin_rr_cpp_memcpy_forward() {
 // Test #8 + #9 — Rust canonical + clone forwarder.
 // ---------------------------------------------------------------------------
 
-#[test]
-#[ignore = "pending: end-to-end body not written; see tests/fixtures/origin/rust/simple_trivial_chain/ANSWERS.md"]
-fn test_origin_rr_rust_simple_trivial_chain() {
-    unimplemented_end_to_end("test_origin_rr_rust_simple_trivial_chain", "rust/simple_trivial_chain");
-}
+// `test_origin_rr_rust_simple_trivial_chain` is in the `rr` module below.
 
 #[test]
 #[ignore = "pending: end-to-end body not written; see tests/fixtures/origin/rust/clone_forwarder/ANSWERS.md"]
@@ -878,6 +874,54 @@ mod rr {
             chain.terminator.kind,
             TerminatorKind::ReadFromExternal,
             "direct origin probe should terminate at the writer thread boundary: {chain:?}"
+        );
+    }
+
+    /// Test #8: the Rust canonical chain, end to end through the DAP server,
+    /// asked the way the desktop asks it (at the current stop).
+    /// `tests/fixtures/origin/rust/simple_trivial_chain/ANSWERS.md`:
+    /// `c = b`, `b = a`, `a = 10`, ending at the literal.
+    #[test]
+    fn test_origin_rr_rust_simple_trivial_chain() {
+        let ct_native_replay = rr_backend("rust_simple_trivial_chain");
+        require_tool("rustc", "--version", "rust_simple_trivial_chain");
+        let recording = record_rr_fixture_with_regenerate("rust", "simple_trivial_chain", "main.rs", &ct_native_replay);
+        let breakpoint_line = fixture_line_containing("rust", "simple_trivial_chain", "main.rs", "println!");
+
+        let mut client = test_harness::DapStdioTestClient::start().expect("DAP stdio client should start");
+        client
+            .initialize_and_launch_rr(&recording, &ct_native_replay)
+            .expect("RR DAP launch should succeed");
+        client
+            .set_breakpoint(&recording.source_path, breakpoint_line)
+            .expect("set breakpoint at the println");
+        let location = client.continue_to_breakpoint().expect("continue to the println");
+        assert_eq!(location.line, breakpoint_line as i64, "stopped at the wrong line: {location:?}");
+
+        let chain = send_rr_origin_chain_request(&mut client, "c", -1, DEFAULT_ORIGIN_MAX_HOPS);
+        let shape: Vec<(OriginKind, i64, String)> = chain
+            .hops
+            .iter()
+            .map(|hop| (hop.kind, hop.location.line, hop.source_expr.clone()))
+            .collect();
+        let line_of = |needle: &str| fixture_line_containing("rust", "simple_trivial_chain", "main.rs", needle) as i64;
+        assert_eq!(
+            chain.hops.iter().map(|hop| hop.location.line).collect::<Vec<_>>(),
+            vec![line_of("let c: i32 = b"), line_of("let b: i32 = a"), line_of("let a: i32 = 10")],
+            "the chain walks c <- b <- a: hops={shape:?} terminator={:?} {:?}",
+            chain.terminator.kind,
+            chain.terminator.expression
+        );
+        assert_eq!(
+            chain.hops.iter().map(|hop| hop.kind).collect::<Vec<_>>(),
+            vec![OriginKind::TrivialCopy, OriginKind::TrivialCopy, OriginKind::Literal],
+            "hops={shape:?}"
+        );
+        assert_eq!(
+            chain.terminator.kind,
+            TerminatorKind::Literal,
+            "the chain ends at the literal 10: {:?}",
+            chain.terminator
         );
     }
 
