@@ -762,8 +762,8 @@ proc reviewLoopSlideHandler(functionKey: string; loopIndex: int;
   result = proc(iteration: int) = onIteration(functionKey, loopIndex, iteration)
 
 proc bindReviewLoopSliders*(componentId: int; zones: seq[ReviewLoopZone];
-    onIteration: proc(functionKey: string; loopIndex, iteration: int)): bool =
-  ## Bind each rendered slider; return whether a later layout pass is needed.
+    onIteration: proc(functionKey: string; loopIndex, iteration: int)) =
+  ## Bind each rendered slider: now, or the moment its zone is laid out.
   for zone in zones:
     let container = document.getElementById(cstring(
       fmt"review-loop-slider-{componentId}-{zone.functionKey}-{zone.loopIndex}"))
@@ -775,10 +775,9 @@ proc bindReviewLoopSliders*(componentId: int; zones: seq[ReviewLoopZone];
       continue
     # `total - 1`: the range is over ITERATION INDICES, and the debugger's
     # `maxLoopIteration` is the same 0-based bound.
-    if not ensureFlowLoopSlider(element, zone.total - 1, zone.iteration,
-        reviewLoopSlideHandler(zone.functionKey, zone.loopIndex, onIteration)):
-      if zone.total > 1:
-        result = true
+    discard ensureFlowLoopSliderWhenLaidOut(element, zone.total - 1,
+      zone.iteration,
+      reviewLoopSlideHandler(zone.functionKey, zone.loopIndex, onIteration))
 
 proc scheduleLoopSliders(self: UnifiedDiffComponent; doc: DiffDocument;
                          attempt: int) =
@@ -788,31 +787,21 @@ proc scheduleLoopSliders(self: UnifiedDiffComponent; doc: DiffDocument;
   ## freshly registered view zone on a LATER frame, so during the tick in which
   ## `rebuildInvocationZones` builds one the slider's element has no box, and a
   ## noUiSlider constructed then is 0x2px and invisible. The debugger comes back
-  ## through `resizeFlowSlider`, driven by its own render pass and by an editor
-  ## resize observer; a review has neither, so it comes back on a timer.
+  ## through `resizeFlowSlider`, driven by its own render pass; a review has
+  ## none, so each slider waits for its own layout
+  ## (`ensureFlowLoopSliderWhenLaidOut`, a `ResizeObserver` on the element).
   ##
-  ## Bounded, and this matters: an unbounded retry against a tab that will
-  ## never lay out (it was closed, or GoldenLayout destroyed its DOM) is a
-  ## timer that runs forever.
-  ##
-  ## Twenty attempts over ~3s, not the eight over ~800ms it started at. The
-  ## shorter window was enough on an idle machine and not enough under load —
-  ## measured as an intermittent failure of "UD-3: the loop control carries the
-  ## debugger's dragged slider", which is exactly the shape of #562 (a slider
-  ## that exists sometimes) and must not be tuned by luck. The cost of the
-  ## longer window is a few more no-op ticks on a tab that will never lay out;
-  ## the cost of the shorter one is a control that is missing on a slow frame.
-  const MaxAttempts = 20
-  if attempt >= MaxAttempts:
-    return
+  ## This used to come back on a timer, twenty tries over ~3 s, and a zone
+  ## revealed by a context expansion under load was laid out after the last
+  ## try: the control kept its stepper and never got its slider. Waiting on
+  ## the layout itself has no deadline to miss, and nothing is left running
+  ## once the zone is gone (the observer drops an element that left the page).
+  discard attempt
   if not self.editorInitialized or self.editor.isNil:
     return
-  let pending = bindReviewLoopSliders(self.id, self.reviewLoopZonesFor(doc),
+  bindReviewLoopSliders(self.id, self.reviewLoopZonesFor(doc),
     proc(functionKey: string; loopIndex, iteration: int) =
       self.setLoopIterationTo(functionKey, loopIndex, iteration))
-  if pending:
-    discard windowSetTimeout(
-      proc() = self.scheduleLoopSliders(doc, attempt + 1), 150)
 
 proc rebuildInvocationZones(self: UnifiedDiffComponent; doc: DiffDocument) =
   ## Replace the whole set of in-editor controls — invocation selectors and loop

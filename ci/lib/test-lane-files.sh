@@ -1237,6 +1237,10 @@ test_lane_files() {
 		# Measuring a pane stays out of the browser's ResizeObserver delivery.
 		# Only a browser has that delivery loop; jsdom observes nothing.
 		echo src/frontend/tests/pane_measure_resize_loop_chromium_test.nim
+		# A review's loop slider is built when its control is laid out, however
+		# late that is: a ResizeObserver and a real layout, which only a
+		# browser has.
+		echo src/frontend/tests/flow_loop_slider_chromium_test.nim
 		# The desktop's shared editor (the `sharedEditor` developer setting):
 		# trusted clicks, an input method's composition, the accessibility
 		# tree a screen reader reads, a forced-colours theme — what only a

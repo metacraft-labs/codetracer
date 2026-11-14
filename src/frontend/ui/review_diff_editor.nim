@@ -1154,7 +1154,7 @@ proc scheduleReviewDeletedLineTokens*(current: proc(): ReviewDiffEditorRefs;
   ##      coloured (`mtk1 mtk23 mtk25 mtk34 mtk17` on that same line).
   ##
   ## Hence: wait for a zone to exist, and repaint it only if it is monochrome.
-  ## Bounded like `scheduleLoopSliders`, and self-verifying rather than fired
+  ## Bounded (20 tries ~150 ms apart), and self-verifying rather than fired
   ## blind — a nudge issued before the first render invalidates nothing, and a
   ## fixed point that keeps re-nudging would recompute the diff forever.
   const MaxAttempts = 20
