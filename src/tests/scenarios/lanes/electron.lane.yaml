@@ -251,10 +251,12 @@ applicable:
   - ../visual-replay/player-failure-shows-error.yaml
   # --- pw5 deepreview ---
   - ../deepreview/boundary-drag-reveals-what-it-crosses.yaml
+  - ../deepreview/boundary-is-operable-from-the-keyboard.yaml
   - ../deepreview/boundary-menu-expands-to-the-file-edge.yaml
   - ../deepreview/boundary-menu-offers-each-direction.yaml
   - ../deepreview/boundary-menu-opens-from-the-keyboard.yaml
   - ../deepreview/boundary-press-reveals-ten-lines.yaml
+  - ../deepreview/boundary-shift-enter-reveals-the-rest.yaml
   - ../deepreview/changed-files-list.yaml
   - ../deepreview/diff-lines-are-classified.yaml
   - ../deepreview/diff-tab-is-drawn-like-the-editor.yaml
