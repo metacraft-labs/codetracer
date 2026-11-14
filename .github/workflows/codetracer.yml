@@ -6289,6 +6289,11 @@ jobs:
             # HCR coordinator driver, the patchable-profile emitter and the in-target
             # agent the patchable Godot links.
             codetracer-flame-demo=220d7abd236c610b69f2d3900a0c0d2eae884416
+            # codetracer-visual-replay's config.nims puts both on its --path
+            # (ct_gfx_player's build); snapshot-codecs at visual-replay's
+            # repro.lock pin, image-diff at codetracer's.
+            codetracer-snapshot-codecs=53eda1fd83f6608f5e2f6f6553644e4115a3b29a
+            codetracer-image-diff=61cc773ba0d1a1b5d6e38d9a872bdd43fe2f9004
             reprobuild=9dbf4e710d7cc0b9a79a4bcd54c931afb6849dd0
             runquota=dev
 
@@ -6388,41 +6393,6 @@ jobs:
       # ``gfx_stream/ctfs_visual`` import and the build-license-ffi recipe all
       # resolve against those clones, so the former per-sibling resolve/clone
       # steps (and the trace-format symlink) are no longer needed.
-
-      - name: Clone codetracer-snapshot-codecs sibling
-        # Both legs: the macOS Playwright suite needs it, and so does the
-        # desktop scenario lane on nixos (MCR and visual-replay scenarios).
-        # codetracer-visual-replay's config.nims threads
-        # ``--path:../codetracer-snapshot-codecs/src`` into the Nim
-        # compile.  The build aborts with ``cannot open file:
-        # snapshot_codecs`` without this checkout.
-        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
-        with:
-          repo: metacraft-labs/codetracer-snapshot-codecs
-          ref: dev
-          path: ${{ github.workspace }}/../codetracer-snapshot-codecs
-          gh-token: ${{ steps.ci_token.outputs.token }}
-          submodules: 'false'
-
-      - name: Clone codetracer-image-diff sibling
-        # Both legs: the macOS Playwright suite needs it, and so does the
-        # desktop scenario lane on nixos (MCR and visual-replay scenarios).
-        # Companion sibling to codetracer-snapshot-codecs threaded via
-        # the same ``config.nims`` --path; without it ST-M3 test
-        # imports break the visual-replay build.
-        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
-        with:
-          repo: metacraft-labs/codetracer-image-diff
-          ref: dev
-          path: ${{ github.workspace }}/../codetracer-image-diff
-          gh-token: ${{ steps.ci_token.outputs.token }}
-          submodules: 'false'
-
-      # NOTE: Nix is installed by the ``Setup dev env`` step above (a fast
-      # no-op on the self-hosted aarch64-darwin runner, where nix is already
-      # on PATH). The former bespoke ``Install Nix (macOS, for ct_cli build)``
-      # step is therefore no longer needed; the visual-replay sibling builds
-      # below still drive each sibling's own ``nix develop`` flake.
 
       - name: Build ct-mcr via codetracer-native-recorder nix develop
         # Both legs: the macOS Playwright suite needs it, and so does the

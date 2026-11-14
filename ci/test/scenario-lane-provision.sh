@@ -29,8 +29,11 @@ native() {
 	# The binary only, in the backend's own shell. `just ensure-ct-native-replay`
 	# runs `just build` inside that shell, which has no `just` (exit 127 in CI,
 	# run 43599944806), and builds every target of the workspace besides.
-	(cd "$ws/codetracer-native-backend" && nix develop --no-write-lock-file --command \
-		cargo build --bin ct-native-replay)
+	# The git CLI for cargo's git dependencies (the private lldb-sys.rs): only
+	# it reads the job-wide GIT_CONFIG_KEY_n credential; cargo's own libgit2
+	# transport does not ("failed to authenticate", run 43624654566).
+	(cd "$ws/codetracer-native-backend" && CARGO_NET_GIT_FETCH_WITH_CLI=true \
+		nix develop --no-write-lock-file --command cargo build --bin ct-native-replay)
 	test -x "$ws/codetracer-native-backend/target/debug/ct-native-replay"
 	# shellcheck disable=SC2016 # expanded by the inner bash, in the recorder's shell
 	(cd "$ws/codetracer-beam-recorder" && nix develop --no-write-lock-file --command bash -c '
