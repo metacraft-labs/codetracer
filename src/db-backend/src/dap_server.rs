@@ -1122,10 +1122,10 @@ fn extract_thread_id_from_request(req: &dap::Request) -> Option<i64> {
 /// trace. The standard DAP requests keep it: their arguments carry a thread
 /// by definition, and `stackTrace` reads its inner part.
 fn without_routing_thread_id(mut req: dap::Request) -> dap::Request {
-    if req.command.starts_with("ct/") {
-        if let Some(arguments) = req.arguments.as_object_mut() {
-            arguments.remove("threadId");
-        }
+    if req.command.starts_with("ct/")
+        && let Some(arguments) = req.arguments.as_object_mut()
+    {
+        arguments.remove("threadId");
     }
     req
 }

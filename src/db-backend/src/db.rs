@@ -6685,16 +6685,22 @@ mod boundary_binding_name_tests {
 
     #[test]
     fn the_webassembly_recorders_boundary_names_are_recognised() {
-        for name in ["compute_balance:ret0", "compute_balance:arg1", "import #4:arg0", "f:ret12"] {
+        for name in [
+            "compute_balance:ret0",
+            "compute_balance:arg1",
+            "import #4:arg0",
+            "f:ret12",
+        ] {
             assert!(is_boundary_binding_name(name), "{name}");
         }
     }
 
     #[test]
     fn program_names_are_not_boundary_names() {
-        for name in ["__doc__", "balance", "Foo::BAR", "x:y", ":ret0", "f:ret", "f:retx", "f:arg-1", "a.b"] {
+        for name in [
+            "__doc__", "balance", "Foo::BAR", "x:y", ":ret0", "f:ret", "f:retx", "f:arg-1", "a.b",
+        ] {
             assert!(!is_boundary_binding_name(name), "{name}");
         }
     }
 }
-
