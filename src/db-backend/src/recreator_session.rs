@@ -273,6 +273,101 @@ fn replay_query_timeout() -> Duration {
         .unwrap_or_else(|| Duration::from_secs(10))
 }
 
+/// The longest a query waits for a worker that is still working (see
+/// [`WorkerProgress`]): `CODETRACER_REPLAY_QUERY_MAX_SECS`, 600 s by default.
+fn replay_query_ceiling() -> Duration {
+    std::env::var("CODETRACER_REPLAY_QUERY_MAX_SECS")
+        .ok()
+        .and_then(|raw| raw.parse::<u64>().ok())
+        .filter(|seconds| *seconds > 0)
+        .map(Duration::from_secs)
+        .unwrap_or_else(|| Duration::from_secs(600))
+}
+
+fn is_read_timeout(e: &std::io::Error) -> bool {
+    e.kind() == std::io::ErrorKind::WouldBlock || e.kind() == std::io::ErrorKind::TimedOut
+}
+
+/// Whether a replay worker that has not answered within the read timeout is
+/// still working on the query: the CPU time of its process tree (the worker,
+/// the rr it started and the program rr replays) grew since the last look.
+/// A worker that hangs (blocked, deadlocked) uses no CPU and is given up on
+/// at the read timeout, as before; a slow one is waited for, up to
+/// [`replay_query_ceiling`].
+///
+/// Linux reads the CPU times from `/proc`. Elsewhere a worker is never
+/// known to be working, so the read timeout alone decides, as before.
+struct WorkerProgress {
+    pid: Option<u32>,
+    last_cpu: Option<u64>,
+    ceiling: Duration,
+}
+
+impl WorkerProgress {
+    fn new(pid: Option<u32>) -> Self {
+        Self {
+            pid,
+            last_cpu: pid.and_then(process_tree_cpu_ticks),
+            ceiling: replay_query_ceiling(),
+        }
+    }
+
+    fn still_working(&mut self, waited: Duration) -> bool {
+        if waited >= self.ceiling {
+            return false;
+        }
+        let Some(now) = self.pid.and_then(process_tree_cpu_ticks) else {
+            return false;
+        };
+        let progressed = self.last_cpu.is_some_and(|before| now > before);
+        self.last_cpu = Some(now);
+        progressed
+    }
+}
+
+/// The user plus system CPU time, in clock ticks, of `pid` and every live
+/// process below it (`/proc/<pid>/stat` fields 14 and 15, children from
+/// `/proc/<pid>/task/<tid>/children`); `None` when `pid` is gone.
+#[cfg(target_os = "linux")]
+fn process_tree_cpu_ticks(pid: u32) -> Option<u64> {
+    let mut total = 0u64;
+    let mut pending = vec![pid];
+    let mut visited = 0usize;
+    while let Some(current) = pending.pop() {
+        visited += 1;
+        if visited > 4096 {
+            break;
+        }
+        let Ok(stat) = std::fs::read_to_string(format!("/proc/{current}/stat")) else {
+            if current == pid {
+                return None;
+            }
+            continue;
+        };
+        // The command name (field 2) is parenthesised and may hold spaces;
+        // the fields after its closing parenthesis start at field 3.
+        let Some(after_comm) = stat.rfind(')').map(|index| &stat[index + 1..]) else {
+            continue;
+        };
+        let fields: Vec<&str> = after_comm.split_whitespace().collect();
+        let ticks = |index: usize| fields.get(index).and_then(|field| field.parse::<u64>().ok()).unwrap_or(0);
+        total += ticks(11) + ticks(12);
+        if let Ok(tasks) = std::fs::read_dir(format!("/proc/{current}/task")) {
+            for task in tasks.flatten() {
+                if let Ok(children) = std::fs::read_to_string(task.path().join("children")) {
+                    pending.extend(children.split_whitespace().filter_map(|child| child.parse::<u32>().ok()));
+                }
+            }
+        }
+    }
+    Some(total)
+}
+
+#[cfg(not(target_os = "linux"))]
+fn process_tree_cpu_ticks(_pid: u32) -> Option<u64> {
+    None
+}
+
 fn replay_worker_startup_timeout() -> Duration {
     std::env::var("CODETRACER_REPLAY_WORKER_STARTUP_TIMEOUT_SECS")
         .ok()
@@ -844,6 +939,7 @@ impl ReplayWorker {
     pub fn dispatch_replay_query(&mut self, query: ReplayQuery) -> Result<String, Box<dyn Error>> {
         let raw_json = serde_json::to_string(&query)?;
 
+        let worker_pid = self.process.as_ref().map(Child::id);
         let Some(stream) = self.stream.as_mut() else {
             return Err(format!("the replay worker is not connected; cannot send: {raw_json}").into());
         };
@@ -862,10 +958,40 @@ impl ReplayWorker {
             ));
         }
 
-        let mut res = "".to_string();
         debug!("wait to read");
 
-        let read_result = BufReader::new(stream).read_line(&mut res);
+        // The read timeout is a bound on a worker that stopped working, not on
+        // a slow one: when it passes while the worker's process tree (the
+        // worker, rr and the replayed program) is still using CPU, the wait
+        // goes on, up to `replay_query_ceiling`. Killing a healthy worker for
+        // being slow lost the user's position: on a loaded host an rr
+        // `RunToEntry` or reverse continue took more than 10 s, the worker was
+        // stopped, and the next query (a value-origin walk) found no worker.
+        let mut progress = WorkerProgress::new(worker_pid);
+        let mut line = Vec::new();
+        let read_result = {
+            let mut reader = BufReader::new(stream);
+            loop {
+                match reader.read_until(b'\n', &mut line) {
+                    Err(e)
+                        if is_read_timeout(&e)
+                            && progress.still_working(Duration::from_millis(
+                                crate::wall_clock::monotonic_ms().saturating_sub(started_ms),
+                            )) =>
+                    {
+                        info!(
+                            "worker {}[{}] has not answered {} yet but is still working; waiting on",
+                            self.name,
+                            self.index,
+                            replay_query_kind(&raw_json)
+                        );
+                        continue;
+                    }
+                    other => break other,
+                }
+            }
+        };
+        let mut res = String::from_utf8_lossy(&line).into_owned();
         if let Err(e) = read_result {
             // Capture these before cleanup kills/reaps the worker: that time
             // is not part of the query wait, and its PID is lost on cleanup.
@@ -878,7 +1004,7 @@ impl ReplayWorker {
             // so it is closed and the worker stopped; the next query starts a
             // fresh one.
             self.abandon_connection();
-            let message = if e.kind() == std::io::ErrorKind::WouldBlock || e.kind() == std::io::ErrorKind::TimedOut {
+            let message = if is_read_timeout(&e) {
                 let message = format!(
                     "dispatch_replay_query timed out (configured timeout {query_timeout:?}; elapsed {elapsed:?}) \
                      waiting for worker {}[{}] pid {worker_pid:?} response to: {raw_json}",
