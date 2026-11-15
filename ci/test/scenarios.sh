@@ -162,6 +162,9 @@ run)
 	# and so does Electron at a 1-minute load above 100 (each lane says so too).
 	case "${flavour}" in
 	gpui) settle=(--settle-timeout 20000) ;;
+	# the terminal settles only once the application has read its input, which
+	# a loaded host can delay by seconds
+	terminal) settle=(--settle-timeout 15000) ;;
 	electron) settle=(--settle-timeout 15000) ;;
 	esac
 	"$(runner_of "${flavour}")" run "${scenario}" --pack "${S}/pack/codetracer.pack.yaml" \

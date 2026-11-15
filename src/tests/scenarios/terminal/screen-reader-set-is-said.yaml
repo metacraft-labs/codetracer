@@ -1,0 +1,22 @@
+scenario: 1
+name: terminal/screen-reader-set-is-said
+pack: codetracer
+summary: >-
+  With the screen-reader mode off, `:set screen-reader on` turns it on and
+  the status line keeps the command's own message (screen reader on); the
+  next focus change is then said, by the pane's name.
+stage:
+  - use: record-program
+    with: { program: calc }
+  - use: front-end-options
+    with: { options: { screen-reader: "off" } }
+  - use: open-recording
+    with: { width: 200, height: 50 }
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - chord: Ctrl+P
+  - type: ":set screen-reader on"
+  - key: Enter
+  - wait: { until: { at: status-line, assert: ['says("screen reader on")', 'says("screen-reader")'] }, timeout: 10s }
+  - key: F6
+  - wait: { until: { at: status-line, assert: ['says(": ")', 'lacks("screen reader on")'] }, timeout: 10s }
