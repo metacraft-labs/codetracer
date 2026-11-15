@@ -5269,6 +5269,18 @@ proc drawFocusOutline(r: GpuiRenderer) =
       r.setStyle(o, key, value)
     gTopEls.add o
 
+proc footerLabelsEnd*(): int =
+  ## Where the footer's docked labels end: past the last label of the bottom
+  ## strip. Not the strip's own rectangle, which runs the window's whole
+  ## width — what follows the labels (the build indicator, the status note)
+  ## placed after THAT was put past the window's right edge, so a refusal
+  ## the status line said was never seen.
+  for st in gGeom.strips:
+    if st.edge != leBottom or st.rect.isEmpty:
+      continue
+    for sl in st.slots:
+      result = max(result, sl.rect.x + sl.rect.w)
+
 proc drawFooter(r: GpuiRenderer) =
   ## PLAT-49 part B (finding 9): THE WINDOW'S FOOTER — its status bar, along
   ## the bottom, full width — as the desktop's `#status-base` (measured
@@ -5327,9 +5339,7 @@ proc drawFooter(r: GpuiRenderer) =
     let vm = gProblems.build
     let words = vm.statusIcon & " " & vm.statusText
     var bx = FooterFileInfoX + (if info.len > 0: FooterFileInfoPx + 16 else: 0)
-    for st in gGeom.strips:
-      if st.edge == leBottom and not st.rect.isEmpty:
-        bx = max(bx, st.rect.x + st.rect.w + 16)
+    bx = max(bx, footerLabelsEnd() + 16)
     let bw = groteskTextPx(words, 14.0) + 8
     gFooterBuildRect = PxRect(x: bx, y: rowY, w: bw, h: TabHeightPx)
     let b = absBox(r, gFooterBuildRect)
@@ -5373,9 +5383,7 @@ proc drawFooter(r: GpuiRenderer) =
     var noteX = gGeom.footer.x + FooterFileInfoX
     if info.len > 0:
       noteX = max(noteX, FooterFileInfoX + FooterFileInfoPx + 16)
-    for st in gGeom.strips:
-      if st.edge == leBottom and not st.rect.isEmpty:
-        noteX = max(noteX, st.rect.x + st.rect.w + 16)
+    noteX = max(noteX, footerLabelsEnd() + 16)
     var noteEnd = gGeom.footer.x + gGeom.footer.w - 8
     if not gSession.isNil:
       let lw = groteskTextPx(footerLocation(), 14.0)
@@ -8275,8 +8283,13 @@ proc cellHoverAt(r: GpuiRenderer; x, y: int) =
   armHoverTick()
 
 proc tickCellHover(r: GpuiRenderer): bool =
-  ## The clock: the tooltip shows once the pointer has rested 500 ms.
+  ## The clock: the tooltip shows once the pointer has rested 500 ms — not
+  ## while a right-click menu is open: the pointer rests on the cell the menu
+  ## was opened over, and the tooltip would cover the menu's entries.
   if not gCellHover.tick(hoverNowMs()):
+    return false
+  if gCtxMenu.open:
+    discard gCellHover.dismiss()
     return false
   showCellTooltip()
   drawTopBar(r)
@@ -10731,6 +10744,9 @@ proc afterMove(r: GpuiRenderer) =
   refreshReplayWindow(r)
 
 proc openContextMenuAt(r: GpuiRenderer; menu: ContextMenuModel; x, y: int) =
+  # a shown cell tooltip goes with it: the menu is what the press asked for
+  if gCellHover.dismiss():
+    gCellTooltip = @[]
   gCtxMenu.openAt(menu, y, x)
   traceGesture("context menu " & $menu.kind & " " & menu.labels.join("|"))
   drawTopBar(r)
