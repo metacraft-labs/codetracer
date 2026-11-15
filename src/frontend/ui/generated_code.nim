@@ -80,7 +80,7 @@ from ../viewmodel/viewmodels/generated_code_vm import
   noteCursorMoved, noteActiveTabChanged, noteSourceEdited
 
 from ../viewmodel/viewmodels/low_level_code_vm import LowLevelCodeVM,
-  showGeneratedListing, clearInstructions
+  showGeneratedListing, clearInstructions, setActiveOffset
 from ../viewmodel/store/types import StopLocation
 from ../viewmodel/viewmodels/nim_c_producer import isGeneratedNimC
 
@@ -318,8 +318,21 @@ proc recordedReadCandidates*(trace: Trace; path: string;
 proc followStopWithGeneratedC(data: Data; store: ReplayDataStore;
                               pane: LowLevelCodeVM)
 
+proc markStopCRow(pane: LowLevelCodeVM; cLine: int) =
+  ## A listing of the stop's own C file marks the stop's C line, which the
+  ## engine names (`StopLocation.cLine`; a C listing's rows are numbered by
+  ## their line). A Nim line maps to several C rows — a loop's header, its
+  ## body, a block opener the source map also gives the line — and the first
+  ## of them is often not where the program is stopped.
+  if pane.isNil or cLine <= 0:
+    return
+  for row in pane.instructions.val:
+    if row.offset == int64(cLine):
+      pane.setActiveOffset(int64(cLine))
+      return
+
 proc showRecordedGeneratedC(data: Data; t: GeneratedCodeTarget; path: string;
-                            line: int) =
+                            line: int; stopCLine = 0) =
   ## Debug mode: the C of the recording, read the way the desktop's editor
   ## reads the recording's files (`recordedReadCandidates`) — together with
   ## the nimcache files a `ct record` recording keeps beside it, which the
@@ -359,6 +372,7 @@ proc showRecordedGeneratedC(data: Data; t: GeneratedCodeTarget; path: string;
       if failure.len > 0:
         data.viewsApi.warnMessage(cstring(failure))
       else:
+        markStopCRow(session.lowLevelCodeVM, stopCLine)
         revealActiveGeneratedRow())
   if refused.len > 0:
     data.viewsApi.warnMessage(cstring(refused))
@@ -387,7 +401,8 @@ proc followStopWithGeneratedC(data: Data; store: ReplayDataStore;
         return
       var t: GeneratedCodeTarget
       if targetById(NimCTargetId, t):
-        showRecordedGeneratedC(data, t, stop.path, stop.line))
+        showRecordedGeneratedC(data, t, stop.path, stop.line,
+          (if stop.cPath.len > 0: stop.cLine else: 0)))
 
 type PendingNimCCompile = object
   ## Edit mode's compile in flight: the request the main process will answer,
