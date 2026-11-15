@@ -3,7 +3,7 @@
 # Refreshed with --record-control-hashes, gated by the
 # needle scan (§39a).
 2a798fae1408b2147eea9779d4726bd3dbbf8c778c41ecf3caaff20e8c858d40  src/frontend/viewmodel/viewmodels/table_overflow.nim
-95728ef45dc23d02341b5c8939c6f2ae5d595841fd9fb8594d958976b5bee55d  src/frontend/viewmodel/viewmodels/event_log_vm.nim
+75c008b2da091f77fed96996db91d7ad8cd44393c2e1c06705bb8444c5f7f32b  src/frontend/viewmodel/viewmodels/event_log_vm.nim
 60e1d468f4b73668f3f4ebad6913195151b66c472599c3240a17ea1e171e5c8f  src/common/value_presentation/surfaces.nim
 643fb879cc5dbd70044dc62566bed49974e2ffd5103497069e607fa4cab2451d  src/frontend/viewmodel/keymap/cua_keymap.nim
 1b9acaca3df38bc17c99e63c4f6e0d0e088ab37f1d7f67309937e5529242af9c  src/frontend/viewmodel/keymap/emacs_keymap.nim
