@@ -22,7 +22,8 @@ import std/[math, strutils]
 import ../../../common/pointer_shape
 import isonim/core/[signals, computation]
 import nim_agents_isonim_viewmodels/agent_harbor/initiative_tabs_vm
-from ../../viewmodel/views/agent_harbor_words import stateSuffix
+from ../../viewmodel/views/agent_harbor_words import stateSuffix, HiddenSeverity,
+  hiddenRecordings, hiddenBarTabs, chipTitle
 
 import ./ah_theme
 import ./ah_session_views
@@ -106,6 +107,9 @@ proc recordingsWidth(vm: InitiativeTabStripVM; buttons: RecordingButtons): float
   # `.ah-rec-more`: 4px in on each side, no outline, 2px after the last button.
   if buttons.hidden > 0:
     result += float(RecordingButtonGapPx) + textWidth("+" & $buttons.hidden, CaptionPx) + 8.0
+    # The mark and its 4px gap when what it hides failed or is missing.
+    if hiddenRecordings(buttons.hiddenStates).severity != hsNone:
+      result += float(MarkPx + 4)
 
 proc initiativeTabContent(vm: InitiativeTabStripVM; tab: StripTab): float =
   ## Its content's width, unclamped and unrounded: what a browser takes as
@@ -179,6 +183,7 @@ proc drawRecordingButton(r: GpuiRenderer; p: AhPalette; vm: InitiativeTabStripVM
   r.tag(result, "recording", $rb.number)
   r.tag(result, "recording-state", $rb.state)
   r.tag(result, "recording-active", $rb.active)
+  r.tag(result, "recording-label", $rb.number & stateSuffix(rb.state))
   r.tag(result, "tooltip", rb.tooltip)
   # Every recording button is outlined (`.ah-rec-button`, 1px in the
   # primary border role); loading dashes it, a failed one is outlined in
@@ -285,14 +290,27 @@ proc drawBarTab(r: GpuiRenderer; p: AhPalette; vm: InitiativeTabStripVM;
           # the active tab's fill in Light too). The web draws that outline
           # as an inset shadow, inside its 4px padding; a GPUI border takes
           # room, so the padding is 3px and the box is the web's width.
+          # It takes the most severe state of what it hides: a failed
+          # recording gives it the failure mark and the error colour, a
+          # missing one the warning mark (`.ah-rec-more.ah-att-*`).
+          let h = hiddenRecordings(buttons.hiddenStates)
           let moreBorder = if p.mode == dmDark: p.borderPrimary else: p.textCaption
           let more = r.box(pairs = [("height", "18px"), ("items", "center"),
+                                    ("gap", "4px"),
                                     ("padding-left", "3px"), ("padding-right", "3px"),
                                     ("rounded", "4px"), ("border-width", "1px"),
                                     ("border-color", moreBorder), ("flex-shrink", "0")])
-          r.appendChild(more, r.text("+" & $buttons.hidden, CaptionPx, p.textLabel,
-                                     shrink = false))
+          case h.severity
+          of hsFailed: r.appendChild(more, r.mark(p.markOf(saFailed)))
+          of hsNeedsInput: r.appendChild(more, r.mark(p.markOf(saNeedsInput)))
+          of hsNone: discard
+          let ink = if h.severity == hsFailed: p.textError else: p.textLabel
+          let words = r.text("+" & $buttons.hidden, CaptionPx, ink, shrink = false)
+          r.tag(words, "ink", ink)
+          r.appendChild(more, words)
           r.tag(more, "recordings-hidden", $buttons.hidden)
+          r.tag(more, "recordings-hidden-severity", $h.severity)
+          r.tag(more, "tooltip", chipTitle(h, "recording", "recordings"))
           r.appendChild(switcher, more)
         r.appendChild(result, switcher)
   elif tab.session.originShort.len > 0:
@@ -636,20 +654,16 @@ proc drawInitiativeTabBar*(r: GpuiRenderer; host: GpuiElement;
                                        initiativeTabContent(vm, tabs[i])))
       x += fitted[k] + BarGapPx
     if overflow.len > 0:
-      var waits = 0
-      for i in overflow:
-        if tabs[i].kind == stkInitiative and tabs[i].state == isNeedsInput or
-            tabs[i].kind == stkSession and tabs[i].session.attention == saNeedsInput:
-          inc waits
+      let hidden = hiddenBarTabs(tabs, overflow)
       let target = vm
       # 8px from "+"; filled only while its menu is open.
-      let chip = r.drawOverflowChip(p, overflow.len, waits, proc() =
+      let chip = r.drawOverflowChip(p, hidden, proc() =
         target.overflowOpen.val = not target.overflowOpen.val, open = vm.overflowOpen.val)
       # The chip's margin and the gap, with "+"'s own margin after them.
       r.setStyle(chip, "margin-right", $(BarChipGapPx - BarGapPx - AddMarginPx) & "px")
       r.tag(chip, "bar-overflow", $overflow.len)
       r.appendChild(line, chip)
-      chipRight = x + overflowChipWidth(overflow.len, waits > 0)
+      chipRight = x + overflowChipWidth(hidden)
     if vm.elsewhereCount > 0:
       r.appendChild(controls, r.drawElsewhere(p, vm))
       # Where the elsewhere control's anchor ends (the chip and its 4px

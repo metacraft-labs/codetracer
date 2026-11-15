@@ -27,20 +27,19 @@
 ##      lines read in order). A text the web shows whole — a head band's
 ##      source, summary and caveat, a panel's error, the initiative bar's
 ##      right-hand group, a milestone's meta — must be drawn whole, wrapped
-##      where a line cannot hold it, and a tree node's title is never cut
-##      while its counts are drawn (`cutTextProblems`). A text that lists
-##      its parts with " · " wraps only after a separator
-##      (`separatorWrapProblems`); a tree node's counts are not cut where
-##      flowing `n/m` inline would keep them whole, and on the docked
-##      panel's wide layout they end flush with the ages
+##      where a line cannot hold it, and a tree node's title is cut only
+##      once its counts have given up their room, down to `CountsLeast`
+##      cells (`cutTextProblems`). A text that lists its parts with " · "
+##      wraps only after a separator (`separatorWrapProblems`); a tree
+##      node's counts are always drawn, end flush with the rows' ages, and
+##      are cut only where the line cannot hold them whole
 ##      (`sessionHeaderProblems`); the popup's heading shows a title whole
 ##      wherever the bar can hold it (`popupHeadingProblems`); an overflow
 ##      menu keeps two cells before its origin (`menuGapProblems`), and a
 ##      `+N` menu (the session strip's and the initiative bar's) hangs from
 ##      its chip: its last cell under the chip's, shifted only as far as the
 ##      terminal requires on either side (`menuHangProblems`). A cut
-##      text never leaves a space or a dangling separator before its "…",
-##      and a tree header's counts are cut only between their parts
+##      text never leaves a space or a dangling separator before its "…"
 ##      (`cutEdgeProblems`); a title keeps two cells before the status word
 ##      right-aligned on its line (`statusGapProblems`), and a text cut
 ##      before whatever follows it on its line (an age, a fleet column, the
@@ -100,7 +99,17 @@ from ../../../viewmodel/views/agent_harbor_words import tabLabelOf, filterCount,
   countsText, activityLineIsError
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads this spelling.
-const ExpectedAssertions = 120
+const ExpectedAssertions = 125
+
+const CountsLeast = 8
+  ## The least room a tree node's counts give up to before its title is
+  ## cut: a part cut inside, `1 needs…` (the brief's session-list node rule:
+  ## the counts are cut with an ellipsis before the title is, and never
+  ## disappear).
+
+const TitleLeast = 4
+  ## The least a cut tree-node title keeps (three glyphs and its "…"): only
+  ## below this may its counts give up more than `CountsLeast`.
 
 const
   Stem = "app_agent_harbor_story"
@@ -178,9 +187,12 @@ const NeverCutFacts = [
 proc cutTextProblems(m: AhTuiMount): seq[string] =
   ## Every text the web never cuts is drawn whole, and so is each
   ## milestone's meta line on the progress panel (it wraps under its title,
-  ## or its column grows). A title is never cut while its own counts
-  ## survive: a group header gives the counts up first. The bar's
-  ## right-hand group (badge, label, position, auto-switch) shows no "…".
+  ## or its column grows). A tree node's title is cut only once its counts
+  ## are down to `CountsLeast` cells (or their whole width, when shorter):
+  ## the counts give up their room first, and while the title keeps more
+  ## than `TitleLeast` cells they give up no more than that (they are drawn
+  ## at least as `elide` cuts them to `CountsLeast`). The bar's right-hand group
+  ## (badge, label, position, auto-switch) shows no "…".
   proc whole(m: AhTuiMount; n: AhNode; fact: string; into: var seq[string]) =
     if n.row >= m.rows or n.attr(fact).len == 0: return
     let drawn = m.drawnText(n)
@@ -201,9 +213,17 @@ proc cutTextProblems(m: AhTuiMount): seq[string] =
     let t = g.first("title")
     let counts = g.first("counts")
     if t.isNil or counts.isNil or counts.width == 0 or t.row >= m.rows: continue
-    if m.drawnText(t) != t.attr("title"):
+    let least = min(CountsLeast, widthOf(counts.attr("counts")))
+    if m.drawnText(t) != t.attr("title") and widthOf(m.drawnText(counts)) > least:
       result.add "the group title '" & t.attr("title") & "' is cut to '" & m.drawnText(t) &
-                 "' while its counts '" & m.drawnText(counts) & "' are drawn"
+                 "' while its counts '" & m.drawnText(counts) & "' have room to give (" &
+                 $widthOf(m.drawnText(counts)) & " cells, " & $least & " at least)"
+    let floor = widthOf(elide(counts.attr("counts"), least))
+    if m.drawnText(t) != t.attr("title") and widthOf(m.drawnText(t).strip) > TitleLeast and
+        widthOf(m.drawnText(counts).strip) < floor:
+      result.add "the counts '" & counts.attr("counts") & "' of '" & t.attr("title") &
+                 "' are cut to '" & m.drawnText(counts).strip & "', below their least (" &
+                 $floor & " cells), while the title keeps '" & m.drawnText(t).strip & "'"
   for n in m.canvas.root.all("controls"):
     let drawn = m.canvas.grid.cellsText(n.row, n.col, n.width)
     if Ellipsis in drawn:
@@ -240,14 +260,12 @@ proc separatorWrapProblems(m: AhTuiMount): seq[string] =
           break
 
 proc sessionHeaderProblems(m: AhTuiMount): seq[string] =
-  ## The session tree's group headers. On the docked panel's wide layout
-  ## every header's counts end flush with the rows' ages. Elsewhere `n/m`
-  ## stands in a column only as a preference: a header whose counts are cut
-  ## (or hidden) although they would show whole with `n/m` two cells after
-  ## its title must flow inline.
+  ## The session tree's group headers, as the web lays them out: every
+  ## header's counts are drawn (never left out), right-aligned to end flush
+  ## with the rows' ages, and are cut only where the line cannot hold the
+  ## title whole, `n/m` and the counts whole, each a cell apart.
   if m.surface != "agent-harbor-session-list": return
   let view = m.view
-  let docked = view.attr("mode") == $tsmDocked and m.cols * CellPx >= 768
   var ageEnds: seq[int]
   for a in view.all("age"):
     if a.row < m.rows and a.width > 0: ageEnds.add a.col + a.width
@@ -255,25 +273,24 @@ proc sessionHeaderProblems(m: AhTuiMount): seq[string] =
     if g.row >= m.rows: continue
     let t = g.first("title")
     let counts = g.first("counts")
-    if docked:
-      if counts.isNil or counts.width == 0: continue
-      for e in ageEnds:
-        if counts.col + counts.width != e:
-          result.add "the counts '" & counts.attr("counts") & "' of '" & t.attr("title") &
-                     "' end at column " & $(counts.col + counts.width) &
-                     ", the ages at " & $e
-          break
+    if t.isNil or counts.isNil: continue   # the viewmodel comparison holds the counts' text
+    let value = counts.attr("counts")
+    let drawn = m.drawnText(counts)
+    if value.len > 0 and (counts.width == 0 or drawn.len == 0):
+      result.add "the counts '" & value & "' of '" & t.attr("title") & "' are not drawn"
       continue
-    let value = if counts.isNil: g.first("counts-hidden").attr("counts-hidden")
-                else: counts.attr("counts")
-    let whole = not counts.isNil and counts.width > 0 and m.drawnText(counts) == value
-    if whole or value.len == 0: continue
-    let progress = g.first("progress")
-    let progressCells = if progress.isNil: 0 else: widthOf(progress.attr("progress")) + 1
-    let lineEnd = g.col + g.width - 1
-    if t.col + widthOf(t.attr("title")) + 2 + progressCells + widthOf(value) <= lineEnd:
-      result.add "the counts '" & value & "' of '" & t.attr("title") &
-                 "' are cut in the n/m column, but fit inline after the title"
+    for e in ageEnds:
+      if counts.col + counts.width != e:
+        result.add "the counts '" & value & "' of '" & t.attr("title") &
+                   "' end at column " & $(counts.col + counts.width) & ", the ages at " & $e
+        break
+    if drawn != value:
+      let progress = g.first("progress")
+      let progressCells = if progress.isNil: 0 else: widthOf(progress.attr("progress")) + 1
+      let lineEnd = g.col + g.width - 1
+      if t.col + widthOf(t.attr("title")) + 1 + progressCells + widthOf(value) <= lineEnd:
+        result.add "the counts '" & value & "' of '" & t.attr("title") & "' are cut to '" &
+                   drawn & "', though the line holds the header whole"
 
 proc popupHeadingProblems(m: AhTuiMount): seq[string] =
   ## The popup's heading never cuts a title the web shows whole: wherever
@@ -330,8 +347,7 @@ proc menuHangProblems(m: AhTuiMount): seq[string] =
 proc cutEdgeProblems(m: AhTuiMount): seq[string] =
   ## A text cut to its cells never leaves a space, or a separator (" · ",
   ## " — ") the cut made last, before its "…": the cell is spent on nothing
-  ## and the "…" stands apart like a word. A tree header's counts are cut
-  ## only between their parts (`2 need input…`, never `2 need…`).
+  ## and the "…" stands apart like a word.
   for fact in DrawnTextFacts:
     for n in m.canvas.root.all(fact):
       if n.row >= m.rows or n.width == 0 or n.height > 1: continue
@@ -342,14 +358,6 @@ proc cutEdgeProblems(m: AhTuiMount): seq[string] =
       if kept.endsWith(" ") or kept.endsWith(" \xC2\xB7") or kept.endsWith(" \xE2\x80\x94"):
         result.add "the " & fact & " '" & n.attr(fact) & "' is cut to '" & drawn &
                    "', a space or a separator before its \"…\""
-      if fact == "counts":
-        var whole = false
-        var acc = ""
-        for part in n.attr(fact).split(Middot):
-          acc = if acc.len == 0: part else: acc & Middot & part
-          if acc == kept: whole = true
-        if not whole:
-          result.add "the counts '" & n.attr(fact) & "' are cut inside a part: '" & drawn & "'"
 
 const CutGapFacts = @DrawnTextFacts & @["initiative-title", "col"]
   ## The texts that may be cut before a next column: every one-row text
@@ -410,6 +418,11 @@ proc commonState(view: AhNode; state: AsyncState; error: string;
   if state in {asIdle, asLoading}:
     problems.expect("loading notice", view.values("notice").contains("loading"), true)
 
+proc severityOf(failed, waiting: bool): string =
+  ## What a `+N` chip says of what it hides, by the brief's rule written out
+  ## here: a failure over a wait over nothing.
+  if failed: "failed" elif waiting: "needs-input" else: "none"
+
 proc checkSessionTabs(view: AhNode; vm: SessionTabStripVM): seq[string] =
   result.expect("state", view.attr("state"), stateName(vm.state.val))
   commonState(view, vm.state.val, vm.error.val, result)
@@ -444,6 +457,12 @@ proc checkSessionTabs(view: AhNode; vm: SessionTabStripVM): seq[string] =
   result.expect("active tab", active, vm.activeId.val)
   result.expect("+N chip", view.values("overflow"),
                 if overflow.len > 0: @[$overflow.len] else: @[])
+  var failed, waiting = false
+  for i in overflow:
+    failed = failed or tabs[i].attention == saFailed
+    waiting = waiting or tabs[i].attention == saNeedsInput
+  result.expect("+N chip's status", view.values("overflow-severity"),
+                if overflow.len > 0: @[severityOf(failed, waiting)] else: @[])
   var menuItems: seq[string]
   let menu = view.first("menu")
   if menu != nil: menuItems = menu.values("menu-item")
@@ -480,6 +499,13 @@ proc checkSessionList(view: AhNode; vm: SessionTabStripVM): seq[string] =
   for g in view.values("group"):
     if g.len > 0: drawnGroups.add g
   result.expect("initiative nodes", drawnGroups, namedGroups)
+  # Every node's counts, none left out (the node of a group with no session
+  # in a counted state draws none).
+  var counts: seq[string]
+  if headers:
+    for g in vm.groups:
+      if countsText(g.counts).len > 0: counts.add countsText(g.counts)
+  result.expect("node counts", view.values("counts"), counts)
   result.expect("rows", view.values("row"), rows)
   if not collapsed:
     result.expect("summary", view.values("summary"), @[vm.summaryText])
@@ -508,14 +534,37 @@ proc checkInitiativeTabs(view: AhNode; vm: InitiativeTabStripVM): seq[string] =
   result.expect("active tab", active, vm.activeTab.val)
   result.expect("+N chip", view.values("overflow"),
                 if layout.overflow.len > 0: @[$layout.overflow.len] else: @[])
-  var wantedNumbers, wantedHidden: seq[string]
+  var barFailed, barWaiting = false
+  for i in layout.overflow:
+    let t = tabs[i]
+    if t.kind == stkInitiative:
+      barFailed = barFailed or t.state == isBlocked
+      barWaiting = barWaiting or t.state == isNeedsInput
+    else:
+      barFailed = barFailed or t.session.attention == saFailed
+      barWaiting = barWaiting or t.session.attention == saNeedsInput
+  result.expect("+N chip's status", view.values("overflow-severity"),
+                if layout.overflow.len > 0: @[severityOf(barFailed, barWaiting)] else: @[])
+  var wantedNumbers, wantedHidden, wantedHiddenStatus: seq[string]
   for t in tabs:
     if t.active and t.kind == stkInitiative:
       let buttons = vm.recordingButtonsOf(t.id)
       for b in buttons.buttons: wantedNumbers.add $b.number
-      if buttons.hidden > 0: wantedHidden.add $buttons.hidden
+      if buttons.hidden > 0:
+        wantedHidden.add $buttons.hidden
+        # The hidden recordings are those after the shown ones' numbers.
+        var shown: seq[int]
+        for b in buttons.buttons: shown.add b.number
+        var failed, missing = false
+        for e in vm.recordingButtonsOf(t.id, maxShown = high(int)).buttons:
+          if e.number notin shown:
+            failed = failed or e.state == rsFailed
+            missing = missing or e.state == rsMissing
+        wantedHiddenStatus.add severityOf(failed, missing)
   result.expect("recording buttons", view.values("recording"), wantedNumbers)
   result.expect("recordings behind +N", view.values("recordings-hidden"), wantedHidden)
+  result.expect("recordings' +N status", view.values("recordings-hidden-severity"),
+                wantedHiddenStatus)
   let popupId = vm.popupId.val
   result.expect("popup", view.values("popup"), if popupId.len > 0: @[popupId] else: @[])
   if popupId.len > 0:
@@ -1150,16 +1199,36 @@ suite "CTF-P1b: the comparisons can fail":
     ck problems.join(" ").contains("where the web shows it whole")
     m.dispose()
 
-  test "a group title cut while its counts survive is reported":
+  test "a group title cut while its counts have room to give is reported":
+    # A header whose counts are drawn wider than their least: its title,
+    # read as longer than drawn, is cut while the counts kept room.
     let m = mountStory(storyOf("agent-harbor-session-list", "sidebar"), 45, 56, dmDark)
     ck cutTextProblems(m).len == 0
     var tagged = false
     for g in m.view.all("group"):
-      if not tagged and not g.first("counts").isNil and g.first("counts").width > 0:
+      let counts = g.first("counts")
+      if not tagged and not counts.isNil and counts.width > CountsLeast:
         g.first("title").tag("title", g.first("title").attr("title") & " that runs on")
         tagged = true
     ck tagged
-    ck cutTextProblems(m).join(" ").contains("while its counts")
+    ck cutTextProblems(m).join(" ").contains("have room to give")
+    m.dispose()
+
+  test "counts cut below their least while the title keeps more than its own is reported":
+    # A header whose title is cut: its counts, drawn narrower than their
+    # least, gave up room the title should have given.
+    let m = mountStory(storyOf("agent-harbor-session-list", "sidebar"), 45, 56, dmDark)
+    ck cutTextProblems(m).len == 0
+    var spoiled = false
+    for g in m.view.all("group"):
+      let t = g.first("title")
+      let counts = g.first("counts")
+      if not spoiled and not t.isNil and not counts.isNil and counts.width > 2 and
+          m.drawnText(t) != t.attr("title"):
+        counts.width = 2
+        spoiled = true
+    ck spoiled
+    ck cutTextProblems(m).join(" ").contains("below their least")
     m.dispose()
 
   test "a focused tab underlined in the text's colour is a style mismatch":
@@ -1215,24 +1284,37 @@ suite "CTF-P1b: the round-2 layout checks can fail":
     ck separatorWrapProblems(m).join(" ").contains("wraps inside a part")
     m.dispose()
 
-  test "docked counts that do not end at the ages are reported":
-    let m = mountStory(storyOf("agent-harbor-session-list", "docked"), 180, 56, dmDark)
+  test "counts that do not end at the ages are reported":
+    for (fixture, cols) in [("docked", 180), ("sidebar", 45)]:
+      let m = mountStory(storyOf("agent-harbor-session-list", fixture), cols, 56, dmDark)
+      ck sessionHeaderProblems(m).len == 0
+      let counts = m.view.first("counts")
+      counts.col -= 1
+      ck sessionHeaderProblems(m).join(" ").contains("the ages at")
+      m.dispose()
+
+  test "counts left out of a tree node are reported":
+    let m = mountStory(storyOf("agent-harbor-session-list", "sidebar"), 45, 56, dmDark)
     ck sessionHeaderProblems(m).len == 0
     let counts = m.view.first("counts")
-    counts.col -= 1
-    ck sessionHeaderProblems(m).join(" ").contains("the ages at")
+    counts.width = 0
+    ck sessionHeaderProblems(m).join(" ").contains("are not drawn")
     m.dispose()
 
-  test "counts cut in the column although they fit inline are reported":
-    let m = mountStory(storyOf("agent-harbor-session-list", "sidebar"), 45, 56, dmDark)
+  test "counts cut although the line holds the header whole are reported":
+    # A header drawn whole, read as if its counts were shorter than drawn:
+    # its counts are then cut where the line holds them.
+    let m = mountStory(storyOf("agent-harbor-session-list", "docked"), 180, 56, dmDark)
     ck sessionHeaderProblems(m).len == 0
     var spoiled = false
     for g in m.view.all("group"):
-      if not spoiled and g.attr("inline") == "true":
-        g.first("counts").width = 0
+      let counts = g.first("counts")
+      if not spoiled and not counts.isNil and Middot in counts.attr("counts") and
+          m.drawnText(counts) == counts.attr("counts"):
+        counts.tag("counts", counts.attr("counts") & Middot & "1 queued")
         spoiled = true
     ck spoiled
-    ck sessionHeaderProblems(m).join(" ").contains("fit inline")
+    ck sessionHeaderProblems(m).join(" ").contains("though the line holds the header whole")
     m.dispose()
 
   test "a popup title cut where the bar holds its heading is reported":
@@ -1349,7 +1431,7 @@ suite "CTF-P1b: the round-3 checks can fail":
   # each drawing is spoiled the way the check guards against and must be
   # reported.
 
-  test "a space before a cut text's \"…\", and counts cut inside a part, are reported":
+  test "a space before a cut text's \"…\" is reported":
     let m = mountStory(storyOf("agent-harbor-session-list", "sidebar"), 45, 56, dmDark)
     ck cutEdgeProblems(m).len == 0
     var t: AhNode
@@ -1360,16 +1442,6 @@ suite "CTF-P1b: the round-3 checks can fail":
     m.canvas.grid.paint(t.row, t.col + t.width - 2, " " & Ellipsis, st)
     ck cutEdgeProblems(m).join(" ").contains("a space or a separator before")
     m.dispose()
-    let m2 = mountStory(storyOf("agent-harbor-session-list", "sidebar"), 45, 56, dmDark)
-    var counts: AhNode
-    for n in m2.view.all("counts"):
-      if counts.isNil and Middot in n.attr("counts") and n.width >= 3: counts = n
-    ck not counts.isNil
-    m2.canvas.grid.paint(counts.row, counts.col, "2" & Ellipsis,
-                         m2.canvas.grid.styleAt(counts.row, counts.col))
-    counts.width = 2
-    ck cutEdgeProblems(m2).join(" ").contains("cut inside a part")
-    m2.dispose()
 
   test "a title against its status word is reported":
     let m = mountStory(storyOf("agent-harbor-initiative-tabs", "popup"), 180, 56, dmDark)

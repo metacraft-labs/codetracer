@@ -28,7 +28,7 @@
 ## a click on a button or its key (space play / pause, `n` step, `[` and `]`
 ## the previous and next named moment, `0` rewind) controls it, and the
 ## runtime's idle hook pumps the clock and repaints when it moved.
-## `--moment` opens it at one of its scenario's named moments (an unknown
+## `--moment` opens it at one of its named moments (`storyMomentNames`) (an unknown
 ## name, or a story that is not a playback story, is a usage error, 2).
 ##
 ## `--list` prints every story id of the section and exits; `--captures`
@@ -94,7 +94,7 @@ when isMainModule:
         var moments = @[""]
         if a.moments:
           if not isPlaybackStory(story.surface, story.fixture): continue
-          moments = playbackScenario(playbackScenarioNameOf(story.fixture)).momentNames
+          moments = storyMomentNames(story.surface, story.fixture)
         for moment in moments:
           for (size, _, _) in TuiSizes:
             for theme in ["dark", "light"]:
@@ -115,7 +115,7 @@ when isMainModule:
         stderr.writeLine("app_agent_harbor_story: --moment names a moment of a playback " &
                          "story; " & a.story & " is not one")
         return 2
-      let names = playbackScenario(playbackScenarioNameOf(story.fixture)).momentNames
+      let names = storyMomentNames(story.surface, story.fixture)
       if a.moment notin names:
         stderr.writeLine("app_agent_harbor_story: " & a.story & " has no moment named '" &
                          a.moment & "' (its moments: " & names.join(", ") & ")")

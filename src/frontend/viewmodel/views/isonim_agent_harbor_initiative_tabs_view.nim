@@ -298,18 +298,13 @@ proc renderAgentHarborInitiativeTabBar*[R, N](r: R; vm: InitiativeTabStripVM): N
           r.appendRendered(bar, renderSessionTab(r, vm, tabs[i]))
       if line.overflow.len > 0:
         let target = vm
-        # A hidden tab that needs the reader marks the chip, as in the
-        # session strip.
-        var hiddenWaits = 0
-        for i in line.overflow:
-          if tabs[i].kind == stkInitiative and tabs[i].state == isNeedsInput or
-              tabs[i].kind == stkSession and tabs[i].session.attention == saNeedsInput:
-            inc hiddenWaits
+        # The chip takes the most severe status of the tabs it hides, as
+        # in the session strip (`hiddenBarTabs`).
+        let hidden = hiddenBarTabs(tabs, line.overflow)
         let chip = ui(r):
           tdiv(class = SessionTabOverflowClass & " ah-tab-overflow-count" &
-                       (if hiddenWaits > 0: " ah-att-needs-input" else: ""),
-               title = $line.overflow.len & " more tabs" &
-                       (if hiddenWaits > 0: ", " & $hiddenWaits & " needing input" else: ""),
+                       (if hidden.severity != hsNone: " ah-att-" & $hidden.severity else: ""),
+               title = chipTitle(hidden, "tab", "tabs"),
                onclick = proc() = target.overflowOpen.val = not target.overflowOpen.val):
             text "+" & $line.overflow.len
         r.appendRendered(bar, chip)

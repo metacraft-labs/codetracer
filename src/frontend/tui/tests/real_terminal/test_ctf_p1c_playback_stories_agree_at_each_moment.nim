@@ -71,11 +71,13 @@
 ##      by definition (Step moves the head to the next entry's time, Rewind
 ##      returns to the first frame, Play and Pause change the state).
 ##
-## And every named moment must change what it names: `MomentChanges`, written
-## by hand from the scenarios' scripts, lists the surfaces each moment's
-## entries change, and a story over such a surface must show other facts
-## (less the bar's readout) than at the moment before; every moment names a
-## surface of a story over its scenario.
+## And every story's moments must change it: `MomentChanges`, written by hand
+## from the scenarios' scripts, lists the surfaces each moment's entries
+## visibly change. A story's moment list (`storyMomentNames`, from the
+## scenario's views) must be exactly the moments that name its surface, in
+## time order, and at each of them the story must show other facts (less the
+## bar's readout) than at the moment before it on its list; every moment
+## names a surface of a story over its scenario.
 ##
 ## THE ORACLE IS NOT ONE HOST AGAINST ITSELF. At every moment the three hosts
 ## are held to each other, and at the moments `SpotChecks` names the facts
@@ -182,6 +184,16 @@ proc fact[N](root: N; name: string): string =
 
 proc activeMark(active: string): string = (if active == "true": " active" else: "")
 
+proc stateMark(label: string): string =
+  ## The state mark a recording button's drawn label carries after its
+  ## number (`1 …` loading, `2 ✕` failed, `3 ?` missing), as ` marked <mark>`;
+  ## "" for a bare number. The active button keeps its mark too: the active
+  ## recording shows that it is still loading until it is ready.
+  var rest = label.strip
+  while rest.len > 0 and rest[0] in Digits: rest = rest[1 .. ^1]
+  rest = rest.strip
+  if rest.len > 0: " marked " & rest else: ""
+
 proc drawnFacts[N](view: N; surface: string): seq[string] =
   ## The facts a GPUI or terminal drawing of `surface` shows, in drawing
   ## order, one line each (the same lines `webFacts` reads off the web).
@@ -191,12 +203,13 @@ proc drawnFacts[N](view: N; surface: string): seq[string] =
     for t in view.all("tab"):
       result.add "tab " & t.fact("label") & " [" & t.attr("attention") & "]" &
                  activeMark(t.attr("active"))
-    for o in view.all("overflow"): result.add "+N " & o.attr("overflow")
+    for o in view.all("overflow"):
+      result.add "+N " & o.attr("overflow") & " [" & o.attr("overflow-severity") & "]"
   of "agent-harbor-session-list":
     result.add "summary " & view.fact("summary")
     for g in view.all("folded"):
-      result.add "group " & g.fact("title") &
-                 (if g.attr("folded") == "true": " folded" else: "")
+      result.add "group " & g.fact("title") & " | " & g.fact("progress") & " | " &
+                 g.fact("counts") & (if g.attr("folded") == "true": " folded" else: "")
     for row in view.all("row"):
       result.add "row " & row.fact("title") & " | " & row.fact("status") & " [" &
                  row.attr("attention") & "]" & activeMark(row.attr("active"))
@@ -209,7 +222,10 @@ proc drawnFacts[N](view: N; surface: string): seq[string] =
                  activeMark(t.attr("active"))
     for b in view.all("recording"):
       result.add "recording " & b.attr("recording") & " " & b.attr("recording-state") &
-                 activeMark(b.attr("recording-active"))
+                 activeMark(b.attr("recording-active")) & stateMark(b.attr("recording-label"))
+    for m in view.all("recordings-hidden"):
+      result.add "recordings +" & m.attr("recordings-hidden") & " [" &
+                 m.attr("recordings-hidden-severity") & "]"
     for e in view.all("elsewhere"): result.add "elsewhere " & e.attr("elsewhere")
     for i in view.all("inbox"): result.add "inbox " & i.attr("inbox")
   of "agent-harbor-initiatives":
@@ -279,11 +295,14 @@ proc webFacts(view: MockNode; surface: string): seq[string] =
       result.add "tab " & t.textOf(SessionTabLabelClass) & " [" & t.tokenAfter("ah-att-") & "]" &
                  (if t.hasClass("active"): " active" else: "")
     for o in view.byClass("ah-tab-overflow-count"):
-      result.add "+N " & o.textContent.strip(chars = {'+'})
+      let severity = o.tokenAfter("ah-att-")
+      result.add "+N " & o.textContent.strip(chars = {'+'}) & " [" &
+                 (if severity.len > 0: severity else: "none") & "]"
   of "agent-harbor-session-list":
     result.add "summary " & view.textOf("ah-session-list-summary")
     for g in view.byClass("ah-session-group-header"):
-      result.add "group " & g.textOf("ah-session-group-title") &
+      result.add "group " & g.textOf("ah-session-group-title") & " | " &
+                 g.textOf("ah-tab-progress") & " | " & g.textOf("ah-session-group-counts") &
                  (if g.textOf("ah-session-group-fold") == "\xE2\x96\xB8": " folded" else: "")
     for row in view.byClass("ah-session-row"):
       result.add "row " & row.textOf("ah-session-row-title") & " | " &
@@ -307,7 +326,11 @@ proc webFacts(view: MockNode; surface: string): seq[string] =
         if c.startsWith("ah-rec-") and c notin ["ah-rec-button", "ah-rec-active"]:
           state = c["ah-rec-".len .. ^1]
       result.add "recording " & number & " " & state &
-                 (if b.hasClass("ah-rec-active"): " active" else: "")
+                 (if b.hasClass("ah-rec-active"): " active" else: "") & stateMark(b.textContent)
+    for m in view.byClass("ah-rec-more"):
+      let severity = m.tokenAfter("ah-att-")
+      result.add "recordings " & m.textContent & " [" &
+                 (if severity.len > 0: severity else: "none") & "]"
     for e in view.byClass("ah-elsewhere-count"): result.add "elsewhere " & e.textContent
     for i in view.byClass("ah-inbox-position"): result.add "inbox " & i.textContent
   of "agent-harbor-initiatives":
@@ -371,7 +394,8 @@ type
 let section = agentHarborSection()
 let gr = GpuiRenderer()
 
-proc mountWeb(story: CodeTracerStory; clock: ClockBase; moment = ""): WebMount =
+proc mountWeb(story: CodeTracerStory; clock: ClockBase; moment = "";
+              widthPx = LaptopW): WebMount =
   ## `storybook_components.mountAgentHarborVM` + `mountPlaybackChrome`, on
   ## the mock DOM (see the header).
   let r = MockRenderer()
@@ -384,7 +408,7 @@ proc mountWeb(story: CodeTracerStory; clock: ClockBase; moment = ""): WebMount =
     case story.surface
     of "agent-harbor-session-tabs":
       let vm = createSessionTabsStoryVM(story.fixture, pb)
-      vm.stripWidthPx.val = LaptopW
+      vm.stripWidthPx.val = widthPx
       m.view = renderAgentHarborTabStrip[MockRenderer, MockNode](r, vm)
       disposeVm = proc() = vm.dispose()
     of "agent-harbor-session-list":
@@ -393,7 +417,7 @@ proc mountWeb(story: CodeTracerStory; clock: ClockBase; moment = ""): WebMount =
       disposeVm = proc() = vm.dispose()
     of "agent-harbor-initiative-tabs":
       let vm = createInitiativeTabsStoryVM(story.fixture, pb)
-      vm.stripWidth.val = LaptopW
+      vm.stripWidth.val = widthPx
       m.view = renderAgentHarborInitiativeTabBar[MockRenderer, MockNode](r, vm)
       disposeVm = proc() = vm.dispose()
     of "agent-harbor-initiatives":
@@ -541,16 +565,17 @@ let SpotChecks: seq[SpotCheck] = @[
     "summary 5 sessions" & Dot & "4 running" & Dot & "1 failed",
     "row " & Migration & " | failed [failed]"]),
   ("agent-harbor-session-list", "importer-removed", @[
-    "summary 4 sessions" & Dot & "1 running" & Dot & "1 failed"]),
+    "summary 4 sessions" & Dot & "1 running" & Dot & "1 failed" & Dot & "2 ended"]),
   # The initiative bar over initiative-run: its n/m and its recordings,
   # numbered in the order they appeared, the first active.
   ("agent-harbor-initiative-tabs", "", @[
     "tab Telemetry upload retries | 0/3 [working] active"]),
   ("agent-harbor-initiative-tabs", "trace-loading", @[
-    "tab Telemetry upload retries | 1/3 [working] active", "recording 1 loading active"]),
+    "tab Telemetry upload retries | 1/3 [working] active",
+    "recording 1 loading active marked \xE2\x80\xA6"]),
   ("agent-harbor-initiative-tabs", "trace-ready", @["recording 1 ready active"]),
   ("agent-harbor-initiative-tabs", "recording-fails", @[
-    "recording 1 ready active", "recording 2 failed"]),
+    "recording 1 ready active", "recording 2 failed marked \xE2\x9C\x95"]),
   ("agent-harbor-initiative-tabs", "recording-reloaded", @[
     "tab Telemetry upload retries | 2/3 [working] active",
     "recording 1 ready active", "recording 2 ready", "recording 3 ready"]),
@@ -604,10 +629,11 @@ proc momentName(moment: string): string =
 # What each named moment changes, written out by hand from the scenarios'
 # scripts (nim-agents-isonim-viewmodels `playback_scenarios.nim`): the
 # surfaces whose drawing the moment's entries must visibly change. A moment
-# names at least one surface of a story over its scenario, and every story
-# whose surface it names must show something else than at the moment before
-# (its facts, less the bar's readout), or the moment is one a reader cannot
-# see happen.
+# names at least one surface of a story over its scenario; a story's moments
+# are exactly those that name its surface; and at each of them the story
+# must show something else than at the moment before it on its list (its
+# facts, less the bar's readout), or the moment is one a reader cannot see
+# happen.
 const
   Strip = "agent-harbor-session-tabs"
   List = "agent-harbor-session-list"
@@ -619,17 +645,22 @@ const
 let MomentChanges: seq[tuple[moment: string; surfaces: seq[string]]] = @[
   # front-ends: a session's state moves its tab, its row in the list and in
   # the fleet, and its line in the route cache's Initiatives row when it
-  # works for the route cache (the migration, the port).
-  ("new-session", @[Strip, List, Fleet]),
+  # works for the route cache (the migration, the port, the benchmark, which
+  # joins the row when it starts). The route cache's milestone moves the
+  # Initiatives row and the list's group header (`n/m`); the config session
+  # logs a line at the same moment, which its fleet row shows. The
+  # importer's removal moves the Initiatives header's count of sessions in
+  # no initiative.
+  ("new-session", @[Strip, List, Fleet, Panel]),
   ("port-asks", @[Strip, List, Fleet, Panel]),
-  ("bench-asks", @[Strip, List, Fleet]),
+  ("bench-asks", @[Strip, List, Fleet, Panel]),
   ("port-answered", @[Strip, List, Fleet, Panel]),
   ("migration-fails", @[Strip, List, Fleet, Panel]),
   ("config-answered", @[Strip, List, Fleet]),
-  ("milestone-done", @[Panel]),
+  ("milestone-done", @[List, Fleet, Panel]),
   ("importer-ends", @[Strip, List, Fleet]),
   ("port-completes", @[Strip, List, Fleet, Panel]),
-  ("importer-removed", @[Strip, List, Fleet]),
+  ("importer-removed", @[Strip, List, Fleet, Panel]),
   # initiative-run: milestones move the bar's n/m and the progress panel;
   # recordings move the bar's recording buttons; the session's end ends the
   # initiative's tab.
@@ -648,11 +679,23 @@ proc changesOf(moment: string): seq[string] =
   for c in MomentChanges:
     if c.moment == moment: return c.surfaces
 
+proc listProblems(story: CodeTracerStory): seq[string] =
+  ## The story's moment list against `MomentChanges`: it must name exactly
+  ## the scenario's moments that name the story's surface, in time order.
+  let scenario = playbackScenario(playbackScenarioNameOf(story.fixture))
+  var wanted: seq[string]
+  for name in scenario.momentNames:
+    if story.surface in changesOf(name): wanted.add name
+  let listed = storyMomentNames(story.surface, story.fixture)
+  if listed != wanted:
+    result.add storybookId(section, story) & ": its moments are " & listed.join(", ") &
+      ", but the moments that change it are " & wanted.join(", ")
+
 proc momentChangeProblems(story: CodeTracerStory;
                           seen: seq[(string, seq[string])]): seq[string] =
-  ## Every moment of `seen` (the web's facts at each moment going forward,
-  ## the bar's readout first) that names the story's surface and shows the
-  ## same as the moment before it.
+  ## Every moment of `seen` (the web's facts at each of the story's moments
+  ## going forward, the bar's readout first) that names the story's surface
+  ## and shows the same as the moment before it on the story's list.
   for i in 1 .. seen.high:
     let (name, facts) = seen[i]
     if story.surface notin changesOf(name): continue
@@ -811,10 +854,15 @@ suite "CTF-P1c: the three hosts agree at every named moment":
   test "test_ctf_p1c_playback_stories_agree_at_each_moment":
     var failures: seq[string]
     var compared = 0
+    var expectedCompared = 0
+      ## Opened, each moment forward, each but the last back, the first
+      ## frame back, and each moment and the first frame opened directly.
     var spotted = 0
     for story in playbackStories():
-      let names = playbackScenario(playbackScenarioNameOf(story.fixture)).momentNames
-      ck names.len == 10
+      let names = storyMomentNames(story.surface, story.fixture)
+      ck names.len > 0
+      failures.add listProblems(story)
+      expectedCompared += 3 * names.len + 2
       var h = mount(story)
       var seen: seq[(string, seq[string])]
         ## What the web showed at each moment going forward.
@@ -878,7 +926,7 @@ suite "CTF-P1c: the three hosts agree at every named moment":
       echo "Playback stories whose hosts disagree (" & $failures.len & "):\n  " &
         failures.join("\n  ")
     ck failures.len == 0
-    ck compared >= MinimumPlaybackStories * 31
+    ck compared == expectedCompared
     ck spotted >= SpotChecks.len
     echo "  compared ", compared, " moments (", spotted, " with hand-written facts)"
 
@@ -887,12 +935,16 @@ suite "CTF-P1c: the three hosts agree at every named moment":
     # written below is a screen held to the in-process drawing at its moment.
     var failures: seq[string]
     var shown = 0
+    var expectedShown = 0
+      ## The first frame and each of the story's moments, at every size and
+      ## in both modes.
     var written = 0
     var playback = 0
     for story in playbackStories():
       inc playback
       let id = storybookId(section, story)
-      let names = playbackScenario(playbackScenarioNameOf(story.fixture)).momentNames
+      let names = storyMomentNames(story.surface, story.fixture)
+      expectedShown += (names.len + 1) * TuiSizes.len * 2
       for name in @[""] & names:
         for (sizeName, cols, rows) in TuiSizes:
           for mode in [dmDark, dmLight]:
@@ -921,7 +973,8 @@ suite "CTF-P1c: the three hosts agree at every named moment":
       echo "Moments the story host shows otherwise on a terminal (" & $failures.len & "):\n  " &
         failures.join("\n  ")
     ck failures.len == 0
-    ck shown >= MinimumPlaybackStories * 11 * TuiSizes.len * 2
+    ck shown + failures.len == expectedShown
+    ck shown >= MinimumPlaybackStories * 5 * TuiSizes.len * 2
     if captureOut.len > 0:
       # One capture per story, named moment, size and mode, none skipped.
       ck written == (shown + failures.len) - playback * TuiSizes.len * 2
@@ -1348,6 +1401,79 @@ suite "CTF-P1c: the terminal's milestone band is the web's":
     ck banded > 0
     for p in problems: echo "  ", p
     ck problems.len == 0
+
+suite "CTF-P1c: a +N chip takes the most severe status of what it hides":
+  # At sidebar width the session strip hides the failed migration behind
+  # its `+N` at migration-fails, and the initiative bar hides the failed
+  # agent session recording behind the recordings' `+N` at recording-fails
+  # (hand-written from the scenarios). In every host the chip must say
+  # failed: its status, its failure mark, its words in the error colour and
+  # its accessible name; the moment before, it says nothing of the sort.
+  proc storyOf(surface: string): CodeTracerStory =
+    for story in playbackStories():
+      if story.surface == surface: return story
+    doAssert false, "no playback story over " & surface
+
+  proc chipsAt(story: CodeTracerStory; moment: string): seq[string] =
+    ## Each host's chip as `<host> <status> | <accessible name>`, and in
+    ## the terminal and GPUI its mark's colour and its words' colour.
+    let web = mountWeb(story, newTestClock(), moment, widthPx = 360)
+    let chipClass = if story.surface == "agent-harbor-session-tabs": "ah-tab-overflow-count"
+                    else: "ah-rec-more"
+    for c in web.view.byClass(chipClass):
+      let status = c.tokenAfter("ah-att-")
+      result.add "web " & (if status.len > 0: status else: "none") & " | " &
+                 c.attributes.getOrDefault("title")
+    web.dispose()
+    let (count, severity) = if story.surface == "agent-harbor-session-tabs":
+                              ("overflow", "overflow-severity")
+                            else: ("recordings-hidden", "recordings-hidden-severity")
+    gpui_reset_tree()
+    let g = gr.mountAgentHarborStoryGpui(story.surface, story.fixture, 360, LaptopH, dmDark,
+                                         "", newTestClock(), moment)
+    let p = ahPalette(dmDark)
+    for c in g.view.all(count):
+      var marks: seq[string]
+      for m in c.all("mark"): marks.add m.attr("mark")
+      let ink = c.first("ink")
+      result.add "GPUI " & c.attr(severity) & " | " & c.attr("tooltip") &
+                 " | mark " & marks.join(",") &
+                 (if marks.len > 0 and marks[0] == p.markOf(saFailed).colour: " (failed)" else: "") &
+                 (if not ink.isNil and ink.attr("ink") == p.textError:
+                    " | words in the error colour" else: "")
+    g.dispose()
+    let t = mountStory(story, 45, LaptopRows, dmDark, newTestClock(), moment)
+    for c in t.view.all(count):
+      var marks: seq[string]
+      for m in c.all("mark"): marks.add m.attr("mark")
+      let ink = t.canvas.grid.styleAt(c.row, c.col + c.width - 2).fg
+      result.add "terminal " & c.attr(severity) & " | " & c.attr("tooltip") &
+                 " | mark " & marks.join(",") &
+                 (if marks.len > 0 and marks[0] == p.markOf(saFailed).colour: " (failed)" else: "") &
+                 (if ink == p.textError: " | words in the error colour" else: "")
+    t.dispose()
+
+  test "a failed hidden tab or recording marks the chip failed, in every host":
+    let p = ahPalette(dmDark)
+    let failedMark = " | mark " & p.markOf(saFailed).colour & " (failed)" &
+                     " | words in the error colour"
+    for (surface, before, at, title) in [
+        ("agent-harbor-session-tabs", "port-answered", "migration-fails",
+         "more tabs, 1 failed"),
+        ("agent-harbor-initiative-tabs", "trace-ready", "recording-fails",
+         "1 more recording, 1 failed to load")]:
+      let story = storyOf(surface)
+      let then = chipsAt(story, before)
+      let now = chipsAt(story, at)
+      checkpoint surface & " at " & before & ": " & then.join("; ")
+      checkpoint surface & " at " & at & ": " & now.join("; ")
+      ck now.len == 3
+      for line in then: ck "failed" notin line.split(" | ")[0]
+      ck now.len == 3 and now[0].startsWith("web failed | ") and title in now[0]
+      ck now.len == 3 and now[1].startsWith("GPUI failed | ") and title in now[1] and
+        now[1].endsWith(failedMark)
+      ck now.len == 3 and now[2].startsWith("terminal failed | ") and title in now[2] and
+        now[2].endsWith(failedMark)
 
 suite "CTF-P1c: assertion count":
   test "every assertion ran":

@@ -1,10 +1,10 @@
  Sessions  ⚲ ✕
  SESSIONS
- 40 sessions · 6 need input ·
- 8 idle · 16 running · 2 failed
+ 40 sessions · 6 need input · 8 idle ·
+ 16 running · 4 queued · 2 failed · 4 ended
  invented working set: 40 sessions over
  5 initiatives
- ▾ ● Telemetry upload retries   1/4
+ ▾ ● Telemetry upload retries 1/4 2 need in…
  ● Retry telemetry uploads with expone…  now
    needs input CodeTracer · Claude 2.1.0…
    assistant: Should the old behaviour stay…
@@ -26,7 +26,7 @@
  ● Cap the telemetry retry budget per h…  1m
    completed CodeTracer · Opencode 0.6.1…
    assistant: Finished; the tests pass.
- ▾ ● Settings redesign          3/8
+ ▾ ● Settings redesign 3/8 2 need input · 2…
  ● Add search to the settings page       now
    needs input CLI · Opencode 0.6.1 · host-b
    assistant: Should the old behaviour stay…
@@ -48,7 +48,7 @@
  ● Add keyboard navigation to the setti…  1m
    completed TUI · Grok 1.2.0 · host-e
    assistant: Finished; the tests pass.
- ▾ ● Release 3.0               5/12
+ ▾ ● Release 3.0 5/12 2 need input · 1 idle…
  ● Trim the 3.0 release bundle under 4…  now
    needs input WebUI · Grok 1.2.0 · host-c
    assistant: Should the old behaviour stay…

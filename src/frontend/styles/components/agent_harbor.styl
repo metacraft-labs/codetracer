@@ -1655,6 +1655,28 @@ AH_MARK = 0.5rem
     border-radius: 50%
     background: colors-ui-icon-warning-primary
 
+// A `+N` chip takes the most severe status of what it hides: a failure
+// gives it the error colour and a failure mark (the session strip's, the
+// initiative bar's and the recording switcher's chips alike).
+.ah-tab-strip .ah-tab-overflow-count.ah-att-failed,
+.ah-rec-more.ah-att-failed,
+.ah-rec-more.ah-att-needs-input
+  gap: 0.25rem
+
+  &::before
+    content: ""
+    width: AH_MARK
+    height: AH_MARK
+    border-radius: 50%
+    background: colors-ui-icon-error-primary
+
+.ah-tab-strip .ah-tab-overflow-count.ah-att-failed,
+.ah-rec-more.ah-att-failed
+  color: colors-ui-text-error-primary !important
+
+.ah-rec-more.ah-att-needs-input::before
+  background: colors-ui-icon-warning-primary
+
 // Notices are outlined, not filled: a filled one read as the active tab.
 .ah-tab-strip .session-tab.ah-tab-notice
   background-color: transparent

@@ -3273,1158 +3273,6 @@
         }
       }
     },
-    "agent-harbor-initiative-progress-playback-at-recording-fails-laptop-dark": {
-      "moment": "recording-fails",
-      "viewport": {
-        "width": 1440,
-        "height": 900
-      },
-      "regions": {
-        "surface": {
-          "x": 4,
-          "y": 40,
-          "w": 1432,
-          "h": 832
-        },
-        "frame-header": {
-          "x": 4,
-          "y": 0,
-          "w": 1432,
-          "h": 32
-        },
-        "head": {
-          "x": 4,
-          "y": 40,
-          "w": 1432,
-          "h": 33
-        },
-        "rows": {
-          "x": 4,
-          "y": 73,
-          "w": 1432,
-          "h": 799
-        },
-        "milestone-row-first": {
-          "x": 4,
-          "y": 205,
-          "w": 1432,
-          "h": 26,
-          "index": 0
-        },
-        "milestone-row-last": {
-          "x": 4,
-          "y": 327,
-          "w": 1432,
-          "h": 26,
-          "index": 2
-        },
-        "milestone-bar": {
-          "x": 12,
-          "y": 81,
-          "w": 1416,
-          "h": 6
-        },
-        "milestone-legend": {
-          "x": 12,
-          "y": 93,
-          "w": 1416,
-          "h": 14
-        },
-        "playback-readout": {
-          "x": 332.515625,
-          "y": 877.5,
-          "w": 1099.484375,
-          "h": 18
-        },
-        "playback-moment": {
-          "x": 340.515625,
-          "y": 877.5,
-          "w": 85.453125,
-          "h": 18,
-          "cut": false
-        }
-      }
-    },
-    "agent-harbor-initiative-progress-playback-at-recording-fails-laptop-light": {
-      "moment": "recording-fails",
-      "viewport": {
-        "width": 1440,
-        "height": 900
-      },
-      "regions": {
-        "surface": {
-          "x": 4,
-          "y": 40,
-          "w": 1432,
-          "h": 832
-        },
-        "frame-header": {
-          "x": 4,
-          "y": 0,
-          "w": 1432,
-          "h": 32
-        },
-        "head": {
-          "x": 4,
-          "y": 40,
-          "w": 1432,
-          "h": 33
-        },
-        "rows": {
-          "x": 4,
-          "y": 73,
-          "w": 1432,
-          "h": 799
-        },
-        "milestone-row-first": {
-          "x": 4,
-          "y": 205,
-          "w": 1432,
-          "h": 26,
-          "index": 0
-        },
-        "milestone-row-last": {
-          "x": 4,
-          "y": 327,
-          "w": 1432,
-          "h": 26,
-          "index": 2
-        },
-        "milestone-bar": {
-          "x": 12,
-          "y": 81,
-          "w": 1416,
-          "h": 6
-        },
-        "milestone-legend": {
-          "x": 12,
-          "y": 93,
-          "w": 1416,
-          "h": 14
-        },
-        "playback-readout": {
-          "x": 332.515625,
-          "y": 877.5,
-          "w": 1099.484375,
-          "h": 18
-        },
-        "playback-moment": {
-          "x": 340.515625,
-          "y": 877.5,
-          "w": 85.453125,
-          "h": 18,
-          "cut": false
-        }
-      }
-    },
-    "agent-harbor-initiative-progress-playback-at-recording-fails-sidebar-dark": {
-      "moment": "recording-fails",
-      "viewport": {
-        "width": 360,
-        "height": 900
-      },
-      "regions": {
-        "surface": {
-          "x": 4,
-          "y": 40,
-          "w": 352,
-          "h": 832
-        },
-        "frame-header": {
-          "x": 4,
-          "y": 0,
-          "w": 352,
-          "h": 32
-        },
-        "head": {
-          "x": 4,
-          "y": 40,
-          "w": 352,
-          "h": 59
-        },
-        "rows": {
-          "x": 4,
-          "y": 99,
-          "w": 352,
-          "h": 773
-        },
-        "milestone-row-first": {
-          "x": 4,
-          "y": 255,
-          "w": 352,
-          "h": 43,
-          "index": 0
-        },
-        "milestone-row-last": {
-          "x": 4,
-          "y": 411,
-          "w": 352,
-          "h": 43,
-          "index": 2
-        },
-        "milestone-bar": {
-          "x": 12,
-          "y": 107,
-          "w": 336,
-          "h": 6
-        },
-        "milestone-legend": {
-          "x": 12,
-          "y": 119,
-          "w": 336,
-          "h": 14
-        },
-        "playback-readout": {
-          "x": 140.671875,
-          "y": 877.5,
-          "w": 211.328125,
-          "h": 18
-        },
-        "playback-moment": {
-          "x": 148.671875,
-          "y": 877.5,
-          "w": 85.453125,
-          "h": 18,
-          "cut": false
-        }
-      }
-    },
-    "agent-harbor-initiative-progress-playback-at-recording-fails-sidebar-light": {
-      "moment": "recording-fails",
-      "viewport": {
-        "width": 360,
-        "height": 900
-      },
-      "regions": {
-        "surface": {
-          "x": 4,
-          "y": 40,
-          "w": 352,
-          "h": 832
-        },
-        "frame-header": {
-          "x": 4,
-          "y": 0,
-          "w": 352,
-          "h": 32
-        },
-        "head": {
-          "x": 4,
-          "y": 40,
-          "w": 352,
-          "h": 59
-        },
-        "rows": {
-          "x": 4,
-          "y": 99,
-          "w": 352,
-          "h": 773
-        },
-        "milestone-row-first": {
-          "x": 4,
-          "y": 255,
-          "w": 352,
-          "h": 43,
-          "index": 0
-        },
-        "milestone-row-last": {
-          "x": 4,
-          "y": 411,
-          "w": 352,
-          "h": 43,
-          "index": 2
-        },
-        "milestone-bar": {
-          "x": 12,
-          "y": 107,
-          "w": 336,
-          "h": 6
-        },
-        "milestone-legend": {
-          "x": 12,
-          "y": 119,
-          "w": 336,
-          "h": 14
-        },
-        "playback-readout": {
-          "x": 140.671875,
-          "y": 877.5,
-          "w": 211.328125,
-          "h": 18
-        },
-        "playback-moment": {
-          "x": 148.671875,
-          "y": 877.5,
-          "w": 85.453125,
-          "h": 18,
-          "cut": false
-        }
-      }
-    },
-    "agent-harbor-initiative-progress-playback-at-recording-reloaded-laptop-dark": {
-      "moment": "recording-reloaded",
-      "viewport": {
-        "width": 1440,
-        "height": 900
-      },
-      "regions": {
-        "surface": {
-          "x": 4,
-          "y": 40,
-          "w": 1432,
-          "h": 832
-        },
-        "frame-header": {
-          "x": 4,
-          "y": 0,
-          "w": 1432,
-          "h": 32
-        },
-        "head": {
-          "x": 4,
-          "y": 40,
-          "w": 1432,
-          "h": 33
-        },
-        "rows": {
-          "x": 4,
-          "y": 73,
-          "w": 1432,
-          "h": 799
-        },
-        "milestone-row-first": {
-          "x": 4,
-          "y": 205,
-          "w": 1432,
-          "h": 26,
-          "index": 0
-        },
-        "milestone-row-last": {
-          "x": 4,
-          "y": 292,
-          "w": 1432,
-          "h": 26,
-          "index": 2
-        },
-        "milestone-bar": {
-          "x": 12,
-          "y": 81,
-          "w": 1416,
-          "h": 6
-        },
-        "milestone-legend": {
-          "x": 12,
-          "y": 93,
-          "w": 1416,
-          "h": 14
-        },
-        "playback-readout": {
-          "x": 332.515625,
-          "y": 877.5,
-          "w": 1099.484375,
-          "h": 18
-        },
-        "playback-moment": {
-          "x": 340.515625,
-          "y": 877.5,
-          "w": 112.578125,
-          "h": 18,
-          "cut": false
-        }
-      }
-    },
-    "agent-harbor-initiative-progress-playback-at-recording-reloaded-laptop-light": {
-      "moment": "recording-reloaded",
-      "viewport": {
-        "width": 1440,
-        "height": 900
-      },
-      "regions": {
-        "surface": {
-          "x": 4,
-          "y": 40,
-          "w": 1432,
-          "h": 832
-        },
-        "frame-header": {
-          "x": 4,
-          "y": 0,
-          "w": 1432,
-          "h": 32
-        },
-        "head": {
-          "x": 4,
-          "y": 40,
-          "w": 1432,
-          "h": 33
-        },
-        "rows": {
-          "x": 4,
-          "y": 73,
-          "w": 1432,
-          "h": 799
-        },
-        "milestone-row-first": {
-          "x": 4,
-          "y": 205,
-          "w": 1432,
-          "h": 26,
-          "index": 0
-        },
-        "milestone-row-last": {
-          "x": 4,
-          "y": 292,
-          "w": 1432,
-          "h": 26,
-          "index": 2
-        },
-        "milestone-bar": {
-          "x": 12,
-          "y": 81,
-          "w": 1416,
-          "h": 6
-        },
-        "milestone-legend": {
-          "x": 12,
-          "y": 93,
-          "w": 1416,
-          "h": 14
-        },
-        "playback-readout": {
-          "x": 332.515625,
-          "y": 877.5,
-          "w": 1099.484375,
-          "h": 18
-        },
-        "playback-moment": {
-          "x": 340.515625,
-          "y": 877.5,
-          "w": 112.578125,
-          "h": 18,
-          "cut": false
-        }
-      }
-    },
-    "agent-harbor-initiative-progress-playback-at-recording-reloaded-sidebar-dark": {
-      "moment": "recording-reloaded",
-      "viewport": {
-        "width": 360,
-        "height": 900
-      },
-      "regions": {
-        "surface": {
-          "x": 4,
-          "y": 40,
-          "w": 352,
-          "h": 832
-        },
-        "frame-header": {
-          "x": 4,
-          "y": 0,
-          "w": 352,
-          "h": 32
-        },
-        "head": {
-          "x": 4,
-          "y": 40,
-          "w": 352,
-          "h": 59
-        },
-        "rows": {
-          "x": 4,
-          "y": 99,
-          "w": 352,
-          "h": 773
-        },
-        "milestone-row-first": {
-          "x": 4,
-          "y": 255,
-          "w": 352,
-          "h": 43,
-          "index": 0
-        },
-        "milestone-row-last": {
-          "x": 4,
-          "y": 376,
-          "w": 352,
-          "h": 43,
-          "index": 2
-        },
-        "milestone-bar": {
-          "x": 12,
-          "y": 107,
-          "w": 336,
-          "h": 6
-        },
-        "milestone-legend": {
-          "x": 12,
-          "y": 119,
-          "w": 336,
-          "h": 14
-        },
-        "playback-readout": {
-          "x": 140.671875,
-          "y": 877.5,
-          "w": 211.328125,
-          "h": 18
-        },
-        "playback-moment": {
-          "x": 148.671875,
-          "y": 877.5,
-          "w": 112.578125,
-          "h": 18,
-          "cut": false
-        }
-      }
-    },
-    "agent-harbor-initiative-progress-playback-at-recording-reloaded-sidebar-light": {
-      "moment": "recording-reloaded",
-      "viewport": {
-        "width": 360,
-        "height": 900
-      },
-      "regions": {
-        "surface": {
-          "x": 4,
-          "y": 40,
-          "w": 352,
-          "h": 832
-        },
-        "frame-header": {
-          "x": 4,
-          "y": 0,
-          "w": 352,
-          "h": 32
-        },
-        "head": {
-          "x": 4,
-          "y": 40,
-          "w": 352,
-          "h": 59
-        },
-        "rows": {
-          "x": 4,
-          "y": 99,
-          "w": 352,
-          "h": 773
-        },
-        "milestone-row-first": {
-          "x": 4,
-          "y": 255,
-          "w": 352,
-          "h": 43,
-          "index": 0
-        },
-        "milestone-row-last": {
-          "x": 4,
-          "y": 376,
-          "w": 352,
-          "h": 43,
-          "index": 2
-        },
-        "milestone-bar": {
-          "x": 12,
-          "y": 107,
-          "w": 336,
-          "h": 6
-        },
-        "milestone-legend": {
-          "x": 12,
-          "y": 119,
-          "w": 336,
-          "h": 14
-        },
-        "playback-readout": {
-          "x": 140.671875,
-          "y": 877.5,
-          "w": 211.328125,
-          "h": 18
-        },
-        "playback-moment": {
-          "x": 148.671875,
-          "y": 877.5,
-          "w": 112.578125,
-          "h": 18,
-          "cut": false
-        }
-      }
-    },
-    "agent-harbor-initiative-progress-playback-at-second-trace-ready-laptop-dark": {
-      "moment": "second-trace-ready",
-      "viewport": {
-        "width": 1440,
-        "height": 900
-      },
-      "regions": {
-        "surface": {
-          "x": 4,
-          "y": 40,
-          "w": 1432,
-          "h": 832
-        },
-        "frame-header": {
-          "x": 4,
-          "y": 0,
-          "w": 1432,
-          "h": 32
-        },
-        "head": {
-          "x": 4,
-          "y": 40,
-          "w": 1432,
-          "h": 33
-        },
-        "rows": {
-          "x": 4,
-          "y": 73,
-          "w": 1432,
-          "h": 799
-        },
-        "milestone-row-first": {
-          "x": 4,
-          "y": 205,
-          "w": 1432,
-          "h": 26,
-          "index": 0
-        },
-        "milestone-row-last": {
-          "x": 4,
-          "y": 327,
-          "w": 1432,
-          "h": 26,
-          "index": 2
-        },
-        "milestone-bar": {
-          "x": 12,
-          "y": 81,
-          "w": 1416,
-          "h": 6
-        },
-        "milestone-legend": {
-          "x": 12,
-          "y": 93,
-          "w": 1416,
-          "h": 14
-        },
-        "playback-readout": {
-          "x": 332.515625,
-          "y": 877.5,
-          "w": 1099.484375,
-          "h": 18
-        },
-        "playback-moment": {
-          "x": 340.515625,
-          "y": 877.5,
-          "w": 117.84375,
-          "h": 18,
-          "cut": false
-        }
-      }
-    },
-    "agent-harbor-initiative-progress-playback-at-second-trace-ready-laptop-light": {
-      "moment": "second-trace-ready",
-      "viewport": {
-        "width": 1440,
-        "height": 900
-      },
-      "regions": {
-        "surface": {
-          "x": 4,
-          "y": 40,
-          "w": 1432,
-          "h": 832
-        },
-        "frame-header": {
-          "x": 4,
-          "y": 0,
-          "w": 1432,
-          "h": 32
-        },
-        "head": {
-          "x": 4,
-          "y": 40,
-          "w": 1432,
-          "h": 33
-        },
-        "rows": {
-          "x": 4,
-          "y": 73,
-          "w": 1432,
-          "h": 799
-        },
-        "milestone-row-first": {
-          "x": 4,
-          "y": 205,
-          "w": 1432,
-          "h": 26,
-          "index": 0
-        },
-        "milestone-row-last": {
-          "x": 4,
-          "y": 327,
-          "w": 1432,
-          "h": 26,
-          "index": 2
-        },
-        "milestone-bar": {
-          "x": 12,
-          "y": 81,
-          "w": 1416,
-          "h": 6
-        },
-        "milestone-legend": {
-          "x": 12,
-          "y": 93,
-          "w": 1416,
-          "h": 14
-        },
-        "playback-readout": {
-          "x": 332.515625,
-          "y": 877.5,
-          "w": 1099.484375,
-          "h": 18
-        },
-        "playback-moment": {
-          "x": 340.515625,
-          "y": 877.5,
-          "w": 117.84375,
-          "h": 18,
-          "cut": false
-        }
-      }
-    },
-    "agent-harbor-initiative-progress-playback-at-second-trace-ready-sidebar-dark": {
-      "moment": "second-trace-ready",
-      "viewport": {
-        "width": 360,
-        "height": 900
-      },
-      "regions": {
-        "surface": {
-          "x": 4,
-          "y": 40,
-          "w": 352,
-          "h": 832
-        },
-        "frame-header": {
-          "x": 4,
-          "y": 0,
-          "w": 352,
-          "h": 32
-        },
-        "head": {
-          "x": 4,
-          "y": 40,
-          "w": 352,
-          "h": 59
-        },
-        "rows": {
-          "x": 4,
-          "y": 99,
-          "w": 352,
-          "h": 773
-        },
-        "milestone-row-first": {
-          "x": 4,
-          "y": 255,
-          "w": 352,
-          "h": 43,
-          "index": 0
-        },
-        "milestone-row-last": {
-          "x": 4,
-          "y": 411,
-          "w": 352,
-          "h": 43,
-          "index": 2
-        },
-        "milestone-bar": {
-          "x": 12,
-          "y": 107,
-          "w": 336,
-          "h": 6
-        },
-        "milestone-legend": {
-          "x": 12,
-          "y": 119,
-          "w": 336,
-          "h": 14
-        },
-        "playback-readout": {
-          "x": 140.671875,
-          "y": 877.5,
-          "w": 211.328125,
-          "h": 18
-        },
-        "playback-moment": {
-          "x": 148.671875,
-          "y": 877.5,
-          "w": 117.84375,
-          "h": 18,
-          "cut": false
-        }
-      }
-    },
-    "agent-harbor-initiative-progress-playback-at-second-trace-ready-sidebar-light": {
-      "moment": "second-trace-ready",
-      "viewport": {
-        "width": 360,
-        "height": 900
-      },
-      "regions": {
-        "surface": {
-          "x": 4,
-          "y": 40,
-          "w": 352,
-          "h": 832
-        },
-        "frame-header": {
-          "x": 4,
-          "y": 0,
-          "w": 352,
-          "h": 32
-        },
-        "head": {
-          "x": 4,
-          "y": 40,
-          "w": 352,
-          "h": 59
-        },
-        "rows": {
-          "x": 4,
-          "y": 99,
-          "w": 352,
-          "h": 773
-        },
-        "milestone-row-first": {
-          "x": 4,
-          "y": 255,
-          "w": 352,
-          "h": 43,
-          "index": 0
-        },
-        "milestone-row-last": {
-          "x": 4,
-          "y": 411,
-          "w": 352,
-          "h": 43,
-          "index": 2
-        },
-        "milestone-bar": {
-          "x": 12,
-          "y": 107,
-          "w": 336,
-          "h": 6
-        },
-        "milestone-legend": {
-          "x": 12,
-          "y": 119,
-          "w": 336,
-          "h": 14
-        },
-        "playback-readout": {
-          "x": 140.671875,
-          "y": 877.5,
-          "w": 211.328125,
-          "h": 18
-        },
-        "playback-moment": {
-          "x": 148.671875,
-          "y": 877.5,
-          "w": 117.84375,
-          "h": 18,
-          "cut": false
-        }
-      }
-    },
-    "agent-harbor-initiative-progress-playback-at-session-ends-laptop-dark": {
-      "moment": "session-ends",
-      "viewport": {
-        "width": 1440,
-        "height": 900
-      },
-      "regions": {
-        "surface": {
-          "x": 4,
-          "y": 40,
-          "w": 1432,
-          "h": 832
-        },
-        "frame-header": {
-          "x": 4,
-          "y": 0,
-          "w": 1432,
-          "h": 32
-        },
-        "head": {
-          "x": 4,
-          "y": 40,
-          "w": 1432,
-          "h": 33
-        },
-        "rows": {
-          "x": 4,
-          "y": 73,
-          "w": 1432,
-          "h": 799
-        },
-        "milestone-row-first": {
-          "x": 4,
-          "y": 183,
-          "w": 1432,
-          "h": 26,
-          "index": 0
-        },
-        "milestone-row-last": {
-          "x": 4,
-          "y": 235,
-          "w": 1432,
-          "h": 26,
-          "index": 2
-        },
-        "milestone-bar": {
-          "x": 12,
-          "y": 81,
-          "w": 1416,
-          "h": 6
-        },
-        "milestone-legend": {
-          "x": 12,
-          "y": 93,
-          "w": 1416,
-          "h": 14
-        },
-        "playback-readout": {
-          "x": 332.515625,
-          "y": 877.5,
-          "w": 1099.484375,
-          "h": 18
-        },
-        "playback-moment": {
-          "x": 340.515625,
-          "y": 877.5,
-          "w": 77.796875,
-          "h": 18,
-          "cut": false
-        }
-      }
-    },
-    "agent-harbor-initiative-progress-playback-at-session-ends-laptop-light": {
-      "moment": "session-ends",
-      "viewport": {
-        "width": 1440,
-        "height": 900
-      },
-      "regions": {
-        "surface": {
-          "x": 4,
-          "y": 40,
-          "w": 1432,
-          "h": 832
-        },
-        "frame-header": {
-          "x": 4,
-          "y": 0,
-          "w": 1432,
-          "h": 32
-        },
-        "head": {
-          "x": 4,
-          "y": 40,
-          "w": 1432,
-          "h": 33
-        },
-        "rows": {
-          "x": 4,
-          "y": 73,
-          "w": 1432,
-          "h": 799
-        },
-        "milestone-row-first": {
-          "x": 4,
-          "y": 183,
-          "w": 1432,
-          "h": 26,
-          "index": 0
-        },
-        "milestone-row-last": {
-          "x": 4,
-          "y": 235,
-          "w": 1432,
-          "h": 26,
-          "index": 2
-        },
-        "milestone-bar": {
-          "x": 12,
-          "y": 81,
-          "w": 1416,
-          "h": 6
-        },
-        "milestone-legend": {
-          "x": 12,
-          "y": 93,
-          "w": 1416,
-          "h": 14
-        },
-        "playback-readout": {
-          "x": 332.515625,
-          "y": 877.5,
-          "w": 1099.484375,
-          "h": 18
-        },
-        "playback-moment": {
-          "x": 340.515625,
-          "y": 877.5,
-          "w": 77.796875,
-          "h": 18,
-          "cut": false
-        }
-      }
-    },
-    "agent-harbor-initiative-progress-playback-at-session-ends-sidebar-dark": {
-      "moment": "session-ends",
-      "viewport": {
-        "width": 360,
-        "height": 900
-      },
-      "regions": {
-        "surface": {
-          "x": 4,
-          "y": 40,
-          "w": 352,
-          "h": 832
-        },
-        "frame-header": {
-          "x": 4,
-          "y": 0,
-          "w": 352,
-          "h": 32
-        },
-        "head": {
-          "x": 4,
-          "y": 40,
-          "w": 352,
-          "h": 59
-        },
-        "rows": {
-          "x": 4,
-          "y": 99,
-          "w": 352,
-          "h": 773
-        },
-        "milestone-row-first": {
-          "x": 4,
-          "y": 233,
-          "w": 352,
-          "h": 43,
-          "index": 0
-        },
-        "milestone-row-last": {
-          "x": 4,
-          "y": 319,
-          "w": 352,
-          "h": 43,
-          "index": 2
-        },
-        "milestone-bar": {
-          "x": 12,
-          "y": 107,
-          "w": 336,
-          "h": 6
-        },
-        "milestone-legend": {
-          "x": 12,
-          "y": 119,
-          "w": 336,
-          "h": 14
-        },
-        "playback-readout": {
-          "x": 140.671875,
-          "y": 877.5,
-          "w": 211.328125,
-          "h": 18
-        },
-        "playback-moment": {
-          "x": 148.671875,
-          "y": 877.5,
-          "w": 77.796875,
-          "h": 18,
-          "cut": false
-        }
-      }
-    },
-    "agent-harbor-initiative-progress-playback-at-session-ends-sidebar-light": {
-      "moment": "session-ends",
-      "viewport": {
-        "width": 360,
-        "height": 900
-      },
-      "regions": {
-        "surface": {
-          "x": 4,
-          "y": 40,
-          "w": 352,
-          "h": 832
-        },
-        "frame-header": {
-          "x": 4,
-          "y": 0,
-          "w": 352,
-          "h": 32
-        },
-        "head": {
-          "x": 4,
-          "y": 40,
-          "w": 352,
-          "h": 59
-        },
-        "rows": {
-          "x": 4,
-          "y": 99,
-          "w": 352,
-          "h": 773
-        },
-        "milestone-row-first": {
-          "x": 4,
-          "y": 233,
-          "w": 352,
-          "h": 43,
-          "index": 0
-        },
-        "milestone-row-last": {
-          "x": 4,
-          "y": 319,
-          "w": 352,
-          "h": 43,
-          "index": 2
-        },
-        "milestone-bar": {
-          "x": 12,
-          "y": 107,
-          "w": 336,
-          "h": 6
-        },
-        "milestone-legend": {
-          "x": 12,
-          "y": 119,
-          "w": 336,
-          "h": 14
-        },
-        "playback-readout": {
-          "x": 140.671875,
-          "y": 877.5,
-          "w": 211.328125,
-          "h": 18
-        },
-        "playback-moment": {
-          "x": 148.671875,
-          "y": 877.5,
-          "w": 77.796875,
-          "h": 18,
-          "cut": false
-        }
-      }
-    },
     "agent-harbor-initiative-progress-playback-at-specification-done-laptop-dark": {
       "moment": "specification-done",
       "viewport": {
@@ -4710,930 +3558,6 @@
           "w": 111.265625,
           "h": 18,
           "cut": false
-        }
-      }
-    },
-    "agent-harbor-initiative-progress-playback-at-trace-loading-laptop-dark": {
-      "moment": "trace-loading",
-      "viewport": {
-        "width": 1440,
-        "height": 900
-      },
-      "regions": {
-        "surface": {
-          "x": 4,
-          "y": 40,
-          "w": 1432,
-          "h": 832
-        },
-        "frame-header": {
-          "x": 4,
-          "y": 0,
-          "w": 1432,
-          "h": 32
-        },
-        "head": {
-          "x": 4,
-          "y": 40,
-          "w": 1432,
-          "h": 33
-        },
-        "rows": {
-          "x": 4,
-          "y": 73,
-          "w": 1432,
-          "h": 799
-        },
-        "milestone-row-first": {
-          "x": 4,
-          "y": 205,
-          "w": 1432,
-          "h": 26,
-          "index": 0
-        },
-        "milestone-row-last": {
-          "x": 4,
-          "y": 327,
-          "w": 1432,
-          "h": 26,
-          "index": 2
-        },
-        "milestone-bar": {
-          "x": 12,
-          "y": 81,
-          "w": 1416,
-          "h": 6
-        },
-        "milestone-legend": {
-          "x": 12,
-          "y": 93,
-          "w": 1416,
-          "h": 14
-        },
-        "playback-readout": {
-          "x": 332.515625,
-          "y": 877.5,
-          "w": 1099.484375,
-          "h": 18
-        },
-        "playback-moment": {
-          "x": 340.515625,
-          "y": 877.5,
-          "w": 79.15625,
-          "h": 18,
-          "cut": false
-        }
-      }
-    },
-    "agent-harbor-initiative-progress-playback-at-trace-loading-laptop-light": {
-      "moment": "trace-loading",
-      "viewport": {
-        "width": 1440,
-        "height": 900
-      },
-      "regions": {
-        "surface": {
-          "x": 4,
-          "y": 40,
-          "w": 1432,
-          "h": 832
-        },
-        "frame-header": {
-          "x": 4,
-          "y": 0,
-          "w": 1432,
-          "h": 32
-        },
-        "head": {
-          "x": 4,
-          "y": 40,
-          "w": 1432,
-          "h": 33
-        },
-        "rows": {
-          "x": 4,
-          "y": 73,
-          "w": 1432,
-          "h": 799
-        },
-        "milestone-row-first": {
-          "x": 4,
-          "y": 205,
-          "w": 1432,
-          "h": 26,
-          "index": 0
-        },
-        "milestone-row-last": {
-          "x": 4,
-          "y": 327,
-          "w": 1432,
-          "h": 26,
-          "index": 2
-        },
-        "milestone-bar": {
-          "x": 12,
-          "y": 81,
-          "w": 1416,
-          "h": 6
-        },
-        "milestone-legend": {
-          "x": 12,
-          "y": 93,
-          "w": 1416,
-          "h": 14
-        },
-        "playback-readout": {
-          "x": 332.515625,
-          "y": 877.5,
-          "w": 1099.484375,
-          "h": 18
-        },
-        "playback-moment": {
-          "x": 340.515625,
-          "y": 877.5,
-          "w": 79.15625,
-          "h": 18,
-          "cut": false
-        }
-      }
-    },
-    "agent-harbor-initiative-progress-playback-at-trace-loading-sidebar-dark": {
-      "moment": "trace-loading",
-      "viewport": {
-        "width": 360,
-        "height": 900
-      },
-      "regions": {
-        "surface": {
-          "x": 4,
-          "y": 40,
-          "w": 352,
-          "h": 832
-        },
-        "frame-header": {
-          "x": 4,
-          "y": 0,
-          "w": 352,
-          "h": 32
-        },
-        "head": {
-          "x": 4,
-          "y": 40,
-          "w": 352,
-          "h": 59
-        },
-        "rows": {
-          "x": 4,
-          "y": 99,
-          "w": 352,
-          "h": 773
-        },
-        "milestone-row-first": {
-          "x": 4,
-          "y": 255,
-          "w": 352,
-          "h": 43,
-          "index": 0
-        },
-        "milestone-row-last": {
-          "x": 4,
-          "y": 411,
-          "w": 352,
-          "h": 43,
-          "index": 2
-        },
-        "milestone-bar": {
-          "x": 12,
-          "y": 107,
-          "w": 336,
-          "h": 6
-        },
-        "milestone-legend": {
-          "x": 12,
-          "y": 119,
-          "w": 336,
-          "h": 14
-        },
-        "playback-readout": {
-          "x": 140.671875,
-          "y": 877.5,
-          "w": 211.328125,
-          "h": 18
-        },
-        "playback-moment": {
-          "x": 148.671875,
-          "y": 877.5,
-          "w": 79.15625,
-          "h": 18,
-          "cut": false
-        }
-      }
-    },
-    "agent-harbor-initiative-progress-playback-at-trace-loading-sidebar-light": {
-      "moment": "trace-loading",
-      "viewport": {
-        "width": 360,
-        "height": 900
-      },
-      "regions": {
-        "surface": {
-          "x": 4,
-          "y": 40,
-          "w": 352,
-          "h": 832
-        },
-        "frame-header": {
-          "x": 4,
-          "y": 0,
-          "w": 352,
-          "h": 32
-        },
-        "head": {
-          "x": 4,
-          "y": 40,
-          "w": 352,
-          "h": 59
-        },
-        "rows": {
-          "x": 4,
-          "y": 99,
-          "w": 352,
-          "h": 773
-        },
-        "milestone-row-first": {
-          "x": 4,
-          "y": 255,
-          "w": 352,
-          "h": 43,
-          "index": 0
-        },
-        "milestone-row-last": {
-          "x": 4,
-          "y": 411,
-          "w": 352,
-          "h": 43,
-          "index": 2
-        },
-        "milestone-bar": {
-          "x": 12,
-          "y": 107,
-          "w": 336,
-          "h": 6
-        },
-        "milestone-legend": {
-          "x": 12,
-          "y": 119,
-          "w": 336,
-          "h": 14
-        },
-        "playback-readout": {
-          "x": 140.671875,
-          "y": 877.5,
-          "w": 211.328125,
-          "h": 18
-        },
-        "playback-moment": {
-          "x": 148.671875,
-          "y": 877.5,
-          "w": 79.15625,
-          "h": 18,
-          "cut": false
-        }
-      }
-    },
-    "agent-harbor-initiative-progress-playback-at-trace-ready-laptop-dark": {
-      "moment": "trace-ready",
-      "viewport": {
-        "width": 1440,
-        "height": 900
-      },
-      "regions": {
-        "surface": {
-          "x": 4,
-          "y": 40,
-          "w": 1432,
-          "h": 832
-        },
-        "frame-header": {
-          "x": 4,
-          "y": 0,
-          "w": 1432,
-          "h": 32
-        },
-        "head": {
-          "x": 4,
-          "y": 40,
-          "w": 1432,
-          "h": 33
-        },
-        "rows": {
-          "x": 4,
-          "y": 73,
-          "w": 1432,
-          "h": 799
-        },
-        "milestone-row-first": {
-          "x": 4,
-          "y": 205,
-          "w": 1432,
-          "h": 26,
-          "index": 0
-        },
-        "milestone-row-last": {
-          "x": 4,
-          "y": 327,
-          "w": 1432,
-          "h": 26,
-          "index": 2
-        },
-        "milestone-bar": {
-          "x": 12,
-          "y": 81,
-          "w": 1416,
-          "h": 6
-        },
-        "milestone-legend": {
-          "x": 12,
-          "y": 93,
-          "w": 1416,
-          "h": 14
-        },
-        "playback-readout": {
-          "x": 332.515625,
-          "y": 877.5,
-          "w": 1099.484375,
-          "h": 18
-        },
-        "playback-moment": {
-          "x": 340.515625,
-          "y": 877.5,
-          "w": 69.578125,
-          "h": 18,
-          "cut": false
-        }
-      }
-    },
-    "agent-harbor-initiative-progress-playback-at-trace-ready-laptop-light": {
-      "moment": "trace-ready",
-      "viewport": {
-        "width": 1440,
-        "height": 900
-      },
-      "regions": {
-        "surface": {
-          "x": 4,
-          "y": 40,
-          "w": 1432,
-          "h": 832
-        },
-        "frame-header": {
-          "x": 4,
-          "y": 0,
-          "w": 1432,
-          "h": 32
-        },
-        "head": {
-          "x": 4,
-          "y": 40,
-          "w": 1432,
-          "h": 33
-        },
-        "rows": {
-          "x": 4,
-          "y": 73,
-          "w": 1432,
-          "h": 799
-        },
-        "milestone-row-first": {
-          "x": 4,
-          "y": 205,
-          "w": 1432,
-          "h": 26,
-          "index": 0
-        },
-        "milestone-row-last": {
-          "x": 4,
-          "y": 327,
-          "w": 1432,
-          "h": 26,
-          "index": 2
-        },
-        "milestone-bar": {
-          "x": 12,
-          "y": 81,
-          "w": 1416,
-          "h": 6
-        },
-        "milestone-legend": {
-          "x": 12,
-          "y": 93,
-          "w": 1416,
-          "h": 14
-        },
-        "playback-readout": {
-          "x": 332.515625,
-          "y": 877.5,
-          "w": 1099.484375,
-          "h": 18
-        },
-        "playback-moment": {
-          "x": 340.515625,
-          "y": 877.5,
-          "w": 69.578125,
-          "h": 18,
-          "cut": false
-        }
-      }
-    },
-    "agent-harbor-initiative-progress-playback-at-trace-ready-sidebar-dark": {
-      "moment": "trace-ready",
-      "viewport": {
-        "width": 360,
-        "height": 900
-      },
-      "regions": {
-        "surface": {
-          "x": 4,
-          "y": 40,
-          "w": 352,
-          "h": 832
-        },
-        "frame-header": {
-          "x": 4,
-          "y": 0,
-          "w": 352,
-          "h": 32
-        },
-        "head": {
-          "x": 4,
-          "y": 40,
-          "w": 352,
-          "h": 59
-        },
-        "rows": {
-          "x": 4,
-          "y": 99,
-          "w": 352,
-          "h": 773
-        },
-        "milestone-row-first": {
-          "x": 4,
-          "y": 255,
-          "w": 352,
-          "h": 43,
-          "index": 0
-        },
-        "milestone-row-last": {
-          "x": 4,
-          "y": 411,
-          "w": 352,
-          "h": 43,
-          "index": 2
-        },
-        "milestone-bar": {
-          "x": 12,
-          "y": 107,
-          "w": 336,
-          "h": 6
-        },
-        "milestone-legend": {
-          "x": 12,
-          "y": 119,
-          "w": 336,
-          "h": 14
-        },
-        "playback-readout": {
-          "x": 140.671875,
-          "y": 877.5,
-          "w": 211.328125,
-          "h": 18
-        },
-        "playback-moment": {
-          "x": 148.671875,
-          "y": 877.5,
-          "w": 69.578125,
-          "h": 18,
-          "cut": false
-        }
-      }
-    },
-    "agent-harbor-initiative-progress-playback-at-trace-ready-sidebar-light": {
-      "moment": "trace-ready",
-      "viewport": {
-        "width": 360,
-        "height": 900
-      },
-      "regions": {
-        "surface": {
-          "x": 4,
-          "y": 40,
-          "w": 352,
-          "h": 832
-        },
-        "frame-header": {
-          "x": 4,
-          "y": 0,
-          "w": 352,
-          "h": 32
-        },
-        "head": {
-          "x": 4,
-          "y": 40,
-          "w": 352,
-          "h": 59
-        },
-        "rows": {
-          "x": 4,
-          "y": 99,
-          "w": 352,
-          "h": 773
-        },
-        "milestone-row-first": {
-          "x": 4,
-          "y": 255,
-          "w": 352,
-          "h": 43,
-          "index": 0
-        },
-        "milestone-row-last": {
-          "x": 4,
-          "y": 411,
-          "w": 352,
-          "h": 43,
-          "index": 2
-        },
-        "milestone-bar": {
-          "x": 12,
-          "y": 107,
-          "w": 336,
-          "h": 6
-        },
-        "milestone-legend": {
-          "x": 12,
-          "y": 119,
-          "w": 336,
-          "h": 14
-        },
-        "playback-readout": {
-          "x": 140.671875,
-          "y": 877.5,
-          "w": 211.328125,
-          "h": 18
-        },
-        "playback-moment": {
-          "x": 148.671875,
-          "y": 877.5,
-          "w": 69.578125,
-          "h": 18,
-          "cut": false
-        }
-      }
-    },
-    "agent-harbor-initiative-tabs-playback-at-milestone-blocked-laptop-dark": {
-      "moment": "milestone-blocked",
-      "viewport": {
-        "width": 1440,
-        "height": 900
-      },
-      "regions": {
-        "surface": {
-          "x": 0,
-          "y": 0,
-          "w": 1440,
-          "h": 34
-        },
-        "active-tab": {
-          "x": 0,
-          "y": 6,
-          "w": 304.203125,
-          "h": 26,
-          "fill": "#3c3c3c"
-        },
-        "add": {
-          "x": 310.203125,
-          "y": 6,
-          "w": 26,
-          "h": 26
-        },
-        "controls": {
-          "x": 1185.15625,
-          "y": 6,
-          "w": 246.84375,
-          "h": 26
-        },
-        "inbox-position": {
-          "x": 1211.96875,
-          "y": 10,
-          "w": 81.046875,
-          "h": 18
-        },
-        "bar-active-tab": {
-          "x": 0,
-          "y": 6,
-          "w": 304.203125,
-          "h": 26
-        },
-        "bar-add": {
-          "x": 310.203125,
-          "y": 6,
-          "w": 26,
-          "h": 26
-        },
-        "caption": {
-          "x": 0,
-          "y": 0,
-          "w": 1440,
-          "h": 34
-        },
-        "bar-active-tab-label": {
-          "x": 24,
-          "y": 7,
-          "w": 188.296875,
-          "h": 24,
-          "cut": false
-        },
-        "playback-readout": {
-          "x": 332.515625,
-          "y": 877.5,
-          "w": 1099.484375,
-          "h": 18
-        },
-        "playback-moment": {
-          "x": 340.515625,
-          "y": 877.5,
-          "w": 108.375,
-          "h": 18,
-          "cut": false
-        },
-        "bar-active-tab-progress": {
-          "x": 218.296875,
-          "y": 10,
-          "w": 19.3125,
-          "h": 18
-        },
-        "bar-active-tab-recordings": {
-          "x": 243.609375,
-          "y": 7,
-          "w": 50.59375,
-          "h": 24
-        }
-      }
-    },
-    "agent-harbor-initiative-tabs-playback-at-milestone-blocked-laptop-light": {
-      "moment": "milestone-blocked",
-      "viewport": {
-        "width": 1440,
-        "height": 900
-      },
-      "regions": {
-        "surface": {
-          "x": 0,
-          "y": 0,
-          "w": 1440,
-          "h": 34
-        },
-        "active-tab": {
-          "x": 0,
-          "y": 6,
-          "w": 304.203125,
-          "h": 26,
-          "fill": "#b5ae9f"
-        },
-        "add": {
-          "x": 310.203125,
-          "y": 6,
-          "w": 26,
-          "h": 26
-        },
-        "controls": {
-          "x": 1185.15625,
-          "y": 6,
-          "w": 246.84375,
-          "h": 26
-        },
-        "inbox-position": {
-          "x": 1211.96875,
-          "y": 10,
-          "w": 81.046875,
-          "h": 18
-        },
-        "bar-active-tab": {
-          "x": 0,
-          "y": 6,
-          "w": 304.203125,
-          "h": 26
-        },
-        "bar-add": {
-          "x": 310.203125,
-          "y": 6,
-          "w": 26,
-          "h": 26
-        },
-        "caption": {
-          "x": 0,
-          "y": 0,
-          "w": 1440,
-          "h": 34
-        },
-        "bar-active-tab-label": {
-          "x": 24,
-          "y": 7,
-          "w": 188.296875,
-          "h": 24,
-          "cut": false
-        },
-        "playback-readout": {
-          "x": 332.515625,
-          "y": 877.5,
-          "w": 1099.484375,
-          "h": 18
-        },
-        "playback-moment": {
-          "x": 340.515625,
-          "y": 877.5,
-          "w": 108.375,
-          "h": 18,
-          "cut": false
-        },
-        "bar-active-tab-progress": {
-          "x": 218.296875,
-          "y": 10,
-          "w": 19.3125,
-          "h": 18
-        },
-        "bar-active-tab-recordings": {
-          "x": 243.609375,
-          "y": 7,
-          "w": 50.59375,
-          "h": 24
-        }
-      }
-    },
-    "agent-harbor-initiative-tabs-playback-at-milestone-blocked-sidebar-dark": {
-      "moment": "milestone-blocked",
-      "viewport": {
-        "width": 360,
-        "height": 900
-      },
-      "regions": {
-        "surface": {
-          "x": 0,
-          "y": 0,
-          "w": 360,
-          "h": 68
-        },
-        "active-tab": {
-          "x": 0,
-          "y": 6,
-          "w": 264,
-          "h": 26,
-          "fill": "#3c3c3c"
-        },
-        "add": {
-          "x": 270,
-          "y": 6,
-          "w": 26,
-          "h": 26
-        },
-        "controls": {
-          "x": 0,
-          "y": 36,
-          "w": 352,
-          "h": 26
-        },
-        "bar-active-tab": {
-          "x": 0,
-          "y": 6,
-          "w": 264,
-          "h": 26
-        },
-        "bar-add": {
-          "x": 270,
-          "y": 6,
-          "w": 26,
-          "h": 26
-        },
-        "caption": {
-          "x": 0,
-          "y": 0,
-          "w": 360,
-          "h": 68
-        },
-        "bar-active-tab-label": {
-          "x": 24,
-          "y": 7,
-          "w": 154.25,
-          "h": 24,
-          "cut": true
-        },
-        "playback-readout": {
-          "x": 140.671875,
-          "y": 877.5,
-          "w": 211.328125,
-          "h": 18
-        },
-        "playback-moment": {
-          "x": 148.671875,
-          "y": 877.5,
-          "w": 108.375,
-          "h": 18,
-          "cut": false
-        },
-        "bar-active-tab-progress": {
-          "x": 184.25,
-          "y": 10,
-          "w": 19.3125,
-          "h": 18
-        },
-        "bar-active-tab-recordings": {
-          "x": 213.5625,
-          "y": 7,
-          "w": 40.4375,
-          "h": 24
-        }
-      }
-    },
-    "agent-harbor-initiative-tabs-playback-at-milestone-blocked-sidebar-light": {
-      "moment": "milestone-blocked",
-      "viewport": {
-        "width": 360,
-        "height": 900
-      },
-      "regions": {
-        "surface": {
-          "x": 0,
-          "y": 0,
-          "w": 360,
-          "h": 68
-        },
-        "active-tab": {
-          "x": 0,
-          "y": 6,
-          "w": 264,
-          "h": 26,
-          "fill": "#b5ae9f"
-        },
-        "add": {
-          "x": 270,
-          "y": 6,
-          "w": 26,
-          "h": 26
-        },
-        "controls": {
-          "x": 0,
-          "y": 36,
-          "w": 352,
-          "h": 26
-        },
-        "bar-active-tab": {
-          "x": 0,
-          "y": 6,
-          "w": 264,
-          "h": 26
-        },
-        "bar-add": {
-          "x": 270,
-          "y": 6,
-          "w": 26,
-          "h": 26
-        },
-        "caption": {
-          "x": 0,
-          "y": 0,
-          "w": 360,
-          "h": 68
-        },
-        "bar-active-tab-label": {
-          "x": 24,
-          "y": 7,
-          "w": 154.25,
-          "h": 24,
-          "cut": true
-        },
-        "playback-readout": {
-          "x": 140.671875,
-          "y": 877.5,
-          "w": 211.328125,
-          "h": 18
-        },
-        "playback-moment": {
-          "x": 148.671875,
-          "y": 877.5,
-          "w": 108.375,
-          "h": 18,
-          "cut": false
-        },
-        "bar-active-tab-progress": {
-          "x": 184.25,
-          "y": 10,
-          "w": 19.3125,
-          "h": 18
-        },
-        "bar-active-tab-recordings": {
-          "x": 213.5625,
-          "y": 7,
-          "w": 40.4375,
-          "h": 24
         }
       }
     },
@@ -6218,7 +4142,7 @@
         "bar-active-tab-label": {
           "x": 24,
           "y": 7,
-          "w": 152,
+          "w": 140,
           "h": 24,
           "cut": true
         },
@@ -6236,15 +4160,15 @@
           "cut": false
         },
         "bar-active-tab-progress": {
-          "x": 182,
+          "x": 170,
           "y": 10,
           "w": 19.3125,
           "h": 18
         },
         "bar-active-tab-recordings": {
-          "x": 211.3125,
+          "x": 199.3125,
           "y": 7,
-          "w": 42.6875,
+          "w": 54.6875,
           "h": 24
         }
       }
@@ -6302,7 +4226,7 @@
         "bar-active-tab-label": {
           "x": 24,
           "y": 7,
-          "w": 152,
+          "w": 140,
           "h": 24,
           "cut": true
         },
@@ -6320,15 +4244,15 @@
           "cut": false
         },
         "bar-active-tab-progress": {
-          "x": 182,
+          "x": 170,
           "y": 10,
           "w": 19.3125,
           "h": 18
         },
         "bar-active-tab-recordings": {
-          "x": 211.3125,
+          "x": 199.3125,
           "y": 7,
-          "w": 42.6875,
+          "w": 54.6875,
           "h": 24
         }
       }
@@ -6566,7 +4490,7 @@
         "bar-active-tab-label": {
           "x": 24,
           "y": 7,
-          "w": 154.25,
+          "w": 142.25,
           "h": 24,
           "cut": true
         },
@@ -6584,15 +4508,15 @@
           "cut": false
         },
         "bar-active-tab-progress": {
-          "x": 184.25,
+          "x": 172.25,
           "y": 10,
           "w": 19.3125,
           "h": 18
         },
         "bar-active-tab-recordings": {
-          "x": 213.5625,
+          "x": 201.5625,
           "y": 7,
-          "w": 40.4375,
+          "w": 52.4375,
           "h": 24
         }
       }
@@ -6650,7 +4574,7 @@
         "bar-active-tab-label": {
           "x": 24,
           "y": 7,
-          "w": 154.25,
+          "w": 142.25,
           "h": 24,
           "cut": true
         },
@@ -6668,15 +4592,15 @@
           "cut": false
         },
         "bar-active-tab-progress": {
-          "x": 184.25,
+          "x": 172.25,
           "y": 10,
           "w": 19.3125,
           "h": 18
         },
         "bar-active-tab-recordings": {
-          "x": 213.5625,
+          "x": 201.5625,
           "y": 7,
-          "w": 40.4375,
+          "w": 52.4375,
           "h": 24
         }
       }
@@ -7262,7 +5186,7 @@
         "bar-active-tab-label": {
           "x": 24,
           "y": 7,
-          "w": 152,
+          "w": 140,
           "h": 24,
           "cut": true
         },
@@ -7280,15 +5204,15 @@
           "cut": false
         },
         "bar-active-tab-progress": {
-          "x": 182,
+          "x": 170,
           "y": 10,
           "w": 19.3125,
           "h": 18
         },
         "bar-active-tab-recordings": {
-          "x": 211.3125,
+          "x": 199.3125,
           "y": 7,
-          "w": 42.6875,
+          "w": 54.6875,
           "h": 24
         }
       }
@@ -7346,7 +5270,7 @@
         "bar-active-tab-label": {
           "x": 24,
           "y": 7,
-          "w": 152,
+          "w": 140,
           "h": 24,
           "cut": true
         },
@@ -7364,15 +5288,15 @@
           "cut": false
         },
         "bar-active-tab-progress": {
-          "x": 182,
+          "x": 170,
           "y": 10,
           "w": 19.3125,
           "h": 18
         },
         "bar-active-tab-recordings": {
-          "x": 211.3125,
+          "x": 199.3125,
           "y": 7,
-          "w": 42.6875,
+          "w": 54.6875,
           "h": 24
         }
       }
@@ -8799,10 +6723,10 @@
         },
         "session-line-last": {
           "x": 640,
-          "y": 104,
+          "y": 123,
           "w": 788,
           "h": 18,
-          "index": 1
+          "index": 2
         },
         "milestone-bar": {
           "x": 12,
@@ -8885,10 +6809,10 @@
         },
         "session-line-last": {
           "x": 640,
-          "y": 104,
+          "y": 123,
           "w": 788,
           "h": 18,
-          "index": 1
+          "index": 2
         },
         "milestone-bar": {
           "x": 12,
@@ -8952,14 +6876,14 @@
           "x": 4,
           "y": 125,
           "w": 352,
-          "h": 153,
+          "h": 172,
           "index": 0
         },
         "initiative-row-last": {
           "x": 4,
           "y": 125,
           "w": 352,
-          "h": 153,
+          "h": 172,
           "index": 0
         },
         "session-line-first": {
@@ -8971,10 +6895,10 @@
         },
         "session-line-last": {
           "x": 32,
-          "y": 250,
+          "y": 269,
           "w": 316,
           "h": 18,
-          "index": 1
+          "index": 2
         },
         "milestone-bar": {
           "x": 12,
@@ -9038,14 +6962,14 @@
           "x": 4,
           "y": 125,
           "w": 352,
-          "h": 153,
+          "h": 172,
           "index": 0
         },
         "initiative-row-last": {
           "x": 4,
           "y": 125,
           "w": 352,
-          "h": 153,
+          "h": 172,
           "index": 0
         },
         "session-line-first": {
@@ -9057,10 +6981,10 @@
         },
         "session-line-last": {
           "x": 32,
-          "y": 250,
+          "y": 269,
           "w": 316,
           "h": 18,
-          "index": 1
+          "index": 2
         },
         "milestone-bar": {
           "x": 12,
@@ -9084,694 +7008,6 @@
           "x": 148.671875,
           "y": 877.5,
           "w": 68,
-          "h": 18,
-          "cut": false
-        }
-      }
-    },
-    "agent-harbor-initiatives-playback-at-config-answered-laptop-dark": {
-      "moment": "config-answered",
-      "viewport": {
-        "width": 1440,
-        "height": 900
-      },
-      "regions": {
-        "surface": {
-          "x": 4,
-          "y": 40,
-          "w": 1432,
-          "h": 832
-        },
-        "frame-header": {
-          "x": 4,
-          "y": 0,
-          "w": 1432,
-          "h": 32
-        },
-        "head": {
-          "x": 4,
-          "y": 40,
-          "w": 1432,
-          "h": 33
-        },
-        "rows": {
-          "x": 4,
-          "y": 73,
-          "w": 1432,
-          "h": 799
-        },
-        "initiative-row-first": {
-          "x": 4,
-          "y": 73,
-          "w": 1432,
-          "h": 108,
-          "index": 0
-        },
-        "initiative-row-last": {
-          "x": 4,
-          "y": 73,
-          "w": 1432,
-          "h": 108,
-          "index": 0
-        },
-        "session-line-first": {
-          "x": 640,
-          "y": 85,
-          "w": 788,
-          "h": 18,
-          "index": 0
-        },
-        "session-line-last": {
-          "x": 640,
-          "y": 104,
-          "w": 788,
-          "h": 18,
-          "index": 1
-        },
-        "milestone-bar": {
-          "x": 12,
-          "y": 117,
-          "w": 420,
-          "h": 6
-        },
-        "milestone-legend": {
-          "x": 444,
-          "y": 113,
-          "w": 144,
-          "h": 14
-        },
-        "playback-readout": {
-          "x": 332.515625,
-          "y": 877.5,
-          "w": 1099.484375,
-          "h": 18
-        },
-        "playback-moment": {
-          "x": 340.515625,
-          "y": 877.5,
-          "w": 99.171875,
-          "h": 18,
-          "cut": false
-        }
-      }
-    },
-    "agent-harbor-initiatives-playback-at-config-answered-laptop-light": {
-      "moment": "config-answered",
-      "viewport": {
-        "width": 1440,
-        "height": 900
-      },
-      "regions": {
-        "surface": {
-          "x": 4,
-          "y": 40,
-          "w": 1432,
-          "h": 832
-        },
-        "frame-header": {
-          "x": 4,
-          "y": 0,
-          "w": 1432,
-          "h": 32
-        },
-        "head": {
-          "x": 4,
-          "y": 40,
-          "w": 1432,
-          "h": 33
-        },
-        "rows": {
-          "x": 4,
-          "y": 73,
-          "w": 1432,
-          "h": 799
-        },
-        "initiative-row-first": {
-          "x": 4,
-          "y": 73,
-          "w": 1432,
-          "h": 108,
-          "index": 0
-        },
-        "initiative-row-last": {
-          "x": 4,
-          "y": 73,
-          "w": 1432,
-          "h": 108,
-          "index": 0
-        },
-        "session-line-first": {
-          "x": 640,
-          "y": 85,
-          "w": 788,
-          "h": 18,
-          "index": 0
-        },
-        "session-line-last": {
-          "x": 640,
-          "y": 104,
-          "w": 788,
-          "h": 18,
-          "index": 1
-        },
-        "milestone-bar": {
-          "x": 12,
-          "y": 117,
-          "w": 420,
-          "h": 6
-        },
-        "milestone-legend": {
-          "x": 444,
-          "y": 113,
-          "w": 144,
-          "h": 14
-        },
-        "playback-readout": {
-          "x": 332.515625,
-          "y": 877.5,
-          "w": 1099.484375,
-          "h": 18
-        },
-        "playback-moment": {
-          "x": 340.515625,
-          "y": 877.5,
-          "w": 99.171875,
-          "h": 18,
-          "cut": false
-        }
-      }
-    },
-    "agent-harbor-initiatives-playback-at-config-answered-sidebar-dark": {
-      "moment": "config-answered",
-      "viewport": {
-        "width": 360,
-        "height": 900
-      },
-      "regions": {
-        "surface": {
-          "x": 4,
-          "y": 40,
-          "w": 352,
-          "h": 832
-        },
-        "frame-header": {
-          "x": 4,
-          "y": 0,
-          "w": 352,
-          "h": 32
-        },
-        "head": {
-          "x": 4,
-          "y": 40,
-          "w": 352,
-          "h": 85
-        },
-        "rows": {
-          "x": 4,
-          "y": 125,
-          "w": 352,
-          "h": 747
-        },
-        "initiative-row-first": {
-          "x": 4,
-          "y": 125,
-          "w": 352,
-          "h": 153,
-          "index": 0
-        },
-        "initiative-row-last": {
-          "x": 4,
-          "y": 125,
-          "w": 352,
-          "h": 153,
-          "index": 0
-        },
-        "session-line-first": {
-          "x": 32,
-          "y": 231,
-          "w": 316,
-          "h": 18,
-          "index": 0
-        },
-        "session-line-last": {
-          "x": 32,
-          "y": 250,
-          "w": 316,
-          "h": 18,
-          "index": 1
-        },
-        "milestone-bar": {
-          "x": 12,
-          "y": 169,
-          "w": 180,
-          "h": 6
-        },
-        "milestone-legend": {
-          "x": 204,
-          "y": 165,
-          "w": 144,
-          "h": 14
-        },
-        "playback-readout": {
-          "x": 140.671875,
-          "y": 877.5,
-          "w": 211.328125,
-          "h": 18
-        },
-        "playback-moment": {
-          "x": 148.671875,
-          "y": 877.5,
-          "w": 99.171875,
-          "h": 18,
-          "cut": false
-        }
-      }
-    },
-    "agent-harbor-initiatives-playback-at-config-answered-sidebar-light": {
-      "moment": "config-answered",
-      "viewport": {
-        "width": 360,
-        "height": 900
-      },
-      "regions": {
-        "surface": {
-          "x": 4,
-          "y": 40,
-          "w": 352,
-          "h": 832
-        },
-        "frame-header": {
-          "x": 4,
-          "y": 0,
-          "w": 352,
-          "h": 32
-        },
-        "head": {
-          "x": 4,
-          "y": 40,
-          "w": 352,
-          "h": 85
-        },
-        "rows": {
-          "x": 4,
-          "y": 125,
-          "w": 352,
-          "h": 747
-        },
-        "initiative-row-first": {
-          "x": 4,
-          "y": 125,
-          "w": 352,
-          "h": 153,
-          "index": 0
-        },
-        "initiative-row-last": {
-          "x": 4,
-          "y": 125,
-          "w": 352,
-          "h": 153,
-          "index": 0
-        },
-        "session-line-first": {
-          "x": 32,
-          "y": 231,
-          "w": 316,
-          "h": 18,
-          "index": 0
-        },
-        "session-line-last": {
-          "x": 32,
-          "y": 250,
-          "w": 316,
-          "h": 18,
-          "index": 1
-        },
-        "milestone-bar": {
-          "x": 12,
-          "y": 169,
-          "w": 180,
-          "h": 6
-        },
-        "milestone-legend": {
-          "x": 204,
-          "y": 165,
-          "w": 144,
-          "h": 14
-        },
-        "playback-readout": {
-          "x": 140.671875,
-          "y": 877.5,
-          "w": 211.328125,
-          "h": 18
-        },
-        "playback-moment": {
-          "x": 148.671875,
-          "y": 877.5,
-          "w": 99.171875,
-          "h": 18,
-          "cut": false
-        }
-      }
-    },
-    "agent-harbor-initiatives-playback-at-importer-ends-laptop-dark": {
-      "moment": "importer-ends",
-      "viewport": {
-        "width": 1440,
-        "height": 900
-      },
-      "regions": {
-        "surface": {
-          "x": 4,
-          "y": 40,
-          "w": 1432,
-          "h": 832
-        },
-        "frame-header": {
-          "x": 4,
-          "y": 0,
-          "w": 1432,
-          "h": 32
-        },
-        "head": {
-          "x": 4,
-          "y": 40,
-          "w": 1432,
-          "h": 33
-        },
-        "rows": {
-          "x": 4,
-          "y": 73,
-          "w": 1432,
-          "h": 799
-        },
-        "initiative-row-first": {
-          "x": 4,
-          "y": 73,
-          "w": 1432,
-          "h": 108,
-          "index": 0
-        },
-        "initiative-row-last": {
-          "x": 4,
-          "y": 73,
-          "w": 1432,
-          "h": 108,
-          "index": 0
-        },
-        "session-line-first": {
-          "x": 640,
-          "y": 85,
-          "w": 788,
-          "h": 18,
-          "index": 0
-        },
-        "session-line-last": {
-          "x": 640,
-          "y": 104,
-          "w": 788,
-          "h": 18,
-          "index": 1
-        },
-        "milestone-bar": {
-          "x": 12,
-          "y": 117,
-          "w": 420,
-          "h": 6
-        },
-        "milestone-legend": {
-          "x": 444,
-          "y": 113,
-          "w": 144,
-          "h": 14
-        },
-        "playback-readout": {
-          "x": 332.515625,
-          "y": 877.5,
-          "w": 1099.484375,
-          "h": 18
-        },
-        "playback-moment": {
-          "x": 340.515625,
-          "y": 877.5,
-          "w": 83.59375,
-          "h": 18,
-          "cut": false
-        }
-      }
-    },
-    "agent-harbor-initiatives-playback-at-importer-ends-laptop-light": {
-      "moment": "importer-ends",
-      "viewport": {
-        "width": 1440,
-        "height": 900
-      },
-      "regions": {
-        "surface": {
-          "x": 4,
-          "y": 40,
-          "w": 1432,
-          "h": 832
-        },
-        "frame-header": {
-          "x": 4,
-          "y": 0,
-          "w": 1432,
-          "h": 32
-        },
-        "head": {
-          "x": 4,
-          "y": 40,
-          "w": 1432,
-          "h": 33
-        },
-        "rows": {
-          "x": 4,
-          "y": 73,
-          "w": 1432,
-          "h": 799
-        },
-        "initiative-row-first": {
-          "x": 4,
-          "y": 73,
-          "w": 1432,
-          "h": 108,
-          "index": 0
-        },
-        "initiative-row-last": {
-          "x": 4,
-          "y": 73,
-          "w": 1432,
-          "h": 108,
-          "index": 0
-        },
-        "session-line-first": {
-          "x": 640,
-          "y": 85,
-          "w": 788,
-          "h": 18,
-          "index": 0
-        },
-        "session-line-last": {
-          "x": 640,
-          "y": 104,
-          "w": 788,
-          "h": 18,
-          "index": 1
-        },
-        "milestone-bar": {
-          "x": 12,
-          "y": 117,
-          "w": 420,
-          "h": 6
-        },
-        "milestone-legend": {
-          "x": 444,
-          "y": 113,
-          "w": 144,
-          "h": 14
-        },
-        "playback-readout": {
-          "x": 332.515625,
-          "y": 877.5,
-          "w": 1099.484375,
-          "h": 18
-        },
-        "playback-moment": {
-          "x": 340.515625,
-          "y": 877.5,
-          "w": 83.59375,
-          "h": 18,
-          "cut": false
-        }
-      }
-    },
-    "agent-harbor-initiatives-playback-at-importer-ends-sidebar-dark": {
-      "moment": "importer-ends",
-      "viewport": {
-        "width": 360,
-        "height": 900
-      },
-      "regions": {
-        "surface": {
-          "x": 4,
-          "y": 40,
-          "w": 352,
-          "h": 832
-        },
-        "frame-header": {
-          "x": 4,
-          "y": 0,
-          "w": 352,
-          "h": 32
-        },
-        "head": {
-          "x": 4,
-          "y": 40,
-          "w": 352,
-          "h": 85
-        },
-        "rows": {
-          "x": 4,
-          "y": 125,
-          "w": 352,
-          "h": 747
-        },
-        "initiative-row-first": {
-          "x": 4,
-          "y": 125,
-          "w": 352,
-          "h": 153,
-          "index": 0
-        },
-        "initiative-row-last": {
-          "x": 4,
-          "y": 125,
-          "w": 352,
-          "h": 153,
-          "index": 0
-        },
-        "session-line-first": {
-          "x": 32,
-          "y": 231,
-          "w": 316,
-          "h": 18,
-          "index": 0
-        },
-        "session-line-last": {
-          "x": 32,
-          "y": 250,
-          "w": 316,
-          "h": 18,
-          "index": 1
-        },
-        "milestone-bar": {
-          "x": 12,
-          "y": 169,
-          "w": 180,
-          "h": 6
-        },
-        "milestone-legend": {
-          "x": 204,
-          "y": 165,
-          "w": 144,
-          "h": 14
-        },
-        "playback-readout": {
-          "x": 140.671875,
-          "y": 877.5,
-          "w": 211.328125,
-          "h": 18
-        },
-        "playback-moment": {
-          "x": 148.671875,
-          "y": 877.5,
-          "w": 83.59375,
-          "h": 18,
-          "cut": false
-        }
-      }
-    },
-    "agent-harbor-initiatives-playback-at-importer-ends-sidebar-light": {
-      "moment": "importer-ends",
-      "viewport": {
-        "width": 360,
-        "height": 900
-      },
-      "regions": {
-        "surface": {
-          "x": 4,
-          "y": 40,
-          "w": 352,
-          "h": 832
-        },
-        "frame-header": {
-          "x": 4,
-          "y": 0,
-          "w": 352,
-          "h": 32
-        },
-        "head": {
-          "x": 4,
-          "y": 40,
-          "w": 352,
-          "h": 85
-        },
-        "rows": {
-          "x": 4,
-          "y": 125,
-          "w": 352,
-          "h": 747
-        },
-        "initiative-row-first": {
-          "x": 4,
-          "y": 125,
-          "w": 352,
-          "h": 153,
-          "index": 0
-        },
-        "initiative-row-last": {
-          "x": 4,
-          "y": 125,
-          "w": 352,
-          "h": 153,
-          "index": 0
-        },
-        "session-line-first": {
-          "x": 32,
-          "y": 231,
-          "w": 316,
-          "h": 18,
-          "index": 0
-        },
-        "session-line-last": {
-          "x": 32,
-          "y": 250,
-          "w": 316,
-          "h": 18,
-          "index": 1
-        },
-        "milestone-bar": {
-          "x": 12,
-          "y": 169,
-          "w": 180,
-          "h": 6
-        },
-        "milestone-legend": {
-          "x": 204,
-          "y": 165,
-          "w": 144,
-          "h": 14
-        },
-        "playback-readout": {
-          "x": 140.671875,
-          "y": 877.5,
-          "w": 211.328125,
-          "h": 18
-        },
-        "playback-moment": {
-          "x": 148.671875,
-          "y": 877.5,
-          "w": 83.59375,
           "h": 18,
           "cut": false
         }
@@ -9831,10 +7067,10 @@
         },
         "session-line-last": {
           "x": 640,
-          "y": 104,
+          "y": 123,
           "w": 788,
           "h": 18,
-          "index": 1
+          "index": 2
         },
         "milestone-bar": {
           "x": 12,
@@ -9917,10 +7153,10 @@
         },
         "session-line-last": {
           "x": 640,
-          "y": 104,
+          "y": 123,
           "w": 788,
           "h": 18,
-          "index": 1
+          "index": 2
         },
         "milestone-bar": {
           "x": 12,
@@ -9984,14 +7220,14 @@
           "x": 4,
           "y": 125,
           "w": 352,
-          "h": 153,
+          "h": 172,
           "index": 0
         },
         "initiative-row-last": {
           "x": 4,
           "y": 125,
           "w": 352,
-          "h": 153,
+          "h": 172,
           "index": 0
         },
         "session-line-first": {
@@ -10003,10 +7239,10 @@
         },
         "session-line-last": {
           "x": 32,
-          "y": 250,
+          "y": 269,
           "w": 316,
           "h": 18,
-          "index": 1
+          "index": 2
         },
         "milestone-bar": {
           "x": 12,
@@ -10070,14 +7306,14 @@
           "x": 4,
           "y": 125,
           "w": 352,
-          "h": 153,
+          "h": 172,
           "index": 0
         },
         "initiative-row-last": {
           "x": 4,
           "y": 125,
           "w": 352,
-          "h": 153,
+          "h": 172,
           "index": 0
         },
         "session-line-first": {
@@ -10089,10 +7325,10 @@
         },
         "session-line-last": {
           "x": 32,
-          "y": 250,
+          "y": 269,
           "w": 316,
           "h": 18,
-          "index": 1
+          "index": 2
         },
         "milestone-bar": {
           "x": 12,
@@ -10175,10 +7411,10 @@
         },
         "session-line-last": {
           "x": 640,
-          "y": 104,
+          "y": 123,
           "w": 788,
           "h": 18,
-          "index": 1
+          "index": 2
         },
         "milestone-bar": {
           "x": 12,
@@ -10261,10 +7497,10 @@
         },
         "session-line-last": {
           "x": 640,
-          "y": 104,
+          "y": 123,
           "w": 788,
           "h": 18,
-          "index": 1
+          "index": 2
         },
         "milestone-bar": {
           "x": 12,
@@ -10328,14 +7564,14 @@
           "x": 4,
           "y": 125,
           "w": 352,
-          "h": 153,
+          "h": 172,
           "index": 0
         },
         "initiative-row-last": {
           "x": 4,
           "y": 125,
           "w": 352,
-          "h": 153,
+          "h": 172,
           "index": 0
         },
         "session-line-first": {
@@ -10347,10 +7583,10 @@
         },
         "session-line-last": {
           "x": 32,
-          "y": 250,
+          "y": 269,
           "w": 316,
           "h": 18,
-          "index": 1
+          "index": 2
         },
         "milestone-bar": {
           "x": 12,
@@ -10414,14 +7650,14 @@
           "x": 4,
           "y": 125,
           "w": 352,
-          "h": 153,
+          "h": 172,
           "index": 0
         },
         "initiative-row-last": {
           "x": 4,
           "y": 125,
           "w": 352,
-          "h": 153,
+          "h": 172,
           "index": 0
         },
         "session-line-first": {
@@ -10433,10 +7669,10 @@
         },
         "session-line-last": {
           "x": 32,
-          "y": 250,
+          "y": 269,
           "w": 316,
           "h": 18,
-          "index": 1
+          "index": 2
         },
         "milestone-bar": {
           "x": 12,
@@ -10519,10 +7755,10 @@
         },
         "session-line-last": {
           "x": 640,
-          "y": 104,
+          "y": 123,
           "w": 788,
           "h": 18,
-          "index": 1
+          "index": 2
         },
         "milestone-bar": {
           "x": 12,
@@ -10605,10 +7841,10 @@
         },
         "session-line-last": {
           "x": 640,
-          "y": 104,
+          "y": 123,
           "w": 788,
           "h": 18,
-          "index": 1
+          "index": 2
         },
         "milestone-bar": {
           "x": 12,
@@ -10672,14 +7908,14 @@
           "x": 4,
           "y": 125,
           "w": 352,
-          "h": 153,
+          "h": 172,
           "index": 0
         },
         "initiative-row-last": {
           "x": 4,
           "y": 125,
           "w": 352,
-          "h": 153,
+          "h": 172,
           "index": 0
         },
         "session-line-first": {
@@ -10691,10 +7927,10 @@
         },
         "session-line-last": {
           "x": 32,
-          "y": 250,
+          "y": 269,
           "w": 316,
           "h": 18,
-          "index": 1
+          "index": 2
         },
         "milestone-bar": {
           "x": 12,
@@ -10758,14 +7994,14 @@
           "x": 4,
           "y": 125,
           "w": 352,
-          "h": 153,
+          "h": 172,
           "index": 0
         },
         "initiative-row-last": {
           "x": 4,
           "y": 125,
           "w": 352,
-          "h": 153,
+          "h": 172,
           "index": 0
         },
         "session-line-first": {
@@ -10777,10 +8013,10 @@
         },
         "session-line-last": {
           "x": 32,
-          "y": 250,
+          "y": 269,
           "w": 316,
           "h": 18,
-          "index": 1
+          "index": 2
         },
         "milestone-bar": {
           "x": 12,
@@ -10863,10 +8099,10 @@
         },
         "session-line-last": {
           "x": 640,
-          "y": 104,
+          "y": 123,
           "w": 788,
           "h": 18,
-          "index": 1
+          "index": 2
         },
         "milestone-bar": {
           "x": 12,
@@ -10949,10 +8185,10 @@
         },
         "session-line-last": {
           "x": 640,
-          "y": 104,
+          "y": 123,
           "w": 788,
           "h": 18,
-          "index": 1
+          "index": 2
         },
         "milestone-bar": {
           "x": 12,
@@ -11016,14 +8252,14 @@
           "x": 4,
           "y": 125,
           "w": 352,
-          "h": 153,
+          "h": 172,
           "index": 0
         },
         "initiative-row-last": {
           "x": 4,
           "y": 125,
           "w": 352,
-          "h": 153,
+          "h": 172,
           "index": 0
         },
         "session-line-first": {
@@ -11035,10 +8271,10 @@
         },
         "session-line-last": {
           "x": 32,
-          "y": 250,
+          "y": 269,
           "w": 316,
           "h": 18,
-          "index": 1
+          "index": 2
         },
         "milestone-bar": {
           "x": 12,
@@ -11102,14 +8338,14 @@
           "x": 4,
           "y": 125,
           "w": 352,
-          "h": 153,
+          "h": 172,
           "index": 0
         },
         "initiative-row-last": {
           "x": 4,
           "y": 125,
           "w": 352,
-          "h": 153,
+          "h": 172,
           "index": 0
         },
         "session-line-first": {
@@ -11121,10 +8357,10 @@
         },
         "session-line-last": {
           "x": 32,
-          "y": 250,
+          "y": 269,
           "w": 316,
           "h": 18,
-          "index": 1
+          "index": 2
         },
         "milestone-bar": {
           "x": 12,
@@ -11207,10 +8443,10 @@
         },
         "session-line-last": {
           "x": 640,
-          "y": 104,
+          "y": 123,
           "w": 788,
           "h": 18,
-          "index": 1
+          "index": 2
         },
         "milestone-bar": {
           "x": 12,
@@ -11293,10 +8529,10 @@
         },
         "session-line-last": {
           "x": 640,
-          "y": 104,
+          "y": 123,
           "w": 788,
           "h": 18,
-          "index": 1
+          "index": 2
         },
         "milestone-bar": {
           "x": 12,
@@ -11360,14 +8596,14 @@
           "x": 4,
           "y": 125,
           "w": 352,
-          "h": 153,
+          "h": 172,
           "index": 0
         },
         "initiative-row-last": {
           "x": 4,
           "y": 125,
           "w": 352,
-          "h": 153,
+          "h": 172,
           "index": 0
         },
         "session-line-first": {
@@ -11379,10 +8615,10 @@
         },
         "session-line-last": {
           "x": 32,
-          "y": 250,
+          "y": 269,
           "w": 316,
           "h": 18,
-          "index": 1
+          "index": 2
         },
         "milestone-bar": {
           "x": 12,
@@ -11446,14 +8682,14 @@
           "x": 4,
           "y": 125,
           "w": 352,
-          "h": 153,
+          "h": 172,
           "index": 0
         },
         "initiative-row-last": {
           "x": 4,
           "y": 125,
           "w": 352,
-          "h": 153,
+          "h": 172,
           "index": 0
         },
         "session-line-first": {
@@ -11465,10 +8701,10 @@
         },
         "session-line-last": {
           "x": 32,
-          "y": 250,
+          "y": 269,
           "w": 316,
           "h": 18,
-          "index": 1
+          "index": 2
         },
         "milestone-bar": {
           "x": 12,
@@ -11551,10 +8787,10 @@
         },
         "session-line-last": {
           "x": 640,
-          "y": 104,
+          "y": 123,
           "w": 788,
           "h": 18,
-          "index": 1
+          "index": 2
         },
         "milestone-bar": {
           "x": 12,
@@ -11637,10 +8873,10 @@
         },
         "session-line-last": {
           "x": 640,
-          "y": 104,
+          "y": 123,
           "w": 788,
           "h": 18,
-          "index": 1
+          "index": 2
         },
         "milestone-bar": {
           "x": 12,
@@ -11704,14 +8940,14 @@
           "x": 4,
           "y": 125,
           "w": 352,
-          "h": 153,
+          "h": 172,
           "index": 0
         },
         "initiative-row-last": {
           "x": 4,
           "y": 125,
           "w": 352,
-          "h": 153,
+          "h": 172,
           "index": 0
         },
         "session-line-first": {
@@ -11723,10 +8959,10 @@
         },
         "session-line-last": {
           "x": 32,
-          "y": 250,
+          "y": 269,
           "w": 316,
           "h": 18,
-          "index": 1
+          "index": 2
         },
         "milestone-bar": {
           "x": 12,
@@ -11790,14 +9026,14 @@
           "x": 4,
           "y": 125,
           "w": 352,
-          "h": 153,
+          "h": 172,
           "index": 0
         },
         "initiative-row-last": {
           "x": 4,
           "y": 125,
           "w": 352,
-          "h": 153,
+          "h": 172,
           "index": 0
         },
         "session-line-first": {
@@ -11809,10 +9045,10 @@
         },
         "session-line-last": {
           "x": 32,
-          "y": 250,
+          "y": 269,
           "w": 316,
           "h": 18,
-          "index": 1
+          "index": 2
         },
         "milestone-bar": {
           "x": 12,
@@ -11895,10 +9131,10 @@
         },
         "session-line-last": {
           "x": 640,
-          "y": 104,
+          "y": 123,
           "w": 788,
           "h": 18,
-          "index": 1
+          "index": 2
         },
         "milestone-bar": {
           "x": 12,
@@ -11981,10 +9217,10 @@
         },
         "session-line-last": {
           "x": 640,
-          "y": 104,
+          "y": 123,
           "w": 788,
           "h": 18,
-          "index": 1
+          "index": 2
         },
         "milestone-bar": {
           "x": 12,
@@ -12048,14 +9284,14 @@
           "x": 4,
           "y": 125,
           "w": 352,
-          "h": 153,
+          "h": 172,
           "index": 0
         },
         "initiative-row-last": {
           "x": 4,
           "y": 125,
           "w": 352,
-          "h": 153,
+          "h": 172,
           "index": 0
         },
         "session-line-first": {
@@ -12067,10 +9303,10 @@
         },
         "session-line-last": {
           "x": 32,
-          "y": 250,
+          "y": 269,
           "w": 316,
           "h": 18,
-          "index": 1
+          "index": 2
         },
         "milestone-bar": {
           "x": 12,
@@ -12134,14 +9370,14 @@
           "x": 4,
           "y": 125,
           "w": 352,
-          "h": 153,
+          "h": 172,
           "index": 0
         },
         "initiative-row-last": {
           "x": 4,
           "y": 125,
           "w": 352,
-          "h": 153,
+          "h": 172,
           "index": 0
         },
         "session-line-first": {
@@ -12153,10 +9389,10 @@
         },
         "session-line-last": {
           "x": 32,
-          "y": 250,
+          "y": 269,
           "w": 316,
           "h": 18,
-          "index": 1
+          "index": 2
         },
         "milestone-bar": {
           "x": 12,
@@ -15490,11 +12726,11 @@
         "overflow": {
           "x": 228,
           "y": 6,
-          "w": 30.9375,
+          "w": 42.9375,
           "h": 26
         },
         "add": {
-          "x": 270.9375,
+          "x": 282.9375,
           "y": 6,
           "w": 26,
           "h": 26
@@ -15502,7 +12738,7 @@
         "strip-overflow": {
           "x": 228,
           "y": 6,
-          "w": 30.9375,
+          "w": 42.9375,
           "h": 26
         },
         "caption": {
@@ -15549,11 +12785,11 @@
         "overflow": {
           "x": 228,
           "y": 6,
-          "w": 30.9375,
+          "w": 42.9375,
           "h": 26
         },
         "add": {
-          "x": 270.9375,
+          "x": 282.9375,
           "y": 6,
           "w": 26,
           "h": 26
@@ -15561,7 +12797,7 @@
         "strip-overflow": {
           "x": 228,
           "y": 6,
-          "w": 30.9375,
+          "w": 42.9375,
           "h": 26
         },
         "caption": {
@@ -15730,11 +12966,11 @@
         "overflow": {
           "x": 228,
           "y": 6,
-          "w": 30.9375,
+          "w": 42.9375,
           "h": 26
         },
         "add": {
-          "x": 270.9375,
+          "x": 282.9375,
           "y": 6,
           "w": 26,
           "h": 26
@@ -15742,7 +12978,7 @@
         "strip-overflow": {
           "x": 228,
           "y": 6,
-          "w": 30.9375,
+          "w": 42.9375,
           "h": 26
         },
         "caption": {
@@ -15789,11 +13025,11 @@
         "overflow": {
           "x": 228,
           "y": 6,
-          "w": 30.9375,
+          "w": 42.9375,
           "h": 26
         },
         "add": {
-          "x": 270.9375,
+          "x": 282.9375,
           "y": 6,
           "w": 26,
           "h": 26
@@ -15801,7 +13037,7 @@
         "strip-overflow": {
           "x": 228,
           "y": 6,
-          "w": 30.9375,
+          "w": 42.9375,
           "h": 26
         },
         "caption": {
@@ -16300,246 +13536,6 @@
           "x": 148.671875,
           "y": 877.5,
           "w": 84.4375,
-          "h": 18,
-          "cut": false
-        }
-      }
-    },
-    "agent-harbor-session-tabs-playback-at-milestone-done-laptop-dark": {
-      "moment": "milestone-done",
-      "viewport": {
-        "width": 1440,
-        "height": 900
-      },
-      "regions": {
-        "surface": {
-          "x": 0,
-          "y": 0,
-          "w": 1440,
-          "h": 34
-        },
-        "active-tab": {
-          "x": 0,
-          "y": 6,
-          "w": 224,
-          "h": 26,
-          "fill": "#3c3c3c"
-        },
-        "add": {
-          "x": 1012,
-          "y": 6,
-          "w": 26,
-          "h": 26
-        },
-        "inactive-tab-first": {
-          "x": 228,
-          "y": 6,
-          "w": 192,
-          "h": 26,
-          "index": 0
-        },
-        "inactive-tab-last": {
-          "x": 816,
-          "y": 6,
-          "w": 192,
-          "h": 26,
-          "index": 3
-        },
-        "caption": {
-          "x": 0,
-          "y": 0,
-          "w": 1440,
-          "h": 34
-        },
-        "playback-readout": {
-          "x": 332.515625,
-          "y": 877.5,
-          "w": 1099.484375,
-          "h": 18
-        },
-        "playback-moment": {
-          "x": 340.515625,
-          "y": 877.5,
-          "w": 91.765625,
-          "h": 18,
-          "cut": false
-        }
-      }
-    },
-    "agent-harbor-session-tabs-playback-at-milestone-done-laptop-light": {
-      "moment": "milestone-done",
-      "viewport": {
-        "width": 1440,
-        "height": 900
-      },
-      "regions": {
-        "surface": {
-          "x": 0,
-          "y": 0,
-          "w": 1440,
-          "h": 34
-        },
-        "active-tab": {
-          "x": 0,
-          "y": 6,
-          "w": 224,
-          "h": 26,
-          "fill": "#b5ae9f"
-        },
-        "add": {
-          "x": 1012,
-          "y": 6,
-          "w": 26,
-          "h": 26
-        },
-        "inactive-tab-first": {
-          "x": 228,
-          "y": 6,
-          "w": 192,
-          "h": 26,
-          "index": 0
-        },
-        "inactive-tab-last": {
-          "x": 816,
-          "y": 6,
-          "w": 192,
-          "h": 26,
-          "index": 3
-        },
-        "caption": {
-          "x": 0,
-          "y": 0,
-          "w": 1440,
-          "h": 34
-        },
-        "playback-readout": {
-          "x": 332.515625,
-          "y": 877.5,
-          "w": 1099.484375,
-          "h": 18
-        },
-        "playback-moment": {
-          "x": 340.515625,
-          "y": 877.5,
-          "w": 91.765625,
-          "h": 18,
-          "cut": false
-        }
-      }
-    },
-    "agent-harbor-session-tabs-playback-at-milestone-done-sidebar-dark": {
-      "moment": "milestone-done",
-      "viewport": {
-        "width": 360,
-        "height": 900
-      },
-      "regions": {
-        "surface": {
-          "x": 0,
-          "y": 0,
-          "w": 360,
-          "h": 34
-        },
-        "active-tab": {
-          "x": 0,
-          "y": 6,
-          "w": 224,
-          "h": 26,
-          "fill": "#3c3c3c"
-        },
-        "overflow": {
-          "x": 228,
-          "y": 6,
-          "w": 30.9375,
-          "h": 26
-        },
-        "add": {
-          "x": 270.9375,
-          "y": 6,
-          "w": 26,
-          "h": 26
-        },
-        "strip-overflow": {
-          "x": 228,
-          "y": 6,
-          "w": 30.9375,
-          "h": 26
-        },
-        "caption": {
-          "x": 0,
-          "y": 0,
-          "w": 360,
-          "h": 34
-        },
-        "playback-readout": {
-          "x": 140.671875,
-          "y": 877.5,
-          "w": 211.328125,
-          "h": 18
-        },
-        "playback-moment": {
-          "x": 148.671875,
-          "y": 877.5,
-          "w": 91.765625,
-          "h": 18,
-          "cut": false
-        }
-      }
-    },
-    "agent-harbor-session-tabs-playback-at-milestone-done-sidebar-light": {
-      "moment": "milestone-done",
-      "viewport": {
-        "width": 360,
-        "height": 900
-      },
-      "regions": {
-        "surface": {
-          "x": 0,
-          "y": 0,
-          "w": 360,
-          "h": 34
-        },
-        "active-tab": {
-          "x": 0,
-          "y": 6,
-          "w": 224,
-          "h": 26,
-          "fill": "#b5ae9f"
-        },
-        "overflow": {
-          "x": 228,
-          "y": 6,
-          "w": 30.9375,
-          "h": 26
-        },
-        "add": {
-          "x": 270.9375,
-          "y": 6,
-          "w": 26,
-          "h": 26
-        },
-        "strip-overflow": {
-          "x": 228,
-          "y": 6,
-          "w": 30.9375,
-          "h": 26
-        },
-        "caption": {
-          "x": 0,
-          "y": 0,
-          "w": 360,
-          "h": 34
-        },
-        "playback-readout": {
-          "x": 140.671875,
-          "y": 877.5,
-          "w": 211.328125,
-          "h": 18
-        },
-        "playback-moment": {
-          "x": 148.671875,
-          "y": 877.5,
-          "w": 91.765625,
           "h": 18,
           "cut": false
         }
@@ -17410,11 +14406,11 @@
         "overflow": {
           "x": 228,
           "y": 6,
-          "w": 30.9375,
+          "w": 42.9375,
           "h": 26
         },
         "add": {
-          "x": 270.9375,
+          "x": 282.9375,
           "y": 6,
           "w": 26,
           "h": 26
@@ -17422,7 +14418,7 @@
         "strip-overflow": {
           "x": 228,
           "y": 6,
-          "w": 30.9375,
+          "w": 42.9375,
           "h": 26
         },
         "caption": {
@@ -17469,11 +14465,11 @@
         "overflow": {
           "x": 228,
           "y": 6,
-          "w": 30.9375,
+          "w": 42.9375,
           "h": 26
         },
         "add": {
-          "x": 270.9375,
+          "x": 282.9375,
           "y": 6,
           "w": 26,
           "h": 26
@@ -17481,7 +14477,7 @@
         "strip-overflow": {
           "x": 228,
           "y": 6,
-          "w": 30.9375,
+          "w": 42.9375,
           "h": 26
         },
         "caption": {

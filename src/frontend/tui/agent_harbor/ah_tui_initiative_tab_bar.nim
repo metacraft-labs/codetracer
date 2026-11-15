@@ -17,7 +17,8 @@
 import std/strutils
 import isonim/core/signals
 import nim_agents_isonim_viewmodels/agent_harbor/initiative_tabs_vm
-from ../../viewmodel/views/agent_harbor_words import stateSuffix
+from ../../viewmodel/views/agent_harbor_words import stateSuffix, HiddenSeverity,
+  hiddenRecordings, hiddenBarTabs, chipTitle
 
 import ./ah_tui_canvas
 import ./ah_tui_session_views
@@ -59,7 +60,9 @@ proc recordingsCells(buttons: RecordingButtons): int =
   for i, rb in buttons.buttons:
     if i > 0: result += RecordingGap
     result += widthOf(buttonLabel(rb))
-  if buttons.hidden > 0: result += RecordingGap + widthOf("+" & $buttons.hidden) + 2
+  if buttons.hidden > 0:
+    result += RecordingGap + widthOf("+" & $buttons.hidden) + 2 +
+      (if hiddenRecordings(buttons.hiddenStates).severity != hsNone: 2 else: 0)
 
 proc tabContent(vm: InitiativeTabStripVM; tab: StripTab): int =
   result = 1 + 2 + widthOf(tab.title) + 1
@@ -103,7 +106,8 @@ proc drawRecordingButton(c: var AhCanvas; parent: AhNode; vm: InitiativeTabStrip
   discard c.put(row, col, label, fg, bg = bg)
   discard c.node(parent, row, col, w, 1,
                  [("recording", $rb.number), ("recording-state", $rb.state),
-                  ("recording-active", $rb.active), ("tooltip", rb.tooltip)])
+                  ("recording-active", $rb.active), ("recording-label", label),
+                  ("tooltip", rb.tooltip)])
   let target = vm
   c.target(row, col, w, 1, proc() = discard target.selectRecording(initiativeId, id))
   w
@@ -145,11 +149,25 @@ proc drawBarTab(c: var AhCanvas; parent: AhNode; vm: InitiativeTabStripVM;
         if i > 0: at += RecordingGap
         at += c.drawRecordingButton(switcher, vm, id, rb, row, at)
       if buttons.hidden > 0:
+        # The recordings' `+N` takes the most severe state of those it
+        # hides: a failed one gives it the error mark and colour, a missing
+        # one the warning mark.
         at += RecordingGap
+        let h = hiddenRecordings(buttons.hiddenStates)
+        let markCells = if h.severity != hsNone: 2 else: 0
         let more = " +" & $buttons.hidden & " "
-        discard c.put(row, at, more, c.p.textLabel, bg = c.tone.chip)
-        discard c.node(switcher, row, at, widthOf(more), 1,
-                       [("recordings-hidden", $buttons.hidden)])
+        let w = widthOf(more) + markCells
+        c.fill(row, at, w, 1, c.tone.chip)
+        let moreNode = c.node(switcher, row, at, w, 1,
+                              [("recordings-hidden", $buttons.hidden),
+                               ("recordings-hidden-severity", $h.severity),
+                               ("tooltip", chipTitle(h, "recording", "recordings"))])
+        if h.severity != hsNone:
+          discard c.mark(moreNode, row, at + 1,
+                         c.p.markOf(if h.severity == hsFailed: saFailed else: saNeedsInput))
+        discard c.put(row, at + markCells, more,
+                      if h.severity == hsFailed: c.p.textError else: c.p.textLabel,
+                      bg = c.tone.chip)
     right = progressCol - 1
     nextAt = progressCol
   elif tab.session.originShort.len > 0:
@@ -401,19 +419,15 @@ proc drawInitiativeTabBar*(c: var AhCanvas; vm: InitiativeTabStripVM; row, col, 
       mins.add tabMinCellsOf(vm, tabs[i])
     var reserved = AddCells + 1
     if overflow.len > 0: reserved += chipWidth(overflow.len, true) + 1
+      # The widest the chip draws: with its mark.
     let fitted = fitCells(widths, tabsRoom - reserved, TabMinCells, 1, mins = mins)
     for k, i in layout.visible:
       if tabs[i].kind == stkInitiative and vm.popupId.val == tabs[i].id: popupCol = at
       c.drawBarTab(host, vm, tabs[i], row, at, fitted[k])
       at += fitted[k] + 1
     if overflow.len > 0:
-      var waits = 0
-      for i in overflow:
-        if tabs[i].kind == stkInitiative and tabs[i].state == isNeedsInput or
-            tabs[i].kind == stkSession and tabs[i].session.attention == saNeedsInput:
-          inc waits
       let target = vm
-      at += c.drawOverflowChip(host, row, at, overflow.len, waits, vm.overflowOpen.val,
+      at += c.drawOverflowChip(host, row, at, hiddenBarTabs(tabs, overflow), vm.overflowOpen.val,
                                proc() = target.overflowOpen.val = not target.overflowOpen.val)
       chipEnd = at
       inc at

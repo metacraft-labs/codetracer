@@ -83,10 +83,12 @@ grep -q '"fixtureSet\\": \\"synthetic\\"' storybook/dist/components.js || {
 	exit 1
 }
 mkdir -p "${OUT}"
-# A re-take starts from no regions: the record below is merged from every
-# regions file in OUT, so one left from an earlier run of a story or moment
-# that no longer exists would otherwise be recorded as if it had been taken.
-rm -f "${OUT}"/*.regions.json
+# A re-take starts from no regions and no frames: the record below is merged
+# from every regions file in OUT, so one left from an earlier run of a story
+# or moment that no longer exists would otherwise be recorded as if it had
+# been taken, and its frame would be paired (`parity-pairs.sh`) as a capture
+# with no partner.
+rm -f "${OUT}"/*.regions.json "${OUT}"/*.png
 for size in laptop sidebar; do
 	node tools/visual-review/capture-storybook.mjs --no-build --font-render-hinting none \
 		"${views[@]}" \

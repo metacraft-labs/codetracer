@@ -42,6 +42,13 @@ fail() {
 target="${GPUI_WINDOWED_TARGET_DIR:-${ISONIM_GPUI}/rust/target/windowed}"
 shim="${target}/debug/libgpui_nim_shim.so"
 mkdir -p "${OUT}"
+# A re-take of the whole set starts from no frames: a frame left from an
+# earlier run of a story or moment that no longer exists would be converted
+# and paired (`parity-pairs.sh`) as a capture with no partner. A run limited
+# to some stories keeps the others' frames.
+if [ -z "${1:-}" ]; then
+	rm -f "${OUT}"/*.ppm "${OUT}"/*.png "${OUT}"/*.regions.json
+fi
 (cd "${ISONIM_GPUI}" && nix develop --command bash -c \
 	"cd rust && CARGO_TARGET_DIR='${target}' cargo build -q --features gpui-backend &&
 	 printf '%s' \"\$LD_LIBRARY_PATH\" > '${OUT}/gpui.ld-path'") ||

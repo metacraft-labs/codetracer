@@ -1,4 +1,4 @@
- ● Telemetry uplo…  1/4  1   +3    ● +6   +
+ ● Telemetry up…  1/4  1   ● +3    ● +6   +
  26    ←  →   Auto: off
                                              
  ● Route cache on the new storage la…   2/6

@@ -24,7 +24,8 @@ import std/strutils
 
 import isonim/core/signals
 import nim_agents_isonim_viewmodels/agent_harbor/[session_tabs_vm, initiative_progress_vm,
-                                                   fleet_vm, recording_switcher]
+                                                   fleet_vm, recording_switcher,
+                                                   initiative_tabs_vm]
 
 const
   AgentHarborTabsLoadingText* = "Loading sessions\xE2\x80\xA6"
@@ -195,3 +196,90 @@ proc stateSuffix*(state: RecordingState): string =
   of rsLoading: " \xE2\x80\xA6"
   of rsFailed: " \xE2\x9C\x95"
   of rsMissing: " ?"
+
+# ---------------------------------------------------------------------------
+# The `+N` chips: what they hide
+# ---------------------------------------------------------------------------
+
+type
+  HiddenSeverity* = enum
+    ## The most severe status among the items a `+N` chip hides, which the
+    ## chip takes: its colour and mark, and its accessible name.
+    hsNone = "none"            ## nothing that asks for the reader
+    hsNeedsInput = "needs-input" ## a hidden item waits (the warning mark)
+    hsFailed = "failed"        ## a hidden item failed (the error colour and mark)
+
+  HiddenSummary* = object
+    ## What a `+N` chip hides: how many items, how many of them wait for
+    ## the reader and how many failed, and the most severe of these.
+    hidden*, waiting*, failed*: int
+    severity*: HiddenSeverity
+
+proc hiddenSummary*(waiting, failed, hidden: int): HiddenSummary =
+  ## A chip hiding `hidden` items, `waiting` of them waiting and `failed`
+  ## of them failed; a failure is more severe than a wait.
+  result = HiddenSummary(hidden: hidden, waiting: waiting, failed: failed)
+  result.severity = if failed > 0: hsFailed elif waiting > 0: hsNeedsInput else: hsNone
+
+proc hiddenSessions*(attentions: openArray[SessionAttention]): HiddenSummary =
+  ## The session tabs a chip hides, by their attention.
+  var waiting, failed = 0
+  for a in attentions:
+    if a == saNeedsInput: inc waiting
+    elif a == saFailed: inc failed
+  hiddenSummary(waiting, failed, attentions.len)
+
+proc hiddenRecordings*(states: openArray[RecordingState]): HiddenSummary =
+  ## The recordings a recording switcher's chip hides: a recording that
+  ## failed to load is a failure; one no longer on the server (missing,
+  ## drawn in the warning colour) is a warning.
+  var waiting, failed = 0
+  for s in states:
+    if s == rsFailed: inc failed
+    elif s == rsMissing: inc waiting
+  hiddenSummary(waiting, failed, states.len)
+
+proc chipTitle*(h: HiddenSummary; noun, nouns: string): string =
+  ## The chip's accessible name and tooltip: `3 more tabs, 1 failed, 1
+  ## needing input`, so what the chip's colour says is also said in words.
+  result = $h.hidden & " more " & (if h.hidden == 1: noun else: nouns)
+  if h.failed > 0:
+    result.add ", " & $h.failed & (if noun == "recording": " failed to load" else: " failed")
+  if h.waiting > 0:
+    result.add ", " & $h.waiting & (if noun == "recording": " missing" else: " needing input")
+
+proc hiddenBarTabs*(tabs: openArray[StripTab]; hidden: openArray[int]): HiddenSummary =
+  ## The initiative bar's tabs a chip hides (indexes into `tabs`): an
+  ## initiative that needs input, or a session that does, waits; an
+  ## initiative whose milestone is blocked with nothing working (its red
+  ## mark), or a session that failed, is a failure.
+  var waiting, failed = 0
+  for i in hidden:
+    let t = tabs[i]
+    case t.kind
+    of stkInitiative:
+      if t.state == isNeedsInput: inc waiting
+      elif t.state == isBlocked: inc failed
+    of stkSession:
+      if t.session.attention == saNeedsInput: inc waiting
+      elif t.session.attention == saFailed: inc failed
+  hiddenSummary(waiting, failed, hidden.len)
+
+# ---------------------------------------------------------------------------
+# Cut text
+# ---------------------------------------------------------------------------
+
+proc trimBeforeEllipsis*(kept: string): string =
+  ## The kept start of a cut text, without what would dangle before its
+  ## "…": trailing spaces, and a separator (`·`, or ` — `) the cut left
+  ## last, so `5ca1ab1e · ` reads `5ca1ab1e…` and `Telemetry upload `
+  ## reads `Telemetry upload…`. Every host's cut text goes through this rule
+  ## (the terminal's `ah_tui_canvas.elide`).
+  result = kept.strip(leading = false)
+  var trimmed = true
+  while trimmed:
+    trimmed = false
+    for sep in ["\xC2\xB7", "\xE2\x80\x94"]:
+      if result.endsWith(sep):
+        result = result[0 ..< result.len - sep.len].strip(leading = false)
+        trimmed = true

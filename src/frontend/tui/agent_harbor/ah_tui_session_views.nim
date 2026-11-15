@@ -22,7 +22,8 @@ import isonim/core/signals
 import nim_agents_isonim_viewmodels/agent_harbor/session_tabs_vm
 from ../../viewmodel/views/agent_harbor_words import
   tabLabelOf, countsText, metaOf, AgentHarborTabsLoadingText,
-  AgentHarborTabsErrorText, AgentHarborTabsEmptyText
+  AgentHarborTabsErrorText, AgentHarborTabsEmptyText, HiddenSummary, HiddenSeverity,
+  hiddenSessions, chipTitle
 
 import ./ah_tui_canvas
 
@@ -93,24 +94,41 @@ proc drawPlus*(c: var AhCanvas; parent: AhNode; row, col: int) =
   discard c.put(row, col, " + ", c.p.addText, bg = c.tone.chip)
   discard c.node(parent, row, col, AddCells, 1, [("add", "+")])
 
-proc chipWidth*(hidden: int; waits: bool): int =
-  ## `+N`, a space either side, and the warning mark when a hidden tab waits.
-  widthOf("+" & $hidden) + 2 + (if waits: 2 else: 0)
+proc chipWidth*(hidden: int; marked: bool): int =
+  ## `+N`, a space either side, and the mark when what it hides waits or
+  ## failed.
+  widthOf("+" & $hidden) + 2 + (if marked: 2 else: 0)
 
-proc drawOverflowChip*(c: var AhCanvas; parent: AhNode; row, col, hidden, waits: int;
+proc chipWidth*(h: HiddenSummary): int = chipWidth(h.hidden, h.severity != hsNone)
+
+proc drawOverflowChip*(c: var AhCanvas; parent: AhNode; row, col: int; h: HiddenSummary;
                        open: bool; onClick: proc()): int =
-  ## `+N`: the tabs one line has no room for; a waiting one marks it. No
+  ## `+N`: the tabs one line has no room for. The chip takes the most
+  ## severe status of what it hides: a failed tab gives it the error mark
+  ## and its words the error colour, a waiting one the warning mark. No
   ## ground at rest (the web's chip has none), the chip's ground while its
-  ## menu is open.
-  let w = chipWidth(hidden, waits > 0)
-  let n = c.node(parent, row, col, w, 1, [("overflow", $hidden),
-                                          ("overflow-waits", $waits)])
+  ## menu is open. Its node names what it hides (`chipTitle`), as the web's
+  ## accessible name does.
+  let w = chipWidth(h)
+  let n = c.node(parent, row, col, w, 1, [("overflow", $h.hidden),
+                                          ("overflow-waits", $h.waiting),
+                                          ("overflow-failed", $h.failed),
+                                          ("overflow-severity", $h.severity),
+                                          ("tooltip", chipTitle(h, "tab", "tabs"))])
   if open: c.fill(row, col, w, 1, c.tone.chip)
   var at = col + 1
-  if waits > 0:
+  case h.severity
+  of hsFailed:
+    discard c.mark(n, row, at, c.p.markOf(saFailed))
+    at += 2
+  of hsNeedsInput:
     discard c.mark(n, row, at, c.p.markOf(saNeedsInput))
     at += 2
-  discard c.put(row, at, "+" & $hidden, if open: c.p.textBody else: c.p.textLabel)
+  of hsNone: discard
+  let ink = if h.severity == hsFailed: c.p.textError
+            elif open: c.p.textBody
+            else: c.p.textLabel
+  discard c.put(row, at, "+" & $h.hidden, ink)
   c.target(row, col, w, 1, onClick)
   w
 
@@ -303,11 +321,10 @@ proc drawSessionTabStrip*(c: var AhCanvas; vm: SessionTabStripVM; row, col, widt
         for i in layout.visible:
           widths.add tabCells(tabs[i], closable)
           fixed.add tabs[i].active
-        var waits = 0
-        for i in overflow:
-          if tabs[i].attention == saNeedsInput: inc waits
+        var attentions: seq[SessionAttention]
+        for i in overflow: attentions.add tabs[i].attention
         let controls = AddCells + 1 +
-          (if overflow.len > 0: chipWidth(overflow.len, waits > 0) + 1 else: 0)
+          (if overflow.len > 0: chipWidth(hiddenSessions(attentions)) + 1 else: 0)
         let fitted = fitCells(widths, width - controls, TabMinCells, 1, fixed)
         for k, i in layout.visible:
           c.drawTab(host, vm, tabs[i], closable, row, at, fitted[k])
@@ -316,11 +333,10 @@ proc drawSessionTabStrip*(c: var AhCanvas; vm: SessionTabStripVM; row, col, widt
   let lastRow = row + lines - 1
   var chipEnd = -1
   if overflow.len > 0:
-    var waits = 0
-    for i in overflow:
-      if tabs[i].attention == saNeedsInput: inc waits
+    var attentions: seq[SessionAttention]
+    for i in overflow: attentions.add tabs[i].attention
     let target = vm
-    at += c.drawOverflowChip(host, lastRow, at, overflow.len, waits, vm.overflowOpen.val,
+    at += c.drawOverflowChip(host, lastRow, at, hiddenSessions(attentions), vm.overflowOpen.val,
                              proc() = target.toggleOverflow())
     chipEnd = at
     inc at
@@ -424,109 +440,71 @@ proc drawListRow(c: var AhCanvas; parent: AhNode; vm: SessionTabStripVM;
   height
 
 type
-  GroupColumns* = object
-    ## Where a list's group headers put their parts, the same for every
-    ## header of the list so `n/m` stands in one column: the title's slot,
-    ## then `n/m` right-aligned in its own, then the counts' slot at the end.
-    ## `flush`: the docked panel's wide layout, where every header's counts
-    ## are right-aligned to the panel's end, flush with the rows' ages.
-    titleAt*, titleW*, progressW*, countsW*: int
-    flush*: bool
-
   GroupHeaderPlace* = object
-    ## One header's parts, in absolute columns: the title's width, where
-    ## `n/m` and the counts start and how many cells the counts get (none
-    ## when fewer than two would show), and whether the header flowed
-    ## inline (`n/m` two cells after its title) rather than in the columns.
-    titleW*, progressAt*, countsAt*, countsW*: int
-    inline*: bool
+    ## One group header's parts, in absolute columns: where the title starts
+    ## and how many cells it gets, where `n/m` starts, and where the counts
+    ## start and how many cells they are drawn in (right-aligned, ending
+    ## flush with the rows' ages).
+    titleAt*, titleW*, progressAt*, countsAt*, countsW*: int
+    countsShown*: string     ## the counts as drawn: whole, or cut with "…"
 
 const
-  GroupCountsShare = 40
-    ## The counts take at most 40% of a header (`.ah-session-group-counts`:
-    ## `max-width: 40%`).
   GroupCountsMin = 8
-    ## What the title slot leaves the counts at least (`2 failed`, `1 idle…`:
-    ## the counts are cut only between their parts, so a slot that holds no
-    ## whole first part shows none).
-  GroupInlineGap = 2
-    ## Between a title and the `n/m` that flows after it.
+    ## The least room the counts give up to before the title is cut: a
+    ## part cut inside reads `1 needs…`. Counts shorter than this keep their
+    ## whole width.
+  GroupTitleMin = 4
+    ## The least a cut title keeps (three glyphs and its "…"); only below
+    ## this do the counts give up more than `GroupCountsMin`.
+  GroupGap = 1
+    ## Between a whole title and `n/m`, and between `n/m` and the counts
+    ## (`.ah-session-group-header`'s 0.5rem gap).
+  GroupTitleAt = 5
+    ## The title's first cell: the fold, a space, the mark, a space.
 
-proc groupColumns*(vm: SessionTabStripVM; width: int; flush = false): GroupColumns =
-  ## The columns of `vm`'s group headers in a list `width` cells wide: the
-  ## title's slot as wide as the widest title, but leaving `n/m` its column
-  ## and the counts at least `GroupCountsMin` cells; `n/m` right-aligned in
-  ## a column as wide as the widest `n/m`; the counts the rest (at most 40%
-  ## of the line). A title longer than its slot takes room from its own
-  ## header's counts (`groupHeaderPlace`): the counts are cut before the
-  ## title is (`.ah-session-group-counts` shrinks a hundred times faster).
-  ## `flush` (the docked panel's wide layout): the counts' slot is the
-  ## widest counts, ending at the panel's end, and `n/m` stands just left of
-  ## it.
-  result.titleAt = 5   # fold, a space, the mark, a space
-  result.flush = flush
-  var widestCounts, widestProgress, widestTitle = 0
-  for g in vm.groups:
-    widestCounts = max(widestCounts, widthOf(countsText(g.counts)))
-    widestProgress = max(widestProgress, widthOf(g.progressText))
-    widestTitle = max(widestTitle, widthOf(g.title))
-  let line = width - result.titleAt - 1
-  let pw = if widestProgress > 0: widestProgress + 1 else: 0
-  result.progressW = widestProgress
-  if flush:
-    result.countsW = min(widestCounts, line * GroupCountsShare div 100)
-    result.titleW = max(4, line - pw - 1 - result.countsW)
-    return
-  result.titleW = max(4, min(max(widestTitle, line - pw - 1 -
-                                 min(widestCounts, line * GroupCountsShare div 100)),
-                             line - pw - 1 - GroupCountsMin))
-  result.countsW = max(0, line - result.titleW - pw - 1)
-
-proc groupHeaderPlace*(cols: GroupColumns; col, width: int; title, progress,
-                       counts: string): GroupHeaderPlace =
-  ## One header's layout. The columns are a preference, not a constraint:
-  ## the title whole when the line can hold it beside `n/m` (taking its
-  ## counts' room first), cut only when it cannot; the counts what is left
-  ## of their slot. A header whose counts the columns would cut, but which
-  ## would show them whole with `n/m` two cells after its title, flows
-  ## inline instead (as the web's header always does), so a short title
-  ## never costs its own counts; the other headers keep the column. On the
-  ## docked panel's wide layout (`cols.flush`) the counts end at the panel's
-  ## end, flush with the rows' ages.
-  let titleAt = col + cols.titleAt
+proc groupHeaderPlace*(col, width: int; title, progress, counts: string): GroupHeaderPlace =
+  ## One header's layout, the web's rule (`.ah-session-group-title`
+  ## `flex: 1 1 auto`, `.ah-session-group-counts` `flex: 0 100 auto`, which
+  ## gives way a hundred times faster): the counts end flush with the rows'
+  ## ages, `n/m` one cell before them, the title from the left. On a line
+  ## too short for all of it the counts give up their room first, cut with
+  ## an ellipsis inside a part where needed (`1 needs…`), down to
+  ## `GroupCountsMin` cells; only then is the title cut, keeping
+  ## `StatusWordGap` cells before `n/m`. The counts never disappear: below a
+  ## `GroupTitleMin`-cell title they shrink further, to one cell at least.
+  result.titleAt = col + GroupTitleAt
   let lineEnd = col + width - 1             # exclusive: one cell of inset
-  let line = width - cols.titleAt - 1
-  let pw = if cols.progressW > 0: cols.progressW + 1 else: 0
-  let natural = widthOf(title)
+  let room = lineEnd - result.titleAt
+  let pw = widthOf(progress)
+  let pg = if pw > 0: pw + GroupGap else: 0  # n/m and its gap before the counts
+  let tw = widthOf(title)
   let cw = widthOf(counts)
-  result.titleW = cols.titleW
-  result.countsW = min(cols.countsW, cw)
-  if natural > cols.titleW:
-    result.titleW = min(natural, line - pw)
-    result.countsW = min(cw, max(0, line - pw - result.titleW - 1))
-  let progressEnd = max(titleAt + result.titleW + 1 + cols.progressW,
-                        lineEnd - (if cols.countsW > 0: cols.countsW + 1 else: 0))
-  result.progressAt = progressEnd - widthOf(progress)
-  result.countsAt = if cols.flush: lineEnd - result.countsW else: progressEnd + 1
-  if not cols.flush and result.countsW < cw:
-    let progressCells = if progress.len > 0: widthOf(progress) + 1 else: 0
-    if titleAt + natural + GroupInlineGap + progressCells + cw <= lineEnd:
-      result = GroupHeaderPlace(titleW: natural, inline: true,
-                                progressAt: titleAt + natural + GroupInlineGap,
-                                countsAt: titleAt + natural + GroupInlineGap + progressCells,
-                                countsW: cw)
-  if result.countsW < 2: result.countsW = 0
+  let least = min(cw, GroupCountsMin)
+  var countsW = cw
+  if tw + GroupGap + pg + cw > room:
+    # The counts give way first, down to their least.
+    countsW = max(least, room - tw - GroupGap - pg)
+    if tw + GroupGap + pg + countsW > room:
+      # Then the title, keeping its gap before what follows; below its
+      # least, the counts again (never to nothing).
+      let titleW = room - StatusWordGap - pg - countsW
+      if titleW < GroupTitleMin:
+        countsW = max(min(cw, 1), room - StatusWordGap - pg - GroupTitleMin)
+  result.countsShown = elide(counts, countsW)
+  result.countsW = widthOf(result.countsShown)
+  result.countsAt = lineEnd - result.countsW
+  result.progressAt = result.countsAt - (if cw > 0: GroupGap else: 0) - pw
+  let next = if pw > 0: result.progressAt else: result.countsAt
+  result.titleW = max(1, if tw + GroupGap <= next - result.titleAt: tw
+                         else: next - StatusWordGap - result.titleAt)
 
 proc drawGroupHeader(c: var AhCanvas; parent: AhNode; vm: SessionTabStripVM;
-                     group: SessionTabGroup; cols: GroupColumns;
-                     index, row, col, width: int) =
+                     group: SessionTabGroup; index, row, col, width: int) =
   ## An initiative's node of the tree: ▸/▾ (a click folds it), its mark,
-  ## title, `n/m` and counts, on the group band. The focused initiative's
-  ## node carries the action role's bar at its left edge (the web fills it;
-  ## a fill here would collide with the band's two grounds). The title has
-  ## priority over the counts, and `n/m` stands in the list's one column
-  ## unless this header's title needs its place or its counts are whole
-  ## only inline (`groupHeaderPlace`).
+  ## title, `n/m` and counts, on the group band, laid out by
+  ## `groupHeaderPlace`. The focused initiative's node carries the action
+  ## role's bar at its left edge (the web fills it; a fill here would
+  ## collide with the band's two grounds).
   let planId = group.planId
   let focused = planId.len > 0 and planId == vm.focusedPlan.val
   c.area("group", row, col, width, 1, c.tone.group[index mod 2])
@@ -540,30 +518,23 @@ proc drawGroupHeader(c: var AhCanvas; parent: AhNode; vm: SessionTabStripVM;
                 c.p.textLabel)
   if planId.len > 0:
     discard c.mark(n, row, col + 3, c.p.markOf(group.state))
-  let titleAt = col + cols.titleAt
   let counts = countsText(group.counts)
   let progress = group.progressText
-  let place = groupHeaderPlace(cols, col, width, group.title, progress, counts)
-  if place.inline: n.tag("inline", "true")
+  let place = groupHeaderPlace(col, width, group.title, progress, counts)
   # A cut title keeps `StatusWordGap` cells before what follows it (`n/m`,
   # else the counts), as every cut text on a line does; one cell read as one
-  # phrase (`…storage lay… 1/4`). A whole title keeps the columns' gap.
-  # The counts are cut only between their parts (`2 need input…`, never
-  # `2 need…`); where not even the first part fits they are left out.
-  let countsShown = place.countsW > 0 and elideParts(counts, place.countsW).len > 0
+  # phrase (`…storage lay… 1/4`).
   let next = if progress.len > 0: place.progressAt
-             elif countsShown: place.countsAt
+             elif counts.len > 0: place.countsAt
              else: -1
-  discard c.text(n, row, titleAt, place.titleW, group.title, c.p.textLabel, bold = true,
-                 fact = "title", before = next)
+  discard c.text(n, row, place.titleAt, place.titleW, group.title, c.p.textLabel,
+                 bold = true, fact = "title", before = next)
   if progress.len > 0:
     discard c.text(n, row, place.progressAt, widthOf(progress), progress,
                    c.p.textCaption, fact = "progress")
-  if countsShown:
+  if counts.len > 0:
     discard c.text(n, row, place.countsAt, place.countsW, counts, c.p.textCaption,
-                   fact = "counts", alignRight = cols.flush, byParts = true)
-  else:
-    discard c.node(n, row, place.countsAt, 0, 1, [("counts-hidden", counts)])
+                   fact = "counts", alignRight = true)
 
 proc drawSessionList*(c: var AhCanvas; vm: SessionTabStripVM; row, col, width, height: int) =
   ## The list at (`row`, `col`): `width` × `height` cells for a docked panel;
@@ -625,11 +596,10 @@ proc drawSessionList*(c: var AhCanvas; vm: SessionTabStripVM; row, col, width, h
       return
     let list = c.node(host, bodyTop, col, w, bodyH, [("rows", "list")])
     r = bodyTop
-    let groupCols = groupColumns(vm, w, flush = columns)
     for gi, group in vm.groups:
       let showHeader = vm.grouped.val and not collapsed
       if showHeader:
-        c.drawGroupHeader(list, vm, group, groupCols, gi, r, col, w)
+        c.drawGroupHeader(list, vm, group, gi, r, col, w)
         inc r
       if not (group.collapsed and showHeader):
         for tab in group.tabs:

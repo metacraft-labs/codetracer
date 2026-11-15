@@ -25,13 +25,13 @@
 ##   codetracer-gpui-story --story=<storybook id> --list-moments
 ##
 ## `--list` prints every story id of the section and exits. `--list-moments`
-## prints the named moments of the story's playback scenario, one a line in
+## prints the story's named moments (`storyMomentNames`), one a line in
 ## time order (nothing for a story that is not a playback story), and exits:
 ## the CTF-P1c capture path opens each of them with `--moment`. A playback story
 ## (`stories/agent_harbor_playback.nim`) plays on IsoNim's `RealClock`, with
 ## the host's playback bar under it (`ah_playback_bar.nim`: play / pause,
 ## step, the previous and next named moment, rewind, and where the playback
-## is); `--moment` opens it at one of its scenario's named moments instead of
+## is); `--moment` opens it at one of its named moments (`storyMomentNames`) instead of
 ## its first frame (an unknown name is a usage error naming the moments). The
 ## window's tick pumps the clock's timers. `--regions` names
 ## the region declaration (`src/tests/visual/agent-harbor-regions.json`): for
@@ -328,7 +328,7 @@ proc run(cmd: StoryCommand): int =
   gWindow = StoryWindow(cmd: cmd, story: findStory(section, cmd.storyId))
   if cmd.listMoments:
     if isPlaybackStory(gWindow.story.surface, gWindow.story.fixture):
-      for name in playbackScenario(playbackScenarioNameOf(gWindow.story.fixture)).momentNames:
+      for name in storyMomentNames(gWindow.story.surface, gWindow.story.fixture):
         echo name
     return 0
   if cmd.moment.len > 0 and not isPlaybackStory(gWindow.story.surface, gWindow.story.fixture):
@@ -337,7 +337,7 @@ proc run(cmd: StoryCommand): int =
   if cmd.moment.len > 0:
     # Checked before the window opens: the root builder is a C callback,
     # which must not raise.
-    let names = playbackScenario(playbackScenarioNameOf(gWindow.story.fixture)).momentNames
+    let names = storyMomentNames(gWindow.story.surface, gWindow.story.fixture)
     if cmd.moment notin names:
       raise newException(ValueError, "the story " & cmd.storyId & " has no moment named '" &
                          cmd.moment & "' (its moments: " & names.join(", ") & ")")

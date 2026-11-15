@@ -72,7 +72,7 @@ import std/[json, os, sets, strutils, tables, unittest]
 
 import ./ctf_layout_judge
 from ../../../frontend/stories/agent_harbor_playback import isPlaybackFixture,
-  playbackScenarioNameOf, playbackScenario, momentNames
+  storyMomentNames
 
 const
   MinimumPlaybackStories = 6
@@ -95,14 +95,14 @@ type MomentCapture = object
 
 proc momentCaptures(section: CodeTracerStorySection): seq[seq[MomentCapture]] =
   ## For each playback story, size and theme, its captures in the order of
-  ## the scenario's moments (so the one before a capture is the moment
-  ## before it).
+  ## the story's moments (so the one before a capture is the moment before
+  ## it on the story's list).
   for story in section.stories:
     if not isPlaybackFixture(story.fixture): continue
     let sid = storybookId(section, story)
     doAssert sid.startsWith(StoryIdPrefix), sid
     let view = ViewPrefix & sid[StoryIdPrefix.len .. ^1]
-    let moments = playbackScenario(playbackScenarioNameOf(story.fixture)).momentNames
+    let moments = storyMomentNames(story.surface, story.fixture)
     for (size, w, h) in Sizes:
       for theme in Themes:
         var run: seq[MomentCapture]
@@ -119,7 +119,7 @@ proc playbackStoryCount(section: CodeTracerStorySection): int =
 proc momentCount(section: CodeTracerStorySection): int =
   for story in section.stories:
     if isPlaybackFixture(story.fixture):
-      result += playbackScenario(playbackScenarioNameOf(story.fixture)).momentNames.len
+      result += storyMomentNames(story.surface, story.fixture).len
 
 let section = agentHarborSection()
 let runs = momentCaptures(section)
@@ -129,7 +129,7 @@ suite "CTF-P1c: at each named moment the GPUI captures lay the stories out as th
     check playbackStoryCount(section) >= MinimumPlaybackStories
     for story in section.stories:
       if isPlaybackFixture(story.fixture):
-        check playbackScenario(playbackScenarioNameOf(story.fixture)).momentNames.len > 0
+        check storyMomentNames(story.surface, story.fixture).len > 0
     let web = loadWebRecord(webRecordPath)
     var judgements: seq[CaptureJudgement]
     var expectedIds: HashSet[string]

@@ -225,16 +225,16 @@ proc renderAgentHarborTabStrip*[R, N](r: R; vm: SessionTabStripVM;
     r.setAttribute(bar, "class", vm.stripClass(overflowIndexes.len > 0))
     if overflowIndexes.len > 0:
       let target = vm
-      # A hidden tab that needs the reader marks the chip, so "what needs
-      # me" is seen without opening the menu.
-      var hiddenWaits = 0
-      for i in overflowIndexes:
-        if tabs[i].attention == saNeedsInput: inc hiddenWaits
+      # The chip takes the most severe status of the tabs it hides (a
+      # failure over a wait), so "what needs me" is seen without opening
+      # the menu, and its accessible name says it.
+      var attentions: seq[SessionAttention]
+      for i in overflowIndexes: attentions.add tabs[i].attention
+      let hidden = hiddenSessions(attentions)
       let chevron = ui(r):
         tdiv(class = SessionTabOverflowClass & " ah-tab-overflow-count" &
-                     (if hiddenWaits > 0: " ah-att-needs-input" else: ""),
-             title = $overflowIndexes.len & " more tabs" &
-                     (if hiddenWaits > 0: ", " & $hiddenWaits & " needing input" else: ""),
+                     (if hidden.severity != hsNone: " ah-att-" & $hidden.severity else: ""),
+             title = chipTitle(hidden, "tab", "tabs"),
              onclick = proc() = target.toggleOverflow()):
           text "+" & $overflowIndexes.len
       r.appendRendered(bar, chevron)

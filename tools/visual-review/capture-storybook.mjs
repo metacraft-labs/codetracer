@@ -368,9 +368,9 @@ async function main() {
   if (regionsDeclaration && !Array.isArray(regionsDeclaration.regions)) {
     throw new Error(`${regionsArg}: no "regions" array`);
   }
-  // `--moments`: each selected PLAYBACK story at each of its scenario's
-  // named moments (the `moments` its declaration lists, from the scenario
-  // itself: tools/stories/emit_storybook_stories.nim), opened by the
+  // `--moments`: each selected PLAYBACK story at each of its named moments
+  // (the `moments` its declaration lists: those of its scenario whose event
+  // its view shows, tools/stories/emit_storybook_stories.nim), opened by the
   // StoryBook global `moment`, instead of at its first frame; a selected
   // story that is not a playback story is skipped. The capture id names the
   // moment: `<view>-at-<moment>-<size>-<theme>`, which the GPUI story

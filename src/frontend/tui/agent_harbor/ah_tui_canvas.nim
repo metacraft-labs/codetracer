@@ -60,6 +60,7 @@ from std/unicode import runes, Rune, `$`, runeAtPos
 import ../app/views/styled_row
 import isonim/viewmodel
 import nim_agents_isonim_viewmodels/agent_harbor/data_source
+from ../../viewmodel/views/agent_harbor_words import trimBeforeEllipsis
 import ../../viewmodel/views/agent_harbor_palette
 
 export styled_row, agent_harbor_palette, data_source, viewmodel
@@ -307,11 +308,8 @@ proc widthOf*(s: string): int = cellWidthOf(s)
 
 proc trimCut(s: string): string =
   ## The kept start of a cut text without what would dangle before "…":
-  ## trailing spaces, and a separator (" · ", " — ") the cut left last.
-  result = s.strip(leading = false)
-  for sep in ["\xC2\xB7", "\xE2\x80\x94"]:
-    if result.endsWith(" " & sep):
-      result = result[0 ..< result.len - sep.len].strip(leading = false)
+  ## the Agent Harbor views' one rule (`trimBeforeEllipsis`).
+  trimBeforeEllipsis(s)
 
 proc elide*(s: string; cells: int): string =
   ## `s` in at most `cells` columns: whole when it fits, else cut and ended
@@ -323,22 +321,6 @@ proc elide*(s: string; cells: int): string =
   if cells == 1: return Ellipsis
   let kept = trimCut(cellSlice(s, 0, cells - 1))
   if kept.len == 0: Ellipsis else: kept & Ellipsis
-
-proc elideParts*(s: string; cells: int): string =
-  ## A text that lists its parts with " · " (a tree header's counts:
-  ## `2 need input · 1 running`) in at most `cells` columns, cut only
-  ## between parts: as many whole parts as fit, ended with "…"; "" when not
-  ## even the first part fits with its "…" (a part cut inside, `2 need…`,
-  ## says less than none). A text with no separator is cut by `elide`.
-  if widthOf(s) <= cells: return s
-  let parts = s.split(Middot)
-  if parts.len < 2: return elide(s, cells)
-  var kept = ""
-  for part in parts:
-    let next = if kept.len == 0: part else: kept & Middot & part
-    if widthOf(next) + 1 > cells: break
-    kept = next
-  if kept.len > 0: kept & Ellipsis else: ""
 
 type
   WrappedLine* = object
@@ -546,10 +528,9 @@ proc put*(c: var AhCanvas; row, col: int; s, fg: string; bold = false;
   w
 
 proc text*(c: var AhCanvas; parent: AhNode; row, col, cells: int; s, fg: string;
-           bold = false; fact = ""; bg = ""; alignRight = false; byParts = false;
+           bold = false; fact = ""; bg = ""; alignRight = false;
            before = -1): int =
-  ## One line of text, elided to `cells` (the width the layout gives it);
-  ## `byParts`: cut only between its " · " parts (`elideParts`).
+  ## One line of text, elided to `cells` (the width the layout gives it).
   ## `before`, when given, is the column the next thing on the line starts
   ## at (an age, the next column of a grid or a menu, a tab's origin): a
   ## text too long for its cells is then cut to end `StatusWordGap` cells
@@ -562,7 +543,7 @@ proc text*(c: var AhCanvas; parent: AhNode; row, col, cells: int; s, fg: string;
   let room = if before >= 0 and widthOf(s) > cells:
                max(1, min(cells, before - StatusWordGap - col))
              else: cells
-  let shown = if byParts: elideParts(s, room) else: elide(s, room)
+  let shown = elide(s, room)
   let w = widthOf(shown)
   let at = if alignRight: col + max(0, cells - w) else: col
   discard c.put(row, at, shown, fg, bold, bg)

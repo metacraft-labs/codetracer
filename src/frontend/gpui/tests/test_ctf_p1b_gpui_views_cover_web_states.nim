@@ -134,6 +134,11 @@ proc commonState(view: GpuiElement; state: AsyncState; error: string;
   if state in {asIdle, asLoading}:
     problems.expect("loading notice", view.values("notice").contains("loading"), true)
 
+proc severityOf(failed, waiting: bool): string =
+  ## What a `+N` chip says of what it hides, by the brief's rule written out
+  ## here: a failure over a wait over nothing.
+  if failed: "failed" elif waiting: "needs-input" else: "none"
+
 proc checkSessionTabs(view: GpuiElement; vm: SessionTabStripVM): seq[string] =
   result.expect("state", view.attr("state"), stateName(vm.state.val))
   commonState(view, vm.state.val, vm.error.val, result)
@@ -169,6 +174,12 @@ proc checkSessionTabs(view: GpuiElement; vm: SessionTabStripVM): seq[string] =
   result.expect("active tab", active, vm.activeId.val)
   result.expect("+N chip", view.values("overflow"),
                 if overflow.len > 0: @[$overflow.len] else: @[])
+  var failed, waiting = false
+  for i in overflow:
+    failed = failed or tabs[i].attention == saFailed
+    waiting = waiting or tabs[i].attention == saNeedsInput
+  result.expect("+N chip's status", view.values("overflow-severity"),
+                if overflow.len > 0: @[severityOf(failed, waiting)] else: @[])
   var menuItems: seq[string]
   let menu = view.first("menu")
   if menu != nil: menuItems = menu.values("menu-item")
@@ -230,16 +241,39 @@ proc checkInitiativeTabs(view: GpuiElement; vm: InitiativeTabStripVM): seq[strin
   result.expect("active tab", active, vm.activeTab.val)
   result.expect("+N chip", view.values("overflow"),
                 if layout.overflow.len > 0: @[$layout.overflow.len] else: @[])
+  var barFailed, barWaiting = false
+  for i in layout.overflow:
+    let t = tabs[i]
+    if t.kind == stkInitiative:
+      barFailed = barFailed or t.state == isBlocked
+      barWaiting = barWaiting or t.state == isNeedsInput
+    else:
+      barFailed = barFailed or t.session.attention == saFailed
+      barWaiting = barWaiting or t.session.attention == saNeedsInput
+  result.expect("+N chip's status", view.values("overflow-severity"),
+                if layout.overflow.len > 0: @[severityOf(barFailed, barWaiting)] else: @[])
   # The active initiative's recording switcher.
   var wantedNumbers: seq[string]
-  var wantedHidden: seq[string]
+  var wantedHidden, wantedHiddenStatus: seq[string]
   for t in tabs:
     if t.active and t.kind == stkInitiative:
       let buttons = vm.recordingButtonsOf(t.id)
       for b in buttons.buttons: wantedNumbers.add $b.number
-      if buttons.hidden > 0: wantedHidden.add $buttons.hidden
+      if buttons.hidden > 0:
+        wantedHidden.add $buttons.hidden
+        # The hidden recordings are those whose numbers are not shown.
+        var shown: seq[int]
+        for b in buttons.buttons: shown.add b.number
+        var failed, missing = false
+        for e in vm.recordingButtonsOf(t.id, maxShown = high(int)).buttons:
+          if e.number notin shown:
+            failed = failed or e.state == rsFailed
+            missing = missing or e.state == rsMissing
+        wantedHiddenStatus.add severityOf(failed, missing)
   result.expect("recording buttons", view.values("recording"), wantedNumbers)
   result.expect("recordings behind +N", view.values("recordings-hidden"), wantedHidden)
+  result.expect("recordings' +N status", view.values("recordings-hidden-severity"),
+                wantedHiddenStatus)
   # The progress popup of the hovered initiative.
   let popupId = vm.popupId.val
   result.expect("popup", view.values("popup"), if popupId.len > 0: @[popupId] else: @[])

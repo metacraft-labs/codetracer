@@ -25,7 +25,8 @@ import isonim/core/[signals, computation]
 import nim_agents_isonim_viewmodels/agent_harbor/session_tabs_vm
 from ../../viewmodel/views/agent_harbor_words import
   tabLabelOf, countsText, metaOf, AgentHarborTabsLoadingText,
-  AgentHarborTabsErrorText, AgentHarborTabsEmptyText
+  AgentHarborTabsErrorText, AgentHarborTabsEmptyText, HiddenSummary, HiddenSeverity,
+  hiddenSessions, chipTitle
 
 import ./ah_theme
 
@@ -245,14 +246,21 @@ proc drawAddButton(r: GpuiRenderer; p: AhPalette): GpuiElement =
   r.tag(result, "add", "+")
   r.appendChild(result, r.plusIcon(p))
 
-proc overflowChipWidth*(hidden: int; waits: bool): int =
-  ## How wide `drawOverflowChip` draws: 8px in on either side, the warning
-  ## mark and its 4px when a hidden tab waits, `+N`; at least 28px.
-  max(28, 16 + textPx("+" & $hidden, CaptionPx) + (if waits: MarkPx + 4 else: 0))
+proc overflowChipWidth*(hidden: int; marked: bool): int =
+  ## How wide `drawOverflowChip` draws: 8px in on either side, the mark and
+  ## its 4px when what it hides waits or failed, `+N`; at least 28px.
+  max(28, 16 + textPx("+" & $hidden, CaptionPx) + (if marked: MarkPx + 4 else: 0))
 
-proc drawOverflowChip*(r: GpuiRenderer; p: AhPalette; hidden, hiddenWaits: int;
+proc overflowChipWidth*(h: HiddenSummary): int =
+  overflowChipWidth(h.hidden, h.severity != hsNone)
+
+proc drawOverflowChip*(r: GpuiRenderer; p: AhPalette; h: HiddenSummary;
                        onClick: proc(); open = false): GpuiElement =
-  ## `+N`: the tabs one line has no room for; a waiting one marks it.
+  ## `+N`: the tabs one line has no room for. It takes the most severe
+  ## status of what it hides: a failed tab gives it the failure mark and its
+  ## words the error colour, a waiting one the warning mark; its tooltip
+  ## (`chipTitle`) says so in words.
+  let hidden = h.hidden
   # A chip the shape of "+" beside it (`.ah-tab-overflow-count`): 24px
   # high on the secondary-hover surface, 12px clear of "+".
   result = r.box(pairs = [("height", "24px"), ("min-width", "28px"),
@@ -261,15 +269,25 @@ proc drawOverflowChip*(r: GpuiRenderer; p: AhPalette; hidden, hiddenWaits: int;
                           ("rounded", $ControlRadiusPx & "px"), ("flex-shrink", "0"),
                           ("cursor", cursorOf(hkControl))])
   # At rest no fill and no outline, its words in the label role -- a hidden
-  # tab that waits is told by the warning mark, not by the colour; while its
-  # menu is open the tertiary surface and the body colour
-  # (`.ah-tab-strip .ah-tab-overflow-count`, `.overflow-open`).
+  # tab that waits is told by the warning mark, one that failed by the
+  # failure mark and the error colour; while its menu is open the tertiary
+  # surface and the body colour (`.ah-tab-strip .ah-tab-overflow-count`,
+  # `.overflow-open`, `.ah-att-failed`).
   if open: r.setStyle(result, "background", p.tertiary)
   r.tag(result, "overflow", $hidden)
-  r.tag(result, "overflow-waits", $hiddenWaits)
-  if hiddenWaits > 0: r.appendChild(result, r.mark(p.markOf(saNeedsInput)))
-  r.appendChild(result, r.text("+" & $hidden, CaptionPx,
-                               if open: p.textBody else: p.textLabel, shrink = false))
+  r.tag(result, "overflow-waits", $h.waiting)
+  r.tag(result, "overflow-failed", $h.failed)
+  r.tag(result, "overflow-severity", $h.severity)
+  r.tag(result, "tooltip", chipTitle(h, "tab", "tabs"))
+  case h.severity
+  of hsFailed: r.appendChild(result, r.mark(p.markOf(saFailed)))
+  of hsNeedsInput: r.appendChild(result, r.mark(p.markOf(saNeedsInput)))
+  of hsNone: discard
+  let ink = if h.severity == hsFailed: p.textError
+            elif open: p.textBody else: p.textLabel
+  let words = r.text("+" & $hidden, CaptionPx, ink, shrink = false)
+  r.tag(words, "ink", ink)
+  r.appendChild(result, words)
   if onClick != nil: r.addEventListener(result, "click", onClick)
 
 proc menuItemWidth*(title: string; trailing: seq[string]; tabular = false): int =
@@ -396,11 +414,10 @@ proc drawSessionTabStrip*(r: GpuiRenderer; host: GpuiElement;
           fixed.add tabs[i].active
         # "+" and, when tabs overflow, the `+N` chip as `drawOverflowChip`
         # draws it, 12px clear of "+".
-        var waits = 0
-        for i in overflow:
-          if tabs[i].attention == saNeedsInput: inc waits
+        var attentions: seq[SessionAttention]
+        for i in overflow: attentions.add tabs[i].attention
         let controls = AddButtonPx + StripGapPx +
-                       (if overflow.len > 0: overflowChipWidth(overflow.len, waits > 0) + ChipGapPx
+                       (if overflow.len > 0: overflowChipWidth(hiddenSessions(attentions)) + ChipGapPx
                         else: 0)
         let fitted = fitWidths(widths, widthPx - 8 - controls, TabMinWidthPx, StripGapPx,
                                fixed, maxes = maxes)
@@ -409,17 +426,17 @@ proc drawSessionTabStrip*(r: GpuiRenderer; host: GpuiElement;
           chipLeft += fitted[k] + StripGapPx
   var chipRight = -1
   if overflow.len > 0:
-    var waits = 0
-    for i in overflow:
-      if tabs[i].attention == saNeedsInput: inc waits
+    var attentions: seq[SessionAttention]
+    for i in overflow: attentions.add tabs[i].attention
+    let hidden = hiddenSessions(attentions)
     let target = vm
-    let chip = r.drawOverflowChip(p, overflow.len, waits, proc() = target.toggleOverflow(),
+    let chip = r.drawOverflowChip(p, hidden, proc() = target.toggleOverflow(),
                                   open = vm.overflowOpen.val)
     # 12px clear of "+" (the strip's 4px gap plus the chip's 8px margin).
     r.setStyle(chip, "margin-right", $(ChipGapPx - StripGapPx) & "px")
     r.tag(chip, "strip-overflow", $overflow.len)
     r.appendChild(line, chip)
-    chipRight = chipLeft + overflowChipWidth(overflow.len, waits > 0)
+    chipRight = chipLeft + overflowChipWidth(hidden)
   r.appendChild(line, r.drawAddButton(p))
   for l in lines: r.appendChild(host, l)
   r.tag(host, "lines", $lines.len)
@@ -598,8 +615,10 @@ proc drawGroupHeader(r: GpuiRenderer; p: AhPalette; vm: SessionTabStripVM;
   r.appendChild(result, title)
   if group.progressText.len > 0:
     # `n/m` (`.ah-tab-progress`): tabular figures.
-    r.appendChild(result, r.text(group.progressText, CaptionPx, p.textCaption,
-                                 shrink = false, tabular = true))
+    let progress = r.text(group.progressText, CaptionPx, p.textCaption,
+                          shrink = false, tabular = true)
+    r.tag(progress, "progress", group.progressText)
+    r.appendChild(result, progress)
   let counts = r.text(countWords, CaptionPx, p.textCaption,
                       pairs = [("flex-shrink", "100"), ("min-width", "0px"),
                                ("max-width", half)])
@@ -650,11 +669,21 @@ proc drawSessionList*(r: GpuiRenderer; host: GpuiElement; vm: SessionTabStripVM;
     r.appendChild(titleLine, toggle)
   r.appendChild(head, titleLine)
   if not collapsed and vm.state.val == asReady:
-    let summary = r.text(vm.summaryText, CaptionPx, p.textCaption,
-                         pairs = [("line-height", "24px")])
+    let ownLine = sidebar or not columns
+    # On its own line under the title the summary wraps, as the web's does
+    # (`.ah-session-list-summary`, `flex: 1 1 100%`, normal white space):
+    # it names every state that has sessions, and a narrow list needs two
+    # lines for them. Beside the title on a wide docked head it is one line.
+    let summary = if ownLine:
+                    r.text(vm.summaryText, CaptionPx, p.textCaption, shrink = false,
+                           pairs = [("line-height", "24px"), ("white-space", "normal"),
+                                    ("flex-shrink", "1"), ("min-width", "0px")])
+                  else:
+                    r.text(vm.summaryText, CaptionPx, p.textCaption,
+                           pairs = [("line-height", "24px")])
     r.tag(summary, "summary", vm.summaryText)
     r.tag(summary, "list-summary", "true")
-    if sidebar or not columns:
+    if ownLine:
       r.appendChild(head, summary)
     else:
       # Docked across a wide window, the head is one line: the label, then

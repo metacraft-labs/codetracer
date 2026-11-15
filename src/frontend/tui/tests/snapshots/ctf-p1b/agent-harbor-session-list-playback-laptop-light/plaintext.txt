@@ -9,7 +9,7 @@
  ● Migrate cached routes without a cold start       14m
    running CLI · Codex 0.9.4 · host-b
    Ran just test
- ▾   No initiative  1 needs input · 1 running
+ ▾   No initiative            1 needs input · 1 running
  ● Answer the question about the config format       1m
    needs input Telegram · Claude 2.1.0 · host-e
    Asked a single-choice question

@@ -123,7 +123,28 @@ proc dispose*(pb: AhPlayback) =
 # What the chrome shows
 # ---------------------------------------------------------------------------
 
-proc momentNames*(pb: AhPlayback): seq[string] = pb.source.scenario.momentNames
+const SurfacePrefix = "agent-harbor-"
+  ## A story's surface is `agent-harbor-<view>`, the view a scenario names
+  ## its moments for (`playback_scenario.PlaybackViews`).
+
+proc viewOfSurface*(surface: string): string =
+  ## The scenario view a story's surface draws; raises `ValueError` for a
+  ## surface that is not an Agent Harbor view.
+  if not surface.startsWith(SurfacePrefix):
+    raise newException(ValueError, "not an Agent Harbor surface: " & surface)
+  surface[SurfacePrefix.len .. ^1]
+
+proc storyMomentNames*(surface, fixture: string): seq[string] =
+  ## The named moments of the playback story `surface`/`fixture`, in time
+  ## order: those of its scenario whose event the story's view shows, so
+  ## each one visibly changes the story. Captures and the hosts' moment
+  ## controls take exactly these. Raises `ValueError` for a fixture that
+  ## names no scenario or a view the scenario names no moments for.
+  playbackScenario(playbackScenarioNameOf(fixture)).momentNames(viewOfSurface(surface))
+
+proc momentNames*(pb: AhPlayback): seq[string] =
+  ## The story's named moments (`storyMomentNames`).
+  pb.source.scenario.momentNames(viewOfSurface(pb.surface))
 proc playing*(pb: AhPlayback): bool = pb.source.playing
 proc finished*(pb: AhPlayback): bool = pb.source.finished
 
@@ -224,13 +245,14 @@ proc rewind*(pb: AhPlayback) =
 proc openAtMoment*(pb: AhPlayback; moment: string) =
   ## Where a host opens a story asked for a named moment (its URL parameter
   ## or command-line option): "" leaves it at the first frame. Raises
-  ## `ValueError` naming the scenario's moments for a name it lacks, so a
-  ## capture never shows another state under the moment's name.
+  ## `ValueError` naming the story's moments for a name it lacks (one its
+  ## scenario lacks, or one whose event its view does not show), so a capture
+  ## never shows another state under the moment's name.
   if moment.len == 0: return
-  if not pb.seekMoment(moment):
-    raise newException(ValueError, "the playback scenario '" & pb.source.scenario.name &
-                       "' has no moment named '" & moment & "' (its moments: " &
-                       pb.momentNames.join(", ") & ")")
+  if moment notin pb.momentNames or not pb.seekMoment(moment):
+    raise newException(ValueError, "the playback story " & pb.surface & " over '" &
+                       pb.source.scenario.name & "' has no moment named '" & moment &
+                       "' (its moments: " & pb.momentNames.join(", ") & ")")
 
 # ---------------------------------------------------------------------------
 # The hosts' controls, one vocabulary
