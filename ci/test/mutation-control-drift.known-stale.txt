@@ -294,3 +294,4 @@ src/tests/scenarios/plat66-pack-mutation-control.sha256	src/tests/scenarios/bind
 # them is owed.
 src/frontend/tui/tests/plat61-shell-mutation-control.sha256	src/ct/db_backend_record.nim	3739e3b1f2facbbb5707f2c17aad8248cfad82a1504077cde78cb2f1aa6eea51	a64446b2acf2dc15bad6f4a77da0132753283c5af6ecd390b4c8650c6966114c
 src/frontend/tui/tests/plat61-shell-mutation-control.sha256	src/frontend/ui/key_router.nim	8280c990f6bdb88b9ceb5d2c2cb6cba8bdad7a0cc37ac171ce451d5f8a7b0c4e	85bb146a2e059ff37e5bf922568d8ffe23c6c923417d80ea41851627fcac19e6
+src/frontend/tui/tests/plat56-build-output-mutation-control.sha256	src/frontend/ui/status.nim	41d6c605ffb49c7ecab5df25fbcec1c8fba5ea6e3eddcbcef144cfbf9c3eaf62	df43b16eb8c1ebbdb419f3fa3db0471c2e9c6f56853a672a76f614b0fa13f518
