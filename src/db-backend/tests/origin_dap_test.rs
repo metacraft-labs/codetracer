@@ -535,6 +535,7 @@ fn test_origin_chain_continuation_token_fingerprint_mismatch() {
         patterns_fingerprint: "0xdeadbeef-not-the-real-one".to_string(),
         source_digests: Vec::new(),
         issued_at: 0,
+        replay_resume: None,
     };
     let encoded = token.encode().expect("encode token");
 
@@ -689,6 +690,7 @@ fn test_origin_chain_continuation_token_source_digest_mismatch() {
             sha256_hex: issued_digest,
         }],
         issued_at: 0,
+        replay_resume: None,
     };
     // Edit the file *after* the token was issued so the digest
     // mismatches.
@@ -1002,6 +1004,7 @@ fn test_origin_summary_eager_and_placeholder_default() {
         patterns_fingerprint: "fp".to_string(),
         source_digests: Vec::new(),
         issued_at: 0,
+        replay_resume: None,
     };
     let summary = db_backend::origin_query::placeholder_summary(token);
     assert!(summary.is_placeholder);

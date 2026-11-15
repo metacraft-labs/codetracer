@@ -175,6 +175,7 @@ applicable:
   - ../cross-process/origin-spans-three-recordings.yaml
   - ../cross-process/origin-hops-seek-across-recordings.yaml
   - ../value-origin/rust-trivial-chain.yaml
+  - ../value-origin/rust-continue-tracing.yaml
   - ../file-conflicts/clean-buffer-reloads.yaml
   - ../file-conflicts/dirty-buffer-asks.yaml
   - ../edit-mode/second-ct-edit-delegates.yaml

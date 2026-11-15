@@ -3628,48 +3628,15 @@ impl MaterializedReplaySession {
         let (mut current_var_name, mut current_step, mut current_frame, hops_already_emitted, source_digests_in_token) =
             if let Some(token_raw) = &args.continuation_token {
                 let token = OriginContinuationToken::decode(token_raw)?;
-                // Spec §5.3.1 step 2: verify pattern fingerprint.
-                if token.patterns_fingerprint != patterns.fingerprint().hex {
-                    return Err(OriginError::new(
-                        OriginErrorCode::ContinuationTokenInvalid,
-                        format!(
-                            "pattern fingerprint changed since token was issued: {} -> {}",
-                            token.patterns_fingerprint,
-                            patterns.fingerprint().hex
-                        ),
-                    )
-                    .with_detail(serde_json::json!({
-                        "kind": "patterns_fingerprint_mismatch",
-                        "issuedFingerprint": token.patterns_fingerprint,
-                        "currentFingerprint": patterns.fingerprint().hex,
-                    })));
-                }
-                // Spec §5.3.1 step 3: verify per-path source digest. We
-                // only check digests for paths whose origin was the
-                // filesystem (bundled paths are immune per spec). The
-                // token is client data, so its paths are read under the
-                // session's source rule: with host reads off, only the
-                // recording's own copy, never the named host file.
-                for digest in &token.source_digests {
-                    if digest.origin == SourceOriginKind::Filesystem {
-                        let current = match expr_loader.token_digest_bytes(Path::new(&digest.path)) {
-                            Some(bytes) => sha256_hex(&bytes),
-                            None => continue,
-                        };
-                        if current != digest.sha256_hex {
-                            return Err(OriginError::new(
-                                OriginErrorCode::ContinuationTokenInvalid,
-                                format!("source file `{}` digest changed since token was issued", digest.path),
-                            )
-                            .with_detail(serde_json::json!({
-                                "kind": "source_digest_mismatch",
-                                "path": digest.path,
-                                "issuedDigest": digest.sha256_hex,
-                                "currentDigest": current,
-                            })));
-                        }
-                    }
-                }
+                // Spec §5.3.1 steps 2 and 3. The token is client data, so
+                // its paths are read under the session's source rule: with
+                // host reads off, only the recording's own copy, never the
+                // named host file.
+                crate::origin_query::check_continuation_token_integrity(
+                    &token,
+                    &patterns.fingerprint().hex,
+                    |path| expr_loader.token_digest_bytes(path),
+                )?;
                 (
                     token.current_var_name,
                     StepId(token.current_step),
@@ -4450,6 +4417,7 @@ impl MaterializedReplaySession {
                 patterns_fingerprint: patterns.fingerprint().hex.clone(),
                 source_digests: source_digests.clone(),
                 issued_at: crate::wall_clock::unix_seconds(),
+                replay_resume: None,
             };
             token.encode().ok()
         } else {

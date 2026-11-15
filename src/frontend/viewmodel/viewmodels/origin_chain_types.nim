@@ -628,6 +628,13 @@ const
 # camelCase JSON the backend expects.
 # ---------------------------------------------------------------------------
 
+proc canContinue*(chain: OriginChain): bool =
+  ## A chain the engine cut off with a point to go on from (spec §5.3.1):
+  ## the request's time limit or its hop limit ended it, not its origin.
+  ## "Continue tracing" is offered for it.
+  chain.truncated and chain.continuationToken.isSome and
+    chain.continuationToken.get.len > 0
+
 proc originChainArgs*(expression: string;
                       stepId: int64 = -1;
                       frameId: int64 = -1;

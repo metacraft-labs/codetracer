@@ -446,7 +446,17 @@ pub struct RecreatorReplaySession {
     /// Whether a query after the worker died may start a replacement. See
     /// [`RecreatorReplaySession::without_respawn_after_worker_death`].
     respawn_after_worker_death: bool,
+    /// The replay positions handed out as the points cut-off value-origin
+    /// chains continue from (`recreator_origin`, spec §5.3.1), oldest first.
+    /// An rr position holds a checkpoint, a forked copy of the replayed
+    /// process, so only the newest [`MAX_ORIGIN_CONTINUATIONS`] are kept:
+    /// handing out one more lets go of the oldest.
+    origin_continuations: std::collections::VecDeque<serde_json::Value>,
 }
+
+/// How many cut-off value-origin chains can be continued at once in one
+/// replay (see `RecreatorReplaySession::origin_continuations`).
+pub const MAX_ORIGIN_CONTINUATIONS: usize = 4;
 
 #[derive(Debug)]
 pub struct ReplayWorker {
@@ -1251,6 +1261,45 @@ fn call_search_name_filter(pattern: &str) -> Result<String, Box<dyn Error>> {
 }
 
 impl RecreatorReplaySession {
+    /// Keep `mark` as the point a cut-off value-origin chain continues from.
+    /// When that makes more than [`MAX_ORIGIN_CONTINUATIONS`], the oldest is
+    /// let go (`ReplayQuery::ForgetReplayPosition`): its chain can no longer
+    /// be continued, and says so when asked (`take_origin_continuation`).
+    pub fn hold_origin_continuation(&mut self, mark: serde_json::Value) {
+        self.origin_continuations.push_back(mark);
+        while self.origin_continuations.len() > MAX_ORIGIN_CONTINUATIONS {
+            if let Some(oldest) = self.origin_continuations.pop_front()
+                && let Err(e) = self
+                    .stable
+                    .dispatch_replay_query(ReplayQuery::ForgetReplayPosition { mark: oldest })
+            {
+                warn!("origin_chain: letting go of an old continuation point failed: {e}");
+            }
+        }
+    }
+
+    /// Take back a point [`Self::hold_origin_continuation`] holds, to
+    /// continue its chain from. `false` when it is not held: let go for a
+    /// newer one, continued already (an rr point is good for one return), or
+    /// handed out by a worker that has since been replaced.
+    pub fn take_origin_continuation(&mut self, mark: &serde_json::Value) -> bool {
+        match self.origin_continuations.iter().position(|held| held == mark) {
+            Some(index) => {
+                self.origin_continuations.remove(index);
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Forget every held continuation point without asking the worker: it
+    /// is gone, and its points with it.
+    fn drop_origin_continuations(&mut self) {
+        self.origin_continuations.clear();
+    }
+}
+
+impl RecreatorReplaySession {
     pub fn new(name: &str, index: usize, ct_rr_args: RecreatorArgs) -> RecreatorReplaySession {
         let mut stable = ReplayWorker::new_with_recording_id(
             name,
@@ -1276,6 +1325,7 @@ impl RecreatorReplaySession {
             materialization_cache: MaterializationCache::new(),
             materialization_cache_ctfs_path: default_materialization_cache_ctfs_path(&ct_rr_args.rr_trace_folder),
             respawn_after_worker_death: true,
+            origin_continuations: std::collections::VecDeque::new(),
         }
     }
 
@@ -1317,6 +1367,8 @@ impl RecreatorReplaySession {
                 return Err(Box::new(death.clone()));
             }
             eprintln!("[rr-dispatcher] starting worker for '{}'", self.name);
+            // The points a dead worker handed out went with it.
+            self.drop_origin_continuations();
             let res = self.stable.start();
             if let Err(e) = res {
                 eprintln!("[rr-dispatcher] worker start FAILED: {:?}", e);
@@ -2403,6 +2455,7 @@ mod tests {
             materialization_cache: MaterializationCache::new(),
             materialization_cache_ctfs_path: None,
             respawn_after_worker_death: true,
+            origin_continuations: std::collections::VecDeque::new(),
         };
 
         let materialized = session.re_execute_and_materialize(10, 20).unwrap();
@@ -2480,6 +2533,7 @@ mod tests {
             materialization_cache: MaterializationCache::new(),
             materialization_cache_ctfs_path: None,
             respawn_after_worker_death: true,
+            origin_continuations: std::collections::VecDeque::new(),
         };
 
         assert_eq!(

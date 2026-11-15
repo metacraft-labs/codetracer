@@ -224,6 +224,12 @@ pub enum ReplayQuery {
     RestoreReplayPosition {
         mark: serde_json::Value,
     },
+    /// Let go of a [`ReplayQuery::SaveReplayPosition`] mark without returning
+    /// to it: an rr mark holds a checkpoint (a forked copy of the replayed
+    /// process) until it is restored or let go. The reply is a JSON `true`.
+    ForgetReplayPosition {
+        mark: serde_json::Value,
+    },
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]

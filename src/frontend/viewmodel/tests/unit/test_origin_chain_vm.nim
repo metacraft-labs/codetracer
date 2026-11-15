@@ -32,7 +32,7 @@
 ## Compile + run:
 ##   nim c -r src/frontend/viewmodel/tests/unit/test_origin_chain_vm.nim
 
-import std/[json, options, sets, strutils, tables, unicode, unittest]
+import std/[json, options, sequtils, sets, strutils, tables, unicode, unittest]
 
 import isonim/core/async_compat
 import isonim/core/[signals, computation, owner]
@@ -1789,6 +1789,141 @@ suite "M86 — the origin badge and Pin to scratchpad, through the production br
     check originVM.loading.val
     check originVM.rejectChainAnswer("req-3")
     check not originVM.loading.val
+
+proc cutOffChainPayload(variable: string): JsonNode =
+  ## The first request's answer when the request's time limit cut the walk
+  ## off after one hop (spec §5.3.1): `variable = b`, truncated, with a
+  ## continuation.
+  %*{
+    "queryVariable": variable,
+    "queryStepId": -1,
+    "hops": [
+      {"kind": "trivialCopy", "targetExpr": variable, "sourceExpr": "b",
+       "sourceVariable": "b",
+       "location": {"path": "main.rs", "line": 7, "rrTicks": 3},
+       "sourceText": "let " & variable & ": i32 = b;", "stepId": -1,
+       "operandSnapshots": [], "truncatedOperands": false,
+       "confidence": 0.95},
+    ],
+    "terminator": {"kind": "outOfBudget",
+                   "expression": "wall-clock budget exhausted (1 ms)"},
+    "truncated": true,
+    "continuationToken": "token-after-c",
+    "metrics": {"stepsScanned": 1, "elapsedMs": 6, "classifierHits": 1},
+    "confidence": 0.95,
+  }
+
+proc restOfChainPayload(variable: string): JsonNode =
+  ## The continuation's answer: the hops after the first, to the literal.
+  %*{
+    "queryVariable": variable,
+    "queryStepId": -1,
+    "hops": [
+      {"kind": "trivialCopy", "targetExpr": "b", "sourceExpr": "a",
+       "sourceVariable": "a",
+       "location": {"path": "main.rs", "line": 6, "rrTicks": 3},
+       "sourceText": "let mut b: i32 = a;", "stepId": -1,
+       "operandSnapshots": [], "truncatedOperands": false,
+       "confidence": 0.95},
+      {"kind": "literal", "targetExpr": "a", "sourceExpr": "10",
+       "location": {"path": "main.rs", "line": 5, "rrTicks": 3},
+       "sourceText": "let a: i32 = 10;", "stepId": -1,
+       "operandSnapshots": [], "truncatedOperands": false,
+       "confidence": 0.95},
+    ],
+    "terminator": {"kind": "literal", "expression": "10"},
+    "truncated": false,
+    "metrics": {"stepsScanned": 2, "elapsedMs": 9, "classifierHits": 2},
+    "confidence": 0.95,
+  }
+
+suite "Continue tracing: a cut-off chain goes on from where it stopped (spec §5.3.1)":
+
+  test "a cut-off row shows Continue tracing; a click appends the rest and the button goes":
+    createRoot proc(dispose: proc()) =
+      let w = makeWiredOrigin()
+      w.showEagerRow("c")
+      w.mock.expect("ct/originChain", cutOffChainPayload("c"))
+      let panel = renderStatePanel[MockRenderer, MockNode](MockRenderer(), w.state)
+      findBadgeForRow(panel, "c").fireEvent("click")
+      drain()
+      let row = findRowNamed(panel, "c")
+      let more = findByClass(row, "ct-origin-continue-chain")
+      check more != nil
+      check more != nil and more.styles.getOrDefault("display", "") == "inline-block"
+      check more != nil and more.textContent.contains("Continue tracing")
+      let blocks = findAllByClass(panel, "ct-origin-inline-chain")
+      check blocks.len == 1 and
+        findAllByClass(blocks[0], "ct-origin-inline-chain-hop").len == 1
+
+      w.mock.clearReceivedCommands()
+      w.mock.expect("ct/originChain", restOfChainPayload("c"))
+      more.fireEvent("click")
+      drain()
+      let sent = originChainRequests(w.mock)
+      check sent.len == 1
+      check sent.len == 1 and sent[0]["variableName"].getStr == "c" and
+        sent[0]{"continuationToken"}.getStr == "token-after-c"
+      check blocks.len == 1 and
+        findAllByClass(blocks[0], "ct-origin-inline-chain-hop").len == 3
+      let terminatorRow = findByClass(blocks[0], "ct-origin-inline-chain-terminator")
+      check terminatorRow != nil and terminatorRow.textContent.contains("10")
+      check more.styles.getOrDefault("display", "") == "none"
+      # Continuing is a row's business: the side panel stays as it was.
+      check not w.origin.sidePanelOpen.val
+      check w.origin.activeChain.val.isNone
+      dispose()
+
+  test "a refused continuation keeps the hops, says why, and drops the button":
+    createRoot proc(dispose: proc()) =
+      let w = makeWiredOrigin()
+      w.showEagerRow("c")
+      w.mock.expect("ct/originChain", cutOffChainPayload("c"))
+      let panel = renderStatePanel[MockRenderer, MockNode](MockRenderer(), w.state)
+      findBadgeForRow(panel, "c").fireEvent("click")
+      drain()
+      let more = findByClass(findRowNamed(panel, "c"), "ct-origin-continue-chain")
+      w.mock.expect("ct/originChain", %*{"success": false,
+        "message": "the replay no longer holds the point this chain continues from"})
+      more.fireEvent("click")
+      drain()
+      let blocks = findAllByClass(panel, "ct-origin-inline-chain")
+      check blocks.len == 1 and
+        findAllByClass(blocks[0], "ct-origin-inline-chain-hop").len == 1
+      let terminatorRow = findByClass(blocks[0], "ct-origin-inline-chain-terminator")
+      check terminatorRow != nil and
+        terminatorRow.textContent.contains("cannot continue: the replay no longer holds")
+      check more.styles.getOrDefault("display", "") == "none"
+      dispose()
+
+  test "appendChainPage keeps the walked hops and ends where the continuation ends":
+    let shown = parseOriginChain(cutOffChainPayload("c"))
+    check shown.canContinue
+    let whole = appendChainPage(shown, parseOriginChain(restOfChainPayload("c")))
+    check whole.hops.mapIt(it.targetExpr & " = " & it.sourceExpr) ==
+      @["c = b", "b = a", "a = 10"]
+    check whole.terminator.expression == "10"
+    check not whole.truncated and whole.continuationToken.isNone
+    check not whole.canContinue
+
+  test "the side panel's Continue tracing appends to its own chain":
+    createRoot proc(dispose: proc()) =
+      let w = makeWiredOrigin()
+      w.showEagerRow("c")
+      w.mock.expect("ct/originChain", cutOffChainPayload("c"))
+      w.origin.onShowOrigin("c", Location())
+      drain()
+      check w.origin.activeChain.val.isSome and
+        w.origin.activeChain.val.get.canContinue
+      w.mock.clearReceivedCommands()
+      w.mock.expect("ct/originChain", restOfChainPayload("c"))
+      w.origin.continueActiveChain()
+      drain()
+      check originChainRequests(w.mock).len == 1
+      check w.origin.activeChain.val.isSome and
+        w.origin.activeChain.val.get.hops.len == 3 and
+        not w.origin.activeChain.val.get.canContinue
+      dispose()
 
 suite "a Computational hop's operands are shown as values":
   # The replay sends each operand snapshot's value as a ValueRecordWithType

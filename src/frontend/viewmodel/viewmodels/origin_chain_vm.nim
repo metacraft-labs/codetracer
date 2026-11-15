@@ -132,6 +132,10 @@ type
       ## Token → resolved-summary cache populated by responses to
       ## `ct/originSummary`. The State Pane subscribes and replaces
       ## `[?]` pills with the filled badge once the entry appears.
+    continuing*: Signal[HashSet[string]]
+      ## The chains being continued now (spec §5.3.1, "continue tracing"),
+      ## by `continuationKey`: a row's variable name, or the side panel's.
+      ## A chain is continued once at a time; its button says so meanwhile.
     sidePanelOpen*: Signal[bool]
       ## Whether the dedicated Origin Chain side panel (spec §3.2.2
       ## "Show in side panel" + §8.1) is currently visible. The host
@@ -198,6 +202,7 @@ proc recordRowChain(vm: OriginChainVM; expression, stop: string;
                     chain: OriginChain)
 proc forgetRowRequest(vm: OriginChainVM; expression, stop: string)
 proc onCancelLoad*(vm: OriginChainVM)
+proc rememberBreadcrumbChain(vm: OriginChainVM; chain: OriginChain)
 
 proc sendChainQuery(vm: OriginChainVM; expression: string; stepId: int64;
                     forSidePanel: bool) =
@@ -315,6 +320,129 @@ proc loadRowChain*(vm: OriginChainVM; expression: string; location: Location) =
     return
   vm.rowChainsAsked.incl(expression)
   vm.sendChainQuery(expression, stepId = -1, forSidePanel = false)
+
+# ---------------------------------------------------------------------------
+# Continuing a cut-off chain (spec §5.3.1, "continue tracing")
+# ---------------------------------------------------------------------------
+
+const SidePanelContinuation* = "<side panel>"
+  ## `continuationKey` of the side panel's chain (a key no variable name is).
+
+proc continuationKey*(expression: string): string =
+  ## `continuing`'s key for the State-pane row `expression`'s chain.
+  expression
+
+proc isContinuing*(vm: OriginChainVM; key: string): bool =
+  ## Reactive: reads `continuing`.
+  key in vm.continuing.val
+
+proc appendChainPage*(shown, page: OriginChain): OriginChain =
+  ## The chain the user sees after a continuation: `shown`'s hops, then the
+  ## hops `page` (the continuation's answer) walked, ending where `page`
+  ## ends — at the origin, or cut off again with `page`'s continuation.
+  result = shown
+  result.hops = shown.hops & page.hops
+  result.terminator = page.terminator
+  result.truncated = page.truncated
+  result.continuationToken = page.continuationToken
+  result.metrics = page.metrics
+  result.crossProcessSpans = shown.crossProcessSpans & page.crossProcessSpans
+  result.confidence = min(shown.confidence, page.confidence)
+
+proc cannotContinue(shown: OriginChain; reason: string): OriginChain =
+  ## `shown`, told that it cannot be continued and why: the engine refused
+  ## its continuation (the replay no longer holds the point, the sources
+  ## changed). The chain stays as walked; tracing the value again starts it
+  ## over.
+  result = shown
+  result.continuationToken = none(string)
+  result.terminator.expression =
+    if reason.len > 0: "cannot continue: " & reason
+    else: "cannot continue; trace the value again"
+
+proc responseMessage(response: JsonNode): string =
+  ## The DAP error message of a failed response; "" when it has none.
+  if not response.isNil and response.kind == JObject and
+      response.hasKey("message") and response["message"].kind == JString:
+    response["message"].getStr
+  else:
+    ""
+
+proc sendContinuation(vm: OriginChainVM; key: string; shown: OriginChain;
+                      apply: proc(chain: OriginChain)) =
+  ## Ask the engine to go on with `shown` from its continuation token and
+  ## hand `apply` the chain with the new hops appended. The request is
+  ## never the side panel's "latest request" (`noteChainRequestSent`): its
+  ## answer is a page of a chain, which `applyChainAnswer` must not take for
+  ## a whole one.
+  if vm.store.isNil or vm.store.directBackend.isNil or not shown.canContinue:
+    return
+  if vm.isContinuing(key):
+    return
+  var keys = vm.continuing.val
+  keys.incl(key)
+  vm.continuing.val = keys
+  let args = originChainArgs(
+    expression = shown.queryVariable,
+    stepId = shown.queryStepId,
+    maxHops = vm.preferences.val.defaultMaxHops,
+    continuationToken = shown.continuationToken,
+  )
+  let vmRef = vm
+  let done = proc() =
+    var keys = vmRef.continuing.val
+    keys.excl(key)
+    vmRef.continuing.val = keys
+  vm.sendingRowChainRequest = true
+  try:
+    async_compat.onComplete(vm.store.directBackend.send("ct/originChain", args),
+      onSuccess = proc(response: JsonNode) =
+        let body = responseBody(response)
+        if responseSucceeded(response) and body.hasKey("hops"):
+          apply(appendChainPage(shown, parseOriginChain(body)))
+        else:
+          apply(cannotContinue(shown, responseMessage(response)))
+        done(),
+      onError = proc(message: string) =
+        apply(cannotContinue(shown, message))
+        done())
+  finally:
+    vm.sendingRowChainRequest = false
+
+proc continueRowChain*(vm: OriginChainVM; expression: string) =
+  ## "Continue tracing" under the State-pane row `expression`: walk the
+  ## row's cut-off chain further and show it longer in place. The chain is
+  ## the one asked at the current stop; a row whose chain is another stop's
+  ## has nothing to continue.
+  if vm.store.isNil:
+    return
+  let stop = stopIdentityOf(vm.store.debugger.val)
+  let shown = vm.rowChainAt(expression, stop)
+  if shown.isNone:
+    return
+  let vmRef = vm
+  vm.sendContinuation(continuationKey(expression), shown.get,
+    proc(chain: OriginChain) =
+      # Only while the row still shows the chain at that stop: after a move
+      # the row asks afresh, and a late page must not land on it.
+      if vmRef.rowChainAt(expression, stop).isSome:
+        vmRef.recordRowChain(expression, stop, chain))
+
+proc continueActiveChain*(vm: OriginChainVM) =
+  ## "Continue tracing" in the side panel: walk its cut-off chain further.
+  let shown = vm.activeChain.val
+  if shown.isNone:
+    return
+  let vmRef = vm
+  let asked = shown.get
+  vm.sendContinuation(SidePanelContinuation, asked,
+    proc(chain: OriginChain) =
+      # Only while the panel still shows the chain that was continued: a
+      # chain asked for since replaced it.
+      let now = vmRef.activeChain.val
+      if now.isSome and now.get == asked:
+        vmRef.activeChain.val = some(chain)
+        vmRef.rememberBreadcrumbChain(chain))
 
 proc openSidePanel*(vm: OriginChainVM) =
   ## Force-open the side panel (used by the command palette / keyboard
@@ -688,6 +816,7 @@ proc createOriginChainVM*(store: ReplayDataStore): OriginChainVM =
       lastResolvedSummaries: createSignal(
         initTable[string, OriginSummary]()),
       sidePanelOpen: createSignal(false),
+      continuing: createSignal(initHashSet[string]()),
       rowChains: createSignal(initTable[string, RowChain]()),
       sendingRowChainRequest: false,
       disposeProc: dispose,

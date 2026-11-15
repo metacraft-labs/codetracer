@@ -9,9 +9,12 @@ stage:
   - use: record-program
     with: { program: src/db-backend/tests/fixtures/origin/rust/simple_trivial_chain/main.rs, backend: rr }
   # rr walks each hop with reverse continues; on a loaded machine one can take
-  # longer than the 1.5 s the chain allows a hop by default.
+  # longer than the 1.5 s the chain allows a hop by default, and the whole
+  # walk longer than the 5 s a request has (at load 130-180 the first hop
+  # alone took 6 s). Cut off, the chain would end at `c = b`; continuing it
+  # is `rust-continue-tracing`'s subject.
   - use: front-end-options
-    with: { env: { CT_RR_ORIGIN_PER_HOP_WALL_CLOCK_MS: "10000" } }
+    with: { env: { CT_RR_ORIGIN_PER_HOP_WALL_CLOCK_MS: "10000", CT_ORIGIN_WALL_CLOCK_MS: "60000" } }
   - use: open-recording
 
 steps:

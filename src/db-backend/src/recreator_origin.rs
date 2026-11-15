@@ -58,8 +58,8 @@ use serde_json::Value as JsonValue;
 use crate::expr_loader::ExprLoader;
 use crate::expr_loader::SourceOrigin;
 use crate::origin_query::{
-    OriginContinuationToken, OriginError, OriginErrorCode, SourceDigest, SourceOriginKind, WallClockDeadline,
-    sha256_hex,
+    OriginContinuationToken, OriginError, OriginErrorCode, ReplayResume, SourceDigest, SourceOriginKind,
+    WallClockDeadline, sha256_hex,
 };
 use crate::query::ReplayQuery;
 use crate::recreator_session::RecreatorReplaySession;
@@ -324,9 +324,39 @@ fn walk_rr_origin_chain(
     // browser build, so measure elapsed time from the deadline rather
     // than opening a second, trapping clock.
     let deadline = WallClockDeadline::new(budget.wall_clock_ms);
-    let mut metrics = OriginMetrics::default();
-    let mut hops: Vec<OriginHop> = Vec::new();
-    let mut source_digests: Vec<SourceDigest> = Vec::new();
+    let metrics = OriginMetrics::default();
+    let hops: Vec<OriginHop> = Vec::new();
+
+    // A continuation (spec §5.3.1, "A replay walk's continuation") puts the
+    // replay back where the cut-off walk stopped and goes on from there.
+    if let Some(raw) = &args.continuation_token {
+        let (resumed, resume) = resume_from_token(session, raw, patterns, expr_loader)?;
+        return walk_from(
+            session,
+            args,
+            budget,
+            expr_loader,
+            patterns,
+            meta_dat_sources_root,
+            WalkStart {
+                deadline,
+                metrics,
+                hops,
+                source_digests: resumed.source_digests,
+                query_variable: resumed.query_variable,
+                query_step: resumed.query_step_id,
+                current_var_name: resumed.current_var_name,
+                watch: EvaluateAddressResponse {
+                    address: resume.address,
+                    size: resume.size,
+                },
+                querying_thread: resume.querying_thread,
+                hops_before: resumed.hops_emitted,
+            },
+        );
+    }
+
+    let source_digests: Vec<SourceDigest> = Vec::new();
     let current_worker_step = load_current_location(session, expr_loader)
         .map(|loc| loc.rr_ticks.0)
         .ok();
@@ -335,7 +365,7 @@ fn walk_rr_origin_chain(
     } else {
         args.step_id
     };
-    let mut current_var_name = args.variable_name.clone();
+    let current_var_name = args.variable_name.clone();
     let query_variable = args.variable_name.clone();
 
     // Defensive bail-out: empty variable name = 6101 (spec §5.3).
@@ -361,7 +391,7 @@ fn walk_rr_origin_chain(
     // Locals can lose addressable DWARF storage as soon as we move to the next
     // RR tick, so capture the real stack slot before positioning the worker for
     // reverse-watchpoint execution.
-    let mut watch = evaluate_with_address(session, &current_var_name)?;
+    let watch = evaluate_with_address(session, &current_var_name)?;
 
     // Step 2: position the replay worker for reverse-watchpoint execution.
     //
@@ -394,6 +424,112 @@ fn walk_rr_origin_chain(
         }
     }
 
+    let querying_thread = current_thread(session).unwrap_or(0);
+    walk_from(
+        session,
+        args,
+        budget,
+        expr_loader,
+        patterns,
+        meta_dat_sources_root,
+        WalkStart {
+            deadline,
+            metrics,
+            hops,
+            source_digests,
+            query_variable,
+            query_step: initial_query_step,
+            current_var_name,
+            watch,
+            querying_thread,
+            hops_before: 0,
+        },
+    )
+}
+
+/// Where [`walk_from`] starts: a fresh query's first variable at the queried
+/// point, or a continuation's next variable at the point the cut-off walk
+/// stopped at (the replay already stands there).
+struct WalkStart {
+    deadline: WallClockDeadline,
+    metrics: OriginMetrics,
+    hops: Vec<OriginHop>,
+    source_digests: Vec<SourceDigest>,
+    query_variable: String,
+    query_step: i64,
+    current_var_name: String,
+    watch: EvaluateAddressResponse,
+    querying_thread: u32,
+    /// Hops the chain's earlier requests returned (0 for a fresh query).
+    hops_before: u32,
+}
+
+/// Decode a continuation token for a replay walk, check it still applies, and
+/// put the replay back at the point it continues from (spec §5.3.1, "A
+/// replay walk's continuation"). Every refusal is DAP 6106: the chain cannot
+/// be continued, and the user traces the value again.
+fn resume_from_token(
+    session: &mut RecreatorReplaySession,
+    raw: &str,
+    patterns: &PatternSet,
+    expr_loader: &mut ExprLoader,
+) -> Result<(OriginContinuationToken, ReplayResume), OriginError> {
+    let mut token = OriginContinuationToken::decode(raw)?;
+    crate::origin_query::check_continuation_token_integrity(&token, &patterns.fingerprint().hex, |path| {
+        expr_loader.token_digest_bytes(path)
+    })?;
+    let Some(resume) = token.replay_resume.take() else {
+        return Err(OriginError::new(
+            OriginErrorCode::ContinuationTokenInvalid,
+            "this continuation was not issued by a replay walk, so it names no replay point to continue from",
+        ));
+    };
+    if !session.take_origin_continuation(&resume.mark) {
+        return Err(OriginError::new(
+            OriginErrorCode::ContinuationTokenInvalid,
+            "the replay no longer holds the point this chain continues from (it was continued already, \
+             a newer cut-off chain took its place, or the replay restarted); trace the value again",
+        ));
+    }
+    session
+        .stable
+        .dispatch_replay_query(ReplayQuery::RestoreReplayPosition {
+            mark: resume.mark.clone(),
+        })
+        .map_err(|e| {
+            OriginError::new(
+                OriginErrorCode::ContinuationTokenInvalid,
+                format!("the replay could not return to the point this chain continues from: {e}"),
+            )
+        })?;
+    Ok((token, resume))
+}
+
+/// The hop loop of the replay walk (spec §6.3), from `start`.
+fn walk_from(
+    session: &mut RecreatorReplaySession,
+    args: &CtOriginChainArguments,
+    budget: &OriginBudget,
+    expr_loader: &mut ExprLoader,
+    patterns: &PatternSet,
+    meta_dat_sources_root: Option<&std::path::Path>,
+    start: WalkStart,
+) -> RrOriginResult {
+    let WalkStart {
+        deadline,
+        mut metrics,
+        mut hops,
+        mut source_digests,
+        query_variable,
+        query_step: initial_query_step,
+        mut current_var_name,
+        mut watch,
+        querying_thread,
+        hops_before,
+    } = start;
+
+    // `max_hops` bounds one request (spec §5.3.1, "A replay walk's
+    // continuation"): a continuation walks up to as many hops again.
     let mut effective_max_hops = budget.max_hops.max(1);
     if args.max_hops > 0 {
         effective_max_hops = effective_max_hops.min(args.max_hops);
@@ -405,12 +541,15 @@ fn walk_rr_origin_chain(
 
     let mut terminator = Terminator::new(TerminatorKind::UnknownSource);
     let mut truncated = false;
-    let querying_thread = current_thread(session).unwrap_or(0);
 
     while hops.len() < effective_max_hops as usize {
-        if deadline.exceeded() {
+        // The request's time limit is checked between hops, never before
+        // the first: every request, a continuation included, walks at least
+        // one hop, so continuing a chain always gets further.
+        if !hops.is_empty() && deadline.exceeded() {
             terminator = Terminator::new(TerminatorKind::OutOfBudget);
             terminator.expression = format!("wall-clock budget exhausted ({} ms)", budget.wall_clock_ms);
+            truncated = true;
             break;
         }
 
@@ -758,16 +897,23 @@ fn walk_rr_origin_chain(
     metrics.steps_scanned = hops.len() as u64;
 
     let confidence: f32 = hops.iter().map(|h| h.confidence).fold(1.0_f32, f32::min);
+    // A cut-off chain continues from where the replay stands now: at the last
+    // hop's write, with `watch` resolved for the variable to follow next.
     let continuation_token = if truncated {
-        Some(build_continuation_token(
-            &query_variable,
-            initial_query_step,
-            &current_var_name,
-            hops.len() as u32,
-            effective_max_hops,
-            patterns,
-            source_digests.clone(),
-        )?)
+        match remember_continuation_point(session, &watch, querying_thread) {
+            Some(replay_resume) => Some(build_continuation_token(
+                &query_variable,
+                initial_query_step,
+                hops.last().map(|hop| hop.location.rr_ticks.0).unwrap_or(initial_query_step),
+                &current_var_name,
+                hops_before + hops.len() as u32,
+                effective_max_hops,
+                patterns,
+                source_digests.clone(),
+                replay_resume,
+            )?),
+            None => None,
+        }
     } else {
         None
     };
@@ -1024,22 +1170,57 @@ fn track_source_digest(
     });
 }
 
+/// Remember the point the replay stands at as the one a cut-off chain
+/// continues from, and hold it in the session (which lets go of the oldest
+/// held point beyond `MAX_ORIGIN_CONTINUATIONS`). `None` when the worker
+/// cannot remember its position: the chain is then cut off with nothing to
+/// continue from.
+fn remember_continuation_point(
+    session: &mut RecreatorReplaySession,
+    watch: &EvaluateAddressResponse,
+    querying_thread: u32,
+) -> Option<ReplayResume> {
+    let raw = match session.stable.dispatch_replay_query(ReplayQuery::SaveReplayPosition) {
+        Ok(raw) => raw,
+        Err(e) => {
+            warn!("origin_chain: the worker cannot remember where the cut-off walk stopped, so it cannot be continued: {e}");
+            return None;
+        }
+    };
+    let mark = match serde_json::from_str::<JsonValue>(&raw) {
+        Ok(mark) => mark,
+        Err(e) => {
+            warn!("origin_chain: the worker's position mark is not JSON ({e}): `{raw}`");
+            return None;
+        }
+    };
+    session.hold_origin_continuation(mark.clone());
+    Some(ReplayResume {
+        mark,
+        address: watch.address,
+        size: watch.size,
+        querying_thread,
+    })
+}
+
 /// Build an opaque continuation token for the chain (spec §5.3.1).
 #[allow(clippy::too_many_arguments)]
 fn build_continuation_token(
     query_variable: &str,
     query_step_id: i64,
+    current_step: i64,
     current_var_name: &str,
     hops_emitted: u32,
     max_hops: u32,
     patterns: &PatternSet,
     source_digests: Vec<SourceDigest>,
+    replay_resume: ReplayResume,
 ) -> Result<String, OriginError> {
     let token = OriginContinuationToken {
         v: OriginContinuationToken::CURRENT_VERSION,
         query_variable: query_variable.to_string(),
         query_step_id,
-        current_step: query_step_id,
+        current_step,
         current_frame: -1,
         current_var_name: current_var_name.to_string(),
         hops_emitted,
@@ -1047,6 +1228,7 @@ fn build_continuation_token(
         patterns_fingerprint: patterns.fingerprint().hex.clone(),
         source_digests,
         issued_at: crate::wall_clock::unix_seconds(),
+        replay_resume: Some(replay_resume),
     };
     token.encode()
 }

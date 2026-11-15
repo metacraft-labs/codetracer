@@ -524,6 +524,20 @@ when defined(js):
     ol.appendChild(termLi)
 
     let footer = document.createElement(cstring"footer")
+    if chain.canContinue:
+      # "Continue tracing" (spec §5.3.1): the engine cut this chain off at
+      # its limits; it goes on from where it stopped.
+      let continueBtn = document.createElement(cstring"button")
+      continueBtn.setAttribute(cstring"class", cstring"ct-origin-continue-chain")
+      let continuing = vm.isContinuing(SidePanelContinuation)
+      continueBtn.innerText =
+        if continuing: cstring"Continuing…" else: cstring"Continue tracing"
+      if continuing:
+        continueBtn.setAttribute(cstring"disabled", cstring"true")
+      let continueHandler = proc(_: Event) =
+        vm.continueActiveChain()
+      continueBtn.addEventListener(cstring"click", continueHandler)
+      footer.appendChild(continueBtn)
     let pinBtn = document.createElement(cstring"button")
     pinBtn.innerText = cstring"Pin to scratchpad"
     let pinHandler = proc(_: Event) =

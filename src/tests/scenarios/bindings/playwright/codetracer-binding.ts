@@ -1338,6 +1338,14 @@ function readSurfacePw8(root: any): void {
           sb.visible = shown(side);
           oc.children.push(sb);
         }
+        // "Continue tracing" under a cut-off chain ("Continuing…" while its
+        // request is out).
+        const more = chain.querySelector("button.ct-origin-continue-chain") as HTMLElement | null;
+        if (more && vis(more)) {
+          const mb = button(more);
+          mb.visible = shown(more);
+          oc.children.push(mb);
+        }
         v.children.push(oc);
       }
     }

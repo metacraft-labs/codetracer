@@ -3833,7 +3833,7 @@ impl Handler {
         // because each RR hop costs a reverse-continue.
         let mut budget = task::OriginBudget {
             max_hops: args.max_hops,
-            wall_clock_ms: task::DEFAULT_ORIGIN_WALL_CLOCK_MS,
+            wall_clock_ms: task::origin_wall_clock_ms(),
             max_steps_scanned: task::DEFAULT_ORIGIN_MAX_STEPS_SCANNED,
         };
         if self.trace_kind == TraceKind::Recreator && budget.max_hops > crate::recreator_origin::RR_DEFAULT_MAX_HOPS {
@@ -4911,6 +4911,7 @@ impl Handler {
             patterns_fingerprint: patterns_fingerprint.to_string(),
             source_digests: Vec::new(),
             issued_at: 0,
+            replay_resume: None,
         };
         crate::origin_query::placeholder_summary(token)
     }
@@ -8077,6 +8078,7 @@ pub(crate) fn build_flow_eager_or_placeholder(
         patterns_fingerprint: patterns_fingerprint.to_string(),
         source_digests: Vec::new(),
         issued_at: 0,
+        replay_resume: None,
     };
     crate::origin_query::placeholder_summary(token)
 }
@@ -9111,6 +9113,7 @@ mod tests {
                     sha256_hex: "0".repeat(64),
                 }],
                 issued_at: 0,
+                replay_resume: None,
             }
             .encode()?)
         };

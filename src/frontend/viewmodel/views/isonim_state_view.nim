@@ -558,6 +558,25 @@ proc onShowInSidePanel(vm: StateVM; item: proc(): VariableViewState): proc() =
     if not vm.onShowOriginProc.isNil and not vm.store.isNil:
       vm.onShowOriginProc(row.name, vm.store.debugger.val.location)
 
+proc continueChainDisplay(vm: StateVM; item: VariableViewState): string =
+  ## "Continue tracing" shows under a chain the engine cut off with a point
+  ## to go on from (spec §5.3.1).
+  let chain = chainForRow(vm, item)
+  if chain.isSome and chain.get.canContinue: "inline-block" else: "none"
+
+proc continueChainText(vm: StateVM; item: VariableViewState): string =
+  if not vm.originChainContinuing.isNil and vm.originChainContinuing(item.name):
+    "Continuing…"
+  else:
+    "Continue tracing"
+
+proc onContinueChain(vm: StateVM; item: proc(): VariableViewState): proc() =
+  ## Reads `item()` when clicked, so a reused row continues the chain it
+  ## shows.
+  result = proc() =
+    if not vm.onContinueOriginChainProc.isNil:
+      vm.onContinueOriginChainProc(item().name)
+
 proc hopLineText(hop: OriginHop): string =
   ## Single-line preview the in-row block emits per hop — matches the
   ## semantics the side-panel renders for the same data shape.
@@ -763,6 +782,7 @@ proc renderVariableRow*[R, N](r: R; vm: StateVM;
   ##           div.ct-origin-inline-chain-hop (one per hop) — text "lhs = rhs"
   ##           div.ct-origin-inline-chain-terminator
   ##         button.ct-origin-show-in-side-panel[display: once the chain is held]
+  ##         button.ct-origin-continue-chain[display: while the chain can be continued]
   ##       div.ct-history-inline-container[display: block when expanded]  ← sibling of atom/compound-parent
   ##         div.ct-history-inline-row (one per history entry)
   ##           div.history-location : "{rrTicks}"
@@ -867,6 +887,12 @@ proc renderVariableRow*[R, N](r: R; vm: StateVM;
                display = showInSidePanelDisplay(vm, item()),
                onclick = onShowInSidePanel(vm, item)):
           text "Show in side panel"
+        # "Continue tracing" — a chain cut off by the engine's limits goes
+        # on from where it stopped (§5.3.1); the new hops join the block.
+        button(class = "ct-origin-continue-chain ct-button-text-xs-tertiary",
+               display = continueChainDisplay(vm, item()),
+               onclick = onContinueChain(vm, item)):
+          text continueChainText(vm, item())
       # History container is a sibling of atomOrCompoundClass — placed
       # outside it so that expanding history does not push the name/value
       # layout out of line. Populated after the ui() block via
