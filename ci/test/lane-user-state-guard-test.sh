@@ -55,6 +55,10 @@
 # THE STAGE SANDBOX (2026-11-05). A stage that is not a lane of files
 # (`ci/lint/nim.sh`) runs itself once inside the same sandbox
 # (`ct_user_state_stage_sandbox`). Cases 15-16 pin the same two halves for it.
+#
+# A DIRECTORY THE OVERLAY CANNOT TAKE (2026-11-15). Cases 17-19: a guarded
+# directory whose overlay the kernel refuses is left to the snapshot
+# comparison and named once; every file and the stage still run.
 
 set -uo pipefail
 
@@ -197,6 +201,7 @@ if [ -e "$TMPDIR/foreign-done" ]; then echo "[OK] ran while another process wrot
 FIX
 
 # --- the scratch home, with the user's state in it --------------------------
+locked_home=0
 reset_home() {
 	rm -rf "${scratch:?}/home"
 	mkdir -p "${scratch}/home/.local/state/codetracer" \
@@ -206,6 +211,12 @@ reset_home() {
 	echo 'cfg: 1' >"${scratch}/home/.config/codetracer/.config.yaml"
 	mkdir -p "${scratch}/home/.cache/codetracer/vscode-484fdf69"
 	echo '{}' >"${scratch}/home/.cache/codetracer/vscode-484fdf69/package.json"
+	# Cases 17-19: no `~/.local/state/codetracer`, and a directory beside it
+	# for `in_locked_home` to mount over.
+	if [ "${locked_home}" = 1 ]; then
+		rm -rf "${scratch}/home/.local/state/codetracer"
+		mkdir -p "${scratch}/home/.local/state/held" "${scratch}/bind-source"
+	fi
 }
 
 run_lane() {
@@ -661,6 +672,93 @@ STAGE
 		t_fail "stage sandbox: another process's write does not fail the stage (sandboxed rc=${rc}; unsandboxed rc=${unsandboxed_rc})"
 		sed 's/^/       /' "${scratch}/out" >&2
 	fi
+
+	# 17-19. A GUARDED DIRECTORY THE OVERLAY CANNOT TAKE (codetracer-specs
+	#    issue 2026-11-15-user-state-sandbox-probe-passes-on-tmp-and-every-
+	#    lane-file-fails-to-mount-on-zfs-home.md). On nixos-ci-bare-004 every
+	#    file of a lane "DID NOT RUN" (exit 32, `mount: …/.local/state: wrong
+	#    fs type`): `~/.local/state/codetracer` did not exist, so the overlay
+	#    went on its parent, and the parent had mounts beneath it. In the
+	#    sandbox's new user namespace every inherited mount is locked, and the
+	#    kernel refuses a lower layer with locked mounts under it ("overlayfs:
+	#    failed to clone lowerpath"). The probe tested a scratch tree, which
+	#    has none, so it passed.
+	#
+	#    The same shape here: the lane runs in an outer user and mount
+	#    namespace with a bind mount under the scratch `~/.local/state`, whose
+	#    `codetracer` entry is absent. That directory must be left to the
+	#    snapshot comparison, named once, and every other one kept sandboxed;
+	#    no file may fail to start.
+	sandbox_cases=7
+	# `$@` in the outer namespace, with the bind mount in place. The command
+	# keeps the caller's environment.
+	in_locked_home() {
+		reset_home
+		# shellcheck disable=SC2016 # expanded by the inner shell, not here
+		unshare --user --map-root-user --mount bash -c \
+			'mount --bind "$1" "$2" || exit 97; shift 2; exec "$@"' locked-home \
+			"${scratch}/bind-source" "${scratch}/home/.local/state/held" "$@"
+	}
+	locked_lane() {
+		rm -f "${scratch}/tmp/roots.txt"
+		(
+			cd "${fake}" || exit 2
+			in_locked_home env -u CODETRACER_HOME -u CODETRACER_TUI_LAYOUT_DIR \
+				-u XDG_STATE_HOME -u XDG_DATA_HOME -u XDG_CONFIG_HOME \
+				HOME="${scratch}/home" TMPDIR="${scratch}/tmp" \
+				PATH="${scratch}/bin:${PATH}" CT_NIM_CACHE_ROOT="${scratch}/cache" \
+				bash ci/lib/run-nim-test-lane.sh "$1"
+		) >"${scratch}/out" 2>&1
+		echo $?
+	}
+	locked_home=1
+	refused_line="user-state sandbox: overlayfs refuses ${scratch}/home/.local/state as a lower layer here"
+	# 17. Every file runs, the refused directory is named once, and the
+	#     sandbox stays on for the others.
+	rc="$(locked_lane guard-clean)"
+	if [ "${rc}" = 0 ] && grep -q 'guard-clean: 2 file(s) passed, 0 failed' "${scratch}/out" &&
+		! grep -q 'DID NOT RUN' "${scratch}/out" &&
+		[ "$(grep -c -F "${refused_line}" "${scratch}/out")" = 1 ] &&
+		grep -q "each file runs in a sandbox" "${scratch}/out"; then
+		t_pass "sandbox: a guarded directory whose parent has mounts beneath it is named once, and every file still runs"
+	else
+		t_fail "sandbox: a guarded directory whose parent has mounts beneath it is named once, and every file still runs (rc=${rc})"
+		sed 's/^/       /' "${scratch}/out" >&2
+	fi
+	# 18. Positive control: that directory is still guarded, by the snapshot
+	#     comparison, so a file writing it fails and is named.
+	rc="$(locked_lane guard-state)"
+	if [ "${rc}" != 0 ] && ! grep -q 'DID NOT RUN' "${scratch}/out" &&
+		grep -q "tests/test_writes_state.nim changed the user's own CodeTracer state" "${scratch}/out" &&
+		grep -q "after: .*${scratch}/home/.local/state/codetracer/terminal-profiles.json" "${scratch}/out"; then
+		t_pass "sandbox: a write to the directory left to the snapshot comparison still fails the file, named"
+	else
+		t_fail "sandbox: a write to the directory left to the snapshot comparison still fails the file (rc=${rc})"
+		sed 's/^/       /' "${scratch}/out" >&2
+	fi
+	# 19. The stage sandbox over the same home runs the stage and keeps its
+	#     own status (3).
+	reset_home
+	cat >"${scratch}/stage.sh" <<STAGE
+set -uo pipefail
+source "${repo_root}/ci/lib/codetracer-home.sh"
+ct_user_state_stage_sandbox probe-stage bash "${scratch}/stage.sh"
+ct_export_scratch_codetracer_home probe-stage
+trap '_ct_rc=\$?; ct_remove_scratch_codetracer_home probe-stage; ct_user_state_guard_exit probe-stage "\$_ct_rc"' EXIT
+exit 3
+STAGE
+	in_locked_home env -u CODETRACER_HOME -u CT_USS_STAGE -u CT_USS_STAGE_COVERED \
+		CT_USER_STATE_SANDBOX=1 HOME="${scratch}/home" TMPDIR="${scratch}/tmp" \
+		bash "${scratch}/stage.sh" >"${scratch}/out" 2>&1
+	rc=$?
+	if [ "${rc}" = 3 ] && grep -q "probe-stage: the sandbox caught no write" "${scratch}/out" &&
+		[ "$(grep -c -F "${refused_line}" "${scratch}/out")" = 1 ]; then
+		t_pass "stage sandbox: a guarded directory whose parent has mounts beneath it is named once, and the stage runs"
+	else
+		t_fail "stage sandbox: a guarded directory whose parent has mounts beneath it is named once, and the stage runs (rc=${rc})"
+		sed 's/^/       /' "${scratch}/out" >&2
+	fi
+	locked_home=0
 fi
 
 echo "lane-user-state-guard-test: ${passes} passed, ${failures} failed"

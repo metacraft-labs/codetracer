@@ -225,6 +225,20 @@ ct_user_state_snapshot() {
 # `ct_user_state_sandbox_enable` proves the mechanism on a scratch tree before
 # it is trusted, so a host where it silently does nothing is never taken for
 # one where it works.
+#
+# It then mounts each REAL directory a run will mount, the same way, because
+# the scratch tree cannot stand in for them. In the sandbox's new user
+# namespace every mount inherited from the host is locked, and the kernel
+# refuses a lower layer that has a locked mount beneath it ("overlayfs: failed
+# to clone lowerpath"; `mount` itself says only "wrong fs type, bad option").
+# A missing `~/.local/state/codetracer` puts the overlay on `~/.local/state`,
+# and a host that bind-mounts anything under it (agent-harbor mounts its own
+# directories under `~/.config`, `~/.cache` and `~/.local/share`) then failed
+# every file of a lane before it ran, as "DID NOT RUN (exit 32)", on
+# nixos-ci-bare-004 (codetracer-specs issue
+# `2026-11-15-user-state-sandbox-probe-passes-on-tmp-and-every-lane-file-fails-to-mount-on-zfs-home.md`).
+# A directory whose overlay is refused stays with the snapshot comparison
+# instead, named in one line; the others stay sandboxed.
 
 _ct_uss_enabled=""
 _ct_uss_guarded=()
@@ -586,6 +600,33 @@ done
 shift
 exec unshare --user --map-user="${CT_USS_UID}" --map-group="${CT_USS_GID}" -- "$@"'
 
+# The probe of the real mount points, as one `bash -c` program: mount each
+# overlay given as `<lower> <upper> <work>` triples, in order and in one
+# namespace, as `_ct_uss_entry` will, and print each lower layer the kernel
+# refused, one per line. Nothing runs over the mounts and they go with the
+# namespace.
+# shellcheck disable=SC2016 # expanded by the inner shell, not here
+_ct_uss_probe_mounts='while [ $# -ge 3 ]; do
+	mount -t overlay overlay -o "lowerdir=$1,upperdir=$2,workdir=$3" "$1" 2>/dev/null ||
+		printf "%s\n" "$1"
+	shift 3
+done'
+
+_ct_uss_mounts_beneath() {
+	# The mount points strictly beneath directory `$1`, one per line, from
+	# this process's mount table (octal escapes such as `\040` decoded). Only
+	# for the message that names a refused directory.
+	local dir
+	dir="$(cd -P -- "$1" 2>/dev/null && pwd)" || return 0
+	local mp
+	while read -r _ _ _ _ mp _; do
+		mp="$(printf '%b' "${mp}")"
+		case "${mp}" in
+		"${dir}"/*) printf '%s\n' "${mp}" ;;
+		esac
+	done </proc/self/mountinfo 2>/dev/null | sort -u
+}
+
 ct_user_state_sandbox_enable() {
 	# Decide, once per lane, whether runs are sandboxed. Opt out with
 	# CT_USER_STATE_SANDBOX=0. Returns 0 when the sandbox is on.
@@ -619,22 +660,86 @@ ct_user_state_sandbox_enable() {
 ${uid}" ] && [ -f "${probe}/up/0/new" ] && [ ! -e "${probe}/lower/new" ]; then
 		ok=1
 	fi
-	chmod -R u+rwx "${probe}" 2>/dev/null
-	rm -rf "${probe}"
-	[ -n "${ok}" ] || return 1
-	local d parent
+	if [ -z "${ok}" ]; then
+		chmod -R u+rwx "${probe}" 2>/dev/null
+		rm -rf "${probe}"
+		return 1
+	fi
+	# Where each guarded directory would be mounted: itself, or its parent
+	# when it does not exist yet.
+	local d parent guarded=() mounts=() subs=()
 	while IFS= read -r d; do
 		parent="$(dirname "${d}")"
 		if [ -d "${d}" ]; then
-			_ct_uss_guarded+=("${d}")
-			_ct_uss_mounts+=("${d}")
-			_ct_uss_subs+=("")
+			guarded+=("${d}")
+			mounts+=("${d}")
+			subs+=("")
 		elif [ -d "${parent}" ]; then
-			_ct_uss_guarded+=("${d}")
-			_ct_uss_mounts+=("${parent}")
-			_ct_uss_subs+=("$(basename "${d}")")
+			guarded+=("${d}")
+			mounts+=("${parent}")
+			subs+=("$(basename "${d}")")
 		fi
 	done < <(ct_user_state_guard_dirs)
+	# Each distinct mount point once, in first-use order, as
+	# `ct_user_state_sandbox_prefix` mounts them.
+	local i k seen_mount targets=() args=()
+	for i in "${!mounts[@]}"; do
+		seen_mount=""
+		for k in "${targets[@]}"; do
+			[ "${k}" = "${mounts[$i]}" ] && seen_mount=1 && break
+		done
+		[ -n "${seen_mount}" ] && continue
+		k="${#targets[@]}"
+		targets+=("${mounts[$i]}")
+		mkdir -p "${probe}/real-up/${k}" "${probe}/real-work/${k}"
+		args+=("${mounts[$i]}" "${probe}/real-up/${k}" "${probe}/real-work/${k}")
+	done
+	local refused=""
+	if [ "${#args[@]}" -gt 0 ]; then
+		refused="$(unshare --user --map-root-user --mount bash -c \
+			"${_ct_uss_probe_mounts}" ct-user-state-sandbox-probe "${args[@]}" \
+			2>/dev/null)" || refused="$(printf '%s\n' "${targets[@]}")"
+	fi
+	chmod -R u+rwx "${probe}" 2>/dev/null
+	rm -rf "${probe}"
+	local target is_refused left beneath mp n
+	for target in "${targets[@]}"; do
+		is_refused=""
+		while IFS= read -r k; do
+			[ "${k}" = "${target}" ] && is_refused=1
+		done <<<"${refused}"
+		[ -n "${is_refused}" ] || continue
+		left=""
+		for i in "${!mounts[@]}"; do
+			[ "${mounts[$i]}" = "${target}" ] && left="${left:+${left}, }${guarded[$i]}"
+		done
+		# The first three, and how many more: a host can have many.
+		beneath=""
+		n=0
+		while IFS= read -r mp; do
+			n=$((n + 1))
+			[ "${n}" -le 3 ] && beneath="${beneath:+${beneath}, }${mp}"
+		done < <(_ct_uss_mounts_beneath "${target}")
+		[ "${n}" -le 3 ] || beneath="${beneath} and $((n - 3)) more"
+		if [ -n "${beneath}" ]; then
+			beneath="it has mounts beneath it, which the sandbox's user namespace locks: ${beneath}"
+		else
+			beneath="the kernel log says why"
+		fi
+		echo "user-state sandbox: overlayfs refuses ${target} as a lower layer here (${beneath}), so ${left} is compared around each run instead" >&2
+	done
+	for i in "${!mounts[@]}"; do
+		is_refused=""
+		while IFS= read -r k; do
+			[ "${k}" = "${mounts[$i]}" ] && is_refused=1
+		done <<<"${refused}"
+		[ -z "${is_refused}" ] || continue
+		_ct_uss_guarded+=("${guarded[$i]}")
+		_ct_uss_mounts+=("${mounts[$i]}")
+		_ct_uss_subs+=("${subs[$i]}")
+	done
+	# Nothing left to cover: no sandbox, and every directory is compared.
+	[ "${#_ct_uss_guarded[@]}" -gt 0 ] || return 1
 	export CT_USS_UID="${uid}" CT_USS_GID="${gid}"
 	_ct_uss_enabled=1
 	# Once per lane, like the probe: every run of this shell's sandbox reaches
