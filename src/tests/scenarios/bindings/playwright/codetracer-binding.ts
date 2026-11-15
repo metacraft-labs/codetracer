@@ -3600,7 +3600,30 @@ const binding = {
   // last (a pane sent to a new window, a session opened in a new window): the
   // first of its Electron windows that is neither the stage's window nor a
   // client already. The user's own action opened it; this only addresses it.
-  async openClient(ctx: Ctx, kind: string, _isolation: string): Promise<any> {
+  async openClient(ctx: Ctx, kind: string, isolation: string): Promise<any> {
+    if (kind === "host-page") {
+      // One more browser page on the `ct host` the stage started (the pack's
+      // `host-page`): what the arm opens itself for a binding without
+      // `openClient` — the address of the client open now, in a new browser
+      // context for `separate` (a second browser), in the same context for
+      // `shared` (a second tab). Defining `openClient` for `app-window` took
+      // that default away from every other kind.
+      if (!ctx.state.hosted) throw new Error("open-client host-page: the stage started no ct host");
+      const url = ctx.page.url();
+      let page: any;
+      if (isolation === "shared") {
+        page = await ctx.context.newPage();
+      } else {
+        const vp = ctx.page.viewportSize() ?? { width: 1600, height: 1000 };
+        const context = await ctx.browser.newContext({
+          viewport: vp,
+          recordVideo: { dir: ctx.videoDir || path.join(process.env.TMPDIR ?? "/tmp", `ct-host-page-video-${process.pid}-${Date.now()}`), size: vp },
+        });
+        page = await context.newPage();
+      }
+      await page.goto(url, { waitUntil: "load" });
+      return page;
+    }
     if (kind !== "app-window") throw new Error(`the desktop binding opens no client of kind '${kind}'`);
     const app = ctx.state.app;
     if (!app) throw new Error("open-client app-window: the application is not running");

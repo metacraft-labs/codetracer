@@ -353,6 +353,7 @@ applicable:
   - ../multi-window/a-step-in-the-second-window-moves-both.yaml
   - ../multi-window/closing-the-second-window-keeps-the-first.yaml
   - ../multi-window/closing-the-first-window-keeps-the-second.yaml
+  - ../multi-window/a-file-opened-in-the-second-window-opens-there.yaml
   - ../multi-replay/stepping-one-tab-moves-only-it.yaml
   - ../multi-replay/tab-switch-restores-the-first-session.yaml
   - ../multi-replay/second-recording-in-a-new-tab.yaml
