@@ -2620,7 +2620,7 @@ function readSurfacePw6(root: any): void {
 //
 // Runs IN THE PAGE, in the same evaluation as `readSurface` (see
 // `SURFACE_EXTENSIONS`), on the tree it returned. Reads only.
-function readSurfacePw4(root: any): void {
+export function readSurfacePw4(root: any): void {
   const vis = (el: Element | null): boolean => {
     if (!el) return false;
     const r = (el as HTMLElement).getBoundingClientRect();
@@ -2788,7 +2788,24 @@ function readSurfacePw4(root: any): void {
       stepping: text(llc.querySelector(".low-level-code-stepping")),
       address: text(llc.querySelector(".low-level-code-address")),
     });
-    for (const row of Array.from(llc.querySelectorAll(".low-level-code-instructions > div")) as HTMLElement[]) {
+    // What a user sees, not the whole listing: a generated C listing runs to
+    // thousands of rows, and reading each (rect, style, text) on every poll
+    // made one observation take minutes. Past `LLC_ALL_ROWS` rows, only those
+    // within a screen of the pane's viewport are read, plus the marked and
+    // executing rows wherever they are; `count` still counts every
+    // instruction, from the class alone.
+    const LLC_ALL_ROWS = 300;
+    const rows = Array.from(llc.querySelectorAll(".low-level-code-instructions > div")) as HTMLElement[];
+    const pane = llc.getBoundingClientRect();
+    const margin = Math.max(pane.height, 200);
+    const windowed = rows.length > LLC_ALL_ROWS;
+    for (const row of rows) {
+      if (windowed && !row.classList.contains("active-instruction") &&
+          !row.classList.contains("execution-pointer") &&
+          !row.classList.contains("active-source-line")) {
+        const r = row.getBoundingClientRect();
+        if (r.bottom < pane.top - margin || r.top > pane.bottom + margin) continue;
+      }
       if (row.classList.contains("low-level-code-source-line")) {
         const n = parseInt(text(row.querySelector(".low-level-code-source-line-number")), 10) || 0;
         v.children.push(node("source-line", row, { number: n, active: row.classList.contains("active-source-line") },
@@ -2804,7 +2821,7 @@ function readSurfacePw4(root: any): void {
         }, [["offset", offset]]));
       }
     }
-    v.props.count = v.children.filter((c: any) => c.role === "instruction").length;
+    v.props.count = llc.querySelectorAll(".low-level-code-instructions > .low-level-code-instruction").length;
     const pointer = llc.querySelector(".low-level-code-instruction.execution-pointer");
     v.props.pointer = text(pointer?.querySelector(".low-level-code-instruction-offset"));
     v.anchors = { points: { ...(stepping ? { header: centre(stepping) } : {}),

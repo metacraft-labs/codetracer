@@ -6,6 +6,7 @@
 #   ci/test/scenarios.sh lint               the scenario linter over every scenario
 #   ci/test/scenarios.sh lane <flavour>     one lane: terminal | gpui | electron
 #   ci/test/scenarios.sh run <flavour> <scenario.yaml> [dvs run args…]
+#   ci/test/scenarios.sh binding-test       the bindings' own tests (bindings/*/*.test.ts)
 #
 # The pack, its scenarios and its lanes are under src/tests/scenarios
 # (README.md there). The general-purpose runner and backends are siblings of
@@ -155,6 +156,10 @@ lane)
 	flavour="${2:?usage: scenarios.sh lane <terminal|gpui|electron>}"
 	runner="$(runner_of "${flavour}")"
 	[ -x "${runner}" ] || "$0" build
+	# The desktop binding's own tests first: a reader that cannot read the
+	# product's large panes in bounded time fails here, by name, rather than as
+	# scenarios timing out.
+	if [ "${flavour}" = electron ]; then "$0" binding-test || exit 1; fi
 	"${runner}" lane "${S}/lanes/${flavour}.lane.yaml" --build "${build_dir}"
 	;;
 run)
@@ -175,8 +180,18 @@ run)
 	"$(runner_of "${flavour}")" run "${scenario}" --pack "${S}/pack/codetracer.pack.yaml" \
 		--backend "$(backend_of "${flavour}")" --build "${build_dir}" "${settle[@]}" "$@"
 	;;
+binding-test)
+	# The bindings' own tests: what a binding reads from a real page, without a
+	# product build (e.g. that a large pane is read in bounded time).
+	rc=0
+	while IFS= read -r t; do
+		echo "== ${t#"${root}/"}"
+		node "${t}" || rc=1
+	done < <(find "${root}/${S}/bindings" -name '*.test.ts' | sort)
+	exit "${rc}"
+	;;
 *)
-	sed -n '2,23p' "$0"
+	sed -n '2,24p' "$0"
 	exit 64
 	;;
 esac
