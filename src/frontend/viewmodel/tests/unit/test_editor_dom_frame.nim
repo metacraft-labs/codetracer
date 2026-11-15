@@ -193,6 +193,18 @@ suite "the vertical layout":
     check lay.contentHeight == 4 * 10
     check lay.topOfLine(4) == 10
 
+  test "a zone after the last hidden line stays, above the next visible one":
+    # Monaco: a zone is shown when the line after its anchor is.
+    let lay = verticalLayout(6, 10, @[(first: 1, last: 2)],
+                             [ZoneSpec(id: 1, afterLine: 3, heightPx: 30),
+                              ZoneSpec(id: 2, afterLine: 1, heightPx: 5)])
+    check zoneHidden(lay.hidden, 6, 2)          # line 3 after line 2 is hidden
+    check not zoneHidden(lay.hidden, 6, 3)      # line 4 after line 3 is not
+    check zoneHidden(lay.hidden, 6, 1)          # a fold's head: line 2 is hidden
+    check lay.contentHeight == 4 * 10 + 30
+    check lay.zoneTop(ZoneSpec(id: 1)) == 10    # drawn after line 1
+    check lay.topOfLine(4) == 10 + 30
+
 suite "a line's spans":
   test "tokens cut at decoration edges, the text concatenates back":
     let line = "    x = 1"

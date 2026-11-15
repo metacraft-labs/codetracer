@@ -52,6 +52,7 @@ from ../view_vocabulary/diff_regions import mergeSpans
 import ../viewmodel/viewmodels/find_vm
 import ../viewmodel/editor/find_match
 import ../tui/app/syntax/[lexical, token_class]
+from ../tui/app/syntax/monarch import addMonarchDefinitions
 import ../tui/app/theme/editor_theme
 import ../styles/generated/design_tokens
 
@@ -159,6 +160,7 @@ type
     afterLine: int
     heightPx: int
     order: int
+    showInHidden: bool
     domNode: JsObject
     marginNode: JsObject
     spec: JsObject
@@ -395,7 +397,19 @@ proc layoutNow(ed: SharedEditor): VerticalLayout =
   var zs: seq[ZoneSpec] = @[]
   for z in ed.zones:
     zs.add ZoneSpec(id: z.id, afterLine: z.afterLine, heightPx: z.heightPx,
-                    order: z.order)
+                    order: z.order, showInHidden: z.showInHidden)
+  # Monaco's `padding` (top and bottom of the content), for the editors that
+  # take Monaco's layout options (the unified diff's): room above the first
+  # line and below the last, before and after every zone there.
+  if ed.monacoGutter and not ed.options.isNil and not isNilOrUndef(ed.options["padding"]):
+    let pad = ed.options["padding"]
+    if not isNilOrUndef(pad["top"]) and jsNum(pad["top"]) > 0:
+      zs.add ZoneSpec(id: -1, afterLine: 0, heightPx: int(jsNum(pad["top"])),
+                      order: -1_000_000, showInHidden: true)
+    if not isNilOrUndef(pad["bottom"]) and jsNum(pad["bottom"]) > 0:
+      zs.add ZoneSpec(id: -2, afterLine: ed.index.lineCount,
+                      heightPx: int(jsNum(pad["bottom"])),
+                      order: 1_000_000, showInHidden: true)
   verticalLayout(ed.index.lineCount, ed.lineHeight, ed.allHidden, zs)
 
 proc topForLine*(ed: SharedEditor; line1: int): int =
@@ -675,6 +689,11 @@ proc render*(ed: SharedEditor) =
     let minChars = int(jsNum(ed.options["lineNumbersMinChars"]))
     ed.gutterPx = max(ed.gutterPx,
       int(ceil(ed.charWidth * float(minChars + 1))) + lanes)
+    if ed.monacoGutter:
+      # Monaco's own width for the numbers: `lineNumbersMinChars` digits (or
+      # the line count's, if more) at the font's digit width.
+      ed.gutterPx = int(round(ed.charWidth * float(max(minChars,
+        len($ed.index.lineCount))))) + lanes
   ed.margin.setStyle("width", cstring($ed.gutterPx & "px"))
   ed.glyphLayer.setStyle("display", if ed.glyphPx == 0: "none" else: "block")
   ed.scrollable.setStyle("left", cstring($ed.gutterPx & "px"))
@@ -906,7 +925,8 @@ proc render*(ed: SharedEditor) =
       w.node.setStyle("transform", "none")
   # Zones: positioned under their anchor lines.
   for z in ed.zones:
-    let hiddenZone = z.afterLine >= 1 and lay.hidden.isHidden(z.afterLine - 1)
+    let hiddenZone = not z.showInHidden and
+                     zoneHidden(lay.hidden, ed.index.lineCount, z.afterLine)
     # Monaco's `IViewZone.onDomNodeTop`: where the zone is in the view (an
     # overlay that follows it, such as the diff's collapsed-region band).
     if not z.spec.isNil and hasFn(z.spec, "onDomNodeTop"):
@@ -1683,7 +1703,22 @@ proc buildFindWidget(ed: SharedEditor) =
 # Construction
 # ---------------------------------------------------------------------------
 
+const DesktopMonarchDefinitions =
+  staticRead("../view_vocabulary/monarch_desktop_languages.json")
+    ## The desktop's own Monarch definitions (`languages/nimLanguage.js`),
+    ## exported by `scripts/monarch-languages.mjs` and gated fresh by
+    ## `ci/test/monarch-languages-fresh.sh`.
+var desktopLanguagesAdded = false
+
 proc lexerForLanguage(path, language: string): LexerId =
+  # Nim, which the terminal colours with its grammar, is coloured here with
+  # the desktop's own Monarch definition (`languages/nimLanguage.js`), as
+  # Monaco colours it.
+  if language == "nim" or lowerExtension(path) in [".nim", ".nims", ".nimble"]:
+    if not desktopLanguagesAdded:
+      desktopLanguagesAdded = true
+      addMonarchDefinitions(DesktopMonarchDefinitions)
+    return lxNim
   result = lexerForPath(path)
   if result == lxNone and language.len > 0:
     result = lexerForPath("x." & (case language
@@ -2132,6 +2167,8 @@ proc addZone*(ed: SharedEditor; spec: JsObject): int =
   ed.zones.add ZoneRec(id: ed.nextZoneId,
     afterLine: int(jsNum(spec["afterLineNumber"])), heightPx: h,
     order: (if isNilOrUndef(spec["ctOrder"]): 0 else: int(jsNum(spec["ctOrder"]))),
+    showInHidden: not isNilOrUndef(spec["showInHiddenAreas"]) and
+                  spec["showInHiddenAreas"].to(bool),
     domNode: (if isNilOrUndef(node): nil else: node), marginNode: mnode,
     spec: spec)
   if not ed.onZonesChanged.isNil: ed.onZonesChanged()
@@ -2244,11 +2281,11 @@ proc lineEndOffset*(ed: SharedEditor; line0: int): int =
   ed.ensureIndex()
   ed.index.lineEnd(clamp(line0, 0, ed.index.lineCount - 1))
 
-type ZoneInfo* = tuple[id, afterLine, heightPx, order: int]
+type ZoneInfo* = tuple[id, afterLine, heightPx, order: int; showInHidden: bool]
 
 proc zoneInfos*(ed: SharedEditor): seq[ZoneInfo] =
   ## The view zones, in the order they were added.
-  for z in ed.zones: result.add (z.id, z.afterLine, z.heightPx, z.order)
+  for z in ed.zones: result.add (z.id, z.afterLine, z.heightPx, z.order, z.showInHidden)
 
 proc rangeJs(ed: SharedEditor; a, b: int): JsObject =
   let p1 = ed.positionAt(a)

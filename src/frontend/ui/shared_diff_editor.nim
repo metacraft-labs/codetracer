@@ -179,7 +179,8 @@ proc alignOriginal(d: SharedDiffEditor) =
   var mods: seq[AlignZone] = @[]
   for z in d.modified.zoneInfos:
     if z.id in d.deletedZoneIds: continue
-    mods.add AlignZone(afterLine: z.afterLine, heightPx: z.heightPx, order: z.order)
+    mods.add AlignZone(afterLine: z.afterLine, heightPx: z.heightPx, order: z.order,
+                       showInHidden: z.showInHidden)
   for id in d.spacerIds: d.original.removeZone(id)
   d.spacerIds = @[]
   for z in originalZones(d.hunks, mods, d.modified.lineHeight, DeletedZoneOrder):
@@ -187,6 +188,7 @@ proc alignOriginal(d: SharedDiffEditor) =
     spec["afterLineNumber"] = z.afterLine
     spec["heightInPx"] = z.heightPx
     spec["ctOrder"] = SpacerOrderBase + z.order
+    spec["showInHiddenAreas"] = z.showInHidden
     let node = createEl("div")
     node.setAttr("class", "ct-diff-spacer")
     spec["domNode"] = node
@@ -332,6 +334,7 @@ proc newBand(d: SharedDiffEditor; i, afterLine: int): Band =
   spec["afterLineNumber"] = afterLine
   spec["heightInPx"] = BandHeightPx
   spec["ctOrder"] = BandZoneOrder
+  spec["showInHiddenAreas"] = true
   spec["domNode"] = holder
   spec["onDomNodeTop"] = proc(t: int) =
     if t < -100_000: node.setStyle("display", "none")
@@ -463,6 +466,7 @@ proc redrawDiff(d: SharedDiffEditor; force = true) =
       spec["afterLineNumber"] = h.newFrom
       spec["heightInLines"] = h.oldTo - h.oldFrom
       spec["ctOrder"] = DeletedZoneOrder
+      spec["showInHiddenAreas"] = true
       spec["domNode"] = zone
       d.deletedZoneIds.add d.modified.addZone(spec)
     for k in h.newFrom ..< h.newTo:

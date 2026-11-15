@@ -445,8 +445,11 @@ type
     heightPx*: int
     order*: int
       ## Among zones after one line, the lower `order` is drawn first (then
-      ## the older zone): the unified diff puts its own blocks — a collapsed
-      ## region's band, the removed lines — before the overlay's.
+      ## the older zone): the unified diff orders its own blocks — the
+      ## removed lines, a collapsed region's band — after the view's.
+    showInHidden*: bool
+      ## Monaco's `IViewZone.showInHiddenAreas`: shown whatever is hidden
+      ## (the diff's collapsed-region bands sit right above hidden lines).
 
   VerticalLayout* = object
     ## Line tops, with folds and zones accounted for. Built per frame from the
@@ -459,13 +462,36 @@ type
     hiddenBefore*: seq[int]
       ## hiddenBefore[k] = lines hidden by ranges `0 ..< k`
 
+func zoneHidden*(hidden: openArray[tuple[first, last: int]];
+                 lineCount, afterLine: int): bool =
+  ## Monaco's rule (`ViewZones._computeWhitespaceProps`): a zone is shown when
+  ## the line AFTER its anchor is visible — the anchor itself for the last
+  ## line — so a zone under a fold's head goes with the fold, and one after
+  ## the last line of a hidden run stays, above the next visible line.
+  if afterLine <= 0: return false
+  hidden.isHidden(min(afterLine, max(1, lineCount) - 1))
+
+func zoneAnchor*(hidden: openArray[tuple[first, last: int]]; afterLine: int): int =
+  ## Where a shown zone is drawn: after its anchor, or after the last visible
+  ## line above it when the anchor is hidden (0: above the first line).
+  result = afterLine
+  for r in hidden:
+    if result >= 1 and r.first <= result - 1 and result - 1 <= r.last:
+      result = r.first
+
 proc verticalLayout*(lineCount, lineHeight: int;
                      hidden: seq[tuple[first, last: int]];
                      zones: openArray[ZoneSpec]): VerticalLayout =
   result.lineHeight = max(1, lineHeight)
   result.lineCount = max(1, lineCount)
   result.hidden = hidden
-  result.zones = @zones
+  result.zones = @[]
+  for z in zones:
+    var placed = z
+    if not z.showInHidden and zoneHidden(hidden, lineCount, z.afterLine):
+      placed.heightPx = 0
+    else: placed.afterLine = zoneAnchor(hidden, z.afterLine)
+    result.zones.add placed
   result.zones.sort(proc (a, b: ZoneSpec): int =
     if a.afterLine != b.afterLine: cmp(a.afterLine, b.afterLine)
     elif a.order != b.order: cmp(a.order, b.order)
@@ -498,8 +524,11 @@ func topOfLine*(v: VerticalLayout; line1: int): int =
   let line0 = clamp(line1 - 1, 0, v.lineCount - 1)
   v.visibleIndexOf(line0) * v.lineHeight + v.zonePxBefore(line0 + 1)
 
-func zoneTop*(v: VerticalLayout; z: ZoneSpec): int =
-  ## Where zone `z` starts: below its anchor line.
+func zoneTop*(v: VerticalLayout; zone: ZoneSpec): int =
+  ## Where zone `zone` starts: below the line it is drawn after.
+  var z = zone
+  for o in v.zones:
+    if o.id == zone.id: z = o
   if z.afterLine <= 0:
     var px = 0
     for o in v.zones:

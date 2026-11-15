@@ -310,6 +310,8 @@ type
     ## first line); `order` breaks ties between blocks after one line (the
     ## lower first), as the editor's layout does.
     afterLine*, heightPx*, order*: int
+    showInHidden*: bool
+      ## Shown whatever is hidden (a band; its spacer too).
 
 proc originalZones*(hunks: openArray[DiffHunk]; modifiedZones: openArray[AlignZone];
                     lineHeight: int; deletedOrder = -1): seq[AlignZone] =
@@ -322,13 +324,13 @@ proc originalZones*(hunks: openArray[DiffHunk]; modifiedZones: openArray[AlignZo
   ##
   ## The result is in layout order, with `order` numbering it, so the old
   ## revision's layout keeps the order given.
-  type Item = tuple[after, sub, slot, tie, seqNo, height: int; spacer: bool]
+  type Item = tuple[after, sub, slot, tie, seqNo, height: int; spacer, shown: bool]
   var items: seq[Item] = @[]
   let lh = max(1, lineHeight)
   # the added runs' spacers, one slot per added line
   for h in hunks:
     for k in 1 .. (h.newTo - h.newFrom):
-      items.add (h.oldTo, 1, k, 0, items.len, lh, true)
+      items.add (h.oldTo, 1, k, 0, items.len, lh, true, false)
   var zs = @modifiedZones
   zs.sort(proc (x, y: AlignZone): int =
     if x.afterLine != y.afterLine: cmp(x.afterLine, y.afterLine)
@@ -339,7 +341,7 @@ proc originalZones*(hunks: openArray[DiffHunk]; modifiedZones: openArray[AlignZo
     for h in hunks:
       if h.newFrom < L and L <= h.newTo:
         # after an added line: between the spacer's slots
-        items.add (h.oldTo, 1, L - h.newFrom, 1, items.len, z.heightPx, false)
+        items.add (h.oldTo, 1, L - h.newFrom, 1, items.len, z.heightPx, false, z.showInHidden)
         placed = true
         break
     if placed: continue
@@ -354,9 +356,9 @@ proc originalZones*(hunks: openArray[DiffHunk]; modifiedZones: openArray[AlignZo
       if h.newTo <= L: origL = L - (h.newTo - h.oldTo)
     if nextH >= 0 and z.order > deletedOrder:
       # drawn below the removed lines' block, above the added lines
-      items.add (hunks[nextH].oldTo, 0, 0, 0, items.len, z.heightPx, false)
+      items.add (hunks[nextH].oldTo, 0, 0, 0, items.len, z.heightPx, false, z.showInHidden)
     else:
-      items.add (origL, 0, 0, 0, items.len, z.heightPx, false)
+      items.add (origL, 0, 0, 0, items.len, z.heightPx, false, z.showInHidden)
   items.sort(proc (x, y: Item): int =
     if x.after != y.after: return cmp(x.after, y.after)
     if x.sub != y.sub: return cmp(x.sub, y.sub)
@@ -370,5 +372,5 @@ proc originalZones*(hunks: openArray[DiffHunk]; modifiedZones: openArray[AlignZo
       result[^1].heightPx += it.height
     else:
       result.add AlignZone(afterLine: it.after, heightPx: it.height,
-                           order: result.len)
+                           order: result.len, showInHidden: it.shown)
     lastSpacer = it.spacer

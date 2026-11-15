@@ -671,6 +671,22 @@ proc caseUnifiedDiffRegions() {.async.} =
   ck num(r0["visibleLineCountBottom"].get()) == 10,
      "the lower end shows ten (" & $num(r0["visibleLineCountTop"].get()) & "/" &
      $num(r0["visibleLineCountBottom"].get()) & ")"
+  # A view zone after the last hidden line (6) is shown — the line after it
+  # (7) is — where the hidden lines are, above the region's band and line 7,
+  # as Monaco shows it.
+  let late = newDivEl()
+  let lateZone = jsNew()
+  lateZone["afterLineNumber"] = 6
+  lateZone["heightInPx"] = 30
+  lateZone["domNode"] = late
+  discard modFacade.changeViewZones(proc(acc: JsObject) = discard acc.addZone(lateZone))
+  await settle()
+  var lateTop = 0.0
+  {.emit: [lateTop, " = parseFloat(", late, ".style.top);"].}
+  ck $late.style.display.to(cstring) != "none" and
+     abs(lateTop + 30.0 + 24.0 - num(modFacade.getTopForLineNumber(7))) < 1.0,
+     "a zone after a hidden line stays, above the band and line 7 (" & $lateTop & ", " &
+     $num(modFacade.getTopForLineNumber(7)) & ")"
   # A drag on the upper handle of the middle region, three lines down.
   let topHandle = bands2[1].querySelector(cstring":scope > .top")
   let tr = rectOf(topHandle)
@@ -714,6 +730,28 @@ proc caseUnifiedDiffRegions() {.async.} =
   ck num(diff.getOriginalEditor().getScrollTop()) == num(modFacade.getScrollTop()),
      "the old revision scrolls with the new one"
   endCase("the unified diff: collapsed regions and their handles, word marks, coloured removed lines, the old revision aligned")
+
+proc caseNimColours() {.async.} =
+  ## Nim, which Monaco colours with the desktop's own Monarch definition
+  ## (`languages/nimLanguage.js`), is coloured with the same definition here:
+  ## a Nim file — the unified diff of a Nim commit among them — is not plain.
+  beginCase()
+  setHtml("""<div id="host" style="width: 800px; height: 200px; position: relative"></div>""")
+  let live = sharedEditors
+  for ed in live: ed.dispose()
+  let ed = newSharedEditor(qs("#host"),
+    "proc main(x: int): string =\n  let y = \"hello\" # note\n  result = $x & y\n",
+    "", "nim", true, 14, "monospace", true, jsNew())
+  ed.render()
+  await settle()
+  var kinds: seq[string] = @[]
+  let spans = qsa(ed.root, ".view-lines .view-line span span")
+  for i in 0 ..< num(spans.length).int:
+    for c in ($spans[i].className.to(cstring)).split(' '):
+      if c.len > 3 and c.startsWith("mtk") and c[3] in {'0'..'9'} and c notin kinds:
+        kinds.add c
+  ck kinds.len >= 4, "a Nim file in several token colours: " & $kinds
+  endCase("Nim is coloured by the desktop's own Monarch definition")
 
 proc caseBracketsAndWheel() {.async.} =
   beginCase()
@@ -839,6 +877,7 @@ proc main() {.async.} =
   await guarded(caseFindAndReplace, "caseFindAndReplace")
   await guarded(caseUnifiedDiff, "caseUnifiedDiff")
   await guarded(caseUnifiedDiffRegions, "caseUnifiedDiffRegions")
+  await guarded(caseNimColours, "caseNimColours")
   await guarded(caseBracketsAndWheel, "caseBracketsAndWheel")
   await guarded(caseScrollRangeAndViewState, "caseScrollRangeAndViewState")
   await guarded(caseHugeFile, "caseHugeFile")
