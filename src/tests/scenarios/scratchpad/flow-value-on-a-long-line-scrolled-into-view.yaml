@@ -1,0 +1,27 @@
+scenario: 1
+name: scratchpad/flow-value-on-a-long-line-scrolled-into-view
+pack: codetracer
+summary: >-
+  A value the editor draws past the end of a long line (main.nr's 160-column
+  `fn main(...)`) is reached by scrolling the editor right, and Ctrl+click
+  on it adds exactly one entry to the scratchpad.
+
+stage:
+  - use: record-program
+    with: { program: noir_space_ship }
+  - use: open-recording
+    with: { width: 2400, height: 1300 }
+
+steps:
+  - wait: { until: replay-idle, timeout: 180s }
+  - click: 'toolbar/toolbar-button[label="next-image"]'
+    settle: false
+  - wait: replay-idle
+  - click: 'pane-tab[label="SCRATCHPAD"]'
+  - wait: { until: { at: scratchpad, count: 0 }, timeout: 10s }
+  - wait: { until: { at: 'editor[file="main.nr"]/flow-value[name="initial_shield", line="12"]', present: true }, timeout: 60s }
+  - wheel: { at: 'editor[file="main.nr"]', direction: right, amount: 32 }
+  - wait: { until: { at: 'editor[file="main.nr"]/flow-value[name="initial_shield", line="12"]', shown: true }, timeout: 10s }
+  - click: { at: 'editor[file="main.nr"]/flow-value[name="initial_shield", line="12"]', modifiers: [Ctrl] }
+  - wait: { until: { at: scratchpad, count: 1 }, timeout: 20s }
+  - expect: { at: 'scratchpad/scratch-entry[expression="initial_shield"]', present: true }
