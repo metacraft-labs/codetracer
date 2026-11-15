@@ -21,7 +21,7 @@
 ##
 ##   ah_tui_story_host --story=<storybook id> [--theme=dark|light]
 ##                     [--moment=<name>] [--cols=<n>] [--rows=<n>]
-##                     [--list] [--captures]
+##                     [--list] [--captures [--moments]]
 ##
 ## A playback story (`stories/agent_harbor_playback.nim`) plays on IsoNim's
 ## `RealClock`, its playback bar on the last row (`ah_tui_playback_bar.nim`);
@@ -33,8 +33,12 @@
 ##
 ## `--list` prints every story id of the section and exits; `--captures`
 ## prints the capture name of every story, size and theme
-## (`agent-harbor-<story>-<size>-<theme>`, the web and GPUI records' names). The sizes the
-## captures use are `ah_tui_stories.TuiSizes`: laptop 180×56 and sidebar
+## (`agent-harbor-<story>-<size>-<theme>`, the web and GPUI records' names);
+## with `--moments` it prints instead the capture name of every PLAYBACK
+## story at every named moment of its scenario, size and theme
+## (`agent-harbor-<story>-at-<moment>-<size>-<theme>`, CTF-P1c's moment
+## captures; the moments are read from the scenario, in time order). The
+## sizes the captures use are `ah_tui_stories.TuiSizes`: laptop 180×56 and sidebar
 ## 45×56, the brief's 1440×900 and 360×900 at 8×16 px a cell. Colours are
 ## 24-bit (the views' design-system roles), so the terminal should be
 ## truecolor. Like every snapshot app it ends after
@@ -57,7 +61,7 @@ const
 type
   StoryArgs = object
     story, theme, moment: string
-    list, captures: bool
+    list, captures, moments: bool
     rest: seq[string]
       ## The snapshot runtime's flags (`--cols`, `--rows`, `--test-ipc`, …).
 
@@ -69,6 +73,7 @@ proc parseStoryArgs(args: openArray[string]): StoryArgs =
     elif arg.startsWith("--moment="): result.moment = arg["--moment=".len .. ^1]
     elif arg == "--list": result.list = true
     elif arg == "--captures": result.captures = true
+    elif arg == "--moments": result.moments = true
     else: result.rest.add arg
 
 when isMainModule:
@@ -81,11 +86,19 @@ when isMainModule:
     if a.list:
       for story in section.stories: echo storybookId(section, story)
       return 0
+    if a.moments and not a.captures:
+      stderr.writeLine("app_agent_harbor_story: --moments goes with --captures")
+      return 2
     if a.captures:
       for story in section.stories:
-        for (size, _, _) in TuiSizes:
-          for theme in ["dark", "light"]:
-            echo captureIdOf(storybookId(section, story), size, theme)
+        var moments = @[""]
+        if a.moments:
+          if not isPlaybackStory(story.surface, story.fixture): continue
+          moments = playbackScenario(playbackScenarioNameOf(story.fixture)).momentNames
+        for moment in moments:
+          for (size, _, _) in TuiSizes:
+            for theme in ["dark", "light"]:
+              echo captureIdOf(storybookId(section, story), size, theme, moment)
       return 0
     if a.theme notin ["dark", "light"]:
       stderr.writeLine("app_agent_harbor_story: --theme is dark or light, not " & a.theme)

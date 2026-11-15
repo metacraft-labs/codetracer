@@ -89,10 +89,14 @@ proc agentHarborSection*(): CodeTracerStorySection =
   for s in codeTracerStorySections():
     if s.title == AgentHarborSectionTitle: return s
 
-proc captureIdOf*(storyId, sizeName, theme: string): string =
+proc captureIdOf*(storyId, sizeName, theme: string; moment = ""): string =
   ## The capture name the web and GPUI records use:
-  ## `agent-harbor-<story>-<size>-<theme>`.
-  "agent-harbor-" & storyId[StoryIdPrefix.len .. ^1] & "-" & sizeName & "-" & theme
+  ## `agent-harbor-<story>-<size>-<theme>`, and for a playback story opened
+  ## at a named moment `agent-harbor-<story>-at-<moment>-<size>-<theme>` (the
+  ## CTF-P1c moment captures' names, `capture-storybook.mjs --moments` and
+  ## `ci/test/ctf_p1b_gpui_story_capture.nim`).
+  "agent-harbor-" & storyId[StoryIdPrefix.len .. ^1] &
+    (if moment.len > 0: "-at-" & moment else: "") & "-" & sizeName & "-" & theme
 
 proc findStory*(id: string): CodeTracerStory =
   ## The story whose StoryBook id is `id`; raises `KeyError` for none.

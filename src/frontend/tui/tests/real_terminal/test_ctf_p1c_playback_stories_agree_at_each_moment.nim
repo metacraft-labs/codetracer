@@ -36,8 +36,10 @@
 ##     story host's mount, driven by its keys (`n` step, `[` and `]` the
 ##     previous and next named moment), redrawn as the host redraws it
 ##     (`idle`); and the story host itself, spawned in a real pty with
-##     `--moment=<name>` for every named moment, its screen compared cell by
-##     cell with the in-process drawing at that moment.
+##     `--moment=<name>` for every named moment, at the laptop and sidebar
+##     sizes (`ah_tui_stories.TuiSizes`) in both colour modes, its screen
+##     compared cell by cell (glyph, ink and ground) with the in-process
+##     drawing at that moment.
 ##
 ## What is compared is the CTF-P1b cover tests' facts read off each drawing
 ## (the GPUI `data-ah-*` attributes, the terminal's `AhNode` facts, the web
@@ -83,6 +85,15 @@
 ## said a second time as its activity line). So a host that draws another state disagrees with the
 ## other two, and a defect all three share (the playback, a viewmodel, a
 ## story constructor) fails the hand-written facts.
+##
+## With `CTF_P1C_TUI_OUT=<dir>` the real-terminal test also writes each
+## screen it read back at a named moment as `<capture id>.svg` in its colours
+## (TermAssert `renderColourSvg`) and `<capture id>.txt`, the capture id being
+## `ah_tui_stories.captureIdOf`'s moment name
+## (`agent-harbor-<story>-at-<moment>-<size>-<theme>`, the web and GPUI
+## moment captures' names): the input of `ci/test/ctf-p1b-tui-capture.sh
+## --moments`, as `test_ctf_p1b_tui_views_cover_web_states.nim` is of its
+## first-frame captures.
 ##
 ## Test doubles, and why each is justified:
 ##   * `TestClock` (IsoNim) instead of `RealClock`: the hosts play on a real
@@ -132,6 +143,9 @@ const
     ## One per P2a surface: the session tab strip, the session list, the
     ## initiative tab bar, the Initiatives and Initiative Progress panels and
     ## the fleet list.
+
+let captureOut = getEnv("CTF_P1C_TUI_OUT")
+  ## Where the real-terminal test writes its screens; empty: nowhere.
 
 let PrintFacts = existsEnv("CTF_P1C_PRINT_FACTS")
   ## Prints the web's facts at every comparison, for a reader writing or
@@ -692,17 +706,20 @@ proc playbackStories(): seq[CodeTracerStory] =
 # The real terminal
 # ---------------------------------------------------------------------------
 
-proc spawnAt(id, moment: string): TuiTestSession =
-  var args = @["--story=" & id, "--theme=dark", "--cols=" & $LaptopCols,
-               "--rows=" & $LaptopRows]
+proc themeOf(mode: DesignMode): string = (if mode == dmDark: "dark" else: "light")
+
+proc spawnAt(id, moment: string; cols = LaptopCols; rows = LaptopRows;
+             mode = dmDark): TuiTestSession =
+  var args = @["--story=" & id, "--theme=" & themeOf(mode), "--cols=" & $cols,
+               "--rows=" & $rows]
   if moment.len > 0: args.add "--moment=" & moment
   result = newTuiTest(appBinaryPath(Stem), args)
-    .width(LaptopCols).height(LaptopRows)
+    .width(cols).height(rows)
     .envSet("TERM", "xterm-256color")
     .envSet("COLORTERM", "truecolor")
     .envSet("LANG", "en_US.UTF-8")
     .spawn()
-  waitForCompleteFrame(result, LaptopCols, LaptopRows)
+  waitForCompleteFrame(result, cols, rows)
 
 proc screenTextProblems(sess: var TuiTestSession; m: AhTuiMount): seq[string] =
   ## Every row the terminal shows against the in-process drawing's.
@@ -717,6 +734,34 @@ proc screenTextProblems(sess: var TuiTestSession; m: AhTuiMount): seq[string] =
       result.add "row " & $r & ": the terminal shows '" & shown.strip & "', the drawing '" &
                  drawn.strip & "'"
       if result.len >= 3: return
+
+proc hexOf(c: Color): string =
+  ## A terminal cell's colour as the drawing spells it (`#rrggbb`).
+  case c.kind
+  of ckRgb: "#" & toHex(int(c.r), 2).toLowerAscii & toHex(int(c.g), 2).toLowerAscii &
+            toHex(int(c.b), 2).toLowerAscii
+  of ckIndexed: "indexed:" & $int(c.idx)
+  of ckDefault: ""
+
+proc screenColourProblems(sess: var TuiTestSession; m: AhTuiMount): seq[string] =
+  ## Every cell's ink and ground the terminal shows against the in-process
+  ## drawing's, as the CTF-P1b cover test holds them: the colours a capture
+  ## is written in are the drawing's.
+  var shown = 0
+  let g = m.canvas.grid
+  for r in 0 ..< m.rows:
+    for c in 0 ..< m.cols:
+      let cell = sess.cellAt(r, c)
+      if cell.width == 0: continue
+      let want = g.styleAt(r, c)
+      let fg = hexOf(cell.fg)
+      let bg = hexOf(cell.bg)
+      if fg != want.fg or bg != want.bg:
+        if shown < 3:
+          result.add "the terminal shows " & fg & " on " & bg & " at (" & $r & "," & $c &
+                     "), the drawing " & want.fg & " on " & want.bg
+        inc shown
+  if shown > 3: result.add "... and " & $(shown - 3) & " more cells"
 
 # ---------------------------------------------------------------------------
 # The suites
@@ -830,26 +875,49 @@ suite "CTF-P1c: the three hosts agree at every named moment":
     echo "  compared ", compared, " moments (", spotted, " with hand-written facts)"
 
   test "the story host opens each moment on a real terminal":
+    # Every size and colour mode the captures are taken at, so each capture
+    # written below is a screen held to the in-process drawing at its moment.
     var failures: seq[string]
     var shown = 0
+    var written = 0
+    var playback = 0
     for story in playbackStories():
+      inc playback
       let id = storybookId(section, story)
       let names = playbackScenario(playbackScenarioNameOf(story.fixture)).momentNames
       for name in @[""] & names:
-        let m = mountStory(story, LaptopCols, LaptopRows, dmDark, newTestClock(), name)
-        var sess = spawnAt(id, name)
-        let problems = screenTextProblems(sess, m)
-        if problems.len > 0:
-          failures.add id & " at " & momentName(name) & ": " & problems.join("; ")
-        else: inc shown
-        sess.send("q")
-        sess.close()
-        m.dispose()
+        for (sizeName, cols, rows) in TuiSizes:
+          for mode in [dmDark, dmLight]:
+            let at = id & " at " & momentName(name) & " @ " & sizeName & "/" & themeOf(mode)
+            let m = mountStory(story, cols, rows, mode, newTestClock(), name)
+            var sess = spawnAt(id, name, cols, rows, mode)
+            let problems = screenTextProblems(sess, m) & screenColourProblems(sess, m)
+            if problems.len > 0:
+              failures.add at & ": " & problems.join("; ")
+            else: inc shown
+            if captureOut.len > 0 and name.len > 0:
+              # Written whatever the comparison said: a reader of a failed
+              # run sees the screen that failed, and the run fails anyway.
+              let p = ahPalette(mode)
+              let capture = captureIdOf(id, sizeName, themeOf(mode), name)
+              createDir(captureOut)
+              writeFile(captureOut / (capture & ".svg"),
+                        renderColourSvg(sess.screen, defaultFg = p.textBody,
+                                        defaultBg = p.ground))
+              writeFile(captureOut / (capture & ".txt"), renderPlain(sess.screen))
+              inc written
+            sess.send("q")
+            sess.close()
+            m.dispose()
     if failures.len > 0:
       echo "Moments the story host shows otherwise on a terminal (" & $failures.len & "):\n  " &
         failures.join("\n  ")
     ck failures.len == 0
-    ck shown >= MinimumPlaybackStories * 11
+    ck shown >= MinimumPlaybackStories * 11 * TuiSizes.len * 2
+    if captureOut.len > 0:
+      # One capture per story, named moment, size and mode, none skipped.
+      ck written == (shown + failures.len) - playback * TuiSizes.len * 2
+      echo "  wrote ", written, " terminal captures at named moments to ", captureOut
 
   test "the story host's keys play and seek on a real terminal":
     # The keys a reader presses, through the pty: `]` to the next named

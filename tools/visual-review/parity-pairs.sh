@@ -37,15 +37,28 @@
 # `build/ctf-p1c/web/<id>.png` (`ci/test/ctf-p1b-web-capture.sh --moments`,
 # `CTF_P1C_WEB_OUT` overrides), in <out-dir> (default `build/ctf-p1c/parity`,
 # where the CTF-P1c layout test writes its report).
+#
+# parity-pairs.sh --agent-harbor-tui-moments [out-dir] — CTF-P1c: the same as
+# `--agent-harbor-tui` for the playback stories at each named moment: every
+# terminal capture `build/ctf-p1c/tui/<id>.png` (`ci/test/ctf-p1b-tui-capture.sh
+# --moments`, `CTF_P1C_TUI_OUT` overrides) beside the web capture of the same
+# story, moment, theme and size, `build/ctf-p1c/web/<id>.png`
+# (`CTF_P1C_WEB_OUT` overrides), in <out-dir> (default
+# `build/ctf-p1c/parity-tui`).
 set -euo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 if [ "${1:-}" = "--agent-harbor" ] || [ "${1:-}" = "--agent-harbor-tui" ] ||
-	[ "${1:-}" = "--agent-harbor-moments" ]; then
+	[ "${1:-}" = "--agent-harbor-moments" ] || [ "${1:-}" = "--agent-harbor-tui-moments" ]; then
 	web_dir="${CTF_P1B_WEB_OUT:-${root}/build/ctf-p1b/web}"
 	if [ "${1}" = "--agent-harbor-tui" ]; then
 		gpui_dir="${CTF_P1B_TUI_OUT:-${root}/build/ctf-p1b/tui}"
 		arm=tui
 		out="${2:-${root}/build/ctf-p1b/parity-tui}"
+	elif [ "${1}" = "--agent-harbor-tui-moments" ]; then
+		gpui_dir="${CTF_P1C_TUI_OUT:-${root}/build/ctf-p1c/tui}"
+		web_dir="${CTF_P1C_WEB_OUT:-${root}/build/ctf-p1c/web}"
+		arm=tui
+		out="${2:-${root}/build/ctf-p1c/parity-tui}"
 	elif [ "${1}" = "--agent-harbor-moments" ]; then
 		gpui_dir="${CTF_P1C_GPUI_OUT:-${root}/build/ctf-p1c/gpui}"
 		web_dir="${CTF_P1C_WEB_OUT:-${root}/build/ctf-p1c/web}"

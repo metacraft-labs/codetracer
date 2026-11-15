@@ -5969,6 +5969,19 @@ ctf-p1c-web-captures *args:
 # side-by-side images.
 ctf-p1c-gpui-captures: ctf-p1b-gpui-captures
 
+# CTF-P1c: the terminal arm at the same moments — each playback story in the
+# terminal story host opened at each named moment (`--moment`), both themes,
+# laptop and sidebar, read back in a pty by `tui-real-terminal`'s
+# `test_ctf_p1c_playback_stories_agree_at_each_moment.nim` (each screen held
+# to the in-process drawing at that moment), written as an SVG in its colours
+# and rasterised to `build/ctf-p1c/tui/<id>.png`, then paired with the web
+# capture of the same story and moment in `build/ctf-p1c/parity-tui/`. Needs
+# `just ctf-p1c-web-captures`; fails when a capture the story host lists
+# (`--captures --moments`) was not written or has no web partner. Over the
+# synthetic set.
+ctf-p1c-tui-captures: tui-prereqs
+  bash ci/test/ctf-p1b-tui-capture.sh --moments
+
 # PLAT-69: the GPUI window as a normal desktop window — its top bar is the
 # title bar — as GuiAssert scenarios on a headless sway (`PLAT69_TARGET=gnome`
 # for GuiAssert's headless GNOME): the window moved, resized, maximized and
