@@ -985,6 +985,18 @@ suite "IsoNim Video Player — structure":
         .attributes["disabled"] == "disabled"
       dispose()
 
+  test "the scrub is enabled while the player has no error, and again once it clears":
+    createRoot proc(dispose: proc()) =
+      let vm = makePlayer()
+      let panel = renderVideoPlayerPanel[MockRenderer, MockNode](MockRenderer(), vm)
+      # `disabled` is boolean: present, even empty, it disables the slider
+      check "disabled" notin panel.findByClass("video-player-scrub-range").attributes
+      vm.frameVm.error.val = "player exited (2)"
+      check panel.findByClass("video-player-scrub-range").attributes["disabled"] == "disabled"
+      vm.frameVm.error.val = ""
+      check "disabled" notin panel.findByClass("video-player-scrub-range").attributes
+      dispose()
+
   test "the buffering dot only shows while playing":
     createRoot proc(dispose: proc()) =
       let vm = makePlayer()

@@ -124,9 +124,9 @@ proc transportDisabledClass(vm: VideoPlayerVM): string =
   else:
     "video-player-transport"
 
-proc scrubDisabledAttr(vm: VideoPlayerVM): string =
-  ## Disable the scrub slider when the player has errored.
-  if vm.frameVm.error.val.len > 0: "disabled" else: ""
+proc scrubDisabled(vm: VideoPlayerVM): bool =
+  ## The scrub slider is disabled while the player has errored.
+  vm.frameVm.error.val.len > 0
 
 proc magnifierClass(vm: VideoPlayerVM): string =
   result = "video-player-loupe"
@@ -232,7 +232,7 @@ proc renderVideoPlayerPanelBody[R, N](r: R; vm: VideoPlayerVM): N =
   ## The panel's markup, for every renderer. The clear-frame ticks follow
   ## ``FrameViewerVM.clearFrames`` reactively (``layoutScrubTicks`` maps
   ## them to 0..100 % positions; legacy traces have none).
-  var ticks: N
+  var ticks, scrub: N
   let panel = ui(r):
     tdiv(class = rootClassFor(vm, "video-player-component isonim-video-player")):
       ## --- Canvas area -----------------------------------------------------
@@ -368,7 +368,7 @@ proc renderVideoPlayerPanelBody[R, N](r: R; vm: VideoPlayerVM): N =
               min = "0",
               max = maxFrameValue(vm),
               value = currentFrameValue(vm),
-              disabled = scrubDisabledAttr(vm))
+              ref = scrub)
         tdiv(class = "video-player-scrub-labels"):
           tdiv(class = "video-player-frame-label"):
             text currentFrameLabel(vm)
@@ -377,6 +377,15 @@ proc renderVideoPlayerPanelBody[R, N](r: R; vm: VideoPlayerVM): N =
           tdiv(class = "video-player-selected-pixel"):
             text selectedPixelText(vm)
 
+  # `disabled` is a boolean attribute: present at all, even empty, it
+  # disables the slider, so it is set while the player has errored and
+  # removed otherwise (an empty value left every scrub disabled once a
+  # recording's player had started).
+  createEffect proc() =
+    if scrubDisabled(vm):
+      r.setAttribute(scrub, "disabled", "disabled")
+    else:
+      r.removeAttribute(scrub, "disabled")
   indexEach[ScrubTick, R, N](r, ticks,
     proc(): seq[ScrubTick] =
       layoutScrubTicks(vm.frameVm.clearFrames.val, vm.frameVm.frameCount.val),
