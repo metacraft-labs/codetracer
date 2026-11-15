@@ -27,7 +27,7 @@ template ck(condition: untyped) =
 
 proc click(element: JsObject) {.importjs: "#.dispatchEvent(new window.MouseEvent('click', {bubbles: true}))".}
 proc tick(): Future[void] {.importjs: "Promise.resolve()".}
-proc packetWindows(): JsObject {.importjs: "({windows: [{id: 11, title: 'First', sessionId: 7}, {id: 22, title: 'Second', sessionId: 7}, {id: 33, title: 'Other session', sessionId: 8}]})".}
+proc packetWindows(): JsObject {.importjs: "({windows: [{id: 11, title: 'First', replayIds: [4, 7]}, {id: 22, title: 'Second', replayIds: [7]}, {id: 33, title: 'Other replay', replayIds: [8]}]})".}
 proc panel(): GoldenContentItem {.importjs: "({parent: null, toConfig: () => ({type: 'component', componentType: 'State'})})".}
 
 suite "legacy loop-built handlers keep their own item":
@@ -75,7 +75,9 @@ suite "legacy loop-built handlers keep their own item":
     let electronObject = JsObject{}
     electronObject.ipcRenderer = transport
     panel_transfer.electron = electronObject
-    let items = buildSendToWindowMenuItems(panel(), 7, packetWindows())
+    # A pane of tab 2, whose replay is 7: the windows showing replay 7, then
+    # "Send to New Window"; the window of replay 8 is not offered.
+    let items = buildSendToWindowMenuItems(panel(), 2, 7, packetWindows())
     ck items.len == 3
     items[0].handler(nil)
     items[1].handler(nil)

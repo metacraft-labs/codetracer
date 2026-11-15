@@ -1066,8 +1066,9 @@ var
   replayStopAllowed*: proc(replayId: int): bool = nil
     ## Whether the client asking may stop `replayId`. `ct host` allows a
     ## client its own replays only (`host_clients`): its clients are separate
-    ## sessions, and one must not end another's. Nil, the desktop, allows
-    ## every one: its windows are one user's.
+    ## sessions, and one must not end another's. The desktop allows it once
+    ## no other window shows the replay (`window_routing.releaseReplay`): a
+    ## tab closed in one window must not end what another window shows.
   replayStopped*: proc(replayId: int) = nil
     ## Told after a client's request stopped `replayId`.
 
@@ -1098,8 +1099,8 @@ proc onCloseReplaySession*(sender: js, response: JsObject) {.async.} =
   if replayId < 0:
     return
   if not replayStopAllowed.isNil and not replayStopAllowed(replayId):
-    warnPrint "index: refused to stop replay ", $replayId,
-      ": it is not the asking client's"
+    warnPrint "index: kept replay ", $replayId,
+      " running: it is another client's, or another window shows it"
     return
   stopReplayProcess(replayId)
   if not replayStopped.isNil:

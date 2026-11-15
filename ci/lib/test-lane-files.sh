@@ -1309,6 +1309,13 @@ test_lane_files() {
 		# reaches the tab owning the replay that sent it, and a tab with no
 		# replay is not run on another tab's.
 		echo src/frontend/tests/dap_replay_selection_test.nim
+		# `desktop_window_routing_test.nim` drives `index/window_routing.nim`
+		# and the DAP router with two desktop windows: an answer reaches the
+		# window that asked (across awaits), a replay's events reach every
+		# window showing it under each window's own tab id, a window opened
+		# for a tab is sent that tab's session, and one window's tab cannot
+		# stop a replay another window shows.
+		echo src/frontend/tests/desktop_window_routing_test.nim
 		echo src/frontend/tests/index_server_binds_loopback_test.nim
 		echo src/frontend/tests/facade_endpoint_verbs_test.nim
 		#

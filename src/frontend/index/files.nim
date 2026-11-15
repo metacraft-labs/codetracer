@@ -1,6 +1,6 @@
 import
   std / [ async, jsffi, json, strutils, strformat, sequtils, jsconsole, os ],
-  electron_vars, config, tab_answers,
+  electron_vars, config, tab_answers, window_routing,
   ../[ types, lang ],
   ../lib/[ jslib, electron_lib ],
   ../../common/[ ct_logging, trace_source_paths ]
@@ -477,7 +477,7 @@ proc onSaveUntitled*(sender: js, response: jsobject(name=cstring, raw=cstring, s
   try:
     var destination = response.name
     if isUntitledBufferName($response.name):
-      let selection = await showSaveDialog(electron.dialog, mainWindow, js{
+      let selection = await showSaveDialog(electron.dialog, requestingBrowserWindow(), js{
         title: cstring"Save file",
         defaultPath: cstring(untitledSaveSuggestion($response.name))
       })
@@ -506,7 +506,7 @@ proc onNoReloadFile*(sender: js, response: jsobject(path=cstring)) =
     data.tabs[response.path].waitsPrompt = false
 
 proc selectFileOrFolder*(options: JsObject): Future[cstring] {.async.} =
-  let selection = await electron.dialog.showOpenDialog(mainWindow, options)
+  let selection = await electron.dialog.showOpenDialog(requestingBrowserWindow(), options)
   let filePaths = cast[seq[cstring]](selection.filePaths)
 
   if filePaths.len > 0:
@@ -517,7 +517,7 @@ proc selectFileOrFolder*(options: JsObject): Future[cstring] {.async.} =
 # tried to return a folder *with* a trailing slash, if it finds one
 proc selectDir*(dialogTitle: cstring, defaultPath: cstring = cstring""): Future[cstring] {.async.} =
   let selection = await electron.dialog.showOpenDialog(
-    mainWindow,
+    requestingBrowserWindow(),
     js{
       properties: @[cstring"openDirectory", cstring"showHiddenFiles"],
       title: dialogTitle,
@@ -616,7 +616,7 @@ proc onAcpPickFiles*(sender: js,
           title: cstring"Select files to attach",
           buttonLabel: cstring"Attach"
         }
-    let dialogResult = await electron.dialog.showOpenDialog(mainWindow, options)
+    let dialogResult = await electron.dialog.showOpenDialog(requestingBrowserWindow(), options)
     let wasCanceled =
       jsHasKey(dialogResult, cstring"canceled") and
       dialogResult[cstring"canceled"].to(bool)

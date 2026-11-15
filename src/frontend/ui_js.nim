@@ -128,6 +128,10 @@ when not defined(ctWeb):
 # own in `ui/web_noir_build`.
 when not defined(ctWeb):
   import ui/desktop_edit_toolbar
+  # A window opened for a session (`index/window.openSessionWindow`) learns
+  # its tab and replay, and every window keeps the list of the others.
+  from ui/panel_transfer import registerInitSessionHandler,
+    registerWindowListHandler
 
 from dom import Element, getAttribute, Node, preventDefault, document,
                 getElementById, querySelectorAll, querySelector
@@ -5294,6 +5298,9 @@ proc stampAskingTab(data: Data) =
 
 proc configureIPC(data: Data) =
   stampAskingTab(data)
+  when not defined(ctWeb):
+    registerInitSessionHandler()
+    registerWindowListHandler()
   uiIpcHandlers("CODETRACER::"):
     "hcr-apply-edit-result"
     # H6 — where the live-edit SESSION is: launching, ready, or failed by name.

@@ -24,23 +24,11 @@ else:
 var
   callerProcessPid*: int = -1
   mainWindow*: JsObject
-
-  # Multi-window management (M15):
-  # windowTable maps BrowserWindow.id to the BrowserWindow JS object.
-  # sessionWindows maps a session ID to the list of window IDs showing that session.
-  # These coexist with mainWindow for backwards compatibility — existing code
-  # that references mainWindow continues to work unchanged.
-  windowTable*: JsAssoc[int, JsObject]   = JsAssoc[int, JsObject]{}
-  sessionWindows*: JsAssoc[int, seq[int]] = JsAssoc[int, seq[int]]{}
-
-proc broadcastToSession*(sessionId: int, channel: cstring, payload: JsObject) =
-  ## Send an IPC message to all windows belonging to the given session.
-  ## Falls back to the legacy mainWindow when no session entry exists.
-  if sessionWindows.hasKey(sessionId):
-    for windowId in sessionWindows[sessionId]:
-      if windowTable.hasKey(windowId):
-        windowTable[windowId].webContents.send(channel, payload)
-  elif not mainWindow.isNil:
-    mainWindow.webContents.send(channel, payload)
+    ## Where the main process sends what it says and does what it does to
+    ## "the window". On the desktop it is `window_routing.windowRouter()`:
+    ## the window whose request is being served (else the primary one), with
+    ## a `webContents.send` that routes per window (`window_routing`). In
+    ## `ct host` it is the server's `FrontendIPC`, routed per client
+    ## (`host_clients`). The tests set a stand-in.
 
 console.time(cstring"index: starting backend")

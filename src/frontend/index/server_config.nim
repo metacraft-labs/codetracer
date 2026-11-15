@@ -1,7 +1,7 @@
 import
   std / [ async, json, jsffi, macros, jsconsole, strformat, strutils ],
   electron_vars, base_handlers, config, idle_timeout, facade_endpoint,
-  host_session_guard,
+  host_session_guard, window_routing,
   ../lib/[ jslib, electron_lib, misc_lib ],
   ../[ types ],
   ../../common/[ paths, ct_logging ]
@@ -78,7 +78,10 @@ when not defined(server):
       # TODO: QA NOTE FIX THE CIRCULAR DEPENDENCY
       #debugIndex fmt"frontend =======> index: {kind}", taskId
       let handlerFunction = jsAsFunction[proc(sender: js, response: js): Future[void]](handler)
-      discard handlerFunction(sender, data)
+      # Served as the window whose renderer sent it (`window_routing`): its
+      # answers, however late, go to that window.
+      runForSender(sender, proc() =
+        discard handlerFunction(sender, data))
 
   var ipc* = DebugMainIPC(electron: electron.ipcMain)
 else:

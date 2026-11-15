@@ -1879,7 +1879,10 @@ roles:
 clients:
   host-page: ~
   # pw6: the desktop window the application opened last (a pane sent to a
-  # new window, a session tab opened in a new window).
+  # new window, a session tab opened in a new window). The binding's
+  # `openClient` returns once the window shows its session's stop: until
+  # then it is still being sent its session, which on a loaded host outlasts
+  # both the settle wait after the open and a condition's default timeout.
   app-window: ~
 
 sync:

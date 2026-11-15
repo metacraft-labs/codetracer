@@ -347,7 +347,12 @@ applicable:
   - ../ct-host/reload-reconnects.yaml
   - ../multi-replay/closing-the-first-tab-keeps-the-second.yaml
   - ../multi-replay/load-answer-reaches-the-tab-that-asked.yaml
-  - ../multi-window/tab-menus-offer-no-second-window.yaml
+  - ../multi-window/tab-menus-reach-a-second-window.yaml
+  - ../multi-window/pane-sent-to-a-new-window-shows-there.yaml
+  - ../multi-window/session-opened-in-a-new-window.yaml
+  - ../multi-window/a-step-in-the-second-window-moves-both.yaml
+  - ../multi-window/closing-the-second-window-keeps-the-first.yaml
+  - ../multi-window/closing-the-first-window-keeps-the-second.yaml
   - ../multi-replay/stepping-one-tab-moves-only-it.yaml
   - ../multi-replay/tab-switch-restores-the-first-session.yaml
   - ../multi-replay/second-recording-in-a-new-tab.yaml

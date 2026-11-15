@@ -82,6 +82,12 @@
         <div id='welcomeScreen'>
 
         </div>
+        <!-- The context menu is a child of the body, outside #root-container:
+             inside it, it shared the root's stacking context and was drawn
+             UNDER the welcome screen (#welcomeScreen, z-index 10), so a
+             session tab's menu opened while a "+" tab showed the welcome
+             screen was invisible and unclickable. -->
+        <div id="context-menu-container" style="display: none;"></div>
         <div id='root-container'>
           <!-- Auto-hide left strip + docked panels + GL container + right strip in a flex row -->
           <div id="auto-hide-layout-row">
@@ -92,7 +98,6 @@
               <div id="auto-hide-docked-left-resize" class="auto-hide-docked-resize-handle"></div>
             </div>
             <div id='ROOT'>
-              <div id="context-menu-container" style="display: none;"></div>
               <div id='fixed-search'>
               </div>
               <div id="session-container-0" class="session-container">

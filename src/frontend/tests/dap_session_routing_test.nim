@@ -29,7 +29,7 @@
 ## `ct/select-replay` switch and the request bookkeeping),
 ## `setupProxyForDap` (the `Content-Length` framing of the Backend Manager's
 ## stream) and the private `handleFrame` / `resolveSessionId` it drives, and
-## `electron_vars.broadcastToSession` (the session -> window fan-out). The
+## `window_routing` (which window and tab an answer or event goes to). The
 ## request frames are shaped as `dap.dispatchCtRequest` builds them (`seq`,
 ## `type`, `command`, `arguments`, `sessionId`); the answer bodies are the
 ## real backend's `ct/load-locals` answer
@@ -46,9 +46,9 @@
 ##      the only way to control the ORDER answers arrive in relative to the
 ##      requests, which is the whole property; nothing in the router is
 ##      replaced or observed through it.
-##   2. Each window's `webContents.send`: records what the window would be
-##      told. `broadcastToSession` itself runs, over the real
-##      `sessionWindows` / `windowTable` maps.
+##   2. The window's send (`window_routing.registerAppWindow`'s
+##      `rawSend`): records what the window would be told. The routing to
+##      the window and tab runs, over the real `window_routing` tables.
 ##
 ## Lane: `main-process` — `nim js -d:nodejs -d:ctIndex -d:server`, the
 ## defines `server_index.js` is built with (`src/Tupfile`), run under node.
@@ -60,6 +60,7 @@ import std/[unittest, jsffi, strutils]
 
 import ../index/ipc_subsystems/dap
 import ../index/electron_vars
+import ../index/window_routing
 
 var checks = 0
 var failedChecks = 0
@@ -127,22 +128,17 @@ proc markerOf(response: JsObject): int =
   parseInt($response["body"]["locals"][0]["value"]["i"].to(cstring))
 
 # ---------------------------------------------------------------------------
-# Two windows, one per session (stand-in 2)
+# One window with the two sessions' tabs (stand-in 2)
 # ---------------------------------------------------------------------------
 
 var received: array[2, seq[(cstring, JsObject)]]
 
-proc windowFor(session: int): JsObject =
-  let contents = newJsObject()
-  contents["send"] = proc(channel: cstring; payload: JsObject) =
-    received[session].add((channel, payload))
-  result = newJsObject()
-  result["webContents"] = contents
-
-windowTable[10] = windowFor(0)
-windowTable[11] = windowFor(1)
-sessionWindows[0] = @[10]
-sessionWindows[1] = @[11]
+# The window the requests come from: outside every window's context (no IPC
+# here) a request is the primary window's, and its answers come back to that
+# window under the asking tab's id, which sorts them per session.
+discard registerAppWindow(10, 100, newJsObject(),
+  proc(channel: cstring; payload: JsObject) =
+    received[payload["sessionId"].to(int)].add((channel, payload)))
 
 proc responsesTo(session: int): seq[JsObject] =
   for (channel, payload) in received[session]:

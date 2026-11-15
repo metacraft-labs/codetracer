@@ -26,9 +26,9 @@ import
 # window to send a pane to.
 #
 # So this import is conditional rather than the module being ported, which is
-# what its guard asks for. `registerPanelAttachHandler` is the only symbol
-# `layout.nim` uses from it (one call site, guarded to match), so the web build
-# simply never installs a handler for an event no web build can raise.
+# what its guard asks for. Every use of it here is guarded to match, so the
+# web build simply never installs a handler for an event no web build can
+# raise.
 when not defined(ctWeb):
   import panel_transfer
 
@@ -160,11 +160,6 @@ type
 # M21: "Send to Window" context menu on GL tabs
 # ---------------------------------------------------------------------------
 
-when not defined(ctWeb):
-  proc noOtherWindows(): JsObject {.importjs: "({windows: []})".}
-  var knownOtherWindows = noOtherWindows()
-    ## The other windows of the last `CODETRACER::list-windows` answer.
-
 proc addPanelTransferContextMenu(tab: GoldenTab, contentItem: GoldenContentItem) =
   ## Attach a right-click context menu to a GL tab element: pin
   ## (left/bottom/right), close and maximise, and on the desktop the
@@ -206,18 +201,17 @@ proc addPanelTransferContextMenu(tab: GoldenTab, contentItem: GoldenContentItem)
           else: s.maximise())
     ]
     when not defined(ctWeb):
-      if not desktopSecondWindowShowsSession:
-        # No "Send to New Window" while a second window draws nothing
-        # (`panel_transfer.desktopSecondWindowShowsSession`).
-        showContextMenu(items, x, y)
-        return
-      # The transfer entries follow the pin ones. The other windows come
-      # from the main process, asynchronously, so the menu opens at once with
-      # the windows known from the last answer, and asks again for the next
-      # one: a menu must not wait on an IPC round trip (or on a main process
-      # that never answers) to appear. "Send to New Window" needs no list.
+      # The transfer entries follow the pin ones, for the pane's tab — the
+      # tab on screen — and its replay. The other windows are the ones the
+      # main process last reported (it says when one opens, closes or is
+      # retitled: `panel_transfer.registerWindowListHandler`), so the menu
+      # opens at once; it asks again too, for a list a missed message left
+      # stale. "Send to New Window" needs no list.
+      let session = data.activeSession
+      let tabId = if session.isNil: 0 else: int(session.id)
+      let replayId = if session.isNil: -1 else: session.replayId
       showContextMenu(items & buildSendToWindowMenuItems(capturedItem,
-          panel_transfer.currentSessionId, knownOtherWindows), x, y)
+          tabId, replayId, knownOtherWindows), x, y)
       proc refreshWindows() {.async.} =
         knownOtherWindows = await requestWindowList()
       discard refreshWindows()
@@ -2458,7 +2452,11 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
   # Desktop only: a web build has no second window to receive a pane FROM, so
   # there is no event to handle. See this file's `panel_transfer` import.
   when not defined(ctWeb):
-    registerPanelAttachHandler(layout)
+    registerPanelAttachHandler(layout, proc(sessionId: int): bool =
+      for session in data.sessions:
+        if not session.isNil and int(session.id) == sessionId:
+          return true
+      false)
 
   # Auto-hide panes: initialise state and set up the edge strip renderer
   # and overlay event handlers.

@@ -23,14 +23,13 @@ when defined(js):
   import isonim/web/web_renderer
   import isonim/web/dom_api as isonim_dom
   from ../lib/jslib import windowSetTimeout
-  import std/jsffi
+  import std/[jsffi, jsconsole]
   import kdom except Location
   import ../context_menu_item
   from ../viewmodel/views/context_menu_bridge import showContextMenu
   when not defined(ctWeb):
     import ../viewmodel/input/dom_pointer
     from ../viewmodel/keymap/scope_path import TopBarScope
-    from ./panel_transfer import desktopSecondWindowShowsSession
 
   proc requestSessionTabsRender*(data: Data)
 
@@ -181,11 +180,18 @@ when defined(js):
           return false
         let x = press.event.clientX.to(int)
         let y = press.event.clientY.to(int)
+        # The tab is named by its id, not its place in the strip: the main
+        # process knows a tab of this window by the id its messages carry.
+        let session = if index < data.sessions.len: data.sessions[index] else: nil
+        if session.isNil:
+          return false
+        let tabId = int(session.id)
         showContextMenu(@[ContextMenuItem(
           name: cstring"Open in New Window", hint: cstring"",
           handler: proc(e: kdom.Event) =
+            console.log cstring"session_tabs: open tab in a new window: ", tabId
             data.ipc.send(cstring"CODETRACER::open-new-window",
-                          js{sessionId: index}))], x, y)
+                          js{sessionId: tabId}))], x, y)
         true)
 
   proc renderIsoNimSessionTabs*(data: Data) =
@@ -217,10 +223,7 @@ when defined(js):
     when not defined(ctWeb):
       # The strip is the `topBar` press scope (scope_path.TopBarScope).
       isonim_dom.setAttribute(container, cstring"data-ct-pane", cstring TopBarScope)
-      # No "Open in New Window" while a second window draws nothing
-      # (`panel_transfer.desktopSecondWindowShowsSession`).
-      if desktopSecondWindowShowsSession:
-        installOpenInNewWindowMenu(data)
+      installOpenInNewWindowMenu(data)
 
   proc requestSessionTabsRender*(data: Data) =
     ## Refresh the direct IsoNim tab-bar mount after explicit session state

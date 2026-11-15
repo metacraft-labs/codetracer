@@ -1,0 +1,45 @@
+scenario: 1
+name: multi-window/session-opened-in-a-new-window
+pack: codetracer
+summary: >-
+  With a second recording open in a "+" tab, "Open in New Window" on that
+  session's tab opens a window that shows the session: its own file, its
+  call trace.
+
+stage:
+  - use: record-program
+    with: { program: py_console_logs/main.py }
+  - use: add-recording
+    with: { program: py_checklist/basics.py }
+  - use: open-recording
+
+clients:
+  main: { open: stage }
+
+steps:
+  - wait: { until: replay-idle, timeout: 180s }
+    as: main
+  - click: session-strip/session-add
+    as: main
+  - wait: { until: { at: 'welcome/recent[name="basics.py"]', present: true }, timeout: 30s }
+    as: main
+  - click: 'welcome/recent[name="basics.py"]'
+    settle: false
+    as: main
+  - wait: { until: { at: 'editor[file="basics.py"]', present: true }, timeout: 120s }
+    as: main
+  - wait: { until: replay-idle, timeout: 120s }
+    as: main
+  - click: { at: 'session-strip/session-tab[title="basics.py"]', button: right }
+    as: main
+  - wait: { until: { at: 'context-menu/menu-item[label="Open in New Window"]', present: true }, timeout: 15s }
+    as: main
+  - click: 'context-menu/menu-item[label="Open in New Window"]'
+    as: main
+  - open-client: { name: second, open: app-window }
+  - wait: { until: { at: 'editor[file="basics.py"]', present: true }, timeout: 120s }
+    as: second
+  - wait: { until: call-trace.loaded, timeout: 120s }
+    as: second
+  - expect: { at: 'editor[file="main.py"]', absent: true }
+    as: second

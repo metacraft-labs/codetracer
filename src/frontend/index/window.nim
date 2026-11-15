@@ -1,13 +1,12 @@
 import
-  std / [ async, jsffi, json, strutils, strformat, os ],
+  std / [ async, jsffi, json, strutils, strformat, os, tables ],
   electron_vars, server_config, base_handlers, config, lsp_bridge,
-  visual_replay_player,
+  visual_replay_player, window_routing,
   ../lib/[ jslib, electron_lib ],
   ../[ types, config as frontend_config ],
   ../../common/[ paths, ct_logging, window_policy ]
 
 var
-  close = false
   backendManagerProcess*: NodeSubProcess = nil
   backendManagerCleanedUp = false
 
@@ -29,18 +28,23 @@ proc duration*(name: string) =
   infoPrint fmt"index: TIME for {name}: {now() - data.start}ms"
 
 proc onOpenDevTools* =
-  electronDebug.devTools(mainWindow)
+  electronDebug.devTools(requestingBrowserWindow())
 
-proc onClose*(e: js) =
-  if not data.config.isNil and data.config.test:
-    # In test mode, prevent all window closes so the window stays alive
-    # for the full test duration. The test fixture tears down by killing
-    # the process directly.
+var closeAnnounced: seq[int] = @[]
+  ## The windows already told `CODETRACER::close`.
+
+proc onWindowClose(win: js; e: js) =
+  if not data.config.isNil and data.config.test and openWindowCount() <= 1:
+    # In test mode, prevent closing the LAST window so the application stays
+    # alive for the full test duration; the test fixture tears down by
+    # killing the process. Another window may close: the others keep the
+    # application alive.
     e.preventDefault()
-  elif not close:
-    # TODO refactor to use just `client.send`
-    mainWindow.webContents.send "CODETRACER::close", js{}
-    close = true
+  else:
+    let id = win.id.to(int)
+    if id notin closeAnnounced:
+      closeAnnounced.add id
+      win.webContents.send "CODETRACER::close", js{}
 
 proc windowLaunchOf*(config: Config): WindowLaunch =
   ## PLAT-69 (C5): how the window opens, from the user's `window:` entry —
@@ -150,7 +154,7 @@ proc createMainWindow*(config: Config = nil): js =
 
     win.loadURL(cstring(url))
 
-    win.on("close", onClose)
+    win.on("close", proc(e: js) = onWindowClose(win, e))
 
     when defined(ctmacos):
       # macOS hides the traffic-light buttons in native fullscreen, so the
@@ -188,7 +192,9 @@ proc createMainWindow*(config: Config = nil): js =
 
 proc onCloseApp*(sender: js, response: js) {.async.} =
   stopBackendManager()
-  mainWindow.close()
+  for w in allWindows():
+    if not w.closed:
+      w.window.close()
 
 proc onRestart*(sender: js, response: js) {.async.} =
   quit(RESTART_EXIT_CODE)
@@ -216,7 +222,18 @@ const DesktopLayoutFiles* = [
   ## `userLayoutDir` — what `onResetLayout` deletes, and the same set
   ## `just reset-layout` clears.
 
+proc layoutIsSaved(): bool =
+  ## Whether the asking window's arrangement is the one kept for the next
+  ## start: the startup's window's is; a window opened later for a session
+  ## (`openSessionWindow`) has its own layout, often one pane, which must not
+  ## replace the user's (`GUI/Multi-Window-Tab-Management.md` §"Cross-Window
+  ## Synchronization" rule 4).
+  let w = currentWindow()
+  w.isNil or w.onHandshake.isNil
+
 proc onSaveConfig*(sender: js, response: jsobject(name=cstring, layout=cstring, isEditMode=bool)) {.async.} =
+  if not layoutIsSaved():
+    return
   # Determine which layout file to save to based on mode
   let layoutFileName = if response.isEditMode:
       "default_edit_layout.json"
@@ -287,6 +304,8 @@ proc onSaveAutoHideState*(sender: js,
   ## pinned panel was gone on the next launch and, when the pinned panel was
   ## FILES, the layout validator declared the saved layout incompatible and
   ## deleted it (issue #608).
+  if not layoutIsSaved():
+    return
   let statePath = frontend_config.userLayoutDir / "auto_hide_state.json"
   let payload = if response.state.isNil: cstring"{}" else: response.state
   let errWrite = await fsWriteFileWithErr(cstring(statePath), payload)
@@ -356,153 +375,213 @@ proc onExitError*(sender: js, response: cstring) {.async.} =
   if true: # workaround for unreachable statement and async
     quit(1)
 
-# ── Multi-window management (M15) ──────────────────────────────────────
 
-proc registerMainWindow*() =
-  ## Register the main window in the window table under session 0.
-  ## Call this right after ``mainWindow = createMainWindow()``.
-  when not defined(server):
-    let windowId = mainWindow.id.to(int)
-    windowTable[windowId] = mainWindow
-    sessionWindows[0] = @[windowId]
-    infoPrint "index: registered main window id=", $windowId, " in session 0"
+# ── Desktop windows (`window_routing`) ──────────────────────────────────
 
-proc unregisterWindow(windowId: int) =
-  ## Remove a window from both the window table and all session lists.
-  discard jsDelete windowTable[windowId]
-  # Iterate over known session IDs to remove the window from any session.
-  # We collect IDs to delete to avoid mutating during iteration.
-  var emptySessionIds: seq[int] = @[]
-  for sid, wins in sessionWindows:
-    let idx = wins.find(windowId)
-    if idx >= 0:
-      # Copy the list, remove the entry, reassign.
-      var updated = wins
-      updated.delete(idx)
-      sessionWindows[sid] = updated
-      if updated.len == 0 and sid != 0:
-        emptySessionIds.add(sid)
-  for sid in emptySessionIds:
-    discard jsDelete sessionWindows[sid]
+var replayOrphaned*: proc(replayId: int) = nil
+  ## Stops a replay no open window shows any more (a closed window's), set
+  ## by `ipc_utils` (`traces.stopReplayProcess`).
 
-proc createSecondaryWindow*(sessionId: int): JsObject =
-  ## Create a new BrowserWindow for an existing session.
-  ## The window reuses the same creation logic as the main window so it
-  ## gets the same dimensions, webPreferences and URL.
-  when not defined(server):
-    let win = createMainWindow(data.config)
-    let windowId = win.id.to(int)
-    windowTable[windowId] = win
-
-    if sessionWindows.hasKey(sessionId):
-      var wins = sessionWindows[sessionId]
-      wins.add(windowId)
-      sessionWindows[sessionId] = wins
-    else:
-      sessionWindows[sessionId] = @[windowId]
-
-    # Tell the renderer which session it belongs to once the page loads.
-    win.webContents.once(cstring"did-finish-load", proc() =
-      win.webContents.send(cstring"CODETRACER::init-session",
-                           js{"sessionId": sessionId})
-    )
-
-    # Clean up when the secondary window is closed.
-    win.on(cstring"closed", proc() =
-      infoPrint "index: secondary window closed id=", $windowId
-      unregisterWindow(windowId)
-    )
-
-    infoPrint "index: created secondary window id=", $windowId,
-              " for session ", $sessionId
-    return win
-
-proc onOpenNewWindow*(sender: js, response: JsObject) {.async.} =
-  ## M17: IPC handler for "open-new-window".
-  ## The renderer sends the sessionId of the replay to open in a new window.
-  let sessionId = if response.hasOwnProperty(cstring"sessionId"):
-    response["sessionId"].to(int)
-  else:
-    0  # default session
-  discard createSecondaryWindow(sessionId)
-
-# ── Cross-window panel transfer (M21/M22) ────────────────────────────────
-
-proc windowBelongsToSession(windowId: int, sessionId: int): bool =
-  ## Check whether a window is registered under the given session.
-  if sessionWindows.hasKey(sessionId):
-    return sessionWindows[sessionId].find(windowId) >= 0
-  return false
-
-proc onPanelDetach*(sender: js, response: JsObject) {.async.} =
-  ## M21/M22: Forward a panel config from one renderer window to another.
-  ## The source renderer sends `{ targetWindowId, panelConfig, sessionId }`.
-  ## We forward `{ panelConfig, sessionId }` to the target window only if
-  ## the target window belongs to the same session.  If the target window
-  ## belongs to a different session, the transfer is rejected (a panel
-  ## from trace A cannot be dropped into a window showing trace B).
-  ## When targetWindowId is -1 (sentinel), a new secondary window is
-  ## created for the panel's session automatically.
-  when not defined(server):
-    let panelSessionId = response["sessionId"].to(int)
-    var targetWindowId = response["targetWindowId"].to(int)
-
-    # Sentinel -1: auto-create a new window for this session.
-    if targetWindowId == -1:
-      let newWin = createSecondaryWindow(panelSessionId)
-      targetWindowId = newWin.id.to(int)
-      infoPrint "index: panel-detach auto-created window ", $targetWindowId,
-        " for session ", $panelSessionId
-
-    if not windowTable.hasKey(targetWindowId):
-      errorPrint "index: panel-detach target window not found: ", $targetWindowId
-      return
-
-    # Validate session binding: reject transfer to a window showing a
-    # different trace/session.
-    if not windowBelongsToSession(targetWindowId, panelSessionId):
-      errorPrint "index: panel-detach rejected — window ", $targetWindowId,
-        " does not belong to session ", $panelSessionId
-      return
-
-    let payload = js{
-      "panelConfig": response["panelConfig"],
-      "sessionId": response["sessionId"]
-    }
-    windowTable[targetWindowId].webContents.send(
-      cstring"CODETRACER::panel-attach", payload)
-    infoPrint "index: forwarded panel to window ", $targetWindowId,
-      " (session ", $panelSessionId, ")"
-
-proc newJsArray(): JsObject {.importjs: "(new Array())".}
+proc jsArray(): JsObject {.importjs: "([])".}
 proc push(arr: JsObject, item: JsObject) {.importjs: "#.push(#)".}
 
-proc sessionIdForWindow(windowId: int): int =
-  ## Look up which session a window belongs to.  Returns -1 if unknown.
-  for sid, wins in sessionWindows:
-    if wins.find(windowId) >= 0:
-      return sid
-  return -1
+proc windowListFor(asker: AppWindow): JsObject =
+  ## The open windows other than `asker`, as the pane tab menu lists them:
+  ## each with its title and the replays its tabs show, which tell the
+  ## renderer whether a pane of one of its replays can go there.
+  result = jsArray()
+  for w in allWindows():
+    if w.closed or w == asker:
+      continue
+    var replays = jsArray()
+    for replay in w.tabReplays.values:
+      replays.push(replay.toJs)
+    result.push(js{
+      "id": w.id,
+      "title": w.window.getTitle(),
+      "replayIds": replays
+    })
+
+proc pushWindowList*() =
+  ## Tell every window the windows it could send a pane to, after a window
+  ## opened, closed or was retitled (the pane tab menu's list,
+  ## `panel_transfer.knownOtherWindows`).
+  for w in allWindows():
+    if not w.closed:
+      w.rawSend(cstring"CODETRACER::windows-changed",
+                js{"windows": windowListFor(w)})
+
+proc registerDesktopWindow*(win: JsObject): AppWindow =
+  ## Register a `BrowserWindow` as one of the application's windows
+  ## (`window_routing`): its sends are logged, it is forgotten when it
+  ## closes, and the other windows learn it opened, closed or was retitled.
+  when not defined(server):
+    let contents = win.webContents
+    let internalSend = contents.send
+    let send: WindowSend = proc(channel: cstring; payload: JsObject) =
+      if contents.isDestroyed().to(bool):
+        return
+      if channel == cstring"CODETRACER::filenames-loaded":
+        debugPrint cstring"frontend ... <=== index: ", channel, "[..not shown to optimize send time..]"
+      else:
+        debugPrint cstring"frontend ... <=== index: ", channel
+      discard internalSend.call(contents, channel, payload)
+    let w = registerAppWindow(win.id.to(int), contents.id.to(int), win, send)
+    win.on(cstring"closed", proc() =
+      infoPrint "index: window ", $w.id, " closed"
+      for replay in closeAppWindow(w):
+        infoPrint "index: no window shows replay ", $replay, " any more: stopping it"
+        if not replayOrphaned.isNil:
+          replayOrphaned(replay)
+      pushWindowList())
+    win.on(cstring"page-title-updated", proc() =
+      discard windowSetTimeout(proc() = pushWindowList(), 0))
+    infoPrint "index: registered window ", $w.id
+    pushWindowList()
+    return w
+
+proc startWindowHandshake(w: AppWindow) =
+  ## Send `CODETRACER::started` until the window's renderer answers it (the
+  ## first window's handshake is `startup.started`).
+  if w.closed or w.handshakeDone:
+    return
+  w.rawSend(cstring"CODETRACER::started", js{})
+  discard windowSetTimeout(proc() = startWindowHandshake(w), 100)
+
+proc windowAnswersStarted*(): bool =
+  ## The renderer of the window being served answered `CODETRACER::started`.
+  ## True when that window was opened after startup and its bootstrap now
+  ## runs; false for the startup's window, whose handshake is
+  ## `startup.started`.
+  let w = currentWindow()
+  if w.isNil:
+    return false
+  if w.handshakeDone:
+    return not w.onHandshake.isNil
+  w.handshakeDone = true
+  if w.onHandshake.isNil:
+    return false
+  let bootstrap = w.onHandshake
+  bootstrap()
+  true
+
+proc panelOnlyLayout(base: JsObject; panel: JsObject): JsObject =
+  ## A layout holding only `panel` (an unresolved component item config,
+  ## `panel_transfer.serializePanelConfig`), with `base`'s settings: what a
+  ## window opened by "Send to New Window" shows.
+  let settings = if base.isNil: js{} else: base[cstring"settings"]
+  let dimensions = if base.isNil: js{} else: base[cstring"dimensions"]
+  var stackContent = jsArray()
+  stackContent.push(panel)
+  var rowContent = jsArray()
+  rowContent.push(js{"type": cstring"stack", "size": cstring"100%",
+                     "content": stackContent})
+  js{
+    "settings": settings,
+    "dimensions": dimensions,
+    "openPopouts": jsArray(),
+    "root": js{"type": cstring"row", "size": cstring"100%",
+               "isClosable": false, "content": rowContent}
+  }
+
+proc windowStartOptions(): JsObject =
+  ## The startup's options, for a window that shows a session tab: neither
+  ## the welcome screen, nor an edit session, nor another startup mode.
+  result = copyOf(data.startOptions.toJs)
+  for flag in [cstring"welcomeScreen", cstring"edit", cstring"shellUi",
+               cstring"withDeepReview"]:
+    result[flag] = false
+
+proc sendWindowBootstrap(w: AppWindow; source: AppWindow; sourceTab: int;
+                         panel: JsObject) =
+  ## What a window opened for `source`'s tab `sourceTab` is sent once its
+  ## renderer listens (`window_routing.bootstrapWindow`), with an `init`
+  ## carrying the session's layout — only `panel` when a pane was sent to it —
+  ## the config and the helpers.
+  let panelGiven = not panel.isNil and not panel.isUndefined
+  let layout =
+    if panelGiven: panelOnlyLayout(data.layout, panel)
+    else: data.layout
+  bootstrapWindow(w, source, sourceTab, js{
+      "home": paths.home.cstring,
+      "config": data.config,
+      "layout": layout,
+      "helpers": data.helpers,
+      "startOptions": windowStartOptions(),
+      "bypass": true
+    },
+    if panelGiven: layout else: nil)
+  pushWindowList()
+
+proc openSessionWindow*(source: AppWindow; sourceTab: int;
+                        panel: JsObject = nil): AppWindow =
+  ## Open a window showing `source`'s tab `sourceTab` (its session and its
+  ## replay, shared with `source`): all of the session's layout, or only
+  ## `panel` (a pane sent to a new window).
+  when not defined(server):
+    let win = createMainWindow(data.config)
+    win.setMenuBarVisibility(false)
+    win.setMenu(jsNull)
+    let w = registerDesktopWindow(win)
+    w.onHandshake = proc() =
+      runAsWindow(w, proc() = sendWindowBootstrap(w, source, sourceTab, panel))
+    win.webContents.once(cstring"did-finish-load", proc() =
+      startWindowHandshake(w))
+    infoPrint "index: opened window ", $w.id, " for tab ", $sourceTab,
+              " of window ", (if source.isNil: "?" else: $source.id)
+    return w
+
+proc onOpenNewWindow*(sender: js, response: JsObject) {.async.} =
+  ## "Open in New Window" on a session tab: `{ sessionId }` names the tab (its
+  ## id in the asking window).
+  let tab = if response.hasOwnProperty(cstring"sessionId"):
+    response["sessionId"].to(int)
+  else:
+    0
+  let source = requestingWindow()
+  infoPrint "index: open-new-window for tab ", $tab, " of window ",
+    (if source.isNil: "(none)" else: $source.id)
+  if source.isNil:
+    return
+  discard openSessionWindow(source, tab)
+
+proc onPanelDetach*(sender: js, response: JsObject) {.async.} =
+  ## "Send to: <window>" / "Send to New Window" on a pane tab. The asking
+  ## window sends `{ targetWindowId, panelConfig, sessionId }`, `sessionId`
+  ## being the tab whose pane it is. `targetWindowId == -1` opens a window
+  ## showing that tab's session with only the pane. Otherwise the pane goes
+  ## to the target window's tab that shows the same replay, and is refused
+  ## when it has none: a pane of trace A cannot show in a window of trace B.
+  when not defined(server):
+    let source = requestingWindow()
+    if source.isNil:
+      return
+    let tab = response["sessionId"].to(int)
+    let panel = response["panelConfig"]
+    let targetWindowId = response["targetWindowId"].to(int)
+    if targetWindowId == -1:
+      discard openSessionWindow(source, tab, panel)
+      return
+    let target = windowWithId(targetWindowId)
+    if target.isNil:
+      errorPrint "index: panel-detach: no open window ", $targetWindowId
+      return
+    let replayId = source.tabReplays.getOrDefault(tab, -1)
+    var targetTab = -1
+    for t, replay in target.tabReplays:
+      if replay == replayId and replayId >= 0:
+        targetTab = t
+    if targetTab < 0:
+      errorPrint "index: panel-detach refused: window ", $targetWindowId,
+        " shows no tab of replay ", $replayId
+      return
+    target.rawSend(cstring"CODETRACER::panel-attach",
+                   js{"panelConfig": panel, "sessionId": targetTab})
+    infoPrint "index: sent a pane to window ", $targetWindowId, " (tab ",
+      $targetTab, ", replay ", $replayId, ")"
 
 proc onListWindows*(sender: js, response: JsObject) {.async.} =
-  ## M21/M22: Return the list of open windows to the requesting renderer.
-  ## The sender's own window is excluded from the list.  Each entry
-  ## includes the window's session ID so the renderer can indicate which
-  ## windows are compatible for panel transfer.
-  when not defined(server):
-    var jsArray = newJsArray()
-    # The sender parameter is the webContents of the sending window.
-    # We compare window IDs to exclude the sender's own window.
-    let senderWebContentsId = sender.toJs.id
-    for windowId, win in windowTable:
-      # Exclude the sender's own window by comparing webContents id.
-      if win.webContents.id != senderWebContentsId:
-        jsArray.push(js{
-          "id": windowId,
-          "title": win.getTitle(),
-          "sessionId": sessionIdForWindow(windowId)
-        })
-    # Reply to the sender window.
-    sender.toJs.send(cstring"CODETRACER::list-windows-reply", js{
-      "windows": jsArray
-    })
+  ## The windows other than the asking one (`windowListFor`).
+  mainWindow.webContents.send(cstring"CODETRACER::list-windows-reply", js{
+    "windows": windowListFor(requestingWindow())
+  })

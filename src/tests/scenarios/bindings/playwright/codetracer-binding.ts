@@ -3612,6 +3612,24 @@ const binding = {
       if (w) {
         taken.push(w);
         await w.waitForLoadState("domcontentloaded");
+        // A window opened after startup is sent its session once its renderer
+        // answers the main process's handshake; it has finished opening when
+        // it shows the session's stop (the `replay-idle` reading). Waited for
+        // here, up to 120 s, because a loaded host takes longer than the
+        // settle wait after the open; the scenario's own steps then decide.
+        const ready = Date.now() + 120_000;
+        while (Date.now() < ready) {
+          const idle = await w.evaluate(() => {
+            const d = (window as any).data;
+            if (!d) return false;
+            const s = d.status ?? d.sessions?.[d.activeSessionIndex ?? 0]?.status;
+            const busy = !!(s && (s.stableBusy || s.busy));
+            const loc = document.querySelector(".location-path")?.textContent ?? "";
+            return !busy && loc.trim().length > 0;
+          }).catch(() => false);
+          if (idle) break;
+          await new Promise((r) => setTimeout(r, 250));
+        }
         return w;
       }
       if (Date.now() > deadline) throw new Error("open-client app-window: the application opened no new window");

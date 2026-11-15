@@ -959,11 +959,14 @@ test.describe("Cross-window interaction", () => {
       return;
     }
 
+    // The reply lists the OTHER open windows (the asking one is never a
+    // target for its own panes): with one window open, none.
     expect(Array.isArray(result.windows)).toBe(true);
-    expect(result.windows.length).toBeGreaterThanOrEqual(1);
+    expect(result.windows.length).toBe(0);
     for (const entry of result.windows) {
       expect(entry).toHaveProperty("id");
       expect(typeof entry.id).toBe("number");
+      expect(Array.isArray(entry.replayIds)).toBe(true);
     }
   });
 
