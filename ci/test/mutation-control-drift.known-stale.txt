@@ -176,7 +176,6 @@ src/tests/scenarios/plat66-pack-mutation-control.sha256	ci/test/scenarios.sh	a3c
 src/tests/scenarios/plat66-pack-mutation-control.sha256	src/tests/scenarios/bindings/termassert/ct_tui_screen.nim	552b9da23ab44d96c08e50302adf410e90bbf42da5082bfc5e63fd7cf8282262	255a2526134d381474f695d7fd979d939f84bcbce60d0cffb1893725869e1816
 # plat70h was graded at 56862a458e4; its runtime moved on agents after that
 # (eec6949f68, a move drawn in flight): a re-grade of the arms whose needles sit in it.
-src/frontend/tui/tests/plat70h-scrollbar-mutation-control.sha256	src/frontend/tui/app/runtime.nim	9f6ceffe6b6685c2accdce1080bd0d79d6355dbe8235135b4e163a554a5aa58b	a7a3bb422082c3ce0dbfd6321695a4a8876ce902281ec4c17f02c3bc4e1bbeb8
 # plat70e and plat70i were graded at a293925583; after that 234a6bcc67 (a session
 # tab's right-click through the pointer keymap) moved the desktop key router
 # and 3ba119e25e (the RunQuota endpoint from the user-state sandbox) moved the
