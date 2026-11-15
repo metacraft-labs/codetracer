@@ -262,7 +262,6 @@ src/frontend/tui/tests/plat49-chrome-mutation-control.sha256	src/frontend/viewmo
 src/frontend/tui/tests/plat50-clicks-mutation-control.sha256	src/frontend/viewmodel/input/pane_presses.nim	e3f3d8c53263304d3ece2696431873e66cc788985184febdefab01445d16820c	34a81493a4dbd68fcf75ed0ddce4faede56c8e626ac96c48c3523becdfdb0216
 src/frontend/tui/tests/plat51-parity-mutation-control.sha256	src/frontend/viewmodel/views/isonim_state_view.nim	6fa4c2f0add340fbca0d4af98b916072646ad082fcbd76267f29a4beb955ec7f	afe19051c4d4f5f4622cf774a9c8af2a892c5bfb162561b65a6e7d23fa08ef25
 src/frontend/viewmodel/tests/unit/plat29-async-mutation-control.sha256	src/frontend/viewmodel/viewmodels/state_vm.nim	b9082f34ed45e3904aaf59df7dbca29c78374f382533075520dbcd7c5673d1dc	93e71cf306ed044285f82ff34813da37691b380cfa236de7d7407b686dd795c0
-src/frontend/viewmodel/tests/unit/plat33-collab-mutation-control.sha256	.github/workflows/codetracer.yml	dc8712a12a175a3191d3ea5e251cb78da4a12a027d4ff42d0950bfecce3ed873	d65a827d6293343ad784e58eb125585b55b77440541e84880b18bb6041041429
 src/tests/scenarios/plat66-pack-mutation-control.sha256	src/tests/scenarios/bindings/playwright/codetracer-binding.ts	5c88be491a92bf4061276ce9fa53c3e5f881e56be6c9802d6cbb1365dc95d513	dac9e35953b0d93636c2284d9c9a858c2bba982b92e9311b0f41fb666e6879c0
 # The desktop windows change (a second window shows its session) edits these
 # digested subjects; the harnesses owe a re-grade for these bytes.
@@ -281,3 +280,4 @@ src/frontend/viewmodel/tests/unit/plat34-front-end-mutation-control.sha256	ci/li
 # c79bee58b1 (the GPUI status line's note, a cell's tooltip off a right-click
 # menu) then moved the GPUI window: a re-grade of the arms whose needles sit in it.
 src/frontend/tui/tests/plat70f-pointer-mutation-control.sha256	src/frontend/gpui/main.nim	bd206f82ec3b500e52053e6eeda52e891e83aede0353ce2e485c65e1fcf50d85	28f36a050600425fdbbea72ccc729250a4977ecc589c87e4d67e73d3196f228e
+src/frontend/viewmodel/tests/unit/plat33-collab-mutation-control.sha256	.github/workflows/codetracer.yml	dc8712a12a175a3191d3ea5e251cb78da4a12a027d4ff42d0950bfecce3ed873	2787b9073d2a94939705b0db14feed2cc1684677d25d78cf570fada19153b553
