@@ -125,7 +125,9 @@ fn a_native_recording_and_each_of_its_slices_name_the_recording() {
     let recorded = hermetic(&ct_mcr)
         .current_dir(dir.path())
         .env("PROBE_OUT", &observed_id_file)
-        .args(["record", "--split", "-o"])
+        // ct-mcr records an allowlisted environment, so the program sees
+        // `PROBE_OUT` only when it is kept by name (`--keep-env`).
+        .args(["record", "--split", "--keep-env", "PROBE_OUT", "-o"])
         .arg(&trace)
         .arg("--")
         .arg(&program)
