@@ -253,7 +253,11 @@ fi
 # The root this lane made is removed when it ends, unless CT_KEEP_SCRATCH_HOME=1
 # asks to keep it for debugging (the knob ci/lib/codetracer-home.sh's
 # `ct_remove_scratch_codetracer_home` reads too).
+#
+# The sandbox's RunQuota relay (`ct_user_state_sandbox_enable`) ends with this
+# shell anyway; stopping it here removes its directory before the lane reports.
 trap 'rm -rf ${_ct_lane_state:+"${_ct_lane_state}"}
+if declare -F ct_user_state_sandbox_stop >/dev/null; then ct_user_state_sandbox_stop; fi
 if [ "${CT_KEEP_SCRATCH_HOME:-}" = 1 ] && [ -n "${_ct_lane_home_owned}" ]; then
 	echo "lane: CT_KEEP_SCRATCH_HOME=1: kept the per-file CODETRACER_HOMEs under ${_ct_lane_home_owned}" >&2
 else

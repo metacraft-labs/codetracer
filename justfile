@@ -236,6 +236,17 @@ test-python-version-alignment:
 test-sibling-backend-path:
   bash ci/test/sibling-backend-path-test.sh
 
+# Assert that a sandboxed entry point (ci/lib/codetracer-home.sh, the
+# user-state sandbox) reaches the host's RunQuota endpoint the way it does
+# unsandboxed: `repro exec` and a lease succeed inside, through a private relay
+# RunQuota verified outside, and an endpoint RunQuota refuses keeps its
+# refusal. Runs a real runquotad, runquota and repro, so it needs this dev
+# shell rather than the lint shell ci/test/lane-user-state-guard-test.sh runs
+# in. Linux only (the sandbox is); about a minute, most of it the fixture
+# project's first `repro exec`.
+test-user-state-sandbox-runquota:
+  bash ci/test/user-state-sandbox-runquota-test.sh
+
 # Assert that the ct-native-replay `build-siblings` reports as built actually
 # starts (`--help` with an empty environment). It once linked the machine's
 # unpinned registry LLDB against codetracer's pinned glibc, reported PASS, and
@@ -1351,6 +1362,7 @@ test:
     test-python-api-gate \
     test-python-api \
     test-sibling-backend-path \
+    test-user-state-sandbox-runquota \
     test-agent-api-contract \
     test-rust \
     test-sibling-cargo-locks \
