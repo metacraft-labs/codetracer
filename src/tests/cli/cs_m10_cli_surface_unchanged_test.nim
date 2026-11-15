@@ -53,8 +53,9 @@
 ##
 ## Cases whose parse SUCCEEDS are never run through the binary: `ct` would go
 ## on to open a window, record, upload, start a server or replay.  Neither is
-## a case with `COMP_LINE` set (the loader prints the candidates and RETURNS,
-## and `ct` would then launch the default command), nor one that the
+## a case with `COMP_LINE` set (the loader prints the candidates and RETURNS;
+## the probe pins what it returns, while `ct` itself stops there with exit 0
+## -- `record_child_argv_test.nim` pins that through the binary), nor one that the
 ## hand-written dispatch before the loader could rewrite into a line that
 ## parses (`--`, `--ui`, `--headless`, the intercepted first words).  The
 ## explicit binary cases go through the probe first as well, and one that the

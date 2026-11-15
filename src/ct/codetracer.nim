@@ -18,6 +18,9 @@ import
 when not defined(js):
   import std / os
   import shell_session_command   # `ct shell-session` (CodeTracer-Shell.md §7.2)
+  # `splitCompletionLine` is the test confutils' loader uses to decide that a
+  # line is a shell-completion request; see the completion stop below.
+  import confutils/shell_completion
 
 when not defined(js) and not defined(windows):
   block:
@@ -288,6 +291,22 @@ try:
     # `commandLineParams()`, element for element, so the no-`--ui` path
     # behaves exactly as before.
     ctArgv = uiCleanArgs
+    # A shell-completion request (`COMP_LINE` set, the protocol confutils
+    # answers) ends here: codetracer-pm `spec/CLI/ct/README.md`, "Shell
+    # completion (`COMP_LINE`)".  confutils' loader prints the candidates and
+    # then RETURNS a configuration it never parsed (`cmd = noCommand`), so
+    # nothing after it may read that configuration.  Until 2026-11-15 the
+    # `record ... --` split below did: its probes and its own resolution read
+    # `recordArgs` / `recordProgram`, fields of the `record` branch, and a
+    # completion of a `ct record -- prog` line died with a FieldDefect after
+    # printing the candidates (codetracer-pm issues/2026-11-15-ct-record-
+    # separator-with-comp-line-set-crashes-with-a-fielddefect.md).  Any other
+    # line went on to launch the default command.  The loader is asked once,
+    # with the same condition it tests itself, and ct exits 0.
+    if splitCompletionLine().len > 0:
+      discard CodetracerConf.load(
+        version = ctVersion, copyrightBanner = ctBanner, cmdLine = ctArgv)
+      quit(QuitSuccess)
     let sep = ctArgv.find("--")
     if sep >= 0 and ctArgv.len > 0 and ctArgv[0] == "record":
       let ownHalf = ctArgv[0 ..< sep]

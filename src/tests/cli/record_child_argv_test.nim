@@ -13,6 +13,14 @@
 ## `\0ct-record-child-program`, NUL bytes included
 ## (reprobuild-pm issues/2026-11-15-ct-record-separator-placeholder-with-a-nul-byte-leaks-into-error-messages.md).
 ##
+## A shell-completion request (`COMP_LINE` set) on such a line is answered and
+## ends with exit 0, before anything reads the configuration (codetracer-pm
+## `spec/CLI/ct/README.md`, "Shell completion (`COMP_LINE`)").  Until
+## 2026-11-15 the loader answered it and returned a configuration it had not
+## parsed, and the split read the `record` fields of it: `ct record -- prog`
+## died with a FieldDefect after printing the candidates
+## (codetracer-pm issues/2026-11-15-ct-record-separator-with-comp-line-set-crashes-with-a-fielddefect.md).
+##
 ## Mocking justification (workspace policy on mock objects): none.  Every
 ## parse below is ct's own `CodetracerConf.load`, the parser the binary runs;
 ## the end-to-end half -- the real `ct` binary -- is the last two tests, and
@@ -22,7 +30,7 @@
 ## Compile and run:
 ##   nim c -r src/tests/cli/record_child_argv_test.nim
 
-import std/[os, osproc, strutils, unittest]
+import std/[os, osproc, sequtils, strutils, unittest]
 import confutils
 import ../../ct/codetracerconf
 import ../../ct/trace/record_child_argv
@@ -161,6 +169,49 @@ suite "ct record: the program and its arguments around --":
         check ("`" & opt & "` needs a value") in err
         check '\0' notin err
         check clean(err)
+        check not fileExists(saw)
+      removeDir(work)
+
+  test "the real ct: a completion request on a `record ... --` line answers once and exits 0":
+    # The argv is the line being completed, as bash's `complete -C` hands it
+    # over; `COMP_LINE` / `COMP_POINT` are what the loader completes.  Each
+    # line reaches a different reader of the unparsed configuration: the
+    # split's own resolution (`recordProgram`, program after or before `--`)
+    # and the missing-value probe (`recordArgs`, an option just before `--`).
+    # The candidate `--lang=` is printed by the loader for `ct record --la`;
+    # it appears once, so the loader was asked once.  The recorder is a stub
+    # that leaves a file behind: a completion must record nothing.
+    let ct = getEnv("CODETRACER_E2E_CT_PATH",
+      currentSourcePath.parentDir.parentDir.parentDir / "build-debug" /
+      "bin" / "ct")
+    check fileExists(ct)
+    if fileExists(ct):
+      let work = getTempDir() / ("ct_record_completion_" & $getCurrentProcessId())
+      removeDir(work)
+      createDir(work)
+      let stub = work / "stub.sh"
+      let saw = work / "saw"
+      writeFile(stub, "#!/bin/sh\ntouch \"$SAW\"\nexit 1\n")
+      setFilePermissions(stub, {fpUserRead, fpUserWrite, fpUserExec})
+      let prog = quoteShell(findExe("true"))
+      const compLine = "ct record --la"
+      for line in ["-- " & prog, prog & " -- a", "--lang -- " & prog,
+                   "--backend=mcr -- " & prog]:
+        let outFile = work / "out"
+        let errFile = work / "err"
+        let (_, code) = execCmdEx("cd " & quoteShell(work) & " && SAW=" &
+          quoteShell(saw) & " CODETRACER_CT_MCR_CMD=" & quoteShell(stub) &
+          " COMP_LINE=" & quoteShell(compLine) & " COMP_POINT=" &
+          $compLine.len & " timeout 300 " & quoteShell(ct) & " record " &
+          line & " >" & quoteShell(outFile) & " 2>" & quoteShell(errFile))
+        let output = if fileExists(outFile): readFile(outFile) else: ""
+        let err = if fileExists(errFile): readFile(errFile) else: ""
+        checkpoint("record " & line & ": exit " & $code & ", stdout " &
+          output.escape & ", stderr " & err.escape)
+        check code == 0
+        check err == ""
+        check "Defect" notin output & err
+        check output.splitLines().count("--lang=") == 1
         check not fileExists(saw)
       removeDir(work)
 

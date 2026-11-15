@@ -1406,11 +1406,11 @@
         "pre-commit-hooks": "pre-commit-hooks_4"
       },
       "locked": {
-        "lastModified": 1794195830,
-        "narHash": "sha256-Afor0Ly4TV19QrY8HvKyBtcbMtQ1HnOoFDcLXpaaemI=",
+        "lastModified": 1794774628,
+        "narHash": "sha256-V5qY6FChavCMGBP+yfsfBxdsAOVhMv4+fIC97BDJGZw=",
         "owner": "metacraft-labs",
         "repo": "codetracer-shell-recorders",
-        "rev": "fce1a11fd7eed05bf3e5669393103797332d3061",
+        "rev": "5d96abe78fed8bc357d6cf5fa2d2ad2d339c6092",
         "type": "github"
       },
       "original": {
@@ -7384,11 +7384,11 @@
     "io-mon": {
       "flake": false,
       "locked": {
-        "lastModified": 1794709643,
-        "narHash": "sha256-hTLTmDwF3aBPNAkNNFYN7TEvmyE4RwUWdtW6bUNfE2E=",
+        "lastModified": 1794772661,
+        "narHash": "sha256-WrUzWjkNL2hus2/fh2EcWzVYt0WvdY4NOCf2gwaucb8=",
         "owner": "metacraft-labs",
         "repo": "io-mon",
-        "rev": "30d85793e891c1a80859d52a9eb197b42d56752c",
+        "rev": "3be8d5cc2dbb825ff984032fd06a63987ee0e2cb",
         "type": "github"
       },
       "original": {
@@ -7435,11 +7435,11 @@
     "isonim": {
       "flake": false,
       "locked": {
-        "lastModified": 1794749077,
-        "narHash": "sha256-pkR6xqtGZqr2ElUBU1zZAHDtk2tfC8exsKimOpEpZAk=",
+        "lastModified": 1794765198,
+        "narHash": "sha256-WCngMJZrY0rub/+L+G+OSOhS0n4alAuEVAh/cNzFwSo=",
         "owner": "metacraft-labs",
         "repo": "isonim",
-        "rev": "d2dd1afb4830be297468411fdd07d9e6ea01f242",
+        "rev": "eca38028cc652593e66b2d12ff82265711600c94",
         "type": "github"
       },
       "original": {
@@ -8326,11 +8326,11 @@
     "nim-stackable-hooks": {
       "flake": false,
       "locked": {
-        "lastModified": 1794707675,
-        "narHash": "sha256-zDMuNW45s8j1T17ahWGWxkevGIk5XtZRHmBL7GsjwTc=",
+        "lastModified": 1794754830,
+        "narHash": "sha256-JkxyVRTcXgePfzp3VhehPRA6gc9OOJi+IhW2uxc76JU=",
         "owner": "metacraft-labs",
         "repo": "nim-stackable-hooks",
-        "rev": "7253dd134671bdf2b8d56bb74dbc3e88b25ccb52",
+        "rev": "c34e3252d413361a0f250d8921e00c119d30e114",
         "type": "github"
       },
       "original": {
