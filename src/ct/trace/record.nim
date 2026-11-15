@@ -272,7 +272,7 @@ proc recordInternal(exe: string, args: seq[string], withDiff: string, storeTrace
     # Propagate the recorder's own exit code instead.
     quit(exCode)
 
-proc nativeRecordingBackendForHost(requested: string): string =
+proc nativeRecordingBackendForHost(requested: string; lang: Lang): string =
   ## MCR is the default native recorder. Linux can explicitly select RR,
   ## Windows can explicitly select TTD, and macOS always uses MCR.
   ##
@@ -283,7 +283,7 @@ proc nativeRecordingBackendForHost(requested: string): string =
   ## any host; this wrapper is the only place the compile-time host and the
   ## exit live.
   let selection =
-    resolveNativeRecordingBackend(requested, hostRecordingPlatform())
+    resolveNativeRecordingBackend(requested, hostRecordingPlatform(), lang)
   if not selection.ok:
     for line in selection.errorLines:
       stderr.writeLine(line)
@@ -438,7 +438,7 @@ proc record*(lang: string,
     if viaDispatchTable:
       ""
     else:
-      nativeRecordingBackendForHost(recordBackend)
+      nativeRecordingBackendForHost(recordBackend, detectedLang)
 
   # `--portable` (codetracer-specs CLI/ct/record.md, "Portable traces"): decided
   # here, with the backend known and before anything is built, spawned or

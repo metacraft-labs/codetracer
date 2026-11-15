@@ -362,3 +362,43 @@ suite "--lang ruby(db) is accepted, announced once on stderr, and means --lang r
     check recordSource.contains("stderr.writeLine(deprecationNote)")
     let dbRecordSource = readFile(repoRoot / "src" / "ct" / "db_backend_record.nim")
     check(not dbRecordSource.contains("deprecatedLangSpellingNote"))
+
+suite "a Lean program is recorded with rr by default (MCR is not for it)":
+  ## `Multi-Core-Recorder.md` §1, "Programs MCR is not for": the Lean runtime
+  ## reads every object's reference count through a captured read site, so
+  ## MCR records tens of thousands of events per millisecond of the program,
+  ## and the Lean Sudoku solver recorded for over half an hour without
+  ## finishing. rr records it in about its own run time.
+
+  test "with no --backend, Lean on Linux takes rr, with a note saying why":
+    let selection = resolveNativeRecordingBackend("", HostLinux, LangLean)
+    check selection.ok
+    check selection.approach == raRr and selection.backend == "rr"
+    check selection.noteLines.len > 0 and
+      selection.noteLines[0].contains("rr") and
+      selection.noteLines.join("\n").contains("--backend mcr")
+
+  test "the desktop's db sentinel on a Lean program takes rr too":
+    let selection = resolveNativeRecordingBackend("db", HostLinux, LangLean)
+    check selection.ok and selection.approach == raRr
+
+  test "--backend mcr is honoured for Lean, with a warning naming rr":
+    let selection = resolveNativeRecordingBackend("mcr", HostLinux, LangLean)
+    check selection.ok and selection.approach == raMcr
+    check selection.noteLines.len > 0 and
+      selection.noteLines[0].startsWith("warning:") and
+      selection.noteLines.join("\n").contains("--backend rr")
+
+  test "a host without rr records Lean with MCR and warns":
+    for host in [HostMacos, HostWindows]:
+      checkpoint(host)
+      let selection = resolveNativeRecordingBackend("", host, LangLean)
+      check selection.ok and selection.approach == raMcr
+      check selection.noteLines.len > 0 and selection.noteLines[0].startsWith("warning:")
+
+  test "every other language keeps the MCR default, silently":
+    for lang in [LangC, LangCpp, LangRust, LangNim, LangGo, LangUnknown]:
+      checkpoint($lang)
+      let selection = resolveNativeRecordingBackend("", HostLinux, lang)
+      check selection.ok and selection.approach == raMcr
+      check selection.noteLines.len == 0
