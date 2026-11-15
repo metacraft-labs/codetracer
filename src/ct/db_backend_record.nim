@@ -1,4 +1,4 @@
-import std/[ options, os, osproc, strutils, strformat, sequtils, json, streams ],
+import std/[ options, os, osproc, strutils, strformat, sequtils, json ],
   json_serialization,
   uuid4,
   ../common/[ lang, paths, types, trace_index ],
@@ -8,54 +8,33 @@ import std/[ options, os, osproc, strutils, strformat, sequtils, json, streams ]
   trace/storage_and_import,
   trace/ctfs_sources,
   trace/recorder_dispatch,
+  trace/recorder_version_probe,
   trace/record_assessment,
   trace/shell
 
 
-const RecorderVersionProbeTimeoutMs = 5_000
-  ## A ``--version`` that does not answer in this long is reported as no
-  ## version; the probe runs only on the failure path, and must not be able
-  ## to turn a refusal into a hang.
-
-proc recorderVersionLine(exe: string): string =
-  ## The first non-empty line ``<exe> --version`` prints, or "" when ``exe``
-  ## is not an executable file, does not answer in time, or prints nothing.
-  ## Used only to REPORT the recorder's version after it wrote a refused
-  ## trace (``staleRecorderMessage``); its failure never changes the outcome.
-  if exe.len == 0 or not fileExists(exe):
-    return ""
-  try:
-    if fpUserExec notin getFilePermissions(exe):
-      return ""
-    var process = startProcess(exe, args = @["--version"],
-                               options = {poStdErrToStdOut})
-    defer: process.close()
-    if waitForExit(process, timeout = RecorderVersionProbeTimeoutMs) == -1 and
-        process.running:
-      process.kill()
-      discard waitForExit(process)
-      return ""
-    for line in process.outputStream.readAll().splitLines():
-      if line.strip().len > 0:
-        return line.strip()
-  except CatchableError:
-    discard
-  ""
-
 template importRecorderOutput(recorderName: string, recorder: RecorderArtifact,
                               sibling: string, installHint: seq[string],
                               importCall: untyped): untyped =
-  ## ``importCall`` imports what the recorder ``recorder`` has just written.
-  ## A refusal on the trace's format VERSION is that recorder's fault, not
-  ## the trace's (GitHub #909): report it as such, with both versions, and
-  ## exit 1 before anything is registered -- the refusal is raised by
+  ## ``importCall`` imports what the recorder ``recorder`` has just written.  ## A refusal on the trace's format VERSION is not the trace's fault but a
+  ## mismatch between that recorder and this `ct` (GitHub #909): report it
+  ## as such, with both versions and the side that is behind, and exit 1
+  ## before anything is registered -- the refusal is raised by
   ## ``readCtfsMetaDat`` / ``openCtfs`` before ``importTrace`` copies or
   ## records anything.
+  ##
+  ## Each argument is evaluated once, and only on the refusal path:
+  ## ``recorder`` may be a call (``recorderArtifactOf``, which resolves the
+  ## toolchain).  A ``loaded`` recorder (PHP's ``codetracer.so``) is never
+  ## run: it is not a program.  The ``--version`` probe is bounded
+  ## (``recorder_version_probe``), so it cannot hold the refusal up.
   try:
     importCall
   except TraceFormatVersionRefused as refusal:
-    for line in staleRecorderMessage(recorderName, recorder,
-                                     recorderVersionLine(recorder.path),
+    let artifact = recorder
+    let reported =
+      if artifact.loaded: "" else: recorderVersionLine(artifact.path)
+    for line in staleRecorderMessage(recorderName, artifact, reported,
                                      refusal.part, refusal.found,
                                      refusal.readable, sibling, installHint):
       errorMessage line

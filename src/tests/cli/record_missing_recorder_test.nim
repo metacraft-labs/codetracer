@@ -44,8 +44,12 @@
 ## Compile and run:
 ##   nim c -r src/tests/cli/record_missing_recorder_test.nim
 
-import std/[os, osproc, strutils, unittest]
+import std/[os, osproc, strutils, times, unittest]
 import results
+when NimMajor >= 2:
+  import ../../db_connector/db_sqlite
+else:
+  import impure/db_sqlite
 from codetracer_trace_writer/multi_stream_writer import
   initMultiStreamWriter, registerPath, registerStep, close, closeCtfs
 import ../../common/lang
@@ -133,7 +137,8 @@ const ClearedOverrides = [
 
 proc runWithoutRecorders(ct, program, outDir, emptyDir: string;
                          extra: seq[string] = @[];
-                         setVars: seq[(string, string)] = @[]):
+                         setVars: seq[(string, string)] = @[];
+                         timeoutSeconds = RecordTimeoutSeconds):
     tuple[output: string, exitCode: int] =
   ## Run the real `ct record` in an environment where no recorder can be
   ## found.  `env -i` is deliberately NOT used: `ct` needs HOME (for
@@ -147,7 +152,7 @@ proc runWithoutRecorders(ct, program, outDir, emptyDir: string;
   # applies to `ct` ONLY.  Setting PATH in the shell instead would also hide
   # `timeout` from the shell itself, which silently turns every assertion
   # below into a check against "timeout: command not found".
-  var cmd = "timeout " & $RecordTimeoutSeconds & " env"
+  var cmd = "timeout " & $timeoutSeconds & " env"
   for name in ClearedOverrides:
     cmd.add(" -u " & name)
   for (name, value) in setVars:
@@ -184,15 +189,35 @@ proc writeContainerAtVersion(root: string, version: int): string =
   result = root / ("container-v" & $version & ".ct")
   writeFile(result, data)
 
-proc writeFakeNargo(root, container: string): string =
+proc writeContainerWithMetaDatVersion(root: string, version: int): string =
+  ## The pinned writer's container (``writeContainerAtVersion``'s
+  ## ``fresh.ct``, at the container version this reader reads) with the
+  ## ``meta.dat`` schema version -- the u16 after its ``CTMD`` magic
+  ## (``internal-files.md`` §"Metadata (meta.dat)") -- set to ``version``.
+  ## ``meta.dat`` is a few dozen bytes, so it sits whole in one block and is
+  ## found by its magic and current version, which must occur exactly once.
+  discard writeContainerAtVersion(root, 5)   # leaves the unpatched fresh.ct
+  var data = readFile(root / "fresh.ct")
+  let header = "CTMD" & char(7) & char(0)
+  let at = data.find(header)
+  doAssert at >= 0 and data.find(header, at + 1) < 0,
+    "fixture: expected exactly one meta.dat v7 header in the writer's container"
+  data[at + 4] = char(version and 0xff)
+  data[at + 5] = char(version shr 8)
+  result = root / ("metadat-v" & $version & ".ct")
+  writeFile(result, data)
+
+proc writeFakeNargo(root, container: string;
+                    versionBody = "echo " & quoteShell(StaleNargoVersion) &
+                                  "; exit 0"): string =
   ## A stand-in for a STALE nargo: ``nargo trace --out-dir <dir>`` copies
   ## ``container`` into ``<dir>`` and prints nargo's own success line, then
-  ## exits 0 -- the reporter's sequence in #909.  ``--version`` answers like
-  ## nargo does.  Only absolute paths are used: ``PATH`` is scrubbed.
+  ## exits 0 -- the reporter's sequence in #909.  ``--version`` runs
+  ## ``versionBody``, by default answering like nargo does.  Only absolute
+  ## paths are used: ``PATH`` is scrubbed.
   result = root / "stale-nargo"
   writeFile(result, "#!/bin/sh\n" &
-    "if [ \"$1\" = \"--version\" ]; then echo " &
-    quoteShell(StaleNargoVersion) & "; exit 0; fi\n" &
+    "if [ \"$1\" = \"--version\" ]; then " & versionBody & "; fi\n" &
     "out=\"\"\n" &
     "while [ $# -gt 0 ]; do\n" &
     "  if [ \"$1\" = \"--out-dir\" ]; then out=\"$2\"; fi\n" &
@@ -201,6 +226,23 @@ proc writeFakeNargo(root, container: string): string =
     "/bin/cp " & quoteShell(container) & " \"$out/trace.ct\" || exit 3\n" &
     "echo \"Saved trace to $out\"\n")
   setFilePermissions(result, {fpUserRead, fpUserWrite, fpUserExec})
+
+proc traceIndexRows(home: string): int =
+  ## The rows of the trace index ``ct`` keeps under ``CODETRACER_HOME``
+  ## (``$CODETRACER_HOME/data/trace_index.db``; ``trace_index.nim``,
+  ## ``ct_home.nim``).  0 when no index, or no ``recordings`` table, exists yet:
+  ## `ct` opens the file before it records, and creates the table only when
+  ## it registers.  A "no row" check built on this is only worth something
+  ## next to a run that DOES add one in the same home, which the #909 case's
+  ## control arm is.
+  let db = home / "data" / "trace_index.db"
+  if not fileExists(db):
+    return 0
+  let conn = open(db, "", "", "")
+  defer: conn.close()
+  if conn.getValue(sql"SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'recordings'") == "0":
+    return 0
+  parseInt(conn.getValue(sql"SELECT COUNT(*) FROM recordings"))
 
 proc writeNoirPackage(root: string): string =
   ## The smallest Noir package ``ct record`` detects as Noir: nargo traces
@@ -296,9 +338,11 @@ suite "ct record missing-recorder diagnostics":
     check "Saved trace to" in output
     check "was not found" notin output
 
-    # The refusal stays.
+    # The refusal stays, and nothing is registered: no row in the trace
+    # index of this run's own home.
     check exitCode != 0
     check "recordingId:" notin output
+    check traceIndexRows(home) == 0
 
     # Both versions: the container version the recorder wrote, the ones this
     # reader reads, and the recorder's own `--version`.
@@ -312,6 +356,9 @@ suite "ct record missing-recorder diagnostics":
 
     # And not the advice that cannot work: re-recording runs the same binary.
     check "Re-record the trace" notin output
+    # It is the recorder that is behind, not `ct`.
+    check "the recorder is out of date" in output
+    check "update ct" notin output
 
     # The control: the same writer's container at its OWN version, through
     # the same fake recorder, records and registers.  So the refusal above is
@@ -327,6 +374,137 @@ suite "ct record missing-recorder diagnostics":
     check controlExit == 0
     check "recordingId:" in controlOutput
     check "is not readable" notin controlOutput
+    # ...and its row lands in the index the refused run was checked against,
+    # so `traceIndexRows(home) == 0` above could see a row had there been one.
+    check traceIndexRows(home) == 1
+
+  test "a recorder that writes a NEWER container version than ct reads is named, and the advice is to update ct (#909 review)":
+    require fileExists(ct)
+    # The other direction of #909: the recorder writes container version 7
+    # and this `ct` reads 5 and 6.  The container is just as fresh, but now
+    # it is `ct` that is behind -- pointing `ct` at "a current recorder"
+    # would replace the one part that is current.
+    let dir = scratch / "newer-recorder"
+    removeDir(dir)
+    createDir(dir)
+    let nargo = writeFakeNargo(dir, writeContainerAtVersion(dir, 7))
+    let pkg = writeNoirPackage(dir)
+    let home = dir / "home"
+    createDir(home)
+
+    let (output, exitCode) = runWithoutRecorders(
+      ct, pkg, dir / "out", emptyDir,
+      setVars = @[("CODETRACER_NOIR_EXE_PATH", nargo),
+                  ("CODETRACER_HOME", home)])
+    checkpoint("ct output:\n" & output)
+    check "Saved trace to" in output
+    check exitCode != 0
+    check "recordingId:" notin output
+    check traceIndexRows(home) == 0
+    # Both versions, still.
+    check "version 7" in output
+    check "5 and 6" in output
+    check StaleNargoVersion in output
+    check nargo in output
+    # The stale party is `ct`.
+    check "update ct" in output
+    check "the recorder is out of date" notin output
+    check "Re-record the trace" notin output
+
+  test "a recorder that writes a refused meta.dat version is named, older or newer than ct reads (#909 review)":
+    require fileExists(ct)
+    # The second version `ct` gates on: the container version is one it
+    # reads, the `meta.dat` schema version is not.  Older (6): the recorder
+    # is behind.  Newer (8): `ct` is.
+    for (version, recorderBehind) in [(6, true), (8, false)]:
+      checkpoint("meta.dat version " & $version)
+      let dir = scratch / ("metadat-v" & $version)
+      removeDir(dir)
+      createDir(dir)
+      let nargo = writeFakeNargo(dir, writeContainerWithMetaDatVersion(dir, version))
+      let pkg = writeNoirPackage(dir)
+      let home = dir / "home"
+      createDir(home)
+
+      let (output, exitCode) = runWithoutRecorders(
+        ct, pkg, dir / "out", emptyDir,
+        setVars = @[("CODETRACER_NOIR_EXE_PATH", nargo),
+                    ("CODETRACER_HOME", home)])
+      checkpoint("ct output:\n" & output)
+      check "Saved trace to" in output
+      check exitCode != 0
+      check traceIndexRows(home) == 0
+      check ("meta.dat version " & $version) in output
+      check "version 7 only" in output
+      check nargo in output
+      check StaleNargoVersion in output
+      check "Re-record the trace" notin output
+      if recorderBehind:
+        check "the recorder is out of date" in output
+        check "update ct" notin output
+      else:
+        check "update ct" in output
+        check "the recorder is out of date" notin output
+
+  test "a recorder whose --version hangs does not hold up the refusal beyond the probe's cap (#909 review)":
+    require fileExists(ct)
+    # `ct` asks the recorder for its `--version` only to REPORT it, after the
+    # refusal is already decided, and caps that at 5 s
+    # (`recorder_version_probe.RecorderVersionProbeTimeoutMs`).  A recorder
+    # that is a `/bin/sh` wrapper (nargo often is one) and whose `--version`
+    # child outlives the cap must not make `ct` wait for that child: the
+    # review measured 20 s for `sleep 20; echo late`.  The fake sleeps 40 s;
+    # the run gets 90 s, so a `ct` that waits it out is still red by name,
+    # on the elapsed time, and a wedged one by the 124 watchdog.
+    let dir = scratch / "hanging-version"
+    removeDir(dir)
+    createDir(dir)
+    let nargo = writeFakeNargo(dir, writeContainerAtVersion(dir, 4),
+                               versionBody = "/bin/sleep 40; echo late; exit 0")
+    let pkg = writeNoirPackage(dir)
+    let home = dir / "home"
+    createDir(home)
+
+    let started = epochTime()
+    let (output, exitCode) = runWithoutRecorders(
+      ct, pkg, dir / "out", emptyDir,
+      setVars = @[("CODETRACER_NOIR_EXE_PATH", nargo),
+                  ("CODETRACER_HOME", home)],
+      timeoutSeconds = 90)
+    let elapsed = epochTime() - started
+    checkpoint("ct output:\n" & output)
+    checkpoint("elapsed: " & formatFloat(elapsed, ffDecimal, 1) & " s")
+    check exitCode != 124                       # the watchdog did not fire
+    check exitCode != 0
+    check "Saved trace to" in output
+    check "reported no version" in output
+    check "late" notin output
+    # The 5 s cap, 1 s between the probe's SIGTERM and SIGKILL, and the
+    # recording itself, with slack for a loaded host: far below 40 s.
+    check elapsed < 5.0 + 1.0 + 10.0
+
+  test "a recorder whose --version fails is reported as giving no version (#909 review)":
+    require fileExists(ct)
+    # An error text is not a version: quoting it as "reports: ..." puts the
+    # recorder's complaint where its version belongs.
+    let dir = scratch / "failing-version"
+    removeDir(dir)
+    createDir(dir)
+    let nargo = writeFakeNargo(dir, writeContainerAtVersion(dir, 4),
+      versionBody = "echo 'error: unrecognized option --version'; exit 2")
+    let pkg = writeNoirPackage(dir)
+    let home = dir / "home"
+    createDir(home)
+
+    let (output, exitCode) = runWithoutRecorders(
+      ct, pkg, dir / "out", emptyDir,
+      setVars = @[("CODETRACER_NOIR_EXE_PATH", nargo),
+                  ("CODETRACER_HOME", home)])
+    checkpoint("ct output:\n" & output)
+    check exitCode != 0
+    check "Saved trace to" in output
+    check "reported no version" in output
+    check "unrecognized option" notin output
 
   test "no trace is registered for a recording that never happened":
     require fileExists(ct)
