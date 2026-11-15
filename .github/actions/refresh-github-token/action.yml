@@ -26,6 +26,13 @@ inputs:
       hour. Needs Nix (for openssl, curl and jq).
     required: false
     default: "false"
+outputs:
+  token:
+    description: >
+      The new installation token, for a later step that takes a token input
+      (a step that read the job's first token from `steps.<id>.outputs.token`
+      still holds the expired one).
+    value: ${{ steps.token.outputs.token }}
 runs:
   using: composite
   steps:

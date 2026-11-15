@@ -6352,6 +6352,7 @@ jobs:
 
       # The build above can outlast the job's first token on a cold runner.
       - name: Refresh the GitHub token
+        id: fresh_token
         if: matrix.platform == 'nixos'
         uses: ./.github/actions/refresh-github-token
         with:
@@ -6701,7 +6702,7 @@ jobs:
           repo: metacraft-labs/codetracer-js-recorder
           ref: dev
           path: ${{ github.workspace }}/../codetracer-js-recorder
-          gh-token: ${{ steps.ci_token.outputs.token }}
+          gh-token: ${{ steps.fresh_token.outputs.token || steps.ci_token.outputs.token }}
           submodules: 'false'
 
       - name: Build codetracer-js-recorder sibling
