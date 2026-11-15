@@ -352,8 +352,18 @@ ARMS = [
      [(LAYERS, "*::Enter opens the tracepoint editor under every base*")],
      "Emacs: Enter in the read-only editor does nothing"),
     # --- parent: the OSC 52 read on real terminals (measured 2026-10-24) ---
+    # H1 RE-AIMED at 32824656f1 ("a terminal's answer is never typed"). That
+    # commit added a SECOND mechanism that keeps a late answer out of the
+    # document: outside the reply window an `ESC ]` is held, and a next byte
+    # that begins an answer's shape (`replyStart`) frames the string whole so
+    # the loop drops it. The Kitty-protocol window (`altChordsAsCsiU`) alone
+    # no longer decides it, and the single edit survived (graded 2026-11-15:
+    # the late OSC 52 answer stayed out of the document). The defect the arm
+    # names is a late answer TYPED, so it now removes both mechanisms.
     ("H1", [(DRIVER, "  d.framer.altChordsAsCsiU = want == 1",
-             "  d.framer.altChordsAsCsiU = false")],
+             "  d.framer.altChordsAsCsiU = false"),
+            (DRIVER, "  of ']': b in {'0' .. '9'}",
+             "  of ']': false")],
      [(PTYB, "*::a LATE clipboard answer is not typed into the document*")],
      "a late OSC 52 answer is typed into the document as text"),
     ("H2", [(CAPS, "  if env.term in ClipboardReadPromptTerms or",
