@@ -1166,7 +1166,10 @@ proc installKeyRouter*() =
       # A user's row naming an operation no element performs (`Ctrl+click`
       # on a call runs Continue): the desktop's dispatch, as a key's would
       # be. A base row with no procedure here is left to the element.
-      res.layer.startsWith("user:") and runDesktopOperation(res) == nkHandled,
+      (res.layer.startsWith("user:") and runDesktopOperation(res) == nkHandled) or
+        # A right click on an element whose menu is its pane's, not the
+        # element's own (the session tabs: `ui/session_tabs`).
+        (res.operation == "context-menu.open" and openPaneMenu(press)),
     proc(operation: string) = traceOperation(operation))
   {.emit: ["window.__ctKeymapProbe = ", probeKeys, ";"].}
   {.emit: ["window.__CODETRACER_TEST__ = window.__CODETRACER_TEST__ || {};",

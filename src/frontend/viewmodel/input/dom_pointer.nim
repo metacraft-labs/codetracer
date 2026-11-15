@@ -146,6 +146,23 @@ proc registerHitTest*(pane: string; test: HitTest) =
   else:
     hitTests[pane] = test
 
+var paneMenus = initTable[string, ElementProc]()
+
+proc registerPaneMenu*(pane: string; open: ElementProc) =
+  ## The menu a right click opens on an element of `pane` when the pointer
+  ## keymap resolves it to `context-menu.open` and no element of that pane
+  ## opens a menu of its own: the front-end's procedure, run by its fallback
+  ## (the desktop's session-tab strip, `ui/session_tabs`). The last
+  ## registration wins.
+  paneMenus[pane] = open
+
+proc openPaneMenu*(press: ElementPress): bool =
+  ## Opens the menu registered for `press.pane`; false when there is none or
+  ## it declined.
+  if not paneMenus.hasKey(press.pane):
+    return false
+  paneMenus[press.pane](press)
+
 proc elementOperationProcedure*(operation: string): ElementProc =
   ## The procedure registered for `operation`; nil when none is.
   procedures.getOrDefault(operation)
