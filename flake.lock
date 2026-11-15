@@ -8043,11 +8043,11 @@
     "nim-pty": {
       "flake": false,
       "locked": {
-        "lastModified": 1794562821,
-        "narHash": "sha256-/AuLhE8E+/7MlfxVZL2qqOvvI6peUor1dcXkiQcj4xQ=",
+        "lastModified": 1794697347,
+        "narHash": "sha256-n3OeL/4RpGBwDFpZ0YduMMyAPJHBHseUuZxky3pOr4A=",
         "owner": "metacraft-labs",
         "repo": "nim-pty",
-        "rev": "00b0d8d6c9e7e83452749cabb61f8c34daf08329",
+        "rev": "6ffb8d788e8a740ca78ec29c7a3a489a13818bcb",
         "type": "github"
       },
       "original": {
