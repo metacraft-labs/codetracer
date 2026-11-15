@@ -773,6 +773,63 @@ proc missingRecorderMessage*(sel: RecorderSelector,
         "a working " & name & " toolchain:")
       result.add("help:   direnv exec ../" & tool.sibling & " <command>")
 
+proc readableVersionsText(readable: seq[int]): string =
+  ## "version 7 only" / "versions 5 and 6" / "versions 5, 6 and 7".
+  case readable.len
+  of 0: "no version"
+  of 1: "version " & $readable[0] & " only"
+  else:
+    var listed = ""
+    for i, v in readable:
+      if i > 0:
+        listed.add(if i == readable.high: " and " else: ", ")
+      listed.add($v)
+    "versions " & listed
+
+proc staleRecorderMessage*(recorderName: string, recorder: RecorderArtifact,
+                           recorderVersion: string, part: string,
+                           found: int, readable: seq[int],
+                           sibling = "", installHint: seq[string] = @[]):
+    seq[string] =
+  ## The message ``ct record`` prints when the recorder it has JUST run
+  ## exited 0 but wrote a trace format version this ``ct`` refuses
+  ## (``ctfs_sources.TraceFormatVersionRefused``).
+  ##
+  ## ``CLI/ct/record.md`` §"Corner Cases": "Recorder present but wrong
+  ## version.  Report both versions; do not attempt a compatibility shim."
+  ## So it names the recorder by the path that was run, the recorder's own
+  ## ``--version`` (``recorderVersion``, "" when it reported none), the
+  ## version it wrote and the versions this ``ct`` reads, and the override
+  ## that points ``ct`` at another recorder.  It does NOT repeat the
+  ## reader's "Re-record the trace": that is the advice for an OLD trace,
+  ## and this one is seconds old -- re-recording runs the same recorder and
+  ## writes the same version again (GitHub #909).
+  ##
+  ## PURE: the caller runs ``--version``; nothing here touches the machine.
+  let exe = if recorder.path.len > 0: recorder.path else: recorder.label
+  result.add("error: the " & recorderName & " recorder `" & exe &
+    "` wrote a trace this `ct` cannot read: " & part & " version " &
+    $found & ", and this `ct` reads " & readableVersionsText(readable) & ".")
+  if recorderVersion.len > 0:
+    result.add("error: `" & exe & " --version` reports: " & recorderVersion)
+  else:
+    result.add("error: `" & exe & " --version` reported no version.")
+  result.add("error: the recorder is out of date with this `ct`, not the " &
+    "trace: recording again with the same recorder writes " & part &
+    " version " & $found & " again.")
+  let pathHint = "put a current `" & recorder.label & "` first on PATH"
+  if recorder.envVar.len > 0:
+    result.add("help: point CodeTracer at a current " & recorder.label &
+      ": set " & recorder.envVar & "=/path/to/" & recorder.label & ", or " &
+      pathHint & ".")
+  else:
+    result.add("help: point CodeTracer at a current " & recorder.label &
+      ": " & pathHint & ".")
+  if sibling.len > 0:
+    result.add("help: it is built by the `" & sibling & "` repo:")
+    for line in installHint:
+      result.add("help:   " & line)
+
 proc recorderInvocation*(sel: RecorderSelector, program: string,
                          traceFolder: string,
                          opts: RecorderOptions = RecorderOptions()):

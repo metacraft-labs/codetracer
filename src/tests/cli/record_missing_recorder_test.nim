@@ -45,6 +45,9 @@
 ##   nim c -r src/tests/cli/record_missing_recorder_test.nim
 
 import std/[os, osproc, strutils, unittest]
+import results
+from codetracer_trace_writer/multi_stream_writer import
+  initMultiStreamWriter, registerPath, registerStep, close, closeCtfs
 import ../../common/lang
 
 const
@@ -129,13 +132,17 @@ const ClearedOverrides = [
 ]
 
 proc runWithoutRecorders(ct, program, outDir, emptyDir: string;
-                         extra: seq[string] = @[]):
+                         extra: seq[string] = @[];
+                         setVars: seq[(string, string)] = @[]):
     tuple[output: string, exitCode: int] =
   ## Run the real `ct record` in an environment where no recorder can be
   ## found.  `env -i` is deliberately NOT used: `ct` needs HOME (for
   ## ~/.local/share/codetracer) and the loader variables the Nix-built
   ## binary was linked with, and the point of the test is the recorder
   ## lookup, not a hermetic environment.
+  ##
+  ## ``setVars`` is applied AFTER the overrides are cleared, so a case can
+  ## point exactly one recorder override at a binary of its own.
   # `env` does the unsetting and the PATH replacement, so the scrubbed PATH
   # applies to `ct` ONLY.  Setting PATH in the shell instead would also hide
   # `timeout` from the shell itself, which silently turns every assertion
@@ -143,12 +150,66 @@ proc runWithoutRecorders(ct, program, outDir, emptyDir: string;
   var cmd = "timeout " & $RecordTimeoutSeconds & " env"
   for name in ClearedOverrides:
     cmd.add(" -u " & name)
+  for (name, value) in setVars:
+    cmd.add(" " & name & "=" & quoteShell(value))
   cmd.add(" PATH=" & quoteShell(emptyDir))
   cmd.add(" " & quoteShell(ct) & " record -o " & quoteShell(outDir))
   for arg in extra:
     cmd.add(" " & quoteShell(arg))
   cmd.add(" " & quoteShell(program) & " 2>&1")
   execCmdEx(cmd)
+
+const
+  StaleNargoVersion = "nargo version = 0.36.0-stale-fixture"
+    ## What the fake recorder below prints for ``--version``, so the case can
+    ## check that ``ct`` reports the RECORDER's version and not only the
+    ## container's.
+
+proc writeContainerAtVersion(root: string, version: int): string =
+  ## A container written by the pinned writer (``codetracer-trace-format-nim``'s
+  ## ``MultiStreamTraceWriter``, the library nargo links), with its container
+  ## version byte (offset 5, ``ctfs-container.md`` §1) set to ``version``.
+  ## That is exactly what a nargo built against an older writer leaves behind:
+  ## the reader refuses it on that byte alone, before reading anything else.
+  let fresh = root / "fresh.ct"
+  let src = root / "main.nr"
+  writeFile(src, "fn main() {}\n")
+  var w = initMultiStreamWriter(fresh, src).get()
+  let pathId = w.registerPath(src).get()
+  w.registerStep(pathId, 1'u64, []).get()
+  w.close().get()
+  w.closeCtfs().get()
+  var data = readFile(fresh)
+  data[5] = char(version)
+  result = root / ("container-v" & $version & ".ct")
+  writeFile(result, data)
+
+proc writeFakeNargo(root, container: string): string =
+  ## A stand-in for a STALE nargo: ``nargo trace --out-dir <dir>`` copies
+  ## ``container`` into ``<dir>`` and prints nargo's own success line, then
+  ## exits 0 -- the reporter's sequence in #909.  ``--version`` answers like
+  ## nargo does.  Only absolute paths are used: ``PATH`` is scrubbed.
+  result = root / "stale-nargo"
+  writeFile(result, "#!/bin/sh\n" &
+    "if [ \"$1\" = \"--version\" ]; then echo " &
+    quoteShell(StaleNargoVersion) & "; exit 0; fi\n" &
+    "out=\"\"\n" &
+    "while [ $# -gt 0 ]; do\n" &
+    "  if [ \"$1\" = \"--out-dir\" ]; then out=\"$2\"; fi\n" &
+    "  shift\n" &
+    "done\n" &
+    "/bin/cp " & quoteShell(container) & " \"$out/trace.ct\" || exit 3\n" &
+    "echo \"Saved trace to $out\"\n")
+  setFilePermissions(result, {fpUserRead, fpUserWrite, fpUserExec})
+
+proc writeNoirPackage(root: string): string =
+  ## The smallest Noir package ``ct record`` detects as Noir: nargo traces
+  ## the package it is run inside (``recorderInvocation``, EXCEPTION 3).
+  result = root / "pkg"
+  createDir(result / "src")
+  writeFile(result / "Nargo.toml",
+    "[package]\nname = \"pkg\"\ntype = \"bin\"\nauthors = [\"\"]\n\n[dependencies]\n")
+  writeFile(result / "src" / "main.nr", "fn main() {}\n")
 
 suite "ct record missing-recorder diagnostics":
 
@@ -201,6 +262,71 @@ suite "ct record missing-recorder diagnostics":
       # 4. And never silently falls through to a different backend.
       check "unsupported trace kind" notin output
       check "recordingId:" notin output
+
+  test "a recorder that writes a refused container version is named, with both versions, and no re-record advice (#909)":
+    require fileExists(ct)
+    # GitHub #909: `ct record test-programs/noir_space_ship` -- nargo printed
+    # `Saved trace to ...` and exited 0, then `ct` failed with the READER's
+    # text, "CTFS container version 4 is not readable: this reader reads
+    # versions 5 and 6. Re-record the trace".  Re-recording ran the same nargo
+    # and wrote version 4 again.  The container is seconds old; the recorder
+    # is what is old.  `CLI/ct/record.md` §"Corner Cases": "Recorder present
+    # but wrong version.  Report both versions; do not attempt a
+    # compatibility shim."  So the refusal stays (non-zero exit, nothing
+    # registered), but the message names the recorder `ct` ran, its own
+    # version, the container version it wrote and the ones this `ct` reads,
+    # and the override that points `ct` at another recorder.
+    let dir = scratch / "stale-recorder"
+    removeDir(dir)
+    createDir(dir)
+    let container = writeContainerAtVersion(dir, 4)
+    let nargo = writeFakeNargo(dir, container)
+    let pkg = writeNoirPackage(dir)
+    let home = dir / "home"
+    createDir(home)
+
+    let (output, exitCode) = runWithoutRecorders(
+      ct, pkg, dir / "out", emptyDir,
+      setVars = @[("CODETRACER_NOIR_EXE_PATH", nargo),
+                  ("CODETRACER_HOME", home)])
+    checkpoint("ct output:\n" & output)
+
+    # The fake recorder really ran and succeeded: this is #909's sequence,
+    # not a missing-recorder failure.
+    check "Saved trace to" in output
+    check "was not found" notin output
+
+    # The refusal stays.
+    check exitCode != 0
+    check "recordingId:" notin output
+
+    # Both versions: the container version the recorder wrote, the ones this
+    # reader reads, and the recorder's own `--version`.
+    check "version 4" in output
+    check "5 and 6" in output
+    check StaleNargoVersion in output
+
+    # The recorder, by the path `ct` ran, and the way to point at another.
+    check nargo in output
+    check "CODETRACER_NOIR_EXE_PATH" in output
+
+    # And not the advice that cannot work: re-recording runs the same binary.
+    check "Re-record the trace" notin output
+
+    # The control: the same writer's container at its OWN version, through
+    # the same fake recorder, records and registers.  So the refusal above is
+    # the version byte's doing, not the fixture's or the fake recorder's.
+    createDir(dir / "current")
+    let currentNargo = writeFakeNargo(dir / "current",
+      dir / "fresh.ct") # `writeContainerAtVersion` left the unpatched one here
+    let (controlOutput, controlExit) = runWithoutRecorders(
+      ct, pkg, dir / "out-current", emptyDir,
+      setVars = @[("CODETRACER_NOIR_EXE_PATH", currentNargo),
+                  ("CODETRACER_HOME", home)])
+    checkpoint("control ct output:\n" & controlOutput)
+    check controlExit == 0
+    check "recordingId:" in controlOutput
+    check "is not readable" notin controlOutput
 
   test "no trace is registered for a recording that never happened":
     require fileExists(ct)

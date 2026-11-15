@@ -57,6 +57,24 @@ const
     ## non-zero reserved byte, is refused by name (§1c).
 
 type
+  TraceFormatVersionRefused* = object of ValueError
+    ## A trace refused for its format VERSION alone: the CTFS container
+    ## version byte (``openCtfs``) or the ``meta.dat`` schema version
+    ## (``parseCtfsMetaDat``).  ``msg`` is the reader's own text, which names
+    ## the version and tells the user to re-record -- the right advice for an
+    ## old trace.  The fields exist for the one caller that knows better:
+    ## ``ct record`` imports a container its recorder wrote seconds ago, so
+    ## there the stale party is the recorder, and re-recording with it writes
+    ## the same version again (GitHub #909; ``CLI/ct/record.md`` §"Corner
+    ## Cases", "Recorder present but wrong version").  It is a ``ValueError``
+    ## so every existing ``except ValueError`` still catches it.
+    part*: string
+      ## what carries the refused version: "CTFS container" or "meta.dat".
+    found*: int
+      ## the version the trace carries.
+    readable*: seq[int]
+      ## the versions this reader reads, lowest first.
+
   CtfsMetaDat* = object
     ## Subset of the ``meta.dat`` payload that the Nim importer
     ## consumes.  Mirrors the fields used to populate the trace index.
@@ -130,10 +148,14 @@ proc openCtfs(path: string): CtfsReader =
   # ``parseCtfsMetaDat`` gates on, and the two move independently.
   let version = result.data[5].ord
   if version != SupportedCtfsVersion and version != CtfsVersionV6:
-    raise newException(ValueError,
+    let refusal = newException(TraceFormatVersionRefused,
       "CTFS container version " & $version & " is not readable: this " &
       "reader reads versions " & $SupportedCtfsVersion & " and " &
       $CtfsVersionV6 & ". Re-record the trace")
+    refusal.part = "CTFS container"
+    refusal.found = version
+    refusal.readable = @[SupportedCtfsVersion, CtfsVersionV6]
+    raise refusal
   result.blockSize = readU32Le(result.data, 8)
   if result.blockSize notin [uint32 1024, 2048, 4096]:
     raise newException(ValueError, "invalid CTFS block size")
@@ -629,10 +651,14 @@ proc parseCtfsMetaDat(data: string): CtfsMetaDat =
         "reads one line high"
       else:
         ""
-    raise newException(ValueError,
+    let refusal = newException(TraceFormatVersionRefused,
       "meta.dat: version " & $version & " is not readable: this reader " &
       "reads version " & $SupportedMetaDatVersion & " only" & detail &
       ". Re-record the trace")
+    refusal.part = "meta.dat"
+    refusal.found = int(version)
+    refusal.readable = @[int(SupportedMetaDatVersion)]
+    raise refusal
   if data.len < 12:
     raise newException(ValueError,
       "meta.dat: a version " & $SupportedMetaDatVersion & " header is 12 " &

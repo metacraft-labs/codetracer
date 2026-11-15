@@ -1,4 +1,4 @@
-import std/[ options, os, osproc, strutils, strformat, sequtils, json ],
+import std/[ options, os, osproc, strutils, strformat, sequtils, json, streams ],
   json_serialization,
   uuid4,
   ../common/[ lang, paths, types, trace_index ],
@@ -6,10 +6,68 @@ import std/[ options, os, osproc, strutils, strformat, sequtils, json ],
   cli/[ logging, help ],
   globals,
   trace/storage_and_import,
+  trace/ctfs_sources,
   trace/recorder_dispatch,
   trace/record_assessment,
   trace/shell
 
+
+const RecorderVersionProbeTimeoutMs = 5_000
+  ## A ``--version`` that does not answer in this long is reported as no
+  ## version; the probe runs only on the failure path, and must not be able
+  ## to turn a refusal into a hang.
+
+proc recorderVersionLine(exe: string): string =
+  ## The first non-empty line ``<exe> --version`` prints, or "" when ``exe``
+  ## is not an executable file, does not answer in time, or prints nothing.
+  ## Used only to REPORT the recorder's version after it wrote a refused
+  ## trace (``staleRecorderMessage``); its failure never changes the outcome.
+  if exe.len == 0 or not fileExists(exe):
+    return ""
+  try:
+    if fpUserExec notin getFilePermissions(exe):
+      return ""
+    var process = startProcess(exe, args = @["--version"],
+                               options = {poStdErrToStdOut})
+    defer: process.close()
+    if waitForExit(process, timeout = RecorderVersionProbeTimeoutMs) == -1 and
+        process.running:
+      process.kill()
+      discard waitForExit(process)
+      return ""
+    for line in process.outputStream.readAll().splitLines():
+      if line.strip().len > 0:
+        return line.strip()
+  except CatchableError:
+    discard
+  ""
+
+template importRecorderOutput(recorderName: string, recorder: RecorderArtifact,
+                              sibling: string, installHint: seq[string],
+                              importCall: untyped): untyped =
+  ## ``importCall`` imports what the recorder ``recorder`` has just written.
+  ## A refusal on the trace's format VERSION is that recorder's fault, not
+  ## the trace's (GitHub #909): report it as such, with both versions, and
+  ## exit 1 before anything is registered -- the refusal is raised by
+  ## ``readCtfsMetaDat`` / ``openCtfs`` before ``importTrace`` copies or
+  ## records anything.
+  try:
+    importCall
+  except TraceFormatVersionRefused as refusal:
+    for line in staleRecorderMessage(recorderName, recorder,
+                                     recorderVersionLine(recorder.path),
+                                     refusal.part, refusal.found,
+                                     refusal.readable, sibling, installHint):
+      errorMessage line
+    quit(1)
+
+proc recorderArtifactOf(sel: RecorderSelector, exe: string): RecorderArtifact =
+  ## The recorder half of ``sel``'s toolchain (label, override, resolved
+  ## path), or -- for a selector the table has none for -- ``exe`` itself.
+  for artifact in recorderRequirements(sel):
+    if artifact.kind == raRecorder and artifact.path.len > 0:
+      return artifact
+  RecorderArtifact(kind: raRecorder, label: exe.extractFilename, path: exe)
 
 proc recordSymbols(sourceDir: string, outputFolder: string, lang: Lang) =
   var ctagsArgs = @[
@@ -84,7 +142,11 @@ proc recordWithCtRrSupport(
     quit(code)
 
   # import replay trace metadata written by ct-native-replay.
-  result = importTrace(traceFolder, recordingId, NO_PID, LangUnknown, DB_SELF_CONTAINED_DEFAULT, traceKind=traceKind)
+  result = importRecorderOutput("native",
+      RecorderArtifact(kind: raRecorder, label: "ct-native-replay",
+                       path: ctRRSupportExe),
+      "", @[]):
+    importTrace(traceFolder, recordingId, NO_PID, LangUnknown, DB_SELF_CONTAINED_DEFAULT, traceKind=traceKind)
 
 
 proc copyMacroSourcemaps(nimcacheDir, traceFolder: string) =
@@ -176,8 +238,13 @@ proc recordNim(
     if exitCode != 0:
       echo fmt"error: nim e tracer exited with {exitCode} for {program}"
       quit(1)
-    return importTrace(traceFolder, recordingId, recordPid, LangNim,
-        DB_SELF_CONTAINED_DEFAULT, traceKind="db")
+    return importRecorderOutput("Nim",
+        RecorderArtifact(kind: raRecorder, label: "nim",
+                         envVar: "CODETRACER_NIM_EXE_PATH",
+                         path: nimCompilerExe()),
+        "", @[]):
+      importTrace(traceFolder, recordingId, recordPid, LangNim,
+          DB_SELF_CONTAINED_DEFAULT, traceKind="db")
 
   # Default (``.nim`` and any other Nim-recognised extension we may add
   # later): compile to a native binary then hand off to MCR.
@@ -219,8 +286,14 @@ proc recordNim(
   if exitCode != 0:
     echo fmt"error: ct-mcr record exited with {exitCode} for {binaryPath}"
     quit(1)
-  result = importTrace(traceFolder, recordingId, recordPid, LangNim,
-      DB_SELF_CONTAINED_DEFAULT, traceKind="db")
+  result = importRecorderOutput("Nim",
+      RecorderArtifact(kind: raRecorder, label: "ct-mcr",
+                       envVar: "CODETRACER_CT_MCR_CMD",
+                       path: mcrRecorderExe()),
+      "codetracer-native-recorder",
+      @["build it with `cd ../codetracer-native-recorder && just build-ct-mcr`"]):
+    importTrace(traceFolder, recordingId, recordPid, LangNim,
+        DB_SELF_CONTAINED_DEFAULT, traceKind="db")
 
 
 # rr patches for ruby/other vm-s: not supported now, instead
@@ -267,8 +340,14 @@ proc recordNativeServer(
     echo fmt"error: the native server recorder exited with {exitCode}"
     quit(1)
 
-  importTrace(traceFolder, recordingId, recordPid, LangUnknown,
-              DB_SELF_CONTAINED_DEFAULT, traceKind = "rr")
+  importRecorderOutput("native server",
+      RecorderArtifact(kind: raRecorder, label: "codetracer-native-recorder",
+                       envVar: "CODETRACER_NATIVE_SERVER_RECORDER_PATH",
+                       path: nativeServerRecorderExe()),
+      "codetracer-native-recorder",
+      @["build it with `cd ../codetracer-native-recorder && just build`"]):
+    importTrace(traceFolder, recordingId, recordPid, LangUnknown,
+                DB_SELF_CONTAINED_DEFAULT, traceKind = "rr")
 
 proc requireRecorder(sel: RecorderSelector) =
   ## Fail with a precise, actionable message when a target's recording
@@ -377,11 +456,15 @@ proc recordDb(
       echo fmt"error: recorder exited with {exitCode} for {lang}"
       quit(1)
 
-  result = importTrace(
-    traceFolder, recordingId, recordPid, lang, DB_SELF_CONTAINED_DEFAULT,
-    traceKind = "db",
-    axesArg = some(TargetAxes(language: sel.language, targetIsa: sel.targetIsa,
-                              toolchain: tcUnknown, approach: sel.approach)))
+  let tool = recorderToolFor(sel)
+  result = importRecorderOutput(displayName(sel),
+                                recorderArtifactOf(sel, invocation.exe),
+                                tool.sibling, tool.installHint):
+    importTrace(
+      traceFolder, recordingId, recordPid, lang, DB_SELF_CONTAINED_DEFAULT,
+      traceKind = "db",
+      axesArg = some(TargetAxes(language: sel.language, targetIsa: sel.targetIsa,
+                                toolchain: tcUnknown, approach: sel.approach)))
 
 
 # record a program run
