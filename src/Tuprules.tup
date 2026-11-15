@@ -232,36 +232,35 @@ WINDOWS_CARGO_HOME_IGNORE = (([A-Za-z]:)?[/\\][Uu]sers[/\\][^/\\]+[/\\]\.cargo[/
 #   * tup has no absolute "this checkout" variable of its own ($(TUP_CWD) is
 #     relative), and the tracked variant configs (build-*/tup.config) cannot
 #     carry a per-checkout value. The cksum needs a shell, so the entry points
-#     compute it: scripts/build-once.sh, scripts/build.sh (`tup monitor`),
-#     ci/build/dev.sh (`tup generate`), the dev shells (nix/shells/ci-base.nix)
-#     and the non-Nix environments (non-nix-build/env.sh, and env.sh through
-#     non-nix-build/windows/setup-codetracer-runtime-env.sh).
+#     compute it, through the same command that sets the Cargo values below:
+#     `ci/lib/tup-cargo-target.sh --export` (scripts/build-once.sh,
+#     scripts/build.sh for `tup monitor`, ci/build/dev.sh for `tup generate`,
+#     the dev shells in nix/shells/ci-base.nix, and the non-Nix environments
+#     non-nix-build/env.sh and, through
+#     non-nix-build/windows/setup-codetracer-runtime-env.sh, env.sh).
 #
-# UNSET (a plain `tup` from a shell none of those prepared) falls back to a
-# root derived from the directory tup was started in, which is always inside
-# the checkout tup is building: `/tmp/ct-nim-cache/tup-from-pwd/<that path>`.
-# Per checkout and under the Windows exclusion below, never the shared bare
-# root. It differs from the scripted root, so switching between the two
-# rebuilds the Nim targets once; export CT_TUP_NIM_CACHE_ROOT (from
-# `ci/lib/nim-cache-root.sh --tup`) to avoid that. With neither variable set
-# (PowerShell does not export PWD) the parse refuses rather than guess.
+# UNSET STOPS THE PARSE, with the remedy. There used to be a fallback, a root
+# derived from the directory tup was started in. It was per checkout, but once
+# the Cargo values below became mandatory it could only be reached by someone
+# who had set those by hand and not this one, and there it picked a root that
+# differed from the scripted one and rebuilt every Nim target. One rule for
+# both: the entry points set the tup roots, or tup stops and says how.
 #
-# Whichever root is used, it must stay under `/tmp/ct-nim-cache/`: that is what
+# The root must stay under `/tmp/ct-nim-cache/`: that is what
 # NIM_SIDE_OUTPUTS_IGNORE excludes on Windows, which is why the helper does not
 # honour a CT_NIM_CACHE_ROOT override. ci/test/stale-artefact-guards-test.sh
-# fails if a rule spells the bare root again.
+# fails if a rule spells the bare root again, or if this refusal goes.
 import CT_TUP_NIM_CACHE_ROOT=
 ifeq ($(CT_TUP_NIM_CACHE_ROOT),)
-import PWD=
-ifeq ($(PWD),)
-error CT_TUP_NIM_CACHE_ROOT is unset, and so is PWD, so tup cannot place the Nim cache for this checkout. Run just build-once, or export CT_TUP_NIM_CACHE_ROOT set to the output of: bash ci/lib/nim-cache-root.sh --tup <checkout>
+error CT_TUP_NIM_CACHE_ROOT is unset, so tup cannot place the Nim cache for this checkout. Run just build-once, or in the checkout: eval "`bash ci/lib/tup-cargo-target.sh --export .`"
 endif
-NIM_CACHE_ROOT = /tmp/ct-nim-cache/tup-from-pwd$(PWD)
-else
 NIM_CACHE_ROOT = $(CT_TUP_NIM_CACHE_ROOT)
-endif
 
-NIM_SIDE_OUTPUTS_IGNORE = ^(([A-Za-z]:)?[/\\]tmp[/\\]ct-nim-cache[/\\].*|([A-Za-z]:)?[/\\].*_linkerArgs\\.txt)$
+# `[.]`, not `\\.`, for the literal dot: tup 0.8 keeps `\\` verbatim inside a
+# variable, so `\\.` was "a backslash, then any character" and this alternative
+# never matched `<name>_linkerArgs.txt` (measured on tup 0.8 against a rule that
+# writes one; ci/test/stale-artefact-guards-test.sh holds the spelling).
+NIM_SIDE_OUTPUTS_IGNORE = ^(([A-Za-z]:)?[/\\]tmp[/\\]ct-nim-cache[/\\].*|([A-Za-z]:)?[/\\].*_linkerArgs[.]txt)$
 
 # The CodeTracer Nim fork's C backend writes a MACRO SOURCEMAP for every
 # binary it links, `macro_sourcemap_<out name>.json`, where <out name> is the
@@ -686,19 +685,22 @@ ifeq (@(TUP_PLATFORM),win32)
     cp $(CARGO_TARGET_BASE)/db_backend_target/debug/mcr_emulator.dll %2o |> %o | $(DB_BACKEND_CARGO_IGNORE_OUTPUTS)
 endif
 ifeq (@(TUP_PLATFORM),linux)
-# The emulator library travels with the binary, which searches its own directory
-# first (src/db-backend/build.rs). The target directory was machine-wide when
-# that was written, and another checkout's build rewrote the copy in it; it is
-# per checkout now, but the binary still must not load from a build directory.
+# The emulator library travels with the binary, whose ONLY run-time search path
+# is its own directory (`$ORIGIN`, src/db-backend/build.rs): a produced binary
+# carries no load path into the Cargo target, so it keeps working when that
+# directory is moved, rebuilt by another compiler or cleaned.
 !debug_rust_cargo_db_backend = |> \
     cargo build --locked $(RUST_WINDOWS_LINKER_CONFIG) $(DB_BACKEND_CARGO_FEATURES) --target-dir $(CARGO_TARGET_BASE)/db_backend_target && \
     cp $(CARGO_TARGET_BASE)/db_backend_target/debug/replay-server$(EXE_SUFFIX) %1o && \
     cp $(CARGO_TARGET_BASE)/db_backend_target/debug/libmcr_emulator.so %2o |> %o | $(DB_BACKEND_CARGO_IGNORE_OUTPUTS)
 endif
 ifeq (@(TUP_PLATFORM),macosx)
+# The same on macOS: the binary's only rpath is `@loader_path`, and the library's
+# install name is `@rpath/libmcr_emulator.dylib` (src/db-backend/build.rs).
 !debug_rust_cargo_db_backend = |> \
     cargo build --locked $(RUST_WINDOWS_LINKER_CONFIG) $(DB_BACKEND_CARGO_FEATURES) --target-dir $(CARGO_TARGET_BASE)/db_backend_target && \
-    cp $(CARGO_TARGET_BASE)/db_backend_target/debug/replay-server$(EXE_SUFFIX) %o |> %o | $(DB_BACKEND_CARGO_IGNORE_OUTPUTS)
+    cp $(CARGO_TARGET_BASE)/db_backend_target/debug/replay-server$(EXE_SUFFIX) %1o && \
+    cp $(CARGO_TARGET_BASE)/db_backend_target/debug/libmcr_emulator.dylib %2o |> %o | $(DB_BACKEND_CARGO_IGNORE_OUTPUTS)
 endif
 !rust_cargo_db_backend = |> \
     cargo build --locked $(RUST_WINDOWS_LINKER_CONFIG) $(DB_BACKEND_CARGO_FEATURES) --release --target-dir $(CARGO_TARGET_BASE)/db_backend_target && \

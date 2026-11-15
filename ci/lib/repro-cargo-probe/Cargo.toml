@@ -1,0 +1,15 @@
+# The compiler probe of the repro build's Cargo slot (repro.nim,
+# ci/lib/tup-cargo-target.sh --repro-slot). It has no dependencies and does
+# nothing but report which rustc Cargo resolved when it built it; see build.rs.
+[package]
+name = "ct-repro-cargo-probe"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[[bin]]
+name = "ct-repro-cargo-probe"
+path = "src/main.rs"
+
+# Not a member of any workspace above it.
+[workspace]

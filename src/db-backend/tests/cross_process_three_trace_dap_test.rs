@@ -740,9 +740,9 @@ fn a_stop_in_a_sibling_recording_names_that_recordings_thread() {
                 }
             }
             Ok(other) => panic!("expected a stopped event, got {other:?}"),
-            Err(err) => panic!(
-                "no stop named the server recording's thread {backend_thread}; stops named {named:?}: {err}"
-            ),
+            Err(err) => {
+                panic!("no stop named the server recording's thread {backend_thread}; stops named {named:?}: {err}")
+            }
         }
     }
 }

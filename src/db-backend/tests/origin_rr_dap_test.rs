@@ -896,7 +896,10 @@ mod rr {
             .set_breakpoint(&recording.source_path, breakpoint_line)
             .expect("set breakpoint at the println");
         let location = client.continue_to_breakpoint().expect("continue to the println");
-        assert_eq!(location.line, breakpoint_line as i64, "stopped at the wrong line: {location:?}");
+        assert_eq!(
+            location.line, breakpoint_line as i64,
+            "stopped at the wrong line: {location:?}"
+        );
 
         let chain = send_rr_origin_chain_request(&mut client, "c", -1, DEFAULT_ORIGIN_MAX_HOPS);
         let shape: Vec<(OriginKind, i64, String)> = chain
@@ -907,7 +910,11 @@ mod rr {
         let line_of = |needle: &str| fixture_line_containing("rust", "simple_trivial_chain", "main.rs", needle) as i64;
         assert_eq!(
             chain.hops.iter().map(|hop| hop.location.line).collect::<Vec<_>>(),
-            vec![line_of("let c: i32 = b"), line_of("let b: i32 = a"), line_of("let a: i32 = 10")],
+            vec![
+                line_of("let c: i32 = b"),
+                line_of("let b: i32 = a"),
+                line_of("let a: i32 = 10")
+            ],
             "the chain walks c <- b <- a: hops={shape:?} terminator={:?} {:?}",
             chain.terminator.kind,
             chain.terminator.expression

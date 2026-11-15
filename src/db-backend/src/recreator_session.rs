@@ -350,12 +350,21 @@ fn process_tree_cpu_ticks(pid: u32) -> Option<u64> {
             continue;
         };
         let fields: Vec<&str> = after_comm.split_whitespace().collect();
-        let ticks = |index: usize| fields.get(index).and_then(|field| field.parse::<u64>().ok()).unwrap_or(0);
+        let ticks = |index: usize| {
+            fields
+                .get(index)
+                .and_then(|field| field.parse::<u64>().ok())
+                .unwrap_or(0)
+        };
         total += ticks(11) + ticks(12);
         if let Ok(tasks) = std::fs::read_dir(format!("/proc/{current}/task")) {
             for task in tasks.flatten() {
                 if let Ok(children) = std::fs::read_to_string(task.path().join("children")) {
-                    pending.extend(children.split_whitespace().filter_map(|child| child.parse::<u32>().ok()));
+                    pending.extend(
+                        children
+                            .split_whitespace()
+                            .filter_map(|child| child.parse::<u32>().ok()),
+                    );
                 }
             }
         }

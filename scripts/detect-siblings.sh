@@ -576,13 +576,33 @@ fi
 # CODETRACER_NIM_BIN.
 if [ -n "$_CT_WORKSPACE_ROOT" ] && [ -x "$_CT_WORKSPACE_ROOT/codetracer-nim/bin/nim" ]; then
 	export CODETRACER_NIM_BIN="$_CT_WORKSPACE_ROOT/codetracer-nim/bin/nim"
-	_ct_pcre_dir=""
-	if command -v nix >/dev/null 2>&1; then
-		_ct_pcre_dir="$(nix build --no-link --print-out-paths "nixpkgs#pcre.out" 2>/dev/null)/lib"
+	# libpcre comes from the dev shell's pinned nixpkgs: ci-base.nix and
+	# armShell.nix export CT_PCRE_LIB_DIR. Outside those shells, ask for it
+	# with `--inputs-from`, which resolves `nixpkgs` from codetracer's
+	# flake.lock. Never a bare `nixpkgs#pcre`: that is the machine's flake
+	# REGISTRY, and nixpkgs-unstable has removed `pcre` (end of life). The
+	# failed build printed nothing, the old `$(…)/lib` became `/lib`, and that
+	# put the HOST glibc on LD_LIBRARY_PATH, so every Nix binary in the shell
+	# died with "/lib/libc.so.6: undefined symbol: __pointer_chk_guard".
+	# pcre2 is not a substitute: it is a different API and soname.
+	_ct_pcre_dir="${CT_PCRE_LIB_DIR:-}"
+	if [ -z "$_ct_pcre_dir" ] && command -v nix >/dev/null 2>&1; then
+		_ct_pcre_out="$(nix build --no-link --print-out-paths --inputs-from "$_CT_ROOT_DIR" "nixpkgs#pcre.out" 2>/dev/null | head -n 1)" || true
+		# Only a store path is a usable answer; empty output means the build
+		# failed, and appending /lib to it would name the host's /lib.
+		case "$_ct_pcre_out" in
+		/nix/store/*) _ct_pcre_dir="$_ct_pcre_out/lib" ;;
+		esac
+		unset _ct_pcre_out
 	fi
-	if [ -n "$_ct_pcre_dir" ] && [ -d "$_ct_pcre_dir" ]; then
-		export LD_LIBRARY_PATH="$_ct_pcre_dir:${LD_LIBRARY_PATH:-}"
+	if [ -n "$_ct_pcre_dir" ] && [ -d "$_ct_pcre_dir" ] && [ "$_ct_pcre_dir" != "/lib" ]; then
+		export LD_LIBRARY_PATH="$_ct_pcre_dir${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 		export CODETRACER_RECORDER_LD_LIBRARY_PATH="$_ct_pcre_dir${CODETRACER_RECORDER_LD_LIBRARY_PATH:+:$CODETRACER_RECORDER_LD_LIBRARY_PATH}"
+	else
+		echo "  WARNING: codetracer-nim's bin/nim needs libpcre, which could not be resolved." >&2
+		echo "    CT_PCRE_LIB_DIR is unset and 'nix build --inputs-from $_CT_ROOT_DIR nixpkgs#pcre.out' failed." >&2
+		echo "    'nim --trace' (CODETRACER_NIM_BIN) will fail with \"could not load: libpcre.so\"." >&2
+		echo "    Enter the codetracer dev shell (nix develop), which provides it." >&2
 	fi
 	unset _ct_pcre_dir
 	_ct_detect_summary "codetracer-nim (bin/nim --trace available)"

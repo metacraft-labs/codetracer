@@ -224,19 +224,13 @@ if [ -z "$CT_BUILD_HOST" ]; then
 	# writers below so it does not miss their first events.
 	#
 	# The monitor's autoupdates parse the Tupfiles with THIS environment, so
-	# it needs the same per-checkout Nim cache root build-once.sh exported to
-	# its own tup runs (src/Tuprules.tup, ci/lib/nim-cache-root.sh). A
-	# different one would rebuild every Nim target on the first autoupdate.
-	# (The contract tests' stripped-down fixture trees have no helper; the
-	# Tuprules fallback is per checkout too.)
-	if [ -f "$REPO_ROOT/ci/lib/nim-cache-root.sh" ]; then
-		CT_TUP_NIM_CACHE_ROOT="$(bash "$REPO_ROOT/ci/lib/nim-cache-root.sh" --tup "$REPO_ROOT")"
-		export CT_TUP_NIM_CACHE_ROOT
-	fi
-	# And the Cargo target base, for the same reason; the helper refuses a
-	# value in this environment that is not this checkout's and compiler's.
+	# it needs the roots build-once.sh exported to its own tup runs: the Cargo
+	# target base and the Nim cache root, from the one helper (see
+	# build-once.sh), which refuses a Cargo value here that is not this
+	# checkout's and compiler's. Without them every autoupdate would stop at
+	# the parse. (The contract tests' fixture trees have no helper.)
 	if [ -f "$REPO_ROOT/ci/lib/tup-cargo-target.sh" ]; then
-		if ! ct_tup_cargo_env="$(bash "$REPO_ROOT/ci/lib/tup-cargo-target.sh" --export "$REPO_ROOT")"; then
+		if ! ct_tup_cargo_env="$(bash "$REPO_ROOT/ci/lib/tup-cargo-target.sh" --reap --export "$REPO_ROOT")"; then
 			echo "build: no Cargo target base this checkout owns (see above); not starting tup monitor." >&2
 			exit 1
 		fi

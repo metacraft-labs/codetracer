@@ -1564,10 +1564,16 @@ fn rust_rr_sudoku_main_flows_after_its_call_trace_row_is_activated() {
     let flow = FlowData::from_event_body(&body).expect("parse the flow");
     println!(
         "FLOW {:?}",
-        flow.steps.iter().take(12).map(|s| (s.line, s.after_values.keys().cloned().collect::<Vec<_>>())).collect::<Vec<_>>()
+        flow.steps
+            .iter()
+            .take(12)
+            .map(|s| (s.line, s.after_values.keys().cloned().collect::<Vec<_>>()))
+            .collect::<Vec<_>>()
     );
     assert!(
-        flow.steps.iter().any(|step| step.after_values.contains_key("test_boards")),
+        flow.steps
+            .iter()
+            .any(|step| step.after_values.contains_key("test_boards")),
         "main's flow shows test_boards: {} steps",
         flow.steps.len()
     );

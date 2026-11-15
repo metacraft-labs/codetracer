@@ -729,6 +729,12 @@ with pkgs;
     export CT_LD_LIBRARY_PATH="${sqlite.out}/lib/:${pcre.out}/lib:${glib.out}/lib:${openssl.out}/lib:${gcc.cc.lib}/lib:${libzip.out}/lib:${zstd.out}/lib";
     export CODETRACER_LD_LIBRARY_PATH="$CT_LD_LIBRARY_PATH"
 
+    # libpcre's directory, from this shell's pinned nixpkgs, for
+    # scripts/detect-siblings.sh: the codetracer-nim sibling's bin/nim
+    # dlopen()s libpcre (pcre1; Nim's std/re does not bind pcre2) and the
+    # floating `nixpkgs` registry no longer carries it.
+    export CT_PCRE_LIB_DIR="${pcre.out}/lib";
+
     # LIBRARY_PATH = compile-time -L search path. Set so tup-sandboxed
     # linker steps resolve -lssl / -lcrypto / -lsqlite3 / -lpcre /
     # -lzip / -lzstd when Nim uses --dynlibOverride + --passL (tup
@@ -736,6 +742,23 @@ with pkgs;
     export LIBRARY_PATH="${openssl.out}/lib:${sqlite.out}/lib:${pcre.out}/lib:${libzip.out}/lib:${zlib.out}/lib:${zstd.out}/lib${
       pkgs.lib.optionalString (!stdenv.isDarwin) ":${libbpf.out}/lib:${elfutils.out}/lib"
     }''${LIBRARY_PATH:+:$LIBRARY_PATH}";
+
+    # NO SELF-RPATH. stdenv's setup appends `-rpath $out/lib` to NIX_LDFLAGS,
+    # which is right for a package build, whose libraries land in $out/lib. In
+    # a dev shell $out is `<checkout>/outputs/out`, which nothing populates, so
+    # every binary linked here carried a run-time search path into the
+    # checkout that never exists. Measured on replay-server: RUNPATH
+    # `$ORIGIN:<checkout>/outputs/out/lib` from `cargo build` in this shell,
+    # against `$ORIGIN` alone from tup (which does not export NIX_LDFLAGS).
+    # src/db-backend/build.rs gives replay-server exactly one search path, its
+    # own directory (codetracer-pm issue 2026-10-05, the 2026-10-12 addendum:
+    # a produced binary carries no load path into a build directory); this is
+    # the one entry the shell added behind its back. Only that flag is
+    # removed; anything else in NIX_LDFLAGS stays.
+    if [ -n "''${out:-}" ]; then
+      NIX_LDFLAGS="''${NIX_LDFLAGS//-rpath $out\/lib/}"
+      export NIX_LDFLAGS
+    fi
 
     # C_INCLUDE_PATH so Nim's direct gcc invocations see
     # #include <bpf/libbpf.h> when tup sandboxes the build.
@@ -790,17 +813,14 @@ with pkgs;
       esac
       export CODETRACER_BUILD_DIR="''${CODETRACER_BUILD_DIR:-$_ct_build_dir}"
       export CODETRACER_REPO_ROOT_PATH=$ROOT_PATH
-      # The per-checkout Nim cache root src/Tuprules.tup imports, so a plain
-      # `tup` in this shell compiles into the same caches `just build-once`
-      # does (which recomputes it for its own checkout regardless) instead of
-      # the Tuprules fallback, which would rebuild every Nim target once.
-      # ci/lib/nim-cache-root.sh holds the scheme.
-      export CT_TUP_NIM_CACHE_ROOT="$(bash "$ROOT_PATH/ci/lib/nim-cache-root.sh" --tup "$ROOT_PATH")"
-      # And the tup rules' Cargo target base (ci/lib/tup-cargo-target.sh),
-      # which they refuse to run without. Preparing the shell is this hook's
-      # job, so an inherited value is dropped first rather than checked; a
-      # refusal leaves both unset, and tup then stops with the remedy.
-      unset CT_TUP_CARGO_TARGET_BASE CT_TUP_CARGO_TARGET_IGNORE
+      # The roots src/Tuprules.tup refuses to parse without (the Cargo target
+      # base and the per-checkout Nim cache root, ci/lib/tup-cargo-target.sh
+      # --export), so a plain `tup` here builds where `just build-once` does.
+      # Preparing the shell is this hook's job, so inherited values are
+      # dropped first rather than checked; a refusal leaves them unset, and
+      # tup then stops with the remedy. No `--reap`: entering a shell must not
+      # remove a base a build in this checkout may be using.
+      unset CT_TUP_CARGO_TARGET_BASE CT_TUP_CARGO_TARGET_IGNORE CT_TUP_NIM_CACHE_ROOT
       if _ct_tup_cargo_env="$(bash "$ROOT_PATH/ci/lib/tup-cargo-target.sh" --export "$ROOT_PATH")"; then
         eval "$_ct_tup_cargo_env"
       else
