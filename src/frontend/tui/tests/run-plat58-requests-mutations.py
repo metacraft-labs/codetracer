@@ -30,6 +30,17 @@ suite, run by `$PLAT58_CARGO_TEST` when set, else `cargo test --test
 seek_to_geid_materialized_test` in `src/db-backend`. The Nim suites run a real
 `replay-server` (`REPLAY_SERVER_BIN`) on the RS-M4 demo container.
 
+`cargo test` builds the crate's `replay-server` binary into
+`src/db-backend/target/debug/` from the MUTATED engine, and the restore
+moves the backup back with its OLD mtime, so cargo would call that binary
+fresh. Every suite after the engine's arm then ran against a mutated server
+when it found one there (the GPUI suites search that path first, and the
+lanes point `REPLAY_SERVER_BIN` at it): at 579be101bd the arms after E1 died
+at the double press's tick check, or refused the stale server, rather than
+for their own defects. So after an engine arm the restored source is
+touched and the binary rebuilt (`$PLAT58_BUILD_ENGINE`, else `cargo build
+--bin replay-server`) before the next arm runs.
+
 Usage:
     run-plat58-requests-mutations.py [--only V1,T1] [--derive]
     run-plat58-requests-mutations.py --needle-scan
@@ -384,6 +395,30 @@ def build_binary():
     return build_with("PLAT58_BUILD_TUI", "build-tui")
 
 
+ENGINE_SOURCES = {ENGINE}
+  # Subjects compiled into the `replay-server` binary.
+
+
+def rebuild_engine(restored):
+    """Rebuild `replay-server` from the restored tree after an engine arm.
+
+    The restored file keeps the mtime it had before the arm, which is older
+    than the binary `cargo test` just built from the mutation, so it is
+    touched first: cargo's fingerprint is mtime based
+    (https://doc.rust-lang.org/cargo/guide/build-cache.html)."""
+    for rel in restored:
+        os.utime(path_of(rel))
+    cmd = os.environ.get("PLAT58_BUILD_ENGINE")
+    argv = ["bash", "-c", cmd] if cmd else \
+        ["cargo", "build", "--bin", "replay-server"]
+    cwd = REPO if cmd else REPO / "src/db-backend"
+    p = subprocess.run(argv, cwd=cwd, capture_output=True, text=True,
+                       timeout=TIMEOUT)
+    if p.returncode != 0:
+        print((p.stdout + p.stderr)[-2000:])
+    return p.returncode == 0
+
+
 def build_gpui():
     return build_with("PLAT58_BUILD_GPUI", "build-gpui")
 
@@ -589,6 +624,11 @@ def main():
                 if sha(rel) != digests[rel]:
                     print(f"ABORT: restore of {rel} failed after {arm_id}.")
                     return 1
+            engine = [rel for rel in files if rel in ENGINE_SOURCES]
+            if engine and not rebuild_engine(engine):
+                print(f"ABORT: replay-server does not rebuild from the "
+                      f"restored tree after {arm_id}.")
+                return 1
         derived[arm_id] = first
         if arm_id in DECLARED_SURVIVORS:
             ok = verdict == "GREEN"
