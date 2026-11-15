@@ -59,13 +59,16 @@ just build-once
 # The server runs every session through `ah` (`branch create`, `agent record`),
 # and a system `ah` from another release makes each command exit -1 with no
 # output. Build the checkout's own `ah` beside the mock agent and hand it to the
-# server through AH_BIN and PATH; an AH_BIN the caller set is kept.
+# server through AH_BIN and PATH; an AH_BIN the caller set is kept. It also
+# gets its own AH_HOME: that `ah` opens $AH_HOME's database, and the user's
+# default one may be migrated past it by a newer `ah` ("migration ... was
+# previously applied but is missing in the resolved migrations").
 # shellcheck disable=SC2016
 build_and_serve='set -e
 cargo build -p mock-agent
 cargo build -p ah-cli --bin ah
 t="${CARGO_TARGET_DIR:-$PWD/target}/debug"
-export AH_BIN="${AH_BIN:-$t/ah}" PATH="$t:$PATH"
+export AH_BIN="${AH_BIN:-$t/ah}" PATH="$t:$PATH" AH_HOME="${AH_HOME:-$(mktemp -d)}"
 exec cargo run -p acp-client-runs-scenario --bin codetracer_m7_rest_server -- "$1" "$2"'
 
 (
