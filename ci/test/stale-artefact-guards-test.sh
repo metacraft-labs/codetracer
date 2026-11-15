@@ -2016,9 +2016,9 @@ fi
 # written to, but is not in .tup/db"; with `[.]` it is Updated). The expression
 # is applied here as an ERE to the path such a write has, which treats `\\` and
 # `[/\\]` exactly as tup's regex engine does.
-if printf '%s\n' "/w/src/build-debug/ct/ct_linkerArgs.txt" | grep -Eq -- "${NIM_IGNORE_RE}" &&
-	printf '%s\n' 'C:\w\src\build-debug\ct\ct_linkerArgs.txt' | grep -Eq -- "${NIM_IGNORE_RE}" &&
-	! printf '%s\n' "/w/src/build-debug/ct/ct_linkerArgsXtxt" | grep -Eq -- "${NIM_IGNORE_RE}"; then
+if grep -Eq -- "${NIM_IGNORE_RE}" <<<"/w/src/build-debug/ct/ct_linkerArgs.txt" &&
+	grep -Eq -- "${NIM_IGNORE_RE}" <<<'C:\w\src\build-debug\ct\ct_linkerArgs.txt' &&
+	! grep -Eq -- "${NIM_IGNORE_RE}" <<<"/w/src/build-debug/ct/ct_linkerArgsXtxt"; then
 	ok "NIM_SIDE_OUTPUTS_IGNORE matches a <name>_linkerArgs.txt side output, and only that name"
 else
 	bad "NIM_SIDE_OUTPUTS_IGNORE matches a <name>_linkerArgs.txt side output, and only that name" \
@@ -2048,7 +2048,7 @@ LOADPATH_WRONG=""
 	grep -qF -- '-Wl,-install_name,@rpath/' <<<"${BUILD_RS_CODE}" ||
 		LOADPATH_WRONG="${LOADPATH_WRONG} build.rs(macOS-install-name-not-@rpath)"
 	[[ "$(grep -c 'deploy_shared_beside_binaries(&so_path)' <<<"${BUILD_RS_CODE}")" -ge 1 ]] &&
-		grep -A12 'fn deploy_shared_beside_binaries' <<<"${BUILD_RS_CODE}" | grep -qF 'profile_dir.join("deps")' ||
+		grep -qF 'profile_dir.join("deps")' <<<"$(grep -A12 'fn deploy_shared_beside_binaries' <<<"${BUILD_RS_CODE}")" ||
 		LOADPATH_WRONG="${LOADPATH_WRONG} build.rs(not-deployed-beside-binaries-and-tests)"
 	grep -qF 'cp $(CARGO_TARGET_BASE)/db_backend_target/debug/libmcr_emulator.so %2o' <<<"${TUP_RULE_LINES}" ||
 		LOADPATH_WRONG="${LOADPATH_WRONG} Tuprules(linux)"
