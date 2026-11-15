@@ -15,11 +15,10 @@
  *   - The RR backend (ct-native-replay)
  *   - The trace recorded with a sourcemap-enabled Nim compiler
  *
- * Stepping forward in the assembly view and by Nim lines in the Nim view are
- * scenarios now (src/tests/scenarios/nim-views/disassembly-steps-by-instruction.yaml,
- * nim-step-moves-by-nim-lines.yaml). The C-view tests and the backward
- * assembly step stay until their scenarios pass (codetracer-pm issues
- * 2026-11-15-a-step-replaces-the-generated-c-listing-with-the-disassembly.md,
+ * Stepping forward in the C view, in the assembly view and by Nim lines are
+ * scenarios now (src/tests/scenarios/nim-views/generated-c-follows-the-nim-stop.yaml,
+ * disassembly-steps-by-instruction.yaml, nim-step-moves-by-nim-lines.yaml).
+ * The two backward steps stay until their scenarios pass (codetracer-pm issues
  * 2026-11-15-reverse-next-never-completes-on-an-rr-nim-recording.md,
  * 2026-11-14-desktop-low-level-code-reverse-instruction-step-leaves-the-function.md).
  */
@@ -140,50 +139,6 @@ test.describe("SteppingThroughViews", () => {
 
   // Nim is an RR-based language: give extra time for compile + record + launch.
   test.setTimeout(180_000);
-
-  test("step forward in C view", async ({ ctPage }) => {
-    const layout = new LayoutPage(ctPage);
-    const statusBar = new StatusBar(ctPage, ctPage.locator("#status-base"));
-    await waitForNimEditorReady(layout, ctPage);
-
-    // Give the backend a chance to deliver the sourcemap before we read
-    // `cLocation`.  Not a gate: `openAlternativeView` reports the precise
-    // missing precondition (including sourcemap state) if the view can't open.
-    await waitForSourcemap(ctPage);
-
-    // Switch to C view (ViewTargetSource).  Throws with a diagnostic if the
-    // view cannot be opened — see `lib/alternative-views.ts` for why this is a
-    // failure rather than a skip.
-    await openAlternativeView(ctPage, ViewTargetSource, async () => {
-      await moveAndSettle(ctPage, () => ctPage.locator("#next-image").click());
-    });
-    await waitForNotBusy(ctPage);
-
-    // Record the current C line from the status bar.
-    const beforeLocation = await waitForStatusBarLocation(statusBar);
-    const beforeLine = beforeLocation.line;
-    const beforeRaw = await getRawStatusBarText(statusBar);
-    const beforeTicks = parseRrTicks(beforeRaw);
-
-    // Press the step-forward (next) button. In C view, this should issue a
-    // C-level next (nextc) which advances by one C source line.
-    const nextBtn = ctPage.locator("#next-image");
-    await moveAndSettle(ctPage, () => nextBtn.click());
-
-    // Verify that the execution position moved forward. We check that either
-    // the line changed or the rrTicks advanced (the line may wrap back on
-    // loops, but ticks always advance forward).
-    const afterRaw = await getRawStatusBarText(statusBar);
-    const afterTicks = parseRrTicks(afterRaw);
-    const afterLocation = await waitForStatusBarLocation(statusBar);
-    const afterLine = afterLocation.line;
-
-    const positionChanged = afterLine !== beforeLine || afterTicks !== beforeTicks;
-    expect(positionChanged).toBe(true);
-
-    // The status bar should show a .c or .h file in C view mode.
-    expect(afterLocation.path).toMatch(/\.(c|h|nim)$/);
-  });
 
   test("step backward in C view (reverse stepping)", async ({ ctPage }) => {
     const layout = new LayoutPage(ctPage);

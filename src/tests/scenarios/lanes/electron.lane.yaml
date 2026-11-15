@@ -390,7 +390,7 @@ applicable:
   - ../noir-space-ship/tracepoint-logs-damage-and-regeneration.yaml
   - ../noir-space-ship/tracepoint-rows-differ-per-pass.yaml
   - ../noir-space-ship/tracepoints-log-messages.yaml
-  - ../nim-views/generated-c-opens-at-the-stop.yaml
+  - ../nim-views/generated-c-follows-the-nim-stop.yaml
   - ../nim-views/disassembly-steps-by-instruction.yaml
   - ../nim-views/nim-step-moves-by-nim-lines.yaml
   - ../layout/event-log-and-scratchpad-tabs.yaml

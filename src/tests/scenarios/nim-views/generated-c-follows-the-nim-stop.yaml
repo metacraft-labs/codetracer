@@ -1,13 +1,13 @@
 scenario: 1
-name: nim-views/generated-c-opens-at-the-stop
+name: nim-views/generated-c-follows-the-nim-stop
 pack: codetracer
 summary: >-
   On an rr recording of the Nim sudoku solver, the editor shows main.nim at
-  the stop (line 60), and View › View Generated C Source opens the generated
-  C in the Low Level Code pane with the row of line 60 (`nimln_(60)`) marked,
-  beside the Nim source. (That the marked row follows a step is not here: a
-  step replaces the listing with the disassembly; codetracer-pm issue
-  2026-11-15-a-step-replaces-the-generated-c-listing-with-the-disassembly.)
+  the stop (line 60); View › View Generated C Source opens the generated C in
+  the Low Level Code pane with the row of line 60 (`nimln_(60)`) marked, and
+  a Next moves the Nim stop and the marked C row together (line 72). (Reverse
+  Next back is not here: it never completes on this recording; codetracer-pm
+  issue 2026-11-15-reverse-next-never-completes-on-an-rr-nim-recording.)
 
 stage:
   - use: record-program
@@ -29,4 +29,9 @@ steps:
   - click: 'menu-bar/menu-item[label="View Generated C Source"]'
   - wait: { until: { at: low-level-code, count: { gt: 10 } }, timeout: 120s }
   - wait: { until: { at: low-level-code, assert: 'active-row-shows("nimln_\\(60\\)")' }, timeout: 60s }
+  - click: 'toolbar/toolbar-button[label="next-image"]'
+    settle: false
+  - wait: { until: { at: status-line, location: { matches: "main.nim:72#" } }, timeout: 60s }
+  - wait: { until: replay-idle, timeout: 60s }
+  - wait: { until: { at: low-level-code, assert: 'active-row-shows("nimln_\\(72\\)")' }, timeout: 60s }
   - expect: { at: window, front-tabs: { contains: "main.nim" } }
