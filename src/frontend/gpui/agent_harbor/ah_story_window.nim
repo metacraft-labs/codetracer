@@ -251,7 +251,13 @@ proc writeRegions(regions: JsonNode) =
     "viewport": {"width": c.width, "height": c.height},
     "regions": regions}
   createDir(parentDir(c.regionsOut))
-  writeFile(c.regionsOut, pretty(doc) & "\n")
+  # Written beside the file and renamed into place, so the file appears
+  # whole or not at all: a capture waits for it to exist and then ends the
+  # window, and a file it saw half-written was left empty (a rename within
+  # one directory is atomic, https://pubs.opengroup.org/onlinepubs/9799919799/functions/rename.html).
+  let partial = c.regionsOut & ".partial"
+  writeFile(partial, pretty(doc) & "\n")
+  moveFile(partial, c.regionsOut)
   echo "codetracer-gpui-story: regions written to ", c.regionsOut
 
 proc pumpClock() =
