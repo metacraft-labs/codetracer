@@ -3683,6 +3683,11 @@ proc onStartDeepReview*(sender: js, response: jsobject(config=Config, startOptio
 
   data.ui.initEventReceived = true
   data.tryInitLayout()
+  # The keyboard and the window's one pointer listener (`dom_pointer`), as
+  # `onNoTrace` and `onInit` install them. A dataset review reaches neither,
+  # and without them every press routed through the pointer keymap did
+  # nothing in a review — its call and loop step buttons among them.
+  configureShortcuts()
 
   # The review's first modified file is opened by `tryInitLayout` itself, as
   # soon as the GoldenLayout tree exists (DeepReview-GUI.md §7 step 2).  It
