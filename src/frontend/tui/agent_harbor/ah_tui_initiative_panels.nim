@@ -366,7 +366,7 @@ proc drawMilestone(c: var AhCanvas; parent: AhNode; m: MilestoneLine; index, row
                  # Dark's tertiary is the stripe's ground here; the active
                  # tab's grey is the next role up.
                  (if c.p.mode == dmDark: c.p.activeTab elif wide: c.p.hover else: c.p.menu)
-               elif wide and index mod 2 == 1: c.tone.band
+               elif wide and index mod 2 == 1: c.tone.milestoneBand
                else: c.tone.body
   if ground == c.tone.body:
     # A plain milestone is an item of the list, not an area: the web

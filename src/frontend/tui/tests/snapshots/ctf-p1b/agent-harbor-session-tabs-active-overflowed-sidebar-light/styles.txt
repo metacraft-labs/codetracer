@@ -8,7 +8,7 @@
 6 #16a34a/#dbd6cc
 7 #7a756a/#dbd6cc
 8 #dc2626/#dbd6cc
-9 #999180/#dbd6cc
+9 #4e4b45/#dbd6cc
 10 #ea580c/#dbd6cc
 11 #2563eb/#dbd6cc
 12 #353430/#dbd6cc

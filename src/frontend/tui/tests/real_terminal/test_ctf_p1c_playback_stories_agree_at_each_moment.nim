@@ -588,6 +588,14 @@ let SpotChecks: seq[SpotCheck] = @[
   ("agent-harbor-fleet", "migration-fails", @["row " & Migration & " | failed [failed]",
     "failure error: the migration test failed", "activity Ran just test",
     "!activity error: the migration test failed"]),
+  # A question answered no longer leads a running row: by +210 s each
+  # answered session shows what it did after its answer (the port ran
+  # `just lint` at +125 s, the bench reported at +160 s, the config at
+  # +210 s), and no session is waiting on a question.
+  ("agent-harbor-fleet", "milestone-done", @["activity Ran just lint",
+    "activity assistant: Reads are three times faster on the new layer.",
+    "activity assistant: The config format is TOML.",
+    "!activity Asked a single-choice question"]),
   ("agent-harbor-fleet", "port-completes", @["row " & Port & " | completed [ended]"])]
 
 proc momentName(moment: string): string =
@@ -1188,6 +1196,156 @@ suite "CTF-P1c: the playback bars' buttons keep their names at every width":
         if b.attr("key") != TuiKeys[control]:
           problems.add "terminal " & size & " " & $control & ": key '" & b.attr("key") & "'"
         if size == "sidebar": ck b.attr("button") == pb.compactControlLabel(control)
+    for p in problems: echo "  ", p
+    ck problems.len == 0
+
+suite "CTF-P1c: the terminal's readout is one group, on a bar of its own":
+  # The web and GPUI print `<moment> +m:ss` as one readout after the
+  # controls, and draw a hairline over the bar. The terminal's time must
+  # start `ReadoutGap` cells after the moment it belongs to (not at the
+  # bar's far end), and the bar must stand on a ground of its own, a step off
+  # both the window's and a panel's, since the terminal separates areas by
+  # their grounds. At every moment's name, so the longest names are held too.
+  proc readoutProblems(story: CodeTracerStory; size: string; cols: int;
+                       mode: DesignMode; moment: string): seq[string] =
+    let pb = newAhPlayback(story.surface, story.fixture, newTestClock())
+    pb.openAtMoment(moment)
+    let p = ahPalette(mode)
+    var c = newAhCanvas(cols, 3, p)
+    c.fill(0, 0, cols, 1, c.tone.frame)
+    c.fill(1, 0, cols, 1, c.tone.body)
+    c.drawPlaybackBar(pb, 2)
+    let at = story.surface & " " & size & " " & $mode & " at " & moment & ": "
+    let m = c.root.first("playback-moment")
+    let t = c.root.first("playback-time")
+    if m.isNil or t.isNil:
+      return @[at & "no moment or no time drawn"]
+    if t.col != m.col + m.width + ReadoutGap:
+      result.add at & "the time starts at cell " & $t.col & ", not " &
+        $(m.col + m.width + ReadoutGap) & " (" & $ReadoutGap &
+        " cells after the moment, which ends at " & $(m.col + m.width) & ")"
+    for k in [0, cols div 2, cols - 1]:
+      let bg = c.bgAt(2, k)
+      if bg == c.tone.frame or bg == c.tone.body:
+        result.add at & "the bar's ground at cell " & $k & " is " & bg &
+          ", the same as the window's or a panel's"
+
+  test "the time follows the moment, and the bar is a step off what is above it":
+    var problems: seq[string]
+    for story in playbackStories():
+      let names = newAhPlayback(story.surface, story.fixture, newTestClock()).momentNames
+      ck names.len > 0
+      for (size, cols) in [("laptop", LaptopCols), ("sidebar", 45)]:
+        for mode in [dmDark, dmLight]:
+          for name in names:
+            problems.add readoutProblems(story, size, cols, mode, name)
+    for p in problems: echo "  ", p
+    ck problems.len == 0
+
+suite "CTF-P1c: the terminal's recording buttons are each a ground of their own":
+  # The web and GPUI draw each recording as its own square, equal gaps
+  # apart. In the terminal two buttons must be parted by at least one cell
+  # of another ground (the tab's), so `2✕` and `3` never read as one block
+  # and a failed button's `✕` never takes the gap. At every moment and size
+  # that shows two or more recordings, in both modes.
+  test "every two recording buttons have a cell of the tab's ground between them":
+    var problems: seq[string]
+    var pairs = 0
+    for story in playbackStories():
+      if story.surface != "agent-harbor-initiative-tabs": continue
+      let names = newAhPlayback(story.surface, story.fixture, newTestClock()).momentNames
+      for (size, cols) in [("laptop", LaptopCols), ("sidebar", 45)]:
+        for mode in [dmDark, dmLight]:
+          for name in names:
+            let m = mountStory(story, cols, LaptopRows, mode, newTestClock(), name)
+            let buttons = m.view.all("recording")
+            for i in 1 ..< buttons.len:
+              let a = buttons[i - 1]
+              let b = buttons[i]
+              inc pairs
+              let at = size & " " & $mode & " at " & name & ", recordings " &
+                a.attr("recording") & " and " & b.attr("recording") & ": "
+              let gap = b.col - (a.col + a.width)
+              if gap < 1:
+                problems.add at & "no cell between them"
+                continue
+              let left = m.canvas.bgAt(a.row, a.col + a.width - 1)
+              let right = m.canvas.bgAt(b.row, b.col)
+              let between = m.canvas.bgAt(a.row, a.col + a.width)
+              if between == left or between == right:
+                problems.add at & "the cell between them is on a button's ground (" &
+                  between & ")"
+    # The scenario shows three recordings side by side on the laptop bar.
+    ck pairs > 0
+    for p in problems: echo "  ", p
+    ck problems.len == 0
+
+suite "CTF-P1c: the terminal's fleet rows take one shape":
+  # The web's fleet rows are all one shape at laptop width. The terminal's
+  # must be too: every row with its status word on the title's line, or
+  # every row with it on a line of its own, never the two mixed in one list;
+  # and a status and meta on the title's line end at least two cells before
+  # the Agent column, so the id never reads as the start of the agent's cell.
+  test "a list's rows all put the status on the same line, with a gutter":
+    var problems: seq[string]
+    var lists = 0
+    for story in playbackStories():
+      if story.surface != "agent-harbor-fleet": continue
+      let names = newAhPlayback(story.surface, story.fixture, newTestClock()).momentNames
+      for mode in [dmDark, dmLight]:
+        for name in names:
+          let m = mountStory(story, LaptopCols, LaptopRows, mode, newTestClock(), name)
+          let at = $mode & " at " & name & ": "
+          var shapes: seq[bool]
+          for row in m.view.all("row"):
+            let status = row.first("status")
+            if status.isNil: continue
+            let inline = status.row == row.row
+            shapes.add inline
+            if inline:
+              let meta = row.first("meta")
+              var agentAt = -1
+              for cell in row.all("col"):
+                if cell.attr("col") == "agent": agentAt = cell.col
+              if not meta.isNil and agentAt >= 0 and agentAt - (meta.col + meta.width) < 2:
+                problems.add at & "row '" & row.attr("row") & "': its meta ends " &
+                  $(agentAt - (meta.col + meta.width)) & " cell(s) before the Agent column"
+          inc lists
+          if shapes.len > 1 and true in shapes and false in shapes:
+            problems.add at & "rows mix the status on the title's line and below it"
+    ck lists > 0
+    for p in problems: echo "  ", p
+    ck problems.len == 0
+
+suite "CTF-P1c: the terminal's milestone band is the web's":
+  # The web bands every other milestone of Initiative Progress at its wide
+  # width on `by-mode(colors-ui-surface-primary-secondary-hover,
+  # colors-ui-surface-base-card)`: in both modes a step off the panel, in
+  # Light a step DARKER. A band lighter than Light's panel reads as a header
+  # strip. So a milestone that is not on the panel must be on the web's
+  # band, and some must be (the scenario has groups of two and three).
+  test "every other milestone sits on the web's band, in both modes":
+    var problems: seq[string]
+    var banded = 0
+    for story in playbackStories():
+      if story.surface != "agent-harbor-initiative-progress": continue
+      let names = newAhPlayback(story.surface, story.fixture, newTestClock()).momentNames
+      for mode in [dmDark, dmLight]:
+        let p = ahPalette(mode)
+        let want = if mode == dmDark: p.hover else: p.menu
+        for name in names:
+          let m = mountStory(story, LaptopCols, LaptopRows, mode, newTestClock(), name)
+          # A milestone is on the panel (an item of the list), on the band,
+          # or (the current one) raised; never on any other ground.
+          for ms in m.view.all("milestone"):
+            if ms.attr("current") == "true": continue
+            let bg = m.canvas.bgAt(ms.row, ms.col + ms.width - 1)
+            if bg == want: inc banded
+            elif bg != p.panel:
+              problems.add $mode & " at " & name & ", " & ms.attr("milestone") &
+                ": on " & bg & ", neither the panel's " & p.panel &
+                " nor the web's band " & want
+    ck banded > 0
     for p in problems: echo "  ", p
     ck problems.len == 0
 

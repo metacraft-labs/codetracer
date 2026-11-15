@@ -53,4 +53,4 @@
                                                                                                                                                                                     
                                                                                                                                                                                     
                                                                                                                                                                                     
-  Play   Step   ◀ Moment   Moment ▶   Rewind   first frame                                                                                                                    +0:00
+  Play   Step   ◀ Moment   Moment ▶   Rewind   first frame  +0:00

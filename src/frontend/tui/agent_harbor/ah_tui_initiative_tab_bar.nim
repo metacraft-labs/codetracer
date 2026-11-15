@@ -46,13 +46,20 @@ proc buttonLabel(rb: RecordingButton): string =
   let suffix = stateSuffix(rb.state).strip
   " " & $rb.number & (if suffix.len > 0: suffix else: " ")
 
+const RecordingGap = 1
+  ## Between two recording buttons, and before `+N`: a cell of the tab's own
+  ## ground, so each button is a ground of its own (the web's and GPUI's
+  ## separate squares) and a failed one's `✕` never stands in the gap.
+
 proc recordingsCells(buttons: RecordingButtons): int =
-  ## The switcher's width: a cell before it, its buttons side by side, and
-  ## `+N`.
+  ## The switcher's width: a cell before it, its buttons `RecordingGap`
+  ## apart, and `+N`.
   if buttons.buttons.len == 0: return 0
   result = 1
-  for rb in buttons.buttons: result += widthOf(buttonLabel(rb))
-  if buttons.hidden > 0: result += widthOf("+" & $buttons.hidden) + 2
+  for i, rb in buttons.buttons:
+    if i > 0: result += RecordingGap
+    result += widthOf(buttonLabel(rb))
+  if buttons.hidden > 0: result += RecordingGap + widthOf("+" & $buttons.hidden) + 2
 
 proc tabContent(vm: InitiativeTabStripVM; tab: StripTab): int =
   result = 1 + 2 + widthOf(tab.title) + 1
@@ -134,9 +141,11 @@ proc drawBarTab(c: var AhCanvas; parent: AhNode; vm: InitiativeTabStripVM;
       let switcher = c.node(n, row, right - rw + 1, rw, 1,
                             [("recordings", $buttons.buttons.len)])
       var at = right - rw + 1
-      for rb in buttons.buttons:
+      for i, rb in buttons.buttons:
+        if i > 0: at += RecordingGap
         at += c.drawRecordingButton(switcher, vm, id, rb, row, at)
       if buttons.hidden > 0:
+        at += RecordingGap
         let more = " +" & $buttons.hidden & " "
         discard c.put(row, at, more, c.p.textLabel, bg = c.tone.chip)
         discard c.node(switcher, row, at, widthOf(more), 1,

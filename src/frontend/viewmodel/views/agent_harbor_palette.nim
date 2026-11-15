@@ -50,7 +50,20 @@ type
     iconSuccess*: string
     iconError*: string
     iconInfo*: string
-    iconSubtle*: string      ## an ended session's grey mark
+    iconSubtle*: string      ## icon/primary/subtle
+    endedMark*: string
+      ## An ended session's, initiative's or fleet row's grey mark:
+      ## `by-mode(colors-ui-icon-primary-subtle,
+      ## colors-ui-icon-primary-default-hover)` (`agent_harbor.styl`). Light's
+      ## icon-subtle (#999180) fell to 1.42:1 on the active tab (#b5ae9f) and
+      ## 2.42:1 on the panel; #4e4b45 keeps 3:1 (WCAG 1.4.11, a graphical
+      ## object) on every Light surface a mark sits on. Dark keeps its role.
+    endedWord*: string
+      ## An ended session's status word (`completed`):
+      ## `by-mode(caption, label)`. Light's caption (#7a756a) fell to 2.59:1
+      ## on the raised row (#c8c2b5); the label role keeps 4.5:1 (WCAG 1.4.3)
+      ## on every Light surface a row sits on, as the row's quiet text does
+      ## on selection (`activeRowQuiet`).
     iconDefault*: string     ## the hollow ring of an idle session
     trackPlanned*: string    ## the milestone bar's planned segment (`by-mode`)
     tabIcon*: string
@@ -115,6 +128,10 @@ proc ahPalette*(mode: DesignMode): AhPalette =
     iconError: t(dtColorsUiIconErrorPrimary),
     iconInfo: t(dtColorsUiIconInformationPrimary),
     iconSubtle: t(dtColorsUiIconPrimarySubtle),
+    endedMark: (if mode == dmDark: t(dtColorsUiIconPrimarySubtle)
+                else: t(dtColorsUiIconPrimaryDefaultHover)),
+    endedWord: (if mode == dmDark: t(dtColorsUiTextPrimaryCaption)
+                else: t(dtColorsUiTextPrimaryLabel)),
     iconDefault: t(dtColorsUiIconPrimaryDefault),
     # The stylesheet's last word on planned (`agent_harbor.styl`, "Planned
     # in Dark: a mark the eye finds"): the mark and the bar's segment both
@@ -158,7 +175,7 @@ proc markOf*(p: AhPalette; attention: SessionAttention): MarkStyle =
   of saQueued: MarkStyle(colour: p.iconInfo)
   of saFailed: MarkStyle(colour: p.iconError)
   of saIdle: MarkStyle(colour: p.iconDefault, ring: true)
-  of saEnded: MarkStyle(colour: p.iconSubtle)
+  of saEnded: MarkStyle(colour: p.endedMark)
 
 proc markOf*(p: AhPalette; state: InitiativeState): MarkStyle =
   case state
@@ -166,7 +183,7 @@ proc markOf*(p: AhPalette; state: InitiativeState): MarkStyle =
   of isWorking: MarkStyle(colour: p.iconSuccess)
   of isBlocked: MarkStyle(colour: p.iconError)
   of isIdle: MarkStyle(colour: p.iconDefault, ring: true)
-  of isEnded: MarkStyle(colour: p.iconSubtle)
+  of isEnded: MarkStyle(colour: p.endedMark)
 
 proc markOf*(p: AhPalette; status: MilestoneStatusClass): MarkStyle =
   case status
@@ -187,7 +204,7 @@ proc statusWordColour*(p: AhPalette; attention: SessionAttention): string =
   of saNeedsInput: p.textWarning
   of saRunning: p.textSuccess
   of saFailed: p.textError
-  of saEnded: p.textCaption
+  of saEnded: p.endedWord
   else: p.textLabel
 
 proc stateWordColour*(p: AhPalette; state: InitiativeState): string =

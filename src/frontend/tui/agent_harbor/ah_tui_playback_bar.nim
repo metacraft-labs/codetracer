@@ -23,6 +23,12 @@
 ## so the readout keeps room for the moment: at the sidebar's 45 cells the
 ## glyphs with a cell of padding each left the longest moments 16 cells.
 ##
+## The readout is one group, as on the web and in GPUI: the moment, then
+## its time two cells after it, not the time pinned to the bar's far end.
+## The bar sits on its own ground (`AhTone.playbackBar`), a step off the
+## window's and the panels', where the web and GPUI draw a hairline above
+## it: the terminal tells areas apart by their grounds, not by rules.
+##
 ## Facts (`AhNode`): `playback` (the playback's state: playing, paused,
 ## ended) on the bar, `playback-control`, `button` (what it draws),
 ## `accessible-name` (its word), `tooltip` and `key` on each button, `playback-moment` and `playback-time` on the readout.
@@ -38,6 +44,9 @@ export agent_harbor_playback
 const
   WideBarCols* = PlaybackCompactBelowPx div 8
     ## From this width (90 cells) the buttons carry their words.
+  ReadoutGap* = 2
+    ## Between the moment and its time: the web's readout gap (0.75rem) in
+    ## cells, as between a session title and what follows it.
 
 type
   PlaybackPress* = proc(operation: string)
@@ -78,11 +87,9 @@ proc drawPlaybackBar*(c: var AhCanvas; pb: AhPlayback; row: int;
   ## The bar on `row`, the canvas's width; a press on a button goes to
   ## `press`. Each button carries the key `keyOf` names for its control
   ## (the base keymap's when nil).
-  # On the window's own ground, as the frame header row is: the bar is part
-  # of the window, not an area of its own beside it (the terminal tells
-  # areas apart by their grounds, `ah_tui_canvas.nim`), and the story above
-  # it keeps its ground.
-  c.fill(row, 0, c.cols, 1, c.tone.frame)
+  # On its own ground, a step off both the window's and a panel's: the
+  # story above it ends where that ground starts (the web's hairline).
+  c.area("playback-bar", row, 0, c.cols, 1, c.tone.playbackBar)
   let bar = c.node(nil, row, 0, c.cols, 1, [("playback", pb.stateLabel)])
   let wide = c.cols >= WideBarCols
   var col = 1
@@ -104,11 +111,17 @@ proc drawPlaybackBar*(c: var AhCanvas; pb: AhPlayback; row: int;
     col += w + 1
   col += 1
   if col < c.cols:
+    # The readout: the moment, cut first when the bar is short, and its
+    # time `ReadoutGap` cells after it; the time is never cut.
     let time = pb.elapsedLabel
     let timeW = widthOf(time)
-    let momentRoom = c.cols - col - timeW - 2
-    if momentRoom > 0:
-      discard c.text(bar, row, col, momentRoom, pb.momentLabel, c.p.textBody,
-                     fact = "playback-moment", before = c.cols - timeW - 1)
-    discard c.text(bar, row, c.cols - timeW - 1, timeW, time, c.p.textCaption,
-                   fact = "playback-time")
+    let momentRoom = c.cols - 1 - col - ReadoutGap - timeW
+    var timeAt = col
+    if momentRoom > 0 and pb.momentLabel.len > 0:
+      let shownW = min(widthOf(pb.momentLabel), momentRoom)
+      timeAt = col + shownW + ReadoutGap
+      discard c.text(bar, row, col, shownW, pb.momentLabel, c.p.textBody,
+                     fact = "playback-moment", before = timeAt)
+    if timeAt + timeW <= c.cols:
+      discard c.text(bar, row, timeAt, timeW, time, c.p.textCaption,
+                     fact = "playback-time")

@@ -8,9 +8,11 @@
  ● Port the route cache to the new storage layer                Claude 2.1.0                   host-a                         Route cache on the new storag…        10m          9m
    running 5ca1ab1e
    Ran just test
- ● Migrate cached routes without a cold start  running 5ca1ab1e Codex 0.9.4                    host-b                         Route cache on the new storag…        15m         14m
+ ● Migrate cached routes without a cold start                   Codex 0.9.4                    host-b                         Route cache on the new storag…        15m         14m
+   running 5ca1ab1e
    Ran just test
- ● Profile the importer on the large fixture  running 5ca1ab1e  Opencode 0.6.1                 host-d                         —                                     20m         19m
+ ● Profile the importer on the large fixture                    Opencode 0.6.1                 host-d                         —                                     20m         19m
+   running 5ca1ab1e
    Ran just profile
                                                                                                                                                                                     
                                                                                                                                                                                     
@@ -51,6 +53,4 @@
                                                                                                                                                                                     
                                                                                                                                                                                     
                                                                                                                                                                                     
-                                                                                                                                                                                    
-                                                                                                                                                                                    
-  Play   Step   ◀ Moment   Moment ▶   Rewind   first frame                                                                                                                    +0:00
+  Play   Step   ◀ Moment   Moment ▶   Rewind   first frame  +0:00

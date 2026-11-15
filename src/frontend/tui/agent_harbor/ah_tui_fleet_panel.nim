@@ -51,7 +51,7 @@ proc markOf(p: AhPalette; category: FleetCategory): MarkStyle =
   of fcRunning: MarkStyle(colour: p.iconSuccess)
   of fcQueued: MarkStyle(colour: p.iconInfo)
   of fcFailed: MarkStyle(colour: p.iconError)
-  of fcEnded: MarkStyle(colour: p.iconSubtle)
+  of fcEnded: MarkStyle(colour: p.endedMark)
 
 proc statusColour(p: AhPalette; category: FleetCategory): string =
   case category
@@ -75,18 +75,35 @@ proc cell(c: var AhCanvas; parent: AhNode; row, col, width: int; s, name: string
                  if empty: c.p.textDisabled elif colour.len > 0: colour else: c.p.textLabel,
                  alignRight = right, before = before)
 
+proc titleLineFits(row: FleetRow; grid: FleetGrid): bool =
+  ## Whether a wide row's title, status word and short meta fit its Session
+  ## column on one line, keeping a gutter: they end at least two cells before
+  ## the Agent column (the column's own gap and one more), so the meta never
+  ## reads as the start of the agent's cell (`… 5ca1ab1e Codex 0.9.4`).
+  widthOf(row.title) + 2 + widthOf(row.statusLabel) + 1 +
+    widthOf(row.metaPartsShort.join(Middot)) <= grid.session - 1
+
+proc titleLinesFit(rows: openArray[FleetRow]; grid: FleetGrid): bool =
+  ## Whether every row's title line fits (`titleLineFits`): the list's rows
+  ## take one shape, all with the status on the title's line or all with it
+  ## on a line of its own, so a list never alternates three- and two-line
+  ## rows (the web's rows are all one shape).
+  for row in rows:
+    if not row.titleLineFits(grid): return false
+  true
+
 proc drawRow(c: var AhCanvas; parent: AhNode; vm: FleetSnapshotVM; row: FleetRow;
              index, top, col, width: int; columns, anyInitiative: bool;
-             grid: FleetGrid): int =
+             grid: FleetGrid; oneLineAll: bool): int =
   let id = row.id
   let sel = row.selected
   let selText = c.p.selectedText
   let shown = if row.expanded: row.activity.len else: min(1, row.activity.len)
   let mainW = if columns: grid.session else: width - 3 - widthOf(row.ageLabel) - 2
   let metaWords = (if columns: row.metaPartsShort else: row.metaParts).join(Middot)
-  # Wide: the title and meta share a line while both fit.
-  let oneLine = columns and widthOf(row.title) + 2 + widthOf(row.statusLabel) + 1 +
-                widthOf(metaWords) <= mainW
+  # Wide: the title and meta share a line when every row's do
+  # (`titleLinesFit`).
+  let oneLine = columns and oneLineAll
   let height = (if oneLine: 1 else: 2) + (if row.failureText.len > 0: 1 else: 0) + shown
   let ground = if sel: c.p.action elif index mod 2 == 1: c.tone.band else: c.tone.body
   if ground == c.tone.body:
@@ -265,5 +282,7 @@ proc drawFleetPanel*(c: var AhCanvas; vm: FleetSnapshotVM; row, col, width, heig
                else: AgentHarborFleetFilteredEmptyText, "empty")
       return
     let list = c.node(host, r, col, width, bodyH, [("rows", "list")])
+    let oneLineAll = columns and titleLinesFit(rows, grid)
     for i, fr in rows:
-      r += c.drawRow(list, vm, fr, i, r, col, width, columns, anyInitiative, grid)
+      r += c.drawRow(list, vm, fr, i, r, col, width, columns, anyInitiative, grid,
+                     oneLineAll)

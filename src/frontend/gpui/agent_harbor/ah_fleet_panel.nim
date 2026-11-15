@@ -69,7 +69,7 @@ proc markOf(p: AhPalette; category: FleetCategory): MarkStyle =
   of fcRunning: MarkStyle(colour: p.iconSuccess)
   of fcQueued: MarkStyle(colour: p.iconInfo)
   of fcFailed: MarkStyle(colour: p.iconError)
-  of fcEnded: MarkStyle(colour: p.iconSubtle)
+  of fcEnded: MarkStyle(colour: p.endedMark)
 
 proc statusColour(p: AhPalette; category: FleetCategory): string =
   ## The status word (`.ah-fleet-status-label`): the label role, or the

@@ -228,8 +228,10 @@ AH_ROW_DOT = 0.5rem
 .ah-fleet-cat-failed .ah-fleet-dot
   background: colors-ui-icon-error-primary
 
+// Ended: grey, but in Light a grey that keeps 3:1 on every surface a mark
+// sits on (icon-subtle fell to 1.42:1 on the active tab).
 .ah-fleet-cat-ended .ah-fleet-dot
-  background: colors-ui-icon-primary-subtle
+  background: by-mode(colors-ui-icon-primary-subtle, colors-ui-icon-primary-default-hover)
 
 .ah-fleet-row-main
   display: flex
@@ -510,7 +512,9 @@ AH_MARK = 0.5rem
   width: AH_MARK
   height: AH_MARK
   border-radius: 50%
-  background: colors-ui-icon-primary-subtle
+  // An ended session's mark (no other rule applies to it): grey, in Light
+  // a grey that keeps 3:1 on the active tab (#b5ae9f) and every panel.
+  background: by-mode(colors-ui-icon-primary-subtle, colors-ui-icon-primary-default-hover)
 
 .ah-att-needs-input .ah-tab-mark
   background: colors-ui-icon-warning-primary
@@ -859,9 +863,10 @@ AH_MARK = 0.5rem
 .ah-att-failed .ah-session-row-status
   color: colors-ui-text-error-primary
 
-// An ended session's status word is as quiet as its grey mark.
+// An ended session's status word is as quiet as its grey mark; in Light
+// the label role, since the caption fell to 2.59:1 on the raised row.
 .ah-att-ended .ah-session-row-status
-  color: colors-ui-text-primary-caption
+  color: by-mode(colors-ui-text-primary-caption, colors-ui-text-primary-label)
 
 .ah-session-list-source
   flex-shrink: 0
@@ -1345,7 +1350,7 @@ AH_MARK = 0.5rem
 .ah-ist-ended > .ah-tab-mark,
 .ah-ist-ended > .ah-popup-head > .ah-tab-mark,
 .ah-ist-ended > .ah-initiative-info > .ah-initiative-head > .ah-tab-mark
-  background: colors-ui-icon-primary-subtle
+  background: by-mode(colors-ui-icon-primary-subtle, colors-ui-icon-primary-default-hover)
 
 // `n/m` milestones: tabular figures, quieter than the name.
 .ah-tab-progress

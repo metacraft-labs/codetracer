@@ -36,8 +36,9 @@ import std/[os, strutils, unittest]
 from std/unicode import runes, Rune, `$`
 
 import ../agent_harbor/ah_tui_stories
+import ../../styles/generated/design_tokens
 
-const ExpectedAssertions = 9
+const ExpectedAssertions = 11
 
 const Modes = [dmDark, dmLight]
 
@@ -179,6 +180,98 @@ suite "CTF-P1b: the checks can fail":
     c.area("top", 0, 0, 10, 2, c.tone.body)
     c.area("bottom", 2, 0, 10, 2, c.tone.body)
     ck areaProblems(c).len > 0
+
+suite "CTF-P1c: an ended mark and word keep their contrast on every surface":
+  # The ended role is grey, and grey has no hue to fall back on: on Light's
+  # active tab icon-subtle measured 1.42:1, and the caption-coloured
+  # `completed` 2.59:1 on Light's raised row. The palette all three hosts
+  # resolve (`agent_harbor_palette`, and `agent_harbor.styl` for the web)
+  # must keep an ended session's and an ended initiative's mark at 3:1 (WCAG
+  # 1.4.11, https://www.w3.org/TR/WCAG21/#non-text-contrast) and an ended
+  # session's status word at 4.5:1 (WCAG 1.4.3,
+  # https://www.w3.org/TR/WCAG21/#contrast-minimum) on every surface a mark
+  # or a row sits on, in both modes.
+  test "the ended mark at 3:1 and the ended word at 4.5:1, Dark and Light":
+    var problems: seq[string]
+    for mode in Modes:
+      let p = ahPalette(mode)
+      let t = p.tone
+      let surfaces = [("the window", p.ground), ("the panel", p.panel),
+                      ("the active tab", p.activeTab), ("the active row", p.activeRow),
+                      ("a row band", t.band), ("a hovered row", p.hover),
+                      ("a group header", t.group[0]), ("a group header", t.group[1]),
+                      ("a menu", p.menu)]
+      for (name, ground) in surfaces:
+        for (what, ink) in [("session", p.markOf(saEnded).colour),
+                            ("initiative", p.markOf(isEnded).colour)]:
+          let ratio = contrastOf(ink, ground)
+          if ratio < 3.0:
+            problems.add $mode & ": an ended " & what & "'s mark " & ink & " on " & name &
+              " " & ground & " is " & formatFloat(ratio, ffDecimal, 2) & ":1"
+        let word = p.statusWordColour(saEnded)
+        let ratio = contrastOf(word, ground)
+        if ratio < 4.5:
+          problems.add $mode & ": the ended word " & word & " on " & name & " " & ground &
+            " is " & formatFloat(ratio, ffDecimal, 2) & ":1"
+    for problem in problems: echo "  ", problem
+    ck problems.len == 0
+
+  test "the web's ended rules resolve to the colours held above":
+    # The web does not read the palette: its marks and words come from
+    # `agent_harbor.styl`. Each ended rule's colour, a design token or
+    # `by-mode(<dark token>, <light token>)`, must resolve in each mode to
+    # the palette's ended colour the case above holds to its contrast, so the
+    # web cannot keep the grey that fell to 1.42:1 while the native hosts
+    # move on.
+    let styl = readFile(currentSourcePath().parentDir.parentDir.parentDir /
+                        "styles" / "components" / "agent_harbor.styl").splitLines
+
+    proc tokenNamed(name: string): (bool, DesignToken) =
+      ## The design token a stylesheet name spells (`colors-ui-icon-…` is
+      ## `colors/ui/icon/…`).
+      for t in DesignToken:
+        if ($t).replace('/', '-') == name: return (true, t)
+
+    proc declaration(selector, property: string): string =
+      ## The value of `property` in the rule whose selector list starts with
+      ## the line `selector`; "" when there is none.
+      for i, line in styl:
+        if line != selector: continue
+        var j = i + 1
+        while j < styl.len and styl[j].len > 0 and styl[j][0] != ' ': inc j
+        while j < styl.len and styl[j].startsWith("  "):
+          let d = styl[j].strip
+          if d.startsWith(property & ":"): return d[property.len + 1 .. ^1].strip
+          inc j
+        return ""
+
+    var problems: seq[string]
+    var resolved = 0
+    for (selector, property, word) in [
+        (".ah-tab-mark", "background", false),
+        (".ah-ist-ended > .ah-tab-mark,", "background", false),
+        (".ah-fleet-cat-ended .ah-fleet-dot", "background", false),
+        (".ah-att-ended .ah-session-row-status", "color", true)]:
+      let value = declaration(selector, property)
+      var names = @[value, value]
+      if value.startsWith("by-mode(") and value.endsWith(")"):
+        names = value["by-mode(".len ..< value.high].split(',')
+        for n in names.mitems: n = n.strip
+      if names.len != 2:
+        problems.add selector & ": " & property & " '" & value & "' is not one token or by-mode of two"
+        continue
+      for k, mode in Modes:
+        let (known, token) = tokenNamed(names[k])
+        let p = ahPalette(mode)
+        let want = if word: p.statusWordColour(saEnded) else: p.markOf(saEnded).colour
+        if not known:
+          problems.add selector & ": '" & names[k] & "' is not a design token"
+        elif tokenHexOf(token, mode) != want:
+          problems.add $mode & ": " & selector & " resolves to " & tokenHexOf(token, mode) &
+            " (" & names[k] & "), the palette's ended colour is " & want
+        else: inc resolved
+    for problem in problems: echo "  ", problem
+    ck problems.len == 0 and resolved == 8
 
 suite "CTF-P1b: assertion count":
   test "every assertion ran":

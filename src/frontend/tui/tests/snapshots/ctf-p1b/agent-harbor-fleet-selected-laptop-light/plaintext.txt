@@ -35,7 +35,8 @@
  ● Profile the paperboat renderer and remove the per-frame al…  Gemini 1.8.2                   mac-01                         Route cache on the new storag…     6h 55m          6h
    running orbit-labs/flight-planner · fix/latency-chart-light…
    Committed 2 files  +1
- ● latency-chart-2  running orbit-ws-6 · efc7e734               Opencode 0.12.7 ×2             win-01                         —                                  7h 29m          7h
+ ● latency-chart-2                                              Opencode 0.12.7 ×2             win-01                         —                                  7h 29m          7h
+   running orbit-ws-6 · efc7e734
    Running the test suite  +1
  ● Document every public function of the units library          Claude 4.2.0                   build-01                       Telemetry upload retries           8h 03m          7h
    running orbit-labs/orbit-sim · fix/propagator-step-count…
@@ -53,4 +54,3 @@
    failed orbit-ws-6 · cf5812b4
    build failed: 3 tests did not pass
    Editing src/propagator/step.rs
- ● Reject route plans whose waypoints leave the mission corri…  Gemini 1.8.2                   build-01                       Telemetry upload retries           3h 10m          8h

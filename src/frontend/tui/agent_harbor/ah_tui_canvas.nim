@@ -139,6 +139,19 @@ type
       ## selected fleet row): surface/action/primary-hover, a step off the
       ## selection in both modes, where the web draws the chip's outline.
     chosen*: string  ## the active filter chip
+    milestoneBand*: string
+      ## Every other milestone of Initiative Progress at its wide width: the
+      ## web's band (`.ah-milestone:nth-child(even)`: Dark's secondary-hover,
+      ## Light's card), a step darker than Light's panel. Unlike `band` it
+      ## needs no lighter Light ground: a milestone row carries no status word,
+      ## only its mark and its caption-coloured counts, which read on the card
+      ## as on the web.
+    playbackBar*: string
+      ## A story host's playback bar (`ah_tui_playback_bar`): a step off the
+      ## window's ground and a panel's in both modes, where the web and GPUI
+      ## draw a hairline above the bar. Dark: surface/base/raised (#161616,
+      ## below the window's #1b1b1b and the panel's #282828); Light: the
+      ## card (#dbd6cc, below the panel's #e6e2db and the window's #f8f6f2).
 
 # ---------------------------------------------------------------------------
 # Colours
@@ -184,7 +197,10 @@ proc tone*(p: AhPalette): AhTone =
          # the next grey up.
          chip: (if dark: p.activeTab else: p.tertiary),
          chipOnAction: tokenHexOf(dtColorsUiSurfaceActionPrimaryHover, p.mode),
-         chosen: p.activeTab)
+         chosen: p.activeTab,
+         milestoneBand: (if dark: p.hover else: p.menu),
+         playbackBar: (if dark: tokenHexOf(dtColorsUiSurfaceBaseRaised, p.mode)
+                       else: p.menu))
 
 proc luminanceOf*(hex: string): float =
   ## WCAG 2 relative luminance of `#rrggbb`
