@@ -381,4 +381,5 @@ applicable:
   - ../formatted-view/step-over.yaml
   - ../formatted-view/minified-step-over.yaml
   - ../formatted-view/statement-step-over.yaml
+  - ../visual-replay/real-recording.yaml
 unsupported: []
