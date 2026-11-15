@@ -1267,6 +1267,10 @@ test_lane_files() {
 		# …and its language features against the dev shell's real
 		# `nimlangserver`, spoken to over stdio by the runner.
 		echo src/frontend/tests/shared_editor_lsp_chromium_test.nim
+		# A side overlay's hide finishes when its slide-out animation ends,
+		# even when the renderer's timers stall. Animation events and timer
+		# scheduling are a browser's; jsdom runs neither.
+		echo src/frontend/tests/auto_hide_slide_out_chromium_test.nim
 		;;
 
 	main-process)

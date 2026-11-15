@@ -1352,15 +1352,42 @@ const OVERLAY_SLIDE_OUT_MS = 100
 ## Pending end-of-slide cleanup for a closing overlay; -1 when none.
 var overlayCloseTimerId = -1
 
+var pendingOverlayTeardown: proc() = nil
+  ## The teardown of the hide whose slide-out is under way, until it has run
+  ## or a reopen has cancelled it (`cancelOverlayClose`).
+
+proc finishPendingOverlayClose() =
+  ## Complete a hide whose slide-out is still under way, now.
+  if overlayCloseTimerId != -1:
+    windowClearTimeout(overlayCloseTimerId)
+    overlayCloseTimerId = -1
+  let teardown = pendingOverlayTeardown
+  pendingOverlayTeardown = nil
+  if not teardown.isNil:
+    teardown()
+
 proc cancelOverlayClose() =
   ## A panel is opening while the previous one is still sliding out: drop the
   ## pending cleanup (the opening panel owns the overlay now) and the slide-out.
+  pendingOverlayTeardown = nil
   if overlayCloseTimerId != -1:
     windowClearTimeout(overlayCloseTimerId)
     overlayCloseTimerId = -1
   let overlayEl = document.getElementById(cstring"auto-hide-overlay")
   if not overlayEl.isNil:
     overlayEl.classList.remove(cstring"closing")
+
+proc onSlideOutEnd(el: kdom.Element; done: proc()) {.importjs: """
+  (function (el, done) {
+    function onEnd(ev) {
+      if (!String(ev.animationName || '').endsWith('-out')) return;
+      el.removeEventListener('animationend', onEnd);
+      done();
+    }
+    el.addEventListener('animationend', onEnd);
+  })(#, #)""".}
+  ## `done` when `el`'s slide-out animation (`ct-overlay-slide-*-out`,
+  ## auto_hide.styl) ends.
 
 proc hideOverlay*(slideOut = true) =
   ## Hide the currently visible auto-hide overlay.
@@ -1379,6 +1406,12 @@ proc hideOverlay*(slideOut = true) =
   if autoHideState.isNil:
     return
 
+  # A previous hide still sliding out is completed first: its teardown puts
+  # its revealed strip back and detaches its content, which a second hide
+  # would otherwise never do (it used to clear the first one's timer and lose
+  # its teardown).
+  finishPendingOverlayClose()
+
   cancelHoverPreview()
   autoHideState.pinnedOpen = false
 
@@ -1392,8 +1425,16 @@ proc hideOverlay*(slideOut = true) =
 
   let overlayEl = document.getElementById(cstring"auto-hide-overlay")
 
+  var tornDown = false
   proc teardown() =
-    overlayCloseTimerId = -1
+    if tornDown:
+      return
+    tornDown = true
+    if pendingOverlayTeardown == teardown:
+      pendingOverlayTeardown = nil
+    if overlayCloseTimerId != -1:
+      windowClearTimeout(overlayCloseTimerId)
+      overlayCloseTimerId = -1
     # Re-opened while sliding out: the overlay belongs to the new panel now,
     # and `doShowOverlayImpl` has already detached this one if it had to.
     if autoHideState.overlayVisible:
@@ -1425,14 +1466,25 @@ proc hideOverlay*(slideOut = true) =
       overlayEl.classList.remove(cstring"auto-hide-overlay-bottom")
       overlayEl.classList.remove(cstring"collapsed-overlay")
 
-  if overlayCloseTimerId != -1:
-    windowClearTimeout(overlayCloseTimerId)
-    overlayCloseTimerId = -1
   if slideOut and not overlayEl.isNil and overlayEl.classList.contains(cstring"visible"):
     overlayEl.classList.add(cstring"closing")
     if revealedEdge != Bottom:
       revealClosing[revealedEdge] = true
+    # The hide completes when the slide-out animation ends (`animationend`),
+    # with the timer as the fallback for a slide that does not run (reduced
+    # motion). A timer alone left the overlay half-way off screen whenever
+    # the renderer's timers were held back longer than the slide: Escape on a
+    # minimal sidebar's overlay then failed to close it within 15 s in 3 of 6
+    # realistic scenario runs (codetracer-pm 21830530), the teardown measured
+    # 12 s after Escape in a passing one.
+    pendingOverlayTeardown = teardown
     overlayCloseTimerId = windowSetTimeout(teardown, OVERLAY_SLIDE_OUT_MS)
+    # Only while this hide is still the pending one: a reopen cancels it
+    # (`cancelOverlayClose`), and its listener must not tear down the panel
+    # that reopened when a later slide-out ends.
+    onSlideOutEnd(overlayEl, proc() =
+      if pendingOverlayTeardown == teardown:
+        finishPendingOverlayClose())
   else:
     teardown()
 
