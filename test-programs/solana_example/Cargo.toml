@@ -1,0 +1,23 @@
+[package]
+name = "solana_example"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "A Solana program for CodeTracer's UI tests, compiled to SBF with `cargo build-sbf`"
+
+# The lib source keeps its name, so the DWARF in the `.so` names
+# solana_flow_test.rs (the file the UI opens).
+[lib]
+path = "src/solana_flow_test.rs"
+crate-type = ["cdylib", "lib"]
+
+[dependencies]
+solana-program = "2"
+
+# cargo-build-sbf builds `[profile.release]`: keep the DWARF (and the code
+# unoptimised) so every PC maps to its source line.
+[profile.release]
+debug = true
+lto = "off"
+opt-level = 0
+strip = "none"

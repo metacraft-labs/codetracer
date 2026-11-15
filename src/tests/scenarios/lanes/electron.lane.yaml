@@ -296,6 +296,9 @@ applicable:
   - ../shell/recorded-build-marks-and-opens-recording.yaml
   - ../languages/tolk-opens-at-entry.yaml
   - ../languages/tolk-call-trace-and-stepping.yaml
+  - ../languages/solana-opens-at-entry.yaml
+  - ../languages/solana-call-trace-and-stepping.yaml
+  - ../breakpoints/solana-column-breakpoint-at-caret.yaml
   # --- pw5 deepreview ---
   - ../deepreview/boundary-drag-reveals-what-it-crosses.yaml
   - ../deepreview/boundary-is-operable-from-the-keyboard.yaml
