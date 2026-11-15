@@ -55,7 +55,7 @@ src/frontend/viewmodel/views/isonim_flow_inline_view.nim click 5
 src/frontend/viewmodel/views/isonim_flow_view.nim click 5
 src/frontend/viewmodel/views/isonim_frame_viewer_view.nim click 4
 src/frontend/viewmodel/views/isonim_low_level_code_view.nim click 1
-src/frontend/viewmodel/views/isonim_menu_shell_view.nim click 10
+src/frontend/viewmodel/views/isonim_menu_shell_view.nim click 8
 src/frontend/viewmodel/views/isonim_no_source_view.nim click 1
 src/frontend/viewmodel/views/isonim_process_tree_view.nim click 1
 src/frontend/viewmodel/views/isonim_recording_switcher_view.nim click 2
