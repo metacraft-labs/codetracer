@@ -960,16 +960,22 @@ suite "IsoNim Menu Shell — structure":
         onNodeClick: proc(path: seq[int]) = clickedPath = path,
         onSearchResultClick: proc(index: int) = searchIndex = index))
 
-    # `.menu-element` is the clickable leaf row; `launch_config.spec.ts`
-    # activates a launch configuration by clicking exactly this selector
+    # `.menu-element` is the entry's item; `launch_config.spec.ts` activates
+    # a launch configuration by clicking exactly this selector
     # (".menu-nested-elements .menu-element", catalogued in
-    # `codetracer-specs/Testing/UI-Test-Catalog.md`), so the class and the
-    # click handler have to sit on the same element.
+    # `codetracer-specs/Testing/UI-Test-Catalog.md`). The click handler is
+    # on the row around it, which the click reaches by bubbling — one
+    # handler, so one click runs the entry once
+    # (`session-chrome/menu_item_click_runs_once_test.nim`). The mock
+    # renderer does not bubble, so the click is delivered up the ancestors.
     let item = findByClass(menuPanel, "menu-element")
     check item != nil
     # Guarded — see the note above.
     if item != nil:
-      item.fireEvent("click")
+      var node = item
+      while node != nil:
+        node.fireEvent("click")
+        node = node.parent
       check clickedPath == @[1]
 
     let searchPanel = renderMenuShell[MockRenderer, MockNode](
