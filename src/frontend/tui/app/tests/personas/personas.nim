@@ -161,13 +161,24 @@ proc probeOf*(p: CapturedPersona; cprExpected = 6): TerminalProbe =
                          cprMarked: p.roundMarked)
   for token in p.replies:
     if token.startsWith("\x1b[?") and token.endsWith("c"):
+      if result.answered:
+        # The plain-CPR fallback round's own fence.
+        result.cprFallbackFenced = true
+        break
       result.answered = true
+      # A round that asked DECXCPR and got no marked answer is asked again
+      # with plain CPR (§4.3, `cprFallbackDue`); the capture tool asks that
+      # round as the binary does, and its replies follow this fence.
+      if result.cprMarked and result.cprAnswers.len == 0 and cprExpected > 0:
+        result.cprFallbackAsked = true
+        continue
       break
     let (isCpr, _, col) = parseCpr(token)
     let (isMarked, _, mcol) = parseMarkedCpr(token)
     if isMarked and result.cprMarked and result.cprAnswers.len < cprExpected:
       result.cprAnswers.add max(0, mcol - 1)
-    elif isCpr and not result.cprMarked and result.cprAnswers.len < cprExpected:
+    elif isCpr and (not result.cprMarked or result.cprFallbackAsked) and
+         result.cprAnswers.len < cprExpected:
       result.cprAnswers.add max(0, col - 1)
     elif token.startsWith("\x1bP>|"):
       let (ok, text) = parseXtversionReply(token)

@@ -74,7 +74,11 @@ import ./persona_peer
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count.
-const ExpectedAssertions = 227
+const ExpectedAssertions = 231
+  ## 227 -> 231, measured: the personas re-captured with the DECXCPR round
+  ## — kitty and xterm answer it (6 marked reports each, as before), and
+  ## the four that do not answer the plain-CPR fallback round (one check
+  ## that the round was answered, +4, and its 6 reports, as before).
   ## 223 -> 227: §4.3 DECXCPR — Ctrl+F3 on a terminal that never answers
   ## (+3), and the marked query never left on the screen (+1).
   ## 120 -> 223, measured: the peer answers each of the six captured
@@ -221,8 +225,20 @@ suite "PLAT-71 Tier 2: the binary adapts to the terminal it runs in":
       ck p.answerFor("\x1b[?u", 0) == c.answerFor("kittyKeyboard")
       for mode in [1016, 2026, 2027]:
         ck p.answerFor("\x1b[?" & $mode & "$p", 0) == c.answerFor("decrqm." & $mode)
+      # The width probe's cursor reports, for the question the capture's
+      # round asked: DECXCPR (`CSI ? 6 n`) in a round captured since §4.3
+      # moved to it, plain CPR in one captured before.
+      let cprQuery = if c.roundMarked: MarkedCprQuery else: CprQuery
       for i in 0 ..< c.cprCount:
-        ck p.answerFor("\x1b[6n", i) == c.answerFor("cpr", i)
+        ck p.answerFor(cprQuery, i) == c.answerFor("cpr", i)
+      # A terminal that answered the fence but not DECXCPR was asked again
+      # with plain CPR (the fallback round): the peer answers that question
+      # with the fallback round's reports.
+      if c.decxcpr == dxNo:
+        let fallback = c.widthReplies
+        ck fallback.len > 0
+        for i in 0 ..< fallback.len:
+          ck p.answerFor(CprQuery, i) == fallback[i]
 
   test "the profile per persona, every axis with its source":
     block kittyCase:

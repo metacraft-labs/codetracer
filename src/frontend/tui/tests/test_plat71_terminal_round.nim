@@ -181,8 +181,13 @@ suite "PLAT-71 Tier 1: the start-up round":
       for i, token in c.replies:
         discard noteReply(shipped, token)
         if shipped.answered:
-          fenceAt = i
-          break
+          if shipped.cprFallbackDue:
+            # What the binary does next (`askCprFallback`): the plain-CPR
+            # round, whose replies and own fence follow in the capture.
+            shipped.cprFallbackAsked = true
+          elif not shipped.cprFallbackAsked or shipped.cprFallbackFenced:
+            fenceAt = i
+            break
       # After the fence, the answer to what was asked after it (tmux's
       # wrapped OSC 22 query), as the main loop's `takeReply` reads it.
       if c.afterFence.len > 0:

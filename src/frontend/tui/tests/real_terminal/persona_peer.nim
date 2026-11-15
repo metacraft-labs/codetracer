@@ -59,6 +59,10 @@ type
       ## was not measured (`dxUnknown`) the peer answers only plain CPR, so
       ## the binary's plain-CPR fallback round is what measures the widths —
       ## the binary is correct either way.
+    markedReplies*: seq[string]
+      ## A captured persona's DECXCPR answers, byte for byte, in the order
+      ## asked: a terminal may add the page (`CSI ? r ; c ; p R`, xterm), which
+      ## an answer built from `widths` would drop. Empty: built from `widths`.
     kittyKeyboard*: bool
     pointerReply*: string
       ## The answer to OSC 22's query, `1,0,…`; "" answers nothing.
@@ -129,7 +133,9 @@ proc answerFor*(p: Persona; query: string; cprIndex: int): string =
     (if cprIndex < p.widths.len: "\x1b[1;" & $(p.widths[cprIndex] + 1) & "R"
      else: "")
   of "\x1b[?6n":
-    (if p.decxcpr == dxYes and cprIndex < p.widths.len:
+    (if p.decxcpr == dxYes and cprIndex < p.markedReplies.len:
+       p.markedReplies[cprIndex]
+     elif p.decxcpr == dxYes and cprIndex < p.widths.len:
        "\x1b[?1;" & $(p.widths[cprIndex] + 1) & "R"
      else: "")
   of PointerQuery, WrappedPointerQuery:
@@ -226,6 +232,9 @@ proc fromCapture*(c: CapturedPersona): Persona =
       let (ok, m, ps) = parseDecrqm(a)
       if ok and m == mode: result.modes[mode] = ps
   result.decxcpr = c.decxcpr
+  if c.decxcpr == dxYes:
+    for i in 0 ..< c.cprCount:
+      result.markedReplies.add c.answerFor("cpr", i)
   for reply in c.widthReplies:
     let (marked, _, mcol) = parseMarkedCpr(reply)
     let (_, _, col) = parseCpr(reply)
