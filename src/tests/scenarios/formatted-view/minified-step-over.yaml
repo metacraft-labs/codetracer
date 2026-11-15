@@ -1,0 +1,26 @@
+scenario: 1
+name: formatted-view/minified-step-over
+pack: codetracer
+summary: >-
+  The same minified program and source map without the formatted view: Next
+  (F10) keeps the recorded source's line granularity and moves from line 1 of
+  program.js straight to line 2.
+
+stage:
+  - use: write-project
+    with:
+      files:
+        program.js: "var a = 1; var b = 2;\nvar c = a + b;\n"
+        program.js.map: "{\"version\": 3, \"file\": \"program.js\", \"sources\": [\"program.src.js\"], \"names\": [], \"mappings\": \"AAAA,WAEA;AAEA\"}"
+        program.src.js: "var a = 1;\n\nvar b = 2;\n\nvar c = a + b;\n"
+  - use: record-program
+    with: { program: $project/program.js }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 180s }
+  - wait: { until: { at: 'editor[file="program.js"]', current-line: 1 }, timeout: 60s }
+  - key: F10
+    settle: false
+  - wait: { until: replay-idle, timeout: 60s }
+  - wait: { until: { at: 'editor[file="program.js"]', current-line: 2 }, timeout: 60s }
