@@ -297,6 +297,40 @@ fn is_read_timeout(e: &std::io::Error) -> bool {
 ///
 /// Linux reads the CPU times from `/proc`. Elsewhere a worker is never
 /// known to be working, so the read timeout alone decides, as before.
+/// Whether a query that outlives its read timeout is waited on while the
+/// worker is busy (`WorkerProgress`), rather than ending in a timeout that
+/// replaces the worker.
+///
+/// Only a query that moves the replay holding the user's position: killing
+/// that worker loses where the user stands, and those queries (a run to
+/// entry, a step, a reverse continue) are the ones a loaded host makes slow.
+/// The side replays (`flow`, `tracepoint`) hold no position of the user's,
+/// and every other query is a read. For them the timeout stays the cure for
+/// a worker that is busy but no longer answering: a CPU-using worker tree is
+/// not proof that the query is being answered. Waiting on every query left
+/// an MCR call trace's flow undrawn for over a minute, where the timeout and
+/// a fresh worker had drawn it in seconds (C, D and Crystal sudoku,
+/// 2026-11-15).
+fn waits_on_a_busy_worker(worker_name: &str, raw_json: &str) -> bool {
+    const SIDE_REPLAYS: &[&str] = &["flow", "tracepoint"];
+    const MOTIONS: &[&str] = &[
+        "RunToEntry",
+        "Step",
+        "JumpToCall",
+        "EventJump",
+        "CallstackJump",
+        "TracepointJump",
+        "LocationJump",
+        "RestoreAt",
+        "SeekToGeid",
+        "SeekToTicks",
+        "ReverseContinue",
+        "SaveReplayPosition",
+        "RestoreReplayPosition",
+    ];
+    !SIDE_REPLAYS.contains(&worker_name) && MOTIONS.contains(&replay_query_kind(raw_json).as_str())
+}
+
 struct WorkerProgress {
     pid: Option<u32>,
     last_cpu: Option<u64>,
@@ -969,13 +1003,16 @@ impl ReplayWorker {
 
         debug!("wait to read");
 
-        // The read timeout is a bound on a worker that stopped working, not on
-        // a slow one: when it passes while the worker's process tree (the
-        // worker, rr and the replayed program) is still using CPU, the wait
-        // goes on, up to `replay_query_ceiling`. Killing a healthy worker for
-        // being slow lost the user's position: on a loaded host an rr
-        // `RunToEntry` or reverse continue took more than 10 s, the worker was
-        // stopped, and the next query (a value-origin walk) found no worker.
+        // For a query that moves the user's replay, the read timeout is a
+        // bound on a worker that stopped working, not on a slow one: when it
+        // passes while the worker's process tree (the worker, rr and the
+        // replayed program) is still using CPU, the wait goes on, up to
+        // `replay_query_ceiling`. Killing a healthy worker for being slow lost
+        // the user's position: on a loaded host an rr `RunToEntry` or reverse
+        // continue took more than 10 s, the worker was stopped, and the next
+        // query (a value-origin walk) found no worker. Every other query keeps
+        // the plain timeout (`waits_on_a_busy_worker`).
+        let waits_on_busy = waits_on_a_busy_worker(&self.name, &raw_json);
         let mut progress = WorkerProgress::new(worker_pid);
         let mut line = Vec::new();
         let read_result = {
@@ -983,7 +1020,8 @@ impl ReplayWorker {
             loop {
                 match reader.read_until(b'\n', &mut line) {
                     Err(e)
-                        if is_read_timeout(&e)
+                        if waits_on_busy
+                            && is_read_timeout(&e)
                             && progress.still_working(Duration::from_millis(
                                 crate::wall_clock::monotonic_ms().saturating_sub(started_ms),
                             )) =>
