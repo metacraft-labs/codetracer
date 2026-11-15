@@ -3979,7 +3979,7 @@ jobs:
         # state, the failure's screen, the cast. How to read one:
         # .agents/codebase-insights.txt, "Scenario run recordings".
         if: ${{ failure() }}
-        uses: metacraft-labs/DemoVideoScript/.github/actions/upload-failed-runs@01592d6af6666b629205e3115d30e9c5424a76ba
+        uses: metacraft-labs/DemoVideoScript/.github/actions/upload-failed-runs@028ea4f6704fc5377e2c6b7021a9e048c15c9f92
         with:
           build-dir: build
           name: scenario-runs-terminal
@@ -4249,7 +4249,7 @@ jobs:
 
       - name: Upload the failed scenario runs (GPUI)
         if: ${{ failure() }}
-        uses: metacraft-labs/DemoVideoScript/.github/actions/upload-failed-runs@01592d6af6666b629205e3115d30e9c5424a76ba
+        uses: metacraft-labs/DemoVideoScript/.github/actions/upload-failed-runs@028ea4f6704fc5377e2c6b7021a9e048c15c9f92
         with:
           build-dir: build
           name: scenario-runs-gpui
@@ -6810,7 +6810,7 @@ jobs:
 
       - name: Upload the failed scenario runs (desktop)
         if: ${{ failure() && matrix.platform == 'nixos' }}
-        uses: metacraft-labs/DemoVideoScript/.github/actions/upload-failed-runs@01592d6af6666b629205e3115d30e9c5424a76ba
+        uses: metacraft-labs/DemoVideoScript/.github/actions/upload-failed-runs@028ea4f6704fc5377e2c6b7021a9e048c15c9f92
         with:
           build-dir: build
           name: scenario-runs-electron

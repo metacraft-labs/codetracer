@@ -280,4 +280,4 @@ src/frontend/viewmodel/tests/unit/plat34-front-end-mutation-control.sha256	ci/li
 # c79bee58b1 (the GPUI status line's note, a cell's tooltip off a right-click
 # menu) then moved the GPUI window: a re-grade of the arms whose needles sit in it.
 src/frontend/tui/tests/plat70f-pointer-mutation-control.sha256	src/frontend/gpui/main.nim	bd206f82ec3b500e52053e6eeda52e891e83aede0353ce2e485c65e1fcf50d85	28f36a050600425fdbbea72ccc729250a4977ecc589c87e4d67e73d3196f228e
-src/frontend/viewmodel/tests/unit/plat33-collab-mutation-control.sha256	.github/workflows/codetracer.yml	dc8712a12a175a3191d3ea5e251cb78da4a12a027d4ff42d0950bfecce3ed873	945b800fd1abb8ca6882eef04491da227647a1c296618104d70f1c4c283b521c
+src/frontend/viewmodel/tests/unit/plat33-collab-mutation-control.sha256	.github/workflows/codetracer.yml	dc8712a12a175a3191d3ea5e251cb78da4a12a027d4ff42d0950bfecce3ed873	2f6d72a0f61fc4eab465b2cb00235e6ab2e79636c2281fa6e9a469cbba81b569
