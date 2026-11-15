@@ -268,3 +268,13 @@ src/frontend/tui/tests/plat51-parity-mutation-control.sha256	src/db-backend/src/
 # The imported-trace root rule for sources outside the workdir edits trace_source_paths.nim;
 # the plat41 pane harness owes a re-grade for these bytes.
 src/frontend/tui/tests/plat41-pane-mutation-control.sha256	src/common/trace_source_paths.nim	30e4b962b05974e99c7d5c12934efbbcc57be5063c80d00cadc462b09090de02	ab9468597d0a869eca1fb548135bc9d7a83a49a7e7cbc3c5a4c97719084ef341
+# The PLAT-59 suites open the gl_scene recording committed in the
+# examples/recordings submodule, and check that the desktop's answers name
+# the commit they were captured from; the capture spec refuses any other
+# recording. These digested suites (and the justfile's recipe comment for the
+# fixture recorder) changed; their harnesses owe a re-grade for these bytes.
+src/frontend/tui/tests/plat59-visual-replay-mutation-control.sha256	src/frontend/gpui/tests/test_plat59_gpui_visual_replay.nim	65ef1c0e46ef631f8105f3bc9e043b2678983ef1c423d39fc68400f1614bb8b0	16bbcb30db00cd589257078c8062ccb4ed42d4f74e3914ded3ae322e7ed3b4a7
+src/frontend/tui/tests/plat59-visual-replay-mutation-control.sha256	src/frontend/tui/tests/test_plat59_visual_replay.nim	83eb0f522a39bb244138eb0e582c9205d4f6937c1ac82710ac085d0440f7cdd9	acc20fbec5548f00cf6383436eafa5ef871da49565d9fa06e76929fb97648511
+src/frontend/tui/tests/plat59-visual-replay-mutation-control.sha256	src/tests/gui/tests/frame-viewer/plat59-visual-replay-capture.spec.ts	cbcbab9123f3f96e353947462e7f0a4d048075b5111750996813be154f6e5333	686784cd29630cd77e582d3d9f957ca817254e5344465b3d6d92a7e580ab3251
+src/frontend/viewmodel/tests/unit/plat17-wasm-mutation-control.sha256	justfile	e0b0f1e05b1e7907a3cc8a424293bf7353eb6f4cd1bf6a624ce1d927128d1443	607bdd6dace44a25eed033ce05fa8bd914ae93d5f58414bf1201f83494ec5b63
+src/frontend/viewmodel/tests/unit/plat33-collab-mutation-control.sha256	justfile	e0b0f1e05b1e7907a3cc8a424293bf7353eb6f4cd1bf6a624ce1d927128d1443	607bdd6dace44a25eed033ce05fa8bd914ae93d5f58414bf1201f83494ec5b63

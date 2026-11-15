@@ -40,9 +40,13 @@ BIN = os.environ.get("CODETRACER_PLAT59_BIN",
 VPOINTER = os.environ.get("CODETRACER_VIRTUAL_POINTER",
                           os.path.join(ISONIM_GPUI, "build", "virtual-pointer"))
 RECORD = os.path.join(ROOT, "src", "tests", "visual", "plat59-gpui-window.json")
-FIXTURE = os.environ.get(
-    "CODETRACER_VISUAL_REPLAY_FIXTURE",
-    os.path.join(ROOT, "test-logs", "tui-fixtures", "visual-gl-scene"))
+# The committed gl_scene recording (the `examples/recordings` submodule at
+# the commit this checkout pins), the one every front-end's answers are
+# captured from. The window opens a copy under OUT: opening a recording
+# writes beside it.
+COMMITTED_FIXTURE = os.path.join(ROOT, "examples", "recordings", "mcr",
+                                 "linux-x86_64", "visual-gl-scene")
+FIXTURE = os.path.join(OUT, "visual-gl-scene")
 FRAME_W, FRAME_H = 1920, 1080
 POLL_S = 0.7
 SETTLE_MAX_S = 150
@@ -108,9 +112,9 @@ def keys(*names, gap_ms=150):
 
 
 def capture():
-    if not os.path.isfile(os.path.join(FIXTURE, "gfx_stream", "gfx_frames.idx")):
-        sys.exit("PLAT-59: refusing to capture — no visual recording at " + FIXTURE +
-                 " (scripts/record-visual-replay-fixture.sh records it)")
+    if not os.path.isfile(os.path.join(COMMITTED_FIXTURE, "gfx_stream", "gfx_frames.idx")):
+        sys.exit("PLAT-59: refusing to capture — no visual recording at " +
+                 COMMITTED_FIXTURE + " (git submodule update --init examples/recordings)")
     for path, what in ((BIN, "the windowed codetracer-gpui (-d:gpuiShimPath=<windowed shim>)"),
                        (VPOINTER, "isonim-gpui's build/virtual-pointer")):
         if not os.path.exists(path):
@@ -118,6 +122,7 @@ def capture():
     if os.path.isdir(OUT):
         shutil.rmtree(OUT)
     os.makedirs(OUT)
+    shutil.copytree(COMMITTED_FIXTURE, FIXTURE)
     state = os.path.join(OUT, "state")
     os.makedirs(state)
     geometry = os.path.join(OUT, "window.geometry.json")

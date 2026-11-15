@@ -222,14 +222,12 @@ for w in "${which[@]}"; do
 			failed+=("${w}")
 			continue
 		fi
-		[ -f "${CODETRACER_VISUAL_REPLAY_FIXTURE:-test-logs/tui-fixtures/visual-gl-scene}/gfx_stream/gfx_frames.idx" ] ||
-			(cd "${WS}/codetracer-visual-replay" && nix develop --command bash \
-				"${root}/scripts/record-visual-replay-fixture.sh" \
-				"${CODETRACER_VISUAL_REPLAY_FIXTURE:-${root}/test-logs/tui-fixtures/visual-gl-scene}") ||
-			{
-				failed+=("${w}")
-				continue
-			}
+		# The committed gl_scene recording (the examples/recordings submodule).
+		[ -f examples/recordings/mcr/linux-x86_64/visual-gl-scene/gfx_stream/gfx_frames.idx ] || {
+			echo "gpui-window-captures: the gl_scene recording is not checked out (git submodule update --init examples/recordings)" >&2
+			failed+=("${w}")
+			continue
+		}
 		in_compositor_shell "bash ci/test/plat59-gpui-window.sh" &&
 			python3 ci/test/plat59_gpui_window.py record &&
 			suite gpui-shell src/frontend/gpui/tests/test_plat59_gpui_window.nim ||

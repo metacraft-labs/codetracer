@@ -6131,9 +6131,10 @@ build-tasks-electron *args:
 plat59-capture-electron *args:
   bash scripts/plat59-capture-electron.sh "$@"
 
-# PLAT-59: the `gl_scene` visual recording the Visual Replay suites open
-# (`test-logs/tui-fixtures/visual-gl-scene`): recorded by `ct-mcr`, its gfx
-# stream extracted.
+# PLAT-59: re-record the `gl_scene` visual recording the Visual Replay suites
+# open. They open the one committed in the `examples/recordings` submodule
+# (`mcr/linux-x86_64/visual-gl-scene`); this writes a new one there, to
+# commit in codetracer-example-recordings.
 record-visual-replay-fixture *args:
   bash scripts/record-visual-replay-fixture.sh "$@"
 

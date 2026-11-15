@@ -9,11 +9,11 @@
 #   native  ct-native-replay and rr in codetracer-native-backend's
 #           target/debug (built in that repository's shell); the BEAM recorder
 #           in its target/debug, with elixir and erl from ITS dev shell
-#           appended to $GITHUB_PATH (codetracer's dev shell has neither);
-#           the gl_scene visual recording at
-#           test-logs/tui-fixtures/visual-gl-scene, made by ct-mcr in
-#           codetracer-visual-replay's shell (EGL/GLES2, Mesa). ct-mcr,
-#           ct_gfx_player and the JS recorder are built by earlier steps.
+#           appended to $GITHUB_PATH (codetracer's dev shell has neither).
+#           ct-mcr, ct_gfx_player and the JS recorder are built by earlier
+#           steps. The gl_scene visual recording is not made here: it is
+#           committed, in the examples/recordings submodule the checkout
+#           brings, and this only checks that it is there.
 #   hcr     what the hcr-flame stage opens: ../codetracer-flame-demo with
 #           its patchable GDExtension and imported project, the coordinator
 #           driver at its artifacts/h3-driver/hcr_patch_driver (built from
@@ -42,9 +42,7 @@ native() {
 		(cd rebar3_codetracer && rebar3 compile)
 		dirname "$(command -v elixir)" >>"$GITHUB_PATH"
 		dirname "$(command -v erl)" >>"$GITHUB_PATH"')
-	nix develop "$ws/codetracer-visual-replay" --no-write-lock-file --command \
-		bash scripts/record-visual-replay-fixture.sh
-	test -f test-logs/tui-fixtures/visual-gl-scene/gfx_stream/gfx_frames.idx
+	test -f examples/recordings/mcr/linux-x86_64/visual-gl-scene/gfx_stream/gfx_frames.idx
 }
 
 hcr() {

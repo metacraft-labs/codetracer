@@ -433,10 +433,9 @@ def without_local_paths(line):
     verbatim held one checkout's absolute path: it matched only in the
     checkout it was derived in, and put a home directory into the tree
     (G5, 2026-11-11)."""
-    fixture = os.environ.get("CODETRACER_VISUAL_REPLAY_FIXTURE", "")
-    if fixture:
-        line = line.replace(str(Path(fixture).resolve()), "<fixture>")
-        line = line.replace(fixture, "<fixture>")
+    # The suites open a per-process scratch copy of the committed recording
+    # (visual_fixture.nim): <temp>/ct-visual-gl-scene-<pid>.
+    line = re.sub(r"[^\s'\"]*ct-visual-gl-scene-[0-9]+", "<fixture>", line)
     return line.replace(str(REPO), "<repo>")
 
 

@@ -67,7 +67,7 @@ import ./fixtures/visual_fixture
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as the suite's RUNTIME assertion count.
-const ExpectedAssertions = 119
+const ExpectedAssertions = 120
 
 var countedAssertions = 0
 
@@ -186,6 +186,14 @@ suite "PLAT-59: the Visual Replay panes on the terminal":
     let (rt, s) = open()
     let panes = s.visualPanes
     let answers = desktopAnswers()
+
+    test "the desktop's answers come from the recording this checkout pins":
+      # Captured from another recording, the GEIDs and the history would be
+      # another program run's; `just plat59-capture-electron` writes the
+      # commit of the recording it opened.
+      ck answers{"fixture", "commit"}.getStr == visualFixtureCommit()
+      ck answers{"fixture", "path"}.getStr ==
+        "examples/recordings/mcr/linux-x86_64/visual-gl-scene"
 
     test "a recording the engine refuses opens with its graphics, and says why":
       # The fixture is a premain recording: the debug server has no stage0

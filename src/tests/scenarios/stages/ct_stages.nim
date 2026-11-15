@@ -412,13 +412,18 @@ proc plantState*(s: StageState; file, content: string) =
   writeFile(path, content)
 
 proc visualRecording*(s: StageState) =
-  ## The visual fixture's `gl_scene` recording (made by ct-mcr), opened with
+  ## The visual fixture's `gl_scene` recording (made by ct-mcr, committed in
+  ## the `examples/recordings` submodule), copied into the run and opened with
   ## the real `ct_gfx_player`; a missing recording or player is a failed
-  ## stage, named.
+  ## stage, named. The copy is the run's: opening a recording writes beside
+  ## it, and the committed one is never changed.
   let skip = visualFixtureSkip()
   if skip.len > 0:
     raise newException(IOError, "visual-recording: " & skip)
-  s.launch.recording = visualFixtureFolder()
+  let dest = s.root / "visual-gl-scene"
+  removeDir(dest)
+  copyDir(visualFixtureSource(), dest)
+  s.launch.recording = dest
   # Visual Replay is licensed. The run's state is its own, so it carries no
   # user's license: the user here holds the test entitlement the product's
   # license helper issues (`ct-native-replay license

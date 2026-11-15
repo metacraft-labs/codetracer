@@ -23,13 +23,14 @@ if [ -n "${CODETRACER_VISUAL_REPLAY_ENV:-}" ]; then
 	. "$CODETRACER_VISUAL_REPLAY_ENV"
 fi
 
-# THE RECORDING the native suites read, recorded when this host has none yet
-# — so every front-end opens one recording.
-fixture="${CODETRACER_VISUAL_REPLAY_FIXTURE:-$repo/test-logs/tui-fixtures/visual-gl-scene}"
-if [ ! -f "$fixture/gfx_stream/gfx_frames.idx" ]; then
-	bash scripts/record-visual-replay-fixture.sh "$fixture"
+# THE RECORDING is the committed one, in the `examples/recordings` submodule
+# at the commit this checkout pins (the spec refuses any other), so the answer
+# it writes holds on every host and in CI.
+if [ ! -f examples/recordings/mcr/linux-x86_64/visual-gl-scene/gfx_stream/gfx_frames.idx ]; then
+	echo "plat59-capture-electron: the gl_scene recording is not checked out;" >&2
+	echo "  run: git submodule update --init examples/recordings" >&2
+	exit 1
 fi
-export CODETRACER_VISUAL_REPLAY_FIXTURE="$fixture"
 
 export CODETRACER_ELECTRON_ARGS="${CODETRACER_ELECTRON_ARGS:---no-sandbox --no-zygote --disable-gpu --disable-gpu-compositing --disable-dev-shm-usage}"
 

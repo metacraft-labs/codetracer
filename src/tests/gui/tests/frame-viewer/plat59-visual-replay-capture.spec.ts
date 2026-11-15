@@ -8,10 +8,14 @@
  * its "The terminal and the GPUI window (PLAT-59)" section.
  *
  * The real Electron front-end on the `gl_scene` visual recording the native
- * suites open (`scripts/record-visual-replay-fixture.sh`;
- * `test-logs/tui-fixtures/visual-gl-scene` or
- * `CODETRACER_VISUAL_REPLAY_FIXTURE`), its Visual Replay panes read from the
- * DOM:
+ * suites open: the one committed in the `examples/recordings` submodule
+ * (codetracer-example-recordings, `mcr/linux-x86_64/visual-gl-scene`), at the
+ * commit this checkout pins, so the answer holds on every host and in CI. A
+ * recording made on the host would not do: its GEIDs count every call the
+ * process made, and those depend on the host's libraries. The spec refuses a
+ * submodule checkout that is not the pinned commit, or not clean, and opens a
+ * scratch copy (opening a recording writes beside it). Its Visual Replay panes
+ * are read from the DOM:
  *
  *   * THE FRAME AT THREE POSITIONS — the first (Jump to Start), the slider's
  *     frame 30 (a drag on the slider: press, input, release) and the last
@@ -34,7 +38,9 @@
  * (the desktop starts it, `index/visual_replay_player`), the real Electron app
  * running the desktop this checkout built (`just build-once`).
  */
+import { execFileSync } from "child_process";
 import * as fs from "fs";
+import * as os from "os";
 import * as path from "path";
 
 import { expect } from "@playwright/test";
@@ -45,16 +51,44 @@ const answersFile =
   process.env.PLAT59_ANSWERS_OUT ||
   path.join(repoRoot, "src", "tests", "visual", "answers", "plat59-visual-replay.electron.json");
 
-function recording(): string {
-  const env = process.env.CODETRACER_VISUAL_REPLAY_FIXTURE ?? "";
-  for (const dir of [env, path.join(repoRoot, "test-logs", "tui-fixtures", "visual-gl-scene")]) {
-    if (dir && fs.existsSync(path.join(dir, "gfx_stream", "gfx_frames.idx"))) return dir;
+const fixtureInSubmodule = path.posix.join("mcr", "linux-x86_64", "visual-gl-scene");
+
+/** The committed recording: its folder, and the submodule commit it is at. */
+function committedRecording(): { dir: string; commit: string } {
+  const submodule = path.join(repoRoot, "examples", "recordings");
+  const dir = path.join(submodule, fixtureInSubmodule);
+  if (!fs.existsSync(path.join(dir, "gfx_stream", "gfx_frames.idx"))) {
+    throw new Error(
+      `PLAT-59: the visual recording is not here (${dir}); ` +
+        "check the submodule out: git submodule update --init examples/recordings",
+    );
   }
-  throw new Error(
-    "PLAT-59: the visual recording is not here; run scripts/record-visual-replay-fixture.sh " +
-      "or set CODETRACER_VISUAL_REPLAY_FIXTURE.",
-  );
+  const git = (cwd: string, ...args: string[]) =>
+    execFileSync("git", args, { cwd, encoding: "utf8" }).trim();
+  const pinned = git(repoRoot, "rev-parse", "HEAD:examples/recordings");
+  const commit = git(submodule, "rev-parse", "HEAD");
+  if (commit !== pinned) {
+    throw new Error(`PLAT-59: examples/recordings is at ${commit}, not the pinned ${pinned}`);
+  }
+  if (git(submodule, "status", "--porcelain", "--", fixtureInSubmodule) !== "") {
+    throw new Error(`PLAT-59: examples/recordings/${fixtureInSubmodule} has local changes`);
+  }
+  return { dir, commit };
 }
+
+// Resolved when the file loads, but a missing or moved recording fails the
+// test (below), not the loading of every spec in the suite.
+let fixture: { dir: string; commit: string } = { dir: "", commit: "" };
+let fixtureError: Error | null = null;
+try {
+  fixture = committedRecording();
+} catch (e) {
+  fixtureError = e as Error;
+}
+
+/** A scratch copy of the committed recording, which the desktop opens. */
+const scratch = fixtureError ? "" : fs.mkdtempSync(path.join(os.tmpdir(), "ct-plat59-gl-scene-"));
+if (scratch) fs.cpSync(fixture.dir, scratch, { recursive: true });
 
 /** The four quads' colours in the image the Video Player shows, Q0..Q3. */
 function readQuads(page: any) {
@@ -125,10 +159,14 @@ test.describe("PLAT-59: the desktop's Visual Replay panes, captured", () => {
     sourcePath: "unused-for-real-visual-trace",
     launchMode: "trace",
     deploymentMode: "web",
-    visualReplayTracePath: path.join(recording(), "trace.ct"),
+    visualReplayTracePath: path.join(scratch || "missing-visual-recording", "trace.ct"),
+  });
+  test.afterAll(() => {
+    if (scratch) fs.rmSync(scratch, { recursive: true, force: true });
   });
 
   test("three frames, a draw call, a picked pixel's history", async ({ ctPage }) => {
+    if (fixtureError) throw fixtureError;
     const pageErrors: string[] = [];
     ctPage.on("pageerror", (e: any) => pageErrors.push(String(e?.stack ?? e)));
     // The Video Player tab the desktop added for a recording with graphics.
@@ -231,7 +269,9 @@ test.describe("PLAT-59: the desktop's Visual Replay panes, captured", () => {
         "PLAT-59 — the desktop's Visual Replay panes on the gl_scene recording, read from the real Electron app.",
         "Produced by src/tests/gui/tests/frame-viewer/plat59-visual-replay-capture.spec.ts",
         "(`just plat59-capture-electron`).",
+        `Recording: examples/recordings/${fixtureInSubmodule} at codetracer-example-recordings ${fixture.commit}.`,
       ],
+      fixture: { path: `examples/recordings/${fixtureInSubmodule}`, commit: fixture.commit },
       frames,
       draw,
       history: { pixel: { x: px, y: py, frame: 59 }, header: history.header, entries: history.entries },

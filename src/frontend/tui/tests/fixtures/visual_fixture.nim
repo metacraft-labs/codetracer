@@ -10,20 +10,27 @@
 ## and a picked pixel's history are each checked against the PROGRAM, not
 ## against what the panes happened to show.
 ##
-## Where it is: `CODETRACER_VISUAL_REPLAY_FIXTURE`, else
-## `test-logs/tui-fixtures/visual-gl-scene` (the script's default). The player
-## is found as `ct gfx-replay` finds it (`CODETRACER_CT_GFX_PLAYER_CMD`, beside
-## `ct`, on PATH). Either missing is a LOUD, COUNTED skip with
+## Where it is: committed, in the `examples/recordings` submodule
+## (codetracer-example-recordings) at `VisualFixtureCommitted`, so every host
+## and CI job opens the same recording, pinned by this checkout's gitlink, and
+## an answer captured from it (`src/tests/visual/answers/plat59-*.json`) holds
+## on all of them. A recording made on the host would differ: its GEIDs count
+## every call the process made, and those depend on the host's libraries.
+## Opening a recording writes beside it (`ct` rewrites `trace.ct` and
+## `paths.json` when it imports one), so the suites open a scratch copy, made
+## once per process; the committed files are never changed.
+##
+## The player is found as `ct gfx-replay` finds it (`CODETRACER_CT_GFX_PLAYER_CMD`,
+## beside `ct`, on PATH). Either missing is a LOUD, COUNTED skip with
 ## `fixture_provider`'s prefix — never a silent pass.
 
-import std/[os, strutils]
+import std/[exitprocs, os, osproc, strutils]
 
 from ../../../../ct/gfx_replay import findCtGfxPlayerBinary
 import ./fixture_provider
 
 const
-  VisualFixtureEnv* = "CODETRACER_VISUAL_REPLAY_FIXTURE"
-  VisualFixtureDefault* = "test-logs/tui-fixtures/visual-gl-scene"
+  VisualFixtureCommitted* = "examples/recordings/mcr/linux-x86_64/visual-gl-scene"
   GlSceneFrames* = 60
   GlSceneDrawsPerFrame* = 4
   GlSceneSize* = 256
@@ -34,21 +41,45 @@ proc repoRootOf(): string =
     dir = dir.parentDir
   dir
 
+proc visualFixtureSource*(): string =
+  ## The committed recording's folder, or "" when the submodule is not
+  ## checked out.
+  let dir = repoRootOf() / VisualFixtureCommitted
+  if fileExists(dir / "gfx_stream" / "gfx_frames.idx"): dir else: ""
+
+proc visualFixtureCommit*(): string =
+  ## The codetracer-example-recordings commit this checkout pins (the
+  ## `examples/recordings` gitlink): the recording an answer captured from
+  ## the committed fixture names in its `fixture.commit`.
+  let (output, code) = execCmdEx("git -C " & quoteShell(repoRootOf()) &
+    " rev-parse HEAD:examples/recordings")
+  if code == 0: output.strip else: ""
+
+var scratchCopy {.threadvar.}: string
+
 proc visualFixtureFolder*(): string =
-  ## The recording's folder, or "" when there is none.
-  let env = getEnv(VisualFixtureEnv)
-  for dir in [env, repoRootOf() / VisualFixtureDefault]:
-    if dir.len > 0 and fileExists(dir / "gfx_stream" / "gfx_frames.idx"):
-      return dir
-  ""
+  ## A scratch copy of the committed recording, made once per process, or ""
+  ## when there is none to copy.
+  if scratchCopy.len > 0 and dirExists(scratchCopy):
+    return scratchCopy
+  let source = visualFixtureSource()
+  if source.len == 0:
+    return ""
+  let dest = getTempDir() / ("ct-visual-gl-scene-" & $getCurrentProcessId())
+  removeDir(dest)
+  copyDir(source, dest)
+  scratchCopy = dest
+  addExitProc(proc () = removeDir(dest))
+  dest
 
 proc visualFixtureSkip*(): string =
   ## Why the Visual Replay suites cannot run here ("" when they can): the
   ## recording or the player missing, in `fixture_provider`'s words.
-  if visualFixtureFolder().len == 0:
+  if visualFixtureSource().len == 0:
     return MissingPrereqSkipPrefix & " the visual recording (gl_scene) is " &
-      "not here: run `scripts/record-visual-replay-fixture.sh` (it needs " &
-      "ct-mcr and a C compiler with EGL), or set " & VisualFixtureEnv
+      "not here: it is committed at " & VisualFixtureCommitted &
+      "; check the submodule out (`git submodule update --init " &
+      "examples/recordings`)"
   if findCtGfxPlayerBinary().len == 0:
     return MissingPrereqSkipPrefix & " the visual replay player " &
       "(ct_gfx_player) is not installed: build codetracer-visual-replay and " &
