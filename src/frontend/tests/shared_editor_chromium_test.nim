@@ -25,7 +25,8 @@
 
 import std/[asyncjs, jsffi, strutils, json]
 
-import ../ui/[shared_editor, shared_editor_facade, shared_diff_editor]
+import ../ui/[shared_editor, shared_editor_facade, shared_diff_editor, editor_surface]
+from ../types import Config
 import ../viewmodel/editing_core
 import ../viewmodel/keymap/base_keymaps
 import ../tui/app/syntax/token_class
@@ -126,7 +127,7 @@ proc endCase(name: string) =
 
 const
   Source = "def main():\n    x = 1\n    if x:\n        y = 2\n\n    return x\nprint(main())\n"
-  ExpectedChecks = 135
+  ExpectedChecks = 140
     ## Written from a run. See the end of `main`.
 
 proc fresh(text = Source; readOnly = false; model = bkCua;
@@ -781,6 +782,31 @@ proc caseNimColours() {.async.} =
   ck kinds.len >= 4, "a Nim file in several token colours: " & $kinds
   endCase("Nim is coloured by the desktop's own Monarch definition")
 
+proc caseEditorSurfaces() {.async.} =
+  ## Every editor surface of the desktop other than the source editor and the
+  ## diff — a macro expansion, a low-level view and its inline editors, the
+  ## tracepoint editor, the Agent Workspace's editor — is made by
+  ## `editor_surface.createEditorSurface`: with the setting on, the shared
+  ## editor behind Monaco's API, from Monaco's creation options.
+  beginCase()
+  setHtml("""<div id="host" style="width: 600px; height: 200px; position: relative"></div>""")
+  let live = sharedEditors
+  for ed in live: ed.dispose()
+  let config = cast[Config](js{sharedEditor: true})
+  let f = createEditorSurface(qs("#host"), js{value: cstring("log(x)\nlog(y)"),
+    language: cstring"python", readOnly: false, theme: cstring"codetracerDark",
+    lineNumbers: cstring"on"}, config, "", 14, "monospace", true)
+  await settle()
+  ck not isNull(qs("#host .monaco-editor[data-ct-shared-editor]")),
+     "the surface is the shared editor"
+  ck $f.getValue().to(cstring) == "log(x)\nlog(y)", "made with the options' value"
+  ck not sharedEditors[^1].readOnly, "and their read-only flag"
+  ck sharedEditors[^1].languageId == "python"
+  # Monaco's `lineNumbers: "on"` (a string, not a function) numbers the lines.
+  ck $textOf(qs("#host .margin-view-overlays .line-numbers")) == "1",
+     "a string `lineNumbers` numbers the lines"
+  endCase("every other editor surface is the shared editor under the setting")
+
 proc caseBracketsAndWheel() {.async.} =
   beginCase()
   var lines: seq[string] = @[]
@@ -906,6 +932,7 @@ proc main() {.async.} =
   await guarded(caseUnifiedDiff, "caseUnifiedDiff")
   await guarded(caseUnifiedDiffRegions, "caseUnifiedDiffRegions")
   await guarded(caseNimColours, "caseNimColours")
+  await guarded(caseEditorSurfaces, "caseEditorSurfaces")
   await guarded(caseBracketsAndWheel, "caseBracketsAndWheel")
   await guarded(caseScrollRangeAndViewState, "caseScrollRangeAndViewState")
   await guarded(caseHugeFile, "caseHugeFile")

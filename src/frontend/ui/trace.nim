@@ -16,6 +16,7 @@ from ./editor_points import gutterMarkFor, breakpointsInFile, EditorMark, emNone
   emBreakpointTracepoint,
   emBreakpointDisabled, emTracepoint
 import ./presented_value
+import ./editor_surface
 import ../viewmodel/input/element_operations
 from ../lib/monaco_appearance import editorGutterLineHtml
 import ../viewmodel/store/replay_data_store
@@ -220,7 +221,10 @@ const
   TRACE_FOOTER_MIN_HEIGHT_PX = 18
   TRACE_RESULTS_VISIBLE_ROWS = 10
 
-proc getCurrentMonacoTheme(editor: MonacoEditor): cstring {.importjs:"#._themeService._theme.themeName".}
+proc getCurrentMonacoTheme(editor: MonacoEditor): cstring {.importjs:
+  "((e) => (e && e._themeService && e._themeService._theme && e._themeService._theme.themeName) || '')(#)".}
+  ## The theme a Monaco editor wears; "" for the shared editor, which has no
+  ## theme service (the page's configured theme is used then).
 proc toggleTrace*(editorUI: EditorViewComponent, name: cstring, line: int)
 proc closeTrace*(self: TraceComponent)
 proc resizeTraceHandler*(self: TraceComponent)
@@ -1644,13 +1648,17 @@ proc traceSourceValue(self: TraceComponent): cstring =
 proc traceEditorTheme(self: TraceComponent): cstring =
 
   if not self.editorUI.isNil and not self.editorUI.monacoEditor.isNil:
-    return self.editorUI.monacoEditor.getCurrentMonacoTheme()
+    result = self.editorUI.monacoEditor.getCurrentMonacoTheme()
+    if result.len > 0: return
+    return monacoThemeName(self.data.config.theme)
 
   let active = self.data.services.editor.active
   if not active.isNil and active.len > 0 and self.data.ui.editors.hasKey(active):
     let activeEditor = self.data.ui.editors[active]
     if not activeEditor.isNil and not activeEditor.monacoEditor.isNil:
-      return activeEditor.monacoEditor.getCurrentMonacoTheme()
+      result = activeEditor.monacoEditor.getCurrentMonacoTheme()
+      if result.len > 0: return
+      return monacoThemeName(self.data.config.theme)
 
   cstring""
 
@@ -1701,9 +1709,11 @@ proc mountMonacoEditor(self: TraceComponent): bool =
     documentTmp.body.appendChild(overflowHost)
 
     editorHost.innerHTML = cstring""
-    let editor = monaco.editor.create(
-      editorHost,
-      MonacoEditorOptions(
+    # Monaco, or the shared editor under the developer setting
+    # `sharedEditor` (`editor_surface`).
+    let editor = cast[MonacoEditor](createEditorSurface(
+      cast[JsObject](editorHost),
+      cast[JsObject](MonacoEditorOptions(
         value: self.traceSourceValue(),
         # language: toJsLang(self.editorUI.lang),
         theme: theme,
@@ -1724,8 +1734,9 @@ proc mountMonacoEditor(self: TraceComponent): bool =
         # },
         overflowWidgetsDomNode: overflowHost,
         fixedOverflowWidgets: true
-      )
-    )
+      )),
+      data.config, "", data.ui.fontSize, $codeFontFamily(data.ui),
+      darkTheme = $theme != "codetracerWhite", embeddedField = true))
     self.monacoEditor = editor
   except:
     cerror "trace: create monaco editor: " & getCurrentExceptionMsg()

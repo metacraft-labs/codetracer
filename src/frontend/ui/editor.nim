@@ -56,6 +56,7 @@ from ../viewmodel/viewmodels/flow_vm import flowStyledLinesOf
 # The developer setting `sharedEditor`: the source editor is the shared
 # editing core behind Monaco's API (`shared_editor_facade`) instead of Monaco.
 import ./shared_editor, ./shared_editor_facade, ./shared_editor_flag,
+  ./editor_surface,
        ./shared_editor_lsp
 from isonim/core/owner import createRoot
 from isonim/core/computation import createEffect
@@ -2276,35 +2277,27 @@ proc setPageMonacoTheme(name: cstring) {.importjs:
   "(globalThis.monaco && globalThis.monaco.editor && globalThis.monaco.editor.setTheme && globalThis.monaco.editor.setTheme(#))".}
 
 proc createSourceEditorIn(self: EditorViewComponent; host: JsObject;
-                          options: MonacoEditorOptions): MonacoEditor =
+                          options: MonacoEditorOptions;
+                          withLsp = true): MonacoEditor =
   ## The source editor of this pane: Monaco, or — under the developer
   ## setting `sharedEditor` (`shared_editor_flag`) — the shared editing core
   ## drawn as DOM (`shared_editor`), answering Monaco's API
-  ## (`shared_editor_facade`), so every caller below works on either. A macro
-  ## expansion and the low-level views keep Monaco.
-  if self.editorView == ViewSource and not self.isExpansion and
-     sharedEditorEnabled(self.data.config):
-    installMonacoGlobals()
-    # What `monaco.editor.create(host, {theme})` does: the theme is the
-    # page's. Monaco's colour variables (`--vscode-*`), which the shared
-    # editor and the flow's widgets paint with, follow it; without a Monaco
-    # editor ever created they would stay Monaco's default light theme's.
-    if not options.theme.isNil and options.theme.len > 0:
-      setPageMonacoTheme(options.theme)
-    let ed = newSharedEditor(host, $options.value, $self.name,
-      $options.language, options.readOnly, self.data.ui.fontSize,
-      $codeFontFamily(self.data.ui),
-      darkTheme = monacoThemeName(self.data.config.theme) != cstring"codetracerWhite",
-      cast[JsObject](options))
-    ed.observeSize()
-    # The language server's features, through the document the LSP router
-    # syncs for this editor (`lsp_router.lspDocumentOf`).
-    let editorId = self.id
-    let data = self.data
-    installSharedEditorLsp(ed,
-      proc(): tuple[kind, uri: string] = lspDocumentOf(editorId),
-      proc(path: string; line, column: int) =
-        discard data.openLocation(cstring(path), line, column))
+  ## (`shared_editor_facade`), so every caller below works on either: the
+  ## source view, a macro expansion and the low-level views alike
+  ## (`editor_surface`).
+  if sharedEditorEnabled(self.data.config):
+    let ed = sharedSurfaceIn(host, cast[JsObject](options), $self.name,
+      self.data.ui.fontSize, $codeFontFamily(self.data.ui),
+      darkTheme = monacoThemeName(self.data.config.theme) != cstring"codetracerWhite")
+    if withLsp and self.editorView == ViewSource and not self.isExpansion:
+      # The language server's features, through the document the LSP
+      # router syncs for this editor (`lsp_router.lspDocumentOf`).
+      let editorId = self.id
+      let data = self.data
+      installSharedEditorLsp(ed,
+        proc(): tuple[kind, uri: string] = lspDocumentOf(editorId),
+        proc(path: string; line, column: int) =
+          discard data.openLocation(cstring(path), line, column))
     return cast[MonacoEditor](facadeOf(ed))
   createMonacoEditorIn(host, options)
 
@@ -2337,8 +2330,10 @@ proc drawDiffViewZones(self: EditorViewComponent, source: cstring, id: int, line
   let theme = monacoThemeName(self.data.config.theme)
   if not self.diffEditors.hasKey(lineNumber):
     discard setTimeout(proc () =
-      self.diffEditors[lineNumber] = createMonacoEditor(
-        "#" & editorDom.id.cstring,
+      # The read-only editor of a recording-with-diff's removed lines: Monaco,
+      # or the shared editor under the setting (`editor_surface`).
+      self.diffEditors[lineNumber] = self.createSourceEditorIn(
+        cast[JsObject](jq("#" & editorDom.id.cstring)),
         MonacoEditorOptions(
           value: source,
           language: cstring(editorLanguageForPath(
@@ -2370,7 +2365,8 @@ proc drawDiffViewZones(self: EditorViewComponent, source: cstring, id: int, line
             "horizontal": "hidden",
             "useShadows": false
           }
-        )
+        ),
+        withLsp = false
       ),
       0
     )

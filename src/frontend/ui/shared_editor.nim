@@ -248,6 +248,11 @@ type
     onHiddenLine*: proc(line1: int): bool
       ## Asked when the caret is revealed on a hidden area's line: the owner
       ## of the areas shows it (Monaco's diff editor reveals the region).
+    embeddedField*: bool
+      ## A one-purpose field inside another view (the tracepoint editor): the
+      ## desktop's key facts stay the view's around it, as they stay the
+      ## source view's around Monaco's tracepoint editor, so its Ctrl+Enter
+      ## runs the trace rather than opening a line.
     monacoGutter*: bool
       ## Size the gutter from Monaco's `glyphMargin`, `folding` and
       ## `lineDecorationsWidth` options (the unified diff's editors); the
@@ -469,8 +474,16 @@ proc measureFont(ed: SharedEditor) =
   ed.measureSpan.textContent = cstring""
 
 proc numberLabel(ed: SharedEditor; line1: int): cstring =
+  ## Monaco's `lineNumbers`: a function of the line, or `"on"` (the line's
+  ## number, also when absent) / `"off"` (none); `"relative"` and
+  ## `"interval"` are drawn as `"on"`.
   if ed.lineNumbersFn.isNil or isNilOrUndef(ed.lineNumbersFn):
     return cstring($line1)
+  var kind: cstring
+  let f = ed.lineNumbersFn
+  {.emit: [kind, " = (typeof ", f, " === 'function') ? 'fn' : String(", f, ");"].}
+  if kind == cstring"off": return cstring""
+  if kind != cstring"fn": return cstring($line1)
   let v = callFn(ed.lineNumbersFn, toJs(line1))
   if isNilOrUndef(v): cstring($line1) else: jsStr(v)
 

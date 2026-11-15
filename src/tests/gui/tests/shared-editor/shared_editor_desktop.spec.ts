@@ -10,6 +10,8 @@
  *   * in Debug mode the stepping keys still reach the debugger, the arrows
  *     move the shared editor's caret, and typing changes nothing (read-only);
  *   * the right-click menu is the CodeTracer menu;
+ *   * the tracepoint editor is the shared editor too, and with the setting on
+ *     no editor root on the page is Monaco's;
  *   * in Edit mode the keys are the document's: CUA typing and Ctrl+S
  *     saving the file to disk, and the Vim and Kakoune keymaps' modes, which
  *     Monaco cannot run (the palette's `:Keymap: <base>`).
@@ -101,6 +103,23 @@ test.describe("Debug mode, the shared editor", () => {
       const text = await textOf(page);
       await page.keyboard.type("zz");
       expect(await textOf(page)).toBe(text);
+    });
+
+  test("the tracepoint editor is the shared editor too, and no editor is Monaco's",
+    async ({ ctPage: page }) => {
+      await editorReady(page);
+      await clickLine(page, 10, 5);
+      await page.keyboard.press("Enter");
+      const trace = page.locator("[id^=\"edit-trace-\"] .monaco-editor[data-ct-shared-editor]").first();
+      await expect(trace).toBeVisible({ timeout: 30_000 });
+      await page.keyboard.type("log(1)");
+      await expect.poll(() => page.evaluate(() => Array.from(document.querySelectorAll(
+        "[id^=\"edit-trace-\"] .monaco-editor[data-ct-shared-editor] .view-line"))
+        .map((l) => l.textContent ?? "").join("\n")), { timeout: 10_000 }).toContain("log(1)");
+      // Monaco's own editor roots carry `role="code"` and none of the shared
+      // editor's attribute; with the setting on there are none.
+      expect(await page.evaluate(() => document.querySelectorAll(
+        ".monaco-editor[role=code]:not([data-ct-shared-editor])").length)).toBe(0);
     });
 
   test("the right-click menu is CodeTracer's", async ({ ctPage: page }) => {

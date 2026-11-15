@@ -269,7 +269,7 @@ proc desktopFacts(): SessionFacts =
                else: EditorFacts(readOnly: false, mode: emInsert)
   let monaco = focusedMonaco()
   let shared = textFocusedSharedEditor()
-  if not shared.isNil:
+  if not shared.isNil and not shared.embeddedField:
     # The shared editor's modal state is the core's (Editor-ViewModel §10.3):
     # the router reads the editor's mode and selection from the document.
     # A read-only CUA / Emacs document is the source view the Monaco path
