@@ -333,7 +333,7 @@ fn waits_on_a_busy_worker(worker_name: &str, raw_json: &str) -> bool {
 
 struct WorkerProgress {
     pid: Option<u32>,
-    last_cpu: Option<u64>,
+    last: Option<std::collections::HashMap<u32, u64>>,
     ceiling: Duration,
 }
 
@@ -341,56 +341,72 @@ impl WorkerProgress {
     fn new(pid: Option<u32>) -> Self {
         Self {
             pid,
-            last_cpu: pid.and_then(process_tree_cpu_ticks),
+            last: pid.and_then(worker_tree_cpu_ticks),
             ceiling: replay_query_ceiling(),
         }
     }
 
+    /// Whether the worker's processes used CPU since the last look: one of
+    /// them that was there before has more CPU time, or one is new.
+    ///
+    /// Per process, not a total. rr discards the processes it is done with
+    /// (an old replay session, a checkpoint), so a total over the live
+    /// processes can fall while rr works, and a fall read as "no progress"
+    /// gave up on a working worker.
     fn still_working(&mut self, waited: Duration) -> bool {
         if waited >= self.ceiling {
             return false;
         }
-        let Some(now) = self.pid.and_then(process_tree_cpu_ticks) else {
+        let Some(now) = self.pid.and_then(worker_tree_cpu_ticks) else {
             return false;
         };
-        let progressed = self.last_cpu.is_some_and(|before| now > before);
-        self.last_cpu = Some(now);
+        let progressed = self.last.as_ref().is_some_and(|before| used_cpu_since(before, &now));
+        self.last = Some(now);
         progressed
     }
 }
 
-/// The user plus system CPU time, in clock ticks, of `pid` and every live
-/// process below it (`/proc/<pid>/stat` fields 14 and 15, children from
-/// `/proc/<pid>/task/<tid>/children`); `None` when `pid` is gone.
+/// Whether a process in `now` has more CPU time than in `before`, or was not
+/// there before.
+fn used_cpu_since(
+    before: &std::collections::HashMap<u32, u64>,
+    now: &std::collections::HashMap<u32, u64>,
+) -> bool {
+    now.iter()
+        .any(|(pid, ticks)| before.get(pid).is_none_or(|earlier| ticks > earlier))
+}
+
+/// CPU ticks (user + system) of every process doing the worker's work: the
+/// worker's descendants, and every process a tracer among them traces.
+///
+/// The traced ones are not always descendants. rr keeps a replay's
+/// checkpoints as forks of the replayed process, and when it moves the
+/// replay on it kills the old process and goes on with a fork, whose parent
+/// is then gone: the fork is reparented (to init or a subreaper), still
+/// traced by rr, and it is where the replay runs. Counted only by parentage,
+/// the worker looked idle while rr replayed in that fork, and a reverse
+/// continue on a loaded host was given up at its read timeout (under
+/// `stress-ng --cpu 64` at load about 90, after 20.8 s).
 #[cfg(target_os = "linux")]
-fn process_tree_cpu_ticks(pid: u32) -> Option<u64> {
-    let mut total = 0u64;
+fn worker_tree_cpu_ticks(pid: u32) -> Option<std::collections::HashMap<u32, u64>> {
+    use std::collections::{HashMap, HashSet};
+    let mut ticks: HashMap<u32, u64> = HashMap::new();
+    let mut seen: HashSet<u32> = HashSet::new();
     let mut pending = vec![pid];
-    let mut visited = 0usize;
+    // Processes traced by a process of the tree, by tracer: read once per
+    // look, and only when the tree reaches them.
+    let mut traced_by: Option<HashMap<u32, Vec<u32>>> = None;
     while let Some(current) = pending.pop() {
-        visited += 1;
-        if visited > 4096 {
-            break;
+        if !seen.insert(current) || seen.len() > 4096 {
+            continue;
         }
-        let Ok(stat) = std::fs::read_to_string(format!("/proc/{current}/stat")) else {
+        let Some(cpu) = process_cpu_ticks(current) else {
             if current == pid {
                 return None;
             }
             continue;
         };
-        // The command name (field 2) is parenthesised and may hold spaces;
-        // the fields after its closing parenthesis start at field 3.
-        let Some(after_comm) = stat.rfind(')').map(|index| &stat[index + 1..]) else {
-            continue;
-        };
-        let fields: Vec<&str> = after_comm.split_whitespace().collect();
-        let ticks = |index: usize| {
-            fields
-                .get(index)
-                .and_then(|field| field.parse::<u64>().ok())
-                .unwrap_or(0)
-        };
-        total += ticks(11) + ticks(12);
+        ticks.insert(current, cpu);
         if let Ok(tasks) = std::fs::read_dir(format!("/proc/{current}/task")) {
             for task in tasks.flatten() {
                 if let Ok(children) = std::fs::read_to_string(task.path().join("children")) {
@@ -402,12 +418,54 @@ fn process_tree_cpu_ticks(pid: u32) -> Option<u64> {
                 }
             }
         }
+        let traced = traced_by.get_or_insert_with(processes_by_tracer);
+        if let Some(tracees) = traced.get(&current) {
+            pending.extend(tracees.iter().copied());
+        }
     }
-    Some(total)
+    Some(ticks)
+}
+
+/// utime + stime of `pid`, from /proc/<pid>/stat.
+#[cfg(target_os = "linux")]
+fn process_cpu_ticks(pid: u32) -> Option<u64> {
+    let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+    // The command name may hold spaces and parentheses: fields after the last ')'.
+    let after_comm = &stat[stat.rfind(')')? + 1..];
+    let fields: Vec<&str> = after_comm.split_whitespace().collect();
+    let field = |index: usize| fields.get(index).and_then(|f| f.parse::<u64>().ok()).unwrap_or(0);
+    Some(field(11) + field(12))
+}
+
+/// Every traced process of the host, by its tracer (`TracerPid` in
+/// /proc/<pid>/status).
+#[cfg(target_os = "linux")]
+fn processes_by_tracer() -> std::collections::HashMap<u32, Vec<u32>> {
+    let mut by_tracer: std::collections::HashMap<u32, Vec<u32>> = std::collections::HashMap::new();
+    let Ok(entries) = std::fs::read_dir("/proc") else {
+        return by_tracer;
+    };
+    for entry in entries.flatten() {
+        let Some(pid) = entry.file_name().to_str().and_then(|name| name.parse::<u32>().ok()) else {
+            continue;
+        };
+        let Ok(status) = std::fs::read_to_string(format!("/proc/{pid}/status")) else {
+            continue;
+        };
+        let tracer = status
+            .lines()
+            .find_map(|line| line.strip_prefix("TracerPid:"))
+            .and_then(|value| value.trim().parse::<u32>().ok())
+            .unwrap_or(0);
+        if tracer != 0 {
+            by_tracer.entry(tracer).or_default().push(pid);
+        }
+    }
+    by_tracer
 }
 
 #[cfg(not(target_os = "linux"))]
-fn process_tree_cpu_ticks(_pid: u32) -> Option<u64> {
+fn worker_tree_cpu_ticks(_pid: u32) -> Option<std::collections::HashMap<u32, u64>> {
     None
 }
 
@@ -2064,6 +2122,108 @@ fn tracepoint_return_value_from_class(response: &TtdTracepointEvalResponseEnvelo
 mod tests {
     use super::*;
     use codetracer_trace_types::{TypeKind, TypeRecord, TypeSpecificInfo};
+
+    /// A worker whose work runs in a process it traces but is not the parent
+    /// of (rr's reparented checkpoint fork, `worker_tree_cpu_ticks`) is seen
+    /// working. The "worker" here is a python tracer that, as rr does, keeps a
+    /// process whose parent has gone: an intermediate starts a busy loop in a
+    /// session of its own, the tracer seizes it, and the intermediate exits.
+    /// The tracer itself only waits, so all the CPU is the orphan's.
+    ///
+    /// CONTROL: without the traced processes the orphan is not part of the
+    /// worker, and the worker reads as idle (asserted below on the parentage
+    /// walk alone).
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_worker_is_working_while_a_process_it_traces_runs_elsewhere() {
+        const TRACER: &str = r#"
+import ctypes, os, sys
+libc = ctypes.CDLL(None, use_errno=True)
+r, w = os.pipe(); gr, gw = os.pipe()
+mid = os.fork()
+if mid == 0:
+    orphan = os.fork()
+    if orphan == 0:
+        os.setsid()
+        while True:
+            pass
+    os.write(w, f"{orphan}\n".encode()); os.read(gr, 1); os._exit(0)
+orphan = int(os.read(r, 64).decode())
+if libc.ptrace(0x4206, orphan, None, None) != 0:
+    sys.exit("PTRACE_SEIZE failed: errno %d" % ctypes.get_errno())
+print(orphan, flush=True)
+os.write(gw, b"x"); os.waitpid(mid, 0)
+while True:
+    try:
+        _, st = os.waitpid(orphan, 0x40000000)
+    except ChildProcessError:
+        break
+    if os.WIFEXITED(st) or os.WIFSIGNALED(st):
+        break
+    libc.ptrace(7, orphan, None, os.WSTOPSIG(st) if os.WIFSTOPPED(st) else 0)
+"#;
+        let Ok(mut tracer) = std::process::Command::new("python3")
+            .arg("-c")
+            .arg(TRACER)
+            .stdout(std::process::Stdio::piped())
+            .spawn()
+        else {
+            panic!("python3 is required (the codetracer dev shell has it)");
+        };
+        let mut first = String::new();
+        std::io::BufRead::read_line(
+            &mut std::io::BufReader::new(tracer.stdout.take().unwrap()),
+            &mut first,
+        )
+        .unwrap();
+        let orphan: u32 = first.trim().parse().unwrap_or_else(|_| panic!("tracer said {first:?}"));
+        let cleanup = |tracer: &mut std::process::Child| {
+            unsafe { libc::kill(orphan as i32, libc::SIGKILL) };
+            let _ = tracer.kill();
+            let _ = tracer.wait();
+        };
+
+        let tree = worker_tree_cpu_ticks(tracer.id()).unwrap();
+        let mut progress = WorkerProgress::new(Some(tracer.id()));
+        std::thread::sleep(Duration::from_millis(500));
+        let working = progress.still_working(Duration::from_secs(11));
+
+        // The control: the parentage walk alone (no tracer map) does not
+        // reach the orphan, so its CPU is not the worker's.
+        let only_children: Vec<u32> = std::fs::read_dir(format!("/proc/{}/task", tracer.id()))
+            .unwrap()
+            .flatten()
+            .filter_map(|task| std::fs::read_to_string(task.path().join("children")).ok())
+            .flat_map(|children| {
+                children
+                    .split_whitespace()
+                    .filter_map(|c| c.parse::<u32>().ok())
+                    .collect::<Vec<_>>()
+            })
+            .collect();
+        cleanup(&mut tracer);
+
+        assert!(
+            !only_children.contains(&orphan),
+            "the busy process must not be a child of the worker, or this tests nothing"
+        );
+        assert!(tree.contains_key(&orphan), "the traced orphan {orphan} is part of the worker: {tree:?}");
+        assert!(working, "a worker whose traced process burns CPU is working");
+    }
+
+    /// A process of the worker that ends between two looks (rr discarding an
+    /// old session) does not hide the work the others did, and a worker
+    /// whose processes all stood still is idle.
+    #[test]
+    fn a_process_that_ends_does_not_hide_progress() {
+        let before: std::collections::HashMap<u32, u64> = [(1, 100), (2, 5000)].into_iter().collect();
+        let moved: std::collections::HashMap<u32, u64> = [(1, 101)].into_iter().collect();
+        assert!(used_cpu_since(&before, &moved), "pid 1 used CPU although the total fell from 5100 to 101");
+        let still: std::collections::HashMap<u32, u64> = [(1, 100)].into_iter().collect();
+        assert!(!used_cpu_since(&before, &still), "nothing moved");
+        let new_process: std::collections::HashMap<u32, u64> = [(1, 100), (3, 0)].into_iter().collect();
+        assert!(used_cpu_since(&before, &new_process), "a new process is work");
+    }
 
     #[test]
     fn call_search_filter_never_excludes_a_rust_regex_match() {

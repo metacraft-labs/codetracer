@@ -980,6 +980,13 @@ pub struct DapStdioTestClient {
     client: DapClient,
 }
 
+/// The longest [`DapStdioTestClient::initialize_and_launch_rr`] and the
+/// breakpoint helpers wait for one answer (see `initialize_and_launch_rr`):
+/// bounds on a db-backend that stopped answering, not on a slow one.
+const RR_LAUNCH_STEP_TIMEOUT: Duration = Duration::from_secs(60);
+/// The longest they wait for a replay to stop (at the entry, at a breakpoint).
+const RR_LAUNCH_ENTRY_TIMEOUT: Duration = Duration::from_secs(300);
+
 impl DapStdioTestClient {
     /// Spawn `db-backend dap-server --stdio` and set up pipes.
     pub fn start() -> Result<Self, String> {
@@ -1037,6 +1044,12 @@ impl DapStdioTestClient {
     ///
     /// Unlike `initialize_and_launch()` (for DB traces), this passes the
     /// `recreator_exe` so the backend can spawn the replay worker.
+    ///
+    /// The waits are bounds on a db-backend or worker that stopped answering,
+    /// not on a slow one: on a host at load 140 (24 threads, `stress-ng --cpu
+    /// 64` on top of the usual load) the initialize response alone took more
+    /// than the 5 s this used to allow, and the stop at the entry more than
+    /// 30 s, so a launch that was going to succeed failed the test.
     pub fn initialize_and_launch_rr(
         &mut self,
         recording: &TestRecording,
@@ -1045,10 +1058,10 @@ impl DapStdioTestClient {
         // Send initialize
         let init = self.client.request("initialize", json!({}));
         self.send(&init)?;
-        self.read_until_response("initialize", Duration::from_secs(5))?;
+        self.read_until_response("initialize", RR_LAUNCH_STEP_TIMEOUT)?;
 
         // Wait for initialized event
-        self.read_until_event("initialized", Duration::from_secs(5))?;
+        self.read_until_event("initialized", RR_LAUNCH_STEP_TIMEOUT)?;
 
         // Send configurationDone
         let conf_done = self.client.request("configurationDone", json!({}));
@@ -1084,9 +1097,9 @@ impl DapStdioTestClient {
         self.send(&launch)?;
 
         // Wait for stopped event (entry point)
-        self.read_until_event("stopped", Duration::from_secs(30))?;
+        self.read_until_event("stopped", RR_LAUNCH_ENTRY_TIMEOUT)?;
         // Consume the complete-move event
-        self.read_until_event("ct/complete-move", Duration::from_secs(5))?;
+        self.read_until_event("ct/complete-move", RR_LAUNCH_STEP_TIMEOUT)?;
 
         Ok(())
     }
@@ -1219,7 +1232,7 @@ impl DapStdioTestClient {
             }),
         );
         self.send(&set_bp)?;
-        let response = self.read_until_response("setBreakpoints", Duration::from_secs(5))?;
+        let response = self.read_until_response("setBreakpoints", RR_LAUNCH_STEP_TIMEOUT)?;
         require_verified_breakpoint(&response, source_path, line)
     }
 
@@ -1243,7 +1256,7 @@ impl DapStdioTestClient {
             }),
         );
         self.send(&set_bp)?;
-        let response = self.read_until_response("setBreakpoints", Duration::from_secs(5))?;
+        let response = self.read_until_response("setBreakpoints", RR_LAUNCH_STEP_TIMEOUT)?;
         require_verified_breakpoint(&response, source_path, line)
     }
 
@@ -1251,8 +1264,8 @@ impl DapStdioTestClient {
     pub fn continue_to_breakpoint_on_thread(&mut self, thread_id: i64) -> Result<Location, String> {
         let continue_req = self.client.request("continue", json!({ "threadId": thread_id }));
         self.send(&continue_req)?;
-        self.read_until_event("stopped", Duration::from_secs(30))?;
-        let complete_move = self.read_until_event("ct/complete-move", Duration::from_secs(10))?;
+        self.read_until_event("stopped", RR_LAUNCH_ENTRY_TIMEOUT)?;
+        let complete_move = self.read_until_event("ct/complete-move", RR_LAUNCH_STEP_TIMEOUT)?;
         match complete_move {
             DapMessage::Event(e) => serde_json::from_value(e.body["location"].clone())
                 .map_err(|e| format!("failed to parse location: {}", e)),
@@ -1265,10 +1278,10 @@ impl DapStdioTestClient {
         self.send(&continue_req)?;
 
         // Wait for stopped event
-        self.read_until_event("stopped", Duration::from_secs(30))?;
+        self.read_until_event("stopped", RR_LAUNCH_ENTRY_TIMEOUT)?;
 
         // Wait for complete-move event to get location
-        let complete_move = self.read_until_event("ct/complete-move", Duration::from_secs(5))?;
+        let complete_move = self.read_until_event("ct/complete-move", RR_LAUNCH_STEP_TIMEOUT)?;
 
         match complete_move {
             DapMessage::Event(e) => serde_json::from_value(e.body["location"].clone())

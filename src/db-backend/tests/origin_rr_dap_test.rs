@@ -444,6 +444,27 @@ mod rr {
         }
     }
 
+    /// A DAP client for a test that asserts a WHOLE chain in one request.
+    ///
+    /// A request's time limit is 5 s and an rr hop's 1.5 s by default, and on a
+    /// loaded host a walk can need more: under `stress-ng --cpu 64` at load
+    /// about 108, `test_rr_origin_chain_after_run_to_entry_twice_and_continue`
+    /// stopped after its first hop with "wall-clock budget exhausted (5000
+    /// ms)", once in eight full runs. Cutting a chain off at the limit is the
+    /// designed behaviour, covered by the tests that set a 1 ms limit and the
+    /// per-hop cap test; these tests are about the chain's answer, so they
+    /// raise both limits (`CT_ORIGIN_WALL_CLOCK_MS` and
+    /// `CT_RR_ORIGIN_PER_HOP_WALL_CLOCK_MS`, honoured under
+    /// `CODETRACER_IN_UI_TEST`), as the desktop scenarios do.
+    fn start_client_for_a_whole_chain() -> test_harness::DapStdioTestClient {
+        test_harness::DapStdioTestClient::start_with_env(&[
+            ("CODETRACER_IN_UI_TEST", "1"),
+            ("CT_ORIGIN_WALL_CLOCK_MS", "60000"),
+            ("CT_RR_ORIGIN_PER_HOP_WALL_CLOCK_MS", "10000"),
+        ])
+        .expect("DAP stdio client should start")
+    }
+
     fn send_rr_origin_chain_request(
         client: &mut test_harness::DapStdioTestClient,
         variable_name: &str,
@@ -468,7 +489,7 @@ mod rr {
         );
         client.send_message(&req).expect("send ct/originChain");
         let response = client
-            .read_until_response_msg("ct/originChain", Duration::from_secs(60))
+            .read_until_response_msg("ct/originChain", Duration::from_secs(300))
             .expect("read ct/originChain response");
         match response {
             DapMessage::Response(response) => {
@@ -513,7 +534,7 @@ mod rr {
         let recording = record_rr_fixture_with_regenerate("c", "cross_thread_copy", "main.c", &ct_native_replay);
         let breakpoint_line = fixture_line_containing("c", "cross_thread_copy", "main.c", "printf(\"%d\\n\", local)");
 
-        let mut client = test_harness::DapStdioTestClient::start().expect("DAP stdio client should start");
+        let mut client = start_client_for_a_whole_chain();
         client
             .initialize_and_launch_rr(&recording, &ct_native_replay)
             .expect("RR DAP launch should succeed");
@@ -575,7 +596,7 @@ mod rr {
         let recording = record_rr_fixture_with_regenerate("c", "cross_thread_copy", "main.c", &ct_native_replay);
         let breakpoint_line = fixture_line_containing("c", "cross_thread_copy", "main.c", "printf(\"%d\\n\", local)");
 
-        let mut client = test_harness::DapStdioTestClient::start().expect("DAP stdio client should start");
+        let mut client = start_client_for_a_whole_chain();
         client
             .initialize_and_launch_rr(&recording, &ct_native_replay)
             .expect("RR DAP launch should succeed");
@@ -635,9 +656,13 @@ mod rr {
         let recording = record_rr_fixture_with_regenerate("c", "cross_thread_copy", "main.c", &ct_native_replay);
         let breakpoint_line = fixture_line_containing("c", "cross_thread_copy", "main.c", "printf(\"%d\\n\", local)");
 
+        // The request's own limit is raised as in `start_client_for_a_whole_chain`:
+        // this test is about the per-hop cap, not about a loaded host cutting
+        // the walk off at 5 s.
         let mut client = test_harness::DapStdioTestClient::start_with_env(&[
             ("CODETRACER_IN_UI_TEST", "1"),
             ("CT_RR_ORIGIN_PER_HOP_WALL_CLOCK_MS", "1"),
+            ("CT_ORIGIN_WALL_CLOCK_MS", "60000"),
         ])
         .expect("DAP stdio client should start");
         client
@@ -846,9 +871,11 @@ mod rr {
             session_id: String::new(),
             classify_source: true,
         };
+        // A whole-chain answer: the request's limit raised, as in
+        // `start_client_for_a_whole_chain`, so a loaded host cannot cut it off.
         let budget = OriginBudget {
             max_hops: DEFAULT_ORIGIN_MAX_HOPS,
-            wall_clock_ms: db_backend::task::DEFAULT_ORIGIN_WALL_CLOCK_MS,
+            wall_clock_ms: 60_000,
             max_steps_scanned: db_backend::task::DEFAULT_ORIGIN_MAX_STEPS_SCANNED,
         };
         let chain = db_backend::recreator_origin::run_rr_origin_chain(
@@ -889,7 +916,7 @@ mod rr {
         let recording = record_rr_fixture_with_regenerate("rust", "simple_trivial_chain", "main.rs", &ct_native_replay);
         let breakpoint_line = fixture_line_containing("rust", "simple_trivial_chain", "main.rs", "println!");
 
-        let mut client = test_harness::DapStdioTestClient::start().expect("DAP stdio client should start");
+        let mut client = start_client_for_a_whole_chain();
         client
             .initialize_and_launch_rr(&recording, &ct_native_replay)
             .expect("RR DAP launch should succeed");
@@ -938,7 +965,7 @@ mod rr {
         let req = client.dap_client_mut().request(command, serde_json::json!({ "threadId": 1 }));
         client.send_message(&req).unwrap_or_else(|e| panic!("send {command}: {e}"));
         match client
-            .read_until_event_msg("ct/complete-move", Duration::from_secs(120))
+            .read_until_event_msg("ct/complete-move", Duration::from_secs(300))
             .unwrap_or_else(|e| panic!("{command} reported no stop: {e}"))
         {
             DapMessage::Event(event) => event.body["location"]["line"]
@@ -1061,7 +1088,7 @@ mod rr {
             assert!(packed.status.success(), "rr pack failed: {}", String::from_utf8_lossy(&packed.stderr));
         }
         let breakpoint_line = fixture_line_containing("rust", "simple_trivial_chain", "main.rs", "println!");
-        let mut client = test_harness::DapStdioTestClient::start().expect("DAP stdio client should start");
+        let mut client = start_client_for_a_whole_chain();
         client
             .initialize_and_launch_rr(&recording, &ct_native_replay)
             .expect("RR DAP launch should succeed");
@@ -1089,7 +1116,7 @@ mod rr {
         let req = client.dap_client_mut().request(command, args);
         client.send_message(&req).unwrap_or_else(|e| panic!("send {command}: {e}"));
         client
-            .read_until_response_msg(command, Duration::from_secs(120))
+            .read_until_response_msg(command, Duration::from_secs(300))
             .unwrap_or_else(|e| panic!("{command}: no response: {e}"));
     }
 
@@ -1147,7 +1174,7 @@ mod rr {
         );
         client.send_message(&req).expect("send ct/originChain");
         let response = client
-            .read_until_response_msg("ct/originChain", Duration::from_secs(60))
+            .read_until_response_msg("ct/originChain", Duration::from_secs(300))
             .expect("read ct/originChain response");
         match response {
             DapMessage::Response(response) if response.success => Ok(serde_json::from_value(response.body)
