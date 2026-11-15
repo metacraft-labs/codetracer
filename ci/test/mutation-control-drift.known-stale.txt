@@ -138,7 +138,6 @@ src/frontend/viewmodel/tests/unit/plat4-layout-mutation-control.sha256	src/front
 # eec6949f68 (a move in flight, an early replay-idle) moved the terminal's
 # runtime and main under its record. A re-grade of the arms whose needles sit
 # in them is owed.
-src/frontend/tui/tests/plat62-constraints-mutation-control.sha256	src/frontend/tui/app/runtime.nim	9f6ceffe6b6685c2accdce1080bd0d79d6355dbe8235135b4e163a554a5aa58b	a7a3bb422082c3ce0dbfd6321695a4a8876ce902281ec4c17f02c3bc4e1bbeb8
 # run-plat60-low-level-code-mutations.py was re-graded at 56862a458e4; since then
 # 49f7146380 (a DOM button's press) and eec6949f68 (a move in flight, an early
 # replay-idle) moved the terminal's runtime, its host and the scope path under
@@ -156,7 +155,6 @@ src/frontend/tui/tests/plat51-parity-mutation-control.sha256	src/frontend/gpui/m
 src/frontend/tui/tests/plat51-parity-mutation-control.sha256	src/frontend/viewmodel/views/list_scrubber_dom.nim	b99647341091c0372803e30eeebceb04444463895d08931d5979b65fee786153	586759be9758b374ae9cd35e26cf90484f399fef18d5816aee1bead2bd489413
 src/frontend/tui/tests/plat54-agent-activity-mutation-control.sha256	src/frontend/gpui/main.nim	2fde80b43566564a900a59186e7bc7debd9c675598646f4fa391424de76c48eb	28f36a050600425fdbbea72ccc729250a4977ecc589c87e4d67e73d3196f228e
 src/frontend/tui/tests/plat54-agent-activity-mutation-control.sha256	src/frontend/ui/agent_activity.nim	61ae1ecf5fbc1e0ce44dc59f15ea0b781785910a0366583b47b32fdfc92c0467	60985af34f2457a1b980bbed2959d9c6697aa8fbcc16173b33a64fe978130f64
-src/frontend/tui/tests/plat62-constraints-mutation-control.sha256	src/frontend/gpui/main.nim	2fde80b43566564a900a59186e7bc7debd9c675598646f4fa391424de76c48eb	28f36a050600425fdbbea72ccc729250a4977ecc589c87e4d67e73d3196f228e
 src/frontend/tui/tests/plat46-design-mutation-control.sha256	src/frontend/tui/app/theme/capabilities.nim	f1f2c84a36ed368523f503701d3a0700b16a9fd1aa5c4c6d9c93c713fe54e38b	4a709e46e1c01539fda428f6784b3535f3a42183eb307651eea4fa86b87714f0
 src/frontend/tui/tests/plat46-design-mutation-control.sha256	src/frontend/tui/host/terminal_probe.nim	124b9e0d5977013726b504dd51c62c291de43270ba8932fde09594388fffd9fb	f76737aff180ffb8ce2023c92a130fc74397ae5e7e14ed1e9c295b95440a4672
 src/frontend/tui/tests/plat46-design-mutation-control.sha256	src/frontend/tui/tests/test_plat46_terminal_probe.nim	825901238fc6539a7b2b1001c28b1689d6fa9c0c3be4ac0de91682919b5da5ac	4b596c88e38d1f938825288763f1d14e2c8a368692192c30b1b78537ab22c267
@@ -174,7 +172,6 @@ src/frontend/tui/tests/plat49-chrome-mutation-control.sha256	src/frontend/tui/ma
 src/frontend/tui/tests/plat50-clicks-mutation-control.sha256	src/frontend/tui/main.nim	66283c44fe09ff1389f0e769ef48637ce573781972c014e30c9c16b1da8606ce	82a88f3f2c8697dc6edab12b1b2be1b458357d4f5be0597552709fceabf7593c
 src/frontend/tui/tests/plat51-parity-mutation-control.sha256	src/frontend/tui/main.nim	66283c44fe09ff1389f0e769ef48637ce573781972c014e30c9c16b1da8606ce	82a88f3f2c8697dc6edab12b1b2be1b458357d4f5be0597552709fceabf7593c
 src/frontend/tui/tests/plat54-agent-activity-mutation-control.sha256	src/frontend/tui/main.nim	66283c44fe09ff1389f0e769ef48637ce573781972c014e30c9c16b1da8606ce	82a88f3f2c8697dc6edab12b1b2be1b458357d4f5be0597552709fceabf7593c
-src/frontend/tui/tests/plat62-constraints-mutation-control.sha256	src/frontend/tui/main.nim	66283c44fe09ff1389f0e769ef48637ce573781972c014e30c9c16b1da8606ce	82a88f3f2c8697dc6edab12b1b2be1b458357d4f5be0597552709fceabf7593c
 src/tests/scenarios/plat66-pack-mutation-control.sha256	ci/test/scenarios.sh	a3c2bf0be61b0e9b9fa7878b0e1d77d7aa2a39eb50fd63bac41bf71971d368b6	0680d62d06bc4671f5e80a843e2d2e34ebce12c2ee5951feca315b19e5a46bd2
 src/tests/scenarios/plat66-pack-mutation-control.sha256	src/tests/scenarios/bindings/termassert/ct_tui_screen.nim	552b9da23ab44d96c08e50302adf410e90bbf42da5082bfc5e63fd7cf8282262	255a2526134d381474f695d7fd979d939f84bcbce60d0cffb1893725869e1816
 # plat70h was graded at 56862a458e4; its runtime moved on agents after that
@@ -281,3 +278,5 @@ src/frontend/tui/tests/build-residuals-mutation-control.sha256	src/frontend/gpui
 # then c79bee58b1 (the GPUI status line's note) moved the GPUI window under
 # its record. A re-grade of the arms whose needles sit in it is owed.
 src/frontend/tui/tests/plat60-low-level-code-mutation-control.sha256	src/frontend/gpui/main.nim	bd206f82ec3b500e52053e6eeda52e891e83aede0353ce2e485c65e1fcf50d85	28f36a050600425fdbbea72ccc729250a4977ecc589c87e4d67e73d3196f228e
+# run-plat62-constraints-mutations.py was re-graded at 25ef4c6b12; since then
+src/frontend/tui/tests/plat62-constraints-mutation-control.sha256	src/frontend/gpui/main.nim	bd206f82ec3b500e52053e6eeda52e891e83aede0353ce2e485c65e1fcf50d85	28f36a050600425fdbbea72ccc729250a4977ecc589c87e4d67e73d3196f228e
