@@ -143,9 +143,6 @@ src/frontend/tui/tests/plat62-constraints-mutation-control.sha256	src/frontend/t
 # 49f7146380 (a DOM button's press) and eec6949f68 (a move in flight, an early
 # replay-idle) moved the terminal's runtime, its host and the scope path under
 # its record. A re-grade of the arms whose needles sit in them is owed.
-src/frontend/tui/tests/plat60-low-level-code-mutation-control.sha256	src/frontend/tui/app/runtime.nim	9f6ceffe6b6685c2accdce1080bd0d79d6355dbe8235135b4e163a554a5aa58b	a7a3bb422082c3ce0dbfd6321695a4a8876ce902281ec4c17f02c3bc4e1bbeb8
-src/frontend/tui/tests/plat60-low-level-code-mutation-control.sha256	src/frontend/tui/host/tui_session.nim	a9ea791e49006488ac348b14e02a4255f0d521e9444766a8aff5219e8c969bee	0c65cb8a6581ca9f73adda27a71e6589473c2573b61ce8a51eac495d0e0b1efe
-src/frontend/tui/tests/plat60-low-level-code-mutation-control.sha256	src/frontend/viewmodel/keymap/scope_path.nim	473c8c6a77041157de5750481c2e46c5a5d3dbe6bd2f749fd0f1f762a8a0b973	b6c5ae61a3b680c3360ebbc53a196fdcc68d5b62f76f02d10ca37d6bd383eef2
 
 # plat47: graded at 26fa87cc26c; eec6949f68 (a move in flight, drawn on the
 # terminal) then moved runtime.nim and tui_session.nim. Re-grade the arms
@@ -159,7 +156,6 @@ src/frontend/tui/tests/plat51-parity-mutation-control.sha256	src/frontend/gpui/m
 src/frontend/tui/tests/plat51-parity-mutation-control.sha256	src/frontend/viewmodel/views/list_scrubber_dom.nim	b99647341091c0372803e30eeebceb04444463895d08931d5979b65fee786153	586759be9758b374ae9cd35e26cf90484f399fef18d5816aee1bead2bd489413
 src/frontend/tui/tests/plat54-agent-activity-mutation-control.sha256	src/frontend/gpui/main.nim	2fde80b43566564a900a59186e7bc7debd9c675598646f4fa391424de76c48eb	28f36a050600425fdbbea72ccc729250a4977ecc589c87e4d67e73d3196f228e
 src/frontend/tui/tests/plat54-agent-activity-mutation-control.sha256	src/frontend/ui/agent_activity.nim	61ae1ecf5fbc1e0ce44dc59f15ea0b781785910a0366583b47b32fdfc92c0467	60985af34f2457a1b980bbed2959d9c6697aa8fbcc16173b33a64fe978130f64
-src/frontend/tui/tests/plat60-low-level-code-mutation-control.sha256	src/frontend/gpui/main.nim	2fde80b43566564a900a59186e7bc7debd9c675598646f4fa391424de76c48eb	28f36a050600425fdbbea72ccc729250a4977ecc589c87e4d67e73d3196f228e
 src/frontend/tui/tests/plat62-constraints-mutation-control.sha256	src/frontend/gpui/main.nim	2fde80b43566564a900a59186e7bc7debd9c675598646f4fa391424de76c48eb	28f36a050600425fdbbea72ccc729250a4977ecc589c87e4d67e73d3196f228e
 src/frontend/tui/tests/plat46-design-mutation-control.sha256	src/frontend/tui/app/theme/capabilities.nim	f1f2c84a36ed368523f503701d3a0700b16a9fd1aa5c4c6d9c93c713fe54e38b	4a709e46e1c01539fda428f6784b3535f3a42183eb307651eea4fa86b87714f0
 src/frontend/tui/tests/plat46-design-mutation-control.sha256	src/frontend/tui/host/terminal_probe.nim	124b9e0d5977013726b504dd51c62c291de43270ba8932fde09594388fffd9fb	f76737aff180ffb8ce2023c92a130fc74397ae5e7e14ed1e9c295b95440a4672
@@ -218,7 +214,6 @@ src/frontend/tui/tests/plat50-clicks-mutation-control.sha256	src/db-backend/src/
 src/frontend/tui/tests/plat51-parity-mutation-control.sha256	src/frontend/viewmodel/views/isonim_state_view.nim	6fa4c2f0add340fbca0d4af98b916072646ad082fcbd76267f29a4beb955ec7f	d6e4e214b5ddc60da0f32de9e57688a058dec4bfcd9e648bdf945556c83f0b53
 src/frontend/tui/tests/plat51-parity-mutation-control.sha256	src/db-backend/src/dap_handler.rs	98fc556946929000619231672219791a054bbbeef7d675bb3722b0870a9e37f0	23f8ff8145f2d5a678588557c9c855a9701cd2bf5fa7afa677028b7262076e76
 src/frontend/tui/tests/plat58-requests-mutation-control.sha256	src/db-backend/src/dap_handler.rs	98fc556946929000619231672219791a054bbbeef7d675bb3722b0870a9e37f0	23f8ff8145f2d5a678588557c9c855a9701cd2bf5fa7afa677028b7262076e76
-src/frontend/tui/tests/plat60-low-level-code-mutation-control.sha256	src/db-backend/src/dap_handler.rs	98fc556946929000619231672219791a054bbbeef7d675bb3722b0870a9e37f0	23f8ff8145f2d5a678588557c9c855a9701cd2bf5fa7afa677028b7262076e76
 src/frontend/tui/tests/plat70f-pointer-mutation-control.sha256	src/frontend/viewmodel/views/isonim_state_view.nim	6fa4c2f0add340fbca0d4af98b916072646ad082fcbd76267f29a4beb955ec7f	d6e4e214b5ddc60da0f32de9e57688a058dec4bfcd9e648bdf945556c83f0b53
 src/frontend/tui/tests/plat70f-pointer-mutation-control.sha256	src/frontend/ui/isonim_origin_chain.nim	1eeff223e11e03c37858e4d58b580724b6263f3d8d5d25742f4bbcbf3272bf7c	1b2891ac4896722a8b3e027aab7e91422663bc83379de6fbf49fa89bbb6720a1
 src/frontend/tui/tests/plat70f-pointer-mutation-control.sha256	src/db-backend/src/db.rs	8cb263f7ff2c5c3d3107acda8acd56f48c46efa974992aeb2d199c41d152d07c	5643f4af288ed8fc9f76c0fb60b2a71af66f1dce2dc96235009e4994b42a398b
@@ -282,3 +277,7 @@ src/frontend/tui/tests/plat64-input-routing-mutation-control.sha256	src/frontend
 # c79bee58b1 (the GPUI status line's note) moved the GPUI window under its
 # record. A re-grade of the arms whose needles sit in it is owed.
 src/frontend/tui/tests/build-residuals-mutation-control.sha256	src/frontend/gpui/main.nim	bd206f82ec3b500e52053e6eeda52e891e83aede0353ce2e485c65e1fcf50d85	28f36a050600425fdbbea72ccc729250a4977ecc589c87e4d67e73d3196f228e
+# run-plat60-low-level-code-mutations.py was re-graded at e919ffb00f; since
+# then c79bee58b1 (the GPUI status line's note) moved the GPUI window under
+# its record. A re-grade of the arms whose needles sit in it is owed.
+src/frontend/tui/tests/plat60-low-level-code-mutation-control.sha256	src/frontend/gpui/main.nim	bd206f82ec3b500e52053e6eeda52e891e83aede0353ce2e485c65e1fcf50d85	28f36a050600425fdbbea72ccc729250a4977ecc589c87e4d67e73d3196f228e
