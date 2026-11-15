@@ -62,6 +62,9 @@ type
     lxShell
     lxJson
     lxYaml
+    lxNim          ## CodeTracer's own Monarch definition, the desktop's Nim
+                   ## colouring (the desktop's shared editor; no extension
+                   ## selects it here — the terminal has the Nim grammar)
 
 const GrammarExtensions*: seq[(string, GrammarId)] = @[
   (".nim", giNim), (".nims", giNim), (".nimble", giNim),
@@ -180,6 +183,7 @@ func monacoLanguageOf*(lexer: LexerId): string =
   of lxShell: "shell"
   of lxJson: "json"
   of lxYaml: "yaml"
+  of lxNim: "nim"
 
 proc initialContext*(lexer: LexerId): string =
   ## The tokenizer state a file starts in, as the opaque context string.
