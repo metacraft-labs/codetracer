@@ -12,7 +12,11 @@ It is a **developer setting**, off by default:
 
 Monaco stays the default until every row below is met. Whether to drop Monaco
 is a later decision taken on this table (codetracer-pm
-`spec/Architecture/Editor-ViewModel.md` §3.2a).
+`spec/Architecture/Editor-ViewModel.md` §3.2a). Four editor surfaces are not
+rows of it yet and still create Monaco with the setting on — the macro
+expansion and low-level views, the low-level view's inline source editors, the
+tracepoint editor and the Agent Workspace's editor (codetracer-pm
+`issues/2026-11-15-with-shared-editor-on-four-editor-surfaces-outside-the-parity-table-still-create-monaco.md`).
 
 ## How it is built
 
@@ -22,7 +26,7 @@ is a later decision taken on this table (codetracer-pm
 | The DOM renderer, input (keys, pointer, composition, clipboard), the find widget | `src/frontend/ui/shared_editor.nim` |
 | Monaco's editor and model API over the core (what `ui/editor`, `ui/flow`, `ui/trace`, the LSP router and the page objects call) | `src/frontend/ui/shared_editor_facade.nim` |
 | Language features through the LSP router's bridge | `src/frontend/ui/shared_editor_lsp.nim` |
-| The unified diff on two shared editors | `src/frontend/ui/shared_diff_editor.nim` |
+| The unified diff on two shared editors: the line diff, collapsed regions and their boundaries, word marks, the old revision aligned beside the new | `src/frontend/ui/shared_diff_editor.nim`, `src/frontend/view_vocabulary/diff_regions.nim` |
 | The setting | `src/frontend/ui/shared_editor_flag.nim`, `common/config.nim` (`sharedEditor`) |
 | Keys through the shared router | `src/frontend/ui/key_router.nim` (`routeSharedEditorKey`, `runSharedEditor`) |
 
@@ -36,7 +40,7 @@ the named part of the environment cannot be reproduced here; **not met** —
 the desktop keeps Monaco for that use, for the reason given.
 
 Suites: **U** `src/frontend/viewmodel/tests/unit/test_editor_dom_frame.nim`
-(vm-unit, vm-unit-js); **B** `src/frontend/tests/shared_editor_chromium_test.nim`
+and **R** `test_diff_regions.nim` (vm-unit, vm-unit-js); **B** `src/frontend/tests/shared_editor_chromium_test.nim`
 and **L** `src/frontend/tests/shared_editor_lsp_chromium_test.nim`
 (renderer-chromium, headless Chromium, trusted input); **D**
 `src/tests/gui/tests/shared-editor/shared_editor_desktop.spec.ts` and **X**
@@ -58,7 +62,7 @@ GUI suite run with `CODETRACER_SHARED_EDITOR=1`. Arms are
 | LSP: completion | met | **L** `Ctrl+Space`, the server's items, Enter inserts. Arm L3. |
 | LSP: go to definition | met | **L** `F12` where the keymap leaves it, Ctrl+click in a writable editor. Arms L2, L5. |
 | LSP: Nim semantic tokens | met | **L** the codetracer langserver's response (the dev shell's `nimlangserver` 1.12.0 advertises semantic tokens and never answers a range request — filed). Asked for only where Monaco's `semanticHighlighting.enabled` option is on: on the desktop Monaco sends no semantic-token request (the trace-macro scenario's language-server traffic, read for both editors), and a range request the server leaves unanswered holds up the macro trace queued behind it. Arms L4, L6. |
-| Syntax highlighting (Monarch via `monarch.nim`) | met | **B** "the document's lines, coloured by the Monarch runner": the keyword span in the editor theme's keyword colour; **U** "tokens cut at decoration edges". Arms R15, R16. |
+| Syntax highlighting (Monarch via `monarch.nim`) | met | **B** "the document's lines, coloured by the Monarch runner": the keyword span in the editor theme's keyword colour; **U** "tokens cut at decoration edges". Arms R15, R16. Nim is coloured with the desktop's own Monarch definition (`languages/nimLanguage.js`, exported beside Monaco's; **B** "Nim is coloured…", arm R40). |
 | Decorations: the execution pointer | met | **B** decorations case (whole-line class in the overlay layer); **X** the execution line after a step. Arm R7. |
 | Decorations: per-line status (breakpoints, tracepoints) in the gutter | met | **U** margin classes on the first line; **B** the glyph class in the margin; **X** the glyph column after a press. Arms F4, F5. |
 | Decorations: inline values | met | **U** injected content; **B** the value chip at the line's end; **X** the value chips. Arm F8. |
@@ -71,7 +75,7 @@ GUI suite run with `CODETRACER_SHARED_EDITOR=1`. Arms are
 | Editing: bracket matching | met | **B** the bracket and its partner. Arm F9. |
 | Editing: drag selection | met | **B** click, double click, drag across lines. Arm R6. |
 | Pointer: where a press puts the caret | met | **B** a press on the middle of a character puts the caret after it, as Monaco's does (the scenario pack aims its text anchors there); a double or triple press is counted, by each press's event time, at the character under the pointer, so a double click on a loaded page still selects the word. Arm R22; the pack's `multiclick-selects-caret-word-line`, `tabs-survive-mode-switch`. |
-| The unified-diff view | not met — Monaco's diff editor is kept | The shared editor's diff (`ui/shared_diff_editor.nim`: two shared editors behind Monaco's diff-editor API, removed lines as zones, added lines marked; **B** "the unified diff…", **U** "the unified diff's line diff", arms R17, R18, F10) draws a diff, but the desktop's review and VCS panel use more of Monaco's diff editor than it does: hidden unchanged regions with their draggable, keyboard-operable boundaries, word-level marks inside a changed line, syntax highlighting of deleted lines, and the flow's values and loop control over the diff (the Electron GUI suite with the setting on: `deepreview/deepreview-gui.spec.ts` UD-1 to UD-4 and Tests 14–16f, 21, 26–31; `vcs/vcs_unified_diff.spec.ts` UD-2). Until it does, the desktop's diff views stay on Monaco under the setting too (`ui/unified_diff.nim`). |
+| The unified-diff view | met | The review's and the VCS panel's diff tab is the shared editor's diff under the setting (`ui/unified_diff.nim`), with what they use of Monaco's diff editor: collapsed unchanged regions with their bands and boundaries — a press reveals the step, a drag one line per line height, Shift+Enter / the menu / the unfold control the rest, keyboard focus kept on a handle across a reveal (**R** the regions, the gestures' arithmetic; **B** "collapsed regions and their handles…": trusted press and drag on the handles); word-level marks (**R**; **B**); removed lines coloured by the old revision's tokens (**B**); the flow's values, call and loop controls over the diff, and the old revision's numbers row for row beside the new (**B** alignment under a view zone and an added run; **G** below). Arms F10, F11–F19, R17, R18, R25–R40, A3, A4. The DeepReview and VCS scenarios with the setting on and off: see "The unified diff with the setting on and off" below. |
 | Read-only mode | met | **B** a read-only editor takes no text and still moves and selects; **D** typing in Debug mode changes nothing. Arm R14. |
 | The editor context menu | met | **D** the right-click menu is CodeTracer's; **G** `tests/editor/editor_context_menu_is_mode_dependent.spec.ts`. |
 | Live editing for hot code reload | met | **D** Edit mode: typing, undo, `Ctrl+S` writes the file; **G** the HCR specs. |
@@ -81,6 +85,42 @@ GUI suite run with `CODETRACER_SHARED_EDITOR=1`. Arms are
 | What the rest of the desktop reads of Monaco | met | The tracepoint view, the flow, the review, the build panel and the page objects call Monaco directly; the shared editor answers what they read: the theme service's theme name, a layout whose minimap entry has its width and left edge (the tracepoint editor and the loop slider size themselves from them), `getModelMarkers` per owner, decorations' hover messages, content widgets placed by Monaco's preference (EXACT on its line) and hidden off the view, view zones as wide as the view, a find-widget press reported as an overlay widget without a position, Escape closing an open find, and an editor in a hidden tab drawing no lines. **B** content widgets; **G** below. Arms R23, R24. |
 | Monaco's DOM where the page styles it | met | The desktop's stylesheet and its page objects address Monaco's structure, and the editor keeps it: the gutter's rows hold only the cells that exist, number last (`text_editor.styl` paints every `div` of a row with the gutter's ground); the glyph decorations in `.glyph-margin-widgets` beside a `.glyph-margin` column; the find widget's `visible` class; a contained, composited `.lines-content`, so the flow's `position: fixed` value chips are placed in the text; Monaco's font fallback; `scrollBeyondLastLine`; every cursor's line highlighted; the view state carrying every selection across a mode switch. **B** the glyph layer and the find widget's class; **X** and the scenario pack (below). Arms R19, R20, R21, A2; the gutter rows under the page's own rules are graded by the scenario pack on the desktop. |
 | The differential | met, with a measured difference | **X** one scripted scenario, both editors, the same observations (the lines drawn, the execution line, the glyph column, the active line, the caret, the selection, the value chips) at each of seven points. `ci/test/shared-editor-differential.sh` runs the scenario pack's editor and tracing scenarios of the Electron lane on both editors and compares every step's status and observation: 17 of 18 the same. The difference: in `dimming-marks-only-untaken-branches`, after the stop at `shield.nr:34`, the first line drawn is 13 with Monaco and 14 with the shared editor (the last, 54, the same; the editors' heights and line heights measured equal) — the scenario's own assertions hold on both. |
+
+## The unified diff with the setting on and off
+
+The DeepReview scenarios (`src/tests/scenarios/deepreview/`, 29), the VCS
+panel's diff scenarios (`vcs/`, 9) and the two agent-activity review
+scenarios that open a diff, each run alone in the Electron flavour, `fast`
+and `realistic`, once with `CODETRACER_SHARED_EDITOR=0` and once with `=1`,
+at the same commit (PLAT-67's status block names it and the counts). Every
+scenario has the same outcome on both editors. The ones that fail, fail on
+both, at the same step, for reasons that are not the editor's
+(codetracer-pm `issues/2026-11-15-review-step-buttons-and-view-diff-tab-count-fail-on-agents-with-either-editor.md`):
+the review's call and loop step buttons do nothing when pressed, and one
+View Diff press opens two diff tabs. The Playwright spec
+`src/tests/gui/tests/vcs/vcs_unified_diff.spec.ts` fails the same six of
+its eleven tests on both editors, for the second of those reasons.
+
+Where the two editors' observations differ (every step's status and
+observation compared, `ci/test/shared-editor-differential.sh`'s rule), the
+scenarios' own assertions hold on both, and the difference is one of these:
+
+- **How many word marks.** The word-level marks are computed by a longest
+  common subsequence over a changed run's words (`diff_regions.innerChanges`),
+  not by Monaco's advanced diff; both mark the changed words with narrow
+  marks, and they draw a different number of them (`main.rs`: see the
+  status block).
+- **How many token kinds.** The shared editor's token classes are its
+  palette's (`token_class`), numbered `mtk1…`, and Monaco's are its theme's
+  colour ids, so "distinct token classes" counts different things (one more
+  or one fewer on the same text); both colour the deleted lines and the code.
+- **Which lines are drawn at a viewport's edge** (a line more or less at the
+  top after a reveal, and the full-file view's count of flow-marked lines in
+  the DOM): Monaco draws a different band of off-screen lines.
+- **Where a flake falls.** A hover-revealed View Diff button that does not
+  appear within 15 s fails a VCS scenario on one side in one run and the
+  other side in the next; the same scenarios pass on both sides in other
+  runs.
 
 ## The Electron GUI suite with the setting on and off
 
