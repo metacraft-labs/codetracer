@@ -255,7 +255,10 @@ ARMS = [
              "        (ValueRecord::Sequence { .. }, ValueRecord::Sequence { .. }) => false,")],
      [(ENGINE_TEST, ENGINE_LIST)],
      "a list that kept its contents reads as changed"),
-    ("O2", [(ENGINE, "                if first_sighting {\n                    // Seen first at this frame's start, under a name the frame never",
+    # O2's needle re-aimed at 62aeebc981c, which added the WebAssembly boundary
+    # exemption to the first-sighting test; the arm still makes that branch
+    # never taken, which is the defect it plants.
+    ("O2", [(ENGINE, "                if first_sighting && !is_boundary_binding_name(&current_var_name) {\n                    // Seen first at this frame's start, under a name the frame never",
              "                if false {\n                    // Seen first at this frame's start, under a name the frame never")],
      [(ENGINE_TEST, ENGINE_DUNDER)],
      "a dunder's first sighting reads as a write"),
@@ -477,6 +480,25 @@ def run_cargo(suite, test_filter):
     return "RED", []
 
 
+def rebuild_engine():
+    """Rebuild db-backend's binaries from the restored tree.
+
+    An engine arm's `cargo test` also builds the package's binaries, so the
+    last one leaves `target/debug/replay-server` built from its mutant; the
+    terminal and pty suites that start that binary do not check it for
+    staleness. Rebuilding once at exit, after every arm's restore, leaves the
+    tree's own engine behind."""
+    try:
+        p = subprocess.run(["cargo", "build", "--bins"],
+                           cwd=REPO / "src/db-backend", capture_output=True,
+                           text=True, timeout=TIMEOUT)
+    except subprocess.TimeoutExpired:
+        return False
+    if p.returncode != 0:
+        print(((p.stdout or "") + (p.stderr or ""))[-2000:])
+    return p.returncode == 0
+
+
 def run_suite(suite, test_filter):
     if suite in CARGO_SUITES:
         return run_cargo(suite, test_filter)
@@ -656,6 +678,11 @@ def main():
                        if k not in DECLARED_SURVIVORS})
         BECAUSE.write_text(json.dumps(merged, indent=2, sort_keys=True) + "\n")
         print(f"derived {len(derived)} because line(s)")
+    if any(s in CARGO_SUITES for arm in selected for s, _ in arm[2]) and \
+            not rebuild_engine():
+        print("FAIL: db-backend's binaries do not rebuild from the restored "
+              "tree.")
+        return 1
     if binary_digest is not None:
         if not build_binary() or sha_path(BIN) != binary_digest:
             print("FAIL: the binary rebuilt from the restored tree differs "
