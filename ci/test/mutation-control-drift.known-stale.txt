@@ -261,4 +261,3 @@ src/frontend/tui/tests/plat56-build-output-mutation-control.sha256	src/frontend/
 # A re-grade for those bytes is owed.
 src/frontend/viewmodel/tests/unit/plat33-collab-mutation-control.sha256	ci/lib/test-lane-files.sh	0837fd79d21f0ec4601131b521643b7e349d7bce090827639a34ac606d5c98f5	b16f56a2a67132e8271371f30aa9253c3e05789999ca88a329fb53045b8986fc
 src/frontend/viewmodel/tests/unit/plat33-collab-mutation-control.sha256	justfile	09f65d0d8dd94201aa918436e898a73c757c0891b188ac0da82c6fd1291b629e	de6e29c858ccacc6a879ec17305f92e561537a9869bbd58834fe32ec32fe6765
-src/frontend/viewmodel/tests/unit/plat34-front-end-mutation-control.sha256	ci/lib/test-lane-files.sh	0837fd79d21f0ec4601131b521643b7e349d7bce090827639a34ac606d5c98f5	b16f56a2a67132e8271371f30aa9253c3e05789999ca88a329fb53045b8986fc
