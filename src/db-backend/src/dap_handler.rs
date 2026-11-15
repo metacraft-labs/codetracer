@@ -1022,6 +1022,14 @@ impl Handler {
             let recorded_column = location.column.unwrap_or(1);
             let (translated_path, translated_line, translated_col) =
                 self.apply_sourcemap_translation(&location.path, location.line, recorded_column);
+            // The stop's source is the formatted view's, at its line: the GUI
+            // opens a stop's editor by its high-level path, so that path
+            // moves with it (left as the recorded path, the editor showed the
+            // minified text under the formatted file's name).
+            if location.high_level_path.is_empty() || location.high_level_path == location.path {
+                location.high_level_path = translated_path.clone();
+                location.high_level_line = translated_line;
+            }
             location.path = translated_path;
             location.line = translated_line;
             // Surface the translated column on the existing slot so the

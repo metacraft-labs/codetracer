@@ -296,3 +296,10 @@ src/frontend/tui/tests/plat70h-scrollbar-mutation-control.sha256	src/frontend/tu
 # and 3ba119e25e (the RunQuota endpoint from the user-state sandbox) moved the
 # Nim test lane: a re-grade of the arms whose needles sit in them.
 src/frontend/tui/tests/plat70e-origin-mutation-control.sha256	ci/lib/run-nim-test-lane.sh	efcf64ff39d6218321383bcca2bdd4571c00fb63d4413176e7061f6c11ec94ff	da6b4e46c486f1a7762fd79b05a42a15dd1b862ab4599ffa22c1bbc166d63783
+
+# 2026-11-15, a formatted-view stop names the view as its high-level source
+# (complete_move): these harnesses owe a re-grade for these bytes.
+src/frontend/tui/tests/plat50-clicks-mutation-control.sha256	src/db-backend/src/dap_handler.rs	98fc556946929000619231672219791a054bbbeef7d675bb3722b0870a9e37f0	879c5594db3630d3003350669f1be636f3567e780591af62b30f13a91257c770
+src/frontend/tui/tests/plat51-parity-mutation-control.sha256	src/db-backend/src/dap_handler.rs	98fc556946929000619231672219791a054bbbeef7d675bb3722b0870a9e37f0	879c5594db3630d3003350669f1be636f3567e780591af62b30f13a91257c770
+src/frontend/tui/tests/plat58-requests-mutation-control.sha256	src/db-backend/src/dap_handler.rs	98fc556946929000619231672219791a054bbbeef7d675bb3722b0870a9e37f0	879c5594db3630d3003350669f1be636f3567e780591af62b30f13a91257c770
+src/frontend/tui/tests/plat60-low-level-code-mutation-control.sha256	src/db-backend/src/dap_handler.rs	98fc556946929000619231672219791a054bbbeef7d675bb3722b0870a9e37f0	879c5594db3630d3003350669f1be636f3567e780591af62b30f13a91257c770
