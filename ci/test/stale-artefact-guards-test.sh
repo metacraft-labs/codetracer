@@ -124,7 +124,7 @@ BUILD_SIBLINGS="${SUITE_ROOT}/scripts/build-siblings.sh"
 # Every contract this suite claims to check. A suite that silently runs fewer
 # assertions than it advertises is a suite that stops protecting anything, so
 # the count is asserted at the end and has to be changed deliberately.
-EXPECTED_ASSERTIONS=168
+EXPECTED_ASSERTIONS=170
 
 ASSERTIONS=0
 FAILURES=0
@@ -2003,6 +2003,71 @@ if grep -qF 'cargo build --target-dir "${cargo_base}/db_backend_target"' <<<"${E
 else
 	bad "build_for_extension.sh builds the replay backend into the compiler-bound base" \
 		"$(grep -n 'cargo\|target' "${EXT_SH}")"
+fi
+
+# THE LINKER RESPONSE FILES. NIM_SIDE_OUTPUTS_IGNORE's second alternative is
+# meant to exclude Nim's `<name>_linkerArgs.txt` side outputs on Windows. It was
+# spelled `_linkerArgs\\.txt`, and tup 0.8 keeps `\\` verbatim inside a
+# variable, so the regex said "a backslash, then any character" and never
+# matched the file (measured with tup 0.8 on a rule that writes one: "was
+# written to, but is not in .tup/db"; with `[.]` it is Updated). The expression
+# is applied here as an ERE to the path such a write has, which treats `\\` and
+# `[/\\]` exactly as tup's regex engine does.
+if printf '%s\n' "/w/src/build-debug/ct/ct_linkerArgs.txt" | grep -Eq -- "${NIM_IGNORE_RE}" &&
+	printf '%s\n' 'C:\w\src\build-debug\ct\ct_linkerArgs.txt' | grep -Eq -- "${NIM_IGNORE_RE}" &&
+	! printf '%s\n' "/w/src/build-debug/ct/ct_linkerArgsXtxt" | grep -Eq -- "${NIM_IGNORE_RE}"; then
+	ok "NIM_SIDE_OUTPUTS_IGNORE matches a <name>_linkerArgs.txt side output, and only that name"
+else
+	bad "NIM_SIDE_OUTPUTS_IGNORE matches a <name>_linkerArgs.txt side output, and only that name" \
+		"NIM_SIDE_OUTPUTS_IGNORE: ${NIM_IGNORE_RE:-<not found>}"
+fi
+
+# THE EMULATOR LIBRARY TRAVELS WITH replay-server. A produced binary must
+# carry no load path into a build-scratch root (codetracer-pm issue
+# 2026-10-05, the 2026-10-12 addendum: macOS's /tmp cleanup emptied the Cargo
+# target's `out/` an installed `replay-server` loaded `libmcr_emulator.dylib`
+# from). src/db-backend/build.rs therefore gives every binary of the crate one
+# run-time search path, its own directory, and names the macOS library by
+# `@rpath`; every place that installs `replay-server` installs the library
+# beside it (or, for the AppImage, in the `lib/` its rewritten rpath names).
+# Source text, comments dropped: the defect is the `-rpath,<OUT_DIR>` emit and
+# a copy that forgets the library.
+BUILD_RS_CODE="$(grep -vE '^[[:space:]]*//' "${SUITE_ROOT}/src/db-backend/build.rs")"
+LOADPATH_WRONG=""
+# shellcheck disable=SC2016 # Rust and Tup source text, not expansions
+{
+	grep -qF 'cargo:rustc-link-arg=-Wl,-rpath,{}' <<<"${BUILD_RS_CODE}" &&
+		LOADPATH_WRONG="${LOADPATH_WRONG} build.rs(rpath-into-OUT_DIR)"
+	grep -qF 'cargo:rustc-link-arg=-Wl,-rpath,$ORIGIN' <<<"${BUILD_RS_CODE}" ||
+		LOADPATH_WRONG="${LOADPATH_WRONG} build.rs(no-\$ORIGIN)"
+	grep -qF 'cargo:rustc-link-arg=-Wl,-rpath,@loader_path' <<<"${BUILD_RS_CODE}" ||
+		LOADPATH_WRONG="${LOADPATH_WRONG} build.rs(no-@loader_path)"
+	grep -qF -- '-Wl,-install_name,@rpath/' <<<"${BUILD_RS_CODE}" ||
+		LOADPATH_WRONG="${LOADPATH_WRONG} build.rs(macOS-install-name-not-@rpath)"
+	[[ "$(grep -c 'deploy_shared_beside_binaries(&so_path)' <<<"${BUILD_RS_CODE}")" -ge 1 ]] &&
+		grep -A12 'fn deploy_shared_beside_binaries' <<<"${BUILD_RS_CODE}" | grep -qF 'profile_dir.join("deps")' ||
+		LOADPATH_WRONG="${LOADPATH_WRONG} build.rs(not-deployed-beside-binaries-and-tests)"
+	grep -qF 'cp $(CARGO_TARGET_BASE)/db_backend_target/debug/libmcr_emulator.so %2o' <<<"${TUP_RULE_LINES}" ||
+		LOADPATH_WRONG="${LOADPATH_WRONG} Tuprules(linux)"
+	grep -qF 'cp $(CARGO_TARGET_BASE)/db_backend_target/debug/libmcr_emulator.dylib %2o' <<<"${TUP_RULE_LINES}" ||
+		LOADPATH_WRONG="${LOADPATH_WRONG} Tuprules(macos)"
+	grep -qF '../bin/replay-server$(EXE_SUFFIX) ../bin/libmcr_emulator.dylib' "${SUITE_ROOT}/src/db-backend/Tupfile" ||
+		LOADPATH_WRONG="${LOADPATH_WRONG} db-backend/Tupfile(macos)"
+	grep -qF 'target("replay-server", [replayServer, replayServerEmulator])' <<<"${REPRO_CODE}" ||
+		LOADPATH_WRONG="${LOADPATH_WRONG} repro.nim"
+	grep -qF 'cp "${cargo_base}/db_backend_target/debug/${emulator_library}" "$(dirname "$2")/${emulator_library}"' <<<"${EXT_CODE}" ||
+		LOADPATH_WRONG="${LOADPATH_WRONG} build_for_extension.sh"
+	grep -qF '"${CODETRACER_PREFIX}/lib/libmcr_emulator.so"' "${SUITE_ROOT}/appimage-scripts/build_db_backend.sh" ||
+		LOADPATH_WRONG="${LOADPATH_WRONG} appimage-scripts/build_db_backend.sh"
+	grep -qF '"$DIST_DIR/bin/${emulator_library}"' "${SUITE_ROOT}/non-nix-build/build_db_backend.sh" ||
+		LOADPATH_WRONG="${LOADPATH_WRONG} non-nix-build/build_db_backend.sh"
+}
+if [[ -z ${LOADPATH_WRONG} ]]; then
+	ok "replay-server loads its emulator library only from beside itself, and every installer puts it there"
+else
+	# shellcheck disable=SC2086 # one item per line
+	bad "replay-server loads its emulator library only from beside itself, and every installer puts it there" \
+		${LOADPATH_WRONG}
 fi
 
 # ---------------------------------------------------------------------------

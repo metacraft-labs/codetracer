@@ -256,7 +256,11 @@ error CT_TUP_NIM_CACHE_ROOT is unset, so tup cannot place the Nim cache for this
 endif
 NIM_CACHE_ROOT = $(CT_TUP_NIM_CACHE_ROOT)
 
-NIM_SIDE_OUTPUTS_IGNORE = ^(([A-Za-z]:)?[/\\]tmp[/\\]ct-nim-cache[/\\].*|([A-Za-z]:)?[/\\].*_linkerArgs\\.txt)$
+# `[.]`, not `\\.`, for the literal dot: tup 0.8 keeps `\\` verbatim inside a
+# variable, so `\\.` was "a backslash, then any character" and this alternative
+# never matched `<name>_linkerArgs.txt` (measured on tup 0.8 against a rule that
+# writes one; ci/test/stale-artefact-guards-test.sh holds the spelling).
+NIM_SIDE_OUTPUTS_IGNORE = ^(([A-Za-z]:)?[/\\]tmp[/\\]ct-nim-cache[/\\].*|([A-Za-z]:)?[/\\].*_linkerArgs[.]txt)$
 
 # The CodeTracer Nim fork's C backend writes a MACRO SOURCEMAP for every
 # binary it links, `macro_sourcemap_<out name>.json`, where <out name> is the
@@ -681,19 +685,22 @@ ifeq (@(TUP_PLATFORM),win32)
     cp $(CARGO_TARGET_BASE)/db_backend_target/debug/mcr_emulator.dll %2o |> %o | $(DB_BACKEND_CARGO_IGNORE_OUTPUTS)
 endif
 ifeq (@(TUP_PLATFORM),linux)
-# The emulator library travels with the binary, which searches its own directory
-# first (src/db-backend/build.rs). The target directory was machine-wide when
-# that was written, and another checkout's build rewrote the copy in it; it is
-# per checkout now, but the binary still must not load from a build directory.
+# The emulator library travels with the binary, whose ONLY run-time search path
+# is its own directory (`$ORIGIN`, src/db-backend/build.rs): a produced binary
+# carries no load path into the Cargo target, so it keeps working when that
+# directory is moved, rebuilt by another compiler or cleaned.
 !debug_rust_cargo_db_backend = |> \
     cargo build --locked $(RUST_WINDOWS_LINKER_CONFIG) $(DB_BACKEND_CARGO_FEATURES) --target-dir $(CARGO_TARGET_BASE)/db_backend_target && \
     cp $(CARGO_TARGET_BASE)/db_backend_target/debug/replay-server$(EXE_SUFFIX) %1o && \
     cp $(CARGO_TARGET_BASE)/db_backend_target/debug/libmcr_emulator.so %2o |> %o | $(DB_BACKEND_CARGO_IGNORE_OUTPUTS)
 endif
 ifeq (@(TUP_PLATFORM),macosx)
+# The same on macOS: the binary's only rpath is `@loader_path`, and the library's
+# install name is `@rpath/libmcr_emulator.dylib` (src/db-backend/build.rs).
 !debug_rust_cargo_db_backend = |> \
     cargo build --locked $(RUST_WINDOWS_LINKER_CONFIG) $(DB_BACKEND_CARGO_FEATURES) --target-dir $(CARGO_TARGET_BASE)/db_backend_target && \
-    cp $(CARGO_TARGET_BASE)/db_backend_target/debug/replay-server$(EXE_SUFFIX) %o |> %o | $(DB_BACKEND_CARGO_IGNORE_OUTPUTS)
+    cp $(CARGO_TARGET_BASE)/db_backend_target/debug/replay-server$(EXE_SUFFIX) %1o && \
+    cp $(CARGO_TARGET_BASE)/db_backend_target/debug/libmcr_emulator.dylib %2o |> %o | $(DB_BACKEND_CARGO_IGNORE_OUTPUTS)
 endif
 !rust_cargo_db_backend = |> \
     cargo build --locked $(RUST_WINDOWS_LINKER_CONFIG) $(DB_BACKEND_CARGO_FEATURES) --release --target-dir $(CARGO_TARGET_BASE)/db_backend_target && \

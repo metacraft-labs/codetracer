@@ -22,4 +22,13 @@ popd
 # bundle under that name and let the legacy name stay retired.
 cp -rL "$ROOT_PATH/src/db-backend/target/release/replay-server" "${CODETRACER_PREFIX}/bin/replay-server"
 
+# And the emulator library it links. src/db-backend/build.rs gives the binary
+# no run-time path into the Cargo target any more (only `$ORIGIN`) and deploys
+# the library into target/release/; build_appimage.sh rewrites every bundled
+# binary's rpath to `$ORIGIN/../lib`, so this is where it must be. Its
+# `lddtree` closure pass copies /nix libraries only, so nothing else would
+# bundle it.
+mkdir -p "${CODETRACER_PREFIX}/lib"
+cp -L "$ROOT_PATH/src/db-backend/target/release/libmcr_emulator.so" "${CODETRACER_PREFIX}/lib/libmcr_emulator.so"
+
 echo "==========="

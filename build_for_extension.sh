@@ -46,3 +46,11 @@ if [ -z "${cargo_base}" ]; then
 fi
 (cd ./src/db-backend && cargo build --target-dir "${cargo_base}/db_backend_target")
 cp "${cargo_base}/db_backend_target/debug/replay-server" "$2"
+# The emulator library goes beside it: the binary's only run-time search path
+# is its own directory ($ORIGIN / @loader_path, src/db-backend/build.rs).
+case "$(uname -s)" in
+Darwin) emulator_library="libmcr_emulator.dylib" ;;
+MINGW* | MSYS* | CYGWIN*) emulator_library="mcr_emulator.dll" ;;
+*) emulator_library="libmcr_emulator.so" ;;
+esac
+cp "${cargo_base}/db_backend_target/debug/${emulator_library}" "$(dirname "$2")/${emulator_library}"

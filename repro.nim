@@ -1440,6 +1440,19 @@ package codeTracer:
     if fileExists("src/db-backend/Cargo.toml"):
       let replayServerBinary =
         ReproCargoSlot & "/db_backend_target/debug/replay-server" & ExeSuffix
+      # The emulator library `replay-server` links. Its only run-time search
+      # path is its own directory (`$ORIGIN` / `@loader_path`, set in
+      # src/db-backend/build.rs, which deploys the library beside the binary
+      # in the profile directory), so the installed copy below needs the
+      # library installed beside it too. It used to find it through an
+      # rpath into the Cargo target's `out/` (`/tmp/codetracer/...` here),
+      # which macOS's /tmp cleanup emptied (2026-10-12).
+      const emulatorLibraryName =
+        when defined(windows): "mcr_emulator.dll"
+        elif defined(macosx): "libmcr_emulator.dylib"
+        else: "libmcr_emulator.so"
+      let emulatorLibrary =
+        ReproCargoSlot & "/db_backend_target/debug/" & emulatorLibraryName
       let replayServerBuild = cargo.build(
         locked = true,
         manifestPath = "src/db-backend/Cargo.toml",
@@ -1454,14 +1467,22 @@ package codeTracer:
           "libs/tree-sitter-nim/src/parser.c",
           "libs/tree-sitter-nim/src/scanner.c"
         ],
-        extraOutputs = @[replayServerBinary])
+        extraOutputs = @[replayServerBinary, emulatorLibrary])
       let replayServer = fs.copyFile(
         source = replayServerBinary,
         output = buildDebugPath("bin/replay-server" & ExeSuffix),
         actionId = "db-replay-server",
         after = @[replayServerBuild])
-      target("replay-server", replayServer)
+      let replayServerEmulator = fs.copyFile(
+        source = emulatorLibrary,
+        output = buildDebugPath("bin/" & emulatorLibraryName),
+        actionId = "db-replay-server-emulator-library",
+        after = @[replayServerBuild])
+      # `replay-server` names a replay-server THAT STARTS: the binary and the
+      # library it loads from beside itself.
+      target("replay-server", [replayServer, replayServerEmulator])
       codetracerActions.add(replayServer)
+      codetracerActions.add(replayServerEmulator)
 
     # Nim cache dirs. Both platforms derive the root from the ambient
     # temporary directory (``%TEMP%`` on Windows, ``$TMPDIR`` on POSIX,
