@@ -3,7 +3,7 @@
   "terminal": "ghostty",
   "version": "1.3.1",
   "launch": "ghostty --config-default-files=false --font-family=DejaVu Sans Mono --font-size=11 --window-decoration=false --gtk-titlebar=false --window-width=160 --window-height=64 --window-padding-x=0 --window-padding-y=0 --window-padding-balance=false --confirm-close-surface=false --shell-integration=none --cursor-style-blink=false -e sh -c <command>",
-  "capturedAt": "2026-11-11T16:52:47Z",
+  "capturedAt": "2026-11-15T03:46:49Z",
   "host": "Linux 6.18.55 x86_64",
   "env": {
     "TERM": "xterm-ghostty",
@@ -15,8 +15,9 @@
   },
   "cols": 160,
   "rows": 64,
-  "fenceMs": 3.3,
-  "round": "\u001B]11;?\u001B\\\u001BP+q524742;5463\u001B\\\u001B[48:2:1:2:3m\u001BP$qm\u001B\\\u001B[m\u001B[?1016$p\u001B[16t\u001B[?u\u001B]22;?default,pointer,text,col-resize,row-resize,grab,grabbing,not-allowed,ew-resize,ns-resize\u001B\\\u001B[>q\u001B[>c\u001B[?2026$p\u001B[?2027$p\u001B[?2026h\u001B[1;1H…\u001B[6n\u001B[1;1H▕\u001B[6n\u001B[1;1H🮇\u001B[6n\u001B[1;1H⏮\u001B[6n\u001B[1;1H中\u001B[6n\u001B[1;1H👩‍💻\u001B[6n\u001B[1;1H\u001B[2K\u001B[?2026l\u001B[c",
+  "fenceMs": 12.67,
+  "round": "\u001B]11;?\u001B\\\u001BP+q524742;5463\u001B\\\u001B[48:2:1:2:3m\u001BP$qm\u001B\\\u001B[m\u001B[?1016$p\u001B[16t\u001B[?u\u001B]22;?default,pointer,text,col-resize,row-resize,grab,grabbing,not-allowed,ew-resize,ns-resize\u001B\\\u001B[>q\u001B[>c\u001B[?2026$p\u001B[?2027$p\u001B[?2026h\u001B[1;1H…\u001B[?6n\u001B[1;1H▕\u001B[?6n\u001B[1;1H🮇\u001B[?6n\u001B[1;1H⏮\u001B[?6n\u001B[1;1H中\u001B[?6n\u001B[1;1H👩‍💻\u001B[?6n\u001B[1;1H\u001B[2K\u001B[?2026l\u001B[c",
+  "afterFence": "",
   "replies": [
     "\u001B]11;rgb:2828/2c2c/3434\u001B\\",
     "\u001BP1+r524742=38\u001B\\",
@@ -29,6 +30,7 @@
     "\u001B[>1;10;0c",
     "\u001B[?2026;2$y",
     "\u001B[?2027;1$y",
+    "\u001B[?62;22;52c",
     "\u001B[1;2R",
     "\u001B[1;2R",
     "\u001B[1;2R",
@@ -51,7 +53,8 @@
       "2026": "\u001B[?2026;2$y",
       "2027": "\u001B[?2027;1$y"
     },
-    "cpr": [
+    "cpr": [],
+    "cprFallback": [
       "\u001B[1;2R",
       "\u001B[1;2R",
       "\u001B[1;2R",

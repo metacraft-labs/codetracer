@@ -3,7 +3,7 @@
   "terminal": "xterm",
   "version": "403",
   "launch": "xterm -fa DejaVu Sans Mono -fs 11 -geometry 160x64+0+0 -bw 0 -b 0 +sb -e sh -c <command>",
-  "capturedAt": "2026-11-11T16:52:10Z",
+  "capturedAt": "2026-11-15T03:46:31Z",
   "host": "Linux 6.18.55 x86_64",
   "env": {
     "TERM": "xterm",
@@ -11,8 +11,9 @@
   },
   "cols": 160,
   "rows": 64,
-  "fenceMs": 3.32,
-  "round": "\u001B]11;?\u001B\\\u001BP+q524742;5463\u001B\\\u001B[48:2:1:2:3m\u001BP$qm\u001B\\\u001B[m\u001B[?1016$p\u001B[16t\u001B[?u\u001B]22;?default,pointer,text,col-resize,row-resize,grab,grabbing,not-allowed,ew-resize,ns-resize\u001B\\\u001B[>q\u001B[>c\u001B[?2026$p\u001B[?2027$p\u001B[?2026h\u001B[1;1H…\u001B[6n\u001B[1;1H▕\u001B[6n\u001B[1;1H🮇\u001B[6n\u001B[1;1H⏮\u001B[6n\u001B[1;1H中\u001B[6n\u001B[1;1H👩‍💻\u001B[6n\u001B[1;1H\u001B[2K\u001B[?2026l\u001B[c",
+  "fenceMs": 9.51,
+  "round": "\u001B]11;?\u001B\\\u001BP+q524742;5463\u001B\\\u001B[48:2:1:2:3m\u001BP$qm\u001B\\\u001B[m\u001B[?1016$p\u001B[16t\u001B[?u\u001B]22;?default,pointer,text,col-resize,row-resize,grab,grabbing,not-allowed,ew-resize,ns-resize\u001B\\\u001B[>q\u001B[>c\u001B[?2026$p\u001B[?2027$p\u001B[?2026h\u001B[1;1H…\u001B[?6n\u001B[1;1H▕\u001B[?6n\u001B[1;1H🮇\u001B[?6n\u001B[1;1H⏮\u001B[?6n\u001B[1;1H中\u001B[?6n\u001B[1;1H👩‍💻\u001B[?6n\u001B[1;1H\u001B[2K\u001B[?2026l\u001B[c",
+  "afterFence": "",
   "replies": [
     "\u001B]11;rgb:ffff/ffff/ffff\u001B\\",
     "\u001BP1+r524742=38;\u001B\\",
@@ -23,12 +24,12 @@
     "\u001B[>41;403;0c",
     "\u001B[?2026;0$y",
     "\u001B[?2027;0$y",
-    "\u001B[1;2R",
-    "\u001B[1;2R",
-    "\u001B[1;2R",
-    "\u001B[1;2R",
-    "\u001B[1;3R",
-    "\u001B[1;5R",
+    "\u001B[?1;2;1R",
+    "\u001B[?1;2;1R",
+    "\u001B[?1;2;1R",
+    "\u001B[?1;2;1R",
+    "\u001B[?1;3;1R",
+    "\u001B[?1;5;1R",
     "\u001B[?64;1;2;6;9;15;16;17;18;21;22;28;29c"
   ],
   "answers": {
@@ -45,13 +46,14 @@
       "2027": "\u001B[?2027;0$y"
     },
     "cpr": [
-      "\u001B[1;2R",
-      "\u001B[1;2R",
-      "\u001B[1;2R",
-      "\u001B[1;2R",
-      "\u001B[1;3R",
-      "\u001B[1;5R"
+      "\u001B[?1;2;1R",
+      "\u001B[?1;2;1R",
+      "\u001B[?1;2;1R",
+      "\u001B[?1;2;1R",
+      "\u001B[?1;3;1R",
+      "\u001B[?1;5;1R"
     ],
+    "cprFallback": [],
     "late": []
   }
 }
