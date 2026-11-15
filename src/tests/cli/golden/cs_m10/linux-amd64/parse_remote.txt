@@ -1,0 +1,397 @@
+# ct remote: 18 argv cases through ct's loader (the parse probe)
+
+### 1: bare
+argv: ct "remote"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = remote
+  remoteArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 2: one word
+argv: ct "remote"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = remote
+  remoteArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 3: words
+argv: ct "remote" "a" "b"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = remote
+  remoteArgs = @["a", "b"]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 4: words that look like options
+argv: ct "remote" "-x" "--y=1" "--cwd" "/z"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = remote
+  remoteArgs = @["-x", "--y=1", "--cwd", "/z"]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 5: a ct option first
+argv: ct "remote" "--new-tab" "a"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = remote
+  remoteArgs = @["--new-tab", "a"]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 6: -- inside
+argv: ct "remote" "--" "a"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = remote
+  remoteArgs = @["--", "a"]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 7: --help inside
+argv: ct "remote" "a" "--help"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = remote
+  remoteArgs = @["a", "--help"]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 8: unknown long option
+argv: ct "remote" "--bogus"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = remote
+  remoteArgs = @["--bogus"]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 9: unknown long option with value
+argv: ct "remote" "--bogus=1"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = remote
+  remoteArgs = @["--bogus=1"]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 10: unknown short option
+argv: ct "remote" "-Z"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = remote
+  remoteArgs = @["-Z"]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 11: lone -
+argv: ct "remote" "-"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = remote
+  remoteArgs = @["-"]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 12: lone -- then a word
+argv: ct "remote" "--" "w"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = remote
+  remoteArgs = @["--", "w"]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 13: --=v
+argv: ct "remote" "--=v"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = remote
+  remoteArgs = @["--=v"]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 14: extra positional
+argv: ct "remote" "extra1" "extra2" "extra3" "extra4" "extra5"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = remote
+  remoteArgs = @["extra1", "extra2", "extra3", "extra4", "extra5"]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 15: global --cwd after the command
+argv: ct "remote" "--cwd" "/w"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = remote
+  remoteArgs = @["--cwd", "/w"]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 16: global --new-tab after the command
+argv: ct "remote" "--new-tab"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = remote
+  remoteArgs = @["--new-tab"]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 17: --version after the command
+argv: ct "remote" "--version"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = remote
+  remoteArgs = @["--version"]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 18: -h after the command
+argv: ct "remote" "-h"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = remote
+  remoteArgs = @["-h"]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
