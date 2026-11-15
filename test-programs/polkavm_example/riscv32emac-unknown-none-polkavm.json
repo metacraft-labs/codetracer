@@ -1,0 +1,38 @@
+{
+  "arch": "riscv32",
+  "cpu": "generic-rv32",
+  "crt-objects-fallback": "false",
+  "data-layout": "e-m:e-p:32:32-i64:64-n32-S32",
+  "eh-frame-header": false,
+  "emit-debug-gdb-scripts": false,
+  "features": "+e,+m,+a,+c,+zbb,+auipc-addi-fusion,+ld-add-fusion,+lui-addi-fusion,+xtheadcondmov",
+  "linker": "rust-lld",
+  "linker-flavor": "ld.lld",
+  "llvm-abiname": "ilp32e",
+  "abi": "ilp32e",
+  "llvm-target": "riscv32",
+  "max-atomic-width": 64,
+  "panic-strategy": "abort",
+  "relocation-model": "pie",
+  "target-pointer-width": 32,
+  "singlethread": true,
+  "pre-link-args": {
+    "ld": [
+      "--emit-relocs",
+      "--unique",
+      "--apply-dynamic-relocs",
+      "--no-allow-shlib-undefined",
+      "-Bsymbolic"
+    ]
+  },
+  "env": "polkavm",
+  "dynamic-linking": true,
+  "only-cdylib": true,
+  "position-independent-executables": true,
+  "static-position-independent-executables": true,
+  "relro-level": "full",
+  "default-visibility": "hidden",
+  "exe-suffix": "",
+  "dll-prefix": "",
+  "dll-suffix": ".elf"
+}

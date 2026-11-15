@@ -146,6 +146,27 @@ proc buildSbf(crate: string): string =
       if kind in {pcFile, pcLinkToFile} and path.endsWith(".so"): return path
   raise newException(IOError, "record-program " & crate & ": `cargo build-sbf` made no .so")
 
+proc buildPolkavmGuest(crate: string): string =
+  ## A PolkaVM guest crate built the way a guest program is: for the target
+  ## JSON beside its Cargo.toml (`riscv32emac-unknown-none-polkavm.json`),
+  ## with `core` and `alloc` built from source (`-Zbuild-std`, which needs
+  ## `RUSTC_BOOTSTRAP` on a stable toolchain; the dev shell's cargo also
+  ## wants `-Zjson-target-spec` for a target given as a JSON file), and the
+  ## RISC-V ELF it made.
+  ## The PolkaVM recorder links that ELF itself, keeping its line table, so
+  ## the recording steps through the guest's source.
+  const triple = "riscv32emac-unknown-none-polkavm"
+  let (output, code) = execCmdEx(
+    "env RUSTC_BOOTSTRAP=1 cargo build --release -Zbuild-std=core,alloc -Zjson-target-spec --target " &
+      quoteShell(crate / (triple & ".json")),
+    workingDir = crate)
+  if code != 0:
+    raise newException(IOError, "record-program " & crate &
+                       ": building the PolkaVM guest exited " & $code & "\n" & output)
+  for kind, path in walkDir(crate / "target" / triple / "release"):
+    if kind in {pcFile, pcLinkToFile} and path.endsWith(".elf"): return path
+  raise newException(IOError, "record-program " & crate & ": the guest build made no .elf")
+
 proc buildStylusWasm(crate: string): string =
   ## A Stylus contract crate built as `ct arb deploy` builds it for
   ## debugging (`cargo build --target wasm32-unknown-unknown`, with DWARF),
@@ -200,13 +221,15 @@ proc recordProgram*(s: StageState; program, backend: string; lang = "";
         let dest = fixtureCacheRoot(repo()) / (name & "-scenario")
         if isUsableTraceDir(dest) and cachedRecordingRefusal(dest).len == 0:
           return dest
-        # A Solana crate is compiled to SBF first: `ct record` records the
-        # compiled program.
+        # A Solana crate is compiled to SBF, and a PolkaVM guest crate to its
+        # RISC-V ELF, first: `ct record` records the compiled program.
         if stylusTrace.len > 0:
           return s.ctRecord(buildStylusWasm(full), backend, lang, dest,
                             stylusTrace = full / stylusTrace)
-        let target = if lang == "solana" and fileExists(full / "Cargo.toml"): buildSbf(full)
-                     else: full
+        let target =
+          if lang == "solana" and fileExists(full / "Cargo.toml"): buildSbf(full)
+          elif lang == "polkavm" and fileExists(full / "Cargo.toml"): buildPolkavmGuest(full)
+          else: full
         return s.ctRecord(target, backend, lang, dest)
   let resolved = resolveFixture(spec)
   if resolved.outcome != foRecorded:

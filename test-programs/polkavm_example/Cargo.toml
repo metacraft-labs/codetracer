@@ -1,0 +1,31 @@
+# `flow_test.rs` built for PolkaVM the way a guest program is: a cdylib for the
+# target polkavm-linker ships (riscv32emac-unknown-none-polkavm.json, copied
+# here from polkavm-linker 0.32's `targets/1_91`, plus `"abi": "ilp32e"`, which
+# rustc 1.96 requires beside that ABI name), with `core` and `alloc` built
+# from source. Unoptimised, with full debug info, so the ELF's line table maps
+# every instruction to flow_test.rs. `codetracer-polkavm-recorder record` takes
+# the resulting `.elf` and links it into the blob it records.
+#
+#   RUSTC_BOOTSTRAP=1 cargo build --release -Zbuild-std=core,alloc \
+#     --target riscv32emac-unknown-none-polkavm.json
+[package]
+name = "flow_test"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+path = "src/flow_test.rs"
+
+[dependencies]
+polkavm-derive = "0.32"
+
+[profile.release]
+opt-level = 0
+debug = 2
+panic = "abort"
+strip = false
+
+# Built on its own, not as part of a workspace.
+[workspace]

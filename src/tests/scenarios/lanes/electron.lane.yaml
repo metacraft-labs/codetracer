@@ -309,6 +309,7 @@ applicable:
   - ../languages/cpp-sudoku-call-trace-to-main.yaml
   - ../languages/crystal-sudoku-shows-source-and-output.yaml
   - ../languages/crystal-sudoku-call-trace-to-main.yaml
+  - ../breakpoints/polkavm-column-breakpoint-at-caret.yaml
   # --- pw5 deepreview ---
   - ../deepreview/boundary-drag-reveals-what-it-crosses.yaml
   - ../deepreview/boundary-is-operable-from-the-keyboard.yaml

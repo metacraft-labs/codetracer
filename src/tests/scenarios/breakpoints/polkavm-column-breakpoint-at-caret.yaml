@@ -1,0 +1,25 @@
+scenario: 1
+name: breakpoints/polkavm-column-breakpoint-at-caret
+pack: codetracer
+summary: >-
+  In a PolkaVM recording of the Rust guest flow_test.rs, Shift+F9 with the
+  caret at line 16 column 18 (the `10` of `let a: u32 = 10;` in `compute`, where
+  that statement's step is) sets a column
+  breakpoint there, its marker drawn at that column, and Continue from the
+  entry stops on line 16.
+
+stage:
+  - use: record-program
+    with: { program: polkavm_example, lang: polkavm }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 240s }
+  - wait: { until: { at: 'editor[file="flow_test.rs"]', current-line: { gt: 0 } }, timeout: 60s }
+  - wait: { until: { at: 'editor[file="flow_test.rs"]/line[number="16"]', present: true }, timeout: 20s }
+  - click: { at: 'editor[file="flow_test.rs"]/line[number="16"]', anchor: caret(18) }
+  - chord: Shift+F9
+  - wait: { until: { at: 'editor[file="flow_test.rs"]/line[number="16"]', inline-breakpoints: ["18"] }, timeout: 20s }
+  - click: 'toolbar/toolbar-button[label="continue-image"]'
+    settle: false
+  - wait: { until: { at: 'editor[file="flow_test.rs"]', current-line: 16 }, timeout: 60s }
