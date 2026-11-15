@@ -270,6 +270,12 @@ Full table: codetracer-specs `spec/Architecture/Per-User-State-Locations.md`.
   Windows run wrote into a real `trace_index.db` (2026-09-23).
 - When YOU drive `ct`, the TUI or the GUI to verify something, export a scratch
   `CODETRACER_HOME` too. When launching for the user, do not.
+- `CODETRACER_HOME` does not move a third-party tool's state. Every GUI launch
+  starts the Agent Activity pane's agent, `codex-acp`, whose login and session
+  list live in `CODEX_HOME` (default `~/.codex`); the Playwright fixtures give
+  it a scratch one per worker. When YOU launch the GUI or `ct host` to verify
+  something, export a scratch `CODEX_HOME` as well, and to exercise the pane
+  put the stub agent on `PATH` (`tests/agent-activity/acp-stub-agent-harness.ts`).
 - `src/common/ct_home_isolation_test.nim` fails a harness that stops setting it,
   a suite that redirects a home variable without it, and a resolver that
   ignores it.

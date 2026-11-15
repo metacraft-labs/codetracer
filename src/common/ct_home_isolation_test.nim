@@ -362,6 +362,25 @@ suite "CODETRACER_HOME — the sweeps":
           "against the developer's real CodeTracer state.")
       check present
 
+  test "B3: the GUI fixtures give the agent a launch starts a scratch CODEX_HOME":
+    ## Not CodeTracer state, but a launch's: the Agent Activity pane starts
+    ## `codex-acp`, whose login and session rollouts live in `CODEX_HOME`
+    ## (default `~/.codex`). codetracer-pm issue 2026-11-12: the GUI tests
+    ## left it inherited, and the agents they started wrote 31 sessions into
+    ## a developer's `~/.codex`. The behaviour is pinned by
+    ## `src/tests/gui/tests/harness/codex-home-isolation.spec.ts`; this keeps
+    ## the statements in place on hosts that never run the GUI suite.
+    const fixtures = "src/tests/gui/lib/fixtures.ts"
+    let lines = codeLines(readFile(repoRoot / fixtures), repoRoot / fixtures)
+    for needle in ["process.env.CODEX_HOME = guiTestCodexHome;",
+                   "env.CODEX_HOME = guiTestCodexHome;"]:
+      let present = lines.anyIt(needle in it)
+      if not present:
+        checkpoint(fixtures & " no longer contains `" & needle & "`: every " &
+          "GUI launch would start codex-acp against the developer's real " &
+          "Codex login and session list.")
+      check present
+
   test "B2: every config.nims under src/ keeps its tree isolated":
     ## Nim evaluates config files root-first, and only the LAST one may add the
     ## force-import (src/frontend/test_support/force_import_isolation.nims).

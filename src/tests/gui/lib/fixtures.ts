@@ -179,6 +179,24 @@ if (ownsGuiTestCodetracerHome) {
   fs.writeFileSync(path.join(guiTestCodetracerHome, ".codetracer-test-home"), "");
 }
 process.env.CODETRACER_HOME = guiTestCodetracerHome;
+// `CODETRACER_HOME` relocates CodeTracer's own state only. The Agent Activity
+// pane starts a third-party agent, `codex-acp` from `PATH`
+// (`src/frontend/index/ipc_subsystems/acp_ipc.nim`), and every launch here
+// mounts the pane, so every launch starts one. Codex keeps its login
+// (`auth.json`), its `config.toml` and its session rollouts in `CODEX_HOME`,
+// which defaults to `~/.codex`: inherited, the agent a test started could
+// spend the developer's paid account and wrote test sessions into their own
+// session list (codetracer-pm issue 2026-11-12, "GUI test launches let
+// `codex-acp` read the real Codex login and write its sessions"). A scratch
+// one per worker, empty, so the agent finds no login and writes nowhere the
+// developer looks. Unlike the two homes above it cannot be supplied from
+// outside: a supplied one is exactly how the real `~/.codex` would get back
+// in. Codex refuses a `CODEX_HOME` that does not exist, so it is created here.
+// Spec: codetracer-specs `spec/Architecture/Per-User-State-Locations.md`,
+// "Third-party agents a test launch starts".
+const originalCodexHome = process.env.CODEX_HOME;
+const guiTestCodexHome = makeGuiTestHome("codetracer-gui-codex-home-", "CODEX_HOME");
+process.env.CODEX_HOME = guiTestCodexHome;
 
 const ctBinaryName = isWindows ? "ct.exe" : "ct";
 const envCodetracerPath = process.env.CODETRACER_E2E_CT_PATH ?? "";
@@ -1037,6 +1055,11 @@ function makeCleanEnv(
   env.CT_HMR = "0";
   env.XDG_CONFIG_HOME = guiTestXdgConfigHome;
   env.CODETRACER_HOME = guiTestCodetracerHome;
+  // The agent the Agent Activity pane starts gets the worker's scratch Codex
+  // state, never the developer's `~/.codex` (see `guiTestCodexHome`). Set
+  // after `launchEnv`, like the two homes above, so no spec can hand a launch
+  // the real one.
+  env.CODEX_HOME = guiTestCodexHome;
   // Bypass the Electron single-instance lock so that concurrent test runs
   // (or stale Electron processes from previous runs) do not prevent this
   // instance from starting.  With "window" policy the new process always
@@ -2205,6 +2228,11 @@ export const test = base.extend<
         delete process.env.CODETRACER_HOME;
       } else {
         process.env.CODETRACER_HOME = originalCodetracerHome;
+      }
+      if (originalCodexHome === undefined) {
+        delete process.env.CODEX_HOME;
+      } else {
+        process.env.CODEX_HOME = originalCodexHome;
       }
       // Killing Electron with SIGKILL leaves Playwright's internal CDP
       // pipe handles open, preventing the worker from exiting.  Force
