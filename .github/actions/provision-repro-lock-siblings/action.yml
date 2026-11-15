@@ -198,6 +198,15 @@ inputs:
 runs:
   using: composite
   steps:
+    # Nix fetches Cargo git dependencies (Agave's, Sui's) by running `git`
+    # with no credential of its own, and the job's git credential covers only
+    # github.com/metacraft-labs/, so those fetches went out anonymously and
+    # failed `nix develop` on a 401 ("could not read Username"). From here on
+    # git answers a github.com challenge from the job netrc; see the helper.
+    - name: Give git the job's token for github.com
+      shell: bash
+      run: bash "${GITHUB_WORKSPACE}/ci/register-git-credential-helper.sh"
+
     # Realise the dev shell BEFORE the token is minted. On a cold runner this
     # can take most of an hour (45 minutes in release job 126333283602), and
     # an installation token lives exactly one. Done inside the credential window,
