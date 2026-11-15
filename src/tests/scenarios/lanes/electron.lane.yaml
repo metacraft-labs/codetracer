@@ -365,6 +365,21 @@ applicable:
   - ../noir-space-ship/flow-value-to-scratchpad.yaml
   - ../noir-space-ship/call-argument-to-scratchpad.yaml
   - ../noir-space-ship/call-trace-search-results-jump.yaml
+  - ../command-palette/find-symbol-opens-definition.yaml
+  - ../command-palette/theme-commands-switch-the-theme.yaml
+  - ../editor/ctrl-f8-and-ctrl-f11-jump-from-the-caret.yaml
+  - ../event-log/filter-trace-and-recorded-events.yaml
+  - ../multi-replay/new-file-alone-is-folderless.yaml
+  - ../multi-replay/new-file-beside-a-replay-is-folderless.yaml
+  - ../multi-replay/shell-recording-opens-in-a-new-tab.yaml
+  - ../multi-replay/stop-ends-the-first-tabs-replay.yaml
+  - ../multi-replay/three-recording-kinds-in-three-tabs.yaml
+  - ../multi-replay/two-tabs-choosing-at-once-each-load-their-own.yaml
+  - ../noir-space-ship/scratchpad-collects-every-kind.yaml
+  - ../noir-space-ship/tracepoint-disable-and-enable.yaml
+  - ../noir-space-ship/tracepoint-logs-damage-and-regeneration.yaml
+  - ../noir-space-ship/tracepoint-rows-differ-per-pass.yaml
+  - ../noir-space-ship/tracepoints-log-messages.yaml
   - ../layout/event-log-and-scratchpad-tabs.yaml
   - ../point-list/breakpoint-rows-follow-the-gutter.yaml
   - ../problems/failed-build-rows-filters-and-press.yaml

@@ -1,0 +1,48 @@
+scenario: 1
+name: multi-replay/shell-recording-opens-in-a-new-tab
+pack: codetracer
+summary: >-
+  A program recorded with `ct record` in the Shell pane opens, from the
+  mark on its output, in a new tab holding that recording, beside the
+  recording already open: one more tab, shown, with the recording asked
+  for.
+
+stage:
+  - use: record-program
+    with: { program: py_console_logs/main.py }
+  - use: write-project
+    with:
+      files:
+        shellrc: "PS1='$ '\n"
+        build.sh: |
+          #!/bin/sh
+          cd "$(dirname "$0")"
+          printf 'def add(a, b):\n    return a + b\nprint("sum", add(2, 3))\nprint("done")\n' > prog.py
+          rm -rf rec-build
+          ct record -o rec-build prog.py
+  - use: front-end-options
+    with:
+      env: { CODETRACER_SHELL_COMMAND: "bash --noprofile --rcfile $project/shellrc -i" }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 180s }
+  - wait: { until: { at: 'editor[file="main.py"]', present: true }, timeout: 60s }
+  - wait: { until: { at: session-strip, count: 1 }, timeout: 30s }
+  - chord: Ctrl+p
+  - wait: { until: { at: omnibox, focused: true }, timeout: 10s }
+  - type: ":Shell"
+  - wait: { until: { at: 'omnibox/option[label="Shell"]', kind: command }, timeout: 10s }
+  - click: 'omnibox/option[label="Shell"]'
+  - wait: { until: { at: shell, state: running }, timeout: 60s }
+  - click: shell
+  - type: "sh ./build.sh"
+  - key: Enter
+    settle: false
+  - wait: { until: { at: shell, assert: 'has-mark("start")' }, timeout: 240s }
+  - click: { at: 'shell/shell-row[text="sum 5", mark="start"]', anchor: gutter }
+    settle: false
+  - wait: { until: { at: session-strip, count: 2 }, timeout: 120s }
+  - wait: { until: { at: 'editor[file="prog.py"]', present: true }, timeout: 120s }
+  - expect: { at: 'editor[file="main.py"]', absent: true }
+  - expect: { at: session-strip, assert: 'has-tab("prog.py")' }

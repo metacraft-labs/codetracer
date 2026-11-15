@@ -1,0 +1,27 @@
+scenario: 1
+name: command-palette/theme-commands-switch-the-theme
+pack: codetracer
+summary: >-
+  The palette's Default White Theme command draws the window in the white
+  theme, and Default Dark Theme brings the dark one back.
+
+stage:
+  - use: record-program
+    with: { program: noir_space_ship }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 180s }
+  - wait: { until: editor.loaded, timeout: 60s }
+  - chord: Ctrl+p
+  - wait: { until: { at: omnibox, focused: true }, timeout: 10s }
+  - type: ":Default White"
+  - wait: { until: { at: 'omnibox/option[label="Default White Theme"]', kind: command }, timeout: 10s }
+  - click: 'omnibox/option[label="Default White Theme"]'
+  - wait: { until: { at: window, theme: { contains: white } }, timeout: 30s }
+  - chord: Ctrl+p
+  - wait: { until: { at: omnibox, focused: true }, timeout: 10s }
+  - type: ":Default Dark"
+  - wait: { until: { at: 'omnibox/option[label="Default Dark Theme"]', kind: command }, timeout: 10s }
+  - click: 'omnibox/option[label="Default Dark Theme"]'
+  - wait: { until: { at: window, theme: { contains: dark } }, timeout: 30s }

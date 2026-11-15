@@ -1,0 +1,45 @@
+scenario: 1
+name: multi-replay/three-recording-kinds-in-three-tabs
+pack: codetracer
+summary: >-
+  A Python recording, an rr recording of the C sudoku solver and a portable
+  MCR recording live in three tabs, each opened from the welcome screen's
+  Recent traces: the Python tab still shows main.py and steps after the
+  others opened, the C tab shows main.c, and the MCR tab shows either a
+  program location or the replay's own refusal.
+
+stage:
+  - use: record-program
+    with: { program: py_console_logs/main.py }
+  - use: add-recording
+    with: { program: c_sudoku_solver/main.c, backend: rr }
+  - use: add-recording
+    with: { recording: ../codetracer-example-recordings/mcr/linux-x86_64/trace-portable.ct }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 180s }
+  - wait: { until: { at: 'editor[file="main.py"]', present: true }, timeout: 60s }
+  - click: session-strip/session-add
+  - wait: { until: { at: 'welcome/recent[name="main.c"]', present: true }, timeout: 30s }
+  - click: 'welcome/recent[name="main.c"]'
+    settle: false
+  - wait: { until: { at: 'session-strip/session-tab[title="main.c"]', active: true }, timeout: 300s }
+  - wait: { until: { at: 'editor[file="main.c"]', present: true }, timeout: 300s }
+  - wait: { until: replay-idle, timeout: 300s }
+  - click: session-strip/session-add
+  - wait: { until: { at: 'welcome/recent[name="ct_fixture_prog"]', present: true }, timeout: 30s }
+  - click: 'welcome/recent[name="ct_fixture_prog"]'
+    settle: false
+  - wait: { until: { at: session-strip, count: 3 }, timeout: 60s }
+  - wait: { until: { at: session-strip, assert: 'has-tab("ct_fixture_prog")' }, timeout: 300s }
+  - wait: { until: settled, timeout: 120s }
+  - capture: { name: mcr-tab }
+  - click: 'session-strip/session-tab[title="main.py"]'
+  - wait: { until: { at: 'editor[file="main.py"]', present: true }, timeout: 60s }
+  - wait: { until: replay-idle, timeout: 60s }
+  - click: 'toolbar/toolbar-button[label="next-image"]'
+    settle: false
+  - wait: { until: { at: status-line, location: { matches: "main.py:8#" } }, timeout: 60s }
+  - click: 'session-strip/session-tab[title="main.c"]'
+  - wait: { until: { at: 'editor[file="main.c"]', present: true }, timeout: 60s }

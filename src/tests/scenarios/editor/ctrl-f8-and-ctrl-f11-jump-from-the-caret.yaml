@@ -1,0 +1,32 @@
+scenario: 1
+name: editor/ctrl-f8-and-ctrl-f11-jump-from-the-caret
+pack: codetracer
+summary: >-
+  In the space-ship recording, with the caret on main.nr's line 15 (the call
+  of iterate_asteroids), Ctrl+F8 jumps the replay to that line, and Ctrl+F11
+  then jumps into the called function, shield.nr's iterate_asteroids.
+
+stage:
+  - use: record-program
+    with: { program: noir_space_ship }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 180s }
+  - wait: { until: { at: 'editor[file="main.nr"]/line[number="15"]', present: true }, timeout: 60s }
+  - click: { at: 'editor[file="main.nr"]/line[number="15"]', anchor: text-start }
+  - wait: { until: { at: 'editor[file="main.nr"]', caret-line: 15 }, timeout: 10s }
+  - chord: Ctrl+F8
+    settle: false
+  - wait: { until: { at: 'editor[file="main.nr"]', current-line: 15 }, timeout: 60s }
+  - wait: { until: replay-idle, timeout: 60s }
+  # the editor's stack maximised: the default column cuts line 15 off before
+  # the call's name
+  - click: { at: 'pane-tab[label="src/main.nr"]', button: right }
+  - click: 'context-menu/menu-item[label="Maximise container"]'
+  - click: { at: 'editor[file="main.nr"]/line[number="15"]', anchor: caret(42) }
+  - wait: { until: { at: 'editor[file="main.nr"]', caret-line: 15 }, timeout: 10s }
+  - chord: Ctrl+F11
+    settle: false
+  - wait: { until: { at: status-line, location: { contains: "shield.nr" } }, timeout: 60s }
+  - wait: { until: replay-idle, timeout: 60s }

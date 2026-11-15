@@ -1252,7 +1252,14 @@ proc runStage*(s: StageState; use: string; args: JsonNode) =
     # A further recording, made the way `record-program` makes one, that the
     # front-end lists among its recent traces (it is imported into this run's
     # trace store before the front-end starts) without opening it.
-    s.launch.extra.add s.recordProgram(argStr(args, "program"), argStr(args, "backend"))
+    let rec = argStr(args, "recording")
+    if rec.len > 0:
+      let path = if rec.isAbsolute: rec else: repo() / rec
+      if not (dirExists(path) or fileExists(path)):
+        raise newException(IOError, "add-recording: no recording at " & path)
+      s.launch.extra.add path
+    else:
+      s.launch.extra.add s.recordProgram(argStr(args, "program"), argStr(args, "backend"))
   else:
     raise newException(KeyError, "the CodeTracer pack has no stage '" & use & "'")
 

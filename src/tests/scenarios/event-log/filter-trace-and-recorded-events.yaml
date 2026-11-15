@@ -1,0 +1,29 @@
+scenario: 1
+name: event-log/filter-trace-and-recorded-events
+pack: codetracer
+summary: >-
+  The event log's Filter: Trace events shows the tracepoints' output (none
+  in a run with no tracepoint), and Recorded events shows the program's own
+  output again, every row of it.
+
+stage:
+  - use: record-program
+    with: { program: noir_space_ship }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 180s }
+  - click: 'pane-tab[label="EVENT LOG"]'
+  - wait: { until: event-log.loaded, timeout: 60s }
+  - wait: { until: { at: event-log, total: 70 }, timeout: 60s }
+  - click: 'event-log/panel-button[label="Filter"]'
+  - wait: { until: { at: 'event-log/dropdown[name="Filter"]', present: true }, timeout: 10s }
+  - click: 'event-log/dropdown[name="Filter"]/dropdown-item[label="Trace events"]'
+  - key: Esc
+  - wait: { until: { at: event-log, total: 0 }, timeout: 30s }
+  - click: 'event-log/panel-button[label="Filter"]'
+  - wait: { until: { at: 'event-log/dropdown[name="Filter"]', present: true }, timeout: 10s }
+  - click: 'event-log/dropdown[name="Filter"]/dropdown-item[label="Recorded events"]'
+  - key: Esc
+  - wait: { until: { at: event-log, total: 70 }, timeout: 30s }
+  - expect: { at: event-log, assert: 'has-output("Positive Test Case")' }

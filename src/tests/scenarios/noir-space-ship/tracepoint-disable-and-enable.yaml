@@ -1,0 +1,38 @@
+scenario: 1
+name: noir-space-ship/tracepoint-disable-and-enable
+pack: codetracer
+summary: >-
+  A tracepoint's menu Disable draws "Tracepoint is disabled" over it and
+  Enable takes it away; enabled again, it logs remaining_shield, one row per
+  pass.
+
+stage:
+  - use: record-program
+    with: { program: noir_space_ship }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 180s }
+  - click: 'pane-tab[label="CALLTRACE"]'
+  - wait: { until: call-trace.loaded, timeout: 60s }
+  - wait: { until: { at: 'call-trace/call[name="iterate_asteroids"]', present: true }, timeout: 60s }
+  - click: { at: 'call-trace/call[name="iterate_asteroids"]', anchor: name }
+    settle: false
+  - wait: { until: { at: 'editor[file="shield.nr"]', active: true }, timeout: 60s }
+  - wait: { until: replay-idle, timeout: 60s }
+  - click: { at: 'editor[file="shield.nr"]/line[number="14"]', anchor: text-start }
+  - key: Enter
+  - wait: { until: { at: 'tracepoint-editor[line="14"]', focused: true }, timeout: 20s }
+  - expect: { at: 'tracepoint-editor[line="14"]', disabled: false }
+  - click: { at: 'tracepoint-editor[line="14"]', anchor: menu }
+  - wait: { until: { at: 'tracepoint-editor[line="14"]/panel-button[label="Disable"]', present: true }, timeout: 10s }
+  - click: 'tracepoint-editor[line="14"]/panel-button[label="Disable"]'
+  - wait: { until: { at: 'tracepoint-editor[line="14"]', disabled: true }, timeout: 10s }
+  - wait: { until: { at: 'tracepoint-editor[line="14"]/panel-button[label="Enable"]', present: true }, timeout: 10s }
+  - click: 'tracepoint-editor[line="14"]/panel-button[label="Enable"]'
+  - wait: { until: { at: 'tracepoint-editor[line="14"]', disabled: false }, timeout: 10s }
+  - click: { at: 'tracepoint-editor[line="14"]' }
+  - type: "log(remaining_shield)"
+  - chord: Ctrl+Enter
+    settle: false
+  - wait: { until: { at: 'trace-results[line="14"]', count: { ge: 8 } }, timeout: 120s }

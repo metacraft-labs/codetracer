@@ -34,6 +34,8 @@ roles:
       front-tabs: lines
       # Every auto-hide strip tab, as `<edge>:<label>`.
       strip-tabs: lines
+      # pw6: the theme the window is drawn in (`default_dark`, `default_white`, …).
+      theme: text
       # The pointer's shape where it rests (Pointer-Affordances.md §4):
       # default, pointer, text, col-resize, row-resize, grab, grabbing,
       # not-allowed.
@@ -217,7 +219,7 @@ roles:
       flow-values: lines
     # pw8: `panel-button`: the "Run test" control beside a test, named by
     # its title ("Run test_passes").
-    children: { line: many, flow-value: many, panel-button: many, loop-control: optional }
+    children: { line: many, flow-value: many, panel-button: many, loop-control: optional, macro-expansion: many }
     affordances: [click, context-click, wheel, focusable, text-entry]
     assertions:
       stopped-at(n): "current-line == n"
@@ -307,6 +309,12 @@ roles:
     affordances: [click, double-click, context-click]
     # `name`: the call's name, where a click activates it.
     anchors: [expander, name]
+
+  # pw6: a macro call's expansion, drawn under its line (Toggle Macro
+  # Expansion): the expanded code, row by row.
+  macro-expansion:
+    keys: [line]
+    properties: { line: int, text: lines }
 
   # pw6: one argument of a call, as the call trace draws it.
   call-argument:
@@ -1231,7 +1239,7 @@ roles:
   trace-row:
     keys: [n]
     properties: { n: int, ticks: text, values: text }
-    affordances: [click]
+    affordances: [click, context-click]
     anchors: [ticks, values]
 
   # A divider between panes of the layout; dragged to resize them.
@@ -1420,9 +1428,13 @@ roles:
       # them all (it grows and shrinks with the expression).
       rows: int
       fits: bool
+      # pw6: "Tracepoint is disabled" is drawn over it.
+      disabled: bool
+    # pw6: `panel-button`s: its menu's entries while open (Disable / Enable).
+    children: { panel-button: many }
     affordances: [click, text-entry, focusable]
-    # pw5: `run`, the editor's Run button (▷).
-    anchors: [run]
+    # pw5: `run`, the editor's Run button (▷); pw6: `menu`, its ☰ button.
+    anchors: [run, menu]
 
   # A pane's search box and what it found.
   search-box:
@@ -1861,6 +1873,9 @@ roles:
 # more browser page on the `ct host` the stage started.
 clients:
   host-page: ~
+  # pw6: the desktop window the application opened last (a pane sent to a
+  # new window, a session tab opened in a new window).
+  app-window: ~
 
 sync:
   # The implicit condition after every input: the window handled it and the
@@ -2127,10 +2142,12 @@ stages:
   # --- pw6 ---
   add-recording:
     summary: >-
-      Record another program (as `record-program` does) that the front-end
-      lists among its recent traces when it starts, without opening it: what
-      a user who recorded it earlier finds on the welcome screen.
-    params: { program: text, backend: text }
+      Record another program (as `record-program` does) — or take an
+      existing recording (`recording`, a folder or a `.ct` file) — that the
+      front-end lists among its recent traces when it starts, without
+      opening it: what a user who recorded it earlier finds on the welcome
+      screen.
+    params: { program: text, backend: text, recording: text }
 
 # Changes outside the application during a run (an `act:` step).
 actions:

@@ -8581,9 +8581,12 @@ ONE ROUTER ON EVERY FRONT-END (2026-10-12, PLAT-68 Phase B).
 - The call-trace search's result box shows ~3 rows; results below need scrolling.
 - Language recordings (Circom, Leo, Cadence, Aiken, Cairo, Miden) stop at the function's first line with no variables; step once before reading the state pane. The Cairo recorder needs `CAIRO_CORELIB_DIR` = a corelib/src matching its cairo-lang (2.17.0-rc.4 at codetracer-cairo-recorder 34c0511).
 - `add-recording` (stage) imports a further recording into the run's trace store before the window starts, so the welcome screen's Recent traces list it — the user's way to open a second recording in a "+" tab.
+- A tab's pane components are per session too for the VCS and terminal panes (`.vcs-container`, `terminalComponent-<n>`): read the visible one, or a second tab reads tab 0's hidden pane.
+- The editor's tracepoint panel re-runs from its `run` button (the `tracepoint-editor` role's `run` anchor); clicking into the editor body instead closes the results. Its hamburger (`menu` anchor) toggles a dropdown that stays open until clicked again. Trace-log values print 64-hex-digit wide for Noir field elements (`0x000…07d0`).
+- "Open Trace in New Tab..." opens a native file dialog; the in-page route to a new tab is the Shell pane: `ct record <program>` there marks the line with a gutter `●`, and clicking the mark opens that recording in a new tab.
+- A Nim recording's View menu (menu bar) carries "View Generated C Source" and "View Disassembly"; the command palette does not list them.
+- A pane tab's context menu lists "Send to: <window title>" from the window list the main process sent LAST (the list is refreshed after the menu opens), so the first menu after a new window appears does not name it yet. The desktop binding's `openClient(ctx, "app-window")` adopts the next Electron window as a scenario client.
 
-||||||| parent of e00113e8ef6 (wip)
-||||||| parent of d67952a20a2 (wip)
 
 ## `replay-idle` and the in-flight move (scenario pack, 2026-11-12)
 - The terminal front-end handles a move synchronously (`tui_session.applyOutcome` blocks in `pumpMove` until `ct/complete-move`, then `refresh` rebuilds the header tick and the editor stop together), so before this there was NO frame between "key read" and "stop drawn": the badge said `[PAUSED]` throughout. `main.nim` now paints one frame before `applyOutcome` for every `awaitsMove` outcome (unless the next key is already waiting) with `TuiApp.replayStatus` = `runtime.statusWhileMoving(action)` — `[STEPPING]`, `[REVERSING]` or `[SEEKING]` — and resets it to `esPaused` after. The badge is wider than `[PAUSED]`, so the top bar re-lays out for that frame.

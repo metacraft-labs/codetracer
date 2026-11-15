@@ -3,8 +3,9 @@ name: multi-replay/second-recording-in-a-new-tab
 pack: codetracer
 summary: >-
   A recording opened from the welcome screen's Recent traces in a "+" tab
-  opens there with its own file, event log and call trace, and each tab
-  keeps its own recording across tab clicks.
+  opens there with its own file, event log, call trace and terminal output,
+  every pane of the tab drawn (scratchpad, Agent Activity, VCS, tests), and
+  each tab keeps its own recording across tab clicks.
 
 stage:
   - use: record-program
@@ -29,6 +30,18 @@ steps:
   - wait: { until: call-trace.loaded, timeout: 60s }
   - click: 'pane-tab[label="EVENT LOG"]'
   - wait: { until: event-log.loaded, timeout: 60s }
+  - expect: { at: event-log, assert: 'has-output("1. literals")' }
+  # every pane of the second tab is drawn, with its own data
+  - click: 'pane-tab[label="TERMINAL OUTPUT"]'
+  - wait: { until: { at: terminal-output, assert: 'shows("1. literals")' }, timeout: 60s }
+  - click: 'pane-tab[label="SCRATCHPAD"]'
+  - wait: { until: { at: scratchpad, present: true }, timeout: 30s }
+  - click: 'pane-tab[label="AGENT ACTIVITY"]'
+  - wait: { until: { at: agent-activity, present: true }, timeout: 30s }
+  - click: 'pane-tab[label="VCS"]'
+  - wait: { until: { at: vcs, present: true }, timeout: 30s }
+  - click: 'pane-tab[label="TESTS"]'
+  - wait: { until: { at: test-results, present: true }, timeout: 30s }
   - click: 'session-strip/session-tab[title="main.py"]'
   - wait: { until: { at: 'editor[file="main.py"]', present: true }, timeout: 60s }
   - expect: { at: 'editor[file="basics.py"]', absent: true }

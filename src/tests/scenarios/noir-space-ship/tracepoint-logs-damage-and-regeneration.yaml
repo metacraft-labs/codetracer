@@ -1,0 +1,35 @@
+scenario: 1
+name: noir-space-ship/tracepoint-logs-damage-and-regeneration
+pack: codetracer
+summary: >-
+  A tracepoint on shield.nr line 14 logging damage, remaining_shield and
+  regeneration lists one row per pass of the loop with the values it
+  logged, and running it again keeps its rows.
+
+stage:
+  - use: record-program
+    with: { program: noir_space_ship }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 180s }
+  - click: 'pane-tab[label="CALLTRACE"]'
+  - wait: { until: call-trace.loaded, timeout: 60s }
+  - wait: { until: { at: 'call-trace/call[name="iterate_asteroids"]', present: true }, timeout: 60s }
+  - click: { at: 'call-trace/call[name="iterate_asteroids"]', anchor: name }
+    settle: false
+  - wait: { until: { at: 'editor[file="shield.nr"]', active: true }, timeout: 60s }
+  - wait: { until: replay-idle, timeout: 60s }
+  - click: { at: 'editor[file="shield.nr"]/line[number="14"]', anchor: text-start }
+  - key: Enter
+  - wait: { until: { at: 'tracepoint-editor[line="14"]', focused: true }, timeout: 20s }
+  - type: "log(damage, remaining_shield, regeneration)"
+  - chord: Ctrl+Enter
+    settle: false
+  - wait: { until: { at: 'trace-results[line="14"]', count: { ge: 8 } }, timeout: 120s }
+  - expect: { at: 'trace-results[line="14"]/trace-row[n="1"]', values: { contains: damage } }
+  - expect: { at: 'trace-results[line="14"]/trace-row[n="1"]', values: { contains: regeneration } }
+  - click: { at: 'tracepoint-editor[line="14"]', anchor: run }
+    settle: false
+  - wait: { until: replay-idle, timeout: 60s }
+  - wait: { until: { at: 'trace-results[line="14"]', count: { ge: 8 } }, timeout: 120s }

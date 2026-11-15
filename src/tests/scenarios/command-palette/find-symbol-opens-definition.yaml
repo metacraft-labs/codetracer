@@ -19,6 +19,7 @@ steps:
   - type: ":sym iterate_asteroids"
   - wait: { until: { at: omnibox, assert: "offers(symbol, iterate_asteroids)" }, timeout: 30s }
   - click: { at: 'omnibox/option[label="iterate_asteroids"]' }
+    settle: false
   - wait: { until: { at: 'editor[file="shield.nr"]', active: true }, timeout: 30s }
   - wait: { until: { at: 'editor[file="shield.nr"]', caret-line: 1 }, timeout: 30s }
   - expect: { at: omnibox, absent: true }

@@ -1,0 +1,24 @@
+scenario: 1
+name: multi-replay/new-file-alone-is-folderless
+pack: codetracer
+summary: >-
+  New file from the welcome screen opens a session with no project folder:
+  Files shows no tree and is not loading, VCS says there is no repository
+  and lists no commits, and Test Results says no project folder is open.
+
+stage:
+  - use: open-welcome
+
+steps:
+  - wait: { until: { at: 'welcome/welcome-action[label="New file"]', present: true }, timeout: 120s }
+  - click: 'welcome/welcome-action[label="New file"]'
+  - wait: { until: { at: welcome, absent: true }, timeout: 60s }
+  - wait: { until: settled, timeout: 60s }
+  - click: 'pane-tab[label="FILES"]'
+  - wait: { until: { at: filesystem, loading: false }, timeout: 60s }
+  - expect: { at: filesystem, count: 0 }
+  - click: 'pane-tab[label="VCS"]'
+  - wait: { until: { at: vcs, no-repo: true }, timeout: 60s }
+  - expect: { at: vcs, commits: 0 }
+  - click: 'pane-tab[label="TESTS"]'
+  - wait: { until: { at: test-results, absence: { matches: "[Nn]o project folder is open" } }, timeout: 60s }

@@ -298,6 +298,10 @@ Object.assign(ROLES, {
   point: { affordances: ["click", "context-click"], properties: ["location", "kind", "enabled"] },
   "call-argument": { affordances: ["click", "context-click"], properties: ["name", "value"] },
 });
+ROLES["tracepoint-editor"].properties.push("disabled");
+ROLES["macro-expansion"] = { affordances: [], properties: ["line", "text"] };
+ROLES.window.properties.push("theme");
+ROLES["trace-row"].affordances.push("context-click");
 
 // --- the surface: one read of the DOM ------------------------------------------
 
@@ -459,7 +463,7 @@ function readSurface(): any {
         };
         const opt = node("column-option", o, {
           name, shown: check?.getAttribute("aria-pressed") === "true",
-        }, [["name", name], ["arguments", text(r.querySelector(".call-args"))]]);
+        }, [["name", name]]);
         opt.anchors = { check: centre(check), handle: centre(handle) };
         cm.children.push(opt);
       }
@@ -495,7 +499,7 @@ function readSurface(): any {
   // Diff / Open File toggle and the changed files; and the unified-diff
   // views the review opened.
   function readReview(root: any): void {
-    const vc = document.querySelector(".vcs-container") as HTMLElement | null;
+    const vc = (Array.from(document.querySelectorAll(".vcs-container")).find((e) => vis(e)) ?? null) as HTMLElement | null;
     if (vc && vis(vc)) {
       const items = Array.from(vc.querySelectorAll(".vcs-file-item")) as HTMLElement[];
       const toggle = vc.querySelector(".vcs-diff-toggle .vcs-toggle-button") as HTMLElement | null;
@@ -1076,7 +1080,7 @@ function readSurfacePw1(root: any): void {
           diagnostic: text(r.querySelector(".agent-test-row-diagnostic")),
           "recording-failed": !!r.querySelector(".agent-test-row-recording-failed"),
           expanded: !!r.querySelector(".agent-test-row-details"),
-        }, [["name", name], ["arguments", text(r.querySelector(".call-args"))]]);
+        }, [["name", name]]);
         if (rh) row.anchors = { points: { header: centre(rh) } };
         for (const b of Array.from(r.querySelectorAll(".agent-test-row-actions button")) as HTMLElement[]) row.children.push(button(b));
         card.children.push(row);
@@ -1423,7 +1427,8 @@ function readSurfacePw8(root: any): void {
   // the Scratchpad: its values and the chains pinned to it
   // (Each reader below leaves a role another reader already drew alone.)
   const has = (role: string) => root.children.some((c: any) => c.role === role);
-  const sp = document.querySelector("div[id^='scratchpadComponent']") as HTMLElement | null;
+  // each session tab has its own scratchpad component: the visible one
+  const sp = (Array.from(document.querySelectorAll("div[id^='scratchpadComponent']")) as HTMLElement[]).find((e) => vis(e)) ?? null;
   if (sp && vis(sp) && !has("scratchpad")) {
     const values = (Array.from(sp.querySelectorAll(".value-components-container > *")) as HTMLElement[]).filter((e) => vis(e));
     const chains = (Array.from(sp.querySelectorAll(".scratchpad-chain-view")) as HTMLElement[]).filter((e) => vis(e));
@@ -1494,7 +1499,7 @@ function readSurfacePw8(root: any): void {
   // the VCS panel's history (edit mode) and its "not a repository" message
   const vcsNode = root.children.find((c: any) => c.role === "vcs");
   if (vcsNode) {
-    const vc = document.querySelector(".vcs-container") as HTMLElement | null;
+    const vc = (Array.from(document.querySelectorAll(".vcs-container")).find((e) => vis(e)) ?? null) as HTMLElement | null;
     vcsNode.props.commits = vc ? (Array.from(vc.querySelectorAll(".vcs-commit-entry, .vcs-commit-item")) as HTMLElement[]).filter((e) => vis(e)).length : 0;
     const nr = vc?.querySelector(".vcs-no-repo-message") as HTMLElement | null;
     vcsNode.props["no-repo"] = !!nr && vis(nr) && text(nr).length > 0;
@@ -1610,7 +1615,7 @@ function readSurfacePw8(root: any): void {
   // the VCS panel's commit history: each commit, its expand control and,
   // once expanded, its files with their View Diff button (shown on hover)
   if (vcsNode) {
-    const vc = document.querySelector(".vcs-container") as HTMLElement | null;
+    const vc = (Array.from(document.querySelectorAll(".vcs-container")).find((e) => vis(e)) ?? null) as HTMLElement | null;
     for (const e of (Array.from(vc?.querySelectorAll(".vcs-commit-entry") ?? []) as HTMLElement[])) {
       if (!vis(e)) continue;
       const msg = text(e.querySelector(".vcs-commit-msg"));
@@ -1735,7 +1740,7 @@ function readSurfacePw8(root: any): void {
   }
 
   // the program's terminal output (`isonim_terminal_output_view`)
-  const term = document.querySelector("div[id^='terminalComponent']") as HTMLElement | null;
+  const term = (Array.from(document.querySelectorAll("div[id^='terminalComponent']")).find((e) => vis(e)) ?? null) as HTMLElement | null;
   if (term && vis(term) && !has("terminal-output")) {
     const lines = (Array.from(term.querySelectorAll(".terminal-line")) as HTMLElement[]).map((l) => text(l));
     root.children.push(node("terminal-output", term, { text: lines, count: lines.length }));
@@ -2444,6 +2449,42 @@ function readSurfacePw6(root: any): void {
     }
   }
 
+  // a tracepoint's disabled state ("Tracepoint is disabled" over its editor)
+  // and its menu (the ☰ button, whose dropdown holds Disable / Enable)
+  for (const te of root.children.filter((c: any) => c.role === "tracepoint-editor")) {
+    const zone = (Array.from(document.querySelectorAll(".monaco-editor .trace")) as HTMLElement[]).find((z) =>
+      vis(z) && (z.querySelector("[id^='edit-trace-']")?.id.split("-").pop() ?? "") === String(te.props.line));
+    if (!zone) continue;
+    const overlay = zone.querySelector(".trace-disabled-overlay");
+    te.props.disabled = !!overlay && !overlay.classList.contains("hidden");
+    const menu = zone.querySelector("#hamburger-dropdown") as HTMLElement | null;
+    if (menu && vis(menu)) te.anchors = { ...(te.anchors ?? {}), points: { ...(te.anchors?.points ?? {}), menu: centre(menu) } };
+    for (const it of Array.from(zone.querySelectorAll(".dropdown-list .dropdown-list-item")) as HTMLElement[]) {
+      if (!vis(it)) continue;
+      const label = text(it);
+      te.children.push(node("panel-button", it, { label, enabled: true, active: false }, [["label", label]]));
+    }
+  }
+
+  // the theme the window is drawn in (`renderer.loadThemeFromName`: the
+  // `#theme` stylesheet's `data-theme`)
+  root.props.theme = ((document.querySelector("#theme") as HTMLElement | null)?.dataset.theme ?? "").toLowerCase();
+
+  // a macro call's expansion, drawn under its line in a nested editor
+  // (`ui/editor.ensureExpanded`: `.expansion#expanded-<line>`)
+  for (const ed of root.children.filter((c: any) => c.role === "editor")) {
+    for (const x of Array.from(document.querySelectorAll(".expansion[id^='expanded-']")) as HTMLElement[]) {
+      if (!vis(x)) continue;
+      const b = x.getBoundingClientRect();
+      if (b.left < ed.x - 1 || b.left > ed.x + ed.w) continue;
+      const line = parseInt(x.id.replace("expanded-", ""), 10) || 0;
+      const lines = (Array.from(x.querySelectorAll(".view-lines > .view-line")) as HTMLElement[])
+        .sort((p, q) => p.getBoundingClientRect().top - q.getBoundingClientRect().top)
+        .map((l) => (l.textContent ?? "").replace(/\u00a0/g, " "));
+      ed.children.push(node("macro-expansion", x, { line, text: lines }, [["line", String(line)]]));
+    }
+  }
+
   // the Breakpoints & Tracepoints pane (`isonim_point_list_view.nim`)
   const pl = (Array.from(document.querySelectorAll(".point-list-component")) as HTMLElement[]).find((e) => vis(e));
   if (pl && !root.children.some((c: any) => c.role === "breakpoints")) {
@@ -2545,6 +2586,20 @@ function readSurfacePw6(root: any): void {
     }
   }
 
+  // the event log's Filter menu: its "Trace events" / "Recorded events"
+  // presets, the tab row above the kind checkboxes, are items of the same
+  // dropdown (selected = the preset shown)
+  const eventLog = root.children.find((c: any) => c.role === "event-log");
+  const filterDd = eventLog?.children.find((c: any) => c.role === "dropdown" && c.props.name === "Filter");
+  const filterList = document.querySelector("#category-image-list") as HTMLElement | null;
+  if (filterDd && filterList && filterList.parentElement) {
+    const presets = Array.from(filterList.parentElement.querySelectorAll(".toggle-buttons > button.ct-tab")) as HTMLElement[];
+    const items = presets.filter(vis).map((b) => node("dropdown-item", b, {
+      label: text(b), shortcut: "", folder: false, selected: b.getAttribute("data-selected") === "true", checked: false,
+    }, [["label", text(b)]]));
+    filterDd.children.unshift(...items);
+    filterDd.props.count = filterDd.children.length;
+  }
 
 }
 
@@ -3512,6 +3567,29 @@ const binding = {
       if (r.status !== 0) throw new Error(`run-product: ct exited ${r.status}: ${(r.stderr || r.stdout || "").trim().slice(-2000)}`);
     } else {
       throw new Error(`the CodeTracer pack has no action '${use}'`);
+    }
+  },
+
+  // pw6: a client of kind `app-window` is the window the application opened
+  // last (a pane sent to a new window, a session opened in a new window): the
+  // first of its Electron windows that is neither the stage's window nor a
+  // client already. The user's own action opened it; this only addresses it.
+  async openClient(ctx: Ctx, kind: string, _isolation: string): Promise<any> {
+    if (kind !== "app-window") throw new Error(`the desktop binding opens no client of kind '${kind}'`);
+    const app = ctx.state.app;
+    if (!app) throw new Error("open-client app-window: the application is not running");
+    const taken: any[] = (ctx.state.windowClients ??= [ctx.page]);
+    const deadline = Date.now() + 60_000;
+    for (;;) {
+      const w = app.windows().find((p: any) => !taken.includes(p) && !p.isClosed() &&
+        p.url() !== "about:blank" && !p.url().startsWith("devtools://"));
+      if (w) {
+        taken.push(w);
+        await w.waitForLoadState("domcontentloaded");
+        return w;
+      }
+      if (Date.now() > deadline) throw new Error("open-client app-window: the application opened no new window");
+      await new Promise((r) => setTimeout(r, 200));
     }
   },
 
