@@ -264,7 +264,6 @@ src/frontend/viewmodel/tests/unit/plat34-front-end-mutation-control.sha256	ci/li
 # c79bee58b1 (the GPUI status line's note, a cell's tooltip off a right-click
 # menu) then moved the GPUI window: a re-grade of the arms whose needles sit in it.
 src/frontend/tui/tests/plat70f-pointer-mutation-control.sha256	src/frontend/gpui/main.nim	bd206f82ec3b500e52053e6eeda52e891e83aede0353ce2e485c65e1fcf50d85	28f36a050600425fdbbea72ccc729250a4977ecc589c87e4d67e73d3196f228e
-src/frontend/viewmodel/tests/unit/plat33-collab-mutation-control.sha256	.github/workflows/codetracer.yml	dc8712a12a175a3191d3ea5e251cb78da4a12a027d4ff42d0950bfecce3ed873	2f6d72a0f61fc4eab465b2cb00235e6ab2e79636c2281fa6e9a469cbba81b569
 
 # plat56: graded at 34f86bd305; c79bee58b1  moved src/frontend/gpui/main.nim
 # after the grade. Re-grade the arms whose needles sit in them.
@@ -274,3 +273,5 @@ src/frontend/tui/tests/plat56-build-output-mutation-control.sha256	src/frontend/
 # Playwright binding under its record. A re-grade of the arms whose needles
 # sit in it is owed.
 src/tests/scenarios/plat66-pack-mutation-control.sha256	src/tests/scenarios/bindings/playwright/codetracer-binding.ts	ce56f44b71f4aa8d3376d5415e48102e8148ded5b463c429cbcb9af5ab9b9544	dac9e35953b0d93636c2284d9c9a858c2bba982b92e9311b0f41fb666e6879c0
+src/frontend/tui/tests/plat60-low-level-code-mutation-control.sha256	src/db-backend/src/dap_handler.rs	23f8ff8145f2d5a678588557c9c855a9701cd2bf5fa7afa677028b7262076e76	7c59887c904659094396b45ce2cf2673ef89803f977fe9fdeb929e5650a4c6d0
+src/frontend/viewmodel/tests/unit/plat33-collab-mutation-control.sha256	.github/workflows/codetracer.yml	4329483bcc55e3898b373e4b379234071ee6e7d04c19bd109045028c62c94d56	2f6d72a0f61fc4eab465b2cb00235e6ab2e79636c2281fa6e9a469cbba81b569
