@@ -4,8 +4,9 @@ Editor-ViewModel.md §3.2a; the parity table is docs/shared-editor-parity.md).
 
 Each arm plants ONE defect in the shared editor — the frame
 (`view_vocabulary/editor_dom_frame.nim`), the DOM renderer
-(`ui/shared_editor.nim`), Monaco's API over it (`ui/shared_editor_facade.nim`)
-or its language features (`ui/shared_editor_lsp.nim`) — and must be killed by
+(`ui/shared_editor.nim`), Monaco's API over it (`ui/shared_editor_facade.nim`),
+its language features (`ui/shared_editor_lsp.nim`) or the unified diff
+(`ui/shared_diff_editor.nim`, `view_vocabulary/diff_regions.nim`) — and must be killed by
 the check the parity table names for that row (the arm's description cites
 the row). The discipline is the PLAT-71 engine's (`plat71_mutation_engine.py`,
 which this harness reuses): committed control digests over subjects AND
@@ -36,13 +37,15 @@ EDITOR = "src/frontend/ui/shared_editor.nim"
 FACADE = "src/frontend/ui/shared_editor_facade.nim"
 LSP = "src/frontend/ui/shared_editor_lsp.nim"
 DIFF = "src/frontend/ui/shared_diff_editor.nim"
+REGIONS = "src/frontend/view_vocabulary/diff_regions.nim"
 
 UNIT = "src/frontend/viewmodel/tests/unit/test_editor_dom_frame.nim"
+REGIONS_UNIT = "src/frontend/viewmodel/tests/unit/test_diff_regions.nim"
 BROWSER = "src/frontend/tests/shared_editor_chromium_test.nim"
 LSP_SUITE = "src/frontend/tests/shared_editor_lsp_chromium_test.nim"
 
-SUBJECTS = [FRAME, EDITOR, FACADE, LSP, DIFF]
-SUITES = [UNIT, BROWSER, LSP_SUITE]
+SUBJECTS = [FRAME, EDITOR, FACADE, LSP, DIFF, REGIONS]
+SUITES = [UNIT, REGIONS_UNIT, BROWSER, LSP_SUITE]
 IN_BINARY = set()
 
 U_FOLLOW = "the moved index equals a rebuilt one, for edits anywhere"
@@ -59,6 +62,10 @@ U_DIFF = "removed, added and changed runs, and nothing for equal text"
 
 def unit(test):
     return (UNIT, "*::" + test)
+
+
+def regions(test):
+    return (REGIONS_UNIT, "*::" + test)
 
 
 def browser(case):
@@ -112,6 +119,47 @@ ARMS = [
               "      dp[i][j] = if a[i] == b[j]: dp[i + 1][j + 1]")],
      [unit(U_DIFF)],
      "the unified diff: equal lines are not matched, every line reads changed"),
+    ("F19", [(FRAME, "      if ranges and o.className.len > 0 and not o.isWholeLine and a != b:",
+              "      if false:")],
+     [unit("a range's class covers the range, not the line, when asked (Monaco's word marks)")],
+     "the unified diff: a word mark is drawn across the whole line"),
+    ("F18", [(FRAME, "  hidden.isHidden(min(afterLine, max(1, lineCount) - 1))",
+              "  hidden.isHidden(afterLine - 1)")],
+     [unit("a zone after the last hidden line stays, above the next visible one")],
+     "view zones: a zone after a hidden line goes although the next line shows (Monaco keeps it)"),
+    ("R39", [(FRAME, "    if not z.showInHidden and zoneHidden(hidden, lineCount, z.afterLine):",
+              "    if zoneHidden(hidden, lineCount, z.afterLine):")],
+     [browser("caseUnifiedDiffRegions")],
+     "the unified diff: `showInHiddenAreas` is ignored, the bands above hidden lines vanish"),
+    # --- the unified diff's model ----------------------------------------------
+    ("F11", [(REGIONS, "      if atStart and not atEnd: n -= c",
+              "      if atStart and not atEnd: n -= 0")],
+     [regions("a run between changes keeps context at both ends")],
+     "the unified diff: a collapsed region at the file's start hides its context too"),
+    ("F12", [(REGIONS, "  r.visibleBottom = min(r.visibleBottom + max(0, count), r.maxVisibleBottom)",
+              "  r.visibleBottom = r.visibleBottom + max(0, count)")],
+     [regions("a press, Shift+Enter, the menu and showAll")],
+     "the unified diff: revealing below takes lines the top already shows"),
+    ("F13", [(REGIONS, "  clamp(start + lines, 0, r.maxVisibleTop)",
+              "  clamp(start - lines, 0, r.maxVisibleTop)")],
+     [regions("a drag reveals one line per line height, and a small move is a press")],
+     "the unified diff: dragging the upper boundary down reveals nothing"),
+    ("F14", [(REGIONS, "        dp[i][j] = if tok(a, ta[i]) == tok(b, tb[j]): dp[i + 1][j + 1] + 1",
+              "        dp[i][j] = if tok(a, ta[i]) == tok(b, tb[j]): dp[i + 1][j + 1]")],
+     [regions("only the words that changed are marked")],
+     "the unified diff: equal words are not matched, every word reads changed"),
+    ("F15", [(REGIONS, "        items.add (h.oldTo, 1, L - h.newFrom, 1, items.len, z.heightPx, false, z.showInHidden)",
+              "        items.add (h.oldTo, 1, 0, 1, items.len, z.heightPx, false, z.showInHidden)")],
+     [regions("an overlay block after an added line splits the spacer")],
+     "the unified diff: a block under an added line is aligned above the added run"),
+    ("F16", [(REGIONS, "    if nextH >= 0 and z.order > deletedOrder:",
+              "    if false:")],
+     [regions("a block right above a change goes below the removed lines")],
+     "the unified diff: a block above a change is aligned above the removed lines"),
+    ("F17", [(REGIONS, "  if fromTop < fromBottom: r.visibleTop = max(r.visibleTop, fromTop + 1)",
+              "  if true: r.visibleTop = max(r.visibleTop, fromTop + 1)")],
+     [regions("a caret on a hidden line shows it from the nearer end")],
+     "the unified diff: a caret near a region's end reveals it from the top"),
     # --- the renderer ----------------------------------------------------------
     ("R1", [(EDITOR, '        discard ed.insertText($ev.data.to(cstring), "keyboard")',
              '        discard ev')],
@@ -205,14 +253,82 @@ ARMS = [
               '      discard 0')],
      [browser("caseDecorationsAndZones")],
      "content widgets: a widget off the view stays shown"),
-    ("R17", [(DIFF, "      d.zoneIds.add d.modified.addZone(spec)",
+    ("R17", [(DIFF, "      d.deletedZoneIds.add d.modified.addZone(spec)",
               "      discard spec")],
      [browser("caseUnifiedDiff")],
      "the unified diff: the removed lines are not drawn"),
-    ("R18", [(DIFF, '      o["className"] = cstring"line-insert"',
-              '      o["className"] = cstring""')],
+    ("R18", [(DIFF, '      modReqs.add wholeLine(d.modified, k, "line-insert", "gutter-insert")',
+              '      discard k')],
      [browser("caseUnifiedDiff")],
      "the unified diff: the added lines are not marked"),
+    ("R25", [(DIFF, "  d.modified.hiddenAreas = mergeSpans(modHidden, [])",
+              "  d.modified.hiddenAreas = @[]")],
+     [browser("caseUnifiedDiffRegions")],
+     "the unified diff: a collapsed region's lines are still drawn"),
+    ("R26", [(DIFF, "      else: d.keepBoundaryAt(index, proc(rr: var UnchangedRegion) = rr.showMoreBelow(n))",
+              "      else: discard n")],
+     [browser("caseUnifiedDiffRegions")],
+     "the unified diff: a press on the lower boundary reveals nothing"),
+    ("R27", [(DIFF, "      d.regionAction(index, proc(rr: var UnchangedRegion) = rr.visibleTop = v)",
+              "      discard v")],
+     [browser("caseUnifiedDiffRegions")],
+     "the unified diff: dragging the upper boundary reveals nothing"),
+    ("R28", [(DIFF, '    for s in inner.inserted: modReqs.add inline(d.modified, s, "char-insert")',
+              '    discard inner.inserted')],
+     [browser("caseUnifiedDiffRegions")],
+     "the unified diff: the inserted words are not marked"),
+    ("R29", [(DIFF, "        discard row.appendChild(d.original.lineContentElement(k + 1, marks))",
+              "        row.textContent = cstring(d.oldLines[k])")],
+     [browser("caseUnifiedDiffRegions")],
+     "the unified diff: the removed lines are drawn without colours or word marks"),
+    ("R30", [(DIFF, "    d.spacerIds.add d.original.addZone(spec)",
+              "    discard spec")],
+     [browser("caseUnifiedDiffRegions")],
+     "the unified diff: the old revision's numbers drift from their lines"),
+    ("R31", [(DIFF, "      d.original.setScroll(d.modified.scrollTop, 0)",
+              "      discard 0")],
+     [browser("caseUnifiedDiffRegions")],
+     "the unified diff: the old revision does not scroll with the new one"),
+    ("R32", [(DIFF, '  b.label.textContent = cstring($r.hiddenCount & " hidden lines")',
+              '  b.label.textContent = cstring($r.lineCount & " hidden lines")')],
+     [browser("caseUnifiedDiffRegions")],
+     "the unified diff: the band counts the region, not what it still hides"),
+    ("R33", [(EDITOR, "  verticalLayout(ed.index.lineCount, ed.lineHeight, ed.allHidden, zs)",
+              "  verticalLayout(ed.index.lineCount, ed.lineHeight, hiddenRanges(ed.index, ed.doc.state.doc, ed.doc.state.folded), zs)")],
+     [browser("caseUnifiedDiffRegions")],
+     "the unified diff: the editor's layout ignores its hidden areas"),
+    ("R34", [(EDITOR, '  zl.styleBox([("position", "absolute"), ("width", "100%"), ("z-index", "1")])',
+              '  zl.styleBox([("position", "absolute"), ("width", "100%")])')],
+     [browser("caseUnifiedDiffRegions")],
+     "view zones: a zone's controls lie under the text layer and take no press"),
+    ("R35", [(EDITOR, '    cls = "mtk" & $(ord(s.tokenClass) - ord(tcPlain) + 1) & " mtk-" & $s.tokenClass',
+              '    cls = "mtk-" & $s.tokenClass')],
+     [browser("caseUnifiedDiffRegions")],
+     "highlighting: the tokens lack Monaco's numbered classes the review counts"),
+    ("R36", [(EDITOR, '  if ed.monacoGutter: ed.optInt("glyphMargin", GlyphMarginPx) else: GlyphMarginPx',
+              '  GlyphMarginPx')],
+     [browser("caseUnifiedDiffRegions")],
+     "the unified diff: `glyphMargin: false` still draws the glyph lane"),
+    ("R37", [(EDITOR, '      discard callFn(z.spec["onDomNodeTop"], toJs(top))',
+              '      discard top')],
+     [browser("caseUnifiedDiffRegions")],
+     "view zones: a zone's `onDomNodeTop` is never told, its overlay stays put"),
+    ("R38", [(EDITOR, "  discard guard.insertBefore(ta, guard.firstChild)",
+              "  guard.appendChild(ta)")],
+     [browser("caseUnifiedDiffRegions")],
+     "focus order: Tab from the text leaves the editor before a zone's controls and the bands"),
+    ("A4", [(FACADE, "    ed.flushRender()\n    let t = ed.lineText(line)",
+             "    let t = ed.lineText(line)")],
+     [browser("caseUnifiedDiffRegions")],
+     "the unified diff: a column measured before the next frame reads the empty editor"),
+    ("R40", [(EDITOR, '  if language == "nim" or lowerExtension(path) in [".nim", ".nims", ".nimble"]:',
+              '  if false:')],
+     [browser("caseNimColours")],
+     "highlighting: a Nim file (a Nim commit's diff) is drawn plain"),
+    ("A3", [(FACADE, '  f["onDidContentSizeChange"] = proc(h: JsObject): JsObject = ed.on("contentSize", h)',
+             '  f["onDidContentSizeChange"] = proc(h: JsObject): JsObject = ed.on("layout", h)')],
+     [browser("caseUnifiedDiffRegions")],
+     "the unified diff: a region opened does not tell the document section to grow"),
     # --- Monaco's API over the core ---------------------------------------------
     ("A1", [(FACADE, '        """, markers, """(model, owner, all); return; }',
              '        return; }')],
