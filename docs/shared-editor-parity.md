@@ -32,7 +32,8 @@ Status: **met** — the row's behaviour matches Monaco's on the desktop and a
 test fails when it is broken (the harness arm named); **met, with a
 measured difference** — the behaviour matches and a stated, measured property
 does not; **not exercised** — the code path is implemented and graded, and
-the named part of the environment cannot be reproduced here.
+the named part of the environment cannot be reproduced here; **not met** —
+the desktop keeps Monaco for that use, for the reason given.
 
 Suites: **U** `src/frontend/viewmodel/tests/unit/test_editor_dom_frame.nim`
 (vm-unit, vm-unit-js); **B** `src/frontend/tests/shared_editor_chromium_test.nim`
@@ -56,27 +57,51 @@ GUI suite run with `CODETRACER_SHARED_EDITOR=1`. Arms are
 | LSP: hover | met | **L** against the dev shell's real `nimlangserver`. Arm L1. |
 | LSP: completion | met | **L** `Ctrl+Space`, the server's items, Enter inserts. Arm L3. |
 | LSP: go to definition | met | **L** `F12` where the keymap leaves it, Ctrl+click in a writable editor. Arms L2, L5. |
-| LSP: Nim semantic tokens | met | **L** the codetracer langserver's response (the dev shell's `nimlangserver` 1.12.0 advertises semantic tokens and never answers a range request, which also stalls Monaco's provider — filed). Arm L4. |
+| LSP: Nim semantic tokens | met | **L** the codetracer langserver's response (the dev shell's `nimlangserver` 1.12.0 advertises semantic tokens and never answers a range request — filed). Asked for only where Monaco's `semanticHighlighting.enabled` option is on: on the desktop Monaco sends no semantic-token request (the trace-macro scenario's language-server traffic, read for both editors), and a range request the server leaves unanswered holds up the macro trace queued behind it. Arms L4, L6. |
 | Syntax highlighting (Monarch via `monarch.nim`) | met | **B** "the document's lines, coloured by the Monarch runner": the keyword span in the editor theme's keyword colour; **U** "tokens cut at decoration edges". Arms R15, R16. |
 | Decorations: the execution pointer | met | **B** decorations case (whole-line class in the overlay layer); **X** the execution line after a step. Arm R7. |
 | Decorations: per-line status (breakpoints, tracepoints) in the gutter | met | **U** margin classes on the first line; **B** the glyph class in the margin; **X** the glyph column after a press. Arms F4, F5. |
 | Decorations: inline values | met | **U** injected content; **B** the value chip at the line's end; **X** the value chips. Arm F8. |
 | Decorations: the flow overlay | met | **B** view zones push the lines below them; **U** the layout; **G** the flow specs. Arms R8, F7. |
-| Editing: find and replace | met | **B** "find highlights incrementally…": the shared find session, incremental highlights, Enter / Escape, Replace All as one undo. Arms R11, R12. |
+| Editing: find and replace | met | **B** "find highlights incrementally…": the shared find session, incremental highlights, Enter / Escape, Replace All as one undo. An off-screen match is centred, and the palette's **Find: Cancel and Return** closes the shared find and restores its origin (the pack's `find-cancel-and-return-restores-the-view`, `incremental-find-walks-and-keeps-the-match`). Arms R11, R12. |
 | Editing: multiple selections | met | **B** two carets drawn and typed at. |
 | Editing: clipboard | met | **B** copy fills the event's `text/plain` and the core's register; paste inserts the clipboard's text. Arm R10. |
 | Editing: undo and redo (PLAT-32) | met | **B** typing undone as one group, redone. |
 | Editing: folding | met | **B** the chevron folds, `unfold-all` unfolds; **U** the fold's extent. Arms R9, F6. |
 | Editing: bracket matching | met | **B** the bracket and its partner. Arm F9. |
 | Editing: drag selection | met | **B** click, double click, drag across lines. Arm R6. |
-| The unified-diff view | met | **B** "the unified diff: removed lines as zones, added lines marked, decorations per side" (Monaco's diff-editor structure and API over two shared editors); **U** "the unified diff's line diff"; **G** `tests/vcs/vcs_unified_diff.spec.ts` with the setting on. Arms R17, R18, F10. |
+| Pointer: where a press puts the caret | met | **B** a press on the middle of a character puts the caret after it, as Monaco's does (the scenario pack aims its text anchors there); a double or triple press is counted, by each press's event time, at the character under the pointer, so a double click on a loaded page still selects the word. Arm R22; the pack's `multiclick-selects-caret-word-line`, `tabs-survive-mode-switch`. |
+| The unified-diff view | not met — Monaco's diff editor is kept | The shared editor's diff (`ui/shared_diff_editor.nim`: two shared editors behind Monaco's diff-editor API, removed lines as zones, added lines marked; **B** "the unified diff…", **U** "the unified diff's line diff", arms R17, R18, F10) draws a diff, but the desktop's review and VCS panel use more of Monaco's diff editor than it does: hidden unchanged regions with their draggable, keyboard-operable boundaries, word-level marks inside a changed line, syntax highlighting of deleted lines, and the flow's values and loop control over the diff (the Electron GUI suite with the setting on: `deepreview/deepreview-gui.spec.ts` UD-1 to UD-4 and Tests 14–16f, 21, 26–31; `vcs/vcs_unified_diff.spec.ts` UD-2). Until it does, the desktop's diff views stay on Monaco under the setting too (`ui/unified_diff.nim`). |
 | Read-only mode | met | **B** a read-only editor takes no text and still moves and selects; **D** typing in Debug mode changes nothing. Arm R14. |
 | The editor context menu | met | **D** the right-click menu is CodeTracer's; **G** `tests/editor/editor_context_menu_is_mode_dependent.spec.ts`. |
 | Live editing for hot code reload | met | **D** Edit mode: typing, undo, `Ctrl+S` writes the file; **G** the HCR specs. |
 | Theming from the design system (PLAT-46) | met | **B** the ground and the keyword colour are the `editor-theme/*` tokens; the forced-colours block. Arm R15. |
 | Input through the shared router: product keymap (CUA) | met | **D** stepping keys reach the debugger, arrows move the caret, `Ctrl+S` saves. |
-| Input through the shared router: Vim, Kakoune | met | **D** the palette's "Keymap: Vim" / "Keymap: Kakoune": modes, motions, operators, as the terminal and GPUI. |
-| The differential | met | **X** one scripted scenario, both editors, the same observations (the lines drawn, the execution line, the glyph column, the active line, the caret, the selection, the value chips) at each of seven points; `ci/test/shared-editor-differential.sh` runs the scenario pack's editor scenarios (`src/tests/scenarios/editor/…`) on both editors and compares every step's status and observation. |
+| Input through the shared router: Vim, Kakoune | met | **D** the palette's "Keymap: Vim" / "Keymap: Kakoune": modes, motions, operators, as the terminal and GPUI. A modal keymap's own chords are the editor's while it has the keys — Kakoune's `Ctrl+P` (back through the jump list) among them, as on the terminal. |
+| What the rest of the desktop reads of Monaco | met | The tracepoint view, the flow, the review, the build panel and the page objects call Monaco directly; the shared editor answers what they read: the theme service's theme name, a layout whose minimap entry has its width and left edge (the tracepoint editor and the loop slider size themselves from them), `getModelMarkers` per owner, decorations' hover messages, content widgets placed by Monaco's preference (EXACT on its line) and hidden off the view, view zones as wide as the view, a find-widget press reported as an overlay widget without a position, Escape closing an open find, and an editor in a hidden tab drawing no lines. **B** content widgets; **G** below. Arms R23, R24. |
+| Monaco's DOM where the page styles it | met | The desktop's stylesheet and its page objects address Monaco's structure, and the editor keeps it: the gutter's rows hold only the cells that exist, number last (`text_editor.styl` paints every `div` of a row with the gutter's ground); the glyph decorations in `.glyph-margin-widgets` beside a `.glyph-margin` column; the find widget's `visible` class; a contained, composited `.lines-content`, so the flow's `position: fixed` value chips are placed in the text; Monaco's font fallback; `scrollBeyondLastLine`; every cursor's line highlighted; the view state carrying every selection across a mode switch. **B** the glyph layer and the find widget's class; **X** and the scenario pack (below). Arms R19, R20, R21, A2; the gutter rows under the page's own rules are graded by the scenario pack on the desktop. |
+| The differential | met, with a measured difference | **X** one scripted scenario, both editors, the same observations (the lines drawn, the execution line, the glyph column, the active line, the caret, the selection, the value chips) at each of seven points. `ci/test/shared-editor-differential.sh` runs the scenario pack's editor and tracing scenarios of the Electron lane on both editors and compares every step's status and observation: 17 of 18 the same. The difference: in `dimming-marks-only-untaken-branches`, after the stop at `shield.nr:34`, the first line drawn is 13 with Monaco and 14 with the shared editor (the last, 54, the same; the editors' heights and line heights measured equal) — the scenario's own assertions hold on both. |
+
+## The Electron GUI suite with the setting on and off
+
+The whole suite, but four specs that cannot run on this workstation (the
+macOS capture lane, the MCR native recorder, the PLAT-59 visual recording),
+each way at the same commit: 107 failures with the shared editor, 108 with
+Monaco, the same tests but for five, and a rerun of those five in both modes
+shows each failing or passing on either editor (timing-dependent storybook
+and Noir space-ship cases). A failure common to both modes is not the
+setting's; whether it predates this work is checked against `agents` with
+the shared editor's commits reverted (PLAT-67's status block names the
+commits and the counts).
+
+`tests/harness/codetracer-ci-dev-shell.spec.ts` used to hang a run for 1.5
+hours: `dotnet` deadlocked at start-up under an `LD_PRELOAD` shim with
+LTTng-UST and ignored SIGTERM, and the synchronous child blocked the worker
+past the test's own timeout. codetracer-ci commands now run with
+`DOTNET_LTTng=0`, and every synchronous child in the suite is bounded by
+the time left to its test (`src/tests/gui/lib/sync-child-timeout.ts`,
+`tests/harness/sync-child-timeout.spec.ts`); codetracer-pm
+`issues/2026-11-13-dotnet-deadlocks-at-start-up-under-an-ld-preload-shim-with-lttng-ust.md`.
 
 ## Measurements
 
