@@ -266,10 +266,9 @@ try:
   #
   # Until 2026-10-01 the second form took `a` as the program and dropped
   # `prog`.  Which form a line is cannot be told from the tokens alone (a ct
-  # flag may take a value), so confutils decides: the placeholder is
-  # appended as the next positional, and lands in `recordProgram` exactly
-  # when no program was named before `--`.
-  const RecordChildProgramPlaceholder = "\0ct-record-child-program"
+  # flag may take a value), so confutils decides: `record_child_argv.nim`
+  # says how, and why its program slot goes right after `record` rather than
+  # at the end of the line.
   var childArgs: seq[string] = @[]
   var childAfterSeparator = false
   # `ctArgv` is what confutils parses.  It defaults to the real argv so the
@@ -277,6 +276,11 @@ try:
   # trims it.  (`cmdLine` defaults to `commandLineParams()`, so it must never
   # be passed an empty seq -- that would parse nothing at all.)
   var ctArgv: seq[string] = @[]
+  let ctVersion = "CodeTracer version: " & version.CodeTracerVersionStr & (
+      when defined(debug): "(debug)" else: "")
+  # TODO: When confutils gets updated with nim 2 make sure to improve on the copyright banner, as newer versions
+  # support having prefix and postfix banners. The banner here is only a prefix banner
+  const ctBanner = "CodeTracer - the user-friendly time-travelling debugger"
   when not defined(js):
     # `uiCleanArgs` rather than `commandLineParams()`: the `--ui` prologue has
     # already taken `--ui` (and `--headless`) out, and for `--ui=webui` it has
@@ -286,28 +290,33 @@ try:
     ctArgv = uiCleanArgs
     let sep = ctArgv.find("--")
     if sep >= 0 and ctArgv.len > 0 and ctArgv[0] == "record":
-      let rest = ctArgv[sep + 1 .. ^1]
-      ctArgv = ctArgv[0 ..< sep]
+      let ownHalf = ctArgv[0 ..< sep]
       childAfterSeparator = true
-      childArgs = rest
-      # `recordProgram` is a required argument, and it may live to the RIGHT
-      # of `--` where confutils can no longer see it.  Stand in a placeholder
-      # so the parse succeeds; below it says which form the line was.  A
-      # placeholder rather than the program's name: a name beginning with `-`
-      # would be read back as a flag.
-      ctArgv.add(RecordChildProgramPlaceholder)
+      childArgs = ctArgv[sep + 1 .. ^1]
+      # An option that ends ct's half (`ct record --lang -- prog`) has no
+      # value; say so by name instead of letting the parse drop it.
+      let missing = recordOptionMissingValue(ownHalf,
+        proc (line: seq[string]): RecordProbe =
+          try:
+            let probed = CodetracerConf.load(
+              version = ctVersion, copyrightBanner = ctBanner,
+              cmdLine = line, printUsage = false, quitOnFailure = false)
+            RecordProbe(parsed: true, args: probed.recordArgs)
+          except ConfigurationError:
+            RecordProbe(parsed: false))
+      if missing.len > 0:
+        stderr.writeLine(recordMissingValueError(missing))
+        quit(1)
+      ctArgv = recordParserLine(ownHalf)
 
-  # TODO: When confutils gets updated with nim 2 make sure to improve on the copyright banner, as newer versions
-  # support having prefix and postfix banners. The banner here is only a prefix banner
   var conf = CodetracerConf.load(
-    version = "CodeTracer version: " & version.CodeTracerVersionStr & (
-        when defined(debug): "(debug)" else: ""),
-    copyrightBanner = "CodeTracer - the user-friendly time-travelling debugger",
+    version = ctVersion,
+    copyrightBanner = ctBanner,
     cmdLine = ctArgv
   )
   if childAfterSeparator:
     let split = resolveRecordChild(conf.recordProgram, conf.recordArgs,
-                                   childArgs, RecordChildProgramPlaceholder)
+                                   childArgs)
     if split.error.len > 0:
       stderr.writeLine(split.error)
       quit(1)

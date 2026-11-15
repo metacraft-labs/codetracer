@@ -1452,8 +1452,7 @@ env: (none)
 exit: 1
 --- stdout
 --- stderr
-Error while processing the \e[34mstore-trace-folder-for-pid=\0ct-record-child-program\e[0m parameter: invalid integer: \0ct-record-child-program\e[0m
-Try \e[36mct --help\e[0m for more information.
+error: `--store-trace-folder-for-pid` needs a value: give it before `--`, as `--store-trace-folder-for-pid=<value>` or `--store-trace-folder-for-pid <value>`
 --- end
 
 ### 29: root 2: the empty word
