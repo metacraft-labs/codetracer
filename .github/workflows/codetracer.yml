@@ -6350,6 +6350,15 @@ jobs:
         if: matrix.platform == 'nixos'
         run: nix build --print-build-logs '.?submodules=1#codetracer' --override-input codetracer-trace-format path:./libs/codetracer-trace-format --override-input codetracer-trace-format-nim path:./libs/codetracer-trace-format-nim
 
+      # The build above can outlast the job's first token on a cold runner.
+      - name: Refresh the GitHub token
+        if: matrix.platform == 'nixos'
+        uses: ./.github/actions/refresh-github-token
+        with:
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+          keep-refreshing: "true"
+
       # --- macOS setup ---
       # The macOS leg now builds the ct binary with codetracer's reprobuild
       # recipe inside the nix dev shell and runs the Playwright suite in that

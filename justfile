@@ -7281,8 +7281,13 @@ ensure-ct-native-replay:
         if ! ( cd "$sibling" && nix develop "$backend_flake_ref" --command true >/dev/null 2>&1 ); then
             backend_flake_ref='.'
         fi
+        # The backend's dev shell does not ship ``just``, so a bare ``just``
+        # inside its login shell resolves only where the host's own PATH has
+        # one. CI runners do not ("just: command not found", exit 127). Hand
+        # it the ``just`` that is running this recipe, by absolute path.
+        just_bin="$(command -v just)"
         ( cd "$sibling" && nix develop "$backend_flake_ref" --command bash -lc \
-            "unset CXXFLAGS CC CXX; just $backend_target" )
+            "unset CXXFLAGS CC CXX; '$just_bin' $backend_target" )
     elif command -v just >/dev/null 2>&1; then
         # Fallback: the sibling dev shell could not be evaluated, but we are
         # already inside the codetracer Nix dev shell which provides cargo +
