@@ -743,6 +743,23 @@ with pkgs;
       pkgs.lib.optionalString (!stdenv.isDarwin) ":${libbpf.out}/lib:${elfutils.out}/lib"
     }''${LIBRARY_PATH:+:$LIBRARY_PATH}";
 
+    # NO SELF-RPATH. stdenv's setup appends `-rpath $out/lib` to NIX_LDFLAGS,
+    # which is right for a package build, whose libraries land in $out/lib. In
+    # a dev shell $out is `<checkout>/outputs/out`, which nothing populates, so
+    # every binary linked here carried a run-time search path into the
+    # checkout that never exists. Measured on replay-server: RUNPATH
+    # `$ORIGIN:<checkout>/outputs/out/lib` from `cargo build` in this shell,
+    # against `$ORIGIN` alone from tup (which does not export NIX_LDFLAGS).
+    # src/db-backend/build.rs gives replay-server exactly one search path, its
+    # own directory (codetracer-pm issue 2026-10-05, the 2026-10-12 addendum:
+    # a produced binary carries no load path into a build directory); this is
+    # the one entry the shell added behind its back. Only that flag is
+    # removed; anything else in NIX_LDFLAGS stays.
+    if [ -n "''${out:-}" ]; then
+      NIX_LDFLAGS="''${NIX_LDFLAGS//-rpath $out\/lib/}"
+      export NIX_LDFLAGS
+    fi
+
     # C_INCLUDE_PATH so Nim's direct gcc invocations see
     # #include <bpf/libbpf.h> when tup sandboxes the build.
     ${pkgs.lib.optionalString (!stdenv.isDarwin) ''

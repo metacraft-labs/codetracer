@@ -2061,6 +2061,11 @@ LOADPATH_WRONG=""
 		LOADPATH_WRONG="${LOADPATH_WRONG} appimage-scripts/build_db_backend.sh"
 	grep -qF '"$DIST_DIR/bin/${emulator_library}"' "${SUITE_ROOT}/non-nix-build/build_db_backend.sh" ||
 		LOADPATH_WRONG="${LOADPATH_WRONG} non-nix-build/build_db_backend.sh"
+	# The dev shell's stdenv self-rpath (`-rpath $out/lib`, $out being
+	# `<checkout>/outputs/out` there) is removed, or every `cargo build` in
+	# the shell gets that second, dead entry.
+	grep -qF "NIX_LDFLAGS=\"''\${NIX_LDFLAGS//-rpath \$out\\/lib/}\"" "${SUITE_ROOT}/nix/shells/ci-base.nix" ||
+		LOADPATH_WRONG="${LOADPATH_WRONG} nix/shells/ci-base.nix(self-rpath)"
 }
 if [[ -z ${LOADPATH_WRONG} ]]; then
 	ok "replay-server loads its emulator library only from beside itself, and every installer puts it there"
