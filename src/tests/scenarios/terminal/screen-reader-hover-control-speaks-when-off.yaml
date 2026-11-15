@@ -1,0 +1,18 @@
+scenario: 1
+name: terminal/screen-reader-hover-control-speaks-when-off
+pack: codetracer
+summary: >-
+  Without the screen-reader mode, the pointer resting on a top-bar control
+  (Next) puts the control's words on the status line: the control for the
+  mode's silence.
+stage:
+  - use: record-program
+    with: { program: calc }
+  - use: front-end-options
+    with: { options: { screen-reader: "off" } }
+  - use: open-recording
+    with: { width: 200, height: 50 }
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - hover: { at: 'toolbar/toolbar-button[label="Next"]', for: 800ms }
+  - wait: { until: { at: status-line, assert: 'says("Next")' }, timeout: 10s }

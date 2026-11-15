@@ -1,0 +1,16 @@
+scenario: 1
+name: terminal/screen-reader-accessible-turns-it-on
+pack: codetracer
+summary: >-
+  `ACCESSIBLE=1` in the environment alone turns the screen-reader mode on:
+  the status line says where focus is, by the pane's name, from the start.
+stage:
+  - use: record-program
+    with: { program: calc }
+  - use: front-end-options
+    with: { env: { ACCESSIBLE: "1" } }
+  - use: open-recording
+    with: { width: 200, height: 50 }
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - wait: { until: { at: status-line, assert: 'says("Source: 1 > #!/usr/bin/env python3")' }, timeout: 30s }

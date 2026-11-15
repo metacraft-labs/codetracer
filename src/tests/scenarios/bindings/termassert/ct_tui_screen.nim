@@ -501,6 +501,13 @@ const
     ## The transport row's glyphs (`top_bar`, unicode tier), in the
     ## desktop toolbar's order, by the desktop's labels
     ## (`debug_controls_vm.TransportActions`).
+  TransportWords = [("Rev next", "Reverse next"), ("Next", "Next"),
+                    ("Rev in", "Reverse step in"), ("In", "Step in"),
+                    ("Rev out", "Reverse step out"), ("Out", "Step out"),
+                    ("Rev cont", "Reverse continue"), ("Continue", "Continue"),
+                    ("Entry", "Run to entry"), ("Stop", "Stop")]
+    ## The same controls on the text tier (`top_bar`'s words), by the same
+    ## labels.
   ContextMenuHint = "Terminal menu: Shift + right-click"
     ## The inert last row every context menu the terminal draws carries.
   FooterLabels = ["BUILD", "PROBLEMS", "FIND IN FILES", "REQUESTS", "TERMINAL",
@@ -761,12 +768,33 @@ proc readChrome*(g: ScreenGrid; t: var Tree; root: SurfaceNode) =
   for (glyph, label) in TransportGlyphs:
     let c = g.findCol(0, glyph)
     if c >= 0 and c < limit: buttons.add (label, c)
+  var widths: seq[int]
+  for _ in buttons: widths.add 1
+  if buttons.len == 0:
+    # --- terminal --- the text tier (ASCII glyphs, the screen-reader mode)
+    # spells the controls as words, two blanks apart, before the omnibox's
+    # `/` lens
+    let slash = g.findCol(0, "/ ")
+    let stop = if slash > 0: slash else: g.width
+    for (word, label) in TransportWords:
+      var c = 0
+      while true:
+        c = g.findCol(0, "  " & word & "  ", c)
+        if c < 0 or c >= stop: break
+        buttons.add (label, c + 2)
+        widths.add word.runeLen
+        break
+    var order = toSeq(0 ..< buttons.len)
+    order.sort(proc (a, b: int): int = cmp(buttons[a][1], buttons[b][1]))
+    buttons = order.mapIt(buttons[it])
+    widths = order.mapIt(widths[it])
   if buttons.len > 0:
-    let tb = node("toolbar", fl(buttons[0][1]), 0, fl(buttons[^1][1] - buttons[0][1] + 1), 1)
+    let tb = node("toolbar", fl(buttons[0][1]), 0,
+                  fl(buttons[^1][1] + widths[^1] - buttons[0][1]), 1)
     t.add(root, tb)
-    for (label, c) in buttons:
-      t.add(tb, node("toolbar-button", fl(c), 0, 1, 1, %*{"label": label, "enabled": true},
-                     @[("label", label)]))
+    for i, (label, c) in buttons:
+      t.add(tb, node("toolbar-button", fl(c), 0, fl(widths[i]), 1,
+                     %*{"label": label, "enabled": true}, @[("label", label)]))
 
 const WelcomeActions = ["New file", "Open folder", "Record new trace", "Open local trace",
                         "Open online trace", "CodeTracer shell"]
