@@ -303,6 +303,10 @@ applicable:
   - ../scratchpad/flow-value-plus-button-adds-one-entry.yaml
   - ../scratchpad/scratchpad-reopened-does-not-multiply-entries.yaml
   - ../scratchpad/flow-value-on-a-long-line-scrolled-into-view.yaml
+  - ../languages/cpp-sudoku-shows-source-and-output.yaml
+  - ../languages/cpp-sudoku-call-trace-to-main.yaml
+  - ../languages/crystal-sudoku-shows-source-and-output.yaml
+  - ../languages/crystal-sudoku-call-trace-to-main.yaml
   # --- pw5 deepreview ---
   - ../deepreview/boundary-drag-reveals-what-it-crosses.yaml
   - ../deepreview/boundary-is-operable-from-the-keyboard.yaml

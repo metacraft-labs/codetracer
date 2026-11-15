@@ -1,0 +1,21 @@
+scenario: 1
+name: languages/cpp-sudoku-call-trace-to-main
+pack: codetracer
+summary: >-
+  In a C++ Sudoku solver recording, activating `main` in the call trace shows
+  main.cpp in the editor, with the `test_boards` value drawn beside its line.
+
+stage:
+  - use: record-program
+    with: { program: cpp_sudoku_solver/main.cpp, backend: rr }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 240s }
+  - click: 'pane-tab[label="CALLTRACE"]'
+  - wait: { until: { at: 'call-trace/call[name="main"]', present: true }, timeout: 120s }
+  - click: { at: 'call-trace/call[name="main"]', anchor: name }
+    settle: false
+  - wait: { until: { at: 'editor[file="main.cpp"]', active: true }, timeout: 60s }
+  - wait: replay-idle
+  - wait: { until: { at: 'editor[file="main.cpp"]/flow-value[name="test_boards", line="71"]', present: true }, timeout: 60s }
