@@ -73,7 +73,8 @@
 #
 # Nothing else is faked: the daemon, the clients, the overlays and the relay
 # are the real ones. `HOME` is a scratch home, as in
-# ci/test/lane-user-state-guard-test.sh.
+# ci/test/lane-user-state-guard-test.sh, and `CODETRACER_HOME` a scratch
+# directory of its own.
 #
 # `repro exec` runs in a one-line fixture project rather than in this
 # checkout, whose dev env takes minutes to activate. Its first activation still
@@ -141,9 +142,15 @@ show() { sed 's/^/       /' "$1" >&2; }
 
 endpoint_dir="${scratch}/rq"
 endpoint="${endpoint_dir}/runquotad.sock"
-mkdir -p "${scratch}/tmp" "${scratch}/project" \
+# The scratch home carries the four directories the sandbox guards, so it has
+# something to overlay. They belong to the fixture, not to CodeTracer: nothing
+# here resolves CodeTracer state. Whatever the suite starts that does resolve
+# it lands in its own scratch CODETRACER_HOME (exported below), which outranks
+# HOME, rather than in the caller's.
+mkdir -p "${scratch}/tmp" "${scratch}/project" "${scratch}/codetracer-home" \
 	"${scratch}/home/.local/state/codetracer" "${scratch}/home/.local/share/codetracer" \
 	"${scratch}/home/.config/codetracer" "${scratch}/home/.cache/codetracer"
+: >"${scratch}/codetracer-home/.codetracer-test-home"
 mkdir -m 0750 "${endpoint_dir}"
 printf 'import repro_project_dsl\npackage fixture:\n  defaultToolProvisioning "path"\n  devEnv:\n    setEnv "CT_USS_RQ_FIXTURE", "1"\n' \
 	>"${scratch}/project/repro.nim"
@@ -154,6 +161,7 @@ printf 'import repro_project_dsl\npackage fixture:\n  defaultToolProvisioning "p
 unset RUNQUOTA_ENDPOINT_SCOPE RUNQUOTA_USER_ENDPOINT_DIR CT_USS_STAGE CT_USS_STAGE_COVERED
 export RUNQUOTA_SOCKET="${endpoint}" RUNQUOTA_ENDPOINT_OWNER_UID=0 RUNQUOTA_ENDPOINT_GROUP=0
 export HOME="${scratch}/home" TMPDIR="${scratch}/tmp" XDG_CACHE_HOME="${_CT_USS_RQ_CACHE}"
+export CODETRACER_HOME="${scratch}/codetracer-home"
 export REPRO_DAEMON=off
 
 start_daemon() {
