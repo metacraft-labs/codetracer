@@ -38,13 +38,14 @@ FACADE = "src/frontend/ui/shared_editor_facade.nim"
 LSP = "src/frontend/ui/shared_editor_lsp.nim"
 DIFF = "src/frontend/ui/shared_diff_editor.nim"
 REGIONS = "src/frontend/view_vocabulary/diff_regions.nim"
+SURFACE = "src/frontend/ui/editor_surface.nim"
 
 UNIT = "src/frontend/viewmodel/tests/unit/test_editor_dom_frame.nim"
 REGIONS_UNIT = "src/frontend/viewmodel/tests/unit/test_diff_regions.nim"
 BROWSER = "src/frontend/tests/shared_editor_chromium_test.nim"
 LSP_SUITE = "src/frontend/tests/shared_editor_lsp_chromium_test.nim"
 
-SUBJECTS = [FRAME, EDITOR, FACADE, LSP, DIFF, REGIONS]
+SUBJECTS = [FRAME, EDITOR, FACADE, LSP, DIFF, REGIONS, SURFACE]
 SUITES = [UNIT, REGIONS_UNIT, BROWSER, LSP_SUITE]
 IN_BINARY = set()
 
@@ -325,6 +326,18 @@ ARMS = [
               '  if false:')],
      [browser("caseNimColours")],
      "highlighting: a Nim file (a Nim commit's diff) is drawn plain"),
+    ("S1", [(SURFACE, "  if sharedEditorEnabled(config):",
+             "  if false:")],
+     [browser("caseEditorSurfaces")],
+     "editor surfaces: a tracepoint / expansion / low-level / workspace editor is Monaco's under the setting"),
+    ("S2", [(SURFACE, "  let readOnly = not isNilOrUndef(options[\"readOnly\"]) and options[\"readOnly\"].to(bool)",
+             "  let readOnly = true")],
+     [browser("caseEditorSurfaces")],
+     "editor surfaces: a writable surface (the tracepoint editor) is made read-only"),
+    ("S3", [(EDITOR, '  if kind != cstring"fn": return cstring($line1)',
+             '  discard kind')],
+     [browser("caseEditorSurfaces")],
+     "editor surfaces: Monaco's string `lineNumbers` (\"on\") is called as a function"),
     ("A3", [(FACADE, '  f["onDidContentSizeChange"] = proc(h: JsObject): JsObject = ed.on("contentSize", h)',
              '  f["onDidContentSizeChange"] = proc(h: JsObject): JsObject = ed.on("layout", h)')],
      [browser("caseUnifiedDiffRegions")],

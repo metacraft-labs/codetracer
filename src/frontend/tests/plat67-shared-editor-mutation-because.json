@@ -67,5 +67,8 @@
   "R6": "ed.doc.state.primaryHead == ed.offsetAt(2, 5)  -- the caret is at line 2 column 5 ((lineNumber: 1, column: 1))",
   "R7": "not isNull(ed.root.querySelector(cstring(",
   "R8": "pxOf(zone) == float(ed.lineHeight)  -- the zone's top 0.0",
-  "R9": "isNull(viewLine(4))  -- line 4 is folded away"
+  "R9": "isNull(viewLine(4))  -- line 4 is folded away",
+  "S1": "[FAILED] uncaught page error: ReferenceError: monaco is not defined",
+  "S2": "not sharedEditors[^1].readOnly  -- and their read-only flag",
+  "S3": "[FAILED] uncaught page error: TypeError: ed_p0.lineNumbersFn is not a function"
 }
