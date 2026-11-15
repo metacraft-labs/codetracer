@@ -382,4 +382,5 @@ applicable:
   - ../formatted-view/minified-step-over.yaml
   - ../formatted-view/statement-step-over.yaml
   - ../visual-replay/real-recording.yaml
+  - ../visual-replay/capture-frames-draws-and-history.yaml
 unsupported: []
