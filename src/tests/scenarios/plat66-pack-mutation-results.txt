@@ -1,6 +1,9 @@
-# plat66 pack mutation results — 2026-11-14 21:48:20 +0200
-# measured against 50ff222d44d (the subjects at the control digests), before its rebase
-# over agents commits that moved only codetracer-binding.ts among the subjects (ledgered)
+# plat66 pack mutation results — 2026-11-15 19:59:46 +0200
+# measured against f1788c93b46 (the subjects at the control digests)
+# on the Linux workstation under load. The runner and backends were private
+# worktrees at the pins 2bd579ffe7's repro.lock names (DemoVideoScript 01592d6,
+# -TermAssert dc6ce3e, -GuiAssert 8e2207a, -Playwright c20cfb5) with TermAssert
+# 3106916; the desktop's Nim tracing used this flake's nimlangserver fork.
 
 T1   KILLED                         the terminal binding misreads the line the replay is stopped on
        | step 1.4: 'editor[file="tracing.nim"]' does not satisfy stopped-within(18, 21)

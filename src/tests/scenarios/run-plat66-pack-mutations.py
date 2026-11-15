@@ -107,9 +107,12 @@ ARMS = [
              "        const current = false;")],
      [("electron", EXAMPLE)],
      "the desktop binding never reads the line the replay is stopped on"),
+    # Narrowed after f1788c93b4, which spells the same reading again to wait
+    # for a second window to open: the arm plants the defect in the
+    # `replay-idle` condition itself, the copy followed by its `});`.
     ("P2", [(PW_BIND,
-             "        return !busy && loc.trim().length > 0;",
-             "        return true;")],
+             "        return !busy && loc.trim().length > 0;\n      });",
+             "        return true;\n      });")],
      [("electron", IDLE)],
      "the desktop's replay-idle fires before the window shows the stop"),
     ("G1", [(GUI_BIND,

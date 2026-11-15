@@ -162,8 +162,6 @@ src/frontend/tui/tests/plat49-chrome-mutation-control.sha256	src/frontend/tui/ma
 src/frontend/tui/tests/plat50-clicks-mutation-control.sha256	src/frontend/tui/main.nim	66283c44fe09ff1389f0e769ef48637ce573781972c014e30c9c16b1da8606ce	82a88f3f2c8697dc6edab12b1b2be1b458357d4f5be0597552709fceabf7593c
 src/frontend/tui/tests/plat51-parity-mutation-control.sha256	src/frontend/tui/main.nim	66283c44fe09ff1389f0e769ef48637ce573781972c014e30c9c16b1da8606ce	82a88f3f2c8697dc6edab12b1b2be1b458357d4f5be0597552709fceabf7593c
 src/frontend/tui/tests/plat54-agent-activity-mutation-control.sha256	src/frontend/tui/main.nim	66283c44fe09ff1389f0e769ef48637ce573781972c014e30c9c16b1da8606ce	82a88f3f2c8697dc6edab12b1b2be1b458357d4f5be0597552709fceabf7593c
-src/tests/scenarios/plat66-pack-mutation-control.sha256	ci/test/scenarios.sh	a3c2bf0be61b0e9b9fa7878b0e1d77d7aa2a39eb50fd63bac41bf71971d368b6	0680d62d06bc4671f5e80a843e2d2e34ebce12c2ee5951feca315b19e5a46bd2
-src/tests/scenarios/plat66-pack-mutation-control.sha256	src/tests/scenarios/bindings/termassert/ct_tui_screen.nim	552b9da23ab44d96c08e50302adf410e90bbf42da5082bfc5e63fd7cf8282262	255a2526134d381474f695d7fd979d939f84bcbce60d0cffb1893725869e1816
 # plat70h was graded at 56862a458e4; its runtime moved on agents after that
 # (eec6949f68, a move drawn in flight): a re-grade of the arms whose needles sit in it.
 # plat70e and plat70i were graded at a293925583; after that 234a6bcc67 (a session
@@ -216,7 +214,6 @@ src/frontend/tui/tests/plat70e-origin-mutation-control.sha256	src/frontend/gpui/
 src/frontend/viewmodel/tests/unit/plat34-front-end-mutation-control.sha256	src/frontend/gpui/main.nim	bd206f82ec3b500e52053e6eeda52e891e83aede0353ce2e485c65e1fcf50d85	28f36a050600425fdbbea72ccc729250a4977ecc589c87e4d67e73d3196f228e
 src/frontend/viewmodel/tests/unit/plat68-keymaps-mutation-control.sha256	src/frontend/gpui/main.nim	bd206f82ec3b500e52053e6eeda52e891e83aede0353ce2e485c65e1fcf50d85	28f36a050600425fdbbea72ccc729250a4977ecc589c87e4d67e73d3196f228e
 src/frontend/viewmodel/tests/unit/plat68-keymaps-mutation-control.sha256	src/frontend/gpui/tests/test_plat68c_gpui_plan.nim	bbf3aecd4106c934b29b39196425cf1e4135e6c89f06261b66da8699fce9107a	0d70bdea3433171b9837202dac66488bd33a1ae450d5e2ada6b9e554ea126210
-src/tests/scenarios/plat66-pack-mutation-control.sha256	src/tests/scenarios/bindings/guiassert/ct_gui_binding.nim	ab9a95f5f0cc52cc823cf3ac0d385987418ce85b038a57460d6c9c094508494b	afef21476a41e4d255f60f949f6d842d3e4dfb7fd769822fafa23f2a9676112c
 # plat47 (lexical.nim, monarch.nim, monarch-languages-fresh.sh) and plat70g (monaco_appearance.nim)
 # moved under the shared editor's unified diff (the desktop's Nim Monarch definition, the themes'
 # diff colours): a re-grade of the arms whose needles sit in them.
@@ -257,7 +254,6 @@ src/frontend/tui/tests/plat49-chrome-mutation-control.sha256	src/frontend/viewmo
 src/frontend/tui/tests/plat50-clicks-mutation-control.sha256	src/frontend/viewmodel/input/pane_presses.nim	e3f3d8c53263304d3ece2696431873e66cc788985184febdefab01445d16820c	34a81493a4dbd68fcf75ed0ddce4faede56c8e626ac96c48c3523becdfdb0216
 src/frontend/tui/tests/plat51-parity-mutation-control.sha256	src/frontend/viewmodel/views/isonim_state_view.nim	6fa4c2f0add340fbca0d4af98b916072646ad082fcbd76267f29a4beb955ec7f	afe19051c4d4f5f4622cf774a9c8af2a892c5bfb162561b65a6e7d23fa08ef25
 src/frontend/viewmodel/tests/unit/plat29-async-mutation-control.sha256	src/frontend/viewmodel/viewmodels/state_vm.nim	b9082f34ed45e3904aaf59df7dbca29c78374f382533075520dbcd7c5673d1dc	93e71cf306ed044285f82ff34813da37691b380cfa236de7d7407b686dd795c0
-src/tests/scenarios/plat66-pack-mutation-control.sha256	src/tests/scenarios/bindings/playwright/codetracer-binding.ts	5c88be491a92bf4061276ce9fa53c3e5f881e56be6c9802d6cbb1365dc95d513	dac9e35953b0d93636c2284d9c9a858c2bba982b92e9311b0f41fb666e6879c0
 # The desktop windows change (a second window shows its session) edits these
 # digested subjects; the harnesses owe a re-grade for these bytes.
 src/frontend/tui/tests/build-residuals-mutation-control.sha256	src/frontend/ui_js.nim	3ede9f3c111db3d01340561893b2b1253c83ed7c5b3b690475d0a70b67c5acac	65a6698c8d3119dafac3c6eb6016268d82e06e8bfcc10ec6f1cbc65c03c2e7da
@@ -280,3 +276,8 @@ src/frontend/viewmodel/tests/unit/plat33-collab-mutation-control.sha256	.github/
 # plat56: graded at 34f86bd305; c79bee58b1  moved src/frontend/gpui/main.nim
 # after the grade. Re-grade the arms whose needles sit in them.
 src/frontend/tui/tests/plat56-build-output-mutation-control.sha256	src/frontend/gpui/main.nim	bd206f82ec3b500e52053e6eeda52e891e83aede0353ce2e485c65e1fcf50d85	28f36a050600425fdbbea72ccc729250a4977ecc589c87e4d67e73d3196f228e
+# run-plat66-pack-mutations.py was re-graded at f1788c93b4; since then
+# 96daf956e5 (a file opened in a second window, host-page clients) moved the
+# Playwright binding under its record. A re-grade of the arms whose needles
+# sit in it is owed.
+src/tests/scenarios/plat66-pack-mutation-control.sha256	src/tests/scenarios/bindings/playwright/codetracer-binding.ts	ce56f44b71f4aa8d3376d5415e48102e8148ded5b463c429cbcb9af5ab9b9544	dac9e35953b0d93636c2284d9c9a858c2bba982b92e9311b0f41fb666e6879c0
