@@ -849,6 +849,15 @@ proc focusInsideEditorZone(): bool {.importjs:
   ## The focus is in something an editor hosts in a view zone (a tracepoint
   ## editor): its keys are its own.
 
+proc focusOnButton(): bool {.importjs: """
+  (function () {
+    var el = document.activeElement;
+    return !!(el && el.matches &&
+      el.matches('button:not(:disabled), a[href]:not(.jstree-anchor), [role="button"]'));
+  })()""".}
+  ## A button, link or `role="button"` row holds the focus.  The file tree's
+  ## anchors are left out: the tree answers `Enter` through the keymap.
+
 proc routeKey(name: string; ev: JsObject) =
   ## One canonical key through the router, run once, the event stopped when
   ## it was run.
@@ -905,6 +914,13 @@ proc routeKey(name: string; ev: JsObject) =
   of erPending:
     handled = true
   of erOperation:
+    if res.operation.startsWith("debugger.") and not facts.replayLoaded and
+       focusOnButton():
+      # No recording is loaded (a dataset review): a debugger key has no
+      # debugger to reach, and a focused control that answers the key itself
+      # keeps it — a collapsed region's boundary opens its menu on Shift+F10,
+      # which is reverse step over where there is something to step.
+      return
     handled = runDesktopOperation(res) == nkHandled
   of erNothing:
     # Mode-Transitions.md §8.1: a key whose operation has no meaning in this
@@ -928,14 +944,6 @@ proc canonicalKeyOfEvent(ev: JsObject): string =
                     ev.ctrlKey.to(bool), ev.shiftKey.to(bool),
                     ev.altKey.to(bool), ev.metaKey.to(bool))
 
-proc focusOnButton(): bool {.importjs: """
-  (function () {
-    var el = document.activeElement;
-    return !!(el && el.matches &&
-      el.matches('button:not(:disabled), a[href]:not(.jstree-anchor), [role="button"]'));
-  })()""".}
-  ## A button, link or `role="button"` row holds the focus.  The file tree's
-  ## anchors are left out: the tree answers `Enter` through the keymap.
 
 
 var paneKeyOwner*: proc(ev: JsObject): bool
