@@ -161,7 +161,6 @@ src/frontend/tui/tests/plat47-parity-mutation-control.sha256	src/frontend/tui/ap
 src/frontend/tui/tests/plat51-parity-mutation-control.sha256	src/frontend/tui/app/theme/capabilities.nim	f1f2c84a36ed368523f503701d3a0700b16a9fd1aa5c4c6d9c93c713fe54e38b	4a709e46e1c01539fda428f6784b3535f3a42183eb307651eea4fa86b87714f0
 src/frontend/tui/tests/plat51-parity-mutation-control.sha256	src/frontend/tui/host/terminal_driver.nim	d77bf3cc513b081176dd9e7c51dbdd18de454f8664782d3644cef2a0d4a478a8	3f55af556114eafeb1a5f7fc686eea6206650b49f4cebfa331aa5de5f707e2c5
 src/frontend/tui/tests/plat51-parity-mutation-control.sha256	src/frontend/tui/host/terminal_probe.nim	124b9e0d5977013726b504dd51c62c291de43270ba8932fde09594388fffd9fb	f76737aff180ffb8ce2023c92a130fc74397ae5e7e14ed1e9c295b95440a4672
-src/frontend/tui/tests/plat70d-grep-mutation-control.sha256	src/frontend/tui/host/terminal_driver.nim	d77bf3cc513b081176dd9e7c51dbdd18de454f8664782d3644cef2a0d4a478a8	3f55af556114eafeb1a5f7fc686eea6206650b49f4cebfa331aa5de5f707e2c5
 
 # plat56: graded at 0350c2234b; 32824656f1 (a terminal's answer is never
 # typed) then moved the terminal's main.nim. Re-grade the arms whose needles
