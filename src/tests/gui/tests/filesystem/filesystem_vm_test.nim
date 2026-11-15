@@ -1207,6 +1207,24 @@ suite "the roots of an imported trace's file tree (#785)":
       payloadWith(["src", "lib"]))
     check roots == @["src", "lib"]
 
+  test "sources that leave the workdir root the tree at their outermost folders":
+    # `multi_root`: the runner in `app/` imports `app/../shared/helpers.py`
+    # and `app/../shared/pkg/extra.py`. The workdir is `app`, mirrored in the
+    # payload, and used to be the only root, so `helpers.py` was not listed.
+    # The roots are what the terminal shows: `app` and `shared` (its `pkg`
+    # inside it), the `..` resolved.
+    const mr = "home/dev/repo/test-programs/multi_root"
+    let roots = importedTraceTreeRoots(
+      ImportedTraceTreeInputs(
+        recordedSourceFolders: @[gitRoot],
+        workdir: "/" & mr & "/app",
+        tracePathsRead: true,
+        tracePaths: @[mr & "/app/main.py", mr & "/app/../shared/helpers.py",
+                      mr & "/app/../shared/pkg/extra.py"],
+        payloadTopLevel: @["home"]),
+      payloadWith(["/" & mr & "/app", mr & "/app", mr & "/shared"]))
+    check roots == @[mr & "/app", mr & "/shared"]
+
 # ---------------------------------------------------------------------------
 # Files context menu (codetracer-pm `spec/GUI/Core-Panes/Filesystem-Pane.md`
 # § "Context menu"; issue 2026-10-21-isonim-files-pane-has-no-context-menu)

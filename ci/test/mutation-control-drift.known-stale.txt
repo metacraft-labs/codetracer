@@ -265,3 +265,6 @@ src/frontend/viewmodel/tests/unit/plat33-collab-mutation-control.sha256	.github/
 # backend/src/dap_handler.rs after the grade. Re-grade the arms whose needles
 # sit in them.
 src/frontend/tui/tests/plat51-parity-mutation-control.sha256	src/db-backend/src/dap_handler.rs	23f8ff8145f2d5a678588557c9c855a9701cd2bf5fa7afa677028b7262076e76	7c59887c904659094396b45ce2cf2673ef89803f977fe9fdeb929e5650a4c6d0
+# The imported-trace root rule for sources outside the workdir edits trace_source_paths.nim;
+# the plat41 pane harness owes a re-grade for these bytes.
+src/frontend/tui/tests/plat41-pane-mutation-control.sha256	src/common/trace_source_paths.nim	30e4b962b05974e99c7d5c12934efbbcc57be5063c80d00cadc462b09090de02	ab9468597d0a869eca1fb548135bc9d7a83a49a7e7cbc3c5a4c97719084ef341

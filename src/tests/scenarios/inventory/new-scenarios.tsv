@@ -3,3 +3,4 @@ tracing/trace-macro-at-caret.yaml	The user's own example (2026-10-07): open a re
 tracing/trace-macro-rebound.yaml	Chord by binding against a user's keybindings.json: the resolver must ask the application's own router, user rows and removals included.
 editor/click-after-the-pointer-rests.yaml	A click after the pointer came to rest on the editor places the caret (the GPUI window lost such presses; scripted clicks never rest).
 docs/terminal-trace-macro.yaml	The first documentation capture, cited by name from docs/book-isonim (ci/test/docs-captures.sh).
+files/python-sources-outside-the-workdir-are-listed.yaml	The desktop Files pane of a recording whose sources leave its workdir (multi_root: app/ imports app/../shared) lists the outside folder and its files as the terminal does, and a file there opens; it used to be rooted at the workdir alone.

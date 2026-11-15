@@ -354,6 +354,61 @@ proc resolveAgainstWorkdir(workdir: string;
       result.addUniqueRoot(
         normalizeForCompare(workdir) & "/" & normalizeSourcePath(folder))
 
+proc resolveDotSegments*(path: string): string =
+  ## ``path`` with its ``.`` and ``..`` segments resolved, without touching
+  ## the disk: ``a/app/../shared/x.py`` is ``a/shared/x.py``. A ``..`` that
+  ## would climb above the start of a relative path is kept. A leading
+  ## ``/`` is kept.
+  let normalized = normalizeSourcePath(path)
+  var parts: seq[string] = @[]
+  for part in normalized.split('/'):
+    if part.len == 0 or part == ".":
+      continue
+    if part == ".." and parts.len > 0 and parts[^1] != "..":
+      parts.setLen(parts.len - 1)
+    else:
+      parts.add part
+  result = parts.join("/")
+  if normalized.startsWith("/"):
+    result = "/" & result
+
+proc outermostSourceRoots*(roots: openArray[string]): seq[string] =
+  ## The roots no OTHER root contains, in order: a package folder inside
+  ## its parent's root (``shared/pkg`` beside ``shared``) is listed within
+  ## the parent, not again as a root of its own.
+  for r in roots:
+    var inside = false
+    for o in roots:
+      if o != r and r.startsWith(o & "/"):
+        inside = true
+        break
+    if not inside and r notin result:
+      result.add r
+
+proc sourcesOutsideWorkdir(input: ImportedTraceTreeInputs): seq[string] =
+  ## The outermost folders of the ``paths.json`` sources, dot segments
+  ## resolved, when the recording's sources lie both inside and outside its
+  ## workdir; empty otherwise (no ``paths.json``, no workdir, every source
+  ## inside it, or a payload layout that does not mirror the workdir).
+  if not input.tracePathsRead or input.workdir.len == 0:
+    return
+  let workdir = normalizeForCompare(input.workdir).strip(
+    leading = true, trailing = false, chars = {'/'})
+  if workdir.len == 0:
+    return
+  var resolved: seq[string] = @[]
+  var inside, outside = false
+  for raw in input.tracePaths:
+    let path = normalizeSourcePath(raw)
+    if path.len == 0 or isAbsoluteTraceSourcePath(path):
+      continue
+    let r = resolveDotSegments(path)
+    resolved.add r
+    if isPathWithinRoot(workdir, r): inside = true
+    else: outside = true
+  if inside and outside:
+    result = outermostSourceRoots(sourceFolderRootsOf(resolved))
+
 proc importedTraceTreeRoots*(
     input: ImportedTraceTreeInputs;
     payloadHasEntries: proc(root: string): bool): seq[string] =
@@ -385,6 +440,20 @@ proc importedTraceTreeRoots*(
   ##    source folders, or ``liveFallback`` — the loader reads those with
   ##    the live-filesystem limits (`index/files.loadFile`).
   var sourceFolders = input.recordedSourceFolders
+
+  # 0. A recording whose sources reach OUTSIDE its workdir (a runner in
+  #    ``app/`` importing modules from ``app/../shared``) is rooted at its
+  #    sources' outermost folders, as the native front-ends root it
+  #    (`native_host.recordingFileTree`). The workdir alone (rule 1) or
+  #    the recorded git root (rule 2) would show only the runner, or the
+  #    whole repository mirror, and not the modules beside it.
+  let spanning = sourcesOutsideWorkdir(input)
+  if spanning.len > 0:
+    for root in spanning:
+      if payloadHasEntries(root):
+        result.addUniqueRoot root
+    if result.len > 0:
+      return
 
   if input.workdir.len > 0 and payloadHasEntries(input.workdir):
     var workdirInsideKnownSource = sourceFolders.len == 0

@@ -250,6 +250,7 @@ applicable:
   - ../languages/ada-sudoku-event-log-populated.yaml
   - ../debug-controls/noir-next-and-f10-step.yaml
   - ../files/noir-files-panel-opens-a-file-once.yaml
+  - ../files/python-sources-outside-the-workdir-are-listed.yaml
   - ../languages/c-sudoku-call-trace-to-main.yaml
   - ../hcr-apply-edit/apply-edit-unconfigured.yaml
   - ../visual-replay/keyboard-shortcuts.yaml
