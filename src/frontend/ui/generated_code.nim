@@ -63,6 +63,11 @@ from ../viewmodel/viewmodels/noir_build_producer import rendererPathFor
 from ./panel_host import panelSession
 from ../event_helpers import warnMessage
 from isonim/core/signals import val
+from isonim/core/computation import createEffect
+from isonim/core/batch import untrack
+from ../viewmodel/store/replay_data_store import ReplayDataStore
+from ../viewmodel/store/stop_timeline import stopIdentityOf
+from ../viewmodel/viewmodels/nim_c_producer import NimCTargetId
 import ../viewmodel/viewmodels/generated_code_presenter as presenter
 from ../../common/trace_source_paths import selfContainedSourcePayloadCandidates
 
@@ -310,6 +315,9 @@ proc recordedReadCandidates*(trace: Trace; path: string;
   if disk.len > 0 and disk notin result:
     result.add disk
 
+proc followStopWithGeneratedC(data: Data; store: ReplayDataStore;
+                              pane: LowLevelCodeVM)
+
 proc showRecordedGeneratedC(data: Data; t: GeneratedCodeTarget; path: string;
                             line: int) =
   ## Debug mode: the C of the recording, read the way the desktop's editor
@@ -342,6 +350,7 @@ proc showRecordedGeneratedC(data: Data; t: GeneratedCodeTarget; path: string;
     if isGeneratedNimC(p) and p.extractFilename notin names:
       files.add p
   let trace = data.trace
+  followStopWithGeneratedC(data, session.store, session.lowLevelCodeVM)
   let refused = presenter.showGeneratedCode(generatedCodeVMInstance,
     session.lowLevelCodeVM, t.id, path, line, session.store.stop.val, files,
     proc(p: string; done: proc(r: presenter.RecordedText)) =
@@ -353,6 +362,32 @@ proc showRecordedGeneratedC(data: Data; t: GeneratedCodeTarget; path: string;
         revealActiveGeneratedRow())
   if refused.len > 0:
     data.viewsApi.warnMessage(cstring(refused))
+
+var stopFollowers: seq[ReplayDataStore] = @[]
+
+proc followStopWithGeneratedC(data: Data; store: ReplayDataStore;
+                              pane: LowLevelCodeVM) =
+  ## GCL-D28: a generated C listing follows the stop. At each new stop in a
+  ## Nim source the listing is shown again for the stop's line, the way View
+  ## Generated C Source showed it for the caret: the stop's own C file when
+  ## the engine names it, the row of the stop's line marked. The stop loader
+  ## asks for no machine code while the listing is in the pane, which is what
+  ## used to replace it at the first step. View Disassembly clears the listing
+  ## (`showDisassembly`), and with it this follower's reason to act.
+  if store.isNil or pane.isNil or store in stopFollowers:
+    return
+  stopFollowers.add store
+  createEffect proc() =
+    let stop = store.stop.val
+    let identity = stopIdentityOf(store.debugger.val)
+    untrack(proc() =
+      let shownAt = pane.generatedAtStop.val
+      if shownAt.len == 0 or shownAt == identity or data.trace.isNil or
+         not presenter.isNimSource(stop.path) or stop.line <= 0:
+        return
+      var t: GeneratedCodeTarget
+      if targetById(NimCTargetId, t):
+        showRecordedGeneratedC(data, t, stop.path, stop.line))
 
 type PendingNimCCompile = object
   ## Edit mode's compile in flight: the request the main process will answer,

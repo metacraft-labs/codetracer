@@ -223,7 +223,7 @@ suite "HSF-D3: the stop loader loads the low-level code while it is shown":
             errors[0].textContent.contains("no instructions recorded")
       dispose()
 
-  test "a generated listing painted at this stop is not replaced":
+  test "a generated listing is not replaced, at this stop or the next":
     let mock = newMockBackendService(autoRespond = true)
     let (session, _) = newSession(mock)
     let vm = session.lowLevelCodeVM
@@ -236,8 +236,15 @@ suite "HSF-D3: the stop loader loads the low-level code while it is shown":
     check mock.sent("ct/load-asm-function") == 0
     check vm.instructions.val.len == 1 and
           vm.instructions.val[0].name == "acir op"
-    # The next move shows the recording's code again.
+    # GCL-D28: the listing follows the stop (the host shows it again for the
+    # new line); the machine code does not replace it at the next move.
     session.store.move(20, "/src/main.nr", "main", "2", 6)
+    drainPlatformCallbacks()
+    check mock.sent("ct/load-asm-function") == 0
+    check vm.instructions.val.len == 1 and
+          vm.instructions.val[0].name == "acir op"
+    # View Disassembly clears the listing, and the machine code is asked for.
+    vm.clearInstructions()
     drainPlatformCallbacks()
     check mock.sent("ct/load-asm-function") == 1
 
