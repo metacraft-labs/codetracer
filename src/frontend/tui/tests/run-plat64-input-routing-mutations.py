@@ -252,21 +252,33 @@ ARMS = [
      [(PLAN, None)],
      "GPUI's + press bypasses the router"),
     # ---- the desktop -----------------------------------------------------------
-    ("W1", [(KEYROUTER, '      res.layer.startsWith("user:") and runDesktopOperation(res) == nkHandled,',
-             '      false and runDesktopOperation(res) == nkHandled,')],
+    # Re-aimed after 234a6bcc67: the user's-row clause is now the first of
+    # two alternatives (the second hands a right click to a pane's menu).
+    ("W1", [(KEYROUTER, '      (res.layer.startsWith("user:") and runDesktopOperation(res) == nkHandled) or',
+             '      (false and runDesktopOperation(res) == nkHandled) or')],
      [(SPEC, None)],
      "the desktop ignores a user's pointer row"),
-    ("W2", [(DESKHIT, '  var res = resolver(path, chordName(mods, gestureKey))',
-             '  var res = resolver(path, chordName(mods - {kmodCtrl}, gestureKey))')],
+    # Re-aimed after 49f7146380: the chord is spelled inside
+    # `element_press.resolveElementPress` from the modifiers the listener
+    # hands it, so the listener drops Ctrl from what it hands over.
+    ("W2", [(DESKHIT, '                                    mods, gestureKey)',
+             '                                    mods - {kmodCtrl}, gestureKey)')],
      [(SPEC, None)],
      "the desktop's gesture drops Ctrl"),
     ("W3", [(DESKOPS, '  of "calltrace.go-to-call":',
              '  of "calltrace.go-to-call-unregistered":')],
      [(PRESSES, None), (DESKSPEC, None)],
      "a DOM front-end has no procedure for a call row's base row: a plain press does nothing"),
-    ("W4", [(DESKHIT, '  var res = resolver(path, chordName(mods, gestureKey))',
-             '  var res = EditingResolution(kind: erOperation, operation:\n'
-             '    (if hit.kind == "row" and paneKind == "calltrace": "calltrace.go-to-call" else: ""))')],
+    # Re-aimed after 49f7146380: the listener no longer asks the router
+    # itself, it hands it to `element_press.resolveElementPress`. The press
+    # bypasses the router by handing that call a resolver that answers
+    # without the keymap, as the arm's earlier spelling answered in place.
+    ("W4", [(DESKHIT, '  let outcome = resolveElementPress(resolver, path, hit.kind, carried,',
+             '  let outcome = resolveElementPress(\n'
+             '    proc(p: ScopePath; g: string): EditingResolution =\n'
+             '      EditingResolution(kind: erOperation, operation:\n'
+             '        (if hit.kind == "row" and paneKind == "calltrace": "calltrace.go-to-call" else: "")),\n'
+             '    path, hit.kind, carried,')],
      [(SPEC, None)],
      "a press bypasses the router: the element's procedure runs whatever the keymap says"),
     ("W5", [(EVVIEW, '       role = "button", tabindex = "0"):\n      discard\n\n  forEachKeyed[EventLogColumn, R, N](r, rowEl,',
