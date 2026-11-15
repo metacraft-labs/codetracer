@@ -991,6 +991,14 @@ proc onKeyDown(ev: JsObject) =
   if key in ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Home", "End"] and
      focusIsIn(cstring CompositeItemSelector):
     return
+  # A native `<select>` (the review's trace context) changes its choice on
+  # the arrows and opens or takes it on Enter and Space, closed or open.
+  # Routed, the pane's list operations ran instead and the choice stayed.
+  if key in ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Home", "End",
+             "PageUp", "PageDown", "Enter", " "] and
+     not menuIsOpen() and not contextMenuIsOpen() and
+     focusIsIn(cstring"select"):
+    return
   routeKey(name, ev)
 
 proc onKeyUp(ev: JsObject) =
