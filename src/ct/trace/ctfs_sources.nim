@@ -382,25 +382,44 @@ proc extractFilemapSources(reader: CtfsReader, outputFolder: string): seq[string
   if filemap.len < 8 or filemap[0 ..< 4] != "FMAP":
     raise newException(ValueError, "invalid CTFS filemap")
 
+  # Two layouts (codetracer-native-recorder `ct_recorder/filemap.nim`, the
+  # writer): version 1 carries an ELF build id per entry; version 2, what
+  # the recorder writes, carries the file's identity instead -- a 16-byte
+  # content hash and a u64 size -- and, when flags bit 2 is set, a
+  # (st_dev, st_ino, st_mtime_ns) tuple after the path. The source bytes are
+  # read from the member either way; the identity fields are skipped.
+  const StatTupleFlag = 0x04
   let version = readU16Le(filemap, 4)
-  if version == 0 or version > 1:
-    raise newException(ValueError, "unsupported CTFS filemap version")
+  if version == 0 or version > 2:
+    raise newException(ValueError, "unsupported CTFS filemap version " & $version)
   let entryCount = int(readU16Le(filemap, 6))
   var offset = 8
 
   for _ in 0 ..< entryCount:
+    if offset + 10 > filemap.len:
+      raise newException(ValueError, "truncated CTFS filemap entry")
     let ctfsName = base40Decode(readU64Le(filemap, offset))
     offset += 8
-    if offset + 3 > filemap.len:
-      raise newException(ValueError, "truncated CTFS filemap entry")
     let entryType = filemap[offset].ord
     offset += 1
-    offset += 1 # flags
-    let buildIdLength = filemap[offset].ord
-    offset += 1 + buildIdLength
-    if offset > filemap.len:
-      raise newException(ValueError, "truncated CTFS filemap build id")
+    let flags = filemap[offset].ord
+    offset += 1
+    if version == 1:
+      if offset + 1 > filemap.len:
+        raise newException(ValueError, "truncated CTFS filemap entry")
+      let buildIdLength = filemap[offset].ord
+      offset += 1 + buildIdLength
+      if offset > filemap.len:
+        raise newException(ValueError, "truncated CTFS filemap build id")
+    else:
+      offset += 16 + 8 # content_hash, file_size
+      if offset > filemap.len:
+        raise newException(ValueError, "truncated CTFS filemap identity")
     let realPath = readVarString(filemap, offset)
+    if version >= 2 and (flags and StatTupleFlag) != 0:
+      offset += 3 * 8 # st_dev, st_ino, st_mtime_ns
+      if offset > filemap.len:
+        raise newException(ValueError, "truncated CTFS filemap stat tuple")
 
     if entryType == 1:
       offset += 8

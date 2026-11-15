@@ -142,6 +142,36 @@ proc buildFilemap(): string =
   result.putVarString("/workspace/project/src/main.c")
   result.putVarString("/workspace/project")
 
+proc buildFilemapV2(statTuple: bool): string =
+  ## The layout codetracer-native-recorder writes (`serializeFilemap`,
+  ## `FilemapContentHashVersion`): a debug-symbol entry and a source entry,
+  ## each with a 16-byte content hash and a u64 size where version 1 had a
+  ## build id, and the stat tuple after the path when flags bit 2 is set.
+  let flags = if statTuple: char(0x04) else: char(0)
+  result.add "FMAP"
+  result.putU16Le(2)
+  result.putU16Le(2)
+  # A debug-symbol entry: its binary_ref follows the path (and stat tuple).
+  result.putU64Le(base40Encode("d/0001"))
+  result.add char(1) # debug symbol
+  result.add flags
+  for i in 0 ..< 16: result.add char(0xA0 + i) # content_hash
+  result.putU64Le(4096)                          # file_size
+  result.putVarString("/usr/lib/debug/main.debug")
+  if statTuple:
+    result.putU64Le(0x10); result.putU64Le(0x20); result.putU64Le(0x30)
+  result.putU64Le(base40Encode("b/0001"))        # binary_ref
+  # The source entry.
+  result.putU64Le(base40Encode("s/0001"))
+  result.add char(2) # source file
+  result.add flags
+  for i in 0 ..< 16: result.add char(0xB0 + i)
+  result.putU64Le(29)
+  result.putVarString("/workspace/project/src/main.c")
+  if statTuple:
+    result.putU64Le(0x11); result.putU64Le(0x21); result.putU64Le(0x31)
+  result.putVarString("/workspace/project")
+
 suite "CTFS source materialization":
   test "extracts paths and portable source files":
     let root = getTempDir() / "ctfs-sources-test-" & $getCurrentProcessId()
@@ -161,6 +191,32 @@ suite "CTFS source materialization":
     check readFile(outDir / "paths.json").contains("/workspace/project/src/main.c")
     check readFile(outDir / "files" / "workspace/project/src/main.c") ==
       "int main(void) { return 0; }\n"
+
+  test "reads a version 2 filemap, the recorder's, with and without the stat tuple":
+    # The recorder writes version 2 (codetracer-native-recorder 81f7398f0).
+    # The reader used to refuse it ("unsupported CTFS filemap version"), so
+    # no portable source of a recording it made was materialised.
+    for statTuple in [false, true]:
+      let root = getTempDir() / ("ctfs-sources-v2-test-" &
+        $getCurrentProcessId() & "-" & $statTuple)
+      removeDir(root)
+      createDir(root)
+      defer: removeDir(root)
+      let ctPath = root / "trace.ct"
+      let outDir = root / "out"
+      createDir(outDir)
+      writeMinimalCtfs(ctPath, @[
+        ("filemap.bin", buildFilemapV2(statTuple)),
+        ("s/0001", "int main(void) { return 0; }\n")
+      ])
+      checkpoint("stat tuple: " & $statTuple)
+      check materializeCtfsSources(ctPath, outDir)
+      let paths = readFile(outDir / "paths.json")
+      check paths.contains("/workspace/project/src/main.c")
+      # The debug-symbol entry names no source to materialise.
+      check not paths.contains("main.debug")
+      check readFile(outDir / "files" / "workspace/project/src/main.c") ==
+        "int main(void) { return 0; }\n"
 
   test "strips the record framing when meta.dat declares a line-count table":
     ## `paths.dat` records are bare path bytes by default, but `meta.dat`
@@ -683,3 +739,16 @@ suite "the pinned writer's container":
     check output.contains(
       "ct host: warning: failed to extract CTFS portable sources: " &
       "invalid CTFS filemap")
+
+suite "CTFS filemap versions":
+  test "a filemap of a version no writer produces is refused by number":
+    let root = getTempDir() / "ctfs-sources-v3-test-" & $getCurrentProcessId()
+    removeDir(root)
+    createDir(root)
+    defer: removeDir(root)
+    var filemap = buildFilemapV2(false)
+    filemap[4] = char(3)
+    let ctPath = root / "trace.ct"
+    writeMinimalCtfs(ctPath, @[("filemap.bin", filemap)])
+    let output = captureStdout(proc () = discard materializeCtfsSources(ctPath, root))
+    check output.contains("unsupported CTFS filemap version 3")
