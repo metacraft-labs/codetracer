@@ -362,10 +362,16 @@ ARMS = [
             "being a property of the producer",
         law_id="LAW-V4",
     ),
+    # RE-AIMED at 8dc20127a1c ("typing into a line Vim's `O` just opened no
+    # longer ends the terminal UI"). That commit split `movedTo` into two
+    # branches: a POINT region now takes the start's mapping, and only a
+    # non-empty region maps its end with `sideBefore`. The two-sided mapping
+    # this arm breaks is that second branch, so the needle names it; the
+    # mutation is the same one — the end mapped with the start's side.
     Arm(
         "M5", RECONCILE,
-        "  let movedTo = delta.mapPos(r.evidenceTo, sideBefore)\n",
-        "  let movedTo = delta.mapPos(r.evidenceTo, sideAfter)\n",
+        "    else: delta.mapPos(r.evidenceTo, sideBefore)\n",
+        "    else: delta.mapPos(r.evidenceTo, sideAfter)\n",
         V5_SIDES,
         "BOTH ENDS OF THE REGION ARE MAPPED WITH THE SAME SIDE — §3.5's own "
         "wording for `LAW-V5`.\n\n"
