@@ -1,0 +1,32 @@
+scenario: 1
+name: nim-views/generated-c-opens-at-the-stop
+pack: codetracer
+summary: >-
+  On an rr recording of the Nim sudoku solver, the editor shows main.nim at
+  the stop (line 60), and View › View Generated C Source opens the generated
+  C in the Low Level Code pane with the row of line 60 (`nimln_(60)`) marked,
+  beside the Nim source. (That the marked row follows a step is not here: a
+  step replaces the listing with the disassembly; codetracer-pm issue
+  2026-11-15-a-step-replaces-the-generated-c-listing-with-the-disassembly.)
+
+stage:
+  - use: record-program
+    with: { program: nim_sudoku_solver/main.nim, backend: rr }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 300s }
+  - wait: { until: { at: window, front-tabs: { contains: "main.nim" } }, timeout: 120s }
+  - wait: { until: { at: status-line, location: { matches: "main.nim:60#" } }, timeout: 60s }
+  - click: menu-bar
+  - wait: { until: { at: 'menu-bar/menu[label="View"]', present: true }, timeout: 10s }
+  - hover: { at: 'menu-bar/menu[label="View"]', for: 300ms }
+  - wait: { until: { at: 'menu-bar/menu-item[label="View Generated C Source"]', present: true }, timeout: 10s }
+  # Across into View's entries along its own row first, as a user does: a
+  # diagonal path over Build and Reset would open their folders instead.
+  - hover: { at: 'menu-bar/menu-item[label="Filesystem"]', for: 200ms }
+  - wait: settled
+  - click: 'menu-bar/menu-item[label="View Generated C Source"]'
+  - wait: { until: { at: low-level-code, count: { gt: 10 } }, timeout: 120s }
+  - wait: { until: { at: low-level-code, assert: 'active-row-shows("nimln_\\(60\\)")' }, timeout: 60s }
+  - expect: { at: window, front-tabs: { contains: "main.nim" } }

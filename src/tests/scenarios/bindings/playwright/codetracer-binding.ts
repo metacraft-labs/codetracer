@@ -173,7 +173,7 @@ const ROLES: Record<string, { affordances: string[]; properties: string[] }> = {
   "dialog-button": { affordances: ["click"], properties: ["label", "enabled"] },
   "low-level-code": { affordances: ["click", "focusable"], properties: ["count", "sync", "stepping", "address", "focused", "pointer"] },
   instruction: { affordances: ["click", "context-click"],
-                 properties: ["offset", "name", "source", "active", "executing", "focused"] },
+                 properties: ["offset", "name", "args", "source", "active", "executing", "focused"] },
   "source-line": { affordances: [], properties: ["number", "active"] },
   "h-scrubber": { affordances: ["click", "drag-source", "drop-target"],
                   properties: ["pane", "content", "viewport", "left", "thumb-px", "track-px", "overflows", "at-end", "centre", "left-columns",
@@ -2814,6 +2814,7 @@ export function readSurfacePw4(root: any): void {
         const offset = text(row.querySelector(".low-level-code-instruction-offset"));
         v.children.push(node("instruction", row, {
           offset, name: text(row.querySelector(".low-level-code-instruction-name")),
+          args: text(row.querySelector(".low-level-code-instruction-args")),
           source: text(row.querySelector(".low-level-code-instruction-source")),
           active: row.classList.contains("active-instruction"),
           executing: row.classList.contains("execution-pointer"),

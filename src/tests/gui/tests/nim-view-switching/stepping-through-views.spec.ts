@@ -14,13 +14,21 @@
  * and require:
  *   - The RR backend (ct-native-replay)
  *   - The trace recorded with a sourcemap-enabled Nim compiler
+ *
+ * Stepping forward in the assembly view and by Nim lines in the Nim view are
+ * scenarios now (src/tests/scenarios/nim-views/disassembly-steps-by-instruction.yaml,
+ * nim-step-moves-by-nim-lines.yaml). The C-view tests and the backward
+ * assembly step stay until their scenarios pass (codetracer-pm issues
+ * 2026-11-15-a-step-replaces-the-generated-c-listing-with-the-disassembly.md,
+ * 2026-11-15-reverse-next-never-completes-on-an-rr-nim-recording.md,
+ * 2026-11-14-desktop-low-level-code-reverse-instruction-step-leaves-the-function.md).
  */
 
 import { test, expect } from "../../lib/fixtures";
 import { LayoutPage } from "../../page-objects/layout-page";
 import { StatusBar } from "../../page-objects/status_bar";
 import { retry } from "../../lib/retry-helpers";
-import { moveAndSettle, moveOrStayAndSettle, waitForNotBusy } from "../../lib/operation-settled";
+import { moveAndSettle, waitForNotBusy } from "../../lib/operation-settled";
 import {
   ViewInstructions,
   ViewTargetSource,
@@ -50,7 +58,6 @@ async function waitForStatusBarLocation(
   );
   return result;
 }
-
 
 /**
  * Reads the raw status bar text which has format: path:line#rrTicks
@@ -223,50 +230,6 @@ test.describe("SteppingThroughViews", () => {
     }
   });
 
-  // This test used to be permanently skipped and never ran a single
-  // assertion.  `probeInstructionsAvailability` ended with
-  // `if (typeof data.openTab !== "function") return { ok: false, ... }`, and
-  // `data.openTab` is a free Nim proc that is never a JS function
-  // (src/frontend/utils.nim:1848), so the probe returned `ok: false`
-  // unconditionally and `test.skip(!probe.ok)` always fired.
-  //
-  // It now opens the assembly view through the live
-  // `data.ui.openViewOnCompleteMove` path and fails loudly if that does not
-  // work.  See `lib/alternative-views.ts` for the full argument.
-  test("step forward in assembly view", async ({ ctPage }) => {
-    const layout = new LayoutPage(ctPage);
-    const statusBar = new StatusBar(ctPage, ctPage.locator("#status-base"));
-
-    await waitForNimEditorReady(layout, ctPage);
-    await waitForSourcemap(ctPage);
-
-    await openAlternativeView(ctPage, ViewInstructions, async () => {
-      await moveAndSettle(ctPage, () => ctPage.locator("#next-image").click());
-    });
-    await waitForNotBusy(ctPage);
-
-    // Record the current position. In assembly view the status bar still
-    // shows path:line#ticks, but the line corresponds to an instruction offset.
-    const beforeRaw = await getRawStatusBarText(statusBar);
-    const beforeTicks = parseRrTicks(beforeRaw);
-    const beforeLocation = await waitForStatusBarLocation(statusBar);
-
-    // Step forward. In assembly view, this should move to the next instruction
-    // (stepi-level granularity).
-    const nextBtn = ctPage.locator("#next-image");
-    await moveAndSettle(ctPage, () => nextBtn.click());
-
-    // Verify the instruction offset or ticks changed.
-    const afterRaw = await getRawStatusBarText(statusBar);
-    const afterTicks = parseRrTicks(afterRaw);
-    const afterLocation = await waitForStatusBarLocation(statusBar);
-
-    const positionChanged =
-      afterLocation.line !== beforeLocation.line ||
-      afterTicks !== beforeTicks;
-    expect(positionChanged).toBe(true);
-  });
-
   // Was permanently skipped for the same reason as "step forward in assembly
   // view" above; same disposition.
   test("step backward in assembly view", async ({ ctPage }) => {
@@ -312,102 +275,4 @@ test.describe("SteppingThroughViews", () => {
     }
   });
 
-  // SKIP-GUARD (option (b) per isonim-migration handoff TODO 5.2(e)):
-  // although this test does not require the assembly view, in practice
-  // it has shared the same flaky failure mode as the assembly tests
-  // under full-sweep load — `waitForNimEditorReady` could time out and
-  // throw before the body's first assertion ran.  We now probe up-front
-  // that the Nim source view is actually reachable (status bar reports
-  // a `.nim` path) and skip cleanly with a meaningful reason when the
-  // editor never settles in time.
-  //
-  // TODO: stabilise the Nim source-line stepping path so this test is
-  // deterministic under sweep load.  The handoff notes this as a
-  // long-standing flake; consider increasing the
-  // `waitForNimEditorReady` timeout, adding a `complete-move` event
-  // wait between the editor-ready signal and the first step, or
-  // reproducing locally with `just test-gui tests/nim-view-switching/`
-  // to capture a deterministic failure.
-  test("stepping in Nim view moves by Nim lines", async ({ ctPage }) => {
-    const layout = new LayoutPage(ctPage);
-    const statusBar = new StatusBar(ctPage, ctPage.locator("#status-base"));
-
-    // Treat editor-ready timeout as a clean skip rather than a hard fail —
-    // the Nim record-and-launch pipeline has flaked under sweep load and
-    // the assertions below depend on the editor settling first.
-    try {
-      await waitForNimEditorReady(layout, ctPage);
-    } catch (e) {
-      test.skip(true, `Nim editor never became ready: ${e instanceof Error ? e.message : e}`);
-      return;
-    }
-
-    // Ensure we are in the default Nim source view.
-    let initialLocation: { path: string; line: number };
-    try {
-      initialLocation = await waitForStatusBarLocation(statusBar);
-    } catch (e) {
-      test.skip(true, `Status bar never reported a Nim location: ${e instanceof Error ? e.message : e}`);
-      return;
-    }
-    if (!initialLocation.path.includes(".nim")) {
-      test.skip(
-        true,
-        `Initial status bar path is not a Nim file: ${initialLocation.path}`,
-      );
-      return;
-    }
-    const initialLine = initialLocation.line;
-
-    // Record rrTicks before stepping.
-    const beforeRaw = await getRawStatusBarText(statusBar);
-    const beforeTicks = parseRrTicks(beforeRaw);
-
-    // Step forward in Nim view.  This should issue a source-level next
-    // which moves by Nim lines (not C line granularity).
-    //
-    // Use `clickNextButton` so the layout-manager `lm_header` /
-    // `jstree-themeicon` overlay (which intermittently intercepts
-    // pointer events on this layout) falls through to a force-click /
-    // dispatchEvent fallback rather than failing the click outright.
-    //
-    // The Nim RR step plumbing has been observed to occasionally
-    // require more than one `next` click to visibly advance — most
-    // commonly when the first step is a non-line-advancing C-level
-    // micro-step inside the Nim runtime.  Try up to 5 times and skip
-    // cleanly with a meaningful reason if the position never moves.
-    const maxStepAttempts = 5;
-    let afterLocation = initialLocation;
-    let afterTicks = beforeTicks;
-    let positionChanged = false;
-    for (let attempt = 0; attempt < maxStepAttempts; attempt++) {
-      // A Nim-level Next can stay put (see above), so this one may.
-      await moveOrStayAndSettle(ctPage, () => layout.clickNextButton());
-      afterLocation = await waitForStatusBarLocation(statusBar);
-      const afterRaw = await getRawStatusBarText(statusBar);
-      afterTicks = parseRrTicks(afterRaw);
-      positionChanged =
-        afterLocation.line !== initialLine || afterTicks !== beforeTicks;
-      if (positionChanged) break;
-    }
-
-    // If after several `next` clicks the debugger still hasn't moved,
-    // skip cleanly — this is a known intermittent failure mode of the
-    // Nim RR backend and is being tracked separately.
-    if (!positionChanged) {
-      test.skip(
-        true,
-        `Nim source-level next did not advance after ${maxStepAttempts} clicks ` +
-          `(line=${afterLocation.line} initialLine=${initialLine} ` +
-          `ticks=${afterTicks} initialTicks=${beforeTicks})`,
-      );
-      return;
-    }
-
-    expect(afterLocation.path).toContain(".nim");
-    expect(positionChanged).toBe(true);
-
-    // The line should still be a valid Nim source line number.
-    expect(afterLocation.line).toBeGreaterThan(0);
-  });
 });

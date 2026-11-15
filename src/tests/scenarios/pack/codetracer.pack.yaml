@@ -1479,10 +1479,13 @@ roles:
     assertions:
       pointer-at(offset): "some instruction: instruction.offset == offset and instruction.executing"
       all-offsets-match(re): "every instruction: instruction.offset matches re"
+      # A generated-source listing's row text is the instruction's `name`.
+      active-row-shows(re): "some instruction: instruction.active and instruction.name matches re"
+      executing-shows(re): "some instruction: instruction.executing and instruction.args matches re"
 
   instruction:
     keys: [offset]
-    properties: { offset: text, name: text, source: text, active: bool, executing: bool, focused: bool }
+    properties: { offset: text, name: text, args: text, source: text, active: bool, executing: bool, focused: bool }
     affordances: [click, context-click]
 
   source-line:

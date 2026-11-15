@@ -1,0 +1,40 @@
+scenario: 1
+name: nim-views/disassembly-steps-by-instruction
+pack: codetracer
+summary: >-
+  On an rr recording of the Nim sudoku solver, View › View Disassembly opens
+  the stop's machine code in the Low Level Code pane under "Originating
+  address: 0x…", grouped by the generated C's lines, with the replay at the
+  first instruction of line 60's C (`movq $0x3c, -0x100(%rbp)`); with the
+  listing focused, F10 steps one instruction forward. (Shift+F10
+  back is not here: it leaves the function; codetracer-pm issue
+  2026-11-14-desktop-low-level-code-reverse-instruction-step-leaves-the-function.)
+
+stage:
+  - use: record-program
+    with: { program: nim_sudoku_solver/main.nim, backend: rr }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 300s }
+  - wait: { until: { at: status-line, location: { matches: "main.nim:60#" } }, timeout: 120s }
+  - click: menu-bar
+  - wait: { until: { at: 'menu-bar/menu[label="View"]', present: true }, timeout: 10s }
+  - hover: { at: 'menu-bar/menu[label="View"]', for: 300ms }
+  - wait: { until: { at: 'menu-bar/menu-item[label="View Disassembly"]', present: true }, timeout: 10s }
+  # Across into View's entries along its own row first, as a user does: a
+  # diagonal path over Build and Reset would open their folders instead.
+  - hover: { at: 'menu-bar/menu-item[label="Filesystem"]', for: 200ms }
+  - wait: settled
+  - click: 'menu-bar/menu-item[label="View Disassembly"]'
+  - wait: { until: { at: low-level-code, count: { gt: 10 } }, timeout: 120s }
+  - expect: { at: low-level-code, address: { matches: "^Originating address: 0x[0-9A-Fa-f]+$" } }
+  - wait: { until: { at: low-level-code, stepping: "steps by instruction" }, timeout: 30s }
+  - wait: { until: { at: low-level-code, assert: 'executing-shows("^\\$0x3c, -0x100\\(%rbp\\)$")' }, timeout: 30s }
+  # A press on the header focuses the listing without moving the replay, so
+  # the step goes by instruction.
+  - click: { at: low-level-code, anchor: header }
+  - wait: { until: { at: low-level-code, focused: true }, timeout: 10s }
+  - key: F10
+  - wait: { until: { at: low-level-code, assert: 'executing-shows("^\\$0x48, -0x100\\(%rbp\\)$")' }, timeout: 60s }
+  - wait: { until: replay-idle, timeout: 60s }
