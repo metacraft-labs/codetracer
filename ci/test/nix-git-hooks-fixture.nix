@@ -42,6 +42,12 @@ pkgs.writeShellScript "codetracer-git-hooks-fixture" ''
     ${pkgs.lib.getExe preCommit.settings.package} install --config .pre-commit-config.yaml --hook-type pre-commit --hook-type pre-push
     exit $?
   fi
+  if [ "''${1:-}" = --relative-store-native ]; then
+    # What the shared installer wrote before it pinned its shims: pre-commit
+    # rewrites this absolute --config relative to the installing checkout.
+    ${pkgs.lib.getExe preCommit.settings.package} install --config ${preCommit.settings.configFile} --hook-type pre-commit --hook-type pre-push
+    exit $?
+  fi
   ROOT_PATH=$(git rev-parse --show-toplevel)
   ${import ../../nix/git-hooks.nix {
     inherit preCommit repro;
