@@ -740,6 +740,8 @@ roles:
       hbar: bool
     children: { row: many }
     affordances: [click, wheel, context-click, drop-target]
+    # The two ends of its list scrubber's track (a pane whose rows overflow).
+    anchors: [scrubber-start, scrubber-end]
     assertions:
       shows(t): "text contains t"
       has-row(t): "some row: row.text contains t"
@@ -2034,13 +2036,21 @@ stages:
       as the recording the next `open-recording` opens; it needs the visual
       replay player.
     params: {}
+  native-recording:
+    summary: >-
+      Record the native fixture (the C sudoku solver of
+      codetracer-native-test-programs) with rr, as the native suites do, and
+      remember it as the recording the next `open-recording` opens.
+    params: {}
   # --- pw1 ---
   stub-agent:
     summary: >-
       Put a stand-in for the Agent Activity pane's agent first on the
       front-end's PATH (`refusing`: refuses the first prompt, answers the
       next, holds a prompt marked to be held; `replay`: replays a review's
-      session).
+      session; `live`: the replay agent's live session, which answers a
+      prompt with a streamed review-evidence turn, named to the front-ends
+      that start their agent themselves).
     params: { agent: text }
   review-session:
     summary: >-

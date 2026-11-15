@@ -30,6 +30,7 @@ import results
 import ../../../tools/demo_request_session
 import ../../../frontend/tui/tests/fixtures/visual_fixture
 import ../../../ct/review_session
+import ../../../frontend/tui/tests/fixtures/native_recording
 
 export fixture_provider
 
@@ -441,6 +442,15 @@ proc visualReplayCapable*(s: StageState) =
   writeFile(dest / "gfx_stream" / "gfx_commands.dat", "")
   s.launch.recording = dest
 
+proc nativeRecordingStage*(s: StageState) =
+  ## The native fixture (codetracer-native-test-programs' C sudoku solver)
+  ## recorded with rr, as the native suites record it; a missing recorder,
+  ## program or replay engine is a failed stage, named.
+  let rec = nativeRecording()
+  if not rec.ok:
+    raise newException(IOError, "native-recording: " & missingNativePrereq(rec))
+  s.launch.recording = rec.tracePath
+
 proc frontEndOptions*(s: StageState; options: JsonNode; term: string;
                       env: JsonNode = nil) =
   ## Command-line options the front-end starts with (`name: value` becomes
@@ -510,7 +520,7 @@ proc stubAgent*(s: StageState; agent: string) =
   let script =
     case agent
     of "refusing": repo() / "src/tests/gui/tests/agent-activity/fixtures/acp-refusing-agent.js"
-    of "replay": repo() / "src/tests/gui/tests/agent-activity-deepreview/fixtures/acp-replay-agent.js"
+    of "replay", "live": repo() / "src/tests/gui/tests/agent-activity-deepreview/fixtures/acp-replay-agent.js"
     else: raise newException(ValueError, "stub-agent: unknown agent '" & agent & "'")
   let node = findExe("node")
   if node.len == 0:
@@ -521,6 +531,14 @@ proc stubAgent*(s: StageState; agent: string) =
     "#!/bin/sh\nexec " & quoteShell(node) & " " & quoteShell(script) & " \"$@\"\n")
   s.launch.env["PATH"] = dir & ":" & getEnv("PATH")
   s.launch.env["CT_FAKE_ACP_LOG"] = dir / "methods.log"
+  if agent == "live":
+    # The native front-ends speak ACP themselves and start the agent the
+    # environment names: the replay agent's live session, which answers a
+    # prompt with the review-evidence turn, streamed.
+    createDir(dir / "evidence")
+    s.launch.env["CODETRACER_AGENT_ACP_COMMAND"] = node
+    s.launch.env["CODETRACER_AGENT_ACP_ARGS"] = script & " --evidence --evidence-dir=" &
+      (dir / "evidence") & " --live-delay-ms=50 --prompt-log=" & (dir / "prompts.jsonl")
 
 proc reviewSession*(s: StageState; run: string; live: bool) =
   ## A review's agent session, resolved the way `ct review` resolves one
@@ -1189,6 +1207,8 @@ proc runStage*(s: StageState; use: string; args: JsonNode) =
     s.visualRecording()
   of "visual-replay-capable":
     s.visualReplayCapable()
+  of "native-recording":
+    s.nativeRecordingStage()
   of "request-session":
     s.requestSession()
   of "fixture-project":

@@ -64,9 +64,27 @@ proc stageState(ctx: GuiContext): StageState =
     stageStates[s.root] = s
   stageStates[ctx.state["$stage"].getStr]
 
+const
+  CellW = 8                ## a terminal cell, as the window's pixels
+  CellH = 20
+  MaxCells = 400
+
+proc windowSize(width, height: int): (int, int) =
+  ## The window's size for the stage's `width` × `height`, in the window's
+  ## pixels. A size small enough to be a terminal's (columns × rows: a
+  ## scenario written for every front-end says how much it shows in the
+  ## terminal's unit) is that many cells of 8 × 20 px, so the terminal's
+  ## 200 × 50 is this window's default 1600 × 1000.
+  var w = if width > 0: width else: 1600
+  var h = if height > 0: height else: 1000
+  if w <= MaxCells and h <= MaxCells:
+    w *= CellW
+    h *= CellH
+  # within the private display (2048 x 1536)
+  (min(w, 2000), min(h, 1500))
+
 proc launchGpui(ctx: GuiContext; s: StageState) =
-  let w = if s.launch.width > 0: s.launch.width else: 1600
-  let h = if s.launch.height > 0: s.launch.height else: 1000
+  let (w, h) = windowSize(s.launch.width, s.launch.height)
   var argv = @[gpuiBinary(), "--width=" & $w, "--height=" & $h]
   if s.launch.keymap.len > 0: argv.add "--keymap=" & s.launch.keymap
   for flag in s.launch.flags: argv.add flag
@@ -81,6 +99,32 @@ proc launchGpui(ctx: GuiContext; s: StageState) =
   ctx.env["LD_LIBRARY_PATH"] = lib.join(":")
   ctx.env.del("LD_PRELOAD")
   if getEnv("CT_GUI_BINDING_DEBUG").len > 0: ctx.env["CODETRACER_GPUI_GESTURE_TRACE"] = "1"
+  # The pointer's shapes are the cursor theme's: a window on a display with
+  # no theme it can load keeps the X server's own `X` cursor whatever it
+  # asks for. So the window gets a theme that exists here, named outright
+  # (the person's XCURSOR_THEME may name one this display cannot find), and
+  # without one the pointer's shape is declared unreadable.
+  var dirs = getEnv("XCURSOR_PATH").split(':')
+  dirs.add "/run/current-system/sw/share/icons"
+  var theme, themeDir = ""
+  for want in ["Adwaita", "default", ""]:
+    for d in dirs:
+      if d.len == 0 or not dirExists(d) or theme.len > 0: continue
+      if want.len > 0:
+        if dirExists(d / want / "cursors"):
+          theme = want
+          themeDir = d
+      else:
+        for kind, sub in walkDir(d):
+          if theme.len == 0 and kind in {pcDir, pcLinkToDir} and dirExists(sub / "cursors"):
+            theme = sub.extractFilename
+            themeDir = d
+    if theme.len > 0: break
+  if theme.len > 0:
+    ctx.env["XCURSOR_PATH"] = themeDir
+    ctx.env["XCURSOR_THEME"] = theme
+    ctx.env["XCURSOR_SIZE"] = "24"
+  ctx.state["$cursorTheme"] = %theme
   let cwd = getCurrentDir()
   setCurrentDir(s.launch.workDir)
   # The window is named after what it shows (`<program> — CodeTracer`).
@@ -163,6 +207,7 @@ type EditorRow = object
   textLeft: int
 
 proc wordsL(ctx: GuiContext; f: Frame; x, y, w, h: int; psm = 6): seq[Word]
+proc normLabel(s: string): string
 
 proc editorRows(ctx: GuiContext; f: Frame; b: EditorBox): seq[EditorRow] =
   ## The editor's rows: the gutter's numbers read as a column, the row
@@ -259,18 +304,67 @@ proc inkRuns(f: Frame; y0, y1, x0, x1: int): seq[(int, int)] =
 
 proc codeLeft(f: Frame; b: EditorBox; rows: seq[EditorRow]; numbersRight: int): int =
   ## Column 0 of the code: the leftmost text any row starts with, a fold
-  ## chevron (a narrow mark before the text, in its own lane) excepted.
-  result = high(int)
+  ## chevron excepted. The chevrons are drawn in a lane of their own left of
+  ## column 0, so a narrow mark with a gap after it, met at the same place on
+  ## two or more rows, is that lane; a lone narrow first letter (`x` of
+  ## `xprint(1)`) is code.
+  var firsts: seq[seq[(int, int)]]
+  var narrow = initCountTable[int]()
   for r in rows:
-    let band0 = r.y + r.h div 5
-    let band1 = r.y + r.h - r.h div 5
-    let runs = inkRuns(f, band0, band1, numbersRight + 4, b.right - 4)
+    let runs = inkRuns(f, r.y + r.h div 5, r.y + r.h - r.h div 5, numbersRight + 4, b.right - 4)
+    firsts.add runs
+    if runs.len > 1 and runs[0][1] - runs[0][0] <= 9 and runs[1][0] - runs[0][1] >= 3:
+      narrow.inc runs[0][0]
+  var lane = -1
+  for x, n in narrow:
+    var near = 0
+    for x2, n2 in narrow:
+      if abs(x2 - x) <= 1: near += n2
+    if near >= 2 and (lane < 0 or x < lane): lane = x
+  result = high(int)
+  for runs in firsts:
     if runs.len == 0: continue
     var first = runs[0]
-    if runs.len > 1 and first[1] - first[0] <= 9 and runs[1][0] - first[1] >= 3:
+    if lane >= 0 and abs(first[0] - lane) <= 1 and first[1] - first[0] <= 9 and runs.len > 1:
       first = runs[1]
     result = min(result, first[0])
   if result == high(int): result = numbersRight + 20
+
+proc readCode(ctx: GuiContext; f: Frame; b: EditorBox; rows: var seq[EditorRow]; left: int) =
+  ## The rows' code, read once more from column 0 rightwards as a block of
+  ## lines on per-line grounds (`wordsL`, bicubic at 3x): the whole-box read
+  ## smooths the code face's small letters together (`calc` read `cale`) and
+  ## takes a fold chevron left of column 0 for the line's first letter. A row
+  ## the block read finds no words on keeps its first reading.
+  let top = rows[0].y
+  let bottom = min(b.bottom, rows[^1].y + rows[^1].h)
+  if bottom - top < 8: return
+  let x0 = max(b.left, left - 3)
+  let ws = ctx.wordsL(f, x0, top, b.right - 4 - x0, bottom - top, psm = 6)
+  for r in rows.mitems:
+    var parts: seq[Word]
+    for w in ws:
+      let cy = w.y + w.h div 2
+      if cy >= r.y and cy < r.y + r.h: parts.add w
+    if parts.len == 0: continue
+    parts.sort(proc (a, c: Word): int = cmp(a.x, c.x))
+    var text = ""
+    var lastRight = -1
+    for p in parts:
+      # words a column or more apart are separated by as many blanks as the
+      # code face's advance says (an indent inside the line, `x  = 1`)
+      if text.len > 0:
+        let px = p.x - lastRight
+        let gap = int(round(float(px) / 9.792))
+        # (none when the engine split one word with no blank between: words
+        # that touch)
+        text.add repeat(' ', if px >= 4: max(1, gap) else: max(0, gap))
+      text.add p.text
+      lastRight = p.x + p.w
+    # the caret, a bar before the line's first letter, reads as `|`
+    if text.len > 1 and text[0] == '|' and text[1] != ' ': text = text[1 .. ^1]
+    r.text = text
+    r.textLeft = parts[0].x
 
 proc pointerRow(f: Frame; b: EditorBox; rows: seq[EditorRow]): int =
   ## The execution pointer: the yellow ▸ in the band left of the numbers.
@@ -327,15 +421,34 @@ proc sessionTabs(ctx: GuiContext; f: Frame): seq[(string, int)] =
     lastRight = w.x + w.w
   if cur.len > 0: result.add (cur, curX)
 
+proc wordsS(ctx: GuiContext; f: Frame; x, y, w, h: int; psm = 11): seq[Word]
+
+proc locationWord(t: string; needTick: bool): string =
+  ## `…/main.py:111#68` as `main.py:111#68`, or "" when `t` is no location
+  ## (with `needTick`, no location naming its tick).
+  let c = t.rfind(':')
+  if c <= 0 or not t.contains('/') or c + 1 >= t.len or t[c + 1] notin Digits: return ""
+  let tail = t[c + 1 .. ^1]
+  let hash = tail.find('#')
+  if needTick and (hash <= 0 or hash + 1 >= tail.len or
+                   not tail[hash + 1 .. ^1].allCharsInSet(Digits)): return ""
+  t.split('/')[^1]
+
 proc statusLocation(ctx: GuiContext; f: Frame): string =
   ## Where the replay is, as the status line says it (`…/tracing.nim:18#0`).
+  ## The footer's small text is read twice when the first reading lost the
+  ## tick's `#` (it reads as `H` or merges into the digits): plainly, then
+  ## from its stretched image.
   let y = f.image.height - FooterH
+  var plain = ""
   for w in ctx.words(f, f.image.width div 2, y, f.image.width div 2, FooterH, psm = 7):
-    let t = w.text
-    let c = t.rfind(':')
-    if c > 0 and t.contains('/') and c + 1 < t.len and t[c + 1] in Digits:
-      return t.split('/')[^1]
-  ""
+    let full = locationWord(w.text, needTick = true)
+    if full.len > 0: return full
+    if plain.len == 0: plain = locationWord(w.text, needTick = false)
+  for w in ctx.wordsS(f, f.image.width div 2, y, f.image.width div 2, FooterH, psm = 7):
+    let full = locationWord(w.text, needTick = true)
+    if full.len > 0: return full
+  plain
 
 # --- gpui batch: the window's boxes, their strips and their rows ---------------------------
 #
@@ -548,6 +661,18 @@ proc paneBoxes(ctx: GuiContext; f: Frame): seq[PaneBox] =
         let band = PaneTab(x0: x, x1: bx1, y0: y, y1: by1, band: true, cut: cut)
         found.add band
         strips.mgetOrPut(y, @[]).add band
+        if cut[0] < 0:
+          # the band stops at the selected tab, which is drawn on the box's
+          # own ground beside it (the selected tab last in its strip)
+          let ym2 = y + 8
+          let c2 = f.rgb(bx1 + 2, ym2)
+          if not f.isGround(g, bx1 + 2, ym2) and not near(c2, cb, 2):
+            var xr = bx1 + 2
+            while xr + 1 < w and near(f.rgb(xr + 1, ym2), c2, 2): inc xr
+            if xr - bx1 >= 30:
+              let sel = PaneTab(x0: bx1 + 1, x1: xr, y0: y, y1: by1, active: true)
+              found.add sel
+              strips.mgetOrPut(y, @[]).add sel
         continue
       if tabH < 16 or tabH > 34: continue
       let tab = PaneTab(x0: x0, x1: x1, y0: y, y1: y1,
@@ -595,20 +720,53 @@ proc paneBoxes(ctx: GuiContext; f: Frame): seq[PaneBox] =
         let cx = wd.x + wd.w div 2
         if cx >= t.x0 and cx <= t.x1 and wd.text.strip.len > 0: parts.add wd
       parts.sort(proc (a, b: Word): int = cmp(a.x, b.x))
+      # the previous tab's pin and close icons, cut into this tab's group on
+      # a focused strip, OCR as short stray glyphs before its label
+      while parts.len > 1 and parts[0].text.strip.len <= 2: parts.delete(0)
       var dirty = false
       for p in parts:
         # the pin and close icons OCR as stray glyphs
         if p.x > t.x1 - 46 and p.text.strip.len <= 2: continue
+        let s = p.text.strip(chars = {'|', '*', '#', '+', '~', '%', '&', '@', ' '})
         # a file's tab: a short mark after its name is the unsaved-changes
-        # dot (`●`, which the engine reads as `e`, `@` or `©`)
-        if t.label.isSourceName and p.text.strip.len <= 2:
+        # dot (`●`, which the engine reads as `e`, `@`, `©` or `»`)
+        var alnum = 0
+        for ch in s:
+          if ch in Letters + Digits: inc alnum
+        if t.label.isSourceName and (p.text.strip.len <= 2 or alnum <= 1):
           dirty = true
           continue
-        let s = p.text.strip(chars = {'|', '*', '#', '+', '~', '%', '&', '@', ' '})
         if s.len == 0 or (s.len == 1 and s[0] notin Letters): continue
         if t.label.len > 0: t.label.add " "
         t.label.add s
       if dirty: t.label.add " ●"
+      # the pin and close icons after a caption read as a short stray word
+      # (`FILES S?X`): dropped while what is left names a pane
+      if not t.label.split(' ')[0].isSourceName:
+        let toks = t.label.splitWhitespace
+        var k = toks.len
+        while k > 1 and toks[k - 1].len <= 3:
+          dec k
+          let shorter = toks[0 ..< k].join(" ")
+          if shorter.normLabel != shorter.toUpperAscii.splitWhitespace.join(" "):
+            t.label = shorter
+            break
+    # a strip's tabs are captions (upper case) or a file's name: a rounded
+    # box of lower-case words is something drawn inside a pane (an editor's
+    # inline value, its loop control), not a strip
+    var captions = false
+    for t in tabs:
+      let first = t.label.split(' ')[0]
+      var letters = 0
+      for ch in t.label:
+        if ch in Letters: inc letters
+      # (a docked pane revealed over the window names itself in its own case:
+      # `Find in Files`)
+      let known = t.label.len > 0 and
+                  t.label.normLabel != t.label.toUpperAscii.splitWhitespace.join(" ")
+      if first.isSourceName or known or (letters >= 2 and t.label == t.label.toUpperAscii):
+        captions = true
+    if not captions: continue
     # boxes: the body under each tab, followed to the ground around it
     var seen: seq[int]
     for t in tabs:
@@ -616,7 +774,10 @@ proc paneBoxes(ctx: GuiContext; f: Frame): seq[PaneBox] =
       if f.isGround(g, t.x0 + 2, yb): continue
       var l = t.x0 + 2
       while l > 0 and not f.isGround(g, l - 1, yb): dec l
-      if l in seen: continue
+      var again = false
+      for s0 in seen:
+        if abs(s0 - l) <= 4: again = true
+      if again: continue
       seen.add l
       var r = t.x0 + 2
       while r + 1 < w and not f.isGround(g, r + 1, yb): inc r
@@ -627,6 +788,14 @@ proc paneBoxes(ctx: GuiContext; f: Frame): seq[PaneBox] =
         if t2.x0 >= l - 2 and t2.x0 < r: box.tabs.add t2
       result.add box
   result.sort(proc (a, b: PaneBox): int = cmp((a.stripTop, a.left), (b.stripTop, b.left)))
+  var unique: seq[PaneBox]
+  for b in result:
+    var dup = false
+    for u in unique:
+      if abs(u.left - b.left) <= 4 and abs(u.right - b.right) <= 4 and
+         abs(u.bottom - b.bottom) <= 4 and abs(u.top - b.top) <= 4: dup = true
+    if not dup: unique.add b
+  result = unique
 
 proc footerDocks(ctx: GuiContext; f: Frame): seq[PaneTab] =
   ## The footer's dock labels: the panes pinned to the window's bottom edge,
@@ -706,6 +875,20 @@ proc normLabel(s: string): string =
   for k in PaneKind:
     if desktopTabTitle(k) == drawn or desktopTabTitle(k).replace(" ", "") == drawn.replace(" ", ""):
       return gpuiPaneName(k)
+  # an inactive tab's dim caption loses a letter to the engine now and then
+  # (`VCS` read `\CS`): the one caption a single character away, when only
+  # one is (and the caption is long enough for one letter not to decide it)
+  let flat = drawn.replace(" ", "")
+  var close: seq[PaneKind]
+  if flat.len >= 3:
+    for k in PaneKind:
+      let want = desktopTabTitle(k).replace(" ", "")
+      if want.len == flat.len:
+        var diff = 0
+        for i in 0 ..< want.len:
+          if want[i] != flat[i]: inc diff
+        if diff == 1: close.add k
+  if close.len == 1: return gpuiPaneName(close[0])
   drawn
 
 proc rowNode(role: string; b: PaneBox; r: TextRow; props: JsonNode;
@@ -725,7 +908,8 @@ proc addPaneTabs(t: var Tree; boxes: seq[PaneBox]; docks: seq[PaneTab]) =
                          fl(tab.y1 - tab.y0 + 1), %*{"label": lbl, "active": tab.active},
                          @[("label", lbl)]))
   for d in docks:
-    let lbl = d.label.toUpperAscii.splitWhitespace.join(" ")
+    # the pane's own name (`Event Log`), as the strip's tabs are named
+    let lbl = d.label.normLabel
     t.add(t.root, node("dock-label", fl(d.x0), fl(d.y0), fl(d.x1 - d.x0 + 1), fl(d.y1 - d.y0 + 1),
                        %*{"label": lbl}, @[("label", lbl)]))
 
@@ -765,7 +949,14 @@ proc readCallTrace(ctx: GuiContext; f: Frame; t: var Tree; b: PaneBox) =
       if hashAt < 0 and i > 0 and tk.len >= 2 and tk[0] == '#': hashAt = i
     if hashAt > 0:
       var nameToks = toks[0 ..< hashAt]
-      if nameToks.len > 1 and nameToks[0].len <= 2: nameToks.delete(0)
+      # the toggle before the callee reads as a stray glyph or two
+      while nameToks.len > 1:
+        var alnum = 0
+        for ch in nameToks[0]:
+          if ch in Letters + Digits + {'<', '_'}: inc alnum
+        if nameToks[0].len <= 2 or alnum == 0 or (alnum == 1 and nameToks[0].len <= 4):
+          nameToks.delete(0)
+        else: break
       name = nameToks.join(" ")
     else:
       let (ok, parsed) = parseCallRow(r.text)
@@ -790,6 +981,12 @@ proc readCallTrace(ctx: GuiContext; f: Frame; t: var Tree; b: PaneBox) =
                                      "depth": depth, "text": r.text},
                     @[("name", name)])
     n.unreadable["selected"] = "the selected call and the current call are drawn alike"
+    # where the callee's name is drawn, for the `name` anchor (a press on the
+    # arguments acts on the argument under it)
+    for wd in r.words:
+      if wd.text.len > 0 and name.split(' ')[0] in wd.text:
+        n.props["$name"] = %(wd.x + min(wd.w div 2, 12))
+        break
     t.add(pane, n)
   pane.props["count"] = %calls.len
 
@@ -940,15 +1137,23 @@ proc overlays(f: Frame; boxes: seq[PaneBox]): seq[Overlay] =
       # the left side (below a rounded corner, a few pixels further left):
       # down the border colour
       var lx = -1
-      for dx in -10 .. 10:
-        # a side that starts at this edge, not a line running on through it
-        # (the focused box's outline)
-        if lx < 0 and x + dx >= 0 and y + 10 < h and near(f.rgb(x + dx, y + 10), c, 2) and
-           not near(f.rgb(x + dx, y - 2), c, 2): lx = x + dx
+      var probe = y + 10
+      # the side is looked for a little below the corner, and further down
+      # when a highlighted first entry covers it there (a menu's selected row
+      # is drawn over its border)
+      for py in [y + 10, y + 32, y + 56]:
+        if lx >= 0: break
+        for dx in -10 .. 10:
+          # a side that starts at this edge, not a line running on through it
+          # (the focused box's outline)
+          if lx < 0 and x + dx >= 0 and py < h and near(f.rgb(x + dx, py), c, 2) and
+             not near(f.rgb(x + dx, y - 2), c, 2):
+            lx = x + dx
+            probe = py
       if lx < 0:
         x = x1 + 1
         continue
-      var y1 = y + 10
+      var y1 = probe
       while y1 + 1 < h and near(f.rgb(lx, y1 + 1), c, 2): inc y1
       if y1 - y < 14:
         x = x1 + 1
@@ -956,7 +1161,9 @@ proc overlays(f: Frame; boxes: seq[PaneBox]): seq[Overlay] =
       let rx = x1 + (x - lx)
       var inside = false
       for o in seen:
-        if x >= o.x0 - 2 and x <= o.x1 + 2 and y >= o.y0 - 2 and y <= o.y1 + 2: inside = true
+        # (a menu's folder level opening against its right edge is no part
+        # of it)
+        if x >= o.x0 - 2 and x <= o.x1 - 3 and y >= o.y0 - 2 and y <= o.y1 + 2: inside = true
       var isBox = false
       for b in boxes:
         if (abs(b.left - x) <= 3 and abs(b.right - x1) <= 3) or
@@ -985,8 +1192,15 @@ proc splitHint(r: TextRow): (string, string) =
   ## told apart by the wide gap between them.
   var label, hint = ""
   var lastRight = -1
+  proc chordLike(t: string): bool =
+    ## a word that starts a hint: a chord (`CTRL+F10`, `Shift+F9`, `F3`) or
+    ## a gesture in angle brackets (`<click …>`)
+    let u = t.toUpperAscii
+    u.startsWith("CTRL+") or u.startsWith("ALT+") or u.startsWith("SHIFT+") or
+      u.startsWith("META+") or u.startsWith("CMD+") or t.startsWith("<") or
+      (u.len >= 2 and u.len <= 3 and u[0] == 'F' and u[1 .. ^1].allCharsInSet(Digits))
   for wd in r.words:
-    if hint.len == 0 and label.len > 0 and wd.x - lastRight > 24:
+    if hint.len == 0 and label.len > 0 and (wd.x - lastRight > 24 or chordLike(wd.text)):
       hint = wd.text
     elif hint.len > 0:
       hint.add " " & wd.text
@@ -1036,6 +1250,7 @@ proc readOverlays(ctx: GuiContext; f: Frame; t: var Tree; boxes: seq[PaneBox]) =
     omni.unreadable["focused"] = "the field draws the same border open or closed"
     t.add(t.root, omni)
   var level = 0
+  var dropdownRights: seq[int]
   for o in f.overlays(boxes):
     let rows = textRows(ctx.wordsL(f, o.x0 + 2, o.y0 + 2, o.x1 - o.x0 - 3, o.y1 - o.y0 - 3))
     if rows.len == 0: continue
@@ -1047,15 +1262,24 @@ proc readOverlays(ctx: GuiContext; f: Frame; t: var Tree; boxes: seq[PaneBox]) =
         let sel = not near(f.rgb(o.x0 + 4, (r.y0 + r.y1) div 2), f.rgb(o.x1 - 4, o.y1 - 4), 3)
         t.add(omni, node("option", fl(o.x0), fl(r.y0 - 3), fl(o.x1 - o.x0), fl(r.y1 - r.y0 + 6),
                          %*{"label": lbl, "detail": detail, "selected": sel}, @[("label", lbl)]))
-    elif o.y0 <= TopBarH + 6 and o.x0 < w div 3:
-      # the program menu: one dropdown per level, left to right
+    elif (o.y0 <= TopBarH + 6 and o.x0 < w div 3) or
+         dropdownRights.anyIt(abs(o.x0 - it) <= 8):
+      # the program menu: one dropdown per level, left to right, each
+      # folder's level opening against the right edge of the one before
       inc level
+      dropdownRights.add o.x1
       let d = node("dropdown", fl(o.x0), fl(o.y0), fl(o.x1 - o.x0), fl(o.y1 - o.y0),
                    %*{"level": level, "count": rows.len}, @[("level", $level)])
       t.add(t.root, d)
       let ground = f.rgb(o.x1 - 3, o.y1 - 3)
       for r in rows:
-        let (lbl, hint) = splitHint(r)
+        var (lbl, hint) = splitHint(r)
+        # a folder's arrow after its label (`File >`) is no part of it
+        for arrow in [" >", " ›", " »", ">", "›", "»"]:
+          if lbl.endsWith(arrow) and lbl.len > arrow.len:
+            lbl = lbl[0 ..< lbl.len - arrow.len].strip
+            break
+        if hint in [">", "›", "»"]: hint = ""
         let sel = not near(f.rgb(o.x0 + 3, (r.y0 + r.y1) div 2), ground, 3)
         let it = node("dropdown-item", fl(o.x0), fl(r.y0 - 3), fl(o.x1 - o.x0), fl(r.y1 - r.y0 + 6),
                       %*{"label": lbl, "shortcut": hint, "selected": sel}, @[("label", lbl)])
@@ -1094,9 +1318,82 @@ proc statusMessage(ctx: GuiContext; f: Frame; docks: seq[PaneTab]): string =
   for w in ws:
     if w.x >= left and w.x + w.w <= right: parts.add w
   parts.sort(proc (a, b: Word): int = cmp(a.x, b.x))
-  for p in parts:
+  # the test-certificate indicator (`No certificates`, `2 certificates`)
+  # stands before the location; it is no note
+  var cut = parts.len
+  for i, p in parts:
+    if p.text.toLowerAscii.startsWith("certificate"):
+      cut = max(0, i - 1)
+      break
+  for p in parts[0 ..< cut]:
     if result.len > 0: result.add " "
     result.add p.text
+
+# --- the top bar's buttons ------------------------------------------------------------------
+#
+# The bar draws the desktop's controls as marks with no text: a thin
+# separator (1 px wide, 16 px high) before each group of 28 px buttons 36 px
+# apart, the first 9 px after it (`window_top_bar`). Which button is which is
+# not written anywhere on screen, so the binding names them by their place in
+# the bar's groups — the desktop's order, as the product declares it
+# (`barGroups`): history, the four motion pairs (reverse, forward), run to
+# entry, reset, run tests, stop. A group count that is not the full bar's
+# (a narrow window drops buttons) names nothing.
+
+const
+  BarGroupLabels = [
+    @["History back", "History forward"], @["Reverse next", "Next"],
+    @["Reverse step in", "Step in"], @["Reverse step out", "Step out"],
+    @["Reverse continue", "Continue"], @["Run to entry"], @["Reset operation"],
+    @["Record and replay tests in a new window"], @["Stop and return to editing"]]
+  BarButtonPx = 28
+  BarButtonPitch = 36
+  BarSeparatorLead = 9
+
+proc barSeparators(f: Frame; x1: int): seq[int] =
+  ## The x of every separator in the bar, left of `x1`: a column lighter than
+  ## the bar's ground for 14 or more of its rows, with ground beside it.
+  let g = f.rgb(2, 2)
+  for x in 2 ..< min(x1, f.image.width - 2):
+    var run, best = 0
+    for y in 4 ..< TopBarH - 4:
+      if not near(f.rgb(x, y), g, 6) and near(f.rgb(x - 2, y), g, 6) and near(f.rgb(x + 2, y), g, 6):
+        inc run
+        best = max(best, run)
+      else: run = 0
+    if best >= 14 and best <= 20 and (result.len == 0 or x - result[^1] > 3): result.add x
+
+proc readToolbar(ctx: GuiContext; f: Frame; t: var Tree; omniLeft: int; overlays: seq[Overlay]) =
+  var seps = f.barSeparators(if omniLeft > 0: omniLeft else: f.image.width div 2)
+  # the menu button's own edges (lit while it is hovered or open) are thin
+  # lines too, left of the groups: the groups' separators are the last ones
+  if seps.len > BarGroupLabels.len: seps = seps[seps.len - BarGroupLabels.len .. ^1]
+  if getEnv("CT_GUI_BINDING_DEBUG").len > 0: stderr.writeLine "bar separators ", seps
+  if seps.len != BarGroupLabels.len: return
+  let bar = node("toolbar", fl(seps[0]), 0, fl(omniLeft - seps[0]), fl(TopBarH))
+  t.add(t.root, bar)
+  for gi, labels in BarGroupLabels:
+    for k, label in labels:
+      let x = seps[gi] + BarSeparatorLead + k * BarButtonPitch
+      # an enabled mark is drawn brighter than a disabled one
+      var bright = 0
+      for yy in 8 ..< TopBarH - 8:
+        for xx in x + 4 ..< x + BarButtonPx - 4:
+          if xx < f.image.width: bright = max(bright, f.luma(xx, yy))
+      # its tooltip: the box drawn just below the bar, under the button
+      var tip = ""
+      for o in overlays:
+        if o.y0 <= TopBarH + 30 and o.x0 <= x + BarButtonPx and o.x1 >= x:
+          for r in textRows(ctx.wordsS(f, o.x0 + 2, o.y0 + 2, o.x1 - o.x0 - 3, o.y1 - o.y0 - 3, psm = 7)):
+            if tip.len > 0: tip.add " "
+            tip.add r.text
+      var chord = ""
+      let o = tip.rfind('(')
+      if o >= 0 and tip.endsWith(")"): chord = tip[o + 1 .. ^2]
+      t.add(bar, node("toolbar-button", fl(x), 3, fl(BarButtonPx), fl(BarButtonPx),
+                      %*{"label": label, "enabled": bright > 140, "tooltip": tip,
+                         "tooltip-chord": chord, "tooltip-shown": tip.len > 0},
+                      @[("label", label)]))
 
 proc readPanes(ctx: GuiContext; f: Frame; t: var Tree) =
   ## The boxes' strips (pane tabs), the footer's docked labels, and the
@@ -1140,6 +1437,7 @@ proc readPanes(ctx: GuiContext; f: Frame; t: var Tree) =
     # every box is also a pane by its title, its rows as drawn
     ctx.readGenericPane(f, t, b, label)
   ctx.readOverlays(f, t, boxes)
+  ctx.readToolbar(f, t, f.omniboxField[0], f.overlays(boxes))
   # the program menu's root button: the first mark in the top bar, at its
   # left end (an icon; the pack calls it "Menu")
   block menuButton:
@@ -1188,10 +1486,22 @@ proc readPanes(ctx: GuiContext; f: Frame; t: var Tree) =
     for d in docks: stderr.writeLine "dock ", d.label, " ", d.x0, "..", d.x1
 
 proc readSurface*(ctx: GuiContext; f: Frame): Tree =
-  result.root = node("window", 0, 0, fl(f.image.width), fl(f.image.height), %*{"mode": "debug"})
+  # a replay names its position (`main.py:1#1`) on the status line; an Edit
+  # window names none
+  let mode = if ctx.statusLocation(f).contains('#'): "debug" else: "edit"
+  result.root = node("window", 0, 0, fl(f.image.width), fl(f.image.height), %*{"mode": mode})
   result.root.visible = true
   result.root.unreadable["title"] = "the window title is not drawn in the window"
-  result.root.unreadable["pointer"] = "the pointer is drawn by the X server, not in the window's pixels"
+  # the pointer is drawn by the X server, not in the window's pixels: its
+  # shape is asked of the server (the cursor's image, through XFixes)
+  try:
+    if ctx.state{"$cursorTheme"}.getStr("").len == 0:
+      raise newException(ValueError, "no cursor theme on this machine: the window draws the X server's own cursor")
+    let shape = ctx.pointerShape()
+    if shape.len > 0: result.root.props["pointer"] = %shape
+    else: result.root.unreadable["pointer"] = "the pointer's image is none of the known shapes"
+  except CatchableError as e:
+    result.root.unreadable["pointer"] = "the pointer's shape could not be read: " & e.msg
   let loc = ctx.statusLocation(f)
   let tabs = ctx.sessionTabs(f)
   # one session draws no tab: the strip still has the one session
@@ -1207,16 +1517,20 @@ proc readSurface*(ctx: GuiContext; f: Frame): Tree =
   let box = ctx.findEditor(f)
   if box.isSome:
     let b = box.get
-    let rows = ctx.editorRows(f, b)
+    var rows = ctx.editorRows(f, b)
+    let left = if rows.len > 0: codeLeft(f, b, rows, rows[0].numbersRight) else: b.left + 110
+    if rows.len > 0: ctx.readCode(f, b, rows, left)
     if getEnv("CT_GUI_BINDING_DEBUG").len > 0:
       for r in rows: stderr.writeLine "row ", r.number, " y=", r.y, " h=", r.h, " ", r.text
-    let left = if rows.len > 0: codeLeft(f, b, rows, rows[0].numbersRight) else: b.left + 110
     var current = pointerRow(f, b, rows)
     var caret = caretRow(f, b, rows)
     if caret == 0 and ctx.running:
-      # the caret may be between blinks: look once more
-      let again = ctx.grab()
-      caret = caretRow(again, b, rows)
+      # the caret may be between blinks (the off phase is about half a
+      # second): look again over most of a blink period
+      for attempt in 0 ..< 4:
+        if caret != 0: break
+        sleep(150)
+        caret = caretRow(ctx.grab(), b, rows)
     let ed = node("editor", fl(b.left), fl(b.top), fl(b.right - b.left), fl(b.bottom - b.top),
                   %*{"file": b.file, "active": true, "focused": caret > 0,
                      "current-line": current, "caret-line": caret,
@@ -1278,7 +1592,10 @@ proc roles(): JsonNode =
     "dropdown-item": {"properties": ["label", "shortcut", "selected"], "affordances": ["click"]},
     "menu-bar": {"properties": [], "affordances": []},
     "menu": {"properties": ["label"], "affordances": ["click"]},
-    "find-field": {"properties": ["query", "count"], "affordances": []}}
+    "find-field": {"properties": ["query", "count"], "affordances": []},
+    "toolbar": {"properties": [], "affordances": []},
+    "toolbar-button": {"properties": ["label", "enabled", "tooltip", "tooltip-chord",
+                                      "tooltip-shown"], "affordances": ["click"]}}
 
 proc ctGuiBinding*(): GuiBinding =
   GuiBinding(
@@ -1308,6 +1625,11 @@ proc ctGuiBinding*(): GuiBinding =
           scope.editorReadOnly = true
       router.resolveChord(operation, scope),
     anchor: proc (ctx: GuiContext; n: SurfaceNode; anchor: string): Option[(int, int)] =
+      if n.role != "line" and anchor in ["scrubber-start", "scrubber-end"]:
+        # a list's scrubber: the track down the body's right edge (its ends
+        # a few pixels in, past the thumb's rounding)
+        let x = int(n.x + n.w) - 5
+        return some((x, if anchor == "scrubber-start": int(n.y) + 4 else: int(n.y + n.h) - 4))
       if n.role != "line":
         # a row of a pane: its text's ends, and a call's toggle before it
         let midY = int(n.y + n.h / 2)
@@ -1318,6 +1640,9 @@ proc ctGuiBinding*(): GuiBinding =
         of "text-start": return some((x0 + 3, midY))
         of "text-end": return some((max(x0 + 3, x1 - 3), midY))
         of "expander": return some((x0 + 6, midY))
+        of "name":
+          let nx = n.props{"$name"}.getInt(-1)
+          return (if nx >= 0: some((nx, midY)) else: none((int, int)))
         else: return none((int, int))
       let midY = int(n.y + n.h / 2)
       let left = n.props{"codeLeft"}.getInt(int(n.x) + 110)

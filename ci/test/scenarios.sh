@@ -35,6 +35,7 @@ dvs_src="${DVS_SRC:-${ws}/DemoVideoScript/src}"
 dta_src="${DVS_TERMASSERT_SRC:-${ws}/DemoVideoScript-TermAssert/src}"
 ta_src="${TERM_ASSERT_SRC:-${ws}/TermAssert/src}"
 dga_src="${DVS_GUIASSERT_SRC:-${ws}/DemoVideoScript-GuiAssert/src}"
+ga_src="${GUIASSERT_SRC:-${ws}/GuiAssert/src}"
 dpw_root="${DVS_PLAYWRIGHT_ROOT:-${ws}/DemoVideoScript-Playwright}"
 
 require() {
@@ -70,9 +71,13 @@ build_terminal() {
 
 build_gpui() {
 	require "DemoVideoScript-GuiAssert" "${dga_src}/demo_video_script_guiassert.nim"
-	nim c "${nim_common[@]}" --path:../GuiAssert/src --path:"${dvs_src}" --path:"${dga_src}" \
+	nim c "${nim_common[@]}" --path:"${ga_src}" --path:"${dvs_src}" --path:"${dga_src}" \
 		--nimcache:"${nimcache}/scenario-guiassert" \
 		-o:"${bin}/dvs-guiassert-codetracer" "${S}/bindings/guiassert/dvs_guiassert_codetracer.nim"
+	# what the binding reads off saved frames (a run's stills), for working on it
+	nim c "${nim_common[@]}" --path:"${ga_src}" --path:"${dvs_src}" --path:"${dga_src}" \
+		--nimcache:"${nimcache}/scenario-guiassert-surface" \
+		-o:"${bin}/ct-gui-surface" "${S}/bindings/guiassert/ct_gui_surface.nim"
 }
 
 build_playwright() {
@@ -161,7 +166,7 @@ run)
 	# longer than the runner's default 5 s to stop changing after an input,
 	# and so does Electron at a 1-minute load above 100 (each lane says so too).
 	case "${flavour}" in
-	gpui) settle=(--settle-timeout 20000) ;;
+	gpui) settle=(--settle-timeout 30000) ;;
 	# the terminal settles only once the application has read its input, which
 	# a loaded host can delay by seconds
 	terminal) settle=(--settle-timeout 15000) ;;
