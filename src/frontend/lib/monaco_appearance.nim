@@ -15,6 +15,8 @@
 ## no ordering against the asset pipeline) is involved. Monaco's theme API:
 ## https://microsoft.github.io/monaco-editor/docs.html#functions/editor.defineTheme.html
 
+import std/[json, strutils]
+
 const
   CodeFontFamily* = "SpaceMono, monospace"
     ## The face for every code surface in the app: the editors, the trace and
@@ -27,6 +29,23 @@ const
     staticRead("../../public/third_party/monaco-themes/themes/customThemes/json/codetracerWhite.json")
   darkThemeDef =
     staticRead("../../public/third_party/monaco-themes/themes/customThemes/json/codetracerDark.json")
+
+proc themeCssVariables(def, prefix: string): string {.compileTime.} =
+  ## The theme's colours under `prefix` as the CSS variables Monaco's theme
+  ## service writes for them (`diffEditor.insertedTextBackground` ->
+  ## `--vscode-diffEditor-insertedTextBackground`), as one declaration list.
+  let colors = parseJson(def){"colors"}
+  if colors.isNil: return ""
+  for key, value in colors.pairs:
+    if key.startsWith(prefix) and value.kind == JString:
+      result.add "--vscode-" & key.replace('.', '-') & ": " & value.getStr & "; "
+
+const
+  CodeTracerDarkDiffVariables* = themeCssVariables(darkThemeDef, "diffEditor.")
+  CodeTracerWhiteDiffVariables* = themeCssVariables(whiteThemeDef, "diffEditor.")
+    ## The themes' diff colours as CSS variables: the shared editor's diff
+    ## (`ui/shared_diff_editor`) wears them where no Monaco editor has started
+    ## Monaco's theme service, which is what writes them for Monaco's own.
 
 func monacoThemeFor*(appTheme: string): string =
   ## The Monaco theme that matches CodeTracer's colour theme. `default_white`

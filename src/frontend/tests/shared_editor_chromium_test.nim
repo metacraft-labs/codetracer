@@ -126,7 +126,7 @@ proc endCase(name: string) =
 
 const
   Source = "def main():\n    x = 1\n    if x:\n        y = 2\n\n    return x\nprint(main())\n"
-  ExpectedChecks = 103
+  ExpectedChecks = 131
     ## Written from a run. See the end of `main`.
 
 proc fresh(text = Source; readOnly = false; model = bkCua;
@@ -551,6 +551,170 @@ proc caseUnifiedDiff() {.async.} =
   ck not isNull(qs(".modified-in-monaco-diff-editor .view-overlays .ct-diff-line-context"))
   endCase("the unified diff: removed lines as zones, added lines marked, decorations per side")
 
+proc gutterRow(side: cstring; n: int): JsObject =
+  qs(cstring("." & $side & "-in-monaco-diff-editor .margin-view-overlays > div[data-line=\"" &
+             $n & "\"]"))
+
+proc topOf(e: JsObject): float = num(rectOf(e).top)
+
+proc caseUnifiedDiffRegions() {.async.} =
+  ## What the review's and the VCS panel's diff use of Monaco's diff editor
+  ## beyond the line diff: collapsed unchanged regions and their boundaries,
+  ## word-level marks, coloured removed lines and the old revision aligned
+  ## beside the new one.
+  beginCase()
+  setHtml("""<div id="host" style="width: 800px; height: 600px; position: relative"></div>""")
+  let all = sharedEditors
+  for e in all: e.dispose()
+  var before, after: seq[string] = @[]
+  for i in 1 .. 40:
+    before.add "v" & $i & " = " & $i
+  after = before
+  before[19] = "value = compute(a, b)"
+  after[19] = "value = compute(a, c)"
+  after.insert("added = 1", 30)
+  let opts = js{hideUnchangedRegions: js{enabled: true, contextLineCount: 3,
+                                         minimumLineCount: 3, revealLineCount: 10},
+                glyphMargin: false, folding: false, lineDecorationsWidth: 0}
+  let diff = newSharedDiffEditor(qs("#host"), opts, 14, "monospace", true, "python")
+  let models = jsNew()
+  models["original"] = textModel(cstring(before.join("\n")))
+  models["modified"] = textModel(cstring(after.join("\n")))
+  discard diff.setModel(models)
+  # Measured at once, as Monaco answers it (the review sizes its value
+  # columns from these before any frame is drawn).
+  let x5 = num(diff.getModifiedEditor().getOffsetForColumn(1, 11))
+  ck x5 > 10.0, "a column is measured before the next frame (" & $x5 & ")"
+  await settle()
+  await settle()
+  let modRoot = qs(".modified-in-monaco-diff-editor")
+  # Three runs collapse: lines 1-16 (context below only), 24-27 (between
+  # the changes) and new 35-41 (context above only).
+  let bands = qsa(modRoot, ".diff-hidden-lines-widget > .diff-hidden-lines")
+  ck num(bands.length) == 3, "three collapsed regions (" & $num(bands.length) & ")"
+  let regions = diff["_diffModel"].get()["unchangedRegions"].get()
+  ck num(regions.length) == 3
+  ck num(regions[0]["lineCount"]) == 16 and num(regions[0]["modifiedLineNumber"]) == 1
+  ck $textOf(bands[0].querySelector(cstring".center")) == "16 hidden lines",
+     "the band says what it hides: " & $textOf(bands[0].querySelector(cstring".center"))
+  # The band spans the editor, gutter included (Monaco draws it as an
+  # overlay at its zone's place), level with the room its zone holds.
+  let band1 = bands[1]
+  ck abs(num(rectOf(band1.querySelector(cstring".center")).left) - num(rectOf(modRoot).left)) < 1.0,
+     "the band starts at the editor's left edge"
+  let holder1 = qsa(modRoot, ".view-zones .ct-diff-band-zone")[1]
+  ck abs(num(rectOf(band1.parentNode).top) - num(rectOf(holder1).top)) < 1.0,
+     "the band is drawn where its zone is"
+  ck not isNull(bands[0].querySelector(cstring":scope > .top")) and
+     not isNull(bands[0].querySelector(cstring":scope > .bottom[role=button]"))
+  ck isNull(qs(".modified-in-monaco-diff-editor .view-line[data-line=\"1\"]")),
+     "a hidden line is not drawn"
+  ck not isNull(qs(".modified-in-monaco-diff-editor .view-line[data-line=\"17\"]"))
+  # Word-level marks: only the changed word, in each revision.
+  let ins = qsa(modRoot, ".view-lines .char-insert")
+  var insText: seq[string] = @[]
+  for i in 0 ..< num(ins.length).int: insText.add $textOf(ins[i])
+  ck insText == @["c"], "only the inserted word is marked: " & $insText
+  ck num(qsa(modRoot, ".view-overlays .cdr.char-insert").length) == 1,
+     "an added-only line is marked whole-line"
+  let dels = qsa(modRoot, ".view-zones .line-delete .char-delete")
+  ck num(dels.length) == 1 and $textOf(dels[0]) == "b",
+     "the removed word is marked in the removed line"
+  # The removed line coloured by the old revision's tokens.
+  let delSpans = qsa(modRoot, ".view-zones .line-delete .view-line span[class^='mtk']")
+  var kinds: seq[string] = @[]
+  for i in 0 ..< num(delSpans.length).int:
+    for c in ($delSpans[i].className.to(cstring)).split(' '):
+      # Monaco's numbered token classes (`mtk1`, `mtk5`, …), what the
+      # review's checks count
+      if c.len > 3 and c.startsWith("mtk") and c[3] in {'0'..'9'} and c notin kinds:
+        kinds.add c
+  ck kinds.len >= 2, "the removed line has token colours: " & $kinds
+  # The old revision is a strip as wide as its numbers: the diff's options
+  # turn the glyph, decoration and folding lanes off.
+  let stripMargin = qs(".original-in-monaco-diff-editor .margin")
+  ck num(rectOf(stripMargin).width) < 40.0,
+     "the old revision's gutter is its numbers (" & $num(rectOf(stripMargin).width) & " px)"
+  # The old revision beside the new one, row for row: old line 20 (removed)
+  # beside its block, old line 21 beside new line 21.
+  let delRow = qs(".modified-in-monaco-diff-editor .view-zones .line-delete .view-line")
+  ck not isNull(gutterRow("original", 20)) and
+     abs(topOf(gutterRow("original", 20)) - topOf(delRow)) < 1.0,
+     "the removed line's old number is beside it"
+  ck abs(topOf(gutterRow("original", 21)) - topOf(gutterRow("modified", 21))) < 1.0
+  ck isNull(gutterRow("original", 1)), "the old revision hides the region too"
+  # A block the view adds to the new revision is matched in the old one.
+  let zone = jsNew()
+  zone["afterLineNumber"] = 22
+  zone["heightInPx"] = 50
+  zone["domNode"] = newDivEl()
+  let modFacade = diff.getModifiedEditor()
+  discard modFacade.changeViewZones(proc(acc: JsObject) = discard acc.addZone(zone))
+  await settle()
+  ck abs(topOf(gutterRow("original", 23)) - topOf(gutterRow("modified", 23))) < 1.0,
+     "a view zone has its spacer in the old revision"
+  ck abs(topOf(gutterRow("original", 31)) - topOf(gutterRow("modified", 32))) < 1.0,
+     "below an added line the rows still line up"
+  # A press on the lower handle reveals ten lines; the band says six.
+  let bottomHandle = bands[0].querySelector(cstring":scope > .bottom")
+  let br = rectOf(bottomHandle)
+  let bx = num(br.left) + num(br.width) / 2
+  let by = num(br.top) + num(br.height) / 2
+  await ctMouse("move", bx, by, "left", 1)
+  await ctMouse("down", bx, by, "left", 1)
+  await ctMouse("up", bx, by, "left", 1)
+  await settle()
+  let bands2 = qsa(modRoot, ".diff-hidden-lines")
+  ck $textOf(bands2[0].querySelector(cstring".center")) == "6 hidden lines",
+     "a press reveals ten lines: " & $textOf(bands2[0].querySelector(cstring".center"))
+  let r0 = diff["_diffModel"].get()["unchangedRegions"].get()[0]
+  ck num(r0["visibleLineCountBottom"].get()) == 10,
+     "the lower end shows ten (" & $num(r0["visibleLineCountTop"].get()) & "/" &
+     $num(r0["visibleLineCountBottom"].get()) & ")"
+  # A drag on the upper handle of the middle region, three lines down.
+  let topHandle = bands2[1].querySelector(cstring":scope > .top")
+  let tr = rectOf(topHandle)
+  let tx = num(tr.left) + num(tr.width) / 2
+  let ty = num(tr.top) + num(tr.height) / 2
+  let lh = float(sharedEditors[^1].lineHeight)   # the new revision's editor
+  await ctMouse("move", tx, ty, "left", 1)
+  await ctMouse("down", tx, ty, "left", 1)
+  await ctMouse("move", tx, ty + lh * 1.5, "left", 1)
+  await ctMouse("move", tx, ty + lh * 3.0, "left", 1)
+  await ctMouse("up", tx, ty + lh * 3.0, "left", 1)
+  await settle()
+  let r1 = diff["_diffModel"].get()["unchangedRegions"].get()[1]
+  ck num(r1["visibleLineCountTop"].get()) == 3,
+     "a drag of three line heights reveals three lines (" &
+     $num(r1["visibleLineCountTop"].get()) & ")"
+  var sizeChanges = 0
+  discard modFacade.onDidContentSizeChange(proc(e: JsObject) = inc sizeChanges)
+  # The unfold control shows the whole region: its band goes.
+  let unfold = qsa(modRoot, ".diff-hidden-lines")[0].querySelector(cstring".center a[role=button]")
+  discard unfold.click()
+  await settle()
+  ck num(qsa(modRoot, ".diff-hidden-lines").length) == 2, "the unfolded region has no band"
+  var stillHidden = false
+  for span in sharedEditors[^1].allHidden:
+    if span.first <= 15: stillHidden = true
+  ck not stillHidden, "lines 1-16 are shown again: " & $sharedEditors[^1].allHidden
+  await settle()
+  ck sizeChanges > 0, "the content grew, and the editor said so (onDidContentSizeChange)"
+  # Tab from the text reaches a zone's controls and then the bands, as from
+  # Monaco's text area (first in its overflow guard).
+  var tabOrder = false
+  let ta = qs(".modified-in-monaco-diff-editor textarea.inputarea")
+  let zoneEl = qs(".modified-in-monaco-diff-editor .view-zones")
+  let bandEl = qs(".modified-in-monaco-diff-editor .diff-hidden-lines .top")
+  {.emit: [tabOrder, " = !!(", ta, ".compareDocumentPosition(", zoneEl, ") & 4) && !!(", zoneEl, ".compareDocumentPosition(", bandEl, ") & 4);"].}
+  ck tabOrder, "the text area, then the zones, then the bands, in document order"
+  # One scroll position for both revisions.
+  discard modFacade.setScrollTop(100)
+  await settle()
+  ck num(diff.getOriginalEditor().getScrollTop()) == num(modFacade.getScrollTop()),
+     "the old revision scrolls with the new one"
+  endCase("the unified diff: collapsed regions and their handles, word marks, coloured removed lines, the old revision aligned")
+
 proc caseBracketsAndWheel() {.async.} =
   beginCase()
   var lines: seq[string] = @[]
@@ -674,6 +838,7 @@ proc main() {.async.} =
   await guarded(caseMultipleCursorsAndClipboard, "caseMultipleCursorsAndClipboard")
   await guarded(caseFindAndReplace, "caseFindAndReplace")
   await guarded(caseUnifiedDiff, "caseUnifiedDiff")
+  await guarded(caseUnifiedDiffRegions, "caseUnifiedDiffRegions")
   await guarded(caseBracketsAndWheel, "caseBracketsAndWheel")
   await guarded(caseScrollRangeAndViewState, "caseScrollRangeAndViewState")
   await guarded(caseHugeFile, "caseHugeFile")

@@ -67,6 +67,8 @@ import ../viewmodel/viewmodels/context_expansion
 import ../viewmodel/viewmodels/review_flow_overlay
 import ./review_diff_editor
 import diff_expansion
+import ./shared_diff_editor
+import ./shared_editor_flag
 
 from isonim/web/dom_api as isonim_dom_api import nil
 import isonim/web/web_renderer
@@ -1007,6 +1009,9 @@ proc scheduleDeletedLineTokens*(self: UnifiedDiffComponent; attempt: int) =
     proc(): ReviewDiffEditorRefs = (self.diffEditor, self.originalModel),
     cstring(editorHostId(self.id)), attempt)
 
+proc udHostElement(hostId: cstring): js
+  {.importjs: "document.getElementById(#)".}
+
 proc fitSectionHost(diffEditor: js; hostId: cstring; onFirstFit: proc())
   {.importjs: """(function(de, hostId, onFirstFit) {
     var host = document.getElementById(hostId);
@@ -1073,12 +1078,21 @@ proc initEditor(self: UnifiedDiffComponent) =
   let diffOptions = reviewDiffEditorOptions(
     theme, diffContextLineCount(pair), self.data.ui.fontSize,
     codeFontFamily(self.data.ui))
-  # Monaco's diff editor, under the developer setting `sharedEditor` too: the
-  # shared editor's diff (`shared_diff_editor`) does not yet do what the
-  # review and the VCS panel use of it — hidden unchanged regions and their
-  # boundaries, word-level marks, highlighted deleted lines, the flow's values
-  # (docs/shared-editor-parity.md, "The unified-diff view").
-  self.diffEditor = udCreateDiffEditor(hostId, diffOptions)
+  # Under the developer setting `sharedEditor` the diff is the shared
+  # editor's (`shared_diff_editor`): the same API, the same DOM, the same
+  # collapsed regions and boundaries, word-level marks, coloured deleted
+  # lines and value bands (docs/shared-editor-parity.md, "The unified-diff
+  # view").
+  self.diffEditor =
+    if sharedEditorEnabled(self.data.config):
+      let themeName = ($theme).toLowerAscii
+      newSharedDiffEditor(udHostElement(hostId), diffOptions,
+        self.data.ui.fontSize, $codeFontFamily(self.data.ui),
+        not (themeName.contains("light") or themeName.contains("white") or
+             themeName == "vs"),
+        $language)
+    else:
+      udCreateDiffEditor(hostId, diffOptions)
 
   # Two real models, each with the language resolved from the reviewed file.
   self.originalModel = udCreateModel(
