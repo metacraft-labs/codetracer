@@ -307,6 +307,10 @@ iterator items*(panel: OriginChainPanel): int =
 
 when defined(js):
   import std/dom
+  import ../viewmodel/input/dom_pointer
+
+  const ContinueChainOperation = "origin-chain.continue"
+    ## The operation the side panel's "Continue tracing" carries.
 
   # ---------------------------------------------------------------------
   # Per-row event handlers.
@@ -534,9 +538,14 @@ when defined(js):
         if continuing: cstring"Continuing…" else: cstring"Continue tracing"
       if continuing:
         continueBtn.setAttribute(cstring"disabled", cstring"true")
-      let continueHandler = proc(_: Event) =
-        vm.continueActiveChain()
-      continueBtn.addEventListener(cstring"click", continueHandler)
+      # The press is routed (Input-Routing §5.1): the button carries its
+      # operation, performed on the panel's chain.
+      continueBtn.setAttribute(cstring OperationAttribute,
+                               cstring ContinueChainOperation)
+      let continuedVm = vm
+      registerElementOperation(ContinueChainOperation, proc(p: ElementPress): bool =
+        continuedVm.continueActiveChain()
+        true)
       footer.appendChild(continueBtn)
     let pinBtn = document.createElement(cstring"button")
     pinBtn.innerText = cstring"Pin to scratchpad"

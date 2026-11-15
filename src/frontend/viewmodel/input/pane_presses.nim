@@ -45,7 +45,7 @@ const
     "event-log.sort", "variables.toggle-expand", "file-tree.activate",
     "point-list.select", "terminal-output.jump-to-write",
     "search.open-result", "requests.select", "low-level.go-to-source-line",
-    "low-level.toggle-sync"]
+    "low-level.toggle-sync", "variables.continue-origin-chain"]
     ## The operations this module performs: one per base pointer row of the
     ## session's panes (`pointer_rows`), and the ones their elements carry (a
     ## call search's result, `calltrace.jump-to-search-result`).
@@ -109,7 +109,15 @@ proc pressEventLog*(vm: EventLogVM; operation: string;
   else: false
 
 proc pressState*(vm: StateVM; operation: string; attr: AttributeReader): bool =
-  ## K27: a compound value's expander shows or hides its parts.
+  ## K27: a compound value's expander shows or hides its parts. The in-row
+  ## origin chain's "Continue tracing" (the operation its button carries)
+  ## walks the row's cut-off chain further.
+  if operation == "variables.continue-origin-chain":
+    let name = attr("data-variable-name")
+    if vm.isNil or name.len == 0:
+      return false
+    vm.continueOriginChain(name)
+    return true
   let path = attr("data-variable-path")
   if vm.isNil or path.len == 0 or operation != "variables.toggle-expand":
     return false

@@ -211,6 +211,7 @@ proc applyAction*(session: SessionViewModel; msg: JsonNode): bool =
                      a.arg("location", store_types.Location()))
     of "jumpToHistoryEntry": v.jumpToHistoryEntry(a.arg("ticks", 0'i64))
     of "loadMore": v.loadMore(a.arg("path", ""))
+    of "continueOriginChain": v.continueOriginChain(a.arg("expression", ""))
     else: return false
 
   of "debugControls":
@@ -409,6 +410,8 @@ proc applyAction*(session: SessionViewModel; msg: JsonNode): bool =
           v.onSeekToHop(hop)
           return true
       return false
+    of "continueActiveChain":
+      v.continueActiveChain()
     else: return false
 
   of "pointList":

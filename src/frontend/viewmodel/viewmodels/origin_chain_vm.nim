@@ -430,6 +430,9 @@ proc continueRowChain*(vm: OriginChainVM; expression: string) =
 
 proc continueActiveChain*(vm: OriginChainVM) =
   ## "Continue tracing" in the side panel: walk its cut-off chain further.
+  ## A mirror's (a VS Code panel) is the primary's to run.
+  if vm.actionSink.forwards("originChain", "continueActiveChain", newJObject()):
+    return
   let shown = vm.activeChain.val
   if shown.isNone:
     return

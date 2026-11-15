@@ -691,6 +691,16 @@ proc loadMore*(vm: StateVM; path: string) =
     onError = proc(message: string) =
       done())
 
+proc continueOriginChain*(vm: StateVM; expression: string) =
+  ## "Continue tracing" under the row `expression`'s cut-off chain (spec
+  ## §5.3.1): walk it further, in place. A mirror's (a VS Code panel) is the
+  ## primary's to run, over its connection to the replay.
+  if vm.actionSink.forwards("state", "continueOriginChain",
+      %*{"expression": expression}):
+    return
+  if not vm.onContinueOriginChainProc.isNil:
+    vm.onContinueOriginChainProc(expression)
+
 proc toggleHistory*(vm: StateVM; expression: string) =
   if vm.actionSink.forwards("state", "toggleHistory",
       %*{"expression": expression}):

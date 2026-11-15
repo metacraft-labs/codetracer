@@ -50,6 +50,7 @@ import ../../viewmodels/[
   command_palette_vm,
 ]
 import ../../views/[state_view, isonim_state_view, isonim_scratchpad_view]
+from ../../input/pane_presses import pressState
 
 proc drain() =
   ## Flush whatever the reactive layer resolved synchronously.
@@ -1837,6 +1838,19 @@ proc restOfChainPayload(variable: string): JsonNode =
     "confidence": 0.95,
   }
 
+proc pressContinue(state: StateVM; button: MockNode): bool =
+  ## A press on the in-row "Continue tracing": the view holds no handler; the
+  ## press is routed to the operation the button carries
+  ## (`data-ct-operation`), performed over the row's `data-variable-name`
+  ## as the DOM front-ends' pointer routing performs it.
+  let reader = proc(name: string): string =
+    var n = button
+    while not n.isNil:
+      if name in n.attributes: return n.attributes[name]
+      n = n.parent
+    ""
+  pressState(state, button.attributes.getOrDefault("data-ct-operation", ""), reader)
+
 suite "Continue tracing: a cut-off chain goes on from where it stopped (spec §5.3.1)":
 
   test "a cut-off row shows Continue tracing; a click appends the rest and the button goes":
@@ -1858,7 +1872,7 @@ suite "Continue tracing: a cut-off chain goes on from where it stopped (spec §5
 
       w.mock.clearReceivedCommands()
       w.mock.expect("ct/originChain", restOfChainPayload("c"))
-      more.fireEvent("click")
+      check pressContinue(w.state, more)
       drain()
       let sent = originChainRequests(w.mock)
       check sent.len == 1
@@ -1885,7 +1899,7 @@ suite "Continue tracing: a cut-off chain goes on from where it stopped (spec §5
       let more = findByClass(findRowNamed(panel, "c"), "ct-origin-continue-chain")
       w.mock.expect("ct/originChain", %*{"success": false,
         "message": "the replay no longer holds the point this chain continues from"})
-      more.fireEvent("click")
+      check pressContinue(w.state, more)
       drain()
       let blocks = findAllByClass(panel, "ct-origin-inline-chain")
       check blocks.len == 1 and

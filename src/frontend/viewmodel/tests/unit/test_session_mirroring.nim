@@ -940,6 +940,24 @@ suite "a mirror whose panels act on the primary (a VS Code webview)":
       link.settle()
       ck mock.findCommand("ct/history-jump").isNone
 
+      # "Continue tracing" in the mirror's side panel and under a mirrored
+      # State row: the primary goes on with the chain, over its connection.
+      var primaryContinued: seq[string] = @[]
+      primary.stateVM.onContinueOriginChainProc = proc(expression: string) =
+        primaryContinued.add expression
+      mirror.session.stateVM.continueOriginChain("c")
+      link.settle()
+      ck primaryContinued == @["c"]
+      var cut = primary.originChainVM.activeChain.val.get
+      cut.truncated = true
+      cut.continuationToken = some("next")
+      primary.originChainVM.activeChain.val = some(cut)
+      link.settle()
+      mock.clearReceivedCommands()
+      origin.continueActiveChain()
+      link.settle()
+      ck mock.findCommand("ct/originChain").isSome
+
       # An Event Log boundary chip clicked in the mirror: its counterpart is
       # looked up on the primary's connection (the mirror's is inert).
       let marker = MarkerEventRow(eventIndex: 3, markerId: 1,

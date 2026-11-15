@@ -570,13 +570,6 @@ proc continueChainText(vm: StateVM; item: VariableViewState): string =
   else:
     "Continue tracing"
 
-proc onContinueChain(vm: StateVM; item: proc(): VariableViewState): proc() =
-  ## Reads `item()` when clicked, so a reused row continues the chain it
-  ## shows.
-  result = proc() =
-    if not vm.onContinueOriginChainProc.isNil:
-      vm.onContinueOriginChainProc(item().name)
-
 proc hopLineText(hop: OriginHop): string =
   ## Single-line preview the in-row block emits per hop — matches the
   ## semantics the side-panel renders for the same data shape.
@@ -889,9 +882,12 @@ proc renderVariableRow*[R, N](r: R; vm: StateVM;
           text "Show in side panel"
         # "Continue tracing" — a chain cut off by the engine's limits goes
         # on from where it stopped (§5.3.1); the new hops join the block.
+        # The press is routed (Input-Routing §5.1): the button carries its
+        # operation, performed on the row its `data-variable-name` names
+        # (`pane_presses.pressState`).
         button(class = "ct-origin-continue-chain ct-button-text-xs-tertiary",
                display = continueChainDisplay(vm, item()),
-               onclick = onContinueChain(vm, item)):
+               `data-ct-operation` = "variables.continue-origin-chain"):
           text continueChainText(vm, item())
       # History container is a sibling of atomOrCompoundClass — placed
       # outside it so that expanding history does not push the name/value

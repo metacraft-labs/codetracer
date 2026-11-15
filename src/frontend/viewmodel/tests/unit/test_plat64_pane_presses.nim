@@ -23,8 +23,9 @@ import isonim/testing/mock_dom
 
 import ../../backend/[backend_service, mock_backend]
 import ../../store/[replay_data_store, types]
-import ../../viewmodels/[calltrace_vm, point_list_vm]
-import ../../views/[isonim_calltrace_view, isonim_point_list_view]
+import ../../viewmodels/[calltrace_vm, point_list_vm, state_vm]
+import ../../views/[isonim_calltrace_view, isonim_point_list_view,
+                    isonim_state_view]
 import ../../input/pane_presses
 import ../../keymap/[base_keymaps, context_keys, editing_keymap, keymap_router,
                      scope_path, user_keymap]
@@ -138,6 +139,34 @@ suite "a press on a session pane's element runs its pointer row":
       check op == "point-list.select"
       check pressPointList(vm, op, readerOf(rows[1]))
       check vm.selectedPoint.val == some(1)
+      dispose()
+
+  test "Variables: \"Continue tracing\" under a row's chain is the operation its button carries":
+    # The in-row origin chain's "Continue tracing" carried a click handler of
+    # its own, which no keymap could reach (Input-Routing §5.1). It carries
+    # its operation now, performed on the row its `data-variable-name` names.
+    createRoot proc(dispose: proc()) =
+      let mock = newMockBackendService(autoRespond = true)
+      let store = createReplayDataStore(mock.toBackendService())
+      let vm = createStateVM(store)
+      var continued: seq[string] = @[]
+      vm.onContinueOriginChainProc = proc(expression: string) =
+        continued.add expression
+      store.locals.locals.val = @[
+        Variable(name: "x", value: "1", typeName: "int"),
+        Variable(name: "c", value: "10", typeName: "int")]
+      let panel = renderStatePanel[MockRenderer, MockNode](MockRenderer(), vm)
+      let buttons = panel.allByClass("ct-origin-continue-chain")
+      check buttons.len == 2
+      if buttons.len == 2:
+        let op = buttons[1].attributes.getOrDefault("data-ct-operation", "")
+        check op == "variables.continue-origin-chain"
+        check op in SessionPressOperations
+        # The view holds no handler: a click event on the button does nothing.
+        fireEvent(buttons[1], "click")
+        check continued.len == 0
+        check pressState(vm, op, readerOf(buttons[1]))
+        check continued == @["c"]
       dispose()
 
   test "every procedure answers only its own operation":
