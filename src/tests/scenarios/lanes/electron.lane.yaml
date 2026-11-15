@@ -294,6 +294,8 @@ applicable:
   - ../session-chrome/overflowing-session-tabs-list-in-chevron.yaml
   - ../session-chrome/menu-highlights-on-hover-and-closes-outside.yaml
   - ../shell/recorded-build-marks-and-opens-recording.yaml
+  - ../languages/tolk-opens-at-entry.yaml
+  - ../languages/tolk-call-trace-and-stepping.yaml
   # --- pw5 deepreview ---
   - ../deepreview/boundary-drag-reveals-what-it-crosses.yaml
   - ../deepreview/boundary-is-operable-from-the-keyboard.yaml

@@ -1,0 +1,29 @@
+scenario: 1
+name: languages/tolk-call-trace-and-stepping
+pack: codetracer
+summary: >-
+  In the Tolk recording the call trace lists `compute`; from the entry at
+  flow_test.tolk line 1 Next moves the replay to line 11, and Continue runs
+  on to line 7.
+
+stage:
+  - use: record-program
+    with: { program: ../codetracer-ton-recorder/test-programs/tolk/flow_test.tolk }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 240s }
+  - click: 'pane-tab[label="CALLTRACE"]'
+  - wait: { until: { at: call-trace, assert: 'has-call("compute")' }, timeout: 60s }
+  - expect:
+      at: call-trace
+      assert:
+        - 'has-call("compute")'
+  - wait: { until: { at: status-line, location: { matches: "flow_test\\.tolk:1#" } }, timeout: 60s }
+  - click: 'toolbar/toolbar-button[label="next-image"]'
+    settle: false
+  - wait: { until: { at: status-line, location: { matches: "flow_test\\.tolk:11#" } }, timeout: 60s }
+  - wait: replay-idle
+  - click: 'toolbar/toolbar-button[label="continue-image"]'
+    settle: false
+  - wait: { until: { at: status-line, location: { matches: "flow_test\\.tolk:7#" } }, timeout: 60s }
