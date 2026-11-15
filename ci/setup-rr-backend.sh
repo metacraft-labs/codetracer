@@ -232,8 +232,12 @@ build_rr_support() {
 		--print-build-logs ||
 		{
 			echo "nix build failed, falling back to cargo build via nix develop..." >&2
+			# Through the git CLI: cargo's built-in fetcher reads none of the
+			# job's GIT_CONFIG_* credentials, and lldb-sys is a private git
+			# dependency ("failed to acquire username/password from local
+			# configuration" once the runner's cargo cache lacked its rev).
 			nix develop "${CLONE_DIR}" --command \
-				bash -c "cd '${CLONE_DIR}' && cargo build"
+				bash -c "cd '${CLONE_DIR}' && CARGO_NET_GIT_FETCH_WITH_CLI=true cargo build"
 		}
 
 	# Verify the binary exists
