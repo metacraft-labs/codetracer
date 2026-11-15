@@ -460,7 +460,9 @@ proc facadeOf*(ed: SharedEditor): JsObject =
   f["getOptions"] = proc(): JsObject =
     result = jsNew()
     result["get"] = proc(id: int): JsObject = ed.optionValue(id)
-  f["getLayoutInfo"] = proc(): JsObject = ed.layoutInfoJs
+  f["getLayoutInfo"] = proc(): JsObject =
+    ed.flushRender()
+    ed.layoutInfoJs
   f["getConfiguration"] = proc(): JsObject =
     result = jsNew()
     result["layoutInfo"] = ed.layoutInfoJs
@@ -563,6 +565,7 @@ proc facadeOf*(ed: SharedEditor): JsObject =
   f["getTopForLineNumber"] = proc(line: int): int = ed.topForLine(line)
   f["getTopForPosition"] = proc(line, col: int): int = ed.topForLine(line)
   f["getOffsetForColumn"] = proc(line, col: int): int =
+    ed.flushRender()
     let t = ed.lineText(line)
     int(ed.xOfByteCol(line, byteColumnOf(t, col)))
   f["getScrolledVisiblePosition"] = proc(p: JsObject): JsObject =
@@ -663,7 +666,7 @@ proc facadeOf*(ed: SharedEditor): JsObject =
   f["onDidFocusEditorWidget"] = proc(h: JsObject): JsObject = ed.on("focus", h)
   f["onDidBlurEditorWidget"] = proc(h: JsObject): JsObject = ed.on("blur", h)
   f["onDidLayoutChange"] = proc(h: JsObject): JsObject = ed.on("layout", h)
-  f["onDidContentSizeChange"] = proc(h: JsObject): JsObject = ed.on("layout", h)
+  f["onDidContentSizeChange"] = proc(h: JsObject): JsObject = ed.on("contentSize", h)
   f["onDidChangeModel"] = proc(h: JsObject): JsObject = ed.on("model", h)
   f["onDidDispose"] = proc(h: JsObject): JsObject = ed.on("dispose", h)
   f["onDidChangeConfiguration"] = proc(h: JsObject): JsObject = ed.on("configuration", h)

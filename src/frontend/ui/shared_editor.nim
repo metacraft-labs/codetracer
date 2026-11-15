@@ -48,6 +48,7 @@ import ../viewmodel/editor/[selection, document_version, change_set]
 import ../viewmodel/input/editor_pointer
 import ../viewmodel/keymap/[editing_keymap, context_keys, base_keymaps]
 import ../view_vocabulary/editor_dom_frame
+from ../view_vocabulary/diff_regions import mergeSpans
 import ../viewmodel/viewmodels/find_vm
 import ../viewmodel/editor/find_match
 import ../tui/app/syntax/[lexical, token_class]
@@ -157,6 +158,7 @@ type
     id: int
     afterLine: int
     heightPx: int
+    order: int
     domNode: JsObject
     marginNode: JsObject
     spec: JsObject
@@ -235,6 +237,20 @@ type
     keyInterceptor*: proc(name: string): bool
       ## A widget that owns some keys while it is open (the suggestion list):
       ## asked first, by the key router, for a key in the text area.
+    onZonesChanged*: proc()
+      ## Told after a view zone is added, removed or laid out again (the
+      ## unified diff aligns the old revision with the new one's zones).
+    hiddenAreas*: seq[tuple[first, last: int]]
+      ## Monaco's `setHiddenAreas`: 0-based lines drawn as if folded away,
+      ## with no fold control (the unified diff's collapsed regions).
+    onHiddenLine*: proc(line1: int): bool
+      ## Asked when the caret is revealed on a hidden area's line: the owner
+      ## of the areas shows it (Monaco's diff editor reveals the region).
+    monacoGutter*: bool
+      ## Size the gutter from Monaco's `glyphMargin`, `folding` and
+      ## `lineDecorationsWidth` options (the unified diff's editors); the
+      ## source editor keeps its fixed lanes.
+    contentSizeSeen: tuple[h, w: int]
     semanticVersion*: DocumentVersion
     semanticSpans*: Table[int, seq[tuple[fromCol, toCol: int; cls: string]]]
       ## A language server's semantic tokens on the drawn lines, by 0-based
@@ -338,6 +354,22 @@ proc contextAt(ed: SharedEditor; line0: int; budgetMs = 30.0): tuple[ctx: string
       return (ed.contexts[ed.contextsValid], false)
   (ed.contexts[line0], true)
 
+proc lineTokenRuns*(ed: SharedEditor; line0: int; lt: string): seq[TokenRun] =
+  ## Line `line0`'s tokens (its text `lt`).
+  if ed.lexer != lxNone and lt.len > 0:
+    # The line's tokens from the tokenizer's cache (`contextAt` keeps the
+    # runs of every line it has passed); a line past the background
+    # budget is tokenized from the nearest state.
+    let (ctx0, exact) = ed.contextAt(line0 + 1)
+    if exact and line0 < ed.lineRuns.len:
+      result = ed.lineRuns[line0]
+    else:
+      var (ctx, _) = ed.contextAt(line0)
+      discard ctx0
+      result = tokenRuns(ed.lexer, lt, ctx)
+  else:
+    result = @[TokenRun(text: lt, class: tcPlain)]
+
 proc tokenColour*(ed: SharedEditor; cls: TokenClass): string =
   let t = tokenClassToken(cls)
   DesignTokenHex[t][if ed.darkTheme: dmDark else: dmLight]
@@ -346,13 +378,25 @@ proc tokenColour*(ed: SharedEditor; cls: TokenClass): string =
 # Geometry
 # ---------------------------------------------------------------------------
 
+proc allHidden*(ed: SharedEditor): seq[tuple[first, last: int]] =
+  ## The lines not drawn: the folds' and the hidden areas'.
+  ed.ensureIndex()
+  let folded = hiddenRanges(ed.index, ed.doc.state.doc, ed.doc.state.folded)
+  if ed.hiddenAreas.len == 0: return folded
+  var areas: seq[tuple[first, last: int]] = @[]
+  for a in ed.hiddenAreas:
+    let first = max(0, a.first)
+    let last = min(ed.index.lineCount - 1, a.last)
+    if last >= first: areas.add (first, last)
+  mergeSpans(folded, areas)
+
 proc layoutNow(ed: SharedEditor): VerticalLayout =
   ed.ensureIndex()
   var zs: seq[ZoneSpec] = @[]
   for z in ed.zones:
-    zs.add ZoneSpec(id: z.id, afterLine: z.afterLine, heightPx: z.heightPx)
-  let hidden = hiddenRanges(ed.index, ed.doc.state.doc, ed.doc.state.folded)
-  verticalLayout(ed.index.lineCount, ed.lineHeight, hidden, zs)
+    zs.add ZoneSpec(id: z.id, afterLine: z.afterLine, heightPx: z.heightPx,
+                    order: z.order)
+  verticalLayout(ed.index.lineCount, ed.lineHeight, ed.allHidden, zs)
 
 proc topForLine*(ed: SharedEditor; line1: int): int =
   ed.layoutNow.topOfLine(line1)
@@ -394,6 +438,14 @@ proc requestRender*(ed: SharedEditor) =
     ed.renderQueued = false
     if not ed.disposed: ed.render())
 
+proc flushRender*(ed: SharedEditor) =
+  ## Draw a frame that is waiting now: a caller about to MEASURE the drawn
+  ## text (Monaco's `getOffsetForColumn`, its layout info) reads what Monaco,
+  ## which lays out synchronously, would answer.
+  if ed.renderQueued and not ed.disposed:
+    ed.renderQueued = false
+    ed.render()
+
 proc measureFont(ed: SharedEditor) =
   ## The editor font's cell width, measured in the editor's own element.
   if ed.measureSpan.isNil: return
@@ -412,7 +464,9 @@ proc spanEl(ed: SharedEditor; s: FrameSpan): JsObject =
   let el = createEl("span")
   var cls = ""
   if s.kind == skText:
-    cls = "mtk-" & $s.tokenClass
+    # Monaco's numbered token class first (`mtk1` is its default colour),
+    # then the token kind by name.
+    cls = "mtk" & $(ord(s.tokenClass) - ord(tcPlain) + 1) & " mtk-" & $s.tokenClass
     if s.tokenClass != tcPlain:
       el.setStyle("color", toCs(ed.tokenColour(s.tokenClass)))
   for c in s.classes:
@@ -422,6 +476,21 @@ proc spanEl(ed: SharedEditor; s: FrameSpan): JsObject =
   el.setAttr("data-kind", cstring($s.kind))
   el.appendChild(createText(cstring(s.text)))
   el
+
+proc lineContentElement*(ed: SharedEditor; line1: int;
+                         inline: seq[tuple[fromCol, toCol: int; cls: string]] = @[]): JsObject =
+  ## Line `line1` as the renderer draws it inside a `.view-line` — its
+  ## tokens, coloured, with `inline` classes over byte columns — for a block
+  ## that shows this editor's lines elsewhere (the unified diff's removed
+  ## lines, drawn in the new revision).
+  ed.ensureIndex()
+  let line0 = clamp(line1 - 1, 0, ed.index.lineCount - 1)
+  let lt = ed.index.lineText(ed.doc.state.doc, line0)
+  var deco = LineDecorations()
+  deco.inline = inline
+  result = createEl("span")
+  for sp in lineSpans(lt, ed.lineTokenRuns(line0, lt), deco):
+    result.appendChild(ed.spanEl(sp))
 
 proc caretOffsets(ed: SharedEditor): seq[int] =
   for r in ed.doc.state.selection.ranges: result.add r.head
@@ -478,6 +547,22 @@ proc codiconFontPresent(): bool =
     codiconProbe = (if present: 1 else: 0)
   codiconProbe == 1
 
+proc optInt(ed: SharedEditor; name: string; dflt: int): int =
+  if ed.options.isNil or isNilOrUndef(ed.options[cstring(name)]): return dflt
+  let v = ed.options[cstring(name)]
+  var isBool = false
+  {.emit: [isBool, " = (typeof ", v, " === 'boolean');"].}
+  if isBool: (if v.to(bool): dflt else: 0)
+  else: int(jsNum(v))
+
+proc glyphPx(ed: SharedEditor): int =
+  if ed.monacoGutter: ed.optInt("glyphMargin", GlyphMarginPx) else: GlyphMarginPx
+proc decoPx(ed: SharedEditor): int =
+  if ed.monacoGutter: ed.optInt("lineDecorationsWidth", LineDecorationsPx)
+  else: LineDecorationsPx
+proc foldPx(ed: SharedEditor): int =
+  if ed.monacoGutter: ed.optInt("folding", FoldingPx) else: FoldingPx
+
 proc renderGutterLine(ed: SharedEditor; line1, top: int; deco: LineDecorations;
                       active, foldable, folded: bool;
                       highlighted = false): JsObject =
@@ -507,27 +592,27 @@ proc renderGutterLine(ed: SharedEditor; line1, top: int; deco: LineDecorations;
     for c in deco.lineDecoClasses: lcls.add " " & c
     ldeco.setClass(cstring(lcls))
     ldeco.setStyle("position", "absolute")
-    ldeco.setStyle("left", cstring($(ed.gutterPx - LineDecorationsPx - FoldingPx) & "px"))
-    ldeco.setStyle("width", cstring($LineDecorationsPx & "px"))
+    ldeco.setStyle("left", cstring($(ed.gutterPx - ed.decoPx - ed.foldPx) & "px"))
+    ldeco.setStyle("width", cstring($ed.decoPx & "px"))
     ldeco.setStyle("height", cstring($ed.lineHeight & "px"))
     ldeco.setAttr("data-ct-target", "decorations")
     row.appendChild(ldeco)
   let num = createEl("div")
   num.setClass(cstring(if active: "line-numbers active-line-number" else: "line-numbers"))
   num.setStyle("position", "absolute")
-  num.setStyle("left", cstring($GlyphMarginPx & "px"))
-  num.setStyle("width", cstring($(ed.gutterPx - GlyphMarginPx - LineDecorationsPx - FoldingPx) & "px"))
+  num.setStyle("left", cstring($ed.glyphPx & "px"))
+  num.setStyle("width", cstring($(ed.gutterPx - ed.glyphPx - ed.decoPx - ed.foldPx) & "px"))
   num.setStyle("height", cstring($ed.lineHeight & "px"))
   num.setStyle("line-height", cstring($ed.lineHeight & "px"))
   num.setAttr("data-ct-target", "number")
   num.setHtml(ed.numberLabel(line1))
   row.appendChild(num)
-  if foldable:
+  if foldable and ed.foldPx > 0:
     let fold = createEl("div")
     fold.setStyle("position", "absolute")
-    fold.setStyle("left", cstring($(ed.gutterPx - FoldingPx) & "px"))
+    fold.setStyle("left", cstring($(ed.gutterPx - ed.foldPx) & "px"))
     fold.setStyle("top", "0px")
-    fold.setStyle("width", cstring($FoldingPx & "px"))
+    fold.setStyle("width", cstring($ed.foldPx & "px"))
     fold.setStyle("height", cstring($ed.lineHeight & "px"))
     fold.setAttr("data-ct-target", "fold")
     fold.setClass(cstring(if folded: "cldr codicon codicon-folding-collapsed ct-fold-toggle"
@@ -584,13 +669,14 @@ proc render*(ed: SharedEditor) =
   # The gutter is as wide as the largest line number needs.
   let chars = max(2, len($ed.index.lineCount))
   ed.numberChars = chars
-  ed.gutterPx = GlyphMarginPx + int(ceil(ed.charWidth * float(chars + 1))) +
-                LineDecorationsPx + FoldingPx
+  let lanes = ed.glyphPx + ed.decoPx + ed.foldPx
+  ed.gutterPx = int(ceil(ed.charWidth * float(chars + 1))) + lanes
   if not ed.options.isNil and not isNilOrUndef(ed.options["lineNumbersMinChars"]):
     let minChars = int(jsNum(ed.options["lineNumbersMinChars"]))
-    ed.gutterPx = max(ed.gutterPx, GlyphMarginPx +
-      int(ceil(ed.charWidth * float(minChars + 1))) + LineDecorationsPx + FoldingPx)
+    ed.gutterPx = max(ed.gutterPx,
+      int(ceil(ed.charWidth * float(minChars + 1))) + lanes)
   ed.margin.setStyle("width", cstring($ed.gutterPx & "px"))
+  ed.glyphLayer.setStyle("display", if ed.glyphPx == 0: "none" else: "block")
   ed.scrollable.setStyle("left", cstring($ed.gutterPx & "px"))
   ed.scrollable.setStyle("width", cstring($(max(0, ed.width - ed.gutterPx)) & "px"))
   ed.linesContent.setStyle("top", cstring($(-ed.scrollTop) & "px"))
@@ -644,21 +730,7 @@ proc render*(ed: SharedEditor) =
        ed.semanticSpans.hasKey(line0):
       for sp in ed.semanticSpans[line0]:
         deco.inline.add (sp.fromCol, sp.toCol, sp.cls)
-    var runs: seq[TokenRun] = @[]
-    if ed.lexer != lxNone and lt.len > 0:
-      # The line's tokens from the tokenizer's cache (`contextAt` keeps the
-      # runs of every line it has passed); a line past the background
-      # budget is tokenized from the nearest state.
-      let (ctx0, exact) = ed.contextAt(line0 + 1)
-      if exact and line0 < ed.lineRuns.len:
-        runs = ed.lineRuns[line0]
-      else:
-        var (ctx, _) = ed.contextAt(line0)
-        discard ctx0
-        runs = tokenRuns(ed.lexer, lt, ctx)
-    else:
-      runs = @[TokenRun(text: lt, class: tcPlain)]
-    let spans = lineSpans(lt, runs, deco)
+    let spans = lineSpans(lt, ed.lineTokenRuns(line0, lt), deco)
     let vl = createEl("div")
     vl.setClass("view-line")
     vl.setAttr("data-line", cstring($line1))
@@ -834,8 +906,16 @@ proc render*(ed: SharedEditor) =
       w.node.setStyle("transform", "none")
   # Zones: positioned under their anchor lines.
   for z in ed.zones:
+    let hiddenZone = z.afterLine >= 1 and lay.hidden.isHidden(z.afterLine - 1)
+    # Monaco's `IViewZone.onDomNodeTop`: where the zone is in the view (an
+    # overlay that follows it, such as the diff's collapsed-region band).
+    if not z.spec.isNil and hasFn(z.spec, "onDomNodeTop"):
+      let top = if hiddenZone: -1_000_000
+                else: lay.zoneTop(ZoneSpec(id: z.id, afterLine: z.afterLine,
+                                           heightPx: z.heightPx)) - ed.scrollTop
+      discard callFn(z.spec["onDomNodeTop"], toJs(top))
     if z.domNode.isNil: continue
-    if z.afterLine >= 1 and lay.hidden.isHidden(z.afterLine - 1):
+    if hiddenZone:
       z.domNode.setStyle("display", "none")
       continue
     let zt = lay.zoneTop(ZoneSpec(id: z.id, afterLine: z.afterLine,
@@ -869,6 +949,17 @@ proc render*(ed: SharedEditor) =
   ed.root.setAttr("data-ct-mode", cstring($ed.doc.state.mode))
   ed.root.setAttr("data-ct-keymap", cstring($ed.doc.model))
   ed.root.setAttr("data-ct-read-only", cstring(if ed.readOnly: "true" else: "false"))
+  # Monaco's `onDidContentSizeChange`: a collapsed region opened, a zone
+  # added — after this frame, so a listener that lays the editor out again
+  # does not draw inside the frame that told it.
+  let size = (ch, ed.contentWidthPx)
+  if size != ed.contentSizeSeen:
+    ed.contentSizeSeen = size
+    let ev = jsNew()
+    ev["contentHeight"] = ch
+    ev["contentWidth"] = ed.contentWidthPx
+    queueRender(proc() =
+      if not ed.disposed: ed.fire("contentSize", ev))
   ed.fire("render", jsNew())
 
 # ---------------------------------------------------------------------------
@@ -1099,6 +1190,10 @@ proc revealLine*(ed: SharedEditor; line1: int; center = false) =
 proc revealOffset*(ed: SharedEditor; offset: int; center = false) =
   ed.ensureIndex()
   let l0 = ed.index.lineOfOffset(offset)
+  # A caret on a hidden area's line: its owner shows it.
+  if ed.hiddenAreas.len > 0 and not ed.onHiddenLine.isNil and
+     ed.hiddenAreas.isHidden(l0):
+    discard ed.onHiddenLine(l0 + 1)
   # A caret inside a fold opens it (Monaco reveals hidden lines).
   let hidden = hiddenRanges(ed.index, ed.doc.state.doc, ed.doc.state.folded)
   if hidden.isHidden(l0):
@@ -1817,7 +1912,10 @@ proc newSharedEditor*(host: JsObject; text, path, language: string;
   let zl = createEl("div")
   zl.setClass("view-zones")
   zl.setAttr("role", "presentation")
-  zl.styleBox([("position", "absolute"), ("width", "100%")])
+  # Above the text layer, whose box spans the document: a zone's own
+  # controls (the diff's boundary handles, a loop slider) take the pointer,
+  # and the press still bubbles to the editor as Monaco's does.
+  zl.styleBox([("position", "absolute"), ("width", "100%"), ("z-index", "1")])
   lc.appendChild(zl)
   ed.zonesLayer = zl
   let ll = createEl("div")
@@ -1856,7 +1954,10 @@ proc newSharedEditor*(host: JsObject; text, path, language: string;
                ("outline", "none"), ("opacity", "0"), ("overflow", "hidden"),
                ("white-space", "pre"), ("z-index", "-10"),
                ("font-size", "inherit"), ("font-family", "inherit")])
-  guard.appendChild(ta)
+  # First in the overflow guard, as Monaco's text area is: Tab from the text
+  # reaches the controls of the view zones and then the overlay widgets (the
+  # diff's boundary handles) before it leaves the editor.
+  discard guard.insertBefore(ta, guard.firstChild)
   ed.textarea = ta
   let vbar = createEl("div")
   vbar.setClass("scrollbar vertical")
@@ -1965,7 +2066,11 @@ proc newSharedEditor*(host: JsObject; text, path, language: string;
   ed
 
 proc observeSize*(ed: SharedEditor) =
-  ## Re-measure when the host's size changes (Monaco's `automaticLayout`).
+  ## Re-measure when the host's size changes (Monaco's `automaticLayout`),
+  ## and measure now: Monaco lays out as it is created, and a caller that
+  ## reads the layout right away (the review's value bands size their
+  ## columns from `getLayoutInfo().contentWidth`) must not read a zero width.
+  ed.measureHost()
   let cb = proc() = ed.measureHost()
   let hostEl = ed.host
   let rootEl = ed.root
@@ -2026,8 +2131,10 @@ proc addZone*(ed: SharedEditor; spec: JsObject): int =
     ed.marginOverlays.parentNode.appendChild(mnode)
   ed.zones.add ZoneRec(id: ed.nextZoneId,
     afterLine: int(jsNum(spec["afterLineNumber"])), heightPx: h,
+    order: (if isNilOrUndef(spec["ctOrder"]): 0 else: int(jsNum(spec["ctOrder"]))),
     domNode: (if isNilOrUndef(node): nil else: node), marginNode: mnode,
     spec: spec)
+  if not ed.onZonesChanged.isNil: ed.onZonesChanged()
   ed.nextZoneId
 
 proc removeZone*(ed: SharedEditor; id: int) =
@@ -2037,7 +2144,9 @@ proc removeZone*(ed: SharedEditor; id: int) =
       if not z.domNode.isNil: z.domNode.removeEl()
       if not z.marginNode.isNil: z.marginNode.removeEl()
     else: kept.add z
+  let changed = kept.len != ed.zones.len
   ed.zones = kept
+  if changed and not ed.onZonesChanged.isNil: ed.onZonesChanged()
 
 proc layoutZone*(ed: SharedEditor; id: int) =
   for z in ed.zones.mitems:
@@ -2047,6 +2156,7 @@ proc layoutZone*(ed: SharedEditor; id: int) =
       elif not isNilOrUndef(spec["heightInLines"]):
         z.heightPx = int(round(jsNum(spec["heightInLines"]) * float(ed.lineHeight)))
       z.afterLine = int(jsNum(spec["afterLineNumber"]))
+  if not ed.onZonesChanged.isNil: ed.onZonesChanged()
 
 proc zoneCount*(ed: SharedEditor): int = ed.zones.len
 
@@ -2118,6 +2228,27 @@ proc deltaDecorationsJs*(ed: SharedEditor; old, added: JsObject): JsObject =
   result = jsArray()
   for id in ids: result.jsPush(toJs(cstring(id)))
   ed.requestRender()
+
+proc deltaDecorationOffsets*(ed: SharedEditor; old: seq[string];
+                             reqs: seq[DecoRequest]): seq[string] =
+  ## `deltaDecorations` over the core's byte offsets.
+  ed.decos.followDocument(ed.doc)
+  result = ed.decos.deltaDecorations(old, reqs)
+  ed.requestRender()
+
+proc lineStartOffset*(ed: SharedEditor; line0: int): int =
+  ed.ensureIndex()
+  ed.index.lineStart(clamp(line0, 0, ed.index.lineCount - 1))
+
+proc lineEndOffset*(ed: SharedEditor; line0: int): int =
+  ed.ensureIndex()
+  ed.index.lineEnd(clamp(line0, 0, ed.index.lineCount - 1))
+
+type ZoneInfo* = tuple[id, afterLine, heightPx, order: int]
+
+proc zoneInfos*(ed: SharedEditor): seq[ZoneInfo] =
+  ## The view zones, in the order they were added.
+  for z in ed.zones: result.add (z.id, z.afterLine, z.heightPx, z.order)
 
 proc rangeJs(ed: SharedEditor; a, b: int): JsObject =
   let p1 = ed.positionAt(a)

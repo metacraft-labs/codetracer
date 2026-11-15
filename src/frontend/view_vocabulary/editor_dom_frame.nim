@@ -443,6 +443,10 @@ type
     id*: int
     afterLine*: int
     heightPx*: int
+    order*: int
+      ## Among zones after one line, the lower `order` is drawn first (then
+      ## the older zone): the unified diff puts its own blocks — a collapsed
+      ## region's band, the removed lines — before the overlay's.
 
   VerticalLayout* = object
     ## Line tops, with folds and zones accounted for. Built per frame from the
@@ -464,6 +468,7 @@ proc verticalLayout*(lineCount, lineHeight: int;
   result.zones = @zones
   result.zones.sort(proc (a, b: ZoneSpec): int =
     if a.afterLine != b.afterLine: cmp(a.afterLine, b.afterLine)
+    elif a.order != b.order: cmp(a.order, b.order)
     else: cmp(a.id, b.id))
   result.hiddenBefore = @[0]
   for r in hidden:
