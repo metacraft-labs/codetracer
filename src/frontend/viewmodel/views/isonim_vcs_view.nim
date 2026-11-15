@@ -1095,6 +1095,13 @@ when defined(js):
   ## Also dispatches a synthetic mousemove at the last known cursor position so
   ## the browser re-evaluates hover state without requiring the user to move the
   ## mouse — important after load-more triggers a full DOM rebuild.
+  ##
+  ## A synthetic event does not move CSS `:hover`, and the browser does not
+  ## give it to a row that replaced the one under a resting pointer until the
+  ## pointer moves: the file row under it lost its View Diff button at every
+  ## refresh (every 5 s, or when a commit's files arrived). The row under the
+  ## pointer is marked `vcs-pointer-rests` (styled as `:hover`) until the
+  ## pointer leaves it.
   proc restoreCommitListScroll(body: isonim_dom.Element)
     {.importjs: """(function(body) {
       var list = body.querySelector('.vcs-commit-list');
@@ -1102,6 +1109,13 @@ when defined(js):
       if (body._vcsLastMouseX != null) {
         var el = document.elementFromPoint(body._vcsLastMouseX, body._vcsLastMouseY);
         if (el) {
+          var row = el.closest && el.closest('.vcs-accordion-file, .vcs-file-item');
+          if (row && body.contains(row)) {
+            row.classList.add('vcs-pointer-rests');
+            row.addEventListener('mouseleave', function() {
+              row.classList.remove('vcs-pointer-rests');
+            }, { once: true });
+          }
           el.dispatchEvent(new MouseEvent('mousemove', {
             bubbles: true, cancelable: true,
             clientX: body._vcsLastMouseX, clientY: body._vcsLastMouseY

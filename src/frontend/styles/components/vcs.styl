@@ -913,6 +913,19 @@ VCS_BRANCH_PICKER_INSET = 0.25em
 .vcs-accordion-file:hover .vcs-file-diff-btn
   display: block
 
+// The row under a resting pointer after the panel was rebuilt, which the
+// browser does not give `:hover` until the pointer moves
+// (`isonim_vcs_view.restoreCommitListScroll`).
+.vcs-file-item.vcs-pointer-rests .vcs-file-diff-btn,
+.vcs-accordion-file.vcs-pointer-rests .vcs-file-diff-btn
+  display: block
+
+.vcs-accordion-file.vcs-pointer-rests
+  background: LIST_HOVER_BG
+
+.vcs-file-item.vcs-pointer-rests
+  background: colors-ui-surface-primary-secondary-hover
+
 .vcs-file-diff-btn:hover > .custom-tooltip
   opacity: 1
   visibility: visible
