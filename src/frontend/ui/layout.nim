@@ -206,6 +206,11 @@ proc addPanelTransferContextMenu(tab: GoldenTab, contentItem: GoldenContentItem)
           else: s.maximise())
     ]
     when not defined(ctWeb):
+      if not desktopSecondWindowShowsSession:
+        # No "Send to New Window" while a second window draws nothing
+        # (`panel_transfer.desktopSecondWindowShowsSession`).
+        showContextMenu(items, x, y)
+        return
       # The transfer entries follow the pin ones. The other windows come
       # from the main process, asynchronously, so the menu opens at once with
       # the windows known from the last answer, and asks again for the next

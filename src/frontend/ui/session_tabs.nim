@@ -30,6 +30,7 @@ when defined(js):
   when not defined(ctWeb):
     import ../viewmodel/input/dom_pointer
     from ../viewmodel/keymap/scope_path import TopBarScope
+    from ./panel_transfer import desktopSecondWindowShowsSession
 
   proc requestSessionTabsRender*(data: Data)
 
@@ -216,7 +217,10 @@ when defined(js):
     when not defined(ctWeb):
       # The strip is the `topBar` press scope (scope_path.TopBarScope).
       isonim_dom.setAttribute(container, cstring"data-ct-pane", cstring TopBarScope)
-      installOpenInNewWindowMenu(data)
+      # No "Open in New Window" while a second window draws nothing
+      # (`panel_transfer.desktopSecondWindowShowsSession`).
+      if desktopSecondWindowShowsSession:
+        installOpenInNewWindowMenu(data)
 
   proc requestSessionTabsRender*(data: Data) =
     ## Refresh the direct IsoNim tab-bar mount after explicit session state

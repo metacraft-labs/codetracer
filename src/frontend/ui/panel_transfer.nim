@@ -122,6 +122,15 @@ proc requestWindowList*(): Future[JsObject] =
       resolve(response))
     ipc.send(cstring"CODETRACER::list-windows", js{}))
 
+const desktopSecondWindowShowsSession* = false
+  ## Whether a second desktop window shows its session. It does not yet: the
+  ## main process sends the renderer's startup and every reply to the first
+  ## window only (codetracer-pm milestone PLAT-74, issue 2026-11-15 "A second
+  ## desktop window opens blank"), so a window opened from "Send to New
+  ## Window" or "Open in New Window" stays blank and inert. The two menu
+  ## entries are left out until it does; the transfer itself stays here for
+  ## PLAT-74 to finish.
+
 proc buildSendToWindowMenuItems*(
   contentItem: GoldenContentItem,
   sessionId: int,
