@@ -114,7 +114,9 @@ proc applyViewport(session: SessionViewModel; args: JsonNode): bool =
   of "eventLog":
     let vm = session.eventLogVM
     if vm.isNil: return false
-    vm.setViewport(merged(vm.viewport.val))
+    # Merged onto the last report (`shownViewport`), not the debounced
+    # `viewport`: a report pending in the gate is the one held.
+    vm.setViewport(merged(vm.shownViewport.val))
     true
   of "terminalOutput":
     let vm = session.terminalOutputVM

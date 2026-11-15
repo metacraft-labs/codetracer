@@ -481,13 +481,20 @@ type
       ## The viewport the window REQUEST is cut from: the last of a burst of
       ## `setViewport` reports, written by `viewportGate` once the reports
       ## stop for `ViewportDebounceMs` (Viewport-Driven-Loading V2). The
-      ## auto-load effect reads it; `currentPage` and `pageSize` are derived
-      ## from it for the pager and collaboration.
+      ## auto-load effect reads it; `currentPage`, `pageSize` and
+      ## `totalPages` are derived from it, the settled page shared with
+      ## collaboration. Nothing that acts on the position the user sees reads
+      ## it: see `shownViewport`.
     shownViewport*: Signal[Viewport]
       ## What the view shows NOW: every `setViewport` report, written at once
-      ## and never debounced. What draws the pane's position reads it: the
-      ## footer's range (`isonim_event_log_view.footerStart` / `footerEnd`)
-      ## and `visibleRows`. The footer follows each scroll event
+      ## and never debounced. The footer's range reads it
+      ## (`isonim_event_log_view.footerStart` / `footerEnd`), and so does
+      ## every action that starts from the position the user sees: the page
+      ## steps (`nextPage` / `prevPage`), the scroll to the top of a search,
+      ## kind filter or filter input, and the relay's merge of a mirror's
+      ## report (`action_relay.applyViewport`); each then reports through
+      ## `setViewport`, so the request stays debounced. `visibleRows` is cut
+      ## from it too. The footer follows each scroll event
       ## (Event-Log-Pane.md § Table Display); only the request waits for the
       ## scroll to stop (pxor #904: the footer read `viewport` and stood still
       ## until ~100 ms after the last scroll event).
@@ -583,6 +590,9 @@ type
     visibleRows*: Memo[seq[EventLogRow]]
       ## The held rows the viewport shows (`shownViewport.firstRow` onwards,
       ## `shownViewport.rows` of them); every held row while unmeasured.
+      ## No production code reads it (the DOM view draws the held window and
+      ## scrolls it; only `signal_registry` names it, as derived); it is
+      ## pinned by `test_viewport_contract.nim`.
     rowHeightPx*: Signal[float]
       ## A row's measured advance in CSS pixels, from the desktop's rendered
       ## rows (`setRowHeightPx`): the list's scroll height is the log's size
@@ -773,22 +783,46 @@ proc followStop*(vm: EventLogVM; follow = true) =
   ## (`followsStop`).
   vm.followsStop = follow
 
+proc isFiltered*(vm: EventLogVM): bool =
+  ## Whether the list the pane pages through is narrower than the log: a
+  ## search or a kind filter is in effect.
+  vm.searchQuery.val.len > 0 or vm.selectedKinds.val.len > 0
+
+proc listTotal*(vm: EventLogVM): int =
+  ## The size of the list the pane pages through: the filtered count under a
+  ## search or a kind filter, the whole log's otherwise.
+  if vm.isFiltered: vm.store.eventLog.recordsFiltered.val
+  else: vm.store.eventLog.recordsTotal.val
+
+proc shownPage(v: Viewport): int =
+  ## The page `v` shows: `currentPage`'s rule, applied to the shown viewport.
+  if v.rows > 0: max(0, v.firstRow) div v.rows else: 0
+
 proc nextPage*(vm: EventLogVM) =
   ## Show the next screenful of rows, clamped to the last page.
+  ##
+  ## The step starts from `shownViewport`, what the footer shows, not from
+  ## the debounced `viewport` / `currentPage`, which lag a scroll burst by
+  ## `ViewportDebounceMs`: stepping from them moved the footer backwards
+  ## (pxor #904 review). The step is one more report, so the burst it joins
+  ## still asks for one window.
   if vm.actionSink.forwards("eventLog", "nextPage", %*{}):
     return
-  let v = vm.viewport.val
-  let maxPage = vm.totalPages.val - 1
-  let next = vm.currentPage.val + 1
-  if v.rows > 0 and maxPage >= 0 and next <= maxPage:
+  let v = vm.shownViewport.val
+  if v.rows <= 0:
+    return
+  let maxPage = (vm.listTotal + v.rows - 1) div v.rows - 1
+  let next = shownPage(v) + 1
+  if next <= maxPage:
     vm.setViewport(v.scrolledTo(next * v.rows))
 
 proc prevPage*(vm: EventLogVM) =
-  ## Show the previous screenful of rows, clamped to the first page.
+  ## Show the previous screenful of rows, clamped to the first page. From
+  ## `shownViewport`, as `nextPage`.
   if vm.actionSink.forwards("eventLog", "prevPage", %*{}):
     return
-  let v = vm.viewport.val
-  let prev = vm.currentPage.val - 1
+  let v = vm.shownViewport.val
+  let prev = shownPage(v) - 1
   if v.rows > 0 and prev >= 0:
     vm.setViewport(v.scrolledTo(prev * v.rows))
 
@@ -889,7 +923,7 @@ proc setSearchQuery*(vm: EventLogVM; query: string) =
     return
   batch(proc() =
     vm.searchQuery.val = query
-    vm.setViewport(vm.viewport.val.scrolledTo(0)))
+    vm.setViewport(vm.shownViewport.val.scrolledTo(0)))
 
 proc normalizedKinds(kinds: seq[bool]): seq[bool] =
   ## Every kind selected is no filter at all: kept as the empty selection, so
@@ -911,18 +945,7 @@ proc setSelectedKinds*(vm: EventLogVM; kinds: seq[bool]) =
     return
   batch(proc() =
     vm.selectedKinds.val = normalized
-    vm.setViewport(vm.viewport.val.scrolledTo(0)))
-
-proc isFiltered*(vm: EventLogVM): bool =
-  ## Whether the list the pane pages through is narrower than the log: a
-  ## search or a kind filter is in effect.
-  vm.searchQuery.val.len > 0 or vm.selectedKinds.val.len > 0
-
-proc listTotal*(vm: EventLogVM): int =
-  ## The size of the list the pane pages through: the filtered count under a
-  ## search or a kind filter, the whole log's otherwise.
-  if vm.isFiltered: vm.store.eventLog.recordsFiltered.val
-  else: vm.store.eventLog.recordsTotal.val
+    vm.setViewport(vm.shownViewport.val.scrolledTo(0)))
 
 func eventLogText*(r: EventLogRow): string =
   ## The event's text as an Event Log shows it: a write is prefixed with the
@@ -1253,7 +1276,7 @@ proc setFilterInput*(vm: EventLogVM; raw: string) =
   batch(proc() =
     vm.filterBar.val = bar
     vm.searchQuery.val = bar.freeText
-    vm.setViewport(vm.viewport.val.scrolledTo(0)))
+    vm.setViewport(vm.shownViewport.val.scrolledTo(0)))
 
 proc rowMatchesFilter*(row: MarkerEventRow; filter: MarkerFilterBar; isUnmatched: bool): bool =
   ## Predicate used by the `visibleMarkerRows` memo. Encapsulated as

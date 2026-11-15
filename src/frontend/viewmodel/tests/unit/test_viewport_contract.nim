@@ -280,6 +280,132 @@ suite "EventLogVM on the viewport contract":
       check footerStart(vm) == 13
       dispose()
 
+  test "Next page and Previous page step from the position the footer shows, mid-burst (#904)":
+    # The footer shows every report at once (`shownViewport`); the debounced
+    # `viewport` lags a burst by `ViewportDebounceMs`. A page step taken
+    # inside that window must start from what the user sees: stepping from
+    # the debounced position moved the footer BACKWARDS (shown row 46, Next
+    # page -> row 31). The step still goes through `setViewport`, so it
+    # joins the burst and the burst still asks for one window.
+    createRoot proc(dispose: proc()) =
+      var loads: seq[JsonNode]
+      let backend = BackendService(
+        sendProc: proc(command: string; args: JsonNode): BackendFuture[JsonNode] =
+          if command == "ct/event-load":
+            loads.add args
+          newCompletedFuture[JsonNode](%*{"events": [], "total": 116}),
+        onEventProc: proc(handler: EventHandler) = discard)
+      let store = createReplayDataStore(backend)
+      let clock = newTestClock()
+      store.viewportScheduler = testClockScheduler(clock)
+      let vm = createEventLogVM(store)
+      let pitch = vm.rowHeightPx.val
+      vm.reportMeasure(Viewport(rows: 30), pitch)
+      clock.advance(ViewportDebounceMs)
+      drain()
+      check loads.len == 1
+      check vm.listTotal == 116
+
+      # A burst onto the second page, and Next page before it settles.
+      for first in [35, 40, 45]:
+        vm.reportMeasure(Viewport(rows: 30, firstRow: first), pitch)
+        clock.advance(20)
+      drain()
+      check footerStart(vm) == 46
+      vm.nextPage()
+      drain()
+      check footerStart(vm) == 61
+      check footerEnd(vm) == 90
+
+      # Previous page, still inside the burst: back to the second page.
+      vm.prevPage()
+      drain()
+      check footerStart(vm) == 31
+
+      # One request for the whole burst, for where it ended.
+      check loads.len == 1
+      clock.advance(ViewportDebounceMs)
+      drain()
+      check loads.len == 2
+      check loads[^1]["start"].getInt == 30 - TrailRows
+      check vm.currentPage.val == 1
+      check footerStart(vm) == 31
+      dispose()
+
+  test "a search, a kind filter or a filter typed mid-burst keeps the size the pane shows (#904)":
+    # `setSearchQuery`, `setSelectedKinds` and `setFilterInput` scroll to
+    # the top through `setViewport`. Cut from the debounced `viewport`, the
+    # scroll carried the size from BEFORE a pending resize and replaced it in
+    # the gate: the pane asked for, and the footer showed, the old height.
+    for action in ["search", "kinds", "filter"]:
+      createRoot proc(dispose: proc()) =
+        var loads: seq[JsonNode]
+        let backend = BackendService(
+          sendProc: proc(command: string; args: JsonNode): BackendFuture[JsonNode] =
+            if command == "ct/event-load":
+              loads.add args
+            newCompletedFuture[JsonNode](%*{"events": [], "total": 116}),
+          onEventProc: proc(handler: EventHandler) = discard)
+        let store = createReplayDataStore(backend)
+        let clock = newTestClock()
+        store.viewportScheduler = testClockScheduler(clock)
+        let vm = createEventLogVM(store)
+        let pitch = vm.rowHeightPx.val
+        vm.reportMeasure(Viewport(rows: 30, firstRow: 50), pitch)
+        clock.advance(ViewportDebounceMs)
+        drain()
+        # A taller pane, at the pitch already held: debounced.
+        vm.reportMeasure(Viewport(rows: 40, firstRow: 50), pitch)
+        case action
+        of "search": vm.setSearchQuery("tick")
+        of "kinds":
+          var kinds = newSeq[bool](24)   # one kind of 24, as in
+          kinds[3] = true                # test_event_log_kind_selection
+          vm.setSelectedKinds(kinds)
+        else: vm.setFilterInput("tick")
+        drain()
+        check vm.shownViewport.val == Viewport(rows: 40, firstRow: 0)
+        clock.advance(ViewportDebounceMs)
+        drain()
+        checkpoint action
+        check vm.viewport.val.rows == 40
+        check vm.viewport.val.firstRow == 0
+        check loads[^1]["start"].getInt == 0
+        check loads[^1]["count"].getInt == 40 + LeadRows
+        dispose()
+
+  test "visibleRows follows the shown viewport inside the held window (no production reader)":
+    # `visibleRows` is cut from `shownViewport`, like the footer. No pane
+    # draws it today (the DOM view renders the held window and scrolls it;
+    # only the signal registry names it), so this pins the memo itself.
+    createRoot proc(dispose: proc()) =
+      let backend = BackendService(
+        sendProc: proc(command: string; args: JsonNode): BackendFuture[JsonNode] =
+          var events = newJArray()
+          if command == "ct/event-load":
+            let start = args["start"].getInt
+            for i in start ..< min(116, start + args["count"].getInt):
+              events.add %*{"content": "e" & $i, "eventIndex": i}
+          newCompletedFuture[JsonNode](%*{"events": events, "total": 116}),
+        onEventProc: proc(handler: EventHandler) = discard)
+      let store = createReplayDataStore(backend)
+      let clock = newTestClock()
+      store.viewportScheduler = testClockScheduler(clock)
+      let vm = createEventLogVM(store)
+      let pitch = vm.rowHeightPx.val
+      vm.reportMeasure(Viewport(rows: 10), pitch)
+      clock.advance(ViewportDebounceMs)
+      drain()
+      check vm.visibleRows.val.len == 10
+      check vm.visibleRows.val[0].value == "e0"
+      # A scroll inside the held window, before the debounce fires.
+      vm.reportMeasure(Viewport(rows: 10, firstRow: 5), pitch)
+      drain()
+      check vm.viewport.val.firstRow == 0
+      check vm.visibleRows.val.len == 10
+      check vm.visibleRows.val[0].value == "e5"
+      dispose()
+
   test "the search is part of the request and of its key":
     createRoot proc(dispose: proc()) =
       let mock = newMockBackendService(autoRespond = false)
