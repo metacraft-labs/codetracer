@@ -171,7 +171,7 @@ const ROLES: Record<string, { affordances: string[]; properties: string[] }> = {
   "binding-row": { affordances: [], properties: ["operation", "key", "layer", "shadowed-by", "text"] },
   dialog: { affordances: [], properties: ["title", "message"] },
   "dialog-button": { affordances: ["click"], properties: ["label", "enabled"] },
-  "low-level-code": { affordances: ["click", "focusable"], properties: ["count", "sync", "stepping", "address", "focused", "pointer"] },
+  "low-level-code": { affordances: ["click", "focusable"], properties: ["count", "sync", "stepping", "address", "focused", "pointer", "pointer-index"] },
   instruction: { affordances: ["click", "context-click"],
                  properties: ["offset", "name", "args", "source", "active", "executing", "focused"] },
   "source-line": { affordances: [], properties: ["number", "active"] },
@@ -2825,6 +2825,8 @@ export function readSurfacePw4(root: any): void {
     v.props.count = llc.querySelectorAll(".low-level-code-instructions > .low-level-code-instruction").length;
     const pointer = llc.querySelector(".low-level-code-instruction.execution-pointer");
     v.props.pointer = text(pointer?.querySelector(".low-level-code-instruction-offset"));
+    v.props["pointer-index"] = v.children.filter((c: any) => c.role === "instruction")
+      .findIndex((c: any) => c.props.executing);
     v.anchors = { points: { ...(stepping ? { header: centre(stepping) } : {}),
                             ...(pointer ? { pointer: centre(pointer) } : {}) } };
     add(v);

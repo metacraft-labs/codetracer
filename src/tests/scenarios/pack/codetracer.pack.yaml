@@ -1469,8 +1469,12 @@ roles:
   low-level-code:
     # `focused`: the keyboard focus is in its pane (a press on its header
     # focuses the pane without moving the debugger, as a press on a row would).
-    # `pointer`: the offset of the instruction the replay is at.
-    properties: { count: int, sync: text, stepping: text, address: text, focused: bool, pointer: text }
+    # `pointer`: the offset of the instruction the replay is at;
+    # `pointer-index`: its place in the listing (0 the first instruction, -1
+    # none) — where the program is loaded moves the offsets from one
+    # recording and machine to the next, and leaves the places.
+    properties: { count: int, sync: text, stepping: text, address: text, focused: bool, pointer: text,
+                  pointer-index: int }
     children: { instruction: many, source-line: many }
     affordances: [click, focusable]
     # `header`: the header's stepping note; `pointer`: the instruction the
