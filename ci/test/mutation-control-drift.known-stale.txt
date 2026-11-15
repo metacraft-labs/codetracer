@@ -95,7 +95,6 @@
 
 # 2026-11-14, conditional breakpoints (Edit breakpoint condition, the condition dialog,
 # the planner): these harnesses owe a re-grade for these bytes.
-src/frontend/tui/tests/plat42-surface-mutation-control.sha256	src/frontend/viewmodel/sdk/breakpoints.nim	16e09b222963f890ab5e6b5ad61fede190204c69a0878367de14d85dc63554aa	eae7718726d2ad00483b9cdc7fb35bb3d15b4fdaaaabbda8c72ab546e7a34bd8
 
 # 2026-11-14, the shared editor answering more of what the desktop reads of
 # Monaco (the editor, the key router, the diff view kept on Monaco). The
@@ -118,12 +117,10 @@ src/frontend/tui/tests/plat50-clicks-mutation-control.sha256	src/frontend/ui/edi
 # re-grade for these bytes.
 src/frontend/tui/tests/plat49-chrome-mutation-control.sha256	src/frontend/gpui/main.nim	c877a4378ca59b26178847f58a7cbde74cf13ef639fd37cfa9c8f80f2f302ff9	28f36a050600425fdbbea72ccc729250a4977ecc589c87e4d67e73d3196f228e
 src/frontend/tui/tests/plat50-clicks-mutation-control.sha256	src/frontend/gpui/main.nim	c877a4378ca59b26178847f58a7cbde74cf13ef639fd37cfa9c8f80f2f302ff9	28f36a050600425fdbbea72ccc729250a4977ecc589c87e4d67e73d3196f228e
-src/frontend/tui/tests/plat42-surface-mutation-control.sha256	src/frontend/tui/app/runtime.nim	745fee32e0bbc92d22443f415809389446e7802595d9845b2c55301ac678e105	a7a3bb422082c3ce0dbfd6321695a4a8876ce902281ec4c17f02c3bc4e1bbeb8
 src/frontend/tui/tests/plat43-selector-mutation-control.sha256	src/frontend/tui/app/runtime.nim	745fee32e0bbc92d22443f415809389446e7802595d9845b2c55301ac678e105	a7a3bb422082c3ce0dbfd6321695a4a8876ce902281ec4c17f02c3bc4e1bbeb8
 src/frontend/tui/tests/plat49-chrome-mutation-control.sha256	src/frontend/tui/app/runtime.nim	6a710a3399799246c1f06628b0b206fd78e0a1a205e7edcb74e555c90161c7b3	a7a3bb422082c3ce0dbfd6321695a4a8876ce902281ec4c17f02c3bc4e1bbeb8
 src/frontend/tui/tests/plat50-clicks-mutation-control.sha256	src/frontend/tui/app/runtime.nim	6a710a3399799246c1f06628b0b206fd78e0a1a205e7edcb74e555c90161c7b3	a7a3bb422082c3ce0dbfd6321695a4a8876ce902281ec4c17f02c3bc4e1bbeb8
 src/frontend/tui/tests/plat40-producer-mutation-control.sha256	src/frontend/tui/host/tui_session.nim	a9ea791e49006488ac348b14e02a4255f0d521e9444766a8aff5219e8c969bee	0c65cb8a6581ca9f73adda27a71e6589473c2573b61ce8a51eac495d0e0b1efe
-src/frontend/tui/tests/plat42-surface-mutation-control.sha256	src/frontend/tui/host/tui_session.nim	a9ea791e49006488ac348b14e02a4255f0d521e9444766a8aff5219e8c969bee	0c65cb8a6581ca9f73adda27a71e6589473c2573b61ce8a51eac495d0e0b1efe
 src/frontend/tui/tests/plat49-chrome-mutation-control.sha256	src/frontend/tui/app/tui_app.nim	cc455c9ce9a525fd905861c04eeeac5edfd762fbb7f426932c75deb4417f6ecb	5e29fc96fe73c25b52f244228fa9880cac9205a1607f7214b733c6c0dcd3e647
 src/frontend/tui/tests/plat49-chrome-mutation-control.sha256	src/frontend/tui/host/tui_session.nim	a9ea791e49006488ac348b14e02a4255f0d521e9444766a8aff5219e8c969bee	0c65cb8a6581ca9f73adda27a71e6589473c2573b61ce8a51eac495d0e0b1efe
 src/frontend/tui/tests/plat50-clicks-mutation-control.sha256	src/frontend/tui/app/tui_app.nim	cc455c9ce9a525fd905861c04eeeac5edfd762fbb7f426932c75deb4417f6ecb	5e29fc96fe73c25b52f244228fa9880cac9205a1607f7214b733c6c0dcd3e647
