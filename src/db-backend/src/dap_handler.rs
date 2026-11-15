@@ -5864,16 +5864,14 @@ impl Handler {
                     return Ok(());
                 }
 
-                // Go to the start BEFORE the tracepoint breakpoints exist.  On
-                // a recreator replay the start is the entry, reached with
-                // `run_to_entry`, which clears the breakpoints it used to get
-                // there with `DeleteBreakpoints`, and that query removes every
-                // breakpoint of the session.  Added first, the tracepoint
-                // breakpoints were removed with them and the Continue below
-                // ran to the end: measured on an MCR recording served by
-                // `ct-mcr debugserver` (zero tracepoint results, the
-                // run-to-entry's `DeleteBreakpoints` sending `z0` for each
-                // tracepoint site).
+                // Go to the start BEFORE the tracepoint breakpoints exist, so
+                // the run to the start cannot stop at one of them.  (On a
+                // recreator replay the run to entry used to end with a
+                // `DeleteBreakpoints` that removed every breakpoint of the
+                // session; tracepoint breakpoints added first were removed
+                // with them and the Continue below ran to the end, measured on
+                // an MCR recording. The worker now removes only the
+                // breakpoints its run to entry set for itself.)
                 self.go_to_tracepoint_run_start()?;
 
                 for (path, line_map) in tracepoint_locations.iter() {

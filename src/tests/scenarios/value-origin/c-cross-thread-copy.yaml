@@ -11,9 +11,11 @@ stage:
   - use: record-program
     with: { program: src/db-backend/tests/fixtures/origin/c/cross_thread_copy/main.c, backend: rr }
   # rr walks each hop with reverse continues; on a loaded machine one can take
-  # longer than the 1.5 s the chain allows a hop by default.
+  # longer than the 1.5 s the chain allows a hop by default, and the chain
+  # longer than the 5 s a request has (at load about 60 the chain was cut off
+  # at 5 s). Continuing a cut-off chain is `rust-continue-tracing`'s subject.
   - use: front-end-options
-    with: { env: { CT_RR_ORIGIN_PER_HOP_WALL_CLOCK_MS: "10000" } }
+    with: { env: { CT_RR_ORIGIN_PER_HOP_WALL_CLOCK_MS: "10000", CT_ORIGIN_WALL_CLOCK_MS: "60000" } }
   - use: open-recording
 
 steps:

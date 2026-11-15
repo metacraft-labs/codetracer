@@ -1497,10 +1497,12 @@ impl ReplaySession for RecreatorReplaySession {
 
     fn run_to_entry(&mut self) -> Result<(), Box<dyn Error>> {
         self.ensure_active_stable()?;
+        // The worker removes the breakpoints its run to entry set for itself
+        // and keeps every other one. A `DeleteBreakpoints` here used to clear
+        // them, and with them the user's: a breakpoint set before "run to
+        // entry" was gone after it, and the next continue ran to the end of
+        // the recording (`test_rr_run_to_entry_twice_then_continue_to_a_breakpoint`).
         let _ok = self.stable.dispatch_replay_query(ReplayQuery::RunToEntry)?;
-        if let Err(err) = self.stable.dispatch_replay_query(ReplayQuery::DeleteBreakpoints) {
-            warn!("failed to clear internal run-to-entry breakpoints: {err}");
-        }
         Ok(())
     }
 

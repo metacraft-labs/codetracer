@@ -514,10 +514,20 @@ pub const MCR_DATA_WATCH_INVALID_ARG: c_int = -1;
 /// `max_hops_zero_is_clamped_to_one`.  Exposing the mutex as a crate
 /// item under `#[cfg(test)]` lets every test module import the one
 /// canonical lock.
+///
+/// It is the same mutex as `omniscient_db::omniscient_ffi_lock()`. The
+/// omniscient tests reset the undo map too (`mcrUndoMapReset` in their
+/// `reset_state` / `reset_all`), and while each family held a mutex of its
+/// own, an omniscient test could empty the undo log between an
+/// `emulator_origin` test's reset and its query: `cargo test --lib origin`
+/// failed one of `tier_two_falls_back_when_window_excludes_query_tick`,
+/// `tier_one_serves_every_hop_within_window` or
+/// `max_hops_zero_is_clamped_to_one` in about one run in four (codetracer
+/// 17446f1e8). Production code never takes the lock, so a test that holds it
+/// never waits on it again.
 #[cfg(test)]
 pub(crate) fn undo_map_ffi_lock() -> &'static std::sync::Mutex<()> {
-    static LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
-    LOCK.get_or_init(|| std::sync::Mutex::new(()))
+    crate::omniscient_db::omniscient_ffi_lock()
 }
 
 #[cfg(test)]

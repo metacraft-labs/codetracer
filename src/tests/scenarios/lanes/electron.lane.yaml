@@ -176,6 +176,7 @@ applicable:
   - ../cross-process/origin-hops-seek-across-recordings.yaml
   - ../value-origin/rust-trivial-chain.yaml
   - ../value-origin/rust-continue-tracing.yaml
+  - ../value-origin/rust-continue-tracing-rr.yaml
   - ../file-conflicts/clean-buffer-reloads.yaml
   - ../file-conflicts/dirty-buffer-asks.yaml
   - ../edit-mode/second-ct-edit-delegates.yaml

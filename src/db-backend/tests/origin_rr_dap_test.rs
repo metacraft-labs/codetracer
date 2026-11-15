@@ -933,6 +933,195 @@ mod rr {
         );
     }
 
+    /// The line of the stop a `ct/complete-move` after `command` reports.
+    fn move_line(client: &mut test_harness::DapStdioTestClient, command: &str) -> i64 {
+        let req = client.dap_client_mut().request(command, serde_json::json!({ "threadId": 1 }));
+        client.send_message(&req).unwrap_or_else(|e| panic!("send {command}: {e}"));
+        match client
+            .read_until_event_msg("ct/complete-move", Duration::from_secs(120))
+            .unwrap_or_else(|e| panic!("{command} reported no stop: {e}"))
+        {
+            DapMessage::Event(event) => event.body["location"]["line"]
+                .as_i64()
+                .unwrap_or_else(|| panic!("{command}: no line in {}", event.body)),
+            other => panic!("{command}: expected ct/complete-move, got {other:?}"),
+        }
+    }
+
+    /// The desktop's first moves on an rr recording, twice: run to entry,
+    /// continue to a breakpoint, run to entry again, continue again. The
+    /// second run to entry restarts rr's replay from a later point
+    /// (`vRun;;t…`), which is where the desktop's replay died.
+    #[test]
+    fn test_rr_run_to_entry_twice_then_continue_to_a_breakpoint() {
+        let ct_native_replay = rr_backend("rr_run_to_entry_twice");
+        require_tool("rustc", "--version", "rr_run_to_entry_twice");
+        let recording = record_rr_fixture_with_regenerate("rust", "simple_trivial_chain", "main.rs", &ct_native_replay);
+        let breakpoint_line = fixture_line_containing("rust", "simple_trivial_chain", "main.rs", "println!");
+        let mut client = test_harness::DapStdioTestClient::start().expect("DAP stdio client should start");
+        client
+            .initialize_and_launch_rr(&recording, &ct_native_replay)
+            .expect("RR DAP launch should succeed");
+        client
+            .set_breakpoint(&recording.source_path, breakpoint_line)
+            .expect("set breakpoint at the println");
+        for round in 0..2 {
+            let entry = move_line(&mut client, "ct/run-to-entry");
+            assert!(entry > 0 && entry < breakpoint_line as i64, "round {round}: run to entry stopped at line {entry}");
+            let stop = move_line(&mut client, "continue");
+            assert_eq!(stop, breakpoint_line as i64, "round {round}: continue stopped at line {stop}");
+        }
+    }
+
+    /// The desktop's order: run to entry, THEN set the breakpoint, then
+    /// continue — twice. A breakpoint set after rr restarted its replay must
+    /// stop the continue.
+    #[test]
+    fn test_rr_breakpoint_set_after_run_to_entry_stops_the_continue() {
+        let ct_native_replay = rr_backend("rr_breakpoint_after_run_to_entry");
+        require_tool("rustc", "--version", "rr_breakpoint_after_run_to_entry");
+        let recording = record_rr_fixture_with_regenerate("rust", "simple_trivial_chain", "main.rs", &ct_native_replay);
+        let breakpoint_line = fixture_line_containing("rust", "simple_trivial_chain", "main.rs", "println!");
+        let mut client = test_harness::DapStdioTestClient::start().expect("DAP stdio client should start");
+        client
+            .initialize_and_launch_rr(&recording, &ct_native_replay)
+            .expect("RR DAP launch should succeed");
+        for round in 0..2 {
+            let entry = move_line(&mut client, "ct/run-to-entry");
+            assert!(entry > 0 && entry < breakpoint_line as i64, "round {round}: run to entry stopped at line {entry}");
+            client
+                .set_breakpoint(&recording.source_path, breakpoint_line)
+                .expect("set breakpoint at the println");
+            let stop = move_line(&mut client, "continue");
+            assert_eq!(stop, breakpoint_line as i64, "round {round}: continue stopped at line {stop}");
+        }
+    }
+
+    /// As `ct record` leaves an rr recording: packed (`rr pack`), so the
+    /// replay maps the trace's own copies of the binary and its libraries.
+    /// The desktop opens such recordings, and there a run to entry, a
+    /// breakpoint and a continue killed rr's replay ("Tracee died
+    /// unexpectedly").
+    #[test]
+    fn test_rr_packed_recording_run_to_entry_then_breakpoint_then_continue() {
+        let ct_native_replay = rr_backend("rr_packed_run_to_entry");
+        require_tool("rustc", "--version", "rr_packed_run_to_entry");
+        let recording = record_rr_fixture_with_regenerate("rust", "simple_trivial_chain", "main.rs", &ct_native_replay);
+        let rr_dir = if recording.trace_dir.join("rr").is_dir() {
+            recording.trace_dir.join("rr")
+        } else {
+            recording.trace_dir.clone()
+        };
+        let packed = Command::new("rr").arg("pack").arg(&rr_dir).output().expect("run rr pack");
+        assert!(packed.status.success(), "rr pack failed: {}", String::from_utf8_lossy(&packed.stderr));
+        let breakpoint_line = fixture_line_containing("rust", "simple_trivial_chain", "main.rs", "println!");
+        let mut client = test_harness::DapStdioTestClient::start().expect("DAP stdio client should start");
+        client
+            .initialize_and_launch_rr(&recording, &ct_native_replay)
+            .expect("RR DAP launch should succeed");
+        for round in 0..2 {
+            let entry = move_line(&mut client, "ct/run-to-entry");
+            assert!(entry > 0 && entry < breakpoint_line as i64, "round {round}: run to entry stopped at line {entry}");
+            client
+                .set_breakpoint(&recording.source_path, breakpoint_line)
+                .expect("set breakpoint at the println");
+            let stop = move_line(&mut client, "continue");
+            assert_eq!(stop, breakpoint_line as i64, "round {round}: continue stopped at line {stop}");
+        }
+    }
+
+    /// The desktop's whole path on a packed recording: run to entry twice
+    /// (the second restarts rr's replay from a later point), a breakpoint
+    /// set after it, a continue to it, then the value origin of `c` -- whose
+    /// walk first saves the replay position, which makes rr clone the
+    /// replayed process for a checkpoint. In the desktop rr's replay died
+    /// there ("remote clone failed with errno ESRCH").
+    #[test]
+    fn test_rr_packed_recording_origin_chain_after_run_to_entry_and_continue() {
+        origin_chain_after_run_to_entry_twice_and_continue("rr_packed_origin_after_continue", true);
+    }
+
+    /// The same path on the recording as recorded (not packed).
+    #[test]
+    fn test_rr_origin_chain_after_run_to_entry_twice_and_continue() {
+        origin_chain_after_run_to_entry_twice_and_continue("rr_origin_after_run_to_entry_twice", false);
+    }
+
+    fn origin_chain_after_run_to_entry_twice_and_continue(name: &str, pack: bool) {
+        let ct_native_replay = rr_backend(name);
+        require_tool("rustc", "--version", name);
+        let recording = record_rr_fixture_with_regenerate("rust", "simple_trivial_chain", "main.rs", &ct_native_replay);
+        if pack {
+            let rr_dir = if recording.trace_dir.join("rr").is_dir() {
+                recording.trace_dir.join("rr")
+            } else {
+                recording.trace_dir.clone()
+            };
+            let packed = Command::new("rr").arg("pack").arg(&rr_dir).output().expect("run rr pack");
+            assert!(packed.status.success(), "rr pack failed: {}", String::from_utf8_lossy(&packed.stderr));
+        }
+        let breakpoint_line = fixture_line_containing("rust", "simple_trivial_chain", "main.rs", "println!");
+        let mut client = test_harness::DapStdioTestClient::start().expect("DAP stdio client should start");
+        client
+            .initialize_and_launch_rr(&recording, &ct_native_replay)
+            .expect("RR DAP launch should succeed");
+        let first = move_line(&mut client, "ct/run-to-entry");
+        let entry = move_line(&mut client, "ct/run-to-entry");
+        assert_eq!(entry, first, "a second run to entry stopped elsewhere");
+        client
+            .set_breakpoint(&recording.source_path, breakpoint_line)
+            .expect("set breakpoint at the println");
+        let stop = move_line(&mut client, "continue");
+        assert_eq!(stop, breakpoint_line as i64, "continue stopped at line {stop}");
+        let line_of = |needle: &str| fixture_line_containing("rust", "simple_trivial_chain", "main.rs", needle) as i64;
+        let chain = send_rr_origin_chain_request(&mut client, "c", -1, DEFAULT_ORIGIN_MAX_HOPS);
+        assert_eq!(
+            chain.hops.iter().map(|hop| hop.location.line).collect::<Vec<_>>(),
+            vec![line_of("let c: i32 = b"), line_of("let b: i32 = a"), line_of("let a: i32 = 10")],
+            "the chain walks c <- b <- a: terminator={:?} {:?}",
+            chain.terminator.kind,
+            chain.terminator.expression
+        );
+    }
+
+    /// Send a desktop request and wait for its response (its body).
+    fn desktop_request(client: &mut test_harness::DapStdioTestClient, command: &str, args: serde_json::Value) {
+        let req = client.dap_client_mut().request(command, args);
+        client.send_message(&req).unwrap_or_else(|e| panic!("send {command}: {e}"));
+        client
+            .read_until_response_msg(command, Duration::from_secs(120))
+            .unwrap_or_else(|e| panic!("{command}: no response: {e}"));
+    }
+
+    /// The desktop's requests on opening an rr recording, in its order (taken
+    /// from a desktop run's DAP log): run to entry, the State pane's locals
+    /// (first with the language not yet known, then as Rust), run to entry
+    /// again from the toolbar, a breakpoint, continue.
+    #[test]
+    fn test_rr_desktop_order_with_locals_then_continue_to_a_breakpoint() {
+        let ct_native_replay = rr_backend("rr_desktop_order_with_locals");
+        require_tool("rustc", "--version", "rr_desktop_order_with_locals");
+        let recording = record_rr_fixture_with_regenerate("rust", "simple_trivial_chain", "main.rs", &ct_native_replay);
+        let breakpoint_line = fixture_line_containing("rust", "simple_trivial_chain", "main.rs", "println!");
+        let mut client = test_harness::DapStdioTestClient::start().expect("DAP stdio client should start");
+        client
+            .initialize_and_launch_rr(&recording, &ct_native_replay)
+            .expect("RR DAP launch should succeed");
+        let entry = move_line(&mut client, "ct/run-to-entry");
+        let locals = |lang: &str, ticks: i64| {
+            serde_json::json!({"countBudget":3000,"depthLimit":7,"lang":lang,"minCountLimit":50,"rrTicks":ticks,"watchExpressions":[]})
+        };
+        desktop_request(&mut client, "ct/load-locals", locals("c", 0));
+        desktop_request(&mut client, "ct/load-locals", locals("rust", 0));
+        let again = move_line(&mut client, "ct/run-to-entry");
+        assert_eq!(again, entry, "the second run to entry stopped elsewhere");
+        client
+            .set_breakpoint(&recording.source_path, breakpoint_line)
+            .expect("set breakpoint at the println");
+        let stop = move_line(&mut client, "continue");
+        assert_eq!(stop, breakpoint_line as i64, "continue stopped at line {stop}");
+    }
+
     /// Send `ct/originChain` with `continuation_token`; the chain, or the
     /// failed response's `(originErrorCode, message)`.
     fn send_rr_origin_chain_continuation(
