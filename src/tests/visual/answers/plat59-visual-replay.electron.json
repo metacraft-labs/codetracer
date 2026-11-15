@@ -55,14 +55,8 @@
   "header": "Pixel 40, 50 frame 59",
   "entries": [
    {
-    "drawCallIndex": 236,
-    "geid": 161138,
-    "pass": "Passed",
-    "post": "rgb(0, 0, 0)"
-   },
-   {
     "drawCallIndex": 238,
-    "geid": 161155,
+    "geid": 122349,
     "pass": "Passed",
     "post": "rgb(22, 16, 39)"
    }

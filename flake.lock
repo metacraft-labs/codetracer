@@ -1618,11 +1618,11 @@
     "codetracer-visual-replay": {
       "flake": false,
       "locked": {
-        "lastModified": 1794728216,
-        "narHash": "sha256-3piWSSg1r45FZU/MiKOwyX7h4xHdJ776hyyr+yBi4Gg=",
+        "lastModified": 1794746554,
+        "narHash": "sha256-G7dapgCYZmfapXpuXZBUkgFegznv4zTme1BIGhaUZQA=",
         "owner": "metacraft-labs",
         "repo": "codetracer-visual-replay",
-        "rev": "54ffd4624f79f506bd0d0e6d8f5ef04f8d602813",
+        "rev": "8f8ca97203e7f79af684ff47ef6b97ecf302e810",
         "type": "github"
       },
       "original": {
