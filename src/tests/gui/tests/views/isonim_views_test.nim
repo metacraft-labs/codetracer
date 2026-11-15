@@ -3456,7 +3456,9 @@ suite "IsoNim Event Log Panel — footer":
       store.applyEventLogRows(@[makeTestEvent(1, "event", 1, "a")], 0,
                               recordsTotal = 150)
       let panel = renderEventLog(vm)
-      vm.viewport.val = Viewport(rows: 20, firstRow: 40)
+      # Through `setViewport`, the one way a view reports (#904: the footer
+      # reads the report as SHOWN, not the debounced request's viewport).
+      vm.setViewport(Viewport(rows: 20, firstRow: 40))
 
       let footer = findByClass(panel, "data-tables-footer")
       check "41to60" in footer.attributes["class"]

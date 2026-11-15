@@ -335,12 +335,16 @@ proc rowsTableStyle*(vm: EventLogVM): string =
 
 proc footerStart*(vm: EventLogVM): int =
   ## The footer's first row shown, counted from 1 (0 for an empty list).
+  ## Read off `shownViewport`, which every report writes at once: the footer
+  ## follows each scroll event, and only the window request is debounced
+  ## (Event-Log-Pane.md § Table Display; pxor #904, when it read the
+  ## debounced `viewport` and stood still until the scroll stopped).
   if vm.listTotal <= 0: 0
-  else: min(vm.listTotal, max(0, vm.viewport.val.firstRow) + 1)
+  else: min(vm.listTotal, max(0, vm.shownViewport.val.firstRow) + 1)
 
 proc footerEnd*(vm: EventLogVM): int =
-  ## The footer's last row shown.
-  let v = vm.viewport.val
+  ## The footer's last row shown (`shownViewport`, as `footerStart`).
+  let v = vm.shownViewport.val
   min(vm.listTotal, max(0, v.firstRow) + max(0, v.rows))
 
 proc footerClass*(vm: EventLogVM): string =

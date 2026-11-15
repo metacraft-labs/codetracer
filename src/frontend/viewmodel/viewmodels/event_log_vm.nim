@@ -454,7 +454,9 @@ type
     ##
     ## Mutable signals:
     ##   selectedRow      — index of the selected row, or none
-    ##   viewport         — what the view was given (`setViewport`)
+    ##   viewport         — the window request's viewport: the last report
+    ##                      of a burst (debounced, `setViewport`)
+    ##   shownViewport    — what the view shows now: every report, at once
     ##   currentPage      — zero-based page index, `firstRow div rows`
     ##   pageSize         — the viewport's rows (0 until measured)
     ##   searchQuery      — current search/filter text
@@ -476,8 +478,19 @@ type
     # -- Mutable state --
     selectedRow*: Signal[Option[int]]
     viewport*: Signal[Viewport]
-      ## What the view was given (`setViewport`); `currentPage` and
-      ## `pageSize` are derived from it for the pager and collaboration.
+      ## The viewport the window REQUEST is cut from: the last of a burst of
+      ## `setViewport` reports, written by `viewportGate` once the reports
+      ## stop for `ViewportDebounceMs` (Viewport-Driven-Loading V2). The
+      ## auto-load effect reads it; `currentPage` and `pageSize` are derived
+      ## from it for the pager and collaboration.
+    shownViewport*: Signal[Viewport]
+      ## What the view shows NOW: every `setViewport` report, written at once
+      ## and never debounced. What draws the pane's position reads it: the
+      ## footer's range (`isonim_event_log_view.footerStart` / `footerEnd`)
+      ## and `visibleRows`. The footer follows each scroll event
+      ## (Event-Log-Pane.md § Table Display); only the request waits for the
+      ## scroll to stop (pxor #904: the footer read `viewport` and stood still
+      ## until ~100 ms after the last scroll event).
     viewportGate: ViewportGate
     followsStop*: bool
       ## Whether each window request names the current stop (`atRRTicks`), so
@@ -568,8 +581,8 @@ type
       ## §5.4 filter result. Computed reactively from `markerRows` +
       ## `filterBar` + `counterpartCache`.
     visibleRows*: Memo[seq[EventLogRow]]
-      ## The held rows the viewport shows (`viewport.firstRow` onwards,
-      ## `viewport.rows` of them); every held row while unmeasured.
+      ## The held rows the viewport shows (`shownViewport.firstRow` onwards,
+      ## `shownViewport.rows` of them); every held row while unmeasured.
     rowHeightPx*: Signal[float]
       ## A row's measured advance in CSS pixels, from the desktop's rendered
       ## rows (`setRowHeightPx`): the list's scroll height is the log's size
@@ -716,19 +729,23 @@ proc doubleClickRow*(vm: EventLogVM; row: int) =
 
 proc setViewport*(vm: EventLogVM; v: Viewport) =
   ## The size and scroll position the view was given — the ONE way a view
-  ## tells this ViewModel what it shows (Viewport-Driven-Loading V1). Reports
-  ## are debounced on the store's `viewportScheduler`; the auto-load effect
-  ## then asks for the window `viewport.listWindow` derives.
+  ## tells this ViewModel what it shows (Viewport-Driven-Loading V1). The
+  ## report is SHOWN at once (`shownViewport`, which the footer reads); the
+  ## REQUEST is debounced on the store's `viewportScheduler`, and the
+  ## auto-load effect then asks for the window `viewport.listWindow` derives.
   # A mirror reports its measured size to the primary and keeps it too.
   discard vm.actionSink.forwards("viewport", "set", %*{
     "pane": "eventLog", "rows": v.rows, "depth": v.cols,
     "firstRow": v.firstRow})
+  vm.shownViewport.val = v
   vm.viewportGate.submit(v)
 
 proc reportMeasure*(vm: EventLogVM; v: Viewport; rowPx: float) =
   ## What the pane's host measured: `v`, at rows `rowPx` apart. Reports at the
-  ## pitch the ViewModel already holds are debounced like any other (scrolling
-  ## must be); one that carries a NEW pitch is applied at once.
+  ## pitch the ViewModel already holds are debounced like any other (a
+  ## scroll's window request must be; the footer follows each one anyway,
+  ## through `setViewport`'s `shownViewport`); one that carries a NEW pitch
+  ## is applied to the request at once.
   ##
   ## With no row rendered there is no pitch to measure, so the pane has to ask
   ## for its first rows at a fallback pitch, and the size that gives is
@@ -1437,6 +1454,7 @@ proc createEventLogVM*(store: ReplayDataStore): EventLogVM =
   withViewModel proc(dispose: proc()): EventLogVM =
     let selectedRow = createSignal(none(int))
     let viewport = createSignal(Viewport())
+    let shownViewport = createSignal(Viewport())
     let currentPage = createSignal(0)
     let pageSize = createSignal(0)
     let viewportGate = newViewportGate(
@@ -1494,8 +1512,10 @@ proc createEventLogVM*(store: ReplayDataStore): EventLogVM =
     # Derived: the rows the viewport shows, cut from the held window (which
     # carries `TrailRows` above and `LeadRows` below them).
     let loadedStart = store.eventLog.loadedStart
+    # The SHOWN viewport, so the rows follow the scroll like the footer does;
+    # rows the held window does not reach yet are cut off until it arrives.
     let visibleRows = createMemo[seq[EventLogRow]] proc(): seq[EventLogRow] =
-      let v = viewport.val
+      let v = shownViewport.val
       let rows = eventRows.val
       if v.rows <= 0:
         return rows
@@ -1528,6 +1548,7 @@ proc createEventLogVM*(store: ReplayDataStore): EventLogVM =
       store: store,
       selectedRow: selectedRow,
       viewport: viewport,
+      shownViewport: shownViewport,
       viewportGate: viewportGate,
       visibleRows: visibleRows,
       currentPage: currentPage,

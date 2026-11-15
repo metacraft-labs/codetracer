@@ -28,6 +28,9 @@ import viewmodels/[calltrace_vm, event_log_vm, state_vm, step_list_vm,
                   origin_chain_vm, origin_chain_types, vcs_vm]
 import session_vm
 import sdk/stop_loader
+# The procs the Event Log's footer binds (#904): asserted directly, not the
+# signal under them, so the test reads what the reader sees.
+from views/isonim_event_log_view import footerStart, footerEnd, footerClass
 
 proc testClockScheduler(clock: TestClock): ViewportScheduler =
   ## Debounces on a `TestClock`: a report is applied when the test advances
@@ -215,6 +218,68 @@ suite "EventLogVM on the viewport contract":
       check asked[^1]["start"].getInt == 15 - TrailRows
       dispose()
 
+  test "the footer's range follows every report of a scroll burst, and the window is still asked for once (#904)":
+    # pxor #904: while the user scrolled, the footer's "Rows X to Y" stood
+    # still and jumped ~100 ms after the last scroll event. The DOM host
+    # reports on EVERY scroll event (`pane_measure_dom.watchPane` ->
+    # `reportMeasure`), and the footer read the viewport only the trailing
+    # debounce wrote. The debounce is for the window REQUEST
+    # (Viewport-Driven-Loading V2); the footer follows the scroll
+    # (Event-Log-Pane.md § Table Display). So this asserts on the procs the
+    # footer binds (`footerStart` / `footerEnd`), after each report and
+    # before any timer runs, and then that the burst still asks once.
+    #
+    # Fakes: a recording `BackendService` that answers `ct/event-load` with
+    # a 116-event total (the reporter's sample), because the footer is
+    # empty while the list's size is unknown; and a `TestClock` behind the
+    # store's `viewportScheduler`, the deferring timer the desktop installs.
+    createRoot proc(dispose: proc()) =
+      var loads: seq[JsonNode]
+      let backend = BackendService(
+        sendProc: proc(command: string; args: JsonNode): BackendFuture[JsonNode] =
+          if command == "ct/event-load":
+            loads.add args
+          newCompletedFuture[JsonNode](%*{"events": [], "total": 116}),
+        onEventProc: proc(handler: EventHandler) = discard)
+      let store = createReplayDataStore(backend)
+      let clock = newTestClock()
+      store.viewportScheduler = testClockScheduler(clock)
+      let vm = createEventLogVM(store)
+      let pitch = vm.rowHeightPx.val
+
+      # The pane's first measurement at the pitch already held, settled and
+      # answered: the list's size is known.
+      vm.reportMeasure(Viewport(rows: 30), pitch)
+      clock.advance(ViewportDebounceMs)
+      drain()
+      check loads.len == 1
+      check vm.listTotal == 116
+      check footerStart(vm) == 1
+      check footerEnd(vm) == 30
+
+      # The scroll: one row per event, closer together than the debounce.
+      for first in [10, 11, 12]:
+        vm.reportMeasure(Viewport(rows: 30, firstRow: first), pitch)
+        drain()
+        check footerStart(vm) == first + 1
+        check footerEnd(vm) == first + 30
+        clock.advance(20)
+      check footerStart(vm) == 13
+      check footerEnd(vm) == 42
+      check footerClass(vm) == "data-tables-footer 13to42"
+
+      # The request is still coalesced: nothing during the burst, then ONE
+      # `ct/event-load` for the last window.
+      drain()
+      check loads.len == 1
+      clock.advance(ViewportDebounceMs)
+      drain()
+      check loads.len == 2
+      check loads[^1]["start"].getInt == 12 - TrailRows
+      check loads[^1]["count"].getInt == 30 + LeadRows + TrailRows
+      check footerStart(vm) == 13
+      dispose()
+
   test "the search is part of the request and of its key":
     createRoot proc(dispose: proc()) =
       let mock = newMockBackendService(autoRespond = false)
@@ -344,8 +409,10 @@ suite "EventLogVM on the viewport contract":
 
 suite "EventLogVM's measured reports":
   # Measured at `c12d777ef` on a 355 px pane: 15 rows at the fallback 24 px
-  # before any row exists, 14 at the rows' own 26.79 px. The footer reads
-  # `viewport`, so it is what these cases watch.
+  # before any row exists, 14 at the rows' own 26.79 px. These cases watch
+  # `viewport`, the debounced viewport the window REQUEST is cut from. The
+  # footer reads `shownViewport`, which every report writes at once (#904,
+  # "the footer's range follows every report of a scroll burst" above).
   const
     FallbackPx = 24.0
     MeasuredPx = 26.79
