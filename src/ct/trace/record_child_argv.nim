@@ -70,9 +70,9 @@ proc recordParserLine*(ownHalf: seq[string]): seq[string] =
 proc recordOptionMissingValue*(
     ownHalf: seq[string],
     probe: proc (line: seq[string]): RecordProbe {.closure.}): string =
-  ## The option written last before `--` when it takes a value and was given
-  ## none -- returned exactly as the user wrote it (`--lang`, `-o`,
-  ## `--lang=`) -- and "" otherwise.
+  ## The option before `--` that takes a value and was given none, when
+  ## ct's half of the line ends with one -- returned exactly as the user
+  ## wrote it (`--lang`, `-o`, `--lang=`) -- and "" otherwise.
   ##
   ## `probe` parses a line with ct's own parser, without printing an error or
   ## exiting.  The question is put to the parser rather than answered from
@@ -88,17 +88,28 @@ proc recordOptionMissingValue*(
   ##    without it: if that succeeds, the trial word was the only problem, so
   ##    the last word was an option waiting for a value.  If it fails too,
   ##    the line has an error of its own, which the real parse reports.
-  if ownHalf.len < 2:
-    return ""                   # `ct record --`: nothing before `--`
-  let line = recordParserLine(ownHalf)
-  let withEnd = probe(line & @[RecordOwnArgsEnd])
-  if withEnd.parsed:
-    if withEnd.args.len > 0 and withEnd.args[^1] == RecordOwnArgsEnd:
-      return ""
-    return ownHalf[^1]
-  if probe(line).parsed:
-    return ownHalf[^1]
-  ""
+  ##
+  ## The waiting option is not always the LAST word: the pinned confutils
+  ## keeps an option waiting for its value across a following switch, so in
+  ## `ct record --lang --upload --` it is `--lang` that takes the trial word.
+  ## So once the line is known to end with an option waiting for a value, the
+  ## words are dropped from the end, one at a time, while the shorter line
+  ## still ends that way; the last word dropped before it stops is the option.
+  proc waiting(half: seq[string]): bool =
+    ## Does `half` end with an option still waiting for its value?
+    if half.len < 2:
+      return false              # `ct record --`: nothing before `--`
+    let line = recordParserLine(half)
+    let withEnd = probe(line & @[RecordOwnArgsEnd])
+    if withEnd.parsed:
+      return withEnd.args.len == 0 or withEnd.args[^1] != RecordOwnArgsEnd
+    probe(line).parsed
+  if not waiting(ownHalf):
+    return ""
+  var last = ownHalf.high
+  while last > 1 and waiting(ownHalf[0 ..< last]):
+    dec last
+  ownHalf[last]
 
 proc recordMissingValueError*(option: string): string =
   ## The refusal for an option that ends ct's half of the line without its

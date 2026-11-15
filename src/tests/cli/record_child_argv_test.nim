@@ -120,6 +120,18 @@ suite "ct record: the program and its arguments around --":
     let r = split(@["record", "prog", "--lang"], @["a"])
     check "`--lang` needs a value" in r.error
 
+  test "the option waiting for a value is named, not a switch after it":
+    # The pinned parser keeps `--lang` waiting across `--upload`, a switch;
+    # the refusal must name `--lang`, not the last word.
+    let r = split(@["record", "--lang", "--upload"], @["prog"])
+    check "`--lang` needs a value" in r.error
+    check "`--upload`" notin r.error
+    let s = split(@["record", "--upload", "--use-interpose", "--lang"], @["prog"])
+    check "`--lang` needs a value" in s.error
+    let t = split(@["record", "-o", "out", "--upload"], @["prog"])
+    check t.error == ""
+    check t.program == "prog"
+
   test "a line with an error of its own is left to the real parse":
     check recordOptionMissingValue(@["record", "--no-such-flag"], probe) == ""
     check recordOptionMissingValue(@["record"], probe) == ""
