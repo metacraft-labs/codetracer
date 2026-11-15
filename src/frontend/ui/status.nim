@@ -16,6 +16,7 @@ from ../viewmodel/platform/displayed_build_identity import
 # model on every backend, and an empty model renders no element — so
 # `statusBaseModel` stays backend-neutral instead of growing a `when`.
 from certificate_indicator import statusCertificateModel
+from ../notification_key import notificationKey
 
 when defined(js):
   import isonim/web/web_renderer
@@ -140,10 +141,13 @@ proc onNotification*(self: StatusComponent, notification: Notification) =
 
   # The same words already showing are one notification. A replay that retries
   # its start reports each attempt in the same sentence, and the copies stacked
-  # into a pile that covered the panes' tabs.
+  # into a pile that covered the panes' tabs. Words that differ only in an
+  # address are the same words: each worker's rr names where it stopped
+  # (`notification_key.nim`).
+  let key = notificationKey($notification.text)
   for shown in self.notifications:
     if shown.active and shown.kind == notification.kind and
-       shown.text == notification.text:
+       notificationKey($shown.text) == key:
       return
 
   if self.notifications.len == self.maxNotificationsCount:
@@ -166,14 +170,15 @@ proc onLaunchFailed*(self: StatusComponent, failure: LaunchFailure) =
   # no stop, and no word of why. The server's Error `ct/notification` with
   # the same sentence is the one kept, whichever of the two arrived first.
   if failure.message.len > 0:
+    let key = notificationKey($failure.message)
     var shown: Notification = nil
     for notification in self.notifications:
-      if notification.kind == NotificationError and notification.text == failure.message:
+      if notification.kind == NotificationError and notificationKey($notification.text) == key:
         shown = notification
     if shown.isNil:
       self.onNotification(newNotification(NotificationError, $failure.message))
       for notification in self.notifications:
-        if notification.kind == NotificationError and notification.text == failure.message:
+        if notification.kind == NotificationError and notificationKey($notification.text) == key:
           shown = notification
     if not shown.isNil:
       clearNotificationTimer(shown)

@@ -32,8 +32,8 @@
 ##   * land in the second tab's status bar, once, and end its busy state;
 ##   * leave the first tab's status bar exactly as it was;
 ##   * not be painted into the window's one `#status` element while its tab is
-##     hidden, and be painted there — with its auto-dismiss timer not yet
-##     started — when its tab is switched to.
+##     hidden, and be painted there when its tab is switched to, kept until
+##     the user dismisses it (no auto-dismiss timer).
 ##
 ## The routing is held from the other side too: a move of the FIRST tab
 ## delivered while the later tab is shown updates the first tab's status bar
@@ -91,7 +91,7 @@ import ../utils
 import ../ui/status
 import ../../common/ct_event
 
-const ExpectedChecks = 30
+const ExpectedChecks = 34
 var checks = 0
 var failedChecks = 0
 template ck(cond: untyped) =
@@ -242,13 +242,17 @@ proc runChecks() {.async.} =
       laterTab.ui.status.notifications[0].active and
       not laterTab.ui.status.notifications[0].hasTimeout
 
-  scenario "switching to the later tab shows the refusal, for its full time":
+  scenario "switching to the later tab shows the refusal, and it stays":
+    # A replay that cannot start keeps its reason on screen until the user
+    # dismisses it (`Multi-Window-Tab-Management.md` item 7): no display
+    # timer is started for it, here or ever.
     showTab(1)
     await settle()
     ck refusal in paintedNotifications()
     ck laterTab.ui.status.notifications.len == 1 and
       laterTab.ui.status.notifications[0].active and
-      laterTab.ui.status.notifications[0].hasTimeout
+      laterTab.ui.status.notifications[0].persistent and
+      not laterTab.ui.status.notifications[0].hasTimeout
 
   scenario "switching back takes the refusal off the bar":
     showTab(0)
@@ -310,6 +314,34 @@ proc runChecks() {.async.} =
     await settle()
     ck firstTab.notificationTexts() == @["untagged"]
     ck "untagged" notin laterTab.notificationTexts()
+
+  scenario "one failure from several workers, differing only in an address, is shown once":
+    # Every worker of a replay that cannot start reports rr's reason, and rr
+    # names the address it was at, so the same failure arrives once per
+    # worker in sentences that differ only there. They stacked one toast
+    # each; the status bar now takes them as the one sentence they are
+    # (`notification_key.nim`).
+    const workerFailure = "The replay could not start: rr could not replay " &
+      "this recording: replay stopped at "
+    for address in ["0x7ffd5a1c2b40", "0x7ffd5a1c2f88"]:
+      deliverDapEvent(data, eventFrame(firstTab.dapApi.sessionId,
+        cstring"ct/notification", errorNotificationBody(cstring(workerFailure & address))))
+    deliverDapEvent(data, eventFrame(firstTab.dapApi.sessionId,
+      cstring"ct/launch-failed", js{"message": cstring(workerFailure & "0x7ffd5a1c3010")}))
+    await settle()
+    let shown = firstTab.notificationTexts().filterIt(it.startsWith(workerFailure))
+    ck shown == @[workerFailure & "0x7ffd5a1c2b40"]
+    ck firstTab.ui.status.notifications.anyIt(
+      $it.text == workerFailure & "0x7ffd5a1c2b40" and it.persistent)
+    # Words that differ in anything but an address are still two notices.
+    deliverDapEvent(data, eventFrame(firstTab.dapApi.sessionId,
+      cstring"ct/notification", errorNotificationBody(cstring(
+        "The replay could not start: rr could not replay this recording: " &
+        "replay crashed at 0x7ffd5a1c2b40"))))
+    await settle()
+    ck firstTab.notificationTexts().filterIt(
+      it.startsWith("The replay could not start:")).len == 2
+    ck firstTab.notificationTexts().filterIt(it.startsWith(workerFailure)).len == 1
 
   # Every check above ran: a scenario that stopped early is a failure, not a
   # shorter pass.
