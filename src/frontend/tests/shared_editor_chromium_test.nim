@@ -126,7 +126,7 @@ proc endCase(name: string) =
 
 const
   Source = "def main():\n    x = 1\n    if x:\n        y = 2\n\n    return x\nprint(main())\n"
-  ExpectedChecks = 133
+  ExpectedChecks = 135
     ## Written from a run. See the end of `main`.
 
 proc fresh(text = Source; readOnly = false; model = bkCua;
@@ -605,6 +605,10 @@ proc caseUnifiedDiffRegions() {.async.} =
   let holder1 = qsa(modRoot, ".view-zones .ct-diff-band-zone")[1]
   ck abs(num(rectOf(band1.parentNode).top) - num(rectOf(holder1).top)) < 1.0,
      "the band is drawn where its zone is"
+  # The band's zone takes its room although the line after it is hidden
+  # (`showInHiddenAreas`): the next shown line (28) starts below the band.
+  ck abs(topOf(gutterRow("modified", 28)) - (num(rectOf(band1.parentNode).top) + 24.0)) < 1.0,
+     "the line after a collapsed region starts below its band"
   ck not isNull(bands[0].querySelector(cstring":scope > .top")) and
      not isNull(bands[0].querySelector(cstring":scope > .bottom[role=button]"))
   ck isNull(qs(".modified-in-monaco-diff-editor .view-line[data-line=\"1\"]")),
@@ -647,6 +651,26 @@ proc caseUnifiedDiffRegions() {.async.} =
      "the removed line's old number is beside it"
   ck abs(topOf(gutterRow("original", 21)) - topOf(gutterRow("modified", 21))) < 1.0
   ck isNull(gutterRow("original", 1)), "the old revision hides the region too"
+  # A control inside a view zone takes a trusted press (the zones lie above
+  # the text layer), as a review's call and loop controls need.
+  let btnZone = newDivEl()
+  btnZone.innerHTML = cstring"<button id='zone-button' style='margin-left: 120px'>next</button>"
+  var zonePresses = 0
+  discard btnZone.addEventListener(cstring"mousedown", proc(e: JsObject) = inc zonePresses)
+  let btnSpec = jsNew()
+  btnSpec["afterLineNumber"] = 18
+  btnSpec["heightInPx"] = 30
+  btnSpec["domNode"] = btnZone
+  discard diff.getModifiedEditor().changeViewZones(proc(acc: JsObject) = discard acc.addZone(btnSpec))
+  await settle()
+  let zb = rectOf(qs("#zone-button"))
+  let zbx = num(zb.left) + num(zb.width) / 2
+  let zby = num(zb.top) + num(zb.height) / 2
+  await ctMouse("move", zbx, zby, "left", 1)
+  await ctMouse("down", zbx, zby, "left", 1)
+  await ctMouse("up", zbx, zby, "left", 1)
+  await settle()
+  ck zonePresses == 1, "a button in a view zone takes the press"
   # A block the view adds to the new revision is matched in the old one.
   let zone = jsNew()
   zone["afterLineNumber"] = 22
