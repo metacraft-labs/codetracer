@@ -1,0 +1,27 @@
+scenario: 1
+name: gpui/input-routing-user-chords
+pack: codetracer
+summary: >-
+  A chord from the user's keybindings.json reaches its operation: Ctrl+Alt+K steps over; Ctrl+click on a call row, rebound to Continue, runs to the end.
+
+stage:
+  - use: record-program
+    with: { program: calc }
+  - use: plant-config
+    with:
+      file: keybindings.json
+      content: |
+        [
+          { "key": "ctrl+alt+k", "command": "debugger.step-over" },
+          { "key": "ctrl+click", "command": "debugger.continue",
+            "when": "paneKind == calltrace && elementKind == row" }
+        ]
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - expect: { at: replay-position, tick: 1 }
+  - chord: Ctrl+Alt+K
+  - wait: { until: { at: replay-position, assert: "past(1)" }, timeout: 30s }
+  - click: { at: 'call-trace/call[#6]', anchor: name, modifiers: [Ctrl] }
+  - wait: { until: { at: replay-position, tick: 171 }, timeout: 60s }

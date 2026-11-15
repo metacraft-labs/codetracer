@@ -1,0 +1,19 @@
+scenario: 1
+name: gpui/tables-cut-cell-detail
+pack: codetracer
+summary: >-
+  In the event log of the wide-lines recording a cut cell ends in `…`; Ctrl+K Ctrl+I on the selected event opens its whole text under the row, and the replay does not move.
+
+stage:
+  - use: record-program
+    with: { program: wide_lines/main.py }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - wait: { until: { at: 'pane[title="Event Log"]', assert: 'has-row("LEFT-EDGE")' }, timeout: 30s }
+  - expect: { at: 'pane[title="Event Log"]', assert: 'lacks-row("RIGHT-EDGE")' }
+  - click: { at: 'event-log/event[#1]' }
+  - wait: { until: { at: replay-position, assert: "past(1)" }, timeout: 30s }
+  - chord: Ctrl+K Ctrl+I
+  - wait: { until: { at: 'pane[title="Event Log"]', assert: 'has-row("RIGHT-EDGE")' }, timeout: 20s }

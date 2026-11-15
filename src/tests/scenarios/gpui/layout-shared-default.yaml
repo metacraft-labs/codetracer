@@ -20,8 +20,8 @@ steps:
   - expect: { at: 'pane[title="Call Trace"]', tabs: ["Call Trace", "Agent Activity"] }
   - expect: { at: 'pane[title="Event Log"]', tabs: ["Event Log", "Terminal Output"] }
   - expect: { at: 'pane[title="calc/main.py"]', present: true }
-  - expect: { at: 'dock-label[label="BUILD"]', present: true }
-  - expect: { at: 'dock-label[label="PROBLEMS"]', present: true }
-  - expect: { at: 'dock-label[label="FIND IN FILES"]', present: true }
-  - expect: { at: 'dock-label[label="REQUESTS"]', present: true }
+  - expect: { at: 'dock-label[label="Build Output"]', present: true }
+  - expect: { at: 'dock-label[label="Problems"]', present: true }
+  - expect: { at: 'dock-label[label="Find in Files"]', present: true }
+  - expect: { at: 'dock-label[label="Requests"]', present: true }
   - expect: { at: 'pane-tab[label="Constraints"]', absent: true }

@@ -15,7 +15,7 @@ steps:
   - wait: { until: call-trace.loaded, timeout: 60s }
   - expect: { at: 'call-trace/call[#5]', name: apply_op }
   - expect: { at: 'call-trace/call[#6]', name: add }
-  - click: { at: 'call-trace/call[#5]', button: right }
+  - click: { at: 'call-trace/call[#5]', anchor: name, button: right }
   - wait: { until: { at: 'context-menu/menu-item[label="Collapse Call Children"]', present: true }, timeout: 30s }
   - expect: { at: 'context-menu/menu-item[label="Collapse Call Children"]', enabled: true }
   - click: { at: 'context-menu/menu-item[label="Collapse Call Children"]' }

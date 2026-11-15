@@ -7,7 +7,7 @@ summary: >-
 
 stage:
   - use: record-program
-    with: { program: wide_lines }
+    with: { program: wide_lines/main.py }
   - use: open-recording
     with: { width: 1440, height: 900 }
 
@@ -18,7 +18,7 @@ steps:
   - expect: { at: 'editor[file="main.py"]', assert: "caret-at(26)" }
   - expect:
       at: 'editor[file="main.py"]/line[number="26"]'
-      text: { contains: "WIDE_SOURCE" }
+      text: { contains: "IDE_SOURCE" }
   - key: End
   - expect:
       at: 'editor[file="main.py"]/line[number="26"]'

@@ -1,0 +1,20 @@
+scenario: 1
+name: gpui/visual-replay-video-player
+pack: codetracer
+summary: >-
+  A visual recording shows the Video Player with Pixel History and Shader Debug; the player draws its frame viewer and End moves it to the last frame.
+
+stage:
+  - use: visual-recording
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 300s }
+  - wait: { until: { at: 'pane-tab[label="Video Player"]', present: true }, timeout: 120s }
+  - expect: { at: 'pane-tab[label="Pixel History"]', present: true }
+  - expect: { at: 'pane-tab[label="Shader Debug"]', present: true }
+  - click: { at: 'pane-tab[label="Video Player"]' }
+  - wait: { until: { at: 'pane[title="Video Player"]', assert: 'has-row("Frame 0")' }, timeout: 120s }
+  - click: { at: 'pane[title="Video Player"]' }
+  - key: End
+  - wait: { until: { at: 'pane[title="Video Player"]', assert: 'lacks-row("Frame 0 ")' }, timeout: 60s }

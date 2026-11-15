@@ -1,0 +1,21 @@
+scenario: 1
+name: gpui/build-output-failing-gcc-build
+pack: codetracer
+summary: >-
+  In an Edit window, `:build` with a failing gcc command shows the Build Output lines and the failure, its error located at src/main.c:5:17.
+
+stage:
+  - use: fixture-project
+    with: { name: c-build }
+  - use: open-project
+    with: { folder: $project }
+
+steps:
+  - wait: { until: ready, timeout: 60s }
+  - chord: Ctrl+P
+  - type: ":build gcc -Wall -c src/main.c -o /dev/null"
+  - key: Enter
+    settle: false
+  - wait: { until: { at: 'pane[title="Build Output"]', assert: 'has-row("src/main.c:5:17")' }, timeout: 180s }
+  - wait: { until: settled, timeout: 60s }
+  - expect: { at: 'pane[title="Build Output"]', assert: 'has-row("error")' }

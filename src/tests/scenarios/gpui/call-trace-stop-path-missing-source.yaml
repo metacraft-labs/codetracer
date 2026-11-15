@@ -20,10 +20,11 @@ steps:
   - wait: { until: call-trace.loaded, timeout: 60s }
   - click: { at: 'call-trace/call[name="add"]' }
   - wait: { until: { at: 'pane-tab[label="shared/helpers.py"]', present: true }, timeout: 60s }
-  - wait:
-      until:
-        at: 'pane[title="shared/helpers.py"]'
-        text: { contains: "/multi_root/app/../shared/helpers.py in this recording." }
-      timeout: 60s
+  # the notice wraps at the editor's width: the reported path runs over its
+  # rows, so each part is a row of its own
+  - wait: { until: { at: 'pane[title="shared/helpers.py"]', assert: 'has-row("helpers.py in this recording.")' }, timeout: 60s }
+  - expect:
+      at: 'pane[title="shared/helpers.py"]'
+      assert: ['has-row("No source for")', 'has-row("multi_root/app/../shared")']
   - expect: { at: 'pane[title="shared/helpers.py"]', assert: 'lacks-row("No verified source")' }
   - expect: { at: 'pane[title="shared/helpers.py"]', assert: 'lacks-row("def scale(value, factor):")' }

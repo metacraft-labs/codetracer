@@ -9,7 +9,7 @@ summary: >-
 
 stage:
   - use: record-program
-    with: { program: wide_lines }
+    with: { program: wide_lines/main.py }
   - use: open-recording
     with: { width: 1440, height: 900 }
 
@@ -23,7 +23,9 @@ steps:
   - wheel: { at: 'editor[file="main.py"]', direction: right, amount: 6 }
   - expect:
       at: 'editor[file="main.py"]/line[number="26"]'
-      text: { matches: "^\\W?[a-z ]*brown fox" }
+      # the line's start is gone: it begins inside the sentence (a notch
+      # moves several columns, as many as the platform's wheel step says)
+      text: { matches: "^\\W?[a-z ,]*(brown fox|jumps over|lazy dog)" }
   - expect: { at: 'editor[file="main.py"]', first-visible: 1 }
   - wheel: { at: 'editor[file="main.py"]', direction: left, amount: 6 }
   - expect:

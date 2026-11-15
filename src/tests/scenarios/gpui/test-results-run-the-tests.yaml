@@ -1,0 +1,24 @@
+scenario: 1
+name: gpui/test-results-run-the-tests
+pack: codetracer
+summary: >-
+  The Tests pane lists the crate's two tests before a run; ▶ runs them and the pane says one passed and one failed.
+
+stage:
+  - use: record-program
+    with: { program: calc }
+  - use: fixture-project
+    with: { name: noir-tests }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - click: { at: 'pane-tab[label="Tests"]' }
+  - wait: { until: { at: 'pane[title="Tests"]', assert: 'has-row("test_fails")' }, timeout: 60s }
+  - expect: { at: 'pane[title="Tests"]', assert: 'has-row("test_passes")' }
+  - chord: Ctrl+P
+  - type: ":Tests: Run"
+  - key: Enter
+    settle: false
+  - wait: { until: { at: 'pane[title="Tests"]', assert: 'has-row("1 passed")' }, timeout: 300s }
+  - expect: { at: 'pane[title="Tests"]', assert: 'has-row("1 failed")' }

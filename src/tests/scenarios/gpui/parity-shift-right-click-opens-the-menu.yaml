@@ -1,0 +1,17 @@
+scenario: 1
+name: gpui/parity-shift-right-click-opens-the-menu
+pack: codetracer
+summary: >-
+  Shift with a right press on an editor line opens the same editor menu a right press does (Run to Cursor among its entries).
+
+stage:
+  - use: record-program
+    with: { program: calc }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - click: { at: 'editor[file="main.py"]/line[number="31"]', anchor: text-start, button: right, modifiers: [Shift] }
+  - wait: { until: { at: context-menu, assert: 'offers("Run to Cursor")' }, timeout: 20s }
+  - key: Esc
+  - wait: { until: { at: context-menu, absent: true }, timeout: 20s }

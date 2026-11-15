@@ -1,0 +1,20 @@
+scenario: 1
+name: gpui/multiclick-double-selects-the-word
+pack: codetracer
+summary: >-
+  In an Edit window a double click selects the word under the pointer (snake_case_name, underscores and all), and typing replaces it.
+
+stage:
+  - use: write-project
+    with:
+      files:
+        fixture.txt: "snake_case_name = other.attr(x)\n    leading indentation\n"
+  - use: open-project
+    with: { folder: $project, file: fixture.txt }
+
+steps:
+  - wait: { until: ready, timeout: 60s }
+  - wait: { until: { at: 'editor[file="fixture.txt"]', assert: 'shows-text("snake_case_name")' }, timeout: 30s }
+  - click: { at: 'editor[file="fixture.txt"]/line[number="1"]', anchor: "column(3)", count: 2 }
+  - type: "Z"
+  - wait: { until: { at: 'editor[file="fixture.txt"]/line[number="1"]', text: { contains: "Z = other.attr(x)" } }, timeout: 20s }

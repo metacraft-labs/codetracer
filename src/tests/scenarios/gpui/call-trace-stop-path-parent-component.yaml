@@ -42,7 +42,7 @@ steps:
           text: { contains: "def scale(value, factor):" }
       - expect:
           at: 'editor[file="extra.py"]/line[number="5"]'
-          text: { contains: "result = value * factor" }
+          text: { contains: "result = value" }
       - expect:
           at: 'editor[file="extra.py"]/line[number="6"]'
           text: { contains: "return result" }

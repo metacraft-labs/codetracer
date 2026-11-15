@@ -16,7 +16,7 @@ stage:
 steps:
   - wait: { until: replay-idle, timeout: 120s }
   - expect: { at: 'pane-tab[label="Event Log"]', absent: true }
-  - expect: { at: 'dock-label[label="EVENT LOG"]', present: true }
+  - expect: { at: 'dock-label[label="Event Log"]', present: true }
   - expect: { at: 'pane[title="Terminal Output"]', present: true }
   - expect: { at: 'pane[title="Call Trace"]', present: true }
   - expect: { at: 'pane[title="Files"]', present: true }

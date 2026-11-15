@@ -2,12 +2,15 @@ scenario: 1
 name: gpui/top-bar-ctrl-o-reveals-docked
 pack: codetracer
 summary: >-
-  Ctrl+O reveals the first docked pane (Build Output) itself over the panes,
+  Under the Vim keymap, Ctrl+O reveals the first docked pane (Build Output) itself over the panes,
   and Esc hides it again.
 
 stage:
   - use: record-program
     with: { program: calc }
+  # Ctrl+O is the Vim and Kakoune bases' reveal (CUA's opens a file)
+  - use: select-keymap
+    with: { preset: vim }
   - use: open-recording
 
 steps:
