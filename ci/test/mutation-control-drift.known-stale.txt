@@ -129,7 +129,6 @@ src/frontend/tui/tests/plat51-parity-mutation-control.sha256	src/frontend/tui/ap
 src/frontend/tui/tests/plat51-parity-mutation-control.sha256	src/frontend/tui/host/tui_session.nim	a9ea791e49006488ac348b14e02a4255f0d521e9444766a8aff5219e8c969bee	0c65cb8a6581ca9f73adda27a71e6589473c2573b61ce8a51eac495d0e0b1efe
 src/frontend/tui/tests/plat54-agent-activity-mutation-control.sha256	src/frontend/tui/app/runtime.nim	9f6ceffe6b6685c2accdce1080bd0d79d6355dbe8235135b4e163a554a5aa58b	a7a3bb422082c3ce0dbfd6321695a4a8876ce902281ec4c17f02c3bc4e1bbeb8
 src/frontend/tui/tests/plat54-agent-activity-mutation-control.sha256	src/frontend/tui/host/tui_session.nim	a9ea791e49006488ac348b14e02a4255f0d521e9444766a8aff5219e8c969bee	0c65cb8a6581ca9f73adda27a71e6589473c2573b61ce8a51eac495d0e0b1efe
-src/frontend/viewmodel/tests/unit/plat4-layout-mutation-control.sha256	src/frontend/tui/app/tui_app.nim	cc455c9ce9a525fd905861c04eeeac5edfd762fbb7f426932c75deb4417f6ecb	5e29fc96fe73c25b52f244228fa9880cac9205a1607f7214b733c6c0dcd3e647
 # run-plat62-constraints-mutations.py was re-graded at 56862a458e4; since then
 # eec6949f68 (a move in flight, an early replay-idle) moved the terminal's
 # runtime and main under its record. A re-grade of the arms whose needles sit
