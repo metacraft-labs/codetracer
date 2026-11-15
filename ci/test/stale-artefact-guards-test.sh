@@ -1654,7 +1654,7 @@ fi
 # shellcheck disable=SC2016 # Tup source text, not expansions
 if grep -qxF 'NIM_CACHE_ROOT = $(CT_TUP_NIM_CACHE_ROOT)' <<<"${TUP_RULE_LINES}" &&
 	grep -qxF 'import CT_TUP_NIM_CACHE_ROOT=' <<<"${TUP_RULE_LINES}" &&
-	grep -A1 -xF 'ifeq ($(CT_TUP_NIM_CACHE_ROOT),)' <<<"${TUP_RULE_LINES}" | grep -q '^error ' &&
+	grep -q '^error ' <<<"$(grep -A1 -xF 'ifeq ($(CT_TUP_NIM_CACHE_ROOT),)' <<<"${TUP_RULE_LINES}")" &&
 	! grep -qE 'tup-from-pwd|import PWD' <<<"${TUP_RULE_LINES}"; then
 	ok "src/Tuprules.tup takes its Nim cache root only from the environment, and refuses without it"
 else
@@ -1742,9 +1742,9 @@ fi
 # (kept verbatim by tup in a variable, measured) into the ERE `[/\]`.
 IGNORE_A="$(printf '%s\n' "${CB_A}" | sed -n 2p)"
 IGNORE_ERE="^$(printf '%s' "${IGNORE_A}" | sed 's/\[\/\\\\\]/[\/\\]/g')db_backend_target[A-Za-z0-9]*[/\\].*\$"
-if printf '%s\n' "${BASE_A}/db_backend_target/debug/replay-server" | grep -Eq -- "${IGNORE_ERE}" &&
-	printf '%s\n' "${BASE_A}/db_backend_targetF5RTUl/CACHEDIR.TAG" | grep -Eq -- "${IGNORE_ERE}" &&
-	! printf '%s\n' "$(first_line "${CB_B}")/db_backend_target/debug/replay-server" | grep -Eq -- "${IGNORE_ERE}"; then
+if grep -Eq -- "${IGNORE_ERE}" <<<"${BASE_A}/db_backend_target/debug/replay-server" &&
+	grep -Eq -- "${IGNORE_ERE}" <<<"${BASE_A}/db_backend_targetF5RTUl/CACHEDIR.TAG" &&
+	! grep -Eq -- "${IGNORE_ERE}" <<<"$(first_line "${CB_B}")/db_backend_target/debug/replay-server"; then
 	ok "the ignore expression covers this base's target writes and not another checkout's"
 else
 	bad "the ignore expression covers this base's target writes and not another checkout's" \
@@ -1812,8 +1812,8 @@ if [[ -z ${TUP_CARGO_BARE} ]] &&
 	grep -qxF 'CARGO_TARGET_BASE = $(CT_TUP_CARGO_TARGET_BASE)' <<<"${TUP_RULE_LINES}" &&
 	grep -qxF 'import CT_TUP_CARGO_TARGET_BASE=' <<<"${TUP_RULE_LINES}" &&
 	grep -qxF 'import CT_TUP_CARGO_TARGET_IGNORE=' <<<"${TUP_RULE_LINES}" &&
-	grep -A1 -xF 'ifeq ($(CT_TUP_CARGO_TARGET_BASE),)' <<<"${TUP_RULE_LINES}" | grep -q '^error ' &&
-	grep -A1 -xF 'ifeq ($(CT_TUP_CARGO_TARGET_IGNORE),)' <<<"${TUP_RULE_LINES}" | grep -q '^error '; then
+	grep -q '^error ' <<<"$(grep -A1 -xF 'ifeq ($(CT_TUP_CARGO_TARGET_BASE),)' <<<"${TUP_RULE_LINES}")" &&
+	grep -q '^error ' <<<"$(grep -A1 -xF 'ifeq ($(CT_TUP_CARGO_TARGET_IGNORE),)' <<<"${TUP_RULE_LINES}")"; then
 	ok "src/Tuprules.tup takes its Cargo target base only from the helper, and refuses without it"
 else
 	bad "src/Tuprules.tup takes its Cargo target base only from the helper, and refuses without it" \
@@ -1862,7 +1862,7 @@ done
 for entry in nix/shells/ci-base.nix non-nix-build/env.sh \
 	non-nix-build/windows/setup-codetracer-runtime-env.sh; do
 	# Code only: these files explain in comments why they do not pass it.
-	! grep -v '^[[:space:]]*#' "${SUITE_ROOT}/${entry}" 2>/dev/null | grep -q -- '--reap' ||
+	! grep -q -- '--reap' <<<"$(grep -v '^[[:space:]]*#' "${SUITE_ROOT}/${entry}" 2>/dev/null)" ||
 		REAP_WRONG="${REAP_WRONG} ${entry}(reaps)"
 done
 if [[ -z ${REAP_WRONG} ]]; then
@@ -1976,15 +1976,18 @@ fi
 # both Cargo actions are ordered after the uncacheable action that binds it.
 REPRO_NIM="${SUITE_ROOT}/repro.nim"
 REPRO_CODE="$(grep -v '^[[:space:]]*#' "${REPRO_NIM}")"
+# The slot action's declaration, held in a variable so each property below is
+# a here-string match rather than a pipe into an early-exiting `grep -q`.
+REPRO_SLOT_ACTION="$(grep -A8 'actionIdValue = "repro-cargo-target-slot"' <<<"${REPRO_CODE}")"
 # shellcheck disable=SC2016 # Nim source text
 if ! grep -qE '"(C:)?/tmp/codetracer"' <<<"${REPRO_CODE}" &&
 	grep -qF 'const ReproCargoSlot = "build/repro-cargo-targets/active"' <<<"${REPRO_CODE}" &&
 	[[ "$(grep -c 'targetDir = ReproCargoSlot & "/' <<<"${REPRO_CODE}")" -eq "$(grep -c 'targetDir = ' <<<"${REPRO_CODE}" | awk '{print $1 - 1}')" ]] &&
 	grep -qF 'targetDir = "build/repro-cargo-targets/probe"' <<<"${REPRO_CODE}" &&
 	[[ "$(grep -c 'after = @\[reproCargoTargetSlot\]' <<<"${REPRO_CODE}")" -eq "$(grep -c 'targetDir = ReproCargoSlot & "/' <<<"${REPRO_CODE}")" ]] &&
-	grep -A8 'actionIdValue = "repro-cargo-target-slot"' <<<"${REPRO_CODE}" | grep -q 'afterValue = \[reproCargoProbe\]' &&
-	grep -A8 'actionIdValue = "repro-cargo-target-slot"' <<<"${REPRO_CODE}" | grep -q 'tup-cargo-target.sh --repro-slot --rustc-probe' &&
-	grep -A8 'actionIdValue = "repro-cargo-target-slot"' <<<"${REPRO_CODE}" | grep -q 'cacheableValue = false'; then
+	grep -q 'afterValue = \[reproCargoProbe\]' <<<"${REPRO_SLOT_ACTION}" &&
+	grep -q 'tup-cargo-target.sh --repro-slot --rustc-probe' <<<"${REPRO_SLOT_ACTION}" &&
+	grep -q 'cacheableValue = false' <<<"${REPRO_SLOT_ACTION}"; then
 	ok "repro.nim builds Cargo only into the bound slot, after the uncacheable action that binds it to the probed compiler"
 else
 	bad "repro.nim builds Cargo only into the bound slot, after the uncacheable action that binds it to the probed compiler" \
