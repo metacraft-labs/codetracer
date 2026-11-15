@@ -343,10 +343,12 @@
     # we have to seed those paths from these flake inputs.  ``.envrc``
     # overrides each with a local checkout when present.
     codetracer-native-recorder = {
-      # CodeTracer's dev build needs the recorder integration branch:
-      # db-backend's emulator FFI contract moves with native-recorder
-      # dev, while stable is only the last released recorder snapshot.
-      url = "github:metacraft-labs/codetracer-native-recorder/dev";
+      # `/agents`, the recorder's agent mainline, like the other
+      # codetracer-family inputs: db-backend's emulator FFI contract moves
+      # with the recorder's integration work, which lands on `agents` before
+      # it is promoted to `dev`, and stable is only the last released
+      # recorder snapshot.
+      url = "github:metacraft-labs/codetracer-native-recorder/agents";
       flake = false;
     };
     codetracer-trace-format-nim = {
@@ -408,7 +410,9 @@
     # compile time.  Workspace dev shells resolve these as sibling repos;
     # standalone Nix package builds need deterministic source fallbacks.
     io-mon = {
-      url = "github:metacraft-labs/io-mon/dev";
+      # `/agents`, io-mon's agent mainline: the capture model ct_test imports
+      # moves there before it is promoted to `dev`.
+      url = "github:metacraft-labs/io-mon/agents";
       flake = false;
     };
     nim-stackable-hooks = {

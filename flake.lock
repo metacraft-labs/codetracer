@@ -1326,7 +1326,7 @@
       },
       "original": {
         "owner": "metacraft-labs",
-        "ref": "dev",
+        "ref": "agents",
         "repo": "codetracer-native-recorder",
         "type": "github"
       }
@@ -7393,7 +7393,7 @@
       },
       "original": {
         "owner": "metacraft-labs",
-        "ref": "dev",
+        "ref": "agents",
         "repo": "io-mon",
         "type": "github"
       }
