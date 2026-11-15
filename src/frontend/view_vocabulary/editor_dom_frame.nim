@@ -317,6 +317,10 @@ type
   LineDecorations* = object
     ## What the decorations put on one line.
     lineClasses*: seq[string]       ## overlay classes (whole line)
+    rangeClasses*: seq[tuple[fromCol, toCol: int; cls: string]]
+      ## overlay classes over byte columns `[fromCol, toCol)` of the line:
+      ## Monaco's `className` on a range that is not whole-line, where the
+      ## caller asks for it (`decorationsByLine`'s `ranges`)
     glyphClasses*: seq[string]
     lineDecoClasses*: seq[string]
     marginClasses*: seq[string]
@@ -327,8 +331,12 @@ type
     hovers*: seq[tuple[fromCol, toCol: int; message: string]]
 
 proc decorationsByLine*(t: DecorationTable; ix: LineIndex;
-                        firstLine0, lastLine0: int): Table[int, LineDecorations] =
+                        firstLine0, lastLine0: int;
+                        ranges = false): Table[int, LineDecorations] =
   ## The decorations touching 0-based lines `firstLine0 .. lastLine0`, by line.
+  ## `ranges`: a `className` on a range that is not whole-line covers that
+  ## range of each line (`rangeClasses`), as Monaco draws it; otherwise the
+  ## whole line.
   result = initTable[int, LineDecorations]()
   var byCore = initTable[int, int]()
   for i, e in t.entries: byCore[e.coreId] = i
@@ -347,7 +355,14 @@ proc decorationsByLine*(t: DecorationTable; ix: LineIndex;
       var ld = result.getOrDefault(line0)
       let ls = ix.lineStart(line0)
       let le = ix.lineEnd(line0)
-      if o.className.len > 0 and (o.isWholeLine or a != b or o.showIfCollapsed):
+      if ranges and o.className.len > 0 and not o.isWholeLine and a != b:
+        let fc = max(a, ls) - ls
+        let tc = min(b, le) - ls
+        # Monaco draws a range that runs past a line's end to the line's end,
+        # and nothing on a line it only touches at column 1.
+        if tc > fc or (b > le and fc < le):
+          ld.rangeClasses.add (fc, max(tc, fc), o.className)
+      elif o.className.len > 0 and (o.isWholeLine or a != b or o.showIfCollapsed):
         ld.lineClasses.add o.className
       # The margin classes go on the range's FIRST line only, as Monaco's
       # glyph margin draws them.

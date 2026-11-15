@@ -311,7 +311,12 @@ proc layoutInfoJs(ed: SharedEditor): JsObject =
   result["decorationsLeft"] = max(0, ed.gutterPx - 26)
   result["decorationsWidth"] = 26
   result["contentLeft"] = ed.gutterPx
-  result["contentWidth"] = max(0, ed.width - ed.gutterPx - 14)
+  # Monaco's diff editors report the content as reaching the editor's right
+  # edge (measured on the review's inline diff: width 426, contentLeft 37,
+  # contentWidth 389); its source editors leave the scrollbar out.
+  result["contentWidth"] =
+    if ed.monacoGutter: max(0, ed.width - ed.gutterPx)
+    else: max(0, ed.width - ed.gutterPx - 14)
   # Monaco's `EditorLayoutInfo.minimap` (the desktop reads `minimapWidth`
   # and `minimapLeft` from here: the tracepoint editor's and the flow
   # slider's widths). No minimap is drawn: width 0, at the right edge.

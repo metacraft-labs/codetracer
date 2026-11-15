@@ -143,6 +143,19 @@ suite "decorations live in the core's set and follow the text":
     check byLine[2].inline.len == 1
     check byLine[2].inline[0].toCol == ix.lineText(Source, 2).len
 
+  test "a range's class covers the range, not the line, when asked (Monaco's word marks)":
+    let ix = buildLineIndex(Source, DocumentVersion(0))
+    var t = initDecorationTable(DocumentVersion(0))
+    # `x` on line 2 ("    x = 1")
+    let a = ix.lineStart(1) + 4
+    discard t.deltaDecorations([], [DecoRequest(fromOffset: a, toOffset: a + 1,
+      options: DecoOptions(className: "char-insert"))])
+    let byRange = t.decorationsByLine(ix, 0, 7, ranges = true)
+    check byRange[1].rangeClasses == @[(fromCol: 4, toCol: 5, cls: "char-insert")]
+    check byRange[1].lineClasses.len == 0
+    # without `ranges`, the whole line, as the source editor draws it
+    check "char-insert" in t.decorationsByLine(ix, 0, 7)[1].lineClasses
+
   test "injected content goes at the range's end":
     let ix = buildLineIndex(Source, DocumentVersion(0))
     var t = initDecorationTable(DocumentVersion(0))

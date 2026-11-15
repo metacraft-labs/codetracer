@@ -126,7 +126,7 @@ proc endCase(name: string) =
 
 const
   Source = "def main():\n    x = 1\n    if x:\n        y = 2\n\n    return x\nprint(main())\n"
-  ExpectedChecks = 131
+  ExpectedChecks = 133
     ## Written from a run. See the end of `main`.
 
 proc fresh(text = Source; readOnly = false; model = bkCua;
@@ -611,12 +611,16 @@ proc caseUnifiedDiffRegions() {.async.} =
      "a hidden line is not drawn"
   ck not isNull(qs(".modified-in-monaco-diff-editor .view-line[data-line=\"17\"]"))
   # Word-level marks: only the changed word, in each revision.
-  let ins = qsa(modRoot, ".view-lines .char-insert")
-  var insText: seq[string] = @[]
-  for i in 0 ..< num(ins.length).int: insText.add $textOf(ins[i])
-  ck insText == @["c"], "only the inserted word is marked: " & $insText
-  ck num(qsa(modRoot, ".view-overlays .cdr.char-insert").length) == 1,
-     "an added-only line is marked whole-line"
+  # As Monaco draws them: rectangles in the overlay layer, one over the
+  # changed word, one over the added-only line.
+  let ins = qsa(modRoot, ".view-overlays .cdr.char-insert")
+  var widths: seq[float] = @[]
+  for i in 0 ..< num(ins.length).int: widths.add num(rectOf(ins[i]).width)
+  ck widths.len == 2, "the inserted word and the added line are marked: " & $widths
+  var narrow = 0
+  for w in widths:
+    if w > 0.0 and w < 20.0: inc narrow
+  ck narrow == 1, "one mark is the width of the inserted word: " & $widths
   let dels = qsa(modRoot, ".view-zones .line-delete .char-delete")
   ck num(dels.length) == 1 and $textOf(dels[0]) == "b",
      "the removed word is marked in the removed line"

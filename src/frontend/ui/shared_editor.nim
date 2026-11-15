@@ -706,7 +706,8 @@ proc render*(ed: SharedEditor) =
   ed.visible = lines
   let firstL0 = if lines.len > 0: lines[0] - 1 else: 0
   let lastL0 = if lines.len > 0: lines[^1] - 1 else: 0
-  let decoByLine = ed.decos.decorationsByLine(ed.index, firstL0, lastL0)
+  let decoByLine = ed.decos.decorationsByLine(ed.index, firstL0, lastL0,
+                                               ranges = ed.monacoGutter)
   let caretLine0 = ed.index.lineOfOffset(ed.primaryOffset)
   var hasSelection = false
   # Monaco highlights the line of every cursor, not only the primary's.
@@ -823,6 +824,13 @@ proc render*(ed: SharedEditor) =
       let ls = ed.index.lineStart(l0)
       rects.add (l0 + 1, "bracket-match", "", "", ed.xOfByteCol(l0 + 1, off - ls),
                  ed.xOfByteCol(l0 + 1, off - ls + 1))
+  # Range `className` decorations (Monaco's word-level diff marks): a
+  # rectangle over the range's columns, in the overlay layer.
+  for line1 in lines:
+    let d = decoByLine.getOrDefault(line1 - 1)
+    for rc in d.rangeClasses:
+      rects.add (line1, "cdr " & rc.cls, "", "", ed.xOfByteCol(line1, rc.fromCol),
+                 ed.xOfByteCol(line1, rc.toCol))
   for m in ed.markers:
     for line1 in lines:
       if line1 < m.line or line1 > m.endLine: continue

@@ -401,9 +401,12 @@ proc regionFacade(d: SharedDiffEditor; index: int): JsObject =
   result["showMoreAbove"] = proc(n: JsObject) =
     let count = if isNilOrUndef(n): 10 else: int(jsNum(n))
     d.regionAction(index, proc(rr: var UnchangedRegion) = rr.showMoreAbove(count))
+  # Called through the API (the view's keyboard path and menu), a reveal
+  # leaves the scroll position alone, as Monaco's does; only the band's own
+  # press and drag keep the lines below the region in place.
   result["showMoreBelow"] = proc(n: JsObject) =
     let count = if isNilOrUndef(n): 10 else: int(jsNum(n))
-    d.keepBoundaryAt(index, proc(rr: var UnchangedRegion) = rr.showMoreBelow(count))
+    d.regionAction(index, proc(rr: var UnchangedRegion) = rr.showMoreBelow(count))
   result["showAll"] = proc() =
     d.regionAction(index, proc(rr: var UnchangedRegion) = rr.showAll())
 
@@ -436,9 +439,12 @@ proc redrawDiff(d: SharedDiffEditor; force = true) =
                 options: DecoOptions(className: cls, isWholeLine: true,
                                      marginClassName: margin))
   proc inline(ed: SharedEditor; s: CharSpan; cls: string): DecoRequest =
+    # Monaco's `char-insert` / `char-delete` in the editors are range
+    # decorations, drawn as rectangles over the words in the overlay layer
+    # (in the removed lines' block they are spans, below).
     let a = ed.lineStartOffset(s.line)
     DecoRequest(fromOffset: a + s.fromCol, toOffset: a + s.toCol,
-                options: DecoOptions(inlineClassName: cls))
+                options: DecoOptions(className: cls))
   for h in d.hunks:
     let inner = innerChanges(d.oldLines, d.newLines, h)
     let whole = wholeLineMarks(h)
