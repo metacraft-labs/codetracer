@@ -255,9 +255,3 @@ src/tests/scenarios/plat66-pack-mutation-control.sha256	src/tests/scenarios/bind
 src/frontend/tui/tests/plat61-shell-mutation-control.sha256	src/ct/db_backend_record.nim	3739e3b1f2facbbb5707f2c17aad8248cfad82a1504077cde78cb2f1aa6eea51	a64446b2acf2dc15bad6f4a77da0132753283c5af6ecd390b4c8650c6966114c
 src/frontend/tui/tests/plat61-shell-mutation-control.sha256	src/frontend/ui/key_router.nim	8280c990f6bdb88b9ceb5d2c2cb6cba8bdad7a0cc37ac171ce451d5f8a7b0c4e	85bb146a2e059ff37e5bf922568d8ffe23c6c923417d80ea41851627fcac19e6
 src/frontend/tui/tests/plat56-build-output-mutation-control.sha256	src/frontend/ui/status.nim	41d6c605ffb49c7ecab5df25fbcec1c8fba5ea6e3eddcbcef144cfbf9c3eaf62	df43b16eb8c1ebbdb419f3fa3db0471c2e9c6f56853a672a76f614b0fa13f518
-# plat17, plat33, plat34: re-graded at 39332359be / 8fbd0ab21f; 3ba119e25e (the host
-# RunQuota endpoint from the user-state sandbox) moved run-nim-test-lane.sh and the
-# justfile, and f2b811e86a (a side overlay's slide-out) moved test-lane-files.sh.
-# A re-grade for those bytes is owed.
-src/frontend/viewmodel/tests/unit/plat33-collab-mutation-control.sha256	ci/lib/test-lane-files.sh	0837fd79d21f0ec4601131b521643b7e349d7bce090827639a34ac606d5c98f5	b16f56a2a67132e8271371f30aa9253c3e05789999ca88a329fb53045b8986fc
-src/frontend/viewmodel/tests/unit/plat33-collab-mutation-control.sha256	justfile	09f65d0d8dd94201aa918436e898a73c757c0891b188ac0da82c6fd1291b629e	de6e29c858ccacc6a879ec17305f92e561537a9869bbd58834fe32ec32fe6765
