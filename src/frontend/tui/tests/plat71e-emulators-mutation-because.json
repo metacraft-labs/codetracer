@@ -6,5 +6,5 @@
   "E5": "tokens(c.replies.join(\"\")) == c.replies",
   "E6": "legacyDrawn == (expectedIdentity(e) in [\"kitty\", \"ghostty\", \"foot\"])",
   "E7": "confused.len == 0",
-  "E8": "log.cursorReports == 6"
+  "E8": "j.axis(\"ambiguousWide\").getBool and j.source(\"ambiguousWide\") == \"probe\""
 }
