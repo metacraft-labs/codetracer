@@ -286,13 +286,29 @@ const
   ]
 
 when defined(windows):
-  const
-    ExeSuffix = ".exe"
-    CargoTargetBase = "C:/tmp/codetracer"
+  const ExeSuffix = ".exe"
 else:
-  const
-    ExeSuffix = ""
-    CargoTargetBase = "/tmp/codetracer"
+  const ExeSuffix = ""
+
+# The Cargo target directory of this checkout's repro build, relative to the
+# checkout. It used to be the host-global `/tmp/codetracer` (`C:/tmp/...`),
+# and two measured failures came from that alone (codetracer-pm
+# issues/2026-10-05-ui-tup-cargo-targets-collide-across-workspaces-and-compilers.md):
+# another account owned the directory, so `.cargo-lock` could not be opened
+# (2026-10-27), and macOS's /tmp cleanup emptied an `out/` a built
+# `replay-server` still loaded `libmcr_emulator.dylib` from (2026-10-12).
+#
+# It is a CONSTANT, not a per-compiler path like the tup build's, because the
+# graph is: reprobuild reuses the provider snapshot and the lowered-graph
+# cache across invocations that differ only in the ambient environment
+# (reprobuild docs/user-guide/idiomatic-reprobuild.md §4.4), so a compiler
+# probed here would be frozen at the first build. The compiler binding happens
+# when the build RUNS instead: `repro-cargo-target-slot` below, an uncacheable
+# action ordered before both Cargo actions, runs
+# `ci/lib/tup-cargo-target.sh --repro-slot`, which checks the slot's owner
+# marker (the same marker, written by the same file, as a tup base) and swaps
+# in a directory for the compiler about to run when it names another one.
+const ReproCargoSlot = "build/repro-cargo-targets/active"
 
 when defined(linux) or defined(macosx):
   const NativeDynlibOverrides = @[
@@ -1358,16 +1374,56 @@ package codeTracer:
     let hasDbBackendRecordInput = fileExists("src/ct/db_backend_record.nim")
     let hasCtInput = fileExists("src/ct/codetracer.nim")
 
+    # See ReproCargoSlot. Two steps, because the compiler the Cargo actions
+    # run is not on a shell action's PATH: the engine provisions it onto the
+    # Cargo edge alone, as a sub-tool.
+    #
+    # 1. The PROBE, built by the same `cargo.build` machinery as the real
+    #    crates, so it gets the same provisioned toolchain. Its build script
+    #    records the absolute path of the rustc Cargo resolved
+    #    (ci/lib/repro-cargo-probe/build.rs). Cacheable: the engine keys it on
+    #    the cargo tool's identity, so it rebuilds when the toolchain changes,
+    #    which is exactly when its answer changes. Its target is inside the
+    #    slot root but is not a slot, so nothing rotates or reaps it.
+    # 2. The SLOT, uncacheable so it runs on every build before either real
+    #    Cargo action can write into the slot: the refusals (a link, another
+    #    user's directory, an object the build did not put there, another
+    #    checkout's marker) must hold every time, and a compiler change must
+    #    be seen before Cargo mixes two compilers' artefacts in one target.
+    const reproCargoProbeBinary =
+      "build/repro-cargo-targets/probe/debug/ct-repro-cargo-probe" & ExeSuffix
+    let reproCargoProbe = cargo.build(
+      locked = true,
+      manifestPath = "ci/lib/repro-cargo-probe/Cargo.toml",
+      targetDir = "build/repro-cargo-targets/probe",
+      actionId = "repro-cargo-compiler-probe",
+      extraInputs = @[
+        "ci/lib/repro-cargo-probe/Cargo.toml",
+        "ci/lib/repro-cargo-probe/Cargo.lock",
+        "ci/lib/repro-cargo-probe/build.rs",
+        "ci/lib/repro-cargo-probe/src/main.rs"
+      ],
+      extraOutputs = @[reproCargoProbeBinary])
+    let reproCargoTargetSlot = ctShell(
+      actionIdValue = "repro-cargo-target-slot",
+      commandValue = "bash ci/lib/tup-cargo-target.sh --repro-slot --rustc-probe " &
+        reproCargoProbeBinary & " .",
+      extraInputsValue = ["ci/lib/tup-cargo-target.sh", "ci/lib/nim-cache-root.sh",
+        reproCargoProbeBinary],
+      afterValue = [reproCargoProbe],
+      cacheableValue = false)
+
     if fileExists("src/backend-manager/Cargo.toml"):
       let sessionManagerBinary =
-        CargoTargetBase & "/backend_manager_target/release/session-manager" &
+        ReproCargoSlot & "/backend_manager_target/release/session-manager" &
           ExeSuffix
       let sessionManagerBuild = cargo.build(
         locked = true,
         release = true,
         manifestPath = "src/backend-manager/Cargo.toml",
-        targetDir = CargoTargetBase & "/backend_manager_target",
+        targetDir = ReproCargoSlot & "/backend_manager_target",
         actionId = "backend-session-manager-cargo",
+        after = @[reproCargoTargetSlot],
         extraInputs = @[
           "src/backend-manager/Cargo.toml",
           "src/backend-manager/Cargo.lock"
@@ -1383,12 +1439,13 @@ package codeTracer:
 
     if fileExists("src/db-backend/Cargo.toml"):
       let replayServerBinary =
-        CargoTargetBase & "/db_backend_target/debug/replay-server" & ExeSuffix
+        ReproCargoSlot & "/db_backend_target/debug/replay-server" & ExeSuffix
       let replayServerBuild = cargo.build(
         locked = true,
         manifestPath = "src/db-backend/Cargo.toml",
-        targetDir = CargoTargetBase & "/db_backend_target",
+        targetDir = ReproCargoSlot & "/db_backend_target",
         actionId = "db-replay-server-cargo",
+        after = @[reproCargoTargetSlot],
         extraInputs = @[
           "src/db-backend/Cargo.toml",
           "src/db-backend/Cargo.lock",

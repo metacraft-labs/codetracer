@@ -8,15 +8,14 @@ echo '##########################################################################
 
 node_modules/.bin/webpack
 
-# The per-checkout Nim cache root src/Tuprules.tup imports. `tup generate`
-# bakes it into the generated script at generate time, so it must be set
-# here, before the generate, not only when the script runs.
-CT_TUP_NIM_CACHE_ROOT="$(bash ci/lib/nim-cache-root.sh --tup "$PWD")"
-export CT_TUP_NIM_CACHE_ROOT
-# The Cargo target base, likewise baked in at generate time. The helper creates
-# the base before the generated script's cargo commands need it, and refuses
-# one it cannot prove belongs to this checkout and compiler.
-ct_tup_cargo_env="$(bash ci/lib/tup-cargo-target.sh --export "$PWD")"
+# The roots src/Tuprules.tup imports and refuses to parse without: the Cargo
+# target base and the per-checkout Nim cache root, from one command.
+# `tup generate` bakes them into the generated script, so they must be set
+# here, before the generate. The helper creates the Cargo base before the
+# generated script's cargo commands need it, refuses one it cannot prove
+# belongs to this checkout and compiler, and (`--reap`, a build) removes this
+# checkout's older-compiler bases.
+ct_tup_cargo_env="$(bash ci/lib/tup-cargo-target.sh --reap --export "$PWD")"
 eval "$ct_tup_cargo_env"
 
 pushd src

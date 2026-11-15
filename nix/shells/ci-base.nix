@@ -796,17 +796,14 @@ with pkgs;
       esac
       export CODETRACER_BUILD_DIR="''${CODETRACER_BUILD_DIR:-$_ct_build_dir}"
       export CODETRACER_REPO_ROOT_PATH=$ROOT_PATH
-      # The per-checkout Nim cache root src/Tuprules.tup imports, so a plain
-      # `tup` in this shell compiles into the same caches `just build-once`
-      # does (which recomputes it for its own checkout regardless) instead of
-      # the Tuprules fallback, which would rebuild every Nim target once.
-      # ci/lib/nim-cache-root.sh holds the scheme.
-      export CT_TUP_NIM_CACHE_ROOT="$(bash "$ROOT_PATH/ci/lib/nim-cache-root.sh" --tup "$ROOT_PATH")"
-      # And the tup rules' Cargo target base (ci/lib/tup-cargo-target.sh),
-      # which they refuse to run without. Preparing the shell is this hook's
-      # job, so an inherited value is dropped first rather than checked; a
-      # refusal leaves both unset, and tup then stops with the remedy.
-      unset CT_TUP_CARGO_TARGET_BASE CT_TUP_CARGO_TARGET_IGNORE
+      # The roots src/Tuprules.tup refuses to parse without (the Cargo target
+      # base and the per-checkout Nim cache root, ci/lib/tup-cargo-target.sh
+      # --export), so a plain `tup` here builds where `just build-once` does.
+      # Preparing the shell is this hook's job, so inherited values are
+      # dropped first rather than checked; a refusal leaves them unset, and
+      # tup then stops with the remedy. No `--reap`: entering a shell must not
+      # remove a base a build in this checkout may be using.
+      unset CT_TUP_CARGO_TARGET_BASE CT_TUP_CARGO_TARGET_IGNORE CT_TUP_NIM_CACHE_ROOT
       if _ct_tup_cargo_env="$(bash "$ROOT_PATH/ci/lib/tup-cargo-target.sh" --export "$ROOT_PATH")"; then
         eval "$_ct_tup_cargo_env"
       else

@@ -182,15 +182,15 @@ unset _tc_file _gnat_ver _ldc_cand _nim_cand _tool_dirs _d SHIMS_DIR
 # ---------------------------------------------------------------------------
 
 export CODETRACER_REPO_ROOT_PATH="$ROOT_DIR"
-# The per-checkout Nim cache root src/Tuprules.tup imports, for the documented
-# `source ../../env.sh && tup upd`. It stays under /tmp/ct-nim-cache/, which
-# nim.exe places on the current drive and NIM_SIDE_OUTPUTS_IGNORE excludes.
-CT_TUP_NIM_CACHE_ROOT="$("${BASH:-bash}" "$ROOT_DIR/ci/lib/nim-cache-root.sh" --tup "$ROOT_DIR")"
-export CT_TUP_NIM_CACHE_ROOT
-# And the tup rules' Cargo target base (ci/lib/tup-cargo-target.sh). This file
-# prepares the shell, so an inherited value is dropped rather than checked. A
-# refusal is reported and leaves both unset; tup then stops with the remedy.
-unset CT_TUP_CARGO_TARGET_BASE CT_TUP_CARGO_TARGET_IGNORE
+# The roots src/Tuprules.tup refuses to parse without, for a plain `tup` (the
+# documented `source ../../env.sh && tup upd` on Windows): the Cargo target
+# base and the per-checkout Nim cache root, from ci/lib/tup-cargo-target.sh
+# --export. The Nim root stays under /tmp/ct-nim-cache/, which nim.exe places
+# on the current drive and NIM_SIDE_OUTPUTS_IGNORE excludes. This file
+# prepares the shell, so inherited values are dropped rather than checked; a
+# refusal is reported and leaves them unset, and tup then stops with the
+# remedy. No `--reap`: preparing a shell removes nothing.
+unset CT_TUP_CARGO_TARGET_BASE CT_TUP_CARGO_TARGET_IGNORE CT_TUP_NIM_CACHE_ROOT
 if _ct_tup_cargo_env="$("${BASH:-bash}" "$ROOT_DIR/ci/lib/tup-cargo-target.sh" --export "$ROOT_DIR")"; then
 	eval "$_ct_tup_cargo_env"
 else
