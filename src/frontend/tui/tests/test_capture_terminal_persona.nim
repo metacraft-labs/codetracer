@@ -18,8 +18,8 @@ import ../app/tests/personas/personas
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count.
-const ExpectedAssertions = 36
-  ## Six committed personas, six checks each.
+const ExpectedAssertions = 38
+  ## Six committed personas, six checks each, and two for DECXCPR's reply.
 
 var countedAssertions = 0
 
@@ -38,9 +38,19 @@ suite "the persona capture tool":
       var late = newJArray()
       var answers = newJObject()
       var fenced = false
+      var cprFallback = newJArray()
+      var fallbackFenced = false
       for t in c.replies:
         let key = keyOf(t)
-        if fenced and key == "osc22" and c.afterFence.len > 0 and
+        # §4.3: a round that asked DECXCPR and got no report by the fence is
+        # followed by the plain-CPR fallback round and its own fence.
+        let inFallback = fenced and c.roundMarked and cpr.len == 0 and
+                         not fallbackFenced
+        if inFallback and key == "cpr":
+          cprFallback.add %t
+        elif inFallback and key == "da1":
+          fallbackFenced = true
+        elif fenced and key == "osc22" and c.afterFence.len > 0 and
            not answers.hasKey("osc22"):
           # Asked after the fence (inside tmux), answered after it.
           answers["osc22"] = %t
@@ -57,12 +67,18 @@ suite "the persona capture tool":
           answers[key] = %t
       answers["decrqm"] = decrqm
       answers["cpr"] = cpr
+      if c.roundMarked:
+        answers["cprFallback"] = cprFallback
       answers["late"] = late
       ck fenced
       ck c.answers == answers
-      ck c.cprCount == 6
+      ck c.widthReplies.len == 6
       ck c.answerFor("da1").startsWith("\x1b[?")
       ck keyOf(c.answerFor("da1")) == "da1"
+
+  test "a DECXCPR report is filed as a cursor report":
+    ck keyOf("\x1b[?1;5R") == "cpr"
+    ck keyOf("\x1b[?1;5;1R") == "cpr"
 
   test "assertion count":
     echo "CHECKS: " & $countedAssertions

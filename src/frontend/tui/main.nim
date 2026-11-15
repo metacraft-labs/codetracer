@@ -1616,6 +1616,11 @@ proc interactive(command: TuiCommand): int =
           app.notification = capabilityNote(negotiation.caps, hintsOn)
           paint(driver, rt)
         continue
+      # §4.3: A STRING (OSC / DCS / APC) IS NEVER A KEY. One that no query of
+      # this session accounts for — a terminal's late answer after the reply
+      # window, an unsolicited report — is dropped, never typed.
+      if isStringToken(ev.token):
+        continue
       # RECORDED BEFORE IT IS HANDLED, so the journal of a session that quit on
       # this token still contains it. A `q` written down only after the loop
       # decided to stop would be a journal that replays to a different screen
@@ -2008,6 +2013,8 @@ proc editInteractive(command: TuiCommand): int =
           app.notification = capabilityNote(negotiation.caps, hintsOn)
           paint(driver, rt)
         continue
+      if isStringToken(ev.token):
+        continue   # §4.3: a late or unsolicited answer, never a key
       let outcome = rt.handleToken(ev.token, nowMs())
       driver.projectPointer(rt, ev.token)
       if outcome.quit:

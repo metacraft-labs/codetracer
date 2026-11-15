@@ -74,7 +74,9 @@ import ./persona_peer
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count.
-const ExpectedAssertions = 223
+const ExpectedAssertions = 227
+  ## 223 -> 227: §4.3 DECXCPR — Ctrl+F3 on a terminal that never answers
+  ## (+3), and the marked query never left on the screen (+1).
   ## 120 -> 223, measured: the peer answers each of the six captured
   ## personas' questions with its terminal's bytes (17 checks each, +102),
   ## and foot answering DEC 2027 recognised-and-off beside foot as captured
@@ -93,7 +95,7 @@ const
     ## What the width probe prints and this front-end never draws itself:
     ## none may survive on the screen (TA-3). (`⏮`, the fourth probe, is
     ## also the `unicode` icons' jump-to-start control, so it is not proof.)
-  QueryTexts = ["[>q", "[>c", "2026$p", "2027$p", "[6n"]
+  QueryTexts = ["[>q", "[>c", "2026$p", "2027$p", "[6n", "[?6n"]
   PointerQuery = "\x1b]22;?default,pointer,text,col-resize,row-resize,grab," &
                  "grabbing,not-allowed,ew-resize,ns-resize\x1b\\"
     ## Pointer-Affordances §5.2's question, spelled as the spec spells it.
@@ -632,6 +634,31 @@ suite "PLAT-71 Tier 2: the binary adapts to the terminal it runs in":
       let j = tokens.find("j")
       let k = tokens.find("k", max(0, j))
       ck j >= 0 and k > j
+      ck tokens.contains("[1;5R")
+
+  test "§4.3 DECXCPR: a terminal that never answers cannot swallow Ctrl+F3":
+    # The round asks DECXCPR, so no unmarked `CSI … R` is owed: Ctrl+F3 typed
+    # while the round waits for a terminal that answers nothing is a key, not
+    # a cursor report taken for the reply window's three seconds.
+    let calc = resolveFixture(pythonSpec("calc"))
+    ck calc.outcome == foRecorded
+    if calc.outcome == foRecorded:
+      let journal = freshState("journal-silent") / "keys.txt"
+      var sess = builder(@["--record-keys=" & journal, calc.tracePath],
+                         probeMs = 3000).spawn()
+      let deadline = getMonoTime() + initDuration(seconds = 20)
+      while not sess.transcriptBytes().contains("\x1b[c") and
+            getMonoTime() < deadline:
+        discard sess.drainOutput(20)
+      sess.send("\x1b[1;5R")
+      discard sess.serve(silent())
+      settleOnDebugger(sess, Cols, Rows)
+      discard sess.drainOutput(300)
+      finishSession(sess)
+      sess.close()
+      ck fileExists(journal)
+      let tokens = readFile(journal)
+      checkpoint("journal: " & tokens.escape)
       ck tokens.contains("[1;5R")
 
   test "TA-14: under a real tmux, one display spawn and no passthrough query but OSC 22's":

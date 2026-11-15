@@ -56,7 +56,9 @@ for cite in "${cites[@]}"; do
 		echo "docs-captures: ${scenario} has no capture '${capture}'" >&2
 		exit 1
 	}
-	for page in $(grep -rlF "${cite}" "${pages}"); do
+	# One page per LINE, not per word: a page path with a space in it must not
+	# split into two paths that do not exist.
+	while IFS= read -r page; do
 		python3 - "${page}" "${cite}" "${file}" "${check}" <<'EOF' || status=1
 import sys, difflib
 page, cite, capfile, check = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4] == "1"
@@ -75,6 +77,6 @@ if check:
 open(page, "w").write(text[:start] + block + text[end:])
 print(f"docs-captures: {page}: wrote '{cite}'")
 EOF
-	done
+	done < <(grep -rlF "${cite}" "${pages}")
 done
 exit "${status}"

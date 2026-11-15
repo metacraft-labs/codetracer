@@ -24,7 +24,9 @@ import ../app/tests/personas/personas
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count.
-const ExpectedAssertions = 84
+const ExpectedAssertions = 117
+  ## 84 -> 117: §4.3's DECXCPR round (+3 in the round's bytes, +13 for the
+  ## marked reports and the key, +17 for the plain-CPR fallback round).
   ## 78 -> 84: each captured persona's after-fence query is this binary's (+6).
   ## 48 -> 78, measured: the six probe code points (+6) and the six captured
   ## personas, four checks each (+24).
@@ -43,15 +45,15 @@ suite "PLAT-71 Tier 1: the start-up round":
     let q = queriesFor(initCapabilityFlags(), utf8Env, 80)
     for query in [XtversionQuery, Da2Query, SyncModeQuery, GraphemeModeQuery]:
       ck q.contains(query)
-    ck q.count(CursorReportQuery) == 6
+    ck q.count(MarkedCursorReportQuery) == 6
     ck cprCountFor(utf8Env, 80) == 6
     ck q.endsWith(Da1Query)
     # The width probe is answered BEFORE the fence: every CPR query precedes
     # DA1, and the probe row is erased in the same write.
-    ck q.rfind(CursorReportQuery) < q.rfind(Da1Query)
+    ck q.rfind(MarkedCursorReportQuery) < q.rfind(Da1Query)
     ck q.contains("\x1b[1;1H\x1b[2K")
     for p in WidthProbe:
-      ck q.contains(WidthProbeText[p] & CursorReportQuery)
+      ck q.contains(WidthProbeText[p] & MarkedCursorReportQuery)
     # Each probe prints the code points §4.3 names — and nothing else. The
     # real-emulator lane found P3 and P6 written as `\U0001FB87`, which Nim
     # reads as U+0001 and the text `FB87`: every terminal measured a control
@@ -70,9 +72,14 @@ suite "PLAT-71 Tier 1: the start-up round":
     ck not linux.contains(XtversionQuery)
     ck not linux.contains(Osc11Query)
     ck linux.count(CursorReportQuery) == 6
+    ck not linux.contains(MarkedCursorReportQuery)
+    # Everywhere else the width probe asks DECXCPR (§4.3).
+    let xtermRound = queriesFor(initCapabilityFlags(), utf8Env, 80)
+    ck xtermRound.count(MarkedCursorReportQuery) == 6
+    ck not xtermRound.contains(CursorReportQuery)
     # A terminal narrower than three columns skips the width probe.
     ck not queriesFor(initCapabilityFlags(), utf8Env, 2).contains(
-      CursorReportQuery)
+      MarkedCursorReportQuery)
     ck cprCountFor(utf8Env, 2) == 0
 
   test "§4.3's F3 rule: a CSI 1;5R is a reply only while the probe waits":
@@ -117,13 +124,59 @@ suite "PLAT-71 Tier 1: the start-up round":
     ck not noteReply(silent, "\x1b[1;5R")
     ck silent.cprAnswers.len == 0
 
+  test "§4.3 DECXCPR: a marked report is a reply, an unmarked CSI 1;5R a key from the start":
+    var p = TerminalProbe(attempted: true, cprExpected: 2, cprMarked: true)
+    # No plain-CPR round is outstanding, so Ctrl+F3 is a key even while the
+    # round waits — a terminal that never answers cannot swallow it.
+    ck not p.cprOpen
+    ck not p.isReplyTokenFor("\x1b[1;5R")
+    ck not noteReply(p, "\x1b[1;5R")
+    ck p.isReplyTokenFor("\x1b[?1;5R")
+    ck noteReply(p, "\x1b[?1;5R")
+    ck noteReply(p, "\x1b[?1;2;1R")      # with the page some terminals add
+    ck p.cprAnswers == @[4, 1]
+    ck not p.isReplyTokenFor("\x1b[?1;3R")   # none is owed any more
+    ck noteReply(p, "\x1b[?62;22c")
+    ck not p.cprFallbackDue                 # the widths were measured
+    # A terminal that never answers: no fallback, and Ctrl+F3 stays a key.
+    var silent = TerminalProbe(attempted: true, cprExpected: 6, cprMarked: true)
+    ck not silent.cprFallbackDue
+    ck not noteReply(silent, "\x1b[1;5R")
+    ck silent.cprAnswers.len == 0
+
+  test "§4.3 DECXCPR: no marked report by the fence asks plain CPR again, fenced":
+    var q = TerminalProbe(attempted: true, cprExpected: 6, cprMarked: true)
+    ck noteReply(q, "\x1b[?62;22c")
+    ck q.cprFallbackDue
+    ck replyWindowOpen(q, 0, 100) == false   # nothing is owed until it is asked
+    let fallback = cprFallbackQueries(80)
+    ck fallback.count(CursorReportQuery) == 6
+    ck not fallback.contains(MarkedCursorReportQuery)
+    ck fallback.endsWith(Da1Query)
+    q.cprFallbackAsked = true
+    ck not q.cprFallbackDue
+    ck replyWindowOpen(q, 0, 100)
+    ck q.cprOpen
+    ck noteReply(q, "\x1b[1;3R")
+    ck q.cprAnswers == @[2]
+    ck noteReply(q, "\x1b[?62;22c")       # the fallback round's own fence
+    ck q.cprFallbackFenced
+    ck not q.cprOpen
+    ck not replyWindowOpen(q, 0, 100)
+    ck not noteReply(q, "\x1b[1;5R")      # Ctrl+F3 again
+    ck q.cprAnswers == @[2]
+
   test "the captured personas: their round is this round, and noteReply reads them as probeOf does":
     for c in capturedPersonas():
       checkpoint(c.provenance)
-      ck queriesFor(initCapabilityFlags(), envOf(c), c.cols) == c.round
+      # A persona captured before the width probe moved to DECXCPR holds the
+      # plain-CPR round; the lane's next capture takes the marked one.
+      ck queriesFor(initCapabilityFlags(), envOf(c), c.cols,
+                    cprMarked = c.roundMarked) == c.round
       ck pointerQueryAfterFence(initCapabilityFlags(), envOf(c)) ==
          c.afterFence
-      var shipped = TerminalProbe(attempted: true, cprExpected: 6)
+      var shipped = TerminalProbe(attempted: true, cprExpected: 6,
+                                  cprMarked: c.roundMarked)
       var fenceAt = c.replies.len
       for i, token in c.replies:
         discard noteReply(shipped, token)

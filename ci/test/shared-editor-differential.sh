@@ -22,7 +22,7 @@
 # exits 1 on any difference, naming the scenario, the step and both sides.
 set -uo pipefail
 root="$(cd "$(dirname "$0")/../.." && pwd)"
-cd "${root}"
+cd "${root}" || exit 1
 S=src/tests/scenarios
 out="${CT_DIFFERENTIAL_OUT:-${root}/build/shared-editor-differential}"
 

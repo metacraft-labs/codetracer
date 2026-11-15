@@ -25,7 +25,8 @@ set -uo pipefail
 flavour="${1:?usage: scenario-broken-run.sh <terminal|gpui|electron>}"
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "${root}" || exit 1
-build="${CT_SCENARIO_BUILD:-${root}/build}"
+# CT_SCENARIO_BUILD (the build directory) is honoured by ci/test/scenarios.sh
+# itself, which reads it from the environment; nothing here needs it.
 out="$(mktemp)"
 trap 'rm -f "${out}"' EXIT
 

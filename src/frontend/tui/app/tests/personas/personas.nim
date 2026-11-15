@@ -108,6 +108,31 @@ proc envOf*(p: CapturedPersona): TerminalEnv =
 
 proc cprCount*(p: CapturedPersona): int = p.answers["cpr"].len
 
+proc roundMarked*(p: CapturedPersona): bool =
+  ## Whether the round this persona was captured with asked DECXCPR
+  ## (`CSI ? 6 n`). The fixtures captured before §4.3 moved to DECXCPR asked
+  ## plain CPR, and their `cpr` answers are plain.
+  p.round.contains("\x1b[?6n")
+
+proc widthReplies*(p: CapturedPersona): seq[string] =
+  ## The cursor reports that measured the width probe: the round's own
+  ## (`cpr`), or — when the round asked DECXCPR and got none — the plain-CPR
+  ## fallback round's (`cprFallback`).
+  for t in p.answers["cpr"]: result.add t.getStr
+  if result.len == 0 and p.answers.hasKey("cprFallback"):
+    for t in p.answers["cprFallback"]: result.add t.getStr
+
+type Decxcpr* = enum
+  dxUnknown  ## not measured: the capture asked plain CPR only
+  dxYes      ## measured: the terminal answered `CSI ? 6 n`
+  dxNo       ## measured: it answered the fence, but not `CSI ? 6 n`
+
+proc decxcpr*(p: CapturedPersona): Decxcpr =
+  ## What the capture measured about DECXCPR.
+  if not p.roundMarked: dxUnknown
+  elif p.cprCount > 0: dxYes
+  else: dxNo
+
 proc answerFor*(p: CapturedPersona; key: string; cprIndex = 0): string =
   ## The reply this terminal gave to the question `key` (the capture's keys:
   ## `xtversion`, `da2`, `da1`, `decrqm.<mode>`, `cpr`, `osc11`,
@@ -132,13 +157,17 @@ proc decodeHexText(s: string): string =
 proc probeOf*(p: CapturedPersona; cprExpected = 6): TerminalProbe =
   ## The probe `noteReply` builds from `p.replies` up to and including the
   ## DA1 fence (see the module header for why this is not `noteReply` itself).
-  result = TerminalProbe(attempted: true, cprExpected: cprExpected)
+  result = TerminalProbe(attempted: true, cprExpected: cprExpected,
+                         cprMarked: p.roundMarked)
   for token in p.replies:
     if token.startsWith("\x1b[?") and token.endsWith("c"):
       result.answered = true
       break
     let (isCpr, _, col) = parseCpr(token)
-    if isCpr and result.cprAnswers.len < cprExpected:
+    let (isMarked, _, mcol) = parseMarkedCpr(token)
+    if isMarked and result.cprMarked and result.cprAnswers.len < cprExpected:
+      result.cprAnswers.add max(0, mcol - 1)
+    elif isCpr and not result.cprMarked and result.cprAnswers.len < cprExpected:
       result.cprAnswers.add max(0, col - 1)
     elif token.startsWith("\x1bP>|"):
       let (ok, text) = parseXtversionReply(token)

@@ -5,5 +5,6 @@
   "E4": "c.answers == answers",
   "E5": "tokens(c.replies.join(\"\")) == c.replies",
   "E6": "legacyDrawn == (expectedIdentity(e) in [\"kitty\", \"ghostty\", \"foot\"])",
-  "E7": "confused.len == 0"
+  "E7": "confused.len == 0",
+  "E8": "log.cursorReports == 6"
 }

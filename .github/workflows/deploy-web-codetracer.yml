@@ -440,14 +440,16 @@ jobs:
             # isonim-gpui again 2026-11-11, after cfdda1ce1; isonim-tui again
             # 2026-11-12 (its web driver reads the browser's capabilities).
             # nim-agents 2026-11-14, after flake.lock moved it (7736bcea7ff).
-            isonim=b5cc28aee4781a71eeec34b14b4c27ba2cd68e67
+            # isonim, isonim-gpui, nim-everywhere, nim-termctl, nim-pty, nim-acp and
+            # nim-agent-harbor 2026-11-15, after the lock re-pin 7cae04a33.
+            isonim=fbf712af44dfab16cec01d44c0171b882ff2a438
             isonim-tui=8e43ce06f7f078530c7a8585c210ad7648fa0051
-            isonim-gpui=9833561d1be64a20ddce7ccf2bece2f1f0ae4db9
-            nim-everywhere=23cf930e5b2463d964579b318e01e4ef1cab63b3
-            nim-termctl=16a81f4d2fc90598a4c61b72aaf93b51162bed3e
-            nim-pty=2845abd58dd2073475177301590c8b51aa5c9094
-            nim-acp=d0fcc8beb97db7132cd22db7abaf49bbbbaf08c4
-            nim-agent-harbor=8d8024331ac46cae7f52bf9bff19f635e70f82f5
+            isonim-gpui=7e34756b9ba1fb4a714a2c4130beeb371ac7f935
+            nim-everywhere=2f5b67a5dafd96ca5d57c9270fc3c2da2c5f2b0b
+            nim-termctl=18fd0b45964ec6f150eaebae31b97e92ff4b6ffd
+            nim-pty=00b0d8d6c9e7e83452749cabb61f8c34daf08329
+            nim-acp=0bf10b4c35064a08d8c96eb912190521322017e2
+            nim-agent-harbor=9694f6b41be21315243df1b19cabd02c5f271d7d
             nim-agents=b2c97c530406d68e215e26b28fc43a2dd02ce090
             # THE REPROBUILD-PACKAGES CATALOG, pinned to the revision the
             # locked reprobuild (flake.lock `reprobuild`, 372aece6) is tested

@@ -236,6 +236,24 @@ seed_store_tools() {
 	FIX_PATH="$nimdir:$rustdir:$FIX/bin"
 }
 
+# The tool names the guard classifies, read from its own `TOOLS` list so a tool
+# added there is kept off the fixtures' system PATH without an edit here.
+GUARDED_TOOLS="$(sed -n '/^TOOLS=(/,/^)/s/^[[:space:]]*"\([^|"]*\)|.*/\1/p' "$GUARD")"
+if [ -z "$GUARDED_TOOLS" ]; then
+	printf 'toolchain-pins-test: could not read the TOOLS list from %s.\n' "$GUARD" >&2
+	exit 2
+fi
+
+# holds_guarded_tool DIR -> 0 when DIR contains an executable named like one of
+# the guarded tools.
+holds_guarded_tool() {
+	local name
+	while IFS= read -r name; do
+		[ -n "$name" ] && [ -x "$1/$name" ] && return 0
+	done <<<"$GUARDED_TOOLS"
+	return 1
+}
+
 # The directories holding the ordinary system utilities the guard shells out to
 # (`dirname`, `cut`, `sed`, `git`, `python3`, …), resolved from the CURRENT
 # environment rather than assumed.
@@ -253,8 +271,19 @@ seed_store_tools() {
 # The `command -v` idiom here is the same one the "python3 removed from PATH"
 # fixture below already uses to populate `$FIX/nopy`; that arm passes on this
 # host for precisely this reason, which is what identified the cause.
+#
+# A DIRECTORY IS ADDED WHOLE ONLY IF IT HOLDS NONE OF THE GUARDED TOOLS. A
+# directory is not one utility, it is everything beside it: on a developer
+# machine `jq` (and, on another host, `git` or `python3`) resolves to
+# `~/.nix-profile/bin`, which also holds the operator's own `nim`. Adding that
+# directory put the host's nim on every fixture's PATH, so the arm that deletes
+# the fixture's Nim to prove "absent is a failure" found the profile's instead
+# and reported it as unattributable — the suite then measured the host, not the
+# guard. Where a directory carries a guarded tool, only the utility itself is
+# linked into a private shim directory, so the fixture sees exactly what it
+# built and nothing the host happens to have installed.
 sys_utility_path() {
-	local tool resolved dir seen=":" out=""
+	local tool resolved dir seen=":" out="" shim="$TMP/sys-shim"
 	# `bash` MUST be in this list. The fixtures' scripts start with
 	# `#!/usr/bin/env bash`, and the guard itself is launched as `bash …`, both
 	# under `env -i` with only this PATH. On an FHS host the /bin fallback below
@@ -272,6 +301,10 @@ sys_utility_path() {
 		case "$resolved" in /*) ;; *) continue ;; esac
 		dir="${resolved%/*}"
 		[ -n "$dir" ] || continue
+		if holds_guarded_tool "$dir"; then
+			mkdir -p "$shim" && ln -sf "$resolved" "$shim/$tool" || return 1
+			dir="$shim"
+		fi
 		case "$seen" in *":$dir:"*) continue ;; esac
 		seen="$seen$dir:"
 		out="${out:+$out:}$dir"
@@ -281,13 +314,18 @@ sys_utility_path() {
 	# thing tried.
 	for dir in /usr/bin /bin /usr/local/bin; do
 		[ -d "$dir" ] || continue
+		# Same rule: an FHS /usr/bin with a distro `cargo` in it is not added.
+		holds_guarded_tool "$dir" && continue
 		case "$seen" in *":$dir:"*) continue ;; esac
 		seen="$seen$dir:"
 		out="${out:+$out:}$dir"
 	done
 	printf '%s\n' "$out"
 }
-SYS_PATH="$(sys_utility_path)"
+SYS_PATH="$(sys_utility_path)" || {
+	printf 'toolchain-pins-test: could not build the system utility shim under %s.\n' "$TMP" >&2
+	exit 2
+}
 if [ -z "$SYS_PATH" ]; then
 	printf 'toolchain-pins-test: could not resolve ANY system utility directory.\n' >&2
 	exit 2

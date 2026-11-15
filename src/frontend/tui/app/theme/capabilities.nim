@@ -652,9 +652,19 @@ type
     sync2026*, grapheme2027*: int
       ## DECRQM's `Ps` for each mode (meaningful when answered).
     cprExpected*: int
-      ## How many cursor reports the width probe asked for. A `CSI r ; c R`
-      ## is taken as a REPLY only while fewer than this have arrived (§4.3's
-      ## F3 rule); after that it is Ctrl+F3 again.
+      ## How many cursor reports the width probe asked for. A report is
+      ## taken as a REPLY only while fewer than this have arrived (§4.3's
+      ## F3 rule).
+    cprMarked*: bool
+      ## The round asked DECXCPR (`CSI ? 6 n`), whose answer `CSI ? r ; c R`
+      ## no key shares. An unmarked `CSI r ; c R` is then a KEY (legacy
+      ## xterm's Ctrl+F3 is `CSI 1 ; 5 R`) unless the plain-CPR fallback
+      ## round below is outstanding.
+    cprFallbackAsked*: bool
+      ## The fence came back with no marked report, so the width probe was
+      ## asked again with plain CPR, fenced by a second DA1 (§4.3).
+    cprFallbackFenced*: bool
+      ## The fallback round's own DA1 has arrived.
     replyWindowClosed*: bool
       ## The reply window passed without the fence (`ReplyWindowMs`). No
       ## owed cursor report is waited for after it, nor after the fence: a
