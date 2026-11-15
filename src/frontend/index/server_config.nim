@@ -445,11 +445,19 @@ when defined(server):
       # anything it does not own comes back as "" and is dropped rather than
       # raising, because this connection also carries the index IPC surface and
       # taking it down over someone else's message would end the session.
+      #
+      # THE ANSWER IS AWAITED, NOT WAITED FOR. A verb that runs git — the
+      # page's VCS pane refreshes `vcs.status` every 5 s and its certificate
+      # indicator computes `vcs.contentId` every 15 s — answers when git has
+      # exited, and this loop serves every other message, of this client and
+      # of every other, meanwhile (`facade_endpoint`'s header, "Which verbs
+      # answer LATER"; `CLI/ct/host.md`, "A facade verb never holds the
+      # server's event loop").
       client.on(FacadeChannel.cstring) do (frame: cstring):
         resetActivity()
-        let answer = facadeEndpoint.handleFrame($frame)
-        if answer.len > 0:
-          client.emit(FacadeChannel.cstring, answer.cstring)
+        whenAnswered(facadeEndpoint.handleFrame($frame), proc(answer: string) =
+          if answer.len > 0:
+            client.emit(FacadeChannel.cstring, answer.cstring))
 
       client.on(cstring"disconnect") do ():
         debugPrint "socket disconnect"

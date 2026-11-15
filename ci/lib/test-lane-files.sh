@@ -1367,6 +1367,16 @@ test_lane_files() {
 		# files under `codetracerExeDir` and removes them.
 		echo src/frontend/tests/facade_endpoint_over_socket_test.nim
 		#
+		# `facade_endpoint_answers_while_git_runs_test.nim` starts the same
+		# real server with two socket.io clients and a `git` on the server's
+		# PATH that takes 0.8 s per run: while client A's `vcs.status`,
+		# `vcs.contentId` or `process.run` is outstanding, client B's
+		# `fs.readText` must be answered first and promptly, and the server's
+		# event loop must keep turning (`CLI/ct/host.md`, "A facade verb never
+		# holds the server's event loop"). Needs `git` and `sh` on PATH;
+		# writes only under one `mkdtemp` directory, which it removes.
+		echo src/frontend/tests/facade_endpoint_answers_while_git_runs_test.nim
+		#
 		# `index_serves_one_deployment_descriptor_test.nim` is §7's "it arrives
 		# differently per deployment and is the SAME document": it fetches
 		# `/deployment.json` over HTTP, reads `welcome.deployment` over a real

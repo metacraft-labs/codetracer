@@ -16,13 +16,17 @@
 ## ## Two git runners, one outcome mapping
 ##
 ## `nodeContentIdHost` runs git through `spawnSync`, which blocks the calling
-## thread for the whole round trip. That is right for the container endpoint,
-## whose verbs are answered one at a time, and wrong for the Electron
-## renderer, whose thread is the UI: each certificate-indicator refresh froze
-## input and redraw for up to 1.2 s (Status-Bar.md, "A refresh never stalls
-## the window"). `nodeAsyncContentIdHost` runs the same commands through
-## `child_process.spawn` and answers when the child closes, and
-## `certificate_content_id.runResumable` drives the one recipe over it. Both
+## thread for the whole round trip. Neither product host can afford that. The
+## Electron renderer's thread is the UI: each certificate-indicator refresh
+## froze input and redraw for up to 1.2 s (Status-Bar.md, "A refresh never
+## stalls the window"). The container endpoint's thread is `ct host`'s one
+## event loop, which carries every client's IPC: there a content-id cycle held
+## it 3.5 s at a time (`CLI/ct/host.md`, "A facade verb never holds the
+## server's event loop"). Both therefore use `nodeAsyncContentIdHost`, which
+## runs the same commands through `child_process.spawn` and answers when the
+## child closes, and `certificate_content_id.runResumable` drives the one
+## recipe over it. The synchronous host stays as the reference the
+## asynchronous one is checked against (`electron_vcs_content_id_async_test`). Both
 ## runners fold node's outcomes into a `GitReply` through `replyOf`, so a
 ## launch error, a signal and an over-long output mean the same thing on both.
 ##
@@ -328,8 +332,9 @@ proc nodeContentIdHost*(tempRoot = "";
   ## A host running git through node's `spawnSync`, with its temporary
   ## indexes in fresh directories under `tempRoot` (default: `os.tmpdir()`),
   ## outside every repository. It BLOCKS the calling thread for every git
-  ## call: right for the container endpoint, wrong for a UI thread — which
-  ## uses `nodeAsyncContentIdHost`.
+  ## call, so no product host uses it: the renderer and the container
+  ## endpoint both use `nodeAsyncContentIdHost`. It is the synchronous
+  ## reference the suites compare the asynchronous host's answers with.
   result = nodeFileOperations(tempRoot)
   result.git = nodeGitRunner(captureLimit)
 
@@ -338,7 +343,8 @@ proc nodeAsyncContentIdHost*(tempRoot = "";
     AsyncContentIdHost =
   ## The same host with git through `child_process.spawn`, for
   ## `certificate_content_id.runResumable` (via `vcs.contentIdOverAsync`):
-  ## the Electron renderer's, whose main thread must not wait for git.
+  ## the Electron renderer's, whose main thread must not wait for git, and
+  ## the container endpoint's, whose event loop must not either.
   asyncContentIdHost(nodeFileOperations(tempRoot), nodeAsyncGitRunner(captureLimit))
 
 # ---------------------------------------------------------------------------
