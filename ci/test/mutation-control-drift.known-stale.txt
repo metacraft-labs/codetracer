@@ -246,8 +246,6 @@ src/frontend/gpui/tests/plat22-mutation-control.sha256	src/ct/ui_selection.nim	c
 src/frontend/tui/tests/plat49-chrome-mutation-control.sha256	src/frontend/viewmodel/views/isonim_event_log_view.nim	f49a9e23ba6434f08360950768487dad63a9fedd4703de6521d6d223f23cfda7	db9c4c6924195d6630347f931128a1d0a9d7c22f5b784749911716d1d5ac556a
 src/frontend/tui/tests/plat51-parity-mutation-control.sha256	src/frontend/viewmodel/views/isonim_event_log_view.nim	f49a9e23ba6434f08360950768487dad63a9fedd4703de6521d6d223f23cfda7	db9c4c6924195d6630347f931128a1d0a9d7c22f5b784749911716d1d5ac556a
 src/frontend/tui/tests/plat64-input-routing-mutation-control.sha256	src/frontend/viewmodel/views/isonim_event_log_view.nim	f49a9e23ba6434f08360950768487dad63a9fedd4703de6521d6d223f23cfda7	db9c4c6924195d6630347f931128a1d0a9d7c22f5b784749911716d1d5ac556a
-src/frontend/viewmodel/tests/unit/plat17-wasm-mutation-control.sha256	ci/lib/test-lane-files.sh	74f7bd01f71475251662dd3643301c037f9d09f64a634aab122dda06f38036ce	44699b1d86c3a974c29d8b12c349689e65fb2d357e232cbaad494a98f6da8b2a
-src/frontend/viewmodel/tests/unit/plat17-wasm-mutation-control.sha256	justfile	f4ef411c943dae0015825aec1eabd103fdc644b886a0dac1a39e83d2fd561792	e0b0f1e05b1e7907a3cc8a424293bf7353eb6f4cd1bf6a624ce1d927128d1443
 src/tests/scenarios/plat66-pack-mutation-control.sha256	src/tests/scenarios/bindings/playwright/codetracer-binding.ts	5c88be491a92bf4061276ce9fa53c3e5f881e56be6c9802d6cbb1365dc95d513	6429c8e4ee71176b5a1a375191728c8ca816dd883c6a2119c9cebf0e06ec2908
 # run-plat61-shell-mutations.py was re-graded at 8fbd0ab21f; since then
 # bf97934eb5 and 9bc543534b (a refused trace version) moved ct's recording
@@ -261,9 +259,6 @@ src/frontend/tui/tests/plat56-build-output-mutation-control.sha256	src/frontend/
 # RunQuota endpoint from the user-state sandbox) moved run-nim-test-lane.sh and the
 # justfile, and f2b811e86a (a side overlay's slide-out) moved test-lane-files.sh.
 # A re-grade for those bytes is owed.
-src/frontend/viewmodel/tests/unit/plat17-wasm-mutation-control.sha256	ci/lib/run-nim-test-lane.sh	efcf64ff39d6218321383bcca2bdd4571c00fb63d4413176e7061f6c11ec94ff	da6b4e46c486f1a7762fd79b05a42a15dd1b862ab4599ffa22c1bbc166d63783
-src/frontend/viewmodel/tests/unit/plat17-wasm-mutation-control.sha256	ci/lib/test-lane-files.sh	0837fd79d21f0ec4601131b521643b7e349d7bce090827639a34ac606d5c98f5	b16f56a2a67132e8271371f30aa9253c3e05789999ca88a329fb53045b8986fc
-src/frontend/viewmodel/tests/unit/plat17-wasm-mutation-control.sha256	justfile	09f65d0d8dd94201aa918436e898a73c757c0891b188ac0da82c6fd1291b629e	de6e29c858ccacc6a879ec17305f92e561537a9869bbd58834fe32ec32fe6765
 src/frontend/viewmodel/tests/unit/plat33-collab-mutation-control.sha256	ci/lib/test-lane-files.sh	0837fd79d21f0ec4601131b521643b7e349d7bce090827639a34ac606d5c98f5	b16f56a2a67132e8271371f30aa9253c3e05789999ca88a329fb53045b8986fc
 src/frontend/viewmodel/tests/unit/plat33-collab-mutation-control.sha256	justfile	09f65d0d8dd94201aa918436e898a73c757c0891b188ac0da82c6fd1291b629e	de6e29c858ccacc6a879ec17305f92e561537a9869bbd58834fe32ec32fe6765
 src/frontend/viewmodel/tests/unit/plat34-front-end-mutation-control.sha256	ci/lib/test-lane-files.sh	0837fd79d21f0ec4601131b521643b7e349d7bce090827639a34ac606d5c98f5	b16f56a2a67132e8271371f30aa9253c3e05789999ca88a329fb53045b8986fc
