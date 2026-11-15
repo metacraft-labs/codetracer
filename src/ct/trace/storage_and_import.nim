@@ -164,11 +164,24 @@ proc detectTraceAxes*(program: string, paths: seq[string],
   ##   `LangC` / `LangCpp` decomposed to before.
   var detectedLang = detectLangFromPath(program)
   if detectedLang == LangUnknown:
+    # A recorded binary names no language, so the captured sources decide. A
+    # Nim program reaches the binary through C: its capture holds C files
+    # (libc headers first, usually) and the nimcache's generated C — named
+    # `@m<module>.nim.c` — and, when the recorder captured them, the `.nim`
+    # sources. "The first recognised path" therefore made every rr recording
+    # of a Nim binary a C one, and its View menu lost the Nim views. A `.nim`
+    # source or a Nim-generated `.nim.c` anywhere in the capture makes it a
+    # Nim recording.
     for path in paths:
-      let p = detectLangFromPath(path)
-      if p != LangUnknown:
-        detectedLang = p
+      if path.endsWith(".nim.c") or detectLangFromPath(path) == LangNim:
+        detectedLang = LangNim
         break
+    if detectedLang == LangUnknown:
+      for path in paths:
+        let p = detectLangFromPath(path)
+        if p != LangUnknown:
+          detectedLang = p
+          break
 
   let artefactIsa = targetIsaForArtefactPath(program)
   if detectedLang == LangUnknown and artefactIsa == tiUnknown:

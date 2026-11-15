@@ -1751,6 +1751,22 @@ suite "the recording's approach decides materialized replay, not its language":
     check detectTraceLang("main.rs", @[], "db") == LangRust
     check detectTraceLang("main.rs", @[], "rr") == LangRust
 
+  test "detectTraceAxes calls an rr recording of a Nim binary Nim":
+    ## The recorded program is the binary, which names no language, and the
+    ## capture leads with a libc header: the first recognised path is C. The
+    ## `.nim` sources further down make it a Nim recording.
+    let paths = @["nix/store/x-glibc-dev/include/alloca.h",
+                  "nimcache/@mmain.nim.c", "test-programs/nim_sudoku_solver/main.nim"]
+    check detectTraceLang("/tmp/rec/main", paths, "rr") == LangNim
+    # The rr capture of `nim_sudoku_solver` holds no `.nim` path at all: the
+    # nimcache's generated C, `@mmain.nim.c`, is the Nim program's mark.
+    check detectTraceLang("/tmp/rec/main",
+                          @["nix/store/x-glibc-dev/include/alloca.h",
+                            "nimcache/@mmain.nim.c"], "rr") == LangNim
+    # A C program's capture is still C.
+    check detectTraceLang("/tmp/rec/main",
+                          @["nix/store/x-glibc-dev/include/alloca.h", "main.c"], "rr") == LangC
+
   test "recordTrace persists the OBSERVED axes when the caller has them":
     ## The other half of (b): the record side writes what it assessed, so a
     ## wasm recording's cell says wasm.  Asserted on the encoder rather than
