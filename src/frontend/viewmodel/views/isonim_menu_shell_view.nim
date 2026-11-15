@@ -304,8 +304,13 @@ proc renderMenuShell*[R, N](
                         tdiv(
                             id = "menu-element-" & $node.path.len & " " & $node.path[^1],
                             class = menuItemClass(node),
-                            onmouseover = nodeMouseOverHandler(callbacks, node.path),
-                            onclick = nodeClickHandler(callbacks, node.path)):
+                            onmouseover = nodeMouseOverHandler(callbacks, node.path)):
+                          # No `onclick` here: the row container around this
+                          # item has it, and a click on the item bubbles to
+                          # the row. A handler on both activated the entry
+                          # twice per click, so a toggle (View > Notifications)
+                          # opened and closed again
+                          # (menu_item_click_runs_once_test.nim).
                           span(class = "ct-menu-item-label"):
                             text node.name
                           if node.shortcut.len > 0:
@@ -348,8 +353,13 @@ proc renderMenuShell*[R, N](
                         tdiv(
                             id = "menu-element-" & $node.path.len & " " & $node.path[^1],
                             class = menuItemClass(node),
-                            onmouseover = nodeMouseOverHandler(callbacks, node.path),
-                            onclick = nodeClickHandler(callbacks, node.path)):
+                            onmouseover = nodeMouseOverHandler(callbacks, node.path)):
+                          # No `onclick` here: the row container around this
+                          # item has it, and a click on the item bubbles to
+                          # the row. A handler on both activated the entry
+                          # twice per click, so a toggle (View > Notifications)
+                          # opened and closed again
+                          # (menu_item_click_runs_once_test.nim).
                           span(class = "ct-menu-item-label"):
                             text node.name
                           if node.shortcut.len > 0:
