@@ -59,9 +59,13 @@ hcr() {
 		set -euo pipefail
 		nim c -d:release --hints:off --warnings:off --outdir:../codetracer-flame-demo/artifacts/h3-driver scripts/hcr_patch_driver.nim
 		nim c -d:release --hints:off --warnings:off --outdir:build/bin scripts/hcr_patchable_profile.nim')
+	# Inside the engine's dev shell: the script enters it for scons, but then
+	# runs its patchable-shape check with a bare `python3`, which a NixOS
+	# runner does not have ("python3: command not found" after a 19-minute
+	# build, which also kept the binary out of the cache).
 	if [ ! -x "$bin" ]; then
 		(cd "$engine" && JOBS=8 VULKAN=yes EXTRA_SUFFIX=hcrgpu REPROBUILD_DIR="$ws/reprobuild" \
-			scripts/build-hcr-patchable-linux.sh)
+			nix develop --no-write-lock-file --command scripts/build-hcr-patchable-linux.sh)
 	fi
 	# shellcheck disable=SC2016 # expanded by the inner bash, in the flame demo's shell
 	(cd "$ws/codetracer-flame-demo" && git submodule update --init --depth 1 third_party/godot-cpp &&
