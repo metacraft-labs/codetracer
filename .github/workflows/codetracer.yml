@@ -6975,6 +6975,15 @@ jobs:
       - name: Build CodeTracer
         run: nix build --print-build-logs '.?submodules=1#codetracer' --override-input codetracer-trace-format path:./libs/codetracer-trace-format --override-input codetracer-trace-format-nim path:./libs/codetracer-trace-format-nim
 
+      # The build above can outlast the job's first token on a cold runner.
+      - name: Refresh the GitHub token
+        id: fresh_token
+        uses: ./.github/actions/refresh-github-token
+        with:
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+          keep-refreshing: "true"
+
       - name: Setup rr-backend
         # `ci/setup-rr-backend.sh` resolves codetracer-native-backend's revision
         # from `$RR_BACKEND_REF` first and otherwise from the workspace lock via
@@ -6990,7 +6999,7 @@ jobs:
         # native-backend is an `/agents` input in flake.nix, and a commit is
         # what the script's stale-checkout check can hold a checkout to.
         env:
-          GH_TOKEN: ${{ steps.ci_token.outputs.token }}
+          GH_TOKEN: ${{ steps.fresh_token.outputs.token }}
           RR_BACKEND_REF: b0947a4debf4a2d6fc038b14d1844cd32ca89ec8
         run: ./ci/setup-rr-backend.sh
 
