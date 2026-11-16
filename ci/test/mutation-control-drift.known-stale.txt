@@ -126,8 +126,6 @@
 # plat47: graded at 26fa87cc26c; eec6949f68 (a move in flight, drawn on the
 # terminal) then moved runtime.nim and tui_session.nim. Re-grade the arms
 # whose needles sit in them.
-src/frontend/tui/tests/plat54-agent-activity-mutation-control.sha256	src/frontend/gpui/main.nim	2fde80b43566564a900a59186e7bc7debd9c675598646f4fa391424de76c48eb	28f36a050600425fdbbea72ccc729250a4977ecc589c87e4d67e73d3196f228e
-src/frontend/tui/tests/plat54-agent-activity-mutation-control.sha256	src/frontend/ui/agent_activity.nim	61ae1ecf5fbc1e0ce44dc59f15ea0b781785910a0366583b47b32fdfc92c0467	60985af34f2457a1b980bbed2959d9c6697aa8fbcc16173b33a64fe978130f64
 src/frontend/tui/tests/plat46-design-mutation-control.sha256	src/frontend/tui/app/theme/capabilities.nim	f1f2c84a36ed368523f503701d3a0700b16a9fd1aa5c4c6d9c93c713fe54e38b	4a709e46e1c01539fda428f6784b3535f3a42183eb307651eea4fa86b87714f0
 src/frontend/tui/tests/plat46-design-mutation-control.sha256	src/frontend/tui/host/terminal_probe.nim	124b9e0d5977013726b504dd51c62c291de43270ba8932fde09594388fffd9fb	f76737aff180ffb8ce2023c92a130fc74397ae5e7e14ed1e9c295b95440a4672
 src/frontend/tui/tests/plat46-design-mutation-control.sha256	src/frontend/tui/tests/test_plat46_terminal_probe.nim	825901238fc6539a7b2b1001c28b1689d6fa9c0c3be4ac0de91682919b5da5ac	4b596c88e38d1f938825288763f1d14e2c8a368692192c30b1b78537ab22c267
@@ -135,7 +133,6 @@ src/frontend/tui/tests/plat46-design-mutation-control.sha256	src/frontend/tui/te
 # plat56: graded at 0350c2234b; 32824656f1 (a terminal's answer is never
 # typed) then moved the terminal's main.nim. Re-grade the arms whose needles
 # sit in it.
-src/frontend/tui/tests/plat54-agent-activity-mutation-control.sha256	src/frontend/tui/main.nim	66283c44fe09ff1389f0e769ef48637ce573781972c014e30c9c16b1da8606ce	82a88f3f2c8697dc6edab12b1b2be1b458357d4f5be0597552709fceabf7593c
 # plat70h was graded at 56862a458e4; its runtime moved on agents after that
 # (eec6949f68, a move drawn in flight): a re-grade of the arms whose needles sit in it.
 # plat70e and plat70i were graded at a293925583; after that 234a6bcc67 (a session
@@ -310,8 +307,6 @@ src/frontend/tui/tests/plat52-terminal-mutation-control.sha256	src/frontend/tui/
 src/frontend/tui/tests/plat52-terminal-mutation-control.sha256	src/frontend/tui/host/tui_session.nim	0c65cb8a6581ca9f73adda27a71e6589473c2573b61ce8a51eac495d0e0b1efe	4059f0d09cbcb6d8ff47bba459e710d5f2ad2e4f556aaa4c87694e86209103df
 src/frontend/tui/tests/plat53-test-results-mutation-control.sha256	src/frontend/tui/app/runtime.nim	a7a3bb422082c3ce0dbfd6321695a4a8876ce902281ec4c17f02c3bc4e1bbeb8	88ea1de80a3f6ed77a8513759b94ec22f7a60e6460d52cfc0186545ef9dc79d3
 src/frontend/tui/tests/plat53-test-results-mutation-control.sha256	src/frontend/ui/editor.nim	58e7279dd66adf426e4fdb32b5836fd8ad049a427f9f45e86a1084735cfc2405	86d697eaff217cdde77e51da1433f850081b315422e9c533035a505af56f0426
-src/frontend/tui/tests/plat54-agent-activity-mutation-control.sha256	src/frontend/tui/app/runtime.nim	9f6ceffe6b6685c2accdce1080bd0d79d6355dbe8235135b4e163a554a5aa58b	88ea1de80a3f6ed77a8513759b94ec22f7a60e6460d52cfc0186545ef9dc79d3
-src/frontend/tui/tests/plat54-agent-activity-mutation-control.sha256	src/frontend/tui/host/tui_session.nim	a9ea791e49006488ac348b14e02a4255f0d521e9444766a8aff5219e8c969bee	4059f0d09cbcb6d8ff47bba459e710d5f2ad2e4f556aaa4c87694e86209103df
 src/frontend/tui/tests/plat55-problems-mutation-control.sha256	src/frontend/tui/app/runtime.nim	a7a3bb422082c3ce0dbfd6321695a4a8876ce902281ec4c17f02c3bc4e1bbeb8	88ea1de80a3f6ed77a8513759b94ec22f7a60e6460d52cfc0186545ef9dc79d3
 src/frontend/tui/tests/plat56-build-output-mutation-control.sha256	src/frontend/tui/app/runtime.nim	a7a3bb422082c3ce0dbfd6321695a4a8876ce902281ec4c17f02c3bc4e1bbeb8	88ea1de80a3f6ed77a8513759b94ec22f7a60e6460d52cfc0186545ef9dc79d3
 src/frontend/tui/tests/plat57-find-in-files-mutation-control.sha256	src/frontend/tui/app/runtime.nim	a7a3bb422082c3ce0dbfd6321695a4a8876ce902281ec4c17f02c3bc4e1bbeb8	88ea1de80a3f6ed77a8513759b94ec22f7a60e6460d52cfc0186545ef9dc79d3
