@@ -64,6 +64,7 @@ import std/[unittest, jsffi, strutils, asyncjs, tables]
 
 import ../index/ipc_subsystems/dap
 import ../index/window_routing
+import ../index/served_client
 
 var checks = 0
 var failedChecks = 0
@@ -199,6 +200,27 @@ suite "the desktop routes what the main process says per window":
     ck secondTold.said("CODETRACER::reset-layout-done").len == 1
     ck firstTold.said("CODETRACER::reset-layout-done").len == 0
     ck router.getTitle().to(cstring) == cstring"first"
+
+  test "a window is one client across its requests":
+    # `served_client.currentClientKey` scopes the ids a page chooses itself
+    # (the Agent Activity pane's `agent-session-0`) by the client that sent
+    # them. On the desktop the client is the window, so every request of one
+    # window must carry the SAME key, and another window a different one.
+    # When `runAsWindow` gave each request a fresh context, each got a fresh
+    # key: the session `agent-session-0` was started under one key and its
+    # prompt looked up under the next, and the main process dropped every
+    # Agent Activity prompt ("prompt for unknown clientSessionId").
+    resetWindows()
+    discard openWindow(1, "first")
+    discard openWindow(2, "second")
+    var start, prompt, other = cstring""
+    runForSender(ipcEventFrom(101), proc() = start = currentClientKey())
+    runForSender(ipcEventFrom(101), proc() = prompt = currentClientKey())
+    runForSender(ipcEventFrom(102), proc() = other = currentClientKey())
+    ck start.len > 0
+    ck prompt == start
+    ck other.len > 0
+    ck other != start
 
 suite "two windows showing one replay":
 

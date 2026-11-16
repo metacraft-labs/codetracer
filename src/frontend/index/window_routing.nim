@@ -77,6 +77,12 @@ type
       ## Whether its renderer answered `CODETRACER::started`.
     onHandshake*: proc()
       ## Run once when it does (a window opened after startup: its bootstrap).
+    clientStore: JsObject
+      ## The context store every request of this window runs in
+      ## (`runAsWindow`). ONE object for the window's life: it is the client
+      ## `served_client.currentClientKey` names, so the ids a page chooses
+      ## itself (the Agent Activity pane's `agent-session-0`) keep their state
+      ## from one request of the window to the next.
 
 const
   WindowKeyField = cstring"ctDesktopWindow"
@@ -139,7 +145,9 @@ proc registerAppWindow*(id, contentsId: int; window: JsObject;
   ## Add a window. The first registered is the primary one until it closes.
   result = AppWindow(id: id, contentsId: contentsId, window: window,
                      rawSend: rawSend, tabReplays: initTable[int, int](),
-                     tabSession: initTable[int, seq[SessionMessage]]())
+                     tabSession: initTable[int, seq[SessionMessage]](),
+                     clientStore: newJsObject())
+  result.clientStore[WindowKeyField] = id
   windows.add result
 
 proc closeAppWindow*(w: AppWindow): seq[int] =
@@ -217,12 +225,14 @@ proc requestingBrowserWindow*(): JsObject =
 
 proc runAsWindow*(w: AppWindow; fn: proc()) =
   ## Run `fn`, and what it starts, as serving `w`.
+  ## Every call for one window runs in that window's own store: a fresh
+  ## store per call made each request a new client, and state a page keyed
+  ## by its own ids (an agent session started by one request, prompted by
+  ## the next) was lost between them.
   if w.isNil:
     fn()
   else:
-    let store = newJsObject()
-    store[WindowKeyField] = w.id
-    runAsClient(store, fn)
+    runAsClient(w.clientStore, fn)
 
 proc runForSender*(event: JsObject; fn: proc()) =
   ## Run an IPC handler as serving the window whose renderer sent `event`
