@@ -27,6 +27,8 @@ steps:
   - hover: { at: 'menu-bar/menu-item[label="Filesystem"]', for: 200ms }
   - wait: settled
   - click: 'menu-bar/menu-item[label="View Generated C Source"]'
+    # the pane loads the listing after the click; the next wait covers it
+    settle: false
   - wait: { until: { at: low-level-code, count: { gt: 10 } }, timeout: 120s }
   - wait: { until: { at: low-level-code, assert: 'active-row-shows("nimln_\\(60\\)")' }, timeout: 60s }
   - click: 'toolbar/toolbar-button[label="next-image"]'

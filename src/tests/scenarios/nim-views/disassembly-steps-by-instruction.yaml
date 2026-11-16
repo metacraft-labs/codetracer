@@ -27,6 +27,8 @@ steps:
   - hover: { at: 'menu-bar/menu-item[label="Filesystem"]', for: 200ms }
   - wait: settled
   - click: 'menu-bar/menu-item[label="View Disassembly"]'
+    # the pane loads the listing after the click; the next wait covers it
+    settle: false
   - wait: { until: { at: low-level-code, count: { gt: 10 } }, timeout: 120s }
   - expect: { at: low-level-code, address: { matches: "^Originating address: 0x[0-9A-Fa-f]+$" } }
   - wait: { until: { at: low-level-code, stepping: "steps by instruction" }, timeout: 30s }
