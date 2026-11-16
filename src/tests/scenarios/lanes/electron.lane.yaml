@@ -389,6 +389,7 @@ applicable:
   - ../multi-replay/stop-ends-the-first-tabs-replay.yaml
   - ../multi-replay/three-recording-kinds-in-three-tabs.yaml
   - ../multi-replay/two-tabs-choosing-at-once-each-load-their-own.yaml
+  - ../multi-replay/tab-strip-adds-switches-and-closes.yaml
   - ../noir-space-ship/scratchpad-collects-every-kind.yaml
   - ../noir-space-ship/tracepoint-disable-and-enable.yaml
   - ../noir-space-ship/tracepoint-logs-damage-and-regeneration.yaml
