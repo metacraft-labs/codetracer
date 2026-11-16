@@ -299,25 +299,32 @@ VALIDATED replayInteractive = false
 ### 17: --with-diff -x (value starts with -)
 argv: ct "record-test" "--with-diff" "-x" "name" "path" "10" "1"
 env: (none)
-exit: 1
+exit: 0
 --- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record-test
+  recordTestTestName = "name"
+  recordTestPath = "path"
+  recordTestLine = 10
+  recordTestColumn = 1
+  recordTestWithDiff = "-x"
+  recordTestStoreTraceFolderForPid = 0
+VALIDATED replayInteractive = false
 --- stderr
-Unrecognized option 'x'\e[0m
-Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 18: --with-diff --x (value starts with --)
 argv: ct "record-test" "--with-diff" "--x" "name" "path" "10" "1"
-env: (none)
-exit: 1
---- stdout
---- stderr
-Unrecognized option 'x'\e[0m
-Try \e[36mct --help\e[0m for more information.
---- end
-
-### 19: --with-diff --new-tab <v> (an option between it and its value)
-argv: ct "record-test" "--with-diff" "--new-tab" "last-commit" "name" "path" "10" "1"
 env: (none)
 exit: 0
 --- stdout
@@ -330,17 +337,27 @@ PARSED
   inspect = none
   remoteDebuggingPort = none
   remoteDebuggingPipe = false
-  newTab = true
+  newTab = false
   newWindow = false
   cmd = record-test
   recordTestTestName = "name"
   recordTestPath = "path"
   recordTestLine = 10
   recordTestColumn = 1
-  recordTestWithDiff = "last-commit"
+  recordTestWithDiff = "--x"
   recordTestStoreTraceFolderForPid = 0
 VALIDATED replayInteractive = false
 --- stderr
+--- end
+
+### 19: --with-diff --new-tab <v> (an option between it and its value)
+argv: ct "record-test" "--with-diff" "--new-tab" "last-commit" "name" "path" "10" "1"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Error while processing the \e[34mrecordTestLine=path\e[0m parameter: invalid integer: path\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 20: --with-diff repeated, last wins
@@ -373,28 +390,11 @@ VALIDATED replayInteractive = false
 ### 21: --with-diff missing value (last)
 argv: ct "record-test" "name" "path" "10" "1" "--with-diff"
 env: (none)
-exit: 0
+exit: 1
 --- stdout
-PARSED
-  cwd = none
-  envFiles = @[]
-  env0Files = @[]
-  tmpEnvFiles = @[]
-  tmpEnv0Files = @[]
-  inspect = none
-  remoteDebuggingPort = none
-  remoteDebuggingPipe = false
-  newTab = false
-  newWindow = false
-  cmd = record-test
-  recordTestTestName = "name"
-  recordTestPath = "path"
-  recordTestLine = 10
-  recordTestColumn = 1
-  recordTestWithDiff = ""
-  recordTestStoreTraceFolderForPid = 0
-VALIDATED replayInteractive = false
 --- stderr
+The option '\e[34m--with-diff\e[0m' requires a value\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 22: --with-diff missing value (before the rest)
@@ -689,7 +689,7 @@ env: (none)
 exit: 1
 --- stdout
 --- stderr
-Unrecognized option 'x'\e[0m
+Error while processing the \e[34mstore-trace-folder-for-pid=-x\e[0m parameter: invalid integer: -x\e[0m
 Try \e[36mct --help\e[0m for more information.
 --- end
 
@@ -699,35 +699,18 @@ env: (none)
 exit: 1
 --- stdout
 --- stderr
-Unrecognized option 'x'\e[0m
+Error while processing the \e[34mstore-trace-folder-for-pid=--x\e[0m parameter: invalid integer: --x\e[0m
 Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 39: --store-trace-folder-for-pid --new-tab <v> (an option between it and its value)
 argv: ct "record-test" "--store-trace-folder-for-pid" "--new-tab" "7" "name" "path" "10" "1"
 env: (none)
-exit: 0
+exit: 1
 --- stdout
-PARSED
-  cwd = none
-  envFiles = @[]
-  env0Files = @[]
-  tmpEnvFiles = @[]
-  tmpEnv0Files = @[]
-  inspect = none
-  remoteDebuggingPort = none
-  remoteDebuggingPipe = false
-  newTab = true
-  newWindow = false
-  cmd = record-test
-  recordTestTestName = "name"
-  recordTestPath = "path"
-  recordTestLine = 10
-  recordTestColumn = 1
-  recordTestWithDiff = ""
-  recordTestStoreTraceFolderForPid = 7
-VALIDATED replayInteractive = false
 --- stderr
+Error while processing the \e[34mstore-trace-folder-for-pid=--new-tab\e[0m parameter: invalid integer: --new-tab\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 40: --store-trace-folder-for-pid repeated, last wins
@@ -760,28 +743,11 @@ VALIDATED replayInteractive = false
 ### 41: --store-trace-folder-for-pid missing value (last)
 argv: ct "record-test" "name" "path" "10" "1" "--store-trace-folder-for-pid"
 env: (none)
-exit: 0
+exit: 1
 --- stdout
-PARSED
-  cwd = none
-  envFiles = @[]
-  env0Files = @[]
-  tmpEnvFiles = @[]
-  tmpEnv0Files = @[]
-  inspect = none
-  remoteDebuggingPort = none
-  remoteDebuggingPipe = false
-  newTab = false
-  newWindow = false
-  cmd = record-test
-  recordTestTestName = "name"
-  recordTestPath = "path"
-  recordTestLine = 10
-  recordTestColumn = 1
-  recordTestWithDiff = ""
-  recordTestStoreTraceFolderForPid = 0
-VALIDATED replayInteractive = false
 --- stderr
+The option '\e[34m--store-trace-folder-for-pid\e[0m' requires a value\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 42: --store-trace-folder-for-pid missing value (before the rest)
@@ -931,62 +897,28 @@ env: (none)
 exit: 1
 --- stdout
 --- stderr
-The required option 'recordTestColumn' was not specified\e[0m
+Unrecognized option ''\e[0m
 Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 52: lone -- then a word
 argv: ct "record-test" "--" "w" "name" "path" "10" "1"
 env: (none)
-exit: 0
+exit: 1
 --- stdout
-PARSED
-  cwd = none
-  envFiles = @[]
-  env0Files = @[]
-  tmpEnvFiles = @[]
-  tmpEnv0Files = @[]
-  inspect = none
-  remoteDebuggingPort = none
-  remoteDebuggingPipe = false
-  newTab = false
-  newWindow = false
-  cmd = record-test
-  recordTestTestName = "name"
-  recordTestPath = "path"
-  recordTestLine = 10
-  recordTestColumn = 1
-  recordTestWithDiff = ""
-  recordTestStoreTraceFolderForPid = 0
-VALIDATED replayInteractive = false
 --- stderr
+Unrecognized option ''\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 53: --=v
 argv: ct "record-test" "--=v" "name" "path" "10" "1"
 env: (none)
-exit: 0
+exit: 1
 --- stdout
-PARSED
-  cwd = none
-  envFiles = @[]
-  env0Files = @[]
-  tmpEnvFiles = @[]
-  tmpEnv0Files = @[]
-  inspect = none
-  remoteDebuggingPort = none
-  remoteDebuggingPipe = false
-  newTab = false
-  newWindow = false
-  cmd = record-test
-  recordTestTestName = "name"
-  recordTestPath = "path"
-  recordTestLine = 10
-  recordTestColumn = 1
-  recordTestWithDiff = ""
-  recordTestStoreTraceFolderForPid = 0
-VALIDATED replayInteractive = false
 --- stderr
+Unrecognized option ''\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 54: extra positional
@@ -1067,9 +999,24 @@ CodeTracer version: <VERSION>
 ### 58: -h after the command
 argv: ct "record-test" "-h" "name" "path" "10" "1"
 env: (none)
-exit: 1
+exit: 0
 --- stdout
+CodeTracer - the user-friendly time-travelling debugger
+
+\e[0m\e[33mUsage:\x20
+\e[0m\e[1m
+\e[36mct record-test\e[0m [OPTIONS]...
+
+The following options are available:
+
+ \e[34m\e[1m--with-diff             \e[0m  Record a diff related to this trace and produce a
+                               multitrace. Arg can be `last-commit`, path to a
+                               diff file (must be from the current repo!) or a
+                               valid `git diff <arg>` arg.\e[0m
+ \e[34m\e[1m--store-trace-folder-for-pid\e[0m  sets a pid, if we should store the resulting
+                               trace folder in a special tmp file, grouping info
+                               for a certain originating codetracer pid. 0 means
+                               'do not store in such a file' [=0].\e[0m
+
 --- stderr
-Unrecognized option 'h'\e[0m
-Try \e[36mct --help\e[0m for more information.
 --- end

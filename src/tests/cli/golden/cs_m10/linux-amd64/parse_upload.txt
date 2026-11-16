@@ -397,7 +397,7 @@ PARSED
   newTab = false
   newWindow = false
   cmd = upload
-  uploadRecordingId = none
+  uploadRecordingId = some("")
   uploadTraceFolder = none
   uploadLastTraceMatchingPattern = none
   uploadInteractive = none
@@ -413,7 +413,7 @@ PARSED
   uploadPasswordFile = none
   uploadPasswordStdin = false
   uploadVisibility = none
-VALIDATED replayInteractive = true
+VALIDATED replayInteractive = false
 --- stderr
 --- end
 
@@ -457,26 +457,6 @@ VALIDATED replayInteractive = false
 ### 14: --id -x (value starts with -)
 argv: ct "upload" "--id" "-x"
 env: (none)
-exit: 1
---- stdout
---- stderr
-Unrecognized option 'x'\e[0m
-Try \e[36mct --help\e[0m for more information.
---- end
-
-### 15: --id --x (value starts with --)
-argv: ct "upload" "--id" "--x"
-env: (none)
-exit: 1
---- stdout
---- stderr
-Unrecognized option 'x'\e[0m
-Try \e[36mct --help\e[0m for more information.
---- end
-
-### 16: --id --new-tab <v> (an option between it and its value)
-argv: ct "upload" "--id" "--new-tab" "0190d7a0"
-env: (none)
 exit: 0
 --- stdout
 PARSED
@@ -488,10 +468,10 @@ PARSED
   inspect = none
   remoteDebuggingPort = none
   remoteDebuggingPipe = false
-  newTab = true
+  newTab = false
   newWindow = false
   cmd = upload
-  uploadRecordingId = some("0190d7a0")
+  uploadRecordingId = some("-x")
   uploadTraceFolder = none
   uploadLastTraceMatchingPattern = none
   uploadInteractive = none
@@ -508,6 +488,81 @@ PARSED
   uploadPasswordStdin = false
   uploadVisibility = none
 VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 15: --id --x (value starts with --)
+argv: ct "upload" "--id" "--x"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = upload
+  uploadRecordingId = some("--x")
+  uploadTraceFolder = none
+  uploadLastTraceMatchingPattern = none
+  uploadInteractive = none
+  uploadOrg = none
+  uploadToken = none
+  uploadBaseUrl = none
+  uploadNoPortable = false
+  uploadNoSplitUpload = false
+  uploadOmniscientDbMode = off
+  uploadArtifactPath = none
+  uploadArtifactKind = none
+  uploadEncrypt = false
+  uploadPasswordFile = none
+  uploadPasswordStdin = false
+  uploadVisibility = none
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 16: --id --new-tab <v> (an option between it and its value)
+argv: ct "upload" "--id" "--new-tab" "0190d7a0"
+env: (none)
+exit: 1
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = upload
+  uploadRecordingId = some("--new-tab")
+  uploadTraceFolder = none
+  uploadLastTraceMatchingPattern = some("0190d7a0")
+  uploadInteractive = none
+  uploadOrg = none
+  uploadToken = none
+  uploadBaseUrl = none
+  uploadNoPortable = false
+  uploadNoSplitUpload = false
+  uploadOmniscientDbMode = off
+  uploadArtifactPath = none
+  uploadArtifactKind = none
+  uploadEncrypt = false
+  uploadPasswordFile = none
+  uploadPasswordStdin = false
+  uploadVisibility = none
+configuration error: expected no more than one arg to command to be passed
+Try `ct --help` for more information
 --- stderr
 --- end
 
@@ -551,38 +606,11 @@ VALIDATED replayInteractive = false
 ### 18: --id missing value (last)
 argv: ct "upload" "--id"
 env: (none)
-exit: 0
+exit: 1
 --- stdout
-PARSED
-  cwd = none
-  envFiles = @[]
-  env0Files = @[]
-  tmpEnvFiles = @[]
-  tmpEnv0Files = @[]
-  inspect = none
-  remoteDebuggingPort = none
-  remoteDebuggingPipe = false
-  newTab = false
-  newWindow = false
-  cmd = upload
-  uploadRecordingId = none
-  uploadTraceFolder = none
-  uploadLastTraceMatchingPattern = none
-  uploadInteractive = none
-  uploadOrg = none
-  uploadToken = none
-  uploadBaseUrl = none
-  uploadNoPortable = false
-  uploadNoSplitUpload = false
-  uploadOmniscientDbMode = off
-  uploadArtifactPath = none
-  uploadArtifactKind = none
-  uploadEncrypt = false
-  uploadPasswordFile = none
-  uploadPasswordStdin = false
-  uploadVisibility = none
-VALIDATED replayInteractive = true
 --- stderr
+The option '\e[34m--id\e[0m' requires a value\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 19: --ID <v> (style variant)
@@ -884,16 +912,6 @@ VALIDATED replayInteractive = false
 ### 27: -t<v> (attached)
 argv: ct "upload" "-t/tr"
 env: (none)
-exit: 1
---- stdout
---- stderr
-Unrecognized option '/'\e[0m
-Try \e[36mct --help\e[0m for more information.
---- end
-
-### 28: -T <v> (other case)
-argv: ct "upload" "-T" "/tr"
-env: (none)
 exit: 0
 --- stdout
 PARSED
@@ -926,6 +944,16 @@ PARSED
   uploadVisibility = none
 VALIDATED replayInteractive = false
 --- stderr
+--- end
+
+### 28: -T <v> (other case)
+argv: ct "upload" "-T" "/tr"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'T'\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 29: --t <v> (the letter as a long option)
@@ -1168,7 +1196,7 @@ PARSED
   newWindow = false
   cmd = upload
   uploadRecordingId = none
-  uploadTraceFolder = none
+  uploadTraceFolder = some("")
   uploadLastTraceMatchingPattern = none
   uploadInteractive = none
   uploadOrg = none
@@ -1183,7 +1211,7 @@ PARSED
   uploadPasswordFile = none
   uploadPasswordStdin = false
   uploadVisibility = none
-VALIDATED replayInteractive = true
+VALIDATED replayInteractive = false
 --- stderr
 --- end
 
@@ -1227,26 +1255,6 @@ VALIDATED replayInteractive = false
 ### 37: --trace-folder -x (value starts with -)
 argv: ct "upload" "--trace-folder" "-x"
 env: (none)
-exit: 1
---- stdout
---- stderr
-Unrecognized option 'x'\e[0m
-Try \e[36mct --help\e[0m for more information.
---- end
-
-### 38: --trace-folder --x (value starts with --)
-argv: ct "upload" "--trace-folder" "--x"
-env: (none)
-exit: 1
---- stdout
---- stderr
-Unrecognized option 'x'\e[0m
-Try \e[36mct --help\e[0m for more information.
---- end
-
-### 39: --trace-folder --new-tab <v> (an option between it and its value)
-argv: ct "upload" "--trace-folder" "--new-tab" "/tr"
-env: (none)
 exit: 0
 --- stdout
 PARSED
@@ -1258,11 +1266,11 @@ PARSED
   inspect = none
   remoteDebuggingPort = none
   remoteDebuggingPipe = false
-  newTab = true
+  newTab = false
   newWindow = false
   cmd = upload
   uploadRecordingId = none
-  uploadTraceFolder = some("/tr")
+  uploadTraceFolder = some("-x")
   uploadLastTraceMatchingPattern = none
   uploadInteractive = none
   uploadOrg = none
@@ -1278,6 +1286,81 @@ PARSED
   uploadPasswordStdin = false
   uploadVisibility = none
 VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 38: --trace-folder --x (value starts with --)
+argv: ct "upload" "--trace-folder" "--x"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = upload
+  uploadRecordingId = none
+  uploadTraceFolder = some("--x")
+  uploadLastTraceMatchingPattern = none
+  uploadInteractive = none
+  uploadOrg = none
+  uploadToken = none
+  uploadBaseUrl = none
+  uploadNoPortable = false
+  uploadNoSplitUpload = false
+  uploadOmniscientDbMode = off
+  uploadArtifactPath = none
+  uploadArtifactKind = none
+  uploadEncrypt = false
+  uploadPasswordFile = none
+  uploadPasswordStdin = false
+  uploadVisibility = none
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 39: --trace-folder --new-tab <v> (an option between it and its value)
+argv: ct "upload" "--trace-folder" "--new-tab" "/tr"
+env: (none)
+exit: 1
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = upload
+  uploadRecordingId = none
+  uploadTraceFolder = some("--new-tab")
+  uploadLastTraceMatchingPattern = some("/tr")
+  uploadInteractive = none
+  uploadOrg = none
+  uploadToken = none
+  uploadBaseUrl = none
+  uploadNoPortable = false
+  uploadNoSplitUpload = false
+  uploadOmniscientDbMode = off
+  uploadArtifactPath = none
+  uploadArtifactKind = none
+  uploadEncrypt = false
+  uploadPasswordFile = none
+  uploadPasswordStdin = false
+  uploadVisibility = none
+configuration error: expected no more than one arg to command to be passed
+Try `ct --help` for more information
 --- stderr
 --- end
 
@@ -1321,38 +1404,11 @@ VALIDATED replayInteractive = false
 ### 41: --trace-folder missing value (last)
 argv: ct "upload" "--trace-folder"
 env: (none)
-exit: 0
+exit: 1
 --- stdout
-PARSED
-  cwd = none
-  envFiles = @[]
-  env0Files = @[]
-  tmpEnvFiles = @[]
-  tmpEnv0Files = @[]
-  inspect = none
-  remoteDebuggingPort = none
-  remoteDebuggingPipe = false
-  newTab = false
-  newWindow = false
-  cmd = upload
-  uploadRecordingId = none
-  uploadTraceFolder = none
-  uploadLastTraceMatchingPattern = none
-  uploadInteractive = none
-  uploadOrg = none
-  uploadToken = none
-  uploadBaseUrl = none
-  uploadNoPortable = false
-  uploadNoSplitUpload = false
-  uploadOmniscientDbMode = off
-  uploadArtifactPath = none
-  uploadArtifactKind = none
-  uploadEncrypt = false
-  uploadPasswordFile = none
-  uploadPasswordStdin = false
-  uploadVisibility = none
-VALIDATED replayInteractive = true
 --- stderr
+The option '\e[34m--trace-folder\e[0m' requires a value\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 42: --TRACE-FOLDER <v> (style variant)
@@ -1469,7 +1525,7 @@ PARSED
   uploadRecordingId = none
   uploadTraceFolder = none
   uploadLastTraceMatchingPattern = none
-  uploadInteractive = none
+  uploadInteractive = some(true)
   uploadOrg = none
   uploadToken = none
   uploadBaseUrl = none
@@ -1489,7 +1545,7 @@ VALIDATED replayInteractive = true
 ### 47: --interactive true
 argv: ct "upload" "--interactive" "true"
 env: (none)
-exit: 0
+exit: 1
 --- stdout
 PARSED
   cwd = none
@@ -1505,7 +1561,7 @@ PARSED
   cmd = upload
   uploadRecordingId = none
   uploadTraceFolder = none
-  uploadLastTraceMatchingPattern = none
+  uploadLastTraceMatchingPattern = some("true")
   uploadInteractive = some(true)
   uploadOrg = none
   uploadToken = none
@@ -1519,7 +1575,8 @@ PARSED
   uploadPasswordFile = none
   uploadPasswordStdin = false
   uploadVisibility = none
-VALIDATED replayInteractive = true
+configuration error: expected no more than one arg to command to be passed
+Try `ct --help` for more information
 --- stderr
 --- end
 
@@ -1580,7 +1637,7 @@ PARSED
   uploadRecordingId = none
   uploadTraceFolder = none
   uploadLastTraceMatchingPattern = none
-  uploadInteractive = none
+  uploadInteractive = some(true)
   uploadOrg = none
   uploadToken = none
   uploadBaseUrl = none
@@ -1600,7 +1657,7 @@ VALIDATED replayInteractive = true
 ### 50: -i true
 argv: ct "upload" "-i" "true"
 env: (none)
-exit: 0
+exit: 1
 --- stdout
 PARSED
   cwd = none
@@ -1616,7 +1673,7 @@ PARSED
   cmd = upload
   uploadRecordingId = none
   uploadTraceFolder = none
-  uploadLastTraceMatchingPattern = none
+  uploadLastTraceMatchingPattern = some("true")
   uploadInteractive = some(true)
   uploadOrg = none
   uploadToken = none
@@ -1630,7 +1687,8 @@ PARSED
   uploadPasswordFile = none
   uploadPasswordStdin = false
   uploadVisibility = none
-VALIDATED replayInteractive = true
+configuration error: expected no more than one arg to command to be passed
+Try `ct --help` for more information
 --- stderr
 --- end
 
@@ -1812,7 +1870,7 @@ PARSED
   uploadRecordingId = none
   uploadTraceFolder = none
   uploadLastTraceMatchingPattern = none
-  uploadInteractive = none
+  uploadInteractive = some(true)
   uploadOrg = none
   uploadToken = none
   uploadBaseUrl = none
@@ -1834,9 +1892,37 @@ argv: ct "upload" "--interactive" "prog"
 env: (none)
 exit: 1
 --- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = upload
+  uploadRecordingId = none
+  uploadTraceFolder = none
+  uploadLastTraceMatchingPattern = some("prog")
+  uploadInteractive = some(true)
+  uploadOrg = none
+  uploadToken = none
+  uploadBaseUrl = none
+  uploadNoPortable = false
+  uploadNoSplitUpload = false
+  uploadOmniscientDbMode = off
+  uploadArtifactPath = none
+  uploadArtifactKind = none
+  uploadEncrypt = false
+  uploadPasswordFile = none
+  uploadPasswordStdin = false
+  uploadVisibility = none
+configuration error: expected no more than one arg to command to be passed
+Try `ct --help` for more information
 --- stderr
-Error while processing the \e[34minteractive=prog\e[0m parameter: 'prog' is not a valid boolean value. Supported values are on/off, yes/no, true/false or 1/0\e[0m
-Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 58: --interactive --cwd=x (next word an option)
@@ -1859,7 +1945,7 @@ PARSED
   uploadRecordingId = none
   uploadTraceFolder = none
   uploadLastTraceMatchingPattern = none
-  uploadInteractive = none
+  uploadInteractive = some(true)
   uploadOrg = none
   uploadToken = none
   uploadBaseUrl = none
@@ -1981,7 +2067,7 @@ PARSED
   cmd = upload
   uploadRecordingId = none
   uploadTraceFolder = some("/tr")
-  uploadLastTraceMatchingPattern = none
+  uploadLastTraceMatchingPattern = some("true")
   uploadInteractive = some(true)
   uploadOrg = none
   uploadToken = none
@@ -2005,6 +2091,16 @@ argv: ct "upload" "prog" "-i" "false"
 env: (none)
 exit: 1
 --- stdout
+--- stderr
+The subcommand 'upload' does not accept additional arguments\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 64: -i false alone
+argv: ct "upload" "-i" "false"
+env: (none)
+exit: 1
+--- stdout
 PARSED
   cwd = none
   envFiles = @[]
@@ -2019,8 +2115,8 @@ PARSED
   cmd = upload
   uploadRecordingId = none
   uploadTraceFolder = none
-  uploadLastTraceMatchingPattern = some("prog")
-  uploadInteractive = some(false)
+  uploadLastTraceMatchingPattern = some("false")
+  uploadInteractive = some(true)
   uploadOrg = none
   uploadToken = none
   uploadBaseUrl = none
@@ -2038,47 +2134,10 @@ Try `ct --help` for more information
 --- stderr
 --- end
 
-### 64: -i false alone
-argv: ct "upload" "-i" "false"
-env: (none)
-exit: 0
---- stdout
-PARSED
-  cwd = none
-  envFiles = @[]
-  env0Files = @[]
-  tmpEnvFiles = @[]
-  tmpEnv0Files = @[]
-  inspect = none
-  remoteDebuggingPort = none
-  remoteDebuggingPipe = false
-  newTab = false
-  newWindow = false
-  cmd = upload
-  uploadRecordingId = none
-  uploadTraceFolder = none
-  uploadLastTraceMatchingPattern = none
-  uploadInteractive = some(false)
-  uploadOrg = none
-  uploadToken = none
-  uploadBaseUrl = none
-  uploadNoPortable = false
-  uploadNoSplitUpload = false
-  uploadOmniscientDbMode = off
-  uploadArtifactPath = none
-  uploadArtifactKind = none
-  uploadEncrypt = false
-  uploadPasswordFile = none
-  uploadPasswordStdin = false
-  uploadVisibility = none
-VALIDATED replayInteractive = true
---- stderr
---- end
-
 ### 65: -i true alone
 argv: ct "upload" "-i" "true"
 env: (none)
-exit: 0
+exit: 1
 --- stdout
 PARSED
   cwd = none
@@ -2094,7 +2153,7 @@ PARSED
   cmd = upload
   uploadRecordingId = none
   uploadTraceFolder = none
-  uploadLastTraceMatchingPattern = none
+  uploadLastTraceMatchingPattern = some("true")
   uploadInteractive = some(true)
   uploadOrg = none
   uploadToken = none
@@ -2108,7 +2167,8 @@ PARSED
   uploadPasswordFile = none
   uploadPasswordStdin = false
   uploadVisibility = none
-VALIDATED replayInteractive = true
+configuration error: expected no more than one arg to command to be passed
+Try `ct --help` for more information
 --- stderr
 --- end
 
@@ -2117,9 +2177,37 @@ argv: ct "upload" "-ti" "x"
 env: (none)
 exit: 1
 --- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = upload
+  uploadRecordingId = none
+  uploadTraceFolder = some("i")
+  uploadLastTraceMatchingPattern = some("x")
+  uploadInteractive = none
+  uploadOrg = none
+  uploadToken = none
+  uploadBaseUrl = none
+  uploadNoPortable = false
+  uploadNoSplitUpload = false
+  uploadOmniscientDbMode = off
+  uploadArtifactPath = none
+  uploadArtifactKind = none
+  uploadEncrypt = false
+  uploadPasswordFile = none
+  uploadPasswordStdin = false
+  uploadVisibility = none
+configuration error: expected no more than one arg to command to be passed
+Try `ct --help` for more information
 --- stderr
-Error while processing the \e[34minteractive=x\e[0m parameter: 'x' is not a valid boolean value. Supported values are on/off, yes/no, true/false or 1/0\e[0m
-Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 67: env <APP>_ID
@@ -2449,7 +2537,7 @@ PARSED
   uploadTraceFolder = none
   uploadLastTraceMatchingPattern = none
   uploadInteractive = none
-  uploadOrg = none
+  uploadOrg = some("")
   uploadToken = none
   uploadBaseUrl = none
   uploadNoPortable = false
@@ -2505,21 +2593,75 @@ VALIDATED replayInteractive = true
 ### 78: --org -x (value starts with -)
 argv: ct "upload" "--org" "-x"
 env: (none)
-exit: 1
+exit: 0
 --- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = upload
+  uploadRecordingId = none
+  uploadTraceFolder = none
+  uploadLastTraceMatchingPattern = none
+  uploadInteractive = none
+  uploadOrg = some("-x")
+  uploadToken = none
+  uploadBaseUrl = none
+  uploadNoPortable = false
+  uploadNoSplitUpload = false
+  uploadOmniscientDbMode = off
+  uploadArtifactPath = none
+  uploadArtifactKind = none
+  uploadEncrypt = false
+  uploadPasswordFile = none
+  uploadPasswordStdin = false
+  uploadVisibility = none
+VALIDATED replayInteractive = true
 --- stderr
-Unrecognized option 'x'\e[0m
-Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 79: --org --x (value starts with --)
 argv: ct "upload" "--org" "--x"
 env: (none)
-exit: 1
+exit: 0
 --- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = upload
+  uploadRecordingId = none
+  uploadTraceFolder = none
+  uploadLastTraceMatchingPattern = none
+  uploadInteractive = none
+  uploadOrg = some("--x")
+  uploadToken = none
+  uploadBaseUrl = none
+  uploadNoPortable = false
+  uploadNoSplitUpload = false
+  uploadOmniscientDbMode = off
+  uploadArtifactPath = none
+  uploadArtifactKind = none
+  uploadEncrypt = false
+  uploadPasswordFile = none
+  uploadPasswordStdin = false
+  uploadVisibility = none
+VALIDATED replayInteractive = true
 --- stderr
-Unrecognized option 'x'\e[0m
-Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 80: --org --new-tab <v> (an option between it and its value)
@@ -2536,14 +2678,14 @@ PARSED
   inspect = none
   remoteDebuggingPort = none
   remoteDebuggingPipe = false
-  newTab = true
+  newTab = false
   newWindow = false
   cmd = upload
   uploadRecordingId = none
   uploadTraceFolder = none
-  uploadLastTraceMatchingPattern = none
+  uploadLastTraceMatchingPattern = some("acme")
   uploadInteractive = none
-  uploadOrg = some("acme")
+  uploadOrg = some("--new-tab")
   uploadToken = none
   uploadBaseUrl = none
   uploadNoPortable = false
@@ -2555,7 +2697,7 @@ PARSED
   uploadPasswordFile = none
   uploadPasswordStdin = false
   uploadVisibility = none
-VALIDATED replayInteractive = true
+VALIDATED replayInteractive = false
 --- stderr
 --- end
 
@@ -2599,38 +2741,11 @@ VALIDATED replayInteractive = true
 ### 82: --org missing value (last)
 argv: ct "upload" "--org"
 env: (none)
-exit: 0
+exit: 1
 --- stdout
-PARSED
-  cwd = none
-  envFiles = @[]
-  env0Files = @[]
-  tmpEnvFiles = @[]
-  tmpEnv0Files = @[]
-  inspect = none
-  remoteDebuggingPort = none
-  remoteDebuggingPipe = false
-  newTab = false
-  newWindow = false
-  cmd = upload
-  uploadRecordingId = none
-  uploadTraceFolder = none
-  uploadLastTraceMatchingPattern = none
-  uploadInteractive = none
-  uploadOrg = none
-  uploadToken = none
-  uploadBaseUrl = none
-  uploadNoPortable = false
-  uploadNoSplitUpload = false
-  uploadOmniscientDbMode = off
-  uploadArtifactPath = none
-  uploadArtifactKind = none
-  uploadEncrypt = false
-  uploadPasswordFile = none
-  uploadPasswordStdin = false
-  uploadVisibility = none
-VALIDATED replayInteractive = true
 --- stderr
+The option '\e[34m--org\e[0m' requires a value\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 83: --ORG <v> (style variant)
@@ -2951,7 +3066,7 @@ PARSED
   uploadLastTraceMatchingPattern = none
   uploadInteractive = none
   uploadOrg = none
-  uploadToken = none
+  uploadToken = some("")
   uploadBaseUrl = none
   uploadNoPortable = false
   uploadNoSplitUpload = false
@@ -3006,21 +3121,75 @@ VALIDATED replayInteractive = true
 ### 93: --token -x (value starts with -)
 argv: ct "upload" "--token" "-x"
 env: (none)
-exit: 1
+exit: 0
 --- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = upload
+  uploadRecordingId = none
+  uploadTraceFolder = none
+  uploadLastTraceMatchingPattern = none
+  uploadInteractive = none
+  uploadOrg = none
+  uploadToken = some("-x")
+  uploadBaseUrl = none
+  uploadNoPortable = false
+  uploadNoSplitUpload = false
+  uploadOmniscientDbMode = off
+  uploadArtifactPath = none
+  uploadArtifactKind = none
+  uploadEncrypt = false
+  uploadPasswordFile = none
+  uploadPasswordStdin = false
+  uploadVisibility = none
+VALIDATED replayInteractive = true
 --- stderr
-Unrecognized option 'x'\e[0m
-Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 94: --token --x (value starts with --)
 argv: ct "upload" "--token" "--x"
 env: (none)
-exit: 1
+exit: 0
 --- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = upload
+  uploadRecordingId = none
+  uploadTraceFolder = none
+  uploadLastTraceMatchingPattern = none
+  uploadInteractive = none
+  uploadOrg = none
+  uploadToken = some("--x")
+  uploadBaseUrl = none
+  uploadNoPortable = false
+  uploadNoSplitUpload = false
+  uploadOmniscientDbMode = off
+  uploadArtifactPath = none
+  uploadArtifactKind = none
+  uploadEncrypt = false
+  uploadPasswordFile = none
+  uploadPasswordStdin = false
+  uploadVisibility = none
+VALIDATED replayInteractive = true
 --- stderr
-Unrecognized option 'x'\e[0m
-Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 95: --token --new-tab <v> (an option between it and its value)
@@ -3037,15 +3206,15 @@ PARSED
   inspect = none
   remoteDebuggingPort = none
   remoteDebuggingPipe = false
-  newTab = true
+  newTab = false
   newWindow = false
   cmd = upload
   uploadRecordingId = none
   uploadTraceFolder = none
-  uploadLastTraceMatchingPattern = none
+  uploadLastTraceMatchingPattern = some("tok")
   uploadInteractive = none
   uploadOrg = none
-  uploadToken = some("tok")
+  uploadToken = some("--new-tab")
   uploadBaseUrl = none
   uploadNoPortable = false
   uploadNoSplitUpload = false
@@ -3056,7 +3225,7 @@ PARSED
   uploadPasswordFile = none
   uploadPasswordStdin = false
   uploadVisibility = none
-VALIDATED replayInteractive = true
+VALIDATED replayInteractive = false
 --- stderr
 --- end
 
@@ -3100,38 +3269,11 @@ VALIDATED replayInteractive = true
 ### 97: --token missing value (last)
 argv: ct "upload" "--token"
 env: (none)
-exit: 0
+exit: 1
 --- stdout
-PARSED
-  cwd = none
-  envFiles = @[]
-  env0Files = @[]
-  tmpEnvFiles = @[]
-  tmpEnv0Files = @[]
-  inspect = none
-  remoteDebuggingPort = none
-  remoteDebuggingPipe = false
-  newTab = false
-  newWindow = false
-  cmd = upload
-  uploadRecordingId = none
-  uploadTraceFolder = none
-  uploadLastTraceMatchingPattern = none
-  uploadInteractive = none
-  uploadOrg = none
-  uploadToken = none
-  uploadBaseUrl = none
-  uploadNoPortable = false
-  uploadNoSplitUpload = false
-  uploadOmniscientDbMode = off
-  uploadArtifactPath = none
-  uploadArtifactKind = none
-  uploadEncrypt = false
-  uploadPasswordFile = none
-  uploadPasswordStdin = false
-  uploadVisibility = none
-VALIDATED replayInteractive = true
 --- stderr
+The option '\e[34m--token\e[0m' requires a value\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 98: --TOKEN <v> (style variant)
@@ -3453,7 +3595,7 @@ PARSED
   uploadInteractive = none
   uploadOrg = none
   uploadToken = none
-  uploadBaseUrl = none
+  uploadBaseUrl = some("")
   uploadNoPortable = false
   uploadNoSplitUpload = false
   uploadOmniscientDbMode = off
@@ -3507,21 +3649,75 @@ VALIDATED replayInteractive = true
 ### 108: --base-url -x (value starts with -)
 argv: ct "upload" "--base-url" "-x"
 env: (none)
-exit: 1
+exit: 0
 --- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = upload
+  uploadRecordingId = none
+  uploadTraceFolder = none
+  uploadLastTraceMatchingPattern = none
+  uploadInteractive = none
+  uploadOrg = none
+  uploadToken = none
+  uploadBaseUrl = some("-x")
+  uploadNoPortable = false
+  uploadNoSplitUpload = false
+  uploadOmniscientDbMode = off
+  uploadArtifactPath = none
+  uploadArtifactKind = none
+  uploadEncrypt = false
+  uploadPasswordFile = none
+  uploadPasswordStdin = false
+  uploadVisibility = none
+VALIDATED replayInteractive = true
 --- stderr
-Unrecognized option 'x'\e[0m
-Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 109: --base-url --x (value starts with --)
 argv: ct "upload" "--base-url" "--x"
 env: (none)
-exit: 1
+exit: 0
 --- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = upload
+  uploadRecordingId = none
+  uploadTraceFolder = none
+  uploadLastTraceMatchingPattern = none
+  uploadInteractive = none
+  uploadOrg = none
+  uploadToken = none
+  uploadBaseUrl = some("--x")
+  uploadNoPortable = false
+  uploadNoSplitUpload = false
+  uploadOmniscientDbMode = off
+  uploadArtifactPath = none
+  uploadArtifactKind = none
+  uploadEncrypt = false
+  uploadPasswordFile = none
+  uploadPasswordStdin = false
+  uploadVisibility = none
+VALIDATED replayInteractive = true
 --- stderr
-Unrecognized option 'x'\e[0m
-Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 110: --base-url --new-tab <v> (an option between it and its value)
@@ -3538,16 +3734,16 @@ PARSED
   inspect = none
   remoteDebuggingPort = none
   remoteDebuggingPipe = false
-  newTab = true
+  newTab = false
   newWindow = false
   cmd = upload
   uploadRecordingId = none
   uploadTraceFolder = none
-  uploadLastTraceMatchingPattern = none
+  uploadLastTraceMatchingPattern = some("https://x.test")
   uploadInteractive = none
   uploadOrg = none
   uploadToken = none
-  uploadBaseUrl = some("https://x.test")
+  uploadBaseUrl = some("--new-tab")
   uploadNoPortable = false
   uploadNoSplitUpload = false
   uploadOmniscientDbMode = off
@@ -3557,7 +3753,7 @@ PARSED
   uploadPasswordFile = none
   uploadPasswordStdin = false
   uploadVisibility = none
-VALIDATED replayInteractive = true
+VALIDATED replayInteractive = false
 --- stderr
 --- end
 
@@ -3601,38 +3797,11 @@ VALIDATED replayInteractive = true
 ### 112: --base-url missing value (last)
 argv: ct "upload" "--base-url"
 env: (none)
-exit: 0
+exit: 1
 --- stdout
-PARSED
-  cwd = none
-  envFiles = @[]
-  env0Files = @[]
-  tmpEnvFiles = @[]
-  tmpEnv0Files = @[]
-  inspect = none
-  remoteDebuggingPort = none
-  remoteDebuggingPipe = false
-  newTab = false
-  newWindow = false
-  cmd = upload
-  uploadRecordingId = none
-  uploadTraceFolder = none
-  uploadLastTraceMatchingPattern = none
-  uploadInteractive = none
-  uploadOrg = none
-  uploadToken = none
-  uploadBaseUrl = none
-  uploadNoPortable = false
-  uploadNoSplitUpload = false
-  uploadOmniscientDbMode = off
-  uploadArtifactPath = none
-  uploadArtifactKind = none
-  uploadEncrypt = false
-  uploadPasswordFile = none
-  uploadPasswordStdin = false
-  uploadVisibility = none
-VALIDATED replayInteractive = true
 --- stderr
+The option '\e[34m--base-url\e[0m' requires a value\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 113: --BASE-URL <v> (style variant)
@@ -5769,38 +5938,11 @@ Try \e[36mct --help\e[0m for more information.
 ### 183: --omniscient-db= (empty)
 argv: ct "upload" "--omniscient-db="
 env: (none)
-exit: 0
+exit: 1
 --- stdout
-PARSED
-  cwd = none
-  envFiles = @[]
-  env0Files = @[]
-  tmpEnvFiles = @[]
-  tmpEnv0Files = @[]
-  inspect = none
-  remoteDebuggingPort = none
-  remoteDebuggingPipe = false
-  newTab = false
-  newWindow = false
-  cmd = upload
-  uploadRecordingId = none
-  uploadTraceFolder = none
-  uploadLastTraceMatchingPattern = none
-  uploadInteractive = none
-  uploadOrg = none
-  uploadToken = none
-  uploadBaseUrl = none
-  uploadNoPortable = false
-  uploadNoSplitUpload = false
-  uploadOmniscientDbMode = off
-  uploadArtifactPath = none
-  uploadArtifactKind = none
-  uploadEncrypt = false
-  uploadPasswordFile = none
-  uploadPasswordStdin = false
-  uploadVisibility = none
-VALIDATED replayInteractive = true
 --- stderr
+Error while processing the \e[34momniscient-db=\e[0m parameter: Invalid enum value: \e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 184: --omniscient-db= <v> (next word)
@@ -5846,7 +5988,7 @@ env: (none)
 exit: 1
 --- stdout
 --- stderr
-Unrecognized option 'x'\e[0m
+Error while processing the \e[34momniscient-db=-x\e[0m parameter: Invalid enum value: -x\e[0m
 Try \e[36mct --help\e[0m for more information.
 --- end
 
@@ -5856,45 +5998,18 @@ env: (none)
 exit: 1
 --- stdout
 --- stderr
-Unrecognized option 'x'\e[0m
+Error while processing the \e[34momniscient-db=--x\e[0m parameter: Invalid enum value: --x\e[0m
 Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 187: --omniscient-db --new-tab <v> (an option between it and its value)
 argv: ct "upload" "--omniscient-db" "--new-tab" "off"
 env: (none)
-exit: 0
+exit: 1
 --- stdout
-PARSED
-  cwd = none
-  envFiles = @[]
-  env0Files = @[]
-  tmpEnvFiles = @[]
-  tmpEnv0Files = @[]
-  inspect = none
-  remoteDebuggingPort = none
-  remoteDebuggingPipe = false
-  newTab = true
-  newWindow = false
-  cmd = upload
-  uploadRecordingId = none
-  uploadTraceFolder = none
-  uploadLastTraceMatchingPattern = none
-  uploadInteractive = none
-  uploadOrg = none
-  uploadToken = none
-  uploadBaseUrl = none
-  uploadNoPortable = false
-  uploadNoSplitUpload = false
-  uploadOmniscientDbMode = off
-  uploadArtifactPath = none
-  uploadArtifactKind = none
-  uploadEncrypt = false
-  uploadPasswordFile = none
-  uploadPasswordStdin = false
-  uploadVisibility = none
-VALIDATED replayInteractive = true
 --- stderr
+Error while processing the \e[34momniscient-db=--new-tab\e[0m parameter: Invalid enum value: --new-tab\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 188: --omniscient-db repeated, last wins
@@ -5937,38 +6052,11 @@ VALIDATED replayInteractive = true
 ### 189: --omniscient-db missing value (last)
 argv: ct "upload" "--omniscient-db"
 env: (none)
-exit: 0
+exit: 1
 --- stdout
-PARSED
-  cwd = none
-  envFiles = @[]
-  env0Files = @[]
-  tmpEnvFiles = @[]
-  tmpEnv0Files = @[]
-  inspect = none
-  remoteDebuggingPort = none
-  remoteDebuggingPipe = false
-  newTab = false
-  newWindow = false
-  cmd = upload
-  uploadRecordingId = none
-  uploadTraceFolder = none
-  uploadLastTraceMatchingPattern = none
-  uploadInteractive = none
-  uploadOrg = none
-  uploadToken = none
-  uploadBaseUrl = none
-  uploadNoPortable = false
-  uploadNoSplitUpload = false
-  uploadOmniscientDbMode = off
-  uploadArtifactPath = none
-  uploadArtifactKind = none
-  uploadEncrypt = false
-  uploadPasswordFile = none
-  uploadPasswordStdin = false
-  uploadVisibility = none
-VALIDATED replayInteractive = true
 --- stderr
+The option '\e[34m--omniscient-db\e[0m' requires a value\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 190: --OMNISCIENT-DB <v> (style variant)
@@ -6314,7 +6402,7 @@ PARSED
   uploadNoPortable = false
   uploadNoSplitUpload = false
   uploadOmniscientDbMode = off
-  uploadArtifactPath = none
+  uploadArtifactPath = some("")
   uploadArtifactKind = none
   uploadEncrypt = false
   uploadPasswordFile = none
@@ -6364,21 +6452,75 @@ VALIDATED replayInteractive = true
 ### 202: --artifact -x (value starts with -)
 argv: ct "upload" "--artifact" "-x"
 env: (none)
-exit: 1
+exit: 0
 --- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = upload
+  uploadRecordingId = none
+  uploadTraceFolder = none
+  uploadLastTraceMatchingPattern = none
+  uploadInteractive = none
+  uploadOrg = none
+  uploadToken = none
+  uploadBaseUrl = none
+  uploadNoPortable = false
+  uploadNoSplitUpload = false
+  uploadOmniscientDbMode = off
+  uploadArtifactPath = some("-x")
+  uploadArtifactKind = none
+  uploadEncrypt = false
+  uploadPasswordFile = none
+  uploadPasswordStdin = false
+  uploadVisibility = none
+VALIDATED replayInteractive = true
 --- stderr
-Unrecognized option 'x'\e[0m
-Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 203: --artifact --x (value starts with --)
 argv: ct "upload" "--artifact" "--x"
 env: (none)
-exit: 1
+exit: 0
 --- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = upload
+  uploadRecordingId = none
+  uploadTraceFolder = none
+  uploadLastTraceMatchingPattern = none
+  uploadInteractive = none
+  uploadOrg = none
+  uploadToken = none
+  uploadBaseUrl = none
+  uploadNoPortable = false
+  uploadNoSplitUpload = false
+  uploadOmniscientDbMode = off
+  uploadArtifactPath = some("--x")
+  uploadArtifactKind = none
+  uploadEncrypt = false
+  uploadPasswordFile = none
+  uploadPasswordStdin = false
+  uploadVisibility = none
+VALIDATED replayInteractive = true
 --- stderr
-Unrecognized option 'x'\e[0m
-Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 204: --artifact --new-tab <v> (an option between it and its value)
@@ -6395,12 +6537,12 @@ PARSED
   inspect = none
   remoteDebuggingPort = none
   remoteDebuggingPipe = false
-  newTab = true
+  newTab = false
   newWindow = false
   cmd = upload
   uploadRecordingId = none
   uploadTraceFolder = none
-  uploadLastTraceMatchingPattern = none
+  uploadLastTraceMatchingPattern = some("/a/dir")
   uploadInteractive = none
   uploadOrg = none
   uploadToken = none
@@ -6408,13 +6550,13 @@ PARSED
   uploadNoPortable = false
   uploadNoSplitUpload = false
   uploadOmniscientDbMode = off
-  uploadArtifactPath = some("/a/dir")
+  uploadArtifactPath = some("--new-tab")
   uploadArtifactKind = none
   uploadEncrypt = false
   uploadPasswordFile = none
   uploadPasswordStdin = false
   uploadVisibility = none
-VALIDATED replayInteractive = true
+VALIDATED replayInteractive = false
 --- stderr
 --- end
 
@@ -6458,38 +6600,11 @@ VALIDATED replayInteractive = true
 ### 206: --artifact missing value (last)
 argv: ct "upload" "--artifact"
 env: (none)
-exit: 0
+exit: 1
 --- stdout
-PARSED
-  cwd = none
-  envFiles = @[]
-  env0Files = @[]
-  tmpEnvFiles = @[]
-  tmpEnv0Files = @[]
-  inspect = none
-  remoteDebuggingPort = none
-  remoteDebuggingPipe = false
-  newTab = false
-  newWindow = false
-  cmd = upload
-  uploadRecordingId = none
-  uploadTraceFolder = none
-  uploadLastTraceMatchingPattern = none
-  uploadInteractive = none
-  uploadOrg = none
-  uploadToken = none
-  uploadBaseUrl = none
-  uploadNoPortable = false
-  uploadNoSplitUpload = false
-  uploadOmniscientDbMode = off
-  uploadArtifactPath = none
-  uploadArtifactKind = none
-  uploadEncrypt = false
-  uploadPasswordFile = none
-  uploadPasswordStdin = false
-  uploadVisibility = none
-VALIDATED replayInteractive = true
 --- stderr
+The option '\e[34m--artifact\e[0m' requires a value\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 207: --ARTIFACT <v> (style variant)
@@ -6890,7 +7005,7 @@ PARSED
   uploadNoSplitUpload = false
   uploadOmniscientDbMode = off
   uploadArtifactPath = none
-  uploadArtifactKind = none
+  uploadArtifactKind = some("")
   uploadEncrypt = false
   uploadPasswordFile = none
   uploadPasswordStdin = false
@@ -6939,21 +7054,75 @@ VALIDATED replayInteractive = true
 ### 219: --kind -x (value starts with -)
 argv: ct "upload" "--kind" "-x"
 env: (none)
-exit: 1
+exit: 0
 --- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = upload
+  uploadRecordingId = none
+  uploadTraceFolder = none
+  uploadLastTraceMatchingPattern = none
+  uploadInteractive = none
+  uploadOrg = none
+  uploadToken = none
+  uploadBaseUrl = none
+  uploadNoPortable = false
+  uploadNoSplitUpload = false
+  uploadOmniscientDbMode = off
+  uploadArtifactPath = none
+  uploadArtifactKind = some("-x")
+  uploadEncrypt = false
+  uploadPasswordFile = none
+  uploadPasswordStdin = false
+  uploadVisibility = none
+VALIDATED replayInteractive = true
 --- stderr
-Unrecognized option 'x'\e[0m
-Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 220: --kind --x (value starts with --)
 argv: ct "upload" "--kind" "--x"
 env: (none)
-exit: 1
+exit: 0
 --- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = upload
+  uploadRecordingId = none
+  uploadTraceFolder = none
+  uploadLastTraceMatchingPattern = none
+  uploadInteractive = none
+  uploadOrg = none
+  uploadToken = none
+  uploadBaseUrl = none
+  uploadNoPortable = false
+  uploadNoSplitUpload = false
+  uploadOmniscientDbMode = off
+  uploadArtifactPath = none
+  uploadArtifactKind = some("--x")
+  uploadEncrypt = false
+  uploadPasswordFile = none
+  uploadPasswordStdin = false
+  uploadVisibility = none
+VALIDATED replayInteractive = true
 --- stderr
-Unrecognized option 'x'\e[0m
-Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 221: --kind --new-tab <v> (an option between it and its value)
@@ -6970,12 +7139,12 @@ PARSED
   inspect = none
   remoteDebuggingPort = none
   remoteDebuggingPipe = false
-  newTab = true
+  newTab = false
   newWindow = false
   cmd = upload
   uploadRecordingId = none
   uploadTraceFolder = none
-  uploadLastTraceMatchingPattern = none
+  uploadLastTraceMatchingPattern = some("recording")
   uploadInteractive = none
   uploadOrg = none
   uploadToken = none
@@ -6984,12 +7153,12 @@ PARSED
   uploadNoSplitUpload = false
   uploadOmniscientDbMode = off
   uploadArtifactPath = none
-  uploadArtifactKind = some("recording")
+  uploadArtifactKind = some("--new-tab")
   uploadEncrypt = false
   uploadPasswordFile = none
   uploadPasswordStdin = false
   uploadVisibility = none
-VALIDATED replayInteractive = true
+VALIDATED replayInteractive = false
 --- stderr
 --- end
 
@@ -7033,38 +7202,11 @@ VALIDATED replayInteractive = true
 ### 223: --kind missing value (last)
 argv: ct "upload" "--kind"
 env: (none)
-exit: 0
+exit: 1
 --- stdout
-PARSED
-  cwd = none
-  envFiles = @[]
-  env0Files = @[]
-  tmpEnvFiles = @[]
-  tmpEnv0Files = @[]
-  inspect = none
-  remoteDebuggingPort = none
-  remoteDebuggingPipe = false
-  newTab = false
-  newWindow = false
-  cmd = upload
-  uploadRecordingId = none
-  uploadTraceFolder = none
-  uploadLastTraceMatchingPattern = none
-  uploadInteractive = none
-  uploadOrg = none
-  uploadToken = none
-  uploadBaseUrl = none
-  uploadNoPortable = false
-  uploadNoSplitUpload = false
-  uploadOmniscientDbMode = off
-  uploadArtifactPath = none
-  uploadArtifactKind = none
-  uploadEncrypt = false
-  uploadPasswordFile = none
-  uploadPasswordStdin = false
-  uploadVisibility = none
-VALIDATED replayInteractive = true
 --- stderr
+The option '\e[34m--kind\e[0m' requires a value\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 224: --KIND <v> (style variant)
@@ -7931,7 +8073,7 @@ PARSED
   uploadArtifactPath = none
   uploadArtifactKind = none
   uploadEncrypt = false
-  uploadPasswordFile = none
+  uploadPasswordFile = some("-")
   uploadPasswordStdin = false
   uploadVisibility = none
 VALIDATED replayInteractive = true
@@ -8042,7 +8184,7 @@ PARSED
   uploadArtifactPath = none
   uploadArtifactKind = none
   uploadEncrypt = false
-  uploadPasswordFile = none
+  uploadPasswordFile = some("")
   uploadPasswordStdin = false
   uploadVisibility = none
 VALIDATED replayInteractive = true
@@ -8089,21 +8231,75 @@ VALIDATED replayInteractive = true
 ### 253: --password-file -x (value starts with -)
 argv: ct "upload" "--password-file" "-x"
 env: (none)
-exit: 1
+exit: 0
 --- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = upload
+  uploadRecordingId = none
+  uploadTraceFolder = none
+  uploadLastTraceMatchingPattern = none
+  uploadInteractive = none
+  uploadOrg = none
+  uploadToken = none
+  uploadBaseUrl = none
+  uploadNoPortable = false
+  uploadNoSplitUpload = false
+  uploadOmniscientDbMode = off
+  uploadArtifactPath = none
+  uploadArtifactKind = none
+  uploadEncrypt = false
+  uploadPasswordFile = some("-x")
+  uploadPasswordStdin = false
+  uploadVisibility = none
+VALIDATED replayInteractive = true
 --- stderr
-Unrecognized option 'x'\e[0m
-Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 254: --password-file --x (value starts with --)
 argv: ct "upload" "--password-file" "--x"
 env: (none)
-exit: 1
+exit: 0
 --- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = upload
+  uploadRecordingId = none
+  uploadTraceFolder = none
+  uploadLastTraceMatchingPattern = none
+  uploadInteractive = none
+  uploadOrg = none
+  uploadToken = none
+  uploadBaseUrl = none
+  uploadNoPortable = false
+  uploadNoSplitUpload = false
+  uploadOmniscientDbMode = off
+  uploadArtifactPath = none
+  uploadArtifactKind = none
+  uploadEncrypt = false
+  uploadPasswordFile = some("--x")
+  uploadPasswordStdin = false
+  uploadVisibility = none
+VALIDATED replayInteractive = true
 --- stderr
-Unrecognized option 'x'\e[0m
-Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 255: --password-file --new-tab <v> (an option between it and its value)
@@ -8120,12 +8316,12 @@ PARSED
   inspect = none
   remoteDebuggingPort = none
   remoteDebuggingPipe = false
-  newTab = true
+  newTab = false
   newWindow = false
   cmd = upload
   uploadRecordingId = none
   uploadTraceFolder = none
-  uploadLastTraceMatchingPattern = none
+  uploadLastTraceMatchingPattern = some("pw.txt")
   uploadInteractive = none
   uploadOrg = none
   uploadToken = none
@@ -8136,10 +8332,10 @@ PARSED
   uploadArtifactPath = none
   uploadArtifactKind = none
   uploadEncrypt = false
-  uploadPasswordFile = some("pw.txt")
+  uploadPasswordFile = some("--new-tab")
   uploadPasswordStdin = false
   uploadVisibility = none
-VALIDATED replayInteractive = true
+VALIDATED replayInteractive = false
 --- stderr
 --- end
 
@@ -8173,7 +8369,7 @@ PARSED
   uploadArtifactPath = none
   uploadArtifactKind = none
   uploadEncrypt = false
-  uploadPasswordFile = some("pw.txt")
+  uploadPasswordFile = some("-")
   uploadPasswordStdin = false
   uploadVisibility = none
 VALIDATED replayInteractive = true
@@ -8183,38 +8379,11 @@ VALIDATED replayInteractive = true
 ### 257: --password-file missing value (last)
 argv: ct "upload" "--password-file"
 env: (none)
-exit: 0
+exit: 1
 --- stdout
-PARSED
-  cwd = none
-  envFiles = @[]
-  env0Files = @[]
-  tmpEnvFiles = @[]
-  tmpEnv0Files = @[]
-  inspect = none
-  remoteDebuggingPort = none
-  remoteDebuggingPipe = false
-  newTab = false
-  newWindow = false
-  cmd = upload
-  uploadRecordingId = none
-  uploadTraceFolder = none
-  uploadLastTraceMatchingPattern = none
-  uploadInteractive = none
-  uploadOrg = none
-  uploadToken = none
-  uploadBaseUrl = none
-  uploadNoPortable = false
-  uploadNoSplitUpload = false
-  uploadOmniscientDbMode = off
-  uploadArtifactPath = none
-  uploadArtifactKind = none
-  uploadEncrypt = false
-  uploadPasswordFile = none
-  uploadPasswordStdin = false
-  uploadVisibility = none
-VALIDATED replayInteractive = true
 --- stderr
+The option '\e[34m--password-file\e[0m' requires a value\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 258: --PASSWORD-FILE <v> (style variant)
@@ -9234,7 +9403,7 @@ PARSED
   uploadEncrypt = false
   uploadPasswordFile = none
   uploadPasswordStdin = false
-  uploadVisibility = none
+  uploadVisibility = some("")
 VALIDATED replayInteractive = true
 --- stderr
 --- end
@@ -9279,26 +9448,6 @@ VALIDATED replayInteractive = true
 ### 291: --visibility -x (value starts with -)
 argv: ct "upload" "--visibility" "-x"
 env: (none)
-exit: 1
---- stdout
---- stderr
-Unrecognized option 'x'\e[0m
-Try \e[36mct --help\e[0m for more information.
---- end
-
-### 292: --visibility --x (value starts with --)
-argv: ct "upload" "--visibility" "--x"
-env: (none)
-exit: 1
---- stdout
---- stderr
-Unrecognized option 'x'\e[0m
-Try \e[36mct --help\e[0m for more information.
---- end
-
-### 293: --visibility --new-tab <v> (an option between it and its value)
-argv: ct "upload" "--visibility" "--new-tab" "tenant"
-env: (none)
 exit: 0
 --- stdout
 PARSED
@@ -9310,7 +9459,7 @@ PARSED
   inspect = none
   remoteDebuggingPort = none
   remoteDebuggingPipe = false
-  newTab = true
+  newTab = false
   newWindow = false
   cmd = upload
   uploadRecordingId = none
@@ -9328,8 +9477,82 @@ PARSED
   uploadEncrypt = false
   uploadPasswordFile = none
   uploadPasswordStdin = false
-  uploadVisibility = some("tenant")
+  uploadVisibility = some("-x")
 VALIDATED replayInteractive = true
+--- stderr
+--- end
+
+### 292: --visibility --x (value starts with --)
+argv: ct "upload" "--visibility" "--x"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = upload
+  uploadRecordingId = none
+  uploadTraceFolder = none
+  uploadLastTraceMatchingPattern = none
+  uploadInteractive = none
+  uploadOrg = none
+  uploadToken = none
+  uploadBaseUrl = none
+  uploadNoPortable = false
+  uploadNoSplitUpload = false
+  uploadOmniscientDbMode = off
+  uploadArtifactPath = none
+  uploadArtifactKind = none
+  uploadEncrypt = false
+  uploadPasswordFile = none
+  uploadPasswordStdin = false
+  uploadVisibility = some("--x")
+VALIDATED replayInteractive = true
+--- stderr
+--- end
+
+### 293: --visibility --new-tab <v> (an option between it and its value)
+argv: ct "upload" "--visibility" "--new-tab" "tenant"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = upload
+  uploadRecordingId = none
+  uploadTraceFolder = none
+  uploadLastTraceMatchingPattern = some("tenant")
+  uploadInteractive = none
+  uploadOrg = none
+  uploadToken = none
+  uploadBaseUrl = none
+  uploadNoPortable = false
+  uploadNoSplitUpload = false
+  uploadOmniscientDbMode = off
+  uploadArtifactPath = none
+  uploadArtifactKind = none
+  uploadEncrypt = false
+  uploadPasswordFile = none
+  uploadPasswordStdin = false
+  uploadVisibility = some("--new-tab")
+VALIDATED replayInteractive = false
 --- stderr
 --- end
 
@@ -9373,38 +9596,11 @@ VALIDATED replayInteractive = true
 ### 295: --visibility missing value (last)
 argv: ct "upload" "--visibility"
 env: (none)
-exit: 0
+exit: 1
 --- stdout
-PARSED
-  cwd = none
-  envFiles = @[]
-  env0Files = @[]
-  tmpEnvFiles = @[]
-  tmpEnv0Files = @[]
-  inspect = none
-  remoteDebuggingPort = none
-  remoteDebuggingPipe = false
-  newTab = false
-  newWindow = false
-  cmd = upload
-  uploadRecordingId = none
-  uploadTraceFolder = none
-  uploadLastTraceMatchingPattern = none
-  uploadInteractive = none
-  uploadOrg = none
-  uploadToken = none
-  uploadBaseUrl = none
-  uploadNoPortable = false
-  uploadNoSplitUpload = false
-  uploadOmniscientDbMode = off
-  uploadArtifactPath = none
-  uploadArtifactKind = none
-  uploadEncrypt = false
-  uploadPasswordFile = none
-  uploadPasswordStdin = false
-  uploadVisibility = none
-VALIDATED replayInteractive = true
 --- stderr
+The option '\e[34m--visibility\e[0m' requires a value\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 296: --VISIBILITY <v> (style variant)
@@ -9608,112 +9804,31 @@ Try \e[36mct --help\e[0m for more information.
 ### 305: lone -
 argv: ct "upload" "-"
 env: (none)
-exit: 0
+exit: 1
 --- stdout
-PARSED
-  cwd = none
-  envFiles = @[]
-  env0Files = @[]
-  tmpEnvFiles = @[]
-  tmpEnv0Files = @[]
-  inspect = none
-  remoteDebuggingPort = none
-  remoteDebuggingPipe = false
-  newTab = false
-  newWindow = false
-  cmd = upload
-  uploadRecordingId = none
-  uploadTraceFolder = none
-  uploadLastTraceMatchingPattern = none
-  uploadInteractive = none
-  uploadOrg = none
-  uploadToken = none
-  uploadBaseUrl = none
-  uploadNoPortable = false
-  uploadNoSplitUpload = false
-  uploadOmniscientDbMode = off
-  uploadArtifactPath = none
-  uploadArtifactKind = none
-  uploadEncrypt = false
-  uploadPasswordFile = none
-  uploadPasswordStdin = false
-  uploadVisibility = none
-VALIDATED replayInteractive = true
 --- stderr
+Unrecognized option ''\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 306: lone -- then a word
 argv: ct "upload" "--" "w"
 env: (none)
-exit: 0
+exit: 1
 --- stdout
-PARSED
-  cwd = none
-  envFiles = @[]
-  env0Files = @[]
-  tmpEnvFiles = @[]
-  tmpEnv0Files = @[]
-  inspect = none
-  remoteDebuggingPort = none
-  remoteDebuggingPipe = false
-  newTab = false
-  newWindow = false
-  cmd = upload
-  uploadRecordingId = some("w")
-  uploadTraceFolder = none
-  uploadLastTraceMatchingPattern = none
-  uploadInteractive = none
-  uploadOrg = none
-  uploadToken = none
-  uploadBaseUrl = none
-  uploadNoPortable = false
-  uploadNoSplitUpload = false
-  uploadOmniscientDbMode = off
-  uploadArtifactPath = none
-  uploadArtifactKind = none
-  uploadEncrypt = false
-  uploadPasswordFile = none
-  uploadPasswordStdin = false
-  uploadVisibility = none
-VALIDATED replayInteractive = false
 --- stderr
+Unrecognized option ''\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 307: --=v
 argv: ct "upload" "--=v"
 env: (none)
-exit: 0
+exit: 1
 --- stdout
-PARSED
-  cwd = none
-  envFiles = @[]
-  env0Files = @[]
-  tmpEnvFiles = @[]
-  tmpEnv0Files = @[]
-  inspect = none
-  remoteDebuggingPort = none
-  remoteDebuggingPipe = false
-  newTab = false
-  newWindow = false
-  cmd = upload
-  uploadRecordingId = some("v")
-  uploadTraceFolder = none
-  uploadLastTraceMatchingPattern = none
-  uploadInteractive = none
-  uploadOrg = none
-  uploadToken = none
-  uploadBaseUrl = none
-  uploadNoPortable = false
-  uploadNoSplitUpload = false
-  uploadOmniscientDbMode = off
-  uploadArtifactPath = none
-  uploadArtifactKind = none
-  uploadEncrypt = false
-  uploadPasswordFile = none
-  uploadPasswordStdin = false
-  uploadVisibility = none
-VALIDATED replayInteractive = false
 --- stderr
+Unrecognized option ''\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 308: extra positional
@@ -9814,9 +9929,52 @@ CodeTracer version: <VERSION>
 ### 312: -h after the command
 argv: ct "upload" "-h"
 env: (none)
-exit: 1
+exit: 0
 --- stdout
+CodeTracer - the user-friendly time-travelling debugger
+
+\e[0m\e[33mUsage:\x20
+\e[0m\e[1m
+\e[36mct upload\e[0m [OPTIONS]...
+
+The following options are available:
+
+     \e[34m\e[1m--id                 \e[0m  a recording id (UUIDv7) — accepts 8+ char short
+                            prefix.\e[0m
+ \e[34m\e[1m-t, \e[0m\e[34m\e[1m--trace-folder       \e[0m  the trace output folder.\e[0m
+ \e[34m\e[1m-i, \e[0m\e[34m\e[1m--interactive        \e[0m  explicit flag for interactively choosing a trace.\e[0m
+     \e[34m\e[1m--org                \e[0m  organization to upload to.\e[0m
+     \e[34m\e[1m--token              \e[0m  bearer token (uses stored token if omitted).\e[0m
+     \e[34m\e[1m--base-url           \e[0m  override the remote server URL.\e[0m
+     \e[34m\e[1m--no-portable        \e[0m  skip adding portable binaries/symbols to MCR traces
+                            before upload.\e[0m
+     \e[34m\e[1m--no-split-upload    \e[0m  skip pre-split slice detection and force full trace
+                            upload even when slices are present.\e[0m
+     \e[34m\e[1m--omniscient-db      \e[0m  how the server prepares the omniscient-DB artefacts
+                            for the uploaded slice (off | on | lazy |
+                            pre-prepared). See spec §6.8.6 / M31.
+                            [=OmniscientDbMode.off].\e[0m
+     \e[34m\e[1m--artifact           \e[0m  path of a local artifact to share (a recording
+                            folder, or a review dataset directory produced by
+                            `ct review collect`).\e[0m
+     \e[34m\e[1m--kind               \e[0m  what --artifact holds (recording | review-dataset);
+                            only needed when it cannot be recognised from the
+                            path itself.\e[0m
+     \e[34m\e[1m--encrypt            \e[0m  encrypt the payload on this computer before
+                            uploading. The password is never sent to the
+                            service, and a lost password cannot be recovered —
+                            not by you and not by CodeTracer.\e[0m
+     \e[34m\e[1m--password-file      \e[0m  read the encryption password from this file instead
+                            of prompting. Passing a password as a command-line
+                            argument is not supported: it would be visible to
+                            every process on the machine.\e[0m
+     \e[34m\e[1m--password-stdin     \e[0m  read the encryption password from standard input
+                            (for scripts and CI). Mutually exclusive with
+                            --password-file.\e[0m
+     \e[34m\e[1m--visibility         \e[0m  who may read the stored artifact: 'tenant' (members
+                            of the owning organisation, the default) or
+                            'tenant-or-invite' (those, plus anyone holding an
+                            invite link).\e[0m
+
 --- stderr
-Unrecognized option 'h'\e[0m
-Try \e[36mct --help\e[0m for more information.
 --- end

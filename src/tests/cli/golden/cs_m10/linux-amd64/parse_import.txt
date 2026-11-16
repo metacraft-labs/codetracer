@@ -109,70 +109,31 @@ Try \e[36mct --help\e[0m for more information.
 ### 9: lone -
 argv: ct "import" "-" "zip1" "out1"
 env: (none)
-exit: 0
+exit: 1
 --- stdout
-PARSED
-  cwd = none
-  envFiles = @[]
-  env0Files = @[]
-  tmpEnvFiles = @[]
-  tmpEnv0Files = @[]
-  inspect = none
-  remoteDebuggingPort = none
-  remoteDebuggingPipe = false
-  newTab = false
-  newWindow = false
-  cmd = import
-  importTraceZipPath = "out1"
-  importOutputPath = ""
-VALIDATED replayInteractive = false
 --- stderr
+Unrecognized option ''\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 10: lone -- then a word
 argv: ct "import" "--" "w" "zip1" "out1"
 env: (none)
-exit: 0
+exit: 1
 --- stdout
-PARSED
-  cwd = none
-  envFiles = @[]
-  env0Files = @[]
-  tmpEnvFiles = @[]
-  tmpEnv0Files = @[]
-  inspect = none
-  remoteDebuggingPort = none
-  remoteDebuggingPipe = false
-  newTab = false
-  newWindow = false
-  cmd = import
-  importTraceZipPath = "zip1"
-  importOutputPath = "out1"
-VALIDATED replayInteractive = false
 --- stderr
+Unrecognized option ''\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 11: --=v
 argv: ct "import" "--=v" "zip1" "out1"
 env: (none)
-exit: 0
+exit: 1
 --- stdout
-PARSED
-  cwd = none
-  envFiles = @[]
-  env0Files = @[]
-  tmpEnvFiles = @[]
-  tmpEnv0Files = @[]
-  inspect = none
-  remoteDebuggingPort = none
-  remoteDebuggingPipe = false
-  newTab = false
-  newWindow = false
-  cmd = import
-  importTraceZipPath = "zip1"
-  importOutputPath = "out1"
-VALIDATED replayInteractive = false
 --- stderr
+Unrecognized option ''\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 12: extra positional
@@ -245,9 +206,16 @@ CodeTracer version: <VERSION>
 ### 16: -h after the command
 argv: ct "import" "-h" "zip1" "out1"
 env: (none)
-exit: 1
+exit: 0
 --- stdout
+CodeTracer - the user-friendly time-travelling debugger
+
+\e[0m\e[33mUsage:\x20
+\e[0m\e[1m
+\e[36mct import\e[0m <importTraceZipPath>\e[0m <importOutputPath>\e[0m
+
+\e[34m\e[1m <importTraceZipPath>\e[0m\e[0m  Trace zip file to import.\e[0m
+\e[34m\e[1m <importOutputPath>\e[0m\e[0m  Output folder for the import command.\e[0m
+
 --- stderr
-Unrecognized option 'h'\e[0m
-Try \e[36mct --help\e[0m for more information.
 --- end

@@ -6,8 +6,10 @@
 ## requires the flags, environment variables, configuration files, defaults,
 ## help content and exit codes of `ct` to be unchanged for its users.  This
 ## test is the evidence: a golden capture taken from the tree before the move
-## (`libs/nim-confutils` at 3bf016c), compared EXACTLY (whole files, no
-## `contains`) with what the tree produces now.
+## (`libs/nim-confutils` at 172981d, nim-confutils' `codetracer` branch, whose
+## parsing ct keeps: CS-M10's decision of 2026-11-16, option (a); the first
+## capture, at 3bf016c, was replaced by this one before the move), compared
+## EXACTLY (whole files, no `contains`) with what the tree produces now.
 ##
 ## WHAT IS PINNED (goldens under `golden/cs_m10/linux-amd64/`):
 ##
@@ -807,6 +809,35 @@ proc helpDelegateCases(): seq[Case] =
   c.add "he_lp", @["he_lp"]
   c
 
+proc firstRefusalCases(): seq[Case] =
+  ## Lines with two refusals: which one is printed.  The loader reads the
+  ## line word by word and rejects a value at the option that takes it, so
+  ## the refusal printed is the first in argv order: a rejected value before
+  ## an unknown option, a missing value, a stray word or an unknown
+  ## subcommand, and the first of two rejected values.  The command line
+  ## before the environment.
+  var c: seq[Case]
+  c.add "value, then an unknown long option", @["print", "--limit", "abc", "--bogus", "t.jsonl"]
+  c.add "value, then an unknown short option", @["print", "t.jsonl", "--limit", "abc", "-Z"]
+  c.add "unknown option, then a value", @["print", "--bogus", "--limit", "abc", "t.jsonl"]
+  c.add "value, then a missing value", @["print", "--limit", "abc", "t.jsonl", "--filter"]
+  c.add "value, then a stray word", @["print", "--limit", "abc", "a", "b"]
+  c.add "switch value, then an integer value", @["print", "--verify=maybe", "-n", "abc", "t.jsonl"]
+  c.add "integer value, then a switch value", @["print", "-n", "abc", "--verify=maybe", "t.jsonl"]
+  c.add "two switch values", @["install", "--json=maybe", "--bpf=nah"]
+  c.add "global switch value, then an unknown option after the command", @["--new-tab=maybe", "list", "--bogus"]
+  c.add "global switch value, then an unknown option before the command", @["--new-tab=maybe", "--bogus", "list"]
+  c.add "global switch value, then an unknown command", @["--new-tab=maybe", "frob"]
+  c.add "integer value, then an unknown option", @["host", "--port", "x", "--bogus"]
+  c.add "two integer values", @["trace-metadata", "--limit", "x", "--record-pid", "y"]
+  c.add "enum value, then a missing value", @["upload", "--omniscient-db=bad", "--id"]
+  c.add "enum value in another style, then an unknown option", @["upload", "--omniscient-db=PRE_prepared", "--bogus"]
+  c.add "record: integer value, then an unknown option", @["record", "--store-trace-folder-for-pid", "x", "--bogus", "prog"]
+  c.add "ci exec: two switch values", @["ci", "exec", "--record=nope", "--monitor-processes=x", "cmd"]
+  c.add "value on the command line, value in the environment", @["print", "--limit", "abc", "t.jsonl"], @[("<APP>_VERIFY", "maybe")]
+  c.add "unknown option on the command line, value in the environment", @["print", "--bogus", "t.jsonl"], @[("<APP>_LIMIT", "ten")]
+  c
+
 proc groups(): seq[Group] =
   result.add Group(name: "root", title: "ct (no command) and the global options", cases: rootCases())
   result.add Group(name: "install", title: "ct install", cases: installCases())
@@ -840,6 +871,7 @@ proc groups(): seq[Group] =
   result.add Group(name: "gfx-replay", title: "ct gfx-replay", cases: gfxReplayCases())
   result.add Group(name: "doctor", title: "ct doctor", cases: positionalCases("doctor", @["lang"]))
   result.add Group(name: "help-delegate", title: "ct help and the help-delegate commands", cases: helpDelegateCases())
+  result.add Group(name: "first-refusal", title: "two refusals in one line: the first in argv order is printed", cases: firstRefusalCases())
 
 # ─── binary-only cases ───────────────────────────────────────────────────────
 

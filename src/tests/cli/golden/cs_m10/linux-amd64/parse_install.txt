@@ -81,27 +81,11 @@ VALIDATED replayInteractive = false
 ### 4: -P (other case)
 argv: ct "install" "-P"
 env: (none)
-exit: 0
+exit: 1
 --- stdout
-PARSED
-  cwd = none
-  envFiles = @[]
-  env0Files = @[]
-  tmpEnvFiles = @[]
-  tmpEnv0Files = @[]
-  inspect = none
-  remoteDebuggingPort = none
-  remoteDebuggingPipe = false
-  newTab = false
-  newWindow = false
-  cmd = install
-  installCtOnPath = true
-  installCtDesktopFile = true
-  installBpf = true
-  installAgentHarbor = true
-  installJson = false
-VALIDATED replayInteractive = false
 --- stderr
+Unrecognized option 'P'\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 5: --p (the letter as a long option)
@@ -553,27 +537,11 @@ VALIDATED replayInteractive = false
 ### 24: -D (other case)
 argv: ct "install" "-D"
 env: (none)
-exit: 0
+exit: 1
 --- stdout
-PARSED
-  cwd = none
-  envFiles = @[]
-  env0Files = @[]
-  tmpEnvFiles = @[]
-  tmpEnv0Files = @[]
-  inspect = none
-  remoteDebuggingPort = none
-  remoteDebuggingPipe = false
-  newTab = false
-  newWindow = false
-  cmd = install
-  installCtOnPath = true
-  installCtDesktopFile = true
-  installBpf = true
-  installAgentHarbor = true
-  installJson = false
-VALIDATED replayInteractive = false
 --- stderr
+Unrecognized option 'D'\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 25: --d (the letter as a long option)
@@ -2309,27 +2277,11 @@ Try \e[36mct --help\e[0m for more information.
 ### 102: lone -
 argv: ct "install" "-"
 env: (none)
-exit: 0
+exit: 1
 --- stdout
-PARSED
-  cwd = none
-  envFiles = @[]
-  env0Files = @[]
-  tmpEnvFiles = @[]
-  tmpEnv0Files = @[]
-  inspect = none
-  remoteDebuggingPort = none
-  remoteDebuggingPipe = false
-  newTab = false
-  newWindow = false
-  cmd = install
-  installCtOnPath = true
-  installCtDesktopFile = true
-  installBpf = true
-  installAgentHarbor = true
-  installJson = false
-VALIDATED replayInteractive = false
 --- stderr
+Unrecognized option ''\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 103: lone -- then a word
@@ -2338,7 +2290,7 @@ env: (none)
 exit: 1
 --- stdout
 --- stderr
-The subcommand 'install' does not accept arguments\e[0m
+Unrecognized option ''\e[0m
 Try \e[36mct --help\e[0m for more information.
 --- end
 
@@ -2348,7 +2300,7 @@ env: (none)
 exit: 1
 --- stdout
 --- stderr
-Error while processing the \e[34mbpf=v\e[0m parameter: 'v' is not a valid boolean value. Supported values are on/off, yes/no, true/false or 1/0\e[0m
+Unrecognized option ''\e[0m
 Try \e[36mct --help\e[0m for more information.
 --- end
 
@@ -2428,9 +2380,23 @@ CodeTracer version: <VERSION>
 ### 109: -h after the command
 argv: ct "install" "-h"
 env: (none)
-exit: 1
+exit: 0
 --- stdout
+CodeTracer - the user-friendly time-travelling debugger
+
+\e[0m\e[33mUsage:\x20
+\e[0m\e[1m
+\e[36mct install\e[0m [OPTIONS]...
+
+The following options are available:
+
+ \e[34m\e[1m-p, \e[0m\e[34m\e[1m--path            \e[0m  Add ct to PATH (pass --no-path to skip) [=true].\e[0m
+ \e[34m\e[1m-d, \e[0m\e[34m\e[1m--desktop         \e[0m  Install .desktop file (pass --no-desktop to skip, Linux
+                         only) [=true].\e[0m
+     \e[34m\e[1m--bpf             \e[0m  Set up BPF monitoring (--no-bpf to skip) [=true].\e[0m
+     \e[34m\e[1m--agent-harbor    \e[0m  Install Agent Harbor (pass --no-agent-harbor to skip)
+                         [=true].\e[0m
+     \e[34m\e[1m--json            \e[0m  Output newline-delimited JSON progress events [=false].\e[0m
+
 --- stderr
-Unrecognized option 'h'\e[0m
-Try \e[36mct --help\e[0m for more information.
 --- end

@@ -259,6 +259,7 @@ const
     projectRootPath / "libs/parsetoml/src",
     projectRootPath / "libs/nim-result",
     projectRootPath / "libs/nim-confutils",
+    projectRootPath / "libs/nim-cli-spec/src",
     projectRootPath / "libs/nimcrypto",
     projectRootPath / "libs/zip",
     projectRootPath / "libs/jsony/src",

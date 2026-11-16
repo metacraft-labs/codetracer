@@ -171,7 +171,7 @@ env: (none)
 exit: 1
 --- stdout
 --- stderr
-The required option 'runTracePathOrId' was not specified\e[0m
+Unrecognized option ''\e[0m
 Try \e[36mct --help\e[0m for more information.
 --- end
 
@@ -181,31 +181,18 @@ env: (none)
 exit: 1
 --- stdout
 --- stderr
-The required option 'runTracePathOrId' was not specified\e[0m
+Unrecognized option ''\e[0m
 Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 13: --=v
 argv: ct "run" "--=v" "prog"
 env: (none)
-exit: 0
+exit: 1
 --- stdout
-PARSED
-  cwd = none
-  envFiles = @[]
-  env0Files = @[]
-  tmpEnvFiles = @[]
-  tmpEnv0Files = @[]
-  inspect = none
-  remoteDebuggingPort = none
-  remoteDebuggingPipe = false
-  newTab = false
-  newWindow = false
-  cmd = run
-  runTracePathOrId = "v"
-  runArgs = @["prog"]
-VALIDATED replayInteractive = false
 --- stderr
+Unrecognized option ''\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 14: extra positional
@@ -265,9 +252,13 @@ CodeTracer version: <VERSION>
 ### 18: -h after the command
 argv: ct "run" "-h" "prog"
 env: (none)
-exit: 1
+exit: 0
 --- stdout
+CodeTracer - the user-friendly time-travelling debugger
+
+\e[0m\e[33mUsage:\x20
+\e[0m\e[1m
+\e[36mct run\e[0m
+
 --- stderr
-Unrecognized option 'h'\e[0m
-Try \e[36mct --help\e[0m for more information.
 --- end

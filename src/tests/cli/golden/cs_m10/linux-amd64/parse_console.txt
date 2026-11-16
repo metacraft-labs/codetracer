@@ -277,11 +277,11 @@ PARSED
   newTab = false
   newWindow = false
   cmd = console
-  consoleRecordingId = none
+  consoleRecordingId = some("")
   consoleTraceFolder = none
   consoleLastTraceMatchingPattern = none
   consoleInteractive = none
-VALIDATED replayInteractive = true
+VALIDATED replayInteractive = false
 --- stderr
 --- end
 
@@ -313,25 +313,30 @@ VALIDATED replayInteractive = false
 ### 14: --id -x (value starts with -)
 argv: ct "console" "--id" "-x"
 env: (none)
-exit: 1
+exit: 0
 --- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = console
+  consoleRecordingId = some("-x")
+  consoleTraceFolder = none
+  consoleLastTraceMatchingPattern = none
+  consoleInteractive = none
+VALIDATED replayInteractive = false
 --- stderr
-Unrecognized option 'x'\e[0m
-Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 15: --id --x (value starts with --)
 argv: ct "console" "--id" "--x"
-env: (none)
-exit: 1
---- stdout
---- stderr
-Unrecognized option 'x'\e[0m
-Try \e[36mct --help\e[0m for more information.
---- end
-
-### 16: --id --new-tab <v> (an option between it and its value)
-argv: ct "console" "--id" "--new-tab" "0190d7a0"
 env: (none)
 exit: 0
 --- stdout
@@ -344,14 +349,40 @@ PARSED
   inspect = none
   remoteDebuggingPort = none
   remoteDebuggingPipe = false
-  newTab = true
+  newTab = false
   newWindow = false
   cmd = console
-  consoleRecordingId = some("0190d7a0")
+  consoleRecordingId = some("--x")
   consoleTraceFolder = none
   consoleLastTraceMatchingPattern = none
   consoleInteractive = none
 VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 16: --id --new-tab <v> (an option between it and its value)
+argv: ct "console" "--id" "--new-tab" "0190d7a0"
+env: (none)
+exit: 1
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = console
+  consoleRecordingId = some("--new-tab")
+  consoleTraceFolder = none
+  consoleLastTraceMatchingPattern = some("0190d7a0")
+  consoleInteractive = none
+configuration error: expected no more than one arg to command to be passed
+Try `ct --help` for more information
 --- stderr
 --- end
 
@@ -383,26 +414,11 @@ VALIDATED replayInteractive = false
 ### 18: --id missing value (last)
 argv: ct "console" "--id"
 env: (none)
-exit: 0
+exit: 1
 --- stdout
-PARSED
-  cwd = none
-  envFiles = @[]
-  env0Files = @[]
-  tmpEnvFiles = @[]
-  tmpEnv0Files = @[]
-  inspect = none
-  remoteDebuggingPort = none
-  remoteDebuggingPipe = false
-  newTab = false
-  newWindow = false
-  cmd = console
-  consoleRecordingId = none
-  consoleTraceFolder = none
-  consoleLastTraceMatchingPattern = none
-  consoleInteractive = none
-VALIDATED replayInteractive = true
 --- stderr
+The option '\e[34m--id\e[0m' requires a value\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 19: --ID <v> (style variant)
@@ -608,16 +624,6 @@ VALIDATED replayInteractive = false
 ### 27: -t<v> (attached)
 argv: ct "console" "-t/tr"
 env: (none)
-exit: 1
---- stdout
---- stderr
-Unrecognized option '/'\e[0m
-Try \e[36mct --help\e[0m for more information.
---- end
-
-### 28: -T <v> (other case)
-argv: ct "console" "-T" "/tr"
-env: (none)
 exit: 0
 --- stdout
 PARSED
@@ -638,6 +644,16 @@ PARSED
   consoleInteractive = none
 VALIDATED replayInteractive = false
 --- stderr
+--- end
+
+### 28: -T <v> (other case)
+argv: ct "console" "-T" "/tr"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'T'\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 29: --t <v> (the letter as a long option)
@@ -808,10 +824,10 @@ PARSED
   newWindow = false
   cmd = console
   consoleRecordingId = none
-  consoleTraceFolder = none
+  consoleTraceFolder = some("")
   consoleLastTraceMatchingPattern = none
   consoleInteractive = none
-VALIDATED replayInteractive = true
+VALIDATED replayInteractive = false
 --- stderr
 --- end
 
@@ -843,25 +859,30 @@ VALIDATED replayInteractive = false
 ### 37: --trace-folder -x (value starts with -)
 argv: ct "console" "--trace-folder" "-x"
 env: (none)
-exit: 1
+exit: 0
 --- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = console
+  consoleRecordingId = none
+  consoleTraceFolder = some("-x")
+  consoleLastTraceMatchingPattern = none
+  consoleInteractive = none
+VALIDATED replayInteractive = false
 --- stderr
-Unrecognized option 'x'\e[0m
-Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 38: --trace-folder --x (value starts with --)
 argv: ct "console" "--trace-folder" "--x"
-env: (none)
-exit: 1
---- stdout
---- stderr
-Unrecognized option 'x'\e[0m
-Try \e[36mct --help\e[0m for more information.
---- end
-
-### 39: --trace-folder --new-tab <v> (an option between it and its value)
-argv: ct "console" "--trace-folder" "--new-tab" "/tr"
 env: (none)
 exit: 0
 --- stdout
@@ -874,14 +895,40 @@ PARSED
   inspect = none
   remoteDebuggingPort = none
   remoteDebuggingPipe = false
-  newTab = true
+  newTab = false
   newWindow = false
   cmd = console
   consoleRecordingId = none
-  consoleTraceFolder = some("/tr")
+  consoleTraceFolder = some("--x")
   consoleLastTraceMatchingPattern = none
   consoleInteractive = none
 VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 39: --trace-folder --new-tab <v> (an option between it and its value)
+argv: ct "console" "--trace-folder" "--new-tab" "/tr"
+env: (none)
+exit: 1
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = console
+  consoleRecordingId = none
+  consoleTraceFolder = some("--new-tab")
+  consoleLastTraceMatchingPattern = some("/tr")
+  consoleInteractive = none
+configuration error: expected no more than one arg to command to be passed
+Try `ct --help` for more information
 --- stderr
 --- end
 
@@ -913,26 +960,11 @@ VALIDATED replayInteractive = false
 ### 41: --trace-folder missing value (last)
 argv: ct "console" "--trace-folder"
 env: (none)
-exit: 0
+exit: 1
 --- stdout
-PARSED
-  cwd = none
-  envFiles = @[]
-  env0Files = @[]
-  tmpEnvFiles = @[]
-  tmpEnv0Files = @[]
-  inspect = none
-  remoteDebuggingPort = none
-  remoteDebuggingPipe = false
-  newTab = false
-  newWindow = false
-  cmd = console
-  consoleRecordingId = none
-  consoleTraceFolder = none
-  consoleLastTraceMatchingPattern = none
-  consoleInteractive = none
-VALIDATED replayInteractive = true
 --- stderr
+The option '\e[34m--trace-folder\e[0m' requires a value\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 42: --TRACE-FOLDER <v> (style variant)
@@ -1025,7 +1057,7 @@ PARSED
   consoleRecordingId = none
   consoleTraceFolder = none
   consoleLastTraceMatchingPattern = none
-  consoleInteractive = none
+  consoleInteractive = some(true)
 VALIDATED replayInteractive = true
 --- stderr
 --- end
@@ -1033,7 +1065,7 @@ VALIDATED replayInteractive = true
 ### 47: --interactive true
 argv: ct "console" "--interactive" "true"
 env: (none)
-exit: 0
+exit: 1
 --- stdout
 PARSED
   cwd = none
@@ -1049,9 +1081,10 @@ PARSED
   cmd = console
   consoleRecordingId = none
   consoleTraceFolder = none
-  consoleLastTraceMatchingPattern = none
+  consoleLastTraceMatchingPattern = some("true")
   consoleInteractive = some(true)
-VALIDATED replayInteractive = true
+configuration error: expected no more than one arg to command to be passed
+Try `ct --help` for more information
 --- stderr
 --- end
 
@@ -1100,7 +1133,7 @@ PARSED
   consoleRecordingId = none
   consoleTraceFolder = none
   consoleLastTraceMatchingPattern = none
-  consoleInteractive = none
+  consoleInteractive = some(true)
 VALIDATED replayInteractive = true
 --- stderr
 --- end
@@ -1108,7 +1141,7 @@ VALIDATED replayInteractive = true
 ### 50: -i true
 argv: ct "console" "-i" "true"
 env: (none)
-exit: 0
+exit: 1
 --- stdout
 PARSED
   cwd = none
@@ -1124,9 +1157,10 @@ PARSED
   cmd = console
   consoleRecordingId = none
   consoleTraceFolder = none
-  consoleLastTraceMatchingPattern = none
+  consoleLastTraceMatchingPattern = some("true")
   consoleInteractive = some(true)
-VALIDATED replayInteractive = true
+configuration error: expected no more than one arg to command to be passed
+Try `ct --help` for more information
 --- stderr
 --- end
 
@@ -1260,7 +1294,7 @@ PARSED
   consoleRecordingId = none
   consoleTraceFolder = none
   consoleLastTraceMatchingPattern = none
-  consoleInteractive = none
+  consoleInteractive = some(true)
 VALIDATED replayInteractive = true
 --- stderr
 --- end
@@ -1270,9 +1304,25 @@ argv: ct "console" "--interactive" "prog"
 env: (none)
 exit: 1
 --- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = console
+  consoleRecordingId = none
+  consoleTraceFolder = none
+  consoleLastTraceMatchingPattern = some("prog")
+  consoleInteractive = some(true)
+configuration error: expected no more than one arg to command to be passed
+Try `ct --help` for more information
 --- stderr
-Error while processing the \e[34minteractive=prog\e[0m parameter: 'prog' is not a valid boolean value. Supported values are on/off, yes/no, true/false or 1/0\e[0m
-Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 58: --interactive --cwd=x (next word an option)
@@ -1295,7 +1345,7 @@ PARSED
   consoleRecordingId = none
   consoleTraceFolder = none
   consoleLastTraceMatchingPattern = none
-  consoleInteractive = none
+  consoleInteractive = some(true)
 VALIDATED replayInteractive = true
 --- stderr
 --- end
@@ -1381,7 +1431,7 @@ PARSED
   cmd = console
   consoleRecordingId = none
   consoleTraceFolder = some("/tr")
-  consoleLastTraceMatchingPattern = none
+  consoleLastTraceMatchingPattern = some("true")
   consoleInteractive = some(true)
 configuration error: expected no more than one arg to command to be passed
 Try `ct --help` for more information
@@ -1393,31 +1443,15 @@ argv: ct "console" "prog" "-i" "false"
 env: (none)
 exit: 1
 --- stdout
-PARSED
-  cwd = none
-  envFiles = @[]
-  env0Files = @[]
-  tmpEnvFiles = @[]
-  tmpEnv0Files = @[]
-  inspect = none
-  remoteDebuggingPort = none
-  remoteDebuggingPipe = false
-  newTab = false
-  newWindow = false
-  cmd = console
-  consoleRecordingId = none
-  consoleTraceFolder = none
-  consoleLastTraceMatchingPattern = some("prog")
-  consoleInteractive = some(false)
-configuration error: expected no more than one arg to command to be passed
-Try `ct --help` for more information
 --- stderr
+The subcommand 'console' does not accept additional arguments\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 64: -i false alone
 argv: ct "console" "-i" "false"
 env: (none)
-exit: 0
+exit: 1
 --- stdout
 PARSED
   cwd = none
@@ -1433,16 +1467,17 @@ PARSED
   cmd = console
   consoleRecordingId = none
   consoleTraceFolder = none
-  consoleLastTraceMatchingPattern = none
-  consoleInteractive = some(false)
-VALIDATED replayInteractive = true
+  consoleLastTraceMatchingPattern = some("false")
+  consoleInteractive = some(true)
+configuration error: expected no more than one arg to command to be passed
+Try `ct --help` for more information
 --- stderr
 --- end
 
 ### 65: -i true alone
 argv: ct "console" "-i" "true"
 env: (none)
-exit: 0
+exit: 1
 --- stdout
 PARSED
   cwd = none
@@ -1458,9 +1493,10 @@ PARSED
   cmd = console
   consoleRecordingId = none
   consoleTraceFolder = none
-  consoleLastTraceMatchingPattern = none
+  consoleLastTraceMatchingPattern = some("true")
   consoleInteractive = some(true)
-VALIDATED replayInteractive = true
+configuration error: expected no more than one arg to command to be passed
+Try `ct --help` for more information
 --- stderr
 --- end
 
@@ -1469,9 +1505,25 @@ argv: ct "console" "-ti" "x"
 env: (none)
 exit: 1
 --- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = console
+  consoleRecordingId = none
+  consoleTraceFolder = some("i")
+  consoleLastTraceMatchingPattern = some("x")
+  consoleInteractive = none
+configuration error: expected no more than one arg to command to be passed
+Try `ct --help` for more information
 --- stderr
-Error while processing the \e[34minteractive=x\e[0m parameter: 'x' is not a valid boolean value. Supported values are on/off, yes/no, true/false or 1/0\e[0m
-Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 67: env <APP>_ID
@@ -1567,76 +1619,31 @@ Try \e[36mct --help\e[0m for more information.
 ### 73: lone -
 argv: ct "console" "-"
 env: (none)
-exit: 0
+exit: 1
 --- stdout
-PARSED
-  cwd = none
-  envFiles = @[]
-  env0Files = @[]
-  tmpEnvFiles = @[]
-  tmpEnv0Files = @[]
-  inspect = none
-  remoteDebuggingPort = none
-  remoteDebuggingPipe = false
-  newTab = false
-  newWindow = false
-  cmd = console
-  consoleRecordingId = none
-  consoleTraceFolder = none
-  consoleLastTraceMatchingPattern = none
-  consoleInteractive = none
-VALIDATED replayInteractive = true
 --- stderr
+Unrecognized option ''\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 74: lone -- then a word
 argv: ct "console" "--" "w"
 env: (none)
-exit: 0
+exit: 1
 --- stdout
-PARSED
-  cwd = none
-  envFiles = @[]
-  env0Files = @[]
-  tmpEnvFiles = @[]
-  tmpEnv0Files = @[]
-  inspect = none
-  remoteDebuggingPort = none
-  remoteDebuggingPipe = false
-  newTab = false
-  newWindow = false
-  cmd = console
-  consoleRecordingId = some("w")
-  consoleTraceFolder = none
-  consoleLastTraceMatchingPattern = none
-  consoleInteractive = none
-VALIDATED replayInteractive = false
 --- stderr
+Unrecognized option ''\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 75: --=v
 argv: ct "console" "--=v"
 env: (none)
-exit: 0
+exit: 1
 --- stdout
-PARSED
-  cwd = none
-  envFiles = @[]
-  env0Files = @[]
-  tmpEnvFiles = @[]
-  tmpEnv0Files = @[]
-  inspect = none
-  remoteDebuggingPort = none
-  remoteDebuggingPipe = false
-  newTab = false
-  newWindow = false
-  cmd = console
-  consoleRecordingId = some("v")
-  consoleTraceFolder = none
-  consoleLastTraceMatchingPattern = none
-  consoleInteractive = none
-VALIDATED replayInteractive = false
 --- stderr
+Unrecognized option ''\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 76: extra positional
@@ -1713,9 +1720,19 @@ CodeTracer version: <VERSION>
 ### 80: -h after the command
 argv: ct "console" "-h"
 env: (none)
-exit: 1
+exit: 0
 --- stdout
+CodeTracer - the user-friendly time-travelling debugger
+
+\e[0m\e[33mUsage:\x20
+\e[0m\e[1m
+\e[36mct console\e[0m [OPTIONS]...
+
+The following options are available:
+
+     \e[34m\e[1m--id              \e[0m  a recording id (UUIDv7) — accepts 8+ char short prefix.\e[0m
+ \e[34m\e[1m-t, \e[0m\e[34m\e[1m--trace-folder    \e[0m  the trace output folder.\e[0m
+ \e[34m\e[1m-i, \e[0m\e[34m\e[1m--interactive     \e[0m  explicit flag for interactively choosing a trace.\e[0m
+
 --- stderr
-Unrecognized option 'h'\e[0m
-Try \e[36mct --help\e[0m for more information.
 --- end

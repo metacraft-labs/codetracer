@@ -307,14 +307,14 @@ PARSED
   newTab = false
   newWindow = false
   cmd = replay
-  replayRecordingId = none
+  replayRecordingId = some("")
   replayTraceFolder = none
   lastTraceMatchingPattern = none
   replayInteractive = none
   replayThreadSyncOrder = none
   replayOsSimulation = none
   replayFollowRequestSpans = none
-VALIDATED replayInteractive = true
+VALIDATED replayInteractive = false
 --- stderr
 --- end
 
@@ -349,25 +349,33 @@ VALIDATED replayInteractive = false
 ### 14: --id -x (value starts with -)
 argv: ct "replay" "--id" "-x"
 env: (none)
-exit: 1
+exit: 0
 --- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = replay
+  replayRecordingId = some("-x")
+  replayTraceFolder = none
+  lastTraceMatchingPattern = none
+  replayInteractive = none
+  replayThreadSyncOrder = none
+  replayOsSimulation = none
+  replayFollowRequestSpans = none
+VALIDATED replayInteractive = false
 --- stderr
-Unrecognized option 'x'\e[0m
-Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 15: --id --x (value starts with --)
 argv: ct "replay" "--id" "--x"
-env: (none)
-exit: 1
---- stdout
---- stderr
-Unrecognized option 'x'\e[0m
-Try \e[36mct --help\e[0m for more information.
---- end
-
-### 16: --id --new-tab <v> (an option between it and its value)
-argv: ct "replay" "--id" "--new-tab" "0190d7a0"
 env: (none)
 exit: 0
 --- stdout
@@ -380,10 +388,10 @@ PARSED
   inspect = none
   remoteDebuggingPort = none
   remoteDebuggingPipe = false
-  newTab = true
+  newTab = false
   newWindow = false
   cmd = replay
-  replayRecordingId = some("0190d7a0")
+  replayRecordingId = some("--x")
   replayTraceFolder = none
   lastTraceMatchingPattern = none
   replayInteractive = none
@@ -391,6 +399,35 @@ PARSED
   replayOsSimulation = none
   replayFollowRequestSpans = none
 VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 16: --id --new-tab <v> (an option between it and its value)
+argv: ct "replay" "--id" "--new-tab" "0190d7a0"
+env: (none)
+exit: 1
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = replay
+  replayRecordingId = some("--new-tab")
+  replayTraceFolder = none
+  lastTraceMatchingPattern = some("0190d7a0")
+  replayInteractive = none
+  replayThreadSyncOrder = none
+  replayOsSimulation = none
+  replayFollowRequestSpans = none
+configuration error: expected no more than one arg to command to be passed
+Try `ct --help` for more information
 --- stderr
 --- end
 
@@ -425,29 +462,11 @@ VALIDATED replayInteractive = false
 ### 18: --id missing value (last)
 argv: ct "replay" "--id"
 env: (none)
-exit: 0
+exit: 1
 --- stdout
-PARSED
-  cwd = none
-  envFiles = @[]
-  env0Files = @[]
-  tmpEnvFiles = @[]
-  tmpEnv0Files = @[]
-  inspect = none
-  remoteDebuggingPort = none
-  remoteDebuggingPipe = false
-  newTab = false
-  newWindow = false
-  cmd = replay
-  replayRecordingId = none
-  replayTraceFolder = none
-  lastTraceMatchingPattern = none
-  replayInteractive = none
-  replayThreadSyncOrder = none
-  replayOsSimulation = none
-  replayFollowRequestSpans = none
-VALIDATED replayInteractive = true
 --- stderr
+The option '\e[34m--id\e[0m' requires a value\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 19: --ID <v> (style variant)
@@ -677,16 +696,6 @@ VALIDATED replayInteractive = false
 ### 27: -t<v> (attached)
 argv: ct "replay" "-t/tr"
 env: (none)
-exit: 1
---- stdout
---- stderr
-Unrecognized option '/'\e[0m
-Try \e[36mct --help\e[0m for more information.
---- end
-
-### 28: -T <v> (other case)
-argv: ct "replay" "-T" "/tr"
-env: (none)
 exit: 0
 --- stdout
 PARSED
@@ -710,6 +719,16 @@ PARSED
   replayFollowRequestSpans = none
 VALIDATED replayInteractive = false
 --- stderr
+--- end
+
+### 28: -T <v> (other case)
+argv: ct "replay" "-T" "/tr"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'T'\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 29: --t <v> (the letter as a long option)
@@ -898,13 +917,13 @@ PARSED
   newWindow = false
   cmd = replay
   replayRecordingId = none
-  replayTraceFolder = none
+  replayTraceFolder = some("")
   lastTraceMatchingPattern = none
   replayInteractive = none
   replayThreadSyncOrder = none
   replayOsSimulation = none
   replayFollowRequestSpans = none
-VALIDATED replayInteractive = true
+VALIDATED replayInteractive = false
 --- stderr
 --- end
 
@@ -939,25 +958,33 @@ VALIDATED replayInteractive = false
 ### 37: --trace-folder -x (value starts with -)
 argv: ct "replay" "--trace-folder" "-x"
 env: (none)
-exit: 1
+exit: 0
 --- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = replay
+  replayRecordingId = none
+  replayTraceFolder = some("-x")
+  lastTraceMatchingPattern = none
+  replayInteractive = none
+  replayThreadSyncOrder = none
+  replayOsSimulation = none
+  replayFollowRequestSpans = none
+VALIDATED replayInteractive = false
 --- stderr
-Unrecognized option 'x'\e[0m
-Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 38: --trace-folder --x (value starts with --)
 argv: ct "replay" "--trace-folder" "--x"
-env: (none)
-exit: 1
---- stdout
---- stderr
-Unrecognized option 'x'\e[0m
-Try \e[36mct --help\e[0m for more information.
---- end
-
-### 39: --trace-folder --new-tab <v> (an option between it and its value)
-argv: ct "replay" "--trace-folder" "--new-tab" "/tr"
 env: (none)
 exit: 0
 --- stdout
@@ -970,17 +997,46 @@ PARSED
   inspect = none
   remoteDebuggingPort = none
   remoteDebuggingPipe = false
-  newTab = true
+  newTab = false
   newWindow = false
   cmd = replay
   replayRecordingId = none
-  replayTraceFolder = some("/tr")
+  replayTraceFolder = some("--x")
   lastTraceMatchingPattern = none
   replayInteractive = none
   replayThreadSyncOrder = none
   replayOsSimulation = none
   replayFollowRequestSpans = none
 VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 39: --trace-folder --new-tab <v> (an option between it and its value)
+argv: ct "replay" "--trace-folder" "--new-tab" "/tr"
+env: (none)
+exit: 1
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = replay
+  replayRecordingId = none
+  replayTraceFolder = some("--new-tab")
+  lastTraceMatchingPattern = some("/tr")
+  replayInteractive = none
+  replayThreadSyncOrder = none
+  replayOsSimulation = none
+  replayFollowRequestSpans = none
+configuration error: expected no more than one arg to command to be passed
+Try `ct --help` for more information
 --- stderr
 --- end
 
@@ -1015,29 +1071,11 @@ VALIDATED replayInteractive = false
 ### 41: --trace-folder missing value (last)
 argv: ct "replay" "--trace-folder"
 env: (none)
-exit: 0
+exit: 1
 --- stdout
-PARSED
-  cwd = none
-  envFiles = @[]
-  env0Files = @[]
-  tmpEnvFiles = @[]
-  tmpEnv0Files = @[]
-  inspect = none
-  remoteDebuggingPort = none
-  remoteDebuggingPipe = false
-  newTab = false
-  newWindow = false
-  cmd = replay
-  replayRecordingId = none
-  replayTraceFolder = none
-  lastTraceMatchingPattern = none
-  replayInteractive = none
-  replayThreadSyncOrder = none
-  replayOsSimulation = none
-  replayFollowRequestSpans = none
-VALIDATED replayInteractive = true
 --- stderr
+The option '\e[34m--trace-folder\e[0m' requires a value\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 42: --TRACE-FOLDER <v> (style variant)
@@ -1136,7 +1174,7 @@ PARSED
   replayRecordingId = none
   replayTraceFolder = none
   lastTraceMatchingPattern = none
-  replayInteractive = none
+  replayInteractive = some(true)
   replayThreadSyncOrder = none
   replayOsSimulation = none
   replayFollowRequestSpans = none
@@ -1147,7 +1185,7 @@ VALIDATED replayInteractive = true
 ### 47: --interactive true
 argv: ct "replay" "--interactive" "true"
 env: (none)
-exit: 0
+exit: 1
 --- stdout
 PARSED
   cwd = none
@@ -1163,12 +1201,13 @@ PARSED
   cmd = replay
   replayRecordingId = none
   replayTraceFolder = none
-  lastTraceMatchingPattern = none
+  lastTraceMatchingPattern = some("true")
   replayInteractive = some(true)
   replayThreadSyncOrder = none
   replayOsSimulation = none
   replayFollowRequestSpans = none
-VALIDATED replayInteractive = true
+configuration error: expected no more than one arg to command to be passed
+Try `ct --help` for more information
 --- stderr
 --- end
 
@@ -1220,7 +1259,7 @@ PARSED
   replayRecordingId = none
   replayTraceFolder = none
   lastTraceMatchingPattern = none
-  replayInteractive = none
+  replayInteractive = some(true)
   replayThreadSyncOrder = none
   replayOsSimulation = none
   replayFollowRequestSpans = none
@@ -1231,7 +1270,7 @@ VALIDATED replayInteractive = true
 ### 50: -i true
 argv: ct "replay" "-i" "true"
 env: (none)
-exit: 0
+exit: 1
 --- stdout
 PARSED
   cwd = none
@@ -1247,12 +1286,13 @@ PARSED
   cmd = replay
   replayRecordingId = none
   replayTraceFolder = none
-  lastTraceMatchingPattern = none
+  lastTraceMatchingPattern = some("true")
   replayInteractive = some(true)
   replayThreadSyncOrder = none
   replayOsSimulation = none
   replayFollowRequestSpans = none
-VALIDATED replayInteractive = true
+configuration error: expected no more than one arg to command to be passed
+Try `ct --help` for more information
 --- stderr
 --- end
 
@@ -1398,7 +1438,7 @@ PARSED
   replayRecordingId = none
   replayTraceFolder = none
   lastTraceMatchingPattern = none
-  replayInteractive = none
+  replayInteractive = some(true)
   replayThreadSyncOrder = none
   replayOsSimulation = none
   replayFollowRequestSpans = none
@@ -1411,9 +1451,28 @@ argv: ct "replay" "--interactive" "prog"
 env: (none)
 exit: 1
 --- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = replay
+  replayRecordingId = none
+  replayTraceFolder = none
+  lastTraceMatchingPattern = some("prog")
+  replayInteractive = some(true)
+  replayThreadSyncOrder = none
+  replayOsSimulation = none
+  replayFollowRequestSpans = none
+configuration error: expected no more than one arg to command to be passed
+Try `ct --help` for more information
 --- stderr
-Error while processing the \e[34minteractive=prog\e[0m parameter: 'prog' is not a valid boolean value. Supported values are on/off, yes/no, true/false or 1/0\e[0m
-Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 58: --interactive --cwd=x (next word an option)
@@ -1436,7 +1495,7 @@ PARSED
   replayRecordingId = none
   replayTraceFolder = none
   lastTraceMatchingPattern = none
-  replayInteractive = none
+  replayInteractive = some(true)
   replayThreadSyncOrder = none
   replayOsSimulation = none
   replayFollowRequestSpans = none
@@ -1531,7 +1590,7 @@ PARSED
   cmd = replay
   replayRecordingId = none
   replayTraceFolder = some("/tr")
-  lastTraceMatchingPattern = none
+  lastTraceMatchingPattern = some("true")
   replayInteractive = some(true)
   replayThreadSyncOrder = none
   replayOsSimulation = none
@@ -1546,6 +1605,16 @@ argv: ct "replay" "prog" "-i" "false"
 env: (none)
 exit: 1
 --- stdout
+--- stderr
+The subcommand 'replay' does not accept additional arguments\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 64: -i false alone
+argv: ct "replay" "-i" "false"
+env: (none)
+exit: 1
+--- stdout
 PARSED
   cwd = none
   envFiles = @[]
@@ -1560,8 +1629,8 @@ PARSED
   cmd = replay
   replayRecordingId = none
   replayTraceFolder = none
-  lastTraceMatchingPattern = some("prog")
-  replayInteractive = some(false)
+  lastTraceMatchingPattern = some("false")
+  replayInteractive = some(true)
   replayThreadSyncOrder = none
   replayOsSimulation = none
   replayFollowRequestSpans = none
@@ -1570,38 +1639,10 @@ Try `ct --help` for more information
 --- stderr
 --- end
 
-### 64: -i false alone
-argv: ct "replay" "-i" "false"
-env: (none)
-exit: 0
---- stdout
-PARSED
-  cwd = none
-  envFiles = @[]
-  env0Files = @[]
-  tmpEnvFiles = @[]
-  tmpEnv0Files = @[]
-  inspect = none
-  remoteDebuggingPort = none
-  remoteDebuggingPipe = false
-  newTab = false
-  newWindow = false
-  cmd = replay
-  replayRecordingId = none
-  replayTraceFolder = none
-  lastTraceMatchingPattern = none
-  replayInteractive = some(false)
-  replayThreadSyncOrder = none
-  replayOsSimulation = none
-  replayFollowRequestSpans = none
-VALIDATED replayInteractive = true
---- stderr
---- end
-
 ### 65: -i true alone
 argv: ct "replay" "-i" "true"
 env: (none)
-exit: 0
+exit: 1
 --- stdout
 PARSED
   cwd = none
@@ -1617,12 +1658,13 @@ PARSED
   cmd = replay
   replayRecordingId = none
   replayTraceFolder = none
-  lastTraceMatchingPattern = none
+  lastTraceMatchingPattern = some("true")
   replayInteractive = some(true)
   replayThreadSyncOrder = none
   replayOsSimulation = none
   replayFollowRequestSpans = none
-VALIDATED replayInteractive = true
+configuration error: expected no more than one arg to command to be passed
+Try `ct --help` for more information
 --- stderr
 --- end
 
@@ -1631,9 +1673,28 @@ argv: ct "replay" "-ti" "x"
 env: (none)
 exit: 1
 --- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = replay
+  replayRecordingId = none
+  replayTraceFolder = some("i")
+  lastTraceMatchingPattern = some("x")
+  replayInteractive = none
+  replayThreadSyncOrder = none
+  replayOsSimulation = none
+  replayFollowRequestSpans = none
+configuration error: expected no more than one arg to command to be passed
+Try `ct --help` for more information
 --- stderr
-Error while processing the \e[34minteractive=x\e[0m parameter: 'x' is not a valid boolean value. Supported values are on/off, yes/no, true/false or 1/0\e[0m
-Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 67: env <APP>_ID
@@ -2003,7 +2064,7 @@ PARSED
   replayTraceFolder = none
   lastTraceMatchingPattern = none
   replayInteractive = none
-  replayThreadSyncOrder = none
+  replayThreadSyncOrder = some("")
   replayOsSimulation = none
   replayFollowRequestSpans = none
 VALIDATED replayInteractive = true
@@ -2041,21 +2102,57 @@ VALIDATED replayInteractive = true
 ### 82: --thread-sync-order -x (value starts with -)
 argv: ct "replay" "--thread-sync-order" "-x"
 env: (none)
-exit: 1
+exit: 0
 --- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = replay
+  replayRecordingId = none
+  replayTraceFolder = none
+  lastTraceMatchingPattern = none
+  replayInteractive = none
+  replayThreadSyncOrder = some("-x")
+  replayOsSimulation = none
+  replayFollowRequestSpans = none
+VALIDATED replayInteractive = true
 --- stderr
-Unrecognized option 'x'\e[0m
-Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 83: --thread-sync-order --x (value starts with --)
 argv: ct "replay" "--thread-sync-order" "--x"
 env: (none)
-exit: 1
+exit: 0
 --- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = replay
+  replayRecordingId = none
+  replayTraceFolder = none
+  lastTraceMatchingPattern = none
+  replayInteractive = none
+  replayThreadSyncOrder = some("--x")
+  replayOsSimulation = none
+  replayFollowRequestSpans = none
+VALIDATED replayInteractive = true
 --- stderr
-Unrecognized option 'x'\e[0m
-Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 84: --thread-sync-order --new-tab <v> (an option between it and its value)
@@ -2072,17 +2169,17 @@ PARSED
   inspect = none
   remoteDebuggingPort = none
   remoteDebuggingPipe = false
-  newTab = true
+  newTab = false
   newWindow = false
   cmd = replay
   replayRecordingId = none
   replayTraceFolder = none
-  lastTraceMatchingPattern = none
+  lastTraceMatchingPattern = some("total")
   replayInteractive = none
-  replayThreadSyncOrder = some("total")
+  replayThreadSyncOrder = some("--new-tab")
   replayOsSimulation = none
   replayFollowRequestSpans = none
-VALIDATED replayInteractive = true
+VALIDATED replayInteractive = false
 --- stderr
 --- end
 
@@ -2117,29 +2214,11 @@ VALIDATED replayInteractive = true
 ### 86: --thread-sync-order missing value (last)
 argv: ct "replay" "--thread-sync-order"
 env: (none)
-exit: 0
+exit: 1
 --- stdout
-PARSED
-  cwd = none
-  envFiles = @[]
-  env0Files = @[]
-  tmpEnvFiles = @[]
-  tmpEnv0Files = @[]
-  inspect = none
-  remoteDebuggingPort = none
-  remoteDebuggingPipe = false
-  newTab = false
-  newWindow = false
-  cmd = replay
-  replayRecordingId = none
-  replayTraceFolder = none
-  lastTraceMatchingPattern = none
-  replayInteractive = none
-  replayThreadSyncOrder = none
-  replayOsSimulation = none
-  replayFollowRequestSpans = none
-VALIDATED replayInteractive = true
 --- stderr
+The option '\e[34m--thread-sync-order\e[0m' requires a value\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 87: --THREAD-SYNC-ORDER <v> (style variant)
@@ -2520,7 +2599,7 @@ PARSED
   lastTraceMatchingPattern = none
   replayInteractive = none
   replayThreadSyncOrder = none
-  replayOsSimulation = none
+  replayOsSimulation = some("")
   replayFollowRequestSpans = none
 VALIDATED replayInteractive = true
 --- stderr
@@ -2557,21 +2636,57 @@ VALIDATED replayInteractive = true
 ### 103: --os-simulation -x (value starts with -)
 argv: ct "replay" "--os-simulation" "-x"
 env: (none)
-exit: 1
+exit: 0
 --- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = replay
+  replayRecordingId = none
+  replayTraceFolder = none
+  lastTraceMatchingPattern = none
+  replayInteractive = none
+  replayThreadSyncOrder = none
+  replayOsSimulation = some("-x")
+  replayFollowRequestSpans = none
+VALIDATED replayInteractive = true
 --- stderr
-Unrecognized option 'x'\e[0m
-Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 104: --os-simulation --x (value starts with --)
 argv: ct "replay" "--os-simulation" "--x"
 env: (none)
-exit: 1
+exit: 0
 --- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = replay
+  replayRecordingId = none
+  replayTraceFolder = none
+  lastTraceMatchingPattern = none
+  replayInteractive = none
+  replayThreadSyncOrder = none
+  replayOsSimulation = some("--x")
+  replayFollowRequestSpans = none
+VALIDATED replayInteractive = true
 --- stderr
-Unrecognized option 'x'\e[0m
-Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 105: --os-simulation --new-tab <v> (an option between it and its value)
@@ -2588,17 +2703,17 @@ PARSED
   inspect = none
   remoteDebuggingPort = none
   remoteDebuggingPipe = false
-  newTab = true
+  newTab = false
   newWindow = false
   cmd = replay
   replayRecordingId = none
   replayTraceFolder = none
-  lastTraceMatchingPattern = none
+  lastTraceMatchingPattern = some("weak-userspace")
   replayInteractive = none
   replayThreadSyncOrder = none
-  replayOsSimulation = some("weak-userspace")
+  replayOsSimulation = some("--new-tab")
   replayFollowRequestSpans = none
-VALIDATED replayInteractive = true
+VALIDATED replayInteractive = false
 --- stderr
 --- end
 
@@ -2633,29 +2748,11 @@ VALIDATED replayInteractive = true
 ### 107: --os-simulation missing value (last)
 argv: ct "replay" "--os-simulation"
 env: (none)
-exit: 0
+exit: 1
 --- stdout
-PARSED
-  cwd = none
-  envFiles = @[]
-  env0Files = @[]
-  tmpEnvFiles = @[]
-  tmpEnv0Files = @[]
-  inspect = none
-  remoteDebuggingPort = none
-  remoteDebuggingPipe = false
-  newTab = false
-  newWindow = false
-  cmd = replay
-  replayRecordingId = none
-  replayTraceFolder = none
-  lastTraceMatchingPattern = none
-  replayInteractive = none
-  replayThreadSyncOrder = none
-  replayOsSimulation = none
-  replayFollowRequestSpans = none
-VALIDATED replayInteractive = true
 --- stderr
+The option '\e[34m--os-simulation\e[0m' requires a value\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 108: --OS-SIMULATION <v> (style variant)
@@ -3037,7 +3134,7 @@ PARSED
   replayInteractive = none
   replayThreadSyncOrder = none
   replayOsSimulation = none
-  replayFollowRequestSpans = none
+  replayFollowRequestSpans = some("")
 VALIDATED replayInteractive = true
 --- stderr
 --- end
@@ -3073,21 +3170,57 @@ VALIDATED replayInteractive = true
 ### 124: --follow-request-spans -x (value starts with -)
 argv: ct "replay" "--follow-request-spans" "-x"
 env: (none)
-exit: 1
+exit: 0
 --- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = replay
+  replayRecordingId = none
+  replayTraceFolder = none
+  lastTraceMatchingPattern = none
+  replayInteractive = none
+  replayThreadSyncOrder = none
+  replayOsSimulation = none
+  replayFollowRequestSpans = some("-x")
+VALIDATED replayInteractive = true
 --- stderr
-Unrecognized option 'x'\e[0m
-Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 125: --follow-request-spans --x (value starts with --)
 argv: ct "replay" "--follow-request-spans" "--x"
 env: (none)
-exit: 1
+exit: 0
 --- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = replay
+  replayRecordingId = none
+  replayTraceFolder = none
+  lastTraceMatchingPattern = none
+  replayInteractive = none
+  replayThreadSyncOrder = none
+  replayOsSimulation = none
+  replayFollowRequestSpans = some("--x")
+VALIDATED replayInteractive = true
 --- stderr
-Unrecognized option 'x'\e[0m
-Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 126: --follow-request-spans --new-tab <v> (an option between it and its value)
@@ -3104,17 +3237,17 @@ PARSED
   inspect = none
   remoteDebuggingPort = none
   remoteDebuggingPipe = false
-  newTab = true
+  newTab = false
   newWindow = false
   cmd = replay
   replayRecordingId = none
   replayTraceFolder = none
-  lastTraceMatchingPattern = none
+  lastTraceMatchingPattern = some("1")
   replayInteractive = none
   replayThreadSyncOrder = none
   replayOsSimulation = none
-  replayFollowRequestSpans = some("1")
-VALIDATED replayInteractive = true
+  replayFollowRequestSpans = some("--new-tab")
+VALIDATED replayInteractive = false
 --- stderr
 --- end
 
@@ -3149,29 +3282,11 @@ VALIDATED replayInteractive = true
 ### 128: --follow-request-spans missing value (last)
 argv: ct "replay" "--follow-request-spans"
 env: (none)
-exit: 0
+exit: 1
 --- stdout
-PARSED
-  cwd = none
-  envFiles = @[]
-  env0Files = @[]
-  tmpEnvFiles = @[]
-  tmpEnv0Files = @[]
-  inspect = none
-  remoteDebuggingPort = none
-  remoteDebuggingPipe = false
-  newTab = false
-  newWindow = false
-  cmd = replay
-  replayRecordingId = none
-  replayTraceFolder = none
-  lastTraceMatchingPattern = none
-  replayInteractive = none
-  replayThreadSyncOrder = none
-  replayOsSimulation = none
-  replayFollowRequestSpans = none
-VALIDATED replayInteractive = true
 --- stderr
+The option '\e[34m--follow-request-spans\e[0m' requires a value\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 129: --FOLLOW-REQUEST-SPANS <v> (style variant)
@@ -3367,85 +3482,31 @@ Try \e[36mct --help\e[0m for more information.
 ### 139: lone -
 argv: ct "replay" "-"
 env: (none)
-exit: 0
+exit: 1
 --- stdout
-PARSED
-  cwd = none
-  envFiles = @[]
-  env0Files = @[]
-  tmpEnvFiles = @[]
-  tmpEnv0Files = @[]
-  inspect = none
-  remoteDebuggingPort = none
-  remoteDebuggingPipe = false
-  newTab = false
-  newWindow = false
-  cmd = replay
-  replayRecordingId = none
-  replayTraceFolder = none
-  lastTraceMatchingPattern = none
-  replayInteractive = none
-  replayThreadSyncOrder = none
-  replayOsSimulation = none
-  replayFollowRequestSpans = none
-VALIDATED replayInteractive = true
 --- stderr
+Unrecognized option ''\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 140: lone -- then a word
 argv: ct "replay" "--" "w"
 env: (none)
-exit: 0
+exit: 1
 --- stdout
-PARSED
-  cwd = none
-  envFiles = @[]
-  env0Files = @[]
-  tmpEnvFiles = @[]
-  tmpEnv0Files = @[]
-  inspect = none
-  remoteDebuggingPort = none
-  remoteDebuggingPipe = false
-  newTab = false
-  newWindow = false
-  cmd = replay
-  replayRecordingId = some("w")
-  replayTraceFolder = none
-  lastTraceMatchingPattern = none
-  replayInteractive = none
-  replayThreadSyncOrder = none
-  replayOsSimulation = none
-  replayFollowRequestSpans = none
-VALIDATED replayInteractive = false
 --- stderr
+Unrecognized option ''\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 141: --=v
 argv: ct "replay" "--=v"
 env: (none)
-exit: 0
+exit: 1
 --- stdout
-PARSED
-  cwd = none
-  envFiles = @[]
-  env0Files = @[]
-  tmpEnvFiles = @[]
-  tmpEnv0Files = @[]
-  inspect = none
-  remoteDebuggingPort = none
-  remoteDebuggingPipe = false
-  newTab = false
-  newWindow = false
-  cmd = replay
-  replayRecordingId = some("v")
-  replayTraceFolder = none
-  lastTraceMatchingPattern = none
-  replayInteractive = none
-  replayThreadSyncOrder = none
-  replayOsSimulation = none
-  replayFollowRequestSpans = none
-VALIDATED replayInteractive = false
 --- stderr
+Unrecognized option ''\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 142: extra positional
@@ -3528,9 +3589,31 @@ CodeTracer version: <VERSION>
 ### 146: -h after the command
 argv: ct "replay" "-h"
 env: (none)
-exit: 1
+exit: 0
 --- stdout
+CodeTracer - the user-friendly time-travelling debugger
+
+\e[0m\e[33mUsage:\x20
+\e[0m\e[1m
+\e[36mct replay\e[0m [OPTIONS]...
+
+The following options are available:
+
+     \e[34m\e[1m--id                    \e[0m  a recording id (UUIDv7) — accepts 8+ char short
+                               prefix.\e[0m
+ \e[34m\e[1m-t, \e[0m\e[34m\e[1m--trace-folder          \e[0m  the trace output folder or a multitrace archive.\e[0m
+ \e[34m\e[1m-i, \e[0m\e[34m\e[1m--interactive           \e[0m  explicit flag for interactively choosing a trace.\e[0m
+     \e[34m\e[1m--thread-sync-order     \e[0m  Thread synchronization order the replay enforces
+                               on a Windows native recording: 'total' or
+                               'per-object' (env CT_THREAD_SYNC_ORDER; the flag
+                               wins). Unset: the replay backend's default.\e[0m
+     \e[34m\e[1m--os-simulation         \e[0m  Replay mode for a native recording:
+                               'weak-userspace', 'strong-userspace' or
+                               'strong-kernel' (env CT_OS_SIMULATION; the flag
+                               wins). Unset: the replay backend's default.\e[0m
+     \e[34m\e[1m--follow-request-spans  \e[0m  Follow requests in a growing container: '1' or
+                               '0' (env CT_FOLLOW_REQUEST_SPANS; the flag wins).
+                               Default off.\e[0m
+
 --- stderr
-Unrecognized option 'h'\e[0m
-Try \e[36mct --help\e[0m for more information.
 --- end

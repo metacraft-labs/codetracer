@@ -66,6 +66,7 @@ NIM_REPO_PATH_FLAGS=\
 --path:$(ROOT)/libs/parsetoml/src\
 --path:$(ROOT)/libs/nim-result\
 --path:$(ROOT)/libs/nim-confutils\
+--path:$(ROOT)/libs/nim-cli-spec/src\
 --path:$(ROOT)/libs/nimcrypto\
 --path:$(ROOT)/libs/zip\
 --path:$(ROOT)/libs/jsony/src\

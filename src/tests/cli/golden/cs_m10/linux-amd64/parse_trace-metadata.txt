@@ -241,7 +241,7 @@ PARSED
   newTab = false
   newWindow = false
   cmd = trace-metadata
-  recordingMetadataIdArg = none
+  recordingMetadataIdArg = some("")
   traceMetadataPathArg = none
   traceMetadataRecordPidArg = none
   traceMetadataProgramArg = none
@@ -291,26 +291,6 @@ VALIDATED replayInteractive = false
 ### 10: --id -x (value starts with -)
 argv: ct "trace-metadata" "--id" "-x"
 env: (none)
-exit: 1
---- stdout
---- stderr
-Unrecognized option 'x'\e[0m
-Try \e[36mct --help\e[0m for more information.
---- end
-
-### 11: --id --x (value starts with --)
-argv: ct "trace-metadata" "--id" "--x"
-env: (none)
-exit: 1
---- stdout
---- stderr
-Unrecognized option 'x'\e[0m
-Try \e[36mct --help\e[0m for more information.
---- end
-
-### 12: --id --new-tab <v> (an option between it and its value)
-argv: ct "trace-metadata" "--id" "--new-tab" "0190d7a0"
-env: (none)
 exit: 0
 --- stdout
 PARSED
@@ -322,10 +302,10 @@ PARSED
   inspect = none
   remoteDebuggingPort = none
   remoteDebuggingPipe = false
-  newTab = true
+  newTab = false
   newWindow = false
   cmd = trace-metadata
-  recordingMetadataIdArg = some("0190d7a0")
+  recordingMetadataIdArg = some("-x")
   traceMetadataPathArg = none
   traceMetadataRecordPidArg = none
   traceMetadataProgramArg = none
@@ -338,6 +318,48 @@ PARSED
   traceMetadataTest = false
 VALIDATED replayInteractive = false
 --- stderr
+--- end
+
+### 11: --id --x (value starts with --)
+argv: ct "trace-metadata" "--id" "--x"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace-metadata
+  recordingMetadataIdArg = some("--x")
+  traceMetadataPathArg = none
+  traceMetadataRecordPidArg = none
+  traceMetadataProgramArg = none
+  traceMetadataRecent = false
+  traceMetadataRecentFolders = false
+  traceMetadataAddRecentFolder = none
+  traceMetadataRecentLimit = 4
+  traceMetadataImportCt = none
+  traceMetadataImportSource = none
+  traceMetadataTest = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 12: --id --new-tab <v> (an option between it and its value)
+argv: ct "trace-metadata" "--id" "--new-tab" "0190d7a0"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The subcommand 'trace-metadata' does not accept arguments\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 13: --id repeated, last wins
@@ -375,33 +397,11 @@ VALIDATED replayInteractive = false
 ### 14: --id missing value (last)
 argv: ct "trace-metadata" "--id"
 env: (none)
-exit: 0
+exit: 1
 --- stdout
-PARSED
-  cwd = none
-  envFiles = @[]
-  env0Files = @[]
-  tmpEnvFiles = @[]
-  tmpEnv0Files = @[]
-  inspect = none
-  remoteDebuggingPort = none
-  remoteDebuggingPipe = false
-  newTab = false
-  newWindow = false
-  cmd = trace-metadata
-  recordingMetadataIdArg = none
-  traceMetadataPathArg = none
-  traceMetadataRecordPidArg = none
-  traceMetadataProgramArg = none
-  traceMetadataRecent = false
-  traceMetadataRecentFolders = false
-  traceMetadataAddRecentFolder = none
-  traceMetadataRecentLimit = 4
-  traceMetadataImportCt = none
-  traceMetadataImportSource = none
-  traceMetadataTest = false
-VALIDATED replayInteractive = false
 --- stderr
+The option '\e[34m--id\e[0m' requires a value\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 15: --ID <v> (style variant)
@@ -678,7 +678,7 @@ PARSED
   newWindow = false
   cmd = trace-metadata
   recordingMetadataIdArg = none
-  traceMetadataPathArg = none
+  traceMetadataPathArg = some("")
   traceMetadataRecordPidArg = none
   traceMetadataProgramArg = none
   traceMetadataRecent = false
@@ -727,25 +727,37 @@ VALIDATED replayInteractive = false
 ### 25: --path -x (value starts with -)
 argv: ct "trace-metadata" "--path" "-x"
 env: (none)
-exit: 1
+exit: 0
 --- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace-metadata
+  recordingMetadataIdArg = none
+  traceMetadataPathArg = some("-x")
+  traceMetadataRecordPidArg = none
+  traceMetadataProgramArg = none
+  traceMetadataRecent = false
+  traceMetadataRecentFolders = false
+  traceMetadataAddRecentFolder = none
+  traceMetadataRecentLimit = 4
+  traceMetadataImportCt = none
+  traceMetadataImportSource = none
+  traceMetadataTest = false
+VALIDATED replayInteractive = false
 --- stderr
-Unrecognized option 'x'\e[0m
-Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 26: --path --x (value starts with --)
 argv: ct "trace-metadata" "--path" "--x"
-env: (none)
-exit: 1
---- stdout
---- stderr
-Unrecognized option 'x'\e[0m
-Try \e[36mct --help\e[0m for more information.
---- end
-
-### 27: --path --new-tab <v> (an option between it and its value)
-argv: ct "trace-metadata" "--path" "--new-tab" "/t"
 env: (none)
 exit: 0
 --- stdout
@@ -758,11 +770,11 @@ PARSED
   inspect = none
   remoteDebuggingPort = none
   remoteDebuggingPipe = false
-  newTab = true
+  newTab = false
   newWindow = false
   cmd = trace-metadata
   recordingMetadataIdArg = none
-  traceMetadataPathArg = some("/t")
+  traceMetadataPathArg = some("--x")
   traceMetadataRecordPidArg = none
   traceMetadataProgramArg = none
   traceMetadataRecent = false
@@ -774,6 +786,16 @@ PARSED
   traceMetadataTest = false
 VALIDATED replayInteractive = false
 --- stderr
+--- end
+
+### 27: --path --new-tab <v> (an option between it and its value)
+argv: ct "trace-metadata" "--path" "--new-tab" "/t"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The subcommand 'trace-metadata' does not accept arguments\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 28: --path repeated, last wins
@@ -811,33 +833,11 @@ VALIDATED replayInteractive = false
 ### 29: --path missing value (last)
 argv: ct "trace-metadata" "--path"
 env: (none)
-exit: 0
+exit: 1
 --- stdout
-PARSED
-  cwd = none
-  envFiles = @[]
-  env0Files = @[]
-  tmpEnvFiles = @[]
-  tmpEnv0Files = @[]
-  inspect = none
-  remoteDebuggingPort = none
-  remoteDebuggingPipe = false
-  newTab = false
-  newWindow = false
-  cmd = trace-metadata
-  recordingMetadataIdArg = none
-  traceMetadataPathArg = none
-  traceMetadataRecordPidArg = none
-  traceMetadataProgramArg = none
-  traceMetadataRecent = false
-  traceMetadataRecentFolders = false
-  traceMetadataAddRecentFolder = none
-  traceMetadataRecentLimit = 4
-  traceMetadataImportCt = none
-  traceMetadataImportSource = none
-  traceMetadataTest = false
-VALIDATED replayInteractive = false
 --- stderr
+The option '\e[34m--path\e[0m' requires a value\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 30: --PATH <v> (style variant)
@@ -1099,16 +1099,6 @@ VALIDATED replayInteractive = false
 ### 38: -r<v> (attached)
 argv: ct "trace-metadata" "-r42"
 env: (none)
-exit: 1
---- stdout
---- stderr
-Unrecognized option '4'\e[0m
-Try \e[36mct --help\e[0m for more information.
---- end
-
-### 39: -R <v> (other case)
-argv: ct "trace-metadata" "-R" "42"
-env: (none)
 exit: 0
 --- stdout
 PARSED
@@ -1136,6 +1126,16 @@ PARSED
   traceMetadataTest = false
 VALIDATED replayInteractive = false
 --- stderr
+--- end
+
+### 39: -R <v> (other case)
+argv: ct "trace-metadata" "-R" "42"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'R'\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 40: --r <v> (the letter as a long option)
@@ -1267,33 +1267,11 @@ Try \e[36mct --help\e[0m for more information.
 ### 46: --record-pid= (empty)
 argv: ct "trace-metadata" "--record-pid="
 env: (none)
-exit: 0
+exit: 1
 --- stdout
-PARSED
-  cwd = none
-  envFiles = @[]
-  env0Files = @[]
-  tmpEnvFiles = @[]
-  tmpEnv0Files = @[]
-  inspect = none
-  remoteDebuggingPort = none
-  remoteDebuggingPipe = false
-  newTab = false
-  newWindow = false
-  cmd = trace-metadata
-  recordingMetadataIdArg = none
-  traceMetadataPathArg = none
-  traceMetadataRecordPidArg = none
-  traceMetadataProgramArg = none
-  traceMetadataRecent = false
-  traceMetadataRecentFolders = false
-  traceMetadataAddRecentFolder = none
-  traceMetadataRecentLimit = 4
-  traceMetadataImportCt = none
-  traceMetadataImportSource = none
-  traceMetadataTest = false
-VALIDATED replayInteractive = false
 --- stderr
+Error while processing the \e[34mrecord-pid=\e[0m parameter: invalid integer: \e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 47: --record-pid= <v> (next word)
@@ -1334,7 +1312,7 @@ env: (none)
 exit: 1
 --- stdout
 --- stderr
-Unrecognized option 'x'\e[0m
+Error while processing the \e[34mrecord-pid=-x\e[0m parameter: invalid integer: -x\e[0m
 Try \e[36mct --help\e[0m for more information.
 --- end
 
@@ -1344,40 +1322,18 @@ env: (none)
 exit: 1
 --- stdout
 --- stderr
-Unrecognized option 'x'\e[0m
+Error while processing the \e[34mrecord-pid=--x\e[0m parameter: invalid integer: --x\e[0m
 Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 50: --record-pid --new-tab <v> (an option between it and its value)
 argv: ct "trace-metadata" "--record-pid" "--new-tab" "42"
 env: (none)
-exit: 0
+exit: 1
 --- stdout
-PARSED
-  cwd = none
-  envFiles = @[]
-  env0Files = @[]
-  tmpEnvFiles = @[]
-  tmpEnv0Files = @[]
-  inspect = none
-  remoteDebuggingPort = none
-  remoteDebuggingPipe = false
-  newTab = true
-  newWindow = false
-  cmd = trace-metadata
-  recordingMetadataIdArg = none
-  traceMetadataPathArg = none
-  traceMetadataRecordPidArg = some(42)
-  traceMetadataProgramArg = none
-  traceMetadataRecent = false
-  traceMetadataRecentFolders = false
-  traceMetadataAddRecentFolder = none
-  traceMetadataRecentLimit = 4
-  traceMetadataImportCt = none
-  traceMetadataImportSource = none
-  traceMetadataTest = false
-VALIDATED replayInteractive = false
 --- stderr
+Error while processing the \e[34mrecord-pid=--new-tab\e[0m parameter: invalid integer: --new-tab\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 51: --record-pid repeated, last wins
@@ -1415,33 +1371,11 @@ VALIDATED replayInteractive = false
 ### 52: --record-pid missing value (last)
 argv: ct "trace-metadata" "--record-pid"
 env: (none)
-exit: 0
+exit: 1
 --- stdout
-PARSED
-  cwd = none
-  envFiles = @[]
-  env0Files = @[]
-  tmpEnvFiles = @[]
-  tmpEnv0Files = @[]
-  inspect = none
-  remoteDebuggingPort = none
-  remoteDebuggingPipe = false
-  newTab = false
-  newWindow = false
-  cmd = trace-metadata
-  recordingMetadataIdArg = none
-  traceMetadataPathArg = none
-  traceMetadataRecordPidArg = none
-  traceMetadataProgramArg = none
-  traceMetadataRecent = false
-  traceMetadataRecentFolders = false
-  traceMetadataAddRecentFolder = none
-  traceMetadataRecentLimit = 4
-  traceMetadataImportCt = none
-  traceMetadataImportSource = none
-  traceMetadataTest = false
-VALIDATED replayInteractive = false
 --- stderr
+The option '\e[34m--record-pid\e[0m' requires a value\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 53: --RECORD-PID <v> (style variant)
@@ -1740,7 +1674,7 @@ PARSED
   recordingMetadataIdArg = none
   traceMetadataPathArg = none
   traceMetadataRecordPidArg = none
-  traceMetadataProgramArg = none
+  traceMetadataProgramArg = some("")
   traceMetadataRecent = false
   traceMetadataRecentFolders = false
   traceMetadataAddRecentFolder = none
@@ -1787,25 +1721,37 @@ VALIDATED replayInteractive = false
 ### 65: --program -x (value starts with -)
 argv: ct "trace-metadata" "--program" "-x"
 env: (none)
-exit: 1
+exit: 0
 --- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace-metadata
+  recordingMetadataIdArg = none
+  traceMetadataPathArg = none
+  traceMetadataRecordPidArg = none
+  traceMetadataProgramArg = some("-x")
+  traceMetadataRecent = false
+  traceMetadataRecentFolders = false
+  traceMetadataAddRecentFolder = none
+  traceMetadataRecentLimit = 4
+  traceMetadataImportCt = none
+  traceMetadataImportSource = none
+  traceMetadataTest = false
+VALIDATED replayInteractive = false
 --- stderr
-Unrecognized option 'x'\e[0m
-Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 66: --program --x (value starts with --)
 argv: ct "trace-metadata" "--program" "--x"
-env: (none)
-exit: 1
---- stdout
---- stderr
-Unrecognized option 'x'\e[0m
-Try \e[36mct --help\e[0m for more information.
---- end
-
-### 67: --program --new-tab <v> (an option between it and its value)
-argv: ct "trace-metadata" "--program" "--new-tab" "prog"
 env: (none)
 exit: 0
 --- stdout
@@ -1818,13 +1764,13 @@ PARSED
   inspect = none
   remoteDebuggingPort = none
   remoteDebuggingPipe = false
-  newTab = true
+  newTab = false
   newWindow = false
   cmd = trace-metadata
   recordingMetadataIdArg = none
   traceMetadataPathArg = none
   traceMetadataRecordPidArg = none
-  traceMetadataProgramArg = some("prog")
+  traceMetadataProgramArg = some("--x")
   traceMetadataRecent = false
   traceMetadataRecentFolders = false
   traceMetadataAddRecentFolder = none
@@ -1834,6 +1780,16 @@ PARSED
   traceMetadataTest = false
 VALIDATED replayInteractive = false
 --- stderr
+--- end
+
+### 67: --program --new-tab <v> (an option between it and its value)
+argv: ct "trace-metadata" "--program" "--new-tab" "prog"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The subcommand 'trace-metadata' does not accept arguments\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 68: --program repeated, last wins
@@ -1871,33 +1827,11 @@ VALIDATED replayInteractive = false
 ### 69: --program missing value (last)
 argv: ct "trace-metadata" "--program"
 env: (none)
-exit: 0
+exit: 1
 --- stdout
-PARSED
-  cwd = none
-  envFiles = @[]
-  env0Files = @[]
-  tmpEnvFiles = @[]
-  tmpEnv0Files = @[]
-  inspect = none
-  remoteDebuggingPort = none
-  remoteDebuggingPipe = false
-  newTab = false
-  newWindow = false
-  cmd = trace-metadata
-  recordingMetadataIdArg = none
-  traceMetadataPathArg = none
-  traceMetadataRecordPidArg = none
-  traceMetadataProgramArg = none
-  traceMetadataRecent = false
-  traceMetadataRecentFolders = false
-  traceMetadataAddRecentFolder = none
-  traceMetadataRecentLimit = 4
-  traceMetadataImportCt = none
-  traceMetadataImportSource = none
-  traceMetadataTest = false
-VALIDATED replayInteractive = false
 --- stderr
+The option '\e[34m--program\e[0m' requires a value\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 70: --PROGRAM <v> (style variant)
@@ -3155,7 +3089,7 @@ PARSED
   traceMetadataProgramArg = none
   traceMetadataRecent = false
   traceMetadataRecentFolders = false
-  traceMetadataAddRecentFolder = none
+  traceMetadataAddRecentFolder = some("")
   traceMetadataRecentLimit = 4
   traceMetadataImportCt = none
   traceMetadataImportSource = none
@@ -3199,25 +3133,37 @@ VALIDATED replayInteractive = false
 ### 116: --add-recent-folder -x (value starts with -)
 argv: ct "trace-metadata" "--add-recent-folder" "-x"
 env: (none)
-exit: 1
+exit: 0
 --- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace-metadata
+  recordingMetadataIdArg = none
+  traceMetadataPathArg = none
+  traceMetadataRecordPidArg = none
+  traceMetadataProgramArg = none
+  traceMetadataRecent = false
+  traceMetadataRecentFolders = false
+  traceMetadataAddRecentFolder = some("-x")
+  traceMetadataRecentLimit = 4
+  traceMetadataImportCt = none
+  traceMetadataImportSource = none
+  traceMetadataTest = false
+VALIDATED replayInteractive = false
 --- stderr
-Unrecognized option 'x'\e[0m
-Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 117: --add-recent-folder --x (value starts with --)
 argv: ct "trace-metadata" "--add-recent-folder" "--x"
-env: (none)
-exit: 1
---- stdout
---- stderr
-Unrecognized option 'x'\e[0m
-Try \e[36mct --help\e[0m for more information.
---- end
-
-### 118: --add-recent-folder --new-tab <v> (an option between it and its value)
-argv: ct "trace-metadata" "--add-recent-folder" "--new-tab" "/f"
 env: (none)
 exit: 0
 --- stdout
@@ -3230,7 +3176,7 @@ PARSED
   inspect = none
   remoteDebuggingPort = none
   remoteDebuggingPipe = false
-  newTab = true
+  newTab = false
   newWindow = false
   cmd = trace-metadata
   recordingMetadataIdArg = none
@@ -3239,13 +3185,23 @@ PARSED
   traceMetadataProgramArg = none
   traceMetadataRecent = false
   traceMetadataRecentFolders = false
-  traceMetadataAddRecentFolder = some("/f")
+  traceMetadataAddRecentFolder = some("--x")
   traceMetadataRecentLimit = 4
   traceMetadataImportCt = none
   traceMetadataImportSource = none
   traceMetadataTest = false
 VALIDATED replayInteractive = false
 --- stderr
+--- end
+
+### 118: --add-recent-folder --new-tab <v> (an option between it and its value)
+argv: ct "trace-metadata" "--add-recent-folder" "--new-tab" "/f"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The subcommand 'trace-metadata' does not accept arguments\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 119: --add-recent-folder repeated, last wins
@@ -3283,33 +3239,11 @@ VALIDATED replayInteractive = false
 ### 120: --add-recent-folder missing value (last)
 argv: ct "trace-metadata" "--add-recent-folder"
 env: (none)
-exit: 0
+exit: 1
 --- stdout
-PARSED
-  cwd = none
-  envFiles = @[]
-  env0Files = @[]
-  tmpEnvFiles = @[]
-  tmpEnv0Files = @[]
-  inspect = none
-  remoteDebuggingPort = none
-  remoteDebuggingPipe = false
-  newTab = false
-  newWindow = false
-  cmd = trace-metadata
-  recordingMetadataIdArg = none
-  traceMetadataPathArg = none
-  traceMetadataRecordPidArg = none
-  traceMetadataProgramArg = none
-  traceMetadataRecent = false
-  traceMetadataRecentFolders = false
-  traceMetadataAddRecentFolder = none
-  traceMetadataRecentLimit = 4
-  traceMetadataImportCt = none
-  traceMetadataImportSource = none
-  traceMetadataTest = false
-VALIDATED replayInteractive = false
 --- stderr
+The option '\e[34m--add-recent-folder\e[0m' requires a value\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 121: --ADD-RECENT-FOLDER <v> (style variant)
@@ -3653,33 +3587,11 @@ Try \e[36mct --help\e[0m for more information.
 ### 135: --limit= (empty)
 argv: ct "trace-metadata" "--limit="
 env: (none)
-exit: 0
+exit: 1
 --- stdout
-PARSED
-  cwd = none
-  envFiles = @[]
-  env0Files = @[]
-  tmpEnvFiles = @[]
-  tmpEnv0Files = @[]
-  inspect = none
-  remoteDebuggingPort = none
-  remoteDebuggingPipe = false
-  newTab = false
-  newWindow = false
-  cmd = trace-metadata
-  recordingMetadataIdArg = none
-  traceMetadataPathArg = none
-  traceMetadataRecordPidArg = none
-  traceMetadataProgramArg = none
-  traceMetadataRecent = false
-  traceMetadataRecentFolders = false
-  traceMetadataAddRecentFolder = none
-  traceMetadataRecentLimit = 4
-  traceMetadataImportCt = none
-  traceMetadataImportSource = none
-  traceMetadataTest = false
-VALIDATED replayInteractive = false
 --- stderr
+Error while processing the \e[34mlimit=\e[0m parameter: invalid integer: \e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 136: --limit= <v> (next word)
@@ -3720,7 +3632,7 @@ env: (none)
 exit: 1
 --- stdout
 --- stderr
-Unrecognized option 'x'\e[0m
+Error while processing the \e[34mlimit=-x\e[0m parameter: invalid integer: -x\e[0m
 Try \e[36mct --help\e[0m for more information.
 --- end
 
@@ -3730,40 +3642,18 @@ env: (none)
 exit: 1
 --- stdout
 --- stderr
-Unrecognized option 'x'\e[0m
+Error while processing the \e[34mlimit=--x\e[0m parameter: invalid integer: --x\e[0m
 Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 139: --limit --new-tab <v> (an option between it and its value)
 argv: ct "trace-metadata" "--limit" "--new-tab" "10"
 env: (none)
-exit: 0
+exit: 1
 --- stdout
-PARSED
-  cwd = none
-  envFiles = @[]
-  env0Files = @[]
-  tmpEnvFiles = @[]
-  tmpEnv0Files = @[]
-  inspect = none
-  remoteDebuggingPort = none
-  remoteDebuggingPipe = false
-  newTab = true
-  newWindow = false
-  cmd = trace-metadata
-  recordingMetadataIdArg = none
-  traceMetadataPathArg = none
-  traceMetadataRecordPidArg = none
-  traceMetadataProgramArg = none
-  traceMetadataRecent = false
-  traceMetadataRecentFolders = false
-  traceMetadataAddRecentFolder = none
-  traceMetadataRecentLimit = 10
-  traceMetadataImportCt = none
-  traceMetadataImportSource = none
-  traceMetadataTest = false
-VALIDATED replayInteractive = false
 --- stderr
+Error while processing the \e[34mlimit=--new-tab\e[0m parameter: invalid integer: --new-tab\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 140: --limit repeated, last wins
@@ -3801,33 +3691,11 @@ VALIDATED replayInteractive = false
 ### 141: --limit missing value (last)
 argv: ct "trace-metadata" "--limit"
 env: (none)
-exit: 0
+exit: 1
 --- stdout
-PARSED
-  cwd = none
-  envFiles = @[]
-  env0Files = @[]
-  tmpEnvFiles = @[]
-  tmpEnv0Files = @[]
-  inspect = none
-  remoteDebuggingPort = none
-  remoteDebuggingPipe = false
-  newTab = false
-  newWindow = false
-  cmd = trace-metadata
-  recordingMetadataIdArg = none
-  traceMetadataPathArg = none
-  traceMetadataRecordPidArg = none
-  traceMetadataProgramArg = none
-  traceMetadataRecent = false
-  traceMetadataRecentFolders = false
-  traceMetadataAddRecentFolder = none
-  traceMetadataRecentLimit = 4
-  traceMetadataImportCt = none
-  traceMetadataImportSource = none
-  traceMetadataTest = false
-VALIDATED replayInteractive = false
 --- stderr
+The option '\e[34m--limit\e[0m' requires a value\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 142: --LIMIT <v> (style variant)
@@ -4111,7 +3979,7 @@ PARSED
   traceMetadataRecentFolders = false
   traceMetadataAddRecentFolder = none
   traceMetadataRecentLimit = 4
-  traceMetadataImportCt = none
+  traceMetadataImportCt = some("")
   traceMetadataImportSource = none
   traceMetadataTest = false
 VALIDATED replayInteractive = false
@@ -4153,25 +4021,37 @@ VALIDATED replayInteractive = false
 ### 152: --import-ct -x (value starts with -)
 argv: ct "trace-metadata" "--import-ct" "-x"
 env: (none)
-exit: 1
+exit: 0
 --- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace-metadata
+  recordingMetadataIdArg = none
+  traceMetadataPathArg = none
+  traceMetadataRecordPidArg = none
+  traceMetadataProgramArg = none
+  traceMetadataRecent = false
+  traceMetadataRecentFolders = false
+  traceMetadataAddRecentFolder = none
+  traceMetadataRecentLimit = 4
+  traceMetadataImportCt = some("-x")
+  traceMetadataImportSource = none
+  traceMetadataTest = false
+VALIDATED replayInteractive = false
 --- stderr
-Unrecognized option 'x'\e[0m
-Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 153: --import-ct --x (value starts with --)
 argv: ct "trace-metadata" "--import-ct" "--x"
-env: (none)
-exit: 1
---- stdout
---- stderr
-Unrecognized option 'x'\e[0m
-Try \e[36mct --help\e[0m for more information.
---- end
-
-### 154: --import-ct --new-tab <v> (an option between it and its value)
-argv: ct "trace-metadata" "--import-ct" "--new-tab" "/t.ct"
 env: (none)
 exit: 0
 --- stdout
@@ -4184,7 +4064,7 @@ PARSED
   inspect = none
   remoteDebuggingPort = none
   remoteDebuggingPipe = false
-  newTab = true
+  newTab = false
   newWindow = false
   cmd = trace-metadata
   recordingMetadataIdArg = none
@@ -4195,11 +4075,21 @@ PARSED
   traceMetadataRecentFolders = false
   traceMetadataAddRecentFolder = none
   traceMetadataRecentLimit = 4
-  traceMetadataImportCt = some("/t.ct")
+  traceMetadataImportCt = some("--x")
   traceMetadataImportSource = none
   traceMetadataTest = false
 VALIDATED replayInteractive = false
 --- stderr
+--- end
+
+### 154: --import-ct --new-tab <v> (an option between it and its value)
+argv: ct "trace-metadata" "--import-ct" "--new-tab" "/t.ct"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The subcommand 'trace-metadata' does not accept arguments\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 155: --import-ct repeated, last wins
@@ -4237,33 +4127,11 @@ VALIDATED replayInteractive = false
 ### 156: --import-ct missing value (last)
 argv: ct "trace-metadata" "--import-ct"
 env: (none)
-exit: 0
+exit: 1
 --- stdout
-PARSED
-  cwd = none
-  envFiles = @[]
-  env0Files = @[]
-  tmpEnvFiles = @[]
-  tmpEnv0Files = @[]
-  inspect = none
-  remoteDebuggingPort = none
-  remoteDebuggingPipe = false
-  newTab = false
-  newWindow = false
-  cmd = trace-metadata
-  recordingMetadataIdArg = none
-  traceMetadataPathArg = none
-  traceMetadataRecordPidArg = none
-  traceMetadataProgramArg = none
-  traceMetadataRecent = false
-  traceMetadataRecentFolders = false
-  traceMetadataAddRecentFolder = none
-  traceMetadataRecentLimit = 4
-  traceMetadataImportCt = none
-  traceMetadataImportSource = none
-  traceMetadataTest = false
-VALIDATED replayInteractive = false
 --- stderr
+The option '\e[34m--import-ct\e[0m' requires a value\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 157: --IMPORT-CT <v> (style variant)
@@ -4568,7 +4436,7 @@ PARSED
   traceMetadataAddRecentFolder = none
   traceMetadataRecentLimit = 4
   traceMetadataImportCt = none
-  traceMetadataImportSource = none
+  traceMetadataImportSource = some("")
   traceMetadataTest = false
 VALIDATED replayInteractive = false
 --- stderr
@@ -4609,25 +4477,37 @@ VALIDATED replayInteractive = false
 ### 169: --import-source -x (value starts with -)
 argv: ct "trace-metadata" "--import-source" "-x"
 env: (none)
-exit: 1
+exit: 0
 --- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace-metadata
+  recordingMetadataIdArg = none
+  traceMetadataPathArg = none
+  traceMetadataRecordPidArg = none
+  traceMetadataProgramArg = none
+  traceMetadataRecent = false
+  traceMetadataRecentFolders = false
+  traceMetadataAddRecentFolder = none
+  traceMetadataRecentLimit = 4
+  traceMetadataImportCt = none
+  traceMetadataImportSource = some("-x")
+  traceMetadataTest = false
+VALIDATED replayInteractive = false
 --- stderr
-Unrecognized option 'x'\e[0m
-Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 170: --import-source --x (value starts with --)
 argv: ct "trace-metadata" "--import-source" "--x"
-env: (none)
-exit: 1
---- stdout
---- stderr
-Unrecognized option 'x'\e[0m
-Try \e[36mct --help\e[0m for more information.
---- end
-
-### 171: --import-source --new-tab <v> (an option between it and its value)
-argv: ct "trace-metadata" "--import-source" "--new-tab" "/src"
 env: (none)
 exit: 0
 --- stdout
@@ -4640,7 +4520,7 @@ PARSED
   inspect = none
   remoteDebuggingPort = none
   remoteDebuggingPipe = false
-  newTab = true
+  newTab = false
   newWindow = false
   cmd = trace-metadata
   recordingMetadataIdArg = none
@@ -4652,10 +4532,20 @@ PARSED
   traceMetadataAddRecentFolder = none
   traceMetadataRecentLimit = 4
   traceMetadataImportCt = none
-  traceMetadataImportSource = some("/src")
+  traceMetadataImportSource = some("--x")
   traceMetadataTest = false
 VALIDATED replayInteractive = false
 --- stderr
+--- end
+
+### 171: --import-source --new-tab <v> (an option between it and its value)
+argv: ct "trace-metadata" "--import-source" "--new-tab" "/src"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The subcommand 'trace-metadata' does not accept arguments\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 172: --import-source repeated, last wins
@@ -4693,33 +4583,11 @@ VALIDATED replayInteractive = false
 ### 173: --import-source missing value (last)
 argv: ct "trace-metadata" "--import-source"
 env: (none)
-exit: 0
+exit: 1
 --- stdout
-PARSED
-  cwd = none
-  envFiles = @[]
-  env0Files = @[]
-  tmpEnvFiles = @[]
-  tmpEnv0Files = @[]
-  inspect = none
-  remoteDebuggingPort = none
-  remoteDebuggingPipe = false
-  newTab = false
-  newWindow = false
-  cmd = trace-metadata
-  recordingMetadataIdArg = none
-  traceMetadataPathArg = none
-  traceMetadataRecordPidArg = none
-  traceMetadataProgramArg = none
-  traceMetadataRecent = false
-  traceMetadataRecentFolders = false
-  traceMetadataAddRecentFolder = none
-  traceMetadataRecentLimit = 4
-  traceMetadataImportCt = none
-  traceMetadataImportSource = none
-  traceMetadataTest = false
-VALIDATED replayInteractive = false
 --- stderr
+The option '\e[34m--import-source\e[0m' requires a value\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 174: --IMPORT-SOURCE <v> (style variant)
@@ -5359,97 +5227,31 @@ Try \e[36mct --help\e[0m for more information.
 ### 200: lone -
 argv: ct "trace-metadata" "-"
 env: (none)
-exit: 0
+exit: 1
 --- stdout
-PARSED
-  cwd = none
-  envFiles = @[]
-  env0Files = @[]
-  tmpEnvFiles = @[]
-  tmpEnv0Files = @[]
-  inspect = none
-  remoteDebuggingPort = none
-  remoteDebuggingPipe = false
-  newTab = false
-  newWindow = false
-  cmd = trace-metadata
-  recordingMetadataIdArg = none
-  traceMetadataPathArg = none
-  traceMetadataRecordPidArg = none
-  traceMetadataProgramArg = none
-  traceMetadataRecent = false
-  traceMetadataRecentFolders = false
-  traceMetadataAddRecentFolder = none
-  traceMetadataRecentLimit = 4
-  traceMetadataImportCt = none
-  traceMetadataImportSource = none
-  traceMetadataTest = false
-VALIDATED replayInteractive = false
 --- stderr
+Unrecognized option ''\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 201: lone -- then a word
 argv: ct "trace-metadata" "--" "w"
 env: (none)
-exit: 0
+exit: 1
 --- stdout
-PARSED
-  cwd = none
-  envFiles = @[]
-  env0Files = @[]
-  tmpEnvFiles = @[]
-  tmpEnv0Files = @[]
-  inspect = none
-  remoteDebuggingPort = none
-  remoteDebuggingPipe = false
-  newTab = false
-  newWindow = false
-  cmd = trace-metadata
-  recordingMetadataIdArg = some("w")
-  traceMetadataPathArg = none
-  traceMetadataRecordPidArg = none
-  traceMetadataProgramArg = none
-  traceMetadataRecent = false
-  traceMetadataRecentFolders = false
-  traceMetadataAddRecentFolder = none
-  traceMetadataRecentLimit = 4
-  traceMetadataImportCt = none
-  traceMetadataImportSource = none
-  traceMetadataTest = false
-VALIDATED replayInteractive = false
 --- stderr
+Unrecognized option ''\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 202: --=v
 argv: ct "trace-metadata" "--=v"
 env: (none)
-exit: 0
+exit: 1
 --- stdout
-PARSED
-  cwd = none
-  envFiles = @[]
-  env0Files = @[]
-  tmpEnvFiles = @[]
-  tmpEnv0Files = @[]
-  inspect = none
-  remoteDebuggingPort = none
-  remoteDebuggingPipe = false
-  newTab = false
-  newWindow = false
-  cmd = trace-metadata
-  recordingMetadataIdArg = some("v")
-  traceMetadataPathArg = none
-  traceMetadataRecordPidArg = none
-  traceMetadataProgramArg = none
-  traceMetadataRecent = false
-  traceMetadataRecentFolders = false
-  traceMetadataAddRecentFolder = none
-  traceMetadataRecentLimit = 4
-  traceMetadataImportCt = none
-  traceMetadataImportSource = none
-  traceMetadataTest = false
-VALIDATED replayInteractive = false
 --- stderr
+Unrecognized option ''\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 203: extra positional
@@ -5540,9 +5342,31 @@ CodeTracer version: <VERSION>
 ### 207: -h after the command
 argv: ct "trace-metadata" "-h"
 env: (none)
-exit: 1
+exit: 0
 --- stdout
+CodeTracer - the user-friendly time-travelling debugger
+
+\e[0m\e[33mUsage:\x20
+\e[0m\e[1m
+\e[36mct trace-metadata\e[0m [OPTIONS]...
+
+The following options are available:
+
+     \e[34m\e[1m--id                   \e[0m  a recording id (UUIDv7) — accepts 8+ char short
+                              prefix.\e[0m
+     \e[34m\e[1m--path                 \e[0m  path for a trace.\e[0m
+ \e[34m\e[1m-r, \e[0m\e[34m\e[1m--record-pid           \e[0m  record pid for a trace.\e[0m
+     \e[34m\e[1m--program              \e[0m  program pattern to find a trace with.\e[0m
+     \e[34m\e[1m--recent               \e[0m  return recent traces [=false].\e[0m
+     \e[34m\e[1m--recent-folders       \e[0m  return recent folders [=false].\e[0m
+     \e[34m\e[1m--add-recent-folder    \e[0m  add a folder to recent folders.\e[0m
+     \e[34m\e[1m--limit                \e[0m  recent traces/folders limit [=4].\e[0m
+     \e[34m\e[1m--import-ct            \e[0m  register the .ct at this path as a Nim trace, laid
+                              out in a folder of its own (the desktop's Trace
+                              Macro route); prints its row.\e[0m
+     \e[34m\e[1m--import-source        \e[0m  with --import-ct: the Nim source the trace was
+                              made from, whose Nim files are copied beside it.\e[0m
+     \e[34m\e[1m--test                 \e[0m
+
 --- stderr
-Unrecognized option 'h'\e[0m
-Try \e[36mct --help\e[0m for more information.
 --- end

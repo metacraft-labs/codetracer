@@ -1,0 +1,191 @@
+# two refusals in one line: the first in argv order is printed: 19 argv cases through ct's loader (the parse probe)
+
+### 1: value, then an unknown long option
+argv: ct "print" "--limit" "abc" "--bogus" "t.jsonl"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Error while processing the \e[34mlimit=abc\e[0m parameter: invalid integer: abc\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 2: value, then an unknown short option
+argv: ct "print" "t.jsonl" "--limit" "abc" "-Z"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Error while processing the \e[34mlimit=abc\e[0m parameter: invalid integer: abc\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 3: unknown option, then a value
+argv: ct "print" "--bogus" "--limit" "abc" "t.jsonl"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'bogus'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 4: value, then a missing value
+argv: ct "print" "--limit" "abc" "t.jsonl" "--filter"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Error while processing the \e[34mlimit=abc\e[0m parameter: invalid integer: abc\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 5: value, then a stray word
+argv: ct "print" "--limit" "abc" "a" "b"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Error while processing the \e[34mlimit=abc\e[0m parameter: invalid integer: abc\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 6: switch value, then an integer value
+argv: ct "print" "--verify=maybe" "-n" "abc" "t.jsonl"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Error while processing the \e[34mverify=maybe\e[0m parameter: 'maybe' is not a valid boolean value. Supported values are on/off, yes/no, true/false or 1/0\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 7: integer value, then a switch value
+argv: ct "print" "-n" "abc" "--verify=maybe" "t.jsonl"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Error while processing the \e[34mlimit=abc\e[0m parameter: invalid integer: abc\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 8: two switch values
+argv: ct "install" "--json=maybe" "--bpf=nah"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Error while processing the \e[34mjson=maybe\e[0m parameter: 'maybe' is not a valid boolean value. Supported values are on/off, yes/no, true/false or 1/0\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 9: global switch value, then an unknown option after the command
+argv: ct "--new-tab=maybe" "list" "--bogus"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Error while processing the \e[34mnew-tab=maybe\e[0m parameter: 'maybe' is not a valid boolean value. Supported values are on/off, yes/no, true/false or 1/0\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 10: global switch value, then an unknown option before the command
+argv: ct "--new-tab=maybe" "--bogus" "list"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Error while processing the \e[34mnew-tab=maybe\e[0m parameter: 'maybe' is not a valid boolean value. Supported values are on/off, yes/no, true/false or 1/0\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 11: global switch value, then an unknown command
+argv: ct "--new-tab=maybe" "frob"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Error while processing the \e[34mnew-tab=maybe\e[0m parameter: 'maybe' is not a valid boolean value. Supported values are on/off, yes/no, true/false or 1/0\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 12: integer value, then an unknown option
+argv: ct "host" "--port" "x" "--bogus"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Error while processing the \e[34mport=x\e[0m parameter: invalid integer: x\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 13: two integer values
+argv: ct "trace-metadata" "--limit" "x" "--record-pid" "y"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Error while processing the \e[34mlimit=x\e[0m parameter: invalid integer: x\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 14: enum value, then a missing value
+argv: ct "upload" "--omniscient-db=bad" "--id"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Error while processing the \e[34momniscient-db=bad\e[0m parameter: Invalid enum value: bad\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 15: enum value in another style, then an unknown option
+argv: ct "upload" "--omniscient-db=PRE_prepared" "--bogus"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Error while processing the \e[34momniscient-db=PRE_prepared\e[0m parameter: Invalid enum value: PRE_prepared\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 16: record: integer value, then an unknown option
+argv: ct "record" "--store-trace-folder-for-pid" "x" "--bogus" "prog"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Error while processing the \e[34mstore-trace-folder-for-pid=x\e[0m parameter: invalid integer: x\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 17: ci exec: two switch values
+argv: ct "ci" "exec" "--record=nope" "--monitor-processes=x" "cmd"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Error while processing the \e[34mrecord=nope\e[0m parameter: 'nope' is not a valid boolean value. Supported values are on/off, yes/no, true/false or 1/0\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 18: value on the command line, value in the environment
+argv: ct "print" "--limit" "abc" "t.jsonl"
+env: <APP>_VERIFY="maybe"
+exit: 1
+--- stdout
+--- stderr
+Error while processing the \e[34mlimit=abc\e[0m parameter: invalid integer: abc\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 19: unknown option on the command line, value in the environment
+argv: ct "print" "--bogus" "t.jsonl"
+env: <APP>_LIMIT="ten"
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'bogus'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end

@@ -319,11 +319,35 @@ VALIDATED replayInteractive = false
 ### 11: --port -1
 argv: ct "host" "--port" "-1"
 env: (none)
-exit: 1
+exit: 0
 --- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = host
+  hostPort = -1
+  hostBind = ""
+  hostBackendSocketPort = none
+  hostFrontendSocketPort = none
+  hostFrontendSocketParameters = ""
+  hostIdleTimeout = ""
+  hostTracePath = ""
+  hostManifestPath = ""
+  hostStorageBaseUrl = ""
+  hostStorageTenantId = ""
+  hostStorageToken = ""
+  hostStorageProtocol = ""
+  hostTraceArg = ""
+VALIDATED replayInteractive = false
 --- stderr
-Unrecognized option '1'\e[0m
-Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 12: --port=-1
@@ -433,35 +457,11 @@ Try \e[36mct --help\e[0m for more information.
 ### 20: --port= (empty)
 argv: ct "host" "--port="
 env: (none)
-exit: 0
+exit: 1
 --- stdout
-PARSED
-  cwd = none
-  envFiles = @[]
-  env0Files = @[]
-  tmpEnvFiles = @[]
-  tmpEnv0Files = @[]
-  inspect = none
-  remoteDebuggingPort = none
-  remoteDebuggingPipe = false
-  newTab = false
-  newWindow = false
-  cmd = host
-  hostPort = -1
-  hostBind = ""
-  hostBackendSocketPort = none
-  hostFrontendSocketPort = none
-  hostFrontendSocketParameters = ""
-  hostIdleTimeout = ""
-  hostTracePath = ""
-  hostManifestPath = ""
-  hostStorageBaseUrl = ""
-  hostStorageTenantId = ""
-  hostStorageToken = ""
-  hostStorageProtocol = ""
-  hostTraceArg = ""
-VALIDATED replayInteractive = false
 --- stderr
+Error while processing the \e[34mport=\e[0m parameter: invalid integer: \e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 21: --port= <v> (next word)
@@ -504,7 +504,7 @@ env: (none)
 exit: 1
 --- stdout
 --- stderr
-Unrecognized option 'x'\e[0m
+Error while processing the \e[34mport=-x\e[0m parameter: invalid integer: -x\e[0m
 Try \e[36mct --help\e[0m for more information.
 --- end
 
@@ -514,56 +514,22 @@ env: (none)
 exit: 1
 --- stdout
 --- stderr
-Unrecognized option 'x'\e[0m
+Error while processing the \e[34mport=--x\e[0m parameter: invalid integer: --x\e[0m
 Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 24: --port --new-tab <v> (an option between it and its value)
 argv: ct "host" "--port" "--new-tab" "5000"
 env: (none)
-exit: 0
+exit: 1
 --- stdout
-PARSED
-  cwd = none
-  envFiles = @[]
-  env0Files = @[]
-  tmpEnvFiles = @[]
-  tmpEnv0Files = @[]
-  inspect = none
-  remoteDebuggingPort = none
-  remoteDebuggingPipe = false
-  newTab = true
-  newWindow = false
-  cmd = host
-  hostPort = 5000
-  hostBind = ""
-  hostBackendSocketPort = none
-  hostFrontendSocketPort = none
-  hostFrontendSocketParameters = ""
-  hostIdleTimeout = ""
-  hostTracePath = ""
-  hostManifestPath = ""
-  hostStorageBaseUrl = ""
-  hostStorageTenantId = ""
-  hostStorageToken = ""
-  hostStorageProtocol = ""
-  hostTraceArg = ""
-VALIDATED replayInteractive = false
 --- stderr
+Error while processing the \e[34mport=--new-tab\e[0m parameter: invalid integer: --new-tab\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 25: --port repeated, last wins
 argv: ct "host" "--port" "5000" "--port" "-1"
-env: (none)
-exit: 1
---- stdout
---- stderr
-Unrecognized option '1'\e[0m
-Try \e[36mct --help\e[0m for more information.
---- end
-
-### 26: --port missing value (last)
-argv: ct "host" "--port"
 env: (none)
 exit: 0
 --- stdout
@@ -594,6 +560,16 @@ PARSED
   hostTraceArg = ""
 VALIDATED replayInteractive = false
 --- stderr
+--- end
+
+### 26: --port missing value (last)
+argv: ct "host" "--port"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The option '\e[34m--port\e[0m' requires a value\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 27: --PORT <v> (style variant)
@@ -1007,21 +983,69 @@ VALIDATED replayInteractive = false
 ### 39: --bind -x (value starts with -)
 argv: ct "host" "--bind" "-x"
 env: (none)
-exit: 1
+exit: 0
 --- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = host
+  hostPort = -1
+  hostBind = "-x"
+  hostBackendSocketPort = none
+  hostFrontendSocketPort = none
+  hostFrontendSocketParameters = ""
+  hostIdleTimeout = ""
+  hostTracePath = ""
+  hostManifestPath = ""
+  hostStorageBaseUrl = ""
+  hostStorageTenantId = ""
+  hostStorageToken = ""
+  hostStorageProtocol = ""
+  hostTraceArg = ""
+VALIDATED replayInteractive = false
 --- stderr
-Unrecognized option 'x'\e[0m
-Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 40: --bind --x (value starts with --)
 argv: ct "host" "--bind" "--x"
 env: (none)
-exit: 1
+exit: 0
 --- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = host
+  hostPort = -1
+  hostBind = "--x"
+  hostBackendSocketPort = none
+  hostFrontendSocketPort = none
+  hostFrontendSocketParameters = ""
+  hostIdleTimeout = ""
+  hostTracePath = ""
+  hostManifestPath = ""
+  hostStorageBaseUrl = ""
+  hostStorageTenantId = ""
+  hostStorageToken = ""
+  hostStorageProtocol = ""
+  hostTraceArg = ""
+VALIDATED replayInteractive = false
 --- stderr
-Unrecognized option 'x'\e[0m
-Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 41: --bind --new-tab <v> (an option between it and its value)
@@ -1038,11 +1062,11 @@ PARSED
   inspect = none
   remoteDebuggingPort = none
   remoteDebuggingPipe = false
-  newTab = true
+  newTab = false
   newWindow = false
   cmd = host
   hostPort = -1
-  hostBind = "0.0.0.0"
+  hostBind = "--new-tab"
   hostBackendSocketPort = none
   hostFrontendSocketPort = none
   hostFrontendSocketParameters = ""
@@ -1053,7 +1077,7 @@ PARSED
   hostStorageTenantId = ""
   hostStorageToken = ""
   hostStorageProtocol = ""
-  hostTraceArg = ""
+  hostTraceArg = "0.0.0.0"
 VALIDATED replayInteractive = false
 --- stderr
 --- end
@@ -1095,35 +1119,11 @@ VALIDATED replayInteractive = false
 ### 43: --bind missing value (last)
 argv: ct "host" "--bind"
 env: (none)
-exit: 0
+exit: 1
 --- stdout
-PARSED
-  cwd = none
-  envFiles = @[]
-  env0Files = @[]
-  tmpEnvFiles = @[]
-  tmpEnv0Files = @[]
-  inspect = none
-  remoteDebuggingPort = none
-  remoteDebuggingPipe = false
-  newTab = false
-  newWindow = false
-  cmd = host
-  hostPort = -1
-  hostBind = ""
-  hostBackendSocketPort = none
-  hostFrontendSocketPort = none
-  hostFrontendSocketParameters = ""
-  hostIdleTimeout = ""
-  hostTracePath = ""
-  hostManifestPath = ""
-  hostStorageBaseUrl = ""
-  hostStorageTenantId = ""
-  hostStorageToken = ""
-  hostStorageProtocol = ""
-  hostTraceArg = ""
-VALIDATED replayInteractive = false
 --- stderr
+The option '\e[34m--bind\e[0m' requires a value\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 44: --BIND <v> (style variant)
@@ -1397,35 +1397,11 @@ Try \e[36mct --help\e[0m for more information.
 ### 54: --backend-socket-port= (empty)
 argv: ct "host" "--backend-socket-port="
 env: (none)
-exit: 0
+exit: 1
 --- stdout
-PARSED
-  cwd = none
-  envFiles = @[]
-  env0Files = @[]
-  tmpEnvFiles = @[]
-  tmpEnv0Files = @[]
-  inspect = none
-  remoteDebuggingPort = none
-  remoteDebuggingPipe = false
-  newTab = false
-  newWindow = false
-  cmd = host
-  hostPort = -1
-  hostBind = ""
-  hostBackendSocketPort = none
-  hostFrontendSocketPort = none
-  hostFrontendSocketParameters = ""
-  hostIdleTimeout = ""
-  hostTracePath = ""
-  hostManifestPath = ""
-  hostStorageBaseUrl = ""
-  hostStorageTenantId = ""
-  hostStorageToken = ""
-  hostStorageProtocol = ""
-  hostTraceArg = ""
-VALIDATED replayInteractive = false
 --- stderr
+Error while processing the \e[34mbackend-socket-port=\e[0m parameter: invalid integer: \e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 55: --backend-socket-port= <v> (next word)
@@ -1468,7 +1444,7 @@ env: (none)
 exit: 1
 --- stdout
 --- stderr
-Unrecognized option 'x'\e[0m
+Error while processing the \e[34mbackend-socket-port=-x\e[0m parameter: invalid integer: -x\e[0m
 Try \e[36mct --help\e[0m for more information.
 --- end
 
@@ -1478,42 +1454,18 @@ env: (none)
 exit: 1
 --- stdout
 --- stderr
-Unrecognized option 'x'\e[0m
+Error while processing the \e[34mbackend-socket-port=--x\e[0m parameter: invalid integer: --x\e[0m
 Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 58: --backend-socket-port --new-tab <v> (an option between it and its value)
 argv: ct "host" "--backend-socket-port" "--new-tab" "5001"
 env: (none)
-exit: 0
+exit: 1
 --- stdout
-PARSED
-  cwd = none
-  envFiles = @[]
-  env0Files = @[]
-  tmpEnvFiles = @[]
-  tmpEnv0Files = @[]
-  inspect = none
-  remoteDebuggingPort = none
-  remoteDebuggingPipe = false
-  newTab = true
-  newWindow = false
-  cmd = host
-  hostPort = -1
-  hostBind = ""
-  hostBackendSocketPort = some(5001)
-  hostFrontendSocketPort = none
-  hostFrontendSocketParameters = ""
-  hostIdleTimeout = ""
-  hostTracePath = ""
-  hostManifestPath = ""
-  hostStorageBaseUrl = ""
-  hostStorageTenantId = ""
-  hostStorageToken = ""
-  hostStorageProtocol = ""
-  hostTraceArg = ""
-VALIDATED replayInteractive = false
 --- stderr
+Error while processing the \e[34mbackend-socket-port=--new-tab\e[0m parameter: invalid integer: --new-tab\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 59: --backend-socket-port repeated, last wins
@@ -1553,35 +1505,11 @@ VALIDATED replayInteractive = false
 ### 60: --backend-socket-port missing value (last)
 argv: ct "host" "--backend-socket-port"
 env: (none)
-exit: 0
+exit: 1
 --- stdout
-PARSED
-  cwd = none
-  envFiles = @[]
-  env0Files = @[]
-  tmpEnvFiles = @[]
-  tmpEnv0Files = @[]
-  inspect = none
-  remoteDebuggingPort = none
-  remoteDebuggingPipe = false
-  newTab = false
-  newWindow = false
-  cmd = host
-  hostPort = -1
-  hostBind = ""
-  hostBackendSocketPort = none
-  hostFrontendSocketPort = none
-  hostFrontendSocketParameters = ""
-  hostIdleTimeout = ""
-  hostTracePath = ""
-  hostManifestPath = ""
-  hostStorageBaseUrl = ""
-  hostStorageTenantId = ""
-  hostStorageToken = ""
-  hostStorageProtocol = ""
-  hostTraceArg = ""
-VALIDATED replayInteractive = false
 --- stderr
+The option '\e[34m--backend-socket-port\e[0m' requires a value\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 61: --BACKEND-SOCKET-PORT <v> (style variant)
@@ -1875,35 +1803,11 @@ Try \e[36mct --help\e[0m for more information.
 ### 73: --frontend-socket= (empty)
 argv: ct "host" "--frontend-socket="
 env: (none)
-exit: 0
+exit: 1
 --- stdout
-PARSED
-  cwd = none
-  envFiles = @[]
-  env0Files = @[]
-  tmpEnvFiles = @[]
-  tmpEnv0Files = @[]
-  inspect = none
-  remoteDebuggingPort = none
-  remoteDebuggingPipe = false
-  newTab = false
-  newWindow = false
-  cmd = host
-  hostPort = -1
-  hostBind = ""
-  hostBackendSocketPort = none
-  hostFrontendSocketPort = none
-  hostFrontendSocketParameters = ""
-  hostIdleTimeout = ""
-  hostTracePath = ""
-  hostManifestPath = ""
-  hostStorageBaseUrl = ""
-  hostStorageTenantId = ""
-  hostStorageToken = ""
-  hostStorageProtocol = ""
-  hostTraceArg = ""
-VALIDATED replayInteractive = false
 --- stderr
+Error while processing the \e[34mfrontend-socket=\e[0m parameter: invalid integer: \e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 74: --frontend-socket= <v> (next word)
@@ -1946,7 +1850,7 @@ env: (none)
 exit: 1
 --- stdout
 --- stderr
-Unrecognized option 'x'\e[0m
+Error while processing the \e[34mfrontend-socket=-x\e[0m parameter: invalid integer: -x\e[0m
 Try \e[36mct --help\e[0m for more information.
 --- end
 
@@ -1956,42 +1860,18 @@ env: (none)
 exit: 1
 --- stdout
 --- stderr
-Unrecognized option 'x'\e[0m
+Error while processing the \e[34mfrontend-socket=--x\e[0m parameter: invalid integer: --x\e[0m
 Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 77: --frontend-socket --new-tab <v> (an option between it and its value)
 argv: ct "host" "--frontend-socket" "--new-tab" "5002"
 env: (none)
-exit: 0
+exit: 1
 --- stdout
-PARSED
-  cwd = none
-  envFiles = @[]
-  env0Files = @[]
-  tmpEnvFiles = @[]
-  tmpEnv0Files = @[]
-  inspect = none
-  remoteDebuggingPort = none
-  remoteDebuggingPipe = false
-  newTab = true
-  newWindow = false
-  cmd = host
-  hostPort = -1
-  hostBind = ""
-  hostBackendSocketPort = none
-  hostFrontendSocketPort = some(5002)
-  hostFrontendSocketParameters = ""
-  hostIdleTimeout = ""
-  hostTracePath = ""
-  hostManifestPath = ""
-  hostStorageBaseUrl = ""
-  hostStorageTenantId = ""
-  hostStorageToken = ""
-  hostStorageProtocol = ""
-  hostTraceArg = ""
-VALIDATED replayInteractive = false
 --- stderr
+Error while processing the \e[34mfrontend-socket=--new-tab\e[0m parameter: invalid integer: --new-tab\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 78: --frontend-socket repeated, last wins
@@ -2031,35 +1911,11 @@ VALIDATED replayInteractive = false
 ### 79: --frontend-socket missing value (last)
 argv: ct "host" "--frontend-socket"
 env: (none)
-exit: 0
+exit: 1
 --- stdout
-PARSED
-  cwd = none
-  envFiles = @[]
-  env0Files = @[]
-  tmpEnvFiles = @[]
-  tmpEnv0Files = @[]
-  inspect = none
-  remoteDebuggingPort = none
-  remoteDebuggingPipe = false
-  newTab = false
-  newWindow = false
-  cmd = host
-  hostPort = -1
-  hostBind = ""
-  hostBackendSocketPort = none
-  hostFrontendSocketPort = none
-  hostFrontendSocketParameters = ""
-  hostIdleTimeout = ""
-  hostTracePath = ""
-  hostManifestPath = ""
-  hostStorageBaseUrl = ""
-  hostStorageTenantId = ""
-  hostStorageToken = ""
-  hostStorageProtocol = ""
-  hostTraceArg = ""
-VALIDATED replayInteractive = false
 --- stderr
+The option '\e[34m--frontend-socket\e[0m' requires a value\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 80: --FRONTEND-SOCKET <v> (style variant)
@@ -2425,21 +2281,69 @@ VALIDATED replayInteractive = false
 ### 92: --frontend-socket-parameters -x (value starts with -)
 argv: ct "host" "--frontend-socket-parameters" "-x"
 env: (none)
-exit: 1
+exit: 0
 --- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = host
+  hostPort = -1
+  hostBind = ""
+  hostBackendSocketPort = none
+  hostFrontendSocketPort = none
+  hostFrontendSocketParameters = "-x"
+  hostIdleTimeout = ""
+  hostTracePath = ""
+  hostManifestPath = ""
+  hostStorageBaseUrl = ""
+  hostStorageTenantId = ""
+  hostStorageToken = ""
+  hostStorageProtocol = ""
+  hostTraceArg = ""
+VALIDATED replayInteractive = false
 --- stderr
-Unrecognized option 'x'\e[0m
-Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 93: --frontend-socket-parameters --x (value starts with --)
 argv: ct "host" "--frontend-socket-parameters" "--x"
 env: (none)
-exit: 1
+exit: 0
 --- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = host
+  hostPort = -1
+  hostBind = ""
+  hostBackendSocketPort = none
+  hostFrontendSocketPort = none
+  hostFrontendSocketParameters = "--x"
+  hostIdleTimeout = ""
+  hostTracePath = ""
+  hostManifestPath = ""
+  hostStorageBaseUrl = ""
+  hostStorageTenantId = ""
+  hostStorageToken = ""
+  hostStorageProtocol = ""
+  hostTraceArg = ""
+VALIDATED replayInteractive = false
 --- stderr
-Unrecognized option 'x'\e[0m
-Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 94: --frontend-socket-parameters --new-tab <v> (an option between it and its value)
@@ -2456,14 +2360,14 @@ PARSED
   inspect = none
   remoteDebuggingPort = none
   remoteDebuggingPipe = false
-  newTab = true
+  newTab = false
   newWindow = false
   cmd = host
   hostPort = -1
   hostBind = ""
   hostBackendSocketPort = none
   hostFrontendSocketPort = none
-  hostFrontendSocketParameters = "a=b"
+  hostFrontendSocketParameters = "--new-tab"
   hostIdleTimeout = ""
   hostTracePath = ""
   hostManifestPath = ""
@@ -2471,7 +2375,7 @@ PARSED
   hostStorageTenantId = ""
   hostStorageToken = ""
   hostStorageProtocol = ""
-  hostTraceArg = ""
+  hostTraceArg = "a=b"
 VALIDATED replayInteractive = false
 --- stderr
 --- end
@@ -2513,35 +2417,11 @@ VALIDATED replayInteractive = false
 ### 96: --frontend-socket-parameters missing value (last)
 argv: ct "host" "--frontend-socket-parameters"
 env: (none)
-exit: 0
+exit: 1
 --- stdout
-PARSED
-  cwd = none
-  envFiles = @[]
-  env0Files = @[]
-  tmpEnvFiles = @[]
-  tmpEnv0Files = @[]
-  inspect = none
-  remoteDebuggingPort = none
-  remoteDebuggingPipe = false
-  newTab = false
-  newWindow = false
-  cmd = host
-  hostPort = -1
-  hostBind = ""
-  hostBackendSocketPort = none
-  hostFrontendSocketPort = none
-  hostFrontendSocketParameters = ""
-  hostIdleTimeout = ""
-  hostTracePath = ""
-  hostManifestPath = ""
-  hostStorageBaseUrl = ""
-  hostStorageTenantId = ""
-  hostStorageToken = ""
-  hostStorageProtocol = ""
-  hostTraceArg = ""
-VALIDATED replayInteractive = false
 --- stderr
+The option '\e[34m--frontend-socket-parameters\e[0m' requires a value\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 97: --FRONTEND-SOCKET-PARAMETERS <v> (style variant)
@@ -2975,21 +2855,69 @@ VALIDATED replayInteractive = false
 ### 111: --idle-timeout -x (value starts with -)
 argv: ct "host" "--idle-timeout" "-x"
 env: (none)
-exit: 1
+exit: 0
 --- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = host
+  hostPort = -1
+  hostBind = ""
+  hostBackendSocketPort = none
+  hostFrontendSocketPort = none
+  hostFrontendSocketParameters = ""
+  hostIdleTimeout = "-x"
+  hostTracePath = ""
+  hostManifestPath = ""
+  hostStorageBaseUrl = ""
+  hostStorageTenantId = ""
+  hostStorageToken = ""
+  hostStorageProtocol = ""
+  hostTraceArg = ""
+VALIDATED replayInteractive = false
 --- stderr
-Unrecognized option 'x'\e[0m
-Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 112: --idle-timeout --x (value starts with --)
 argv: ct "host" "--idle-timeout" "--x"
 env: (none)
-exit: 1
+exit: 0
 --- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = host
+  hostPort = -1
+  hostBind = ""
+  hostBackendSocketPort = none
+  hostFrontendSocketPort = none
+  hostFrontendSocketParameters = ""
+  hostIdleTimeout = "--x"
+  hostTracePath = ""
+  hostManifestPath = ""
+  hostStorageBaseUrl = ""
+  hostStorageTenantId = ""
+  hostStorageToken = ""
+  hostStorageProtocol = ""
+  hostTraceArg = ""
+VALIDATED replayInteractive = false
 --- stderr
-Unrecognized option 'x'\e[0m
-Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 113: --idle-timeout --new-tab <v> (an option between it and its value)
@@ -3006,7 +2934,7 @@ PARSED
   inspect = none
   remoteDebuggingPort = none
   remoteDebuggingPipe = false
-  newTab = true
+  newTab = false
   newWindow = false
   cmd = host
   hostPort = -1
@@ -3014,14 +2942,14 @@ PARSED
   hostBackendSocketPort = none
   hostFrontendSocketPort = none
   hostFrontendSocketParameters = ""
-  hostIdleTimeout = "30s"
+  hostIdleTimeout = "--new-tab"
   hostTracePath = ""
   hostManifestPath = ""
   hostStorageBaseUrl = ""
   hostStorageTenantId = ""
   hostStorageToken = ""
   hostStorageProtocol = ""
-  hostTraceArg = ""
+  hostTraceArg = "30s"
 VALIDATED replayInteractive = false
 --- stderr
 --- end
@@ -3063,35 +2991,11 @@ VALIDATED replayInteractive = false
 ### 115: --idle-timeout missing value (last)
 argv: ct "host" "--idle-timeout"
 env: (none)
-exit: 0
+exit: 1
 --- stdout
-PARSED
-  cwd = none
-  envFiles = @[]
-  env0Files = @[]
-  tmpEnvFiles = @[]
-  tmpEnv0Files = @[]
-  inspect = none
-  remoteDebuggingPort = none
-  remoteDebuggingPipe = false
-  newTab = false
-  newWindow = false
-  cmd = host
-  hostPort = -1
-  hostBind = ""
-  hostBackendSocketPort = none
-  hostFrontendSocketPort = none
-  hostFrontendSocketParameters = ""
-  hostIdleTimeout = ""
-  hostTracePath = ""
-  hostManifestPath = ""
-  hostStorageBaseUrl = ""
-  hostStorageTenantId = ""
-  hostStorageToken = ""
-  hostStorageProtocol = ""
-  hostTraceArg = ""
-VALIDATED replayInteractive = false
 --- stderr
+The option '\e[34m--idle-timeout\e[0m' requires a value\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 116: --IDLE-TIMEOUT <v> (style variant)
@@ -3457,21 +3361,69 @@ VALIDATED replayInteractive = false
 ### 128: --trace-path -x (value starts with -)
 argv: ct "host" "--trace-path" "-x"
 env: (none)
-exit: 1
+exit: 0
 --- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = host
+  hostPort = -1
+  hostBind = ""
+  hostBackendSocketPort = none
+  hostFrontendSocketPort = none
+  hostFrontendSocketParameters = ""
+  hostIdleTimeout = ""
+  hostTracePath = "-x"
+  hostManifestPath = ""
+  hostStorageBaseUrl = ""
+  hostStorageTenantId = ""
+  hostStorageToken = ""
+  hostStorageProtocol = ""
+  hostTraceArg = ""
+VALIDATED replayInteractive = false
 --- stderr
-Unrecognized option 'x'\e[0m
-Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 129: --trace-path --x (value starts with --)
 argv: ct "host" "--trace-path" "--x"
 env: (none)
-exit: 1
+exit: 0
 --- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = host
+  hostPort = -1
+  hostBind = ""
+  hostBackendSocketPort = none
+  hostFrontendSocketPort = none
+  hostFrontendSocketParameters = ""
+  hostIdleTimeout = ""
+  hostTracePath = "--x"
+  hostManifestPath = ""
+  hostStorageBaseUrl = ""
+  hostStorageTenantId = ""
+  hostStorageToken = ""
+  hostStorageProtocol = ""
+  hostTraceArg = ""
+VALIDATED replayInteractive = false
 --- stderr
-Unrecognized option 'x'\e[0m
-Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 130: --trace-path --new-tab <v> (an option between it and its value)
@@ -3488,7 +3440,7 @@ PARSED
   inspect = none
   remoteDebuggingPort = none
   remoteDebuggingPipe = false
-  newTab = true
+  newTab = false
   newWindow = false
   cmd = host
   hostPort = -1
@@ -3497,13 +3449,13 @@ PARSED
   hostFrontendSocketPort = none
   hostFrontendSocketParameters = ""
   hostIdleTimeout = ""
-  hostTracePath = "/t.ct"
+  hostTracePath = "--new-tab"
   hostManifestPath = ""
   hostStorageBaseUrl = ""
   hostStorageTenantId = ""
   hostStorageToken = ""
   hostStorageProtocol = ""
-  hostTraceArg = ""
+  hostTraceArg = "/t.ct"
 VALIDATED replayInteractive = false
 --- stderr
 --- end
@@ -3545,35 +3497,11 @@ VALIDATED replayInteractive = false
 ### 132: --trace-path missing value (last)
 argv: ct "host" "--trace-path"
 env: (none)
-exit: 0
+exit: 1
 --- stdout
-PARSED
-  cwd = none
-  envFiles = @[]
-  env0Files = @[]
-  tmpEnvFiles = @[]
-  tmpEnv0Files = @[]
-  inspect = none
-  remoteDebuggingPort = none
-  remoteDebuggingPipe = false
-  newTab = false
-  newWindow = false
-  cmd = host
-  hostPort = -1
-  hostBind = ""
-  hostBackendSocketPort = none
-  hostFrontendSocketPort = none
-  hostFrontendSocketParameters = ""
-  hostIdleTimeout = ""
-  hostTracePath = ""
-  hostManifestPath = ""
-  hostStorageBaseUrl = ""
-  hostStorageTenantId = ""
-  hostStorageToken = ""
-  hostStorageProtocol = ""
-  hostTraceArg = ""
-VALIDATED replayInteractive = false
 --- stderr
+The option '\e[34m--trace-path\e[0m' requires a value\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 133: --TRACE-PATH <v> (style variant)
@@ -3939,21 +3867,69 @@ VALIDATED replayInteractive = false
 ### 145: --manifest -x (value starts with -)
 argv: ct "host" "--manifest" "-x"
 env: (none)
-exit: 1
+exit: 0
 --- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = host
+  hostPort = -1
+  hostBind = ""
+  hostBackendSocketPort = none
+  hostFrontendSocketPort = none
+  hostFrontendSocketParameters = ""
+  hostIdleTimeout = ""
+  hostTracePath = ""
+  hostManifestPath = "-x"
+  hostStorageBaseUrl = ""
+  hostStorageTenantId = ""
+  hostStorageToken = ""
+  hostStorageProtocol = ""
+  hostTraceArg = ""
+VALIDATED replayInteractive = false
 --- stderr
-Unrecognized option 'x'\e[0m
-Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 146: --manifest --x (value starts with --)
 argv: ct "host" "--manifest" "--x"
 env: (none)
-exit: 1
+exit: 0
 --- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = host
+  hostPort = -1
+  hostBind = ""
+  hostBackendSocketPort = none
+  hostFrontendSocketPort = none
+  hostFrontendSocketParameters = ""
+  hostIdleTimeout = ""
+  hostTracePath = ""
+  hostManifestPath = "--x"
+  hostStorageBaseUrl = ""
+  hostStorageTenantId = ""
+  hostStorageToken = ""
+  hostStorageProtocol = ""
+  hostTraceArg = ""
+VALIDATED replayInteractive = false
 --- stderr
-Unrecognized option 'x'\e[0m
-Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 147: --manifest --new-tab <v> (an option between it and its value)
@@ -3970,7 +3946,7 @@ PARSED
   inspect = none
   remoteDebuggingPort = none
   remoteDebuggingPipe = false
-  newTab = true
+  newTab = false
   newWindow = false
   cmd = host
   hostPort = -1
@@ -3980,12 +3956,12 @@ PARSED
   hostFrontendSocketParameters = ""
   hostIdleTimeout = ""
   hostTracePath = ""
-  hostManifestPath = "/m.json"
+  hostManifestPath = "--new-tab"
   hostStorageBaseUrl = ""
   hostStorageTenantId = ""
   hostStorageToken = ""
   hostStorageProtocol = ""
-  hostTraceArg = ""
+  hostTraceArg = "/m.json"
 VALIDATED replayInteractive = false
 --- stderr
 --- end
@@ -4027,35 +4003,11 @@ VALIDATED replayInteractive = false
 ### 149: --manifest missing value (last)
 argv: ct "host" "--manifest"
 env: (none)
-exit: 0
+exit: 1
 --- stdout
-PARSED
-  cwd = none
-  envFiles = @[]
-  env0Files = @[]
-  tmpEnvFiles = @[]
-  tmpEnv0Files = @[]
-  inspect = none
-  remoteDebuggingPort = none
-  remoteDebuggingPipe = false
-  newTab = false
-  newWindow = false
-  cmd = host
-  hostPort = -1
-  hostBind = ""
-  hostBackendSocketPort = none
-  hostFrontendSocketPort = none
-  hostFrontendSocketParameters = ""
-  hostIdleTimeout = ""
-  hostTracePath = ""
-  hostManifestPath = ""
-  hostStorageBaseUrl = ""
-  hostStorageTenantId = ""
-  hostStorageToken = ""
-  hostStorageProtocol = ""
-  hostTraceArg = ""
-VALIDATED replayInteractive = false
 --- stderr
+The option '\e[34m--manifest\e[0m' requires a value\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 150: --MANIFEST <v> (style variant)
@@ -4401,21 +4353,69 @@ VALIDATED replayInteractive = false
 ### 160: --storage-base-url -x (value starts with -)
 argv: ct "host" "--storage-base-url" "-x"
 env: (none)
-exit: 1
+exit: 0
 --- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = host
+  hostPort = -1
+  hostBind = ""
+  hostBackendSocketPort = none
+  hostFrontendSocketPort = none
+  hostFrontendSocketParameters = ""
+  hostIdleTimeout = ""
+  hostTracePath = ""
+  hostManifestPath = ""
+  hostStorageBaseUrl = "-x"
+  hostStorageTenantId = ""
+  hostStorageToken = ""
+  hostStorageProtocol = ""
+  hostTraceArg = ""
+VALIDATED replayInteractive = false
 --- stderr
-Unrecognized option 'x'\e[0m
-Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 161: --storage-base-url --x (value starts with --)
 argv: ct "host" "--storage-base-url" "--x"
 env: (none)
-exit: 1
+exit: 0
 --- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = host
+  hostPort = -1
+  hostBind = ""
+  hostBackendSocketPort = none
+  hostFrontendSocketPort = none
+  hostFrontendSocketParameters = ""
+  hostIdleTimeout = ""
+  hostTracePath = ""
+  hostManifestPath = ""
+  hostStorageBaseUrl = "--x"
+  hostStorageTenantId = ""
+  hostStorageToken = ""
+  hostStorageProtocol = ""
+  hostTraceArg = ""
+VALIDATED replayInteractive = false
 --- stderr
-Unrecognized option 'x'\e[0m
-Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 162: --storage-base-url --new-tab <v> (an option between it and its value)
@@ -4432,7 +4432,7 @@ PARSED
   inspect = none
   remoteDebuggingPort = none
   remoteDebuggingPipe = false
-  newTab = true
+  newTab = false
   newWindow = false
   cmd = host
   hostPort = -1
@@ -4443,11 +4443,11 @@ PARSED
   hostIdleTimeout = ""
   hostTracePath = ""
   hostManifestPath = ""
-  hostStorageBaseUrl = "https://s.test"
+  hostStorageBaseUrl = "--new-tab"
   hostStorageTenantId = ""
   hostStorageToken = ""
   hostStorageProtocol = ""
-  hostTraceArg = ""
+  hostTraceArg = "https://s.test"
 VALIDATED replayInteractive = false
 --- stderr
 --- end
@@ -4489,35 +4489,11 @@ VALIDATED replayInteractive = false
 ### 164: --storage-base-url missing value (last)
 argv: ct "host" "--storage-base-url"
 env: (none)
-exit: 0
+exit: 1
 --- stdout
-PARSED
-  cwd = none
-  envFiles = @[]
-  env0Files = @[]
-  tmpEnvFiles = @[]
-  tmpEnv0Files = @[]
-  inspect = none
-  remoteDebuggingPort = none
-  remoteDebuggingPipe = false
-  newTab = false
-  newWindow = false
-  cmd = host
-  hostPort = -1
-  hostBind = ""
-  hostBackendSocketPort = none
-  hostFrontendSocketPort = none
-  hostFrontendSocketParameters = ""
-  hostIdleTimeout = ""
-  hostTracePath = ""
-  hostManifestPath = ""
-  hostStorageBaseUrl = ""
-  hostStorageTenantId = ""
-  hostStorageToken = ""
-  hostStorageProtocol = ""
-  hostTraceArg = ""
-VALIDATED replayInteractive = false
 --- stderr
+The option '\e[34m--storage-base-url\e[0m' requires a value\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 165: --STORAGE-BASE-URL <v> (style variant)
@@ -4883,21 +4859,69 @@ VALIDATED replayInteractive = false
 ### 177: --storage-tenant-id -x (value starts with -)
 argv: ct "host" "--storage-tenant-id" "-x"
 env: (none)
-exit: 1
+exit: 0
 --- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = host
+  hostPort = -1
+  hostBind = ""
+  hostBackendSocketPort = none
+  hostFrontendSocketPort = none
+  hostFrontendSocketParameters = ""
+  hostIdleTimeout = ""
+  hostTracePath = ""
+  hostManifestPath = ""
+  hostStorageBaseUrl = ""
+  hostStorageTenantId = "-x"
+  hostStorageToken = ""
+  hostStorageProtocol = ""
+  hostTraceArg = ""
+VALIDATED replayInteractive = false
 --- stderr
-Unrecognized option 'x'\e[0m
-Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 178: --storage-tenant-id --x (value starts with --)
 argv: ct "host" "--storage-tenant-id" "--x"
 env: (none)
-exit: 1
+exit: 0
 --- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = host
+  hostPort = -1
+  hostBind = ""
+  hostBackendSocketPort = none
+  hostFrontendSocketPort = none
+  hostFrontendSocketParameters = ""
+  hostIdleTimeout = ""
+  hostTracePath = ""
+  hostManifestPath = ""
+  hostStorageBaseUrl = ""
+  hostStorageTenantId = "--x"
+  hostStorageToken = ""
+  hostStorageProtocol = ""
+  hostTraceArg = ""
+VALIDATED replayInteractive = false
 --- stderr
-Unrecognized option 'x'\e[0m
-Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 179: --storage-tenant-id --new-tab <v> (an option between it and its value)
@@ -4914,7 +4938,7 @@ PARSED
   inspect = none
   remoteDebuggingPort = none
   remoteDebuggingPipe = false
-  newTab = true
+  newTab = false
   newWindow = false
   cmd = host
   hostPort = -1
@@ -4926,10 +4950,10 @@ PARSED
   hostTracePath = ""
   hostManifestPath = ""
   hostStorageBaseUrl = ""
-  hostStorageTenantId = "ten"
+  hostStorageTenantId = "--new-tab"
   hostStorageToken = ""
   hostStorageProtocol = ""
-  hostTraceArg = ""
+  hostTraceArg = "ten"
 VALIDATED replayInteractive = false
 --- stderr
 --- end
@@ -4971,35 +4995,11 @@ VALIDATED replayInteractive = false
 ### 181: --storage-tenant-id missing value (last)
 argv: ct "host" "--storage-tenant-id"
 env: (none)
-exit: 0
+exit: 1
 --- stdout
-PARSED
-  cwd = none
-  envFiles = @[]
-  env0Files = @[]
-  tmpEnvFiles = @[]
-  tmpEnv0Files = @[]
-  inspect = none
-  remoteDebuggingPort = none
-  remoteDebuggingPipe = false
-  newTab = false
-  newWindow = false
-  cmd = host
-  hostPort = -1
-  hostBind = ""
-  hostBackendSocketPort = none
-  hostFrontendSocketPort = none
-  hostFrontendSocketParameters = ""
-  hostIdleTimeout = ""
-  hostTracePath = ""
-  hostManifestPath = ""
-  hostStorageBaseUrl = ""
-  hostStorageTenantId = ""
-  hostStorageToken = ""
-  hostStorageProtocol = ""
-  hostTraceArg = ""
-VALIDATED replayInteractive = false
 --- stderr
+The option '\e[34m--storage-tenant-id\e[0m' requires a value\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 182: --STORAGE-TENANT-ID <v> (style variant)
@@ -5365,21 +5365,69 @@ VALIDATED replayInteractive = false
 ### 194: --storage-token -x (value starts with -)
 argv: ct "host" "--storage-token" "-x"
 env: (none)
-exit: 1
+exit: 0
 --- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = host
+  hostPort = -1
+  hostBind = ""
+  hostBackendSocketPort = none
+  hostFrontendSocketPort = none
+  hostFrontendSocketParameters = ""
+  hostIdleTimeout = ""
+  hostTracePath = ""
+  hostManifestPath = ""
+  hostStorageBaseUrl = ""
+  hostStorageTenantId = ""
+  hostStorageToken = "-x"
+  hostStorageProtocol = ""
+  hostTraceArg = ""
+VALIDATED replayInteractive = false
 --- stderr
-Unrecognized option 'x'\e[0m
-Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 195: --storage-token --x (value starts with --)
 argv: ct "host" "--storage-token" "--x"
 env: (none)
-exit: 1
+exit: 0
 --- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = host
+  hostPort = -1
+  hostBind = ""
+  hostBackendSocketPort = none
+  hostFrontendSocketPort = none
+  hostFrontendSocketParameters = ""
+  hostIdleTimeout = ""
+  hostTracePath = ""
+  hostManifestPath = ""
+  hostStorageBaseUrl = ""
+  hostStorageTenantId = ""
+  hostStorageToken = "--x"
+  hostStorageProtocol = ""
+  hostTraceArg = ""
+VALIDATED replayInteractive = false
 --- stderr
-Unrecognized option 'x'\e[0m
-Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 196: --storage-token --new-tab <v> (an option between it and its value)
@@ -5396,7 +5444,7 @@ PARSED
   inspect = none
   remoteDebuggingPort = none
   remoteDebuggingPipe = false
-  newTab = true
+  newTab = false
   newWindow = false
   cmd = host
   hostPort = -1
@@ -5409,9 +5457,9 @@ PARSED
   hostManifestPath = ""
   hostStorageBaseUrl = ""
   hostStorageTenantId = ""
-  hostStorageToken = "tok"
+  hostStorageToken = "--new-tab"
   hostStorageProtocol = ""
-  hostTraceArg = ""
+  hostTraceArg = "tok"
 VALIDATED replayInteractive = false
 --- stderr
 --- end
@@ -5453,35 +5501,11 @@ VALIDATED replayInteractive = false
 ### 198: --storage-token missing value (last)
 argv: ct "host" "--storage-token"
 env: (none)
-exit: 0
+exit: 1
 --- stdout
-PARSED
-  cwd = none
-  envFiles = @[]
-  env0Files = @[]
-  tmpEnvFiles = @[]
-  tmpEnv0Files = @[]
-  inspect = none
-  remoteDebuggingPort = none
-  remoteDebuggingPipe = false
-  newTab = false
-  newWindow = false
-  cmd = host
-  hostPort = -1
-  hostBind = ""
-  hostBackendSocketPort = none
-  hostFrontendSocketPort = none
-  hostFrontendSocketParameters = ""
-  hostIdleTimeout = ""
-  hostTracePath = ""
-  hostManifestPath = ""
-  hostStorageBaseUrl = ""
-  hostStorageTenantId = ""
-  hostStorageToken = ""
-  hostStorageProtocol = ""
-  hostTraceArg = ""
-VALIDATED replayInteractive = false
 --- stderr
+The option '\e[34m--storage-token\e[0m' requires a value\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 199: --STORAGE-TOKEN <v> (style variant)
@@ -5847,21 +5871,69 @@ VALIDATED replayInteractive = false
 ### 211: --storage-protocol -x (value starts with -)
 argv: ct "host" "--storage-protocol" "-x"
 env: (none)
-exit: 1
+exit: 0
 --- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = host
+  hostPort = -1
+  hostBind = ""
+  hostBackendSocketPort = none
+  hostFrontendSocketPort = none
+  hostFrontendSocketParameters = ""
+  hostIdleTimeout = ""
+  hostTracePath = ""
+  hostManifestPath = ""
+  hostStorageBaseUrl = ""
+  hostStorageTenantId = ""
+  hostStorageToken = ""
+  hostStorageProtocol = "-x"
+  hostTraceArg = ""
+VALIDATED replayInteractive = false
 --- stderr
-Unrecognized option 'x'\e[0m
-Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 212: --storage-protocol --x (value starts with --)
 argv: ct "host" "--storage-protocol" "--x"
 env: (none)
-exit: 1
+exit: 0
 --- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = host
+  hostPort = -1
+  hostBind = ""
+  hostBackendSocketPort = none
+  hostFrontendSocketPort = none
+  hostFrontendSocketParameters = ""
+  hostIdleTimeout = ""
+  hostTracePath = ""
+  hostManifestPath = ""
+  hostStorageBaseUrl = ""
+  hostStorageTenantId = ""
+  hostStorageToken = ""
+  hostStorageProtocol = "--x"
+  hostTraceArg = ""
+VALIDATED replayInteractive = false
 --- stderr
-Unrecognized option 'x'\e[0m
-Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 213: --storage-protocol --new-tab <v> (an option between it and its value)
@@ -5878,7 +5950,7 @@ PARSED
   inspect = none
   remoteDebuggingPort = none
   remoteDebuggingPipe = false
-  newTab = true
+  newTab = false
   newWindow = false
   cmd = host
   hostPort = -1
@@ -5892,8 +5964,8 @@ PARSED
   hostStorageBaseUrl = ""
   hostStorageTenantId = ""
   hostStorageToken = ""
-  hostStorageProtocol = "local-storage"
-  hostTraceArg = ""
+  hostStorageProtocol = "--new-tab"
+  hostTraceArg = "local-storage"
 VALIDATED replayInteractive = false
 --- stderr
 --- end
@@ -5935,35 +6007,11 @@ VALIDATED replayInteractive = false
 ### 215: --storage-protocol missing value (last)
 argv: ct "host" "--storage-protocol"
 env: (none)
-exit: 0
+exit: 1
 --- stdout
-PARSED
-  cwd = none
-  envFiles = @[]
-  env0Files = @[]
-  tmpEnvFiles = @[]
-  tmpEnv0Files = @[]
-  inspect = none
-  remoteDebuggingPort = none
-  remoteDebuggingPipe = false
-  newTab = false
-  newWindow = false
-  cmd = host
-  hostPort = -1
-  hostBind = ""
-  hostBackendSocketPort = none
-  hostFrontendSocketPort = none
-  hostFrontendSocketParameters = ""
-  hostIdleTimeout = ""
-  hostTracePath = ""
-  hostManifestPath = ""
-  hostStorageBaseUrl = ""
-  hostStorageTenantId = ""
-  hostStorageToken = ""
-  hostStorageProtocol = ""
-  hostTraceArg = ""
-VALIDATED replayInteractive = false
 --- stderr
+The option '\e[34m--storage-protocol\e[0m' requires a value\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 216: --STORAGE-PROTOCOL <v> (style variant)
@@ -6165,35 +6213,11 @@ Try \e[36mct --help\e[0m for more information.
 ### 226: lone -
 argv: ct "host" "-"
 env: (none)
-exit: 0
+exit: 1
 --- stdout
-PARSED
-  cwd = none
-  envFiles = @[]
-  env0Files = @[]
-  tmpEnvFiles = @[]
-  tmpEnv0Files = @[]
-  inspect = none
-  remoteDebuggingPort = none
-  remoteDebuggingPipe = false
-  newTab = false
-  newWindow = false
-  cmd = host
-  hostPort = -1
-  hostBind = ""
-  hostBackendSocketPort = none
-  hostFrontendSocketPort = none
-  hostFrontendSocketParameters = ""
-  hostIdleTimeout = ""
-  hostTracePath = ""
-  hostManifestPath = ""
-  hostStorageBaseUrl = ""
-  hostStorageTenantId = ""
-  hostStorageToken = ""
-  hostStorageProtocol = ""
-  hostTraceArg = ""
-VALIDATED replayInteractive = false
 --- stderr
+Unrecognized option ''\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 227: lone -- then a word
@@ -6202,7 +6226,7 @@ env: (none)
 exit: 1
 --- stdout
 --- stderr
-Error while processing the \e[34mport=w\e[0m parameter: invalid integer: w\e[0m
+Unrecognized option ''\e[0m
 Try \e[36mct --help\e[0m for more information.
 --- end
 
@@ -6212,7 +6236,7 @@ env: (none)
 exit: 1
 --- stdout
 --- stderr
-Error while processing the \e[34mport=v\e[0m parameter: invalid integer: v\e[0m
+Unrecognized option ''\e[0m
 Try \e[36mct --help\e[0m for more information.
 --- end
 
@@ -6308,9 +6332,43 @@ CodeTracer version: <VERSION>
 ### 233: -h after the command
 argv: ct "host" "-h"
 env: (none)
-exit: 1
+exit: 0
 --- stdout
+CodeTracer - the user-friendly time-travelling debugger
+
+\e[0m\e[33mUsage:\x20
+\e[0m\e[1m
+\e[36mct host\e[0m [OPTIONS]... <hostTraceArg>\e[0m
+
+\e[34m\e[1m <hostTraceArg>\e[0m               \e[0m  Trace id to run. If not a valid trace id, treats
+                               it as a trace folder.\e[0m
+
+The following options are available:
+
+ \e[34m\e[1m--port                  \e[0m  Port to listen on (default: auto-assign;
+                               CODETRACER_HOST_PORT) [=-1].\e[0m
+ \e[34m\e[1m--bind                  \e[0m  Interface to bind (default: 127.0.0.1;
+                               CODETRACER_HOST_BIND).\e[0m
+ \e[34m\e[1m--backend-socket-port   \e[0m  Port to listen on for backend socket.\e[0m
+ \e[34m\e[1m--frontend-socket       \e[0m  Port to listen on for frontend socket.\e[0m
+ \e[34m\e[1m--frontend-socket-parameters\e[0m  Parameters to forward to frontend socket.\e[0m
+ \e[34m\e[1m--idle-timeout          \e[0m  Host idle timeout (e.g., 30s, 5m, 1h). Default
+                               10m. Use 0/never to disable..\e[0m
+ \e[34m\e[1m--trace-path            \e[0m  Path to a .ct file, trace folder, or local
+                               trace-storage manifest to auto-import and host.
+                               Skips the need for a separate ct import..\e[0m
+ \e[34m\e[1m--manifest              \e[0m  Path to a local shared trace-storage or recording
+                               manifest to host..\e[0m
+ \e[34m\e[1m--storage-base-url      \e[0m  Base URL for storage-server manifest object
+                               reads. Also honors CODETRACER_STORAGE_BASE_URL..\e[0m
+ \e[34m\e[1m--storage-tenant-id     \e[0m  Tenant id for storage-server object reads. Also
+                               honors CODETRACER_STORAGE_TENANT_ID..\e[0m
+ \e[34m\e[1m--storage-token         \e[0m  Replay credential bearer token for storage-server
+                               object reads. Also honors
+                               CODETRACER_STORAGE_REPLAY_TOKEN..\e[0m
+ \e[34m\e[1m--storage-protocol      \e[0m  Storage protocol selector (default
+                               local-storage). Also honors
+                               CODETRACER_STORAGE_PROTOCOL..\e[0m
+
 --- stderr
-Unrecognized option 'h'\e[0m
-Try \e[36mct --help\e[0m for more information.
 --- end

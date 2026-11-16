@@ -349,7 +349,7 @@ PARSED
   newTab = false
   newWindow = false
   cmd = list
-  listFormat = "text"
+  listFormat = ""
   listTarget = "local"
 VALIDATED replayInteractive = false
 --- stderr
@@ -381,21 +381,47 @@ VALIDATED replayInteractive = false
 ### 18: --format -x (value starts with -)
 argv: ct "list" "--format" "-x"
 env: (none)
-exit: 1
+exit: 0
 --- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = list
+  listFormat = "-x"
+  listTarget = "local"
+VALIDATED replayInteractive = false
 --- stderr
-Unrecognized option 'x'\e[0m
-Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 19: --format --x (value starts with --)
 argv: ct "list" "--format" "--x"
 env: (none)
-exit: 1
+exit: 0
 --- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = list
+  listFormat = "--x"
+  listTarget = "local"
+VALIDATED replayInteractive = false
 --- stderr
-Unrecognized option 'x'\e[0m
-Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 20: --format --new-tab <v> (an option between it and its value)
@@ -412,11 +438,11 @@ PARSED
   inspect = none
   remoteDebuggingPort = none
   remoteDebuggingPipe = false
-  newTab = true
+  newTab = false
   newWindow = false
   cmd = list
-  listFormat = "json"
-  listTarget = "local"
+  listFormat = "--new-tab"
+  listTarget = "json"
 VALIDATED replayInteractive = false
 --- stderr
 --- end
@@ -447,24 +473,11 @@ VALIDATED replayInteractive = false
 ### 22: --format missing value (last)
 argv: ct "list" "--format"
 env: (none)
-exit: 0
+exit: 1
 --- stdout
-PARSED
-  cwd = none
-  envFiles = @[]
-  env0Files = @[]
-  tmpEnvFiles = @[]
-  tmpEnv0Files = @[]
-  inspect = none
-  remoteDebuggingPort = none
-  remoteDebuggingPipe = false
-  newTab = false
-  newWindow = false
-  cmd = list
-  listFormat = "text"
-  listTarget = "local"
-VALIDATED replayInteractive = false
 --- stderr
+The option '\e[34m--format\e[0m' requires a value\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 23: --FORMAT <v> (style variant)
@@ -700,25 +713,28 @@ VALIDATED replayInteractive = false
 ### 33: --format -x (value starts with -)
 argv: ct "list" "--format" "-x" "remote"
 env: (none)
-exit: 1
+exit: 0
 --- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = list
+  listFormat = "-x"
+  listTarget = "remote"
+VALIDATED replayInteractive = false
 --- stderr
-Unrecognized option 'x'\e[0m
-Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 34: --format --x (value starts with --)
 argv: ct "list" "--format" "--x" "remote"
-env: (none)
-exit: 1
---- stdout
---- stderr
-Unrecognized option 'x'\e[0m
-Try \e[36mct --help\e[0m for more information.
---- end
-
-### 35: --format --new-tab <v> (an option between it and its value)
-argv: ct "list" "--format" "--new-tab" "json" "remote"
 env: (none)
 exit: 0
 --- stdout
@@ -731,13 +747,23 @@ PARSED
   inspect = none
   remoteDebuggingPort = none
   remoteDebuggingPipe = false
-  newTab = true
+  newTab = false
   newWindow = false
   cmd = list
-  listFormat = "json"
+  listFormat = "--x"
   listTarget = "remote"
 VALIDATED replayInteractive = false
 --- stderr
+--- end
+
+### 35: --format --new-tab <v> (an option between it and its value)
+argv: ct "list" "--format" "--new-tab" "json" "remote"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The subcommand 'list' does not accept additional arguments\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 36: --format repeated, last wins
@@ -766,24 +792,11 @@ VALIDATED replayInteractive = false
 ### 37: --format missing value (last)
 argv: ct "list" "remote" "--format"
 env: (none)
-exit: 0
+exit: 1
 --- stdout
-PARSED
-  cwd = none
-  envFiles = @[]
-  env0Files = @[]
-  tmpEnvFiles = @[]
-  tmpEnv0Files = @[]
-  inspect = none
-  remoteDebuggingPort = none
-  remoteDebuggingPipe = false
-  newTab = false
-  newWindow = false
-  cmd = list
-  listFormat = "text"
-  listTarget = "remote"
-VALIDATED replayInteractive = false
 --- stderr
+The option '\e[34m--format\e[0m' requires a value\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 38: --format missing value (before the rest)
@@ -957,70 +970,31 @@ Try \e[36mct --help\e[0m for more information.
 ### 47: lone -
 argv: ct "list" "-"
 env: (none)
-exit: 0
+exit: 1
 --- stdout
-PARSED
-  cwd = none
-  envFiles = @[]
-  env0Files = @[]
-  tmpEnvFiles = @[]
-  tmpEnv0Files = @[]
-  inspect = none
-  remoteDebuggingPort = none
-  remoteDebuggingPipe = false
-  newTab = false
-  newWindow = false
-  cmd = list
-  listFormat = "text"
-  listTarget = "local"
-VALIDATED replayInteractive = false
 --- stderr
+Unrecognized option ''\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 48: lone -- then a word
 argv: ct "list" "--" "w"
 env: (none)
-exit: 0
+exit: 1
 --- stdout
-PARSED
-  cwd = none
-  envFiles = @[]
-  env0Files = @[]
-  tmpEnvFiles = @[]
-  tmpEnv0Files = @[]
-  inspect = none
-  remoteDebuggingPort = none
-  remoteDebuggingPipe = false
-  newTab = false
-  newWindow = false
-  cmd = list
-  listFormat = "w"
-  listTarget = "local"
-VALIDATED replayInteractive = false
 --- stderr
+Unrecognized option ''\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 49: --=v
 argv: ct "list" "--=v"
 env: (none)
-exit: 0
+exit: 1
 --- stdout
-PARSED
-  cwd = none
-  envFiles = @[]
-  env0Files = @[]
-  tmpEnvFiles = @[]
-  tmpEnv0Files = @[]
-  inspect = none
-  remoteDebuggingPort = none
-  remoteDebuggingPipe = false
-  newTab = false
-  newWindow = false
-  cmd = list
-  listFormat = "v"
-  listTarget = "local"
-VALIDATED replayInteractive = false
 --- stderr
+Unrecognized option ''\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 50: extra positional
@@ -1093,9 +1067,19 @@ CodeTracer version: <VERSION>
 ### 54: -h after the command
 argv: ct "list" "-h"
 env: (none)
-exit: 1
+exit: 0
 --- stdout
+CodeTracer - the user-friendly time-travelling debugger
+
+\e[0m\e[33mUsage:\x20
+\e[0m\e[1m
+\e[36mct list\e[0m [OPTIONS]... <target>\e[0m
+
+\e[34m\e[1m <target>\e[0m         \e[0m  target for list: local or remote [=local].\e[0m
+
+The following options are available:
+
+ \e[34m\e[1m--format    \e[0m  text or json [=text].\e[0m
+
 --- stderr
-Unrecognized option 'h'\e[0m
-Try \e[36mct --help\e[0m for more information.
 --- end

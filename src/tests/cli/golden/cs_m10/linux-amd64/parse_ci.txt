@@ -185,7 +185,7 @@ PARSED
   newTab = false
   newWindow = false
   cmd = ci
-  ciToken = none
+  ciToken = some("")
   ciBaseUrl = none
   ciCommand = noCommand
 VALIDATED replayInteractive = false
@@ -219,25 +219,29 @@ VALIDATED replayInteractive = false
 ### 10: --token -x (value starts with -)
 argv: ct "ci" "--token" "-x"
 env: (none)
-exit: 1
+exit: 0
 --- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = some("-x")
+  ciBaseUrl = none
+  ciCommand = noCommand
+VALIDATED replayInteractive = false
 --- stderr
-Unrecognized option 'x'\e[0m
-Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 11: --token --x (value starts with --)
 argv: ct "ci" "--token" "--x"
-env: (none)
-exit: 1
---- stdout
---- stderr
-Unrecognized option 'x'\e[0m
-Try \e[36mct --help\e[0m for more information.
---- end
-
-### 12: --token --new-tab <v> (an option between it and its value)
-argv: ct "ci" "--token" "--new-tab" "tok"
 env: (none)
 exit: 0
 --- stdout
@@ -250,14 +254,24 @@ PARSED
   inspect = none
   remoteDebuggingPort = none
   remoteDebuggingPipe = false
-  newTab = true
+  newTab = false
   newWindow = false
   cmd = ci
-  ciToken = some("tok")
+  ciToken = some("--x")
   ciBaseUrl = none
   ciCommand = noCommand
 VALIDATED replayInteractive = false
 --- stderr
+--- end
+
+### 12: --token --new-tab <v> (an option between it and its value)
+argv: ct "ci" "--token" "--new-tab" "tok"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The subcommand 'ci' does not accept arguments\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 13: --token repeated, last wins
@@ -287,25 +301,11 @@ VALIDATED replayInteractive = false
 ### 14: --token missing value (last)
 argv: ct "ci" "--token"
 env: (none)
-exit: 0
+exit: 1
 --- stdout
-PARSED
-  cwd = none
-  envFiles = @[]
-  env0Files = @[]
-  tmpEnvFiles = @[]
-  tmpEnv0Files = @[]
-  inspect = none
-  remoteDebuggingPort = none
-  remoteDebuggingPipe = false
-  newTab = false
-  newWindow = false
-  cmd = ci
-  ciToken = none
-  ciBaseUrl = none
-  ciCommand = noCommand
-VALIDATED replayInteractive = false
 --- stderr
+The option '\e[34m--token\e[0m' requires a value\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 15: --TOKEN <v> (style variant)
@@ -518,7 +518,7 @@ PARSED
   newWindow = false
   cmd = ci
   ciToken = none
-  ciBaseUrl = none
+  ciBaseUrl = some("")
   ciCommand = noCommand
 VALIDATED replayInteractive = false
 --- stderr
@@ -551,25 +551,29 @@ VALIDATED replayInteractive = false
 ### 25: --base-url -x (value starts with -)
 argv: ct "ci" "--base-url" "-x"
 env: (none)
-exit: 1
+exit: 0
 --- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = some("-x")
+  ciCommand = noCommand
+VALIDATED replayInteractive = false
 --- stderr
-Unrecognized option 'x'\e[0m
-Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 26: --base-url --x (value starts with --)
 argv: ct "ci" "--base-url" "--x"
-env: (none)
-exit: 1
---- stdout
---- stderr
-Unrecognized option 'x'\e[0m
-Try \e[36mct --help\e[0m for more information.
---- end
-
-### 27: --base-url --new-tab <v> (an option between it and its value)
-argv: ct "ci" "--base-url" "--new-tab" "https://b.test"
 env: (none)
 exit: 0
 --- stdout
@@ -582,14 +586,24 @@ PARSED
   inspect = none
   remoteDebuggingPort = none
   remoteDebuggingPipe = false
-  newTab = true
+  newTab = false
   newWindow = false
   cmd = ci
   ciToken = none
-  ciBaseUrl = some("https://b.test")
+  ciBaseUrl = some("--x")
   ciCommand = noCommand
 VALIDATED replayInteractive = false
 --- stderr
+--- end
+
+### 27: --base-url --new-tab <v> (an option between it and its value)
+argv: ct "ci" "--base-url" "--new-tab" "https://b.test"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The subcommand 'ci' does not accept arguments\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 28: --base-url repeated, last wins
@@ -619,25 +633,11 @@ VALIDATED replayInteractive = false
 ### 29: --base-url missing value (last)
 argv: ct "ci" "--base-url"
 env: (none)
-exit: 0
+exit: 1
 --- stdout
-PARSED
-  cwd = none
-  envFiles = @[]
-  env0Files = @[]
-  tmpEnvFiles = @[]
-  tmpEnv0Files = @[]
-  inspect = none
-  remoteDebuggingPort = none
-  remoteDebuggingPipe = false
-  newTab = false
-  newWindow = false
-  cmd = ci
-  ciToken = none
-  ciBaseUrl = none
-  ciCommand = noCommand
-VALIDATED replayInteractive = false
 --- stderr
+The option '\e[34m--base-url\e[0m' requires a value\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 30: --BASE-URL <v> (style variant)
@@ -1187,7 +1187,7 @@ PARSED
   ciToken = none
   ciBaseUrl = none
   ciCommand = start
-  ciStartRepo = none
+  ciStartRepo = some("")
   ciStartCommit = none
   ciStartBranch = none
   ciStartBaseCommit = none
@@ -1230,25 +1230,35 @@ VALIDATED replayInteractive = false
 ### 53: --repo -x (value starts with -)
 argv: ct "ci" "start" "--repo" "-x"
 env: (none)
-exit: 1
+exit: 0
 --- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = start
+  ciStartRepo = some("-x")
+  ciStartCommit = none
+  ciStartBranch = none
+  ciStartBaseCommit = none
+  ciStartLabel = none
+  ciStartMonitorProcesses = false
+VALIDATED replayInteractive = false
 --- stderr
-Unrecognized option 'x'\e[0m
-Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 54: --repo --x (value starts with --)
 argv: ct "ci" "start" "--repo" "--x"
-env: (none)
-exit: 1
---- stdout
---- stderr
-Unrecognized option 'x'\e[0m
-Try \e[36mct --help\e[0m for more information.
---- end
-
-### 55: --repo --new-tab <v> (an option between it and its value)
-argv: ct "ci" "start" "--repo" "--new-tab" "https://g.test/r"
 env: (none)
 exit: 0
 --- stdout
@@ -1261,13 +1271,13 @@ PARSED
   inspect = none
   remoteDebuggingPort = none
   remoteDebuggingPipe = false
-  newTab = true
+  newTab = false
   newWindow = false
   cmd = ci
   ciToken = none
   ciBaseUrl = none
   ciCommand = start
-  ciStartRepo = some("https://g.test/r")
+  ciStartRepo = some("--x")
   ciStartCommit = none
   ciStartBranch = none
   ciStartBaseCommit = none
@@ -1275,6 +1285,16 @@ PARSED
   ciStartMonitorProcesses = false
 VALIDATED replayInteractive = false
 --- stderr
+--- end
+
+### 55: --repo --new-tab <v> (an option between it and its value)
+argv: ct "ci" "start" "--repo" "--new-tab" "https://g.test/r"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The subcommand 'start' does not accept arguments\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 56: --repo repeated, last wins
@@ -1310,31 +1330,11 @@ VALIDATED replayInteractive = false
 ### 57: --repo missing value (last)
 argv: ct "ci" "start" "--repo"
 env: (none)
-exit: 0
+exit: 1
 --- stdout
-PARSED
-  cwd = none
-  envFiles = @[]
-  env0Files = @[]
-  tmpEnvFiles = @[]
-  tmpEnv0Files = @[]
-  inspect = none
-  remoteDebuggingPort = none
-  remoteDebuggingPipe = false
-  newTab = false
-  newWindow = false
-  cmd = ci
-  ciToken = none
-  ciBaseUrl = none
-  ciCommand = start
-  ciStartRepo = none
-  ciStartCommit = none
-  ciStartBranch = none
-  ciStartBaseCommit = none
-  ciStartLabel = none
-  ciStartMonitorProcesses = false
-VALIDATED replayInteractive = false
 --- stderr
+The option '\e[34m--repo\e[0m' requires a value\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 58: --REPO <v> (style variant)
@@ -1598,7 +1598,7 @@ PARSED
   ciBaseUrl = none
   ciCommand = start
   ciStartRepo = none
-  ciStartCommit = none
+  ciStartCommit = some("")
   ciStartBranch = none
   ciStartBaseCommit = none
   ciStartLabel = none
@@ -1640,25 +1640,35 @@ VALIDATED replayInteractive = false
 ### 68: --commit -x (value starts with -)
 argv: ct "ci" "start" "--commit" "-x"
 env: (none)
-exit: 1
+exit: 0
 --- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = start
+  ciStartRepo = none
+  ciStartCommit = some("-x")
+  ciStartBranch = none
+  ciStartBaseCommit = none
+  ciStartLabel = none
+  ciStartMonitorProcesses = false
+VALIDATED replayInteractive = false
 --- stderr
-Unrecognized option 'x'\e[0m
-Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 69: --commit --x (value starts with --)
 argv: ct "ci" "start" "--commit" "--x"
-env: (none)
-exit: 1
---- stdout
---- stderr
-Unrecognized option 'x'\e[0m
-Try \e[36mct --help\e[0m for more information.
---- end
-
-### 70: --commit --new-tab <v> (an option between it and its value)
-argv: ct "ci" "start" "--commit" "--new-tab" "abc123"
 env: (none)
 exit: 0
 --- stdout
@@ -1671,20 +1681,30 @@ PARSED
   inspect = none
   remoteDebuggingPort = none
   remoteDebuggingPipe = false
-  newTab = true
+  newTab = false
   newWindow = false
   cmd = ci
   ciToken = none
   ciBaseUrl = none
   ciCommand = start
   ciStartRepo = none
-  ciStartCommit = some("abc123")
+  ciStartCommit = some("--x")
   ciStartBranch = none
   ciStartBaseCommit = none
   ciStartLabel = none
   ciStartMonitorProcesses = false
 VALIDATED replayInteractive = false
 --- stderr
+--- end
+
+### 70: --commit --new-tab <v> (an option between it and its value)
+argv: ct "ci" "start" "--commit" "--new-tab" "abc123"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The subcommand 'start' does not accept arguments\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 71: --commit repeated, last wins
@@ -1720,31 +1740,11 @@ VALIDATED replayInteractive = false
 ### 72: --commit missing value (last)
 argv: ct "ci" "start" "--commit"
 env: (none)
-exit: 0
+exit: 1
 --- stdout
-PARSED
-  cwd = none
-  envFiles = @[]
-  env0Files = @[]
-  tmpEnvFiles = @[]
-  tmpEnv0Files = @[]
-  inspect = none
-  remoteDebuggingPort = none
-  remoteDebuggingPipe = false
-  newTab = false
-  newWindow = false
-  cmd = ci
-  ciToken = none
-  ciBaseUrl = none
-  ciCommand = start
-  ciStartRepo = none
-  ciStartCommit = none
-  ciStartBranch = none
-  ciStartBaseCommit = none
-  ciStartLabel = none
-  ciStartMonitorProcesses = false
-VALIDATED replayInteractive = false
 --- stderr
+The option '\e[34m--commit\e[0m' requires a value\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 73: --COMMIT <v> (style variant)
@@ -2009,7 +2009,7 @@ PARSED
   ciCommand = start
   ciStartRepo = none
   ciStartCommit = none
-  ciStartBranch = none
+  ciStartBranch = some("")
   ciStartBaseCommit = none
   ciStartLabel = none
   ciStartMonitorProcesses = false
@@ -2050,25 +2050,35 @@ VALIDATED replayInteractive = false
 ### 83: --branch -x (value starts with -)
 argv: ct "ci" "start" "--branch" "-x"
 env: (none)
-exit: 1
+exit: 0
 --- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = start
+  ciStartRepo = none
+  ciStartCommit = none
+  ciStartBranch = some("-x")
+  ciStartBaseCommit = none
+  ciStartLabel = none
+  ciStartMonitorProcesses = false
+VALIDATED replayInteractive = false
 --- stderr
-Unrecognized option 'x'\e[0m
-Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 84: --branch --x (value starts with --)
 argv: ct "ci" "start" "--branch" "--x"
-env: (none)
-exit: 1
---- stdout
---- stderr
-Unrecognized option 'x'\e[0m
-Try \e[36mct --help\e[0m for more information.
---- end
-
-### 85: --branch --new-tab <v> (an option between it and its value)
-argv: ct "ci" "start" "--branch" "--new-tab" "main"
 env: (none)
 exit: 0
 --- stdout
@@ -2081,7 +2091,7 @@ PARSED
   inspect = none
   remoteDebuggingPort = none
   remoteDebuggingPipe = false
-  newTab = true
+  newTab = false
   newWindow = false
   cmd = ci
   ciToken = none
@@ -2089,12 +2099,22 @@ PARSED
   ciCommand = start
   ciStartRepo = none
   ciStartCommit = none
-  ciStartBranch = some("main")
+  ciStartBranch = some("--x")
   ciStartBaseCommit = none
   ciStartLabel = none
   ciStartMonitorProcesses = false
 VALIDATED replayInteractive = false
 --- stderr
+--- end
+
+### 85: --branch --new-tab <v> (an option between it and its value)
+argv: ct "ci" "start" "--branch" "--new-tab" "main"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The subcommand 'start' does not accept arguments\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 86: --branch repeated, last wins
@@ -2130,31 +2150,11 @@ VALIDATED replayInteractive = false
 ### 87: --branch missing value (last)
 argv: ct "ci" "start" "--branch"
 env: (none)
-exit: 0
+exit: 1
 --- stdout
-PARSED
-  cwd = none
-  envFiles = @[]
-  env0Files = @[]
-  tmpEnvFiles = @[]
-  tmpEnv0Files = @[]
-  inspect = none
-  remoteDebuggingPort = none
-  remoteDebuggingPipe = false
-  newTab = false
-  newWindow = false
-  cmd = ci
-  ciToken = none
-  ciBaseUrl = none
-  ciCommand = start
-  ciStartRepo = none
-  ciStartCommit = none
-  ciStartBranch = none
-  ciStartBaseCommit = none
-  ciStartLabel = none
-  ciStartMonitorProcesses = false
-VALIDATED replayInteractive = false
 --- stderr
+The option '\e[34m--branch\e[0m' requires a value\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 88: --BRANCH <v> (style variant)
@@ -2420,7 +2420,7 @@ PARSED
   ciStartRepo = none
   ciStartCommit = none
   ciStartBranch = none
-  ciStartBaseCommit = none
+  ciStartBaseCommit = some("")
   ciStartLabel = none
   ciStartMonitorProcesses = false
 VALIDATED replayInteractive = false
@@ -2460,25 +2460,35 @@ VALIDATED replayInteractive = false
 ### 98: --base-commit -x (value starts with -)
 argv: ct "ci" "start" "--base-commit" "-x"
 env: (none)
-exit: 1
+exit: 0
 --- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = start
+  ciStartRepo = none
+  ciStartCommit = none
+  ciStartBranch = none
+  ciStartBaseCommit = some("-x")
+  ciStartLabel = none
+  ciStartMonitorProcesses = false
+VALIDATED replayInteractive = false
 --- stderr
-Unrecognized option 'x'\e[0m
-Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 99: --base-commit --x (value starts with --)
 argv: ct "ci" "start" "--base-commit" "--x"
-env: (none)
-exit: 1
---- stdout
---- stderr
-Unrecognized option 'x'\e[0m
-Try \e[36mct --help\e[0m for more information.
---- end
-
-### 100: --base-commit --new-tab <v> (an option between it and its value)
-argv: ct "ci" "start" "--base-commit" "--new-tab" "def456"
 env: (none)
 exit: 0
 --- stdout
@@ -2491,7 +2501,7 @@ PARSED
   inspect = none
   remoteDebuggingPort = none
   remoteDebuggingPipe = false
-  newTab = true
+  newTab = false
   newWindow = false
   cmd = ci
   ciToken = none
@@ -2500,11 +2510,21 @@ PARSED
   ciStartRepo = none
   ciStartCommit = none
   ciStartBranch = none
-  ciStartBaseCommit = some("def456")
+  ciStartBaseCommit = some("--x")
   ciStartLabel = none
   ciStartMonitorProcesses = false
 VALIDATED replayInteractive = false
 --- stderr
+--- end
+
+### 100: --base-commit --new-tab <v> (an option between it and its value)
+argv: ct "ci" "start" "--base-commit" "--new-tab" "def456"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The subcommand 'start' does not accept arguments\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 101: --base-commit repeated, last wins
@@ -2540,31 +2560,11 @@ VALIDATED replayInteractive = false
 ### 102: --base-commit missing value (last)
 argv: ct "ci" "start" "--base-commit"
 env: (none)
-exit: 0
+exit: 1
 --- stdout
-PARSED
-  cwd = none
-  envFiles = @[]
-  env0Files = @[]
-  tmpEnvFiles = @[]
-  tmpEnv0Files = @[]
-  inspect = none
-  remoteDebuggingPort = none
-  remoteDebuggingPipe = false
-  newTab = false
-  newWindow = false
-  cmd = ci
-  ciToken = none
-  ciBaseUrl = none
-  ciCommand = start
-  ciStartRepo = none
-  ciStartCommit = none
-  ciStartBranch = none
-  ciStartBaseCommit = none
-  ciStartLabel = none
-  ciStartMonitorProcesses = false
-VALIDATED replayInteractive = false
 --- stderr
+The option '\e[34m--base-commit\e[0m' requires a value\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 103: --BASE-COMMIT <v> (style variant)
@@ -2851,7 +2851,7 @@ PARSED
   ciStartCommit = none
   ciStartBranch = none
   ciStartBaseCommit = none
-  ciStartLabel = none
+  ciStartLabel = some("")
   ciStartMonitorProcesses = false
 VALIDATED replayInteractive = false
 --- stderr
@@ -2890,25 +2890,35 @@ VALIDATED replayInteractive = false
 ### 115: --label -x (value starts with -)
 argv: ct "ci" "start" "--label" "-x"
 env: (none)
-exit: 1
+exit: 0
 --- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = start
+  ciStartRepo = none
+  ciStartCommit = none
+  ciStartBranch = none
+  ciStartBaseCommit = none
+  ciStartLabel = some("-x")
+  ciStartMonitorProcesses = false
+VALIDATED replayInteractive = false
 --- stderr
-Unrecognized option 'x'\e[0m
-Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 116: --label --x (value starts with --)
 argv: ct "ci" "start" "--label" "--x"
-env: (none)
-exit: 1
---- stdout
---- stderr
-Unrecognized option 'x'\e[0m
-Try \e[36mct --help\e[0m for more information.
---- end
-
-### 117: --label --new-tab <v> (an option between it and its value)
-argv: ct "ci" "start" "--label" "--new-tab" "nightly"
 env: (none)
 exit: 0
 --- stdout
@@ -2921,7 +2931,7 @@ PARSED
   inspect = none
   remoteDebuggingPort = none
   remoteDebuggingPipe = false
-  newTab = true
+  newTab = false
   newWindow = false
   cmd = ci
   ciToken = none
@@ -2931,10 +2941,20 @@ PARSED
   ciStartCommit = none
   ciStartBranch = none
   ciStartBaseCommit = none
-  ciStartLabel = some("nightly")
+  ciStartLabel = some("--x")
   ciStartMonitorProcesses = false
 VALIDATED replayInteractive = false
 --- stderr
+--- end
+
+### 117: --label --new-tab <v> (an option between it and its value)
+argv: ct "ci" "start" "--label" "--new-tab" "nightly"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The subcommand 'start' does not accept arguments\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 118: --label repeated, last wins
@@ -2970,31 +2990,11 @@ VALIDATED replayInteractive = false
 ### 119: --label missing value (last)
 argv: ct "ci" "start" "--label"
 env: (none)
-exit: 0
+exit: 1
 --- stdout
-PARSED
-  cwd = none
-  envFiles = @[]
-  env0Files = @[]
-  tmpEnvFiles = @[]
-  tmpEnv0Files = @[]
-  inspect = none
-  remoteDebuggingPort = none
-  remoteDebuggingPipe = false
-  newTab = false
-  newWindow = false
-  cmd = ci
-  ciToken = none
-  ciBaseUrl = none
-  ciCommand = start
-  ciStartRepo = none
-  ciStartCommit = none
-  ciStartBranch = none
-  ciStartBaseCommit = none
-  ciStartLabel = none
-  ciStartMonitorProcesses = false
-VALIDATED replayInteractive = false
 --- stderr
+The option '\e[34m--label\e[0m' requires a value\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 120: --LABEL <v> (style variant)
@@ -3560,91 +3560,31 @@ Try \e[36mct --help\e[0m for more information.
 ### 144: lone -
 argv: ct "ci" "start" "-"
 env: (none)
-exit: 0
+exit: 1
 --- stdout
-PARSED
-  cwd = none
-  envFiles = @[]
-  env0Files = @[]
-  tmpEnvFiles = @[]
-  tmpEnv0Files = @[]
-  inspect = none
-  remoteDebuggingPort = none
-  remoteDebuggingPipe = false
-  newTab = false
-  newWindow = false
-  cmd = ci
-  ciToken = none
-  ciBaseUrl = none
-  ciCommand = start
-  ciStartRepo = none
-  ciStartCommit = none
-  ciStartBranch = none
-  ciStartBaseCommit = none
-  ciStartLabel = none
-  ciStartMonitorProcesses = false
-VALIDATED replayInteractive = false
 --- stderr
+Unrecognized option ''\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 145: lone -- then a word
 argv: ct "ci" "start" "--" "w"
 env: (none)
-exit: 0
+exit: 1
 --- stdout
-PARSED
-  cwd = none
-  envFiles = @[]
-  env0Files = @[]
-  tmpEnvFiles = @[]
-  tmpEnv0Files = @[]
-  inspect = none
-  remoteDebuggingPort = none
-  remoteDebuggingPipe = false
-  newTab = false
-  newWindow = false
-  cmd = ci
-  ciToken = none
-  ciBaseUrl = none
-  ciCommand = start
-  ciStartRepo = some("w")
-  ciStartCommit = none
-  ciStartBranch = none
-  ciStartBaseCommit = none
-  ciStartLabel = none
-  ciStartMonitorProcesses = false
-VALIDATED replayInteractive = false
 --- stderr
+Unrecognized option ''\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 146: --=v
 argv: ct "ci" "start" "--=v"
 env: (none)
-exit: 0
+exit: 1
 --- stdout
-PARSED
-  cwd = none
-  envFiles = @[]
-  env0Files = @[]
-  tmpEnvFiles = @[]
-  tmpEnv0Files = @[]
-  inspect = none
-  remoteDebuggingPort = none
-  remoteDebuggingPipe = false
-  newTab = false
-  newWindow = false
-  cmd = ci
-  ciToken = none
-  ciBaseUrl = none
-  ciCommand = start
-  ciStartRepo = some("v")
-  ciStartCommit = none
-  ciStartBranch = none
-  ciStartBaseCommit = none
-  ciStartLabel = none
-  ciStartMonitorProcesses = false
-VALIDATED replayInteractive = false
 --- stderr
+Unrecognized option ''\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 147: extra positional
@@ -3731,11 +3671,26 @@ CodeTracer version: <VERSION>
 ### 151: -h after the command
 argv: ct "ci" "start" "-h"
 env: (none)
-exit: 1
+exit: 0
 --- stdout
+CodeTracer - the user-friendly time-travelling debugger
+
+\e[0m\e[33mUsage:\x20
+\e[0m\e[1m
+\e[36mct ci start\e[0m [OPTIONS]...
+
+The following options are available:
+
+ \e[34m\e[1m--repo                 \e[0m  Repository URL (auto-detected from git remote if
+                              omitted).\e[0m
+ \e[34m\e[1m--commit               \e[0m  Git commit SHA (auto-detected from HEAD if
+                              omitted).\e[0m
+ \e[34m\e[1m--branch               \e[0m  Git branch name (auto-detected if omitted).\e[0m
+ \e[34m\e[1m--base-commit          \e[0m  Base commit SHA for diffing.\e[0m
+ \e[34m\e[1m--label                \e[0m  Human-readable label for the run.\e[0m
+ \e[34m\e[1m--monitor-processes    \e[0m  Enable BPF process tree monitoring [=false].\e[0m
+
 --- stderr
-Unrecognized option 'h'\e[0m
-Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 152: run bare
@@ -3992,21 +3947,67 @@ VALIDATED replayInteractive = false
 ### 161: --repo -x (value starts with -)
 argv: ct "ci" "run" "--repo" "-x" "cmd"
 env: (none)
-exit: 1
+exit: 0
 --- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = run
+  ciRunRepo = some("-x")
+  ciRunCommit = none
+  ciRunBranch = none
+  ciRunBaseCommit = none
+  ciRunLabel = none
+  ciRunMonitorProcesses = false
+  ciRunRecord = false
+  ciRunProgram = "cmd"
+  ciRunArgs = @[]
+VALIDATED replayInteractive = false
 --- stderr
-Unrecognized option 'x'\e[0m
-Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 162: --repo --x (value starts with --)
 argv: ct "ci" "run" "--repo" "--x" "cmd"
 env: (none)
-exit: 1
+exit: 0
 --- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = run
+  ciRunRepo = some("--x")
+  ciRunCommit = none
+  ciRunBranch = none
+  ciRunBaseCommit = none
+  ciRunLabel = none
+  ciRunMonitorProcesses = false
+  ciRunRecord = false
+  ciRunProgram = "cmd"
+  ciRunArgs = @[]
+VALIDATED replayInteractive = false
 --- stderr
-Unrecognized option 'x'\e[0m
-Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 163: --repo --new-tab <v> (an option between it and its value)
@@ -4023,21 +4024,21 @@ PARSED
   inspect = none
   remoteDebuggingPort = none
   remoteDebuggingPipe = false
-  newTab = true
+  newTab = false
   newWindow = false
   cmd = ci
   ciToken = none
   ciBaseUrl = none
   ciCommand = run
-  ciRunRepo = some("https://g.test/r")
+  ciRunRepo = some("--new-tab")
   ciRunCommit = none
   ciRunBranch = none
   ciRunBaseCommit = none
   ciRunLabel = none
   ciRunMonitorProcesses = false
   ciRunRecord = false
-  ciRunProgram = "cmd"
-  ciRunArgs = @[]
+  ciRunProgram = "https://g.test/r"
+  ciRunArgs = @["cmd"]
 VALIDATED replayInteractive = false
 --- stderr
 --- end
@@ -4078,34 +4079,11 @@ VALIDATED replayInteractive = false
 ### 165: --repo missing value (last)
 argv: ct "ci" "run" "cmd" "--repo"
 env: (none)
-exit: 0
+exit: 1
 --- stdout
-PARSED
-  cwd = none
-  envFiles = @[]
-  env0Files = @[]
-  tmpEnvFiles = @[]
-  tmpEnv0Files = @[]
-  inspect = none
-  remoteDebuggingPort = none
-  remoteDebuggingPipe = false
-  newTab = false
-  newWindow = false
-  cmd = ci
-  ciToken = none
-  ciBaseUrl = none
-  ciCommand = run
-  ciRunRepo = none
-  ciRunCommit = none
-  ciRunBranch = none
-  ciRunBaseCommit = none
-  ciRunLabel = none
-  ciRunMonitorProcesses = false
-  ciRunRecord = false
-  ciRunProgram = "cmd"
-  ciRunArgs = @[]
-VALIDATED replayInteractive = false
 --- stderr
+The option '\e[34m--repo\e[0m' requires a value\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 166: --repo missing value (before the rest)
@@ -4428,21 +4406,67 @@ VALIDATED replayInteractive = false
 ### 177: --commit -x (value starts with -)
 argv: ct "ci" "run" "--commit" "-x" "cmd"
 env: (none)
-exit: 1
+exit: 0
 --- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = run
+  ciRunRepo = none
+  ciRunCommit = some("-x")
+  ciRunBranch = none
+  ciRunBaseCommit = none
+  ciRunLabel = none
+  ciRunMonitorProcesses = false
+  ciRunRecord = false
+  ciRunProgram = "cmd"
+  ciRunArgs = @[]
+VALIDATED replayInteractive = false
 --- stderr
-Unrecognized option 'x'\e[0m
-Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 178: --commit --x (value starts with --)
 argv: ct "ci" "run" "--commit" "--x" "cmd"
 env: (none)
-exit: 1
+exit: 0
 --- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = run
+  ciRunRepo = none
+  ciRunCommit = some("--x")
+  ciRunBranch = none
+  ciRunBaseCommit = none
+  ciRunLabel = none
+  ciRunMonitorProcesses = false
+  ciRunRecord = false
+  ciRunProgram = "cmd"
+  ciRunArgs = @[]
+VALIDATED replayInteractive = false
 --- stderr
-Unrecognized option 'x'\e[0m
-Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 179: --commit --new-tab <v> (an option between it and its value)
@@ -4459,21 +4483,21 @@ PARSED
   inspect = none
   remoteDebuggingPort = none
   remoteDebuggingPipe = false
-  newTab = true
+  newTab = false
   newWindow = false
   cmd = ci
   ciToken = none
   ciBaseUrl = none
   ciCommand = run
   ciRunRepo = none
-  ciRunCommit = some("abc123")
+  ciRunCommit = some("--new-tab")
   ciRunBranch = none
   ciRunBaseCommit = none
   ciRunLabel = none
   ciRunMonitorProcesses = false
   ciRunRecord = false
-  ciRunProgram = "cmd"
-  ciRunArgs = @[]
+  ciRunProgram = "abc123"
+  ciRunArgs = @["cmd"]
 VALIDATED replayInteractive = false
 --- stderr
 --- end
@@ -4514,34 +4538,11 @@ VALIDATED replayInteractive = false
 ### 181: --commit missing value (last)
 argv: ct "ci" "run" "cmd" "--commit"
 env: (none)
-exit: 0
+exit: 1
 --- stdout
-PARSED
-  cwd = none
-  envFiles = @[]
-  env0Files = @[]
-  tmpEnvFiles = @[]
-  tmpEnv0Files = @[]
-  inspect = none
-  remoteDebuggingPort = none
-  remoteDebuggingPipe = false
-  newTab = false
-  newWindow = false
-  cmd = ci
-  ciToken = none
-  ciBaseUrl = none
-  ciCommand = run
-  ciRunRepo = none
-  ciRunCommit = none
-  ciRunBranch = none
-  ciRunBaseCommit = none
-  ciRunLabel = none
-  ciRunMonitorProcesses = false
-  ciRunRecord = false
-  ciRunProgram = "cmd"
-  ciRunArgs = @[]
-VALIDATED replayInteractive = false
 --- stderr
+The option '\e[34m--commit\e[0m' requires a value\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 182: --commit missing value (before the rest)
@@ -4864,21 +4865,67 @@ VALIDATED replayInteractive = false
 ### 193: --branch -x (value starts with -)
 argv: ct "ci" "run" "--branch" "-x" "cmd"
 env: (none)
-exit: 1
+exit: 0
 --- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = run
+  ciRunRepo = none
+  ciRunCommit = none
+  ciRunBranch = some("-x")
+  ciRunBaseCommit = none
+  ciRunLabel = none
+  ciRunMonitorProcesses = false
+  ciRunRecord = false
+  ciRunProgram = "cmd"
+  ciRunArgs = @[]
+VALIDATED replayInteractive = false
 --- stderr
-Unrecognized option 'x'\e[0m
-Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 194: --branch --x (value starts with --)
 argv: ct "ci" "run" "--branch" "--x" "cmd"
 env: (none)
-exit: 1
+exit: 0
 --- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = run
+  ciRunRepo = none
+  ciRunCommit = none
+  ciRunBranch = some("--x")
+  ciRunBaseCommit = none
+  ciRunLabel = none
+  ciRunMonitorProcesses = false
+  ciRunRecord = false
+  ciRunProgram = "cmd"
+  ciRunArgs = @[]
+VALIDATED replayInteractive = false
 --- stderr
-Unrecognized option 'x'\e[0m
-Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 195: --branch --new-tab <v> (an option between it and its value)
@@ -4895,7 +4942,7 @@ PARSED
   inspect = none
   remoteDebuggingPort = none
   remoteDebuggingPipe = false
-  newTab = true
+  newTab = false
   newWindow = false
   cmd = ci
   ciToken = none
@@ -4903,13 +4950,13 @@ PARSED
   ciCommand = run
   ciRunRepo = none
   ciRunCommit = none
-  ciRunBranch = some("main")
+  ciRunBranch = some("--new-tab")
   ciRunBaseCommit = none
   ciRunLabel = none
   ciRunMonitorProcesses = false
   ciRunRecord = false
-  ciRunProgram = "cmd"
-  ciRunArgs = @[]
+  ciRunProgram = "main"
+  ciRunArgs = @["cmd"]
 VALIDATED replayInteractive = false
 --- stderr
 --- end
@@ -4950,34 +4997,11 @@ VALIDATED replayInteractive = false
 ### 197: --branch missing value (last)
 argv: ct "ci" "run" "cmd" "--branch"
 env: (none)
-exit: 0
+exit: 1
 --- stdout
-PARSED
-  cwd = none
-  envFiles = @[]
-  env0Files = @[]
-  tmpEnvFiles = @[]
-  tmpEnv0Files = @[]
-  inspect = none
-  remoteDebuggingPort = none
-  remoteDebuggingPipe = false
-  newTab = false
-  newWindow = false
-  cmd = ci
-  ciToken = none
-  ciBaseUrl = none
-  ciCommand = run
-  ciRunRepo = none
-  ciRunCommit = none
-  ciRunBranch = none
-  ciRunBaseCommit = none
-  ciRunLabel = none
-  ciRunMonitorProcesses = false
-  ciRunRecord = false
-  ciRunProgram = "cmd"
-  ciRunArgs = @[]
-VALIDATED replayInteractive = false
 --- stderr
+The option '\e[34m--branch\e[0m' requires a value\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 198: --branch missing value (before the rest)
@@ -5300,21 +5324,67 @@ VALIDATED replayInteractive = false
 ### 209: --base-commit -x (value starts with -)
 argv: ct "ci" "run" "--base-commit" "-x" "cmd"
 env: (none)
-exit: 1
+exit: 0
 --- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = run
+  ciRunRepo = none
+  ciRunCommit = none
+  ciRunBranch = none
+  ciRunBaseCommit = some("-x")
+  ciRunLabel = none
+  ciRunMonitorProcesses = false
+  ciRunRecord = false
+  ciRunProgram = "cmd"
+  ciRunArgs = @[]
+VALIDATED replayInteractive = false
 --- stderr
-Unrecognized option 'x'\e[0m
-Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 210: --base-commit --x (value starts with --)
 argv: ct "ci" "run" "--base-commit" "--x" "cmd"
 env: (none)
-exit: 1
+exit: 0
 --- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = run
+  ciRunRepo = none
+  ciRunCommit = none
+  ciRunBranch = none
+  ciRunBaseCommit = some("--x")
+  ciRunLabel = none
+  ciRunMonitorProcesses = false
+  ciRunRecord = false
+  ciRunProgram = "cmd"
+  ciRunArgs = @[]
+VALIDATED replayInteractive = false
 --- stderr
-Unrecognized option 'x'\e[0m
-Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 211: --base-commit --new-tab <v> (an option between it and its value)
@@ -5331,7 +5401,7 @@ PARSED
   inspect = none
   remoteDebuggingPort = none
   remoteDebuggingPipe = false
-  newTab = true
+  newTab = false
   newWindow = false
   cmd = ci
   ciToken = none
@@ -5340,12 +5410,12 @@ PARSED
   ciRunRepo = none
   ciRunCommit = none
   ciRunBranch = none
-  ciRunBaseCommit = some("def456")
+  ciRunBaseCommit = some("--new-tab")
   ciRunLabel = none
   ciRunMonitorProcesses = false
   ciRunRecord = false
-  ciRunProgram = "cmd"
-  ciRunArgs = @[]
+  ciRunProgram = "def456"
+  ciRunArgs = @["cmd"]
 VALIDATED replayInteractive = false
 --- stderr
 --- end
@@ -5386,34 +5456,11 @@ VALIDATED replayInteractive = false
 ### 213: --base-commit missing value (last)
 argv: ct "ci" "run" "cmd" "--base-commit"
 env: (none)
-exit: 0
+exit: 1
 --- stdout
-PARSED
-  cwd = none
-  envFiles = @[]
-  env0Files = @[]
-  tmpEnvFiles = @[]
-  tmpEnv0Files = @[]
-  inspect = none
-  remoteDebuggingPort = none
-  remoteDebuggingPipe = false
-  newTab = false
-  newWindow = false
-  cmd = ci
-  ciToken = none
-  ciBaseUrl = none
-  ciCommand = run
-  ciRunRepo = none
-  ciRunCommit = none
-  ciRunBranch = none
-  ciRunBaseCommit = none
-  ciRunLabel = none
-  ciRunMonitorProcesses = false
-  ciRunRecord = false
-  ciRunProgram = "cmd"
-  ciRunArgs = @[]
-VALIDATED replayInteractive = false
 --- stderr
+The option '\e[34m--base-commit\e[0m' requires a value\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 214: --base-commit missing value (before the rest)
@@ -5756,21 +5803,67 @@ VALIDATED replayInteractive = false
 ### 227: --label -x (value starts with -)
 argv: ct "ci" "run" "--label" "-x" "cmd"
 env: (none)
-exit: 1
+exit: 0
 --- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = run
+  ciRunRepo = none
+  ciRunCommit = none
+  ciRunBranch = none
+  ciRunBaseCommit = none
+  ciRunLabel = some("-x")
+  ciRunMonitorProcesses = false
+  ciRunRecord = false
+  ciRunProgram = "cmd"
+  ciRunArgs = @[]
+VALIDATED replayInteractive = false
 --- stderr
-Unrecognized option 'x'\e[0m
-Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 228: --label --x (value starts with --)
 argv: ct "ci" "run" "--label" "--x" "cmd"
 env: (none)
-exit: 1
+exit: 0
 --- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = run
+  ciRunRepo = none
+  ciRunCommit = none
+  ciRunBranch = none
+  ciRunBaseCommit = none
+  ciRunLabel = some("--x")
+  ciRunMonitorProcesses = false
+  ciRunRecord = false
+  ciRunProgram = "cmd"
+  ciRunArgs = @[]
+VALIDATED replayInteractive = false
 --- stderr
-Unrecognized option 'x'\e[0m
-Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 229: --label --new-tab <v> (an option between it and its value)
@@ -5787,7 +5880,7 @@ PARSED
   inspect = none
   remoteDebuggingPort = none
   remoteDebuggingPipe = false
-  newTab = true
+  newTab = false
   newWindow = false
   cmd = ci
   ciToken = none
@@ -5797,11 +5890,11 @@ PARSED
   ciRunCommit = none
   ciRunBranch = none
   ciRunBaseCommit = none
-  ciRunLabel = some("nightly")
+  ciRunLabel = some("--new-tab")
   ciRunMonitorProcesses = false
   ciRunRecord = false
-  ciRunProgram = "cmd"
-  ciRunArgs = @[]
+  ciRunProgram = "nightly"
+  ciRunArgs = @["cmd"]
 VALIDATED replayInteractive = false
 --- stderr
 --- end
@@ -5842,34 +5935,11 @@ VALIDATED replayInteractive = false
 ### 231: --label missing value (last)
 argv: ct "ci" "run" "cmd" "--label"
 env: (none)
-exit: 0
+exit: 1
 --- stdout
-PARSED
-  cwd = none
-  envFiles = @[]
-  env0Files = @[]
-  tmpEnvFiles = @[]
-  tmpEnv0Files = @[]
-  inspect = none
-  remoteDebuggingPort = none
-  remoteDebuggingPipe = false
-  newTab = false
-  newWindow = false
-  cmd = ci
-  ciToken = none
-  ciBaseUrl = none
-  ciCommand = run
-  ciRunRepo = none
-  ciRunCommit = none
-  ciRunBranch = none
-  ciRunBaseCommit = none
-  ciRunLabel = none
-  ciRunMonitorProcesses = false
-  ciRunRecord = false
-  ciRunProgram = "cmd"
-  ciRunArgs = @[]
-VALIDATED replayInteractive = false
 --- stderr
+The option '\e[34m--label\e[0m' requires a value\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 232: --label missing value (before the rest)
@@ -6496,74 +6566,28 @@ env: (none)
 exit: 1
 --- stdout
 --- stderr
-The required option 'ciRunProgram' was not specified\e[0m
+Unrecognized option ''\e[0m
 Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 258: lone -- then a word
 argv: ct "ci" "run" "--" "w" "cmd"
 env: (none)
-exit: 0
+exit: 1
 --- stdout
-PARSED
-  cwd = none
-  envFiles = @[]
-  env0Files = @[]
-  tmpEnvFiles = @[]
-  tmpEnv0Files = @[]
-  inspect = none
-  remoteDebuggingPort = none
-  remoteDebuggingPipe = false
-  newTab = false
-  newWindow = false
-  cmd = ci
-  ciToken = none
-  ciBaseUrl = none
-  ciCommand = run
-  ciRunRepo = some("w")
-  ciRunCommit = none
-  ciRunBranch = none
-  ciRunBaseCommit = none
-  ciRunLabel = none
-  ciRunMonitorProcesses = false
-  ciRunRecord = false
-  ciRunProgram = "cmd"
-  ciRunArgs = @[]
-VALIDATED replayInteractive = false
 --- stderr
+Unrecognized option ''\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 259: --=v
 argv: ct "ci" "run" "--=v" "cmd"
 env: (none)
-exit: 0
+exit: 1
 --- stdout
-PARSED
-  cwd = none
-  envFiles = @[]
-  env0Files = @[]
-  tmpEnvFiles = @[]
-  tmpEnv0Files = @[]
-  inspect = none
-  remoteDebuggingPort = none
-  remoteDebuggingPipe = false
-  newTab = false
-  newWindow = false
-  cmd = ci
-  ciToken = none
-  ciBaseUrl = none
-  ciCommand = run
-  ciRunRepo = some("v")
-  ciRunCommit = none
-  ciRunBranch = none
-  ciRunBaseCommit = none
-  ciRunLabel = none
-  ciRunMonitorProcesses = false
-  ciRunRecord = false
-  ciRunProgram = "cmd"
-  ciRunArgs = @[]
-VALIDATED replayInteractive = false
 --- stderr
+Unrecognized option ''\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 260: extra positional
@@ -6679,11 +6703,31 @@ CodeTracer version: <VERSION>
 ### 264: -h after the command
 argv: ct "ci" "run" "-h" "cmd"
 env: (none)
-exit: 1
+exit: 0
 --- stdout
+CodeTracer - the user-friendly time-travelling debugger
+
+\e[0m\e[33mUsage:\x20
+\e[0m\e[1m
+\e[36mct ci run\e[0m [OPTIONS]... <ciRunProgram>\e[0m <ciRunArgs>\e[0m
+
+\e[34m\e[1m <ciRunProgram>\e[0m              \e[0m  Command to execute.\e[0m
+\e[34m\e[1m <ciRunArgs>\e[0m                 \e[0m  Arguments for the command [=@[]].\e[0m
+
+The following options are available:
+
+ \e[34m\e[1m--repo                 \e[0m  Repository URL (auto-detected from git remote if
+                              omitted).\e[0m
+ \e[34m\e[1m--commit               \e[0m  Git commit SHA (auto-detected from HEAD if
+                              omitted).\e[0m
+ \e[34m\e[1m--branch               \e[0m  Git branch name (auto-detected if omitted).\e[0m
+ \e[34m\e[1m--base-commit          \e[0m  Base commit SHA for diffing.\e[0m
+ \e[34m\e[1m--label                \e[0m  Human-readable label for the run.\e[0m
+ \e[34m\e[1m--monitor-processes    \e[0m  Enable BPF process tree monitoring [=false].\e[0m
+ \e[34m\e[1m--record               \e[0m  Wrap command in ct record and auto-upload trace
+                              [=false].\e[0m
+
 --- stderr
-Unrecognized option 'h'\e[0m
-Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 265: run cmd args
@@ -7289,76 +7333,31 @@ Try \e[36mct --help\e[0m for more information.
 ### 289: lone -
 argv: ct "ci" "attach" "-" "r1"
 env: (none)
-exit: 0
+exit: 1
 --- stdout
-PARSED
-  cwd = none
-  envFiles = @[]
-  env0Files = @[]
-  tmpEnvFiles = @[]
-  tmpEnv0Files = @[]
-  inspect = none
-  remoteDebuggingPort = none
-  remoteDebuggingPipe = false
-  newTab = false
-  newWindow = false
-  cmd = ci
-  ciToken = none
-  ciBaseUrl = none
-  ciCommand = attach
-  ciAttachRunId = "r1"
-VALIDATED replayInteractive = false
 --- stderr
+Unrecognized option ''\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 290: lone -- then a word
 argv: ct "ci" "attach" "--" "w" "r1"
 env: (none)
-exit: 0
+exit: 1
 --- stdout
-PARSED
-  cwd = none
-  envFiles = @[]
-  env0Files = @[]
-  tmpEnvFiles = @[]
-  tmpEnv0Files = @[]
-  inspect = none
-  remoteDebuggingPort = none
-  remoteDebuggingPipe = false
-  newTab = false
-  newWindow = false
-  cmd = ci
-  ciToken = none
-  ciBaseUrl = none
-  ciCommand = attach
-  ciAttachRunId = "r1"
-VALIDATED replayInteractive = false
 --- stderr
+Unrecognized option ''\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 291: --=v
 argv: ct "ci" "attach" "--=v" "r1"
 env: (none)
-exit: 0
+exit: 1
 --- stdout
-PARSED
-  cwd = none
-  envFiles = @[]
-  env0Files = @[]
-  tmpEnvFiles = @[]
-  tmpEnv0Files = @[]
-  inspect = none
-  remoteDebuggingPort = none
-  remoteDebuggingPipe = false
-  newTab = false
-  newWindow = false
-  cmd = ci
-  ciToken = none
-  ciBaseUrl = none
-  ciCommand = attach
-  ciAttachRunId = "r1"
-VALIDATED replayInteractive = false
 --- stderr
+Unrecognized option ''\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 292: extra positional
@@ -7435,11 +7434,17 @@ CodeTracer version: <VERSION>
 ### 296: -h after the command
 argv: ct "ci" "attach" "-h" "r1"
 env: (none)
-exit: 1
+exit: 0
 --- stdout
+CodeTracer - the user-friendly time-travelling debugger
+
+\e[0m\e[33mUsage:\x20
+\e[0m\e[1m
+\e[36mct ci attach\e[0m <ciAttachRunId>\e[0m
+
+\e[34m\e[1m <ciAttachRunId>\e[0m\e[0m  Run ID to attach to.\e[0m
+
 --- stderr
-Unrecognized option 'h'\e[0m
-Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 297: exec bare
@@ -8415,57 +8420,21 @@ Try \e[36mct --help\e[0m for more information.
 ### 340: lone -
 argv: ct "ci" "exec" "-" "cmd"
 env: (none)
-exit: 0
+exit: 1
 --- stdout
-PARSED
-  cwd = none
-  envFiles = @[]
-  env0Files = @[]
-  tmpEnvFiles = @[]
-  tmpEnv0Files = @[]
-  inspect = none
-  remoteDebuggingPort = none
-  remoteDebuggingPipe = false
-  newTab = false
-  newWindow = false
-  cmd = ci
-  ciToken = none
-  ciBaseUrl = none
-  ciCommand = exec
-  ciExecMonitorProcesses = true
-  ciExecRecord = false
-  ciExecProgram = "cmd"
-  ciExecArgs = @[]
-VALIDATED replayInteractive = false
 --- stderr
+Unrecognized option ''\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 341: lone -- then a word
 argv: ct "ci" "exec" "--" "w" "cmd"
 env: (none)
-exit: 0
+exit: 1
 --- stdout
-PARSED
-  cwd = none
-  envFiles = @[]
-  env0Files = @[]
-  tmpEnvFiles = @[]
-  tmpEnv0Files = @[]
-  inspect = none
-  remoteDebuggingPort = none
-  remoteDebuggingPipe = false
-  newTab = false
-  newWindow = false
-  cmd = ci
-  ciToken = none
-  ciBaseUrl = none
-  ciCommand = exec
-  ciExecMonitorProcesses = true
-  ciExecRecord = false
-  ciExecProgram = "w"
-  ciExecArgs = @["cmd"]
-VALIDATED replayInteractive = false
 --- stderr
+Unrecognized option ''\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 342: --=v
@@ -8474,7 +8443,7 @@ env: (none)
 exit: 1
 --- stdout
 --- stderr
-Error while processing the \e[34mmonitor-processes=v\e[0m parameter: 'v' is not a valid boolean value. Supported values are on/off, yes/no, true/false or 1/0\e[0m
+Unrecognized option ''\e[0m
 Try \e[36mct --help\e[0m for more information.
 --- end
 
@@ -8576,11 +8545,24 @@ CodeTracer version: <VERSION>
 ### 347: -h after the command
 argv: ct "ci" "exec" "-h" "cmd"
 env: (none)
-exit: 1
+exit: 0
 --- stdout
+CodeTracer - the user-friendly time-travelling debugger
+
+\e[0m\e[33mUsage:\x20
+\e[0m\e[1m
+\e[36mct ci exec\e[0m [OPTIONS]... <ciExecProgram>\e[0m <ciExecArgs>\e[0m
+
+\e[34m\e[1m <ciExecProgram>\e[0m             \e[0m  Command to execute.\e[0m
+\e[34m\e[1m <ciExecArgs>\e[0m                \e[0m  Arguments for the command [=@[]].\e[0m
+
+The following options are available:
+
+ \e[34m\e[1m--monitor-processes    \e[0m  Enable BPF-based process tree monitoring [=false].\e[0m
+ \e[34m\e[1m--record               \e[0m  Wrap command in ct record and auto-upload trace
+                              [=false].\e[0m
+
 --- stderr
-Unrecognized option 'h'\e[0m
-Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 348: finish bare
@@ -8828,7 +8810,7 @@ PARSED
   ciToken = none
   ciBaseUrl = none
   ciCommand = finish
-  ciFinishStatus = none
+  ciFinishStatus = some("")
 VALIDATED replayInteractive = false
 --- stderr
 --- end
@@ -8861,25 +8843,30 @@ VALIDATED replayInteractive = false
 ### 359: --status -x (value starts with -)
 argv: ct "ci" "finish" "--status" "-x"
 env: (none)
-exit: 1
+exit: 0
 --- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = finish
+  ciFinishStatus = some("-x")
+VALIDATED replayInteractive = false
 --- stderr
-Unrecognized option 'x'\e[0m
-Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 360: --status --x (value starts with --)
 argv: ct "ci" "finish" "--status" "--x"
-env: (none)
-exit: 1
---- stdout
---- stderr
-Unrecognized option 'x'\e[0m
-Try \e[36mct --help\e[0m for more information.
---- end
-
-### 361: --status --new-tab <v> (an option between it and its value)
-argv: ct "ci" "finish" "--status" "--new-tab" "passed"
 env: (none)
 exit: 0
 --- stdout
@@ -8892,15 +8879,25 @@ PARSED
   inspect = none
   remoteDebuggingPort = none
   remoteDebuggingPipe = false
-  newTab = true
+  newTab = false
   newWindow = false
   cmd = ci
   ciToken = none
   ciBaseUrl = none
   ciCommand = finish
-  ciFinishStatus = some("passed")
+  ciFinishStatus = some("--x")
 VALIDATED replayInteractive = false
 --- stderr
+--- end
+
+### 361: --status --new-tab <v> (an option between it and its value)
+argv: ct "ci" "finish" "--status" "--new-tab" "passed"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The subcommand 'finish' does not accept arguments\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 362: --status repeated, last wins
@@ -8931,26 +8928,11 @@ VALIDATED replayInteractive = false
 ### 363: --status missing value (last)
 argv: ct "ci" "finish" "--status"
 env: (none)
-exit: 0
+exit: 1
 --- stdout
-PARSED
-  cwd = none
-  envFiles = @[]
-  env0Files = @[]
-  tmpEnvFiles = @[]
-  tmpEnv0Files = @[]
-  inspect = none
-  remoteDebuggingPort = none
-  remoteDebuggingPipe = false
-  newTab = false
-  newWindow = false
-  cmd = ci
-  ciToken = none
-  ciBaseUrl = none
-  ciCommand = finish
-  ciFinishStatus = none
-VALIDATED replayInteractive = false
 --- stderr
+The option '\e[34m--status\e[0m' requires a value\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 364: --STATUS <v> (style variant)
@@ -9036,76 +9018,31 @@ Try \e[36mct --help\e[0m for more information.
 ### 369: lone -
 argv: ct "ci" "finish" "-"
 env: (none)
-exit: 0
+exit: 1
 --- stdout
-PARSED
-  cwd = none
-  envFiles = @[]
-  env0Files = @[]
-  tmpEnvFiles = @[]
-  tmpEnv0Files = @[]
-  inspect = none
-  remoteDebuggingPort = none
-  remoteDebuggingPipe = false
-  newTab = false
-  newWindow = false
-  cmd = ci
-  ciToken = none
-  ciBaseUrl = none
-  ciCommand = finish
-  ciFinishStatus = none
-VALIDATED replayInteractive = false
 --- stderr
+Unrecognized option ''\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 370: lone -- then a word
 argv: ct "ci" "finish" "--" "w"
 env: (none)
-exit: 0
+exit: 1
 --- stdout
-PARSED
-  cwd = none
-  envFiles = @[]
-  env0Files = @[]
-  tmpEnvFiles = @[]
-  tmpEnv0Files = @[]
-  inspect = none
-  remoteDebuggingPort = none
-  remoteDebuggingPipe = false
-  newTab = false
-  newWindow = false
-  cmd = ci
-  ciToken = none
-  ciBaseUrl = none
-  ciCommand = finish
-  ciFinishStatus = some("w")
-VALIDATED replayInteractive = false
 --- stderr
+Unrecognized option ''\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 371: --=v
 argv: ct "ci" "finish" "--=v"
 env: (none)
-exit: 0
+exit: 1
 --- stdout
-PARSED
-  cwd = none
-  envFiles = @[]
-  env0Files = @[]
-  tmpEnvFiles = @[]
-  tmpEnv0Files = @[]
-  inspect = none
-  remoteDebuggingPort = none
-  remoteDebuggingPipe = false
-  newTab = false
-  newWindow = false
-  cmd = ci
-  ciToken = none
-  ciBaseUrl = none
-  ciCommand = finish
-  ciFinishStatus = some("v")
-VALIDATED replayInteractive = false
 --- stderr
+Unrecognized option ''\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 372: extra positional
@@ -9182,11 +9119,19 @@ CodeTracer version: <VERSION>
 ### 376: -h after the command
 argv: ct "ci" "finish" "-h"
 env: (none)
-exit: 1
+exit: 0
 --- stdout
+CodeTracer - the user-friendly time-travelling debugger
+
+\e[0m\e[33mUsage:\x20
+\e[0m\e[1m
+\e[36mct ci finish\e[0m [OPTIONS]...
+
+The following options are available:
+
+ \e[34m\e[1m--status    \e[0m  Override run status (passed/failed/error).\e[0m
+
 --- stderr
-Unrecognized option 'h'\e[0m
-Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 377: log no message
@@ -9345,73 +9290,31 @@ Try \e[36mct --help\e[0m for more information.
 ### 386: lone -
 argv: ct "ci" "-"
 env: (none)
-exit: 0
+exit: 1
 --- stdout
-PARSED
-  cwd = none
-  envFiles = @[]
-  env0Files = @[]
-  tmpEnvFiles = @[]
-  tmpEnv0Files = @[]
-  inspect = none
-  remoteDebuggingPort = none
-  remoteDebuggingPipe = false
-  newTab = false
-  newWindow = false
-  cmd = ci
-  ciToken = none
-  ciBaseUrl = none
-  ciCommand = noCommand
-VALIDATED replayInteractive = false
 --- stderr
+Unrecognized option ''\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 387: lone -- then a word
 argv: ct "ci" "--" "w"
 env: (none)
-exit: 0
+exit: 1
 --- stdout
-PARSED
-  cwd = none
-  envFiles = @[]
-  env0Files = @[]
-  tmpEnvFiles = @[]
-  tmpEnv0Files = @[]
-  inspect = none
-  remoteDebuggingPort = none
-  remoteDebuggingPipe = false
-  newTab = false
-  newWindow = false
-  cmd = ci
-  ciToken = some("w")
-  ciBaseUrl = none
-  ciCommand = noCommand
-VALIDATED replayInteractive = false
 --- stderr
+Unrecognized option ''\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 388: --=v
 argv: ct "ci" "--=v"
 env: (none)
-exit: 0
+exit: 1
 --- stdout
-PARSED
-  cwd = none
-  envFiles = @[]
-  env0Files = @[]
-  tmpEnvFiles = @[]
-  tmpEnv0Files = @[]
-  inspect = none
-  remoteDebuggingPort = none
-  remoteDebuggingPipe = false
-  newTab = false
-  newWindow = false
-  cmd = ci
-  ciToken = some("v")
-  ciBaseUrl = none
-  ciCommand = noCommand
-VALIDATED replayInteractive = false
 --- stderr
+Unrecognized option ''\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 389: extra positional
@@ -9486,9 +9389,74 @@ CodeTracer version: <VERSION>
 ### 393: -h after the command
 argv: ct "ci" "-h"
 env: (none)
-exit: 1
+exit: 0
 --- stdout
+CodeTracer - the user-friendly time-travelling debugger
+
+\e[0m\e[33mUsage:\x20
+\e[0m\e[1m
+\e[36mct ci\e[0m [OPTIONS]... command
+
+The following options are available:
+
+ \e[34m\e[1m--token       \e[0m  CI API token (uses CODETRACER_TOKEN env var if omitted).\e[0m
+ \e[34m\e[1m--base-url    \e[0m  Override the remote server URL.\e[0m
+\e[33m
+Available sub-commands:
+\e[0m\e[1m
+\e[36mct ci start\e[0m [OPTIONS]...
+
+The following options are available:
+
+ \e[34m\e[1m--repo        \e[0m  Repository URL (auto-detected from git remote if omitted).\e[0m
+ \e[34m\e[1m--commit      \e[0m  Git commit SHA (auto-detected from HEAD if omitted).\e[0m
+ \e[34m\e[1m--branch      \e[0m  Git branch name (auto-detected if omitted).\e[0m
+ \e[34m\e[1m--base-commit \e[0m  Base commit SHA for diffing.\e[0m
+ \e[34m\e[1m--label       \e[0m  Human-readable label for the run.\e[0m
+ \e[34m\e[1m--monitor-processes\e[0m  Enable BPF process tree monitoring [=false].\e[0m
+\e[1m
+\e[36mct ci attach\e[0m <ciAttachRunId>\e[0m
+
+\e[34m\e[1m <ciAttachRunId>\e[0m    \e[0m  Run ID to attach to.\e[0m
+\e[1m
+\e[36mct ci exec\e[0m [OPTIONS]... <ciExecProgram>\e[0m <ciExecArgs>\e[0m
+
+\e[34m\e[1m <ciExecProgram>\e[0m    \e[0m  Command to execute.\e[0m
+\e[34m\e[1m <ciExecArgs>\e[0m       \e[0m  Arguments for the command [=@[]].\e[0m
+
+The following options are available:
+
+ \e[34m\e[1m--monitor-processes\e[0m  Enable BPF-based process tree monitoring [=false].\e[0m
+ \e[34m\e[1m--record      \e[0m  Wrap command in ct record and auto-upload trace [=false].\e[0m
+\e[1m
+\e[36mct ci finish\e[0m [OPTIONS]...
+
+The following options are available:
+
+ \e[34m\e[1m--status      \e[0m  Override run status (passed/failed/error).\e[0m
+\e[1m
+\e[36mct ci run\e[0m [OPTIONS]... <ciRunProgram>\e[0m <ciRunArgs>\e[0m
+
+\e[34m\e[1m <ciRunProgram>\e[0m     \e[0m  Command to execute.\e[0m
+\e[34m\e[1m <ciRunArgs>\e[0m        \e[0m  Arguments for the command [=@[]].\e[0m
+
+The following options are available:
+
+ \e[34m\e[1m--repo        \e[0m  Repository URL (auto-detected from git remote if omitted).\e[0m
+ \e[34m\e[1m--commit      \e[0m  Git commit SHA (auto-detected from HEAD if omitted).\e[0m
+ \e[34m\e[1m--branch      \e[0m  Git branch name (auto-detected if omitted).\e[0m
+ \e[34m\e[1m--base-commit \e[0m  Base commit SHA for diffing.\e[0m
+ \e[34m\e[1m--label       \e[0m  Human-readable label for the run.\e[0m
+ \e[34m\e[1m--monitor-processes\e[0m  Enable BPF process tree monitoring [=false].\e[0m
+ \e[34m\e[1m--record      \e[0m  Wrap command in ct record and auto-upload trace [=false].\e[0m
+\e[1m
+\e[36mct ci log\e[0m <ciLogMessage>\e[0m
+
+\e[34m\e[1m <ciLogMessage>\e[0m     \e[0m  Log message to append.\e[0m
+\e[1m
+\e[36mct ci status\e[0m
+\e[1m
+\e[36mct ci cancel\e[0m
+
 --- stderr
-Unrecognized option 'h'\e[0m
-Try \e[36mct --help\e[0m for more information.
 --- end

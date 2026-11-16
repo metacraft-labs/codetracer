@@ -188,7 +188,7 @@ PARSED
   newTab = false
   newWindow = false
   cmd = check-license
-  checkLicenseToken = none
+  checkLicenseToken = some("")
   checkLicenseBaseUrl = none
 VALIDATED replayInteractive = false
 --- stderr
@@ -220,25 +220,28 @@ VALIDATED replayInteractive = false
 ### 11: --token -x (value starts with -)
 argv: ct "check-license" "--token" "-x"
 env: (none)
-exit: 1
+exit: 0
 --- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = check-license
+  checkLicenseToken = some("-x")
+  checkLicenseBaseUrl = none
+VALIDATED replayInteractive = false
 --- stderr
-Unrecognized option 'x'\e[0m
-Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 12: --token --x (value starts with --)
 argv: ct "check-license" "--token" "--x"
-env: (none)
-exit: 1
---- stdout
---- stderr
-Unrecognized option 'x'\e[0m
-Try \e[36mct --help\e[0m for more information.
---- end
-
-### 13: --token --new-tab <v> (an option between it and its value)
-argv: ct "check-license" "--token" "--new-tab" "tok"
 env: (none)
 exit: 0
 --- stdout
@@ -251,13 +254,23 @@ PARSED
   inspect = none
   remoteDebuggingPort = none
   remoteDebuggingPipe = false
-  newTab = true
+  newTab = false
   newWindow = false
   cmd = check-license
-  checkLicenseToken = some("tok")
+  checkLicenseToken = some("--x")
   checkLicenseBaseUrl = none
 VALIDATED replayInteractive = false
 --- stderr
+--- end
+
+### 13: --token --new-tab <v> (an option between it and its value)
+argv: ct "check-license" "--token" "--new-tab" "tok"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The subcommand 'check-license' does not accept arguments\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 14: --token repeated, last wins
@@ -286,24 +299,11 @@ VALIDATED replayInteractive = false
 ### 15: --token missing value (last)
 argv: ct "check-license" "--token"
 env: (none)
-exit: 0
+exit: 1
 --- stdout
-PARSED
-  cwd = none
-  envFiles = @[]
-  env0Files = @[]
-  tmpEnvFiles = @[]
-  tmpEnv0Files = @[]
-  inspect = none
-  remoteDebuggingPort = none
-  remoteDebuggingPipe = false
-  newTab = false
-  newWindow = false
-  cmd = check-license
-  checkLicenseToken = none
-  checkLicenseBaseUrl = none
-VALIDATED replayInteractive = false
 --- stderr
+The option '\e[34m--token\e[0m' requires a value\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 16: --TOKEN <v> (style variant)
@@ -508,7 +508,7 @@ PARSED
   newWindow = false
   cmd = check-license
   checkLicenseToken = none
-  checkLicenseBaseUrl = none
+  checkLicenseBaseUrl = some("")
 VALIDATED replayInteractive = false
 --- stderr
 --- end
@@ -539,25 +539,28 @@ VALIDATED replayInteractive = false
 ### 26: --base-url -x (value starts with -)
 argv: ct "check-license" "--base-url" "-x"
 env: (none)
-exit: 1
+exit: 0
 --- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = check-license
+  checkLicenseToken = none
+  checkLicenseBaseUrl = some("-x")
+VALIDATED replayInteractive = false
 --- stderr
-Unrecognized option 'x'\e[0m
-Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 27: --base-url --x (value starts with --)
 argv: ct "check-license" "--base-url" "--x"
-env: (none)
-exit: 1
---- stdout
---- stderr
-Unrecognized option 'x'\e[0m
-Try \e[36mct --help\e[0m for more information.
---- end
-
-### 28: --base-url --new-tab <v> (an option between it and its value)
-argv: ct "check-license" "--base-url" "--new-tab" "https://b.test"
 env: (none)
 exit: 0
 --- stdout
@@ -570,13 +573,23 @@ PARSED
   inspect = none
   remoteDebuggingPort = none
   remoteDebuggingPipe = false
-  newTab = true
+  newTab = false
   newWindow = false
   cmd = check-license
   checkLicenseToken = none
-  checkLicenseBaseUrl = some("https://b.test")
+  checkLicenseBaseUrl = some("--x")
 VALIDATED replayInteractive = false
 --- stderr
+--- end
+
+### 28: --base-url --new-tab <v> (an option between it and its value)
+argv: ct "check-license" "--base-url" "--new-tab" "https://b.test"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The subcommand 'check-license' does not accept arguments\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 29: --base-url repeated, last wins
@@ -605,24 +618,11 @@ VALIDATED replayInteractive = false
 ### 30: --base-url missing value (last)
 argv: ct "check-license" "--base-url"
 env: (none)
-exit: 0
+exit: 1
 --- stdout
-PARSED
-  cwd = none
-  envFiles = @[]
-  env0Files = @[]
-  tmpEnvFiles = @[]
-  tmpEnv0Files = @[]
-  inspect = none
-  remoteDebuggingPort = none
-  remoteDebuggingPipe = false
-  newTab = false
-  newWindow = false
-  cmd = check-license
-  checkLicenseToken = none
-  checkLicenseBaseUrl = none
-VALIDATED replayInteractive = false
 --- stderr
+The option '\e[34m--base-url\e[0m' requires a value\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 31: --BASE-URL <v> (style variant)
@@ -747,70 +747,31 @@ Try \e[36mct --help\e[0m for more information.
 ### 39: lone -
 argv: ct "check-license" "-"
 env: (none)
-exit: 0
+exit: 1
 --- stdout
-PARSED
-  cwd = none
-  envFiles = @[]
-  env0Files = @[]
-  tmpEnvFiles = @[]
-  tmpEnv0Files = @[]
-  inspect = none
-  remoteDebuggingPort = none
-  remoteDebuggingPipe = false
-  newTab = false
-  newWindow = false
-  cmd = check-license
-  checkLicenseToken = none
-  checkLicenseBaseUrl = none
-VALIDATED replayInteractive = false
 --- stderr
+Unrecognized option ''\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 40: lone -- then a word
 argv: ct "check-license" "--" "w"
 env: (none)
-exit: 0
+exit: 1
 --- stdout
-PARSED
-  cwd = none
-  envFiles = @[]
-  env0Files = @[]
-  tmpEnvFiles = @[]
-  tmpEnv0Files = @[]
-  inspect = none
-  remoteDebuggingPort = none
-  remoteDebuggingPipe = false
-  newTab = false
-  newWindow = false
-  cmd = check-license
-  checkLicenseToken = some("w")
-  checkLicenseBaseUrl = none
-VALIDATED replayInteractive = false
 --- stderr
+Unrecognized option ''\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 41: --=v
 argv: ct "check-license" "--=v"
 env: (none)
-exit: 0
+exit: 1
 --- stdout
-PARSED
-  cwd = none
-  envFiles = @[]
-  env0Files = @[]
-  tmpEnvFiles = @[]
-  tmpEnv0Files = @[]
-  inspect = none
-  remoteDebuggingPort = none
-  remoteDebuggingPipe = false
-  newTab = false
-  newWindow = false
-  cmd = check-license
-  checkLicenseToken = some("v")
-  checkLicenseBaseUrl = none
-VALIDATED replayInteractive = false
 --- stderr
+Unrecognized option ''\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 42: extra positional
@@ -883,9 +844,18 @@ CodeTracer version: <VERSION>
 ### 46: -h after the command
 argv: ct "check-license" "-h"
 env: (none)
-exit: 1
+exit: 0
 --- stdout
+CodeTracer - the user-friendly time-travelling debugger
+
+\e[0m\e[33mUsage:\x20
+\e[0m\e[1m
+\e[36mct check-license\e[0m [OPTIONS]...
+
+The following options are available:
+
+ \e[34m\e[1m--token       \e[0m  bearer token (uses stored token if omitted).\e[0m
+ \e[34m\e[1m--base-url    \e[0m  override the remote server URL.\e[0m
+
 --- stderr
-Unrecognized option 'h'\e[0m
-Try \e[36mct --help\e[0m for more information.
 --- end

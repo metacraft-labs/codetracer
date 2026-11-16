@@ -229,16 +229,6 @@ VALIDATED replayInteractive = false
 ### 11: -f<v> (attached)
 argv: ct "print" "-fcalls" "t.jsonl"
 env: (none)
-exit: 1
---- stdout
---- stderr
-Unrecognized option 'c'\e[0m
-Try \e[36mct --help\e[0m for more information.
---- end
-
-### 12: -F <v> (other case)
-argv: ct "print" "-F" "calls" "t.jsonl"
-env: (none)
 exit: 0
 --- stdout
 PARSED
@@ -262,6 +252,16 @@ PARSED
   printFollow = false
 VALIDATED replayInteractive = false
 --- stderr
+--- end
+
+### 12: -F <v> (other case)
+argv: ct "print" "-F" "calls" "t.jsonl"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The subcommand 'print' does not accept additional arguments\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 13: --f <v> (the letter as a long option)
@@ -473,25 +473,33 @@ VALIDATED replayInteractive = false
 ### 21: --filter -x (value starts with -)
 argv: ct "print" "--filter" "-x" "t.jsonl"
 env: (none)
-exit: 1
+exit: 0
 --- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = print
+  printPath = "t.jsonl"
+  printFilter = some("-x")
+  printFunction = none
+  printLimit = none
+  printFormat = none
+  printVerify = false
+  printFollow = false
+VALIDATED replayInteractive = false
 --- stderr
-Unrecognized option 'x'\e[0m
-Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 22: --filter --x (value starts with --)
 argv: ct "print" "--filter" "--x" "t.jsonl"
-env: (none)
-exit: 1
---- stdout
---- stderr
-Unrecognized option 'x'\e[0m
-Try \e[36mct --help\e[0m for more information.
---- end
-
-### 23: --filter --new-tab <v> (an option between it and its value)
-argv: ct "print" "--filter" "--new-tab" "calls" "t.jsonl"
 env: (none)
 exit: 0
 --- stdout
@@ -504,11 +512,11 @@ PARSED
   inspect = none
   remoteDebuggingPort = none
   remoteDebuggingPipe = false
-  newTab = true
+  newTab = false
   newWindow = false
   cmd = print
   printPath = "t.jsonl"
-  printFilter = some("calls")
+  printFilter = some("--x")
   printFunction = none
   printLimit = none
   printFormat = none
@@ -516,6 +524,16 @@ PARSED
   printFollow = false
 VALIDATED replayInteractive = false
 --- stderr
+--- end
+
+### 23: --filter --new-tab <v> (an option between it and its value)
+argv: ct "print" "--filter" "--new-tab" "calls" "t.jsonl"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The subcommand 'print' does not accept additional arguments\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 24: --filter repeated, last wins
@@ -549,29 +567,11 @@ VALIDATED replayInteractive = false
 ### 25: --filter missing value (last)
 argv: ct "print" "t.jsonl" "--filter"
 env: (none)
-exit: 0
+exit: 1
 --- stdout
-PARSED
-  cwd = none
-  envFiles = @[]
-  env0Files = @[]
-  tmpEnvFiles = @[]
-  tmpEnv0Files = @[]
-  inspect = none
-  remoteDebuggingPort = none
-  remoteDebuggingPipe = false
-  newTab = false
-  newWindow = false
-  cmd = print
-  printPath = "t.jsonl"
-  printFilter = none
-  printFunction = none
-  printLimit = none
-  printFormat = none
-  printVerify = false
-  printFollow = false
-VALIDATED replayInteractive = false
 --- stderr
+The option '\e[34m--filter\e[0m' requires a value\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 26: --filter missing value (before the rest)
@@ -849,25 +849,33 @@ VALIDATED replayInteractive = false
 ### 37: --function -x (value starts with -)
 argv: ct "print" "--function" "-x" "t.jsonl"
 env: (none)
-exit: 1
+exit: 0
 --- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = print
+  printPath = "t.jsonl"
+  printFilter = none
+  printFunction = some("-x")
+  printLimit = none
+  printFormat = none
+  printVerify = false
+  printFollow = false
+VALIDATED replayInteractive = false
 --- stderr
-Unrecognized option 'x'\e[0m
-Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 38: --function --x (value starts with --)
 argv: ct "print" "--function" "--x" "t.jsonl"
-env: (none)
-exit: 1
---- stdout
---- stderr
-Unrecognized option 'x'\e[0m
-Try \e[36mct --help\e[0m for more information.
---- end
-
-### 39: --function --new-tab <v> (an option between it and its value)
-argv: ct "print" "--function" "--new-tab" "main" "t.jsonl"
 env: (none)
 exit: 0
 --- stdout
@@ -880,18 +888,28 @@ PARSED
   inspect = none
   remoteDebuggingPort = none
   remoteDebuggingPipe = false
-  newTab = true
+  newTab = false
   newWindow = false
   cmd = print
   printPath = "t.jsonl"
   printFilter = none
-  printFunction = some("main")
+  printFunction = some("--x")
   printLimit = none
   printFormat = none
   printVerify = false
   printFollow = false
 VALIDATED replayInteractive = false
 --- stderr
+--- end
+
+### 39: --function --new-tab <v> (an option between it and its value)
+argv: ct "print" "--function" "--new-tab" "main" "t.jsonl"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The subcommand 'print' does not accept additional arguments\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 40: --function repeated, last wins
@@ -925,29 +943,11 @@ VALIDATED replayInteractive = false
 ### 41: --function missing value (last)
 argv: ct "print" "t.jsonl" "--function"
 env: (none)
-exit: 0
+exit: 1
 --- stdout
-PARSED
-  cwd = none
-  envFiles = @[]
-  env0Files = @[]
-  tmpEnvFiles = @[]
-  tmpEnv0Files = @[]
-  inspect = none
-  remoteDebuggingPort = none
-  remoteDebuggingPipe = false
-  newTab = false
-  newWindow = false
-  cmd = print
-  printPath = "t.jsonl"
-  printFilter = none
-  printFunction = none
-  printLimit = none
-  printFormat = none
-  printVerify = false
-  printFollow = false
-VALIDATED replayInteractive = false
 --- stderr
+The option '\e[34m--function\e[0m' requires a value\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 42: --function missing value (before the rest)
@@ -1187,16 +1187,6 @@ VALIDATED replayInteractive = false
 ### 51: -n<v> (attached)
 argv: ct "print" "-n5" "t.jsonl"
 env: (none)
-exit: 1
---- stdout
---- stderr
-Unrecognized option '5'\e[0m
-Try \e[36mct --help\e[0m for more information.
---- end
-
-### 52: -N <v> (other case)
-argv: ct "print" "-N" "5" "t.jsonl"
-env: (none)
 exit: 0
 --- stdout
 PARSED
@@ -1220,6 +1210,16 @@ PARSED
   printFollow = false
 VALIDATED replayInteractive = false
 --- stderr
+--- end
+
+### 52: -N <v> (other case)
+argv: ct "print" "-N" "5" "t.jsonl"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'N'\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 53: --n <v> (the letter as a long option)
@@ -1309,11 +1309,29 @@ VALIDATED replayInteractive = false
 ### 56: --limit -1
 argv: ct "print" "--limit" "-1" "t.jsonl"
 env: (none)
-exit: 1
+exit: 0
 --- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = print
+  printPath = "t.jsonl"
+  printFilter = none
+  printFunction = none
+  printLimit = some(-1)
+  printFormat = none
+  printVerify = false
+  printFollow = false
+VALIDATED replayInteractive = false
 --- stderr
-Unrecognized option '1'\e[0m
-Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 57: --limit=-1
@@ -1514,7 +1532,7 @@ env: (none)
 exit: 1
 --- stdout
 --- stderr
-Unrecognized option 'x'\e[0m
+Error while processing the \e[34mlimit=-x\e[0m parameter: invalid integer: -x\e[0m
 Try \e[36mct --help\e[0m for more information.
 --- end
 
@@ -1524,36 +1542,18 @@ env: (none)
 exit: 1
 --- stdout
 --- stderr
-Unrecognized option 'x'\e[0m
+Error while processing the \e[34mlimit=--x\e[0m parameter: invalid integer: --x\e[0m
 Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 71: --limit --new-tab <v> (an option between it and its value)
 argv: ct "print" "--limit" "--new-tab" "5" "t.jsonl"
 env: (none)
-exit: 0
+exit: 1
 --- stdout
-PARSED
-  cwd = none
-  envFiles = @[]
-  env0Files = @[]
-  tmpEnvFiles = @[]
-  tmpEnv0Files = @[]
-  inspect = none
-  remoteDebuggingPort = none
-  remoteDebuggingPipe = false
-  newTab = true
-  newWindow = false
-  cmd = print
-  printPath = "t.jsonl"
-  printFilter = none
-  printFunction = none
-  printLimit = some(5)
-  printFormat = none
-  printVerify = false
-  printFollow = false
-VALIDATED replayInteractive = false
 --- stderr
+Error while processing the \e[34mlimit=--new-tab\e[0m parameter: invalid integer: --new-tab\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 72: --limit repeated, last wins
@@ -1587,29 +1587,11 @@ VALIDATED replayInteractive = false
 ### 73: --limit missing value (last)
 argv: ct "print" "t.jsonl" "--limit"
 env: (none)
-exit: 0
+exit: 1
 --- stdout
-PARSED
-  cwd = none
-  envFiles = @[]
-  env0Files = @[]
-  tmpEnvFiles = @[]
-  tmpEnv0Files = @[]
-  inspect = none
-  remoteDebuggingPort = none
-  remoteDebuggingPipe = false
-  newTab = false
-  newWindow = false
-  cmd = print
-  printPath = "t.jsonl"
-  printFilter = none
-  printFunction = none
-  printLimit = none
-  printFormat = none
-  printVerify = false
-  printFollow = false
-VALIDATED replayInteractive = false
 --- stderr
+The option '\e[34m--limit\e[0m' requires a value\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 74: --limit missing value (before the rest)
@@ -1943,25 +1925,33 @@ VALIDATED replayInteractive = false
 ### 87: --format -x (value starts with -)
 argv: ct "print" "--format" "-x" "t.jsonl"
 env: (none)
-exit: 1
+exit: 0
 --- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = print
+  printPath = "t.jsonl"
+  printFilter = none
+  printFunction = none
+  printLimit = none
+  printFormat = some("-x")
+  printVerify = false
+  printFollow = false
+VALIDATED replayInteractive = false
 --- stderr
-Unrecognized option 'x'\e[0m
-Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 88: --format --x (value starts with --)
 argv: ct "print" "--format" "--x" "t.jsonl"
-env: (none)
-exit: 1
---- stdout
---- stderr
-Unrecognized option 'x'\e[0m
-Try \e[36mct --help\e[0m for more information.
---- end
-
-### 89: --format --new-tab <v> (an option between it and its value)
-argv: ct "print" "--format" "--new-tab" "json" "t.jsonl"
 env: (none)
 exit: 0
 --- stdout
@@ -1974,18 +1964,28 @@ PARSED
   inspect = none
   remoteDebuggingPort = none
   remoteDebuggingPipe = false
-  newTab = true
+  newTab = false
   newWindow = false
   cmd = print
   printPath = "t.jsonl"
   printFilter = none
   printFunction = none
   printLimit = none
-  printFormat = some("json")
+  printFormat = some("--x")
   printVerify = false
   printFollow = false
 VALIDATED replayInteractive = false
 --- stderr
+--- end
+
+### 89: --format --new-tab <v> (an option between it and its value)
+argv: ct "print" "--format" "--new-tab" "json" "t.jsonl"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The subcommand 'print' does not accept additional arguments\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 90: --format repeated, last wins
@@ -2019,29 +2019,11 @@ VALIDATED replayInteractive = false
 ### 91: --format missing value (last)
 argv: ct "print" "t.jsonl" "--format"
 env: (none)
-exit: 0
+exit: 1
 --- stdout
-PARSED
-  cwd = none
-  envFiles = @[]
-  env0Files = @[]
-  tmpEnvFiles = @[]
-  tmpEnv0Files = @[]
-  inspect = none
-  remoteDebuggingPort = none
-  remoteDebuggingPipe = false
-  newTab = false
-  newWindow = false
-  cmd = print
-  printPath = "t.jsonl"
-  printFilter = none
-  printFunction = none
-  printLimit = none
-  printFormat = none
-  printVerify = false
-  printFollow = false
-VALIDATED replayInteractive = false
 --- stderr
+The option '\e[34m--format\e[0m' requires a value\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 92: --format missing value (before the rest)
@@ -2545,31 +2527,85 @@ VALIDATED replayInteractive = false
 ### 113: -F
 argv: ct "print" "-F" "t.jsonl"
 env: (none)
-exit: 1
+exit: 0
 --- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = print
+  printPath = "t.jsonl"
+  printFilter = none
+  printFunction = none
+  printLimit = none
+  printFormat = none
+  printVerify = false
+  printFollow = true
+VALIDATED replayInteractive = false
 --- stderr
-The required option 'printPath' was not specified\e[0m
-Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 114: -F (other case)
 argv: ct "print" "-F" "t.jsonl"
 env: (none)
-exit: 1
+exit: 0
 --- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = print
+  printPath = "t.jsonl"
+  printFilter = none
+  printFunction = none
+  printLimit = none
+  printFormat = none
+  printVerify = false
+  printFollow = true
+VALIDATED replayInteractive = false
 --- stderr
-The required option 'printPath' was not specified\e[0m
-Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 115: --F (the letter as a long option)
 argv: ct "print" "--F" "t.jsonl"
 env: (none)
-exit: 1
+exit: 0
 --- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = print
+  printPath = "t.jsonl"
+  printFilter = none
+  printFunction = none
+  printLimit = none
+  printFormat = none
+  printVerify = false
+  printFollow = true
+VALIDATED replayInteractive = false
 --- stderr
-The required option 'printPath' was not specified\e[0m
-Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 116: --follow=true
@@ -3035,6 +3071,16 @@ VALIDATED replayInteractive = false
 ### 135: -F x (filter or follow?)
 argv: ct "print" "-F" "x" "t.jsonl"
 env: (none)
+exit: 1
+--- stdout
+--- stderr
+The subcommand 'print' does not accept additional arguments\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 136: -f x -F
+argv: ct "print" "-f" "x" "-F" "t.jsonl"
+env: (none)
 exit: 0
 --- stdout
 PARSED
@@ -3055,39 +3101,65 @@ PARSED
   printLimit = none
   printFormat = none
   printVerify = false
-  printFollow = false
+  printFollow = true
 VALIDATED replayInteractive = false
 --- stderr
---- end
-
-### 136: -f x -F
-argv: ct "print" "-f" "x" "-F" "t.jsonl"
-env: (none)
-exit: 1
---- stdout
---- stderr
-The required option 'printPath' was not specified\e[0m
-Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 137: -n5 (attached)
 argv: ct "print" "-n5" "t.jsonl"
 env: (none)
-exit: 1
+exit: 0
 --- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = print
+  printPath = "t.jsonl"
+  printFilter = none
+  printFunction = none
+  printLimit = some(5)
+  printFormat = none
+  printVerify = false
+  printFollow = false
+VALIDATED replayInteractive = false
 --- stderr
-Unrecognized option '5'\e[0m
-Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 138: -fn (cluster)
 argv: ct "print" "-fn" "t.jsonl"
 env: (none)
-exit: 1
+exit: 0
 --- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = print
+  printPath = "t.jsonl"
+  printFilter = some("n")
+  printFunction = none
+  printLimit = none
+  printFormat = none
+  printVerify = false
+  printFollow = false
+VALIDATED replayInteractive = false
 --- stderr
-Error while processing the \e[34mlimit=t.jsonl\e[0m parameter: invalid integer: t.jsonl\e[0m
-Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 139: env <APP>_PRINTPATH (the positional)
@@ -3189,85 +3261,31 @@ Try \e[36mct --help\e[0m for more information.
 ### 145: lone -
 argv: ct "print" "-" "t.jsonl"
 env: (none)
-exit: 0
+exit: 1
 --- stdout
-PARSED
-  cwd = none
-  envFiles = @[]
-  env0Files = @[]
-  tmpEnvFiles = @[]
-  tmpEnv0Files = @[]
-  inspect = none
-  remoteDebuggingPort = none
-  remoteDebuggingPipe = false
-  newTab = false
-  newWindow = false
-  cmd = print
-  printPath = "t.jsonl"
-  printFilter = none
-  printFunction = none
-  printLimit = none
-  printFormat = none
-  printVerify = false
-  printFollow = false
-VALIDATED replayInteractive = false
 --- stderr
+Unrecognized option ''\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 146: lone -- then a word
 argv: ct "print" "--" "w" "t.jsonl"
 env: (none)
-exit: 0
+exit: 1
 --- stdout
-PARSED
-  cwd = none
-  envFiles = @[]
-  env0Files = @[]
-  tmpEnvFiles = @[]
-  tmpEnv0Files = @[]
-  inspect = none
-  remoteDebuggingPort = none
-  remoteDebuggingPipe = false
-  newTab = false
-  newWindow = false
-  cmd = print
-  printPath = "t.jsonl"
-  printFilter = none
-  printFunction = none
-  printLimit = none
-  printFormat = none
-  printVerify = false
-  printFollow = false
-VALIDATED replayInteractive = false
 --- stderr
+Unrecognized option ''\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 147: --=v
 argv: ct "print" "--=v" "t.jsonl"
 env: (none)
-exit: 0
+exit: 1
 --- stdout
-PARSED
-  cwd = none
-  envFiles = @[]
-  env0Files = @[]
-  tmpEnvFiles = @[]
-  tmpEnv0Files = @[]
-  inspect = none
-  remoteDebuggingPort = none
-  remoteDebuggingPipe = false
-  newTab = false
-  newWindow = false
-  cmd = print
-  printPath = "t.jsonl"
-  printFilter = none
-  printFunction = none
-  printLimit = none
-  printFormat = none
-  printVerify = false
-  printFollow = false
-VALIDATED replayInteractive = false
 --- stderr
+Unrecognized option ''\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 148: extra positional
@@ -3350,9 +3368,24 @@ CodeTracer version: <VERSION>
 ### 152: -h after the command
 argv: ct "print" "-h" "t.jsonl"
 env: (none)
-exit: 1
+exit: 0
 --- stdout
+CodeTracer - the user-friendly time-travelling debugger
+
+\e[0m\e[33mUsage:\x20
+\e[0m\e[1m
+\e[36mct print\e[0m [OPTIONS]...
+
+The following options are available:
+
+ \e[34m\e[1m-f, \e[0m\e[34m\e[1m--filter      \e[0m  Filter events (e.g. 'calls', 'steps', 'http', 'errors').\e[0m
+     \e[34m\e[1m--function    \e[0m  Show only events for this function name.\e[0m
+ \e[34m\e[1m-n, \e[0m\e[34m\e[1m--limit       \e[0m  Maximum number of events to print.\e[0m
+     \e[34m\e[1m--format      \e[0m  Output format: text (default), json, csv.\e[0m
+     \e[34m\e[1m--verify      \e[0m  Verify recording quality (exit 0 if valid, 1 if not).
+                     Checks: trace files exist, events present, HTTP requests
+                     found. [=false].\e[0m
+ \e[34m\e[1m-F, \e[0m\e[34m\e[1m--follow      \e[0m  Follow mode: watch for new events (like tail -f) [=false].\e[0m
+
 --- stderr
-Unrecognized option 'h'\e[0m
-Try \e[36mct --help\e[0m for more information.
 --- end

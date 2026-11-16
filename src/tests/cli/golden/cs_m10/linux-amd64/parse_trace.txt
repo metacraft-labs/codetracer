@@ -313,16 +313,6 @@ VALIDATED replayInteractive = false
 ### 18: -o<v> (attached)
 argv: ct "trace" "extract-gfx" "-o/d" "t.ct"
 env: (none)
-exit: 1
---- stdout
---- stderr
-Unrecognized option '/'\e[0m
-Try \e[36mct --help\e[0m for more information.
---- end
-
-### 19: -O <v> (other case)
-argv: ct "trace" "extract-gfx" "-O" "/d" "t.ct"
-env: (none)
 exit: 0
 --- stdout
 PARSED
@@ -342,6 +332,16 @@ PARSED
   traceExtractGfxPath = "t.ct"
 VALIDATED replayInteractive = false
 --- stderr
+--- end
+
+### 19: -O <v> (other case)
+argv: ct "trace" "extract-gfx" "-O" "/d" "t.ct"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'O'\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 20: --o <v> (the letter as a long option)
@@ -477,25 +477,29 @@ VALIDATED replayInteractive = false
 ### 26: --output-dir -x (value starts with -)
 argv: ct "trace" "extract-gfx" "--output-dir" "-x" "t.ct"
 env: (none)
-exit: 1
+exit: 0
 --- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace
+  traceCommand = extract-gfx
+  traceExtractGfxOutputDir = "-x"
+  traceExtractGfxPath = "t.ct"
+VALIDATED replayInteractive = false
 --- stderr
-Unrecognized option 'x'\e[0m
-Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 27: --output-dir --x (value starts with --)
 argv: ct "trace" "extract-gfx" "--output-dir" "--x" "t.ct"
-env: (none)
-exit: 1
---- stdout
---- stderr
-Unrecognized option 'x'\e[0m
-Try \e[36mct --help\e[0m for more information.
---- end
-
-### 28: --output-dir --new-tab <v> (an option between it and its value)
-argv: ct "trace" "extract-gfx" "--output-dir" "--new-tab" "/d" "t.ct"
 env: (none)
 exit: 0
 --- stdout
@@ -508,14 +512,24 @@ PARSED
   inspect = none
   remoteDebuggingPort = none
   remoteDebuggingPipe = false
-  newTab = true
+  newTab = false
   newWindow = false
   cmd = trace
   traceCommand = extract-gfx
-  traceExtractGfxOutputDir = "/d"
+  traceExtractGfxOutputDir = "--x"
   traceExtractGfxPath = "t.ct"
 VALIDATED replayInteractive = false
 --- stderr
+--- end
+
+### 28: --output-dir --new-tab <v> (an option between it and its value)
+argv: ct "trace" "extract-gfx" "--output-dir" "--new-tab" "/d" "t.ct"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The subcommand 'extract-gfx' does not accept additional arguments\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 29: --output-dir repeated, last wins
@@ -548,7 +562,7 @@ env: (none)
 exit: 1
 --- stdout
 --- stderr
-The required option 'output-dir' was not specified\e[0m
+The option '\e[34m--output-dir\e[0m' requires a value\e[0m
 Try \e[36mct --help\e[0m for more information.
 --- end
 
@@ -663,73 +677,31 @@ Try \e[36mct --help\e[0m for more information.
 ### 39: lone -
 argv: ct "trace" "extract-gfx" "-" "-o" "/d" "t.ct"
 env: (none)
-exit: 0
+exit: 1
 --- stdout
-PARSED
-  cwd = none
-  envFiles = @[]
-  env0Files = @[]
-  tmpEnvFiles = @[]
-  tmpEnv0Files = @[]
-  inspect = none
-  remoteDebuggingPort = none
-  remoteDebuggingPipe = false
-  newTab = false
-  newWindow = false
-  cmd = trace
-  traceCommand = extract-gfx
-  traceExtractGfxOutputDir = "/d"
-  traceExtractGfxPath = "t.ct"
-VALIDATED replayInteractive = false
 --- stderr
+Unrecognized option ''\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 40: lone -- then a word
 argv: ct "trace" "extract-gfx" "--" "w" "-o" "/d" "t.ct"
 env: (none)
-exit: 0
+exit: 1
 --- stdout
-PARSED
-  cwd = none
-  envFiles = @[]
-  env0Files = @[]
-  tmpEnvFiles = @[]
-  tmpEnv0Files = @[]
-  inspect = none
-  remoteDebuggingPort = none
-  remoteDebuggingPipe = false
-  newTab = false
-  newWindow = false
-  cmd = trace
-  traceCommand = extract-gfx
-  traceExtractGfxOutputDir = "/d"
-  traceExtractGfxPath = "t.ct"
-VALIDATED replayInteractive = false
 --- stderr
+Unrecognized option ''\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 41: --=v
 argv: ct "trace" "extract-gfx" "--=v" "-o" "/d" "t.ct"
 env: (none)
-exit: 0
+exit: 1
 --- stdout
-PARSED
-  cwd = none
-  envFiles = @[]
-  env0Files = @[]
-  tmpEnvFiles = @[]
-  tmpEnv0Files = @[]
-  inspect = none
-  remoteDebuggingPort = none
-  remoteDebuggingPipe = false
-  newTab = false
-  newWindow = false
-  cmd = trace
-  traceCommand = extract-gfx
-  traceExtractGfxOutputDir = "/d"
-  traceExtractGfxPath = "t.ct"
-VALIDATED replayInteractive = false
 --- stderr
+Unrecognized option ''\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 42: extra positional
@@ -804,11 +776,21 @@ CodeTracer version: <VERSION>
 ### 46: -h after the command
 argv: ct "trace" "extract-gfx" "-h" "-o" "/d" "t.ct"
 env: (none)
-exit: 1
+exit: 0
 --- stdout
+CodeTracer - the user-friendly time-travelling debugger
+
+\e[0m\e[33mUsage:\x20
+\e[0m\e[1m
+\e[36mct trace extract-gfx\e[0m [OPTIONS]... <traceExtractGfxPath>\e[0m
+
+\e[34m\e[1m <traceExtractGfxPath>\e[0m\e[0m  Path to the .ct trace container to extract..\e[0m
+
+The following options are available:
+
+ \e[34m\e[1m-o, \e[0m\e[34m\e[1m--output-dir    \e[0m  Directory to extract the graphics stream into. Required..\e[0m
+
 --- stderr
-Unrecognized option 'h'\e[0m
-Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 47: export bare
@@ -984,16 +966,6 @@ VALIDATED replayInteractive = false
 ### 55: -o<v> (attached)
 argv: ct "trace" "export" "-o/e.ct" "t.ct"
 env: (none)
-exit: 1
---- stdout
---- stderr
-Unrecognized option '/'\e[0m
-Try \e[36mct --help\e[0m for more information.
---- end
-
-### 56: -O <v> (other case)
-argv: ct "trace" "export" "-O" "/e.ct" "t.ct"
-env: (none)
 exit: 0
 --- stdout
 PARSED
@@ -1014,6 +986,16 @@ PARSED
   traceExportPath = "t.ct"
 VALIDATED replayInteractive = false
 --- stderr
+--- end
+
+### 56: -O <v> (other case)
+argv: ct "trace" "export" "-O" "/e.ct" "t.ct"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'O'\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 57: --o <v> (the letter as a long option)
@@ -1154,25 +1136,30 @@ VALIDATED replayInteractive = false
 ### 63: --output -x (value starts with -)
 argv: ct "trace" "export" "--output" "-x" "t.ct"
 env: (none)
-exit: 1
+exit: 0
 --- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace
+  traceCommand = export
+  traceExportPortable = false
+  traceExportOutput = "-x"
+  traceExportPath = "t.ct"
+VALIDATED replayInteractive = false
 --- stderr
-Unrecognized option 'x'\e[0m
-Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 64: --output --x (value starts with --)
 argv: ct "trace" "export" "--output" "--x" "t.ct"
-env: (none)
-exit: 1
---- stdout
---- stderr
-Unrecognized option 'x'\e[0m
-Try \e[36mct --help\e[0m for more information.
---- end
-
-### 65: --output --new-tab <v> (an option between it and its value)
-argv: ct "trace" "export" "--output" "--new-tab" "/e.ct" "t.ct"
 env: (none)
 exit: 0
 --- stdout
@@ -1185,15 +1172,25 @@ PARSED
   inspect = none
   remoteDebuggingPort = none
   remoteDebuggingPipe = false
-  newTab = true
+  newTab = false
   newWindow = false
   cmd = trace
   traceCommand = export
   traceExportPortable = false
-  traceExportOutput = "/e.ct"
+  traceExportOutput = "--x"
   traceExportPath = "t.ct"
 VALIDATED replayInteractive = false
 --- stderr
+--- end
+
+### 65: --output --new-tab <v> (an option between it and its value)
+argv: ct "trace" "export" "--output" "--new-tab" "/e.ct" "t.ct"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The subcommand 'export' does not accept additional arguments\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 66: --output repeated, last wins
@@ -1227,7 +1224,7 @@ env: (none)
 exit: 1
 --- stdout
 --- stderr
-The required option 'output' was not specified\e[0m
+The option '\e[34m--output\e[0m' requires a value\e[0m
 Try \e[36mct --help\e[0m for more information.
 --- end
 
@@ -1704,26 +1701,11 @@ Try \e[36mct --help\e[0m for more information.
 ### 91: lone -
 argv: ct "trace" "export" "-" "-o" "/e.ct" "t.ct"
 env: (none)
-exit: 0
+exit: 1
 --- stdout
-PARSED
-  cwd = none
-  envFiles = @[]
-  env0Files = @[]
-  tmpEnvFiles = @[]
-  tmpEnv0Files = @[]
-  inspect = none
-  remoteDebuggingPort = none
-  remoteDebuggingPipe = false
-  newTab = false
-  newWindow = false
-  cmd = trace
-  traceCommand = export
-  traceExportPortable = true
-  traceExportOutput = "/e.ct"
-  traceExportPath = "t.ct"
-VALIDATED replayInteractive = false
 --- stderr
+Unrecognized option ''\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 92: lone -- then a word
@@ -1732,7 +1714,7 @@ env: (none)
 exit: 1
 --- stdout
 --- stderr
-The subcommand 'export' does not accept additional arguments\e[0m
+Unrecognized option ''\e[0m
 Try \e[36mct --help\e[0m for more information.
 --- end
 
@@ -1742,7 +1724,7 @@ env: (none)
 exit: 1
 --- stdout
 --- stderr
-Error while processing the \e[34mportable=v\e[0m parameter: 'v' is not a valid boolean value. Supported values are on/off, yes/no, true/false or 1/0\e[0m
+Unrecognized option ''\e[0m
 Try \e[36mct --help\e[0m for more information.
 --- end
 
@@ -1820,11 +1802,23 @@ CodeTracer version: <VERSION>
 ### 98: -h after the command
 argv: ct "trace" "export" "-h" "-o" "/e.ct" "t.ct"
 env: (none)
-exit: 1
+exit: 0
 --- stdout
+CodeTracer - the user-friendly time-travelling debugger
+
+\e[0m\e[33mUsage:\x20
+\e[0m\e[1m
+\e[36mct trace export\e[0m [OPTIONS]... <traceExportPath>\e[0m
+
+\e[34m\e[1m <traceExportPath>\e[0m  \e[0m  Path to the source trace to export..\e[0m
+
+The following options are available:
+
+     \e[34m\e[1m--portable    \e[0m  Produce a portable export with embedded binaries and debug
+                     symbols. [=false].\e[0m
+ \e[34m\e[1m-o, \e[0m\e[34m\e[1m--output      \e[0m  Output path for the exported trace (required)..\e[0m
+
 --- stderr
-Unrecognized option 'h'\e[0m
-Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 99: omniscient-prep bare
@@ -2138,25 +2132,29 @@ VALIDATED replayInteractive = false
 ### 113: --mode -x (value starts with -)
 argv: ct "trace" "omniscient-prep" "--mode" "-x" "t.ct"
 env: (none)
-exit: 1
+exit: 0
 --- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace
+  traceCommand = omniscient-prep
+  traceOmniscientPrepMode = "-x"
+  traceOmniscientPrepPath = "t.ct"
+VALIDATED replayInteractive = false
 --- stderr
-Unrecognized option 'x'\e[0m
-Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 114: --mode --x (value starts with --)
 argv: ct "trace" "omniscient-prep" "--mode" "--x" "t.ct"
-env: (none)
-exit: 1
---- stdout
---- stderr
-Unrecognized option 'x'\e[0m
-Try \e[36mct --help\e[0m for more information.
---- end
-
-### 115: --mode --new-tab <v> (an option between it and its value)
-argv: ct "trace" "omniscient-prep" "--mode" "--new-tab" "on" "t.ct"
 env: (none)
 exit: 0
 --- stdout
@@ -2169,14 +2167,24 @@ PARSED
   inspect = none
   remoteDebuggingPort = none
   remoteDebuggingPipe = false
-  newTab = true
+  newTab = false
   newWindow = false
   cmd = trace
   traceCommand = omniscient-prep
-  traceOmniscientPrepMode = "on"
+  traceOmniscientPrepMode = "--x"
   traceOmniscientPrepPath = "t.ct"
 VALIDATED replayInteractive = false
 --- stderr
+--- end
+
+### 115: --mode --new-tab <v> (an option between it and its value)
+argv: ct "trace" "omniscient-prep" "--mode" "--new-tab" "on" "t.ct"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The subcommand 'omniscient-prep' does not accept additional arguments\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 116: --mode repeated, last wins
@@ -2206,25 +2214,11 @@ VALIDATED replayInteractive = false
 ### 117: --mode missing value (last)
 argv: ct "trace" "omniscient-prep" "t.ct" "--mode"
 env: (none)
-exit: 0
+exit: 1
 --- stdout
-PARSED
-  cwd = none
-  envFiles = @[]
-  env0Files = @[]
-  tmpEnvFiles = @[]
-  tmpEnv0Files = @[]
-  inspect = none
-  remoteDebuggingPort = none
-  remoteDebuggingPipe = false
-  newTab = false
-  newWindow = false
-  cmd = trace
-  traceCommand = omniscient-prep
-  traceOmniscientPrepMode = "on"
-  traceOmniscientPrepPath = "t.ct"
-VALIDATED replayInteractive = false
 --- stderr
+The option '\e[34m--mode\e[0m' requires a value\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 118: --mode missing value (before the rest)
@@ -2321,56 +2315,28 @@ env: (none)
 exit: 1
 --- stdout
 --- stderr
-The required option 'traceOmniscientPrepPath' was not specified\e[0m
+Unrecognized option ''\e[0m
 Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 125: lone -- then a word
 argv: ct "trace" "omniscient-prep" "--" "w" "t.ct"
 env: (none)
-exit: 0
+exit: 1
 --- stdout
-PARSED
-  cwd = none
-  envFiles = @[]
-  env0Files = @[]
-  tmpEnvFiles = @[]
-  tmpEnv0Files = @[]
-  inspect = none
-  remoteDebuggingPort = none
-  remoteDebuggingPipe = false
-  newTab = false
-  newWindow = false
-  cmd = trace
-  traceCommand = omniscient-prep
-  traceOmniscientPrepMode = "w"
-  traceOmniscientPrepPath = "t.ct"
-VALIDATED replayInteractive = false
 --- stderr
+Unrecognized option ''\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 126: --=v
 argv: ct "trace" "omniscient-prep" "--=v" "t.ct"
 env: (none)
-exit: 0
+exit: 1
 --- stdout
-PARSED
-  cwd = none
-  envFiles = @[]
-  env0Files = @[]
-  tmpEnvFiles = @[]
-  tmpEnv0Files = @[]
-  inspect = none
-  remoteDebuggingPort = none
-  remoteDebuggingPipe = false
-  newTab = false
-  newWindow = false
-  cmd = trace
-  traceCommand = omniscient-prep
-  traceOmniscientPrepMode = "v"
-  traceOmniscientPrepPath = "t.ct"
-VALIDATED replayInteractive = false
 --- stderr
+Unrecognized option ''\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 127: extra positional
@@ -2445,11 +2411,21 @@ CodeTracer version: <VERSION>
 ### 131: -h after the command
 argv: ct "trace" "omniscient-prep" "-h" "t.ct"
 env: (none)
-exit: 1
+exit: 0
 --- stdout
+CodeTracer - the user-friendly time-travelling debugger
+
+\e[0m\e[33mUsage:\x20
+\e[0m\e[1m
+\e[36mct trace omniscient-prep\e[0m [OPTIONS]... <traceOmniscientPrepPath>\e[0m
+
+\e[34m\e[1m <traceOmniscientPrepPath>\e[0m\e[0m  Path to the trace or trace folder..\e[0m
+
+The following options are available:
+
+ \e[34m\e[1m--mode    \e[0m  OmniscientDB preparation mode. [=on].\e[0m
+
 --- stderr
-Unrecognized option 'h'\e[0m
-Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 132: env <APP>_TRACECOMMAND=export
@@ -2556,23 +2532,11 @@ Try \e[36mct --help\e[0m for more information.
 ### 138: lone -
 argv: ct "trace" "-"
 env: (none)
-exit: 0
+exit: 1
 --- stdout
-PARSED
-  cwd = none
-  envFiles = @[]
-  env0Files = @[]
-  tmpEnvFiles = @[]
-  tmpEnv0Files = @[]
-  inspect = none
-  remoteDebuggingPort = none
-  remoteDebuggingPipe = false
-  newTab = false
-  newWindow = false
-  cmd = trace
-  traceCommand = noCommand
-VALIDATED replayInteractive = false
 --- stderr
+Unrecognized option ''\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 139: lone -- then a word
@@ -2581,7 +2545,7 @@ env: (none)
 exit: 1
 --- stdout
 --- stderr
-Error while processing the \e[34mtraceCommand=w\e[0m parameter: Invalid enum value: w\e[0m
+Unrecognized option ''\e[0m
 Try \e[36mct --help\e[0m for more information.
 --- end
 
@@ -2591,7 +2555,7 @@ env: (none)
 exit: 1
 --- stdout
 --- stderr
-Error while processing the \e[34mtraceCommand=v\e[0m parameter: Invalid enum value: v\e[0m
+Unrecognized option ''\e[0m
 Try \e[36mct --help\e[0m for more information.
 --- end
 
@@ -2663,9 +2627,41 @@ CodeTracer version: <VERSION>
 ### 145: -h after the command
 argv: ct "trace" "-h"
 env: (none)
-exit: 1
+exit: 0
 --- stdout
+CodeTracer - the user-friendly time-travelling debugger
+
+\e[0m\e[33mUsage:\x20
+\e[0m\e[1m
+\e[36mct trace\e[0m command
+\e[33m
+Available sub-commands:
+\e[0m\e[1m
+\e[36mct trace extract-gfx\e[0m [OPTIONS]... <traceExtractGfxPath>\e[0m
+
+\e[34m\e[1m <traceExtractGfxPath>\e[0m\e[0m  Path to the .ct trace container to extract..\e[0m
+
+The following options are available:
+
+ \e[34m\e[1m-o, \e[0m\e[34m\e[1m--output-dir\e[0m  Directory to extract the graphics stream into. Required..\e[0m
+\e[1m
+\e[36mct trace export\e[0m [OPTIONS]... <traceExportPath>\e[0m
+
+\e[34m\e[1m <traceExportPath>\e[0m\e[0m  Path to the source trace to export..\e[0m
+
+The following options are available:
+
+ \e[34m\e[1m--portable\e[0m  Produce a portable export with embedded binaries and debug symbols.
+             [=false].\e[0m
+ \e[34m\e[1m-o, \e[0m\e[34m\e[1m--output\e[0m  Output path for the exported trace (required)..\e[0m
+\e[1m
+\e[36mct trace omniscient-prep\e[0m [OPTIONS]... <traceOmniscientPrepPath>\e[0m
+
+\e[34m\e[1m <traceOmniscientPrepPath>\e[0m\e[0m  Path to the trace or trace folder..\e[0m
+
+The following options are available:
+
+ \e[34m\e[1m--mode\e[0m  OmniscientDB preparation mode. [=on].\e[0m
+
 --- stderr
-Unrecognized option 'h'\e[0m
-Try \e[36mct --help\e[0m for more information.
 --- end

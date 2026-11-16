@@ -109,70 +109,31 @@ Try \e[36mct --help\e[0m for more information.
 ### 9: lone -
 argv: ct "build" "-" "src1" "out1"
 env: (none)
-exit: 0
+exit: 1
 --- stdout
-PARSED
-  cwd = none
-  envFiles = @[]
-  env0Files = @[]
-  tmpEnvFiles = @[]
-  tmpEnv0Files = @[]
-  inspect = none
-  remoteDebuggingPort = none
-  remoteDebuggingPipe = false
-  newTab = false
-  newWindow = false
-  cmd = build
-  buildProgramPath = "out1"
-  buildOutputPath = ""
-VALIDATED replayInteractive = false
 --- stderr
+Unrecognized option ''\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 10: lone -- then a word
 argv: ct "build" "--" "w" "src1" "out1"
 env: (none)
-exit: 0
+exit: 1
 --- stdout
-PARSED
-  cwd = none
-  envFiles = @[]
-  env0Files = @[]
-  tmpEnvFiles = @[]
-  tmpEnv0Files = @[]
-  inspect = none
-  remoteDebuggingPort = none
-  remoteDebuggingPipe = false
-  newTab = false
-  newWindow = false
-  cmd = build
-  buildProgramPath = "src1"
-  buildOutputPath = "out1"
-VALIDATED replayInteractive = false
 --- stderr
+Unrecognized option ''\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 11: --=v
 argv: ct "build" "--=v" "src1" "out1"
 env: (none)
-exit: 0
+exit: 1
 --- stdout
-PARSED
-  cwd = none
-  envFiles = @[]
-  env0Files = @[]
-  tmpEnvFiles = @[]
-  tmpEnv0Files = @[]
-  inspect = none
-  remoteDebuggingPort = none
-  remoteDebuggingPipe = false
-  newTab = false
-  newWindow = false
-  cmd = build
-  buildProgramPath = "src1"
-  buildOutputPath = "out1"
-VALIDATED replayInteractive = false
 --- stderr
+Unrecognized option ''\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 12: extra positional
@@ -245,9 +206,16 @@ CodeTracer version: <VERSION>
 ### 16: -h after the command
 argv: ct "build" "-h" "src1" "out1"
 env: (none)
-exit: 1
+exit: 0
 --- stdout
+CodeTracer - the user-friendly time-travelling debugger
+
+\e[0m\e[33mUsage:\x20
+\e[0m\e[1m
+\e[36mct build\e[0m <buildProgramPath>\e[0m <buildOutputPath>\e[0m
+
+\e[34m\e[1m <buildProgramPath>\e[0m\e[0m  path to program source code.\e[0m
+\e[34m\e[1m <buildOutputPath>\e[0m\e[0m  Output path.\e[0m
+
 --- stderr
-Unrecognized option 'h'\e[0m
-Try \e[36mct --help\e[0m for more information.
 --- end

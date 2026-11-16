@@ -583,21 +583,73 @@ VALIDATED replayInteractive = false
 ### 20: --lang -x (value starts with -)
 argv: ct "record" "--lang" "-x" "prog"
 env: (none)
-exit: 1
+exit: 0
 --- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = "-x"
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
 --- stderr
-Unrecognized option 'x'\e[0m
-Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 21: --lang --x (value starts with --)
 argv: ct "record" "--lang" "--x" "prog"
 env: (none)
-exit: 1
+exit: 0
 --- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = "--x"
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
 --- stderr
-Unrecognized option 'x'\e[0m
-Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 22: --lang --new-tab <v> (an option between it and its value)
@@ -614,10 +666,10 @@ PARSED
   inspect = none
   remoteDebuggingPort = none
   remoteDebuggingPipe = false
-  newTab = true
+  newTab = false
   newWindow = false
   cmd = record
-  recordLang = "python"
+  recordLang = "--new-tab"
   recordOutputFolder = "."
   recordBackend = ""
   recordExportFile = ""
@@ -630,8 +682,8 @@ PARSED
   recordUseInterpose = false
   recordServer = false
   recordPortable = false
-  recordProgram = "prog"
-  recordArgs = @[]
+  recordProgram = "python"
+  recordArgs = @["prog"]
 VALIDATED replayInteractive = false
 --- stderr
 --- end
@@ -675,37 +727,11 @@ VALIDATED replayInteractive = false
 ### 24: --lang missing value (last)
 argv: ct "record" "prog" "--lang"
 env: (none)
-exit: 0
+exit: 1
 --- stdout
-PARSED
-  cwd = none
-  envFiles = @[]
-  env0Files = @[]
-  tmpEnvFiles = @[]
-  tmpEnv0Files = @[]
-  inspect = none
-  remoteDebuggingPort = none
-  remoteDebuggingPipe = false
-  newTab = false
-  newWindow = false
-  cmd = record
-  recordLang = ""
-  recordOutputFolder = "."
-  recordBackend = ""
-  recordExportFile = ""
-  recordStylusTrace = ""
-  recordAddress = ""
-  recordSocket = ""
-  recordWithDiff = ""
-  recordStoreTraceFolderForPid = 0
-  recordUpload = false
-  recordUseInterpose = false
-  recordServer = false
-  recordPortable = false
-  recordProgram = "prog"
-  recordArgs = @[]
-VALIDATED replayInteractive = false
 --- stderr
+The option '\e[34m--lang\e[0m' requires a value\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 25: --lang missing value (before the rest)
@@ -1009,16 +1035,6 @@ VALIDATED replayInteractive = false
 ### 34: -o<v> (attached)
 argv: ct "record" "-o/out" "prog"
 env: (none)
-exit: 1
---- stdout
---- stderr
-Unrecognized option '/'\e[0m
-Try \e[36mct --help\e[0m for more information.
---- end
-
-### 35: -O <v> (other case)
-argv: ct "record" "-O" "/out" "prog"
-env: (none)
 exit: 0
 --- stdout
 PARSED
@@ -1050,6 +1066,16 @@ PARSED
   recordArgs = @[]
 VALIDATED replayInteractive = false
 --- stderr
+--- end
+
+### 35: -O <v> (other case)
+argv: ct "record" "-O" "/out" "prog"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'O'\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 36: --o <v> (the letter as a long option)
@@ -1317,21 +1343,73 @@ VALIDATED replayInteractive = false
 ### 44: --output-folder -x (value starts with -)
 argv: ct "record" "--output-folder" "-x" "prog"
 env: (none)
-exit: 1
+exit: 0
 --- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "-x"
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
 --- stderr
-Unrecognized option 'x'\e[0m
-Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 45: --output-folder --x (value starts with --)
 argv: ct "record" "--output-folder" "--x" "prog"
 env: (none)
-exit: 1
+exit: 0
 --- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "--x"
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
 --- stderr
-Unrecognized option 'x'\e[0m
-Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 46: --output-folder --new-tab <v> (an option between it and its value)
@@ -1348,11 +1426,11 @@ PARSED
   inspect = none
   remoteDebuggingPort = none
   remoteDebuggingPipe = false
-  newTab = true
+  newTab = false
   newWindow = false
   cmd = record
   recordLang = ""
-  recordOutputFolder = "/out"
+  recordOutputFolder = "--new-tab"
   recordBackend = ""
   recordExportFile = ""
   recordStylusTrace = ""
@@ -1364,8 +1442,8 @@ PARSED
   recordUseInterpose = false
   recordServer = false
   recordPortable = false
-  recordProgram = "prog"
-  recordArgs = @[]
+  recordProgram = "/out"
+  recordArgs = @["prog"]
 VALIDATED replayInteractive = false
 --- stderr
 --- end
@@ -1409,37 +1487,11 @@ VALIDATED replayInteractive = false
 ### 48: --output-folder missing value (last)
 argv: ct "record" "prog" "--output-folder"
 env: (none)
-exit: 0
+exit: 1
 --- stdout
-PARSED
-  cwd = none
-  envFiles = @[]
-  env0Files = @[]
-  tmpEnvFiles = @[]
-  tmpEnv0Files = @[]
-  inspect = none
-  remoteDebuggingPort = none
-  remoteDebuggingPipe = false
-  newTab = false
-  newWindow = false
-  cmd = record
-  recordLang = ""
-  recordOutputFolder = "."
-  recordBackend = ""
-  recordExportFile = ""
-  recordStylusTrace = ""
-  recordAddress = ""
-  recordSocket = ""
-  recordWithDiff = ""
-  recordStoreTraceFolderForPid = 0
-  recordUpload = false
-  recordUseInterpose = false
-  recordServer = false
-  recordPortable = false
-  recordProgram = "prog"
-  recordArgs = @[]
-VALIDATED replayInteractive = false
 --- stderr
+The option '\e[34m--output-folder\e[0m' requires a value\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 49: --output-folder missing value (before the rest)
@@ -2025,21 +2077,73 @@ VALIDATED replayInteractive = false
 ### 68: --backend -x (value starts with -)
 argv: ct "record" "--backend" "-x" "prog"
 env: (none)
-exit: 1
+exit: 0
 --- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = "-x"
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
 --- stderr
-Unrecognized option 'x'\e[0m
-Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 69: --backend --x (value starts with --)
 argv: ct "record" "--backend" "--x" "prog"
 env: (none)
-exit: 1
+exit: 0
 --- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = "--x"
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
 --- stderr
-Unrecognized option 'x'\e[0m
-Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 70: --backend --new-tab <v> (an option between it and its value)
@@ -2056,12 +2160,12 @@ PARSED
   inspect = none
   remoteDebuggingPort = none
   remoteDebuggingPipe = false
-  newTab = true
+  newTab = false
   newWindow = false
   cmd = record
   recordLang = ""
   recordOutputFolder = "."
-  recordBackend = "mcr"
+  recordBackend = "--new-tab"
   recordExportFile = ""
   recordStylusTrace = ""
   recordAddress = ""
@@ -2072,8 +2176,8 @@ PARSED
   recordUseInterpose = false
   recordServer = false
   recordPortable = false
-  recordProgram = "prog"
-  recordArgs = @[]
+  recordProgram = "mcr"
+  recordArgs = @["prog"]
 VALIDATED replayInteractive = false
 --- stderr
 --- end
@@ -2117,37 +2221,11 @@ VALIDATED replayInteractive = false
 ### 72: --backend missing value (last)
 argv: ct "record" "prog" "--backend"
 env: (none)
-exit: 0
+exit: 1
 --- stdout
-PARSED
-  cwd = none
-  envFiles = @[]
-  env0Files = @[]
-  tmpEnvFiles = @[]
-  tmpEnv0Files = @[]
-  inspect = none
-  remoteDebuggingPort = none
-  remoteDebuggingPipe = false
-  newTab = false
-  newWindow = false
-  cmd = record
-  recordLang = ""
-  recordOutputFolder = "."
-  recordBackend = ""
-  recordExportFile = ""
-  recordStylusTrace = ""
-  recordAddress = ""
-  recordSocket = ""
-  recordWithDiff = ""
-  recordStoreTraceFolderForPid = 0
-  recordUpload = false
-  recordUseInterpose = false
-  recordServer = false
-  recordPortable = false
-  recordProgram = "prog"
-  recordArgs = @[]
-VALIDATED replayInteractive = false
 --- stderr
+The option '\e[34m--backend\e[0m' requires a value\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 73: --backend missing value (before the rest)
@@ -2451,16 +2529,6 @@ VALIDATED replayInteractive = false
 ### 82: -e<v> (attached)
 argv: ct "record" "-e/e.zip" "prog"
 env: (none)
-exit: 1
---- stdout
---- stderr
-Unrecognized option '/'\e[0m
-Try \e[36mct --help\e[0m for more information.
---- end
-
-### 83: -E <v> (other case)
-argv: ct "record" "-E" "/e.zip" "prog"
-env: (none)
 exit: 0
 --- stdout
 PARSED
@@ -2492,6 +2560,16 @@ PARSED
   recordArgs = @[]
 VALIDATED replayInteractive = false
 --- stderr
+--- end
+
+### 83: -E <v> (other case)
+argv: ct "record" "-E" "/e.zip" "prog"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'E'\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 84: --e <v> (the letter as a long option)
@@ -2687,21 +2765,73 @@ VALIDATED replayInteractive = false
 ### 90: --export -x (value starts with -)
 argv: ct "record" "--export" "-x" "prog"
 env: (none)
-exit: 1
+exit: 0
 --- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = "-x"
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
 --- stderr
-Unrecognized option 'x'\e[0m
-Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 91: --export --x (value starts with --)
 argv: ct "record" "--export" "--x" "prog"
 env: (none)
-exit: 1
+exit: 0
 --- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = "--x"
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
 --- stderr
-Unrecognized option 'x'\e[0m
-Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 92: --export --new-tab <v> (an option between it and its value)
@@ -2718,13 +2848,13 @@ PARSED
   inspect = none
   remoteDebuggingPort = none
   remoteDebuggingPipe = false
-  newTab = true
+  newTab = false
   newWindow = false
   cmd = record
   recordLang = ""
   recordOutputFolder = "."
   recordBackend = ""
-  recordExportFile = "/e.zip"
+  recordExportFile = "--new-tab"
   recordStylusTrace = ""
   recordAddress = ""
   recordSocket = ""
@@ -2734,8 +2864,8 @@ PARSED
   recordUseInterpose = false
   recordServer = false
   recordPortable = false
-  recordProgram = "prog"
-  recordArgs = @[]
+  recordProgram = "/e.zip"
+  recordArgs = @["prog"]
 VALIDATED replayInteractive = false
 --- stderr
 --- end
@@ -2779,37 +2909,11 @@ VALIDATED replayInteractive = false
 ### 94: --export missing value (last)
 argv: ct "record" "prog" "--export"
 env: (none)
-exit: 0
+exit: 1
 --- stdout
-PARSED
-  cwd = none
-  envFiles = @[]
-  env0Files = @[]
-  tmpEnvFiles = @[]
-  tmpEnv0Files = @[]
-  inspect = none
-  remoteDebuggingPort = none
-  remoteDebuggingPipe = false
-  newTab = false
-  newWindow = false
-  cmd = record
-  recordLang = ""
-  recordOutputFolder = "."
-  recordBackend = ""
-  recordExportFile = ""
-  recordStylusTrace = ""
-  recordAddress = ""
-  recordSocket = ""
-  recordWithDiff = ""
-  recordStoreTraceFolderForPid = 0
-  recordUpload = false
-  recordUseInterpose = false
-  recordServer = false
-  recordPortable = false
-  recordProgram = "prog"
-  recordArgs = @[]
-VALIDATED replayInteractive = false
 --- stderr
+The option '\e[34m--export\e[0m' requires a value\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 95: --export missing value (before the rest)
@@ -3113,16 +3217,6 @@ VALIDATED replayInteractive = false
 ### 104: -t<v> (attached)
 argv: ct "record" "-t/s.json" "prog"
 env: (none)
-exit: 1
---- stdout
---- stderr
-Unrecognized option '/'\e[0m
-Try \e[36mct --help\e[0m for more information.
---- end
-
-### 105: -T <v> (other case)
-argv: ct "record" "-T" "/s.json" "prog"
-env: (none)
 exit: 0
 --- stdout
 PARSED
@@ -3154,6 +3248,16 @@ PARSED
   recordArgs = @[]
 VALIDATED replayInteractive = false
 --- stderr
+--- end
+
+### 105: -T <v> (other case)
+argv: ct "record" "-T" "/s.json" "prog"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'T'\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 106: --t <v> (the letter as a long option)
@@ -3349,21 +3453,73 @@ VALIDATED replayInteractive = false
 ### 112: --stylus-trace -x (value starts with -)
 argv: ct "record" "--stylus-trace" "-x" "prog"
 env: (none)
-exit: 1
+exit: 0
 --- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = "-x"
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
 --- stderr
-Unrecognized option 'x'\e[0m
-Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 113: --stylus-trace --x (value starts with --)
 argv: ct "record" "--stylus-trace" "--x" "prog"
 env: (none)
-exit: 1
+exit: 0
 --- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = "--x"
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
 --- stderr
-Unrecognized option 'x'\e[0m
-Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 114: --stylus-trace --new-tab <v> (an option between it and its value)
@@ -3380,14 +3536,14 @@ PARSED
   inspect = none
   remoteDebuggingPort = none
   remoteDebuggingPipe = false
-  newTab = true
+  newTab = false
   newWindow = false
   cmd = record
   recordLang = ""
   recordOutputFolder = "."
   recordBackend = ""
   recordExportFile = ""
-  recordStylusTrace = "/s.json"
+  recordStylusTrace = "--new-tab"
   recordAddress = ""
   recordSocket = ""
   recordWithDiff = ""
@@ -3396,8 +3552,8 @@ PARSED
   recordUseInterpose = false
   recordServer = false
   recordPortable = false
-  recordProgram = "prog"
-  recordArgs = @[]
+  recordProgram = "/s.json"
+  recordArgs = @["prog"]
 VALIDATED replayInteractive = false
 --- stderr
 --- end
@@ -3441,37 +3597,11 @@ VALIDATED replayInteractive = false
 ### 116: --stylus-trace missing value (last)
 argv: ct "record" "prog" "--stylus-trace"
 env: (none)
-exit: 0
+exit: 1
 --- stdout
-PARSED
-  cwd = none
-  envFiles = @[]
-  env0Files = @[]
-  tmpEnvFiles = @[]
-  tmpEnv0Files = @[]
-  inspect = none
-  remoteDebuggingPort = none
-  remoteDebuggingPipe = false
-  newTab = false
-  newWindow = false
-  cmd = record
-  recordLang = ""
-  recordOutputFolder = "."
-  recordBackend = ""
-  recordExportFile = ""
-  recordStylusTrace = ""
-  recordAddress = ""
-  recordSocket = ""
-  recordWithDiff = ""
-  recordStoreTraceFolderForPid = 0
-  recordUpload = false
-  recordUseInterpose = false
-  recordServer = false
-  recordPortable = false
-  recordProgram = "prog"
-  recordArgs = @[]
-VALIDATED replayInteractive = false
 --- stderr
+The option '\e[34m--stylus-trace\e[0m' requires a value\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 117: --stylus-trace missing value (before the rest)
@@ -3795,16 +3925,6 @@ VALIDATED replayInteractive = false
 ### 128: -a<v> (attached)
 argv: ct "record" "-a0xabc" "prog"
 env: (none)
-exit: 1
---- stdout
---- stderr
-Unrecognized option '0'\e[0m
-Try \e[36mct --help\e[0m for more information.
---- end
-
-### 129: -A <v> (other case)
-argv: ct "record" "-A" "0xabc" "prog"
-env: (none)
 exit: 0
 --- stdout
 PARSED
@@ -3836,6 +3956,16 @@ PARSED
   recordArgs = @[]
 VALIDATED replayInteractive = false
 --- stderr
+--- end
+
+### 129: -A <v> (other case)
+argv: ct "record" "-A" "0xabc" "prog"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'A'\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 130: --a <v> (the letter as a long option)
@@ -4031,21 +4161,73 @@ VALIDATED replayInteractive = false
 ### 136: --address -x (value starts with -)
 argv: ct "record" "--address" "-x" "prog"
 env: (none)
-exit: 1
+exit: 0
 --- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = "-x"
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
 --- stderr
-Unrecognized option 'x'\e[0m
-Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 137: --address --x (value starts with --)
 argv: ct "record" "--address" "--x" "prog"
 env: (none)
-exit: 1
+exit: 0
 --- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = "--x"
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
 --- stderr
-Unrecognized option 'x'\e[0m
-Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 138: --address --new-tab <v> (an option between it and its value)
@@ -4062,7 +4244,7 @@ PARSED
   inspect = none
   remoteDebuggingPort = none
   remoteDebuggingPipe = false
-  newTab = true
+  newTab = false
   newWindow = false
   cmd = record
   recordLang = ""
@@ -4070,7 +4252,7 @@ PARSED
   recordBackend = ""
   recordExportFile = ""
   recordStylusTrace = ""
-  recordAddress = "0xabc"
+  recordAddress = "--new-tab"
   recordSocket = ""
   recordWithDiff = ""
   recordStoreTraceFolderForPid = 0
@@ -4078,8 +4260,8 @@ PARSED
   recordUseInterpose = false
   recordServer = false
   recordPortable = false
-  recordProgram = "prog"
-  recordArgs = @[]
+  recordProgram = "0xabc"
+  recordArgs = @["prog"]
 VALIDATED replayInteractive = false
 --- stderr
 --- end
@@ -4123,37 +4305,11 @@ VALIDATED replayInteractive = false
 ### 140: --address missing value (last)
 argv: ct "record" "prog" "--address"
 env: (none)
-exit: 0
+exit: 1
 --- stdout
-PARSED
-  cwd = none
-  envFiles = @[]
-  env0Files = @[]
-  tmpEnvFiles = @[]
-  tmpEnv0Files = @[]
-  inspect = none
-  remoteDebuggingPort = none
-  remoteDebuggingPipe = false
-  newTab = false
-  newWindow = false
-  cmd = record
-  recordLang = ""
-  recordOutputFolder = "."
-  recordBackend = ""
-  recordExportFile = ""
-  recordStylusTrace = ""
-  recordAddress = ""
-  recordSocket = ""
-  recordWithDiff = ""
-  recordStoreTraceFolderForPid = 0
-  recordUpload = false
-  recordUseInterpose = false
-  recordServer = false
-  recordPortable = false
-  recordProgram = "prog"
-  recordArgs = @[]
-VALIDATED replayInteractive = false
 --- stderr
+The option '\e[34m--address\e[0m' requires a value\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 141: --address missing value (before the rest)
@@ -4503,21 +4659,73 @@ VALIDATED replayInteractive = false
 ### 152: --socket -x (value starts with -)
 argv: ct "record" "--socket" "-x" "prog"
 env: (none)
-exit: 1
+exit: 0
 --- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = "-x"
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
 --- stderr
-Unrecognized option 'x'\e[0m
-Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 153: --socket --x (value starts with --)
 argv: ct "record" "--socket" "--x" "prog"
 env: (none)
-exit: 1
+exit: 0
 --- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = "--x"
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
 --- stderr
-Unrecognized option 'x'\e[0m
-Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 154: --socket --new-tab <v> (an option between it and its value)
@@ -4534,7 +4742,7 @@ PARSED
   inspect = none
   remoteDebuggingPort = none
   remoteDebuggingPipe = false
-  newTab = true
+  newTab = false
   newWindow = false
   cmd = record
   recordLang = ""
@@ -4543,15 +4751,15 @@ PARSED
   recordExportFile = ""
   recordStylusTrace = ""
   recordAddress = ""
-  recordSocket = "/sock"
+  recordSocket = "--new-tab"
   recordWithDiff = ""
   recordStoreTraceFolderForPid = 0
   recordUpload = false
   recordUseInterpose = false
   recordServer = false
   recordPortable = false
-  recordProgram = "prog"
-  recordArgs = @[]
+  recordProgram = "/sock"
+  recordArgs = @["prog"]
 VALIDATED replayInteractive = false
 --- stderr
 --- end
@@ -4595,37 +4803,11 @@ VALIDATED replayInteractive = false
 ### 156: --socket missing value (last)
 argv: ct "record" "prog" "--socket"
 env: (none)
-exit: 0
+exit: 1
 --- stdout
-PARSED
-  cwd = none
-  envFiles = @[]
-  env0Files = @[]
-  tmpEnvFiles = @[]
-  tmpEnv0Files = @[]
-  inspect = none
-  remoteDebuggingPort = none
-  remoteDebuggingPipe = false
-  newTab = false
-  newWindow = false
-  cmd = record
-  recordLang = ""
-  recordOutputFolder = "."
-  recordBackend = ""
-  recordExportFile = ""
-  recordStylusTrace = ""
-  recordAddress = ""
-  recordSocket = ""
-  recordWithDiff = ""
-  recordStoreTraceFolderForPid = 0
-  recordUpload = false
-  recordUseInterpose = false
-  recordServer = false
-  recordPortable = false
-  recordProgram = "prog"
-  recordArgs = @[]
-VALIDATED replayInteractive = false
 --- stderr
+The option '\e[34m--socket\e[0m' requires a value\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 157: --socket missing value (before the rest)
@@ -5047,21 +5229,73 @@ VALIDATED replayInteractive = false
 ### 170: --with-diff -x (value starts with -)
 argv: ct "record" "--with-diff" "-x" "prog"
 env: (none)
-exit: 1
+exit: 0
 --- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = "-x"
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
 --- stderr
-Unrecognized option 'x'\e[0m
-Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 171: --with-diff --x (value starts with --)
 argv: ct "record" "--with-diff" "--x" "prog"
 env: (none)
-exit: 1
+exit: 0
 --- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = "--x"
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
 --- stderr
-Unrecognized option 'x'\e[0m
-Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 172: --with-diff --new-tab <v> (an option between it and its value)
@@ -5078,7 +5312,7 @@ PARSED
   inspect = none
   remoteDebuggingPort = none
   remoteDebuggingPipe = false
-  newTab = true
+  newTab = false
   newWindow = false
   cmd = record
   recordLang = ""
@@ -5088,14 +5322,14 @@ PARSED
   recordStylusTrace = ""
   recordAddress = ""
   recordSocket = ""
-  recordWithDiff = "last-commit"
+  recordWithDiff = "--new-tab"
   recordStoreTraceFolderForPid = 0
   recordUpload = false
   recordUseInterpose = false
   recordServer = false
   recordPortable = false
-  recordProgram = "prog"
-  recordArgs = @[]
+  recordProgram = "last-commit"
+  recordArgs = @["prog"]
 VALIDATED replayInteractive = false
 --- stderr
 --- end
@@ -5139,37 +5373,11 @@ VALIDATED replayInteractive = false
 ### 174: --with-diff missing value (last)
 argv: ct "record" "prog" "--with-diff"
 env: (none)
-exit: 0
+exit: 1
 --- stdout
-PARSED
-  cwd = none
-  envFiles = @[]
-  env0Files = @[]
-  tmpEnvFiles = @[]
-  tmpEnv0Files = @[]
-  inspect = none
-  remoteDebuggingPort = none
-  remoteDebuggingPipe = false
-  newTab = false
-  newWindow = false
-  cmd = record
-  recordLang = ""
-  recordOutputFolder = "."
-  recordBackend = ""
-  recordExportFile = ""
-  recordStylusTrace = ""
-  recordAddress = ""
-  recordSocket = ""
-  recordWithDiff = ""
-  recordStoreTraceFolderForPid = 0
-  recordUpload = false
-  recordUseInterpose = false
-  recordServer = false
-  recordPortable = false
-  recordProgram = "prog"
-  recordArgs = @[]
-VALIDATED replayInteractive = false
 --- stderr
+The option '\e[34m--with-diff\e[0m' requires a value\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 175: --with-diff missing value (before the rest)
@@ -5628,7 +5836,7 @@ env: (none)
 exit: 1
 --- stdout
 --- stderr
-Unrecognized option 'x'\e[0m
+Error while processing the \e[34mstore-trace-folder-for-pid=-x\e[0m parameter: invalid integer: -x\e[0m
 Try \e[36mct --help\e[0m for more information.
 --- end
 
@@ -5638,44 +5846,18 @@ env: (none)
 exit: 1
 --- stdout
 --- stderr
-Unrecognized option 'x'\e[0m
+Error while processing the \e[34mstore-trace-folder-for-pid=--x\e[0m parameter: invalid integer: --x\e[0m
 Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 196: --store-trace-folder-for-pid --new-tab <v> (an option between it and its value)
 argv: ct "record" "--store-trace-folder-for-pid" "--new-tab" "123" "prog"
 env: (none)
-exit: 0
+exit: 1
 --- stdout
-PARSED
-  cwd = none
-  envFiles = @[]
-  env0Files = @[]
-  tmpEnvFiles = @[]
-  tmpEnv0Files = @[]
-  inspect = none
-  remoteDebuggingPort = none
-  remoteDebuggingPipe = false
-  newTab = true
-  newWindow = false
-  cmd = record
-  recordLang = ""
-  recordOutputFolder = "."
-  recordBackend = ""
-  recordExportFile = ""
-  recordStylusTrace = ""
-  recordAddress = ""
-  recordSocket = ""
-  recordWithDiff = ""
-  recordStoreTraceFolderForPid = 123
-  recordUpload = false
-  recordUseInterpose = false
-  recordServer = false
-  recordPortable = false
-  recordProgram = "prog"
-  recordArgs = @[]
-VALIDATED replayInteractive = false
 --- stderr
+Error while processing the \e[34mstore-trace-folder-for-pid=--new-tab\e[0m parameter: invalid integer: --new-tab\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 197: --store-trace-folder-for-pid repeated, last wins
@@ -5717,37 +5899,11 @@ VALIDATED replayInteractive = false
 ### 198: --store-trace-folder-for-pid missing value (last)
 argv: ct "record" "prog" "--store-trace-folder-for-pid"
 env: (none)
-exit: 0
+exit: 1
 --- stdout
-PARSED
-  cwd = none
-  envFiles = @[]
-  env0Files = @[]
-  tmpEnvFiles = @[]
-  tmpEnv0Files = @[]
-  inspect = none
-  remoteDebuggingPort = none
-  remoteDebuggingPipe = false
-  newTab = false
-  newWindow = false
-  cmd = record
-  recordLang = ""
-  recordOutputFolder = "."
-  recordBackend = ""
-  recordExportFile = ""
-  recordStylusTrace = ""
-  recordAddress = ""
-  recordSocket = ""
-  recordWithDiff = ""
-  recordStoreTraceFolderForPid = 0
-  recordUpload = false
-  recordUseInterpose = false
-  recordServer = false
-  recordPortable = false
-  recordProgram = "prog"
-  recordArgs = @[]
-VALIDATED replayInteractive = false
 --- stderr
+The option '\e[34m--store-trace-folder-for-pid\e[0m' requires a value\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 199: --store-trace-folder-for-pid missing value (before the rest)
@@ -8026,9 +8182,45 @@ PARSED
   newWindow = false
   cmd = record
   recordLang = ""
-  recordOutputFolder = "."
+  recordOutputFolder = "e"
   recordBackend = ""
-  recordExportFile = "x"
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "x"
+  recordArgs = @["prog"]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 275: -o/out (attached)
+argv: ct "record" "-o/out" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "/out"
+  recordBackend = ""
+  recordExportFile = ""
   recordStylusTrace = ""
   recordAddress = ""
   recordSocket = ""
@@ -8042,16 +8234,6 @@ PARSED
   recordArgs = @[]
 VALIDATED replayInteractive = false
 --- stderr
---- end
-
-### 275: -o/out (attached)
-argv: ct "record" "-o/out" "prog"
-env: (none)
-exit: 1
---- stdout
---- stderr
-Unrecognized option '/'\e[0m
-Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 276: env <APP>_LANG
@@ -8316,80 +8498,28 @@ env: (none)
 exit: 1
 --- stdout
 --- stderr
-The required option 'recordProgram' was not specified\e[0m
+Unrecognized option ''\e[0m
 Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 287: lone -- then a word
 argv: ct "record" "--" "w" "prog"
 env: (none)
-exit: 0
+exit: 1
 --- stdout
-PARSED
-  cwd = none
-  envFiles = @[]
-  env0Files = @[]
-  tmpEnvFiles = @[]
-  tmpEnv0Files = @[]
-  inspect = none
-  remoteDebuggingPort = none
-  remoteDebuggingPipe = false
-  newTab = false
-  newWindow = false
-  cmd = record
-  recordLang = "w"
-  recordOutputFolder = "."
-  recordBackend = ""
-  recordExportFile = ""
-  recordStylusTrace = ""
-  recordAddress = ""
-  recordSocket = ""
-  recordWithDiff = ""
-  recordStoreTraceFolderForPid = 0
-  recordUpload = false
-  recordUseInterpose = false
-  recordServer = false
-  recordPortable = false
-  recordProgram = "prog"
-  recordArgs = @[]
-VALIDATED replayInteractive = false
 --- stderr
+Unrecognized option ''\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 288: --=v
 argv: ct "record" "--=v" "prog"
 env: (none)
-exit: 0
+exit: 1
 --- stdout
-PARSED
-  cwd = none
-  envFiles = @[]
-  env0Files = @[]
-  tmpEnvFiles = @[]
-  tmpEnv0Files = @[]
-  inspect = none
-  remoteDebuggingPort = none
-  remoteDebuggingPipe = false
-  newTab = false
-  newWindow = false
-  cmd = record
-  recordLang = "v"
-  recordOutputFolder = "."
-  recordBackend = ""
-  recordExportFile = ""
-  recordStylusTrace = ""
-  recordAddress = ""
-  recordSocket = ""
-  recordWithDiff = ""
-  recordStoreTraceFolderForPid = 0
-  recordUpload = false
-  recordUseInterpose = false
-  recordServer = false
-  recordPortable = false
-  recordProgram = "prog"
-  recordArgs = @[]
-VALIDATED replayInteractive = false
 --- stderr
+Unrecognized option ''\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 289: extra positional
@@ -8514,9 +8644,68 @@ CodeTracer version: <VERSION>
 ### 293: -h after the command
 argv: ct "record" "-h" "prog"
 env: (none)
-exit: 1
+exit: 0
 --- stdout
+CodeTracer - the user-friendly time-travelling debugger
+
+\e[0m\e[33mUsage:\x20
+\e[0m\e[1m
+\e[36mct record\e[0m [OPTIONS]... <recordProgram>\e[0m <recordArgs>\e[0m
+
+\e[34m\e[1m <recordProgram>\e[0m              \e[0m  Program to record.\e[0m
+\e[34m\e[1m <recordArgs>\e[0m                 \e[0m  Arguments for the recorded program [=@[]].\e[0m
+                             \e[0m  Everything after `--` is passed to the recorded
+                               program unchanged, including flags..\e[0m
+
+The following options are available:
+
+     \e[34m\e[1m--lang                  \e[0m  Language of the recording (auto-detected from the
+                               program path)..\e[0m
+                             \e[0m  Leave blank to auto-detect. Python scripts use
+                               the db backend and run with the same interpreter
+                               you would get from `python`, honoring
+                               CODETRACER_PYTHON_INTERPRETER, PYTHON_EXECUTABLE,
+                               PYTHONEXECUTABLE, PYTHON, or PATH. Ensure that
+                               interpreter has the codetracer_python_recorder
+                               package installed..\e[0m
+ \e[34m\e[1m-o, \e[0m\e[34m\e[1m--output-folder         \e[0m  Output folder for the recording [=.].\e[0m
+     \e[34m\e[1m--backend               \e[0m  Native recording backend. MCR is the default on
+                               every host, and `mcr` also pins it. Linux
+                               additionally accepts `rr`; Windows accepts `ttd`.
+                               A value this host cannot honour is refused, never
+                               silently downgraded. Not a language selector: see
+                               --lang..\e[0m
+ \e[34m\e[1m-e, \e[0m\e[34m\e[1m--export                \e[0m  Export zip file for the recording.\e[0m
+ \e[34m\e[1m-t, \e[0m\e[34m\e[1m--stylus-trace          \e[0m  Path to a stylus emv trace json file.\e[0m
+ \e[34m\e[1m-a, \e[0m\e[34m\e[1m--address               \e[0m  Address when we are recording in ci
+                               mode/environment.\e[0m
+     \e[34m\e[1m--socket                \e[0m  Path to socket for sending the trace events
+                               metadata when in ci mode/environment.\e[0m
+     \e[34m\e[1m--with-diff             \e[0m  Record a diff related to this trace and produce a
+                               multitrace. Arg can be `last-commit`, path to a
+                               diff file (must be from the current repo!) or a
+                               valid `git diff <arg>` arg.\e[0m
+     \e[34m\e[1m--store-trace-folder-for-pid\e[0m  sets a pid, if we should store the resulting
+                               trace folder in a special tmp file, grouping info
+                               for a certain originating codetracer pid. 0 means
+                               'do not store in such a file' [=0].\e[0m
+     \e[34m\e[1m--upload                \e[0m  upload the trace directly after recording and
+                               processing it.\e[0m
+     \e[34m\e[1m--use-interpose         \e[0m  Record graphics API calls for visual replay (MCR
+                               backend only). [=false].\e[0m
+     \e[34m\e[1m--server                \e[0m  Record a long-lived server. The recording stays
+                               readable while it runs, so `ct replay -t
+                               <folder>` in another terminal shows requests
+                               arriving live; stop it with Ctrl-C. [=false].\e[0m
+     \e[34m\e[1m--portable              \e[0m  Make the trace replayable on another machine, or
+                               later after its files change: the MCR backend
+                               bundles every file the program mapped, their
+                               debug symbols and the platform description into
+                               the trace, and the rr backend packs the files the
+                               trace mapped into it. A backend that cannot do
+                               this yet refuses the flag. Also honors
+                               CODETRACER_PORTABLE=on|off; --upload implies it,
+                               and warns where it is not implemented. [=false].\e[0m
+
 --- stderr
-Unrecognized option 'h'\e[0m
-Try \e[36mct --help\e[0m for more information.
 --- end

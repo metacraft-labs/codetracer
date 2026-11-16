@@ -188,7 +188,7 @@ PARSED
   newTab = false
   newWindow = false
   cmd = activate
-  activateToken = none
+  activateToken = some("")
   activateBaseUrl = none
 VALIDATED replayInteractive = false
 --- stderr
@@ -220,25 +220,28 @@ VALIDATED replayInteractive = false
 ### 11: --token -x (value starts with -)
 argv: ct "activate" "--token" "-x"
 env: (none)
-exit: 1
+exit: 0
 --- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = activate
+  activateToken = some("-x")
+  activateBaseUrl = none
+VALIDATED replayInteractive = false
 --- stderr
-Unrecognized option 'x'\e[0m
-Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 12: --token --x (value starts with --)
 argv: ct "activate" "--token" "--x"
-env: (none)
-exit: 1
---- stdout
---- stderr
-Unrecognized option 'x'\e[0m
-Try \e[36mct --help\e[0m for more information.
---- end
-
-### 13: --token --new-tab <v> (an option between it and its value)
-argv: ct "activate" "--token" "--new-tab" "tok"
 env: (none)
 exit: 0
 --- stdout
@@ -251,13 +254,23 @@ PARSED
   inspect = none
   remoteDebuggingPort = none
   remoteDebuggingPipe = false
-  newTab = true
+  newTab = false
   newWindow = false
   cmd = activate
-  activateToken = some("tok")
+  activateToken = some("--x")
   activateBaseUrl = none
 VALIDATED replayInteractive = false
 --- stderr
+--- end
+
+### 13: --token --new-tab <v> (an option between it and its value)
+argv: ct "activate" "--token" "--new-tab" "tok"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The subcommand 'activate' does not accept arguments\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 14: --token repeated, last wins
@@ -286,24 +299,11 @@ VALIDATED replayInteractive = false
 ### 15: --token missing value (last)
 argv: ct "activate" "--token"
 env: (none)
-exit: 0
+exit: 1
 --- stdout
-PARSED
-  cwd = none
-  envFiles = @[]
-  env0Files = @[]
-  tmpEnvFiles = @[]
-  tmpEnv0Files = @[]
-  inspect = none
-  remoteDebuggingPort = none
-  remoteDebuggingPipe = false
-  newTab = false
-  newWindow = false
-  cmd = activate
-  activateToken = none
-  activateBaseUrl = none
-VALIDATED replayInteractive = false
 --- stderr
+The option '\e[34m--token\e[0m' requires a value\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 16: --TOKEN <v> (style variant)
@@ -508,7 +508,7 @@ PARSED
   newWindow = false
   cmd = activate
   activateToken = none
-  activateBaseUrl = none
+  activateBaseUrl = some("")
 VALIDATED replayInteractive = false
 --- stderr
 --- end
@@ -539,25 +539,28 @@ VALIDATED replayInteractive = false
 ### 26: --base-url -x (value starts with -)
 argv: ct "activate" "--base-url" "-x"
 env: (none)
-exit: 1
+exit: 0
 --- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = activate
+  activateToken = none
+  activateBaseUrl = some("-x")
+VALIDATED replayInteractive = false
 --- stderr
-Unrecognized option 'x'\e[0m
-Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 27: --base-url --x (value starts with --)
 argv: ct "activate" "--base-url" "--x"
-env: (none)
-exit: 1
---- stdout
---- stderr
-Unrecognized option 'x'\e[0m
-Try \e[36mct --help\e[0m for more information.
---- end
-
-### 28: --base-url --new-tab <v> (an option between it and its value)
-argv: ct "activate" "--base-url" "--new-tab" "https://b.test"
 env: (none)
 exit: 0
 --- stdout
@@ -570,13 +573,23 @@ PARSED
   inspect = none
   remoteDebuggingPort = none
   remoteDebuggingPipe = false
-  newTab = true
+  newTab = false
   newWindow = false
   cmd = activate
   activateToken = none
-  activateBaseUrl = some("https://b.test")
+  activateBaseUrl = some("--x")
 VALIDATED replayInteractive = false
 --- stderr
+--- end
+
+### 28: --base-url --new-tab <v> (an option between it and its value)
+argv: ct "activate" "--base-url" "--new-tab" "https://b.test"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The subcommand 'activate' does not accept arguments\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 29: --base-url repeated, last wins
@@ -605,24 +618,11 @@ VALIDATED replayInteractive = false
 ### 30: --base-url missing value (last)
 argv: ct "activate" "--base-url"
 env: (none)
-exit: 0
+exit: 1
 --- stdout
-PARSED
-  cwd = none
-  envFiles = @[]
-  env0Files = @[]
-  tmpEnvFiles = @[]
-  tmpEnv0Files = @[]
-  inspect = none
-  remoteDebuggingPort = none
-  remoteDebuggingPipe = false
-  newTab = false
-  newWindow = false
-  cmd = activate
-  activateToken = none
-  activateBaseUrl = none
-VALIDATED replayInteractive = false
 --- stderr
+The option '\e[34m--base-url\e[0m' requires a value\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 31: --BASE-URL <v> (style variant)
@@ -747,70 +747,31 @@ Try \e[36mct --help\e[0m for more information.
 ### 39: lone -
 argv: ct "activate" "-"
 env: (none)
-exit: 0
+exit: 1
 --- stdout
-PARSED
-  cwd = none
-  envFiles = @[]
-  env0Files = @[]
-  tmpEnvFiles = @[]
-  tmpEnv0Files = @[]
-  inspect = none
-  remoteDebuggingPort = none
-  remoteDebuggingPipe = false
-  newTab = false
-  newWindow = false
-  cmd = activate
-  activateToken = none
-  activateBaseUrl = none
-VALIDATED replayInteractive = false
 --- stderr
+Unrecognized option ''\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 40: lone -- then a word
 argv: ct "activate" "--" "w"
 env: (none)
-exit: 0
+exit: 1
 --- stdout
-PARSED
-  cwd = none
-  envFiles = @[]
-  env0Files = @[]
-  tmpEnvFiles = @[]
-  tmpEnv0Files = @[]
-  inspect = none
-  remoteDebuggingPort = none
-  remoteDebuggingPipe = false
-  newTab = false
-  newWindow = false
-  cmd = activate
-  activateToken = some("w")
-  activateBaseUrl = none
-VALIDATED replayInteractive = false
 --- stderr
+Unrecognized option ''\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 41: --=v
 argv: ct "activate" "--=v"
 env: (none)
-exit: 0
+exit: 1
 --- stdout
-PARSED
-  cwd = none
-  envFiles = @[]
-  env0Files = @[]
-  tmpEnvFiles = @[]
-  tmpEnv0Files = @[]
-  inspect = none
-  remoteDebuggingPort = none
-  remoteDebuggingPipe = false
-  newTab = false
-  newWindow = false
-  cmd = activate
-  activateToken = some("v")
-  activateBaseUrl = none
-VALIDATED replayInteractive = false
 --- stderr
+Unrecognized option ''\e[0m
+Try \e[36mct --help\e[0m for more information.
 --- end
 
 ### 42: extra positional
@@ -883,9 +844,18 @@ CodeTracer version: <VERSION>
 ### 46: -h after the command
 argv: ct "activate" "-h"
 env: (none)
-exit: 1
+exit: 0
 --- stdout
+CodeTracer - the user-friendly time-travelling debugger
+
+\e[0m\e[33mUsage:\x20
+\e[0m\e[1m
+\e[36mct activate\e[0m [OPTIONS]...
+
+The following options are available:
+
+ \e[34m\e[1m--token       \e[0m  bearer token (uses stored token if omitted).\e[0m
+ \e[34m\e[1m--base-url    \e[0m  override the remote server URL.\e[0m
+
 --- stderr
-Unrecognized option 'h'\e[0m
-Try \e[36mct --help\e[0m for more information.
 --- end
