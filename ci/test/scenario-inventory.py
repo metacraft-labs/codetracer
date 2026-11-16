@@ -84,6 +84,27 @@ def counts_text(rs):
     return "\n".join(lines) + "\n"
 
 
+def column_whitespace_problem(path, scenarios):
+    """The scenarios column is comma-separated with no spaces: "a.yaml, b.yaml"
+    would name " b.yaml", which resolves to nothing, and leave b.yaml an orphan
+    no row names."""
+    if scenarios != scenarios.strip() or any(s != s.strip() for s in scenarios.split(",")):
+        return (f"{path}: the scenarios column has whitespace around a name "
+                f"({scenarios!r}); write it as a.yaml,b.yaml")
+    return None
+
+
+def controls():
+    """The check's own controls: a rule that accepts what it exists to refuse
+    fails here, before any row is read."""
+    out = []
+    if column_whitespace_problem("control", "a.yaml, b.yaml") is None:
+        out.append("control: a scenarios column written 'a.yaml, b.yaml' was accepted")
+    if column_whitespace_problem("control", "a.yaml,b.yaml") is not None:
+        out.append("control: a scenarios column written 'a.yaml,b.yaml' was refused")
+    return out
+
+
 def main():
     rs = rows()
     if len(sys.argv) > 1 and sys.argv[1] == "--counts":
@@ -91,7 +112,7 @@ def main():
             fh.write(counts_text(rs))
         print(counts_text(rs), end="")
         return 0
-    problems = []
+    problems = controls()
     seen = collections.Counter(r["path"] for r in rs)
     for p, n in seen.items():
         if n > 1:
@@ -111,6 +132,9 @@ def main():
         if r["class"] not in CLASSES:
             problems.append(f"{r['path']}: unknown class {r['class']!r}")
             continue
+        bad = column_whitespace_problem(r["path"], r["scenarios"])
+        if bad:
+            problems.append(bad)
         sc = [s for s in r["scenarios"].split(",") if s not in ("", "-")]
         if r["class"] == "lower-tier":
             if sc:
