@@ -67,6 +67,63 @@ pub struct DapLaunchOptions {
 }
 
 // ---------------------------------------------------------------------------
+// Per-step timeout
+// ---------------------------------------------------------------------------
+
+/// The environment variable that overrides the per-step DAP init timeout, in
+/// whole seconds (1..=3600).
+pub const DAP_INIT_TIMEOUT_ENV: &str = "CODETRACER_DAP_INIT_TIMEOUT_SECS";
+
+/// The default per-step timeout. Large DB traces (e.g. 96 MB Python traces)
+/// can take long to parse and post-process in replay-server's `setup()`.
+pub const DAP_INIT_TIMEOUT_DEFAULT: std::time::Duration = std::time::Duration::from_secs(120);
+
+/// The per-step DAP init timeout for a value of [`DAP_INIT_TIMEOUT_ENV`]
+/// (`None` when unset). A native trace of a large binary on a loaded host can
+/// need more than the default to reach its first stop: the rr replay of Agent
+/// Harbor's 3 GB debug `ah` daemon did not answer `stopped` within 120 s at
+/// load ~150. A value that is not a whole number of seconds in 1..=3600 is an
+/// error, never a silent default.
+pub fn dap_init_timeout_from(value: Option<&str>) -> Result<std::time::Duration, String> {
+    let Some(raw) = value else {
+        return Ok(DAP_INIT_TIMEOUT_DEFAULT);
+    };
+    match raw.trim().parse::<u64>() {
+        Ok(secs) if (1..=3600).contains(&secs) => Ok(std::time::Duration::from_secs(secs)),
+        _ => Err(format!(
+            "{DAP_INIT_TIMEOUT_ENV}={raw:?} is not a whole number of seconds in 1..=3600"
+        )),
+    }
+}
+
+/// How long a client of the daemon (the MCP server, the CLI) waits for
+/// `ct/open-trace`. With [`DAP_INIT_TIMEOUT_ENV`] set, the daemon's own bound
+/// on the DAP init sequence (its four waits -- initialize, launch,
+/// configurationDone, the first stop -- each bounded by the per-step timeout)
+/// plus 30 s of slack: a shorter client wait abandoned a replay the daemon was
+/// still bringing up (opening an rr trace of a 3 GB binary takes minutes).
+/// Unset, the caller's own historical wait (`unset_secs`), so default
+/// behaviour does not change: the MCP server answers one request at a time,
+/// and a long default would hold every tool behind one slow open. An unusable
+/// value counts as the default here; the daemon refuses it by name.
+/// Not covered: an open that queues behind another client's open (the daemon
+/// handles one at a time), and the variable differing between this client and
+/// a daemon started earlier with another environment.
+pub fn open_trace_deadline_secs(value: Option<&str>, unset_secs: u64) -> u64 {
+    match value {
+        None => unset_secs,
+        Some(_) => {
+            dap_init_timeout_from(value).unwrap_or(DAP_INIT_TIMEOUT_DEFAULT).as_secs() * 4 + 30
+        }
+    }
+}
+
+/// [`open_trace_deadline_secs`] for this process's environment.
+pub fn open_trace_deadline_secs_from_env(unset_secs: u64) -> u64 {
+    open_trace_deadline_secs(std::env::var(DAP_INIT_TIMEOUT_ENV).ok().as_deref(), unset_secs)
+}
+
+// ---------------------------------------------------------------------------
 // Errors
 // ---------------------------------------------------------------------------
 
@@ -102,7 +159,12 @@ pub enum DapInitError {
 impl std::fmt::Display for DapInitError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Timeout { step } => write!(f, "DAP init timed out at step: {step}"),
+            Self::Timeout { step } => write!(
+                f,
+                "DAP init timed out at step: {step} (each step waits {DAP_INIT_TIMEOUT_ENV} \
+                 seconds, default 120, as set in the daemon's environment; a running daemon \
+                 keeps the value it was started with)"
+            ),
             Self::ChannelClosed { step } => {
                 write!(f, "backend channel closed during DAP init at step: {step}")
             }
@@ -474,7 +536,30 @@ pub async fn run_dap_init(
 
 #[cfg(test)]
 mod tests {
+
     use super::*;
+
+    #[test]
+    fn dap_init_timeout_defaults_to_120_s_and_takes_a_valid_override() {
+        use std::time::Duration;
+        assert_eq!(super::dap_init_timeout_from(None), Ok(Duration::from_secs(120)));
+        assert_eq!(super::dap_init_timeout_from(Some("600")), Ok(Duration::from_secs(600)));
+        assert_eq!(super::dap_init_timeout_from(Some(" 30 ")), Ok(Duration::from_secs(30)));
+        for bad in ["0", "3601", "-5", "1.5", "ten", ""] {
+            assert!(super::dap_init_timeout_from(Some(bad)).is_err(), "{bad:?} must be refused");
+        }
+    }
+
+    #[test]
+    fn a_client_waits_for_open_trace_as_long_as_the_daemon_bounds_its_init() {
+        // Unset: the caller's historical wait, unchanged.
+        assert_eq!(super::open_trace_deadline_secs(None, 30), 30);
+        assert_eq!(super::open_trace_deadline_secs(None, 180), 180);
+        // Set: the daemon's own bound plus slack.
+        assert_eq!(super::open_trace_deadline_secs(Some("900"), 30), 900 * 4 + 30);
+        assert_eq!(super::open_trace_deadline_secs(Some("bogus"), 30), 120 * 4 + 30);
+    }
+
     use tokio::sync::mpsc;
 
     /// Helper: creates a channel pair and returns (sender-to-backend, receiver-from-backend,
