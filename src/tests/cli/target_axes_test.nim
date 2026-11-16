@@ -1666,10 +1666,6 @@ suite "the recording's approach decides materialized replay, not its language":
       ("src/frontend/services/debugger_service.nim",
        "self.data.trace.usesMaterializedTraces"),
       ("src/frontend/index/traces.nim", "data.trace.usesMaterializedTraces"),
-      ("src/frontend/ui/calltrace.nim",
-       "self.usesMaterializedTracesTrace = self.data.trace.usesMaterializedTraces"),
-      ("src/frontend/ui/event_log.nim",
-       "self.usesMaterializedTracesTrace = self.data.trace.usesMaterializedTraces"),
     ]
     for (relative, needle) in Sites:
       let path = RepoRoot / relative
@@ -1684,6 +1680,20 @@ suite "the recording's approach decides materialized replay, not its language":
       # The two OLD shapes, matched as code rather than as prose (the
       # comments at each site quote them on purpose, which is why the needles
       # include the surrounding syntax).
+      check "self.data.trace.lang.usesMaterializedTraces" notin source
+      check "data.trace.lang.usesMaterializedTraces()" notin source
+      check "usesMaterializedTracesTrace = lang != LangUnknown" notin source
+      check "= toLangFromFilename(self.location.path)" notin source
+    # The Call Trace pane and the Event Log were the fifth and sixth sites.
+    # Each is now one view over its ViewModel for every recording (`730399e0e04`
+    # "mount State and Call Trace where their containers are made",
+    # `1c18341dd07` "the desktop Event Log is one view over its ViewModel") and
+    # no longer asks the question at all; what the recording's kind decides is
+    # `loadCalltraceMode`'s, below. They are pinned by the negative half only:
+    # neither may ask a `Lang` summary.
+    for relative in ["src/frontend/ui/calltrace.nim", "src/frontend/ui/event_log.nim"]:
+      let source = readFile(RepoRoot / relative)
+      checkpoint(relative & " must not ask a Lang summary")
       check "self.data.trace.lang.usesMaterializedTraces" notin source
       check "data.trace.lang.usesMaterializedTraces()" notin source
       check "usesMaterializedTracesTrace = lang != LangUnknown" notin source
