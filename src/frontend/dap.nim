@@ -551,6 +551,16 @@ when not defined(ctInExtension):
     ## change is the pre-M49 behaviour arriving late rather than a new
     ## failure mode.
 
+  proc isMotionCommand*(command: cstring): bool =
+    ## A request that moves the replay (a step, a continue, either way). The
+    ## status bar shows it as the running operation until the move arrives
+    ## (`CtCompleteMove`); a refused one brings no move, so its refusal is
+    ## what ends it.
+    command in [cstring"next", cstring"stepIn", cstring"stepOut",
+                cstring"continue", cstring"stepBack", cstring"reverseContinue",
+                cstring"ct/reverseStepIn", cstring"ct/reverseStepOut",
+                cstring"ct/step"]
+
   proc requestFailureText*(outcome: DapRequestOutcome): cstring =
     ## The sentence a user reads when a request they triggered did not
     ## succeed — or "" when it did, which is what keeps this from firing on

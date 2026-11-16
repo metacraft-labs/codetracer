@@ -196,6 +196,17 @@ proc setupMiddlewareApis*(dapApi: DapApi, viewsApi: MediatorWithSubscribers) {.e
     if not requestFailureNoticesInstalled:
       requestFailureNoticesInstalled = true
       onCtRequestFailed(proc(outcome: DapRequestOutcome) =
+        # A refused step or continue brings no move, so nothing else ends
+        # the operation the status bar shows ("stable: reverse-next" stayed
+        # up for as long as the window did): the refusal ends it.
+        if isMotionCommand(outcome.command):
+          for session in data.sessions:
+            if not session.isNil and not session.dapApi.isNil and
+               session.dapApi.sessionId == outcome.sessionId:
+              session.status.stableBusy = false
+              if not session.ui.isNil and not session.ui.status.isNil:
+                session.ui.status.state.stableBusy = false
+                session.ui.status.redraw()
         let text = requestFailureText(outcome)
         if text.len == 0:
           return
