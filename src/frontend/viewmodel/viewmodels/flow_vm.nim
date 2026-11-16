@@ -957,10 +957,10 @@ proc requestWindow*(vm: FlowVM;
       # refusal or a timeout. No event will follow it.
       if vmRef.sentCallFlows != sentAs:
         # A newer request is in flight, and the panel shows its state. This
-        # is how the engine answers a request a newer one superseded before
-        # it started (CodeTracer-DAP-Extensions.md, `ct/load-flow`,
-        # "Superseded requests"): showing it as an error would flip the
-        # panel to an error while the flow of the stop on screen loads.
+        # is how the engine answers a request a newer one superseded, before
+        # it started or while it ran (a `superseded` refusal): showing it as
+        # an error would flip the panel to an error while the flow of the
+        # stop on screen loads.
         done(false)
         return
       vmRef.loadingState.val = lsError

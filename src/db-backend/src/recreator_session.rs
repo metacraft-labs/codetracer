@@ -25,6 +25,7 @@ use crate::ctfs_trace_reader::materialization_cache::{
 use crate::ctfs_trace_reader::server_prep_encoding::{decode_linehits, decode_memwrites};
 use crate::db::DbRecordEvent;
 use crate::expr_loader::ExprLoader;
+use crate::flow_supersession::FlowCancel;
 use crate::lang::Lang;
 #[cfg(windows)]
 use crate::paths::CODETRACER_PATHS;
@@ -581,6 +582,11 @@ pub struct ReplayWorker {
     /// How this worker last died with a query in flight, until a later
     /// [`ReplayWorker::start`] replaces it. See [`ReplayWorkerDied`].
     last_death: Option<ReplayWorkerDied>,
+    /// The cancellation token of the `ct/load-flow` this worker serves, for a
+    /// flow worker (see [`RecreatorReplaySession::with_flow_cancel`]). Once
+    /// the flow is superseded the worker is stopped at once, even with a
+    /// query in flight, and is not started again.
+    cancel: Option<FlowCancel>,
 }
 
 #[derive(Default, Debug, Clone)]
@@ -650,6 +656,7 @@ impl ReplayWorker {
             process: None,
             stream: None,
             last_death: None,
+            cancel: None,
         }
     }
 
@@ -711,6 +718,8 @@ impl ReplayWorker {
     }
 
     pub fn start(&mut self) -> Result<(), Box<dyn Error>> {
+        // A superseded flow starts no worker: its result would be discarded.
+        self.refuse_if_superseded()?;
         if let Some(program) = &self.live_program {
             info!(
                 "start: {} replay-worker --name {} --index {} --live-program {}",
@@ -855,10 +864,12 @@ impl ReplayWorker {
         loop {
             if let Ok(stream) = UnixStream::connect(&socket_path) {
                 stream.set_read_timeout(Some(replay_query_timeout()))?;
+                self.register_interrupt(&stream)?;
                 self.stream = Some(stream);
                 eprintln!("[rr-worker] socket connected");
                 return Ok(());
             }
+            self.refuse_if_superseded()?;
 
             if Instant::now() >= deadline {
                 return Err(format!(
@@ -906,6 +917,7 @@ impl ReplayWorker {
         );
 
         while Instant::now() < deadline {
+            self.refuse_if_superseded()?;
             {
                 let preferred_manifest = tmp_path.join(format!("run-{}", preferred_run_id)).join(&manifest_name);
                 if preferred_manifest.exists() {
@@ -943,6 +955,7 @@ impl ReplayWorker {
 
                             match connect_tcp_endpoint_with_timeout(&endpoint.address, Duration::from_millis(250)) {
                                 Ok(stream) => {
+                                    self.register_interrupt(&stream)?;
                                     self.stream = Some(stream);
                                     info!(
                                         "worker stream is now setup via tcp {} using preferred manifest {}",
@@ -1033,6 +1046,7 @@ impl ReplayWorker {
 
                         match connect_tcp_endpoint_with_timeout(&endpoint.address, Duration::from_millis(250)) {
                             Ok(stream) => {
+                                self.register_interrupt(&stream)?;
                                 self.stream = Some(stream);
                                 info!(
                                     "worker stream is now setup via tcp {} using manifest {}",
@@ -1084,6 +1098,13 @@ impl ReplayWorker {
     pub fn dispatch_replay_query(&mut self, query: ReplayQuery) -> Result<String, Box<dyn Error>> {
         let raw_json = serde_json::to_string(&query)?;
 
+        // A superseded flow sends nothing more: stop its worker now rather
+        // than when the session is dropped.
+        if self.superseded().is_some() {
+            self.abandon_connection();
+            self.refuse_if_superseded()?;
+        }
+
         let worker_pid = self.process.as_ref().map(Child::id);
         if self.stream.is_some() && worker_has_exited(self.process.as_mut()) {
             // The worker died between queries. Its socket can outlive it
@@ -1104,6 +1125,10 @@ impl ReplayWorker {
         debug!("send to worker {raw_json}\n");
         // `clippy::unused_io_amount` catched we need write_all, not write
         if let Err(e) = stream.write_all(&format!("{raw_json}\n").into_bytes()) {
+            if self.superseded().is_some() {
+                self.abandon_connection();
+                self.refuse_if_superseded()?;
+            }
             // The worker's end of the socket is gone (EPIPE / ECONNRESET): it
             // died after answering the previous query.
             return Err(Box::new(
@@ -1181,6 +1206,15 @@ impl ReplayWorker {
             )));
         }
         let mut res = String::from_utf8_lossy(&line).into_owned();
+        // The flow this worker serves was superseded while the query was in
+        // flight: its interrupter shut the socket down, so the read returned
+        // (an end of file or an error) without the worker having answered.
+        // Stop the worker now. The death path below would first wait up to
+        // `WORKER_EXIT_GRACE` for a worker that is still busy with the query.
+        if self.superseded().is_some() {
+            self.abandon_connection();
+            self.refuse_if_superseded()?;
+        }
         if let Err(e) = read_result {
             // Capture these before cleanup kills/reaps the worker: that time
             // is not part of the query wait, and its PID is lost on cleanup.
@@ -1257,6 +1291,44 @@ impl ReplayWorker {
     /// restarted since.
     pub fn last_death(&self) -> Option<&ReplayWorkerDied> {
         self.last_death.as_ref()
+    }
+
+    /// Serve the `ct/load-flow` that `cancel` belongs to (see
+    /// [`RecreatorReplaySession::with_flow_cancel`]).
+    pub fn set_flow_cancel(&mut self, cancel: Option<FlowCancel>) {
+        self.cancel = cancel;
+    }
+
+    /// The request that superseded the flow this worker serves, if one has.
+    fn superseded(&self) -> Option<i64> {
+        self.cancel.as_ref().and_then(FlowCancel::superseded_by)
+    }
+
+    /// `Err` naming the superseding request once the flow is superseded.
+    fn refuse_if_superseded(&self) -> Result<(), Box<dyn Error>> {
+        match self.superseded() {
+            Some(newer_seq) => Err(format!(
+                "the {}[{}] replay worker was stopped: its flow was superseded by ct/load-flow request {newer_seq}",
+                self.name, self.index
+            )
+            .into()),
+            None => Ok(()),
+        }
+    }
+
+    /// Let a cancel of the flow this worker serves interrupt a query blocked
+    /// on `stream`: shutting the socket down makes the read return at once.
+    /// The registered handle is a duplicate of the socket, so it is shut down
+    /// (not closed) and cannot reach any other connection.
+    #[cfg(any(unix, windows))]
+    fn register_interrupt(&self, stream: &WorkerStream) -> Result<(), Box<dyn Error>> {
+        if let Some(cancel) = &self.cancel {
+            let handle = stream.try_clone()?;
+            cancel.on_supersede(Box::new(move || {
+                let _ = handle.shutdown(std::net::Shutdown::Both);
+            }));
+        }
+        Ok(())
     }
 
     /// Record that the worker went away while answering `raw_json`: drop the
@@ -1473,6 +1545,15 @@ impl RecreatorReplaySession {
     /// replacement and returned the first steps of `main` as the flow.
     pub fn without_respawn_after_worker_death(mut self) -> Self {
         self.respawn_after_worker_death = false;
+        self
+    }
+
+    /// Run this session for the `ct/load-flow` whose token is `cancel`: when
+    /// a newer request supersedes the flow, a query in flight returns at once
+    /// with an error, the worker is stopped (killed and reaped), and no
+    /// further query starts a worker (`flow_supersession`).
+    pub fn with_flow_cancel(mut self, cancel: Option<FlowCancel>) -> Self {
+        self.stable.set_flow_cancel(cancel);
         self
     }
 
@@ -2716,6 +2797,7 @@ while True:
                 process: None,
                 stream: Some(client),
                 last_death: None,
+                cancel: None,
             },
             recreator_exe: PathBuf::new(),
             rr_trace_folder: PathBuf::new(),
@@ -2794,6 +2876,7 @@ while True:
                 process: None,
                 stream: Some(client),
                 last_death: None,
+                cancel: None,
             },
             recreator_exe: PathBuf::new(),
             rr_trace_folder: PathBuf::new(),
@@ -2861,6 +2944,58 @@ while True:
     fn expect_death<'a>(err: &'a (dyn Error + 'static)) -> &'a ReplayWorkerDied {
         err.downcast_ref::<ReplayWorkerDied>()
             .unwrap_or_else(|| panic!("expected a ReplayWorkerDied, got: {err}"))
+    }
+
+    /// A flow superseded while its worker is busy with a query does not wait
+    /// for the answer (up to the read timeout, which a step over a large call
+    /// of an MCR recording reaches): the query returns at once naming the
+    /// superseding request, the worker is killed and reaped, and no later
+    /// query starts a new one (`flow_supersession`).
+    #[cfg(unix)]
+    #[test]
+    fn a_superseded_flow_stops_its_busy_worker_at_once() {
+        use crate::flow_supersession::FlowCancel;
+        // `exec`: the busy "worker" is the process the session holds, so
+        // killing it leaves nothing behind.
+        let mut worker = worker_that_reads_one_query_then("exec sleep 60", "flow");
+        let pid = worker.process.as_ref().unwrap().id();
+        let cancel = FlowCancel::new();
+        worker.set_flow_cancel(Some(cancel.clone()));
+        let stream = worker.stream.as_ref().unwrap().try_clone().unwrap();
+        worker.register_interrupt(&stream).unwrap();
+
+        let canceller = {
+            let cancel = cancel.clone();
+            thread::spawn(move || {
+                thread::sleep(Duration::from_millis(300));
+                cancel.supersede(42)
+            })
+        };
+        let started = Instant::now();
+        let err = worker
+            .dispatch_replay_query(ReplayQuery::Step {
+                action: Action::Next,
+                forward: true,
+            })
+            .expect_err("a superseded flow's query is not answered");
+        let waited = started.elapsed();
+        assert!(canceller.join().unwrap(), "the cancel took effect");
+        assert!(
+            err.to_string().contains("superseded by ct/load-flow request 42"),
+            "the error names the superseding request: {err}"
+        );
+        // The helper's own read timeout is 30 s and the "worker" sleeps 60 s:
+        // only the interrupt ends the wait this early.
+        assert!(waited < Duration::from_secs(10), "the query returned after {waited:?}");
+        assert!(worker.process.is_none() && !worker.active, "the worker is stopped");
+        // Reaped, not left as a zombie or running: its pid is gone.
+        assert!(
+            !Path::new(&format!("/proc/{pid}")).exists(),
+            "the worker process {pid} is still there"
+        );
+        // And nothing starts again for this flow.
+        let again = worker.start().expect_err("a superseded flow starts no worker");
+        assert!(again.to_string().contains("superseded"), "{again}");
     }
 
     /// A worker that dies with a query in flight is reported as a death that

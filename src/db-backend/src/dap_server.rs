@@ -18,6 +18,7 @@ use crate::dap_types;
 
 use crate::dap_handler::Handler;
 use crate::db::Db;
+use crate::flow_supersession::{FlowCancel, FlowSuperseded, FlowSupersession};
 use crate::macro_sourcemap::UpdateExpansionArgs;
 #[cfg(not(windows))]
 use crate::paths::CODETRACER_PATHS;
@@ -2587,6 +2588,10 @@ pub struct Ctx {
     pub to_tracepoint_sender: Option<Sender<dap::Request>>,
     pub disconnect_response_written: Arc<AtomicBool>,
     pub should_terminate: bool,
+    /// The newest `ct/load-flow` of each mode and the flow running on the
+    /// `flow` thread, shared by the dispatcher and that thread so a newer
+    /// request supersedes a running flow (`flow_supersession`).
+    pub flow_supersession: Arc<FlowSupersession>,
 }
 
 impl Default for Ctx {
@@ -2615,6 +2620,7 @@ impl Default for Ctx {
             to_tracepoint_sender: None,
             disconnect_response_written: Arc::new(AtomicBool::new(false)),
             should_terminate: false,
+            flow_supersession: Arc::new(FlowSupersession::default()),
         }
     }
 }
@@ -3564,17 +3570,17 @@ fn load_flow_mode(request: &dap::Request) -> Option<task::FlowMode> {
 /// request it just finished. A `ct/load-flow` that a newer `ct/load-flow` of
 /// the same `flowMode` follows in that queue is not run: it is answered
 /// `success: false`, naming the request that superseded it, and no
-/// `ct/updated-flow` is sent for it (CodeTracer-DAP-Extensions.md,
-/// `ct/load-flow`, "Superseded requests").
+/// `ct/updated-flow` is sent for it. The answer's `message` starts with
+/// `superseded`, which is how clients tell it from a failure.
 ///
 /// Why: a client asks for the flow of every stop, and one flow can take
 /// seconds on a native recording, so with one `flow` thread serving them in
 /// order the flow of the stop the user is looking at waited behind the flows
-/// of every stop it had already left (codetracer-pm issue
-/// `2026-11-15-mcr-rust-sudoku-load-flow-takes-19-to-48-seconds`). Only
-/// requests that have not started are superseded; a flow already running
-/// finishes. The order of every other request is kept, and a `diff` flow is
-/// never superseded by a `call` flow or the other way round: the two answer
+/// of every stop it had already left. Only requests that have not started
+/// are superseded here; a flow already running is superseded through
+/// [`FlowSupersession`], which `task_thread` consults around each flow. The
+/// order of every other request is kept, and a `diff` flow is never
+/// superseded by a `call` flow or the other way round: the two answer
 /// different questions.
 ///
 /// Returns `Err` when the channel is closed and nothing is left to run.
@@ -3610,13 +3616,31 @@ fn next_task_request(
                 send_failed_response(
                     sender,
                     &request,
-                    format!(
-                        "superseded: a newer ct/load-flow (request {newer_seq}) for the same flow mode \
-                         arrived before this one started"
-                    ),
+                    FlowSuperseded {
+                        newer_seq,
+                        started: false,
+                    }
+                    .to_string(),
                 );
             }
             None => return Ok(request),
+        }
+    }
+}
+
+/// Put every handler of `session` under `cancel`, the token of the
+/// `ct/load-flow` about to run (or none after it).
+fn set_flow_cancel(session: &mut SessionHandler, cancel: Option<FlowCancel>) {
+    for slot in 0..session.trace_count() {
+        if let Ok(slot) = TraceSlot::try_from(slot)
+            && let Some(handler) = session.handler_for_slot_mut(slot)
+        {
+            // The preloader holds the token for one walk; dropping it after
+            // the flow also releases the worker sockets it registered.
+            if cancel.is_none() {
+                handler.flow_preloader.cancel = None;
+            }
+            handler.flow_cancel = cancel.clone();
         }
     }
 }
@@ -3985,10 +4009,50 @@ fn task_thread(
             // delegates each request to the owning trace's
             // single-trace Handler (unchanged code path) per M24.
             let primary_initialized = session.trace(0).map(|t| t.handler.initialized).unwrap_or(false);
+            // A `ct/load-flow` runs under a cancellation token, unless a newer
+            // request of its mode reached the dispatcher before it could
+            // start (`flow_supersession`).
+            let flow_cancel = match load_flow_mode(&request).filter(|_| primary_initialized) {
+                Some(mode) => match ctx_with_cached_launch.flow_supersession.begin(request.base.seq, mode) {
+                    Ok(cancel) => Some(cancel),
+                    Err(newer_seq) => {
+                        info!(
+                            "ct/load-flow {} superseded by ct/load-flow {newer_seq} before it started",
+                            request.base.seq
+                        );
+                        send_failed_response(
+                            &sender,
+                            &request,
+                            FlowSuperseded {
+                                newer_seq,
+                                started: false,
+                            }
+                            .to_string(),
+                        );
+                        continue;
+                    }
+                },
+                None => None,
+            };
             if primary_initialized {
+                set_flow_cancel(&mut session, flow_cancel.clone());
                 let res = run_answering_panics(name, &request, || {
                     handle_request_via_session(&mut session, request.clone(), sender.clone())
                 });
+                if flow_cancel.is_some() {
+                    set_flow_cancel(&mut session, None);
+                    ctx_with_cached_launch.flow_supersession.finish(request.base.seq);
+                }
+                // A flow superseded while it ran is answered as superseded
+                // whatever its walk made of the stopped replay (an error, or
+                // a partial result `Handler::load_flow` did not deliver).
+                let res = match (res, flow_cancel.as_ref().and_then(FlowCancel::superseded_by)) {
+                    (Ok(Err(_)), Some(newer_seq)) => Ok(Err(Box::new(FlowSuperseded {
+                        newer_seq,
+                        started: true,
+                    }) as Box<dyn Error>)),
+                    (res, _) => res,
+                };
                 match res {
                     Ok(Ok(())) => {}
                     Ok(Err(e)) => {
@@ -4193,6 +4257,16 @@ where
                 // The flow thread's handler keeps the uncut values behind the
                 // flows it sent, so their continuation is answered there too.
                 "ct/load-flow" | "ct/load-flow-value-elements" => {
+                    // A `ct/load-flow` is announced before it is forwarded:
+                    // from now on it is the newest of its mode, and a flow of
+                    // that mode running on the flow thread is stopped and
+                    // answered as superseded (`flow_supersession`). A request
+                    // whose arguments do not parse supersedes nothing; its
+                    // handler refuses it. A value-elements continuation has
+                    // no flow mode (`load_flow_mode`) and supersedes nothing.
+                    if let Some(mode) = load_flow_mode(&request) {
+                        ctx.flow_supersession.arrived(request.base.seq, mode);
+                    }
                     if let Some(to_flow_sender) = ctx.to_flow_sender.clone()
                         && let Err(e) = to_flow_sender.send(request.clone())
                     {

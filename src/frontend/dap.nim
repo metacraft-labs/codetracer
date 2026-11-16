@@ -596,9 +596,9 @@ when not defined(ctInExtension):
 
   proc isSupersededFlowRefusal*(outcome: DapRequestOutcome): bool =
     ## Whether `outcome` is the engine's answer to a `ct/load-flow` that a
-    ## newer one of the same `flowMode` superseded before it started
-    ## (CodeTracer-DAP-Extensions.md, `ct/load-flow`, "Superseded requests":
-    ## `success: false`, a `message` that starts with `superseded`).
+    ## newer one of the same `flowMode` superseded, before it started or
+    ## while it ran: `success: false`, a `message` that starts with
+    ## `superseded`.
     ##
     ## Nothing failed there: the engine skipped the flow of a stop the user
     ## has already left and is computing the newer one. Painted as a failure,

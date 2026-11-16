@@ -353,8 +353,8 @@ suite "2026-11-04: the flow window is delivered once, on the event":
 suite "a flow request a newer one superseded":
   # The engine answers a `ct/load-flow` that a newer one of the same mode
   # overtook before it started with a refusal, and computes only the newer
-  # one (CodeTracer-DAP-Extensions.md, `ct/load-flow`, "Superseded
-  # requests"). The panel shows the newer request's state, so that refusal
+  # one (`success: false`, a `message` that starts with `superseded`). The
+  # panel shows the newer request's state, so that refusal
   # must not flip it to an error while the flow of the stop on screen loads.
 
   test "the older request's refusal leaves the panel loading the newer one":

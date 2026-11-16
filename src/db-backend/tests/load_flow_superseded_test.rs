@@ -1,15 +1,12 @@
 //! A `ct/load-flow` that a newer one overtakes before it starts is not run.
 //!
-//! Issue: codetracer-pm
-//! `issues/2026-11-15-mcr-rust-sudoku-load-flow-takes-19-to-48-seconds.md`
-//! ("What still fails, and the decision"). A client asks for the flow of
-//! every stop, and the replay server's one `flow` thread served those
-//! requests in order, so the flow of the stop the user is looking at waited
-//! behind the flows of every stop already left. Spec:
-//! `CodeTracer-DAP-Extensions.md`, `ct/load-flow`, "Superseded requests": a
-//! queued `ct/load-flow` that a newer one of the same `flowMode` follows is
-//! answered `success: false`, naming the newer request, and gets no
-//! `ct/updated-flow`.
+//! A client asks for the flow of every stop, and the replay server's one
+//! `flow` thread served those requests in order, so the flow of the stop the
+//! user is looking at waited behind the flows of every stop already left
+//! (seconds each on a native recording). Now a queued `ct/load-flow` that a
+//! newer one of the same `flowMode` follows is answered `success: false`,
+//! with a `message` that starts with `superseded` and names the newer
+//! request, and gets no `ct/updated-flow`.
 //!
 //! The slow request the flows queue behind is the `flow` thread's own
 //! `launch`: it loads the recording before it serves anything, and the four

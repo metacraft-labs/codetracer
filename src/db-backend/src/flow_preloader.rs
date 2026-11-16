@@ -156,6 +156,11 @@ pub struct FlowPreloader {
     /// Who hears how a walk is going while it runs, if anyone (see
     /// [`FlowPreloader::report_progress`]).
     progress: Option<FlowProgressReporter>,
+    /// The cancellation token of the `ct/load-flow` being loaded, if it can
+    /// be superseded (`flow_supersession`): the walk stops at the next step
+    /// once a newer request has superseded it, since its result will be
+    /// dropped. Set by `Handler::load_flow` for each request.
+    pub cancel: Option<crate::flow_supersession::FlowCancel>,
 }
 
 /// How far a flow walk has got: sent while it runs, so a front-end waiting
@@ -222,6 +227,7 @@ impl FlowPreloader {
         FlowPreloader {
             expr_loader: ExprLoader::new(CoreTrace::default()),
             progress: None,
+            cancel: None,
         }
     }
 
@@ -1035,6 +1041,10 @@ impl<'a> CallFlowPreloader<'a> {
         self.stop_position = None;
         info!("flow loop: values cut at the source: {}", self.cut_at_the_source);
         loop {
+            if let Some(newer_seq) = self.flow_preloader.cancel.as_ref().and_then(|c| c.superseded_by()) {
+                info!("  break flow: superseded by ct/load-flow {newer_seq}");
+                break;
+            }
             // let (step_id, progressing) = if first {
             //     first = false;
             //     self.find_first_step(iter_step_id, replay)
