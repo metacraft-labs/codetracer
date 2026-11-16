@@ -114,10 +114,6 @@
 # 2026-11-14, the desktop palette's View: Toggle Formatted Source View (a new
 # ClientAction, its operation and its census entry): these harnesses owe a
 # re-grade for these bytes.
-src/frontend/tui/tests/plat49-chrome-mutation-control.sha256	src/frontend/gpui/main.nim	c877a4378ca59b26178847f58a7cbde74cf13ef639fd37cfa9c8f80f2f302ff9	28f36a050600425fdbbea72ccc729250a4977ecc589c87e4d67e73d3196f228e
-src/frontend/tui/tests/plat49-chrome-mutation-control.sha256	src/frontend/tui/app/runtime.nim	6a710a3399799246c1f06628b0b206fd78e0a1a205e7edcb74e555c90161c7b3	4a29788490e9b99d5f52461181399c62601fc3eca6b582f8efbd715224ac544d
-src/frontend/tui/tests/plat49-chrome-mutation-control.sha256	src/frontend/tui/app/tui_app.nim	cc455c9ce9a525fd905861c04eeeac5edfd762fbb7f426932c75deb4417f6ecb	5e29fc96fe73c25b52f244228fa9880cac9205a1607f7214b733c6c0dcd3e647
-src/frontend/tui/tests/plat49-chrome-mutation-control.sha256	src/frontend/tui/host/tui_session.nim	a9ea791e49006488ac348b14e02a4255f0d521e9444766a8aff5219e8c969bee	0c65cb8a6581ca9f73adda27a71e6589473c2573b61ce8a51eac495d0e0b1efe
 src/frontend/tui/tests/plat54-agent-activity-mutation-control.sha256	src/frontend/tui/app/runtime.nim	9f6ceffe6b6685c2accdce1080bd0d79d6355dbe8235135b4e163a554a5aa58b	4a29788490e9b99d5f52461181399c62601fc3eca6b582f8efbd715224ac544d
 src/frontend/tui/tests/plat54-agent-activity-mutation-control.sha256	src/frontend/tui/host/tui_session.nim	a9ea791e49006488ac348b14e02a4255f0d521e9444766a8aff5219e8c969bee	0c65cb8a6581ca9f73adda27a71e6589473c2573b61ce8a51eac495d0e0b1efe
 # run-plat62-constraints-mutations.py was re-graded at 56862a458e4; since then
@@ -141,7 +137,6 @@ src/frontend/tui/tests/plat46-design-mutation-control.sha256	src/frontend/tui/te
 # plat56: graded at 0350c2234b; 32824656f1 (a terminal's answer is never
 # typed) then moved the terminal's main.nim. Re-grade the arms whose needles
 # sit in it.
-src/frontend/tui/tests/plat49-chrome-mutation-control.sha256	src/frontend/tui/main.nim	66283c44fe09ff1389f0e769ef48637ce573781972c014e30c9c16b1da8606ce	82a88f3f2c8697dc6edab12b1b2be1b458357d4f5be0597552709fceabf7593c
 src/frontend/tui/tests/plat54-agent-activity-mutation-control.sha256	src/frontend/tui/main.nim	66283c44fe09ff1389f0e769ef48637ce573781972c014e30c9c16b1da8606ce	82a88f3f2c8697dc6edab12b1b2be1b458357d4f5be0597552709fceabf7593c
 # plat70h was graded at 56862a458e4; its runtime moved on agents after that
 # (eec6949f68, a move drawn in flight): a re-grade of the arms whose needles sit in it.
@@ -156,8 +151,6 @@ src/frontend/tui/tests/plat54-agent-activity-mutation-control.sha256	src/fronten
 # plat58: graded at 3ba119e25e; 1cbb12ab23 (a formatted-view stop names the
 # view as its high-level source) then moved dap_handler.rs. Re-grade E1, whose
 # needle sits in it.
-src/frontend/tui/tests/plat49-chrome-mutation-control.sha256	src/frontend/viewmodel/viewmodels/event_log_vm.nim	26158d77dd8f6e58b67e9b9edb89f1e3b01ace21df15e569811687402e479b02	75c008b2da091f77fed96996db91d7ad8cd44393c2e1c06705bb8444c5f7f32b
-src/frontend/tui/tests/plat49-chrome-mutation-control.sha256	src/frontend/viewmodel/views/isonim_event_log_view.nim	f49a9e23ba6434f08360950768487dad63a9fedd4703de6521d6d223f23cfda7	db9c4c6924195d6630347f931128a1d0a9d7c22f5b784749911716d1d5ac556a
 # run-plat61-shell-mutations.py was re-graded at 8fbd0ab21f; since then
 # bf97934eb5 and 9bc543534b (a refused trace version) moved ct's recording
 # command, and 234a6bcc67 (a session tab's right-click) the desktop's key
@@ -214,7 +207,6 @@ src/frontend/tui/tests/build-residuals-mutation-control.sha256	src/frontend/gpui
 src/frontend/tui/tests/plat60-low-level-code-mutation-control.sha256	src/frontend/gpui/main.nim	bd206f82ec3b500e52053e6eeda52e891e83aede0353ce2e485c65e1fcf50d85	28f36a050600425fdbbea72ccc729250a4977ecc589c87e4d67e73d3196f228e
 # run-plat62-constraints-mutations.py was re-graded at 25ef4c6b12; since then
 src/frontend/tui/tests/plat62-constraints-mutation-control.sha256	src/frontend/gpui/main.nim	bd206f82ec3b500e52053e6eeda52e891e83aede0353ce2e485c65e1fcf50d85	28f36a050600425fdbbea72ccc729250a4977ecc589c87e4d67e73d3196f228e
-src/frontend/tui/tests/plat49-chrome-mutation-control.sha256	src/frontend/viewmodel/viewmodels/state_vm.nim	83317d6b298c7a4e59d739ce107e6edd021b4abe8be210d6e8233b1338538610	93e71cf306ed044285f82ff34813da37691b380cfa236de7d7407b686dd795c0
 # The desktop windows change (a second window shows its session) edits these
 # digested subjects; the harnesses owe a re-grade for these bytes.
 src/frontend/tui/tests/build-residuals-mutation-control.sha256	src/frontend/ui_js.nim	3ede9f3c111db3d01340561893b2b1253c83ed7c5b3b690475d0a70b67c5acac	4528ed56f9567b4736e575bd0ed2725773aead94c7cf743a51fb775a9b82e4b7
@@ -336,3 +328,9 @@ src/frontend/tui/tests/plat70g-multiclick-mutation-control.sha256	src/frontend/u
 # reached the core apart (a loaded host); the shared editor harness owes a
 # re-grade of its browser-graded arms.
 src/frontend/tests/plat67-shared-editor-mutation-control.sha256	src/frontend/tests/shared_editor_chromium_test.nim	4a3e39edfc34a44c98f4a6d53db550ab32e92508f4d1c262b871a0685fa7e956	a4810794febb765cdc842b3eac6ceebc764a6446c7bb3dbcae28d6b9eaefa402
+
+# plat49: graded at 1cb8dbac0d; d5699320f5  moved
+# src/frontend/tui/app/runtime.nim,src/frontend/tui/host/tui_session.nim after
+# the grade. Re-grade the arms whose needles sit in them.
+src/frontend/tui/tests/plat49-chrome-mutation-control.sha256	src/frontend/tui/app/runtime.nim	4a29788490e9b99d5f52461181399c62601fc3eca6b582f8efbd715224ac544d	88ea1de80a3f6ed77a8513759b94ec22f7a60e6460d52cfc0186545ef9dc79d3
+src/frontend/tui/tests/plat49-chrome-mutation-control.sha256	src/frontend/tui/host/tui_session.nim	0c65cb8a6581ca9f73adda27a71e6589473c2573b61ce8a51eac495d0e0b1efe	4059f0d09cbcb6d8ff47bba459e710d5f2ad2e4f556aaa4c87694e86209103df
