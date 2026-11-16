@@ -520,6 +520,21 @@ suite "KL-11: VS Code's precedence, through input":
     ck r.press(debugFacts(), EditorPath, "Ctrl+Alt+o").op == "debugger.step-over"
     ck bindingSetIndex("stepping:none") >= 0
 
+  test "a user editor row takes Alt+E from the base's global focus row":
+    # CUA's Alt+E focuses the event log (a GLOBAL row). A user's `alt+e` for
+    # an EDITOR operation wins wherever the editor is on the path: the user
+    # pass comes before the base pass (§5.1). The macro expansion issue
+    # (codetracer-pm 2026-11-15) binds Toggle Macro Expansion to Alt+E this
+    # way.
+    let uk = parseUserKeymap("""[{"key": "alt+e", "command": "editor.toggle-macro-expansion"}]""")
+    for delivery in [Linux, Gpui, KeyDelivery(frontEnd: feDesktop, platform: pkLinux,
+                                              keyProtocol: kpNative)]:
+      var r = initKeymapRouter(bkCua, delivery, user = uk)
+      checkpoint($delivery.frontEnd)
+      check r.press(debugFacts(), EditorPath, "Alt+e").op == "editor.toggle-macro-expansion"
+      # Outside the editor the user row does not apply, and the base's does.
+      check r.press(debugFacts(), CallTracePath, "Alt+e").op == "layout.focus-pane(event-log)"
+
 suite "the web studio's Run and Export (CUA-Keymap.md §3.7)":
   test "Ctrl+Enter runs and Ctrl+Shift+E exports on the web; VS Code's rows elsewhere":
     const
