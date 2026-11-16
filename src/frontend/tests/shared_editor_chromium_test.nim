@@ -200,11 +200,20 @@ proc caseTypingReachesTheCore() {.async.} =
   await settle()
   ck ed.text.startsWith("xydef main"), "the document starts `" & ed.text[0 ..< 10] & "`"
   ck $textOf(viewLine(1)) == "xydef main():"
-  # Undo is the core's (PLAT-32): one group for the two keys.
+  # Undo is the core's (PLAT-32): one group for the two keys, or two when
+  # they reached the core more than `NewGroupDelayMs` apart (a loaded host;
+  # the grouping rule itself is graded on a virtual clock in the core's
+  # own suite).
   discard ed.applyKeyName("Ctrl+z")
   await settle()
+  var undos = 1
+  if ed.text == "x" & Source:
+    discard ed.applyKeyName("Ctrl+z")
+    await settle()
+    undos = 2
   ck ed.text == Source, "undo restored the text"
-  discard ed.applyKeyName("Ctrl+y")
+  for _ in 1 .. undos:
+    discard ed.applyKeyName("Ctrl+y")
   ck ed.text.startsWith("xydef")
   endCase("printable keys are the core's text, and undo / redo are the core's")
 
