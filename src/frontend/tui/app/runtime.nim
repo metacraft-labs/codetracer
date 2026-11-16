@@ -690,6 +690,9 @@ proc paneBodyRows*(rt: TuiRuntime; pane: PaneKind): int
   ## `sourcePaneRows`.
 
 proc showPane(rt: TuiRuntime; pane: PaneKind; outcome: var RuntimeOutcome)
+proc revealEditor*(rt: TuiRuntime)
+  ## M102 (#877): FORWARD-DECLARED for the Files pane's open paths; defined
+  ## beside `showPane`, whose rule it uses.
 proc openOmnibar*(rt: TuiRuntime; query = "")
   ## PLAT-54: FORWARD-DECLARED for Agent Activity's prompt row and `/ai`.
 proc openFindInFiles(rt: TuiRuntime; outcome: var RuntimeOutcome)
@@ -1469,6 +1472,9 @@ proc openProjectFile(rt: TuiRuntime; relative: string): bool =
   discard rt.app.editSession.openFile(relative, opened.text,
                                       max(1, rt.sourcePaneRows()))
   rt.app.fileTree.openPath = relative
+  # M102 (#877): the file is shown, not only loaded — an arrangement whose
+  # editor tab was closed (or is behind another tab) gets it back.
+  rt.revealEditor()
   rt.note("editing " & relative)
   true
 
@@ -7471,6 +7477,34 @@ proc showPane(rt: TuiRuntime; pane: PaneKind; outcome: var RuntimeOutcome) =
     else:
       rt.note($pane & ": " & added.message)
   outcome.repaint = true
+
+proc revealEditor*(rt: TuiRuntime) =
+  ## M102 (#877): a file opened from the Files pane is the ACTIVE EDITOR —
+  ## *"its tab is the one on screen and the one the editor's commands act
+  ## on"* (codetracer-pm `spec/GUI/Core-Panes/Filesystem-Pane.md` § "Opening
+  ## a file"). Loading the file into the source model or the edit session is
+  ## not enough when no pane draws it: a tab's Close removes the editor from
+  ## the arrangement (`lcRemovePane` does not protect it), and the
+  ## arrangement is remembered across launches (`host/layout_store`), so a
+  ## later start can have no editor at all. The editor is brought forward by
+  ## `showPane`'s rule, as the View menu brings any pane forward: re-added
+  ## when the arrangement does not place it (PLAT-50), its tab activated when
+  ## it is behind another, then focused.
+  ##
+  ## The status line is the caller's (`opened <path>`, `editing <path>`):
+  ## `showPane`'s own word (`focus editor`, `opened editor`) is dropped,
+  ## except when the editor could NOT be placed, where its reason is the
+  ## more useful thing to read.
+  if not rt.layoutBindingEnabled():
+    # A fixed arrangement always places the editor; only the focus moves.
+    discard rt.focus.focusPaneKind(paneEditor)
+    return
+  let said = rt.app.notification
+  var outcome: RuntimeOutcome
+  rt.showPane(paneEditor, outcome)
+  if rt.app.layoutBinding.layout.tree.contains(paneEditor) or
+     rt.app.layoutBinding.layout.dockedIndex(paneEditor) >= 0:
+    rt.app.notification = said
 
 proc openFindInFiles(rt: TuiRuntime; outcome: var RuntimeOutcome) =
   ## `search.find-in-files` with no pattern — `Ctrl+Shift+F` under CUA, the

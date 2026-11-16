@@ -2083,6 +2083,9 @@ proc applyPaneClick(s: TuiSession; rt: TuiRuntime; c: PaneClickRequest) =
     rt.app.viewedFile = c.path
     s.showViewedFile(rt)
     if rt.app.viewedFile.len > 0:
+      # M102 (#877): the editor that shows it is brought forward — re-added
+      # when its tab was closed, activated when it is behind another tab.
+      rt.revealEditor()
       rt.app.notification = "opened " & c.path
   of pcToggleFolder:
     # K18: the desktop's `FilesystemVM.toggleExpanded`.
