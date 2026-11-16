@@ -75,7 +75,8 @@ permissions:
 # `dmg-lib-check`, `test-non-gui` (both legs), `test-ui-tests` (both legs),
 # `ct-test-providers`, `push-to-attic`, `create-release`, `ci-verdict`. Of
 # these, `push-to-attic` and `create-release` have no sample of ANY kind -- only
-# zero-length cancellations, meaning they never started. Their bounds are
+# zero-length cancellations, meaning they never started. (`push-to-attic` has
+# since moved to its own workflow, cache-push.yml, 2026-11-16.) Their bounds are
 # structural, not measured, and say so. Nine of the twelve ALREADY-bounded jobs
 # have no green sample either; the whole Windows family is red.
 #
@@ -104,7 +105,9 @@ permissions:
 # group", and they answer it WITHOUT a watchdog. With every job bounded and
 # `ci/verdict/job-timeouts.py` keeping them bounded, the worst case is the
 # longest path through `needs:`, computable from this file alone. For a push
-# that is test-ui-tests (150) -> push-to-attic (60) = 210 minutes. A watchdog
+# that is test-ui-tests (150) -> push-to-attic (60) = 210 minutes. (Since
+# 2026-11-16 the cache push is cache-push.yml, outside this graph, so the
+# longest path is now test-ui-tests alone.) A watchdog
 # would report the same fact later, and only after a runner had already been
 # stranded for the afternoon.
 jobs:
@@ -7892,54 +7895,6 @@ jobs:
         if: ${{ !cancelled() }}
         run: nix develop .#devShells.x86_64-linux.default --command just test-certificate-vectors-wrong-pin
 
-  push-to-attic:
-    runs-on: [self-hosted, linux, x64]  # CIP-5 nix job; H4: routed to GPU host gpu-server-001
-    # NO SAMPLE OF ANY KIND: 0 success, 0 failure, and 7 cancellations of zero
-    # length -- this job is `refs/heads/main`-only and never started in the
-    # window. There is nothing to measure. 60m is chosen structurally: the job
-    # pushes a Nix closure to a binary cache, so it is bounded by upload of the
-    # artefacts its `needs:` already built. Revisit once it has run green once.
-    timeout-minutes: 60
-    needs:
-      - test-non-gui
-      - test-ui-tests
-      - appimage-lib-check
-      - dmg-lib-check
-    if: "github.ref == 'refs/heads/main' && ${{ !github.event.codetracer-ci }}"
-    steps:
-      - name: Mint installation token for cross-repo sibling access
-        # GitHub free plan restricts org-level secrets with visibility
-        # ALL from being readable inside private repos, so we mint
-        # per-run installation tokens from the repo-local
-        # CI_TOKEN_PROVIDER_APP_ID + CI_TOKEN_PROVIDER_PRIVATE_KEY
-        # secrets via the CI Token Provider GitHub App.
-        id: ci_token
-        uses: actions/create-github-app-token@v2
-        with:
-          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
-          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
-          owner: metacraft-labs
-
-      - name: Checkout
-        uses: actions/checkout@v5
-        with:
-          submodules: recursive
-          token: ${{ steps.ci_token.outputs.token }}
-
-      - name: Install Nix
-        uses: ./.github/actions/setup-nix
-        with:
-          trusted-public-keys: ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
-          attic-token: ${{ secrets.ATTIC_TOKEN }}
-          substituters: ${{ vars.ATTIC_SUBSTITUTER }}
-          gh-token: ${{ steps.ci_token.outputs.token }}
-
-      - run: "nix develop .#devShells.x86_64-linux.default --command ./ci/deploy/build-nix-and-push-to-attic.sh"
-        env:
-          ATTIC_ENDPOINT: ${{ vars.ATTIC_ENDPOINT }}
-          ATTIC_CACHE: ${{ vars.ATTIC_CACHE }}
-          ATTIC_TOKEN: ${{ secrets.ATTIC_TOKEN }}
-
   docs-scope:
     # Does this run have any documentation to publish?
     #
@@ -8016,12 +7971,12 @@ jobs:
     # The docs site is INDEPENDENT content: it is built by its own isonim-docs
     # SSG consumer (docs/book-isonim via ci/deploy/docs.sh) and consumes NO
     # artifact from the app build or the attic-cache push. It must therefore not
-    # be chained behind push-to-attic (which needs the full build/test matrix:
-    # test-non-gui, test-ui-tests, appimage/dmg-lib-check) — otherwise any
+    # be chained behind the cache push (which, as push-to-attic, needed the
+    # full build/test matrix; it is cache-push.yml now) — otherwise any
     # unrelated app-CI failure silently blocks the docs deploy. Decoupled so the
     # docs publish on every push to a documentation branch regardless of
     # build/test status. The attic substituter set up in "Install Nix" is a
-    # read-through cache that works whether or not this run's push-to-attic
+    # read-through cache that works whether or not cache-push.yml has
     # populated it.
     #
     # THREE PUBLISH CHANNELS, one job, chosen by the event and the branch
