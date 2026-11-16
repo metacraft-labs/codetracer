@@ -129,6 +129,24 @@ jobs:
           # its runner and backend from these (ci/test/scenarios.sh).
           test-siblings: DemoVideoScript,DemoVideoScript-GuiAssert,GuiAssert
 
+      - name: Give Vulkan a software driver where the host has none
+        # The windowed GPUI front-end draws through wgpu/Vulkan. The GPU hosts
+        # carry a driver; an ephemeral garm VM has no Vulkan ICD at all, and
+        # every window there aborted with "Failed to create surface for any
+        # enabled backend" (run 43935388749, shard 2). Mesa's lavapipe, from
+        # this flake's nixpkgs, is the fallback; a host with an ICD keeps its.
+        run: |
+          if ls /run/opengl-driver/share/vulkan/icd.d/*.json /etc/vulkan/icd.d/*.json /usr/share/vulkan/icd.d/*.json >/dev/null 2>&1; then
+            echo "the host has a Vulkan driver; keeping it"
+          else
+            mesa="$(nix build --no-link --print-out-paths --inputs-from . nixpkgs#mesa | head -n 1)"
+            icd="${mesa}/share/vulkan/icd.d/lvp_icd.x86_64.json"
+            test -f "${icd}"
+            echo "no Vulkan driver on this host; using lavapipe (${icd})"
+            echo "VK_ICD_FILENAMES=${icd}" >> "${GITHUB_ENV}"
+            echo "VK_DRIVER_FILES=${icd}" >> "${GITHUB_ENV}"
+          fi
+
       - name: Build ct and replay-server
         id: ct
         # `ct record` records the `calc` and `call_pages` fixtures the
