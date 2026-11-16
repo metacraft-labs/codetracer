@@ -185,13 +185,18 @@ inputs:
     required: true
   test-siblings:
     description: >
-      Members of the lock's develop set that are not build inputs but that a
-      job's tests run against, comma-separated, cloned at the lock's pins with
-      the build inputs: the scenario lanes name the scenario runner and their
-      backend (DemoVideoScript, DemoVideoScript-TermAssert,
+      Siblings a job's tests run against, comma-separated, cloned next to the
+      build inputs at the revisions the TEST lock pins:
+      `ci/test/siblings/repro.lock`, a project of its own nested in this repo,
+      not this repo's `repro.lock`. The scenario lanes name the scenario runner
+      and their backend (DemoVideoScript, DemoVideoScript-TermAssert,
       DemoVideoScript-GuiAssert with GuiAssert, DemoVideoScript-Playwright),
-      which `ci/test/scenarios.sh` builds from `../<name>`. Names only; the
-      revisions come from repro.lock, as for every other entry.
+      which `ci/test/scenarios.sh` builds from `../<name>`; the terminal lane
+      also names TermAssert, TermAssertClient and nim-libvterm. Names only.
+      They live in their own lock because `repro.lock` is refreshed from
+      `repro.nim`, which declares only what the product is built from, and
+      each refresh dropped them (codetracer-pm issue
+      2026-11-15-repro-lock-refreshes-drop-the-scenario-lanes-test-siblings).
     required: false
     default: ""
 
@@ -293,14 +298,20 @@ runs:
           # shell, and a nix-darwin runner has no grep or sed on its PATH
           # here.
           build_inputs="$(ci/repro-lock-build-input-siblings.sh repro.lock)"
-          test_siblings="${{ inputs.test-siblings }}"
-          if [ -n "${test_siblings}" ]; then
-            build_inputs="${build_inputs},${test_siblings}"
-          fi
           echo "Provisioning the lock's build-input siblings: ${build_inputs}"
           siblings_root="$(cd .. && pwd)"
           nix develop .#ci --command \
             repro develop --all --only="${build_inputs}" --reset --into="${siblings_root}"
+          # The test siblings come from the test project's own lock. `repro
+          # develop` reads the lock of the project it runs in, so it runs in
+          # ci/test/siblings; --into puts them beside codetracer all the same.
+          test_siblings="${{ inputs.test-siblings }}"
+          if [ -n "${test_siblings}" ]; then
+            echo "Provisioning the test siblings from ci/test/siblings/repro.lock: ${test_siblings}"
+            nix develop .#ci --command bash -c \
+              'cd ci/test/siblings && exec repro develop --all --only="$1" --reset --into="$2"' \
+              provision-test-siblings "${test_siblings}" "${siblings_root}"
+          fi
 
     # Hand the clone's fresh token to the rest of the job. Every store the
     # job's setup filled (nix.conf, NIX_CONFIG, the Nix netrc, the exported

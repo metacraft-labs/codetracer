@@ -715,16 +715,16 @@ jobs:
             # d91a98626 moved io-mon and nim-shm-gset.
             # runquota is locked as a `follows` of reprobuild's `runquota-src`;
             # the pin below is that node's rev.
-            io-mon=e7741516110ca4cda19d604474d3f16c513a4a99
+            io-mon=3be8d5cc2dbb825ff984032fd06a63987ee0e2cb
             nim-shm-queue=84fd76b174d4868e703ba3d599668ee340e0b6ea
             nim-shm-gset=7bc81ad2440860a8a9254eb2757c585df9652438
-            nim-stackable-hooks=d715806424e8373708494913e59a48237978cc2a
+            nim-stackable-hooks=c34e3252d413361a0f250d8921e00c119d30e114
             # Pinned to flake.lock's revs. See "THE FLAKE-INPUT THREE" above
             # before changing any of these. isonim-tui is in codetracer's
             # repro.lock since 6850efc5e, and took the SHA shape because the
             # recorder repos' lock records these edges also resolve did not
             # carry it. They do now; going bare is a separate change.
-            isonim=fbf712af44dfab16cec01d44c0171b882ff2a438
+            isonim=eca38028cc652593e66b2d12ff82265711600c94
             isonim-tui=8e43ce06f7f078530c7a8585c210ad7648fa0051
             runquota=f9e1a4d3f3ba7840aefe56883127653af9c5a608
             # Required by scripts/require-siblings.sh (`ct` links its reference
@@ -736,7 +736,7 @@ jobs:
             # imports `nim_pty`; see "NIM-PTY" above). SHA, not bare, for the
             # same reason as test-certificates-tools: recorder repos' locks need
             # not pin it. It is a flake input, so the SHA is flake.lock's.
-            nim-pty=00b0d8d6c9e7e83452749cabb61f8c34daf08329
+            nim-pty=6ffb8d788e8a740ca78ec29c7a3a489a13818bcb
 
       - name: Check the workspace has the shape the driver expects
         # Cheap, and it turns the one class of failure a local rehearsal cannot

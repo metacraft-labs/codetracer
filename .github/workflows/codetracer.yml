@@ -3840,25 +3840,21 @@ jobs:
       # EVERY AUTHENTICATED CLONE IS IN THIS BLOCK, at the top of the job: the
       # installation token minted above expires an hour after it is minted (see
       # `viewmodel-tests`), and this job's bound is longer than that.
-      - name: Setup db-backend siblings and the terminal-test siblings
+      - name: Setup db-backend siblings and the launcher
         # The db-backend siblings are what `just build-once` needs to build
-        # `replay-server` (see `gpui-window-captures`). The three extra ones are
-        # the Tier-2 lane's: `ci/lib/test-lane-files.sh` compiles every
-        # `tui-real-terminal` file with `--path:../TermAssert/src`,
-        # `../TermAssertClient/src` and `../nim-libvterm/src`. The fourth,
+        # `replay-server` (see `gpui-window-captures`). The extra one,
         # `codetracer-launcher`, is the real `ct` two suites execute (see "Build
         # the launcher" below), and its source is what `test_caps_file_shape.nim`
-        # imports. All four are in this repo's committed `repro.lock`, so they
-        # are named BARE and clone at the revision that lock pins -- not at a
-        # branch tip.
+        # imports. It is in this repo's committed `repro.lock`, so it is named
+        # BARE and clones at the revision that lock pins -- not at a branch tip.
+        # The Tier-2 lane's terminal harness (TermAssert, TermAssertClient,
+        # nim-libvterm) comes from the test lock with the scenario siblings, in
+        # "Provision dependency siblings from repro.lock" below.
         uses: ./.github/actions/setup-db-backend-siblings
         with:
           env-flavor: nix
           gh-token: ${{ steps.ci_token.outputs.token }}
           extra-siblings: |
-            TermAssert
-            TermAssertClient
-            nim-libvterm
             codetracer-launcher
 
       - name: Clone runquota sibling
@@ -3882,8 +3878,12 @@ jobs:
         with:
           app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
           private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
-          # The scenario lane builds its runner and backend from these (ci/test/scenarios.sh).
-          test-siblings: DemoVideoScript,DemoVideoScript-TermAssert
+          # From the test lock, ci/test/siblings/repro.lock. The scenario lane
+          # builds its runner and backend from the first two (ci/test/scenarios.sh);
+          # `ci/lib/test-lane-files.sh` compiles every `tui-real-terminal` file with
+          # `--path:../TermAssert/src`, `../TermAssertClient/src` and
+          # `../nim-libvterm/src`.
+          test-siblings: DemoVideoScript,DemoVideoScript-TermAssert,TermAssert,TermAssertClient,nim-libvterm
 
       - name: Build ct and replay-server
         # `test_fixture_corpus.nim` (Tier 1) opens real recorded traces through
@@ -4214,7 +4214,8 @@ jobs:
         with:
           app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
           private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
-          # The scenario lane builds its runner and backend from these (ci/test/scenarios.sh).
+          # From the test lock, ci/test/siblings/repro.lock: the scenario lane builds
+          # its runner and backend from these (ci/test/scenarios.sh).
           test-siblings: DemoVideoScript,DemoVideoScript-GuiAssert,GuiAssert
 
       - name: Build ct and replay-server
@@ -6297,7 +6298,7 @@ jobs:
             # (ct_gfx_player's build); snapshot-codecs at visual-replay's
             # repro.lock pin, image-diff at codetracer's.
             codetracer-snapshot-codecs=53eda1fd83f6608f5e2f6f6553644e4115a3b29a
-            codetracer-image-diff=8fd7306da5451b0adc07b1e74651f517242af5f1
+            codetracer-image-diff=0913d0a86e0a75f6a14bd62c58dce962018b50b5
             reprobuild=5a1326957ceac91f94eccf0d9957f03e053fad79
             runquota=dev
 
@@ -6396,7 +6397,8 @@ jobs:
         with:
           app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
           private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
-          # The scenario lane builds its runner and backend from these (ci/test/scenarios.sh).
+          # From the test lock, ci/test/siblings/repro.lock: the scenario lane builds
+          # its runner and backend from these (ci/test/scenarios.sh).
           test-siblings: DemoVideoScript,DemoVideoScript-Playwright
 
       # NOTE: codetracer-trace-format, codetracer-trace-format-nim,
@@ -7350,7 +7352,7 @@ jobs:
             # rule: .github/actions/setup-db-backend-siblings/action.yml.
             codetracer-trace-format=0218896c99412f1f23e6f0c5ea4fd062f9258118
             codetracer-trace-format-nim=fae1af40833e3f7a206ae11f68c52e8c826fbe4b
-            io-mon=e7741516110ca4cda19d604474d3f16c513a4a99
+            io-mon=3be8d5cc2dbb825ff984032fd06a63987ee0e2cb
             nim-shm-queue=84fd76b174d4868e703ba3d599668ee340e0b6ea
             nim-shm-gset=7bc81ad2440860a8a9254eb2757c585df9652438
             nim-stackable-hooks=dev
@@ -7678,7 +7680,7 @@ jobs:
             # rule: .github/actions/setup-db-backend-siblings/action.yml.
             codetracer-trace-format=0218896c99412f1f23e6f0c5ea4fd062f9258118
             codetracer-trace-format-nim=fae1af40833e3f7a206ae11f68c52e8c826fbe4b
-            io-mon=e7741516110ca4cda19d604474d3f16c513a4a99
+            io-mon=3be8d5cc2dbb825ff984032fd06a63987ee0e2cb
             nim-shm-queue=84fd76b174d4868e703ba3d599668ee340e0b6ea
             nim-shm-gset=7bc81ad2440860a8a9254eb2757c585df9652438
             nim-stackable-hooks=dev
