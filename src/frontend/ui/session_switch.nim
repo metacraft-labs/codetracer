@@ -289,8 +289,7 @@ proc createNewSession*(data: Data) =
   )
   session.network = Network(
     futures: JsAssoc[cstring, JsAssoc[cstring, JsObject]]{})
-  session.pointList = PointListData(
-    tracepoints: JsAssoc[int, Tracepoint]{})
+  session.pointList = PointListData()
   session.status = StatusState(
     lastDirection: DebForward,
     currentOperation: cstring"",
