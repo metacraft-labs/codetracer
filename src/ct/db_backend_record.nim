@@ -731,6 +731,10 @@ proc main*(): Trace =
   var noirTestName = ""
     ## `--noir-test-name <name>`: trace that Noir test function instead of
     ## `main` (`ct record-test` on a `.nr` file; see `recordTest`).
+  var recordingIdFile = ""
+    ## Internal `--recording-id-file <path>`: `ct record` on a terminal gives
+    ## the recorded program its own streams and reads the id from this file
+    ## (`trace/recorder_spawn.nim`).
 
   # for i, arg in args:
   var i = 0
@@ -790,6 +794,12 @@ proc main*(): Trace =
       else:
         stderr.writeLine("db-backend-record: --recognized-lang names no language: " & args[i + 1])
         quit(1)
+      i += 2
+    elif arg == "--recording-id-file":
+      if args.len() < i + 2:
+        displayHelp()
+        return
+      recordingIdFile = args[i + 1]
       i += 2
     elif arg == "--backend":
       if args.len() < i + 2:
@@ -1003,6 +1013,14 @@ proc main*(): Trace =
     # Marker for caller — M-REC-6 renamed the prefix from ``traceId:`` to
     # ``recordingId:`` to remove the "trace_id" overload across our
     # subprocess plumbing.  The payload is still a UUIDv7 string.
+    if recordingIdFile.len > 0:
+      # Before the marker, so the two never disagree; a failure here must not
+      # fail a recording that is already made and indexed.
+      try:
+        writeFile(recordingIdFile, traceId & "\n")
+      except IOError, OSError:
+        stderr.writeLine("warning: could not write the recording id to " &
+          recordingIdFile & ": " & getCurrentExceptionMsg())
     echo fmt"recordingId:{traceId}"
     # The recorder runs the traced program as a child with
     # ``poParentStreams``, so the child writes directly to our inherited

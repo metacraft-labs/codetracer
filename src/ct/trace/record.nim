@@ -2,7 +2,7 @@ import std/[os, osproc, streams, strutils, sequtils, strtabs, strformat, json, o
   multitrace,
   native_backend_selection,
   record_assessment, recorder_dispatch, portable_route, recorder_env,
-  recorder_output, record_lang_forwarding,
+  recorder_output, recorder_spawn, record_lang_forwarding,
   ../../common/[ lang, paths, types, trace_index, config, ct_logging,
                  ct_state_dir ],
   ../utilities/[language_detection ],
@@ -184,26 +184,6 @@ proc storeTraceFolderInfoForPid(traceId: string, traceFolder: string, pid: int) 
   createDir(pidFolder)
   writeFile(pidFolder / fmt"trace-{traceId}", traceFolder)
 
-proc streamRecorderOutput(p: Process): tuple[lines: seq[string], exitCode: int] =
-  ## Relay the recorder's merged stdout/stderr to our own stdout AS IT
-  ## ARRIVES, while keeping every line so the ``recordingId:`` marker can
-  ## still be found afterwards.
-  ##
-  ## ``osproc.readLines`` (what this replaced) waits for the child to exit
-  ## before returning anything, which is invisible for a script that finishes
-  ## in a second and fatal for ``ct record --server``: the whole point of that
-  ## flag is that you watch the session while it runs, and the "watch it live
-  ## with: ct replay -t …" guidance would not have appeared until the server
-  ## was already stopped.
-  var lines: seq[string] = @[]
-  let stream = p.outputStream
-  var line = ""
-  while stream.readLine(line):
-    echo line
-    flushFile(stdout)
-    lines.add(line)
-  (lines, p.waitForExit)
-
 proc recordInternal(exe: string, args: seq[string], withDiff: string, storeTraceFolderForPid: int, upload: bool): Trace =
   # let env = if configPath.len > 0:
   #     setupEnv(configPath)
@@ -212,13 +192,9 @@ proc recordInternal(exe: string, args: seq[string], withDiff: string, storeTrace
   #     for name, value in envPairs():
   #       env[name] = value
   #     env
-  let p = startProcess(
-    exe,
-    args = args,
-    # env = env,
-    options = {poStdErrToStdOut, poUsePath})
-
-  let (lines, exCode) = streamRecorderOutput(p)
+  # On a terminal the recorded program gets ct's own streams (a TUI needs
+  # them); otherwise the recorder's merged output is relayed as before.
+  let (lines, exCode) = runRecorder(exe, args, ctHasTerminal(), codetracerTmpPath)
   # Flush the relayed recorder output (which ends with the
   # ``recordingId:`` marker) so it durably reaches our caller before
   # ``ct`` exits — see the matching note in ``db_backend_record.nim``.
