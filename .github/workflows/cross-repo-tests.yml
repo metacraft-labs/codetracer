@@ -136,7 +136,7 @@ jobs:
             # rule: .github/actions/setup-db-backend-siblings/action.yml.
             codetracer-trace-format=0218896c99412f1f23e6f0c5ea4fd062f9258118
             codetracer-trace-format-nim=fae1af40833e3f7a206ae11f68c52e8c826fbe4b
-            codetracer-native-recorder=293d7fe6c9847052751c1d92678b8dec128f03f7
+            codetracer-native-recorder=b1ae4b78652f3f5f2e51a41e1ef61015a26f8a1e
 
       - name: Unfold native-backend submodules into parent index
         # codetracer-native-backend's flake.nix has

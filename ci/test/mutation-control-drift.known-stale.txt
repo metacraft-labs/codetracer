@@ -246,7 +246,7 @@ src/frontend/tui/tests/plat56-build-output-mutation-control.sha256	src/frontend/
 # sit in it is owed.
 src/tests/scenarios/plat66-pack-mutation-control.sha256	src/tests/scenarios/bindings/playwright/codetracer-binding.ts	ce56f44b71f4aa8d3376d5415e48102e8148ded5b463c429cbcb9af5ab9b9544	dac9e35953b0d93636c2284d9c9a858c2bba982b92e9311b0f41fb666e6879c0
 src/frontend/tui/tests/plat60-low-level-code-mutation-control.sha256	src/db-backend/src/dap_handler.rs	23f8ff8145f2d5a678588557c9c855a9701cd2bf5fa7afa677028b7262076e76	7c59887c904659094396b45ce2cf2673ef89803f977fe9fdeb929e5650a4c6d0
-src/frontend/viewmodel/tests/unit/plat33-collab-mutation-control.sha256	.github/workflows/codetracer.yml	4329483bcc55e3898b373e4b379234071ee6e7d04c19bd109045028c62c94d56	ab0cbe5a15c40eda995c56b166eaecaea745a5a8f80343001352b5eab21e10c8
+src/frontend/viewmodel/tests/unit/plat33-collab-mutation-control.sha256	.github/workflows/codetracer.yml	4329483bcc55e3898b373e4b379234071ee6e7d04c19bd109045028c62c94d56	8c06026a476c0401501b7b71df76a6fbb3492edfe351ab31416a69a77f974108
 # plat51: graded at f1788c93b4; 8f8906730e  moved src/db-
 # backend/src/dap_handler.rs after the grade. Re-grade the arms whose needles
 # sit in them.
