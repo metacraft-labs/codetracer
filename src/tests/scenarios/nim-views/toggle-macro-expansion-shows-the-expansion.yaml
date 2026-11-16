@@ -1,0 +1,34 @@
+scenario: 1
+name: nim-views/toggle-macro-expansion-shows-the-expansion
+pack: codetracer
+summary: >-
+  On an rr recording of a Nim program, stopped on a macro call, Toggle Macro
+  Expansion with the pointer on that line opens the call's expansion inline
+  under it: the two statements `addTwice(counter, 3)` expands to.
+
+stage:
+  - use: record-program
+    with: { program: nim_macro_steps/main.nim, backend: rr }
+  # A chord no base layer claims, so the scenario tests the expansion and not
+  # the keymap's precedence.
+  - use: plant-config
+    with: { file: keybindings.json, content: '[ { "key": "ctrl+alt+shift+m", "command": "editor.toggle-macro-expansion" } ]' }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 300s }
+  - wait: { until: { at: 'editor[file="main.nim"]/line[number="17"]', present: true }, timeout: 120s }
+  - click: { at: 'editor[file="main.nim"]/line[number="17"]', anchor: glyph }
+  - click: 'toolbar/toolbar-button[label="continue-image"]'
+    settle: false
+  - wait: { until: { at: 'editor[file="main.nim"]', current-line: 17 }, timeout: 120s }
+  - wait: { until: replay-idle, timeout: 60s }
+  - expect: { at: 'editor[file="main.nim"]/macro-expansion[line="17"]', present: false }
+  - click: { at: 'editor[file="main.nim"]/line[number="17"]', anchor: text-start }
+  - wait: { until: { at: 'editor[file="main.nim"]', focused: true }, timeout: 10s }
+  # toggleMacroExpansion expands the line under the pointer.
+  - hover: { at: 'editor[file="main.nim"]/line[number="17"]', anchor: text-start, for: 500ms }
+  - chord: Ctrl+Alt+Shift+m
+  - wait: { until: { at: 'editor[file="main.nim"]/macro-expansion[line="17"]', present: true }, timeout: 30s }
+  - expect: { at: 'editor[file="main.nim"]/macro-expansion[line="17"]', text: { contains: "addTwice expansion" } }
+  - expect: { at: 'editor[file="main.nim"]/macro-expansion[line="17"]', text: { contains: "counter += 3" } }

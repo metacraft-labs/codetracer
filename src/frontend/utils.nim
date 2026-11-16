@@ -607,6 +607,21 @@ proc tabLoad*(self: EditorService, location: types.Location, editorView: EditorV
     self.data.redraw()
   return tabInfo
 
+proc expansionParentField(raw: JsObject; i: int): JsObject {.importjs:
+  "((r, i) => Array.isArray(r) ? r[i] : r['Field' + i])(#, #)".}
+
+proc expansionParent*(location: types.Location; index: int): (cstring, int, int) =
+  ## `location.expansionParents[index]`: (path, line, first line of the
+  ## expansion). The field is a Nim tuple, but the DAP answer
+  ## (`ct/update-expansion`) carries each parent as a JSON array
+  ## (`["main.nim", 17, 80]`) and is cast, not converted, so reading the tuple's
+  ## fields gave `undefined` and Toggle Macro Expansion found no parent editor.
+  ## Either shape is read here.
+  let raw = cast[JsObject](location.expansionParents)[index]
+  (expansionParentField(raw, 0).to(cstring),
+   expansionParentField(raw, 1).to(int),
+   expansionParentField(raw, 2).to(int))
+
 proc makeEditorViewComponent*(
   data: Data,
   id: int,
@@ -629,7 +644,7 @@ proc makeEditorViewComponent*(
   if data.ui.editors.hasKey(editorName):
     cerror "tabs: " & $editorName & " already exists"
     raise newException(ValueError, &"editor {editorName} exists")
-  let parentLine = if not isExpansion: -1 else: expandedLocation.expansionParents[0][1]
+  let parentLine = if not isExpansion: -1 else: expandedLocation.expansionParent(0)[1]
 
   result = EditorViewComponent(
     id: id,

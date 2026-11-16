@@ -4164,6 +4164,11 @@ proc renderExpandedEditorDirect(self: EditorViewComponent) =
 
   self.editorAfterRedraw()
 
+expansionOpenedHook = proc(parent: EditorViewComponent) =
+  # `editor_service.openExpanded` records an expansion on its parent; this
+  # mounts and draws it now rather than at the next move.
+  parent.editorAfterRedraw()
+
 proc ensureExpanded*(self: EditorViewComponent, expanded: EditorViewComponent, line: int) =
   if expanded.viewZone.isNil:
     let id = cstring(&"expanded-{line}")

@@ -397,6 +397,7 @@ applicable:
   - ../nim-views/generated-c-follows-the-nim-stop.yaml
   - ../nim-views/disassembly-steps-by-instruction.yaml
   - ../nim-views/nim-step-moves-by-nim-lines.yaml
+  - ../nim-views/toggle-macro-expansion-shows-the-expansion.yaml
   - ../layout/event-log-and-scratchpad-tabs.yaml
   - ../point-list/breakpoint-rows-follow-the-gutter.yaml
   - ../point-list/tracepoint-rows-beside-breakpoints.yaml

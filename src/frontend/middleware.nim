@@ -336,7 +336,16 @@ proc setupMiddlewareApis*(dapApi: DapApi, viewsApi: MediatorWithSubscribers) {.e
   # forward them identically.
   wireSessionNotifications(dapApi, viewsApi)
   dapApi.on(CtLoadAsmFunctionResponse, proc(kind: CtEventKind, value: Instructions) = viewsApi.emit(CtLoadAsmFunctionResponse, value.toJs))
-  dapApi.on(CtUpdateExpansionResponse, proc(kind: CtEventKind, value: Location) = viewsApi.emit(CtUpdateExpansionResponse, value))
+  dapApi.on(CtUpdateExpansionResponse, proc(kind: CtEventKind, value: Location) =
+    viewsApi.emit(CtUpdateExpansionResponse, value)
+    when not defined(ctInExtension):
+      # The editor service opens the expansion (S6). It was subscribed on
+      # `data.dapApi` alone (`types.nim`), and a session's answers arrive on
+      # its own `DapApi`, so Toggle Macro Expansion got its expansion back
+      # and nothing opened it.
+      if not data.services.isNil and not data.services.editor.isNil and
+         not data.services.editor.onExpansionResponse.isNil:
+        discard data.services.editor.onExpansionResponse(data.services.editor, value))
 
     #when defined(ctInExtension):
     # TODO: For now not using in the extension

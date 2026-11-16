@@ -718,7 +718,11 @@ proc onTabLoad*(sender: js, response: jsobject(location=types.Location, name=cst
   console.log response
   case response.lang:
   of LangC, LangCpp, LangRust, LangNim, LangGo, LangRubyDb:
-    if response.editorView in {ViewSource, ViewTargetSource, ViewCalltrace}:
+    # A macro expansion is a source too (`expanded.nim`, at the location's
+    # `highLevelPath`): it was left out, so Toggle Macro Expansion's tab never
+    # loaded and nothing was drawn.
+    if response.editorView in {ViewSource, ViewTargetSource, ViewCalltrace,
+                               ViewMacroExpansion}:
       discard mainWindow.openTab(response.location, response.lang, response.editorView,
                                  tab = askingTab(response.toJs))
     else:

@@ -2677,13 +2677,9 @@ when defined(ctRenderer):
 
   wireSessionServiceMoves(data, data.sessions[0])
 
-  data.dapApi.on(CtUpdateExpansionResponse, proc(kind: CtEventKind, value: Location) =
-    ## Handle the macro expansion response from the backend (S6).
-    ## Delegates to the editor service callback which handles both the
-    ## expanded case (open inline) and the non-expanded case (navigate to
-    ## the resolved high-level location).
-    if data.activeSessionIndex >= 0:
-      discard data.services.editor.onExpansionResponse(data.services.editor, value))
+  # The macro expansion response (S6) is handed to the editor service by each
+  # session's middleware (`middleware.setupMiddlewareApis`), on the `DapApi`
+  # the answer arrives on.
 
   # Expose the global `data` object on `window` as a debugging aid in the
   # renderer / webview.  The VS Code central extension context
