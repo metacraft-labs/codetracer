@@ -3876,6 +3876,17 @@ jobs:
           gh-token: ${{ steps.ci_token.outputs.token }}
           submodules: 'false'
 
+      - name: Clone codetracer-pm sibling
+        # Tier 1's spec-reading suites (test_capability_resolution et al.) read
+        # ../codetracer-pm and fail without it; cloned at `latest`, as lint-nim.
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
+        with:
+          repo: metacraft-labs/codetracer-pm
+          ref: latest
+          path: ${{ github.workspace }}/../codetracer-pm
+          gh-token: ${{ steps.ci_token.outputs.token }}
+          submodules: 'false'
+
       - name: Provision dependency siblings from repro.lock
         # isonim, isonim-tui, nim-pty, nim-termctl et al., which every TUI suite
         # compiles against through codetracer's top-level `config.nims`. After
