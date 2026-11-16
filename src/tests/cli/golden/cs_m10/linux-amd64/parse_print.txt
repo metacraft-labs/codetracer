@@ -3370,22 +3370,6 @@ argv: ct "print" "-h" "t.jsonl"
 env: (none)
 exit: 0
 --- stdout
-CodeTracer - the user-friendly time-travelling debugger
-
-\e[0m\e[33mUsage:\x20
-\e[0m\e[1m
-\e[36mct print\e[0m [OPTIONS]...
-
-The following options are available:
-
- \e[34m\e[1m-f, \e[0m\e[34m\e[1m--filter      \e[0m  Filter events (e.g. 'calls', 'steps', 'http', 'errors').\e[0m
-     \e[34m\e[1m--function    \e[0m  Show only events for this function name.\e[0m
- \e[34m\e[1m-n, \e[0m\e[34m\e[1m--limit       \e[0m  Maximum number of events to print.\e[0m
-     \e[34m\e[1m--format      \e[0m  Output format: text (default), json, csv.\e[0m
-     \e[34m\e[1m--verify      \e[0m  Verify recording quality (exit 0 if valid, 1 if not).
-                     Checks: trace files exist, events present, HTTP requests
-                     found. [=false].\e[0m
- \e[34m\e[1m-F, \e[0m\e[34m\e[1m--follow      \e[0m  Follow mode: watch for new events (like tail -f) [=false].\e[0m
-
+<the help clispec renders for this request: ct print>
 --- stderr
 --- end

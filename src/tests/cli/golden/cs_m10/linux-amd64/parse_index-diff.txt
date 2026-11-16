@@ -182,13 +182,6 @@ argv: ct "index-diff" "-h" "trace1"
 env: (none)
 exit: 0
 --- stdout
-CodeTracer - the user-friendly time-travelling debugger
-
-\e[0m\e[33mUsage:\x20
-\e[0m\e[1m
-\e[36mct index-diff\e[0m <indexDiffTracePath>\e[0m
-
-\e[34m\e[1m <indexDiffTracePath>\e[0m\e[0m  Path to a trace with diffs: for now indexing only a single trace.\e[0m
-
+<the help clispec renders for this request: ct index-diff>
 --- stderr
 --- end

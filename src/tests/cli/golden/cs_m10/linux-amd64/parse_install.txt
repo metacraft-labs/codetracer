@@ -2382,21 +2382,6 @@ argv: ct "install" "-h"
 env: (none)
 exit: 0
 --- stdout
-CodeTracer - the user-friendly time-travelling debugger
-
-\e[0m\e[33mUsage:\x20
-\e[0m\e[1m
-\e[36mct install\e[0m [OPTIONS]...
-
-The following options are available:
-
- \e[34m\e[1m-p, \e[0m\e[34m\e[1m--path            \e[0m  Add ct to PATH (pass --no-path to skip) [=true].\e[0m
- \e[34m\e[1m-d, \e[0m\e[34m\e[1m--desktop         \e[0m  Install .desktop file (pass --no-desktop to skip, Linux
-                         only) [=true].\e[0m
-     \e[34m\e[1m--bpf             \e[0m  Set up BPF monitoring (--no-bpf to skip) [=true].\e[0m
-     \e[34m\e[1m--agent-harbor    \e[0m  Install Agent Harbor (pass --no-agent-harbor to skip)
-                         [=true].\e[0m
-     \e[34m\e[1m--json            \e[0m  Output newline-delimited JSON progress events [=false].\e[0m
-
+<the help clispec renders for this request: ct install>
 --- stderr
 --- end

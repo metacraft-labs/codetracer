@@ -988,32 +988,7 @@ argv: ct "arb" "help"
 env: (none)
 exit: 0
 --- stdout
-CodeTracer - the user-friendly time-travelling debugger
-
-\e[0m\e[33mUsage:\x20
-\e[0m\e[1m
-\e[36mct arb\e[0m [OPTIONS]... command
-
-The following options are available:
-
- \e[34m\e[1m--arbitrum-rpc-url    \e[0m  Arbitrum Node JSON-RPC URL [=localhost].\e[0m
-\e[33m
-Available sub-commands:
-\e[0m\e[1m
-\e[36mct arb explorer\e[0m
-\e[1m
-\e[36mct arb record\e[0m <arbRecordTransaction>\e[0m
-
-\e[34m\e[1m <arbRecordTransaction>\e[0m     \e[0m  Hex-encoded transaction hash.\e[0m
-\e[1m
-\e[36mct arb replay\e[0m <arbReplayTransaction>\e[0m
-
-\e[34m\e[1m <arbReplayTransaction>\e[0m     \e[0m  Hex-encoded transaction hash.\e[0m
-\e[1m
-\e[36mct arb deploy\e[0m
-\e[1m
-\e[36mct arb listRecentTx\e[0m
-
+<the help clispec renders for this request: ct arb>
 --- stderr
 --- end
 
@@ -1043,14 +1018,7 @@ argv: ct "arb" "record" "--help"
 env: (none)
 exit: 0
 --- stdout
-CodeTracer - the user-friendly time-travelling debugger
-
-\e[0m\e[33mUsage:\x20
-\e[0m\e[1m
-\e[36mct arb record\e[0m <arbRecordTransaction>\e[0m
-
-\e[34m\e[1m <arbRecordTransaction>\e[0m\e[0m  Hex-encoded transaction hash.\e[0m
-
+<the help clispec renders for this request: ct arb record>
 --- stderr
 --- end
 
@@ -1276,32 +1244,7 @@ argv: ct "arb" "-h"
 env: (none)
 exit: 0
 --- stdout
-CodeTracer - the user-friendly time-travelling debugger
-
-\e[0m\e[33mUsage:\x20
-\e[0m\e[1m
-\e[36mct arb\e[0m [OPTIONS]... command
-
-The following options are available:
-
- \e[34m\e[1m--arbitrum-rpc-url    \e[0m  Arbitrum Node JSON-RPC URL [=localhost].\e[0m
-\e[33m
-Available sub-commands:
-\e[0m\e[1m
-\e[36mct arb explorer\e[0m
-\e[1m
-\e[36mct arb record\e[0m <arbRecordTransaction>\e[0m
-
-\e[34m\e[1m <arbRecordTransaction>\e[0m     \e[0m  Hex-encoded transaction hash.\e[0m
-\e[1m
-\e[36mct arb replay\e[0m <arbReplayTransaction>\e[0m
-
-\e[34m\e[1m <arbReplayTransaction>\e[0m     \e[0m  Hex-encoded transaction hash.\e[0m
-\e[1m
-\e[36mct arb deploy\e[0m
-\e[1m
-\e[36mct arb listRecentTx\e[0m
-
+<the help clispec renders for this request: ct arb>
 --- stderr
 --- end
 
@@ -1437,11 +1380,6 @@ argv: ct "arb" "explorer" "-h"
 env: (none)
 exit: 0
 --- stdout
-CodeTracer - the user-friendly time-travelling debugger
-
-\e[0m\e[33mUsage:\x20
-\e[0m\e[1m
-\e[36mct arb explorer\e[0m
-
+<the help clispec renders for this request: ct arb explorer>
 --- stderr
 --- end

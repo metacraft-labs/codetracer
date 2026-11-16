@@ -1756,21 +1756,6 @@ argv: ct "download" "-h" "https://x.test/t/1"
 env: (none)
 exit: 0
 --- stdout
-CodeTracer - the user-friendly time-travelling debugger
-
-\e[0m\e[33mUsage:\x20
-\e[0m\e[1m
-\e[36mct download\e[0m [OPTIONS]...
-
-The following options are available:
-
- \e[34m\e[1m--token             \e[0m  bearer token (uses stored token if omitted).\e[0m
- \e[34m\e[1m--base-url          \e[0m  override the remote server URL.\e[0m
- \e[34m\e[1m--password-file     \e[0m  read the decryption password from this file, when the
-                           artifact turns out to be encrypted.\e[0m
- \e[34m\e[1m--password-stdin    \e[0m  read the decryption password from standard input (for
-                           scripts and CI). Mutually exclusive with
-                           --password-file.\e[0m
-
+<the help clispec renders for this request: ct download>
 --- stderr
 --- end

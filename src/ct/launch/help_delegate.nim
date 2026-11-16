@@ -55,8 +55,7 @@ import
   ../codetracerconf,
   ../ui_selection,
   ../version,
-  confutils,
-  confutils/[ defs, runtime_surface ]
+  confutils/[ defs, runtime_surface, clispec_config ]
 
 export defs, runtime_surface
 
@@ -257,8 +256,11 @@ proc selfSurface*(): RuntimeCommandSurface =
   ## that codetracer-desktop itself handles. We start from M6's
   ## compile-time bridge (``surfaceFromType``), then annotate the
   ## per-command file-types and descriptions that the confutils
-  ## case-object discriminator does not carry.
-  result = surfaceFromType(CodetracerConf, helpDelegateComponentName)
+  ## case-object discriminator does not carry.  CS-M10: the surface comes
+  ## from ct's clispec description (`surfaceFromModel` gives what
+  ## `surfaceFromType` gave for the equivalent confutils type).
+  result = CtCli.surfaceFromModel(helpDelegateComponentName,
+                                  defaultCommandName = "noCommand")
   result.version = version.CodeTracerVersionStr
   result.description = "CodeTracer - the user-friendly time-travelling debugger"
   for i in 0 ..< result.commands.len:

@@ -89,12 +89,14 @@ proc recordOptionMissingValue*(
   ##    the last word was an option waiting for a value.  If it fails too,
   ##    the line has an error of its own, which the real parse reports.
   ##
-  ## The waiting option is not always the LAST word: the pinned confutils
-  ## keeps an option waiting for its value across a following switch, so in
-  ## `ct record --lang --upload --` it is `--lang` that takes the trial word.
-  ## So once the line is known to end with an option waiting for a value, the
-  ## words are dropped from the end, one at a time, while the shorter line
-  ## still ends that way; the last word dropped before it stops is the option.
+  ## The waiting option is the last word with the parser ct keeps since
+  ## CS-M10 (a value option takes the next word, even one that starts with
+  ## `-`).  The confutils ct pinned before it kept an option waiting for its
+  ## value across a following switch (`ct record --lang --upload --` gave the
+  ## trial word to `--lang`), so the option is not read off the end: once
+  ## the line is known to end with an option waiting for a value, the words
+  ## are dropped from the end, one at a time, while the shorter line still
+  ## ends that way; the last word dropped before it stops is the option.
   proc waiting(half: seq[string]): bool =
     ## Does `half` end with an option still waiting for its value?
     if half.len < 2:

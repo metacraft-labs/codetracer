@@ -960,16 +960,6 @@ argv: ct "start_backend" "-h" "db"
 env: (none)
 exit: 0
 --- stdout
-CodeTracer - the user-friendly time-travelling debugger
-
-\e[0m\e[33mUsage:\x20
-\e[0m\e[1m
-\e[36mct start_backend\e[0m [OPTIONS]...
-
-The following options are available:
-
- \e[34m\e[1m--stdio          \e[0m
- \e[34m\e[1m--socket-path    \e[0m
-
+<the help clispec renders for this request: ct start_backend>
 --- stderr
 --- end

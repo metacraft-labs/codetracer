@@ -833,16 +833,6 @@ argv: ct "login" "-h"
 env: (none)
 exit: 0
 --- stdout
-CodeTracer - the user-friendly time-travelling debugger
-
-\e[0m\e[33mUsage:\x20
-\e[0m\e[1m
-\e[36mct login\e[0m [OPTIONS]...
-
-The following options are available:
-
- \e[34m\e[1m--default-org    \e[0m  set a default organization for uploads.\e[0m
- \e[34m\e[1m--base-url       \e[0m  override the remote server URL.\e[0m
-
+<the help clispec renders for this request: ct login>
 --- stderr
 --- end

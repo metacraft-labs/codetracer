@@ -1059,13 +1059,14 @@ const
 
   CliSurfaceGateTests* = [
     # `ct`'s whole command line, pinned before CS-M10 (Clispec Library
-    # campaign) moves it from confutils' type-based loader to a clispec
+    # campaign) moved it from confutils' type-based loader to a clispec
     # description.  Same contract and the same runner as the arrays above --
     # `just test-cli-record` globs the whole of `src/tests/cli` -- kept in its
     # own array because its subject is every command, not one of them.
     #
     # The move is required to leave every flag, environment variable, default,
-    # help screen and exit code unchanged, and this golden capture is the only
+    # error text and exit code unchanged (help screens are clispec's default
+    # rendering, compared in-process), and this golden capture is the only
     # evidence that it did.  A move that also deleted or skip-disabled the test
     # would look exactly like a move that changed nothing, which is why it is
     # registered rather than reachable by the glob alone.

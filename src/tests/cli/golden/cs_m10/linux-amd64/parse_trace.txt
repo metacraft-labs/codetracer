@@ -99,40 +99,7 @@ argv: ct "trace" "help"
 env: (none)
 exit: 0
 --- stdout
-CodeTracer - the user-friendly time-travelling debugger
-
-\e[0m\e[33mUsage:\x20
-\e[0m\e[1m
-\e[36mct trace\e[0m command
-\e[33m
-Available sub-commands:
-\e[0m\e[1m
-\e[36mct trace extract-gfx\e[0m [OPTIONS]... <traceExtractGfxPath>\e[0m
-
-\e[34m\e[1m <traceExtractGfxPath>\e[0m\e[0m  Path to the .ct trace container to extract..\e[0m
-
-The following options are available:
-
- \e[34m\e[1m-o, \e[0m\e[34m\e[1m--output-dir\e[0m  Directory to extract the graphics stream into. Required..\e[0m
-\e[1m
-\e[36mct trace export\e[0m [OPTIONS]... <traceExportPath>\e[0m
-
-\e[34m\e[1m <traceExportPath>\e[0m\e[0m  Path to the source trace to export..\e[0m
-
-The following options are available:
-
- \e[34m\e[1m--portable\e[0m  Produce a portable export with embedded binaries and debug symbols.
-             [=false].\e[0m
- \e[34m\e[1m-o, \e[0m\e[34m\e[1m--output\e[0m  Output path for the exported trace (required)..\e[0m
-\e[1m
-\e[36mct trace omniscient-prep\e[0m [OPTIONS]... <traceOmniscientPrepPath>\e[0m
-
-\e[34m\e[1m <traceOmniscientPrepPath>\e[0m\e[0m  Path to the trace or trace folder..\e[0m
-
-The following options are available:
-
- \e[34m\e[1m--mode\e[0m  OmniscientDB preparation mode. [=on].\e[0m
-
+<the help clispec renders for this request: ct trace>
 --- stderr
 --- end
 
@@ -778,18 +745,7 @@ argv: ct "trace" "extract-gfx" "-h" "-o" "/d" "t.ct"
 env: (none)
 exit: 0
 --- stdout
-CodeTracer - the user-friendly time-travelling debugger
-
-\e[0m\e[33mUsage:\x20
-\e[0m\e[1m
-\e[36mct trace extract-gfx\e[0m [OPTIONS]... <traceExtractGfxPath>\e[0m
-
-\e[34m\e[1m <traceExtractGfxPath>\e[0m\e[0m  Path to the .ct trace container to extract..\e[0m
-
-The following options are available:
-
- \e[34m\e[1m-o, \e[0m\e[34m\e[1m--output-dir    \e[0m  Directory to extract the graphics stream into. Required..\e[0m
-
+<the help clispec renders for this request: ct trace extract-gfx>
 --- stderr
 --- end
 
@@ -1804,20 +1760,7 @@ argv: ct "trace" "export" "-h" "-o" "/e.ct" "t.ct"
 env: (none)
 exit: 0
 --- stdout
-CodeTracer - the user-friendly time-travelling debugger
-
-\e[0m\e[33mUsage:\x20
-\e[0m\e[1m
-\e[36mct trace export\e[0m [OPTIONS]... <traceExportPath>\e[0m
-
-\e[34m\e[1m <traceExportPath>\e[0m  \e[0m  Path to the source trace to export..\e[0m
-
-The following options are available:
-
-     \e[34m\e[1m--portable    \e[0m  Produce a portable export with embedded binaries and debug
-                     symbols. [=false].\e[0m
- \e[34m\e[1m-o, \e[0m\e[34m\e[1m--output      \e[0m  Output path for the exported trace (required)..\e[0m
-
+<the help clispec renders for this request: ct trace export>
 --- stderr
 --- end
 
@@ -2413,18 +2356,7 @@ argv: ct "trace" "omniscient-prep" "-h" "t.ct"
 env: (none)
 exit: 0
 --- stdout
-CodeTracer - the user-friendly time-travelling debugger
-
-\e[0m\e[33mUsage:\x20
-\e[0m\e[1m
-\e[36mct trace omniscient-prep\e[0m [OPTIONS]... <traceOmniscientPrepPath>\e[0m
-
-\e[34m\e[1m <traceOmniscientPrepPath>\e[0m\e[0m  Path to the trace or trace folder..\e[0m
-
-The following options are available:
-
- \e[34m\e[1m--mode    \e[0m  OmniscientDB preparation mode. [=on].\e[0m
-
+<the help clispec renders for this request: ct trace omniscient-prep>
 --- stderr
 --- end
 
@@ -2629,39 +2561,6 @@ argv: ct "trace" "-h"
 env: (none)
 exit: 0
 --- stdout
-CodeTracer - the user-friendly time-travelling debugger
-
-\e[0m\e[33mUsage:\x20
-\e[0m\e[1m
-\e[36mct trace\e[0m command
-\e[33m
-Available sub-commands:
-\e[0m\e[1m
-\e[36mct trace extract-gfx\e[0m [OPTIONS]... <traceExtractGfxPath>\e[0m
-
-\e[34m\e[1m <traceExtractGfxPath>\e[0m\e[0m  Path to the .ct trace container to extract..\e[0m
-
-The following options are available:
-
- \e[34m\e[1m-o, \e[0m\e[34m\e[1m--output-dir\e[0m  Directory to extract the graphics stream into. Required..\e[0m
-\e[1m
-\e[36mct trace export\e[0m [OPTIONS]... <traceExportPath>\e[0m
-
-\e[34m\e[1m <traceExportPath>\e[0m\e[0m  Path to the source trace to export..\e[0m
-
-The following options are available:
-
- \e[34m\e[1m--portable\e[0m  Produce a portable export with embedded binaries and debug symbols.
-             [=false].\e[0m
- \e[34m\e[1m-o, \e[0m\e[34m\e[1m--output\e[0m  Output path for the exported trace (required)..\e[0m
-\e[1m
-\e[36mct trace omniscient-prep\e[0m [OPTIONS]... <traceOmniscientPrepPath>\e[0m
-
-\e[34m\e[1m <traceOmniscientPrepPath>\e[0m\e[0m  Path to the trace or trace folder..\e[0m
-
-The following options are available:
-
- \e[34m\e[1m--mode\e[0m  OmniscientDB preparation mode. [=on].\e[0m
-
+<the help clispec renders for this request: ct trace>
 --- stderr
 --- end

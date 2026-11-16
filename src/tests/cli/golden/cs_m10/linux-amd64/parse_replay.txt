@@ -3591,29 +3591,6 @@ argv: ct "replay" "-h"
 env: (none)
 exit: 0
 --- stdout
-CodeTracer - the user-friendly time-travelling debugger
-
-\e[0m\e[33mUsage:\x20
-\e[0m\e[1m
-\e[36mct replay\e[0m [OPTIONS]...
-
-The following options are available:
-
-     \e[34m\e[1m--id                    \e[0m  a recording id (UUIDv7) — accepts 8+ char short
-                               prefix.\e[0m
- \e[34m\e[1m-t, \e[0m\e[34m\e[1m--trace-folder          \e[0m  the trace output folder or a multitrace archive.\e[0m
- \e[34m\e[1m-i, \e[0m\e[34m\e[1m--interactive           \e[0m  explicit flag for interactively choosing a trace.\e[0m
-     \e[34m\e[1m--thread-sync-order     \e[0m  Thread synchronization order the replay enforces
-                               on a Windows native recording: 'total' or
-                               'per-object' (env CT_THREAD_SYNC_ORDER; the flag
-                               wins). Unset: the replay backend's default.\e[0m
-     \e[34m\e[1m--os-simulation         \e[0m  Replay mode for a native recording:
-                               'weak-userspace', 'strong-userspace' or
-                               'strong-kernel' (env CT_OS_SIMULATION; the flag
-                               wins). Unset: the replay backend's default.\e[0m
-     \e[34m\e[1m--follow-request-spans  \e[0m  Follow requests in a growing container: '1' or
-                               '0' (env CT_FOLLOW_REQUEST_SPANS; the flag wins).
-                               Default off.\e[0m
-
+<the help clispec renders for this request: ct replay>
 --- stderr
 --- end

@@ -38,12 +38,13 @@
 ##     process on every refusal and on `--help` (`quitOnFailure = true` is
 ##     what ct uses, and the only way to see its messages and exit codes),
 ##     and because `{.restOfArgs.}` reads the process's own `paramStr`, not
-##     `cmdLine`.  The probe is the only place in this file that names the
-##     loader (`probeMain`): the move replaces that one call with the new
-##     loader and nothing else here.
-##   * `binary_help.txt`, through the real `ct` binary: every help screen
+##     `cmdLine`.  The probe is the only place in this file that runs ct's
+##     loader (`probeMain`); the description itself is asked only which help
+##     a line requests (`expectedHelp`, under HELP below).
+##   * `binary_help.txt`, through the real `ct` binary: every help request
 ##     (top level and per command and subcommand, `--help`, `-h`, the `help`
-##     and `version` words, other spellings, other terminal widths), the
+##     and `version` words, other spellings, other terminal widths; see HELP
+##     below for how a help screen is compared), the
 ##     version, and the help-delegate commands that print the command surface
 ##     (`ct-describe-commands`, `ct-help`, `ct-complete`, `ct-completions`).
 ##   * `binary_dispatch.txt`, through the binary: the hand-written dispatch
@@ -64,6 +65,28 @@
 ## probe says `ct` would run is recorded as `NOT RUN` instead of being run
 ## (`remote --help` and `electron --help`, where `{.restOfArgs.}` takes
 ## `--help`); if the probe cannot be started, no binary case runs at all.
+##
+## HELP.  ct's help screens are clispec's: what clispec renders by default
+## for ct's description (CS-M10's decision of 2026-11-16), not a layout of
+## ct's own, so they are not pinned as text.  For every run (probe or
+## binary) the test asks the description in-process, with ct's options and
+## the words ct's loader would get (`loaderLine`), whether the line asks for
+## help: `CtCli.load` raising `CliHelpRequest` for that very request, and
+## `ctHelpScreen` (the function ct's loader prints help with) rendering it
+## with clispec's default layout.  The rendering reads no terminal: clispec's
+## help does not wrap unless a layout asks it to and never looks at `COLUMNS`,
+## a tty or `/dev/tty`, so neither the child's nor this process's terminal
+## can reach it (the `COLUMNS` cases pin that ct ignores the variable too).
+## When the run's stdout is exactly that text (with the newline
+## ct ends it with), stdout is replaced by one marker line,
+## `<the help clispec renders for this request: ct record>`, and the golden
+## pins the marker, the exit code and stderr.  So the goldens pin WHICH help
+## a line gets and the help's text follows clispec's default design without
+## a re-capture; a help screen that differs from the rendering stays text and
+## fails the comparison.  The version text, the help-delegate surface
+## (`ct-help`, `ct-describe-commands`, `ct-complete`, `ct-completions`) and
+## the help texts of the commands ct dispatches itself (`review`, `agent`)
+## are not clispec's help and stay text.
 ##
 ## The goldens are text: a child's control characters are written `\e`,
 ## `\r`, `\0` or `\xNN`, and the last blank of a line that ends in one as
@@ -99,8 +122,10 @@ when not (defined(linux) and defined(amd64)):
 
 import std/[os, osproc, strutils, streams, strtabs, times, options, tempfiles,
             unittest]
-import confutils
-import ../../ct/[codetracerconf, globals, version]
+import confutils/defs
+import confutils/clispec_config
+import ../../ct/[codetracerconf, globals, ui_selection, version]
+import ../../ct/trace/record_child_argv
 
 const
   ThisDir = currentSourcePath.parentDir
@@ -1048,16 +1073,84 @@ proc visibleLineEnds(text: string): string =
       line = line[0 ..< ^1] & last
   lines.join("\n")
 
-proc finishBin(p: Process; scratch, bin: string; probe: bool): Run =
+type
+  ExpectedHelp = tuple[asked: bool, path: seq[string], text: string]
+    ## The help a line asks for, as the description renders it by default.
+
+proc loaderLine(argv: seq[string]; env: seq[(string, string)];
+                probe: bool): tuple[reaches: bool, line: seq[string]] =
+  ## The words `ct`'s loader gets for `argv`: the probe hands it its argv
+  ## unchanged; the binary first takes `--ui`/`--headless` out (the `--ui`
+  ## prologue, `planUiSelection`, with no configuration file: every run has
+  ## an empty HOME) and splits `record ... --` (`recordParserLine`), as
+  ## `codetracer.nim` does.  `reaches` is false when the prologue ends the
+  ## process or hands it to another binary.
+  if probe:
+    return (true, argv)
+  var envUi = ""
+  for (k, v) in env:
+    if k == UiEnvVar: envUi = v
+  let plan = planUiSelection(argv, envUi, "")
+  var line: seq[string]
+  case plan.kind
+  of upkInProcess: line = plan.ctArgs
+  of upkRewrite: line = plan.rewrittenArgs
+  of upkHandoff, upkUsageError: return (false, @[])
+  let sep = line.find("--")
+  if sep >= 0 and line.len > 0 and line[0] == "record":
+    line = recordParserLine(line[0 ..< sep])
+  (true, line)
+
+proc expectedHelp(cs: Case; argv: seq[string]; probe: bool): ExpectedHelp =
+  ## Whether ct's loader answers this line with help, and with which text:
+  ## the description is asked in-process (`CtCli.load`, ct's own options),
+  ## and the `CliHelpRequest` it raises carries the command and the help
+  ## clispec renders by default for that request.  Rendered under the
+  ## case's `COLUMNS` (or none), as the child sees it.
+  let (reaches, line) = loaderLine(argv, cs.env, probe)
+  if not reaches:
+    return
+  var columns = ""
+  var hasColumns = false
+  for (k, v) in cs.env:
+    if k == "COLUMNS": (columns, hasColumns) = (v, true)
+  let saved = getEnv("COLUMNS")
+  let hadColumns = existsEnv("COLUMNS")
+  if hasColumns: putEnv("COLUMNS", columns) else: delEnv("COLUMNS")
+  try:
+    discard CtCli.load(line, CliSources(), ctCliOptions(VersionText))
+  except CliVersionRequest:
+    discard
+  except CliHelpRequest as e:
+    result = (true, e.commandPath, ctHelpScreen(e))
+  except CatchableError:
+    discard
+  if hadColumns: putEnv("COLUMNS", saved) else: delEnv("COLUMNS")
+
+proc helpMarker(path: seq[string]): string =
+  ## What a help screen is replaced with in the goldens (see "HELP" in the
+  ## module documentation): the command whose help was asked for.
+  "<the help clispec renders for this request: " &
+    (@["ct"] & path).join(" ") & ">\n"
+
+proc finishBin(p: Process; scratch, bin: string; probe: bool;
+               help: ExpectedHelp): Run =
   ## Collects a run started by `startBin` and renders its exit code, stdout
   ## and stderr.  stdout is read to its end first; no case writes anywhere
   ## near a pipe's capacity to stderr, so the child cannot block on it.  A
   ## run that `timeout` had to stop (exit 124, or 137 after the kill) is
   ## reported as a failure.
   try:
-    let o = p.outputStream.readAll()
+    var o = p.outputStream.readAll()
     let r = p.errorStream.readAll()
     let code = p.waitForExit()
+    # A help screen: compared here with the help the description renders
+    # for the same request, in-process, and pinned by the marker.
+    if help.asked:
+      let printed = if help.text.endsWith("\n"): help.text
+                    else: help.text & "\n"
+      if o == printed:
+        o = helpMarker(help.path)
     p.close()
     if code in [124, 137]:
       return (code, "", "did not exit within 60 s; stopped by timeout")
@@ -1083,7 +1176,8 @@ proc runAll(bin, tag: string; cases: seq[Case]; scratch: string;
   ## Runs every case, at most `MaxInFlight` at once, each in its own
   ## directory `<scratch>/<tag>-<i>`; results in case order.
   result = newSeq[Run](cases.len)
-  var inFlight: seq[tuple[i: int, p: Process, dir: string]]
+  var inFlight: seq[tuple[i: int, p: Process, dir: string,
+                          help: ExpectedHelp]]
   var next = 0
   while next < cases.len or inFlight.len > 0:
     while next < cases.len and inFlight.len < MaxInFlight:
@@ -1093,12 +1187,12 @@ proc runAll(bin, tag: string; cases: seq[Case]; scratch: string;
       for a in cs.argv: argv.add a.replace("<SCRATCH>", dir)
       let (p, failure) = startBin(bin, argv, cs.env, dir, probe)
       if p == nil: result[next] = (-1, "", failure)
-      else: inFlight.add (next, p, dir)
+      else: inFlight.add (next, p, dir, expectedHelp(cs, argv, probe))
       inc next
     if inFlight.len > 0:
       let head = inFlight[0]
       inFlight.delete(0)
-      result[head.i] = finishBin(head.p, head.dir, bin, probe)
+      result[head.i] = finishBin(head.p, head.dir, bin, probe, head.help)
 
 proc caseHeader(i: int; cs: Case): string =
   var parts: seq[string]
@@ -1345,6 +1439,47 @@ proc main(): int =
       if extra.len > 0: checkpoint("goldens this test no longer produces: " & extra.join(", "))
       check missing.len == 0
       check extra.len == 0
+    test "every help screen is clispec's default rendering, less env names and letter aliases":
+      # The goldens compare ct's help with `ctHelpScreen`, the function ct
+      # prints it with, so this pins `ctHelpScreen` against clispec itself:
+      # for every command, its screen has the words of clispec's default
+      # rendering of the description (`cliHelpText`) in the same order, less
+      # each `[env: X]` note and each `--<letter>,` alias -- the right page,
+      # nothing else dropped or added -- and no Nim spelling of a default.
+      let g = CtCli.cliGrammar
+      var paths: seq[seq[string]]
+      for c in g.commands:
+        if c.path notin paths: paths.add c.path
+      for path in paths:
+        var stock, shown: seq[string]
+        try:
+          stock = cliHelpText(g, cliHelpCommand(g, path, "ct"), "ct").splitWhitespace
+        except CliUsageError as e:
+          checkpoint("ct " & path.join(" ") & ": " & e.msg)
+          check false
+        shown = ctHelpScreen((ref CliHelpRequest)(commandPath: path,
+          text: "<not rendered>")).splitWhitespace
+        var expected: seq[string]
+        var inEnv = false
+        for w in stock:
+          if inEnv:
+            inEnv = not w.endsWith("]")
+          elif w == "[env:":
+            inEnv = true
+          elif w.len == 4 and w.startsWith("--") and w.endsWith(",") and
+              w[2] in Letters:
+            discard
+          else:
+            expected.add w
+        if shown != expected:
+          checkpoint("ct " & path.join(" ") & ":\n" & shown.join(" ") &
+            "\n  expected:\n" & expected.join(" "))
+        check shown == expected
+        let text = shown.join(" ")
+        for nimism in ["[env:", "@[]", "[default: ]", "OmniscientDbMode."]:
+          if nimism in text:
+            checkpoint("ct " & path.join(" ") & " shows " & nimism)
+          check nimism notin text
     for item in produced:
       let file = item.file
       let text = item.text

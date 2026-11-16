@@ -7,7 +7,7 @@ import
   ../ct_test/incremental_cli,
   ../ct_test/ct_test,
   ../ct_test/ct_test_delegate,
-  codetracerconf, confutils,
+  codetracerconf, confutils/defs,
   review_cli,
   trace/[record_child_argv, replay_backend_env],
   version
@@ -321,8 +321,13 @@ try:
               version = ctVersion, copyrightBanner = ctBanner,
               cmdLine = line, printUsage = false, quitOnFailure = false)
             RecordProbe(parsed: true, args: probed.recordArgs)
-          except ConfigurationError:
-            RecordProbe(parsed: false))
+          except ConfigurationError as e:
+            # A refusal for the missing value of the option the line ends
+            # with answers the probe's question as a parse would: that
+            # option is waiting for its value.  (confutils 3bf016c dropped
+            # the option and parsed the line; the parser ct keeps since
+            # CS-M10 refuses it.)
+            RecordProbe(parsed: e.kind == cekMissingValue))
       if missing.len > 0:
         stderr.writeLine(recordMissingValueError(missing))
         quit(1)

@@ -867,73 +867,7 @@ argv: ct "ci" "help"
 env: (none)
 exit: 0
 --- stdout
-CodeTracer - the user-friendly time-travelling debugger
-
-\e[0m\e[33mUsage:\x20
-\e[0m\e[1m
-\e[36mct ci\e[0m [OPTIONS]... command
-
-The following options are available:
-
- \e[34m\e[1m--token       \e[0m  CI API token (uses CODETRACER_TOKEN env var if omitted).\e[0m
- \e[34m\e[1m--base-url    \e[0m  Override the remote server URL.\e[0m
-\e[33m
-Available sub-commands:
-\e[0m\e[1m
-\e[36mct ci start\e[0m [OPTIONS]...
-
-The following options are available:
-
- \e[34m\e[1m--repo        \e[0m  Repository URL (auto-detected from git remote if omitted).\e[0m
- \e[34m\e[1m--commit      \e[0m  Git commit SHA (auto-detected from HEAD if omitted).\e[0m
- \e[34m\e[1m--branch      \e[0m  Git branch name (auto-detected if omitted).\e[0m
- \e[34m\e[1m--base-commit \e[0m  Base commit SHA for diffing.\e[0m
- \e[34m\e[1m--label       \e[0m  Human-readable label for the run.\e[0m
- \e[34m\e[1m--monitor-processes\e[0m  Enable BPF process tree monitoring [=false].\e[0m
-\e[1m
-\e[36mct ci attach\e[0m <ciAttachRunId>\e[0m
-
-\e[34m\e[1m <ciAttachRunId>\e[0m    \e[0m  Run ID to attach to.\e[0m
-\e[1m
-\e[36mct ci exec\e[0m [OPTIONS]... <ciExecProgram>\e[0m <ciExecArgs>\e[0m
-
-\e[34m\e[1m <ciExecProgram>\e[0m    \e[0m  Command to execute.\e[0m
-\e[34m\e[1m <ciExecArgs>\e[0m       \e[0m  Arguments for the command [=@[]].\e[0m
-
-The following options are available:
-
- \e[34m\e[1m--monitor-processes\e[0m  Enable BPF-based process tree monitoring [=false].\e[0m
- \e[34m\e[1m--record      \e[0m  Wrap command in ct record and auto-upload trace [=false].\e[0m
-\e[1m
-\e[36mct ci finish\e[0m [OPTIONS]...
-
-The following options are available:
-
- \e[34m\e[1m--status      \e[0m  Override run status (passed/failed/error).\e[0m
-\e[1m
-\e[36mct ci run\e[0m [OPTIONS]... <ciRunProgram>\e[0m <ciRunArgs>\e[0m
-
-\e[34m\e[1m <ciRunProgram>\e[0m     \e[0m  Command to execute.\e[0m
-\e[34m\e[1m <ciRunArgs>\e[0m        \e[0m  Arguments for the command [=@[]].\e[0m
-
-The following options are available:
-
- \e[34m\e[1m--repo        \e[0m  Repository URL (auto-detected from git remote if omitted).\e[0m
- \e[34m\e[1m--commit      \e[0m  Git commit SHA (auto-detected from HEAD if omitted).\e[0m
- \e[34m\e[1m--branch      \e[0m  Git branch name (auto-detected if omitted).\e[0m
- \e[34m\e[1m--base-commit \e[0m  Base commit SHA for diffing.\e[0m
- \e[34m\e[1m--label       \e[0m  Human-readable label for the run.\e[0m
- \e[34m\e[1m--monitor-processes\e[0m  Enable BPF process tree monitoring [=false].\e[0m
- \e[34m\e[1m--record      \e[0m  Wrap command in ct record and auto-upload trace [=false].\e[0m
-\e[1m
-\e[36mct ci log\e[0m <ciLogMessage>\e[0m
-
-\e[34m\e[1m <ciLogMessage>\e[0m     \e[0m  Log message to append.\e[0m
-\e[1m
-\e[36mct ci status\e[0m
-\e[1m
-\e[36mct ci cancel\e[0m
-
+<the help clispec renders for this request: ct ci>
 --- stderr
 --- end
 
@@ -3673,23 +3607,7 @@ argv: ct "ci" "start" "-h"
 env: (none)
 exit: 0
 --- stdout
-CodeTracer - the user-friendly time-travelling debugger
-
-\e[0m\e[33mUsage:\x20
-\e[0m\e[1m
-\e[36mct ci start\e[0m [OPTIONS]...
-
-The following options are available:
-
- \e[34m\e[1m--repo                 \e[0m  Repository URL (auto-detected from git remote if
-                              omitted).\e[0m
- \e[34m\e[1m--commit               \e[0m  Git commit SHA (auto-detected from HEAD if
-                              omitted).\e[0m
- \e[34m\e[1m--branch               \e[0m  Git branch name (auto-detected if omitted).\e[0m
- \e[34m\e[1m--base-commit          \e[0m  Base commit SHA for diffing.\e[0m
- \e[34m\e[1m--label                \e[0m  Human-readable label for the run.\e[0m
- \e[34m\e[1m--monitor-processes    \e[0m  Enable BPF process tree monitoring [=false].\e[0m
-
+<the help clispec renders for this request: ct ci start>
 --- stderr
 --- end
 
@@ -6705,28 +6623,7 @@ argv: ct "ci" "run" "-h" "cmd"
 env: (none)
 exit: 0
 --- stdout
-CodeTracer - the user-friendly time-travelling debugger
-
-\e[0m\e[33mUsage:\x20
-\e[0m\e[1m
-\e[36mct ci run\e[0m [OPTIONS]... <ciRunProgram>\e[0m <ciRunArgs>\e[0m
-
-\e[34m\e[1m <ciRunProgram>\e[0m              \e[0m  Command to execute.\e[0m
-\e[34m\e[1m <ciRunArgs>\e[0m                 \e[0m  Arguments for the command [=@[]].\e[0m
-
-The following options are available:
-
- \e[34m\e[1m--repo                 \e[0m  Repository URL (auto-detected from git remote if
-                              omitted).\e[0m
- \e[34m\e[1m--commit               \e[0m  Git commit SHA (auto-detected from HEAD if
-                              omitted).\e[0m
- \e[34m\e[1m--branch               \e[0m  Git branch name (auto-detected if omitted).\e[0m
- \e[34m\e[1m--base-commit          \e[0m  Base commit SHA for diffing.\e[0m
- \e[34m\e[1m--label                \e[0m  Human-readable label for the run.\e[0m
- \e[34m\e[1m--monitor-processes    \e[0m  Enable BPF process tree monitoring [=false].\e[0m
- \e[34m\e[1m--record               \e[0m  Wrap command in ct record and auto-upload trace
-                              [=false].\e[0m
-
+<the help clispec renders for this request: ct ci run>
 --- stderr
 --- end
 
@@ -7436,14 +7333,7 @@ argv: ct "ci" "attach" "-h" "r1"
 env: (none)
 exit: 0
 --- stdout
-CodeTracer - the user-friendly time-travelling debugger
-
-\e[0m\e[33mUsage:\x20
-\e[0m\e[1m
-\e[36mct ci attach\e[0m <ciAttachRunId>\e[0m
-
-\e[34m\e[1m <ciAttachRunId>\e[0m\e[0m  Run ID to attach to.\e[0m
-
+<the help clispec renders for this request: ct ci attach>
 --- stderr
 --- end
 
@@ -8547,21 +8437,7 @@ argv: ct "ci" "exec" "-h" "cmd"
 env: (none)
 exit: 0
 --- stdout
-CodeTracer - the user-friendly time-travelling debugger
-
-\e[0m\e[33mUsage:\x20
-\e[0m\e[1m
-\e[36mct ci exec\e[0m [OPTIONS]... <ciExecProgram>\e[0m <ciExecArgs>\e[0m
-
-\e[34m\e[1m <ciExecProgram>\e[0m             \e[0m  Command to execute.\e[0m
-\e[34m\e[1m <ciExecArgs>\e[0m                \e[0m  Arguments for the command [=@[]].\e[0m
-
-The following options are available:
-
- \e[34m\e[1m--monitor-processes    \e[0m  Enable BPF-based process tree monitoring [=false].\e[0m
- \e[34m\e[1m--record               \e[0m  Wrap command in ct record and auto-upload trace
-                              [=false].\e[0m
-
+<the help clispec renders for this request: ct ci exec>
 --- stderr
 --- end
 
@@ -9121,16 +8997,7 @@ argv: ct "ci" "finish" "-h"
 env: (none)
 exit: 0
 --- stdout
-CodeTracer - the user-friendly time-travelling debugger
-
-\e[0m\e[33mUsage:\x20
-\e[0m\e[1m
-\e[36mct ci finish\e[0m [OPTIONS]...
-
-The following options are available:
-
- \e[34m\e[1m--status    \e[0m  Override run status (passed/failed/error).\e[0m
-
+<the help clispec renders for this request: ct ci finish>
 --- stderr
 --- end
 
@@ -9391,72 +9258,6 @@ argv: ct "ci" "-h"
 env: (none)
 exit: 0
 --- stdout
-CodeTracer - the user-friendly time-travelling debugger
-
-\e[0m\e[33mUsage:\x20
-\e[0m\e[1m
-\e[36mct ci\e[0m [OPTIONS]... command
-
-The following options are available:
-
- \e[34m\e[1m--token       \e[0m  CI API token (uses CODETRACER_TOKEN env var if omitted).\e[0m
- \e[34m\e[1m--base-url    \e[0m  Override the remote server URL.\e[0m
-\e[33m
-Available sub-commands:
-\e[0m\e[1m
-\e[36mct ci start\e[0m [OPTIONS]...
-
-The following options are available:
-
- \e[34m\e[1m--repo        \e[0m  Repository URL (auto-detected from git remote if omitted).\e[0m
- \e[34m\e[1m--commit      \e[0m  Git commit SHA (auto-detected from HEAD if omitted).\e[0m
- \e[34m\e[1m--branch      \e[0m  Git branch name (auto-detected if omitted).\e[0m
- \e[34m\e[1m--base-commit \e[0m  Base commit SHA for diffing.\e[0m
- \e[34m\e[1m--label       \e[0m  Human-readable label for the run.\e[0m
- \e[34m\e[1m--monitor-processes\e[0m  Enable BPF process tree monitoring [=false].\e[0m
-\e[1m
-\e[36mct ci attach\e[0m <ciAttachRunId>\e[0m
-
-\e[34m\e[1m <ciAttachRunId>\e[0m    \e[0m  Run ID to attach to.\e[0m
-\e[1m
-\e[36mct ci exec\e[0m [OPTIONS]... <ciExecProgram>\e[0m <ciExecArgs>\e[0m
-
-\e[34m\e[1m <ciExecProgram>\e[0m    \e[0m  Command to execute.\e[0m
-\e[34m\e[1m <ciExecArgs>\e[0m       \e[0m  Arguments for the command [=@[]].\e[0m
-
-The following options are available:
-
- \e[34m\e[1m--monitor-processes\e[0m  Enable BPF-based process tree monitoring [=false].\e[0m
- \e[34m\e[1m--record      \e[0m  Wrap command in ct record and auto-upload trace [=false].\e[0m
-\e[1m
-\e[36mct ci finish\e[0m [OPTIONS]...
-
-The following options are available:
-
- \e[34m\e[1m--status      \e[0m  Override run status (passed/failed/error).\e[0m
-\e[1m
-\e[36mct ci run\e[0m [OPTIONS]... <ciRunProgram>\e[0m <ciRunArgs>\e[0m
-
-\e[34m\e[1m <ciRunProgram>\e[0m     \e[0m  Command to execute.\e[0m
-\e[34m\e[1m <ciRunArgs>\e[0m        \e[0m  Arguments for the command [=@[]].\e[0m
-
-The following options are available:
-
- \e[34m\e[1m--repo        \e[0m  Repository URL (auto-detected from git remote if omitted).\e[0m
- \e[34m\e[1m--commit      \e[0m  Git commit SHA (auto-detected from HEAD if omitted).\e[0m
- \e[34m\e[1m--branch      \e[0m  Git branch name (auto-detected if omitted).\e[0m
- \e[34m\e[1m--base-commit \e[0m  Base commit SHA for diffing.\e[0m
- \e[34m\e[1m--label       \e[0m  Human-readable label for the run.\e[0m
- \e[34m\e[1m--monitor-processes\e[0m  Enable BPF process tree monitoring [=false].\e[0m
- \e[34m\e[1m--record      \e[0m  Wrap command in ct record and auto-upload trace [=false].\e[0m
-\e[1m
-\e[36mct ci log\e[0m <ciLogMessage>\e[0m
-
-\e[34m\e[1m <ciLogMessage>\e[0m     \e[0m  Log message to append.\e[0m
-\e[1m
-\e[36mct ci status\e[0m
-\e[1m
-\e[36mct ci cancel\e[0m
-
+<the help clispec renders for this request: ct ci>
 --- stderr
 --- end

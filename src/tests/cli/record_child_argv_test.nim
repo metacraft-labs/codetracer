@@ -31,7 +31,7 @@
 ##   nim c -r src/tests/cli/record_child_argv_test.nim
 
 import std/[os, osproc, sequtils, strutils, unittest]
-import confutils
+import confutils/defs
 import ../../ct/codetracerconf
 import ../../ct/trace/record_child_argv
 
@@ -41,8 +41,12 @@ proc probe(line: seq[string]): RecordProbe =
     let conf = CodetracerConf.load(cmdLine = line, printUsage = false,
                                    quitOnFailure = false)
     RecordProbe(parsed: true, args: conf.recordArgs)
-  except ConfigurationError:
-    RecordProbe(parsed: false)
+  except ConfigurationError as e:
+    # A line whose last option lacks its value is refused for that, which
+    # answers the probe as a parse would (confutils 3bf016c dropped the
+    # option and accepted the line; the parser ct keeps since CS-M10
+    # refuses it), as `codetracer.nim`'s probe does.
+    RecordProbe(parsed: e.kind == cekMissingValue)
 
 proc split(ownHalf, afterSeparator: seq[string]): RecordChild =
   ## The whole `ct record ... -- ...` path short of recording: the
@@ -128,12 +132,21 @@ suite "ct record: the program and its arguments around --":
     let r = split(@["record", "prog", "--lang"], @["a"])
     check "`--lang` needs a value" in r.error
 
-  test "the option waiting for a value is named, not a switch after it":
-    # The pinned parser keeps `--lang` waiting across `--upload`, a switch;
-    # the refusal must name `--lang`, not the last word.
+  test "a value option takes the switch after it as its value; only the last word waits":
+    # The parser ct keeps since CS-M10 (nim-confutils 172981d, as getopt
+    # reads a line) gives a value option the next word even when it starts
+    # with `-`: `--lang --upload` is `--lang=--upload`, so that line waits
+    # for nothing and is not refused, and `--upload` is not set.  (Under
+    # confutils 3bf016c `--lang` waited across the switch, and the refusal
+    # had to name `--lang`, not `--upload`.)
     let r = split(@["record", "--lang", "--upload"], @["prog"])
-    check "`--lang` needs a value" in r.error
-    check "`--upload`" notin r.error
+    check r.error == ""
+    check r.program == "prog"
+    let conf = CodetracerConf.load(
+      cmdLine = recordParserLine(@["record", "--lang", "--upload"]),
+      printUsage = false, quitOnFailure = false)
+    check conf.recordLang == "--upload"
+    check not conf.recordUpload
     let s = split(@["record", "--upload", "--use-interpose", "--lang"], @["prog"])
     check "`--lang` needs a value" in s.error
     let t = split(@["record", "-o", "out", "--upload"], @["prog"])
