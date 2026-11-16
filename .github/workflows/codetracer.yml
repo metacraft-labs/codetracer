@@ -7047,6 +7047,13 @@ jobs:
           PLAYWRIGHT_GLOBAL_TIMEOUT: "10800000"
         run: "nix develop .#devShells.x86_64-linux.default --command just test-gui"
 
+      # `just test-gui` builds the dev ct these three read (src/build-debug), but
+      # when an earlier step fails it is skipped and they still run; then they
+      # failed with "no built ct at src/build-debug/bin/ct". A no-op after it.
+      - name: Build ct for the native capture and lanes
+        if: ${{ !cancelled() }}
+        run: nix develop .#devShells.x86_64-linux.default --command just build-once
+
       - name: The desktop's Low Level Code view on a native recording is the reference
         if: ${{ !cancelled() }}
         # The desktop column of the Low Level Code pane on an rr recording of
