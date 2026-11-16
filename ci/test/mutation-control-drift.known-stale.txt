@@ -238,7 +238,6 @@ src/frontend/tui/tests/plat56-build-output-mutation-control.sha256	src/frontend/
 # sit in it is owed.
 src/tests/scenarios/plat66-pack-mutation-control.sha256	src/tests/scenarios/bindings/playwright/codetracer-binding.ts	ce56f44b71f4aa8d3376d5415e48102e8148ded5b463c429cbcb9af5ab9b9544	dac9e35953b0d93636c2284d9c9a858c2bba982b92e9311b0f41fb666e6879c0
 src/frontend/tui/tests/plat60-low-level-code-mutation-control.sha256	src/db-backend/src/dap_handler.rs	23f8ff8145f2d5a678588557c9c855a9701cd2bf5fa7afa677028b7262076e76	7c59887c904659094396b45ce2cf2673ef89803f977fe9fdeb929e5650a4c6d0
-src/frontend/viewmodel/tests/unit/plat33-collab-mutation-control.sha256	.github/workflows/codetracer.yml	4329483bcc55e3898b373e4b379234071ee6e7d04c19bd109045028c62c94d56	8c06026a476c0401501b7b71df76a6fbb3492edfe351ab31416a69a77f974108
 # plat51: graded at f1788c93b4; 8f8906730e  moved src/db-
 # backend/src/dap_handler.rs after the grade. Re-grade the arms whose needles
 # sit in them.
@@ -254,8 +253,6 @@ src/frontend/tui/tests/plat41-pane-mutation-control.sha256	src/common/trace_sour
 src/frontend/tui/tests/plat59-visual-replay-mutation-control.sha256	src/frontend/gpui/tests/test_plat59_gpui_visual_replay.nim	65ef1c0e46ef631f8105f3bc9e043b2678983ef1c423d39fc68400f1614bb8b0	16bbcb30db00cd589257078c8062ccb4ed42d4f74e3914ded3ae322e7ed3b4a7
 src/frontend/tui/tests/plat59-visual-replay-mutation-control.sha256	src/frontend/tui/tests/test_plat59_visual_replay.nim	83eb0f522a39bb244138eb0e582c9205d4f6937c1ac82710ac085d0440f7cdd9	acc20fbec5548f00cf6383436eafa5ef871da49565d9fa06e76929fb97648511
 src/frontend/tui/tests/plat59-visual-replay-mutation-control.sha256	src/tests/gui/tests/frame-viewer/plat59-visual-replay-capture.spec.ts	cbcbab9123f3f96e353947462e7f0a4d048075b5111750996813be154f6e5333	686784cd29630cd77e582d3d9f957ca817254e5344465b3d6d92a7e580ab3251
-src/frontend/viewmodel/tests/unit/plat17-wasm-mutation-control.sha256	justfile	e0b0f1e05b1e7907a3cc8a424293bf7353eb6f4cd1bf6a624ce1d927128d1443	607bdd6dace44a25eed033ce05fa8bd914ae93d5f58414bf1201f83494ec5b63
-src/frontend/viewmodel/tests/unit/plat33-collab-mutation-control.sha256	justfile	e0b0f1e05b1e7907a3cc8a424293bf7353eb6f4cd1bf6a624ce1d927128d1443	607bdd6dace44a25eed033ce05fa8bd914ae93d5f58414bf1201f83494ec5b63
 
 # codetracer#886 (Pxor-Bugs M107): the desktop tracepoint editor writes its
 # tracepoints into the store's point rows (sdk/tracepoints), so ui/trace.nim
@@ -312,3 +309,7 @@ src/frontend/viewmodel/tests/unit/plat68-keymaps-mutation-control.sha256	src/fro
 # src/frontend/tui/app/runtime.nim after the grade. Re-grade the arms whose
 # needles sit in them.
 src/frontend/tui/tests/plat47-parity-mutation-control.sha256	src/frontend/tui/app/runtime.nim	a7a3bb422082c3ce0dbfd6321695a4a8876ce902281ec4c17f02c3bc4e1bbeb8	4a29788490e9b99d5f52461181399c62601fc3eca6b582f8efbd715224ac544d
+src/frontend/viewmodel/tests/unit/plat17-wasm-mutation-control.sha256	justfile	e0b0f1e05b1e7907a3cc8a424293bf7353eb6f4cd1bf6a624ce1d927128d1443	7651131dc0beb1e308f6863f1ffc3dad3e99908bb6b8c8e4dd0ef32cdbdbcc75
+src/frontend/viewmodel/tests/unit/plat33-collab-mutation-control.sha256	.github/workflows/codetracer.yml	4329483bcc55e3898b373e4b379234071ee6e7d04c19bd109045028c62c94d56	a4e71e48fde9a05e172da38e53bc49e6d4af94edc3e8bfbb3a385d47e85fff5c
+src/frontend/viewmodel/tests/unit/plat33-collab-mutation-control.sha256	justfile	e0b0f1e05b1e7907a3cc8a424293bf7353eb6f4cd1bf6a624ce1d927128d1443	7651131dc0beb1e308f6863f1ffc3dad3e99908bb6b8c8e4dd0ef32cdbdbcc75
+src/tests/scenarios/plat66-pack-mutation-control.sha256	ci/test/scenarios.sh	0680d62d06bc4671f5e80a843e2d2e34ebce12c2ee5951feca315b19e5a46bd2	e8aa010ef16afbe0001a989d7ad80edb1dbfccda7b62d56edd8b4b0097275f18
