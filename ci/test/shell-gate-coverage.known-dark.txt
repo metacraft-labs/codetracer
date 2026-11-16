@@ -13,7 +13,7 @@
 # where a reviewer sees it; wiring one up means editing it downward, which the
 # both-directions rule already forces in the same commit.
 #
-# RECORDED-DARK-CEILING: 49
+# RECORDED-DARK-CEILING: 48
 #
 # TWO KINDS OF DARK, AND ONLY ONE OF THEM MAY BE ADDED HERE.
 #
@@ -605,13 +605,6 @@ ci/test/plat42-surfaces-window.sh
 ci/test/plat44-edit-window.sh
 ci/test/plat44_sequences_window_record.py
 ci/test/plat44-sequences-window.sh
-# PLAT-47 part B: `scripts/plat47-vcs-fixture.sh` builds the git repository
-# with a modified, an added and an untracked file that the VCS tests read; it
-# is run by Nim suites (`test_plat47_vcs_pane.nim`, `test_plat47_gpui_parity
-# .nim`), the Electron capture and the window driver
-# (`ci/test/plat47_gpui_window.py`, a step of `gpui-window-captures` since
-# PLAT-48's review), none of which this scan follows.
-scripts/plat47-vcs-fixture.sh
 
 # ---------------------------------------------------------------------------
 # HCR H6 — THE LAUNCH-UNDER-HCR ARMS. **BLOCKED on a sibling and two build

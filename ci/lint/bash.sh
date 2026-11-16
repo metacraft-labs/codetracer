@@ -333,6 +333,11 @@ lint_step "Nim test lane shards cover their lane exactly" \
 
 # A step that runs past an earlier failure and needs ct waits on the ct build,
 # or the earlier failure resurfaces as a second, misleading `ct ENOENT`.
+# The VCS fixture builds a git repository; run under a caller's GIT_DIR it
+# once wrote its identity into codetracer's own .git/config.
+lint_step "the VCS fixture touches no repository but its own" \
+	bash ci/test/plat47-vcs-fixture-test.sh
+
 lint_step "steps that need ct wait on the ct build" \
 	bash ci/test/ct-build-gate-test.sh
 
