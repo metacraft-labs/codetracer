@@ -3784,8 +3784,15 @@ jobs:
           path: test-logs/
           retention-days: 30
 
+  ct-build:
+    # The job is in ct-build.yml: build-once and the windowed shim, once per
+    # run, for the TUI and GPUI shards.
+    uses: ./.github/workflows/ct-build.yml
+    secrets: inherit
+
   tui-tests:
-    # The job is in tui-tests.yml.
+    # The job is in tui-tests.yml; it takes ct from ct-build.
+    needs: ct-build
     uses: ./.github/workflows/tui-tests.yml
     secrets: inherit
 
@@ -3894,7 +3901,8 @@ jobs:
           if-no-files-found: ignore
 
   gpui-window-captures:
-    # The job is in gpui-window-captures.yml.
+    # The job is in gpui-window-captures.yml; it takes ct from ct-build.
+    needs: ct-build
     uses: ./.github/workflows/gpui-window-captures.yml
     secrets: inherit
 

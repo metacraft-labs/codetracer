@@ -141,27 +141,20 @@ jobs:
           # `../nim-libvterm/src`.
           test-siblings: DemoVideoScript,DemoVideoScript-TermAssert,TermAssert,TermAssertClient,nim-libvterm
 
-      - name: Build ct and replay-server
-        id: ct
+      - name: Restore ct and replay-server from the ct-build job
         # `test_fixture_corpus.nim` (Tier 1) opens real recorded traces through
         # a real `replay-server`, and on a cold `test-logs/tui-fixtures/` cache
-        # records them with `ct`. A missing `replay-server` fails that file by
-        # design and an all-skipped corpus fails it too (see the comment above
-        # `test-tui` in the justfile), so both are built first.
-        #
-        # The trace writer's Nim archive needs the same paths. build-once.sh
-        # derives CODETRACER_TRACE_FORMAT_NIM_EXTRA_PATHS only when
-        # CT_EMULATOR_EXTRA_NIM_PATHS is unset, and it turns off the writer's
-        # `nimble install`, so with only the emulator's variable given here the
-        # writer's `nim c` got no path to `results`. On a persistent runner a
-        # leftover nimble store hid that; on a fresh one the build failed with
-        # "cannot open file: results" (TUI job 127420337626). `libs/nim-result`
-        # stays last, as build-once.sh explains.
-        env:
-          CODETRACER_DB_BACKEND_SKIP_DIRENV: "1"
-          CT_EMULATOR_EXTRA_NIM_PATHS: ${{ github.workspace }}/libs/nim-stew/stew:${{ github.workspace }}/libs/nim-stew:${{ github.workspace }}/libs/nim-result
-          CODETRACER_TRACE_FORMAT_NIM_EXTRA_PATHS: ${{ github.workspace }}/libs/nim-stew/stew:${{ github.workspace }}/libs/nim-stew:${{ github.workspace }}/libs/nim-result
-        run: nix develop .#devShells.x86_64-linux.default --command just build-once
+        # records them with `ct`; a missing `replay-server` fails that file by
+        # design. ct-build.yml runs build-once once per run (this job `needs:`
+        # it), where each of the 8 shards would otherwise rebuild the tree.
+        id: ct
+        uses: actions/download-artifact@v4
+        with:
+          name: ct-build-products
+          path: ${{ runner.temp }}/ct-build
+
+      - name: Unpack them beside the siblings
+        run: tar -xzf "${RUNNER_TEMP}/ct-build/ct-build-products.tar.gz" -C ..
 
       - name: Build the GPUI front-end the cross-front-end suites drive
         # Four files in these lanes hold the terminal to the same answers as

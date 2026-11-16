@@ -17,7 +17,7 @@ for lane in "$root"/src/tests/scenarios/lanes/*.lane.yaml; do
 	name="$(basename "$lane" .lane.yaml)"
 	all="$(sed -n '/^applicable:/,/^[^ ]/{s/^ *- //p}' "$lane" | sort)"
 	count="$(grep -c . <<<"$all" || true)"
-	for n in 2 3 4 8 10; do
+	for n in 2 3 4 8 10 20; do
 		[ "$count" -ge "$n" ] || continue
 		union=""
 		dup=0

@@ -4,6 +4,9 @@
 #
 #   bash ci/test/gpui-window-captures.sh [plat45] [plat47] [plat48] [plat68] [plat69] [plat59] [plat70a] [plat70b] [m71]
 #   just gpui-window-captures                 # all nine
+#   bash ci/test/gpui-window-captures.sh --shim-only    # step 1 only: the
+#                                             # windowed shim and the virtual
+#                                             # pointer (CI's ct-build job)
 #   bash ci/test/gpui-window-captures.sh --build-only   # steps 1-2 only: the
 #                                             # windowed shim and front-end the
 #                                             # GPUI scenario lane opens (the CI
@@ -65,11 +68,21 @@ fail() {
 	exit 1
 }
 
+# CT_GPUI_SHIM_PREBUILT=1: the windowed shim and the virtual pointer are
+# already in place (CI's shards restore them from the ct-build job), so step 1
+# is skipped and only checked.
 build_only=0
-if [ "${1:-}" = --build-only ]; then
+shim_only=0
+case "${1:-}" in
+--build-only)
 	build_only=1
 	shift
-fi
+	;;
+--shim-only)
+	shim_only=1
+	shift
+	;;
+esac
 which=("$@")
 [ "${#which[@]}" -gt 0 ] || which=(plat45 plat47 plat48 plat59 plat68 plat69 plat70a plat70b m71)
 for w in "${which[@]}"; do
@@ -96,13 +109,23 @@ export REPLAY_SERVER_BIN="${REPLAY_SERVER_BIN:-${_ct_replay_default}}"
 
 # ---- 1. the windowed shim and the virtual pointer, in isonim-gpui's shell ---
 target="${GPUI_WINDOWED_TARGET_DIR:-${ISONIM_GPUI}/rust/target/windowed}"
-echo "=== isonim-gpui: the windowed shim (${target}) and build/virtual-pointer"
-(cd "${ISONIM_GPUI}" && nix develop --command bash -c \
-	"cd rust && CARGO_TARGET_DIR='${target}' cargo build --features gpui-backend &&
-	 cd .. && bash scripts/build-virtual-pointer.sh") ||
-	fail "could not build isonim-gpui's windowed shim or its virtual pointer"
 shim="${target}/debug/libgpui_nim_shim.so"
+if [ "${CT_GPUI_SHIM_PREBUILT:-0}" = 1 ]; then
+	echo "=== isonim-gpui: the windowed shim and build/virtual-pointer are prebuilt (CT_GPUI_SHIM_PREBUILT=1)"
+	[ -x "${ISONIM_GPUI}/build/virtual-pointer" ] ||
+		fail "CT_GPUI_SHIM_PREBUILT=1, but there is no ${ISONIM_GPUI}/build/virtual-pointer"
+else
+	echo "=== isonim-gpui: the windowed shim (${target}) and build/virtual-pointer"
+	(cd "${ISONIM_GPUI}" && nix develop --command bash -c \
+		"cd rust && CARGO_TARGET_DIR='${target}' cargo build --features gpui-backend &&
+		 cd .. && bash scripts/build-virtual-pointer.sh") ||
+		fail "could not build isonim-gpui's windowed shim or its virtual pointer"
+fi
 [ -f "${shim}" ] || fail "the windowed shim is not at ${shim}"
+if [ "${shim_only}" = 1 ]; then
+	echo "gpui-window-captures: built ${shim} and build/virtual-pointer (--shim-only)"
+	exit 0
+fi
 
 # ---- 2. this checkout's GPUI front-end, pinned to that shim -----------------
 echo "=== build/bin/codetracer-gpui-window against ${shim}"

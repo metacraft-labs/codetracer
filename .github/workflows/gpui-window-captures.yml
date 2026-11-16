@@ -19,15 +19,17 @@ jobs:
     # generous first bound, to be tightened from the first green runs.
     timeout-minutes: 90
     # The GPUI scenario lane does not fit one 90-minute job (70 runs at about
-    # 6 minutes each, run 43806398582), so it runs as 10 shards. Shard 1 also
+    # 6 minutes each, run 43806398582), so it runs as 20 shards: 10 left each
+    # shard about 8 runs of 5-11 minutes, about 55 minutes before a cold
+    # runner's ~30 of provisioning (run 43935388749, shard 4). Shard 1 also
     # carries the capture steps, and takes a light slice
     # (ci/test/scenario-lane-shard.py; scenario-lane-shard-test.sh holds the
     # shards' union to the lane).
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
-    name: GPUI window captures (headless sway) (${{ matrix.shard }}/10)
+        shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]
+    name: GPUI window captures (headless sway) (${{ matrix.shard }}/20)
     # WHY THIS JOB EXISTS. The GPUI window suites assert records measured off
     # a real window (`src/tests/visual/plat4{5,7,8}-…json`); until this job
     # nothing re-took them, so a record stopped describing the window the
@@ -147,29 +149,33 @@ jobs:
             echo "VK_DRIVER_FILES=${icd}" >> "${GITHUB_ENV}"
           fi
 
-      - name: Build ct and replay-server
+      - name: Restore ct and the windowed shim from the ct-build job
+        # ct-build.yml builds them once per run (this job `needs:` it): ct,
+        # replay-server and the bundles (src/build-debug), and isonim-gpui's
+        # windowed shim and virtual pointer. Each shard used to run
+        # build-once itself, 24-43 minutes on a cold garm VM.
         id: ct
-        # `ct record` records the `calc` and `call_pages` fixtures the
-        # captures open; `replay-server` replays them.
-        env:
-          CODETRACER_DB_BACKEND_SKIP_DIRENV: "1"
-          CT_EMULATOR_EXTRA_NIM_PATHS: ${{ github.workspace }}/libs/nim-stew/stew:${{ github.workspace }}/libs/nim-stew:${{ github.workspace }}/libs/nim-result
-          # The trace writer's Nim build reads `results` only from here; a warm
-          # runner's ~/.nimble hid its absence (run 43859070538, 6 cold shards:
-          # "cannot open file: results").
-          CODETRACER_TRACE_FORMAT_NIM_EXTRA_PATHS: ${{ github.workspace }}/libs/nim-stew/stew:${{ github.workspace }}/libs/nim-stew:${{ github.workspace }}/libs/nim-result
-        run: nix develop .#devShells.x86_64-linux.default --command just build-once
+        uses: actions/download-artifact@v4
+        with:
+          name: ct-build-products
+          path: ${{ runner.temp }}/ct-build
+
+      - name: Unpack them beside the siblings
+        run: tar -xzf "${RUNNER_TEMP}/ct-build/ct-build-products.tar.gz" -C ..
 
       - name: Build the windowed GPUI front-end the scenario lane opens
-        # Shard 1 builds it inside the captures step below; the other shards
-        # take no captures, and without this ran every scenario against a
-        # missing build/bin/codetracer-gpui-window (run 43859070538).
+        # Linked here, against the restored shim, because the front-end pins
+        # the shim's absolute path (-d:gpuiShimPath) and runners differ in
+        # theirs. Shard 1's captures step relinks it too.
         id: gpui-window
-        if: ${{ matrix.shard != 1 }}
+        env:
+          CT_GPUI_SHIM_PREBUILT: "1"
         run: nix develop .#devShells.x86_64-linux.default --command bash ci/test/gpui-window-captures.sh --build-only
 
       - name: Re-take and assert the GPUI window captures
         if: ${{ matrix.shard == 1 }}
+        env:
+          CT_GPUI_SHIM_PREBUILT: "1"
         # isonim-gpui's windowed shim and virtual pointer are built in ITS
         # dev shell (the one that declares the X/Wayland libraries and the
         # compositor tools); the recipe enters it itself.
@@ -183,7 +189,7 @@ jobs:
         # dev shell, which declares their X and Wayland libraries.
         if: ${{ !cancelled() && steps.ct.outcome == 'success' && steps.gpui-window.outcome != 'failure' }}
         env:
-          SCENARIO_LANE_SHARD: ${{ matrix.shard }}/10
+          SCENARIO_LANE_SHARD: ${{ matrix.shard }}/20
         run: |
           (cd ../GuiAssert && nix develop --command bash helpers/linux/build.sh "${{ github.workspace }}/build/gui-assert-helpers")
           nix develop .#devShells.x86_64-linux.default --command bash -c '

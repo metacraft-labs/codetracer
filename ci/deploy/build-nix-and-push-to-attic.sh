@@ -42,3 +42,18 @@ for target in \
 	# shellcheck disable=SC2086 # one store path per line
 	attic push "$ATTIC_CACHE" ${out}
 done
+
+# The flake's inputs too. A cold runner fetched them one by one from GitHub,
+# codeberg and releases.nixos.org: 11 of the 29 minutes its provisioning took
+# (run 43935388749, GPUI shard 2), plus 5 waiting on one nixexprs tarball.
+# A locked input is a store path with a known NAR hash, so a runner whose
+# substituters hold it copies it instead of fetching it.
+echo "== pushing the flake's inputs"
+# The builds above fetched every input they read; flake-input-paths.py names
+# them from flake.lock's NAR hashes (`nix flake archive` refuses the whole
+# flake on one unlocked node).
+mapfile -t inputs < <(python3 ci/deploy/flake-input-paths.py --existing flake.lock)
+echo "== ${#inputs[@]} input source(s) present"
+if [ "${#inputs[@]}" -gt 0 ]; then
+	attic push "$ATTIC_CACHE" "${inputs[@]}"
+fi

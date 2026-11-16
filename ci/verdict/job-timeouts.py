@@ -71,6 +71,7 @@ DEFAULT_WORKFLOWS = [
     ".github/workflows/codetracer.yml",
     ".github/workflows/tui-tests.yml",
     ".github/workflows/gpui-window-captures.yml",
+    ".github/workflows/ct-build.yml",
 ]
 
 # GitHub's own default. A declared bound must be strictly tighter than this,
