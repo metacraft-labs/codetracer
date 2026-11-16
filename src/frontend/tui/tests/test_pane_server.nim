@@ -515,6 +515,114 @@ suite "HSF-E1: the pane server, over a real recording":
     check srv.handle(%*{"jsonrpc": "2.0", "method": "exit"}).len == 0
     check srv.exitRequested
 
+  test "the view.* source switches answer what they did, in both modes":
+    # Editor-Hosted-Front-Ends §E13: the editor owns the source window, so a
+    # view switch either acts through a message the editor realises
+    # (`layout/changed`, `source/show`) or refuses. Measured
+    # 2026-11-16 at codetracer `agents` @ `23084ab21a` (codetracer-pm issue
+    # 2026-11-12, "operation/run reports success for operations it cannot
+    # perform"): `view.source-code` took the whole server down — the runtime
+    # wrote the focus into the terminal's layout binding, which a hosted
+    # session does not have — and `view.low-level-code` answered
+    # `ok: true` with "the layout is not rearrangeable in this session"
+    # while the server placed the pane anyway.
+    let resolution = resolveFixture(FixtureName)
+    if resolution.outcome == foMissingPrereq:
+      echo "  ", missingPrereqMessage(resolution.spec, resolution.detail)
+      fail()
+      return
+    let srv = newPaneServer(dap = false)
+    let project = createTempDir("ct-hsf-views-project-", "")
+    writeFile(project / "viewed_app.py", "print('viewed')\n")
+    srv.projectRoot = project
+    discard srv.request("initialize", %*{
+      "capabilities": {"media": ["text"]}, "keymapOverrides": []})
+    let (opened, _) = srv.request("session/open",
+                                  %*{"trace": resolution.tracePath})
+    let sid = opened{"result", "session"}.getInt
+    check sid > 0
+    for pane in ["calltrace", "state", "eventLog"]:
+      discard srv.request("pane/open", %*{"session": sid, "pane": pane,
+                                          "width": 80, "height": 20})
+    # Positive control: a step answers, and its effect follows the answer.
+    let (stepped, steppedNotes) = srv.request("operation/run",
+      %*{"session": sid, "operation": "debugger.step-over"})
+    check stepped{"result", "ok"}.getBool
+    let positions = steppedNotes.notes("session/position")
+    check positions.len == 1
+    let stopFile = if positions.len == 1:
+                     positions[0]{"params", "file"}.getStr else: ""
+    check stopFile.len > 0
+    let stopLine = if positions.len == 1:
+                     positions[0]{"params", "line"}.getInt else: 0
+    check stopLine > 0
+
+    proc views(srv: PaneServer; sid: int; mode, sourceFile: string;
+               sourceLine: int) =
+      checkpoint("mode: " & mode)
+      # ---- "View Source Code": the editor brings its source forward -------
+      let (src, srcNotes) = srv.request("operation/run",
+        %*{"session": sid, "operation": "view.source-code"})
+      checkpoint("view.source-code answered " & $src & " then " & $srcNotes)
+      check src{"error"}.isNil
+      check src{"result", "ok"}.getBool
+      check src{"result", "detail"}.getStr ==
+        "the source: " & sourceFile.extractFilename
+      let shown = srcNotes.notes("source/show")
+      check shown.len == 1
+      if shown.len == 1:
+        check shown[0]{"params", "file"}.getStr == sourceFile
+        check shown[0]{"params", "line"}.getInt == sourceLine
+      # ---- "Low Level Code": the pane beside the source, said as such -----
+      # The first of the two places the pane (the mode's layout has none:
+      # `layout/changed` carries it, split after the editor); the second
+      # finds it placed and changes nothing. Both answer what the session
+      # did — never the terminal runtime's "not rearrangeable", which a
+      # hosted session's own placement made untrue.
+      for op in ["view.low-level-code", "view.disassembly"]:
+        let (low, lowNotes) = srv.request("operation/run",
+          %*{"session": sid, "operation": op})
+        checkpoint(op & " answered " & $low & " then " & $lowNotes)
+        check low{"error"}.isNil
+        check low{"result", "ok"}.getBool
+        check low{"result", "detail"}.getStr ==
+          LowLevelCodeTitle & " beside the source"
+        let changed = lowNotes.notes("layout/changed")
+        if op == "view.low-level-code":
+          check changed.len == 1
+          if changed.len == 1:
+            check changed[0]{"params", "mode"}.getStr == mode
+            let region = findPane(changed[0]{"params", "layout"},
+                                  "lowLevelCode")
+            check not region.isNil
+        else:
+          check changed.len == 0
+
+    srv.views(sid, "debug", stopFile, stopLine)
+    let (_, toEdit) = srv.request("operation/run",
+      %*{"session": sid, "operation": "session.toggle-product-mode"})
+    check toEdit.notes("layout/changed").len == 1
+    # Edit mode shows the project's file: the editor's caret is in it, at
+    # its start.
+    discard srv.request("operation/run", %*{"session": sid,
+      "operation": "file-tree.open", "args": {"path": "viewed_app.py"}})
+    srv.views(sid, "edit", project / "viewed_app.py", 1)
+
+    # ---- A session that shows no source refuses "View Source Code" --------
+    # A project session with no file opened: nothing to bring forward.
+    let empty = createTempDir("ct-hsf-views-empty-", "")
+    let (bare, _) = srv.request("session/open", %*{"project": empty})
+    let bareId = bare{"result", "session"}.getInt
+    check bareId > 0
+    let (refused, refusedNotes) = srv.request("operation/run",
+      %*{"session": bareId, "operation": "view.source-code"})
+    checkpoint("bare view.source-code answered " & $refused)
+    check refused{"error"}.isNil
+    check not refused{"result", "ok"}.getBool
+    check "no source file" in refused{"result", "detail"}.getStr
+    check refusedNotes.notes("source/show").len == 0
+    discard srv.request("shutdown")
+
   test "HSF-E5: edit-mode services — refusals, messages, a test recorded from Test Results":
     # Editor-Hosted-Front-Ends §E9. Until 2026-11-12 the server wired none of
     # the services the terminal's window owns, and `operation/run` erased the

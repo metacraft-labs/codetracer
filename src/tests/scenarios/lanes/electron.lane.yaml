@@ -11,6 +11,10 @@ retention: { runs: 5, failure-days: 7 }
 # Electron on a loaded host (1-minute load above 100) can take longer than
 # the default 5 s to stop changing after an input.
 settle-timeout: 15000
+# A stage that records a compiled program builds and records it on a cold
+# fixture cache: the Crystal sudoku solver took more than the default 120 s
+# at load 44-83, and the stage was stopped mid-recording.
+stage-timeout: 300000
 applicable:
   - ../tracing/trace-macro-at-caret.yaml
   - ../tracing/trace-macro-rebound.yaml

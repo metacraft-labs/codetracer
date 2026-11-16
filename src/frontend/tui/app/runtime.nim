@@ -9661,7 +9661,12 @@ proc buildOperationTables(rt: TuiRuntime) =
       else: AlwaysEnabled)
   session.bindOp("view.source-code", act do:
     discard rt.focus.focusPaneKind(paneEditor)
-    rt.app.layoutBinding.focus = paneEditor
+    # The layout binding is the terminal's own arrangement; a session hosted
+    # by an editor has none (the editor owns the source window, and the pane
+    # server answers this operation with `source/show`). Writing through it
+    # unguarded took the pane server down (codetracer-pm issue 2026-11-12).
+    if rt.layoutBindingEnabled():
+      rt.app.layoutBinding.focus = paneEditor
     rt.note("the source"))
   # PLAT-55 (EMT-D22): `F8` / `Shift+F8` in Edit mode, `Ctrl+Alt+N` /
   # `Ctrl+Alt+P` — the desktop's `aGotoNextError` / `aGotoPreviousError`.

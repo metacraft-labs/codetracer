@@ -62,6 +62,7 @@ import ../app/views/inline_annotations
 import ../app/views/variables
 import ../app/views/shell
 from ../app/views/low_level_code_pane import LowLevelAct, LowLevelActResult   # HSF-E11
+from ../../viewmodel/viewmodels/low_level_code_vm import LowLevelCodeTitle
 import ./native_host
 import ./tui_session
 import ./visual_replay_host
@@ -889,6 +890,24 @@ proc editCaret(s: ServerSession): tuple[file: string; line, column: int] =
     column = (if at < 0: text.len else: at) + 1
   (file: file, line: line, column: column)
 
+proc shownSource(s: ServerSession): tuple[file: string; line, column: int] =
+  ## The source the session is at, as the protocol positions it: Edit mode's
+  ## caret; otherwise the file the session shows (`TuiApp.viewedFile`, a
+  ## file opened from a pane, no position in it), and failing that the
+  ## debugger's stop. Empty when the session has none of them.
+  result = s.editCaret()
+  if result.file.len > 0:
+    return
+  let t = if s.tui.isNil: nil else: s.tui.session
+  let stopFile = if t.isNil: "" else: t.getCurrentFile()
+  let viewed = s.app.viewedFile
+  if viewed.len > 0 and viewed != stopFile:
+    return (file: viewed, line: 0, column: 0)
+  if stopFile.len > 0:
+    let col = t.getCurrentColumn()
+    return (file: stopFile, line: t.getCurrentLine(),
+            column: (if col.isSome: col.get else: 1))
+
 proc runOperation(srv: PaneServer; s: ServerSession; params: JsonNode): JsonNode =
   ## `operation/run`: a catalogued operation, or a pane operation from a
   ## hotspot, applied to the session as a key or a click is.
@@ -978,7 +997,28 @@ proc runOperation(srv: PaneServer; s: ServerSession; params: JsonNode): JsonNode
      name != "file-tree.open":
     s.showRequest = caretAfter.file
     s.showAt = (line: caretAfter.line, column: caretAfter.column)
-  let detail = if outcome.detail.len > 0: outcome.detail else: s.app.notification
+  var detail = if outcome.detail.len > 0: outcome.detail else: s.app.notification
+  case name
+  of "view.source-code":
+    # The terminal focuses its own source pane; here the source window is
+    # the editor's (§E7), so the switch is `source/show` of the source the
+    # session is at — Edit mode's caret, else the file the session shows,
+    # else the stop. With none there is nothing to bring forward: refused.
+    let at = s.shownSource()
+    if at.file.len == 0:
+      return %*{"ok": false, "operation": text,
+                "detail": "View Source Code: this session shows no source file"}
+    s.showRequest = at.file
+    s.showAt = (line: at.line, column: at.column)
+    detail = "the source: " & at.file.extractFilename
+  of "view.low-level-code", "view.disassembly":
+    # The runtime's own placement needs the terminal's layout binding, so in
+    # a hosted session it says "the layout is not rearrangeable" — while the
+    # server placed the pane above. The answer is what the session did.
+    if s.currentLayout().contains(paneLowLevelCode):
+      detail = LowLevelCodeTitle & " beside the source"
+  else:
+    discard
   %*{"ok": true, "operation": text, "detail": detail}
 
 proc handleRequest(srv: PaneServer; meth: string; params: JsonNode;

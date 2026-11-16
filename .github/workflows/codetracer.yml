@@ -1336,7 +1336,7 @@ jobs:
           gh-token: ${{ steps.ci_token.outputs.token }}
           env-ps1-path: ./env.ps1
           siblings: |
-            codetracer-native-recorder=293d7fe6c9847052751c1d92678b8dec128f03f7
+            codetracer-native-recorder=b1ae4b78652f3f5f2e51a41e1ef61015a26f8a1e
             # codetracer-trace-format{,-nim} BY COMMIT, not `=dev`: the two halves of
             # the FFI pair are `/agents` inputs in flake.nix, and trace-format's `dev`
             # tip (051a298, 2026-09-30) predates the FileTable / PathTableKind API that
@@ -1861,7 +1861,7 @@ jobs:
             # rule: .github/actions/setup-db-backend-siblings/action.yml.
             codetracer-trace-format=0218896c99412f1f23e6f0c5ea4fd062f9258118
             codetracer-trace-format-nim=fae1af40833e3f7a206ae11f68c52e8c826fbe4b
-            codetracer-native-recorder=293d7fe6c9847052751c1d92678b8dec128f03f7
+            codetracer-native-recorder=b1ae4b78652f3f5f2e51a41e1ef61015a26f8a1e
 
       # MEASURE THE FETCH ENVIRONMENT BEFORE NIX TOUCHES THE NETWORK, and
       # before the FIRST `nix develop` in this job rather than before the
@@ -3857,6 +3857,10 @@ jobs:
         with:
           env-flavor: nix
           gh-token: ${{ steps.ci_token.outputs.token }}
+          substituters: ${{ vars.ATTIC_SUBSTITUTER }}
+          trusted-public-keys: ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
+          attic-token: ${{ secrets.ATTIC_TOKEN }}
+          attic-cache: ${{ vars.ATTIC_CACHE }}
           extra-siblings: |
             codetracer-launcher
 
@@ -4211,6 +4215,10 @@ jobs:
         with:
           env-flavor: nix
           gh-token: ${{ steps.ci_token.outputs.token }}
+          substituters: ${{ vars.ATTIC_SUBSTITUTER }}
+          trusted-public-keys: ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
+          attic-token: ${{ secrets.ATTIC_TOKEN }}
+          attic-cache: ${{ vars.ATTIC_CACHE }}
 
       - name: Provision dependency siblings from repro.lock
         uses: ./.github/actions/provision-repro-lock-siblings
@@ -5001,7 +5009,7 @@ jobs:
             # rule: .github/actions/setup-db-backend-siblings/action.yml.
             codetracer-trace-format=0218896c99412f1f23e6f0c5ea4fd062f9258118
             codetracer-trace-format-nim=fae1af40833e3f7a206ae11f68c52e8c826fbe4b
-            codetracer-native-recorder=293d7fe6c9847052751c1d92678b8dec128f03f7
+            codetracer-native-recorder=b1ae4b78652f3f5f2e51a41e1ef61015a26f8a1e
             # Required by scripts/require-siblings.sh, which build-once.sh runs first.
             # BARE: this job only runs on codetracer, so clone-siblings resolves
             # them from this commit's own committed repro.lock, which pins all of them.
@@ -6280,7 +6288,7 @@ jobs:
             # rule: .github/actions/setup-db-backend-siblings/action.yml.
             codetracer-trace-format=0218896c99412f1f23e6f0c5ea4fd062f9258118
             codetracer-trace-format-nim=fae1af40833e3f7a206ae11f68c52e8c826fbe4b
-            codetracer-native-recorder=293d7fe6c9847052751c1d92678b8dec128f03f7
+            codetracer-native-recorder=b1ae4b78652f3f5f2e51a41e1ef61015a26f8a1e
             # codetracer-native-backend and codetracer-visual-replay BY COMMIT as well: both are
             # `/agents` inputs in flake.nix (7ab073a22), so `=dev` cloned a different tree than the
             # Nix lane builds. These are the revs flake.lock and repro.lock lock; refresh them with
@@ -7365,7 +7373,7 @@ jobs:
             # the lock, as for the trace-format pair above.
             codetracer-visual-replay=8f8ca97203e7f79af684ff47ef6b97ecf302e810
             codetracer-native-backend=b0947a4debf4a2d6fc038b14d1844cd32ca89ec8
-            codetracer-native-recorder=293d7fe6c9847052751c1d92678b8dec128f03f7
+            codetracer-native-recorder=b1ae4b78652f3f5f2e51a41e1ef61015a26f8a1e
             codetracer-native-test-programs=dev
             codetracer-visual-replay-fixtures=dev
             runquota=dev
@@ -7687,7 +7695,7 @@ jobs:
             nim-shm-queue=84fd76b174d4868e703ba3d599668ee340e0b6ea
             nim-shm-gset=7bc81ad2440860a8a9254eb2757c585df9652438
             nim-stackable-hooks=dev
-            codetracer-native-recorder=293d7fe6c9847052751c1d92678b8dec128f03f7
+            codetracer-native-recorder=b1ae4b78652f3f5f2e51a41e1ef61015a26f8a1e
             codetracer-js-recorder=dev
             codetracer-ruby-recorder=dev
             # codetracer-native-backend and codetracer-visual-replay BY COMMIT as well: both are
