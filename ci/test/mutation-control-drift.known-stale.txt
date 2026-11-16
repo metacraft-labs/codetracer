@@ -352,3 +352,6 @@ src/frontend/viewmodel/tests/unit/plat68-keymaps-mutation-control.sha256	src/fro
 # the grade. Re-grade the arms whose needles sit in them.
 src/frontend/tui/tests/plat58-requests-mutation-control.sha256	src/frontend/tui/app/runtime.nim	4a29788490e9b99d5f52461181399c62601fc3eca6b582f8efbd715224ac544d	88ea1de80a3f6ed77a8513759b94ec22f7a60e6460d52cfc0186545ef9dc79d3
 src/frontend/tui/tests/plat58-requests-mutation-control.sha256	src/frontend/tui/host/tui_session.nim	0c65cb8a6581ca9f73adda27a71e6589473c2573b61ce8a51eac495d0e0b1efe	4059f0d09cbcb6d8ff47bba459e710d5f2ad2e4f556aaa4c87694e86209103df
+src/frontend/tui/tests/plat61-shell-mutation-control.sha256	src/ct/db_backend_record.nim	a64446b2acf2dc15bad6f4a77da0132753283c5af6ecd390b4c8650c6966114c	001fa9cb53c251ec472b956f1e5f2c27828206e11e3b08b44acc13c2b7b605d5
+src/frontend/tui/tests/plat70e-origin-mutation-control.sha256	ci/lib/run-nim-test-lane.sh	da6b4e46c486f1a7762fd79b05a42a15dd1b862ab4599ffa22c1bbc166d63783	d1a2a215a9f74c50d465925aaa14ad2fbc674db88c4dfa5e4a2e24ea222ef97e
+src/frontend/viewmodel/tests/unit/plat17-wasm-mutation-control.sha256	ci/lib/run-nim-test-lane.sh	da6b4e46c486f1a7762fd79b05a42a15dd1b862ab4599ffa22c1bbc166d63783	d1a2a215a9f74c50d465925aaa14ad2fbc674db88c4dfa5e4a2e24ea222ef97e
