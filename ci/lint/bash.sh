@@ -321,6 +321,11 @@ lint_step "contract suite: the sibling Cargo.lock guard runs on agents" \
 lint_step "workflow files stay under GitHub's size limit" \
 	bash ci/test/workflow-file-size-test.sh
 
+# A CI job runs a scenario lane in shards (SCENARIO_LANE_SHARD); the shards
+# must cover the lane exactly, or a scenario silently stops running.
+lint_step "scenario lane shards cover their lane exactly" \
+	bash ci/test/scenario-lane-shard-test.sh
+
 # Not covered by the `ci/**/*.sh` glob above, and it runs in the deploy lane on
 # every push to `cloud`, where a shell defect would surface as a deploy failure
 # rather than as a lint one.

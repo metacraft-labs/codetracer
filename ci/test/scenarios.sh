@@ -5,6 +5,7 @@
 #   ci/test/scenarios.sh build [part…]      the runner and the bindings' programs
 #   ci/test/scenarios.sh lint               the scenario linter over every scenario
 #   ci/test/scenarios.sh lane <flavour>     one lane: terminal | gpui | electron
+#                                           (SCENARIO_LANE_SHARD=i/n: one shard of it)
 #   ci/test/scenarios.sh run <flavour> <scenario.yaml> [dvs run args…]
 #   ci/test/scenarios.sh binding-test       the bindings' own tests (bindings/*/*.test.ts)
 #
@@ -160,7 +161,18 @@ lane)
 	# product's large panes in bounded time fails here, by name, rather than as
 	# scenarios timing out.
 	if [ "${flavour}" = electron ]; then "$0" binding-test || exit 1; fi
-	"${runner}" lane "${S}/lanes/${flavour}.lane.yaml" --build "${build_dir}"
+	lane_file="${S}/lanes/${flavour}.lane.yaml"
+	# SCENARIO_LANE_SHARD=i/n runs one shard of the lane: every n-th entry of
+	# its `applicable:` list (ci/test/scenario-lane-shard.py), so a CI matrix
+	# can split a lane that does not fit one job's time limit. The lane file
+	# stays the one list; scenario-lane-shard-test.sh holds the shards to it.
+	if [ -n "${SCENARIO_LANE_SHARD:-}" ]; then
+		lane_file="$(python3 ci/test/scenario-lane-shard.py "${lane_file}" "${SCENARIO_LANE_SHARD}")"
+		trap 'rm -f "${lane_file}"' EXIT
+		echo "scenarios: shard ${SCENARIO_LANE_SHARD} of the ${flavour} lane:"
+		sed -n '/^applicable:/,/^[^ ]/{s/^ *- /  /p}' "${lane_file}"
+	fi
+	"${runner}" lane "${lane_file}" --build "${build_dir}"
 	;;
 run)
 	flavour="${2:?usage: scenarios.sh run <flavour> <scenario.yaml> [args]}"

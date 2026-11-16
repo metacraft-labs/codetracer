@@ -4127,7 +4127,16 @@ jobs:
     # and three captures of 2-5 minutes each on this host class. 90m is a
     # generous first bound, to be tightened from the first green runs.
     timeout-minutes: 90
-    name: GPUI window captures (headless sway)
+    # The GPUI scenario lane does not fit one 90-minute job (70 runs at about
+    # 6 minutes each, run 43806398582), so it runs as 10 shards. Shard 1 also
+    # carries the capture steps, and takes a light slice
+    # (ci/test/scenario-lane-shard.py; scenario-lane-shard-test.sh holds the
+    # shards' union to the lane).
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+    name: GPUI window captures (headless sway) (${{ matrix.shard }}/10)
     # WHY THIS JOB EXISTS. The GPUI window suites assert records measured off
     # a real window (`src/tests/visual/plat4{5,7,8}-…json`); until this job
     # nothing re-took them, so a record stopped describing the window the
@@ -4238,6 +4247,7 @@ jobs:
         run: nix develop .#devShells.x86_64-linux.default --command just build-once
 
       - name: Re-take and assert the GPUI window captures
+        if: ${{ matrix.shard == 1 }}
         # isonim-gpui's windowed shim and virtual pointer are built in ITS
         # dev shell (the one that declares the X/Wayland libraries and the
         # compositor tools); the recipe enters it itself.
@@ -4250,6 +4260,8 @@ jobs:
         # GuiAssert's capture and input helpers are built in GuiAssert's own
         # dev shell, which declares their X and Wayland libraries.
         if: ${{ !cancelled() }}
+        env:
+          SCENARIO_LANE_SHARD: ${{ matrix.shard }}/10
         run: |
           (cd ../GuiAssert && nix develop --command bash helpers/linux/build.sh "${{ github.workspace }}/build/gui-assert-helpers")
           nix develop .#devShells.x86_64-linux.default --command bash -c '
@@ -4257,14 +4269,14 @@ jobs:
             export GUI_ASSERT_HELPER_DIR="$PWD/build/gui-assert-helpers"
             just scenario-build dvs stage gpui
             bash ci/test/scenarios.sh lane gpui
-            bash ci/test/scenario-broken-run.sh gpui'
+            if [ "${SCENARIO_LANE_SHARD%%/*}" = 1 ]; then bash ci/test/scenario-broken-run.sh gpui; fi'
 
       - name: Upload the failed scenario runs (GPUI)
         if: ${{ failure() }}
         uses: metacraft-labs/DemoVideoScript/.github/actions/upload-failed-runs@028ea4f6704fc5377e2c6b7021a9e048c15c9f92
         with:
           build-dir: build
-          name: scenario-runs-gpui
+          name: scenario-runs-gpui-${{ matrix.shard }}
 
       - name: PLAT-35's GPUI arm as a real window, one per parity scenario
         # Linux has no headless GPUI renderer, so PLAT-35's GPUI frames on
@@ -4275,7 +4287,7 @@ jobs:
         # step above, which builds the same windowed shim and records the
         # `calc` trace it opens; `!cancelled()` so a red capture above does
         # not hide whether this one works.
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && matrix.shard == 1 }}
         run: nix develop .#devShells.x86_64-linux.default --command just plat35-capture-gpui-window
 
       - name: CTF-P1b's Agent Harbor stories as real windows, against the web layout
@@ -4288,7 +4300,7 @@ jobs:
         # CTF-P1c: the same for each playback story at each named moment of
         # its scenario (`build/ctf-p1c/gpui/`), against the committed
         # `src/tests/visual/agent-harbor-web-regions-at-moments.json`.
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && matrix.shard == 1 }}
         run: nix develop .#devShells.x86_64-linux.default --command just ctf-p1b-gpui-captures
 
       - name: The terminal front-end in real terminal emulators
@@ -4303,11 +4315,11 @@ jobs:
         # emulator this runner cannot provide or start is a counted
         # MISSING-PREREQ skip, never a failure; `!cancelled()` so a red GPUI
         # capture does not hide it.
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && matrix.shard == 1 }}
         run: nix develop .#devShells.x86_64-linux.default --command just test-tui-real-emulators
 
       - name: Upload the frames
-        if: failure()
+        if: ${{ failure() && matrix.shard == 1 }}
         uses: actions/upload-artifact@v4
         with:
           name: gpui-window-captures
