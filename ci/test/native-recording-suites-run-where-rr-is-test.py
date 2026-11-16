@@ -78,6 +78,8 @@ except ImportError:  # pragma: no cover
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
 WORKFLOW = REPO_ROOT / ".github" / "workflows" / "codetracer.yml"
+sys.path.insert(0, str(REPO_ROOT / "ci" / "lib"))
+import codetracer_workflow  # noqa: E402  (codetracer.yml with its called workflows inlined)
 
 # The suite the issue names. The positive control requires the detector to find
 # it, so a detector that stopped seeing it cannot pass vacuously.
@@ -258,7 +260,7 @@ def bad(msg, *detail):
 
 def main():
     recipes = parse_justfile(REPO_ROOT / "justfile")
-    workflow = yaml.safe_load(WORKFLOW.read_text())
+    workflow = codetracer_workflow.load(WORKFLOW)
 
     print("=== native-recording-suites-run-where-rr-is — does every job that records under rr have rr and ct-native-replay? ===")
     print()

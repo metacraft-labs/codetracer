@@ -70,6 +70,9 @@ except ImportError:  # pragma: no cover
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
 WORKFLOW = REPO_ROOT / ".github" / "workflows" / "codetracer.yml"
+sys.path.insert(0, str(REPO_ROOT / "ci" / "lib"))
+import codetracer_workflow  # noqa: E402  (codetracer.yml with its called workflows inlined)
+
 LAUNCHER_REPO = "codetracer-launcher"
 
 # The two suites the issue names. The positive control requires the detector to
@@ -254,7 +257,8 @@ def bad(msg, *detail):
 
 def main():
     recipes = parse_justfile(REPO_ROOT / "justfile")
-    workflow = yaml.safe_load(WORKFLOW.read_text())
+    # tui-tests lives in tui-tests.yml, called from codetracer.yml: inline it.
+    workflow = codetracer_workflow.load(WORKFLOW)
 
     print("=== launcher-suites-build-launcher — does every job that runs the real launcher build it? ===")
     print()

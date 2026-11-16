@@ -8,7 +8,8 @@
 # tests with `spawnSync .../bin/ct ENOENT`: one failure reported twice, the
 # second time as something it was not.
 #
-# The rule, per job of codetracer.yml: once a step with `id: ct` or
+# The rule, per job of every workflow (codetracer.yml and the reusable
+# workflows it calls, tui-tests.yml and gpui-window-captures.yml): once a step with `id: ct` or
 # `id: ct-darwin` (the job's build of ct) has been seen, every later step whose
 # `if:` lets it run after a failure (`!cancelled()` or `always()`, without
 # `failure()`) must name `steps.ct` / `steps.ct-darwin` in that `if:`. Uploads,
@@ -20,7 +21,7 @@
 # fail on whatever the workflow currently contains.
 set -euo pipefail
 cd "$(dirname "$0")/../.."
-workflow=.github/workflows/codetracer.yml
+workflows=(.github/workflows/*.yml)
 
 check() {
 	python3 - "$1" <<'EOF'
@@ -64,20 +65,28 @@ EOF
 
 failures=0
 echo "== a step that needs ct and runs past a failure waits on the ct build"
-if out="$(check "$workflow")"; then
-	echo "  ok   every such step in codetracer.yml names its job's ct build"
-else
-	echo "  FAIL steps that can run without a ct:"
-	echo "$out"
-	failures=$((failures + 1))
-fi
+for workflow in "${workflows[@]}"; do
+	if out="$(check "$workflow")"; then
+		echo "  ok   every such step in $(basename "$workflow") names its job's ct build"
+	else
+		echo "  FAIL steps in $(basename "$workflow") that can run without a ct:"
+		echo "$out"
+		failures=$((failures + 1))
+	fi
+done
 
-gated="$(grep -c "steps\.ct\(-darwin\)\?\.outcome == 'success'" "$workflow" || true)"
+gated=0
+named=0
 tmp="$(mktemp)"
 trap 'rm -f "$tmp"' EXIT
-sed -e "s/ && (steps\.ct\.outcome == 'success' || steps\.ct-darwin\.outcome == 'success')//" \
-	-e "s/ && steps\.ct\.outcome == 'success'//" "$workflow" >"$tmp"
-named="$(check "$tmp" | grep -c ': ' || true)"
+for workflow in "${workflows[@]}"; do
+	g="$(grep -c "steps\.ct\(-darwin\)\?\.outcome == 'success'" "$workflow" || true)"
+	gated=$((gated + g))
+	sed -e "s/ && (steps\.ct\.outcome == 'success' || steps\.ct-darwin\.outcome == 'success')//" \
+		-e "s/ && steps\.ct\.outcome == 'success'//" "$workflow" >"$tmp"
+	n="$(check "$tmp" | grep -c ': ' || true)"
+	named=$((named + n))
+done
 if [ "$gated" -gt 0 ] && [ "$named" -eq "$gated" ]; then
 	echo "  ok   with the gate stripped, the checker names all $gated steps it lost"
 else

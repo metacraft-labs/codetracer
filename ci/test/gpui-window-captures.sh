@@ -4,6 +4,10 @@
 #
 #   bash ci/test/gpui-window-captures.sh [plat45] [plat47] [plat48] [plat68] [plat69] [plat59] [plat70a] [plat70b] [m71]
 #   just gpui-window-captures                 # all nine
+#   bash ci/test/gpui-window-captures.sh --build-only   # steps 1-2 only: the
+#                                             # windowed shim and front-end the
+#                                             # GPUI scenario lane opens (the CI
+#                                             # shards that take no captures)
 #
 # The GPUI window suites (`test_plat45_three_media.nim`,
 # `test_plat47_gpui_window.nim`, `test_plat48_gpui_window.nim`,
@@ -61,6 +65,11 @@ fail() {
 	exit 1
 }
 
+build_only=0
+if [ "${1:-}" = --build-only ]; then
+	build_only=1
+	shift
+fi
 which=("$@")
 [ "${#which[@]}" -gt 0 ] || which=(plat45 plat47 plat48 plat59 plat68 plat69 plat70a plat70b m71)
 for w in "${which[@]}"; do
@@ -104,6 +113,10 @@ nim c --hints:off --warnings:off --mm:orc -d:release \
 	"-d:gpuiShimPath=${shim}" \
 	-o:build/bin/codetracer-gpui-window src/frontend/gpui/main.nim ||
 	fail "could not build the windowed codetracer-gpui"
+if [ "${build_only}" = 1 ]; then
+	echo "gpui-window-captures: built build/bin/codetracer-gpui-window (--build-only)"
+	exit 0
+fi
 
 # ---- 3. the recordings -------------------------------------------------------
 #

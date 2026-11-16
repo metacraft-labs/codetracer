@@ -446,7 +446,7 @@ jobs:
             # flake.lock and repro.lock pin (they had moved past this list).
             isonim=eca38028cc652593e66b2d12ff82265711600c94
             isonim-tui=8e43ce06f7f078530c7a8585c210ad7648fa0051
-            isonim-gpui=7e34756b9ba1fb4a714a2c4130beeb371ac7f935
+            isonim-gpui=cf6af690c264e9945e89b49d59dd5d51f0ec28d9
             nim-everywhere=2f5b67a5dafd96ca5d57c9270fc3c2da2c5f2b0b
             nim-termctl=63560ed41ce0fea563431a44db9e9d852cd703dd
             nim-pty=6ffb8d788e8a740ca78ec29c7a3a489a13818bcb

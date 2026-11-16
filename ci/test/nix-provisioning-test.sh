@@ -271,7 +271,13 @@ done
 # `scripts/isonim-editor-codetracer.sh --smoke` (codetracer-pm issues/2026-11-04-
 # shell-gate-coverage-red-on-two-new-scripts.md). A new job, provisioning Nix
 # through setup-db-backend-siblings, env-flavor nix, as `tui-tests` does.
-readonly EXPECTED_NIX_JOBS=42
+#
+# 42 -> 43: cache-push.yml's `push-to-attic`, the build-only job that pushes the
+# CI dev shell's closure on every push to dev/agents (replacing codetracer.yml's
+# never-run push-to-attic). It installs Nix through setup-nix before `nix`.
+# tui-tests and gpui-window-captures moved to tui-tests.yml and
+# gpui-window-captures.yml the same day; the count does not change for that.
+readonly EXPECTED_NIX_JOBS=43
 
 if [ "${#nix_jobs[@]}" -eq "$EXPECTED_NIX_JOBS" ]; then
 	ok "the scanner still classifies the nix-using jobs (${#nix_jobs[@]})"
