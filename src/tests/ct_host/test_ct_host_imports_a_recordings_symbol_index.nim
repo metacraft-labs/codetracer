@@ -54,7 +54,7 @@ proc importedId(output: string): string =
   if at < 0: return ""
   output[at + marker.len .. ^1].splitLines()[0].strip()
 
-suite "ct host imports a recording's symbol index":
+suite "ct host imports a recording's symbol index and macro source maps":
 
   test "the recording store's copy holds symbols.json, byte for byte":
     let rec = nativeRecording()
@@ -72,6 +72,13 @@ suite "ct host imports a recording's symbol index":
       copyDir(rec.tracePath, source)
       const index = """[{"name":"main","path":"/src/main.c","line":3,"kind":"function"}]"""
       writeFile(source / "symbols.json", index)
+      # …and the Nim compiler's macro source map `db_backend_record` copies
+      # to the recording's root, which the replay loads from the folder it
+      # is given: without it Toggle Macro Expansion answers nothing (codetracer-pm
+      # issue 2026-11-15 "The desktop's Toggle Macro Expansion draws nothing on
+      # an rr Nim recording").
+      const macroMap = """{"schema":2,"expansions":[],"expandedEntries":{}}"""
+      writeFile(source / "macro_sourcemap_main.json", macroMap)
       var env = newStringTable(modeCaseSensitive)
       for key, value in envPairs():
         env[key] = value
@@ -109,3 +116,6 @@ suite "ct host imports a recording's symbol index":
       check fileExists(imported / "symbols.json")
       if fileExists(imported / "symbols.json"):
         check readFile(imported / "symbols.json") == index
+      check fileExists(imported / "macro_sourcemap_main.json")
+      if fileExists(imported / "macro_sourcemap_main.json"):
+        check readFile(imported / "macro_sourcemap_main.json") == macroMap

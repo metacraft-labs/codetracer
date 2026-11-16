@@ -496,6 +496,24 @@ proc importTrace*(
           copyFile(source, outputFolder / RECORDING_SYMBOLS_FILE)
         break
 
+  # The Nim compiler's macro source maps (`macro_sourcemap_*.json`, which
+  # `db_backend_record.copyMacroSourcemaps` puts at the recording's root) are
+  # part of the recording too: the replay loads them from the trace folder it
+  # is given (`macro_sourcemap.rs::load_macro_sourcemaps`), and an imported
+  # copy without them answered every Toggle Macro Expansion with nothing.
+  if outputFolder != recordingSourceFolder:
+    for folder in [recordingSourceFolder, traceFolder]:
+      var copied = false
+      for (kind, source) in walkDir(folder):
+        let name = source.extractFilename
+        if kind == pcFile and name.startsWith("macro_sourcemap") and
+            name.endsWith(".json"):
+          if not fileExists(outputFolder / name):
+            copyFile(source, outputFolder / name)
+          copied = true
+      if copied:
+        break
+
   var sourceFoldersInitialSet = initHashSet[string]()
   for path in paths:
     if path.len > 0 and isAbsolutePath(path):
