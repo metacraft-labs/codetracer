@@ -3544,6 +3544,83 @@ impl ThreadPoison {
     }
 }
 
+/// The `flowMode` of a `ct/load-flow` request, or `None` for any other
+/// request and for a `ct/load-flow` whose arguments do not parse (that one is
+/// left to its handler, which refuses it by name).
+fn load_flow_mode(request: &dap::Request) -> Option<task::FlowMode> {
+    if request.command != "ct/load-flow" {
+        return None;
+    }
+    request
+        .load_args::<CtLoadFlowArguments>()
+        .ok()
+        .map(|args| args.flow_mode)
+}
+
+/// The next request a task thread should run, blocking until one arrives.
+///
+/// Requests that arrived while the thread was busy are moved from `receiver`
+/// into `backlog` first, so the thread sees everything queued behind the
+/// request it just finished. A `ct/load-flow` that a newer `ct/load-flow` of
+/// the same `flowMode` follows in that queue is not run: it is answered
+/// `success: false`, naming the request that superseded it, and no
+/// `ct/updated-flow` is sent for it (CodeTracer-DAP-Extensions.md,
+/// `ct/load-flow`, "Superseded requests").
+///
+/// Why: a client asks for the flow of every stop, and one flow can take
+/// seconds on a native recording, so with one `flow` thread serving them in
+/// order the flow of the stop the user is looking at waited behind the flows
+/// of every stop it had already left (codetracer-pm issue
+/// `2026-11-15-mcr-rust-sudoku-load-flow-takes-19-to-48-seconds`). Only
+/// requests that have not started are superseded; a flow already running
+/// finishes. The order of every other request is kept, and a `diff` flow is
+/// never superseded by a `call` flow or the other way round: the two answer
+/// different questions.
+///
+/// Returns `Err` when the channel is closed and nothing is left to run.
+fn next_task_request(
+    receiver: &Receiver<dap::Request>,
+    backlog: &mut std::collections::VecDeque<dap::Request>,
+    sender: &Sender<DapMessage>,
+) -> Result<dap::Request, mpsc::RecvError> {
+    loop {
+        backlog.extend(receiver.try_iter());
+        let request = match backlog.pop_front() {
+            Some(request) => request,
+            None => {
+                // Nothing queued: wait for the next request, and look again
+                // with whatever arrived with it.
+                backlog.push_back(receiver.recv()?);
+                continue;
+            }
+        };
+        let newer = load_flow_mode(&request).and_then(|mode| {
+            backlog
+                .iter()
+                .rev()
+                .find(|queued| load_flow_mode(queued) == Some(mode))
+                .map(|queued| queued.base.seq)
+        });
+        match newer {
+            Some(newer_seq) => {
+                info!(
+                    "ct/load-flow {} superseded by queued ct/load-flow {newer_seq}",
+                    request.base.seq
+                );
+                send_failed_response(
+                    sender,
+                    &request,
+                    format!(
+                        "superseded: a newer ct/load-flow (request {newer_seq}) for the same flow mode \
+                         arrived before this one started"
+                    ),
+                );
+            }
+            None => return Ok(request),
+        }
+    }
+}
+
 /// Serve the requests routed to one task thread (`name`) against the session
 /// it loads on `launch`. `announces_session` is true for the one thread whose
 /// session answers the client — see [`announce_session_load`].
@@ -3684,10 +3761,13 @@ fn task_thread(
     // Set when a handler panics; while set, this thread refuses every request
     // but `launch` (see [`run_answering_panics`]).
     let mut poison: Option<ThreadPoison> = None;
+    // Requests that arrived while this thread was busy; see
+    // [`next_task_request`].
+    let mut backlog = std::collections::VecDeque::new();
 
     loop {
         info!("waiting for new message from DAP server");
-        let request = from_thread_receiver.recv().map_err(|e| {
+        let request = next_task_request(&from_thread_receiver, &mut backlog, &sender).map_err(|e| {
             error!("{name} thread recv error: {e:?}");
             format!("{name} thread recv error: {e:?}")
         })?;
@@ -5547,6 +5627,136 @@ mod tests {
             assert!(refusal.contains("stackTrace"), "{refusal}");
             assert!(refusal.contains("scopes (seq 6) panicked: boom"), "{refusal}");
             assert!(refusal.contains("launch"), "{refusal}");
+        }
+    }
+
+    /// `next_task_request`: what a task thread runs next when requests
+    /// queued while it was busy. The channel and the response sender are the
+    /// ones `task_thread` uses; nothing is mocked, the requests are the unit's
+    /// input and the answers on the sender are its output.
+    mod stale_load_flow_coalescing {
+        use super::*;
+        use std::collections::VecDeque;
+
+        fn request(seq: i64, command: &str, arguments: Value) -> dap::Request {
+            dap::Request {
+                base: ProtocolMessage {
+                    seq,
+                    type_: "request".to_string(),
+                },
+                command: command.to_string(),
+                arguments,
+            }
+        }
+
+        fn load_flow(seq: i64, mode: &str, line: i64) -> dap::Request {
+            let location = Location {
+                line,
+                ..Location::default()
+            };
+            request(seq, "ct/load-flow", json!({ "flowMode": mode, "location": location }))
+        }
+
+        /// `(request_seq, success, message)` of every response sent.
+        fn answers(rx: &Receiver<DapMessage>) -> Vec<(i64, bool, String)> {
+            rx.try_iter()
+                .map(|message| match message {
+                    DapMessage::Response(r) => (r.request_seq, r.success, r.message.unwrap_or_default()),
+                    other => panic!("only responses are expected, got {other:?}"),
+                })
+                .collect()
+        }
+
+        #[test]
+        fn only_the_newest_of_the_flows_queued_behind_a_running_one_runs() {
+            let (to_thread, from_dispatcher) = mpsc::channel::<dap::Request>();
+            let (sender, responses) = mpsc::channel::<DapMessage>();
+            let mut backlog = VecDeque::new();
+
+            // The slow flow: taken while nothing else is queued, so it runs.
+            to_thread.send(load_flow(10, "call", 136)).unwrap();
+            let running = next_task_request(&from_dispatcher, &mut backlog, &sender).unwrap();
+            assert_eq!(running.base.seq, 10);
+            // While it runs, the client stops three more times and asks for
+            // each stop's flow.
+            for (seq, line) in [(11, 137), (12, 140), (13, 11)] {
+                to_thread.send(load_flow(seq, "call", line)).unwrap();
+            }
+
+            let next = next_task_request(&from_dispatcher, &mut backlog, &sender).unwrap();
+            assert_eq!(next.base.seq, 13, "the newest flow runs next");
+            assert!(backlog.is_empty(), "nothing is left queued: {backlog:?}");
+            let answered = answers(&responses);
+            assert_eq!(
+                answered.iter().map(|(seq, ok, _)| (*seq, *ok)).collect::<Vec<_>>(),
+                vec![(11, false), (12, false)],
+                "the two superseded flows are each answered once, as failures: {answered:?}"
+            );
+            for (_, _, message) in &answered {
+                assert!(
+                    message.contains("superseded") && message.contains("request 13"),
+                    "the answer names the request that superseded it: {message}"
+                );
+            }
+        }
+
+        #[test]
+        fn other_requests_keep_their_order_and_a_flow_of_another_mode_is_kept() {
+            let (to_thread, from_dispatcher) = mpsc::channel::<dap::Request>();
+            let (sender, responses) = mpsc::channel::<DapMessage>();
+            let mut backlog = VecDeque::new();
+            for queued in [
+                load_flow(1, "call", 5),
+                request(2, "launch", json!({})),
+                load_flow(3, "diff", 0),
+                load_flow(4, "call", 7),
+                request(5, "ct/event-load", json!({})),
+            ] {
+                to_thread.send(queued).unwrap();
+            }
+            drop(to_thread);
+
+            let mut ran = Vec::new();
+            while let Ok(next) = next_task_request(&from_dispatcher, &mut backlog, &sender) {
+                ran.push(next.base.seq);
+            }
+            assert_eq!(
+                ran,
+                vec![2, 3, 4, 5],
+                "only the call flow a newer call flow follows is skipped; the diff flow \
+                 and the other requests run in the order they came"
+            );
+            let answered = answers(&responses);
+            assert_eq!(answered.len(), 1, "{answered:?}");
+            assert_eq!((answered[0].0, answered[0].1), (1, false));
+        }
+
+        #[test]
+        fn a_flow_alone_in_the_queue_runs_and_is_not_answered_here() {
+            let (to_thread, from_dispatcher) = mpsc::channel::<dap::Request>();
+            let (sender, responses) = mpsc::channel::<DapMessage>();
+            let mut backlog = VecDeque::new();
+            to_thread.send(load_flow(7, "call", 3)).unwrap();
+            to_thread
+                .send(request(8, "ct/load-flow", json!({ "bogus": true })))
+                .unwrap();
+            // An unparseable `ct/load-flow` neither supersedes nor is
+            // superseded: its handler refuses it by name.
+            assert_eq!(
+                next_task_request(&from_dispatcher, &mut backlog, &sender)
+                    .unwrap()
+                    .base
+                    .seq,
+                7
+            );
+            assert_eq!(
+                next_task_request(&from_dispatcher, &mut backlog, &sender)
+                    .unwrap()
+                    .base
+                    .seq,
+                8
+            );
+            assert!(answers(&responses).is_empty());
         }
     }
 }

@@ -216,6 +216,12 @@ type
       ## oldest one.
     awaitingDiff: seq[proc(applied: bool) {.closure.}]
       ## The same, for the `diff` query.
+    sentCallFlows: int
+      ## How many call-flow requests `requestWindow` has sent. A request
+      ## compares it with its own number when it is refused: one that a newer
+      ## request followed leaves the panel to that newer one.
+    sentDiffFlows: int
+      ## The same, for the `diff` query (`requestDiffFlow`).
     styledLines*: Signal[seq[FlowStyledLine]]
       ## PLAT-42 — what the flow can say about each SOURCE line of the window:
       ## `flskHit` (the line ran in this window) or `flskSkip` (it lies inside
@@ -909,6 +915,8 @@ proc requestWindow*(vm: FlowVM;
     },
   }
   vm.loadingState.val = lsLoading
+  inc vm.sentCallFlows
+  let sentAs = vm.sentCallFlows
   # Consume the answer. Firing the request and dropping it is what made every
   # loop-iteration assertion at this layer vacuous; see the module header.
   let appliedBefore = vm.appliedWindows
@@ -947,9 +955,21 @@ proc requestWindow*(vm: FlowVM;
       # A refusal, or a reply that is neither the window nor the
       # acknowledgement — which is how a body-only transport presents a
       # refusal or a timeout. No event will follow it.
+      if vmRef.sentCallFlows != sentAs:
+        # A newer request is in flight, and the panel shows its state. This
+        # is how the engine answers a request a newer one superseded before
+        # it started (CodeTracer-DAP-Extensions.md, `ct/load-flow`,
+        # "Superseded requests"): showing it as an error would flip the
+        # panel to an error while the flow of the stop on screen loads.
+        done(false)
+        return
       vmRef.loadingState.val = lsError
       done(false),
     proc(message: string) =
+      if vmRef.sentCallFlows != sentAs:
+        # As above: a newer request owns the panel.
+        done(false)
+        return
       # A failed flow load must not leave the panel claiming to still be
       # loading forever, and must not leave a stale window's loop shape in
       # place attributed to the new position.
@@ -974,6 +994,8 @@ proc requestDiffFlow*(vm: FlowVM;
     if not onDone.isNil: onDone(applied)
   let settled = proc() = done(vmRef.diffLoadingState.val == lsIdle)
   vm.diffLoadingState.val = lsLoading
+  inc vm.sentDiffFlows
+  let sentAs = vm.sentDiffFlows
   onComplete(vm.store.backend.send("ct/load-flow", %*{
       "flowMode": FlowModeWireDiff,
       "location": {"path": "", "line": 0, "rrTicks": 0, "callstackDepth": 0}}),
@@ -990,11 +1012,14 @@ proc requestDiffFlow*(vm: FlowVM;
       if isFlowAcknowledgement(response):
         vmRef.awaitingDiff.add(done)
         return
-      # A refusal, as either transport presents one (see `requestWindow`).
-      vmRef.diffLoadingState.val = lsError
+      # A refusal, as either transport presents one (see `requestWindow`),
+      # unless a newer diff request owns the panel (also as there).
+      if vmRef.sentDiffFlows == sentAs:
+        vmRef.diffLoadingState.val = lsError
       done(false),
     proc(message: string) =
-      vmRef.diffLoadingState.val = lsError
+      if vmRef.sentDiffFlows == sentAs:
+        vmRef.diffLoadingState.val = lsError
       done(false))
 
 proc createFlowVM*(store: ReplayDataStore): FlowVM =
