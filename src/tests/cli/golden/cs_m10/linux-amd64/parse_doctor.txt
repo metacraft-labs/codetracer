@@ -194,6 +194,6 @@ argv: ct "doctor" "-h" "lang1"
 env: (none)
 exit: 0
 --- stdout
-<the help clispec renders for this request: ct doctor>
+<the short help page clispec renders for this request: ct doctor>
 --- stderr
 --- end

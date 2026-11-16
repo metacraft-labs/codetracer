@@ -5,7 +5,7 @@ argv: ct "--help"
 env: (none)
 exit: 0
 --- stdout
-<the help clispec renders for this request: ct>
+<the long help page clispec renders for this request: ct>
 --- stderr
 --- end
 
@@ -14,7 +14,7 @@ argv: ct "-h"
 env: (none)
 exit: 0
 --- stdout
-<the help clispec renders for this request: ct>
+<the short help page clispec renders for this request: ct>
 --- stderr
 --- end
 
@@ -23,7 +23,7 @@ argv: ct "help"
 env: (none)
 exit: 0
 --- stdout
-<the help clispec renders for this request: ct>
+<the long help page clispec renders for this request: ct>
 --- stderr
 --- end
 
@@ -32,7 +32,7 @@ argv: ct "help" "record"
 env: (none)
 exit: 0
 --- stdout
-<the help clispec renders for this request: ct>
+<the long help page clispec renders for this request: ct>
 --- stderr
 --- end
 
@@ -41,7 +41,7 @@ argv: ct "--HELP"
 env: (none)
 exit: 0
 --- stdout
-<the help clispec renders for this request: ct>
+<the long help page clispec renders for this request: ct>
 --- stderr
 --- end
 
@@ -50,7 +50,7 @@ argv: ct "--he_lp"
 env: (none)
 exit: 0
 --- stdout
-<the help clispec renders for this request: ct>
+<the long help page clispec renders for this request: ct>
 --- stderr
 --- end
 
@@ -59,7 +59,7 @@ argv: ct "--help=1"
 env: (none)
 exit: 0
 --- stdout
-<the help clispec renders for this request: ct>
+<the long help page clispec renders for this request: ct>
 --- stderr
 --- end
 
@@ -68,7 +68,7 @@ argv: ct "--help" "record"
 env: (none)
 exit: 0
 --- stdout
-<the help clispec renders for this request: ct>
+<the long help page clispec renders for this request: ct>
 --- stderr
 --- end
 
@@ -77,7 +77,7 @@ argv: ct "-help"
 env: (none)
 exit: 0
 --- stdout
-<the help clispec renders for this request: ct>
+<the short help page clispec renders for this request: ct>
 --- stderr
 --- end
 
@@ -108,7 +108,7 @@ argv: ct "--help"
 env: COLUMNS="40"
 exit: 0
 --- stdout
-<the help clispec renders for this request: ct>
+<the long help page clispec renders for this request: ct>
 --- stderr
 --- end
 
@@ -117,7 +117,7 @@ argv: ct "--help"
 env: COLUMNS="120"
 exit: 0
 --- stdout
-<the help clispec renders for this request: ct>
+<the long help page clispec renders for this request: ct>
 --- stderr
 --- end
 
@@ -126,7 +126,7 @@ argv: ct "--help"
 env: COLUMNS="250"
 exit: 0
 --- stdout
-<the help clispec renders for this request: ct>
+<the long help page clispec renders for this request: ct>
 --- stderr
 --- end
 
@@ -135,7 +135,7 @@ argv: ct "--help"
 env: COLUMNS="x"
 exit: 0
 --- stdout
-<the help clispec renders for this request: ct>
+<the long help page clispec renders for this request: ct>
 --- stderr
 --- end
 
@@ -144,7 +144,7 @@ argv: ct "install" "--help"
 env: (none)
 exit: 0
 --- stdout
-<the help clispec renders for this request: ct install>
+<the long help page clispec renders for this request: ct install>
 --- stderr
 --- end
 
@@ -153,7 +153,7 @@ argv: ct "list" "--help"
 env: (none)
 exit: 0
 --- stdout
-<the help clispec renders for this request: ct list>
+<the long help page clispec renders for this request: ct list>
 --- stderr
 --- end
 
@@ -162,7 +162,7 @@ argv: ct "print" "--help"
 env: (none)
 exit: 0
 --- stdout
-<the help clispec renders for this request: ct print>
+<the long help page clispec renders for this request: ct print>
 --- stderr
 --- end
 
@@ -171,7 +171,7 @@ argv: ct "replay" "--help"
 env: (none)
 exit: 0
 --- stdout
-<the help clispec renders for this request: ct replay>
+<the long help page clispec renders for this request: ct replay>
 --- stderr
 --- end
 
@@ -180,7 +180,7 @@ argv: ct "console" "--help"
 env: (none)
 exit: 0
 --- stdout
-<the help clispec renders for this request: ct console>
+<the long help page clispec renders for this request: ct console>
 --- stderr
 --- end
 
@@ -189,7 +189,7 @@ argv: ct "upload" "--help"
 env: (none)
 exit: 0
 --- stdout
-<the help clispec renders for this request: ct upload>
+<the long help page clispec renders for this request: ct upload>
 --- stderr
 --- end
 
@@ -198,7 +198,7 @@ argv: ct "host" "--help"
 env: (none)
 exit: 0
 --- stdout
-<the help clispec renders for this request: ct host>
+<the long help page clispec renders for this request: ct host>
 --- stderr
 --- end
 
@@ -207,7 +207,7 @@ argv: ct "import" "--help"
 env: (none)
 exit: 0
 --- stdout
-<the help clispec renders for this request: ct import>
+<the long help page clispec renders for this request: ct import>
 --- stderr
 --- end
 
@@ -216,7 +216,7 @@ argv: ct "build" "--help"
 env: (none)
 exit: 0
 --- stdout
-<the help clispec renders for this request: ct build>
+<the long help page clispec renders for this request: ct build>
 --- stderr
 --- end
 
@@ -225,7 +225,7 @@ argv: ct "record" "--help"
 env: (none)
 exit: 0
 --- stdout
-<the help clispec renders for this request: ct record>
+<the long help page clispec renders for this request: ct record>
 --- stderr
 --- end
 
@@ -234,7 +234,7 @@ argv: ct "record-test" "--help"
 env: (none)
 exit: 0
 --- stdout
-<the help clispec renders for this request: ct record-test>
+<the long help page clispec renders for this request: ct record-test>
 --- stderr
 --- end
 
@@ -243,7 +243,7 @@ argv: ct "run" "--help"
 env: (none)
 exit: 0
 --- stdout
-<the help clispec renders for this request: ct run>
+<the long help page clispec renders for this request: ct run>
 --- stderr
 --- end
 
@@ -262,7 +262,7 @@ argv: ct "download" "--help"
 env: (none)
 exit: 0
 --- stdout
-<the help clispec renders for this request: ct download>
+<the long help page clispec renders for this request: ct download>
 --- stderr
 --- end
 
@@ -271,7 +271,7 @@ argv: ct "login" "--help"
 env: (none)
 exit: 0
 --- stdout
-<the help clispec renders for this request: ct login>
+<the long help page clispec renders for this request: ct login>
 --- stderr
 --- end
 
@@ -280,7 +280,7 @@ argv: ct "set-default-org" "--help"
 env: (none)
 exit: 0
 --- stdout
-<the help clispec renders for this request: ct set-default-org>
+<the long help page clispec renders for this request: ct set-default-org>
 --- stderr
 --- end
 
@@ -289,7 +289,7 @@ argv: ct "get-default-org" "--help"
 env: (none)
 exit: 0
 --- stdout
-<the help clispec renders for this request: ct get-default-org>
+<the long help page clispec renders for this request: ct get-default-org>
 --- stderr
 --- end
 
@@ -298,7 +298,7 @@ argv: ct "activate" "--help"
 env: (none)
 exit: 0
 --- stdout
-<the help clispec renders for this request: ct activate>
+<the long help page clispec renders for this request: ct activate>
 --- stderr
 --- end
 
@@ -307,7 +307,7 @@ argv: ct "check-license" "--help"
 env: (none)
 exit: 0
 --- stdout
-<the help clispec renders for this request: ct check-license>
+<the long help page clispec renders for this request: ct check-license>
 --- stderr
 --- end
 
@@ -316,7 +316,7 @@ argv: ct "arb" "--help"
 env: (none)
 exit: 0
 --- stdout
-<the help clispec renders for this request: ct arb>
+<the long help page clispec renders for this request: ct arb>
 --- stderr
 --- end
 
@@ -325,7 +325,7 @@ argv: ct "ci" "--help"
 env: (none)
 exit: 0
 --- stdout
-<the help clispec renders for this request: ct ci>
+<the long help page clispec renders for this request: ct ci>
 --- stderr
 --- end
 
@@ -334,7 +334,7 @@ argv: ct "index-diff" "--help"
 env: (none)
 exit: 0
 --- stdout
-<the help clispec renders for this request: ct index-diff>
+<the long help page clispec renders for this request: ct index-diff>
 --- stderr
 --- end
 
@@ -343,7 +343,7 @@ argv: ct "edit" "--help"
 env: (none)
 exit: 0
 --- stdout
-<the help clispec renders for this request: ct edit>
+<the long help page clispec renders for this request: ct edit>
 --- stderr
 --- end
 
@@ -352,7 +352,7 @@ argv: ct "trace-metadata" "--help"
 env: (none)
 exit: 0
 --- stdout
-<the help clispec renders for this request: ct trace-metadata>
+<the long help page clispec renders for this request: ct trace-metadata>
 --- stderr
 --- end
 
@@ -361,7 +361,7 @@ argv: ct "start_backend" "--help"
 env: (none)
 exit: 0
 --- stdout
-<the help clispec renders for this request: ct start_backend>
+<the long help page clispec renders for this request: ct start_backend>
 --- stderr
 --- end
 
@@ -370,7 +370,7 @@ argv: ct "trace" "--help"
 env: (none)
 exit: 0
 --- stdout
-<the help clispec renders for this request: ct trace>
+<the long help page clispec renders for this request: ct trace>
 --- stderr
 --- end
 
@@ -379,7 +379,7 @@ argv: ct "gfx-replay" "--help"
 env: (none)
 exit: 0
 --- stdout
-<the help clispec renders for this request: ct gfx-replay>
+<the long help page clispec renders for this request: ct gfx-replay>
 --- stderr
 --- end
 
@@ -388,7 +388,7 @@ argv: ct "doctor" "--help"
 env: (none)
 exit: 0
 --- stdout
-<the help clispec renders for this request: ct doctor>
+<the long help page clispec renders for this request: ct doctor>
 --- stderr
 --- end
 
@@ -397,7 +397,7 @@ argv: ct "ct-describe-commands" "--help"
 env: (none)
 exit: 0
 --- stdout
-<the help clispec renders for this request: ct ct-describe-commands>
+<the long help page clispec renders for this request: ct ct-describe-commands>
 --- stderr
 --- end
 
@@ -406,7 +406,7 @@ argv: ct "ct-help" "--help"
 env: (none)
 exit: 0
 --- stdout
-<the help clispec renders for this request: ct ct-help>
+<the long help page clispec renders for this request: ct ct-help>
 --- stderr
 --- end
 
@@ -505,7 +505,7 @@ argv: ct "review" "x" "--help"
 env: (none)
 exit: 0
 --- stdout
-<the help clispec renders for this request: ct review>
+<the long help page clispec renders for this request: ct review>
 --- stderr
 --- end
 
@@ -514,7 +514,7 @@ argv: ct "arb" "explorer" "--help"
 env: (none)
 exit: 0
 --- stdout
-<the help clispec renders for this request: ct arb explorer>
+<the long help page clispec renders for this request: ct arb explorer>
 --- stderr
 --- end
 
@@ -523,7 +523,7 @@ argv: ct "arb" "record" "--help"
 env: (none)
 exit: 0
 --- stdout
-<the help clispec renders for this request: ct arb record>
+<the long help page clispec renders for this request: ct arb record>
 --- stderr
 --- end
 
@@ -532,7 +532,7 @@ argv: ct "arb" "replay" "--help"
 env: (none)
 exit: 0
 --- stdout
-<the help clispec renders for this request: ct arb replay>
+<the long help page clispec renders for this request: ct arb replay>
 --- stderr
 --- end
 
@@ -541,7 +541,7 @@ argv: ct "arb" "deploy" "--help"
 env: (none)
 exit: 0
 --- stdout
-<the help clispec renders for this request: ct arb deploy>
+<the long help page clispec renders for this request: ct arb deploy>
 --- stderr
 --- end
 
@@ -550,7 +550,7 @@ argv: ct "arb" "listRecentTx" "--help"
 env: (none)
 exit: 0
 --- stdout
-<the help clispec renders for this request: ct arb listRecentTx>
+<the long help page clispec renders for this request: ct arb listRecentTx>
 --- stderr
 --- end
 
@@ -559,7 +559,7 @@ argv: ct "ci" "start" "--help"
 env: (none)
 exit: 0
 --- stdout
-<the help clispec renders for this request: ct ci start>
+<the long help page clispec renders for this request: ct ci start>
 --- stderr
 --- end
 
@@ -568,7 +568,7 @@ argv: ct "ci" "attach" "--help"
 env: (none)
 exit: 0
 --- stdout
-<the help clispec renders for this request: ct ci attach>
+<the long help page clispec renders for this request: ct ci attach>
 --- stderr
 --- end
 
@@ -577,7 +577,7 @@ argv: ct "ci" "exec" "--help"
 env: (none)
 exit: 0
 --- stdout
-<the help clispec renders for this request: ct ci exec>
+<the long help page clispec renders for this request: ct ci exec>
 --- stderr
 --- end
 
@@ -586,7 +586,7 @@ argv: ct "ci" "finish" "--help"
 env: (none)
 exit: 0
 --- stdout
-<the help clispec renders for this request: ct ci finish>
+<the long help page clispec renders for this request: ct ci finish>
 --- stderr
 --- end
 
@@ -595,7 +595,7 @@ argv: ct "ci" "run" "--help"
 env: (none)
 exit: 0
 --- stdout
-<the help clispec renders for this request: ct ci run>
+<the long help page clispec renders for this request: ct ci run>
 --- stderr
 --- end
 
@@ -604,7 +604,7 @@ argv: ct "ci" "log" "--help"
 env: (none)
 exit: 0
 --- stdout
-<the help clispec renders for this request: ct ci log>
+<the long help page clispec renders for this request: ct ci log>
 --- stderr
 --- end
 
@@ -613,7 +613,7 @@ argv: ct "ci" "status" "--help"
 env: (none)
 exit: 0
 --- stdout
-<the help clispec renders for this request: ct ci status>
+<the long help page clispec renders for this request: ct ci status>
 --- stderr
 --- end
 
@@ -622,7 +622,7 @@ argv: ct "ci" "cancel" "--help"
 env: (none)
 exit: 0
 --- stdout
-<the help clispec renders for this request: ct ci cancel>
+<the long help page clispec renders for this request: ct ci cancel>
 --- stderr
 --- end
 
@@ -631,7 +631,7 @@ argv: ct "trace" "extract-gfx" "--help"
 env: (none)
 exit: 0
 --- stdout
-<the help clispec renders for this request: ct trace extract-gfx>
+<the long help page clispec renders for this request: ct trace extract-gfx>
 --- stderr
 --- end
 
@@ -640,7 +640,7 @@ argv: ct "trace" "export" "--help"
 env: (none)
 exit: 0
 --- stdout
-<the help clispec renders for this request: ct trace export>
+<the long help page clispec renders for this request: ct trace export>
 --- stderr
 --- end
 
@@ -649,7 +649,7 @@ argv: ct "trace" "omniscient-prep" "--help"
 env: (none)
 exit: 0
 --- stdout
-<the help clispec renders for this request: ct trace omniscient-prep>
+<the long help page clispec renders for this request: ct trace omniscient-prep>
 --- stderr
 --- end
 
@@ -658,7 +658,7 @@ argv: ct "ci" "help"
 env: (none)
 exit: 0
 --- stdout
-<the help clispec renders for this request: ct ci>
+<the long help page clispec renders for this request: ct ci>
 --- stderr
 --- end
 
@@ -667,7 +667,7 @@ argv: ct "trace" "help"
 env: (none)
 exit: 0
 --- stdout
-<the help clispec renders for this request: ct trace>
+<the long help page clispec renders for this request: ct trace>
 --- stderr
 --- end
 
@@ -687,7 +687,7 @@ argv: ct "record" "--help"
 env: COLUMNS="60"
 exit: 0
 --- stdout
-<the help clispec renders for this request: ct record>
+<the long help page clispec renders for this request: ct record>
 --- stderr
 --- end
 
@@ -696,7 +696,7 @@ argv: ct "record" "--help"
 env: COLUMNS="200"
 exit: 0
 --- stdout
-<the help clispec renders for this request: ct record>
+<the long help page clispec renders for this request: ct record>
 --- stderr
 --- end
 
@@ -705,7 +705,7 @@ argv: ct "record" "-o" "/o" "--lang=python" "--help"
 env: (none)
 exit: 0
 --- stdout
-<the help clispec renders for this request: ct record>
+<the long help page clispec renders for this request: ct record>
 --- stderr
 --- end
 
@@ -734,7 +734,7 @@ argv: ct "print" "-h"
 env: (none)
 exit: 0
 --- stdout
-<the help clispec renders for this request: ct print>
+<the short help page clispec renders for this request: ct print>
 --- stderr
 --- end
 

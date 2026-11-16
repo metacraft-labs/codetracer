@@ -960,6 +960,6 @@ argv: ct "start_backend" "-h" "db"
 env: (none)
 exit: 0
 --- stdout
-<the help clispec renders for this request: ct start_backend>
+<the short help page clispec renders for this request: ct start_backend>
 --- stderr
 --- end

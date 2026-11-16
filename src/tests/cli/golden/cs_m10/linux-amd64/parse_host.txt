@@ -6334,6 +6334,6 @@ argv: ct "host" "-h"
 env: (none)
 exit: 0
 --- stdout
-<the help clispec renders for this request: ct host>
+<the short help page clispec renders for this request: ct host>
 --- stderr
 --- end

@@ -1722,6 +1722,6 @@ argv: ct "console" "-h"
 env: (none)
 exit: 0
 --- stdout
-<the help clispec renders for this request: ct console>
+<the short help page clispec renders for this request: ct console>
 --- stderr
 --- end

@@ -1075,6 +1075,10 @@ const
     # no enum subcommands (`{.command.}`), no confutils field pragmas, no
     # import of the module whose `load` reads them.
     "src/tests/cli/cs_m10_no_enum_subcommands_left_test.nim",
+    # ... and that its help is coloured only where clispec's printer would
+    # colour it (on a terminal, without `NO_COLOR`, `TERM` not `dumb`) and
+    # as wide as the terminal or `COLUMNS`, on the real binary.
+    "src/tests/cli/cs_m10_help_colour_test.nim",
   ]
 
   GuiActionGateEntries*: array[5, GuiActionGateEntry] = [

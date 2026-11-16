@@ -254,6 +254,6 @@ argv: ct "run" "-h" "prog"
 env: (none)
 exit: 0
 --- stdout
-<the help clispec renders for this request: ct run>
+<the short help page clispec renders for this request: ct run>
 --- stderr
 --- end

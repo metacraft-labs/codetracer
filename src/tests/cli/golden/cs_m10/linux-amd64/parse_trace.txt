@@ -99,7 +99,7 @@ argv: ct "trace" "help"
 env: (none)
 exit: 0
 --- stdout
-<the help clispec renders for this request: ct trace>
+<the long help page clispec renders for this request: ct trace>
 --- stderr
 --- end
 
@@ -745,7 +745,7 @@ argv: ct "trace" "extract-gfx" "-h" "-o" "/d" "t.ct"
 env: (none)
 exit: 0
 --- stdout
-<the help clispec renders for this request: ct trace extract-gfx>
+<the short help page clispec renders for this request: ct trace extract-gfx>
 --- stderr
 --- end
 
@@ -1760,7 +1760,7 @@ argv: ct "trace" "export" "-h" "-o" "/e.ct" "t.ct"
 env: (none)
 exit: 0
 --- stdout
-<the help clispec renders for this request: ct trace export>
+<the short help page clispec renders for this request: ct trace export>
 --- stderr
 --- end
 
@@ -2356,7 +2356,7 @@ argv: ct "trace" "omniscient-prep" "-h" "t.ct"
 env: (none)
 exit: 0
 --- stdout
-<the help clispec renders for this request: ct trace omniscient-prep>
+<the short help page clispec renders for this request: ct trace omniscient-prep>
 --- stderr
 --- end
 
@@ -2561,6 +2561,6 @@ argv: ct "trace" "-h"
 env: (none)
 exit: 0
 --- stdout
-<the help clispec renders for this request: ct trace>
+<the short help page clispec renders for this request: ct trace>
 --- stderr
 --- end

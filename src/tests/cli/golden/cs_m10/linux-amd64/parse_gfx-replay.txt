@@ -1646,6 +1646,6 @@ argv: ct "gfx-replay" "-h" "--gfx-stream" "/g"
 env: (none)
 exit: 0
 --- stdout
-<the help clispec renders for this request: ct gfx-replay>
+<the short help page clispec renders for this request: ct gfx-replay>
 --- stderr
 --- end

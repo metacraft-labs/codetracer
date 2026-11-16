@@ -1756,6 +1756,6 @@ argv: ct "download" "-h" "https://x.test/t/1"
 env: (none)
 exit: 0
 --- stdout
-<the help clispec renders for this request: ct download>
+<the short help page clispec renders for this request: ct download>
 --- stderr
 --- end

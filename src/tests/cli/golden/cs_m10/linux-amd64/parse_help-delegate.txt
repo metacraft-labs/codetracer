@@ -249,7 +249,7 @@ argv: ct "help"
 env: (none)
 exit: 0
 --- stdout
-<the help clispec renders for this request: ct>
+<the long help page clispec renders for this request: ct>
 --- stderr
 --- end
 
@@ -258,7 +258,7 @@ argv: ct "help" "record"
 env: (none)
 exit: 0
 --- stdout
-<the help clispec renders for this request: ct>
+<the long help page clispec renders for this request: ct>
 --- stderr
 --- end
 
@@ -267,7 +267,7 @@ argv: ct "HELP"
 env: (none)
 exit: 0
 --- stdout
-<the help clispec renders for this request: ct>
+<the long help page clispec renders for this request: ct>
 --- stderr
 --- end
 
@@ -276,6 +276,6 @@ argv: ct "he_lp"
 env: (none)
 exit: 0
 --- stdout
-<the help clispec renders for this request: ct>
+<the long help page clispec renders for this request: ct>
 --- stderr
 --- end

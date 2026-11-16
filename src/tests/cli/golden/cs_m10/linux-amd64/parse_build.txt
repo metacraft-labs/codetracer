@@ -208,6 +208,6 @@ argv: ct "build" "-h" "src1" "out1"
 env: (none)
 exit: 0
 --- stdout
-<the help clispec renders for this request: ct build>
+<the short help page clispec renders for this request: ct build>
 --- stderr
 --- end

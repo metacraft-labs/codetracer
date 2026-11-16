@@ -182,6 +182,6 @@ argv: ct "index-diff" "-h" "trace1"
 env: (none)
 exit: 0
 --- stdout
-<the help clispec renders for this request: ct index-diff>
+<the short help page clispec renders for this request: ct index-diff>
 --- stderr
 --- end

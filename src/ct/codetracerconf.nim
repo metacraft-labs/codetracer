@@ -673,10 +673,10 @@ type
 # (172981d; CS-M10's decision of 2026-11-16, option (a)): its error texts on
 # stderr and exit 1, its version text, and the `<app path>_<NAME>`
 # environment variables.  Help is clispec's: the help screens are what
-# clispec renders by default for the description (`ctHelpScreen`: its
-# default layout, without the environment suffixes and the `--<letter>`
-# aliases the description declares only for parsing), not confutils'
-# classic layout.
+# clispec's printer prints for the description (`ctHelpScreen`: its default
+# design, at the terminal's width and coloured on a terminal, without the
+# environment suffixes and the `--<letter>` aliases the description declares
+# only for parsing), not confutils' classic layout.
 
 proc parseCliValue*(text: string; value: var int) {.raises: [CliValueError].} =
   ## confutils' `parseCmdArg(int)`, with its message.
@@ -1667,16 +1667,38 @@ func ctHelpGrammar(): CliGrammar =
     if p.short != '\0' and p.alias == "--" & $p.short:
       p.alias = ""
 
-proc ctHelpScreen*(e: ref CliHelpRequest): string {.raises: [].} =
-  ## The help screen ct prints for the help request `e`: what clispec renders
-  ## by default (`cliHelpText`, `CliHelpLayout()`) for the command `e` asks
-  ## about, from `ctHelpGrammar`.  Exported for the CS-M10 surface test,
-  ## which compares the screens ct prints with it.
+proc ctHelpScreen*(e: ref CliHelpRequest; options: CliOptions;
+                   width = CliDefaultWidth; styled = false): string {.
+    raises: [].} =
+  ## The help screen ct prints for the help request `e`: the page clispec's
+  ## printer (`cliPrintHelp`, `e.render`) prints for it, rendered from
+  ## `ctHelpGrammar` instead of the description's grammar.  It is the page
+  ## `options` asks for (clispec's default design unless
+  ## `options.helpLayout` says otherwise, with the `--version` row when
+  ## `options.versionText` is set, as clispec adds it), short for `-h` and
+  ## long for `--help` and the `help` word (`e.long`), `width` columns wide
+  ## (at most `CliMaxWidth`) when the layout leaves the width to the
+  ## printer, and styled when `styled` (a classic layout only under
+  ## `ccmAlways`).  ct's loader passes the width and colour clispec's
+  ## printer would choose for stdout (`cliOutputWidth`, `cliUseColor`).
+  ## Exported for the CS-M10 surface test, which compares the screens ct
+  ## prints with it.
   if e.json:
     return e.text
+  var layout = options.helpLayout
+  if layout.style == chsStandard and layout.versionFlag.len == 0 and
+      options.versionText.len > 0:
+    layout.versionFlag = "Print version"
+  if layout.style == chsStandard and layout.width == 0:
+    # As clispec's page sizes itself: at most `CliMaxWidth`, and
+    # `CliDefaultWidth` for a width that is not positive.
+    layout.width = if width > 0: min(width, CliMaxWidth) else: CliDefaultWidth
+  let paint = styled and (layout.style == chsStandard or
+    options.color == ccmAlways)
   let g = ctHelpGrammar()
   try:
-    cliHelpText(g, cliHelpCommand(g, e.commandPath, CtProgram), CtProgram)
+    cliHelpText(g, cliHelpCommand(g, e.commandPath, options.program),
+      options.program, layout, e.long, paint)
   except CliUsageError:
     e.text
 
@@ -1705,11 +1727,15 @@ proc load*(T: typedesc[CodetracerConf]; cmdLine = commandLineParams();
       discard
     quit QuitSuccess
   except CliHelpRequest as e:
-    # The help clispec renders by default for the request (its design, not
-    # confutils' classic screen: CS-M10's decision of 2026-11-16), ended by
-    # a newline.  `copyrightBanner` is no longer printed with it.
-    let text = ctHelpScreen(e)
+    # The help clispec prints for the request (its default design, not
+    # confutils' classic screen: CS-M10's decision of 2026-11-16), at the
+    # width and in the colours clispec's printer chooses for stdout
+    # (`COLUMNS`, else the terminal's width, else 80, at most 100; styled
+    # only on a terminal, without `NO_COLOR`, with `TERM` not `dumb`), ended
+    # by a newline.  `copyrightBanner` is no longer printed with it.
     try:
+      let text = ctHelpScreen(e, options, cliOutputWidth(stdout),
+        cliUseColor(stdout, options.color))
       stdout.write text
       if not text.endsWith("\n"):
         stdout.write "\n"

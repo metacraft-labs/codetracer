@@ -3370,6 +3370,6 @@ argv: ct "print" "-h" "t.jsonl"
 env: (none)
 exit: 0
 --- stdout
-<the help clispec renders for this request: ct print>
+<the short help page clispec renders for this request: ct print>
 --- stderr
 --- end

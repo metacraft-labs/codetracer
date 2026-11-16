@@ -182,6 +182,6 @@ argv: ct "set-default-org" "-h" "org1"
 env: (none)
 exit: 0
 --- stdout
-<the help clispec renders for this request: ct set-default-org>
+<the short help page clispec renders for this request: ct set-default-org>
 --- stderr
 --- end

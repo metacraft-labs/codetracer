@@ -9931,6 +9931,6 @@ argv: ct "upload" "-h"
 env: (none)
 exit: 0
 --- stdout
-<the help clispec renders for this request: ct upload>
+<the short help page clispec renders for this request: ct upload>
 --- stderr
 --- end

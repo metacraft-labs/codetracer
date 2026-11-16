@@ -208,6 +208,6 @@ argv: ct "import" "-h" "zip1" "out1"
 env: (none)
 exit: 0
 --- stdout
-<the help clispec renders for this request: ct import>
+<the short help page clispec renders for this request: ct import>
 --- stderr
 --- end

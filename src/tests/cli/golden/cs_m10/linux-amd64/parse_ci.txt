@@ -867,7 +867,7 @@ argv: ct "ci" "help"
 env: (none)
 exit: 0
 --- stdout
-<the help clispec renders for this request: ct ci>
+<the long help page clispec renders for this request: ct ci>
 --- stderr
 --- end
 
@@ -3607,7 +3607,7 @@ argv: ct "ci" "start" "-h"
 env: (none)
 exit: 0
 --- stdout
-<the help clispec renders for this request: ct ci start>
+<the short help page clispec renders for this request: ct ci start>
 --- stderr
 --- end
 
@@ -6623,7 +6623,7 @@ argv: ct "ci" "run" "-h" "cmd"
 env: (none)
 exit: 0
 --- stdout
-<the help clispec renders for this request: ct ci run>
+<the short help page clispec renders for this request: ct ci run>
 --- stderr
 --- end
 
@@ -7333,7 +7333,7 @@ argv: ct "ci" "attach" "-h" "r1"
 env: (none)
 exit: 0
 --- stdout
-<the help clispec renders for this request: ct ci attach>
+<the short help page clispec renders for this request: ct ci attach>
 --- stderr
 --- end
 
@@ -8437,7 +8437,7 @@ argv: ct "ci" "exec" "-h" "cmd"
 env: (none)
 exit: 0
 --- stdout
-<the help clispec renders for this request: ct ci exec>
+<the short help page clispec renders for this request: ct ci exec>
 --- stderr
 --- end
 
@@ -8997,7 +8997,7 @@ argv: ct "ci" "finish" "-h"
 env: (none)
 exit: 0
 --- stdout
-<the help clispec renders for this request: ct ci finish>
+<the short help page clispec renders for this request: ct ci finish>
 --- stderr
 --- end
 
@@ -9258,6 +9258,6 @@ argv: ct "ci" "-h"
 env: (none)
 exit: 0
 --- stdout
-<the help clispec renders for this request: ct ci>
+<the short help page clispec renders for this request: ct ci>
 --- stderr
 --- end

@@ -988,7 +988,7 @@ argv: ct "arb" "help"
 env: (none)
 exit: 0
 --- stdout
-<the help clispec renders for this request: ct arb>
+<the long help page clispec renders for this request: ct arb>
 --- stderr
 --- end
 
@@ -1018,7 +1018,7 @@ argv: ct "arb" "record" "--help"
 env: (none)
 exit: 0
 --- stdout
-<the help clispec renders for this request: ct arb record>
+<the long help page clispec renders for this request: ct arb record>
 --- stderr
 --- end
 
@@ -1244,7 +1244,7 @@ argv: ct "arb" "-h"
 env: (none)
 exit: 0
 --- stdout
-<the help clispec renders for this request: ct arb>
+<the short help page clispec renders for this request: ct arb>
 --- stderr
 --- end
 
@@ -1380,6 +1380,6 @@ argv: ct "arb" "explorer" "-h"
 env: (none)
 exit: 0
 --- stdout
-<the help clispec renders for this request: ct arb explorer>
+<the short help page clispec renders for this request: ct arb explorer>
 --- stderr
 --- end

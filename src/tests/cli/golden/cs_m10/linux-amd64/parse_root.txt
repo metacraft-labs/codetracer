@@ -57,7 +57,7 @@ argv: ct "-h"
 env: (none)
 exit: 0
 --- stdout
-<the help clispec renders for this request: ct>
+<the short help page clispec renders for this request: ct>
 --- stderr
 --- end
 

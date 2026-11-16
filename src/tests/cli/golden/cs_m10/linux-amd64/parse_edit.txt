@@ -182,6 +182,6 @@ argv: ct "edit" "-h" "path1"
 env: (none)
 exit: 0
 --- stdout
-<the help clispec renders for this request: ct edit>
+<the short help page clispec renders for this request: ct edit>
 --- stderr
 --- end

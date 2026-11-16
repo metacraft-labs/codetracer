@@ -1001,6 +1001,6 @@ argv: ct "record-test" "-h" "name" "path" "10" "1"
 env: (none)
 exit: 0
 --- stdout
-<the help clispec renders for this request: ct record-test>
+<the short help page clispec renders for this request: ct record-test>
 --- stderr
 --- end

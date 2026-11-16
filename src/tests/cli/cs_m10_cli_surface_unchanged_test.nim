@@ -66,24 +66,29 @@
 ## (`remote --help` and `electron --help`, where `{.restOfArgs.}` takes
 ## `--help`); if the probe cannot be started, no binary case runs at all.
 ##
-## HELP.  ct's help screens are clispec's: what clispec renders by default
-## for ct's description (CS-M10's decision of 2026-11-16), not a layout of
-## ct's own, so they are not pinned as text.  For every run (probe or
-## binary) the test asks the description in-process, with ct's options and
-## the words ct's loader would get (`loaderLine`), whether the line asks for
-## help: `CtCli.load` raising `CliHelpRequest` for that very request, and
-## `ctHelpScreen` (the function ct's loader prints help with) rendering it
-## with clispec's default layout.  The rendering reads no terminal: clispec's
-## help does not wrap unless a layout asks it to and never looks at `COLUMNS`,
-## a tty or `/dev/tty`, so neither the child's nor this process's terminal
-## can reach it (the `COLUMNS` cases pin that ct ignores the variable too).
-## When the run's stdout is exactly that text (with the newline
-## ct ends it with), stdout is replaced by one marker line,
-## `<the help clispec renders for this request: ct record>`, and the golden
-## pins the marker, the exit code and stderr.  So the goldens pin WHICH help
-## a line gets and the help's text follows clispec's default design without
-## a re-capture; a help screen that differs from the rendering stays text and
-## fails the comparison.  The version text, the help-delegate surface
+## HELP.  ct's help screens are clispec's: what clispec's printer prints for
+## ct's description (its default design; CS-M10's decision of 2026-11-16),
+## not a layout of ct's own, so they are not pinned as text.  For every run
+## (probe or binary) the test asks the description in-process, with ct's
+## options and the words ct's loader would get (`loaderLine`), whether the
+## line asks for help: `CtCli.load` raising `CliHelpRequest` for that very
+## request, and `ctHelpScreen` (the function ct's loader prints help with)
+## rendering it -- the short page for `-h`, the long one for `--help` and the
+## `help` word (`CliHelpRequest.long`) -- as clispec's printer renders it for
+## a stream that is not a terminal: at the width the case's `COLUMNS` gives
+## (a positive integer, at most 100; unset or anything else: 80) and
+## unstyled.  The children run without a terminal (stdout and stderr are
+## pipes, and `setsid` leaves them no controlling terminal), so ct prints
+## them that way too; this process's own terminal, if any, plays no part.
+## When the run's stdout is exactly that text (with the newline ct ends it
+## with), stdout is replaced by one marker line naming the page and the
+## command, `<the long help page clispec renders for this request: ct
+## record>` (or `short`), and the golden pins the marker, the exit code and
+## stderr.  So the goldens pin WHICH help a line gets, long or short, and the
+## help's text follows clispec's design without a re-capture; a help screen
+## that differs from the rendering stays text and fails the comparison.
+## Colour on a terminal is checked by `cs_m10_help_colour_test.nim`.  The
+## version text, the help-delegate surface
 ## (`ct-help`, `ct-describe-commands`, `ct-complete`, `ct-completions`) and
 ## the help texts of the commands ct dispatches itself (`review`, `agent`)
 ## are not clispec's help and stay text.
@@ -1027,11 +1032,12 @@ proc startBin(bin: string; argv: seq[string]; env: seq[(string, string)];
   let timeoutExe = findExe("timeout", followSymlinks = false)
   if timeoutExe.len == 0:
     return (nil, "no `timeout` on PATH")
-  # A new session, so the child has no controlling terminal: `terminalWidth()`
-  # (the help screens' wrapping) falls back to `/dev/tty` when `COLUMNS` does
-  # not answer, so without this the width of the terminal the test happens to
-  # be started from would reach the goldens.  `-w`: wait for the child and
-  # exit with its status, should `setsid` have to fork.
+  # A new session, so the child has no controlling terminal: nothing it
+  # runs can reach the terminal the test happens to be started from through
+  # `/dev/tty`.  Its stdout is a pipe, so clispec's printer chooses the
+  # width from `COLUMNS` (else 80) and no colour for the help screens.
+  # `-w`: wait for the child and exit with its status, should `setsid` have
+  # to fork.
   let setsidExe = findExe("setsid", followSymlinks = false)
   if setsidExe.len == 0:
     return (nil, "no `setsid` on PATH")
@@ -1074,8 +1080,23 @@ proc visibleLineEnds(text: string): string =
   lines.join("\n")
 
 type
-  ExpectedHelp = tuple[asked: bool, path: seq[string], text: string]
-    ## The help a line asks for, as the description renders it by default.
+  ExpectedHelp = tuple[asked: bool, path: seq[string], long: bool,
+                       text: string]
+    ## The help a line asks for (the long page or the short one), as ct
+    ## renders it for a stream that is not a terminal.
+
+proc pipeWidth(env: seq[(string, string)]): int =
+  ## The width of a help page printed to a pipe under `env` (clispec's
+  ## printer, `cliOutputWidth`, for a stream that is not a terminal):
+  ## `COLUMNS` when it is a positive integer, at most 100; else 80.
+  result = 80
+  for (k, v) in env:
+    if k == "COLUMNS":
+      try:
+        let n = parseInt(v.strip())
+        result = if n > 0: min(n, 100) else: 80
+      except ValueError:
+        result = 80
 
 proc loaderLine(argv: seq[string]; env: seq[(string, string)];
                 probe: bool): tuple[reaches: bool, line: seq[string]] =
@@ -1104,33 +1125,29 @@ proc loaderLine(argv: seq[string]; env: seq[(string, string)];
 proc expectedHelp(cs: Case; argv: seq[string]; probe: bool): ExpectedHelp =
   ## Whether ct's loader answers this line with help, and with which text:
   ## the description is asked in-process (`CtCli.load`, ct's own options),
-  ## and the `CliHelpRequest` it raises carries the command and the help
-  ## clispec renders by default for that request.  Rendered under the
-  ## case's `COLUMNS` (or none), as the child sees it.
+  ## and the `CliHelpRequest` it raises carries the command and the page
+  ## (`long`); `ctHelpScreen` renders it as ct prints it to a pipe: at the
+  ## case's `COLUMNS` (`pipeWidth`), unstyled.
   let (reaches, line) = loaderLine(argv, cs.env, probe)
   if not reaches:
     return
-  var columns = ""
-  var hasColumns = false
-  for (k, v) in cs.env:
-    if k == "COLUMNS": (columns, hasColumns) = (v, true)
-  let saved = getEnv("COLUMNS")
-  let hadColumns = existsEnv("COLUMNS")
-  if hasColumns: putEnv("COLUMNS", columns) else: delEnv("COLUMNS")
+  let options = ctCliOptions(VersionText)
   try:
-    discard CtCli.load(line, CliSources(), ctCliOptions(VersionText))
+    discard CtCli.load(line, CliSources(), options)
   except CliVersionRequest:
     discard
   except CliHelpRequest as e:
-    result = (true, e.commandPath, ctHelpScreen(e))
+    result = (true, e.commandPath, e.long,
+      ctHelpScreen(e, options, pipeWidth(cs.env), styled = false))
   except CatchableError:
     discard
-  if hadColumns: putEnv("COLUMNS", saved) else: delEnv("COLUMNS")
 
-proc helpMarker(path: seq[string]): string =
+proc helpMarker(path: seq[string]; long: bool): string =
   ## What a help screen is replaced with in the goldens (see "HELP" in the
-  ## module documentation): the command whose help was asked for.
-  "<the help clispec renders for this request: " &
+  ## module documentation): the page (long or short) and the command whose
+  ## help was asked for.
+  "<the " & (if long: "long" else: "short") &
+    " help page clispec renders for this request: " &
     (@["ct"] & path).join(" ") & ">\n"
 
 proc finishBin(p: Process; scratch, bin: string; probe: bool;
@@ -1150,7 +1167,7 @@ proc finishBin(p: Process; scratch, bin: string; probe: bool;
       let printed = if help.text.endsWith("\n"): help.text
                     else: help.text & "\n"
       if o == printed:
-        o = helpMarker(help.path)
+        o = helpMarker(help.path, help.long)
     p.close()
     if code in [124, 137]:
       return (code, "", "did not exit within 60 s; stopped by timeout")
@@ -1439,47 +1456,140 @@ proc main(): int =
       if extra.len > 0: checkpoint("goldens this test no longer produces: " & extra.join(", "))
       check missing.len == 0
       check extra.len == 0
-    test "every help screen is clispec's default rendering, less env names and letter aliases":
+    test "every help screen is clispec's printed page, less env names and letter aliases":
       # The goldens compare ct's help with `ctHelpScreen`, the function ct
-      # prints it with, so this pins `ctHelpScreen` against clispec itself:
-      # for every command, its screen has the words of clispec's default
-      # rendering of the description (`cliHelpText`) in the same order, less
-      # each `[env: X]` note and each `--<letter>,` alias -- the right page,
-      # nothing else dropped or added -- and no Nim spelling of a default.
+      # prints it with, so this pins `ctHelpScreen` against clispec itself,
+      # for every command, on both pages (`-h` short, `--help` long) and at
+      # widths 50, 80 and 100 (and 120, which is 100):
+      #
+      # * clispec's own page is what its printer prints for the request
+      #   (`CliHelpRequest.render`, raised by `CtCli.load` for `<path> -h` /
+      #   `<path> --help`).  ct's page has the words of that page in the
+      #   same order, less each `[env: X]` note and each `--<letter>` alias
+      #   (the comma before it goes too, and a value written after it moves
+      #   to the long name) -- the right page, nothing else dropped or
+      #   added -- and no Nim spelling of a default.  No line of ct's page
+      #   is wider than the page unless clispec's page has that very line
+      #   (clispec breaks neither the usage line nor its closing hint).
+      # * line for line, ct's page is clispec's `cliHelpText` of the
+      #   description's grammar with those two things taken out (done here,
+      #   not with ct's `ctHelpGrammar`), in clispec's default design with
+      #   the `--version` row clispec adds for a program with a version
+      #   text, at that width and page; styled, too, and the styled page is
+      #   the plain one plus escape sequences.
+      #
+      # The pages no argv reaches (`remote` and `electron`, whose rest
+      # positional takes `-h` and `--help`, and `help`, a subcommand the
+      # `help` word shadows; `ct help <command>` prints the top page, as
+      # under confutils) have only the second check, and must be exactly
+      # those three.  The long and short pages of `record`, whose `--lang`
+      # has a long help, differ in it.
       let g = CtCli.cliGrammar
-      var paths: seq[seq[string]]
-      for c in g.commands:
-        if c.path notin paths: paths.add c.path
-      for path in paths:
-        var stock, shown: seq[string]
+      let options = ctCliOptions(VersionText)
+      var stripped = g
+      for p in stripped.params.mitems:
+        p.env = @[]
+        if p.short != '\0' and p.alias == "--" & $p.short:
+          p.alias = ""
+      proc request(argv: seq[string]; path: seq[string];
+                   long: bool): ref CliHelpRequest =
         try:
-          stock = cliHelpText(g, cliHelpCommand(g, path, "ct"), "ct").splitWhitespace
+          discard CtCli.load(argv, CliSources(), options)
+        except CliVersionRequest:
+          discard
+        except CliHelpRequest as e:
+          if e.commandPath == path and e.long == long and not e.json and
+              e.render != nil:
+            return e
+        except CatchableError:
+          discard
+      proc ownPage(path: seq[string]; long: bool; width: int;
+                   styled: bool): string =
+        var layout = cliDefaultHelpLayout
+        layout.versionFlag = "Print version"
+        layout.width = width
+        try:
+          cliHelpText(stripped, cliHelpCommand(stripped, path, "ct"), "ct",
+            layout, long, styled)
         except CliUsageError as e:
-          checkpoint("ct " & path.join(" ") & ": " & e.msg)
-          check false
-        shown = ctHelpScreen((ref CliHelpRequest)(commandPath: path,
-          text: "<not rendered>")).splitWhitespace
-        var expected: seq[string]
+          "<" & e.msg & ">"
+      proc expectedWords(stock: seq[string]): seq[string] =
         var inEnv = false
         for w in stock:
           if inEnv:
             inEnv = not w.endsWith("]")
           elif w == "[env:":
             inEnv = true
-          elif w.len == 4 and w.startsWith("--") and w.endsWith(",") and
-              w[2] in Letters:
-            discard
+          elif w.len >= 3 and w.startsWith("--") and w[2] in Letters and
+              (w.len == 3 or w[3] in {'[', '='}) and result.len > 0 and
+              result[^1].endsWith(","):
+            result[^1] = result[^1][0 ..< ^1] & w[3 .. ^1]
           else:
-            expected.add w
-        if shown != expected:
-          checkpoint("ct " & path.join(" ") & ":\n" & shown.join(" ") &
-            "\n  expected:\n" & expected.join(" "))
-        check shown == expected
-        let text = shown.join(" ")
-        for nimism in ["[env:", "@[]", "[default: ]", "OmniscientDbMode."]:
-          if nimism in text:
-            checkpoint("ct " & path.join(" ") & " shows " & nimism)
-          check nimism notin text
+            result.add w
+      var paths: seq[seq[string]]
+      for c in g.commands:
+        if c.path notin paths: paths.add c.path
+      var compared = 0
+      var unreachable: seq[string]
+      for path in paths:
+        for long in [false, true]:
+          let label0 = "ct " & path.join(" ") & " (" &
+            (if long: "long" else: "short")
+          let e = request(path & @[if long: "--help" else: "-h"], path, long)
+          let reached = e != nil
+          if not reached and path.join(" ") notin unreachable:
+            unreachable.add path.join(" ")
+          let req = if reached: e
+                    else: (ref CliHelpRequest)(commandPath: path, long: long,
+                                               text: "<not rendered>")
+          for width in [50, 80, 100]:
+            let label = label0 & ", " & $width & " columns)"
+            let shown = ctHelpScreen(req, options, width, styled = false)
+            let styled = ctHelpScreen(req, options, width, styled = true)
+            inc compared
+            let own = ownPage(path, long, width, false)
+            if shown != own:
+              checkpoint(label & ":\n" & shown & "  expected:\n" & own)
+            check shown == own
+            check styled == ownPage(path, long, width, true)
+            check cliStripStyles(styled) == shown
+            check "\e[" in styled and "\e[" notin shown
+            if width == 100:
+              check ctHelpScreen(req, options, 120) == shown
+            for nimism in ["[env:", "@[]", "[default: ]", "OmniscientDbMode."]:
+              if nimism in shown:
+                checkpoint(label & " shows " & nimism)
+              check nimism notin shown
+            if not reached:
+              continue
+            let stock = e.render(width, false)
+            let words = shown.splitWhitespace
+            let expected = expectedWords(stock.splitWhitespace)
+            if words != expected:
+              checkpoint(label & ":\n" & words.join(" ") &
+                "\n  expected:\n" & expected.join(" "))
+            check words == expected
+            let stockLines = stock.splitLines
+            for line in shown.splitLines:
+              if line.len > width and line notin stockLines:
+                checkpoint(label & " has a line of " & $line.len &
+                  " columns: " & line)
+                check false
+      check unreachable == @["remote", "help", "electron"]
+      if unreachable != @["remote", "help", "electron"]:
+        checkpoint("pages no -h/--help reaches: " & $unreachable)
+      let record = request(@["record", "-h"], @["record"], false)
+      let recordLong = request(@["record", "--help"], @["record"], true)
+      check record != nil and recordLong != nil
+      if record != nil and recordLong != nil:
+        let short = ctHelpScreen(record, options, 80)
+        let long = ctHelpScreen(recordLong, options, 80)
+        check "Leave blank to auto-detect." notin short
+        check "Leave blank to auto-detect." in long
+        check "Print help (see more with '--help')" in short
+      echo "    " & $compared & " pages compared; reached by no -h/--help: " &
+        unreachable.join(", ")
+      check compared == paths.len * 2 * 3
     for item in produced:
       let file = item.file
       let text = item.text
