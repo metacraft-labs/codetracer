@@ -326,6 +326,11 @@ lint_step "workflow files stay under GitHub's size limit" \
 lint_step "scenario lane shards cover their lane exactly" \
 	bash ci/test/scenario-lane-shard-test.sh
 
+# The TUI job runs the Nim test lanes in shards (NIM_TEST_LANE_SHARD); the
+# shards must cover each lane exactly, or a suite silently stops running.
+lint_step "Nim test lane shards cover their lane exactly" \
+	bash ci/test/nim-test-lane-shard-test.sh
+
 # A step that runs past an earlier failure and needs ct waits on the ct build,
 # or the earlier failure resurfaces as a second, misleading `ct ENOENT`.
 lint_step "steps that need ct wait on the ct build" \

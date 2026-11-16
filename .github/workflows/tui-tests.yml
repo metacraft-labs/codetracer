@@ -33,7 +33,18 @@ jobs:
     # ceiling: 355m. It fits a host at ordinary load; tighten it once the job
     # has run on a warm cache.
     timeout-minutes: 355
-    name: TUI tests (Tier 1 + Tier 2)
+    # Eight shards: Tier 1 and Tier 2 compile ~225 Nim files one by one (1-6
+    # min each), which one job could not finish inside 355 minutes (run
+    # 43859070538, cancelled in Tier 1). Each shard runs every 8th file of both
+    # lanes (NIM_TEST_LANE_SHARD, ci/test/nim-test-lane-shard-test.sh) and its
+    # slice of the terminal scenario lane (SCENARIO_LANE_SHARD; shard 1's slice
+    # is the lighter one, since shard 1 also runs the whole-lane checks and
+    # CTF-P1b).
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4, 5, 6, 7, 8]
+    name: TUI tests (Tier 1 + Tier 2) (${{ matrix.shard }}/8)
     # WHY THIS JOB EXISTS. `just test-tui` and `just test-tui-real-terminal` are
     # the only routes to the `tui` and `tui-real-terminal` lanes of
     # `ci/lib/run-nim-test-lane.sh` -- 133 and 64 files -- and until this job no
@@ -192,12 +203,16 @@ jobs:
         # `ct-native-replay` -- in this lane they skipped every case and failed
         # it (codetracer-pm issues/2026-11-09-tui-job-runs-plat60-and-plat65-
         # without-their-prerequisites.md).
+        env:
+          NIM_TEST_LANE_SHARD: ${{ matrix.shard }}/8
         run: nix develop .#devShells.x86_64-linux.default --command just test-tui
 
       - name: TUI Tier 2 — the real binary in a real pty
         # `!cancelled()`, so a Tier-1 failure does not hide whether Tier 2 holds.
         # The recipe builds `build/bin/codetracer-tui` itself (`build-tui`).
         if: ${{ !cancelled() && steps.ct.outcome == 'success' }}
+        env:
+          NIM_TEST_LANE_SHARD: ${{ matrix.shard }}/8
         run: nix develop .#devShells.x86_64-linux.default --command just test-tui-real-terminal
 
       - name: Scenarios — the linter, the inventory and the terminal lane
@@ -210,15 +225,17 @@ jobs:
         # DemoVideoScript and DemoVideoScript-TermAssert are siblings at
         # repro.lock's pins (provisioned above).
         if: ${{ !cancelled() && steps.ct.outcome == 'success' }}
+        env:
+          SCENARIO_LANE_SHARD: ${{ matrix.shard }}/8
+        # The linter, the inventory, the broken-run check and the docs captures
+        # are whole-lane checks: shard 1 runs them, every shard its slice.
         run: |
           nix develop .#devShells.x86_64-linux.default --command bash -c '
             set -e
             just scenario-build dvs stage terminal
-            just scenario-lint
-            just scenario-inventory
+            if [ "${SCENARIO_LANE_SHARD%%/*}" = 1 ]; then just scenario-lint; just scenario-inventory; fi
             just scenario-lane terminal
-            bash ci/test/scenario-broken-run.sh terminal
-            just docs-captures --check'
+            if [ "${SCENARIO_LANE_SHARD%%/*}" = 1 ]; then bash ci/test/scenario-broken-run.sh terminal; just docs-captures --check; fi'
 
       - name: Upload the failed scenario runs (terminal)
         # The recording of every failed run: manifest, per-step stills and
@@ -228,18 +245,18 @@ jobs:
         uses: metacraft-labs/DemoVideoScript/.github/actions/upload-failed-runs@028ea4f6704fc5377e2c6b7021a9e048c15c9f92
         with:
           build-dir: build
-          name: scenario-runs-terminal
+          name: scenario-runs-terminal-${{ matrix.shard }}
 
       - name: CTF-P1b's Agent Harbor stories on a real terminal, as captures
         # The `tui-real-terminal` suite `test_ctf_p1b_tui_views_cover_web_states`
         # again (Tier 2 above ran it too), now writing every story, theme and
         # size as a picture of the terminal's screen (`build/ctf-p1b/tui/`),
         # the input of the visual review; it fails as the suite does.
-        if: ${{ !cancelled() && steps.ct.outcome == 'success' }}
+        if: ${{ !cancelled() && steps.ct.outcome == 'success' && matrix.shard == 1 }}
         run: nix develop .#devShells.x86_64-linux.default --command just ctf-p1b-tui-captures
 
       - name: Upload the terminal captures
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && matrix.shard == 1 }}
         uses: actions/upload-artifact@v4
         with:
           name: ctf-p1b-tui-captures
@@ -250,6 +267,6 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: tui-test-logs
+          name: tui-test-logs-${{ matrix.shard }}
           path: test-logs/
           retention-days: 30

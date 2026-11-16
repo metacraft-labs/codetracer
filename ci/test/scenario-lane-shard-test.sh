@@ -7,7 +7,10 @@ set -euo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 shard="$root/ci/test/scenario-lane-shard.py"
 failures=0
-fail() { echo "  FAIL $*"; failures=$((failures + 1)); }
+fail() {
+	echo "  FAIL $*"
+	failures=$((failures + 1))
+}
 ok() { echo "  ok   $*"; }
 
 for lane in "$root"/src/tests/scenarios/lanes/*.lane.yaml; do
@@ -18,15 +21,22 @@ for lane in "$root"/src/tests/scenarios/lanes/*.lane.yaml; do
 		[ "$count" -ge "$n" ] || continue
 		union=""
 		dup=0
+		first=0
+		heavier=1
 		for i in $(seq 1 "$n"); do
 			part="$(python3 "$shard" "$lane" "$i/$n" --list)"
 			[ -n "$part" ] || fail "$name shard $i/$n is empty"
+			size="$(grep -c . <<<"$part" || true)"
+			# Shard 1 also carries the whole-lane checks and the captures,
+			# so its slice must be no larger than any other shard's.
+			if [ "$i" = 1 ]; then first="$size"; elif [ "$size" -lt "$first" ]; then heavier=0; fi
 			if [ -n "$union" ] && [ -n "$(comm -12 <(sort <<<"$union") <(sort <<<"$part"))" ]; then
 				dup=1
 			fi
 			union="$(printf '%s\n%s' "$union" "$part" | grep . | sort)"
 		done
 		[ "$dup" = 0 ] || fail "$name: the $n shards overlap"
+		[ "$heavier" = 1 ] || fail "$name: shard 1/$n ($first) is larger than another shard"
 		if [ "$union" = "$all" ]; then
 			ok "$name: the $n shards cover its $count scenarios exactly"
 		else

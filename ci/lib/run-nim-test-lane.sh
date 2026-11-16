@@ -51,7 +51,13 @@
 #     invisible-coverage failure this whole area is about.
 #
 # Usage:
-#   bash ci/lib/run-nim-test-lane.sh <lane-id> [--compile-only]
+#   bash ci/lib/run-nim-test-lane.sh <lane-id> [--compile-only] [--list-shard]
+#
+# NIM_TEST_LANE_SHARD=i/n runs one shard of the lane: every n-th of its files,
+# starting with the i-th, so the n shards together run each file exactly once
+# (ci/test/nim-test-lane-shard-test.sh holds them to the lane). CI runs the
+# terminal lanes in shards because one job cannot compile ~225 files within its
+# timeout (run 43859070538). --list-shard prints the shard's files and exits.
 #
 # Environment:
 #   CT_NIM_CACHE_ROOT  nimcache root (default /tmp/ct-nim-cache)
@@ -71,7 +77,7 @@ source "${repo_root}/ci/lib/test-lane-report.sh"
 
 lane="${1:-}"
 if [ -z "${lane}" ]; then
-	echo "usage: run-nim-test-lane.sh <lane-id> [--compile-only]" >&2
+	echo "usage: run-nim-test-lane.sh <lane-id> [--compile-only] [--list-shard]" >&2
 	# Only the lanes this script will actually run; listing the recipe-owned
 	# ones here would advertise an invocation the check below refuses.
 	echo "lanes:" >&2
@@ -84,9 +90,11 @@ fi
 shift
 
 compile_only=0
+list_shard=0
 while [ $# -gt 0 ]; do
 	case "$1" in
 	--compile-only) compile_only=1 ;;
+	--list-shard) list_shard=1 ;;
 	*)
 		echo "run-nim-test-lane.sh: unknown argument '$1'" >&2
 		exit 2
@@ -94,6 +102,39 @@ while [ $# -gt 0 ]; do
 	esac
 	shift
 done
+
+# The lane's files, or the shard NIM_TEST_LANE_SHARD=i/n names of them.
+lane_run_files() {
+	if [ -z "${NIM_TEST_LANE_SHARD:-}" ]; then
+		test_lane_files "${lane}"
+		return
+	fi
+	local i="${NIM_TEST_LANE_SHARD%%/*}" n="${NIM_TEST_LANE_SHARD##*/}" k=0 f
+	case "${i}/${n}" in
+	[0-9]*/[0-9]*) ;;
+	*)
+		echo "run-nim-test-lane.sh: NIM_TEST_LANE_SHARD must be i/n, got '${NIM_TEST_LANE_SHARD}'" >&2
+		return 2
+		;;
+	esac
+	if [ "${n}" -lt 1 ] || [ "${i}" -lt 1 ] || [ "${i}" -gt "${n}" ]; then
+		echo "run-nim-test-lane.sh: NIM_TEST_LANE_SHARD ${NIM_TEST_LANE_SHARD} is out of range" >&2
+		return 2
+	fi
+	while read -r f; do
+		[ -n "${f}" ] || continue
+		[ $((k % n)) -eq $((i - 1)) ] && printf '%s\n' "${f}"
+		k=$((k + 1))
+	done < <(test_lane_files "${lane}")
+}
+if [ "${list_shard}" -eq 1 ]; then
+	lane_run_files
+	exit $?
+fi
+if [ -n "${NIM_TEST_LANE_SHARD:-}" ]; then
+	lane_run_files >/dev/null || exit 2
+	echo "${lane}: shard ${NIM_TEST_LANE_SHARD} ($(lane_run_files | wc -l) of $(test_lane_files "${lane}" | grep -c .) file(s))"
+fi
 
 # A RECIPE-OWNED LANE IS REFUSED HERE, BEFORE ANYTHING ELSE HAPPENS — before
 # the cache root, the scratch state directories, the user-state snapshot or a
@@ -786,7 +827,7 @@ while read -r f; do
 		failed=$((failed + 1))
 		;;
 	esac
-done < <(test_lane_files "${lane}")
+done < <(lane_run_files)
 
 echo ""
 if [ "${total_skips}" -gt 0 ]; then
