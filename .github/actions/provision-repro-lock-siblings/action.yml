@@ -214,10 +214,46 @@ runs:
     # shell needs no git credential of its own here: Nix fetches the flake's
     # private inputs with the job-wide `access-tokens` and netrc that
     # setup-nix wrote, exactly as this step did before the clone took a token.
+    # Keep the job's token fresh from here on. Started BEFORE the dev shell is
+    # realised: that alone can outlast the token's hour on a cold runner (the
+    # macOS leg's ran 81 minutes, run 43765077986), and the git credential
+    # helper registered above reads the job netrc this rewrites. The step after
+    # the clone is often longer than the token's hour too (the TUI job's
+    # `just build-once` ran 85 minutes), and a build script inside it can still
+    # start Nix fetches late
+    # in the step: the release build got "401 Bad credentials" from
+    # db-backend's build.rs 49 minutes into its AppImage step. refresh-github-
+    # token's keep-refreshing.sh re-mints every 40 minutes and rewrites every
+    # store refresh.sh knows, the job's credential files included, which every
+    # new `nix` process reads. The runner ends it with the job. grep, sed and
+    # awk come from the shell below because a nix-darwin runner has none on
+    # its PATH outside the dev shell.
+    - name: Keep the token fresh for the rest of the job
+      shell: bash
+      working-directory: ${{ github.workspace }}
+      env:
+        APP_ID: ${{ inputs.app-id }}
+        APP_PRIVATE_KEY: ${{ inputs.private-key }}
+      run: |
+        log="$RUNNER_TEMP/keep-refreshing-github-token.log"
+        nohup nix shell nixpkgs#openssl nixpkgs#curl nixpkgs#jq \
+          nixpkgs#gnugrep nixpkgs#gnused nixpkgs#gawk nixpkgs#coreutils -c \
+          bash "${GITHUB_WORKSPACE}/.github/actions/refresh-github-token/keep-refreshing.sh" \
+          >"$log" 2>&1 &
+        echo "token refresher started (pid $!); log: $log"
+
+    # The flake's locked inputs are fetched first, while the job's token is
+    # fresh. A running `nix` reads its access-tokens once, at start, so an
+    # input the evaluation reaches only late (it builds as it evaluates) got
+    # "401 Bad credentials" 81 minutes in (codetracer-python-recorder's
+    # tarball, macOS, run 43765077986). Best effort: a Nix without
+    # `flake prefetch-inputs` fetches them lazily, as before.
     - name: Realise the CI dev shell
       shell: bash
       working-directory: ${{ github.workspace }}
-      run: nix develop .#ci --command true
+      run: |
+        nix flake prefetch-inputs || echo "nix flake prefetch-inputs failed or is unsupported; inputs are fetched lazily" >&2
+        nix develop .#ci --command true
 
     # The clone's own token, minted only now, so that its hour starts after
     # the slow part. The caller's job token cannot be used: it was minted in
@@ -282,30 +318,6 @@ runs:
       run: |
         nix develop .#ci --command \
           bash "${GITHUB_WORKSPACE}/.github/actions/refresh-github-token/refresh.sh"
-
-    # And keep it fresh. The step after this one is often longer than the
-    # token's hour on a cold runner (the TUI job's `just build-once` ran 85
-    # minutes), and a build script inside it can still start Nix fetches late
-    # in the step: the release build got "401 Bad credentials" from
-    # db-backend's build.rs 49 minutes into its AppImage step. refresh-github-
-    # token's keep-refreshing.sh re-mints every 40 minutes and rewrites every
-    # store refresh.sh knows, the job's credential files included, which every
-    # new `nix` process reads. The runner ends it with the job. grep, sed and
-    # awk come from the shell below because a nix-darwin runner has none on
-    # its PATH outside the dev shell.
-    - name: Keep the token fresh for the rest of the job
-      shell: bash
-      working-directory: ${{ github.workspace }}
-      env:
-        APP_ID: ${{ inputs.app-id }}
-        APP_PRIVATE_KEY: ${{ inputs.private-key }}
-      run: |
-        log="$RUNNER_TEMP/keep-refreshing-github-token.log"
-        nohup nix shell nixpkgs#openssl nixpkgs#curl nixpkgs#jq \
-          nixpkgs#gnugrep nixpkgs#gnused nixpkgs#gawk nixpkgs#coreutils -c \
-          bash "${GITHUB_WORKSPACE}/.github/actions/refresh-github-token/keep-refreshing.sh" \
-          >"$log" 2>&1 &
-        echo "token refresher started (pid $!); log: $log"
 
     - name: Seed isonim tailwind-styles.json placeholder
       # Still required after the switch. `scripts/build-tailwind.sh` PRODUCES

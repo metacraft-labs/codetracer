@@ -1978,6 +1978,10 @@ untokened_submodule_checkouts=()
 # workflow, or the whole file for a composite action (which has no jobs but can
 # still declare steps and consume their outputs).
 declare -A SCOPE_MINT_IDS=()
+# Steps that run ./.github/actions/refresh-github-token, by job: its `token`
+# output is a fresh mint of the same App token, so a later step may name it.
+# Kept apart from SCOPE_MINT_IDS so a refresh is never a "second mint".
+declare -A SCOPE_REFRESH_IDS=()
 # Parallel list of "scope<TAB>id<TAB>where" consumer records, validated after
 # each file is fully read -- a consumer may legally precede its mint in the
 # file even though it cannot precede it at runtime.
@@ -2139,6 +2143,12 @@ scan_credential_file() {
 		esac
 
 		case "$stripped" in
+		'uses: ./.github/actions/refresh-github-token' | '- uses: ./.github/actions/refresh-github-token')
+			[ -n "$cur_step_id" ] && SCOPE_REFRESH_IDS["$wf_name|$scope"]+=" $cur_step_id"
+			;;
+		esac
+
+		case "$stripped" in
 		'uses: actions/checkout@'* | '- uses: actions/checkout@'*)
 			in_checkout=1
 			checkout_line="$line_no"
@@ -2267,7 +2277,7 @@ for record in ${CONSUMER_RECORDS+"${CONSUMER_RECORDS[@]}"}; do
 	tail_="${record#*	}"
 	ref_id="${tail_%%	*}"
 	where="${tail_#*	}"
-	declared="${SCOPE_MINT_IDS[$key]-}"
+	declared="${SCOPE_MINT_IDS[$key]-}${SCOPE_REFRESH_IDS[$key]-}"
 	case " $declared " in
 	*" $ref_id "*) ;;
 	*)
