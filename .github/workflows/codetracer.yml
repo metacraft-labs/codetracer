@@ -3857,6 +3857,10 @@ jobs:
         with:
           env-flavor: nix
           gh-token: ${{ steps.ci_token.outputs.token }}
+          substituters: ${{ vars.ATTIC_SUBSTITUTER }}
+          trusted-public-keys: ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
+          attic-token: ${{ secrets.ATTIC_TOKEN }}
+          attic-cache: ${{ vars.ATTIC_CACHE }}
           extra-siblings: |
             codetracer-launcher
 
@@ -4211,6 +4215,10 @@ jobs:
         with:
           env-flavor: nix
           gh-token: ${{ steps.ci_token.outputs.token }}
+          substituters: ${{ vars.ATTIC_SUBSTITUTER }}
+          trusted-public-keys: ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
+          attic-token: ${{ secrets.ATTIC_TOKEN }}
+          attic-cache: ${{ vars.ATTIC_CACHE }}
 
       - name: Provision dependency siblings from repro.lock
         uses: ./.github/actions/provision-repro-lock-siblings
