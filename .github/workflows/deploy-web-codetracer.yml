@@ -448,7 +448,7 @@ jobs:
             isonim-tui=8e43ce06f7f078530c7a8585c210ad7648fa0051
             isonim-gpui=7e34756b9ba1fb4a714a2c4130beeb371ac7f935
             nim-everywhere=2f5b67a5dafd96ca5d57c9270fc3c2da2c5f2b0b
-            nim-termctl=18fd0b45964ec6f150eaebae31b97e92ff4b6ffd
+            nim-termctl=63560ed41ce0fea563431a44db9e9d852cd703dd
             nim-pty=6ffb8d788e8a740ca78ec29c7a3a489a13818bcb
             nim-acp=0bf10b4c35064a08d8c96eb912190521322017e2
             nim-agent-harbor=9694f6b41be21315243df1b19cabd02c5f271d7d
