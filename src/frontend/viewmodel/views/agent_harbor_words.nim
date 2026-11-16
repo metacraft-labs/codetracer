@@ -269,17 +269,51 @@ proc hiddenBarTabs*(tabs: openArray[StripTab]; hidden: openArray[int]): HiddenSu
 # Cut text
 # ---------------------------------------------------------------------------
 
+const
+  CutEllipsis* = "\xE2\x80\xA6"
+    ## What ends a cut text.
+  CutSeparators* = ["\xC2\xB7", "\xE2\x80\x94"]
+    ## The separators a cut drops when they end what it keeps: `·`, and the
+    ## `—` of ` — `. Spaces are always dropped too. The GPUI views hand this
+    ## set to isonim-gpui's text element (`ah_theme.text`), so the native
+    ## cut follows the same rule.
+
 proc trimBeforeEllipsis*(kept: string): string =
   ## The kept start of a cut text, without what would dangle before its
-  ## "…": trailing spaces, and a separator (`·`, or ` — `) the cut left
-  ## last, so `5ca1ab1e · ` reads `5ca1ab1e…` and `Telemetry upload `
-  ## reads `Telemetry upload…`. Every host's cut text goes through this rule
-  ## (the terminal's `ah_tui_canvas.elide`).
+  ## "…": trailing spaces, and a separator (`CutSeparators`: `·`, or
+  ## ` — `) the cut left last, so `5ca1ab1e · ` reads `5ca1ab1e…` and
+  ## `Telemetry upload ` reads `Telemetry upload…`. Every host's cut text
+  ## goes through this rule: the terminal's `ah_tui_canvas.elide`, the web's
+  ## `ah_cut_text` and, through `CutSeparators`, the GPUI text element.
   result = kept.strip(leading = false)
   var trimmed = true
   while trimmed:
     trimmed = false
-    for sep in ["\xC2\xB7", "\xE2\x80\x94"]:
+    for sep in CutSeparators:
       if result.endsWith(sep):
         result = result[0 ..< result.len - sep.len].strip(leading = false)
         trimmed = true
+
+proc danglesBeforeEllipsis*(shown: string): bool =
+  ## Whether a drawn text breaks the rule above: it ends in "…" and what it
+  ## keeps before the "…" ends in a space or a separator. A bare "…"
+  ## keeps nothing and does not dangle. The hosts' tests read their drawn
+  ## cut texts through this; it reads the text itself rather than asking
+  ## `trimBeforeEllipsis`, so a broken trim cannot also blind the check.
+  if not shown.endsWith(CutEllipsis): return false
+  let kept = shown[0 ..< shown.len - CutEllipsis.len]
+  if kept.len == 0: return false
+  if kept[^1] in Whitespace: return true
+  for sep in CutSeparators:
+    if kept.endsWith(sep): return true
+  false
+
+proc countsFloor*(counts: string): string =
+  ## The least a tree node's counts are cut to (CTF-P1c D7): the first
+  ## count's number and the ellipsis, `1…` for `1 needs input · 2 running`.
+  ## The counts never shrink below it; the title gives way first. Counts
+  ## that are a number alone, or do not open with one, are their own floor.
+  var digits = 0
+  while digits < counts.len and counts[digits] in Digits: inc digits
+  if digits == 0 or digits == counts.len: counts
+  else: counts[0 ..< digits] & CutEllipsis

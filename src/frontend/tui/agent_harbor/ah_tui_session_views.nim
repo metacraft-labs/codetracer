@@ -23,7 +23,7 @@ import nim_agents_isonim_viewmodels/agent_harbor/session_tabs_vm
 from ../../viewmodel/views/agent_harbor_words import
   tabLabelOf, countsText, metaOf, AgentHarborTabsLoadingText,
   AgentHarborTabsErrorText, AgentHarborTabsEmptyText, HiddenSummary, HiddenSeverity,
-  hiddenSessions, chipTitle
+  hiddenSessions, chipTitle, countsFloor
 
 import ./ah_tui_canvas
 
@@ -454,8 +454,10 @@ const
     ## part cut inside reads `1 needs…`. Counts shorter than this keep their
     ## whole width.
   GroupTitleMin = 4
-    ## The least a cut title keeps (three glyphs and its "…"); only below
-    ## this do the counts give up more than `GroupCountsMin`.
+    ## The least a cut title keeps (three glyphs and its "…") while the
+    ## counts are above their floor: below this the counts give up more than
+    ## `GroupCountsMin`, down to their floor (`countsFloor`, `1…`), and only
+    ## then does the title give way further.
   GroupGap = 1
     ## Between a whole title and `n/m`, and between `n/m` and the counts
     ## (`.ah-session-group-header`'s 0.5rem gap).
@@ -470,8 +472,10 @@ proc groupHeaderPlace*(col, width: int; title, progress, counts: string): GroupH
   ## too short for all of it the counts give up their room first, cut with
   ## an ellipsis inside a part where needed (`1 needs…`), down to
   ## `GroupCountsMin` cells; only then is the title cut, keeping
-  ## `StatusWordGap` cells before `n/m`. The counts never disappear: below a
-  ## `GroupTitleMin`-cell title they shrink further, to one cell at least.
+  ## `StatusWordGap` cells before `n/m`. Below a `GroupTitleMin`-cell title
+  ## the counts shrink further, but never below their floor, the first
+  ## count's number and its "…" (`countsFloor`, `1…`): on a line too short
+  ## even for that, the title gives way (CTF-P1c D7).
   result.titleAt = col + GroupTitleAt
   let lineEnd = col + width - 1             # exclusive: one cell of inset
   let room = lineEnd - result.titleAt
@@ -489,7 +493,8 @@ proc groupHeaderPlace*(col, width: int; title, progress, counts: string): GroupH
       # least, the counts again (never to nothing).
       let titleW = room - StatusWordGap - pg - countsW
       if titleW < GroupTitleMin:
-        countsW = max(min(cw, 1), room - StatusWordGap - pg - GroupTitleMin)
+        countsW = max(widthOf(countsFloor(counts)),
+                      room - StatusWordGap - pg - GroupTitleMin)
   result.countsShown = elide(counts, countsW)
   result.countsW = widthOf(result.countsShown)
   result.countsAt = lineEnd - result.countsW

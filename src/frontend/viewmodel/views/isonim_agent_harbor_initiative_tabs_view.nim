@@ -29,6 +29,9 @@ when defined(js):
 
 import isonim/core/[signals, computation]
 import isonim/dsl/[ui, components]
+# Its one-line texts (`data-ah-cut`) are cut in code, by the views' one rule
+# for a cut (`ah_cut_text`, CTF-P1c D6).
+import ./ah_cut_text
 
 when defined(js):
   import isonim/web/web_renderer
@@ -63,7 +66,7 @@ proc renderPopupSession[R](r: R; item: SessionItem): auto =
     tdiv(class = "ah-initiative-session ah-att-" & $item.attention, title = item.tooltip):
       span(class = "ah-tab-mark"):
         discard
-      span(class = "ah-initiative-session-title"):
+      span(`data-ah-cut` = "line", class = "ah-initiative-session-title"):
         text item.title
       span(class = "ah-initiative-session-status"):
         text item.statusLabel
@@ -76,7 +79,7 @@ proc renderPopup[R](r: R; popup: InitiativePopup): auto =
       tdiv(class = "ah-popup-head"):
         span(class = "ah-tab-mark"):
           discard
-        span(class = "ah-popup-title"):
+        span(`data-ah-cut` = "line", class = "ah-popup-title"):
           text popup.title
         span(class = "ah-popup-state ah-popup-state-" & $popup.state):
           text stateWord(popup.state)
@@ -87,7 +90,7 @@ proc renderPopup[R](r: R; popup: InitiativePopup): auto =
         tdiv(class = "ah-initiative-current"):
           span(class = "ah-initiative-label"):
             text "Current"
-          span(class = "ah-initiative-current-text"):
+          span(`data-ah-cut` = "line", class = "ah-initiative-current-text"):
             text popup.currentMilestone
       if popup.executiveSummary.len > 0:
         tdiv(class = "ah-popup-summary"):
@@ -109,7 +112,7 @@ proc renderInitiativeTab[R](r: R; vm: InitiativeTabStripVM; tab: StripTab): auto
          onclick = proc() = discard vm.activate(key)):
       span(class = "ah-tab-mark"):
         discard
-      span(class = SessionTabLabelClass):
+      span(`data-ah-cut` = "line", class = SessionTabLabelClass):
         text tab.title
       span(class = "ah-tab-progress"):
         text tab.progressText
@@ -140,7 +143,7 @@ proc renderSessionTab[R](r: R; vm: InitiativeTabStripVM; tab: StripTab): auto =
          onclick = proc() = discard vm.activate(key)):
       span(class = "ah-tab-mark"):
         discard
-      span(class = SessionTabLabelClass):
+      span(`data-ah-cut` = "line", class = SessionTabLabelClass):
         text tab.title
       if tab.session.originShort.len > 0:
         span(class = "ah-tab-origin", title = "started from " & tab.session.originLabel):
@@ -155,7 +158,7 @@ proc renderOverflowTab[R](r: R; vm: InitiativeTabStripVM; tab: StripTab): auto =
          title = tab.tooltip, onclick = proc() = discard vm.activate(key)):
       span(class = "ah-tab-mark"):
         discard
-      span(class = "ah-tab-overflow-title"):
+      span(`data-ah-cut` = "line", class = "ah-tab-overflow-title"):
         text tab.title
       if tab.progressText.len > 0:
         span(class = "ah-tab-progress"):
@@ -169,11 +172,11 @@ proc renderElsewhereItem[R](r: R; vm: InitiativeTabStripVM; entry: ElsewhereSess
          title = entry.item.tooltip, onclick = proc() = discard vm.openSession(id)):
       span(class = "ah-tab-mark"):
         discard
-      span(class = "ah-tab-overflow-title"):
+      span(`data-ah-cut` = "line", class = "ah-tab-overflow-title"):
         text entry.item.title
       # Its initiative beside its state: where it opens (inside that
       # initiative's tab, or as a tab of its own).
-      span(class = "ah-elsewhere-initiative" &
+      span(`data-ah-cut` = "line", class = "ah-elsewhere-initiative" &
                    (if entry.initiativeTitle.len == 0: " ah-elsewhere-no-initiative" else: ""),
            title = (if entry.initiativeTitle.len > 0: "initiative: " & entry.initiativeTitle
                     else: "launched for no initiative")):
@@ -267,7 +270,7 @@ proc renderAgentHarborInitiativeTabBar*[R, N](r: R; vm: InitiativeTabStripVM): N
     of asIdle, asLoading:
       let notice = ui(r):
         tdiv(class = SessionTabClass & " ah-tab-notice ah-tab-loading"):
-          span(class = SessionTabLabelClass):
+          span(`data-ah-cut` = "line", class = SessionTabLabelClass):
             text "Loading initiatives\xE2\x80\xA6"
       r.appendRendered(bar, notice)
     of asError:
@@ -275,7 +278,7 @@ proc renderAgentHarborInitiativeTabBar*[R, N](r: R; vm: InitiativeTabStripVM): N
       let message = "Initiatives unavailable: " & vm.error.val
       let notice = ui(r):
         tdiv(class = SessionTabClass & " ah-tab-notice ah-tab-error", title = message):
-          span(class = SessionTabLabelClass):
+          span(`data-ah-cut` = "line", class = SessionTabLabelClass):
             text message
           button(class = "ah-tab-retry", onclick = proc() = target.load()):
             text "Retry"
@@ -285,7 +288,7 @@ proc renderAgentHarborInitiativeTabBar*[R, N](r: R; vm: InitiativeTabStripVM): N
       if tabs.len == 0:
         let notice = ui(r):
           tdiv(class = SessionTabClass & " ah-tab-notice ah-tab-empty"):
-            span(class = SessionTabLabelClass):
+            span(`data-ah-cut` = "line", class = SessionTabLabelClass):
               text "No initiative is running."
         r.appendRendered(bar, notice)
       # One line: the tabs that fit, the active one always among them, and

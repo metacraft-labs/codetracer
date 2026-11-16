@@ -79,7 +79,10 @@
 ## index, for a fill one and two units off (one passes, two fails), and for
 ## a `px` edge off by `PxTolerance` (passes) and one pixel more (fails),
 ## and for each `+N` menu moved off its chip (right-aligned under the bar, or
-## past the window's left edge where the window should have stopped it).
+## past the window's left edge where the window should have stopped it),
+## and for a cut text the window lists (`drawnCuts`) that keeps a space or
+## a separator before its "…", or a regions file that lists none (CTF-P1c
+## D6).
 ##
 ## No mocks: both sides are real captures of real renderers, over the
 ## committed synthetic fixture set both builds embed.
@@ -165,6 +168,27 @@ suite "CTF-P1b: the layout judge fails what it must (negative controls)":
     check fileExists(gpuiDir / (source.id & ".ppm"))
     let j = judgeCapture(source.id, plant(), web{source.id}, source.width, source.height)
     check j.verdict == vPass
+
+  test "a cut text with a separator before its \"…\" fails, and so does a file that lists none":
+    # CTF-P1c D6: the window's cut texts (`drawnCuts`) follow the views'
+    # rule. A planted `a ·…` and `a …` fail; `a…` passes; a regions file
+    # without the list fails.
+    proc withCuts(cuts: JsonNode): CaptureJudgement =
+      let dir = plant()
+      let path = dir / (source.id & ".regions.json")
+      var doc = parseJson(readFile(path))
+      if cuts.isNil: doc.delete("drawnCuts")
+      else: doc["drawnCuts"] = cuts
+      writeFile(path, $doc)
+      judgeCapture(source.id, dir, web{source.id}, source.width, source.height)
+    check withCuts(%["Route cache\xE2\x80\xA6"]).verdict == vPass
+    let dot = withCuts(%["Route cache \xC2\xB7\xE2\x80\xA6"])
+    check dot.verdict == vCut
+    check "with a space or a separator before its" in dot.problems.join(" ")
+    check withCuts(%["Route cache \xE2\x80\xA6"]).verdict == vCut
+    let none = withCuts(nil)
+    check none.verdict == vCut
+    check "does not list the texts it drew cut" in none.problems.join(" ")
 
   test "a blank capture fails":
     let dir = plant()

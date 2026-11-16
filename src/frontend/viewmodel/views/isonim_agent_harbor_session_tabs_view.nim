@@ -28,6 +28,9 @@ when defined(js):
 
 import isonim/core/[signals, computation]
 import isonim/dsl/[ui, components]
+# Its one-line texts (`data-ah-cut`) are cut in code, by the views' one rule
+# for a cut (`ah_cut_text`, CTF-P1c D6).
+import ./ah_cut_text
 
 when defined(js):
   import isonim/web/web_renderer
@@ -94,7 +97,7 @@ proc renderTab[R](r: R; vm: SessionTabStripVM; cb: AgentHarborTabCallbacks;
          onclick = proc() = vm.invokeActivate(cb, id)):
       span(class = "ah-tab-mark"):
         discard
-      span(class = SessionTabLabelClass):
+      span(`data-ah-cut` = "line", class = SessionTabLabelClass):
         text tabLabelOf(tab)
       if tab.originShort.len > 0:
         span(class = "ah-tab-origin", title = "started from " & tab.originLabel):
@@ -120,7 +123,7 @@ proc renderOverflowItem[R](r: R; vm: SessionTabStripVM; cb: AgentHarborTabCallba
          title = tab.tooltip, onclick = proc() = vm.invokeActivate(cb, id)):
       span(class = "ah-tab-mark"):
         discard
-      span(class = "ah-tab-overflow-title"):
+      span(`data-ah-cut` = "line", class = "ah-tab-overflow-title"):
         text tab.title
       if tab.originShort.len > 0:
         span(class = "ah-tab-origin", title = "started from " & tab.originLabel):
@@ -138,7 +141,7 @@ proc renderStatusTab[R](r: R; vm: SessionTabStripVM; cb: AgentHarborTabCallbacks
   ## its retry.
   ui(r):
     tdiv(class = SessionTabClass & " ah-tab-notice " & extra, title = text):
-      span(class = SessionTabLabelClass):
+      span(`data-ah-cut` = "line", class = SessionTabLabelClass):
         text text
       if retry:
         button(class = "ah-tab-retry", onclick = proc() = vm.invokeRetry(cb)):
@@ -284,15 +287,15 @@ proc renderListRow[R](r: R; vm: SessionTabStripVM; cb: AgentHarborTabCallbacks;
       span(class = "ah-tab-mark"):
         discard
       tdiv(class = "ah-session-row-main"):
-        tdiv(class = "ah-session-row-title"):
+        tdiv(`data-ah-cut` = "line", class = "ah-session-row-title"):
           text tab.title
         tdiv(class = "ah-session-row-meta"):
           span(class = "ah-session-row-status"):
             text tab.statusLabel
-          span(class = "ah-session-row-meta-text"):
+          span(`data-ah-cut` = "line", class = "ah-session-row-meta-text"):
             text metaOf(tab)
         if detail.len > 0:
-          tdiv(class = "ah-session-row-detail" &
+          tdiv(`data-ah-cut` = "line", class = "ah-session-row-detail" &
                        (if tab.failureText.len > 0: " ah-session-row-failure" else: "")):
             text detail
       span(class = "ah-session-row-age"):
@@ -316,12 +319,13 @@ proc renderGroupHeader[R](r: R; vm: SessionTabStripVM; group: SessionTabGroup): 
       if group.planId.len > 0:
         span(class = "ah-tab-mark"):
           discard
-      span(class = "ah-session-group-title"):
+      span(`data-ah-cut` = "line", class = "ah-session-group-title"):
         text group.title
       if group.progressText.len > 0:
         span(class = "ah-tab-progress"):
           text group.progressText
-      span(class = "ah-session-group-counts", title = countsText(group.counts)):
+      span(`data-ah-cut` = "line", `data-ah-floor` = countsFloor(countsText(group.counts)),
+           class = "ah-session-group-counts", title = countsText(group.counts)):
         text countsText(group.counts)
 
 proc renderAgentHarborSessionList*[R, N](r: R; vm: SessionTabStripVM;
@@ -364,7 +368,7 @@ proc renderAgentHarborSessionList*[R, N](r: R; vm: SessionTabStripVM;
       # Where the sessions come from (a server, a snapshot, an invented set),
       # as the fleet panel names its source.
       let source = ui(r):
-        tdiv(class = "ah-session-list-source", title = vm.sourceLabel):
+        tdiv(`data-ah-cut` = "line", class = "ah-session-list-source", title = vm.sourceLabel):
           text vm.sourceLabel
       r.appendRendered(body, source)
     case vm.state.val

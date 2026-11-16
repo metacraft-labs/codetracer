@@ -26,6 +26,9 @@
 
 import isonim/core/[signals, computation]
 import isonim/dsl/[ui, components]
+# Its one-line texts (`data-ah-cut`) are cut in code, by the views' one rule
+# for a cut (`ah_cut_text`, CTF-P1c D6).
+import ./ah_cut_text
 
 import ../../stories/agent_harbor_playback
 from ../keymap/scope_path import StoryPlaybackScope
@@ -82,7 +85,7 @@ proc renderAgentHarborPlaybackBar*[R, N](r: R; pb: AhPlayback): N =
     # layout check measures (`playback-moment`) is the part drawn.
     let readout = ui(r):
       span(class = "ah-playback-readout"):
-        span(class = "ah-playback-moment"):
+        span(`data-ah-cut` = "line", class = "ah-playback-moment"):
           text pb.momentLabel
         span(class = "ah-playback-time"):
           text pb.elapsedLabel

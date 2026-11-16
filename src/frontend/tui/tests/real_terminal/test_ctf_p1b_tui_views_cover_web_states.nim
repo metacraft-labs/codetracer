@@ -29,7 +29,9 @@
 ##      right-hand group, a milestone's meta — must be drawn whole, wrapped
 ##      where a line cannot hold it, and a tree node's title is cut only
 ##      once its counts have given up their room, down to `CountsLeast`
-##      cells (`cutTextProblems`). A text that lists its parts with " · "
+##      cells, and its counts are never cut below their floor, the first
+##      count's number and its "…" (`countsFloor`, `1…`; CTF-P1c D7)
+##      (`cutTextProblems`). A text that lists its parts with " · "
 ##      wraps only after a separator (`separatorWrapProblems`); a tree
 ##      node's counts are always drawn, end flush with the rows' ages, and
 ##      are cut only where the line cannot hold them whole
@@ -96,10 +98,10 @@ import nim_agents/agent_harbor/fleet_records
 import nim_agents_isonim_viewmodels/agent_harbor/[fleet_vm, session_tabs_vm,
   initiative_tabs_vm, initiatives_vm, initiative_progress_vm, fixture_source, data_source]
 from ../../../viewmodel/views/agent_harbor_words import tabLabelOf, filterCount,
-  countsText, activityLineIsError
+  countsText, activityLineIsError, countsFloor, danglesBeforeEllipsis
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads this spelling.
-const ExpectedAssertions = 125
+const ExpectedAssertions = 133
 
 const CountsLeast = 8
   ## The least room a tree node's counts give up to before its title is
@@ -219,11 +221,24 @@ proc cutTextProblems(m: AhTuiMount): seq[string] =
                  "' while its counts '" & m.drawnText(counts) & "' have room to give (" &
                  $widthOf(m.drawnText(counts)) & " cells, " & $least & " at least)"
     let floor = widthOf(elide(counts.attr("counts"), least))
-    if m.drawnText(t) != t.attr("title") and widthOf(m.drawnText(t).strip) > TitleLeast and
-        widthOf(m.drawnText(counts).strip) < floor:
+    # The cells the title keeps past its least, handed back to the counts,
+    # would show more of them: the counts gave up room the title should
+    # have. (A cell the counts' trim frees, `1 …` drawn `1…`, the title
+    # may keep.)
+    let drawnCountsW = widthOf(m.drawnText(counts).strip)
+    let spare = widthOf(m.drawnText(t).strip) - TitleLeast
+    if m.drawnText(t) != t.attr("title") and spare > 0 and drawnCountsW < floor and
+        widthOf(elide(counts.attr("counts"), drawnCountsW + spare)) > drawnCountsW:
       result.add "the counts '" & counts.attr("counts") & "' of '" & t.attr("title") &
                  "' are cut to '" & m.drawnText(counts).strip & "', below their least (" &
                  $floor & " cells), while the title keeps '" & m.drawnText(t).strip & "'"
+    # The counts' floor (CTF-P1c D7): never less than the first count's
+    # number and its "…" (`1…`), whatever the title keeps.
+    let countsFloorText = countsFloor(counts.attr("counts"))
+    if widthOf(m.drawnText(counts).strip) < widthOf(countsFloorText):
+      result.add "the counts '" & counts.attr("counts") & "' of '" & t.attr("title") &
+                 "' are cut to '" & m.drawnText(counts).strip & "', below their floor '" &
+                 countsFloorText & "'"
   for n in m.canvas.root.all("controls"):
     let drawn = m.canvas.grid.cellsText(n.row, n.col, n.width)
     if Ellipsis in drawn:
@@ -353,9 +368,7 @@ proc cutEdgeProblems(m: AhTuiMount): seq[string] =
       if n.row >= m.rows or n.width == 0 or n.height > 1: continue
       let drawn = m.drawnText(n)
       if not drawn.endsWith(Ellipsis): continue
-      let kept = drawn[0 ..< drawn.len - Ellipsis.len]
-      if kept.len == 0: continue
-      if kept.endsWith(" ") or kept.endsWith(" \xC2\xB7") or kept.endsWith(" \xE2\x80\x94"):
+      if danglesBeforeEllipsis(drawn):
         result.add "the " & fact & " '" & n.attr(fact) & "' is cut to '" & drawn &
                    "', a space or a separator before its \"…\""
 
@@ -1706,6 +1719,57 @@ suite "CTF-P1b: the terminal views share the viewmodels, not the web views":
     ck scanned >= 7
     if offenders.len > 0: echo "  web imports:\n    " & offenders.join("\n    ")
     ck offenders.len == 0
+
+suite "CTF-P1c D7: a tree node's counts keep their floor":
+  # On a line too short for the title, `n/m` and the counts, the counts
+  # give way down to their floor, the first count's number and its "…"
+  # (`1…`), and the title gives way after that: the counts never shrink to
+  # a bare "…".
+
+  test "a tree node about 20 cells wide keeps its counts' floor":
+    # The pure layout, at every width around 20 cells: the counts drawn are
+    # never narrower than their floor, and at 20 cells with a long title
+    # they are at it while the title is cut.
+    const
+      title = "Route cache warmup for the importer"
+      progress = "1/4"
+      counts = "1 needs input \xC2\xB7 2 running"
+    var belowFloor: seq[string]
+    for width in 14 .. 30:
+      let place = groupHeaderPlace(0, width, title, progress, counts)
+      if widthOf(place.countsShown) < widthOf(countsFloor(counts)):
+        belowFloor.add $width & " cells: '" & place.countsShown & "'"
+    ck belowFloor.len == 0
+    let at20 = groupHeaderPlace(0, 20, title, "10/12", counts)
+    ck at20.countsShown == countsFloor(counts)
+    ck at20.titleW < widthOf(title)
+    # The stories, drawn 20 cells wide: every node's counts at least at
+    # their floor, and some node there.
+    let m = mountStory(storyOf("agent-harbor-session-list", "sidebar"), 20, 56, dmDark)
+    let problems = cutTextProblems(m)
+    if problems.len > 0: echo "  20 cells: ", problems.join("\n  20 cells: ")
+    ck problems.len == 0
+    var atFloor = 0
+    for g in m.view.all("group"):
+      let counts = g.first("counts")
+      if counts.isNil or counts.row >= m.rows: continue
+      if m.drawnText(counts).strip == countsFloor(counts.attr("counts")): inc atFloor
+    ck atFloor > 0
+    m.dispose()
+
+  test "counts cut to a bare \"…\" are reported":
+    let m = mountStory(storyOf("agent-harbor-session-list", "sidebar"), 20, 56, dmDark)
+    ck cutTextProblems(m).len == 0
+    var spoiled = false
+    for g in m.view.all("group"):
+      let counts = g.first("counts")
+      if spoiled or counts.isNil or counts.row >= m.rows or counts.width < 2: continue
+      let st = m.canvas.grid.styleAt(counts.row, counts.col)
+      m.canvas.grid.paint(counts.row, counts.col, " ".repeat(counts.width - 1) & Ellipsis, st)
+      spoiled = true
+    ck spoiled
+    ck cutTextProblems(m).join(" ").contains("below their floor")
+    m.dispose()
 
 suite "CTF-P1b: assertion count":
   test "every assertion ran":

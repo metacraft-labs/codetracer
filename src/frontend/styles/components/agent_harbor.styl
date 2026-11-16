@@ -17,6 +17,51 @@ ah-rem(px)
 
 AH_ROW_DOT = 0.5rem
 
+// ---------------------------------------------------------------------------
+// Cut text (CTF-P1c D6)
+// ---------------------------------------------------------------------------
+// A one-line text the views mark `data-ah-cut` is cut in code
+// (`views/ah_cut_text.nim`): CSS's `text-overflow: ellipsis` cannot drop the
+// space or separator a cut leaves before its "…", so those rules carry none.
+// While the text is cut, the element keeps its whole text in the DOM, drawn
+// transparent, so its size is that of the whole text as under CSS's ellipsis,
+// and the cut text (`data-ah-shown`) is drawn over it from where the text
+// starts (`--ah-cut-indent`), in the element's own colour. A `::before` of
+// the element keeps its ink.
+//
+// Two rules below keep CSS's ellipsis: `.ah-milestone-meta`, a line of spans
+// in two colours (the failing count in the error role) that one drawn string
+// cannot colour, and which the progress panel gives its whole width, so it
+// is shown whole; and `.ah-playback-readout`, a flex container, whose
+// `text-overflow` applies to no text (its moment and time are flex items;
+// the moment is cut here).
+[data-ah-shown]
+  position: relative
+  -webkit-text-fill-color: transparent
+
+  &::before
+    -webkit-text-fill-color: currentColor
+
+  &::after
+    content: attr(data-ah-shown)
+    position: absolute
+    top: 0
+    right: 0
+    bottom: 0
+    left: 0
+    padding: inherit
+    text-indent: var(--ah-cut-indent, 0px)
+    white-space: nowrap
+    overflow: hidden
+    pointer-events: none
+    -webkit-text-fill-color: currentColor
+
+// The session tab strip's label shares `.session-tab-label` with the
+// desktop's strip (session_tabs.styl), which keeps CSS's ellipsis; the
+// Agent Harbor views' label is cut in code.
+.session-tab-label[data-ah-cut]
+  text-overflow: clip
+
 .agent-harbor-fleet
   height: 100%
   display: flex
@@ -74,7 +119,6 @@ AH_ROW_DOT = 0.5rem
   color: colors-ui-text-primary-caption
   white-space: nowrap
   overflow: hidden
-  text-overflow: ellipsis
 
 // The VCS diff-toggle row (`.vcs-diff-toggle`): small toggles on the panel
 // surface, the active one raised.
@@ -246,7 +290,6 @@ AH_ROW_DOT = 0.5rem
   color: colors-ui-text-primary-body
   white-space: nowrap
   overflow: hidden
-  text-overflow: ellipsis
 
 .ah-fleet-row-meta
   display: flex
@@ -275,7 +318,6 @@ AH_ROW_DOT = 0.5rem
   min-width: 0
   white-space: nowrap
   overflow: hidden
-  text-overflow: ellipsis
 
 // Said once, in the header: the server withholds the prompts, so the rows
 // are titled by what else names them. Plain, not italic.
@@ -293,7 +335,6 @@ AH_ROW_DOT = 0.5rem
   color: colors-ui-text-primary-caption
   white-space: nowrap
   overflow: hidden
-  text-overflow: ellipsis
 
 .ah-fleet-row-failure
   font-size: ah-rem(type-ui-size-caption-md)
@@ -301,7 +342,6 @@ AH_ROW_DOT = 0.5rem
   color: colors-ui-text-error-primary
   white-space: nowrap
   overflow: hidden
-  text-overflow: ellipsis
 
 .ah-fleet-row-activity
   display: flex
@@ -327,7 +367,6 @@ AH_ROW_DOT = 0.5rem
   color: colors-ui-text-primary-caption
   white-space: nowrap
   overflow: hidden
-  text-overflow: ellipsis
 
 // "+N" / "less": unfolds a row's other activity lines. A text control in
 // the label role, like the VCS panel's small toggles at rest.
@@ -361,7 +400,6 @@ AH_ROW_DOT = 0.5rem
   color: colors-ui-text-primary-label
   white-space: nowrap
   overflow: hidden
-  text-overflow: ellipsis
 
 .ah-fleet-meta-short
   display: none
@@ -629,7 +667,6 @@ AH_MARK = 0.5rem
   flex: 1 1 auto
   min-width: 0
   overflow: hidden
-  text-overflow: ellipsis
 
 // Several lines: the strip wraps and the caption bar grows with it.
 .ah-tab-strip.ah-tab-strip-wrap
@@ -764,19 +801,23 @@ AH_MARK = 0.5rem
   user-select: none
   min-width: 0
 
-// The title keeps at least half the line; the counts give way first.
+// The title keeps at least half the line; the counts give way first (they
+// shrink a hundred times faster), down to their floor, the first count's
+// number and its "…" (`1…`, `data-ah-floor`, kept by `ah_cut_text`; CTF-P1c
+// D7). On a line too short for half of it beside the rest at that floor
+// (`--ah-floor-rest`, set by `ah_cut_text`), the title gives way instead.
 .ah-session-group-title
   flex: 1 1 auto
-  min-width: 50%
+  min-width: unquote("min(50%, calc(100% - var(--ah-floor-rest, 0px)))")
   font-size: ah-rem(type-ui-size-label-md)
   font-weight: 600
   color: colors-ui-text-primary-label
   white-space: nowrap
   overflow: hidden
-  text-overflow: ellipsis
 
 // One line: the counts are cut before the title is (they shrink a hundred
-// times faster).
+// times faster), never below their floor (`data-ah-floor`, whose width
+// `ah_cut_text` gives them as their `min-width`).
 .ah-session-group-counts
   flex: 0 100 auto
   max-width: 40%
@@ -785,7 +826,6 @@ AH_MARK = 0.5rem
   color: colors-ui-text-primary-caption
   white-space: nowrap
   overflow: hidden
-  text-overflow: ellipsis
 
 .ah-session-group-focus .ah-session-group-title
   color: colors-ui-text-primary-body
@@ -840,7 +880,6 @@ AH_MARK = 0.5rem
   color: colors-ui-text-primary-body
   white-space: nowrap
   overflow: hidden
-  text-overflow: ellipsis
 
 .ah-session-row-meta
   display: flex
@@ -876,14 +915,12 @@ AH_MARK = 0.5rem
   color: colors-ui-text-primary-caption
   white-space: nowrap
   overflow: hidden
-  text-overflow: ellipsis
 
 .ah-session-row-meta-text,
 .ah-session-row-detail
   min-width: 0
   white-space: nowrap
   overflow: hidden
-  text-overflow: ellipsis
 
 .ah-session-row-detail
   font-size: ah-rem(type-ui-size-caption-md)
@@ -1046,7 +1083,6 @@ AH_MARK = 0.5rem
   color: colors-ui-text-primary-body
   white-space: nowrap
   overflow: hidden
-  text-overflow: ellipsis
 
 .ah-initiative-progress-text
   flex-shrink: 0
@@ -1090,7 +1126,6 @@ AH_MARK = 0.5rem
   color: colors-ui-text-primary-body
   white-space: nowrap
   overflow: hidden
-  text-overflow: ellipsis
 
 .ah-initiative-meta-text
   flex: 1 1 auto
@@ -1098,7 +1133,6 @@ AH_MARK = 0.5rem
   color: colors-ui-text-primary-caption
   white-space: nowrap
   overflow: hidden
-  text-overflow: ellipsis
 
 // Wraps under the meta text when the row is narrow, cut if it still does
 // not fit.
@@ -1133,7 +1167,6 @@ AH_MARK = 0.5rem
   color: colors-ui-text-primary-body
   white-space: nowrap
   overflow: hidden
-  text-overflow: ellipsis
 
 .ah-initiative-session-status
   font-size: ah-rem(type-ui-size-caption-md)
@@ -1256,7 +1289,6 @@ AH_MARK = 0.5rem
   color: colors-ui-text-primary-body
   white-space: nowrap
   overflow: hidden
-  text-overflow: ellipsis
 
 .ah-milestone-current-tag
   flex-shrink: 0
@@ -1566,7 +1598,6 @@ AH_MARK = 0.5rem
   font-size: ah-rem(type-ui-size-body-md)
   font-weight: 600
   overflow: hidden
-  text-overflow: ellipsis
   white-space: nowrap
 
 .ah-popup-state
@@ -2421,7 +2452,6 @@ AH_MARK = 0.5rem
   max-width: 12rem
   min-width: 0
   overflow: hidden
-  text-overflow: ellipsis
   white-space: nowrap
   font-size: ah-rem(type-ui-size-caption-md)
   color: colors-ui-text-primary-label
@@ -2583,7 +2613,6 @@ AH_MARK = 0.5rem
 .ah-playback-moment
   min-width: 0
   overflow: hidden
-  text-overflow: ellipsis
 
 .ah-playback-time
   flex-shrink: 0

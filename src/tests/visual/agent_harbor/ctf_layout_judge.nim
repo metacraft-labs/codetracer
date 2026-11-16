@@ -22,6 +22,13 @@
 ## ("Telemetry upload retri…") in a box 0.2px narrower than the web's, which
 ## drew it whole, well within every tolerance above. No tolerance changed.
 ##
+## Added with CTF-P1c round 3 (D6): the GPUI window lists every text it
+## drew cut (`drawnCuts`, isonim-gpui's `drawnText`), and none may keep a
+## space or a separator before its "…" (`danglesBeforeEllipsis`, the views'
+## one rule for a cut); a regions file without the list fails too (verdict
+## `cut`), so the check cannot pass by being skipped. The web's cut texts
+## are held to the same rule by the StoryBook render check.
+##
 ## Trap 13 / §29 (`Verification-Harness-Traps.md`): every helper returns what
 ## it found; only the test bodies `check`.
 
@@ -30,6 +37,7 @@ import std/[algorithm, json, math, os, sets, strutils, tables]
 import ../../../common/view_vocabulary/layout_questions
 import ../../../frontend/stories/codetracer_stories
 import ../../../../tools/stories/emit_storybook_stories
+from ../../../frontend/viewmodel/views/agent_harbor_words import danglesBeforeEllipsis
 
 export layout_questions, codetracer_stories, emit_storybook_stories
 
@@ -376,6 +384,18 @@ proc compareRegions(web, gpui: RegionSet; vw, vh: int;
     if judgement.problems.len == 0:
       judgement.problems.add c.detail
 
+proc drawnCutProblems*(gpuiDoc: JsonNode): seq[string] =
+  ## The GPUI window's cut texts (`drawnCuts`) against the views' rule: no
+  ## space or separator before the "…". A regions file that does not list
+  ## them fails, so the check cannot pass by being skipped.
+  let cuts = gpuiDoc{"drawnCuts"}
+  if cuts.isNil or cuts.kind != JArray:
+    return @["the GPUI regions file does not list the texts it drew cut (drawnCuts)"]
+  for cut in cuts:
+    if danglesBeforeEllipsis(cut.getStr):
+      result.add "GPUI draws the cut text '" & cut.getStr &
+                 "' with a space or a separator before its \"…\""
+
 proc judgeCapture*(id: string; dir: string; webCapture: JsonNode;
                   vw, vh: int): CaptureJudgement =
   ## Everything this suite asserts about ONE capture, as a verdict and the
@@ -439,6 +459,9 @@ proc judgeCapture*(id: string; dir: string; webCapture: JsonNode;
   compareFills(webCapture["regions"], gpui, frame, result)
   compareHangs(regionsOf(webCapture["regions"]), gpui, vw, result)
   compareElision(webCapture["regions"], gpuiDoc["regions"], result)
+  for problem in drawnCutProblems(gpuiDoc):
+    if result.verdict == vPass: result.verdict = vCut
+    result.problems.add problem
 
 # ---------------------------------------------------------------------------
 # The expected captures

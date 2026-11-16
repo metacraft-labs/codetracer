@@ -28,7 +28,10 @@
 // content is taken away, a panel reduced to its title bar or to a toolbar,
 // classed and unclassed empty-state text, unclassed loading and error text
 // alone (in a CodeTracer panel and in an Agent Harbor panel; beside a
-// spinner; split over an inline element; in one panel of a layout), an editor with
+// spinner; split over an inline element; in one panel of a layout), an
+// Agent Harbor cut text that keeps a separator before its "…", that is cut
+// below its floor or that CSS cut instead of the views' code (CTF-P1c D6,
+// D7), an editor with
 // an empty model, content faded out by an ancestor, the review without its
 // diff, a panel mounted in `#main`, a console error, a thrown error, failed
 // and aborted requests, and a declared empty state that shows data) and
@@ -180,6 +183,56 @@ const PLANTS = {
     code: `mountCodeTracerStory = (function (real) { return function (c, k, n, f) {
       const dispose = real(c, k, n, f);
       setTimeout(() => { c.innerHTML = '<div class="calltrace-lines"><div>Loading…</div></div>'; }, 300);
+      return dispose; }; })(mountCodeTracerStory);`,
+  },
+  "cut-text-dangles": {
+    // CTF-P1c D6: an Agent Harbor text cut in code whose drawn cut keeps a
+    // separator before its "…" (as a cut that skipped the shared rule would).
+    expect: "cut-edge",
+    story: "codetracer-agent-harbor--session-list-sidebar",
+    code: `mountCodeTracerStory = (function (real) { return function (c, k, n, f) {
+      const dispose = real(c, k, n, f);
+      const started = Date.now();
+      const timer = setInterval(() => {
+        const el = c.querySelector("[data-ah-cut]");
+        if (el && el.getAttribute("data-ah-shown") !== "planted \u00b7\u2026") {
+          el.setAttribute("data-ah-shown", "planted \u00b7\u2026");
+        }
+        if (Date.now() - started > 15000) clearInterval(timer);
+      }, 100);
+      return dispose; }; })(mountCodeTracerStory);`,
+  },
+  "cut-text-below-floor": {
+    // CTF-P1c D7: a tree node's counts drawn as a bare "…", below their
+    // floor, `1…`.
+    expect: "cut-edge",
+    story: "codetracer-agent-harbor--session-list-sidebar",
+    code: `mountCodeTracerStory = (function (real) { return function (c, k, n, f) {
+      const dispose = real(c, k, n, f);
+      const started = Date.now();
+      const timer = setInterval(() => {
+        const el = c.querySelector("[data-ah-floor]");
+        if (el && el.getAttribute("data-ah-shown") !== "\u2026") el.setAttribute("data-ah-shown", "\u2026");
+        if (Date.now() - started > 15000) clearInterval(timer);
+      }, 100);
+      return dispose; }; })(mountCodeTracerStory);`,
+  },
+  "cut-text-by-css": {
+    // CTF-P1c D6: an Agent Harbor text cut by CSS's ellipsis instead of in
+    // code: its mark taken away, the stylesheet's ellipsis put back.
+    expect: "cut-edge",
+    story: "codetracer-agent-harbor--session-list-sidebar",
+    code: `mountCodeTracerStory = (function (real) { return function (c, k, n, f) {
+      const dispose = real(c, k, n, f);
+      const started = Date.now();
+      const timer = setInterval(() => {
+        for (const el of c.querySelectorAll(".ah-session-row-title[data-ah-cut]")) {
+          el.removeAttribute("data-ah-cut");
+          el.style.textOverflow = "ellipsis";
+          el.style.maxWidth = "3rem";
+        }
+        if (Date.now() - started > 15000) clearInterval(timer);
+      }, 100);
       return dispose; }; })(mountCodeTracerStory);`,
   },
   "agent-panel-loading-text": {

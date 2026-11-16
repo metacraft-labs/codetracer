@@ -46,7 +46,9 @@
 ## (the last row of a list the window shows entirely); a region with a
 ## `pick` also reports its `index` among the matches laid out with an area,
 ## as the web capture does, so the layout test can tell the same row from
-## another. The web capture writes
+## another. Beside the regions, `drawnCuts` lists every text the window drew
+## cut (isonim-gpui's `drawnText`, ending in "…"), for the layout check's
+## rule on cut texts. The web capture writes
 ## the same file from the browser's own layout (`capture-storybook.mjs
 ## --regions`), and the CTF-P1b layout test compares the two
 ## (`src/tests/visual/agent_harbor/test_ctf_p1b_gpui_capture_matches_web_layout.nim`).
@@ -69,6 +71,7 @@ import ../window_preflight
 import ../design_fonts
 import ../chrome
 import ./ah_stories
+from ../../viewmodel/views/agent_harbor_words import CutEllipsis
 
 const
   SectionTitle = "CodeTracer/Agent Harbor"
@@ -242,14 +245,25 @@ proc readRegions(probes: seq[RegionProbe]; viewportHeight: int): JsonNode =
         result[probe.name]["cut"] = %(b.w + 0.01 < parseFloat(need[0 ..< ^2]))
       except ValueError: discard
 
-proc writeRegions(regions: JsonNode) =
+proc drawnCuts(node: GpuiElement; into: var seq[string]) =
+  ## Every text the window drew cut, in document order: what isonim-gpui's
+  ## text element drew for each element that declares `text-overflow`
+  ## (`drawnText`), where it ends in "…". The layout check holds each to the
+  ## views' rule for a cut (`agent_harbor_words.danglesBeforeEllipsis`).
+  if node.isNil: return
+  let drawn = drawnText(node)
+  if drawn.endsWith(CutEllipsis): into.add drawn
+  for i in 0 ..< childCount(node): drawnCuts(nthChild(node, i), into)
+
+proc writeRegions(regions: JsonNode; cuts: seq[string]) =
   let c = gWindow.cmd
   let doc = %*{
     "renderer": "gpui",
     "story": c.storyId,
     "theme": (if c.mode == dmDark: "dark" else: "light"),
     "viewport": {"width": c.width, "height": c.height},
-    "regions": regions}
+    "regions": regions,
+    "drawnCuts": cuts}
   createDir(parentDir(c.regionsOut))
   # Written beside the file and renamed into place, so the file appears
   # whole or not at all: a capture waits for it to exist and then ends the
@@ -275,13 +289,15 @@ proc regionTick() {.cdecl.} =
   if gWindow.written or gWindow.probes.len == 0: return
   let regions = readRegions(gWindow.probes, gWindow.cmd.height)
   if regions.isNil: return
-  let read = $regions
+  var cuts: seq[string]
+  drawnCuts(gWindow.mount.root, cuts)
+  let read = $regions & $(%cuts)
   if read == gWindow.lastRead: inc gWindow.stableReads
   else:
     gWindow.lastRead = read
     gWindow.stableReads = 0
   if gWindow.stableReads >= 1:
-    writeRegions(regions)
+    writeRegions(regions, cuts)
     gWindow.written = true
     if gWindow.mount.playback.isNil: gpui_set_tick(0, nil)
 

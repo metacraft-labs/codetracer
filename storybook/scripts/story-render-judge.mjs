@@ -39,6 +39,17 @@
 //   type-size    A panel (a GoldenLayout root) inherits another type size
 //                than the window's: the app mounts every panel in `#ROOT`'s
 //                session container, never in `#main` (1.25rem).
+//   cut-edge     An Agent Harbor view's cut text breaks the views' one rule
+//                for a cut (CTF-P1c D6): a text cut in code
+//                (`views/ah_cut_text.nim`, `data-ah-shown`) keeps a space or
+//                a separator before its "…" (`ahCutTextDangles`, the shared
+//                `agent_harbor_words.danglesBeforeEllipsis`, exported to the
+//                page); a text is cut below its floor (`data-ah-floor`,
+//                a tree node's counts' `1…`, CTF-P1c D7); a text marked to
+//                be cut in code (`data-ah-cut`)
+//                overflows and is not cut; or a text in an Agent Harbor view
+//                is cut by CSS's `text-overflow: ellipsis`, which cannot
+//                drop either.
 //
 // What a story is meant to show comes from its declaration
 // (`src/frontend/stories/codetracer_stories.nim`, `state`, emitted into
@@ -377,6 +388,46 @@ function inspectStory({ statePatterns, stateText, messageWording, missingText, m
       }
     }
   }
+  // Cut text in an Agent Harbor view (`cut-edge`). A line overflows when
+  // its text, as laid out (a Range over it, overflow included), ends past
+  // the element's content box.
+  const cutTexts = [];
+  const overflows = (el) => {
+    const box = el.getBoundingClientRect();
+    if (box.width <= 0 || !el.textContent) return false;
+    const style = getComputedStyle(el);
+    const right = box.right - parseFloat(style.borderRightWidth || 0) - parseFloat(style.paddingRight || 0);
+    const range = document.createRange();
+    range.selectNodeContents(el);
+    return range.getBoundingClientRect().right > right + 0.01;
+  };
+  const AGENT_HARBOR = "[class^='ah-'], [class*=' ah-'], [class*='agent-harbor']";
+  for (const el of root.querySelectorAll("*")) {
+    if (!visible(el)) continue;
+    const shown = el.getAttribute("data-ah-shown");
+    if (shown !== null) {
+      if (typeof globalThis.ahCutTextDangles !== "function") {
+        cutTexts.push({ problem: "cut-rule-missing", text: shown });
+      } else if (globalThis.ahCutTextDangles(shown)) {
+        cutTexts.push({ problem: "dangles", text: shown, full: el.textContent.slice(0, 120) });
+      }
+      const floor = el.getAttribute("data-ah-floor");
+      if (floor && [...shown].length < [...floor].length) {
+        cutTexts.push({ problem: "below-floor", text: shown, floor });
+      }
+      continue;
+    }
+    if (!el.closest(AGENT_HARBOR)) continue;
+    if (el.hasAttribute("data-ah-cut")) {
+      if (overflows(el)) cutTexts.push({ problem: "uncut", text: el.textContent.slice(0, 120) });
+    } else if (getComputedStyle(el).textOverflow === "ellipsis" &&
+               !/flex|grid/.test(getComputedStyle(el).display) && overflows(el)) {
+      // `text-overflow` cuts a block's own inline content; a flex or grid
+      // container's children are items it does not cut.
+      cutTexts.push({ problem: "css", text: el.textContent.slice(0, 120), cls: el.className });
+    }
+  }
+
   // A layout drawn without the harness's panel frames (the standalone app
   // shell) is judged as one box, as a panel is.
   if (contentBoxes.length === 0) contentBoxes.push(pageBox(content, kind || "story"));
@@ -395,6 +446,7 @@ function inspectStory({ statePatterns, stateText, messageWording, missingText, m
     stateTexts,
     messageTexts,
     typeSizes,
+    cutTexts,
     contentBox: { width: Math.round(box.width), height: Math.round(box.height) },
     contentBoxes,
   };
@@ -403,8 +455,8 @@ function inspectStory({ statePatterns, stateText, messageWording, missingText, m
 // --- The verdict ------------------------------------------------------------------
 
 // The verdict for one rendered story: a list of failures, each with its
-// category (`placeholder`, `empty`, `error`, `type-size`). An empty list is a
-// pass.
+// category (`placeholder`, `empty`, `error`, `type-size`, `cut-edge`). An
+// empty list is a pass.
 export function judge(story, observed) {
   const failures = [];
   const add = (category, message) => failures.push({ category, message });
@@ -464,6 +516,19 @@ export function judge(story, observed) {
   if (nothing && !onlyMessage) {
     add("empty", `the ${page.kind || "story"}'s content area (${page.contentBox.width}x${page.contentBox.height}) shows nothing beyond chrome` +
       (page.chromeText ? ` (chrome: "${page.chromeText.slice(0, 60)}")` : ""));
+  }
+  for (const c of page.cutTexts ?? []) {
+    if (c.problem === "dangles") {
+      add("cut-edge", `a cut text keeps a space or a separator before its "…": "${c.text}" (of "${c.full}")`);
+    } else if (c.problem === "below-floor") {
+      add("cut-edge", `a text is cut to "${c.text}", below its floor "${c.floor}"`);
+    } else if (c.problem === "uncut") {
+      add("cut-edge", `a text marked to be cut in code overflows and is not cut: "${c.text}"`);
+    } else if (c.problem === "css") {
+      add("cut-edge", `an Agent Harbor text is cut by CSS's ellipsis, which cannot trim it (.${String(c.cls).split(" ").join(".")}): "${c.text}"`);
+    } else {
+      add("cut-edge", `a cut text is drawn but the page has no cut rule to check it by: "${c.text}"`);
+    }
   }
   for (const t of page.typeSizes ?? []) {
     add("type-size", `the ${t.panel} panel inherits ${t.size}, the window's type size is ${t.rootSize}` +

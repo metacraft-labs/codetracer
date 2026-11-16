@@ -31,6 +31,7 @@ import nim_agents_isonim_viewmodels/agent_harbor/[data_source, session_items]
 
 import ../../styles/generated/design_tokens
 import ../../viewmodel/views/agent_harbor_palette
+from ../../viewmodel/views/agent_harbor_words import CutSeparators
 import ../chrome
 import ../design_font_metrics
 
@@ -90,6 +91,10 @@ proc text*(r: GpuiRenderer; s: string; sizePx: int; colour: string;
            pairs: openArray[(string, string)] = []): GpuiElement =
   ## One line of text: never wraps, elides at its box's edge when it may
   ## shrink (the stylesheet's `white-space: nowrap; text-overflow: ellipsis`).
+  ## A cut drops the spaces and separators before its "…" by the views' one
+  ## rule (`agent_harbor_words.trimBeforeEllipsis`): isonim-gpui's text
+  ## element is handed `CutSeparators` (`EllipsisTrimAttribute`), as the web
+  ## (`ah_cut_text`) and the terminal (`elide`) apply the rule themselves.
   ## `tabular`: its digits in tabular figures, all one width
   ## (`font-variant-numeric: tabular-nums`, which the stylesheet sets on
   ## counts, ages, `n/m` and the recording buttons); measure such text with
@@ -102,6 +107,7 @@ proc text*(r: GpuiRenderer; s: string; sizePx: int; colour: string;
   if shrink:
     r.styles(result, [("overflow", "hidden"), ("text-overflow", "ellipsis"),
                       ("flex-shrink", "1")])
+    r.setAttribute(result, EllipsisTrimAttribute, CutSeparators.join(""))
   else:
     r.setStyle(result, "flex-shrink", "0")
   r.styles(result, pairs)

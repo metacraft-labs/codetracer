@@ -39,7 +39,7 @@
 ## Trap 13 / §29 (`Verification-Harness-Traps.md`): every helper that calls
 ## `check` is a template; the procs return the mismatches they found.
 
-import std/[os, sets, strutils, unittest]
+import std/[math, os, sets, strutils, unittest]
 
 import isonim_gpui/renderer
 from isonim_gpui/bindings import gpui_reset_tree
@@ -49,11 +49,12 @@ import ../../../../tools/stories/emit_storybook_stories
 import ../agent_harbor/ah_stories
 import ../agent_harbor/ah_session_views
 import ../agent_harbor/ah_fleet_panel
+from ../agent_harbor/ah_theme import textWidth, textPx, CaptionPx, InsetPx, MarkPx
 import nim_agents/agent_harbor/fleet_records
 import nim_agents_isonim_viewmodels/agent_harbor/[fleet_vm, session_tabs_vm,
   initiative_tabs_vm, initiatives_vm, initiative_progress_vm, data_source, fixture_source]
 from ../../viewmodel/views/agent_harbor_words import tabLabelOf, filterCount,
-  activityLineIsError
+  activityLineIsError, countsFloor
 
 const
   AgentHarborSectionTitle = "CodeTracer/Agent Harbor"
@@ -721,6 +722,25 @@ suite "CTF-P1b: the fleet's and the inbox's inks follow the shared rules":
                                                  ahPalette(mode).action)
       m.dispose()
 
+suite "CTF-P1c D7: a tree node's counts keep their floor":
+  test "the counts never go below their floor, and the title gives way first":
+    # The limits `drawGroupHeader` hands GPUI's flex layout. At a laptop's
+    # and a sidebar's width the title keeps half the line; on a node about
+    # 20 terminal cells (200px) wide the title's least drops below half,
+    # and the counts' least stays their floor, `1…`, a pixel over its
+    # words.
+    const counts = "1 needs input \xC2\xB7 2 running"
+    let floorPx = int(ceil(textWidth(countsFloor(counts), CaptionPx))) + 1
+    for widthPx in [1440, 360]:
+      let w = groupHeaderWidths(widthPx, counts, "1/4", marked = true)
+      ck w.titleMin == (widthPx - 2 * InsetPx) div 2
+      ck w.countsMin == floorPx
+    let narrow = groupHeaderWidths(200, counts, "10/12", marked = true)
+    ck narrow.countsMin == floorPx
+    ck narrow.titleMin < (200 - 2 * InsetPx) div 2
+    ck narrow.titleMin + narrow.countsMin + 12 + MarkPx +
+       textPx("10/12", CaptionPx, tabular = true) + 4 * 8 <= 200 - 2 * InsetPx
+
 suite "CTF-P1b: the GPUI views share the viewmodels, not the web views":
   test "no GPUI Agent Harbor view imports a web view or the web renderer":
     # The words both front-ends say live in `viewmodel/views/agent_harbor_words`,
@@ -743,4 +763,4 @@ suite "CTF-P1b: the GPUI views share the viewmodels, not the web views":
 
 suite "CTF-P1b: assertion count":
   test "every assertion ran":
-    check countedAssertions == 60
+    check countedAssertions == 67

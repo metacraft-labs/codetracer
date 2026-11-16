@@ -26,7 +26,7 @@ import nim_agents_isonim_viewmodels/agent_harbor/session_tabs_vm
 from ../../viewmodel/views/agent_harbor_words import
   tabLabelOf, countsText, metaOf, AgentHarborTabsLoadingText,
   AgentHarborTabsErrorText, AgentHarborTabsEmptyText, HiddenSummary, HiddenSeverity,
-  hiddenSessions, chipTitle
+  hiddenSessions, chipTitle, countsFloor
 
 import ./ah_theme
 
@@ -574,6 +574,38 @@ proc drawListRow(r: GpuiRenderer; p: AhPalette; vm: SessionTabStripVM;
     r.appendChild(result, main)
   r.appendChild(result, age)
 
+type
+  GroupHeaderWidths* = object
+    ## A tree node's flex limits, in px: the title's least, and the
+    ## counts' least and most.
+    titleMin*, countsMin*, countsMax*: int
+
+proc groupHeaderWidths*(widthPx: int; counts, progress: string;
+                        marked: bool): GroupHeaderWidths =
+  ## The limits `drawGroupHeader` gives a node `widthPx` wide. The counts
+  ## take at most half the line. Their least is their floor (CTF-P1c D7):
+  ## the first count's number and its "…" (`countsFloor`, `1…`), its box a
+  ## pixel wider than its words, since GPUI keeps a glyph only while the
+  ## glyphs and the "…" sum to less than the box
+  ## (`LineWrapper::should_truncate_line`). The title's least is half the
+  ## line or what the line leaves it beside the fold, the mark, `n/m`, the
+  ## counts' floor and the 8px gaps, whichever is less: the title gives way
+  ## before the counts go below their floor.
+  let lineW = widthPx - 2 * InsetPx
+  let floorPx = min(int(ceil(textWidth(countsFloor(counts), CaptionPx))),
+                    textPx(counts, CaptionPx)) + 1
+  var others = 12 + floorPx       # the fold's 12px and the counts' floor
+  var parts = 3                   # fold, title, counts
+  if marked:
+    others += MarkPx
+    inc parts
+  if progress.len > 0:
+    others += textPx(progress, CaptionPx, tabular = true)
+    inc parts
+  others += 8 * (parts - 1)
+  GroupHeaderWidths(titleMin: max(0, min(lineW div 2, lineW - others)),
+                    countsMin: floorPx, countsMax: lineW div 2)
+
 proc drawGroupHeader(r: GpuiRenderer; p: AhPalette; vm: SessionTabStripVM;
                      group: SessionTabGroup; widthPx: int): GpuiElement =
   ## An initiative's node of the tree: fold control, state mark, name,
@@ -602,15 +634,16 @@ proc drawGroupHeader(r: GpuiRenderer; p: AhPalette; vm: SessionTabStripVM;
   # The title and the counts share the line as the stylesheet has them
   # share it, and GPUI's flex layout (Taffy, CSS Flexbox §9.7,
   # https://www.w3.org/TR/css-flexbox-1/#resolve-flexible-lengths) resolves
-  # it from the faces' real widths: the title `flex: 1 1 auto` and
-  # `min-width: 50%`, the counts `flex: 0 100 auto` and `max-width: 50%`
-  # (`.ah-session-group-title`, `.ah-session-group-counts`). An overfull line
-  # shrinks each in proportion to factor times content, so the counts give
-  # way a hundred times faster, the title never below half the line.
-  let half = $((widthPx - 2 * InsetPx) div 2) & "px"
+  # it from the faces' real widths: the title `flex: 1 1 auto`, the counts
+  # `flex: 0 100 auto` (`.ah-session-group-title`, `.ah-session-group-counts`).
+  # An overfull line shrinks each in proportion to factor times content, so
+  # the counts give way a hundred times faster, down to their floor; the
+  # title gives way after them (`groupHeaderWidths` has the limits).
+  let widths = groupHeaderWidths(widthPx, countWords, group.progressText,
+                                 marked = planId.len > 0)
   let title = r.text(group.title, CaptionPx, p.textLabel, bold = true,
                      pairs = [("flex-grow", "1"), ("flex-shrink", "1"),
-                              ("min-width", half)])
+                              ("min-width", $widths.titleMin & "px")])
   r.tag(title, "title", group.title)
   r.appendChild(result, title)
   if group.progressText.len > 0:
@@ -620,8 +653,9 @@ proc drawGroupHeader(r: GpuiRenderer; p: AhPalette; vm: SessionTabStripVM;
     r.tag(progress, "progress", group.progressText)
     r.appendChild(result, progress)
   let counts = r.text(countWords, CaptionPx, p.textCaption,
-                      pairs = [("flex-shrink", "100"), ("min-width", "0px"),
-                               ("max-width", half)])
+                      pairs = [("flex-shrink", "100"),
+                               ("min-width", $widths.countsMin & "px"),
+                               ("max-width", $widths.countsMax & "px")])
   r.tag(counts, "counts", countsText(group.counts))
   r.appendChild(result, counts)
   let target = vm
