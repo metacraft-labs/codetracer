@@ -110,23 +110,46 @@ proc ctRecord(s: StageState; program, backend, lang, dest: string; workDir = "";
   ## `ct record` of `program` into `dest` — the binary, subcommand and
   ## options a user records with (`--backend`, `--lang`) — and the recording
   ## it made. A missing recorder is a failed stage, named by `ct record`.
+  ##
+  ## `dest` is the fixture cache's entry, so the recording is made in a
+  ## staging folder beside it and renamed into place only once `ct record`
+  ## has finished and exited 0. Recorded straight into `dest`, a recording
+  ## the stage's time limit cut off (the backend's process tree is stopped)
+  ## stayed there half written: a `.ct` without its folded `filemap.bin`,
+  ## which the cache then handed to every later run, and every one failed
+  ## replaying it ("PROVENANCE: ... the trace carries no filemap.bin", the
+  ## Crystal sudoku scenarios once a loaded run timed out recording them).
   removeDir(dest)
   createDir(dest.parentDir)
+  let staging = dest & ".partial"
+  removeDir(staging)
   let ct = findCtBinary()
   if ct.len == 0: raise newException(IOError, "record-program: `ct` is not built")
   let cmd = quoteShell(ct) & " record " &
             (if backend.len > 0: "--backend " & quoteShell(backend) & " " else: "") &
             (if lang.len > 0: "--lang " & quoteShell(lang) & " " else: "") &
             (if stylusTrace.len > 0: "--stylus-trace " & quoteShell(stylusTrace) & " " else: "") &
-            "-o " & quoteShell(dest) & " " & quoteShell(program)
+            "-o " & quoteShell(staging) & " " & quoteShell(program)
   let (output, code) = execCmdEx(cmd, workingDir = workDir)
   if code != 0:
+    removeDir(staging)
     raise newException(IOError, "record-program " & program & ": `ct record` exited " &
                        $code & "\n" & output)
-  if isUsableTraceDir(dest): return dest
-  for kind, path in walkDir(dest):
-    if kind == pcDir and isUsableTraceDir(path): return path
-  raise newException(IOError, "record-program " & program & ": no recording in " & dest)
+  var recorded = ""
+  if isUsableTraceDir(staging):
+    recorded = staging
+  else:
+    for kind, path in walkDir(staging):
+      if kind == pcDir and isUsableTraceDir(path):
+        recorded = path
+        break
+  if recorded.len == 0:
+    removeDir(staging)
+    raise newException(IOError, "record-program " & program & ": no recording in " & staging)
+  # One rename, so a later run never finds a half-written entry under the
+  # name it looks the recording up by.
+  moveDir(staging, dest)
+  if recorded == staging: dest else: dest / recorded.relativePath(staging)
 
 proc buildSbf(crate: string): string =
   ## A Solana program crate compiled to SBF the way its author builds it
