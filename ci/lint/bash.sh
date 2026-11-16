@@ -326,6 +326,11 @@ lint_step "workflow files stay under GitHub's size limit" \
 lint_step "scenario lane shards cover their lane exactly" \
 	bash ci/test/scenario-lane-shard-test.sh
 
+# A step that runs past an earlier failure and needs ct waits on the ct build,
+# or the earlier failure resurfaces as a second, misleading `ct ENOENT`.
+lint_step "steps that need ct wait on the ct build" \
+	bash ci/test/ct-build-gate-test.sh
+
 # Not covered by the `ci/**/*.sh` glob above, and it runs in the deploy lane on
 # every push to `cloud`, where a shell defect would surface as a deploy failure
 # rather than as a lint one.

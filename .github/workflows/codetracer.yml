@@ -3541,6 +3541,7 @@ jobs:
         run: nix develop .#devShells.x86_64-linux.default --command just test-vm-recorder-gated
 
       - name: Build ct (needed by the CLI dispatch tests)
+        id: ct
         # record_missing_recorder_test.nim and record_dispatch_e2e_test.nim
         # drive the SHIPPED `ct` binary rather than importing its modules, so
         # the lane needs a build.  The pure dispatch table test does not, but
@@ -3556,7 +3557,7 @@ jobs:
         run: nix develop .#devShells.x86_64-linux.default --command just test-cli-record
 
       - name: The desktop opens the one shared default arrangement, and follows it
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.ct.outcome == 'success' }}
         # The desktop's first-run default is GENERATED from the arrangement the
         # terminal and the GPUI window also open with, and `ci/lint/nim.sh`
         # already fails when the committed file is stale. This is the half a
@@ -3577,7 +3578,7 @@ jobs:
         run: nix develop .#devShells.x86_64-linux.default --command just plat45-capture-electron
 
       - name: The desktop shows what the terminal and GPUI front-ends must equal
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.ct.outcome == 'success' }}
         # The desktop column of the terminal's and GPUI's desktop-parity
         # suites: the first-run arrangement, the editor's colours as the eye
         # sees them, the focused panel's outline, the Files pane's entries and
@@ -3588,7 +3589,7 @@ jobs:
         run: nix develop .#devShells.x86_64-linux.default --command just plat47-capture-electron
 
       - name: The desktop's menu is drawn from the shared Menu ViewModel
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.ct.outcome == 'success' }}
         # The desktop column of the one menu drawn three ways: a highlight
         # given to the Menu ViewModel ALONE must move the desktop's DOM
         # highlight (a renderer keeping its own copy fails here), the Debug
@@ -3600,7 +3601,7 @@ jobs:
         run: nix develop .#devShells.x86_64-linux.default --command just plat48-capture-electron
 
       - name: The desktop's chrome is the reference for the other front-ends
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.ct.outcome == 'success' }}
         # The desktop column of the chrome the terminal and GPUI front-ends
         # draw: one root menu button whose first level drops below it and
         # whose submenus open to its right, each transport control's tooltip
@@ -3611,7 +3612,7 @@ jobs:
         run: nix develop .#devShells.x86_64-linux.default --command just plat49-capture-electron
 
       - name: The desktop's click behaviours and chrome are the reference
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.ct.outcome == 'success' }}
         # The desktop column of the click sweep and the chrome colours: its
         # caption bar (the omnibox centred, the buttons on the bar's ground),
         # its strip and splitters, its menu surface, its right-click menus and
@@ -3622,7 +3623,7 @@ jobs:
         run: nix develop .#devShells.x86_64-linux.default --command just plat50-capture-electron
 
       - name: The desktop's Terminal Output pane is the reference
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.ct.outcome == 'success' }}
         # The desktop column of the Terminal Output pane: the lines of a
         # program writing coloured output with each fragment's computed
         # style, where a click on a fragment moves the debugger, and the
@@ -3633,7 +3634,7 @@ jobs:
         run: nix develop .#devShells.x86_64-linux.default --command just plat52-capture-electron
 
       - name: The desktop's Test Results pane is the reference
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.ct.outcome == 'success' }}
         # The desktop column of the Test Results pane: its rows before and
         # after a real `ct test run` over a Noir crate with a passing and a
         # failing test, the controls' titles and modes, the marks' colours,
@@ -3643,7 +3644,7 @@ jobs:
         run: nix develop .#devShells.x86_64-linux.default --command just plat53-capture-electron
 
       - name: The desktop's Constraints pane is the reference
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.ct.outcome == 'success' }}
         # The desktop column of the Constraints pane: the rows of a Noir
         # crate measured by a real `nargo info --json`, where each function is
         # declared, what a right-click on a row opens and where a press goes —
@@ -3652,7 +3653,7 @@ jobs:
         run: nix develop .#devShells.x86_64-linux.default --command just plat62-capture-electron
 
       - name: The desktop's Agent Activity pane is the reference
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.ct.outcome == 'success' }}
         # The desktop column of the Agent Activity pane: a review's agent
         # session replayed through `ct review` — every evidence card in its
         # state with its shape, dataset, command and note, the `ct test` run
@@ -3662,7 +3663,7 @@ jobs:
         run: nix develop .#devShells.x86_64-linux.default --command just plat54-capture-electron
 
       - name: The desktop's Problems panel is the reference
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.ct.outcome == 'success' }}
         # The desktop column of the Problems pane: its rows after a real
         # `nargo compile` of a crate with one warning and two errors in two
         # files, the icons' colours, the Errors filter and Group by File, and
@@ -3672,7 +3673,7 @@ jobs:
         run: nix develop .#devShells.x86_64-linux.default --command just plat55-capture-electron
 
       - name: The desktop's Build Output is the reference
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.ct.outcome == 'success' }}
         # The desktop column of the Build Output pane: each line's class, text
         # and colours after a real coloured `gcc` build that fails and one
         # that passes, the verdict, the status bar's build indicator, a press
@@ -3682,7 +3683,7 @@ jobs:
         run: nix develop .#devShells.x86_64-linux.default --command just plat56-capture-electron
 
       - name: The desktop's Requests pane is the reference
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.ct.outcome == 'success' }}
         # The desktop column of the Requests pane: the rows of a recording
         # carrying request spans, the Method and Status filters and the URL
         # search, a double-click going to a request's handler, and the
@@ -3692,7 +3693,7 @@ jobs:
         run: nix develop .#devShells.x86_64-linux.default --command just plat58-capture-electron
 
       - name: The desktop's Low Level Code view is the reference
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.ct.outcome == 'success' }}
         # The desktop column of the Low Level Code pane: the listing of a Noir
         # recording opened with Alt+1, its execution pointer, its header, an
         # instruction's right-click menu and a click going to its source line —
@@ -3702,7 +3703,7 @@ jobs:
         run: nix develop .#devShells.x86_64-linux.default --command just plat60-capture-electron
 
       - name: The desktop's Shell pane is the reference
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.ct.outcome == 'success' }}
         # The desktop column of the Shell pane: a recorded build run in the
         # pane's shell, its output and the recording's marked lines, and a
         # click opening the recording in a new tab — read from the REAL
@@ -3711,7 +3712,7 @@ jobs:
         run: nix develop .#devShells.x86_64-linux.default --command just plat61-capture-electron
 
       - name: The desktop's Timeline removal, list scrubbers and changed values are the reference
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.ct.outcome == 'success' }}
         # The desktop column of the 2026-10-05 decisions: no Timeline (and a
         # saved layout that held one opens without it), the Event Log's, the
         # Call Trace's and the Terminal Output's scrollbars as scrubbers over
@@ -3722,7 +3723,7 @@ jobs:
         run: nix develop .#devShells.x86_64-linux.default --command just plat51-capture-electron
 
       - name: The desktop's keys go through the shared keymap router
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.ct.outcome == 'success' }}
         # The desktop column of the one keymap every front-end resolves:
         # each F-key runs its operation once, a letter steps and Enter opens
         # the tracepoint editor in the read-only editor, Alt+E focuses the
@@ -3735,7 +3736,7 @@ jobs:
         run: nix develop .#devShells.x86_64-linux.default --command just plat68-desktop-keys
 
       - name: The desktop answers every key as the shared rule does (DIFF-13)
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.ct.outcome == 'success' }}
         # The cross-front-end differential's desktop column: every key of the
         # four base keymaps in six situations, built as a real KeyboardEvent
         # and named by the desktop's own decoder, resolved for the scope path
@@ -3747,7 +3748,7 @@ jobs:
         run: nix develop .#devShells.x86_64-linux.default --command just plat68-desktop-keys
 
       - name: One keybindings.json, three front-ends, one behaviour
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.ct.outcome == 'success' }}
         # The same user file read by the terminal (a real pty), the GPUI
         # window and the Electron app in one run: a rebound call-trace
         # operation and a removed base row give the same execution lines on
@@ -3756,7 +3757,7 @@ jobs:
         run: nix develop .#devShells.x86_64-linux.default --command bash -c 'just build-tui && just build-gpui && just plat68-one-keymap'
 
       - name: One input routing, three front-ends (keys and presses)
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.ct.outcome == 'success' }}
         # Input-Routing-And-Keymaps.md IR-3, IR-5 and §5.1: one user file
         # binds a chord to Step Over and Ctrl+click on a call-trace row to
         # Continue; the terminal (a real pty), the GPUI window and the
@@ -3766,7 +3767,7 @@ jobs:
         run: nix develop .#devShells.x86_64-linux.default --command bash -c 'just build-tui && just build-gpui && just plat64-input-routing'
 
       - name: The desktop's presses are the pointer keymap's rows
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.ct.outcome == 'success' }}
         # A press on a call, its toggle and an Event Log column header runs
         # each element's pointer row through the desktop's one pointer
         # listener; a user's row removing the base's leaves the press with
@@ -3893,6 +3894,7 @@ jobs:
           test-siblings: DemoVideoScript,DemoVideoScript-TermAssert,TermAssert,TermAssertClient,nim-libvterm
 
       - name: Build ct and replay-server
+        id: ct
         # `test_fixture_corpus.nim` (Tier 1) opens real recorded traces through
         # a real `replay-server`, and on a cold `test-logs/tui-fixtures/` cache
         # records them with `ct`. A missing `replay-server` fails that file by
@@ -3958,7 +3960,7 @@ jobs:
       - name: TUI Tier 2 — the real binary in a real pty
         # `!cancelled()`, so a Tier-1 failure does not hide whether Tier 2 holds.
         # The recipe builds `build/bin/codetracer-tui` itself (`build-tui`).
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.ct.outcome == 'success' }}
         run: nix develop .#devShells.x86_64-linux.default --command just test-tui-real-terminal
 
       - name: Scenarios — the linter, the inventory and the terminal lane
@@ -3970,7 +3972,7 @@ jobs:
         # documentation's captures against what their scenarios produce now.
         # DemoVideoScript and DemoVideoScript-TermAssert are siblings at
         # repro.lock's pins (provisioned above).
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.ct.outcome == 'success' }}
         run: |
           nix develop .#devShells.x86_64-linux.default --command bash -c '
             set -e
@@ -3996,7 +3998,7 @@ jobs:
         # again (Tier 2 above ran it too), now writing every story, theme and
         # size as a picture of the terminal's screen (`build/ctf-p1b/tui/`),
         # the input of the visual review; it fails as the suite does.
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.ct.outcome == 'success' }}
         run: nix develop .#devShells.x86_64-linux.default --command just ctf-p1b-tui-captures
 
       - name: Upload the terminal captures
@@ -4239,6 +4241,7 @@ jobs:
           test-siblings: DemoVideoScript,DemoVideoScript-GuiAssert,GuiAssert
 
       - name: Build ct and replay-server
+        id: ct
         # `ct record` records the `calc` and `call_pages` fixtures the
         # captures open; `replay-server` replays them.
         env:
@@ -4259,7 +4262,7 @@ jobs:
         # vision (GuiAssert's capture and OCR), driven by OS-level input.
         # GuiAssert's capture and input helpers are built in GuiAssert's own
         # dev shell, which declares their X and Wayland libraries.
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.ct.outcome == 'success' }}
         env:
           SCENARIO_LANE_SHARD: ${{ matrix.shard }}/10
         run: |
@@ -4287,7 +4290,7 @@ jobs:
         # step above, which builds the same windowed shim and records the
         # `calc` trace it opens; `!cancelled()` so a red capture above does
         # not hide whether this one works.
-        if: ${{ !cancelled() && matrix.shard == 1 }}
+        if: ${{ !cancelled() && steps.ct.outcome == 'success' && matrix.shard == 1 }}
         run: nix develop .#devShells.x86_64-linux.default --command just plat35-capture-gpui-window
 
       - name: CTF-P1b's Agent Harbor stories as real windows, against the web layout
@@ -4300,7 +4303,7 @@ jobs:
         # CTF-P1c: the same for each playback story at each named moment of
         # its scenario (`build/ctf-p1c/gpui/`), against the committed
         # `src/tests/visual/agent-harbor-web-regions-at-moments.json`.
-        if: ${{ !cancelled() && matrix.shard == 1 }}
+        if: ${{ !cancelled() && steps.ct.outcome == 'success' && matrix.shard == 1 }}
         run: nix develop .#devShells.x86_64-linux.default --command just ctf-p1b-gpui-captures
 
       - name: The terminal front-end in real terminal emulators
@@ -4315,7 +4318,7 @@ jobs:
         # emulator this runner cannot provide or start is a counted
         # MISSING-PREREQ skip, never a failure; `!cancelled()` so a red GPUI
         # capture does not hide it.
-        if: ${{ !cancelled() && matrix.shard == 1 }}
+        if: ${{ !cancelled() && steps.ct.outcome == 'success' && matrix.shard == 1 }}
         run: nix develop .#devShells.x86_64-linux.default --command just test-tui-real-emulators
 
       - name: Upload the frames
@@ -6371,6 +6374,7 @@ jobs:
           cp -a "$SRC" "$DEST"
 
       - name: Build CodeTracer (nix)
+        id: ct
         if: matrix.platform == 'nixos'
         run: nix build --print-build-logs '.?submodules=1#codetracer' --override-input codetracer-trace-format path:./libs/codetracer-trace-format --override-input codetracer-trace-format-nim path:./libs/codetracer-trace-format-nim
 
@@ -6535,6 +6539,7 @@ jobs:
           nix develop --no-write-lock-file --command just build
 
       - name: Build CodeTracer (nix dev shell)
+        id: ct-darwin
         if: matrix.platform == 'macos'
         # Toolchain-free reprobuild build inside codetracer's nix dev shell,
         # the same path ``dmg-build`` uses on this runner. On Darwin
@@ -6792,7 +6797,7 @@ jobs:
       # spec in the suite has already gone red.
       - name: Native replay, the BEAM recorder and the GL recording for the desktop scenario lane
         # What each piece is and where it lands: ci/test/scenario-lane-provision.sh.
-        if: ${{ !cancelled() && matrix.platform == 'nixos' }}
+        if: ${{ !cancelled() && steps.ct.outcome == 'success' && matrix.platform == 'nixos' }}
         run: bash ci/test/scenario-lane-provision.sh native
 
       - name: Restore the patchable Godot engine for the HCR flame scenarios
@@ -6800,7 +6805,7 @@ jobs:
         # its revision, reprobuild's and the flags are the whole key. Restore and
         # save are separate: actions/cache saves only when the whole job passes.
         id: hcr-godot
-        if: ${{ !cancelled() && matrix.platform == 'nixos' }}
+        if: ${{ !cancelled() && steps.ct.outcome == 'success' && matrix.platform == 'nixos' }}
         uses: actions/cache/restore@v4
         with:
           path: ${{ github.workspace }}/../codetracer-engine-godot/bin/godot.linuxbsd.template_debug.x86_64.hcrgpu
@@ -6808,7 +6813,7 @@ jobs:
 
       - name: The HCR flame demo for the desktop scenario lane
         id: hcr-flame
-        if: ${{ !cancelled() && matrix.platform == 'nixos' }}
+        if: ${{ !cancelled() && steps.ct.outcome == 'success' && matrix.platform == 'nixos' }}
         env:
           HCR_ENGINE_REV: c2b72fd205bcb509cca8513a2627ae18d9809562
         run: bash ci/test/scenario-lane-provision.sh hcr
@@ -6823,7 +6828,7 @@ jobs:
       - name: Scenarios — the desktop lane
         # The real `ct` → Electron through DemoVideoScript-Playwright's arm
         # with CodeTracer's Playwright binding, under Xvfb at 2560x1440, 96 dpi.
-        if: ${{ !cancelled() && matrix.platform == 'nixos' }}
+        if: ${{ !cancelled() && steps.ct.outcome == 'success' && matrix.platform == 'nixos' }}
         run: |
           nix develop .#devShells.x86_64-linux.default --command bash -c '
             set -e
@@ -6842,7 +6847,8 @@ jobs:
           name: scenario-runs-electron
 
       - name: Event Log stays static across a jump
-        if: always()
+        # Only with a ct, or an earlier failure resurfaces as `ct ENOENT`.
+        if: ${{ !cancelled() && (steps.ct.outcome == 'success' || steps.ct-darwin.outcome == 'success') }}
         run: ./ci/test/ui-tests-db.sh tests/event-log/event_log_is_static_across_jumps.spec.ts
         env:
           CODETRACER_CI_PLATFORM: ${{ matrix.platform }}
@@ -7076,11 +7082,12 @@ jobs:
       # when an earlier step fails it is skipped and they still run; then they
       # failed with "no built ct at src/build-debug/bin/ct". A no-op after it.
       - name: Build ct for the native capture and lanes
+        id: ct
         if: ${{ !cancelled() }}
         run: nix develop .#devShells.x86_64-linux.default --command just build-once
 
       - name: The desktop's Low Level Code view on a native recording is the reference
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.ct.outcome == 'success' }}
         # The desktop column of the Low Level Code pane on an rr recording of
         # `codetracer-native-test-programs/c/sudoku_solver`: the machine-code
         # listing, the execution pointer, the header, and a step by
@@ -7093,7 +7100,7 @@ jobs:
         run: nix develop .#devShells.x86_64-linux.default --command just plat60-native-capture-electron
 
       - name: TUI Tier 1 over a native rr recording (the `tui-native` lane)
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.ct.outcome == 'success' }}
         # The terminal's suites that open an rr recording of a native program
         # -- every Tier-1 suite importing `fixtures/native_recording`, PLAT-60's
         # Low Level Code suite among them -- over the same
@@ -7121,7 +7128,7 @@ jobs:
         run: nix develop .#devShells.x86_64-linux.default --command just test-tui-native
 
       - name: The GPUI window over a native rr recording (the `gpui-native` lane)
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.ct.outcome == 'success' }}
         # The GPUI suites that open an rr recording of a native program --
         # PLAT-60's Low Level Code pane in the GPUI window -- over the same
         # sudoku fixture as the step above. In the `gpui-shell` lane they
@@ -7389,6 +7396,14 @@ jobs:
             codetracer-native-test-programs=dev
             codetracer-visual-replay-fixtures=dev
             runquota=dev
+            isonim-tui
+            test-certificates-tools
+            nim-pty
+
+      - name: Build ct for the gate and the Visual Replay capture
+        # Its own step, so the capture below can wait on it (the gate rebuilds).
+        id: ct
+        run: nix develop .#devShells.x86_64-linux.default --command just build-once
 
       - name: Run visual replay regression gate
         env:
@@ -7468,7 +7483,7 @@ jobs:
           nix develop .#devShells.x86_64-linux.default --command just test-visual-replay-gate
 
       - name: The desktop's Visual Replay panes are the reference
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.ct.outcome == 'success' }}
         # The desktop column of the Visual Replay panes: the Video Player's
         # frame at three positions on a real `gl_scene` recording, a draw
         # call, a picked pixel's history, the Shader Debug pane and a history
