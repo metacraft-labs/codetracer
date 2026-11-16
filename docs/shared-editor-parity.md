@@ -12,11 +12,8 @@ It is a **developer setting**, off by default:
 
 Monaco stays the default until every row below is met. Whether to drop Monaco
 is a later decision taken on this table (codetracer-pm
-`spec/Architecture/Editor-ViewModel.md` §3.2a). Four editor surfaces are not
-rows of it yet and still create Monaco with the setting on — the macro
-expansion and low-level views, the low-level view's inline source editors, the
-tracepoint editor and the Agent Workspace's editor (codetracer-pm
-`issues/2026-11-15-with-shared-editor-on-four-editor-surfaces-outside-the-parity-table-still-create-monaco.md`).
+`spec/Architecture/Editor-ViewModel.md` §3.2a). Every editor surface of the desktop is a row,
+and with the setting on none of them is Monaco's (`ui/editor_surface`).
 
 ## How it is built
 
@@ -27,6 +24,7 @@ tracepoint editor and the Agent Workspace's editor (codetracer-pm
 | Monaco's editor and model API over the core (what `ui/editor`, `ui/flow`, `ui/trace`, the LSP router and the page objects call) | `src/frontend/ui/shared_editor_facade.nim` |
 | Language features through the LSP router's bridge | `src/frontend/ui/shared_editor_lsp.nim` |
 | The unified diff on two shared editors: the line diff, collapsed regions and their boundaries, word marks, the old revision aligned beside the new | `src/frontend/ui/shared_diff_editor.nim`, `src/frontend/view_vocabulary/diff_regions.nim` |
+| Every other editor surface (macro expansions, low-level views, the removed lines' editors of a recording opened with a diff, the tracepoint editor, the Agent Workspace's editor), made from Monaco's creation options | `src/frontend/ui/editor_surface.nim` |
 | The setting | `src/frontend/ui/shared_editor_flag.nim`, `common/config.nim` (`sharedEditor`) |
 | Keys through the shared router | `src/frontend/ui/key_router.nim` (`routeSharedEditorKey`, `runSharedEditor`) |
 
@@ -76,6 +74,9 @@ GUI suite run with `CODETRACER_SHARED_EDITOR=1`. Arms are
 | Editing: drag selection | met | **B** click, double click, drag across lines. Arm R6. |
 | Pointer: where a press puts the caret | met | **B** a press on the middle of a character puts the caret after it, as Monaco's does (the scenario pack aims its text anchors there); a double or triple press is counted, by each press's event time, at the character under the pointer, so a double click on a loaded page still selects the word. Arm R22; the pack's `multiclick-selects-caret-word-line`, `tabs-survive-mode-switch`. |
 | The unified-diff view | met | The review's and the VCS panel's diff tab is the shared editor's diff under the setting (`ui/unified_diff.nim`), with what they use of Monaco's diff editor: collapsed unchanged regions with their bands and boundaries — a press reveals the step, a drag one line per line height, Shift+Enter / the menu / the unfold control the rest, keyboard focus kept on a handle across a reveal (**R** the regions, the gestures' arithmetic; **B** "collapsed regions and their handles…": trusted press and drag on the handles); word-level marks (**R**; **B**); removed lines coloured by the old revision's tokens (**B**); the flow's values, call and loop controls over the diff, and the old revision's numbers row for row beside the new (**B** alignment under a view zone and an added run; **G** below). Arms F10, F11–F19, R17, R18, R25–R40, A3, A4. The DeepReview and VCS scenarios with the setting on and off: see "The unified diff with the setting on and off" below. |
+| Macro expansions and the low-level views | met | The editor pane's macro expansions, its low-level views (assembly, generated C) and the read-only editors that show a recording-with-diff's removed lines in the source view are made by `ui/editor_surface` too (`ui/editor.createSourceEditorIn`, which installs the language server's features on the source view only). **B** "every other editor surface…" (arms S1, S3); **G** `macro-expansion/*` (4) and `low-level-code/*` (2) scenarios (the native one on an rr recording) and `tests/low-level-code/generated-c-source.spec.ts`, `tests/macro_expansion/semantic-tokens.spec.ts`, both settings, fast and realistic. |
+| The tracepoint editor | met | `ui/trace` makes it with `editor_surface` as an embedded field: the desktop's key facts stay the source view's around it, so Ctrl+Enter runs the trace as with Monaco's; its theme no longer reads Monaco's private theme service. **B** (arms S1, S2); **D** "the tracepoint editor is the shared editor too, and no editor is Monaco's" (no `.monaco-editor[role=code]` root without the shared editor's attribute); **G** `tracepoints/results-grid-jumps-and-stays`, `tracing/trace-macro-*`, `tests/editor/editor_is_writable_after_stop.spec.ts`, `editor_context_menu_is_mode_dependent.spec.ts`. |
+| The Agent Workspace's editor | met | `ui/agent_workspace` makes it with `editor_surface` (read-only), as the tracepoint editor and the macro expansions are made; **B** "every other editor surface…" grades the maker with Monaco's creation options (arm S1). The pane draws its editor only for a session's workspace, and a session cannot be started from the desktop yet, on either editor (codetracer-pm `issues/2026-11-13-a-harbor-worktree-agent-session-cannot-be-started-from-the-desktop.md`): View › Start Agent Worktree Session opens the pane empty, and the `agentic-coding/*` scenarios and `tests/agentic-coding/agentic-worktree.spec.ts`, run against a real Agent Harbor M7 server, fail the same way with the setting on and off before the pane has a workspace. The pane's own editor with the setting on is checked end to end when that issue is fixed. |
 | Read-only mode | met | **B** a read-only editor takes no text and still moves and selects; **D** typing in Debug mode changes nothing. Arm R14. |
 | The editor context menu | met | **D** the right-click menu is CodeTracer's; **G** `tests/editor/editor_context_menu_is_mode_dependent.spec.ts`. |
 | Live editing for hot code reload | met | **D** Edit mode: typing, undo, `Ctrl+S` writes the file; **G** the HCR specs. |
@@ -93,13 +94,19 @@ panel's diff scenarios (`vcs/`, 9) and the two agent-activity review
 scenarios that open a diff, each run alone in the Electron flavour, `fast`
 and `realistic`, once with `CODETRACER_SHARED_EDITOR=0` and once with `=1`,
 at the same commit (PLAT-67's status block names it and the counts). Every
-scenario has the same outcome on both editors. The ones that fail, fail on
-both, at the same step, for reasons that are not the editor's
-(codetracer-pm `issues/2026-11-15-review-step-buttons-and-view-diff-tab-count-fail-on-agents-with-either-editor.md`):
-the review's call and loop step buttons do nothing when pressed, and one
-View Diff press opens two diff tabs. The Playwright spec
-`src/tests/gui/tests/vcs/vcs_unified_diff.spec.ts` fails the same six of
-its eleven tests on both editors, for the second of those reasons.
+scenario has the same outcome on both editors. A dataset review used to
+install no key router or pointer listener, so its call and loop step
+buttons did nothing on either editor; it installs them now, and with the
+router in a review its keys reach the focused control first where that
+control answers them (Shift+F10 on a boundary handle opens its menu, the
+trace-context drop-down takes its arrows and Enter). One View Diff press
+still opens two diff tabs on either editor: the row's own click runs before
+the button's routed press. Its fix (the pointer keymap performing a row on
+the pressed element) is landing with the pointer keymap's own work, and
+until it does the VCS scenarios that count diff tabs and
+`src/tests/gui/tests/vcs/vcs_unified_diff.spec.ts`'s six tab-count cases
+fail on both editors (codetracer-pm
+`issues/2026-11-15-review-step-buttons-and-view-diff-tab-count-fail-on-agents-with-either-editor.md`).
 
 Where the two editors' observations differ (every step's status and
 observation compared, `ci/test/shared-editor-differential.sh`'s rule), the
@@ -117,10 +124,6 @@ scenarios' own assertions hold on both, and the difference is one of these:
 - **Which lines are drawn at a viewport's edge** (a line more or less at the
   top after a reveal, and the full-file view's count of flow-marked lines in
   the DOM): Monaco draws a different band of off-screen lines.
-- **Where a flake falls.** A hover-revealed View Diff button that does not
-  appear within 15 s fails a VCS scenario on one side in one run and the
-  other side in the next; the same scenarios pass on both sides in other
-  runs.
 
 ## The Electron GUI suite with the setting on and off
 
