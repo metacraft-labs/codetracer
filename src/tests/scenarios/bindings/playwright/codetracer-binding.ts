@@ -87,7 +87,9 @@ const ROLES: Record<string, { affordances: string[]; properties: string[] }> = {
                  // pw4
                  "find-focused",
                  // pw8
-                 "flow-values"],
+                 "flow-values",
+                 // pw6: the shared editor
+                 "shared", "keymap", "mode"],
   },
   line: {
     affordances: ["click", "double-click", "context-click"],
@@ -97,7 +99,7 @@ const ROLES: Record<string, { affordances: string[]; properties: string[] }> = {
   "call-trace": { affordances: ["wheel", "focusable"], properties: ["count", "focused"] },
   call: { affordances: ["click", "double-click", "context-click"],
           properties: ["name", "current", "selected", "expanded", "arguments"] },
-  "event-log": { affordances: ["click", "wheel", "focusable"], properties: ["count", "total", "focused", "last-shown", "columns", "search"] },
+  "event-log": { affordances: ["click", "wheel", "focusable"], properties: ["count", "total", "focused", "last-shown", "columns", "search", "sort"] },
   event: { affordances: ["click", "double-click", "context-click"], properties: ["text", "kind", "current", "future"] },
   variables: { affordances: ["wheel", "focusable"], properties: ["count", "focused", "tab-strip", "code-line"] },
   variable: { affordances: ["click", "double-click", "context-click"], properties: ["name", "type", "value", "origin-badge", "watch", "invalid", "text"] },
@@ -171,7 +173,7 @@ const ROLES: Record<string, { affordances: string[]; properties: string[] }> = {
   "binding-row": { affordances: [], properties: ["operation", "key", "layer", "shadowed-by", "text"] },
   dialog: { affordances: [], properties: ["title", "message"] },
   "dialog-button": { affordances: ["click"], properties: ["label", "enabled"] },
-  "low-level-code": { affordances: ["click", "focusable"], properties: ["count", "sync", "stepping", "address", "focused", "pointer", "pointer-index"] },
+  "low-level-code": { affordances: ["click", "focusable"], properties: ["count", "sync", "stepping", "address", "focused", "pointer", "pointer-index", "error"] },
   instruction: { affordances: ["click", "context-click"],
                  properties: ["offset", "name", "args", "source", "active", "executing", "focused"] },
   "source-line": { affordances: [], properties: ["number", "active"] },
@@ -182,7 +184,7 @@ const ROLES: Record<string, { affordances: string[]; properties: string[] }> = {
                   properties: ["pane", "fit", "sideways", "wider", "scroll-left", "header-follows"] },
   "table-cell": { affordances: ["click", "context-click", "drop-target"],
                   properties: ["cell", "column", "text", "full", "cut", "drawn-cut"] },
-  "column-header": { affordances: ["click", "drag-source"], properties: ["column", "label", "cells"] },
+  "column-header": { affordances: ["click", "drag-source"], properties: ["column", "label", "cells", "sorted"] },
   "table-tooltip": { affordances: [], properties: ["text", "widest"] },
   "row-detail": { affordances: [], properties: ["text", "count"] },
   "live-edit-panel": { affordances: [], properties: ["status", "detail"] },
@@ -299,8 +301,10 @@ Object.assign(ROLES, {
   "call-argument": { affordances: ["click", "context-click"], properties: ["name", "value"] },
 });
 ROLES["tracepoint-editor"].properties.push("disabled");
+ROLES["tracepoint-editor"].properties.push("shared");
 ROLES["macro-expansion"] = { affordances: [], properties: ["line", "text"] };
 ROLES.window.properties.push("theme");
+ROLES.window.properties.push("monaco-editors");
 ROLES["trace-row"].affordances.push("context-click");
 
 // --- the surface: one read of the DOM ------------------------------------------
@@ -439,6 +443,11 @@ function readSurface(): any {
     el.props["last-shown"] = end ? parseInt(text(end).replace(/,/g, ""), 10) || 0 : 0;
     el.props.columns = (Array.from(comp.querySelectorAll(".eventLog-column-header > *")) as HTMLElement[])
       .filter((e) => e.offsetParent !== null).map((e) => text(e).replace(/\s*[▲▼]$/, ""));
+    // the column the rows are sorted by, with its direction as drawn ("tick ▲"),
+    // or "" while the log is in its recorded order
+    const sortedBy = (Array.from(comp.querySelectorAll(".eventLog-column-header > *")) as HTMLElement[])
+      .filter((e) => e.offsetParent !== null).map((e) => text(e)).find((t) => /[▲▼]$/.test(t));
+    el.props.sort = sortedBy ?? "";
     const body = comp.querySelector(".eventLog-scroll-body");
     if (body) {
       // rows are on screen only where the scroll body shows them
@@ -609,6 +618,11 @@ function readSurface(): any {
       file, active: isActive, focused: within(comp), "read-only": false,
       "current-line": 0, "caret-line": 0, "first-visible": 0, "last-visible": 0, text: [] as string[],
     };
+    // the shared editor (the `sharedEditor` setting) marks its root; it
+    // reports its keymap and, for modal keymaps, the mode it is in
+    props.shared = !!ed?.hasAttribute("data-ct-shared-editor");
+    props.keymap = ed?.getAttribute("data-ct-keymap") ?? "";
+    props.mode = ed?.getAttribute("data-ct-mode") ?? "";
     const editorNode = node("editor", container ?? comp, props, [["file", file]]);
     if (ed) {
       // Each gutter row carries its line number (`.gutter[data-line]`); the
@@ -2477,6 +2491,9 @@ function readSurfacePw6(root: any): void {
   // the theme the window is drawn in (`renderer.loadThemeFromName`: the
   // `#theme` stylesheet's `data-theme`)
   root.props.theme = ((document.querySelector("#theme") as HTMLElement | null)?.dataset.theme ?? "").toLowerCase();
+  // Monaco's own editor roots on the page (the shared editor's carry
+  // data-ct-shared-editor; with the sharedEditor setting on there are none)
+  root.props["monaco-editors"] = document.querySelectorAll(".monaco-editor[role=code]:not([data-ct-shared-editor])").length;
 
   // a macro call's expansion, drawn under its line in a nested editor
   // (`ui/editor.ensureExpanded`: `.expansion#expanded-<line>`)
@@ -2609,6 +2626,8 @@ function readSurfacePw6(root: any): void {
     filterDd.props.count = filterDd.children.length;
   }
 
+  }
+
 }
 
 // The readers that extend `readSurface`'s tree, run in the same page
@@ -2717,6 +2736,8 @@ export function readSurfacePw4(root: any): void {
     add(node("tracepoint-editor", ed ?? z, {
       line, text: lines, focused: within(z), rows: lines.length,
       fits: !!eb && rowH > 0 && eb.height >= lines.length * rowH - 1 && zb.height >= eb.height - 1,
+      // pw6: drawn by the shared editor (the sharedEditor setting)
+      shared: !!(z.querySelector(".monaco-editor[data-ct-shared-editor]")),
     }, [["line", String(line)]]));
   }
 
@@ -2787,6 +2808,9 @@ export function readSurfacePw4(root: any): void {
       sync: text(llc.querySelector(".low-level-code-sync")),
       stepping: text(llc.querySelector(".low-level-code-stepping")),
       address: text(llc.querySelector(".low-level-code-address")),
+      // the pane's own statement in place of a listing ("compiling …",
+      // "could not compile …"), "" when it shows one
+      error: text(llc.querySelector(".low-level-code-error")),
     });
     // What a user sees, not the whole listing: a generated C listing runs to
     // thousands of rows, and reading each (rect, style, text) on every poll
@@ -2925,12 +2949,19 @@ export function readSurfacePw4(root: any): void {
     const c = document.querySelector(".eventLog-rows td.eventLog-text") as HTMLElement | null;
     if (h && c) elTable.props["header-follows"] =
       Math.abs(h.getBoundingClientRect().left - c.getBoundingClientRect().left) <= 1;
-    for (const hd of Array.from(document.querySelectorAll(".eventLog-column-header .eventLog-index")) as HTMLElement[]) {
+    // the index column's header ("#") and each data column's (keyed by its
+    // `data-column`); `sorted`: ▲ or ▼ when the rows are sorted by it (a press
+    // on a header sorts them), else ""
+    for (const hd of Array.from(document.querySelectorAll(
+        ".eventLog-column-header .eventLog-index, .eventLog-column-header [data-column]")) as HTMLElement[]) {
       if (!vis(hd)) continue;
+      const column = hd.getAttribute("data-column") ?? "#";
       const g = hd.querySelector(".eventLog-column-grip");
+      const m = /([▲▼])\s*$/.exec(text(hd));
       elTable.children.push(node("column-header", hd, {
-        column: "#", label: text(hd), cells: Math.round(hd.getBoundingClientRect().width / 8),
-      }, [["column", "#"]], { anchors: { points: g ? { separator: centre(g) } : {} } }));
+        column, label: text(hd).replace(/\s*[▲▼]$/, ""), cells: Math.round(hd.getBoundingClientRect().width / 8),
+        sorted: m ? m[1] : "",
+      }, [["column", column]], { anchors: { points: g ? { separator: centre(g) } : {} } }));
     }
   }
   tablePane("call-trace", (Array.from(document.querySelectorAll("div[id^='calltraceComponent']")).find((e) => vis(e)) ?? null),

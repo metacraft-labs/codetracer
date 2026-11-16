@@ -106,7 +106,7 @@ proc resolveProgram(program: string): string =
   program
 
 proc ctRecord(s: StageState; program, backend, lang, dest: string; workDir = "";
-              stylusTrace = ""): string =
+              stylusTrace = ""; nimExe = ""): string =
   ## `ct record` of `program` into `dest` — the binary, subcommand and
   ## options a user records with (`--backend`, `--lang`) — and the recording
   ## it made. A missing recorder is a failed stage, named by `ct record`.
@@ -125,7 +125,8 @@ proc ctRecord(s: StageState; program, backend, lang, dest: string; workDir = "";
   removeDir(staging)
   let ct = findCtBinary()
   if ct.len == 0: raise newException(IOError, "record-program: `ct` is not built")
-  let cmd = quoteShell(ct) & " record " &
+  let cmd = (if nimExe.len > 0: "CODETRACER_NIM_EXE_PATH=" & quoteShell(nimExe) & " " else: "") &
+            quoteShell(ct) & " record " &
             (if backend.len > 0: "--backend " & quoteShell(backend) & " " else: "") &
             (if lang.len > 0: "--lang " & quoteShell(lang) & " " else: "") &
             (if stylusTrace.len > 0: "--stylus-trace " & quoteShell(stylusTrace) & " " else: "") &
@@ -203,8 +204,16 @@ proc buildStylusWasm(crate: string): string =
     if kind == pcFile and path.endsWith(".wasm"): return path
   raise newException(IOError, "record-program " & crate & ": the build made no .wasm")
 
+proc stockNim(): string =
+  ## The stock Nim compiler (not CodeTracer's fork; its C carries `#line`
+  ## directives, not source maps): `GENC_STOCK_NIM`, which the dev shell sets
+  ## to nixpkgs' `nim` at the flake's pin (`nix/shells/ci-base.nix`). Never
+  ## whatever `nim` a host happens to have: "" when it is not set.
+  let given = getEnv("GENC_STOCK_NIM")
+  if given.len > 0 and fileExists(given): given else: ""
+
 proc recordProgram*(s: StageState; program, backend: string; lang = "";
-                    stylusTrace = ""): string =
+                    stylusTrace = ""; nim = ""): string =
   ## A recording of `program`, through the fixture corpus: a cached recording
   ## when this build can read one made from the same sources, else `ct record`
   ## — the binary and subcommand a user records with. A missing recorder is a
@@ -221,6 +230,17 @@ proc recordProgram*(s: StageState; program, backend: string; lang = "";
   if backend.len > 0: name.add "_" & backend
   if lang.len > 0: name.add "_" & lang
   if stylusTrace.len > 0: name.add "_stylus"
+  var nimExe = ""
+  if nim == "stock":
+    nimExe = stockNim()
+    if nimExe.len == 0:
+      raise newException(IOError, "record-program " & program & ": `nim: stock` needs GENC_STOCK_NIM, " &
+                         "the pinned stock Nim the dev shell exports (nix/shells/ci-base.nix); it is " &
+                         (if getEnv("GENC_STOCK_NIM").len > 0: "set to a path that does not exist: " &
+                            getEnv("GENC_STOCK_NIM") else: "not set"))
+    name.add "_stocknim"
+  elif nim.len > 0:
+    raise newException(ValueError, "record-program: nim is `stock` or absent, not '" & nim & "'")
   var spec: FixtureSpec
   var declared = false
   for d in DeclaredFixtures:
@@ -253,7 +273,7 @@ proc recordProgram*(s: StageState; program, backend: string; lang = "";
           if lang == "solana" and fileExists(full / "Cargo.toml"): buildSbf(full)
           elif lang == "polkavm" and fileExists(full / "Cargo.toml"): buildPolkavmGuest(full)
           else: full
-        return s.ctRecord(target, backend, lang, dest)
+        return s.ctRecord(target, backend, lang, dest, nimExe = nimExe)
   let resolved = resolveFixture(spec)
   if resolved.outcome != foRecorded:
     raise newException(IOError, "record-program: " &
@@ -1198,7 +1218,7 @@ proc runStage*(s: StageState; use: string; args: JsonNode) =
       s.launch.recording = s.recordProjectFile(program["$project/".len .. ^1], argStr(args, "backend"))
     else:
       s.launch.recording = s.recordProgram(program, argStr(args, "backend"), argStr(args, "lang"),
-                                           argStr(args, "stylus-trace"))
+                                           argStr(args, "stylus-trace"), argStr(args, "nim"))
   of "nim-project":
     s.nimProject()
   of "open-recording":

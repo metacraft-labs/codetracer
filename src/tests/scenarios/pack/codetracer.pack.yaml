@@ -36,6 +36,8 @@ roles:
       strip-tabs: lines
       # pw6: the theme the window is drawn in (`default_dark`, `default_white`, …).
       theme: text
+      # pw6: how many of Monaco's own editor roots are on the page.
+      monaco-editors: int
       # The pointer's shape where it rests (Pointer-Affordances.md §4):
       # default, pointer, text, col-resize, row-resize, grab, grabbing,
       # not-allowed.
@@ -200,6 +202,12 @@ roles:
       last-visible: int
       # The text of every line on screen, in order.
       text: lines
+      # pw6: the shared editor (the sharedEditor setting) draws it, its base
+      # keymap (cua, vim, kakoune, …) and, for a modal one, its mode
+      # (normal, insert).
+      shared: bool
+      keymap: text
+      mode: text
       # --- pw2 ---
       # The selected text of each cursor ("" for a bare caret), the first
       # one's, and how many cursors there are.
@@ -335,6 +343,9 @@ roles:
       last-shown: int
       # The visible column titles, in order.
       columns: lines
+      # The column the rows are sorted by, as its header draws it ("tick ▲"),
+      # or "" while the log is in its recorded order.
+      sort: text
       # pw3: the first row shown, as the footer reports it (`Rows <n> to …`).
       first-shown: int
       # The text of every drawn row, in order; how many of them are dimmed
@@ -1432,6 +1443,8 @@ roles:
       fits: bool
       # pw6: "Tracepoint is disabled" is drawn over it.
       disabled: bool
+      # pw6: drawn by the shared editor (the sharedEditor setting).
+      shared: bool
     # pw6: `panel-button`s: its menu's entries while open (Disable / Enable).
     children: { panel-button: many }
     affordances: [click, text-entry, focusable]
@@ -1469,12 +1482,14 @@ roles:
   low-level-code:
     # `focused`: the keyboard focus is in its pane (a press on its header
     # focuses the pane without moving the debugger, as a press on a row would).
+    # `error`: the pane's statement in place of a listing ("compiling …",
+    # "could not compile …"), "" when it shows one.
     # `pointer`: the offset of the instruction the replay is at;
     # `pointer-index`: its place in the listing (0 the first instruction, -1
     # none) — where the program is loaded moves the offsets from one
     # recording and machine to the next, and leaves the places.
     properties: { count: int, sync: text, stepping: text, address: text, focused: bool, pointer: text,
-                  pointer-index: int }
+                  pointer-index: int, error: text }
     children: { instruction: many, source-line: many }
     affordances: [click, focusable]
     # `header`: the header's stepping note; `pointer`: the instruction the
@@ -1485,6 +1500,8 @@ roles:
       all-offsets-match(re): "every instruction: instruction.offset matches re"
       # A generated-source listing's row text is the instruction's `name`.
       active-row-shows(re): "some instruction: instruction.active and instruction.name matches re"
+      # A row is anchored to the line asked about (marked active).
+      has-active-row: "some instruction: instruction.active"
       executing-shows(re): "some instruction: instruction.executing and instruction.args matches re"
 
   instruction:
@@ -1570,8 +1587,9 @@ roles:
   column-header:
     keys: [column]
     # `cells`: its width in 8-pixel cells, the unit the native front-ends
-    # remember it in.
-    properties: { column: text, label: text, cells: int }
+    # remember it in. `sorted`: ▲ or ▼ when the rows are sorted by this column
+    # (a press on the header sorts them), else "".
+    properties: { column: text, label: text, cells: int, sorted: text }
     affordances: [click, drag-source]
     anchors: [separator]
 
@@ -1939,8 +1957,11 @@ stages:
       `solana`; a Solana crate is compiled with `cargo build-sbf` first).
       `stylus-trace` (a file in the program's folder) is a Stylus
       transaction's EVM trace: the contract crate is built to WebAssembly and
-      recorded against it (`ct record --stylus-trace`).
-    params: { program: text, backend: text, lang: text, stylus-trace: text }
+      recorded against it (`ct record --stylus-trace`). `nim: stock` records
+      a Nim program with the stock Nim compiler the dev shell pins
+      (GENC_STOCK_NIM, nixpkgs' nim), whose C carries `#line` directives; the
+      stage fails, saying so, without it.
+    params: { program: text, backend: text, lang: text, stylus-trace: text, nim: text }
   nim-project:
     summary: >-
       Write the Nim compile-time tracing project (a macro, a static block, a

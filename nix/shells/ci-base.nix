@@ -586,6 +586,12 @@ with pkgs;
     # stock one, which has no trace queries.
     export CODETRACER_NIMSUGGEST="${ourPkgs.nim-fork}/libexec/nimsuggest"
 
+    # A STOCK Nim compiler, nixpkgs' at this flake's pin: the scenarios that
+    # record a Nim program the way a user without CodeTracer's fork would
+    # (`record-program { nim: stock }`; its C carries `#line` directives and
+    # no source map) record with it. The fork on PATH is not one.
+    export GENC_STOCK_NIM="${pkgs.nim}/bin/nim"
+
     # PLAT-37 — THE GPUI RUNTIME LIBRARY PATH, exported under its OWN name
     # rather than prepended to `LD_LIBRARY_PATH`.
     #
