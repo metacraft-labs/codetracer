@@ -112,12 +112,23 @@ nim c --hints:off --warnings:off --mm:orc -d:release \
 # corpus, so a name alone cannot be resolved (`test_window_capture_fixtures.nim`
 # asserts every capture's recordings resolve). The provider reuses a recording
 # whose program is unchanged, so this is cheap when they already exist.
-echo "=== recording the fixtures ${which[*]} open"
-nim c -r --hints:off --warnings:off --path:src/frontend/tui/tests \
-	--nimcache:build/nimcache/window-capture-fixtures \
-	-o:build/window-capture-fixtures \
-	src/frontend/tui/tests/fixtures/window_capture_fixtures.nim "${which[@]}" ||
-	fail "could not record the fixtures ${which[*]} open"
+#
+# plat59 is not one of them: it opens the committed gl_scene recording
+# (visual_fixture.nim), which nothing here records, and the recorder's
+# `WindowCaptures` does not list it. Passing it failed the whole step with
+# "unknown capture 'plat59'" whenever the default list ran.
+recorded=()
+for w in "${which[@]}"; do
+	[ "$w" = plat59 ] || recorded+=("$w")
+done
+if [ "${#recorded[@]}" -gt 0 ]; then
+	echo "=== recording the fixtures ${recorded[*]} open"
+	nim c -r --hints:off --warnings:off --path:src/frontend/tui/tests \
+		--nimcache:build/nimcache/window-capture-fixtures \
+		-o:build/window-capture-fixtures \
+		src/frontend/tui/tests/fixtures/window_capture_fixtures.nim "${recorded[@]}" ||
+		fail "could not record the fixtures ${recorded[*]} open"
+fi
 
 # ---- 3b. the no-display refusal, with the binary that CAN open a window -----
 #
