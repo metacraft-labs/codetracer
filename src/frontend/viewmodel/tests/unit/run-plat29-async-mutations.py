@@ -828,16 +828,20 @@ ARMS = [
     # THE RESIDUALS OF 2026-09-24, CLOSED — the main process's router, and
     # the one `ct/load-locals` per stop in the stopped-in file's language.
     # =======================================================================
+    # R1 RE-AIMED at f1788c93b4 ("a second window shows its session"), which
+    # added the owning `window` to each pending request. The mutation is
+    # unchanged: the table is keyed by the renderer's own `seq` and the frame
+    # goes out without a wire number of its own.
     Arm(
         "R1", MAIN_DAP,
         "    let wireSeq = nextWireSeq()\n"
         "    pendingRequests[wireSeq] = PendingDapRequest(\n"
-        "      sessionId: sessionId, seq: message[\"seq\"].to(int))\n"
+        "      sessionId: sessionId, seq: message[\"seq\"].to(int), window: window)\n"
         "    frame = jsAssign(newJsObject(), message)\n"
         "    frame[\"seq\"] = wireSeq\n",
         "    let wireSeq = message[\"seq\"].to(int)\n"
         "    pendingRequests[wireSeq] = PendingDapRequest(\n"
-        "      sessionId: sessionId, seq: message[\"seq\"].to(int))\n",
+        "      sessionId: sessionId, seq: message[\"seq\"].to(int), window: window)\n",
         R_SESSIONS,
         "**THE ROUTER KEYS ITS TABLE BY THE RENDERER'S `seq` ALONE** — the "
         "residual as it was. Every session numbers from zero, so the second "
@@ -845,10 +849,19 @@ ARMS = [
         "tagged with the wrong session and the other falls through to "
         "whichever session the Backend Manager is serving",
     ),
+    # R2 RE-AIMED at f1788c93b4 ("a second window shows its session"). Since
+    # then the desktop's answers no longer pass through `resolveSessionId`
+    # (the server's router): `deliverDesktop` takes the pending request and
+    # writes its `seq` back before handing the answer to the window and tab
+    # that asked. The old needle sat in the server-only branch, which the
+    # desktop routing suite does not reach, and SURVIVED there (graded
+    # 2026-11-15). The mutation is the same: the answer keeps the wire number.
     Arm(
         "R2", MAIN_DAP,
-        "      body[\"request_seq\"] = request.seq\n      return request.sessionId\n",
-        "      discard request.seq\n      return request.sessionId\n",
+        "        body[\"request_seq\"] = request.seq\n"
+        "        deliverToWindowTab(request.window, request.sessionId,\n",
+        "        discard request.seq\n"
+        "        deliverToWindowTab(request.window, request.sessionId,\n",
         R_SESSIONS,
         "**THE ANSWER KEEPS THE WIRE NUMBER.** Routed to the right session, "
         "but carrying the router's own `seq` rather than the one that session "

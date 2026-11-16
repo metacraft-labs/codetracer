@@ -169,7 +169,6 @@ src/frontend/tui/tests/plat49-chrome-mutation-control.sha256	src/frontend/viewmo
 # them is owed.
 src/frontend/tui/tests/plat58-requests-mutation-control.sha256	src/db-backend/src/dap_handler.rs	98fc556946929000619231672219791a054bbbeef7d675bb3722b0870a9e37f0	7c59887c904659094396b45ce2cf2673ef89803f977fe9fdeb929e5650a4c6d0
 src/frontend/tui/tests/plat47-parity-mutation-control.sha256	src/frontend/viewmodel/sdk/stop_loader.nim	c564b55c211441a96b2e2b570f8599aaf5cf58a1d8c1cc8a252132c7b24387b7	9f904fb8f31643914cf531aa512b89b334d4c74fa72e7cb1277f4d19ad671c18
-src/frontend/viewmodel/tests/unit/plat29-async-mutation-control.sha256	src/frontend/viewmodel/sdk/stop_loader.nim	c564b55c211441a96b2e2b570f8599aaf5cf58a1d8c1cc8a252132c7b24387b7	9f904fb8f31643914cf531aa512b89b334d4c74fa72e7cb1277f4d19ad671c18
 ci/test/plat70c-find-mutation-control.sha256	src/frontend/gpui/main.nim	bd206f82ec3b500e52053e6eeda52e891e83aede0353ce2e485c65e1fcf50d85	28f36a050600425fdbbea72ccc729250a4977ecc589c87e4d67e73d3196f228e
 ci/test/plat70i-fit-mutation-control.sha256	src/frontend/gpui/main.nim	bd206f82ec3b500e52053e6eeda52e891e83aede0353ce2e485c65e1fcf50d85	28f36a050600425fdbbea72ccc729250a4977ecc589c87e4d67e73d3196f228e
 src/frontend/gpui/tests/plat44-editing-mutation-control.sha256	src/frontend/gpui/main.nim	bd206f82ec3b500e52053e6eeda52e891e83aede0353ce2e485c65e1fcf50d85	28f36a050600425fdbbea72ccc729250a4977ecc589c87e4d67e73d3196f228e
@@ -224,7 +223,6 @@ src/frontend/tui/tests/plat60-low-level-code-mutation-control.sha256	src/fronten
 # run-plat62-constraints-mutations.py was re-graded at 25ef4c6b12; since then
 src/frontend/tui/tests/plat62-constraints-mutation-control.sha256	src/frontend/gpui/main.nim	bd206f82ec3b500e52053e6eeda52e891e83aede0353ce2e485c65e1fcf50d85	28f36a050600425fdbbea72ccc729250a4977ecc589c87e4d67e73d3196f228e
 src/frontend/tui/tests/plat49-chrome-mutation-control.sha256	src/frontend/viewmodel/viewmodels/state_vm.nim	83317d6b298c7a4e59d739ce107e6edd021b4abe8be210d6e8233b1338538610	93e71cf306ed044285f82ff34813da37691b380cfa236de7d7407b686dd795c0
-src/frontend/viewmodel/tests/unit/plat29-async-mutation-control.sha256	src/frontend/viewmodel/viewmodels/state_vm.nim	b9082f34ed45e3904aaf59df7dbca29c78374f382533075520dbcd7c5673d1dc	93e71cf306ed044285f82ff34813da37691b380cfa236de7d7407b686dd795c0
 # The desktop windows change (a second window shows its session) edits these
 # digested subjects; the harnesses owe a re-grade for these bytes.
 src/frontend/tui/tests/build-residuals-mutation-control.sha256	src/frontend/ui_js.nim	3ede9f3c111db3d01340561893b2b1253c83ed7c5b3b690475d0a70b67c5acac	65a6698c8d3119dafac3c6eb6016268d82e06e8bfcc10ec6f1cbc65c03c2e7da
@@ -233,8 +231,6 @@ src/frontend/tui/tests/plat53-test-results-mutation-control.sha256	src/frontend/
 src/frontend/tui/tests/plat57-find-in-files-mutation-control.sha256	src/frontend/index/ipc_utils.nim	2acc5c524b519326cd294dfc9b9ae7738885e60c230a967b746bdbb5970dfc45	be32903921826cd6e1e0470d79ecc1051bd27c296d86ef16a1bc2f8a690021ef
 src/frontend/tui/tests/plat63-verification-mutation-control.sha256	src/frontend/ui_js.nim	3ede9f3c111db3d01340561893b2b1253c83ed7c5b3b690475d0a70b67c5acac	65a6698c8d3119dafac3c6eb6016268d82e06e8bfcc10ec6f1cbc65c03c2e7da
 src/frontend/tui/tests/plat70d-grep-mutation-control.sha256	src/frontend/ui_js.nim	3ede9f3c111db3d01340561893b2b1253c83ed7c5b3b690475d0a70b67c5acac	65a6698c8d3119dafac3c6eb6016268d82e06e8bfcc10ec6f1cbc65c03c2e7da
-src/frontend/viewmodel/tests/unit/plat29-async-mutation-control.sha256	src/frontend/index/ipc_subsystems/dap.nim	28a466cd738f7cf4bc4982f58dad5ff69fe214c9b3b9373ba72d0a0e91f4cf84	0d28e7440fe690569abf994b6f3739d422a82e9e985fbd475acd862d6755c88d
-src/frontend/viewmodel/tests/unit/plat29-async-mutation-control.sha256	src/frontend/tests/dap_session_routing_test.nim	cf088a35357ae32cb0ef3548f5a036c68e16ae0b7ca749267e1ade8c35890c50	23f78b7c75cf637296b0c6f87a1cfe695fb20ace8b7642f04df618a2b88cd56d
 src/frontend/viewmodel/tests/unit/plat34-front-end-mutation-control.sha256	ci/lib/test-lane-files.sh	44699b1d86c3a974c29d8b12c349689e65fb2d357e232cbaad494a98f6da8b2a	166f483f99e6679e34a4fcbe74b96920fbd89561316a7f8a025a8e6c745c450c
 # plat70f was graded at 5e672b6611 (agents 781807611e and the batch before it);
 # c79bee58b1 (the GPUI status line's note, a cell's tooltip off a right-click
