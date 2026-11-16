@@ -1071,6 +1071,10 @@ const
     # would look exactly like a move that changed nothing, which is why it is
     # registered rather than reachable by the glob alone.
     "src/tests/cli/cs_m10_cli_surface_unchanged_test.nim",
+    # ... and that nothing of confutils' type-based command line is left:
+    # no enum subcommands (`{.command.}`), no confutils field pragmas, no
+    # import of the module whose `load` reads them.
+    "src/tests/cli/cs_m10_no_enum_subcommands_left_test.nim",
   ]
 
   GuiActionGateEntries*: array[5, GuiActionGateEntry] = [
