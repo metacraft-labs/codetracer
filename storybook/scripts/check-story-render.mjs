@@ -30,8 +30,9 @@
 // alone (in a CodeTracer panel and in an Agent Harbor panel; beside a
 // spinner; split over an inline element; in one panel of a layout), an
 // Agent Harbor cut text that keeps a separator before its "…", that is cut
-// below its floor or that CSS cut instead of the views' code (CTF-P1c D6,
-// D7), an editor with
+// below its floor, whose box the views let shrink below its floor, that the
+// accessibility tree reads twice or that CSS cut instead of the views' code
+// (CTF-P1c D6, D7), an editor with
 // an empty model, content faded out by an ancestor, the review without its
 // diff, a panel mounted in `#main`, a console error, a thrown error, failed
 // and aborted requests, and a declared empty state that shows data) and
@@ -44,7 +45,7 @@ import { existsSync, mkdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, extname, join, normalize, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { renderAndJudge } from "./story-render-judge.mjs";
+import { probeCutTexts, renderAndJudge } from "./story-render-judge.mjs";
 
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
@@ -217,6 +218,22 @@ const PLANTS = {
       }, 100);
       return dispose; }; })(mountCodeTracerStory);`,
   },
+  "cut-text-floor-not-kept": {
+    // CTF-P1c D7: the counts' box not kept at their floor, so a narrow line
+    // squeezes them below `1…` (the probe narrows the tree node's line).
+    expect: "cut-edge",
+    story: "codetracer-agent-harbor--session-list-sidebar",
+    code: `document.head.appendChild(Object.assign(document.createElement("style"),
+      { textContent: "[data-ah-floor] { min-width: 0 !important; }" }));`,
+  },
+  "cut-text-read-twice": {
+    // CTF-P1c D6: the drawn cut without its empty alternative text, so the
+    // accessibility tree reads it beside the whole text.
+    expect: "cut-edge",
+    story: "codetracer-agent-harbor--session-list-sidebar",
+    code: `document.head.appendChild(Object.assign(document.createElement("style"),
+      { textContent: "[data-ah-shown]::after { content: attr(data-ah-shown) !important; }" }));`,
+  },
   "cut-text-by-css": {
     // CTF-P1c D6: an Agent Harbor text cut by CSS's ellipsis instead of in
     // code: its mark taken away, the stylesheet's ellipsis put back.
@@ -379,9 +396,12 @@ async function renderStory(browser, baseUrl, story, theme, plant) {
         const body = (await response.text()) + "\n;" + plant.code + "\n";
         await route.fulfill({ response, body });
       }) : undefined,
-      afterInspect: shotsDir
-        ? (p) => p.screenshot({ path: join(shotsDir, `${story.id}-${theme}.png`) })
-        : undefined,
+      // The screenshot first: the cut-text probe narrows the page's tree
+      // nodes (`probeCutTexts`; its findings join the `cut-edge` verdict).
+      afterInspect: async (p, observed) => {
+        if (shotsDir) await p.screenshot({ path: join(shotsDir, `${story.id}-${theme}.png`) });
+        if (observed.page) observed.page.cutTexts = [...(observed.page.cutTexts ?? []), ...await probeCutTexts(p)];
+      },
     });
     return failures;
   } finally {

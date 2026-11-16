@@ -27,7 +27,8 @@ AH_ROW_DOT = 0.5rem
 // transparent, so its size is that of the whole text as under CSS's ellipsis,
 // and the cut text (`data-ah-shown`) is drawn over it from where the text
 // starts (`--ah-cut-indent`), in the element's own colour. A `::before` of
-// the element keeps its ink.
+// the element keeps its ink. A reader and the accessibility tree get the
+// whole text, once; a selection copies the whole text.
 //
 // Two rules below keep CSS's ellipsis: `.ah-milestone-meta`, a line of spans
 // in two colours (the failing count in the error role) that one drawn string
@@ -43,7 +44,10 @@ AH_ROW_DOT = 0.5rem
     -webkit-text-fill-color: currentColor
 
   &::after
-    content: attr(data-ah-shown)
+    // Empty alternative text (CSS Generated Content 3, `content: <content> /
+    // <alt>`, https://www.w3.org/TR/css-content-3/#alt): the accessibility
+    // tree reads the element's whole text once, not the drawn cut beside it.
+    content: unquote('attr(data-ah-shown) / ""')
     position: absolute
     top: 0
     right: 0
