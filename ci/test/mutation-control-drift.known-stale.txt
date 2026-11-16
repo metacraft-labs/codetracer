@@ -109,20 +109,15 @@
 # 702190afba, c703ea3499): a re-grade of the arms whose needles sit in them.
 # plat70i: the Event Log's model moved after its grade (82b3e7e9c13, an Event
 # Log boundary chip goes to the other side of the crossing): a re-grade of the arms whose needles sit in it.
-src/frontend/tui/tests/plat50-clicks-mutation-control.sha256	src/frontend/ui/editor.nim	ee5897fa7c5c959b3cad5400d6846ed700d771918d578c021e269d282ba0e985	9e377e95c784963ea9965a829b037090eee002ef5ca13d50766c80a21078eed9
 
 
 # 2026-11-14, the desktop palette's View: Toggle Formatted Source View (a new
 # ClientAction, its operation and its census entry): these harnesses owe a
 # re-grade for these bytes.
 src/frontend/tui/tests/plat49-chrome-mutation-control.sha256	src/frontend/gpui/main.nim	c877a4378ca59b26178847f58a7cbde74cf13ef639fd37cfa9c8f80f2f302ff9	28f36a050600425fdbbea72ccc729250a4977ecc589c87e4d67e73d3196f228e
-src/frontend/tui/tests/plat50-clicks-mutation-control.sha256	src/frontend/gpui/main.nim	c877a4378ca59b26178847f58a7cbde74cf13ef639fd37cfa9c8f80f2f302ff9	28f36a050600425fdbbea72ccc729250a4977ecc589c87e4d67e73d3196f228e
 src/frontend/tui/tests/plat49-chrome-mutation-control.sha256	src/frontend/tui/app/runtime.nim	6a710a3399799246c1f06628b0b206fd78e0a1a205e7edcb74e555c90161c7b3	a7a3bb422082c3ce0dbfd6321695a4a8876ce902281ec4c17f02c3bc4e1bbeb8
-src/frontend/tui/tests/plat50-clicks-mutation-control.sha256	src/frontend/tui/app/runtime.nim	6a710a3399799246c1f06628b0b206fd78e0a1a205e7edcb74e555c90161c7b3	a7a3bb422082c3ce0dbfd6321695a4a8876ce902281ec4c17f02c3bc4e1bbeb8
 src/frontend/tui/tests/plat49-chrome-mutation-control.sha256	src/frontend/tui/app/tui_app.nim	cc455c9ce9a525fd905861c04eeeac5edfd762fbb7f426932c75deb4417f6ecb	5e29fc96fe73c25b52f244228fa9880cac9205a1607f7214b733c6c0dcd3e647
 src/frontend/tui/tests/plat49-chrome-mutation-control.sha256	src/frontend/tui/host/tui_session.nim	a9ea791e49006488ac348b14e02a4255f0d521e9444766a8aff5219e8c969bee	0c65cb8a6581ca9f73adda27a71e6589473c2573b61ce8a51eac495d0e0b1efe
-src/frontend/tui/tests/plat50-clicks-mutation-control.sha256	src/frontend/tui/app/tui_app.nim	cc455c9ce9a525fd905861c04eeeac5edfd762fbb7f426932c75deb4417f6ecb	5e29fc96fe73c25b52f244228fa9880cac9205a1607f7214b733c6c0dcd3e647
-src/frontend/tui/tests/plat50-clicks-mutation-control.sha256	src/frontend/tui/host/tui_session.nim	a9ea791e49006488ac348b14e02a4255f0d521e9444766a8aff5219e8c969bee	0c65cb8a6581ca9f73adda27a71e6589473c2573b61ce8a51eac495d0e0b1efe
 src/frontend/tui/tests/plat54-agent-activity-mutation-control.sha256	src/frontend/tui/app/runtime.nim	9f6ceffe6b6685c2accdce1080bd0d79d6355dbe8235135b4e163a554a5aa58b	a7a3bb422082c3ce0dbfd6321695a4a8876ce902281ec4c17f02c3bc4e1bbeb8
 src/frontend/tui/tests/plat54-agent-activity-mutation-control.sha256	src/frontend/tui/host/tui_session.nim	a9ea791e49006488ac348b14e02a4255f0d521e9444766a8aff5219e8c969bee	0c65cb8a6581ca9f73adda27a71e6589473c2573b61ce8a51eac495d0e0b1efe
 # run-plat62-constraints-mutations.py was re-graded at 56862a458e4; since then
@@ -140,7 +135,6 @@ src/frontend/tui/tests/plat54-agent-activity-mutation-control.sha256	src/fronten
 src/frontend/tui/tests/plat47-parity-mutation-control.sha256	src/frontend/tui/host/tui_session.nim	a9ea791e49006488ac348b14e02a4255f0d521e9444766a8aff5219e8c969bee	0c65cb8a6581ca9f73adda27a71e6589473c2573b61ce8a51eac495d0e0b1efe
 src/frontend/tui/tests/plat47-parity-mutation-control.sha256	src/frontend/tui/app/runtime.nim	9f6ceffe6b6685c2accdce1080bd0d79d6355dbe8235135b4e163a554a5aa58b	a7a3bb422082c3ce0dbfd6321695a4a8876ce902281ec4c17f02c3bc4e1bbeb8
 src/frontend/tui/tests/plat47-parity-mutation-control.sha256	src/frontend/gpui/main.nim	2fde80b43566564a900a59186e7bc7debd9c675598646f4fa391424de76c48eb	28f36a050600425fdbbea72ccc729250a4977ecc589c87e4d67e73d3196f228e
-src/frontend/tui/tests/plat50-clicks-mutation-control.sha256	src/frontend/gpui/window_clicks.nim	7a08b5dc849865d5b5c1c1f6d97dd58ffb9ad9f42bf554bedcc7d6c63c34c6ae	348d412ad297467f77fdde0607263dc7bd3464de3e457506921a3ae2e52530cb
 src/frontend/tui/tests/plat54-agent-activity-mutation-control.sha256	src/frontend/gpui/main.nim	2fde80b43566564a900a59186e7bc7debd9c675598646f4fa391424de76c48eb	28f36a050600425fdbbea72ccc729250a4977ecc589c87e4d67e73d3196f228e
 src/frontend/tui/tests/plat54-agent-activity-mutation-control.sha256	src/frontend/ui/agent_activity.nim	61ae1ecf5fbc1e0ce44dc59f15ea0b781785910a0366583b47b32fdfc92c0467	60985af34f2457a1b980bbed2959d9c6697aa8fbcc16173b33a64fe978130f64
 src/frontend/tui/tests/plat46-design-mutation-control.sha256	src/frontend/tui/app/theme/capabilities.nim	f1f2c84a36ed368523f503701d3a0700b16a9fd1aa5c4c6d9c93c713fe54e38b	4a709e46e1c01539fda428f6784b3535f3a42183eb307651eea4fa86b87714f0
@@ -152,7 +146,6 @@ src/frontend/tui/tests/plat47-parity-mutation-control.sha256	src/frontend/tui/ap
 # typed) then moved the terminal's main.nim. Re-grade the arms whose needles
 # sit in it.
 src/frontend/tui/tests/plat49-chrome-mutation-control.sha256	src/frontend/tui/main.nim	66283c44fe09ff1389f0e769ef48637ce573781972c014e30c9c16b1da8606ce	82a88f3f2c8697dc6edab12b1b2be1b458357d4f5be0597552709fceabf7593c
-src/frontend/tui/tests/plat50-clicks-mutation-control.sha256	src/frontend/tui/main.nim	66283c44fe09ff1389f0e769ef48637ce573781972c014e30c9c16b1da8606ce	82a88f3f2c8697dc6edab12b1b2be1b458357d4f5be0597552709fceabf7593c
 src/frontend/tui/tests/plat54-agent-activity-mutation-control.sha256	src/frontend/tui/main.nim	66283c44fe09ff1389f0e769ef48637ce573781972c014e30c9c16b1da8606ce	82a88f3f2c8697dc6edab12b1b2be1b458357d4f5be0597552709fceabf7593c
 # plat70h was graded at 56862a458e4; its runtime moved on agents after that
 # (eec6949f68, a move drawn in flight): a re-grade of the arms whose needles sit in it.
@@ -168,14 +161,12 @@ src/frontend/tui/tests/plat54-agent-activity-mutation-control.sha256	src/fronten
 # view as its high-level source) then moved dap_handler.rs. Re-grade E1, whose
 # needle sits in it.
 src/frontend/tui/tests/plat49-chrome-mutation-control.sha256	src/frontend/viewmodel/viewmodels/event_log_vm.nim	26158d77dd8f6e58b67e9b9edb89f1e3b01ace21df15e569811687402e479b02	75c008b2da091f77fed96996db91d7ad8cd44393c2e1c06705bb8444c5f7f32b
-src/frontend/tui/tests/plat50-clicks-mutation-control.sha256	src/frontend/viewmodel/viewmodels/event_log_vm.nim	26158d77dd8f6e58b67e9b9edb89f1e3b01ace21df15e569811687402e479b02	75c008b2da091f77fed96996db91d7ad8cd44393c2e1c06705bb8444c5f7f32b
 src/frontend/tui/tests/plat49-chrome-mutation-control.sha256	src/frontend/viewmodel/views/isonim_event_log_view.nim	f49a9e23ba6434f08360950768487dad63a9fedd4703de6521d6d223f23cfda7	db9c4c6924195d6630347f931128a1d0a9d7c22f5b784749911716d1d5ac556a
 # run-plat61-shell-mutations.py was re-graded at 8fbd0ab21f; since then
 # bf97934eb5 and 9bc543534b (a refused trace version) moved ct's recording
 # command, and 234a6bcc67 (a session tab's right-click) the desktop's key
 # router, under its record. A re-grade of the arms whose needles sit in
 # them is owed.
-src/frontend/tui/tests/plat50-clicks-mutation-control.sha256	src/db-backend/src/dap_handler.rs	98fc556946929000619231672219791a054bbbeef7d675bb3722b0870a9e37f0	7c59887c904659094396b45ce2cf2673ef89803f977fe9fdeb929e5650a4c6d0
 src/frontend/tui/tests/plat58-requests-mutation-control.sha256	src/db-backend/src/dap_handler.rs	98fc556946929000619231672219791a054bbbeef7d675bb3722b0870a9e37f0	7c59887c904659094396b45ce2cf2673ef89803f977fe9fdeb929e5650a4c6d0
 src/frontend/tui/tests/plat47-parity-mutation-control.sha256	src/frontend/viewmodel/sdk/stop_loader.nim	c564b55c211441a96b2e2b570f8599aaf5cf58a1d8c1cc8a252132c7b24387b7	9f904fb8f31643914cf531aa512b89b334d4c74fa72e7cb1277f4d19ad671c18
 src/frontend/viewmodel/tests/unit/plat29-async-mutation-control.sha256	src/frontend/viewmodel/sdk/stop_loader.nim	c564b55c211441a96b2e2b570f8599aaf5cf58a1d8c1cc8a252132c7b24387b7	9f904fb8f31643914cf531aa512b89b334d4c74fa72e7cb1277f4d19ad671c18
@@ -233,7 +224,6 @@ src/frontend/tui/tests/plat60-low-level-code-mutation-control.sha256	src/fronten
 # run-plat62-constraints-mutations.py was re-graded at 25ef4c6b12; since then
 src/frontend/tui/tests/plat62-constraints-mutation-control.sha256	src/frontend/gpui/main.nim	bd206f82ec3b500e52053e6eeda52e891e83aede0353ce2e485c65e1fcf50d85	28f36a050600425fdbbea72ccc729250a4977ecc589c87e4d67e73d3196f228e
 src/frontend/tui/tests/plat49-chrome-mutation-control.sha256	src/frontend/viewmodel/viewmodels/state_vm.nim	83317d6b298c7a4e59d739ce107e6edd021b4abe8be210d6e8233b1338538610	93e71cf306ed044285f82ff34813da37691b380cfa236de7d7407b686dd795c0
-src/frontend/tui/tests/plat50-clicks-mutation-control.sha256	src/frontend/viewmodel/input/pane_presses.nim	e3f3d8c53263304d3ece2696431873e66cc788985184febdefab01445d16820c	34a81493a4dbd68fcf75ed0ddce4faede56c8e626ac96c48c3523becdfdb0216
 src/frontend/viewmodel/tests/unit/plat29-async-mutation-control.sha256	src/frontend/viewmodel/viewmodels/state_vm.nim	b9082f34ed45e3904aaf59df7dbca29c78374f382533075520dbcd7c5673d1dc	93e71cf306ed044285f82ff34813da37691b380cfa236de7d7407b686dd795c0
 # The desktop windows change (a second window shows its session) edits these
 # digested subjects; the harnesses owe a re-grade for these bytes.
