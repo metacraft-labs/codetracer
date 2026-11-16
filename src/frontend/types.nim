@@ -2211,7 +2211,9 @@ type
     init*: bool
     tracepointTable*: js
     lastTracepoint*: int
-    tracepoints*: JsAssoc[int, Tracepoint]
+    # The desktop's tracepoints are rows of the tab's store
+    # (`store.pointList.rows`, written by `ui/trace` through
+    # `sdk/tracepoints`); this record keeps no copy of them (codetracer#886).
     redrawTracepoints*: bool
 
   ProblemSeverity* = enum
@@ -2640,8 +2642,7 @@ when defined(ctRenderer):
     )
     session.network = Network(
       futures: JsAssoc[cstring, JsAssoc[cstring, JsObject]]{})
-    session.pointList = PointListData(
-      tracepoints: JsAssoc[int, Tracepoint]{})
+    session.pointList = PointListData()
     session.status = StatusState(
       lastDirection: DebForward,
       currentOperation: cstring"",

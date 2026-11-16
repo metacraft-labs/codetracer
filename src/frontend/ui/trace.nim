@@ -19,6 +19,9 @@ import ./presented_value
 import ../viewmodel/input/element_operations
 from ../lib/monaco_appearance import editorGutterLineHtml
 import ../viewmodel/store/replay_data_store
+from ../viewmodel/store/types as store_types import TracepointSweepSpec,
+  TracepointSweepHit
+import ../viewmodel/sdk/tracepoints
 from ../viewmodel/viewmodels/timeline_vm import
   TimelineVM, createTimelineVM
 from isonim/web/dom_api import nil
@@ -96,6 +99,89 @@ proc ownPaneStore(self: TraceComponent): ReplayDataStore =
   ## The store of the tab that holds `self` (`session_viewmodels.ownPaneVM`).
   let vm = ownPaneVM(self, timelineVMInstance, timelineVM)
   if vm.isNil: nil else: vm.store
+
+# ---------------------------------------------------------------------------
+# The tracepoint's row of the Breakpoints & Tracepoints pane (codetracer#886)
+#
+# The pane draws its tab's `store.pointList.rows` (`PointListVM.points`). A
+# tracepoint this editor holds is one of those rows from the moment its editor
+# opens under a line, run or not (`sdk/tracepoints.declareTracepoint`). A run's
+# answer annotates the rows (`applyTracepointResults`), disabling flips the
+# row's enabled flag, and closing removes it. The store is the tab's own
+# (`ownPaneStore`), the one its point-list pane and its debugger service's
+# breakpoints share (`ui_js.configureSessionMiddleware`).
+# ---------------------------------------------------------------------------
+
+proc sweptHits(stops: seq[Stop]): seq[TracepointSweepHit] =
+  ## A `ct/tracepoint-results` answer's stops, as the store holds a sweep's
+  ## hits. The locals are not carried: the results grid reads them from the
+  ## legacy session, and the point list needs only where and how often.
+  for stop in stops:
+    if stop.isNil:
+      continue
+    result.add TracepointSweepHit(
+      tracepointId: stop.tracepointId,
+      rrTicks: uint64(max(0, stop.rrTicks)),
+      path: $stop.path,
+      line: stop.line,
+      errorMessage: $stop.errorMessage)
+
+proc sweepSpecs(tracepoints: seq[Tracepoint]): seq[TracepointSweepSpec] =
+  ## The tracepoints a run sent (`TraceSession.tracepoints`), as the store
+  ## matches an answer's hits back to them: by the id the engine echoes.
+  for tp in tracepoints:
+    if tp.isNil:
+      continue
+    result.add TracepointSweepSpec(tracepointId: tp.tracepointId,
+                                   path: $tp.name, line: tp.line,
+                                   expression: $tp.expression)
+
+proc declarePointRow(self: TraceComponent; expression: cstring) =
+  ## Hold this tracepoint as a row of its tab's point list, with `expression`
+  ## and its enabled state. The hits its last run reported let the store find
+  ## a row that run moved (`sdk/tracepoints.heldTracepointLocation`).
+  let store = self.ownPaneStore()
+  if store.isNil or self.tracepoint.isNil:
+    return
+  store.declareTracepoint($self.name, self.line, $expression,
+                          enabled = not self.isDisabled,
+                          swept = sweptHits(self.tracepoint.results))
+
+var lastPointListAnswer: TracepointResultsAggregate
+  ## The last `ct/tracepoint-results` answer written into a point list. Every
+  ## TraceComponent subscribes to the answer and receives the SAME object, but
+  ## the answer is the whole sweep's: it is written once, with every
+  ## tracepoint the run sent. A second write of it would not be a no-op when
+  ## the sweep moved a row (the second pass would find no row at the line it
+  ## sent and add one).
+
+proc ownTraceSession(self: TraceComponent; sessionId: int): TraceSession =
+  ## The run `sessionId` of the tab that holds `self`, or nil. A run is kept
+  ## in the trace service of the tab it was started in (`runTracepoints`), and
+  ## an answer can arrive after another tab was brought to the front, so the
+  ## shown tab's `data.services` may hold a different run under the same id.
+  let owner = data.sessionOfComponent(self)
+  let services =
+    if owner.isNil or owner.services.isNil: data.services else: owner.services
+  if services.isNil or services.trace.isNil or sessionId < 0 or
+     sessionId >= services.trace.traceSessions.len:
+    return nil
+  services.trace.traceSessions[sessionId]
+
+proc applySweepToPointList(self: TraceComponent;
+                           response: TracepointResultsAggregate) =
+  ## Write one sweep's answer into the tab's point list, once per answer.
+  ## The specs are the run's own: the tracepoints of the tab whose store is
+  ## written, never another tab's.
+  if response == lastPointListAnswer:
+    return
+  lastPointListAnswer = response
+  let store = self.ownPaneStore()
+  let session = self.ownTraceSession(response.sessionId)
+  if store.isNil or session.isNil:
+    return
+  store.applyTracepointResults(sweepSpecs(session.tracepoints),
+                               sweptHits(response.results))
 
 proc syncTimelineDebuggerPosition(store: ReplayDataStore;
                                   rrTicks: int, path: cstring, line: int;
@@ -521,6 +607,7 @@ proc runTracepoints*(data: Data) {.exportc.} =
       trace.indexInSession = i
 
       trace.tracepoint.expression = code
+      trace.declarePointRow(code)
       trace.tracepoint.lastRender = 0
       trace.tracepoint.isChanged = trace.isChanged
       trace.tracepoint.results = @[]
@@ -619,6 +706,7 @@ method onTracepointResultsAggregate*(
 
   let session = data.services.trace.traceSessions[response.sessionId]
   session.results[response.sessionId] = response.results
+  traceComponent.applySweepToPointList(response)
   traceResultsChanged()
 
   if traceComponent.tracepoint.isNil:
@@ -1195,6 +1283,13 @@ proc toggleTraceState*(self: TraceComponent) =
   self.forceReload = true
   self.tracepoint.isDisabled = not self.tracepoint.isDisabled
   self.error = nil
+
+  # The point list's row follows: a disabled tracepoint stays a row, dimmed.
+  let store = self.ownPaneStore()
+  if not store.isNil and not store.setDeclaredTracepointEnabled(
+      $self.name, self.line, not self.isDisabled,
+      sweptHits(self.tracepoint.results)):
+    self.declarePointRow(self.tracepoint.expression)
 
   self.refreshLine()
   self.refreshTrace()
@@ -1961,9 +2056,6 @@ proc togglePoint*(trace: TraceComponent) =
     # tabInfo.monacoEditor.changeViewZones do (view: js):
     #   trace.zoneId = cast[int](view.addZone(trace.viewZone))
 
-    # # add tracepoint to points register
-    # data.pointList.tracepoints[trace.tracepoint.tracepointId] = trace.tracepoint
-
     trace.finishTraceDomMount()
 
 proc toggleTrace*(editorUI: EditorViewComponent, name: cstring, line: int) =
@@ -2019,8 +2111,9 @@ proc toggleTrace*(editorUI: EditorViewComponent, name: cstring, line: int) =
 
     trace.zoneId = addMonacoViewZone(tabInfo.monacoEditor, trace.viewZone)
 
-    # add tracepoint to points register
-    data.pointList.tracepoints[trace.tracepoint.tracepointId] = trace.tracepoint
+    # The tracepoint is held from here on, so it is a row of the
+    # Breakpoints & Tracepoints pane before anything is run (codetracer#886).
+    trace.declarePointRow(trace.tracepoint.expression)
 
     # render current trace component
     trace.appendTraceViewZoneDomContent()
@@ -2103,10 +2196,11 @@ proc closeTrace*(self: TraceComponent) =
   # remove editor view zone
   removeMonacoViewZone(self.editorUI.tabInfo.monacoEditor, self.zoneId)
 
-  # remove tracepoint from pointList
-  if self.data.pointList.tracepoints.hasKey(self.tracepoint.tracepointId):
-    discard jsdelete(self.data.pointList.tracepoints[self.tracepoint.tracepointId])
-    self.data.pointList.redrawTracepoints = true
+  # remove its row from the point list, wherever its last run located it
+  let store = self.ownPaneStore()
+  if not store.isNil:
+    discard store.removeDeclaredTracepoint($self.name, self.line,
+                                           sweptHits(self.tracepoint.results))
 
   # remove trace component from the editor register
   discard jsDelete(self.editorUI.traces[self.line])

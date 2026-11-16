@@ -526,7 +526,16 @@ readonly REPRO_LOCK="$REPO_ROOT/repro.lock"
 # test dependencies, like infra: in the develop set, not in the build-input
 # subset. The lock had declared them since the pack landed (a0efd649434), and
 # this list had not followed.
-readonly LOCK_DECLARED_DEPS='isonim,isonim-tui,codetracer-trace-format-nim,nim-everywhere,nim-agent-harbor,nim-agents,nim-agents-isonim-viewmodels,nim-acp,test-certificates-tools,io-mon,nim-stackable-hooks,codetracer-image-diff,isonim-render-serve,nim-termctl,nim-pty,nim-shm-queue,isonim-gpui,isonim-freya,isonim-cocoa,reprobuild-packages,TermAssert,TermAssertClient,codetracer-beam-recorder,codetracer-ci,codetracer-evm-recorder,codetracer-js-recorder,codetracer-launcher,codetracer-native-backend,codetracer-native-recorder,codetracer-native-test-programs,codetracer-observability-cli,codetracer-observability-e2e,codetracer-observability-grafana,codetracer-observability-jaeger,codetracer-private-recordings,codetracer-python-recorder,codetracer-ruby-recorder,codetracer-test-mirror,codetracer-trace-format,codetracer-visual-replay,codetracer-vscode-extension,codetracer-wasm-instrumenter,codetracer-wasm-recorder,isonim-examples,metacraft-github-actions,ngx-isonim,nim-faststreams,nim-libvterm,nim-shm-gset,nim-stew,reprobuild,runquota,tree-sitter-aiken,tree-sitter-nim,infra,isonim-platform,DemoVideoScript,DemoVideoScript-TermAssert,DemoVideoScript-GuiAssert,DemoVideoScript-Playwright,GuiAssert'
+#
+# 61 -> 64 members (2026-11-16): the five scenario siblings move OUT, to the test lock
+# (ci/test/siblings/repro.lock, checked below). They are not build inputs, so
+# every refresh of this lock dropped them, and each time every scenario job
+# stopped before its first scenario (codetracer-pm issue
+# 2026-11-15-repro-lock-refreshes-drop-the-scenario-lanes-test-siblings).
+# codetracer-pm (45e5d092643) and seven blockchain recorders (cairo, cardano,
+# circom, flow, leo, miden, move; 249cca0a7ec) had joined the lock's develop
+# set without this list following them.
+readonly LOCK_DECLARED_DEPS='isonim,isonim-tui,codetracer-trace-format-nim,nim-everywhere,nim-agent-harbor,nim-agents,nim-agents-isonim-viewmodels,nim-acp,test-certificates-tools,io-mon,nim-stackable-hooks,codetracer-image-diff,isonim-render-serve,nim-termctl,nim-pty,nim-shm-queue,isonim-gpui,isonim-freya,isonim-cocoa,reprobuild-packages,TermAssert,TermAssertClient,codetracer-beam-recorder,codetracer-ci,codetracer-evm-recorder,codetracer-js-recorder,codetracer-launcher,codetracer-native-backend,codetracer-native-recorder,codetracer-native-test-programs,codetracer-observability-cli,codetracer-observability-e2e,codetracer-observability-grafana,codetracer-observability-jaeger,codetracer-private-recordings,codetracer-python-recorder,codetracer-ruby-recorder,codetracer-test-mirror,codetracer-trace-format,codetracer-visual-replay,codetracer-vscode-extension,codetracer-wasm-instrumenter,codetracer-wasm-recorder,isonim-examples,metacraft-github-actions,ngx-isonim,nim-faststreams,nim-libvterm,nim-shm-gset,nim-stew,reprobuild,runquota,tree-sitter-aiken,tree-sitter-nim,infra,isonim-platform,codetracer-pm,codetracer-cairo-recorder,codetracer-cardano-recorder,codetracer-circom-recorder,codetracer-flow-recorder,codetracer-leo-recorder,codetracer-miden-recorder,codetracer-move-recorder'
 # The build-input subset of that set (members that are also solved packages,
 # i.e. what `repro.nim` `uses` from source), as
 # `ci/repro-lock-build-input-siblings.sh` derives it from the lock. This is
@@ -662,6 +671,121 @@ if [ "$path_free_inputs" = "$actual_build_inputs" ]; then
 else
 	fail "path-free v3 locks select the same build-input siblings" \
 		"expected: $actual_build_inputs" "actual: $path_free_inputs"
+fi
+
+# THE TEST LOCK. The siblings the test lanes run against and no build compiles
+# -- the scenario runner, its backends and the terminal harness -- are pinned
+# by ci/test/siblings/repro.lock, a project of its own nested here, and not by
+# repro.lock. repro.lock is refreshed from repro.nim on every push, and
+# repro.nim names only what the product is built from, so each refresh dropped
+# them, and each time every scenario job stopped at "'--only=DemoVideoScript'
+# names no repo in this workspace's lock set" (codetracer-pm issue
+# 2026-11-15-repro-lock-refreshes-drop-the-scenario-lanes-test-siblings).
+readonly TEST_LOCK="$REPO_ROOT/ci/test/siblings/repro.lock"
+readonly TEST_LOCK_DECLARED_DEPS='DemoVideoScript,DemoVideoScript-TermAssert,DemoVideoScript-GuiAssert,DemoVideoScript-Playwright,GuiAssert,TermAssert,TermAssertClient,nim-libvterm,nim-pty'
+# The members that are ONLY test siblings. They must not come back into
+# repro.lock: two locks pinning one repository is two answers to "which
+# revision?", and the product lock's answer is the one a refresh deletes.
+readonly TEST_ONLY_SIBLINGS='DemoVideoScript,DemoVideoScript-TermAssert,DemoVideoScript-GuiAssert,DemoVideoScript-Playwright,GuiAssert'
+
+# lock_rev <lock> <name> -> the revision the lock's deps entry records, or ''.
+lock_rev() {
+	grep -o "name = \"$2\", \\(self = \"true\", \\)\\?coord_kind = \"vcs\", url = \"[^\"]*\", revision = \"[0-9a-f]*\"" "$1" 2>/dev/null |
+		sed 's/.*revision = "//; s/"$//' | head -n 1
+}
+
+if [ -f "$TEST_LOCK" ]; then
+	test_lock_deps="$(grep -o 'self = "true"[^}]*depends = "[^"]*"' "$TEST_LOCK" |
+		sed 's/.*depends = "//; s/"$//' | head -n 1)"
+else
+	test_lock_deps="<$TEST_LOCK not found>"
+fi
+if [ "$(sorted_dep_set "$test_lock_deps")" = "$(sorted_dep_set "$TEST_LOCK_DECLARED_DEPS")" ]; then
+	ok "the test lock declares the test siblings ($test_lock_deps)"
+else
+	fail "the test lock declares the test siblings" \
+		"ci/test/siblings/repro.lock is what provision-repro-lock-siblings clones" \
+		"every test-siblings name from" \
+		"missing from the test lock: $(comm -23 <(sorted_dep_set "$TEST_LOCK_DECLARED_DEPS") <(sorted_dep_set "$test_lock_deps") | paste -sd, -)" \
+		"not declared here:          $(comm -13 <(sorted_dep_set "$TEST_LOCK_DECLARED_DEPS") <(sorted_dep_set "$test_lock_deps") | paste -sd, -)"
+fi
+
+test_lock_defects=()
+IFS=',' read -r -a _test_declared <<<"$TEST_LOCK_DECLARED_DEPS"
+for name in "${_test_declared[@]}"; do
+	rev="$(lock_rev "$TEST_LOCK" "$name")"
+	if ! [[ $rev =~ ^[0-9a-f]{40}$ ]]; then
+		test_lock_defects+=("$name: the test lock records no 40-hex revision ('$rev')")
+		continue
+	fi
+	# A repository both locks pin must be one commit: nim-pty is a build input
+	# of ct AND what TermAssert drives, and the TUI lanes compile both halves
+	# against the one ../nim-pty checkout.
+	product_rev="$(lock_rev "$REPRO_LOCK" "$name")"
+	if [ -n "$product_rev" ] && [ "$product_rev" != "$rev" ]; then
+		test_lock_defects+=("$name: the test lock pins $rev, repro.lock pins $product_rev")
+	fi
+done
+IFS=',' read -r -a _test_only <<<"$TEST_ONLY_SIBLINGS"
+for name in "${_test_only[@]}"; do
+	if [ -n "$(lock_rev "$REPRO_LOCK" "$name")" ]; then
+		test_lock_defects+=("$name is pinned by repro.lock too; it belongs to the test lock only")
+	fi
+done
+if [ "${#test_lock_defects[@]}" -eq 0 ]; then
+	ok "every test sibling has one 40-hex pin, and the two locks agree where both pin a repo"
+else
+	fail "every test sibling has one 40-hex pin, and the two locks agree where both pin a repo" \
+		"${test_lock_defects[@]}"
+fi
+
+# The action clones test-siblings from the test lock: `repro develop` reads the
+# lock of the project it runs in, so it has to run in ci/test/siblings.
+if [ -f "$LOCK_ACTION" ] && grep -q 'cd ci/test/siblings && exec repro develop --all --only=' "$LOCK_ACTION"; then
+	ok "provision-repro-lock-siblings clones test-siblings from the test lock"
+else
+	fail "provision-repro-lock-siblings clones test-siblings from the test lock" \
+		"its test-siblings must be resolved by 'repro develop' run in ci/test/siblings;" \
+		"from the codetracer root they resolve against repro.lock, which does not pin them"
+fi
+
+# Every name a job passes as test-siblings is one the test lock pins; anything
+# else stops that job at "names no repo in this workspace's lock set".
+test_sibling_defects=()
+while IFS= read -r hit; do
+	file="${hit%%:*}"
+	rest="${hit#*:}"
+	line="${rest%%:*}"
+	value="$(sed 's/.*test-siblings:[[:space:]]*//; s/[[:space:]]*$//' <<<"${rest#*:}")"
+	IFS=',' read -r -a _named <<<"$value"
+	for name in "${_named[@]}"; do
+		if ! grep -qx -- "$name" <(sorted_dep_set "$test_lock_deps"); then
+			test_sibling_defects+=("${file##*/}:$line: '$name' is not in the test lock")
+		fi
+	done
+done < <(grep -n -H -E '^[[:space:]]+test-siblings:[[:space:]]*[A-Za-z]' "$WORKFLOW_DIR"/*.yml 2>/dev/null)
+if [ "${#test_sibling_defects[@]}" -eq 0 ]; then
+	ok "every test-siblings name is one the test lock pins"
+else
+	fail "every test-siblings name is one the test lock pins" "${test_sibling_defects[@]}"
+fi
+
+# The scenario jobs upload a failed run with DemoVideoScript's own action. It
+# is the runner's code, so it is pinned to the runner's revision.
+dvs_pin="$(lock_rev "$TEST_LOCK" DemoVideoScript)"
+upload_defects=()
+while IFS= read -r hit; do
+	sha="${hit##*@}"
+	sha="${sha%%[[:space:]]*}"
+	if [ "$sha" != "$dvs_pin" ]; then
+		upload_defects+=("${hit%%:*}: upload-failed-runs@$sha, the test lock pins DemoVideoScript at $dvs_pin")
+	fi
+done < <(grep -n -H -o 'metacraft-labs/DemoVideoScript/.github/actions/upload-failed-runs@[0-9a-f]*' "$WORKFLOW_DIR"/*.yml 2>/dev/null |
+	sed 's|^\([^:]*/\)\{0,1\}||')
+if [ "${#upload_defects[@]}" -eq 0 ]; then
+	ok "upload-failed-runs is pinned to the DemoVideoScript revision the test lock pins"
+else
+	fail "upload-failed-runs is pinned to the DemoVideoScript revision the test lock pins" "${upload_defects[@]}"
 fi
 
 # The selector runs in a raw `shell: bash` step BEFORE the dev shell, and on
@@ -1978,6 +2102,10 @@ untokened_submodule_checkouts=()
 # workflow, or the whole file for a composite action (which has no jobs but can
 # still declare steps and consume their outputs).
 declare -A SCOPE_MINT_IDS=()
+# Steps that run ./.github/actions/refresh-github-token, by job: its `token`
+# output is a fresh mint of the same App token, so a later step may name it.
+# Kept apart from SCOPE_MINT_IDS so a refresh is never a "second mint".
+declare -A SCOPE_REFRESH_IDS=()
 # Parallel list of "scope<TAB>id<TAB>where" consumer records, validated after
 # each file is fully read -- a consumer may legally precede its mint in the
 # file even though it cannot precede it at runtime.
@@ -2139,6 +2267,12 @@ scan_credential_file() {
 		esac
 
 		case "$stripped" in
+		'uses: ./.github/actions/refresh-github-token' | '- uses: ./.github/actions/refresh-github-token')
+			[ -n "$cur_step_id" ] && SCOPE_REFRESH_IDS["$wf_name|$scope"]+=" $cur_step_id"
+			;;
+		esac
+
+		case "$stripped" in
 		'uses: actions/checkout@'* | '- uses: actions/checkout@'*)
 			in_checkout=1
 			checkout_line="$line_no"
@@ -2267,7 +2401,7 @@ for record in ${CONSUMER_RECORDS+"${CONSUMER_RECORDS[@]}"}; do
 	tail_="${record#*	}"
 	ref_id="${tail_%%	*}"
 	where="${tail_#*	}"
-	declared="${SCOPE_MINT_IDS[$key]-}"
+	declared="${SCOPE_MINT_IDS[$key]-}${SCOPE_REFRESH_IDS[$key]-}"
 	case " $declared " in
 	*" $ref_id "*) ;;
 	*)
@@ -2830,7 +2964,11 @@ echo
 # expired inside a cold realisation of that shell.
 # 40 -> 42: every mint supplies the private key from its owning context, and
 # mutation controls prove that missing or wrong-source inputs are rejected.
-readonly EXPECTED_ASSERTIONS=42
+# 42 -> 47 (2026-11-16): the test lock, ci/test/siblings/repro.lock. It declares
+# the test siblings; each has one 40-hex pin and agrees with repro.lock where
+# both pin a repo; the action clones test-siblings from it; every
+# test-siblings name is in it; upload-failed-runs follows its DemoVideoScript.
+readonly EXPECTED_ASSERTIONS=47
 if [ "$assertions" -ne "$EXPECTED_ASSERTIONS" ]; then
 	printf 'FAIL: ran %d assertions, expected %d\n' "$assertions" "$EXPECTED_ASSERTIONS"
 	failures=$((failures + 1))

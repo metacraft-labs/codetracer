@@ -395,6 +395,7 @@ applicable:
   - ../nim-views/nim-step-moves-by-nim-lines.yaml
   - ../layout/event-log-and-scratchpad-tabs.yaml
   - ../point-list/breakpoint-rows-follow-the-gutter.yaml
+  - ../point-list/tracepoint-rows-beside-breakpoints.yaml
   - ../problems/failed-build-rows-filters-and-press.yaml
   - ../video-player/keys-drive-the-player.yaml
   - ../languages/aiken-recording-smoke.yaml
