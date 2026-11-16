@@ -16,9 +16,25 @@ set -euo pipefail
 
 attic login --set-default codetracer-ci "$ATTIC_ENDPOINT" "$ATTIC_TOKEN"
 
+# test-ui-tests builds ct-mcr in codetracer-native-recorder's own dev shell
+# (`nix develop` in the sibling, which sits at the revision codetracer's
+# flake.lock pins). That shell is the same derivation as the flake input's at
+# that revision (checked 2026-11-16: both evaluate to one .drv), so it is
+# pushed from there.
+recorder_node="$(jq -r '.nodes.root.inputs["codetracer-native-recorder"]' flake.lock)"
+recorder_rev="$(jq -r --arg n "$recorder_node" '.nodes[$n].locked.rev' flake.lock)"
+case "$recorder_rev" in
+[0-9a-f][0-9a-f][0-9a-f][0-9a-f]*) ;;
+*)
+	echo "build-nix-and-push-to-attic: cannot read codetracer-native-recorder's revision from flake.lock (got '${recorder_rev}')" >&2
+	exit 1
+	;;
+esac
+
 for target in \
 	.#devShells.x86_64-linux.ci.inputDerivation \
 	.#devShells.x86_64-linux.default.inputDerivation \
+	"github:metacraft-labs/codetracer-native-recorder/${recorder_rev}#devShells.x86_64-linux.default.inputDerivation" \
 	".?submodules=1#codetracer"; do
 	echo "== building ${target}"
 	out="$(nix build --no-link --print-out-paths "${target}")"
