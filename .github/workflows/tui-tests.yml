@@ -208,6 +208,24 @@ jobs:
           NIM_TEST_LANE_SHARD: ${{ matrix.shard }}/8
         run: nix develop .#devShells.x86_64-linux.default --command just test-tui-real-terminal
 
+      - name: Does this shard's scenario slice need the visual replay player?
+        # Decided from the slice itself, not a shard number, so a rebalance of
+        # the shards moves the player with its scenarios
+        # (ci/test/scenario-slice-uses-stage-test.sh).
+        id: player
+        run: bash ci/test/scenario-slice-uses-stage.sh terminal "${{ matrix.shard }}/8" visual-recording >> "$GITHUB_OUTPUT"
+
+      - name: Build the visual replay player for this shard's visual-recording scenarios
+        # terminal/visual-replay-video-player opens a visual recording, which
+        # needs ct_gfx_player, ct-native-replay's test licence and ct-mcr; no
+        # step built them and the scenario failed with "the visual replay
+        # player (ct_gfx_player) is not installed" (run 43996043232, shard 6).
+        if: ${{ !cancelled() && steps.ct.outcome == 'success' && steps.player.outputs.needed == 'true' }}
+        run: |
+          nix develop .#devShells.x86_64-linux.default --command bash ci/test/visual-replay-tools.sh "$RUNNER_TEMP/visual-replay.env"
+          # shellcheck disable=SC1091
+          ( . "$RUNNER_TEMP/visual-replay.env"; env | grep -E '^(CODETRACER_|CT_)' ) >> "$GITHUB_ENV"
+
       - name: Scenarios — the linter, the inventory and the terminal lane
         # CodeTracer's scenario pack (src/tests/scenarios): every scenario
         # against the pack (no step may reach application code), the inventory

@@ -264,7 +264,20 @@ runs:
       shell: bash
       working-directory: ${{ github.workspace }}
       run: |
-        nix flake prefetch-inputs || echo "nix flake prefetch-inputs failed or is unsupported; inputs are fetched lazily" >&2
+        # A fetch that fails on the network (run 43996043232, GPUI shard 19:
+        # "Could not resolve host: github.com" from one garm VM) is retried,
+        # three attempts in all, 30 s then 60 s apart; nix's own retry inside a
+        # download lasts seconds, not the minute a resolver hiccup can.
+        retry_net() {
+          local attempt
+          for attempt in 1 2 3; do
+            "$@" && return 0
+            [ "$attempt" = 3 ] && return 1
+            echo "::warning::'$*' failed (attempt $attempt of 3); retrying in $((attempt * 30)) s" >&2
+            sleep $((attempt * 30))
+          done
+        }
+        retry_net nix flake prefetch-inputs || echo "nix flake prefetch-inputs failed or is unsupported; inputs are fetched lazily" >&2
         # GC ROOTS FOR THE JOB'S DEV SHELLS, in RUNNER_TEMP (the runner empties
         # it when the job ends). `nix develop --command` replaces itself with
         # the command, so the store paths a long build runs from are rooted by
@@ -277,9 +290,9 @@ runs:
         roots="$RUNNER_TEMP/ct-gcroots"
         mkdir -p "$roots"
         echo "CT_GCROOT_DIR=$roots" >>"$GITHUB_ENV"
-        nix develop .#ci --profile "$roots/codetracer-ci" --command true
+        retry_net nix develop .#ci --profile "$roots/codetracer-ci" --command true
         if [ "${{ inputs.root-default-shell }}" = true ]; then
-          nix develop --profile "$roots/codetracer-default" --command true
+          retry_net nix develop --profile "$roots/codetracer-default" --command true
         fi
 
     # The clone's own token, minted only now, so that its hour starts after

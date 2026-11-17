@@ -331,6 +331,11 @@ lint_step "scenario lane shards cover their lane exactly" \
 lint_step "Nim test lane shards cover their lane exactly" \
 	bash ci/test/nim-test-lane-shard-test.sh
 
+# The TUI shard whose scenario slice uses the visual-recording stage builds the
+# visual replay player; the slice decides it, not a shard number.
+lint_step "a visual-recording scenario lands on a shard that builds the player" \
+	bash ci/test/scenario-slice-uses-stage-test.sh
+
 # A step that runs past an earlier failure and needs ct waits on the ct build,
 # or the earlier failure resurfaces as a second, misleading `ct ENOENT`.
 # The VCS fixture builds a git repository; run under a caller's GIT_DIR it
