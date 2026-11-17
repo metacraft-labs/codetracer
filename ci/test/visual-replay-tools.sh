@@ -19,12 +19,18 @@ for sibling in "${visual}" "${backend}" "${recorder}"; do
 	}
 done
 
-# shellcheck source=ci/test/visual-replay-private-cargo-env.sh
-source "${root}/ci/test/visual-replay-private-cargo-env.sh"
-
+# ct-native-replay first, BEFORE the private-cargo Git policy below: that policy
+# allows only https (`protocol.allow=never`), and `nix develop '.?submodules=1'`
+# fetches codetracer-native-backend's own submodules (libs/rr, libs/delve) over
+# file://, which it then refuses ("transport 'file' not allowed", TUI shard 6
+# of run 44081496736). The private lldb-sys dependency is fetched with the git
+# CLI and answered by the job's credential helper.
 native_replay="${backend}/target/debug/ct-native-replay"
 [ -x "${native_replay}" ] ||
-	(cd "${backend}" && nix develop '.?submodules=1' --command cargo build --bin ct-native-replay)
+	(cd "${backend}" && CARGO_NET_GIT_FETCH_WITH_CLI=true nix develop '.?submodules=1' --command cargo build --bin ct-native-replay)
+
+# shellcheck source=ci/test/visual-replay-private-cargo-env.sh
+source "${root}/ci/test/visual-replay-private-cargo-env.sh"
 
 license_dir="$(dirname "${env_file}")/visual-replay-license"
 mkdir -p "${license_dir}"
