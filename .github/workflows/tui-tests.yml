@@ -168,7 +168,7 @@ jobs:
         # `ci/test/gpui-window-captures.sh` builds it. `../isonim-gpui` is the
         # checkout `provision-repro-lock-siblings` made, at the lock's revision.
         run: |
-          (cd ../isonim-gpui && nix develop --command bash -c 'cd rust && cargo build')
+          (cd ../isonim-gpui && nix develop --profile "${CT_GCROOT_DIR:-$RUNNER_TEMP}/isonim-gpui-shell" --command bash -c 'cd rust && cargo build')
           nix develop .#devShells.x86_64-linux.default --command just build-gpui
 
       - name: Build the launcher the CTUI-12 suites execute
@@ -186,7 +186,7 @@ jobs:
         # isonim-gpui's shim is built in its own shell above.
         # `ci/test/launcher-suites-build-launcher-test.py` fails when a job runs
         # a launcher suite without cloning and building the launcher first.
-        run: (cd ../codetracer-launcher && nix develop --command just build)
+        run: (cd ../codetracer-launcher && nix develop --profile "${CT_GCROOT_DIR:-$RUNNER_TEMP}/codetracer-launcher-shell" --command just build)
 
       - name: TUI Tier 1 — the suites that need no terminal
         # NOT the Tier-1 suites that open an rr recording of a native program

@@ -7313,7 +7313,11 @@ ensure-ct-native-replay:
         # found", exit 127). The ``just`` running this recipe is passed by
         # absolute path, since the backend's shell ships none of its own.
         just_bin="$(command -v just)"
-        ( cd "$sibling" && nix develop "$backend_flake_ref" --command bash -c \
+        # A GC root for the backend's shell while it builds (CI sets
+        # CT_GCROOT_DIR; see provision-repro-lock-siblings).
+        gcroot=()
+        [ -n "${CT_GCROOT_DIR:-}" ] && gcroot=(--profile "${CT_GCROOT_DIR}/codetracer-native-backend-shell")
+        ( cd "$sibling" && nix develop "$backend_flake_ref" ${gcroot[@]+"${gcroot[@]}"} --command bash -c \
             "unset CXXFLAGS CC CXX; '$just_bin' $backend_target" )
     elif command -v just >/dev/null 2>&1; then
         # Fallback: the sibling dev shell could not be evaluated, but we are

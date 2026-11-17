@@ -966,7 +966,7 @@ if [ -f "$LOCK_ACTION" ]; then
 		*'repro develop --all'*) ls_develops[cur]=$((ls_develops[cur] + 1)) ;;
 		esac
 		case "$stripped" in
-		*'nix develop .#ci --command true'*) ls_realises[cur]=1 ;;
+		*'nix develop .#ci --command true'* | *'nix develop .#ci --profile '*' --command true'*) ls_realises[cur]=1 ;;
 		esac
 		case "$stripped" in
 		*GIT_CONFIG_COUNT* | *GIT_CONFIG_KEY_* | *GIT_CONFIG_VALUE_* | *GIT_CONFIG_PARAMETERS*)

@@ -168,6 +168,13 @@ description: |
   siblings itself.
 
 inputs:
+  root-default-shell:
+    description: >
+      Also realise and GC-root this repository's default dev shell for the rest
+      of the job ("true"), as every long-build job runs from it. "false" for a
+      job that never enters it.
+    required: false
+    default: "true"
   app-id:
     description: >
       The GitHub App id (the CI_TOKEN_PROVIDER_APP_ID secret). The action
@@ -258,7 +265,22 @@ runs:
       working-directory: ${{ github.workspace }}
       run: |
         nix flake prefetch-inputs || echo "nix flake prefetch-inputs failed or is unsupported; inputs are fetched lazily" >&2
-        nix develop .#ci --command true
+        # GC ROOTS FOR THE JOB'S DEV SHELLS, in RUNNER_TEMP (the runner empties
+        # it when the job ends). `nix develop --command` replaces itself with
+        # the command, so the store paths a long build runs from are rooted by
+        # nothing while it runs, and a host whose daemon collects below
+        # min-free deleted part of Nim's lib/ under a compiling ct_cli (macOS
+        # runner m3-mcl-001, run 43935388749: `cannot open file:
+        # std/private/osseps`). The sibling dev shells the job enters root
+        # themselves the same way, under CT_GCROOT_DIR
+        # (ci/test/dev-shell-gcroot-test.sh).
+        roots="$RUNNER_TEMP/ct-gcroots"
+        mkdir -p "$roots"
+        echo "CT_GCROOT_DIR=$roots" >>"$GITHUB_ENV"
+        nix develop .#ci --profile "$roots/codetracer-ci" --command true
+        if [ "${{ inputs.root-default-shell }}" = true ]; then
+          nix develop --profile "$roots/codetracer-default" --command true
+        fi
 
     # The clone's own token, minted only now, so that its hour starts after
     # the slow part. The caller's job token cannot be used: it was minted in

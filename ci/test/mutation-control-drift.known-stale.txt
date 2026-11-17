@@ -260,8 +260,8 @@ src/frontend/tui/tests/plat51-parity-mutation-control.sha256	src/frontend/tui/te
 # plat47: graded at 39e4112f69; b9396a9502  moved
 # src/frontend/tui/app/runtime.nim after the grade. Re-grade the arms whose
 # needles sit in them.
-src/frontend/viewmodel/tests/unit/plat17-wasm-mutation-control.sha256	justfile	e0b0f1e05b1e7907a3cc8a424293bf7353eb6f4cd1bf6a624ce1d927128d1443	7651131dc0beb1e308f6863f1ffc3dad3e99908bb6b8c8e4dd0ef32cdbdbcc75
-src/frontend/viewmodel/tests/unit/plat33-collab-mutation-control.sha256	justfile	e0b0f1e05b1e7907a3cc8a424293bf7353eb6f4cd1bf6a624ce1d927128d1443	7651131dc0beb1e308f6863f1ffc3dad3e99908bb6b8c8e4dd0ef32cdbdbcc75
+src/frontend/viewmodel/tests/unit/plat17-wasm-mutation-control.sha256	justfile	e0b0f1e05b1e7907a3cc8a424293bf7353eb6f4cd1bf6a624ce1d927128d1443	f545a5dd3dafd64411def5226f4136c5a226558cdaf7ae1cd990f00bac7bb404
+src/frontend/viewmodel/tests/unit/plat33-collab-mutation-control.sha256	justfile	e0b0f1e05b1e7907a3cc8a424293bf7353eb6f4cd1bf6a624ce1d927128d1443	f545a5dd3dafd64411def5226f4136c5a226558cdaf7ae1cd990f00bac7bb404
 src/tests/scenarios/plat66-pack-mutation-control.sha256	ci/test/scenarios.sh	0680d62d06bc4671f5e80a843e2d2e34ebce12c2ee5951feca315b19e5a46bd2	bfb931c58d6d541e981988e530f05779de79a63d84a891a644a41e375f4c9f5d
 
 # The shared editor on every editor surface (ui/editor_surface: the macro
@@ -352,4 +352,4 @@ src/frontend/tui/tests/plat58-requests-mutation-control.sha256	src/frontend/tui/
 src/frontend/tui/tests/plat61-shell-mutation-control.sha256	src/ct/db_backend_record.nim	a64446b2acf2dc15bad6f4a77da0132753283c5af6ecd390b4c8650c6966114c	001fa9cb53c251ec472b956f1e5f2c27828206e11e3b08b44acc13c2b7b605d5
 src/frontend/tui/tests/plat70e-origin-mutation-control.sha256	ci/lib/run-nim-test-lane.sh	da6b4e46c486f1a7762fd79b05a42a15dd1b862ab4599ffa22c1bbc166d63783	d1a2a215a9f74c50d465925aaa14ad2fbc674db88c4dfa5e4a2e24ea222ef97e
 src/frontend/viewmodel/tests/unit/plat17-wasm-mutation-control.sha256	ci/lib/run-nim-test-lane.sh	da6b4e46c486f1a7762fd79b05a42a15dd1b862ab4599ffa22c1bbc166d63783	d1a2a215a9f74c50d465925aaa14ad2fbc674db88c4dfa5e4a2e24ea222ef97e
-src/frontend/viewmodel/tests/unit/plat33-collab-mutation-control.sha256	.github/workflows/codetracer.yml	4329483bcc55e3898b373e4b379234071ee6e7d04c19bd109045028c62c94d56	3eb92aa52b6ebb125e37a6667c7fbe8e3056790bd419cdd612519fa491908ad0
+src/frontend/viewmodel/tests/unit/plat33-collab-mutation-control.sha256	.github/workflows/codetracer.yml	4329483bcc55e3898b373e4b379234071ee6e7d04c19bd109045028c62c94d56	90e248aad4e2cde4e575722fdbd74a69ae3a5337e567e57dee5c27088566afb5

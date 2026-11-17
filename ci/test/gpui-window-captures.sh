@@ -116,7 +116,9 @@ if [ "${CT_GPUI_SHIM_PREBUILT:-0}" = 1 ]; then
 		fail "CT_GPUI_SHIM_PREBUILT=1, but there is no ${ISONIM_GPUI}/build/virtual-pointer"
 else
 	echo "=== isonim-gpui: the windowed shim (${target}) and build/virtual-pointer"
-	(cd "${ISONIM_GPUI}" && nix develop --command bash -c \
+	gcroot=()
+	[ -n "${CT_GCROOT_DIR:-}" ] && gcroot=(--profile "${CT_GCROOT_DIR}/isonim-gpui-shell")
+	(cd "${ISONIM_GPUI}" && nix develop ${gcroot[@]+"${gcroot[@]}"} --command bash -c \
 		"cd rust && CARGO_TARGET_DIR='${target}' cargo build --features gpui-backend &&
 		 cd .. && bash scripts/build-virtual-pointer.sh") ||
 		fail "could not build isonim-gpui's windowed shim or its virtual pointer"

@@ -191,7 +191,7 @@ jobs:
         env:
           SCENARIO_LANE_SHARD: ${{ matrix.shard }}/20
         run: |
-          (cd ../GuiAssert && nix develop --command bash helpers/linux/build.sh "${{ github.workspace }}/build/gui-assert-helpers")
+          (cd ../GuiAssert && nix develop --profile "${CT_GCROOT_DIR:-$RUNNER_TEMP}/GuiAssert-shell" --command bash helpers/linux/build.sh "${{ github.workspace }}/build/gui-assert-helpers")
           nix develop .#devShells.x86_64-linux.default --command bash -c '
             set -e
             export GUI_ASSERT_HELPER_DIR="$PWD/build/gui-assert-helpers"
