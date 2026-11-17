@@ -70,6 +70,18 @@ type Snapshot = seq[seq[Cell]]
 
 var spawned = 0
 
+proc pythonSpec(name: string): FixtureSpec =
+  ## A program of `test-programs/` recorded with the Python recorder, as
+  ## `test_plat51_pty.nim` declares it.
+  FixtureSpec(
+    name: name, program: "test-programs/" & name & "/main.py",
+    recorder: "codetracer-python-recorder",
+    probe: FixtureProbe(kind: pkPythonRecorder),
+    buildHint: "Install codetracer_python_recorder into the interpreter " &
+               "`ct` will use (the repo's .python-recorder-venv, or " &
+               "$CODETRACER_PYTHON_INTERPRETER).",
+    blockedOn: "")
+
 proc open(args: seq[string] = @[]): TuiTestSession =
   let resolved = resolveFixture("calc")
   doAssert resolved.outcome == foRecorded
@@ -462,6 +474,11 @@ suite "PLAT-49 part B review on a real terminal: the layout's own edge":
 suite "PLAT-49 part B review on a real terminal: the strip's +":
 
   test "a recording opened in a new tab, switched to and back, closed":
+    # The second recording is this case's own prerequisite, recorded here when
+    # the cache lacks it: the welcome screen lists only the recordings that
+    # sit beside calc, so a case that counted on another suite to have
+    # recorded it failed whenever that suite had not run first.
+    let pages = extractFilename(requireFixture(pythonSpec("call_pages")))
     var sess = open()
     let row0 = sess.rowText(0)
     let plus = row0.cellFind(" + ")
@@ -479,11 +496,11 @@ suite "PLAT-49 part B review on a real terminal: the strip's +":
     sess.click(0, plus + 1)
     discard sess.waitFor("Welcome to CodeTracer", timeoutMs = 5000)
     discard sess.waitFor("Recent traces", timeoutMs = 5000)
-    let (pr, pc) = sess.snap().findRow("call_pages-d6745afd1e2e")
+    let (pr, pc) = sess.snap().findRow(pages)
     ck pr > 1 and pc >= 0
     sess.click(pr, pc + 2)
     # Its own tab, its own engine, its own panes.
-    discard sess.waitFor("call_pages-d6745afd1e2e ×", timeoutMs = 30000,
+    discard sess.waitFor(pages & " ×", timeoutMs = 30000,
                          below = 1)
     discard sess.waitForCall("step #", "(i=0)", timeoutMs = 30000)
     ck sess.rowText(0).contains("calc-")
@@ -498,9 +515,9 @@ suite "PLAT-49 part B review on a real terminal: the strip's +":
     ck sess.snap().findCall("step #", "(i=0)").row < 0
     # Close the second: its engine stops; one session, the "+" alone.
     let line = sess.rowText(0)
-    let at = line.cellFind("call_pages-d6745afd1e2e ×")
+    let at = line.cellFind(pages & " ×")
     ck at > 0
-    sess.click(0, at + "call_pages-d6745afd1e2e ".len)
+    sess.click(0, at + (pages & " ").len)
     discard sess.waitFor(" × ", present = false, timeoutMs = 10000, below = 1)
     let deadline = getMonoTime() + initDuration(seconds = 10)
     while getMonoTime() < deadline and markedReplayServerPids().len > before:
