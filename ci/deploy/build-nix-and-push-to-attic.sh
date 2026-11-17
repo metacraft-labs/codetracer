@@ -16,6 +16,21 @@ set -euo pipefail
 
 attic login --set-default codetracer-ci "$ATTIC_ENDPOINT" "$ATTIC_TOKEN"
 
+# attic push, retried: the server answers a large upload with a transient
+# InternalServerError now and then (cache-push 43982407247, on
+# codetracer-electron), and one such answer failed the whole job.
+attic_push() {
+	local attempt
+	for attempt in 1 2 3; do
+		if attic push "$ATTIC_CACHE" "$@"; then
+			return 0
+		fi
+		echo "== attic push failed (attempt ${attempt} of 3)" >&2
+		sleep $((attempt * 30))
+	done
+	return 1
+}
+
 # test-ui-tests builds ct-mcr in codetracer-native-recorder's own dev shell
 # (`nix develop` in the sibling, which sits at the revision codetracer's
 # flake.lock pins). That shell is the same derivation as the flake input's at
@@ -40,8 +55,21 @@ for target in \
 	out="$(nix build --no-link --print-out-paths "${target}")"
 	echo "== pushing ${out}"
 	# shellcheck disable=SC2086 # one store path per line
-	attic push "$ATTIC_CACHE" ${out}
+	attic_push ${out}
 done
+
+# What #codetracer was BUILT from, not only what it runs with: a build-time-only
+# input (Noir among them) is outside the runtime closure pushed above, so a cold
+# runner built it from source -- Noir alone for 1h36m (run 43935388749's nixos
+# leg). The build closure's outputs that this build realised are pushed too;
+# attic skips whatever cache.nixos.org already serves.
+echo "== pushing #codetracer's build-time inputs"
+ct_drv="$(nix path-info --derivation '.?submodules=1#codetracer')"
+mapfile -t build_inputs < <(nix-store -qR --include-outputs "${ct_drv}" | grep -v '\.drv$' | while read -r p; do [ -e "${p}" ] && printf '%s\n' "${p}"; done)
+echo "== ${#build_inputs[@]} realised build-time path(s)"
+if [ "${#build_inputs[@]}" -gt 0 ]; then
+	attic_push "${build_inputs[@]}"
+fi
 
 # The flake's inputs too. A cold runner fetched them one by one from GitHub,
 # codeberg and releases.nixos.org: 11 of the 29 minutes its provisioning took
@@ -55,5 +83,5 @@ echo "== pushing the flake's inputs"
 mapfile -t inputs < <(python3 ci/deploy/flake-input-paths.py --existing flake.lock)
 echo "== ${#inputs[@]} input source(s) present"
 if [ "${#inputs[@]}" -gt 0 ]; then
-	attic push "$ATTIC_CACHE" "${inputs[@]}"
+	attic_push "${inputs[@]}"
 fi

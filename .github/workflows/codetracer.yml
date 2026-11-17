@@ -5942,7 +5942,11 @@ jobs:
       - name: Build CodeTracer (nix)
         id: ct
         if: matrix.platform == 'nixos'
-        run: nix build --print-build-logs '.?submodules=1#codetracer' --override-input codetracer-trace-format path:./libs/codetracer-trace-format --override-input codetracer-trace-format-nim path:./libs/codetracer-trace-format-nim
+        # No --override-input: the staged libs/ copies are the revisions flake.lock
+        # pins (sibling-provisioning-test holds the spellings to it), and
+        # overriding them changed Noir's derivation, which then built from
+        # source for 1h36m on a cold runner (run 43935388749, cancelled).
+        run: nix build --print-build-logs '.?submodules=1#codetracer'
 
       # The build above can outlast the job's first token on a cold runner.
       - name: Refresh the GitHub token
@@ -6570,7 +6574,11 @@ jobs:
           cp -a "$SRC" "$DEST"
 
       - name: Build CodeTracer
-        run: nix build --print-build-logs '.?submodules=1#codetracer' --override-input codetracer-trace-format path:./libs/codetracer-trace-format --override-input codetracer-trace-format-nim path:./libs/codetracer-trace-format-nim
+        # No --override-input: the staged libs/ copies are the revisions flake.lock
+        # pins (sibling-provisioning-test holds the spellings to it), and
+        # overriding them changed Noir's derivation, which then built from
+        # source for 1h36m on a cold runner (run 43935388749, cancelled).
+        run: nix build --print-build-logs '.?submodules=1#codetracer'
 
       # The build above can outlast the job's first token on a cold runner.
       - name: Refresh the GitHub token
