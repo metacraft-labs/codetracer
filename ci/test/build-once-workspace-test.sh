@@ -131,24 +131,15 @@ readonly PREFLIGHT="$REPO_ROOT/scripts/require-siblings.sh"
 # the lock is generated and then silently dropped), then drop the `=<sha>` from
 # the two entries in launcher-recorder-e2e.yml's `siblings:` block.
 #
-# THE REMAINING FOUR ARE A DIFFERENT CASE and are recorded as FOUND, not as
-# accepted. This suite's first run reported them, they are static facts about
-# the workflow file, and no CI run has yet corroborated them because neither
-# job has reached `build-once` recently -- `viewmodel-tests` died in `Setup dev
-# env` on a branch with no lock and then on an unrelated nixpkgs fetch, and
+# THE WINDOWS-INSTALLER ENTRIES ARE A DIFFERENT CASE and are recorded as
+# FOUND, not as accepted. This suite's first run reported them, they are static
+# facts about the workflow file, and no CI run has yet corroborated them because
 # `windows-installer-build` is release-gated and reports `skipped`. They are
-# listed rather than fixed because fixing them means editing jobs this change
+# listed rather than fixed because fixing them means editing a job this change
 # cannot exercise; each line says what is missing and what would close it.
+# (Two viewmodel-tests entries stood here too; they closed once that job
+# provisioned the lock-pinned siblings, and the suite asked for their removal.)
 KNOWN_GAPS=(
-	# viewmodel-tests provisions the IsoNim family through
-	# .github/actions/setup-isonim-siblings and adds codetracer-trace-format-nim,
-	# codetracer-js-recorder and runquota as clone-repo steps -- but not
-	# codetracer-trace-format (whose column in the required table is
-	# deliberately override-free) nor codetracer-native-recorder. Both ARE in
-	# the published lock, so both close with a bare entry.
-	"codetracer.yml|viewmodel-tests|codetracer-trace-format"
-	"codetracer.yml|viewmodel-tests|codetracer-native-recorder"
-
 	# windows-installer-build runs `bash scripts/build-once.sh` directly with an
 	# `env-flavor: windows-diy` setup-dev-env whose siblings: block carries only
 	# the three db-backend repos. The preflight is driver-agnostic -- it runs
