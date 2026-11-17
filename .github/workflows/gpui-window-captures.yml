@@ -149,6 +149,21 @@ jobs:
             echo "VK_DRIVER_FILES=${icd}" >> "${GITHUB_ENV}"
           fi
 
+      - name: Give the window a cursor theme where the host has none
+        # The scenario binding names the theme the window loads its pointer
+        # shapes from; an ephemeral garm VM has none, and gpui/pointer-shapes
+        # failed there with "no cursor theme on this machine" (run
+        # 43996043232, shard 9). Adwaita, from this flake's nixpkgs, through
+        # XCURSOR_PATH, which the binding reads first.
+        run: |
+          if [ -d /run/current-system/sw/share/icons/Adwaita/cursors ]; then
+            echo "the host has the Adwaita cursor theme; keeping it"
+          else
+            theme="$(nix build --no-link --print-out-paths --inputs-from . nixpkgs#adwaita-icon-theme | head -n 1)"
+            test -d "${theme}/share/icons/Adwaita/cursors"
+            echo "XCURSOR_PATH=${theme}/share/icons" >> "${GITHUB_ENV}"
+          fi
+
       - name: Restore ct and the windowed shim from the ct-build job
         # ct-build.yml builds them once per run (this job `needs:` it): ct,
         # replay-server and the bundles (src/build-debug), and isonim-gpui's
