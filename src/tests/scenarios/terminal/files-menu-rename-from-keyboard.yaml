@@ -2,9 +2,11 @@ scenario: 1
 name: terminal/files-menu-rename-from-keyboard
 pack: codetracer
 summary: >-
-  From the keyboard: a press on a Files row gives the pane the focus, Down
-  selects the next row, Shift+F10 opens its menu, and Rename, edited on the
-  command line, renames the file — the pane lists it under its new name.
+  From the keyboard: a press on a Files row opens the file, and the opened
+  file's editor takes the focus; a press on the Files tab gives it back to
+  the pane, Down selects the next row, Shift+F10 opens its menu, and Rename,
+  edited on the command line, renames the file — the pane lists it under its
+  new name.
 stage:
   - use: write-project
     with:
@@ -18,6 +20,7 @@ steps:
   - wait: { until: { at: 'filesystem/file-node[name="notes.txt"]', present: true }, timeout: 30s }
   - click: { at: 'filesystem/file-node[name="notes.txt"]' }
   - wait: { until: { at: status-line, message: { contains: "editing notes.txt" } }, timeout: 20s }
+  - click: { at: 'pane-tab[label="Files"]' }
   - key: Down
   - chord: Shift+F10
   - expect: { at: context-menu, assert: 'offers("Rename")' }

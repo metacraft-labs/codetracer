@@ -58,6 +58,13 @@ type
 
 proc repo*(): string = fixture_provider.repoRoot()
 
+proc prependPath*(s: StageState; dir: string) =
+  ## `dir` first on the front-end's `PATH`, ahead of what earlier stages put
+  ## there (and of this process's own `PATH` when none did): stages compose,
+  ## so a stand-in tool added by one never drops the `ct` another put there.
+  let rest = s.launch.env.getOrDefault("PATH", getEnv("PATH"))
+  s.launch.env["PATH"] = dir & (if rest.len > 0: ":" & rest else: "")
+
 proc newStageState*(root = ""): StageState =
   ## A fresh, isolated state root for one run.
   let base =
@@ -82,6 +89,14 @@ proc newStageState*(root = ""): StageState =
                  ("CODETRACER_TUI_LAYOUT_DIR", base / "layout")]:
     createDir(v)
     result.launch.env[k] = v
+  # THE `ct` UNDER TEST IS THE ONE ON THE FRONT-END'S PATH, as an installed
+  # product's is: what the user runs inside it — a build script in the Shell
+  # pane, a task that records — finds `ct` by name. Without this it found
+  # whatever the host's PATH held, or nothing on a CI runner ("ct: command
+  # not found" in the Shell pane).
+  let ct = findCtBinary()
+  if ct.len > 0:
+    result.prependPath(ct.parentDir)
 
 proc configDir*(s: StageState): string =
   ## The product's configuration directory for this run
@@ -387,7 +402,7 @@ proc fixtureProject*(s: StageState; name: string) =
     for f in walkDirRec(s.root / "verno-bin"):
       if f.extractFilename == "verno":
         setFilePermissions(f, {fpUserRead, fpUserWrite, fpUserExec})
-    s.launch.env["PATH"] = (s.root / "verno-bin") & ":" & getEnv("PATH")
+    s.prependPath(s.root / "verno-bin")
   of "verno-run", "verno-held", "verno-proved":
     # pw8: PLAT-63's `typeerr` package under its own name (a finding's
     # location is spelled from the package's parent, `typeerr/src/main.nr`)
@@ -407,7 +422,7 @@ proc fixtureProject*(s: StageState; name: string) =
     if name == "verno-proved":
       writeFile(s.root / "verno-bin" / "recorded-output.txt", "")
       writeFile(script, readFile(script).replace("\nexit 1\n", "\nexit 0\n"))
-    s.launch.env["PATH"] = (s.root / "verno-bin") & ":" & getEnv("PATH")
+    s.prependPath(s.root / "verno-bin")
     s.launch.project = pkg
     s.launch.workDir = pkg
     return
@@ -600,7 +615,7 @@ proc stubAgent*(s: StageState; agent: string) =
   createDir(dir)
   writeExecutable(dir / "codex-acp",
     "#!/bin/sh\nexec " & quoteShell(node) & " " & quoteShell(script) & " \"$@\"\n")
-  s.launch.env["PATH"] = dir & ":" & getEnv("PATH")
+  s.prependPath(dir)
   s.launch.env["CT_FAKE_ACP_LOG"] = dir / "methods.log"
   if agent == "live":
     # The native front-ends speak ACP themselves and start the agent the
