@@ -165,8 +165,8 @@ jobs:
           #   ct-mcr accepts the `replay-worker --parent-pid` that this
           #   native-backend passes (see setup-db-backend-siblings/action.yml).
           siblings: |
-            codetracer-native-recorder=${{ github.event.inputs.native_recorder_ref || '92f3a34c4cc68ff110c3639eb7adde0937a1889b' }}
-            codetracer-native-backend=${{ github.event.inputs.native_backend_ref || 'd34e0b125a0356db3d1e597bac4b60702716ebbf' }}
+            codetracer-native-recorder=${{ github.event.inputs.native_recorder_ref || '8a79c040e7ac06a1a49af21d88eee50134d824a2' }}
+            codetracer-native-backend=${{ github.event.inputs.native_backend_ref || '3715b91249518a27975ea18dda49910a475a6323' }}
             # codetracer-trace-format{,-nim} BY COMMIT, not `=dev`: the two halves of
             # the FFI pair are `/agents` inputs in flake.nix, and trace-format's `dev`
             # tip (051a298, 2026-09-30) predates the FileTable / PathTableKind API that
