@@ -59,6 +59,12 @@ const
     "view.preview-multiline", "view.preview-none", "view.preview-single-line",
     "view.previous-point-in-time", "view.source-code", "view.start-window",
     "view.theme-0", "view.theme-2",
+    # The session activity timeline's presses. Its elements carry them
+    # (`agent_harbor_activity_words`), but no story host or pane draws the
+    # timeline yet, so no surface offers them. Off this list once the story
+    # hosts mount the timeline.
+    "session-activity.copy", "session-activity.jump-to-latest",
+    "session-activity.retry", "session-activity.toggle",
   ]
 
 proc bound(): HashSet[string] =
