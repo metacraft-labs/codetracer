@@ -5813,6 +5813,11 @@ jobs:
     # macOS tests are new and may have pre-existing failures; don't block PRs
     continue-on-error: ${{ matrix.platform == 'macos' }}
     steps:
+      - name: Record when the job started
+        # For the cache push, whose budget is capped at what the job's time
+        # limit leaves.
+        run: echo "CT_JOB_STARTED_AT=$(date +%s)" >>"$GITHUB_ENV"
+
       - name: Mint installation token for cross-repo sibling access
         # GitHub free plan restricts org-level secrets with visibility
         # ALL from being readable inside private repos, so we mint
@@ -6012,13 +6017,18 @@ jobs:
         # (CT_CACHE_PUSH_BUDGET, 15 minutes), exit 0 on any failure, and only
         # dev and agents write the shared cache
         # (ci/test/push-built-closure-test.sh).
-        if: ${{ !cancelled() && matrix.platform == 'nixos' && steps.ct.outcome == 'success' && (github.ref_name == 'dev' || github.ref_name == 'agents') }}
+        # Right after the build, so a job that then runs out of time has
+        # still pushed; a warm cache leaves little to upload. The budget is
+        # capped at what the job's 150 minutes leave (CT_JOB_TIMEOUT_MINUTES,
+        # held equal to timeout-minutes by push-built-closure-test.sh).
+        if: ${{ !cancelled() && matrix.platform == 'nixos' && steps.ct.conclusion == 'success' && (github.ref_name == 'dev' || github.ref_name == 'agents') }}
         continue-on-error: true
         timeout-minutes: 20
         env:
           ATTIC_ENDPOINT: ${{ vars.ATTIC_ENDPOINT }}
           ATTIC_CACHE: ${{ vars.ATTIC_CACHE }}
           ATTIC_TOKEN: ${{ secrets.ATTIC_TOKEN }}
+          CT_JOB_TIMEOUT_MINUTES: 150
         run: bash ci/deploy/push-built-closure.sh --codetracer --flake-inputs
 
       # The build above can outlast the job's first token on a cold runner.
@@ -6546,6 +6556,11 @@ jobs:
     runs-on: [self-hosted, linux, x64]  # CIP-5 nix job; H4: routed to GPU host gpu-server-002
     timeout-minutes: 120
     steps:
+      - name: Record when the job started
+        # For the cache push, whose budget is capped at what the job's time
+        # limit leaves.
+        run: echo "CT_JOB_STARTED_AT=$(date +%s)" >>"$GITHUB_ENV"
+
       - name: Mint installation token for cross-repo sibling access
         # GitHub free plan restricts org-level secrets with visibility
         # ALL from being readable inside private repos, so we mint
@@ -6674,6 +6689,10 @@ jobs:
         # (CT_CACHE_PUSH_BUDGET, 15 minutes), exit 0 on any failure, and only
         # dev and agents write the shared cache
         # (ci/test/push-built-closure-test.sh).
+        # Right after the build, so a job that then runs out of time has
+        # still pushed; a warm cache leaves little to upload. The budget is
+        # capped at what the job's 120 minutes leave (CT_JOB_TIMEOUT_MINUTES,
+        # held equal to timeout-minutes by push-built-closure-test.sh).
         if: ${{ !cancelled() && steps.ct_build.outcome == 'success' && (github.ref_name == 'dev' || github.ref_name == 'agents') }}
         continue-on-error: true
         timeout-minutes: 20
@@ -6681,6 +6700,7 @@ jobs:
           ATTIC_ENDPOINT: ${{ vars.ATTIC_ENDPOINT }}
           ATTIC_CACHE: ${{ vars.ATTIC_CACHE }}
           ATTIC_TOKEN: ${{ secrets.ATTIC_TOKEN }}
+          CT_JOB_TIMEOUT_MINUTES: 120
         run: bash ci/deploy/push-built-closure.sh --codetracer --flake-inputs
 
       # The build above can outlast the job's first token on a cold runner.

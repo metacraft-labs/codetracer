@@ -13,8 +13,8 @@
 # `id: ct-darwin` (the job's build of ct) has been seen, every later step whose
 # `if:` lets it run after a failure (`!cancelled()` or `always()`, without
 # `failure()`) must name `steps.ct` / `steps.ct-darwin` in that `if:`. Uploads,
-# cache saves and summaries (`Upload`/`Save`/`Show` steps) are exempt: they do
-# not run ct.
+# cache saves, cache pushes and summaries (`Upload`/`Save`/`Push`/`Show` steps)
+# are exempt: they do not run ct.
 #
 # The negative control strips the gate back off the live file and requires the
 # checker to name every step it just lost, so the check is shown to be able to
@@ -33,7 +33,7 @@ def close(st):
     cond = st.get('if', '')
     if not re.search(r'!cancelled\(\)|always\(\)', cond) or 'failure()' in cond:
         return
-    if re.match(r'(Upload|Save|Show)\b', st.get('name', '')):
+    if re.match(r'(Upload|Save|Push|Show)\b', st.get('name', '')):
         return
     if not re.search(r'steps\.ct(-darwin)?\.outcome', cond):
         bad.append(f"{job}: {st.get('name')} (L{st['line']}): {cond}")

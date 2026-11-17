@@ -10,8 +10,13 @@
 #     secrets it pushes nothing;
 #   * a push that keeps failing is retried three times and the script still
 #     exits 0, as does a failed login;
-#   * ct-build, test-ui-tests' nixos leg and test-ui-tests-rr run it right after
-#     their build, gated on dev/agents, with continue-on-error.
+#   * with CT_JOB_STARTED_AT and CT_JOB_TIMEOUT_MINUTES it pushes only within
+#     what the job's limit leaves;
+#   * GPUI shard 1 (at its end), test-ui-tests' nixos leg and test-ui-tests-rr
+#     (after their build) run it, gated on dev/agents, with continue-on-error
+#     and their own timeout-minutes;
+#   * no job that another job `needs` pushes -- ct-build in particular, which
+#     every GPUI and TUI shard waits for.
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 failures=0
@@ -114,28 +119,78 @@ check "a spent budget stops further pushes, exit 0" "budget not honoured" \
 	run GITHUB_REF_NAME=agents CT_CACHE_PUSH_BUDGET=0
 check "nothing pushed with a zero budget" "pushed $(pushes) set(s) with a zero budget" test "$(pushes)" = 0
 
-echo "the jobs that build run it, gated and best effort"
+echo "a job near its limit does not push"
+check "exits 0 with no time left in the job" "exited non-zero" \
+	run GITHUB_REF_NAME=agents CT_JOB_TIMEOUT_MINUTES=90 CT_JOB_STARTED_AT="$(($(date +%s) - 85 * 60))"
+check "and pushes nothing" "pushed $(pushes) set(s) with 5 minutes left" test "$(pushes)" = 0
+check "with time left it pushes" "pushed $(pushes) set(s) with the job's limit far off" \
+	run GITHUB_REF_NAME=agents CT_JOB_TIMEOUT_MINUTES=90 CT_JOB_STARTED_AT="$(date +%s)"
+test "$(pushes)" = 3 || fail "expected 3 pushes with time left, saw $(pushes)"
+
+echo "the jobs that build run it, gated, best effort and off the shards' path"
+# step_block FILE LINE: the step starting at LINE, up to the next step.
+step_block() {
+	{
+		cat "$1"
+		echo "      - name: end"
+	} | sed -n "${2},\$p" | sed -n '1p;2,/^      - name:/p' | sed '$d'
+}
+# job_timeout FILE LINE: the timeout-minutes of the job holding LINE.
+job_timeout() {
+	head -n "$2" "$1" | grep -E '^    timeout-minutes: [0-9]+' | tail -1 | grep -oE '[0-9]+$'
+}
 for spec in \
-	".github/workflows/ct-build.yml|Push the dev shells this job realised to the cache" \
-	".github/workflows/codetracer.yml|Push the build to the cache"; do
-	f="${spec%%|*}" name="${spec#*|}"
+	".github/workflows/gpui-window-captures.yml|Push the dev shells this shard realised to the cache|1" \
+	".github/workflows/codetracer.yml|Push the build to the cache|2"; do
+	IFS='|' read -r f name want <<<"$spec"
 	n="$(grep -c "name: ${name}\$" "$f")"
-	want=1
-	[ "$f" = .github/workflows/codetracer.yml ] && want=2
 	check "$f has ${want} '${name}' step(s)" "$f has ${n}" test "$n" = "$want"
 	while read -r line; do
-		block="$({
-			cat "$f"
-			echo "      - name: end"
-		} | sed -n "${line},\$p" | sed -n '1p;2,/^      - name:/p' | sed '$d')"
+		block="$(step_block "$f" "$line")"
 		check "  line ${line}: gated on dev/agents" "line ${line}: not gated on dev and agents" \
 			grep -q "github.ref_name == 'dev' || github.ref_name == 'agents'" <<<"$block"
 		check "  line ${line}: continue-on-error" "line ${line}: a push failure would fail the job" \
 			grep -q "continue-on-error: true" <<<"$block"
 		check "  line ${line}: runs push-built-closure.sh" "line ${line}: does not run the script" \
 			grep -q "ci/deploy/push-built-closure.sh" <<<"$block"
+		t="$(job_timeout "$f" "$line")"
+		check "  line ${line}: CT_JOB_TIMEOUT_MINUTES is the job's ${t}" \
+			"line ${line}: CT_JOB_TIMEOUT_MINUTES differs from the job's timeout-minutes (${t})" \
+			grep -q "CT_JOB_TIMEOUT_MINUTES: ${t}\$" <<<"$block"
 	done < <(grep -n "name: ${name}\$" "$f" | cut -d: -f1)
 done
+check "the GPUI push runs on one shard only" "the GPUI push is not limited to one shard" \
+	grep -q "matrix.shard == 1 &&" <(step_block .github/workflows/gpui-window-captures.yml \
+		"$(grep -n 'name: Push the dev shells this shard realised to the cache$' .github/workflows/gpui-window-captures.yml | cut -d: -f1)")
+
+# Nothing a job `needs` may push: a needed job holds its dependants until it
+# ends, so a push there would sit on their critical path (ct-build's did, in
+# front of every GPUI and TUI shard).
+needed="$(grep -hoE '^    needs: *(\[[^]]*\]|[A-Za-z0-9_-]+)' .github/workflows/*.yml |
+	sed -E 's/^    needs: *//; s/[][,]/ /g' | tr ' ' '\n' | grep -v '^$' | sort -u)"
+pushing=""
+for wf in .github/workflows/*.yml; do
+	# jobs in this file that run the push, directly or through a called workflow
+	while read -r job; do
+		[ -n "$job" ] && pushing="${pushing} ${job}"
+	done < <(awk -v wf="$wf" '
+		/^  [A-Za-z0-9_-]+:[[:space:]]*$/ { job = $1; sub(":", "", job) }
+		/push-built-closure\.sh/ && job != "" { print job }
+		/^    uses: \.\/\.github\/workflows\// && job != "" {
+			f = $2; sub("^\\./", "", f)
+			while ((getline l < f) > 0) if (l ~ /push-built-closure\.sh/) { print job; break }
+			close(f)
+		}' "$wf" | sort -u)
+done
+bad=""
+for j in $pushing; do
+	if grep -qx "$j" <<<"$needed"; then bad="${bad} ${j}"; fi
+done
+[ -n "$pushing" ] || fail "found no job that pushes: the needs check proves nothing"
+check "no job another job needs runs a push (pushing:${pushing})" \
+	"needed by another job yet pushes:${bad}" test -z "$bad"
+check "ct-build in particular does not push" "ct-build.yml runs the push" \
+	test "$(grep -c push-built-closure.sh .github/workflows/ct-build.yml)" = 0
 
 echo
 if [ "$failures" -gt 0 ]; then
