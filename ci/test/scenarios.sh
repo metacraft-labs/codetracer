@@ -188,10 +188,16 @@ lint)
 		return "${PIPESTATUS[0]}"
 	}
 	for b in "${S}"/bindings/playwright/*.ts; do
-		parse_ts "${b}" || { echo "scenarios: ${b} does not parse" >&2; exit 1; }
+		parse_ts "${b}" || {
+			echo "scenarios: ${b} does not parse" >&2
+			exit 1
+		}
 	done
 	bad="$(mktemp --suffix=.ts)"
-	{ cat "${S}/bindings/playwright/codetracer-binding.ts"; printf '\n}\n'; } > "${bad}"
+	{
+		cat "${S}/bindings/playwright/codetracer-binding.ts"
+		printf '\n}\n'
+	} >"${bad}"
 	if parse_ts "${bad}" >/dev/null 2>&1; then
 		rm -f "${bad}"
 		echo "scenarios: the binding parse check accepted a binding with a stray '}'" >&2
