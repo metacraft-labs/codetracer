@@ -1128,8 +1128,23 @@ proc nextEvent*(d: TerminalDriver; timeoutMs: int = 100): DriverEvent =
     var next = -1
     if d.inputPending():
       next = readByteWithTimeout(0, d.inFd)
-    if next >= 0 and char(next) in {'[', 'O'}:
+    # …AND SO DOES A TERMINAL'S ANSWER WAITING BEHIND IT. `ESC P 1 $ r …` (a
+    # DECRQSS answer), `ESC ] 1 1 ;` (OSC 11) and `ESC _ G` (a graphics
+    # answer) arrive in one write like any sequence, and the `ESC` can be held
+    # alone with the rest unread: the start-up round's bound ran out right
+    # after reading it, or the loop was busy. Declared the `Esc` key, the
+    # answer's text went into the document (`P1$r48:2:1:2:3m` at the start of
+    # an Edit-mode file, measured under load). Only when the byte after the
+    # introducer is waiting too AND begins an answer's shape (`replyStart`):
+    # an `Esc` then `P` typed into a busy loop is still the `Esc` key and `P`.
+    var after = -1
+    if next >= 0 and char(next) in {']', 'P', '_'} and d.inputPending():
+      after = readByteWithTimeout(0, d.inFd)
+    let answer = after >= 0 and replyStart(char(next), char(after))
+    if next >= 0 and (char(next) in {'[', 'O'} or answer):
       var (complete, token) = d.framer.feed(char(next))
+      if answer and not complete:
+        (complete, token) = d.framer.feed(char(after))
       while not complete and d.framer.pending.len > 0:
         let more = readByteWithTimeout(0, d.inFd)
         if more < 0:
@@ -1147,14 +1162,22 @@ proc nextEvent*(d: TerminalDriver; timeoutMs: int = 100): DriverEvent =
       # The waiting byte, framed after the `Esc` (an `ESC` begins a new
       # sequence, held from now).
       let (complete, token) = d.framer.feed(char(next))
-      if d.framer.holdsEscPrefix:
-        d.framer.escSinceMs = (getMonoTime() - MonoTime()).inMilliseconds
       if complete:
-        if paired:
-          d.takeExtra()
-          return tokenEvent(token)
         d.buffered.add token
       d.takeExtra()
+      if after >= 0:
+        # The byte read to see whether an answer followed, and none did: a
+        # key of its own, after the introducer's.
+        let (afterDone, afterToken) = d.framer.feed(char(after))
+        if afterDone:
+          d.buffered.add afterToken
+        d.takeExtra()
+      if d.framer.holdsEscPrefix:
+        d.framer.escSinceMs = (getMonoTime() - MonoTime()).inMilliseconds
+      if paired and d.buffered.len > 0:
+        let first = d.buffered[0]
+        d.buffered.delete(0)
+        return tokenEvent(first)
     if not paired:
       return DriverEvent(kind: dekToken, token: $Esc)
     if next >= 0:

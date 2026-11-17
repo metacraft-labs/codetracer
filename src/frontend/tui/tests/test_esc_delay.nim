@@ -33,6 +33,7 @@
 import std/[monotimes, os, posix, strutils, times, unittest]
 
 import ../host/terminal_driver
+import ../host/terminal_probe
 import ../../../common/key_names
 import ../app/theme/capabilities
 
@@ -238,6 +239,67 @@ suite "an Esc, then another key's escape sequence":
     ck d.nextToken(1000)[0] == "\x1b"
     ck d.nextToken(1000)[0] == "\x1b"
     let (none, _) = d.nextToken(200)
+    ck none == ""
+
+suite "a terminal's answer behind a held ESC":
+  # A DECRQSS answer, as libvterm (and xterm) write it for the start-up
+  # round's SGR query.
+  const answer = "\x1bP1$r48:2:1:2:3m\x1b\\"
+
+  test "an answer waiting behind a lone ESC is one token, however late the reader":
+    # The `ESC` was read alone, the rest of the answer arrived while the loop
+    # was busy. Declared the `Esc` key, `P1$r48:2:1:2:3m` was typed into an
+    # Edit-mode document (measured under load).
+    let (d, w) = pipeDriver()
+    w.put("\x1b")
+    let held = d.nextEvent(20)
+    ck held.kind == dekIdle
+    w.put(answer[1 .. ^1])
+    os.sleep(int(EscDelayMs) * 3)
+    let first = d.nextEvent(20)
+    checkpoint("late event " & $first.kind & " " & first.token.escape)
+    ck first.kind == dekToken
+    ck first.token == answer
+    ck isStringToken(first.token)
+    let (none, _) = d.nextToken(150)
+    ck none == ""
+
+  test "Esc, then P and a key that begins no answer, into a busy loop: Esc, P, the key":
+    # The same shape typed by a user — Vim's Esc, then `P` (paste before) —
+    # is NOT an answer: no byte after the introducer begins one.
+    let (d, w) = pipeDriver()
+    w.put("\x1b")
+    let held = d.nextEvent(20)
+    ck held.kind == dekIdle
+    w.put("Pq")
+    os.sleep(int(EscDelayMs) * 3)
+    var got: seq[string] = @[]
+    for _ in 0 ..< 3:
+      let (t, _) = d.nextToken(150)
+      got.add t
+    checkpoint("tokens " & $got)
+    ck got == @[$Esc, "P", "q"]
+
+  test "the start-up round's bound runs out after an answer's ESC: the answer is still one token":
+    # The round is bounded and checks its deadline before each byte, so it
+    # could stop holding the answer's `ESC` alone. The rest arrives after it
+    # and the loop comes back late: nothing of the answer may be typed.
+    var input, output: array[2, cint]
+    doAssert pipe(input) == 0
+    doAssert pipe(output) == 0
+    let d = newTerminalDriver(caps(), inFd = input[0], outFd = output[1])
+    input[1].put("\x1b")
+    let probe = d.runStartupProbe(
+      initTerminalEnv(term = "xterm-256color", lang = "en_US.UTF-8"),
+      initCapabilityFlags(), timeoutMs = 30)
+    ck not probe.answered
+    input[1].put(answer[1 .. ^1])
+    os.sleep(int(EscDelayMs) * 3)
+    let first = d.nextEvent(20)
+    checkpoint("first event " & $first.kind & " " & first.token.escape)
+    ck first.kind == dekToken
+    ck first.token == answer
+    let (none, _) = d.nextToken(150)
     ck none == ""
 
 suite "ESC delay — assertion tally":

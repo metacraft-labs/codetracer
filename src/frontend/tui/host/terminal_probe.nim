@@ -621,6 +621,29 @@ proc runStartupProbe*(d: TerminalDriver; env: TerminalEnv;
         # The fallback round gets the same bound as the first.
         deadline = max(deadline,
                        getMonoTime() + initDuration(milliseconds = timeoutMs))
+  # THE BOUND NEVER CUTS A SEQUENCE THAT HAS ALREADY ARRIVED. It is checked
+  # before each byte, so it could run out just after an answer's `ESC`, with
+  # the rest of the answer waiting unread; the loop below then took the held
+  # `ESC` as long overdue and the rest as typing. What is already waiting is
+  # framed now, and whatever is still held is held from now (`escSinceMs`),
+  # so `EscDelayMs` measures bytes that have not arrived — as it does in the
+  # loop (`nextEvent`).
+  while d.framer.pending.len > 0 and d.inputPending():
+    let b = readByteWithTimeout(0, d.inFd)
+    if b < 0:
+      break
+    let (complete, token) = d.framer.feed(char(b))
+    if complete:
+      let wasAnswered = result.answered
+      if not noteReply(result, token):
+        d.buffered.add token
+      if result.answered and not wasAnswered:
+        result.rttMeasured = true
+        result.rttMs = int((getMonoTime() - writtenAt).inMilliseconds)
+        d.writeCprFallback(result)
+    d.takeExtra()
+  if d.framer.holdsEscPrefix and d.framer.escSinceMs == 0:
+    d.framer.escSinceMs = (getMonoTime() - MonoTime()).inMilliseconds
   # No fence within the bound: the wrapped query goes now all the same.
   d.writeWrappedPointerQuery(result, flags, env)
   finishTmuxQuery(tmux, result)
