@@ -407,6 +407,46 @@ impl MacroSourceMapCollection {
 
         Location::default()
     }
+
+    /// Where a stop in a macro-expanded file is shown, at the expansion level
+    /// the user chose for its call (Editor-Hosted-Front-Ends §E15, "Stepping
+    /// follows the expansion level"); `None` when `path` is no loaded map's
+    /// expanded file, or the line belongs to no expansion.
+    ///
+    /// The engine steps by Nim line, and a statement a macro or template
+    /// produced is a line of the compiler's `expanded.nim`, so a step lands
+    /// there (`expanded.nim:3` for `addTwice(counter, 3)` in
+    /// `test-programs/nim_macro_steps`). Like the legacy backend
+    /// (`load_expanded_level_location`, codetracer-native-backend
+    /// `legacy/src/gdb/native_backend.py`):
+    ///
+    /// - while the call is COLLAPSED (level 0, the default) the stop is the
+    ///   call site, `main.nim:17`, and nothing marks it expanded: the macro
+    ///   call is one source line, as it reads;
+    /// - once the user EXPANDED it (`ct/update-expansion`), the stop is the
+    ///   expanded line, with the call site as its parent and the expansion's
+    ///   range, which is what every front-end draws its execution row from.
+    ///
+    /// Read-only: the levels are the ones `update_expansion` keeps, under the
+    /// same root (the call site in the user's file), and a move never
+    /// changes them.
+    pub fn stop_location(&self, path: &str, line: i64) -> Option<Location> {
+        let map = self.maps.iter().find(|m| m.expanded_filename == path)?;
+        let chain = map.build_expansion_chain(path, line);
+        // The stop itself and at least its call site.
+        let root = chain.last().filter(|_| chain.len() >= 2)?;
+        let level = self
+            .levels
+            .get(&root.path)
+            .and_then(|lines| lines.get(&root.line))
+            .cloned()
+            .unwrap_or_default();
+        let resolved = map.resolve_expansion_to_location(path, line, &level);
+        if resolved.high_level_path.is_empty() || resolved.high_level_line <= 0 {
+            return None;
+        }
+        Some(resolved)
+    }
 }
 
 /// Apply a level update to the current expansion level.
@@ -805,5 +845,71 @@ mod tests {
         let (path, line) = map.follow_top_level_lines("/tmp/expanded.nim", 15);
         assert_eq!(path, "original.nim");
         assert_eq!(line, 5);
+    }
+
+    // -- A stop inside an expansion (Editor-Hosted-Front-Ends §E15) --------
+    //
+    // `tests/data/nim_macro_steps.macro-sourcemap.json` is the patched
+    // compiler's own `macro_sourcemap_main.json` for
+    // `test-programs/nim_macro_steps/main.nim` (`ct record` of it,
+    // 2026-11-17), with its two absolute paths renamed to `/work/…` so the
+    // file names no machine. `addTwice(counter, 3)` on line 17 expands to
+    // `expanded.nim` lines 1–4; an rr/MCR step stops at `expanded.nim:3`.
+
+    const STEPS_MAIN: &str = "/work/nim_macro_steps/main.nim";
+    const STEPS_EXPANDED: &str = "/work/nimcache/expanded.nim";
+
+    fn nim_macro_steps() -> MacroSourceMapCollection {
+        let map = parse_macro_sourcemap(include_str!("../tests/data/nim_macro_steps.macro-sourcemap.json"))
+            .expect("the compiler's sourcemap parses");
+        MacroSourceMapCollection {
+            maps: vec![map],
+            ..MacroSourceMapCollection::default()
+        }
+    }
+
+    fn update(kind: MacroExpansionUpdateKind) -> MacroExpansionLevelUpdate {
+        MacroExpansionLevelUpdate { kind, times: 1 }
+    }
+
+    #[test]
+    fn a_stop_in_a_collapsed_expansion_is_the_call_site() {
+        let maps = nim_macro_steps();
+        let at = maps
+            .stop_location(STEPS_EXPANDED, 3)
+            .expect("expanded.nim:3 is addTwice's expansion");
+        assert_eq!((at.high_level_path.as_str(), at.high_level_line), (STEPS_MAIN, 17));
+        assert!(!at.is_expanded);
+        assert!(at.expansion_parents.is_empty());
+    }
+
+    #[test]
+    fn a_stop_in_an_expanded_call_is_inside_its_expansion() {
+        let mut maps = nim_macro_steps();
+        // What Toggle Macro Expansion sends for the call's line.
+        let opened = maps.update_expansion(STEPS_MAIN, 17, &update(MacroExpansionUpdateKind::MacroUpdateExpand));
+        assert!(opened.is_expanded);
+        let at = maps.stop_location(STEPS_EXPANDED, 3).expect("inside the expansion");
+        assert!(at.is_expanded);
+        assert_eq!((at.high_level_path.as_str(), at.high_level_line), (STEPS_EXPANDED, 3));
+        assert_eq!(at.expansion_parents, vec![(STEPS_MAIN.to_string(), 17, 1)]);
+        assert_eq!((at.expansion_first_line, at.expansion_last_line), (1, 4));
+        assert_eq!(at.expansion_depth, 1);
+        // A move reads the level and leaves it: the same stop again.
+        let again = maps.stop_location(STEPS_EXPANDED, 3).expect("still inside");
+        assert!(again.is_expanded);
+        // Collapsing the call puts its stops back at the call site.
+        maps.update_expansion(STEPS_MAIN, 17, &update(MacroExpansionUpdateKind::MacroUpdateCollapse));
+        let back = maps.stop_location(STEPS_EXPANDED, 3).expect("the call site");
+        assert!(!back.is_expanded);
+        assert_eq!(back.high_level_line, 17);
+    }
+
+    #[test]
+    fn a_stop_outside_any_expanded_file_is_left_alone() {
+        let maps = nim_macro_steps();
+        assert!(maps.stop_location(STEPS_MAIN, 17).is_none());
+        // A line of the expanded file no expansion owns (a blank separator).
+        assert!(maps.stop_location(STEPS_EXPANDED, 6).is_none());
     }
 }

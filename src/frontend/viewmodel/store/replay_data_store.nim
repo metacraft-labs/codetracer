@@ -1409,6 +1409,32 @@ proc updateDebuggerPosition*(store: ReplayDataStore;
   # about a stop the debugger has left.
   store.stops.observe(store.debugger.val)
 
+proc expansionCallSiteOf*(loc: JsonNode): tuple[path: string; line: int] =
+  ## The macro call a stop is inside the expansion of: `expansionParents[0]`
+  ## of a `Location` with `isExpanded` (`db-backend`
+  ## `apply_macro_expansion_level`), ("", 0) for any other. Each parent is
+  ## `(path, line, expansion's first line)`, which serde writes as a JSON
+  ## array; a `Field0..` object (Nim's tuple spelling) is read as well, as the
+  ## desktop's `utils.expansionParent` does.
+  if loc.isNil or loc.kind != JObject or
+     not loc.getOrDefault("isExpanded").getBool(false):
+    return ("", 0)
+  let parents = loc.getOrDefault("expansionParents")
+  if parents.isNil or parents.kind != JArray or parents.len == 0:
+    return ("", 0)
+  let first = parents[0]
+  case first.kind
+  of JArray:
+    if first.len >= 2:
+      result = (first[0].getStr(""), first[1].getInt(0))
+  of JObject:
+    result = (first.getOrDefault("Field0").getStr(""),
+              first.getOrDefault("Field1").getInt(0))
+  else:
+    discard
+  if result.path.len == 0 or result.line <= 0:
+    result = ("", 0)
+
 proc applyStopLocation*(store: ReplayDataStore; body: JsonNode) =
   ## Adopt the whole location a `ct/complete-move` event reports
   ## (`MoveState`: `location`, `cLocation`, `frameInfo`) as `stop` — what an
@@ -1430,6 +1456,8 @@ proc applyStopLocation*(store: ReplayDataStore; body: JsonNode) =
     stop.asmName = loc.getOrDefault("asmName").getStr("")
     stop.isExpanded = loc.getOrDefault("isExpanded").getBool(false)
     stop.expansionFirstLine = loc.getOrDefault("expansionFirstLine").getInt(0)
+    stop.expansionLastLine = loc.getOrDefault("expansionLastLine").getInt(0)
+    (stop.expansionCallPath, stop.expansionCallLine) = expansionCallSiteOf(loc)
     stop.rrTicks = loc.getOrDefault("rrTicks").getBiggestInt(0).uint64
     # Native moves carry the top frame's PC here. An explicitly selected
     # frame below overrides it; an absent PC stays absent rather than a tick.
@@ -1492,6 +1520,14 @@ proc applyCompleteMove*(store: ReplayDataStore; body: JsonNode) =
   if not loc.isNil and loc.kind == JObject:
     file = loc.getOrDefault("path").getStr("")
     line = loc.getOrDefault("line").getInt(0)
+    # A stop inside an expanded macro call (Editor-Hosted-Front-Ends §E15):
+    # the position every source follows is the CALL, and where in the
+    # expansion the stop is stays in `stop` (`applyStopLocation`), which the
+    # Macro Expansion pane draws. The position was the compiler's
+    # `expanded.nim`, and every source showed the whole generated file.
+    let call = expansionCallSiteOf(loc)
+    if call.line > 0:
+      (file, line) = call
     sourceGeneration = loc.getOrDefault("sourceGeneration").getInt(0)
     sourceDigest = loc.getOrDefault("sourceDigest").getStr("")
     if loc.hasKey("rrTicks"):

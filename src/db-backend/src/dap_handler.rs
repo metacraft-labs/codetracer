@@ -1003,6 +1003,7 @@ impl Handler {
         // self.db.load_location(self.step_id, call_key, &mut self.expr_loader),
         let mut location = self.replay.load_location(&mut self.expr_loader)?;
         self.step_id = self.replay.current_step_id();
+        self.apply_macro_expansion_level(&mut location);
         // M3 — when the user has toggled into a formatted srcview, the
         // GUI cursor must follow the formatted coordinates the runner
         // is stepping through.  Project the recorded
@@ -7185,6 +7186,45 @@ impl Handler {
                 }
                 AutoloadOutcome::NoMatch | AutoloadOutcome::SourceUnreadable | AutoloadOutcome::CatalogUnavailable => {}
             }
+        }
+    }
+
+    /// Show a move's stop at the macro expansion level the user chose for its
+    /// call (`MacroSourceMapCollection::stop_location`,
+    /// Editor-Hosted-Front-Ends §E15). A stop in `expanded.nim` whose call is
+    /// collapsed becomes the call site; one whose call is expanded keeps its
+    /// expanded line and gains the expansion's fields — the parent call site
+    /// and the range — which `ct/complete-move` carries to every front-end.
+    /// Until 2026-11-17 such a stop arrived as a bare `expanded.nim:3` with
+    /// `isExpanded` false, and every surface showed the whole generated file,
+    /// or nothing.
+    fn apply_macro_expansion_level(&self, location: &mut Location) {
+        if self.macro_sourcemaps.is_empty() {
+            return;
+        }
+        let Some(resolved) = self.macro_sourcemaps.stop_location(&location.path, location.line) else {
+            return;
+        };
+        if resolved.is_expanded {
+            location.expansion_parents = resolved.expansion_parents;
+            location.expansion_depth = resolved.expansion_depth;
+            location.expansion_id = resolved.expansion_id;
+            location.expansion_first_line = resolved.expansion_first_line;
+            location.expansion_last_line = resolved.expansion_last_line;
+            location.is_expanded = true;
+            // The expanded file is the stop's high-level source, as in the
+            // `ct/update-expansion` answer: the desktop loads an expansion's
+            // text from it (`config.open`).
+            location.high_level_path.clone_from(&location.path);
+            location.high_level_line = location.line;
+        } else {
+            // The column was the expanded line's; the call site has its own,
+            // which this answer does not carry, so none is claimed.
+            location.path.clone_from(&resolved.high_level_path);
+            location.line = resolved.high_level_line;
+            location.high_level_path = resolved.high_level_path;
+            location.high_level_line = resolved.high_level_line;
+            location.column = None;
         }
     }
 

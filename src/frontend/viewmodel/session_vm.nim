@@ -65,6 +65,7 @@ import viewmodels/[
   step_list_vm,
   repl_vm,
   low_level_code_vm,
+  macro_expansion_vm,
   generated_code_vm,
   request_panel_vm,
   trace_log_vm,
@@ -146,6 +147,9 @@ type
     stepListVM*: StepListVM
     replVM*: ReplVM
     lowLevelCodeVM*: LowLevelCodeVM
+    macroExpansionVM*: MacroExpansionVM
+      ## Toggle Macro Expansion's open expansions (Editor-Hosted-Front-Ends
+      ## §E15), which the Macro Expansion pane draws.
     generatedCodeVM*: GeneratedCodeVM
       ## The Generated Code Listing operation's state (Generated-Code-Listing
       ## §7), for the listing the Low Level Code pane shows — the session's,
@@ -313,6 +317,8 @@ proc initializePanelViewModels*(session: SessionViewModel) =
     session.replVM = createReplVM(session.store)
   if session.lowLevelCodeVM.isNil:
     session.lowLevelCodeVM = createLowLevelCodeVM(session.store)
+  if session.macroExpansionVM.isNil:
+    session.macroExpansionVM = createMacroExpansionVM(session.store)
   if session.generatedCodeVM.isNil:
     session.generatedCodeVM = createGeneratedCodeVM()
   if session.requestPanelVM.isNil:
@@ -592,6 +598,8 @@ proc dispose*(session: SessionViewModel; disconnectBackend: bool = true) =
     session.replVM.dispose()
   if not session.lowLevelCodeVM.isNil:
     session.lowLevelCodeVM.dispose()
+  if not session.macroExpansionVM.isNil:
+    session.macroExpansionVM.dispose()
   if not session.generatedCodeVM.isNil:
     session.generatedCodeVM.dispose()
   if not session.requestPanelVM.isNil:
