@@ -50,9 +50,12 @@
  *    (`send_launch_failure_notification`, `src/db-backend/src/dap_server.rs`).
  *
  * Every other fixture is expected to replay. A fixture recorded on another
- * OS or ISA takes the debugserver's cross-platform path, and on a Linux
- * x86-64 host the macos-arm64 and windows-x86_64 fixtures carry the known
- * defects below (`crossPlatformKnownDefect`).
+ * OS or ISA takes the debugserver's cross-platform path: the macos-arm64
+ * fixture (a cooperative recording with its entry snapshot) is replayed in
+ * the arm64 emulator (codetracer-pm `spec/CLI/ct-mcr/debugserver.md`, "A
+ * macOS arm64 cooperative recording on another host"), with no known defect;
+ * on a Linux x86-64 host the windows-x86_64 fixture carries the known defect
+ * below (`crossPlatformKnownDefect`).
  */
 
 import * as fs from "node:fs";
@@ -62,15 +65,6 @@ import { expect } from "@playwright/test";
 
 import { parseStatusLocation, type SimpleLocation, type StatusBar } from "../page-objects/status_bar";
 import { ctfsContainerVersion, ctfsVersionRefusal, readableCtfsVersions } from "./ctfs-container";
-
-/**
- * `ct-mcr debugserver` serves the macOS arm64 fixture (a cooperative
- * recording) from its static checkpoint mode, describing the process as the
- * host's ISA with zeroed registers, so LLDB drops the arm64 executable and no
- * entry breakpoint resolves.
- */
-export const ISSUE_STATIC_MODE_FOREIGN_ISA =
-  "codetracer-pm/issues/2026-10-22-ct-mcr-static-checkpoint-mode-serves-a-foreign-isa-trace-as-the-host-isa.md";
 
 /**
  * `ct-mcr debugserver`'s cross-platform loader reads only `tstart.mem` /
@@ -242,40 +236,13 @@ function debugserverSaid(
 
 /**
  * The known defect a session on `fixture` shows on this host, when the
- * fixture is one of the two cross-platform fixtures this host cannot
- * replay; `undefined` otherwise. Each cause requires the common half
+ * fixture is a cross-platform fixture this host cannot replay; `undefined`
+ * otherwise. The cause requires the common half
  * (`extractedTargetThenEntryFailure`) AND the debugserver's own account of
- * the path it took for that fixture, so neither fixture's evidence satisfies
- * the other's defect.
+ * the path it took for that fixture.
  */
 function crossPlatformKnownDefect(fixture: McrPortableFixture, host: McrHost): McrKnownDefect | undefined {
   if (host.platform !== "linux" || host.arch !== "x64") return undefined;
-  if (fixture.platform === "macos-arm64") {
-    return {
-      symptom: CROSS_PLATFORM_ENTRY_BREAKPOINT_REFUSAL,
-      causeInWorkerLog: (workerLog) => {
-        const common = extractedTargetThenEntryFailure(workerLog);
-        if (common === null) return null;
-        // Served by the static checkpoint mode: the cross-platform notice,
-        // and no emulator path.
-        const staticMode = debugserverSaid(
-          workerLog,
-          common.offset,
-          "debugserver: cross-platform replay (posMacos/paAarch64 on posLinux/paX86_64)",
-          ["debugserver: cross-platform replay via emulator"],
-        );
-        return staticMode
-          ? `target ${common.binary} (extracted), served by the static checkpoint mode, then ` +
-              `"MCR run-to-entry could not resolve an entry breakpoint"`
-          : null;
-      },
-      summary:
-        "ct-mcr debugserver serves this foreign-ISA cooperative recording from its static " +
-        "checkpoint mode as an x86-64 process with zeroed registers, so LLDB drops the arm64 " +
-        "executable and RunToEntry finds no entry breakpoint",
-      issues: [ISSUE_STATIC_MODE_FOREIGN_ISA, ISSUE_PORTABLE_EXPORT_NO_LINE_TABLE],
-    };
-  }
   if (fixture.platform === "windows-x86_64") {
     return {
       symptom: CROSS_PLATFORM_ENTRY_BREAKPOINT_REFUSAL,

@@ -6494,6 +6494,9 @@ jobs:
         # The real `ct` → Electron through DemoVideoScript-Playwright's arm
         # with CodeTracer's Playwright binding, under Xvfb at 2560x1440, 96 dpi.
         if: ${{ !cancelled() && steps.ct.outcome == 'success' && matrix.platform == 'nixos' }}
+        env: # Windows system files: the private CAS remote (ct_stages portableRecording)
+          CODETRACER_PRIVATE_RECORDINGS: ${{ github.workspace }}/../codetracer-private-recordings
+          CT_SYMBOL_SERVER: "off"
         run: |
           nix develop .#devShells.x86_64-linux.default --command bash -c '
             set -e

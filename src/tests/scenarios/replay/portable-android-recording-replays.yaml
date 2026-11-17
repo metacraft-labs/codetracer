@@ -1,0 +1,17 @@
+scenario: 1
+name: replay/portable-android-recording-replays
+pack: codetracer
+summary: >-
+  A portable cooperative MCR recording made on Android arm64
+  (codetracer-example-recordings), opened through `ct host` in a browser on
+  another platform, replays from its entry snapshot: the status bar shows a
+  location in the recorded program's source.
+
+stage:
+  - use: portable-recording
+    with: { platform: android-arm64 }
+  - use: open-recording
+    with: { deployment: web }
+
+steps:
+  - wait: { until: { at: status-line, location: { contains: "cooperative_fixture.c:" } }, timeout: 300s }

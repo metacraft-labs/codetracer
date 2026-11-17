@@ -1,0 +1,17 @@
+scenario: 1
+name: replay/portable-ios-recording-replays
+pack: codetracer
+summary: >-
+  A portable cooperative MCR recording made on iOS-simulator arm64
+  (codetracer-example-recordings), opened through `ct host` in a browser on
+  another platform, replays from its entry snapshot: the status bar shows a
+  location in the recorded program's source.
+
+stage:
+  - use: portable-recording
+    with: { platform: ios-arm64 }
+  - use: open-recording
+    with: { deployment: web }
+
+steps:
+  - wait: { until: { at: status-line, location: { contains: "cooperative_fixture.c:" } }, timeout: 300s }

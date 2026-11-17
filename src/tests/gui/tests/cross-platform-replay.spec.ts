@@ -23,16 +23,13 @@
  * an open, recorded product defect and the replay worker's own log records
  * that defect's cause, the case is skipped as "not verified", naming the
  * issue (`knownDefectReport`). On a Linux x86-64 host that is the
- * macos-arm64 and windows-x86_64 fixtures: the replay worker builds its LLDB
- * target from the binary `ct-mcr debugserver` extracted, the debugserver
- * serves the trace from its static checkpoint mode (directly for the macOS
- * cooperative recording; after its cross-platform loader finds no initial
- * state for the Windows one), and the worker answers `RunToEntry` with "MCR
- * run-to-entry could not resolve an entry breakpoint"
- * (codetracer-pm/issues/2026-10-22-ct-mcr-static-checkpoint-mode-serves-a-foreign-isa-trace-as-the-host-isa.md,
- * codetracer-pm/issues/2026-10-22-ct-mcr-cross-platform-replay-ignores-a-windows-stage0-recordings-initial-state.md;
- * neither portable trace carries a line table either,
- * codetracer-pm/issues/2026-10-22-portable-export-bundles-no-dsym-or-pdb-debug-info.md).
+ * windows-x86_64 fixture: the replay worker builds its LLDB target from the
+ * binary `ct-mcr debugserver` extracted, the debugserver's cross-platform
+ * loader finds no initial state it can run to `main`, and the worker answers
+ * `RunToEntry` with "MCR run-to-entry could not resolve an entry breakpoint"
+ * (codetracer-pm/issues/2026-10-22-ct-mcr-cross-platform-replay-ignores-a-windows-stage0-recordings-initial-state.md).
+ * The macos-arm64 fixture replays: it is a cooperative recording with its
+ * entry snapshot, which the debugserver serves from the arm64 emulator.
  * Chrome only, nothing shown, any other error, or the symptom without that
  * fixture's cause in the log still fails.
  *

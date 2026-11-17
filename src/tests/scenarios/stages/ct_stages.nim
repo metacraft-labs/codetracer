@@ -1147,6 +1147,20 @@ proc portableRecording*(s: StageState; platform: string) =
   if not fileExists(portable):
     raise newException(IOError, "portable-recording: prerequisite missing: " & portable &
       " (the codetracer-example-recordings sibling checkout, with its LFS files)")
+  # A Windows recording carries Microsoft's system files by reference only
+  # (they may not be published); its replay resolves them from the private
+  # recordings' CAS remote (codetracer-pm MCR-Memory-Page-CAS.md §17.4). The
+  # case fails, naming the variable, when that checkout is not named.
+  if platform.startsWith("windows-"):
+    let priv = getEnv("CODETRACER_PRIVATE_RECORDINGS")
+    if priv.len == 0 or not dirExists(priv / "cas" / "files"):
+      raise newException(IOError, "portable-recording: prerequisite missing: " &
+        "CODETRACER_PRIVATE_RECORDINGS must name a codetracer-private-recordings " &
+        "checkout holding cas/files/ (got '" & priv & "'): the Windows " &
+        "recording's system files are resolved from it")
+    let remotes = getEnv("CT_CAS_REMOTES")
+    s.launch.env["CT_CAS_REMOTES"] =
+      ("file://" & priv.absolutePath) & (if remotes.len > 0: " " & remotes else: "")
   let dest = s.root / ("portable-" & platform)
   removeDir(dest)
   createDir(dest / "files")

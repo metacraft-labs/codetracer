@@ -144,6 +144,9 @@ applicable:
   - ../ct-host/files-pane-survives-session-sync.yaml
   - ../browser/mcr-replay.yaml
   - ../replay/portable-linux-interpose-recording-is-refused.yaml
+  - ../replay/portable-macos-recording-replays.yaml
+  - ../replay/portable-ios-recording-replays.yaml
+  - ../replay/portable-android-recording-replays.yaml
   - ../breakpoints/column-breakpoint-stops-at-its-column.yaml
   - ../breakpoints/glyph-breakpoint-is-line-only.yaml
   - ../breakpoints/column-breakpoint-replaces-the-lines-column.yaml
