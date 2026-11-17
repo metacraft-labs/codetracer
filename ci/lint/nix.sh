@@ -40,6 +40,15 @@ lint_step "backend-manager sandbox package inputs" \
 	nix build --impure --no-link --max-jobs 2 --cores 2 \
 	--expr 'import ./ci/test/backend-manager-package-inputs.nix { }'
 
+# db-backend builds from an explicit file set (nix/packages/default.nix): it
+# must hold every path dependency its manifests reach, and a commit outside it
+# must leave its derivation (and so its cached output) unchanged.
+lint_step "db-backend package inputs" \
+	nix build --impure --no-link --max-jobs 2 --cores 2 \
+	--expr 'import ./ci/test/db-backend-package-inputs.nix { }'
+lint_step "a commit outside a package's inputs leaves its derivation alone" \
+	bash ci/test/package-src-invariance-test.sh
+
 # Requires the host's Nix daemon and real local bare repositories, so this
 # belongs to the Nix lane rather than the lightweight shell-only lint lane.
 lint_step "Nix Git hooks in fresh worktrees" bash ci/test/nix-git-hooks-test.sh

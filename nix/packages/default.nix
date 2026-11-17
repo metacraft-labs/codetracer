@@ -716,7 +716,52 @@
 
         db-backend =
           let
-            fullSrc = ../../.;
+            # ONLY what the build reads, as an explicit union -- never "the
+            # repository minus X". With the whole checkout as `src`, every
+            # commit changed db-backend's derivation, so no cache push could
+            # ever cover it and every CI run rebuilt it from source for over
+            # 100 minutes (run 44081496736's nixos leg was cancelled at its
+            # 150-minute limit still compiling it). Now a commit outside these
+            # paths leaves the derivation, and its cached output, as it was;
+            # ci/test/package-src-invariance-test.sh holds that, and
+            # ci/test/db-backend-package-inputs.nix that every path dependency
+            # the crate's manifests reach is here.
+            #
+            # The libraries are the crate's path dependencies, transitively
+            # (its Cargo.toml, then theirs); libs/nim-stew is what the native
+            # build environment's shell hook puts on the ct_emulator Nim path
+            # (../backend-native-env.nix). codetracer-trace-format, -nim and
+            # codetracer-native-recorder come from flake inputs (postUnpack).
+            dbBackendLibs = [
+              "ct-dap-client"
+              "ct-data-breakpoints"
+              "ct-home"
+              "ct-lang"
+              "ct-open-beneath"
+              "jsbound"
+              "nim-stew"
+              "origin-classifier"
+              "tree-sitter-aiken"
+              "tree-sitter-cadence"
+              "tree-sitter-cairo"
+              "tree-sitter-circom"
+              "tree-sitter-leo"
+              "tree-sitter-masm"
+              "tree-sitter-move-on-aptos"
+              "tree-sitter-nim"
+              "tree-sitter-sway"
+              "tree-sitter-tolk"
+            ];
+            dbBackendSrc = pkgs.lib.fileset.toSource {
+              root = ../../.;
+              fileset = pkgs.lib.fileset.unions (
+                # maybeMissing: the submodule libraries exist only when the
+                # flake is evaluated with `?submodules=1`, as every build of
+                # it is; without them the build fails, as it did before.
+                [ ../../src/db-backend ]
+                ++ map (lib: pkgs.lib.fileset.maybeMissing (../../libs + "/${lib}")) dbBackendLibs
+              );
+            };
             nativeBackendEnv = import ../backend-native-env.nix {
               inherit pkgs inputs;
               nimCompiler = nim-codetracer;
@@ -726,7 +771,7 @@
             name = "db-backend";
             pname = "db-backend";
 
-            src = fullSrc;
+            src = dbBackendSrc;
 
             inherit (nativeBackendEnv) nativeBuildInputs;
 
