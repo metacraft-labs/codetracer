@@ -11,7 +11,10 @@
 #
 # The pack, its scenarios and its lanes are under src/tests/scenarios
 # (README.md there). The general-purpose runner and backends are siblings of
-# this checkout, at the revisions `repro.lock` pins:
+# this checkout, at the revisions the TEST lock pins: ci/test/siblings/repro.lock,
+# a project of its own nested here (its repro.nim says why it is separate from
+# the product's repro.lock). CI clones them from it; `build` warns when a
+# checkout here is at another revision.
 #
 #   ../DemoVideoScript               the format, the linter and the one runner
 #   ../DemoVideoScript-TermAssert    the terminal backend (over ../TermAssert)
@@ -44,8 +47,24 @@ require() {
 	local what="$1" path="$2"
 	if [ ! -e "${path}" ]; then
 		echo "scenarios: ${what} is missing at ${path}" >&2
-		echo "  (a sibling checkout at the revision repro.lock pins)" >&2
+		echo "  (a sibling checkout at the revision ci/test/siblings/repro.lock pins)" >&2
 		exit 2
+	fi
+}
+
+# warn_off_pin <name> <dir>: say so when ../<name> is a checkout at another
+# revision than the test lock pins. A warning, not a failure: trying the pack
+# against a sibling's work in progress is a normal thing to do locally.
+test_lock="${root}/ci/test/siblings/repro.lock"
+warn_off_pin() {
+	local name="$1" dir="$2" pinned head
+	[ -f "${test_lock}" ] || return 0
+	pinned="$(grep -o "name = \"${name}\", coord_kind = \"vcs\", url = \"[^\"]*\", revision = \"[0-9a-f]*\"" "${test_lock}" |
+		sed 's/.*revision = "//; s/"$//' | head -n 1)"
+	[ -n "${pinned}" ] || return 0
+	head="$(git -C "${dir}" rev-parse HEAD 2>/dev/null)" || return 0
+	if [ "${head}" != "${pinned}" ]; then
+		echo "scenarios: warning: ${dir} is at ${head:0:11}, the test lock pins ${name} at ${pinned:0:11}" >&2
 	fi
 }
 
@@ -122,6 +141,9 @@ build)
 	shift
 	parts=("$@")
 	[ "${#parts[@]}" -gt 0 ] || parts=(dvs stage terminal gpui playwright)
+	for sibling in DemoVideoScript DemoVideoScript-TermAssert TermAssert DemoVideoScript-GuiAssert GuiAssert DemoVideoScript-Playwright; do
+		if [ -d "${ws}/${sibling}" ]; then warn_off_pin "${sibling}" "${ws}/${sibling}"; fi
+	done
 	for p in "${parts[@]}"; do "build_${p}"; done
 	;;
 lint)

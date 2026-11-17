@@ -221,7 +221,7 @@ src/frontend/tui/tests/plat56-build-output-mutation-control.sha256	src/frontend/
 # 96daf956e5 (a file opened in a second window, host-page clients) moved the
 # Playwright binding under its record. A re-grade of the arms whose needles
 # sit in it is owed.
-src/tests/scenarios/plat66-pack-mutation-control.sha256	src/tests/scenarios/bindings/playwright/codetracer-binding.ts	ce56f44b71f4aa8d3376d5415e48102e8148ded5b463c429cbcb9af5ab9b9544	cf6c9f44f5cec01421bfd44b3cfe953b2e13a785138218512769dea9e3e29e8b
+src/tests/scenarios/plat66-pack-mutation-control.sha256	src/tests/scenarios/bindings/playwright/codetracer-binding.ts	dac9e35953b0d93636c2284d9c9a858c2bba982b92e9311b0f41fb666e6879c0	cf6c9f44f5cec01421bfd44b3cfe953b2e13a785138218512769dea9e3e29e8b
 src/frontend/tui/tests/plat60-low-level-code-mutation-control.sha256	src/db-backend/src/dap_handler.rs	23f8ff8145f2d5a678588557c9c855a9701cd2bf5fa7afa677028b7262076e76	7c59887c904659094396b45ce2cf2673ef89803f977fe9fdeb929e5650a4c6d0
 # plat51: graded at f1788c93b4; 8f8906730e  moved src/db-
 # backend/src/dap_handler.rs after the grade. Re-grade the arms whose needles
@@ -262,7 +262,7 @@ src/frontend/tui/tests/plat51-parity-mutation-control.sha256	src/frontend/tui/te
 # needles sit in them.
 src/frontend/viewmodel/tests/unit/plat17-wasm-mutation-control.sha256	justfile	e0b0f1e05b1e7907a3cc8a424293bf7353eb6f4cd1bf6a624ce1d927128d1443	f545a5dd3dafd64411def5226f4136c5a226558cdaf7ae1cd990f00bac7bb404
 src/frontend/viewmodel/tests/unit/plat33-collab-mutation-control.sha256	justfile	e0b0f1e05b1e7907a3cc8a424293bf7353eb6f4cd1bf6a624ce1d927128d1443	f545a5dd3dafd64411def5226f4136c5a226558cdaf7ae1cd990f00bac7bb404
-src/tests/scenarios/plat66-pack-mutation-control.sha256	ci/test/scenarios.sh	0680d62d06bc4671f5e80a843e2d2e34ebce12c2ee5951feca315b19e5a46bd2	bfb931c58d6d541e981988e530f05779de79a63d84a891a644a41e375f4c9f5d
+src/tests/scenarios/plat66-pack-mutation-control.sha256	ci/test/scenarios.sh	4edebac246b9c375f8b5e181b3fb621774088543476bea5c556b0e1d642c0e77	9a0f898cea40ac00511b51e2c648b9f87f0fc73936fdfb64d53b141b88905203
 
 # The shared editor on every editor surface (ui/editor_surface: the macro
 # expansions, low-level views, a recording-with-diff's removed lines, the

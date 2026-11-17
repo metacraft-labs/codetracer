@@ -2,11 +2,11 @@
 # AND the scenarios they are graded by. Refreshed with
 # --record-control-hashes, gated by the needle scan.
 255a2526134d381474f695d7fd979d939f84bcbce60d0cffb1893725869e1816  src/tests/scenarios/bindings/termassert/ct_tui_screen.nim
-51790c64abae9e6d2149cb1c26f0c66cff659614fe57f91411c8bc92bba957c3  src/tests/scenarios/bindings/termassert/ct_term_binding.nim
-ce56f44b71f4aa8d3376d5415e48102e8148ded5b463c429cbcb9af5ab9b9544  src/tests/scenarios/bindings/playwright/codetracer-binding.ts
+4e8868c3a9d9b320145a538499112672abbc040935a896a2b73b7f2d98bb8fdc  src/tests/scenarios/bindings/termassert/ct_term_binding.nim
+dac9e35953b0d93636c2284d9c9a858c2bba982b92e9311b0f41fb666e6879c0  src/tests/scenarios/bindings/playwright/codetracer-binding.ts
 afef21476a41e4d255f60f949f6d842d3e4dfb7fd769822fafa23f2a9676112c  src/tests/scenarios/bindings/guiassert/ct_gui_binding.nim
 ea54334d3c660c0212a5ab3c5b37aca4ba526a783367774ddad0647756afce5b  src/tests/scenarios/resolver/ct_resolver.nim
 1102f6565cc74974cdc0f510242a03904d2dd9aeeb4aa50515387624434a7072  src/tests/scenarios/tracing/trace-macro-at-caret.yaml
 bc90f69fcfa378f0de095cbc2c50a2ecfe70b9891c83e468aacd49387dd152cb  src/tests/scenarios/tracing/trace-macro-rebound.yaml
 34b4c6156310f25cbdbdff07f16c84563259095e55695564cf1657500df645f4  src/tests/scenarios/tests/replay-idle-means-the-stop-is-shown.yaml
-0680d62d06bc4671f5e80a843e2d2e34ebce12c2ee5951feca315b19e5a46bd2  ci/test/scenarios.sh
+4edebac246b9c375f8b5e181b3fb621774088543476bea5c556b0e1d642c0e77  ci/test/scenarios.sh

@@ -129,7 +129,12 @@ proc launchTui(ctx: TermContext; s: StageState) =
   var env: seq[(string, string)] = @[("TERM", "xterm-256color"), ("LANG", "en_US.UTF-8"),
                                      ("COLORTERM", "truecolor")]
   for k, v in s.launch.env: env.add (k, v)
+  # The terminal answers the front-end's start-up queries, as a real one does.
+  # Without the answers the front-end keeps its reply window open for three
+  # seconds and reads a modified F1-F4 (Ctrl+F3 is `CSI 1 ; 5 R`) typed in
+  # that time as a late cursor report.
   var b = newTuiTest(tuiBinary(), args).width(w).height(h).transcript(true)
+    .answerQueries(true)
     .workDir(s.launch.workDir)
     .envRemove("TERM_PROGRAM", "NO_COLOR", "LC_ALL", "LC_CTYPE", "TMUX", "STY",
                "NERD_FONT", "NERDFONT", "COLORFGBG")
