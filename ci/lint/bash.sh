@@ -336,6 +336,11 @@ lint_step "Nim test lane shards cover their lane exactly" \
 lint_step "a visual-recording scenario lands on a shard that builds the player" \
 	bash ci/test/scenario-slice-uses-stage-test.sh
 
+# A GPUI shard gives a bare host the Vulkan driver, cursor theme and D-Bus
+# session configuration the window and its compositor need.
+lint_step "a GPUI shard provisions what a bare host lacks" \
+	bash ci/test/gpui-host-provisioning-test.sh
+
 # A step that runs past an earlier failure and needs ct waits on the ct build,
 # or the earlier failure resurfaces as a second, misleading `ct ENOENT`.
 # The VCS fixture builds a git repository; run under a caller's GIT_DIR it

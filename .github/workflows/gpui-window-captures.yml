@@ -164,6 +164,26 @@ jobs:
             echo "XCURSOR_PATH=${theme}/share/icons" >> "${GITHUB_ENV}"
           fi
 
+      - name: Give dbus-run-session a session bus configuration where the host has none
+        # GuiAssert starts sway through nixpkgs' wrapper, which runs it under
+        # dbus-run-session; that reads /etc/dbus-1/session.conf, which an
+        # ephemeral garm VM does not have, so sway never started and every
+        # window-manager capture failed ("Failed to open
+        # /etc/dbus-1/session.conf", run 43996043232, shard 1). The host gets
+        # the configuration from this flake's nixpkgs dbus; a host that has
+        # one keeps its own.
+        run: |
+          if [ -e /etc/dbus-1/session.conf ]; then
+            echo "the host has /etc/dbus-1/session.conf; keeping it"
+          else
+            dbus="$(nix build --no-link --print-out-paths --inputs-from . nixpkgs#dbus.out)"
+            test -f "${dbus}/share/dbus-1/session.conf"
+            sudo mkdir -p /etc/dbus-1
+            sudo ln -s "${dbus}/share/dbus-1/session.conf" /etc/dbus-1/session.conf
+            # A GC root for the job, so the linked file outlives no collection.
+            nix-store --add-root "${RUNNER_TEMP}/dbus-session-conf-root" --realise "${dbus}" >/dev/null
+          fi
+
       - name: Restore ct and the windowed shim from the ct-build job
         # ct-build.yml builds them once per run (this job `needs:` it): ct,
         # replay-server and the bundles (src/build-debug), and isonim-gpui's
