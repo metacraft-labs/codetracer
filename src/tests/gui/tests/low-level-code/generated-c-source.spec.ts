@@ -310,9 +310,35 @@ test.setTimeout(600_000);
 // (a) a stock-Nim recording
 // ---------------------------------------------------------------------------
 
+/** ROT13 over letters, as nixpkgs' Nim applies it to a module's C file name. */
+function rot13(s: string): string {
+  return s.replace(/[a-zA-Z]/g, (c) => {
+    const base = c <= "Z" ? 65 : 97;
+    return String.fromCharCode(((c.charCodeAt(0) - base + 13) % 26) + base);
+  });
+}
+
+/**
+ * The C file a Nim compiler wrote for `nim`'s module into `nimcache`. Upstream
+ * Nim and CodeTracer's compiler name it `@m<module>.nim.c`. nixpkgs' Nim
+ * (2.2.4, `compiler/modulepaths.nim`'s `mangleModuleName`) ROT13s that name,
+ * all but its trailing `.nim`, so `nim_flow_test.nim`'s is
+ * `@zavz_sybj_grfg.nim.c`: the stock compiler CI's shell names
+ * (`GENC_STOCK_NIM`, nix/shells/ci-base.nix) is that one. Exactly one of the
+ * two must exist.
+ */
+function moduleCFile(nimcache: string, nim: string): string {
+  const plain = "@m" + path.basename(nim, ".nim");
+  const names = [plain + ".nim.c", rot13(plain) + ".nim.c"];
+  const found = names.map((n) => path.join(nimcache, n)).filter((p) => fs.existsSync(p));
+  expect(found, `one of ${names.join(", ")} in ${nimcache}`).toHaveLength(1);
+  return found[0];
+}
+
 /**
  * The recording's Nim stop, the C of its module — the recording's own
- * `nimcache/@m<module>.nim.c` — and the View menu's two items over it.
+ * `nimcache/@m<module>.nim.c` (`moduleCFile`) — and the View menu's two items
+ * over it.
  */
 async function generatedCOfStop(page: Page, expectDirectives: boolean) {
   // The replay's first stop, asked about as it is: its line has C
@@ -320,7 +346,7 @@ async function generatedCOfStop(page: Page, expectDirectives: boolean) {
   const stop = await nimStop(page);
   console.log(`# the first Nim stop: ${stop.path}:${stop.line}`);
   const folder = await page.evaluate(() => String((window as any).data.trace.outputFolder));
-  const cFileOf = (nim: string) => path.join(folder, "nimcache", "@m" + path.basename(nim) + ".c");
+  const cFileOf = (nim: string) => moduleCFile(path.join(folder, "nimcache"), nim);
   await editorShows(page, stop.path);
   await caretAt(page, stop.line);
   await runMenuItem(page, "View Generated C Source");
