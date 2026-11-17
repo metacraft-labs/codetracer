@@ -138,7 +138,9 @@
     };
 
     codetracer-js-recorder = {
-      url = "github:metacraft-labs/codetracer-js-recorder";
+      # `/agents`, the recorder's agent mainline, like the other
+      # codetracer-family inputs.
+      url = "github:metacraft-labs/codetracer-js-recorder/agents";
       inputs.nixpkgs.follows = "nixpkgs";
       inputs.codetracer-trace-format-nim.follows = "codetracer-trace-format-nim";
       inputs.codetracer-trace-format.follows = "codetracer-trace-format";
@@ -416,7 +418,9 @@
       flake = false;
     };
     nim-stackable-hooks = {
-      url = "github:metacraft-labs/nim-stackable-hooks/dev";
+      # `/agents`, the library's agent mainline, like io-mon above: the
+      # revision repro.lock pins is published there before it reaches `dev`.
+      url = "github:metacraft-labs/nim-stackable-hooks/agents";
       flake = false;
     };
 
@@ -428,11 +432,11 @@
     # nix/packages/default.nix: `ct test run`'s read-set capture). Move them
     # with `repro lock update`.
     nim-shm-queue = {
-      url = "github:metacraft-labs/nim-shm-queue/84fd76b174d4868e703ba3d599668ee340e0b6ea";
+      url = "github:metacraft-labs/nim-shm-queue/0d6049997d77421b6e4748f819657cf6042e9508";
       flake = false;
     };
     nim-shm-gset = {
-      url = "github:metacraft-labs/nim-shm-gset/7bc81ad2440860a8a9254eb2757c585df9652438";
+      url = "github:metacraft-labs/nim-shm-gset/0b2896adc65d0d62c0ee84af1356c909da2975d0";
       flake = false;
     };
 
@@ -540,7 +544,7 @@
     # ``.envrc`` can override each with
     # ``--override-input isonim path:../isonim`` for local development.
     isonim = {
-      url = "github:metacraft-labs/isonim/dev";
+      url = "github:metacraft-labs/isonim/agents";
       flake = false;
     };
     # Facebook's Yoga, which ``isonim`` vendors as a GIT SUBMODULE at
@@ -583,11 +587,11 @@
       flake = false;
     };
     isonim-tui = {
-      url = "github:metacraft-labs/isonim-tui/dev";
+      url = "github:metacraft-labs/isonim-tui/agents";
       flake = false;
     };
     isonim-gpui = {
-      url = "github:metacraft-labs/isonim-gpui/dev";
+      url = "github:metacraft-labs/isonim-gpui/agents";
       flake = false;
     };
     nim-everywhere = {
@@ -595,15 +599,15 @@
       flake = false;
     };
     nim-termctl = {
-      url = "github:metacraft-labs/nim-termctl/dev";
+      url = "github:metacraft-labs/nim-termctl/agents";
       flake = false;
     };
     nim-pty = {
-      url = "github:metacraft-labs/nim-pty/dev";
+      url = "github:metacraft-labs/nim-pty/agents";
       flake = false;
     };
     nim-acp = {
-      url = "github:metacraft-labs/nim-acp/dev";
+      url = "github:metacraft-labs/nim-acp/agents";
       flake = false;
     };
     nim-agent-harbor = {
@@ -611,7 +615,7 @@
       flake = false;
     };
     nim-agents = {
-      url = "github:metacraft-labs/nim-agents/dev";
+      url = "github:metacraft-labs/nim-agents/agents";
       flake = false;
     };
 

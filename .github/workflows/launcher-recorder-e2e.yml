@@ -715,18 +715,18 @@ jobs:
             # d91a98626 moved io-mon and nim-shm-gset.
             # runquota is locked as a `follows` of reprobuild's `runquota-src`;
             # the pin below is that node's rev.
-            io-mon=ed11e2b2ba323d959bf1b158d35ff0690ca8e600
-            nim-shm-queue=84fd76b174d4868e703ba3d599668ee340e0b6ea
-            nim-shm-gset=7bc81ad2440860a8a9254eb2757c585df9652438
-            nim-stackable-hooks=c34e3252d413361a0f250d8921e00c119d30e114
+            io-mon=735726963f48d91031463cbd9d1e9cf8f444f5ee
+            nim-shm-queue=0d6049997d77421b6e4748f819657cf6042e9508
+            nim-shm-gset=0b2896adc65d0d62c0ee84af1356c909da2975d0
+            nim-stackable-hooks=07319306758cf608e664fe9e64ab7e0bed5ca186
             # Pinned to flake.lock's revs. See "THE FLAKE-INPUT THREE" above
             # before changing any of these. isonim-tui is in codetracer's
             # repro.lock since 6850efc5e, and took the SHA shape because the
             # recorder repos' lock records these edges also resolve did not
             # carry it. They do now; going bare is a separate change.
-            isonim=eca38028cc652593e66b2d12ff82265711600c94
+            isonim=03183989147a6e5d109bf03638dc49bb74ecf248
             isonim-tui=8e43ce06f7f078530c7a8585c210ad7648fa0051
-            runquota=f9e1a4d3f3ba7840aefe56883127653af9c5a608
+            runquota=6ff973131e7f715f0237cb0f08b8dd16cbeba0dc
             # Required by scripts/require-siblings.sh (`ct` links its reference
             # library). SHA, not bare: this workflow is also called from recorder
             # repos, whose repro.lock need not pin it. It is a flake input, so the

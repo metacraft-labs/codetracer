@@ -1344,7 +1344,7 @@ jobs:
             # sibling cloned at `dev` fails to compile. Full account and the refresh
             # rule: .github/actions/setup-db-backend-siblings/action.yml.
             codetracer-trace-format=2f01e602e70f69a04675293f3fa0d5bad9f196a1
-            codetracer-trace-format-nim=adf9ea1db02354d7f15bc280132a99ddcb23db8a
+            codetracer-trace-format-nim=8eef47d71a2431311a4b9d6b6cf38a2acb37a33f
 
       - name: Install Nim dependencies
         shell: bash
@@ -1861,7 +1861,7 @@ jobs:
             # sibling cloned at `dev` fails to compile. Full account and the refresh
             # rule: .github/actions/setup-db-backend-siblings/action.yml.
             codetracer-trace-format=2f01e602e70f69a04675293f3fa0d5bad9f196a1
-            codetracer-trace-format-nim=adf9ea1db02354d7f15bc280132a99ddcb23db8a
+            codetracer-trace-format-nim=8eef47d71a2431311a4b9d6b6cf38a2acb37a33f
             codetracer-native-recorder=92f3a34c4cc68ff110c3639eb7adde0937a1889b
 
       # MEASURE THE FETCH ENVIRONMENT BEFORE NIX TOUCHES THE NETWORK, and
@@ -4590,7 +4590,7 @@ jobs:
             # sibling cloned at `dev` fails to compile. Full account and the refresh
             # rule: .github/actions/setup-db-backend-siblings/action.yml.
             codetracer-trace-format=2f01e602e70f69a04675293f3fa0d5bad9f196a1
-            codetracer-trace-format-nim=adf9ea1db02354d7f15bc280132a99ddcb23db8a
+            codetracer-trace-format-nim=8eef47d71a2431311a4b9d6b6cf38a2acb37a33f
             codetracer-native-recorder=92f3a34c4cc68ff110c3639eb7adde0937a1889b
             # Required by scripts/require-siblings.sh, which build-once.sh runs first.
             # BARE: this job only runs on codetracer, so clone-siblings resolves
@@ -5869,14 +5869,14 @@ jobs:
             # sibling cloned at `dev` fails to compile. Full account and the refresh
             # rule: .github/actions/setup-db-backend-siblings/action.yml.
             codetracer-trace-format=2f01e602e70f69a04675293f3fa0d5bad9f196a1
-            codetracer-trace-format-nim=adf9ea1db02354d7f15bc280132a99ddcb23db8a
+            codetracer-trace-format-nim=8eef47d71a2431311a4b9d6b6cf38a2acb37a33f
             codetracer-native-recorder=92f3a34c4cc68ff110c3639eb7adde0937a1889b
             # codetracer-native-backend and codetracer-visual-replay BY COMMIT as well: both are
             # `/agents` inputs in flake.nix (7ab073a22), so `=dev` cloned a different tree than the
             # Nix lane builds. These are the revs flake.lock and repro.lock lock; refresh them with
             # the lock, as for the trace-format pair above.
             codetracer-visual-replay=92d39d8d249356bd05d8fca5db4d526e1ac4505a
-            codetracer-native-backend=b0947a4debf4a2d6fc038b14d1844cd32ca89ec8
+            codetracer-native-backend=d34e0b125a0356db3d1e597bac4b60702716ebbf
             # The desktop scenario lane's recorders and recordings: the BEAM
             # recorder at repro.lock's pin, and the example recordings (not a
             # build input, so not in the lock) at the commit their scenarios
@@ -5890,9 +5890,9 @@ jobs:
             # codetracer-visual-replay's config.nims puts both on its --path
             # (ct_gfx_player's build); snapshot-codecs at visual-replay's
             # repro.lock pin, image-diff at codetracer's.
-            codetracer-snapshot-codecs=53eda1fd83f6608f5e2f6f6553644e4115a3b29a
-            codetracer-image-diff=0913d0a86e0a75f6a14bd62c58dce962018b50b5
-            reprobuild=5a1326957ceac91f94eccf0d9957f03e053fad79
+            codetracer-snapshot-codecs=3e503da83b73e805f30096d4baa45c18d138f6d3
+            codetracer-image-diff=d04b56d822c7d4335fbc40f0a1aad387a1b838b5
+            reprobuild=e2fe4eb9f5b94abe382f10d39be0957e90a344a9
             runquota=dev
 
       - name: Stage codetracer-trace-format into libs/
@@ -6380,7 +6380,7 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: ${{ github.workspace }}/../codetracer-engine-godot/bin/godot.linuxbsd.template_debug.x86_64.hcrgpu
-          key: hcr-godot-c2b72fd205bcb509cca8513a2627ae18d9809562-reprobuild-5a1326957ceac91f94eccf0d9957f03e053fad79-vulkan-hcrgpu
+          key: hcr-godot-c2b72fd205bcb509cca8513a2627ae18d9809562-reprobuild-e2fe4eb9f5b94abe382f10d39be0957e90a344a9-vulkan-hcrgpu
 
       - name: The HCR flame demo for the desktop scenario lane
         id: hcr-flame
@@ -6507,7 +6507,7 @@ jobs:
           extra-siblings: |
             # The native fixture the desktop's native Low Level Code capture
             # records (`c/sudoku_solver`), at the revision repro.lock pins.
-            codetracer-native-test-programs=af5a77b20f5a4ae09c202902b3ee01e9edf5473f
+            codetracer-native-test-programs=0d0d64e2ebe2cb261284778fa7959bb7cf761604
 
       - name: Clone runquota sibling
         # `just test-gui` -> `build-once` compiles `ct`, which imports
@@ -6606,7 +6606,7 @@ jobs:
         # what the script's stale-checkout check can hold a checkout to.
         env:
           GH_TOKEN: ${{ steps.fresh_token.outputs.token }}
-          RR_BACKEND_REF: b0947a4debf4a2d6fc038b14d1844cd32ca89ec8
+          RR_BACKEND_REF: d34e0b125a0356db3d1e597bac4b60702716ebbf
         run: ./ci/setup-rr-backend.sh
 
       - name: Assert the ct-native-replay build-siblings builds can start
@@ -6936,7 +6936,9 @@ jobs:
       - name: Setup dev env
         # setup-dev-env installs Nix (with the Attic substituter/keys) and
         # clones every source dependency used by the visual gate adjacent to
-        # this checkout at their pinned `dev` refs. That includes the
+        # this checkout at their pinned refs -- `agents` for isonim, nim-acp
+        # and nim-agents, whose flake.nix inputs follow that branch
+        # (ci/test/sibling-input-branch-test.sh). That includes the
         # frontend's IsoNim/agent libraries, the incremental runner's trace and
         # I/O libraries, and visual replay's own native siblings. A missing
         # lock entry fails loudly before the build starts.
@@ -6959,11 +6961,11 @@ jobs:
           attic-token: ${{ secrets.ATTIC_TOKEN }}
           attic-cache: ${{ vars.ATTIC_CACHE }}
           siblings: |
-            isonim=dev
+            isonim=agents
             nim-everywhere=dev
-            nim-acp=dev
+            nim-acp=agents
             nim-agent-harbor=dev
-            nim-agents=dev
+            nim-agents=agents
             # codetracer-trace-format{,-nim} BY COMMIT, not `=dev`: the two halves of
             # the FFI pair are `/agents` inputs in flake.nix, and trace-format's `dev`
             # tip (051a298, 2026-09-30) predates the FileTable / PathTableKind API that
@@ -6971,17 +6973,17 @@ jobs:
             # sibling cloned at `dev` fails to compile. Full account and the refresh
             # rule: .github/actions/setup-db-backend-siblings/action.yml.
             codetracer-trace-format=2f01e602e70f69a04675293f3fa0d5bad9f196a1
-            codetracer-trace-format-nim=adf9ea1db02354d7f15bc280132a99ddcb23db8a
-            io-mon=ed11e2b2ba323d959bf1b158d35ff0690ca8e600
-            nim-shm-queue=84fd76b174d4868e703ba3d599668ee340e0b6ea
-            nim-shm-gset=7bc81ad2440860a8a9254eb2757c585df9652438
-            nim-stackable-hooks=dev
+            codetracer-trace-format-nim=8eef47d71a2431311a4b9d6b6cf38a2acb37a33f
+            io-mon=735726963f48d91031463cbd9d1e9cf8f444f5ee
+            nim-shm-queue=0d6049997d77421b6e4748f819657cf6042e9508
+            nim-shm-gset=0b2896adc65d0d62c0ee84af1356c909da2975d0
+            nim-stackable-hooks=07319306758cf608e664fe9e64ab7e0bed5ca186
             # codetracer-native-backend and codetracer-visual-replay BY COMMIT as well: both are
             # `/agents` inputs in flake.nix (7ab073a22), so `=dev` cloned a different tree than the
             # Nix lane builds. These are the revs flake.lock and repro.lock lock; refresh them with
             # the lock, as for the trace-format pair above.
             codetracer-visual-replay=92d39d8d249356bd05d8fca5db4d526e1ac4505a
-            codetracer-native-backend=b0947a4debf4a2d6fc038b14d1844cd32ca89ec8
+            codetracer-native-backend=d34e0b125a0356db3d1e597bac4b60702716ebbf
             codetracer-native-recorder=92f3a34c4cc68ff110c3639eb7adde0937a1889b
             codetracer-native-test-programs=dev
             codetracer-visual-replay-fixtures=dev
@@ -7307,19 +7309,19 @@ jobs:
             # sibling cloned at `dev` fails to compile. Full account and the refresh
             # rule: .github/actions/setup-db-backend-siblings/action.yml.
             codetracer-trace-format=2f01e602e70f69a04675293f3fa0d5bad9f196a1
-            codetracer-trace-format-nim=adf9ea1db02354d7f15bc280132a99ddcb23db8a
-            io-mon=ed11e2b2ba323d959bf1b158d35ff0690ca8e600
-            nim-shm-queue=84fd76b174d4868e703ba3d599668ee340e0b6ea
-            nim-shm-gset=7bc81ad2440860a8a9254eb2757c585df9652438
-            nim-stackable-hooks=dev
+            codetracer-trace-format-nim=8eef47d71a2431311a4b9d6b6cf38a2acb37a33f
+            io-mon=735726963f48d91031463cbd9d1e9cf8f444f5ee
+            nim-shm-queue=0d6049997d77421b6e4748f819657cf6042e9508
+            nim-shm-gset=0b2896adc65d0d62c0ee84af1356c909da2975d0
+            nim-stackable-hooks=07319306758cf608e664fe9e64ab7e0bed5ca186
             codetracer-native-recorder=92f3a34c4cc68ff110c3639eb7adde0937a1889b
-            codetracer-js-recorder=dev
+            codetracer-js-recorder=1df4100fb244bb334dbf9f0a691d11846c2ac39f
             codetracer-ruby-recorder=dev
             # codetracer-native-backend and codetracer-visual-replay BY COMMIT as well: both are
             # `/agents` inputs in flake.nix (7ab073a22), so `=dev` cloned a different tree than the
             # Nix lane builds. These are the revs flake.lock and repro.lock lock; refresh them with
             # the lock, as for the trace-format pair above.
-            codetracer-native-backend=b0947a4debf4a2d6fc038b14d1844cd32ca89ec8
+            codetracer-native-backend=d34e0b125a0356db3d1e597bac4b60702716ebbf
             codetracer-visual-replay=92d39d8d249356bd05d8fca5db4d526e1ac4505a
 
       - name: Allow direnv in the cloned recorder siblings

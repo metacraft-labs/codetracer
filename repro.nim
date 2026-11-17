@@ -598,6 +598,86 @@ package codeTracer:
     # `codetracer-image-diff`, and its package `image_diff` resolves from it.
     "codetracer-image-diff >=0"
 
+    # EVERY ENTRY BELOW IS A SIBLING THIS REPOSITORY'S BUILD, TESTS OR CI READ
+    # FROM A CHECKOUT BESIDE IT. `uses:` is the only place a dependency is
+    # declared and `repro.lock` is derived from it (reprobuild 5a1326957), so a
+    # sibling a job checks out by bare name -- `provision-repro-lock-siblings`,
+    # `setup-db-backend-siblings`' `extra-siblings`, a `siblings:` block -- but
+    # that this list omits is a sibling the lock cannot pin. Each names its
+    # consumer. Siblings that build nothing carry a minimal `repro.nim` so they
+    # can be named here.
+    #
+    # The test lanes' scenario runner, its backends and the terminal harness
+    # (DemoVideoScript*, GuiAssert, TermAssert, TermAssertClient, nim-libvterm)
+    # are NOT here: no build compiles them, and ci/test/siblings/repro.nim
+    # declares them for the test lock that provision-repro-lock-siblings
+    # clones `test-siblings` from.
+    #
+    # Read from source by config.nims (`../<name>/src` on the Nim path), so
+    # every `ct` build reaches them; also named in the deploy-web-codetracer
+    # and launcher-recorder-e2e `siblings:` blocks.
+    "isonim-gpui >=0"
+    "nim-termctl >=0"
+    "nim-pty >=0"
+    # `ct` imports `runquota_process` (config.nims; the "Clone runquota
+    # sibling" steps in codetracer.yml).
+    "runquota >=0"
+    # io-mon's capture half, put on the Nim path by config.nims and cloned by
+    # the codetracer.yml jobs that compile it.
+    "nim-shm-queue >=0"
+    "nim-shm-gset >=0"
+    # The db-backend Cargo path dependencies and the replay-server build
+    # (.github/actions/setup-db-backend-siblings, scripts/build-siblings.sh,
+    # scripts/detect-siblings.sh, .github/sibling-repos).
+    "codetracer-trace-format >=0"
+    "codetracer-native-recorder >=0"
+    "codetracer-native-backend >=0"
+    "codetracer-visual-replay >=0"
+    # The recorders the GUI / launcher / cross-process lanes record with
+    # (.github/sibling-repos, scripts/detect-siblings.sh,
+    # scripts/build-siblings.sh, launcher-recorder-e2e*.yml, beam-flow.yml,
+    # request-panel-sidecar-retirement.yml, cross-repo-tests.yml).
+    "codetracer-launcher >=0"
+    "codetracer-python-recorder >=0"
+    "codetracer-ruby-recorder >=0"
+    "codetracer-js-recorder >=0"
+    "codetracer-beam-recorder >=0"
+    "codetracer-evm-recorder >=0"
+    "codetracer-wasm-recorder >=0"
+    "codetracer-wasm-instrumenter >=0"
+    # Test programs scripts/detect-siblings.sh locates for the recording lanes.
+    "codetracer-native-test-programs >=0"
+    # The `isonim-review` daemon: IsoNim's `isonim-review-build` compiles it
+    # with `--path:../nim-faststreams` and `--path:../nim-stew` (codetracer.yml
+    # `extra-siblings`).
+    "nim-faststreams >=0"
+    "nim-stew >=0"
+    # The observability GUI specs (src/tests/gui/tests/observability-m34-*
+    # and -m29-*) and the MCP dive-in gateway test
+    # (`just t_mcp_dive_in_fetch_sends_token_only_to_gateway`).
+    "codetracer-observability-cli >=0"
+    "codetracer-observability-e2e >=0"
+    "codetracer-observability-grafana >=0"
+    "codetracer-observability-jaeger >=0"
+    # The scenario inventory's extension rows (ci/test/scenario-inventory.py).
+    "codetracer-vscode-extension >=0"
+    # The plat68 keymap mutation runner puts `../isonim-examples` on its Nim
+    # path (src/frontend/viewmodel/tests/unit/run-plat68-keymaps-mutations.py).
+    "isonim-examples >=0"
+    # The HCR flame scenarios' coordinator driver, patchable-profile emitter
+    # and in-target agent (codetracer.yml's desktop scenario `siblings:`).
+    "reprobuild >=0"
+    # ci/test/identity-live-device-grant.sh reads infra's shared SSO
+    # descriptor and drives isonim-platform's local stack;
+    # ci/test/host-image-serves-in-incus-vm.sh uses isonim-platform's
+    # sessionctl.
+    "infra >=0"
+    "isonim-platform >=0"
+    # ci/test/sibling-provisioning-test.sh verifies the git-auth pin in
+    # provision-repro-lock-siblings against a checkout beside this one
+    # (codetracer.yml's "Clone metacraft-github-actions beside the checkout").
+    "metacraft-github-actions >=0"
+
     # Windows-only build tools. ``nsis`` (the Nullsoft Scriptable
     # Install System compiler) is what the ``windows-installer``
     # build action invokes to produce ``CodeTracer-Setup.exe``.

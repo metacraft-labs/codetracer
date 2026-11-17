@@ -1253,11 +1253,11 @@
     "codetracer-image-diff": {
       "flake": false,
       "locked": {
-        "lastModified": 1794707537,
-        "narHash": "sha256-+C2fMTy4YsWO+xBV/ZrNp/D5ngsyk/BAv6Figr6f8kk=",
+        "lastModified": 1794846715,
+        "narHash": "sha256-r/EzsQjVWaAo4L4ch/sTq42+25kiV3AS0eOH/s6XBL4=",
         "owner": "metacraft-labs",
         "repo": "codetracer-image-diff",
-        "rev": "0913d0a86e0a75f6a14bd62c58dce962018b50b5",
+        "rev": "d04b56d822c7d4335fbc40f0a1aad387a1b838b5",
         "type": "github"
       },
       "original": {
@@ -1284,15 +1284,16 @@
         "pre-commit-hooks": "pre-commit-hooks"
       },
       "locked": {
-        "lastModified": 1794625646,
-        "narHash": "sha256-8sXznInCuEUt/HDEATBrIFK7BnVFwbdg4C56TMNkeSE=",
+        "lastModified": 1794842619,
+        "narHash": "sha256-iPHTEdXt2PDEvmWghdl4FFuu6z+nOxfheXQ3fB+MnE4=",
         "owner": "metacraft-labs",
         "repo": "codetracer-js-recorder",
-        "rev": "279cef1f0d1335136105b1300e76653dfb2a10e4",
+        "rev": "1df4100fb244bb334dbf9f0a691d11846c2ac39f",
         "type": "github"
       },
       "original": {
         "owner": "metacraft-labs",
+        "ref": "agents",
         "repo": "codetracer-js-recorder",
         "type": "github"
       }
@@ -1300,11 +1301,11 @@
     "codetracer-native-backend": {
       "flake": false,
       "locked": {
-        "lastModified": 1794773679,
-        "narHash": "sha256-xEo5j7Rd2nGPGxo9gM3ulRvhjhFL5z46w4Dv8IM7ccY=",
+        "lastModified": 1794799013,
+        "narHash": "sha256-/kF6zJIxvkbSKsv7ECrboL67w024TNByGZmlrdQ3LXo=",
         "owner": "metacraft-labs",
         "repo": "codetracer-native-backend",
-        "rev": "b0947a4debf4a2d6fc038b14d1844cd32ca89ec8",
+        "rev": "d34e0b125a0356db3d1e597bac4b60702716ebbf",
         "type": "github"
       },
       "original": {
@@ -1572,11 +1573,11 @@
         "standard-hooks-src": "standard-hooks-src"
       },
       "locked": {
-        "lastModified": 1794783348,
-        "narHash": "sha256-fLHLcvgGKd+sa/dZExaIYJOhcFWrledWMF2NP/AEyJU=",
+        "lastModified": 1794840653,
+        "narHash": "sha256-IzHOIlsqSji9zDz3eqZHKTn5FzPqn0U9nJhExajA+p0=",
         "owner": "metacraft-labs",
         "repo": "codetracer-trace-format-nim",
-        "rev": "adf9ea1db02354d7f15bc280132a99ddcb23db8a",
+        "rev": "8eef47d71a2431311a4b9d6b6cf38a2acb37a33f",
         "type": "github"
       },
       "original": {
@@ -7384,11 +7385,11 @@
     "io-mon": {
       "flake": false,
       "locked": {
-        "lastModified": 1794781336,
-        "narHash": "sha256-Y2/KtP9Sx6M+j003ne4tK8Cfi0V4HCPD2DS8DGDZOuU=",
+        "lastModified": 1794846266,
+        "narHash": "sha256-3JCeydGVE2hCOxZ2fQdR6ikVceNO7M7iXSv3yGRaNb0=",
         "owner": "metacraft-labs",
         "repo": "io-mon",
-        "rev": "ed11e2b2ba323d959bf1b158d35ff0690ca8e600",
+        "rev": "735726963f48d91031463cbd9d1e9cf8f444f5ee",
         "type": "github"
       },
       "original": {
@@ -7418,33 +7419,33 @@
     "io-mon-src_2": {
       "flake": false,
       "locked": {
-        "lastModified": 1794504076,
-        "narHash": "sha256-llYhoO9iyth1UKougYc/opo6FDb669YkS0hUMYxnou0=",
+        "lastModified": 1794709643,
+        "narHash": "sha256-hTLTmDwF3aBPNAkNNFYN7TEvmyE4RwUWdtW6bUNfE2E=",
         "owner": "metacraft-labs",
         "repo": "io-mon",
-        "rev": "35829647d603b481276d2632b39ec2a9ce3625b2",
+        "rev": "30d85793e891c1a80859d52a9eb197b42d56752c",
         "type": "github"
       },
       "original": {
         "owner": "metacraft-labs",
         "repo": "io-mon",
-        "rev": "35829647d603b481276d2632b39ec2a9ce3625b2",
+        "rev": "30d85793e891c1a80859d52a9eb197b42d56752c",
         "type": "github"
       }
     },
     "isonim": {
       "flake": false,
       "locked": {
-        "lastModified": 1794765198,
-        "narHash": "sha256-WCngMJZrY0rub/+L+G+OSOhS0n4alAuEVAh/cNzFwSo=",
+        "lastModified": 1794876054,
+        "narHash": "sha256-eWPuxUzuSjUV2pmWT4r2C4p4Rnlya/zY/ouYEjjQcfk=",
         "owner": "metacraft-labs",
         "repo": "isonim",
-        "rev": "eca38028cc652593e66b2d12ff82265711600c94",
+        "rev": "03183989147a6e5d109bf03638dc49bb74ecf248",
         "type": "github"
       },
       "original": {
         "owner": "metacraft-labs",
-        "ref": "dev",
+        "ref": "agents",
         "repo": "isonim",
         "type": "github"
       }
@@ -7452,16 +7453,16 @@
     "isonim-gpui": {
       "flake": false,
       "locked": {
-        "lastModified": 1794820848,
-        "narHash": "sha256-OzpkDFBtoAsycd9v4/GUyHdbsDgWo4UngY0a7F9i3ZA=",
+        "lastModified": 1794875141,
+        "narHash": "sha256-7qn0T5pWxxLlwKuuousTZxPc/mxoKzaeV3VlikaqWIU=",
         "owner": "metacraft-labs",
         "repo": "isonim-gpui",
-        "rev": "cf6af690c264e9945e89b49d59dd5d51f0ec28d9",
+        "rev": "2db29d9fa463ee6975ba436844553993a385661f",
         "type": "github"
       },
       "original": {
         "owner": "metacraft-labs",
-        "ref": "dev",
+        "ref": "agents",
         "repo": "isonim-gpui",
         "type": "github"
       }
@@ -7478,7 +7479,7 @@
       },
       "original": {
         "owner": "metacraft-labs",
-        "ref": "dev",
+        "ref": "agents",
         "repo": "isonim-tui",
         "type": "github"
       }
@@ -7797,7 +7798,7 @@
       },
       "original": {
         "owner": "metacraft-labs",
-        "ref": "dev",
+        "ref": "agents",
         "repo": "nim-acp",
         "type": "github"
       }
@@ -7822,16 +7823,16 @@
     "nim-agents": {
       "flake": false,
       "locked": {
-        "lastModified": 1794726601,
-        "narHash": "sha256-YijkGwsO4wnrMLxu/MYdmpEIznbVnBWAt3ZXxEjtZkY=",
+        "lastModified": 1794875085,
+        "narHash": "sha256-9fanOtqL9kRQ4alQeg+eEoElmiTzpLQlc/lsLOtmBF8=",
         "owner": "metacraft-labs",
         "repo": "nim-agents",
-        "rev": "99e23d675ab5cdd5374cab6e279eed29dd45033e",
+        "rev": "e2a1a7aaf8f93a0c214435bce7611210c7080292",
         "type": "github"
       },
       "original": {
         "owner": "metacraft-labs",
-        "ref": "dev",
+        "ref": "agents",
         "repo": "nim-agents",
         "type": "github"
       }
@@ -7867,6 +7868,40 @@
         "owner": "nim-lang",
         "repo": "checksums",
         "rev": "0b8e46379c5bc1bf73d8b3011908389c60fb9b98",
+        "type": "github"
+      }
+    },
+    "nim-cli-spec-src": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1794855652,
+        "narHash": "sha256-2PXrPF+3a2dYMbyoFliukQRLVXc3wIBuvqDOYZWR/ko=",
+        "owner": "metacraft-labs",
+        "repo": "nim-cli-spec",
+        "rev": "8c36bf19c98f551f8eaa03e9d12ecad387f3a081",
+        "type": "github"
+      },
+      "original": {
+        "owner": "metacraft-labs",
+        "repo": "nim-cli-spec",
+        "rev": "8c36bf19c98f551f8eaa03e9d12ecad387f3a081",
+        "type": "github"
+      }
+    },
+    "nim-confutils-src": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1794856118,
+        "narHash": "sha256-zHFUtlFQEmS3jK8oGm2ItMgMcWAsW2U1LciY3QspuS8=",
+        "owner": "metacraft-labs",
+        "repo": "nim-confutils",
+        "rev": "0ad5824caee1672ed7d78eb5e3ff9f296a4d8f74",
+        "type": "github"
+      },
+      "original": {
+        "owner": "metacraft-labs",
+        "repo": "nim-confutils",
+        "rev": "0ad5824caee1672ed7d78eb5e3ff9f296a4d8f74",
         "type": "github"
       }
     },
@@ -7942,17 +7977,17 @@
     "nim-fork-src_2": {
       "flake": false,
       "locked": {
-        "lastModified": 1794131186,
-        "narHash": "sha256-p8Ea5ODLI1Bs6NFTC/jr1OjnCXbMuRembJdSRhdzBpw=",
+        "lastModified": 1794758457,
+        "narHash": "sha256-91/nyQHJF9xQWiDcGELCb6UFQq2BhiT48kl7gJdvzKA=",
         "ref": "codetracer",
-        "rev": "8384ff3fecfdbd8772d46c79054967769915d6fd",
-        "revCount": 23175,
+        "rev": "bb0e894367a94b6bcf4ce0b2ee666a4d9cbe1654",
+        "revCount": 23176,
         "type": "git",
         "url": "https://github.com/metacraft-labs/nim"
       },
       "original": {
         "ref": "codetracer",
-        "rev": "8384ff3fecfdbd8772d46c79054967769915d6fd",
+        "rev": "bb0e894367a94b6bcf4ce0b2ee666a4d9cbe1654",
         "type": "git",
         "url": "https://github.com/metacraft-labs/nim"
       }
@@ -8052,7 +8087,7 @@
       },
       "original": {
         "owner": "metacraft-labs",
-        "ref": "dev",
+        "ref": "agents",
         "repo": "nim-pty",
         "type": "github"
       }
@@ -8192,17 +8227,17 @@
     "nim-shm-gset": {
       "flake": false,
       "locked": {
-        "lastModified": 1794200622,
+        "lastModified": 1794430864,
         "narHash": "sha256-h6GbBG2O+abwn464tyjs2+8rReh3wEKysPuaXY0oUgc=",
         "owner": "metacraft-labs",
         "repo": "nim-shm-gset",
-        "rev": "7bc81ad2440860a8a9254eb2757c585df9652438",
+        "rev": "0b2896adc65d0d62c0ee84af1356c909da2975d0",
         "type": "github"
       },
       "original": {
         "owner": "metacraft-labs",
         "repo": "nim-shm-gset",
-        "rev": "7bc81ad2440860a8a9254eb2757c585df9652438",
+        "rev": "0b2896adc65d0d62c0ee84af1356c909da2975d0",
         "type": "github"
       }
     },
@@ -8259,11 +8294,11 @@
     "nim-shm-lease_2": {
       "flake": false,
       "locked": {
-        "lastModified": 1790618872,
-        "narHash": "sha256-hjlaK5aECxEbCGhG9CSPVOhTQoyFdF64m9nieVapDD8=",
+        "lastModified": 1794766859,
+        "narHash": "sha256-Jm0oyf3aT/ZJ7EixurDMBm3smLHQBRHbZOXZzJb4UPk=",
         "owner": "metacraft-labs",
         "repo": "nim-shm-lease",
-        "rev": "22e3100cdb4fbc374689ddac55b4b32c90654140",
+        "rev": "08a3f50a391b32b053598f64c670d5232e1eb051",
         "type": "github"
       },
       "original": {
@@ -8275,17 +8310,17 @@
     "nim-shm-queue": {
       "flake": false,
       "locked": {
-        "lastModified": 1793346901,
-        "narHash": "sha256-ph1AMDJSXCDuvC4JH6NxSU7yXEFYz4UjJ1zW+Tj19EA=",
+        "lastModified": 1794707477,
+        "narHash": "sha256-ckJ89lDK6nUyRuw1wbgHIJvwQe1PRnbSEFWTu820kao=",
         "owner": "metacraft-labs",
         "repo": "nim-shm-queue",
-        "rev": "84fd76b174d4868e703ba3d599668ee340e0b6ea",
+        "rev": "0d6049997d77421b6e4748f819657cf6042e9508",
         "type": "github"
       },
       "original": {
         "owner": "metacraft-labs",
         "repo": "nim-shm-queue",
-        "rev": "84fd76b174d4868e703ba3d599668ee340e0b6ea",
+        "rev": "0d6049997d77421b6e4748f819657cf6042e9508",
         "type": "github"
       }
     },
@@ -8309,33 +8344,33 @@
     "nim-shm-queue-src_2": {
       "flake": false,
       "locked": {
-        "lastModified": 1793346901,
-        "narHash": "sha256-ph1AMDJSXCDuvC4JH6NxSU7yXEFYz4UjJ1zW+Tj19EA=",
+        "lastModified": 1794438542,
+        "narHash": "sha256-x9UKDQRIJtADZqwKJsBR2AMG2OPZWqj8ztf/xDn17v4=",
         "owner": "metacraft-labs",
         "repo": "nim-shm-queue",
-        "rev": "84fd76b174d4868e703ba3d599668ee340e0b6ea",
+        "rev": "8dff4ad246ff4b15ef63ddf7d65938af3115f844",
         "type": "github"
       },
       "original": {
         "owner": "metacraft-labs",
         "repo": "nim-shm-queue",
-        "rev": "84fd76b174d4868e703ba3d599668ee340e0b6ea",
+        "rev": "8dff4ad246ff4b15ef63ddf7d65938af3115f844",
         "type": "github"
       }
     },
     "nim-stackable-hooks": {
       "flake": false,
       "locked": {
-        "lastModified": 1794754830,
-        "narHash": "sha256-JkxyVRTcXgePfzp3VhehPRA6gc9OOJi+IhW2uxc76JU=",
+        "lastModified": 1794845237,
+        "narHash": "sha256-IP7n+cWCmk4wzq2w0By/fBnIMOeLPSwkjZRn8+Awn4w=",
         "owner": "metacraft-labs",
         "repo": "nim-stackable-hooks",
-        "rev": "c34e3252d413361a0f250d8921e00c119d30e114",
+        "rev": "07319306758cf608e664fe9e64ab7e0bed5ca186",
         "type": "github"
       },
       "original": {
         "owner": "metacraft-labs",
-        "ref": "dev",
+        "ref": "agents",
         "repo": "nim-stackable-hooks",
         "type": "github"
       }
@@ -8360,17 +8395,17 @@
     "nim-stackable-hooks-src_2": {
       "flake": false,
       "locked": {
-        "lastModified": 1793490826,
+        "lastModified": 1793500220,
         "narHash": "sha256-ehKnmydA0HqIgmxDTDYcIzb8oNC8M2rfNolg3t6j7Rw=",
         "owner": "metacraft-labs",
         "repo": "nim-stackable-hooks",
-        "rev": "c1d55ce33fb2a29e4cf8d8bdbe1713f355370d0a",
+        "rev": "d715806424e8373708494913e59a48237978cc2a",
         "type": "github"
       },
       "original": {
         "owner": "metacraft-labs",
         "repo": "nim-stackable-hooks",
-        "rev": "c1d55ce33fb2a29e4cf8d8bdbe1713f355370d0a",
+        "rev": "d715806424e8373708494913e59a48237978cc2a",
         "type": "github"
       }
     },
@@ -8519,7 +8554,7 @@
       },
       "original": {
         "owner": "metacraft-labs",
-        "ref": "dev",
+        "ref": "agents",
         "repo": "nim-termctl",
         "type": "github"
       }
@@ -13665,11 +13700,11 @@
     "reprobuild-test-adapters-src_2": {
       "flake": false,
       "locked": {
-        "lastModified": 1794471557,
-        "narHash": "sha256-NUl990Imiyrlit+9/J51+U6u3d3AMaTR1pHCCjhOw5Y=",
+        "lastModified": 1794520036,
+        "narHash": "sha256-KEV/+e7aWmRWmOoPI4oEU8KolyYSFtr+gwaH1iobEqQ=",
         "owner": "metacraft-labs",
         "repo": "reprobuild-test-adapters",
-        "rev": "ed615a304fcdaa9d337664e08e460b041c2dbb19",
+        "rev": "04b44dbe545e9d96a16810c62538a179655b5f13",
         "type": "github"
       },
       "original": {
@@ -13692,6 +13727,8 @@
         ],
         "io-mon-src": "io-mon-src_2",
         "nim-checksums-src": "nim-checksums-src_2",
+        "nim-cli-spec-src": "nim-cli-spec-src",
+        "nim-confutils-src": "nim-confutils-src",
         "nim-csources-src": "nim-csources-src_2",
         "nim-fork-src": "nim-fork-src_2",
         "nim-nimony-src": "nim-nimony-src_2",
@@ -13717,11 +13754,11 @@
         "test-certificates-tools-src": "test-certificates-tools-src"
       },
       "locked": {
-        "lastModified": 1794525538,
-        "narHash": "sha256-JOD4nuE3iN4lGVU5+f7of2wnaPHbY3F0L3HHaLUhHcI=",
+        "lastModified": 1794875900,
+        "narHash": "sha256-PHTwK78IL+vTKJ7rOxkEvr3OlTnI/YnX9if7GpReCcw=",
         "owner": "metacraft-labs",
         "repo": "reprobuild",
-        "rev": "5a1326957ceac91f94eccf0d9957f03e053fad79",
+        "rev": "e2fe4eb9f5b94abe382f10d39be0957e90a344a9",
         "type": "github"
       },
       "original": {
@@ -13892,11 +13929,11 @@
         "runquota-package-catalog": "runquota-package-catalog"
       },
       "locked": {
-        "lastModified": 1794490268,
-        "narHash": "sha256-hRA117/72yuJ+BbgmIJAGjN7lVDWdhlE1FESQo9xeOg=",
+        "lastModified": 1794870716,
+        "narHash": "sha256-HV6YZN126tUUcrT4M8m2taNeavQ0ZZltEEvL8fvsP24=",
         "owner": "metacraft-labs",
         "repo": "runquota",
-        "rev": "f9e1a4d3f3ba7840aefe56883127653af9c5a608",
+        "rev": "6ff973131e7f715f0237cb0f08b8dd16cbeba0dc",
         "type": "github"
       },
       "original": {
@@ -15195,17 +15232,17 @@
     "test-certificates-tools-src": {
       "flake": false,
       "locked": {
-        "lastModified": 1793493787,
-        "narHash": "sha256-kj7SWWfs675mrVpN5iiaBenh/hiKAP68aPNTADmSwP8=",
+        "lastModified": 1793866381,
+        "narHash": "sha256-QtrNpzM3rUIfreSre8T9GfNoxDxkTisoccsaYMSyo/c=",
         "owner": "metacraft-labs",
         "repo": "test-certificates-tools",
-        "rev": "4b395de551d86c745d6eb8ebf7c7228df25298f5",
+        "rev": "a726655886808d1062390d05c50f4fce03150eb4",
         "type": "github"
       },
       "original": {
         "owner": "metacraft-labs",
         "repo": "test-certificates-tools",
-        "rev": "4b395de551d86c745d6eb8ebf7c7228df25298f5",
+        "rev": "a726655886808d1062390d05c50f4fce03150eb4",
         "type": "github"
       }
     },
