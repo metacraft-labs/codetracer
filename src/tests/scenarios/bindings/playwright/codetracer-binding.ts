@@ -2626,8 +2626,6 @@ function readSurfacePw6(root: any): void {
     filterDd.props.count = filterDd.children.length;
   }
 
-  }
-
 }
 
 // The readers that extend `readSurface`'s tree, run in the same page
