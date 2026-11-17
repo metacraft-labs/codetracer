@@ -85,6 +85,9 @@ if [ -n "$cred_dir" ] && [ -f "$cred_dir/nix-access-tokens.conf" ]; then
 		mv -f "$tmp" "$job_netrc"
 		echo "refreshed github.com in the job netrc"
 	fi
+	# When this token was minted, for keep-refreshing.sh and the git credential
+	# helper (ci/git-credential-job-netrc.sh), which renew a token by its age.
+	date +%s >"$cred_dir/github-token-minted-at"
 fi
 
 # The Nix netrc: git+https inputs, which Nix fetches by running git.

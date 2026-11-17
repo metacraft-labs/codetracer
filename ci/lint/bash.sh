@@ -336,6 +336,12 @@ lint_step "Nim test lane shards cover their lane exactly" \
 lint_step "a visual-recording scenario lands on a shard that builds the player" \
 	bash ci/test/scenario-slice-uses-stage-test.sh
 
+# A git fetch late in a job gets a recently minted token: the refresher renews
+# by age and on request, and the credential helper asks before handing out an
+# old one.
+lint_step "a late git fetch gets a freshly minted GitHub token" \
+	bash ci/test/github-token-freshness-test.sh
+
 # A GPUI shard gives a bare host the Vulkan driver, cursor theme and D-Bus
 # session configuration the window and its compositor need.
 lint_step "a GPUI shard provisions what a bare host lacks" \

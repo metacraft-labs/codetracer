@@ -1547,6 +1547,17 @@ jobs:
           private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
           root-default-shell: "false"  # lint-nim enters only the lint shell
 
+      - name: Mint a token for the clone below
+        # An installation token lives an hour, and the clone below comes after
+        # 'Provision dependency siblings from repro.lock', which can take most of
+        # one on a cold runner: hand it a token minted here, not the job's first
+        # (ci/test/late-clone-token-test.py).
+        id: late_token
+        uses: ./.github/actions/refresh-github-token
+        with:
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+
       - name: Clone codetracer-pm sibling
         # `ci/test/cua-keymap-extractor.sh` (PLAT-68's CUA keymap step in
         # ci/lint/nim.sh) re-extracts every binding CUA-Keymap.md cites, and
@@ -1563,7 +1574,7 @@ jobs:
           repo: metacraft-labs/codetracer-pm
           ref: latest
           path: ${{ github.workspace }}/../codetracer-pm
-          gh-token: ${{ steps.ci_token.outputs.token }}
+          gh-token: ${{ steps.late_token.outputs.token }}
           submodules: 'false'
 
       # MEASURE THE FETCH ENVIRONMENT BEFORE NIX TOUCHES THE NETWORK, and
@@ -2399,6 +2410,17 @@ jobs:
           app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
           private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
 
+      - name: Mint a token for the clones below
+        # An installation token lives an hour, and the clones below come after
+        # 'Provision dependency siblings from repro.lock', which can take most of
+        # one on a cold runner: hand them a token minted here, not the job's first
+        # (ci/test/late-clone-token-test.py).
+        id: late_token
+        uses: ./.github/actions/refresh-github-token
+        with:
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+
       # The envelope records the three-tier demo from this tree, and
       # scripts/materialize-recording.sh refuses without `ct-instrument` and a
       # built codetracer-js-recorder. `just test-cross-process` builds both
@@ -2414,7 +2436,7 @@ jobs:
           ref: dev
           path: ${{ github.workspace }}/../codetracer-wasm-instrumenter
           submodules: "false"
-          gh-token: ${{ steps.ci_token.outputs.token }}
+          gh-token: ${{ steps.late_token.outputs.token }}
 
       - name: Clone codetracer-js-recorder sibling
         uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
@@ -2423,7 +2445,7 @@ jobs:
           ref: dev
           path: ${{ github.workspace }}/../codetracer-js-recorder
           submodules: "false"
-          gh-token: ${{ steps.ci_token.outputs.token }}
+          gh-token: ${{ steps.late_token.outputs.token }}
 
       - name: Clone runquota sibling
         # `just build-once` below compiles `ct`, and src/ct/codetracer.nim ->
@@ -2439,7 +2461,7 @@ jobs:
           repo: metacraft-labs/runquota
           ref: dev
           path: ${{ github.workspace }}/../runquota
-          gh-token: ${{ steps.ci_token.outputs.token }}
+          gh-token: ${{ steps.late_token.outputs.token }}
           submodules: 'false'
 
       - name: Build frontend (needed by gated Playwright stage)
@@ -5362,6 +5384,17 @@ jobs:
       # "Provision dependency siblings from repro.lock" step above clones
       # them, on both legs, at the revisions repro.lock pins.
 
+      - name: Mint a token for the clones below
+        # An installation token lives an hour, and the clones below come after
+        # 'Provision dependency siblings from repro.lock', which can take most of
+        # one on a cold runner: hand them a token minted here, not the job's first
+        # (ci/test/late-clone-token-test.py).
+        id: late_token
+        uses: ./.github/actions/refresh-github-token
+        with:
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+
       - name: Clone python-recorder (macOS)
         if: matrix.platform == 'macos'
         uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
@@ -5391,7 +5424,7 @@ jobs:
           # change this line back.
           ref: dev
           path: ${{ github.workspace }}/../codetracer-python-recorder
-          gh-token: ${{ steps.ci_token.outputs.token }}
+          gh-token: ${{ steps.late_token.outputs.token }}
 
       # The Ruby recorder, on BOTH legs. It used to be cloned and built on macOS
       # only, on the reading that the nixos leg got it from "Provision
@@ -5415,7 +5448,7 @@ jobs:
           repo: metacraft-labs/codetracer-ruby-recorder
           ref: dev
           path: ${{ github.workspace }}/../codetracer-ruby-recorder
-          gh-token: ${{ steps.ci_token.outputs.token }}
+          gh-token: ${{ steps.late_token.outputs.token }}
 
       - name: Build ruby-recorder native extension
         # Both legs (see the clone step above for why the nixos leg needs it
@@ -5487,6 +5520,17 @@ jobs:
           fi
           echo "ruby recorder native extension: $found"
 
+      - name: Mint a token for the clone below
+        # An installation token lives an hour, and the clone below comes after
+        # 'Build ruby-recorder native extension', which can take most of
+        # one on a cold runner: hand it a token minted here, not the job's first
+        # (ci/test/late-clone-token-test.py).
+        id: late_token_2
+        uses: ./.github/actions/refresh-github-token
+        with:
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+
       # ---------------------------------------------------------------------
       # codetracer-js-recorder. This lane runs `./ci/test/non-gui.sh` ->
       # `just test` -> `just test-rust` -> `cargo nextest run --release
@@ -5538,7 +5582,7 @@ jobs:
           ref: dev
           path: ${{ github.workspace }}/../codetracer-js-recorder
           submodules: "false"
-          gh-token: ${{ steps.ci_token.outputs.token }}
+          gh-token: ${{ steps.late_token_2.outputs.token }}
 
       - name: Build codetracer-js-recorder sibling
         # The clone lands unbuilt and `packages/cli/dist/` is PRODUCED, never
@@ -5567,6 +5611,17 @@ jobs:
           fi
           echo "js recorder CLI: $(pwd)/packages/cli/dist/index.js"
 
+      - name: Mint a token for the clone below
+        # An installation token lives an hour, and the clone below comes after
+        # 'Build codetracer-js-recorder sibling', which can take most of
+        # one on a cold runner: hand it a token minted here, not the job's first
+        # (ci/test/late-clone-token-test.py).
+        id: late_token_3
+        uses: ./.github/actions/refresh-github-token
+        with:
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+
       # ---------------------------------------------------------------------
       # codetracer-wasm-instrumenter. Seven db-backend integration tests in
       # this lane replay the `cross-process-three-trace` recording
@@ -5588,7 +5643,7 @@ jobs:
           ref: dev
           path: ${{ github.workspace }}/../codetracer-wasm-instrumenter
           submodules: "false"
-          gh-token: ${{ steps.ci_token.outputs.token }}
+          gh-token: ${{ steps.late_token_3.outputs.token }}
 
       - name: Build ct-instrument (codetracer-wasm-instrumenter sibling)
         shell: bash
@@ -6171,6 +6226,18 @@ jobs:
           nix develop . --command repro daemon stop >/dev/null 2>&1 || true
           nix develop . --command just build-once
 
+      - name: Mint a token for the clones below
+        # An installation token lives an hour, and the clones below come after
+        # 'Build CodeTracer (nix dev shell)', which can take most of
+        # one on a cold runner: hand them a token minted here, not the job's first
+        # (ci/test/late-clone-token-test.py).
+        if: matrix.platform == 'macos'
+        id: late_token
+        uses: ./.github/actions/refresh-github-token
+        with:
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+
       - name: Clone python-recorder (macOS)
         if: matrix.platform == 'macos'
         uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
@@ -6200,7 +6267,7 @@ jobs:
           # change this line back.
           ref: dev
           path: ${{ github.workspace }}/../codetracer-python-recorder
-          gh-token: ${{ steps.ci_token.outputs.token }}
+          gh-token: ${{ steps.late_token.outputs.token }}
 
       - name: Clone ruby-recorder (macOS)
         if: matrix.platform == 'macos'
@@ -6209,7 +6276,7 @@ jobs:
           repo: metacraft-labs/codetracer-ruby-recorder
           ref: dev
           path: ${{ github.workspace }}/../codetracer-ruby-recorder
-          gh-token: ${{ steps.ci_token.outputs.token }}
+          gh-token: ${{ steps.late_token.outputs.token }}
 
       - name: Build ruby-recorder native extension (macOS)
         if: matrix.platform == 'macos'
@@ -8356,6 +8423,13 @@ jobs:
         # m3-mcl-001, run 43935388749). python3 and PyYAML, as above.
         if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
         run: python3 ci/test/dev-shell-gcroot-test.py
+
+      - name: A clone after a long step uses a token minted after it
+        # An installation token lives an hour; clones that followed sibling
+        # provisioning or a nix build with the job's first token failed with
+        # "Invalid username or token" (run 43996043232). python3 and PyYAML.
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
+        run: python3 ci/test/late-clone-token-test.py
 
       - name: Jobs that run a native rr-recording suite set rr up and build ct-native-replay first
         # `tui-tests` ran PLAT-60's terminal Low Level Code suite, which records

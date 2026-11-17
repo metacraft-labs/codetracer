@@ -21,9 +21,11 @@ inputs:
   keep-refreshing:
     description: >
       "true" also starts keep-refreshing.sh in the background, which mints a
-      new token every 40 minutes for the rest of the job and writes it into
-      nix.conf and the Nix netrc. For a single step that runs longer than an
-      hour. Needs Nix (for openssl, curl and jq).
+      new token at once, again whenever the token is 35 minutes old or the git
+      credential helper (ci/git-credential-job-netrc.sh) asks for one, and
+      retries a failed mint every minute, for the rest of the job. Each new
+      token goes into nix.conf, the Nix netrc and the job netrc. For a single
+      step that runs longer than an hour. Needs Nix (for openssl, curl and jq).
     required: false
     default: "false"
 outputs:

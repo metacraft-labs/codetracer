@@ -409,6 +409,17 @@ jobs:
             direnv exec "$RECORDER_DIR" \
               bash -c "cd '$RECORDER_DIR/ct_emulator' && nimble install --depsOnly -y"
 
+      - name: Mint a token for the clones below
+        # An installation token lives an hour, and the clones below come after
+        # 'Resolve ct_emulator nimble dependencies', which can take most of
+        # one on a cold runner: hand them a token minted here, not the job's first
+        # (ci/test/late-clone-token-test.py).
+        id: late_token
+        uses: ./.github/actions/refresh-github-token
+        with:
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+
       # The recorder siblings, cloned with `clone-repo` rather than added to the
       # `extra-siblings` block above: those entries are `=dev` branch tips, and
       # ci/test/sibling-provisioning-test.sh's branch-tip ceiling is lowered,
@@ -420,7 +431,7 @@ jobs:
           ref: dev
           path: ${{ github.workspace }}/../codetracer-cairo-recorder
           submodules: "false"
-          gh-token: ${{ steps.ci_token.outputs.token }}
+          gh-token: ${{ steps.late_token.outputs.token }}
 
       - name: Clone codetracer-circom-recorder sibling
         uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
@@ -429,7 +440,7 @@ jobs:
           ref: dev
           path: ${{ github.workspace }}/../codetracer-circom-recorder
           submodules: "false"
-          gh-token: ${{ steps.ci_token.outputs.token }}
+          gh-token: ${{ steps.late_token.outputs.token }}
 
       - name: Clone codetracer-leo-recorder sibling
         uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
@@ -438,7 +449,7 @@ jobs:
           ref: dev
           path: ${{ github.workspace }}/../codetracer-leo-recorder
           submodules: "false"
-          gh-token: ${{ steps.ci_token.outputs.token }}
+          gh-token: ${{ steps.late_token.outputs.token }}
 
       - name: Clone codetracer-cardano-recorder sibling
         uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
@@ -447,7 +458,7 @@ jobs:
           ref: dev
           path: ${{ github.workspace }}/../codetracer-cardano-recorder
           submodules: "false"
-          gh-token: ${{ steps.ci_token.outputs.token }}
+          gh-token: ${{ steps.late_token.outputs.token }}
 
       - name: Clone codetracer-solana-recorder sibling
         uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
@@ -456,7 +467,7 @@ jobs:
           ref: dev
           path: ${{ github.workspace }}/../codetracer-solana-recorder
           submodules: "false"
-          gh-token: ${{ steps.ci_token.outputs.token }}
+          gh-token: ${{ steps.late_token.outputs.token }}
 
       - name: Clone codetracer-fuel-recorder sibling
         uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
@@ -465,7 +476,7 @@ jobs:
           ref: dev
           path: ${{ github.workspace }}/../codetracer-fuel-recorder
           submodules: "false"
-          gh-token: ${{ steps.ci_token.outputs.token }}
+          gh-token: ${{ steps.late_token.outputs.token }}
 
       - name: Clone codetracer-php-recorder sibling
         uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
@@ -474,7 +485,7 @@ jobs:
           ref: dev
           path: ${{ github.workspace }}/../codetracer-php-recorder
           submodules: "false"
-          gh-token: ${{ steps.ci_token.outputs.token }}
+          gh-token: ${{ steps.late_token.outputs.token }}
 
       - name: Clone codetracer-evm-recorder sibling
         uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
@@ -483,7 +494,7 @@ jobs:
           ref: dev
           path: ${{ github.workspace }}/../codetracer-evm-recorder
           submodules: "false"
-          gh-token: ${{ steps.ci_token.outputs.token }}
+          gh-token: ${{ steps.late_token.outputs.token }}
 
       - name: Clone codetracer-flow-recorder sibling
         uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
@@ -492,7 +503,7 @@ jobs:
           ref: dev
           path: ${{ github.workspace }}/../codetracer-flow-recorder
           submodules: "false"
-          gh-token: ${{ steps.ci_token.outputs.token }}
+          gh-token: ${{ steps.late_token.outputs.token }}
 
       - name: Clone codetracer-miden-recorder sibling
         uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
@@ -501,7 +512,7 @@ jobs:
           ref: dev
           path: ${{ github.workspace }}/../codetracer-miden-recorder
           submodules: "false"
-          gh-token: ${{ steps.ci_token.outputs.token }}
+          gh-token: ${{ steps.late_token.outputs.token }}
 
       - name: Clone codetracer-move-recorder sibling
         uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
@@ -510,7 +521,7 @@ jobs:
           ref: dev
           path: ${{ github.workspace }}/../codetracer-move-recorder
           submodules: "false"
-          gh-token: ${{ steps.ci_token.outputs.token }}
+          gh-token: ${{ steps.late_token.outputs.token }}
 
       - name: Clone codetracer-polkavm-recorder sibling
         uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
@@ -519,7 +530,7 @@ jobs:
           ref: dev
           path: ${{ github.workspace }}/../codetracer-polkavm-recorder
           submodules: "false"
-          gh-token: ${{ steps.ci_token.outputs.token }}
+          gh-token: ${{ steps.late_token.outputs.token }}
 
       - name: Clone codetracer-ton-recorder sibling
         uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
@@ -528,7 +539,7 @@ jobs:
           ref: dev
           path: ${{ github.workspace }}/../codetracer-ton-recorder
           submodules: "false"
-          gh-token: ${{ steps.ci_token.outputs.token }}
+          gh-token: ${{ steps.late_token.outputs.token }}
 
       - name: Build recorder siblings
         # Each recorder is built in its own dev shell with its own `just`

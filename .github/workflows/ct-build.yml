@@ -15,10 +15,16 @@ permissions:
 jobs:
   ct-build:
     runs-on: [self-hosted, linux, x64]
-    # Sized from run 43935388749's slowest cold garm shard: provisioning 1768 s,
-    # build-once 2557 s, the windowed shim and front-end 830 s (86 min), plus
-    # packing and the upload; 120 leaves a third in hand.
-    timeout-minutes: 120
+    # First sized at 120 from run 43935388749's slowest cold garm shard:
+    # provisioning 1768 s, build-once 2557 s, the windowed shim and front-end
+    # 830 s (86 min), plus packing and the upload. Run 44048043714 then spent
+    # 94 minutes provisioning on a slow runner and was cancelled at 120 minutes
+    # in the shim build, and every GPUI and TUI shard waits on this job, so it
+    # skipped both matrices. 180 is headroom for a slow fleet, not a target.
+    # Revisit once infra finds the slow host: metacraft-pm issue
+    # 2026-11-17-one-garm-runner-ran-the-same-dev-shell-provisioning-eight-to-
+    # fifteen-times-slower-than-its-siblings.md (recorded at 4ffa812).
+    timeout-minutes: 180
     name: Build ct and the windowed GPUI shim (once per run)
     steps:
       - name: Generate CI token
