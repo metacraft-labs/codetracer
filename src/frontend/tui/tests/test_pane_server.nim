@@ -1274,3 +1274,99 @@ suite "§E9 and HSF-E11: a project session, and Edit mode's generated C":
     else:
       check false
     discard srv.request("shutdown")
+
+suite "§E15: Toggle Macro Expansion in an editor-hosted session":
+  test "HSF-E12: the expansion beside the source, and a step at its row":
+    # Editor-Hosted-Front-Ends §E15 over the `ct record` recording of
+    # `test-programs/nim_macro_steps` (`addTwice(counter, 3)` on line 17,
+    # expanded to `expanded.nim` 1–4). The editor's cursor names the call;
+    # the server places the Macro Expansion pane beside the source
+    # (`layout/changed`), the editor opens it, and a step from line 16 is the
+    # pane's `▸` row while `session/position` stays on the call. Until
+    # HSF-E12 the operation was answered by nothing, and the step's position
+    # was `…/nimcache/expanded.nim:3`.
+    let rec = nimMacroRecording()
+    if not rec.ok:
+      echo "  ", MissingPrereqSkipPrefix, " ", NimMacroFixtureName, " — ",
+           rec.detail
+      skip()
+      return
+    let program = rec.sourcePath
+    let srv = newPaneServer(dap = false)
+    let (init, _) = srv.request("initialize", %*{
+      "capabilities": {"media": ["text"]}, "keymapOverrides": []})
+    check "macroExpansion" in init{"result", "capabilities", "panes"}.getElems.mapIt(it.getStr)
+    let (opened, _) = srv.request("session/open", %*{"trace": rec.tracePath})
+    let sid = opened{"result", "session"}.getInt
+    check sid > 0
+    if sid <= 0: return
+    # To `var counter = 0`, the line before the call.
+    var at = (file: "", line: 0)
+    for i in 0 ..< 60:
+      let (_, notes) = srv.request("operation/run", %*{"session": sid,
+        "operation": "debugger.step-into"})
+      for n in notes.notes("session/position"):
+        at = (file: n{"params", "file"}.getStr, line: n{"params", "line"}.getInt)
+      if at.file == program and at.line == 16:
+        break
+    checkpoint("stop: " & $at)
+    check at == (file: program, line: 16)
+    # A line that expands nothing is refused.
+    discard srv.request("source/cursor", %*{"session": sid, "file": program,
+                                            "line": 16, "column": 3})
+    let (nothing, _) = srv.request("operation/run", %*{"session": sid,
+      "operation": "editor.toggle-macro-expansion"})
+    checkpoint("line 16: " & $nothing)
+    check not nothing{"result", "ok"}.getBool
+    check nothing{"result", "detail"}.getStr == "No macro expansion at main.nim:16"
+    # The call's line: the pane is placed beside the source.
+    discard srv.request("source/cursor", %*{"session": sid, "file": program,
+                                            "line": 17, "column": 3})
+    let (shown, shownNotes) = srv.request("operation/run", %*{"session": sid,
+      "operation": "editor.toggle-macro-expansion"})
+    checkpoint("line 17: " & $shown)
+    check shown{"result", "ok"}.getBool
+    check "beside the source" in shown{"result", "detail"}.getStr
+    let placed = shownNotes.notes("layout/changed")
+    check placed.len == 1 and "macroExpansion" in $placed[0]{"params", "layout"}
+    let (_, openNotes) = srv.request("pane/open", %*{"session": sid,
+      "pane": "macroExpansion", "width": 80, "height": 12})
+    var rows: seq[string] = @[]
+    check paneRowsOf(openNotes, "macroExpansion", rows)
+    checkpoint("Macro Expansion:\n" & rows.join("\n"))
+    # (A row is padded to the window's width.)
+    check rows.len > 0 and rows[0].strip == "main.nim:17 · expanded.nim 1–4"
+    check rows.anyIt("addTwice expansion" in it)
+    check rows.anyIt(it.strip.endsWith("counter += 3"))
+    # The heading carries the toggle on its call, for a press in the editor.
+    var heading = newJNull()
+    for n in openNotes.notes("pane/content"):
+      if n{"params", "pane"}.getStr == "macroExpansion":
+        for r in n{"params", "rows"}.getElems:
+          if r{"index"}.getInt == 0 and r{"hotspots"}.len > 0:
+            heading = r{"hotspots"}[0]
+    check not heading.isNil and
+      heading{"operation"}.getStr == "editor.toggle-macro-expansion" and
+      heading{"args", "path"}.getStr == program and
+      heading{"args", "line"}.getInt == 17
+    # A step from line 16 is inside the expansion: the source stays on the
+    # call, the pane marks the row.
+    let (_, stepNotes) = srv.request("operation/run", %*{"session": sid,
+      "operation": "debugger.step-into"})
+    for n in stepNotes.notes("session/position"):
+      at = (file: n{"params", "file"}.getStr, line: n{"params", "line"}.getInt)
+    checkpoint("stop in the expansion: " & $at)
+    check at == (file: program, line: 17)
+    discard paneRowsOf(stepNotes, "macroExpansion", rows)
+    checkpoint("Macro Expansion after the step:\n" & rows.join("\n"))
+    check rows.anyIt("▸" in it and "counter += 3" in it)
+    # The heading's press closes it.
+    if not heading.isNil:
+      let (closed, closedNotes) = srv.request("operation/run", %*{
+        "session": sid, "pane": "macroExpansion",
+        "operation": heading{"operation"}.getStr, "args": heading{"args"}})
+      checkpoint("closed: " & $closed)
+      check closed{"result", "ok"}.getBool
+      discard paneRowsOf(closedNotes, "macroExpansion", rows)
+      check rows.len > 0 and rows[0].startsWith("Toggle Macro Expansion on a macro call")
+    discard srv.request("shutdown")

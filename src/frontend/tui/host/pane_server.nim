@@ -335,6 +335,14 @@ proc wireServices(srv: PaneServer; s: ServerSession) =
       rt.editLowLevelAct(edit, act)
     else:
       s.tui.lowLevelAct(rt, act)
+  # §E15: Toggle Macro Expansion — a replay's; a project session has none.
+  rt.app.toggleMacroExpansion = proc(path: string; line: int):
+      tuple[ok, opened: bool; detail: string] =
+    if s.tui.isNil:
+      (false, false, "Toggle Macro Expansion: this session has no " &
+                     "recording to expand a macro of")
+    else:
+      s.tui.toggleMacroExpansion(rt, path, line)
   let opener = proc(path: string; line, col: int): string =
     # A Problems or Build Output row names a place: the editor goes there.
     s.showRequest = path
@@ -709,6 +717,28 @@ proc testsOf(s: ServerSession): JsonNode =
                       "refresh": controlJson(r.refresh)}
   %*{"session": s.id, "file": file, "controls": controls}
 
+proc placeBesideSource(s: ServerSession; pane: PaneKind): string =
+  ## §E13, §E15: `pane` placed beside the source when the mode's layout does
+  ## not hold it — the terminal splits its own arrangement
+  ## (`runtime.openLowLevelCode`, `showMacroExpansionPane`), which a hosted
+  ## session has no binding for; the server holds the layout, and the editor
+  ## realises the change (`layout/changed`) and opens the pane. "" when it is
+  ## placed, else the layout's reason.
+  let tree = s.currentLayout()
+  if tree.contains(pane):
+    return ""
+  # `apply` leaves the tree as it is and answers with the new one, which
+  # becomes the mode's (the register holds one tree per mode).
+  let placed = tree.apply(cmdSplit(paneEditor, pane, saRow, ssAfter))
+  case placed.kind
+  of loApplied:
+    s.app.modes.layouts[s.app.modes.product] = placed.layout.tree
+    ""
+  of loNoOp:
+    ""
+  of loRefused:
+    $placed.problem.kind
+
 proc publish(srv: PaneServer; s: ServerSession; fullPanes: seq[PaneKind] = @[];
              fullFrameViewer = false;
              onlyPanes: seq[PaneKind] = @[]): seq[JsonNode] =
@@ -719,6 +749,15 @@ proc publish(srv: PaneServer; s: ServerSession; fullPanes: seq[PaneKind] = @[];
   ## The open panes are repainted and compared with what the editor holds —
   ## all of them, or only `onlyPanes` when the caller knows the others cannot
   ## have changed (a resize that moved one pane's viewport).
+  # §E15: an expansion opened (a toggle, or a stop inside one): the Macro
+  # Expansion pane beside the source, once — a user who closes it keeps it
+  # closed until the next expansion opens.
+  if s.rt.macroExpansionWanted:
+    s.rt.macroExpansionWanted = false
+    let refused = s.placeBesideSource(paneMacroExpansion)
+    if refused.len > 0:
+      s.app.notification = "the Macro Expansion pane could not be placed " &
+                           "beside the source (" & refused & ")"
   let product = s.app.modes.product
   let layout = $layoutJson(s.currentLayout())
   if product != s.product or layout != s.layoutSent:
@@ -933,6 +972,13 @@ proc runOperation(srv: PaneServer; s: ServerSession; params: JsonNode): JsonNode
   var isPaneOp = false
   for (op, _) in PaneOperations:
     if op == name: isPaneOp = true
+  # §E15: Toggle Macro Expansion names the call it acts on when a pane's
+  # heading sends it (`args {path, line}`), and acts at the editor's cursor
+  # otherwise.
+  let rawArgs = params{"args"}
+  if name == "editor.toggle-macro-expansion" and not rawArgs.isNil and
+     rawArgs.kind == JObject and rawArgs{"line"}.getInt(0) > 0:
+    isPaneOp = true
   # What the operation says is its answer's `detail`, so the status line is
   # cleared BEFORE it runs. (It was cleared after, which erased every
   # message an operation gave through the status line — "this window runs
@@ -970,21 +1016,11 @@ proc runOperation(srv: PaneServer; s: ServerSession; params: JsonNode): JsonNode
   # change (`layout/changed`) and opens the pane.
   if name in ["view.low-level-code", "view.disassembly",
               "view.generated-c-source"]:
-    let tree = s.currentLayout()
-    if not tree.contains(paneLowLevelCode):
-      # `apply` leaves the tree as it is and answers with the new one, which
-      # becomes the mode's (the register holds one tree per mode).
-      let placed = tree.apply(cmdSplit(paneEditor, paneLowLevelCode, saRow,
-                                       ssAfter))
-      case placed.kind
-      of loApplied:
-        s.app.modes.layouts[s.app.modes.product] = placed.layout.tree
-      of loNoOp:
-        discard
-      of loRefused:
-        return %*{"ok": false, "operation": text, "detail":
-          "the Low Level Code pane could not be placed beside the source (" &
-          $placed.problem.kind & ")"}
+    let refused = s.placeBesideSource(paneLowLevelCode)
+    if refused.len > 0:
+      return %*{"ok": false, "operation": text, "detail":
+        "the Low Level Code pane could not be placed beside the source (" &
+        refused & ")"}
   # A press on the VCS pane's or Test Results' controls is that source's, as
   # in the terminal's loop; anything else the session applies.
   if not s.vcs.applyClick(s.rt, outcome.paneClick) and
@@ -1058,6 +1094,8 @@ proc handleRequest(srv: PaneServer; meth: string; params: JsonNode;
                   $paneTestResults, $paneProblems,
                   # §E13: the Low Level Code listing, opened on demand.
                   $paneLowLevelCode,
+                  # §E15: the open macro expansions, placed when one opens.
+                  $paneMacroExpansion,
                   FrameViewerPane]}}
   of "shutdown":
     srv.shutdownRequested = true

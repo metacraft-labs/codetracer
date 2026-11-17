@@ -97,6 +97,10 @@ proc argsJson(a: PaneOpArgs; operation: string): JsonNode =
      "file-tree.open", "file-tree.toggle-folder",
      "tests.refresh-test":
     result["path"] = %a.path
+  of "editor.toggle-macro-expansion":
+    # §E15: a Macro Expansion heading names the call it closes.
+    result["path"] = %a.path
+    result["line"] = %a.line
   of "tests.open-test":
     result["path"] = %a.path
     if a.text.len > 0:
