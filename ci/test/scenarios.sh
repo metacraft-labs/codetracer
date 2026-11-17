@@ -152,6 +152,31 @@ lint)
 		fi
 		echo "scenarios: rejected as it must be: ${f##*/}: $(echo "${out}" | grep -o 'error\[L[0-9]*\]' | head -1)"
 	done
+	# The desktop binding is TypeScript that Node loads as source when a run
+	# starts: a syntax error in it (8e7d4ce79c8's stray `}`) fails every
+	# desktop scenario at start-up, which the scenario lint above never sees.
+	# Every Playwright binding file must parse; the Nim bindings are compiled
+	# by `build`. The control: the binding with a stray `}` appended must not.
+	parse_ts() {
+		node -e '
+			const src = require("fs").readFileSync(process.argv[1], "utf8");
+			try { require("node:module").stripTypeScriptTypes(src); }
+			catch (e) { console.error(process.argv[1] + ": " + e.message.split("\n")[0]); process.exit(1); }
+		' "$1" 2>&1 | grep -v -e ExperimentalWarning -e 'node --trace-warnings'
+		return "${PIPESTATUS[0]}"
+	}
+	for b in "${S}"/bindings/playwright/*.ts; do
+		parse_ts "${b}" || { echo "scenarios: ${b} does not parse" >&2; exit 1; }
+	done
+	bad="$(mktemp --suffix=.ts)"
+	{ cat "${S}/bindings/playwright/codetracer-binding.ts"; printf '\n}\n'; } > "${bad}"
+	if parse_ts "${bad}" >/dev/null 2>&1; then
+		rm -f "${bad}"
+		echo "scenarios: the binding parse check accepted a binding with a stray '}'" >&2
+		exit 1
+	fi
+	rm -f "${bad}"
+	echo "scenarios: the Playwright bindings parse; a stray '}' is rejected as it must be"
 	;;
 lane)
 	flavour="${2:?usage: scenarios.sh lane <terminal|gpui|electron>}"
