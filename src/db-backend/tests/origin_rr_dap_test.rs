@@ -962,8 +962,12 @@ mod rr {
 
     /// The line of the stop a `ct/complete-move` after `command` reports.
     fn move_line(client: &mut test_harness::DapStdioTestClient, command: &str) -> i64 {
-        let req = client.dap_client_mut().request(command, serde_json::json!({ "threadId": 1 }));
-        client.send_message(&req).unwrap_or_else(|e| panic!("send {command}: {e}"));
+        let req = client
+            .dap_client_mut()
+            .request(command, serde_json::json!({ "threadId": 1 }));
+        client
+            .send_message(&req)
+            .unwrap_or_else(|e| panic!("send {command}: {e}"));
         match client
             .read_until_event_msg("ct/complete-move", Duration::from_secs(300))
             .unwrap_or_else(|e| panic!("{command} reported no stop: {e}"))
@@ -994,9 +998,15 @@ mod rr {
             .expect("set breakpoint at the println");
         for round in 0..2 {
             let entry = move_line(&mut client, "ct/run-to-entry");
-            assert!(entry > 0 && entry < breakpoint_line as i64, "round {round}: run to entry stopped at line {entry}");
+            assert!(
+                entry > 0 && entry < breakpoint_line as i64,
+                "round {round}: run to entry stopped at line {entry}"
+            );
             let stop = move_line(&mut client, "continue");
-            assert_eq!(stop, breakpoint_line as i64, "round {round}: continue stopped at line {stop}");
+            assert_eq!(
+                stop, breakpoint_line as i64,
+                "round {round}: continue stopped at line {stop}"
+            );
         }
     }
 
@@ -1015,12 +1025,18 @@ mod rr {
             .expect("RR DAP launch should succeed");
         for round in 0..2 {
             let entry = move_line(&mut client, "ct/run-to-entry");
-            assert!(entry > 0 && entry < breakpoint_line as i64, "round {round}: run to entry stopped at line {entry}");
+            assert!(
+                entry > 0 && entry < breakpoint_line as i64,
+                "round {round}: run to entry stopped at line {entry}"
+            );
             client
                 .set_breakpoint(&recording.source_path, breakpoint_line)
                 .expect("set breakpoint at the println");
             let stop = move_line(&mut client, "continue");
-            assert_eq!(stop, breakpoint_line as i64, "round {round}: continue stopped at line {stop}");
+            assert_eq!(
+                stop, breakpoint_line as i64,
+                "round {round}: continue stopped at line {stop}"
+            );
         }
     }
 
@@ -1039,8 +1055,16 @@ mod rr {
         } else {
             recording.trace_dir.clone()
         };
-        let packed = Command::new("rr").arg("pack").arg(&rr_dir).output().expect("run rr pack");
-        assert!(packed.status.success(), "rr pack failed: {}", String::from_utf8_lossy(&packed.stderr));
+        let packed = Command::new("rr")
+            .arg("pack")
+            .arg(&rr_dir)
+            .output()
+            .expect("run rr pack");
+        assert!(
+            packed.status.success(),
+            "rr pack failed: {}",
+            String::from_utf8_lossy(&packed.stderr)
+        );
         let breakpoint_line = fixture_line_containing("rust", "simple_trivial_chain", "main.rs", "println!");
         let mut client = test_harness::DapStdioTestClient::start().expect("DAP stdio client should start");
         client
@@ -1048,12 +1072,18 @@ mod rr {
             .expect("RR DAP launch should succeed");
         for round in 0..2 {
             let entry = move_line(&mut client, "ct/run-to-entry");
-            assert!(entry > 0 && entry < breakpoint_line as i64, "round {round}: run to entry stopped at line {entry}");
+            assert!(
+                entry > 0 && entry < breakpoint_line as i64,
+                "round {round}: run to entry stopped at line {entry}"
+            );
             client
                 .set_breakpoint(&recording.source_path, breakpoint_line)
                 .expect("set breakpoint at the println");
             let stop = move_line(&mut client, "continue");
-            assert_eq!(stop, breakpoint_line as i64, "round {round}: continue stopped at line {stop}");
+            assert_eq!(
+                stop, breakpoint_line as i64,
+                "round {round}: continue stopped at line {stop}"
+            );
         }
     }
 
@@ -1084,8 +1114,16 @@ mod rr {
             } else {
                 recording.trace_dir.clone()
             };
-            let packed = Command::new("rr").arg("pack").arg(&rr_dir).output().expect("run rr pack");
-            assert!(packed.status.success(), "rr pack failed: {}", String::from_utf8_lossy(&packed.stderr));
+            let packed = Command::new("rr")
+                .arg("pack")
+                .arg(&rr_dir)
+                .output()
+                .expect("run rr pack");
+            assert!(
+                packed.status.success(),
+                "rr pack failed: {}",
+                String::from_utf8_lossy(&packed.stderr)
+            );
         }
         let breakpoint_line = fixture_line_containing("rust", "simple_trivial_chain", "main.rs", "println!");
         let mut client = start_client_for_a_whole_chain();
@@ -1104,7 +1142,11 @@ mod rr {
         let chain = send_rr_origin_chain_request(&mut client, "c", -1, DEFAULT_ORIGIN_MAX_HOPS);
         assert_eq!(
             chain.hops.iter().map(|hop| hop.location.line).collect::<Vec<_>>(),
-            vec![line_of("let c: i32 = b"), line_of("let b: i32 = a"), line_of("let a: i32 = 10")],
+            vec![
+                line_of("let c: i32 = b"),
+                line_of("let b: i32 = a"),
+                line_of("let a: i32 = 10")
+            ],
             "the chain walks c <- b <- a: terminator={:?} {:?}",
             chain.terminator.kind,
             chain.terminator.expression
@@ -1114,7 +1156,9 @@ mod rr {
     /// Send a desktop request and wait for its response (its body).
     fn desktop_request(client: &mut test_harness::DapStdioTestClient, command: &str, args: serde_json::Value) {
         let req = client.dap_client_mut().request(command, args);
-        client.send_message(&req).unwrap_or_else(|e| panic!("send {command}: {e}"));
+        client
+            .send_message(&req)
+            .unwrap_or_else(|e| panic!("send {command}: {e}"));
         client
             .read_until_response_msg(command, Duration::from_secs(300))
             .unwrap_or_else(|e| panic!("{command}: no response: {e}"));
@@ -1135,9 +1179,7 @@ mod rr {
             .initialize_and_launch_rr(&recording, &ct_native_replay)
             .expect("RR DAP launch should succeed");
         let entry = move_line(&mut client, "ct/run-to-entry");
-        let locals = |lang: &str, ticks: i64| {
-            serde_json::json!({"countBudget":3000,"depthLimit":7,"lang":lang,"minCountLimit":50,"rrTicks":ticks,"watchExpressions":[]})
-        };
+        let locals = |lang: &str, ticks: i64| serde_json::json!({"countBudget":3000,"depthLimit":7,"lang":lang,"minCountLimit":50,"rrTicks":ticks,"watchExpressions":[]});
         desktop_request(&mut client, "ct/load-locals", locals("c", 0));
         desktop_request(&mut client, "ct/load-locals", locals("rust", 0));
         let again = move_line(&mut client, "ct/run-to-entry");
@@ -1177,8 +1219,10 @@ mod rr {
             .read_until_response_msg("ct/originChain", Duration::from_secs(300))
             .expect("read ct/originChain response");
         match response {
-            DapMessage::Response(response) if response.success => Ok(serde_json::from_value(response.body)
-                .unwrap_or_else(|e| panic!("failed to decode OriginChain: {e}"))),
+            DapMessage::Response(response) if response.success => {
+                Ok(serde_json::from_value(response.body)
+                    .unwrap_or_else(|e| panic!("failed to decode OriginChain: {e}")))
+            }
             DapMessage::Response(response) => Err((
                 response.body["originErrorCode"].as_u64().unwrap_or(0),
                 response.message.unwrap_or_default(),
@@ -1281,7 +1325,10 @@ mod rr {
                     chain.truncated && chain.terminator.kind == TerminatorKind::OutOfBudget,
                     "request {page} is cut off by the time limit: {chain:?}"
                 );
-                assert!(chain.continuation_token.is_some(), "request {page} can be continued: {chain:?}");
+                assert!(
+                    chain.continuation_token.is_some(),
+                    "request {page} can be continued: {chain:?}"
+                );
             }
             if page == 0 {
                 first_token = chain.continuation_token.clone();

@@ -192,9 +192,13 @@ fn origin_mcr_cut_off_chain_continues_from_where_it_stopped() {
         "ct-mcr was not found: `just build-ct-mcr` in codetracer-native-recorder, or set CODETRACER_CT_MCR_CMD"
     );
     let source = fixture();
-    let recording =
-        test_harness::TestRecording::create_mcr(&source, test_harness::Language::Rust, "mcr-continued", &ct_native_replay)
-            .expect("MCR recording failed");
+    let recording = test_harness::TestRecording::create_mcr(
+        &source,
+        test_harness::Language::Rust,
+        "mcr-continued",
+        &ct_native_replay,
+    )
+    .expect("MCR recording failed");
     let line = test_harness::find_line_containing(&source, "println!(\"{}\", c)") as u32;
 
     let mut client = test_harness::DapStdioTestClient::start_with_env(&[

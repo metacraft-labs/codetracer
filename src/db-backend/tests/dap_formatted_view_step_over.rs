@@ -547,6 +547,13 @@ fn formatted_view_stop_names_the_view_as_its_high_level_source() {
         serde_json::json!(path),
         "the stop's high-level path is the formatted view's too: {location}"
     );
-    assert_eq!(location["highLevelLine"], location["line"], "at the view's line: {location}");
-    assert_eq!(location["line"], serde_json::json!(FMT_LINE_S2), "one formatted line on");
+    assert_eq!(
+        location["highLevelLine"], location["line"],
+        "at the view's line: {location}"
+    );
+    assert_eq!(
+        location["line"],
+        serde_json::json!(FMT_LINE_S2),
+        "one formatted line on"
+    );
 }

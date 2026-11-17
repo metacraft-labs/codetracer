@@ -904,7 +904,9 @@ fn walk_from(
             Some(replay_resume) => Some(build_continuation_token(
                 &query_variable,
                 initial_query_step,
-                hops.last().map(|hop| hop.location.rr_ticks.0).unwrap_or(initial_query_step),
+                hops.last()
+                    .map(|hop| hop.location.rr_ticks.0)
+                    .unwrap_or(initial_query_step),
                 &current_var_name,
                 hops_before + hops.len() as u32,
                 effective_max_hops,
@@ -1183,7 +1185,9 @@ fn remember_continuation_point(
     let raw = match session.stable.dispatch_replay_query(ReplayQuery::SaveReplayPosition) {
         Ok(raw) => raw,
         Err(e) => {
-            warn!("origin_chain: the worker cannot remember where the cut-off walk stopped, so it cannot be continued: {e}");
+            warn!(
+                "origin_chain: the worker cannot remember where the cut-off walk stopped, so it cannot be continued: {e}"
+            );
             return None;
         }
     };

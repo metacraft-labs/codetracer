@@ -128,10 +128,14 @@ fn a_motion_of_the_users_replay_is_waited_for_and_nothing_else_is() {
 
     // A motion on the flow side replay: the timeout ends it too.
     let temp = tempfile::tempdir().expect("create temp dir");
-    let (first, _) = two_queries(temp.path(), "flow", ReplayQuery::Step {
-        action: db_backend::task::Action::Next,
-        forward: true,
-    });
+    let (first, _) = two_queries(
+        temp.path(),
+        "flow",
+        ReplayQuery::Step {
+            action: db_backend::task::Action::Next,
+            forward: true,
+        },
+    );
     assert!(
         first.as_ref().is_err_and(|e| e.contains("timed out")),
         "a query of the flow replay must end at the read timeout however busy its worker is, got {first:?}"

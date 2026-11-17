@@ -3632,11 +3632,9 @@ impl MaterializedReplaySession {
                 // its paths are read under the session's source rule: with
                 // host reads off, only the recording's own copy, never the
                 // named host file.
-                crate::origin_query::check_continuation_token_integrity(
-                    &token,
-                    &patterns.fingerprint().hex,
-                    |path| expr_loader.token_digest_bytes(path),
-                )?;
+                crate::origin_query::check_continuation_token_integrity(&token, &patterns.fingerprint().hex, |path| {
+                    expr_loader.token_digest_bytes(path)
+                })?;
                 (
                     token.current_var_name,
                     StepId(token.current_step),

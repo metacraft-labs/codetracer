@@ -368,10 +368,7 @@ impl WorkerProgress {
 
 /// Whether a process in `now` has more CPU time than in `before`, or was not
 /// there before.
-fn used_cpu_since(
-    before: &std::collections::HashMap<u32, u64>,
-    now: &std::collections::HashMap<u32, u64>,
-) -> bool {
+fn used_cpu_since(before: &std::collections::HashMap<u32, u64>, now: &std::collections::HashMap<u32, u64>) -> bool {
     now.iter()
         .any(|(pid, ticks)| before.get(pid).is_none_or(|earlier| ticks > earlier))
 }
@@ -2171,11 +2168,7 @@ while True:
             panic!("python3 is required (the codetracer dev shell has it)");
         };
         let mut first = String::new();
-        std::io::BufRead::read_line(
-            &mut std::io::BufReader::new(tracer.stdout.take().unwrap()),
-            &mut first,
-        )
-        .unwrap();
+        std::io::BufRead::read_line(&mut std::io::BufReader::new(tracer.stdout.take().unwrap()), &mut first).unwrap();
         let orphan: u32 = first.trim().parse().unwrap_or_else(|_| panic!("tracer said {first:?}"));
         let cleanup = |tracer: &mut std::process::Child| {
             unsafe { libc::kill(orphan as i32, libc::SIGKILL) };
@@ -2207,7 +2200,10 @@ while True:
             !only_children.contains(&orphan),
             "the busy process must not be a child of the worker, or this tests nothing"
         );
-        assert!(tree.contains_key(&orphan), "the traced orphan {orphan} is part of the worker: {tree:?}");
+        assert!(
+            tree.contains_key(&orphan),
+            "the traced orphan {orphan} is part of the worker: {tree:?}"
+        );
         assert!(working, "a worker whose traced process burns CPU is working");
     }
 
@@ -2218,7 +2214,10 @@ while True:
     fn a_process_that_ends_does_not_hide_progress() {
         let before: std::collections::HashMap<u32, u64> = [(1, 100), (2, 5000)].into_iter().collect();
         let moved: std::collections::HashMap<u32, u64> = [(1, 101)].into_iter().collect();
-        assert!(used_cpu_since(&before, &moved), "pid 1 used CPU although the total fell from 5100 to 101");
+        assert!(
+            used_cpu_since(&before, &moved),
+            "pid 1 used CPU although the total fell from 5100 to 101"
+        );
         let still: std::collections::HashMap<u32, u64> = [(1, 100)].into_iter().collect();
         assert!(!used_cpu_since(&before, &still), "nothing moved");
         let new_process: std::collections::HashMap<u32, u64> = [(1, 100), (3, 0)].into_iter().collect();
