@@ -16,6 +16,10 @@
 ##     click does not run it again;
 ##   * an inline value (`elementKind == value`): its plain press runs what it
 ##     carries, `Ctrl+Click` the pointer keymap's `scratchpad.add-value` on it;
+##   * an element carrying its operation for its double click
+##     (`DoubleClick:<operation>`, the unified diff's band label) runs it on
+##     its `dblclick` and not on either of the clicks the browser delivers
+##     before it;
 ##   * the mouse's side buttons are pointer rows (`BackClick`,
 ##     `ForwardClick` → `navigation.back` / `navigation.forward`);
 ##   * a cut table cell's `…` is named by the table panes' own hit test and
@@ -59,6 +63,9 @@ proc query(root: JsObject; selector: cstring): JsObject {.importjs: "#.querySele
 proc click(el: JsObject; ctrl = false) {.importjs: """
   #.dispatchEvent(new window.MouseEvent('click', { bubbles: true,
     cancelable: true, button: 0, ctrlKey: # }))""".}
+proc dblClick(el: JsObject) {.importjs: """
+  #.dispatchEvent(new window.MouseEvent('dblclick', { bubbles: true,
+    cancelable: true, button: 0, detail: 2 }))""".}
 proc mouseDown(el: JsObject; button = 0; x = 0) {.importjs: """
   #.dispatchEvent(new window.MouseEvent('mousedown', { bubbles: true,
     cancelable: true, button: #, clientX: # }))""".}
@@ -95,6 +102,7 @@ let pane = newEl(cstring"""<div data-scope-kind="pane" data-scope-id="calltrace"
   <span class="bound">bound</span>
   <div class="zone"><span class="down">down</span></div>
   <span class="value">42</span>
+  <span class="twice">12 hidden lines</span>
 </div>""")
 let popup = newEl(cstring"""<div class="popup"><span class="loose">x</span></div>""")
 let editor = newEl(cstring"""<div data-scope-kind="pane" data-scope-id="editor">
@@ -108,6 +116,8 @@ bindElementOperation(pane.query(cstring".bound"), "test.bound",
   proc(p: PressInfo) = runs.add("bound" & (if p.ctrl: "+ctrl" else: "")))
 bindPressOperation(pane.query(cstring".down"), "test.down",
   proc(p: PressInfo) = runs.add "down")
+bindElementOperation(pane.query(cstring".twice"), "test.twice",
+  (proc(p: PressInfo) = runs.add "twice"), gesture = "DoubleClick")
 bindElementOperation(popup.query(cstring".loose"), "test.loose",
   proc(p: PressInfo) = runs.add "loose")
 let chip = editor.query(cstring".chip")
@@ -128,6 +138,7 @@ suite "an element that carries its operation is pressed through the router":
     pane.query(cstring".bound").click()
     pane.query(cstring".down").mouseDown()
     popup.query(cstring".loose").click()
+    pane.query(cstring".twice").dblClick()
     pane.mouseDown(button = 3)
     ck runs.len == 0
 
@@ -152,6 +163,18 @@ suite "an element that carries its operation is pressed through the router":
     ck heard.n.to(int) == 0
     pane.query(cstring".down").click()
     ck runs == @["down"]
+
+  test "a double click's reference runs on the double click only":
+    runs = @[]
+    let twice = pane.query(cstring".twice")
+    ck $twice.getAttribute(cstring(OperationAttribute)).to(cstring) ==
+       "DoubleClick:test.twice"
+    # The browser's two clicks, then its `dblclick`.
+    twice.click()
+    twice.click()
+    ck runs.len == 0
+    twice.dblClick()
+    ck runs == @["twice"]
 
   test "an inline value: its press is its own, Ctrl+Click the scratchpad's":
     runs = @[]
@@ -184,13 +207,16 @@ suite "an element that carries its operation is pressed through the router":
         "when": "paneKind == editor && elementKind == value" },
       { "key": "backclick", "command": "debugger.continue" },
       { "key": "click", "command": "debugger.continue",
-        "when": "paneKind == eventLog && elementKind == value" } ]"""))
+        "when": "paneKind == eventLog && elementKind == value" },
+      { "key": "doubleclick", "command": "debugger.continue",
+        "when": "paneKind == calltrace && elementKind == button" } ]"""))
     ck router.errors.len == 0
     routeWith(router)
     runs = @[]
     pane.query(cstring".bound").click()
     pane.query(cstring".down").mouseDown()
     chip.click()
+    pane.query(cstring".twice").dblClick()
     pane.mouseDown(button = 3)
     tablePaneEl.query(cstring"[data-ct-cell]").mouseDown(x = 0)
     ck runs.len == 0

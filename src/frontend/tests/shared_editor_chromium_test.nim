@@ -19,6 +19,14 @@
 ## desktop's operations — is graded through the desktop
 ## (`src/tests/gui/tests/shared-editor/`).
 ##
+## THE PRESSES ON A UNIFIED DIFF'S BAND are routed (Input-Routing-And-Keymaps
+## §5.1): the unfold control, the label and the handles carry their
+## operations, and the window's one pointer listener (`dom_pointer`) runs
+## them. The diff cases install that listener over the shipped CUA base
+## keymap, as the desktop's `key_router` does, so every band press below
+## goes through the router; a user's row taking the press over is the
+## control that it does.
+##
 ## COUNTED ASSERTIONS (Verification-Harness-Traps §4c): `ck` tallies, each
 ## case prints `[OK]` / `[FAILED]`, and the tally is compared with a number
 ## written from a run.
@@ -28,7 +36,10 @@ import std/[asyncjs, jsffi, strutils, json]
 import ../ui/[shared_editor, shared_editor_facade, shared_diff_editor, editor_surface]
 from ../types import Config
 import ../viewmodel/editing_core
-import ../viewmodel/keymap/base_keymaps
+import ../viewmodel/keymap/[base_keymaps, context_keys, keymap_router, user_keymap]
+import ../viewmodel/input/[dom_pointer, element_press]
+import ../viewmodel/viewmodels/product_mode
+from ../../common/key_names import kpNative
 import ../tui/app/syntax/token_class
 import ../tui/app/theme/editor_theme
 import ../styles/generated/design_tokens
@@ -127,7 +138,7 @@ proc endCase(name: string) =
 
 const
   Source = "def main():\n    x = 1\n    if x:\n        y = 2\n\n    return x\nprint(main())\n"
-  ExpectedChecks = 140
+  ExpectedChecks = 151
     ## Written from a run. See the end of `main`.
 
 proc fresh(text = Source; readOnly = false; model = bkCua;
@@ -561,6 +572,19 @@ proc caseUnifiedDiff() {.async.} =
   ck not isNull(qs(".modified-in-monaco-diff-editor .view-overlays .ct-diff-line-context"))
   endCase("the unified diff: removed lines as zones, added lines marked, decorations per side")
 
+const DesktopDelivery = KeyDelivery(frontEnd: feDesktop, platform: pkLinux,
+                                    keyProtocol: kpNative)
+
+proc routePresses(user = "") =
+  ## The window's pointer listener over the shipped CUA base keymap and, when
+  ## given, a user's `keybindings.json` rows: the route a press on a band's
+  ## control takes on the desktop (`key_router.installKeyRouter`).
+  let router = if user.len == 0: initKeymapRouter(bkCua, DesktopDelivery)
+               else: initKeymapRouter(bkCua, DesktopDelivery,
+                                      user = parseUserKeymap(user))
+  installDomPointerRouting(routerResolver(router,
+    SessionFacts(product: pmDebug, replayLoaded: true)))
+
 proc gutterRow(side: cstring; n: int): JsObject =
   qs(cstring("." & $side & "-in-monaco-diff-editor .margin-view-overlays > div[data-line=\"" &
              $n & "\"]"))
@@ -573,6 +597,7 @@ proc caseUnifiedDiffRegions() {.async.} =
   ## word-level marks, coloured removed lines and the old revision aligned
   ## beside the new one.
   beginCase()
+  routePresses()
   setHtml("""<div id="host" style="width: 800px; height: 600px; position: relative"></div>""")
   let all = sharedEditors
   for e in all: e.dispose()
@@ -769,6 +794,129 @@ proc caseUnifiedDiffRegions() {.async.} =
      "the old revision scrolls with the new one"
   endCase("the unified diff: collapsed regions and their handles, word marks, coloured removed lines, the old revision aligned")
 
+proc centre(e: JsObject): tuple[x, y: float] =
+  let r = rectOf(e)
+  (num(r.left) + num(r.width) / 2, num(r.top) + num(r.height) / 2)
+
+proc bandsOf(root: JsObject): JsObject =
+  qsa(root, ".diff-hidden-lines-widget > .diff-hidden-lines")
+
+proc caseUnifiedDiffBandPresses() {.async.} =
+  ## Every press on a collapsed region's band, as a user makes it with the
+  ## mouse (trusted input, through the browser's own pipeline) and through
+  ## the router (`routePresses`), inside the VCS pane that shows the diff:
+  ## the label unfolds on a double click and not on a single one, the
+  ## unfold control on its click, a handle's press reveals
+  ## `revealLineCount` lines and its drag one line per line height, without
+  ## the drag's own click revealing more. Then a user's rows for the label's
+  ## double click and the control's click take both presses over, which is
+  ## what tells a routed press from a handler the view holds itself.
+  beginCase()
+  routePresses()
+  # The desktop loads the codicon font, which gives the unfold control's
+  # icon its box; this page does not, so a rule gives the icon the size the
+  # font would, or the control would have no area to press.
+  setHtml("""<style>.codicon { display: inline-block; width: 16px; height: 16px; }</style>
+    <div data-scope-kind="pane" data-scope-id="vcs">
+    <div id="host" style="width: 800px; height: 600px; position: relative"></div></div>""")
+  let all = sharedEditors
+  for e in all: e.dispose()
+  var before, after: seq[string] = @[]
+  for i in 1 .. 60:
+    before.add "v" & $i & " = " & $i
+  after = before
+  after[19] = "v20 = 2000"
+  after[44] = "v45 = 4500"
+  let opts = js{hideUnchangedRegions: js{enabled: true, contextLineCount: 3,
+                                         minimumLineCount: 3, revealLineCount: 4},
+                glyphMargin: false, folding: false, lineDecorationsWidth: 0}
+  proc build(): JsObject =
+    result = newSharedDiffEditor(qs("#host"), opts, 14, "monospace", true, "python")
+    let models = jsNew()
+    models["original"] = textModel(cstring(before.join("\n")))
+    models["modified"] = textModel(cstring(after.join("\n")))
+    discard result.setModel(models)
+  var diff = build()
+  await settle()
+  await settle()
+  let modRoot = qs(".modified-in-monaco-diff-editor")
+  proc region(i: int): JsObject = diff["_diffModel"].get()["unchangedRegions"].get()[i]
+  # Lines 1-16, 24-41 and 49-60 collapse.
+  ck num(bandsOf(modRoot).length) == 3, "three collapsed regions (" &
+    $num(bandsOf(modRoot).length) & ")"
+  ck num(region(1)["lineCount"]) == 18
+  # The last region's upper handle (pressed first, while the band is on
+  # screen): its press reveals four lines…
+  let lastTop = bandsOf(modRoot)[2].querySelector(cstring":scope > .top")
+  var (hx, hy) = centre(lastTop)
+  await ctMouse("move", hx, hy, "left", 1)
+  await ctMouse("down", hx, hy, "left", 1)
+  await ctMouse("up", hx, hy, "left", 1)
+  await settle()
+  ck num(region(2)["visibleLineCountTop"].get()) == 4,
+     "a press on the upper handle reveals revealLineCount lines (" &
+     $num(region(2)["visibleLineCountTop"].get()) & ")"
+  # …and a drag of two line heights two more, its click nothing.
+  (hx, hy) = centre(bandsOf(modRoot)[2].querySelector(cstring":scope > .top"))
+  let lh = float(sharedEditors[^1].lineHeight)
+  await ctMouse("move", hx, hy, "left", 1)
+  await ctMouse("down", hx, hy, "left", 1)
+  await ctMouse("move", hx, hy + lh, "left", 1)
+  await ctMouse("move", hx, hy + lh * 2.0, "left", 1)
+  await ctMouse("up", hx, hy + lh * 2.0, "left", 1)
+  await settle()
+  ck num(region(2)["visibleLineCountTop"].get()) == 6,
+     "a drag of two line heights reveals two lines, and its click no more (" &
+     $num(region(2)["visibleLineCountTop"].get()) & ")"
+  # A single press on the label does nothing: its reference is its double
+  # click's.
+  let label1 = bandsOf(modRoot)[1].querySelector(cstring".center span[title]")
+  let (lx, ly) = centre(label1)
+  await ctMouse("click", lx, ly, "left", 1)
+  await settle()
+  ck num(bandsOf(modRoot).length) == 3, "a single press on the label unfolds nothing"
+  # A double click on the label shows the whole region, as Monaco's does.
+  await ctMouse("click", lx, ly, "left", 2)
+  await settle()
+  ck num(bandsOf(modRoot).length) == 2, "a double click on the label unfolds its region (" &
+    $num(bandsOf(modRoot).length) & " bands)"
+  ck not isNull(qs(".modified-in-monaco-diff-editor .view-line[data-line=\"30\"]")),
+     "line 30, in the middle region, is drawn again"
+  # The unfold control, pressed with the mouse, shows the first region.
+  let unfold0 = bandsOf(modRoot)[0].querySelector(cstring".center a[role=button]")
+  let (ux, uy) = centre(unfold0)
+  await ctMouse("move", ux, uy, "left", 1)
+  await ctMouse("down", ux, uy, "left", 1)
+  await ctMouse("up", ux, uy, "left", 1)
+  await settle()
+  ck num(bandsOf(modRoot).length) == 1, "the unfold control unfolds its region"
+  ck not isNull(qs(".modified-in-monaco-diff-editor .view-line[data-line=\"1\"]")),
+     "line 1 is drawn again"
+  # CONTROL: a user's rows for the presses take them over (`debugger.continue`
+  # has no procedure on these elements, so nothing runs): the label and the
+  # control are pressed through the router, not by handlers of their own.
+  routePresses("""[
+    { "key": "doubleclick", "command": "debugger.continue",
+      "when": "paneKind == vcs && elementKind == button" },
+    { "key": "click", "command": "debugger.continue",
+      "when": "paneKind == vcs && elementKind == button" } ]""")
+  diff.dispose()
+  diff = build()
+  await settle()
+  await settle()
+  let modRoot2 = qs(".modified-in-monaco-diff-editor")
+  ck num(bandsOf(modRoot2).length) == 3
+  let (mx, my) = centre(bandsOf(modRoot2)[1].querySelector(cstring".center span[title]"))
+  await ctMouse("click", mx, my, "left", 2)
+  let (vx, vy) = centre(bandsOf(modRoot2)[0].querySelector(cstring".center a[role=button]"))
+  await ctMouse("click", vx, vy, "left", 1)
+  await settle()
+  ck num(bandsOf(modRoot2).length) == 3,
+     "a user's rows take the label's double click and the control's click (" &
+     $num(bandsOf(modRoot2).length) & " bands)"
+  routePresses()
+  endCase("the unified diff's band: its presses are routed, as Monaco's act")
+
 proc caseNimColours() {.async.} =
   ## Nim, which Monaco colours with the desktop's own Monarch definition
   ## (`languages/nimLanguage.js`), is coloured with the same definition here:
@@ -940,6 +1088,7 @@ proc main() {.async.} =
   await guarded(caseFindAndReplace, "caseFindAndReplace")
   await guarded(caseUnifiedDiff, "caseUnifiedDiff")
   await guarded(caseUnifiedDiffRegions, "caseUnifiedDiffRegions")
+  await guarded(caseUnifiedDiffBandPresses, "caseUnifiedDiffBandPresses")
   await guarded(caseNimColours, "caseNimColours")
   await guarded(caseEditorSurfaces, "caseEditorSurfaces")
   await guarded(caseBracketsAndWheel, "caseBracketsAndWheel")

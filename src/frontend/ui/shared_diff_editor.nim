@@ -43,6 +43,7 @@ import std/[jsffi, strutils]
 import ./shared_editor
 import ./shared_editor_facade
 import ../view_vocabulary/[editor_dom_frame, diff_regions]
+import ../viewmodel/input/element_operations
 from ../lib/monaco_appearance import CodeTracerDarkDiffVariables,
   CodeTracerWhiteDiffVariables
 
@@ -146,6 +147,10 @@ type
     diffListeners: seq[JsObject]
     aligning: bool
     redrawQueued: bool
+    handleDragged: bool
+      ## The last press on a band's handle moved it (`dragHandle`): its
+      ## click, which the browser still delivers when the press ends on the
+      ## handle, is the drag's end and reveals nothing more.
     stripWidth: int
     facade*: JsObject
 
@@ -216,11 +221,21 @@ proc keepBoundaryAt(d: SharedDiffEditor; index: int;
   if after != before:
     d.modified.setScroll(d.modified.scrollTop + (after - before), d.modified.scrollLeft)
 
+proc showMoreAt(d: SharedDiffEditor; index: int; top: bool) =
+  ## A press on a band's handle that did not move: Monaco reveals
+  ## `revealLineCount` lines at that end.
+  let n = d.revealLineCount
+  if top: d.regionAction(index, proc(rr: var UnchangedRegion) = rr.showMoreAbove(n))
+  else: d.keepBoundaryAt(index, proc(rr: var UnchangedRegion) = rr.showMoreBelow(n))
+
 proc dragHandle(d: SharedDiffEditor; index: int; top: bool; handle, ev: JsObject) =
-  ## Monaco's boundary drag: one line per line height, a press that does not
-  ## move reveals `revealLineCount` lines.
+  ## Monaco's boundary drag (Input-Routing-And-Keymaps.md §5.2, a gesture
+  ## whose machine owns the rest): one line per line height. A press that
+  ## does not move is the handle's click, which is routed (`showMoreAt`
+  ## through `diff.show-more-above` / `diff.show-more-below`, `bandNode`).
   if not isNilOrUndef(ev["button"]) and int(jsNum(ev["button"])) != 0: return
   if index < 0 or index >= d.regions.len: return
+  d.handleDragged = false
   discard ev.preventDefault()
   handle.toggleClass("dragging", true)
   let startY = jsNum(ev["clientY"])
@@ -243,12 +258,21 @@ proc dragHandle(d: SharedDiffEditor; index: int; top: bool; handle, ev: JsObject
     doc.removeListener("mousemove", onMove)
     doc.removeListener("mouseup", onUp)
     handle.toggleClass("dragging", false)
-    if not moved:
-      let n = d.revealLineCount
-      if top: d.regionAction(index, proc(rr: var UnchangedRegion) = rr.showMoreAbove(n))
-      else: d.keepBoundaryAt(index, proc(rr: var UnchangedRegion) = rr.showMoreBelow(n))
+    d.handleDragged = moved
   doc.addListener("mousemove", onMove)
   doc.addListener("mouseup", onUp)
+
+proc bindReveal(d: SharedDiffEditor; handle: JsObject; index: int; top: bool) =
+  ## A band handle's click: `diff.show-more-above` / `diff.show-more-below`,
+  ## performed on this region. The click that ends a drag reveals nothing
+  ## more (`handleDragged`). A proc of its own so each handle's closure
+  ## sees its own end.
+  let operation = if top: "diff.show-more-above" else: "diff.show-more-below"
+  bindElementOperation(handle, operation, proc(p: PressInfo) =
+    if d.handleDragged:
+      d.handleDragged = false
+    else:
+      d.showMoreAt(index, top))
 
 proc bandNode(d: SharedDiffEditor; index: int):
     tuple[node, top, bottom, label: JsObject] =
@@ -278,8 +302,13 @@ proc bandNode(d: SharedDiffEditor; index: int):
   icon.setAttr("class", "codicon codicon-unfold")
   discard unfold.appendChild(icon)
   let regionIndex = index
-  unfold.addListener("click", proc(e: JsObject) =
-    d.regionAction(regionIndex, proc(r: var UnchangedRegion) = r.showAll()))
+  # The band's presses are routed (Input-Routing-And-Keymaps.md §5.1): each
+  # control carries its operation and the procedure that performs it on this
+  # region (`bindElementOperation`), so a user's pointer row for the press
+  # takes it, and the view holds no press handler of its own.
+  proc unfoldRegion(p: PressInfo) =
+    d.regionAction(regionIndex, proc(r: var UnchangedRegion) = r.showAll())
+  bindElementOperation(unfold, "diff.show-unchanged-region", unfoldRegion)
   discard first.appendChild(unfold)
   let others = createEl("div")
   others.setStyle("display", "flex")
@@ -287,10 +316,10 @@ proc bandNode(d: SharedDiffEditor; index: int):
   others.setStyle("align-items", "center")
   let label = createEl("span")
   label.setAttr("title", "Double click to unfold")
-  label.addListener("dblclick", proc(e: JsObject) =
-    if not isNilOrUndef(e["button"]) and int(jsNum(e["button"])) != 0: return
-    discard e.preventDefault()
-    d.regionAction(regionIndex, proc(r: var UnchangedRegion) = r.showAll()))
+  # Monaco's label unfolds on a double click, and a single press on it does
+  # nothing: it carries the operation for its double click only.
+  bindElementOperation(label, "diff.show-unchanged-region", unfoldRegion,
+                       gesture = "DoubleClick")
   discard others.appendChild(label)
   discard center.appendChild(first)
   discard center.appendChild(others)
@@ -298,10 +327,15 @@ proc bandNode(d: SharedDiffEditor; index: int):
   bottom.setAttr("class", "bottom")
   bottom.setAttr("title", "Click or drag to show more below")
   bottom.setAttr("role", "button")
-  top.addListener("mousedown", proc(e: JsObject) =
+  # A handle is two inputs, as Monaco's: its press begins the boundary drag
+  # (a §5.2 gesture, `dragHandle`), and its click, a press that did not
+  # move, carries the reveal at that end.
+  top.addListener("mousedown", proc(e: JsObject) =  # ir1-gate: gesture (the boundary drag)
     d.dragHandle(regionIndex, true, top, e))
-  bottom.addListener("mousedown", proc(e: JsObject) =
+  bottom.addListener("mousedown", proc(e: JsObject) =  # ir1-gate: gesture (the boundary drag)
     d.dragHandle(regionIndex, false, bottom, e))
+  d.bindReveal(top, regionIndex, true)
+  d.bindReveal(bottom, regionIndex, false)
   discard lines.appendChild(top)
   discard lines.appendChild(center)
   discard lines.appendChild(bottom)

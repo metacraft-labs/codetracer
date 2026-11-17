@@ -115,15 +115,20 @@ when defined(js):
         false)
 
   proc bindElementOperation*(element: JsObject; operation: string;
-                             run: ElementRun; carried = true; onDown = false) =
+                             run: ElementRun; carried = true; onDown = false;
+                             gesture = "Click") =
     ## `element` carries `operation` (when `carried`: its plain press runs
     ## it) and `run` is the procedure that performs `operation` on it.
     ## `onDown`: the element is pressed on the press, not on its click
     ## (`dom_pointer.PressDownAttribute`: an element inside Monaco).
+    ## `gesture`: the gesture the carried reference is for, when it is not
+    ## the primary press (`DoubleClick`: the element's double click runs
+    ## `operation` and its single press runs nothing, `carriedReference`).
     if element.isNil or element.isUndefined:
       return
     if carried:
-      jsSetAttribute(element, cstring(OperationAttribute), cstring(operation))
+      jsSetAttribute(element, cstring(OperationAttribute),
+                     cstring(carriedReference(gesture, operation)))
     if onDown:
       jsSetAttribute(element, cstring(PressDownAttribute), cstring"down")
     runsOf(element, true)[cstring(operation)] = toJs(run)
