@@ -219,11 +219,9 @@ proc identity(path: string): string =
   let info = getFileInfo(path)
   $info.size & "@" & $info.lastWriteTime.toUnix
 
-proc nimForkRecording*(): NativeRecording =
-  ## The `ct record` recording of `nim_flow_test.nim`, recorded now unless
-  ## this checkout's cache holds one for the same program and tools.
-  let source = repoRoot() / "src" / "db-backend" / "test-programs" / "nim" /
-               "nim_flow_test.nim"
+proc ctRecordingOfNim(source, fixtureName: string): NativeRecording =
+  ## The `ct record` recording of the Nim program `source`, recorded now
+  ## unless this checkout's cache holds one for the same program and tools.
   result.sourcePath = source
   let ct = ctBinary()
   let mcr = ctMcrBinary()
@@ -255,7 +253,7 @@ proc nimForkRecording*(): NativeRecording =
   # recording's GEID page", measured 2026-11-13). A user's program is not
   # compiled under CodeTracer's own configuration, so the fixture's is not.
   let dir = getTempDir() / "codetracer-tui-fixtures" /
-            NimForkFixtureName & "-" & key
+            fixtureName & "-" & key
   let trace = dir / "trace"
   let program = dir / "src" / source.extractFilename
   result.sourcePath = program
@@ -278,3 +276,19 @@ proc nimForkRecording*(): NativeRecording =
       "and nimcache/ in " & trace & ":\n" & output)
   result.ok = true
   result.tracePath = trace
+
+proc nimForkRecording*(): NativeRecording =
+  ## The `ct record` recording of `nim_flow_test.nim`.
+  ctRecordingOfNim(repoRoot() / "src" / "db-backend" / "test-programs" /
+                   "nim" / "nim_flow_test.nim", NimForkFixtureName)
+
+const NimMacroFixtureName* = "nim_macro_steps"
+
+proc nimMacroRecording*(): NativeRecording =
+  ## Editor-Hosted-Front-Ends §E15: the `ct record` recording of
+  ## `test-programs/nim_macro_steps/main.nim` — a macro call (`addTwice`) on
+  ## line 17 whose expansion is `expanded.nim` lines 1–4, and a template on
+  ## line 18. Its `macro_sourcemap_main.json` and `nimcache/expanded.nim` are
+  ## in the trace folder, where the replay and the source provider read them.
+  ctRecordingOfNim(repoRoot() / "test-programs" / "nim_macro_steps" /
+                   "main.nim", NimMacroFixtureName)

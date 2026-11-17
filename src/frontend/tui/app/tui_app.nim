@@ -68,6 +68,7 @@ import ./views/agent_activity_pane
 import ./views/problems_pane
 import ./views/requests_pane
 import ./views/low_level_code_pane
+import ./views/macro_expansion_pane   # Editor-Hosted-Front-Ends §E15
 import ./views/verification_pane   # PLAT-63
 import ./views/constraints_pane
 import ./views/shell_session_pane   # PLAT-61
@@ -312,6 +313,10 @@ type
       ## `AgentActivityVM` through the shared feed; its `scroll` is the
       ## pane's own reading position.
     lowLevel*: LowLevelPaneModel
+    macroExpansion*: MacroExpansionPaneModel
+      ## Editor-Hosted-Front-Ends §E15. THE MACRO EXPANSION pane's model, as a
+      ## value, filled by the host (`tui_session.refreshMacroExpansion`) from
+      ## the session's `MacroExpansionVM`; its `scrollTop` is the pane's own.
     pixelHistory*: PixelHistoryPaneModel
     shaderDebug*: ShaderDebugPaneModel
       ## PLAT-59: the Pixel History and Shader Debug panes, as values
@@ -424,6 +429,13 @@ type
       ## (`tui_session.visualAct`), which refreshes the three panes. nil when
       ## the session has no graphics.
     lowLevelAct*: proc(act: LowLevelAct): LowLevelActResult {.closure.}
+    toggleMacroExpansion*: proc(path: string; line: int):
+        tuple[ok, opened: bool; detail: string] {.closure.}
+      ## Editor-Hosted-Front-Ends §E15: Toggle Macro Expansion on the call at
+      ## `path:line`, done by the host through the session's
+      ## `MacroExpansionVM` (`tui_session.toggleMacroExpansion`), the pane's
+      ## model refreshed. `opened`: an expansion is open afterwards, so the
+      ## pane is to be shown. Nil when no replay session owns the window.
       ## PLAT-60: the HOST's answer to an act on the Low Level Code pane — a
       ## press, a menu built or chosen, a key, the sync toggle, a step —
       ## done through the session's `LowLevelCodeVM`, the pane's model
@@ -806,6 +818,7 @@ proc shellModel*(app: TuiApp; width, height: int): ShellModel =
     problems: app.problems,
     requests: app.requests,
     lowLevel: app.lowLevel,
+    macroExpansion: app.macroExpansion,
     verification: app.verification,
     constraints: app.constraints,
     shellPane: app.shellPane,

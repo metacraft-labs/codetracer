@@ -1132,6 +1132,11 @@ proc interactive(command: TuiCommand): int =
   app.lowLevelAct = proc(act: LowLevelAct): LowLevelActResult =
     if app.modes.product == pmEdit: rt.editLowLevelAct(edit, act)
     else: session.lowLevelAct(rt, act)
+  # Editor-Hosted-Front-Ends §E15: Toggle Macro Expansion, through the shown
+  # session's `MacroExpansionVM`.
+  app.toggleMacroExpansion = proc(path: string; line: int):
+      tuple[ok, opened: bool; detail: string] =
+    session.toggleMacroExpansion(rt, path, line)
   # PLAT-61: the Shell pane — a key, a press on a recorded command, the
   # scrollback — done through the shown session's `ShellVM`; its shell is
   # pumped on the idle tick below.

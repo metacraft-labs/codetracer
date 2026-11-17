@@ -11306,6 +11306,11 @@ proc runContextAction(r: GpuiRenderer; action: ContextAction;
     return
   case action
   of caNone: discard
+  of caToggleMacroExpansion:
+    # Editor-Hosted-Front-Ends §E15: this window does not offer the entry
+    # (`editorTextContextMenu`'s `macroExpansion` stays false) until it
+    # places the Macro Expansion pane beside its editor.
+    discard
   of caTraceMacro, caTraceStaticBlock, caTraceConstant, caTraceEval:
     runGpuiNimTrace(r, nimTraceActionOf(action).action, target.path,
                     target.line, target.column)

@@ -34,7 +34,7 @@ const
     # operations with no default chord: a user's row or the terminal's `:` line is
     # how they are reached today. Each is a surface to add, or a member to retire.
     "app.suspend", "build.compile", "build.run-program-in-current-tab",
-    "build.run-static", "editor.toggle-macro-expansion",
+    "build.run-static",
     "flow.loop-level-at-position", "flow.zoom-loop-in", "flow.zoom-loop-out",
     "help.about", "help.check-key-delivery", "help.suggest-feature",
     "help.user-manual", "layout.load", "layout.new-event-log",

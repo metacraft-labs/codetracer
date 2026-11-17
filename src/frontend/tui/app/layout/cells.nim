@@ -120,6 +120,7 @@ proc terminalPaneName*(kind: PaneKind): string =
   of paneVideoPlayer: "Video Player"
   of panePixelHistory: "Pixel History"
   of paneShaderDebug: "Shader Debug"
+  of paneMacroExpansion: "Macro Expansion"
 
 proc minPaneWidth*(kind: PaneKind): int =
   ## The narrowest column a pane can be given: its content's minimum, and

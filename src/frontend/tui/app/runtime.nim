@@ -68,6 +68,7 @@ import ./views/agent_activity_pane
 import ./views/problems_pane
 import ./views/requests_pane   # PLAT-58
 import ./views/low_level_code_pane   # PLAT-60
+import ./views/macro_expansion_pane   # Editor-Hosted-Front-Ends §E15
 import ./views/verification_pane     # PLAT-63
 import ./views/constraints_pane   # PLAT-62
 import ./views/shell_session_pane   # PLAT-61
@@ -674,6 +675,10 @@ type
       ## has none.
     hostedCols*: Table[PaneKind, int]
       ## HSF-V2: the same windows' widths, in cells (`paneBodyCols`).
+    macroExpansionWanted*: bool
+      ## §E15: an expansion opened in a HOSTED session, whose layout is the
+      ## pane server's: the server places the Macro Expansion pane beside the
+      ## source on its next publish and clears this.
 
 const
   QuitDetail* = "quit"
@@ -3210,6 +3215,19 @@ proc lowLevelPaneScreen*(rt: TuiRuntime): tuple[area: CellArea,
                         result.area.row + result.area.height)
   result.screen = paintLowLevelCode(g, result.area, rt.app.lowLevel)
 
+proc macroExpansionPaneScreen*(rt: TuiRuntime): tuple[area: CellArea,
+    screen: MacroExpansionPaneScreen] =
+  ## §E15: the Macro Expansion pane below its strip, and where the painter put
+  ## its rows — the arithmetic a press is read back with.
+  let under = rt.paneAreaOf(paneMacroExpansion)
+  result.area = CellArea(col: under.col, row: under.row + 1,
+                         width: under.width, height: max(0, under.height - 1))
+  if result.area.width <= 0:
+    return
+  var g = newStyledGrid(result.area.col + result.area.width,
+                        result.area.row + result.area.height)
+  result.screen = paintMacroExpansion(g, result.area, rt.app.macroExpansion)
+
 proc lowLevelListRows(rt: TuiRuntime): int =
   ## How many rows of the listing the pane shows: the terminal's screen's,
   ## or an editor's window's (`hostedRows`), less the header — 1 while the
@@ -3357,6 +3375,58 @@ proc openLowLevelCode(rt: TuiRuntime; outcome: var RuntimeOutcome) =
     if rt.app.lowLevel.executionRow >= 0:
       rt.revealLowLevelRow(rt.app.lowLevel.executionRow)
   rt.note(LowLevelCodeTitle & " beside the source")
+
+proc showMacroExpansionPane*(rt: TuiRuntime): string =
+  ## Editor-Hosted-Front-Ends §E15: the Macro Expansion pane placed BESIDE THE
+  ## SOURCE — the editor's region split, the pane after it, as
+  ## `openLowLevelCode` places its own — when an expansion opens and no layout
+  ## holds the pane; brought forward when one does. The focus stays where it
+  ## was: the user toggled from the source, and steps from it. "" when the
+  ## pane is shown, else why not. A hosted session's layout is the server's,
+  ## which places the pane itself (`pane_server.placeBesideSource`).
+  if rt.hostedRows.hasKey(paneEditor):
+    rt.macroExpansionWanted = true
+    return ""
+  if not rt.layoutBindingEnabled():
+    return "Macro Expansion: the layout is not rearrangeable in this session"
+  let b = rt.app.layoutBinding
+  let acted =
+    if b.layout.tree.contains(paneMacroExpansion):
+      b.dispatch(cmdActivateTab(paneMacroExpansion))
+    else:
+      b.dispatch(cmdSplit(paneEditor, paneMacroExpansion, saRow, ssAfter))
+  if acted.status == lasApplied:
+    rt.afterLayoutCommit()
+    rt.rebuildFocus()
+  elif not b.layout.tree.contains(paneMacroExpansion):
+    return "the Macro Expansion pane could not be placed beside the source: " &
+           acted.message
+  ""
+
+proc toggleMacroExpansionAt(rt: TuiRuntime; path: string; line: int;
+                            outcome: var RuntimeOutcome) =
+  ## Toggle Macro Expansion on the call at `path:line` (§E15): the host asks
+  ## the replay through the session's `MacroExpansionVM`; an expansion that
+  ## opened is shown beside the source. The status line says what happened.
+  outcome.repaint = true
+  if rt.app.toggleMacroExpansion.isNil:
+    rt.note("Toggle Macro Expansion: this window has no recording to " &
+            "expand a macro of")
+    outcome.refused = rt.app.notification
+    return
+  let answer = rt.app.toggleMacroExpansion(path, line)
+  if not answer.ok:
+    # A line that expands nothing is a refusal: an editor's `operation/run`
+    # answers `ok: false` with it (§E9).
+    rt.note(answer.detail)
+    outcome.refused = answer.detail
+    return
+  if answer.opened:
+    let why = rt.showMacroExpansionPane()
+    if why.len > 0:
+      rt.note(why)
+      return
+  rt.note(answer.detail)
 
 proc runLowLevelKeyOperation(rt: TuiRuntime; operation: string;
                              outcome: var RuntimeOutcome): bool =
@@ -4681,7 +4751,11 @@ proc editorTextMenu(rt: TuiRuntime; target: SourceClickTarget):
                         inlineChord = rt.inlineChord(),
                         nimTrace = rt.nimTraceEntriesAt(
                           src.path, rt.nimTraceDocument().lines,
-                          target.line, target.column))
+                          target.line, target.column),
+                        # §E15: a Nim source of a replay this window can ask
+                        # to expand a macro in.
+                        macroExpansion = src.path.endsWith(".nim") and
+                          not rt.app.toggleMacroExpansion.isNil)
 
 proc lineValues(target: SourceClickTarget): seq[NamedValue] =
   for v in target.values:
@@ -4817,6 +4891,9 @@ proc applyBarTop(rt: TuiRuntime; bar: BarSpot; top: int;
     of paneLowLevelCode:
       # PLAT-60: the listing's view moves; nothing is fetched.
       rt.app.lowLevel.scrollTop = top
+    of paneMacroExpansion:
+      # §E15: the expansions' view moves; nothing is fetched.
+      rt.app.macroExpansion.scrollTop = top
     of paneVerification:
       # PLAT-63: the list's view moves.
       rt.app.verification.scrollTop = top
@@ -5737,6 +5814,21 @@ proc routePaneClick(rt: TuiRuntime; geometry: LayoutGeometry;
       return true
     of pbHeader, pbText, pbNone:
       return false
+  of paneMacroExpansion:
+    # §E15: a press on an expansion's heading closes it (Toggle Macro
+    # Expansion on its call); a press on its lines only focuses the pane.
+    if event.button != mbLeft or not rt.app.macroExpansion.loaded:
+      return false
+    rt.app.layoutBinding.focus = paneMacroExpansion
+    let (area, screen) = rt.macroExpansionPaneScreen()
+    let i = rt.app.macroExpansion.macroExpansionRowAt(screen, area, event.row,
+                                                      event.col)
+    if i < 0:
+      return false
+    let row = rt.app.macroExpansion.rows[i]
+    if row.kind == mpHeading:
+      rt.toggleMacroExpansionAt(row.callPath, row.callLine, outcome)
+    return true
   of paneLowLevelCode:
     # PLAT-60 (K61 – K63): a press on an instruction goes to the source line
     # it came from (the desktop's click; the listing's cursor goes on it); a
@@ -6038,6 +6130,8 @@ proc runContextAction(rt: TuiRuntime; action: ContextAction;
     rt.runNimTrace(nimTraceActionOf(action).action, target.line,
                    target.column)
     outcome.repaint = true
+  of caToggleMacroExpansion:
+    rt.toggleMacroExpansionAt(target.path, target.line, outcome)
   of caToggleCallChildren:
     outcome.togglesCall = true
     outcome.callIndex = target.index
@@ -9693,6 +9787,23 @@ proc buildOperationTables(rt: TuiRuntime) =
           (if path.len == 0: "there is no file in the editor"
            else: path.extractFilename & " is not a Nim source"))
       else: AlwaysEnabled)
+  # Editor-Hosted-Front-Ends §E15: Toggle Macro Expansion — on the call a
+  # menu or a hosted pane's heading names (`c.target`), else at the command
+  # context's line (an editor's cursor, the caret, the stop). It has no
+  # default chord, as on the desktop: the source's right-click menu offers it
+  # (`caToggleMacroExpansion`), and a user's row or the `:` line reach it.
+  session.bindOp("editor.toggle-macro-expansion",
+    act do:
+      if c.target.path.len > 0 and c.target.line > 0:
+        rt.toggleMacroExpansionAt(c.target.path, c.target.line, outcome)
+      else:
+        let (path, line) = rt.generatedCodeSubject()
+        rt.toggleMacroExpansionAt(path, line, outcome),
+    proc(): Enablement =
+      if rt.app.toggleMacroExpansion.isNil:
+        operationDisabled("Toggle Macro Expansion: this window has no " &
+                          "recording to expand a macro of")
+      else: AlwaysEnabled)
   session.bindOp("view.source-code", act do:
     discard rt.focus.focusPaneKind(paneEditor)
     # The layout binding is the terminal's own arrangement; a session hosted
@@ -10554,6 +10665,24 @@ proc hostedHotspots*(rt: TuiRuntime; pane: PaneKind;
         of ltSync:
           result[r].addRun(c, "low-level.toggle-sync", PaneOpArgs())
         else: discard
+  of paneMacroExpansion:
+    # §E15: an expansion's heading closes it, as a press on the terminal's
+    # heading does (`routePaneClick`): Toggle Macro Expansion on its call,
+    # whose `{path, line}` the hotspot carries.
+    if not rt.app.macroExpansion.loaded:
+      return
+    let rows = CellArea(col: 0, row: 0, width: width, height: height)
+    var g = newStyledGrid(width, height)
+    let screen = paintMacroExpansion(g, rows, rt.app.macroExpansion)
+    for r in 0 ..< height:
+      let i = rt.app.macroExpansion.macroExpansionRowAt(screen, rows, r, 0)
+      if i < 0 or rt.app.macroExpansion.rows[i].kind != mpHeading:
+        continue
+      let heading = rt.app.macroExpansion.rows[i]
+      for c in 0 ..< width:
+        result[r].addRun(c, "editor.toggle-macro-expansion",
+                         PaneOpArgs(path: heading.callPath,
+                                    line: heading.callLine))
   of paneState:
     if rt.app.variables.isEmpty:
       return
@@ -10818,6 +10947,13 @@ proc paneBodyTargetAt(rt: TuiRuntime; pane: PaneKind; under: CellArea;
     of pbFilter, pbGroup: paneTarget(hkControl)
     of pbTrack: paneTarget(hkScrubber)
     of pbHeader, pbText, pbNone: HitTarget()
+  of paneMacroExpansion:
+    if not rt.app.macroExpansion.loaded: return
+    let (area, screen) = rt.macroExpansionPaneScreen()
+    let i = rt.app.macroExpansion.macroExpansionRowAt(screen, area, r, c)
+    if i >= 0 and rt.app.macroExpansion.rows[i].kind == mpHeading:
+      paneTarget(hkControl)
+    else: HitTarget()
   of paneLowLevelCode:
     if not rt.app.lowLevel.loaded: return
     let (area, screen) = rt.lowLevelPaneScreen()

@@ -40,6 +40,7 @@ func gpuiPaneName*(kind: PaneKind): string =
   of paneVideoPlayer: "Video Player"
   of panePixelHistory: "Pixel History"
   of paneShaderDebug: "Shader Debug"
+  of paneMacroExpansion: "Macro Expansion"
 
 func desktopTabTitle*(kind: PaneKind): string =
   ## What the desktop's tab says for a built-in pane: its content's name split

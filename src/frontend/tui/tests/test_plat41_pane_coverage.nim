@@ -106,13 +106,16 @@ suite "PLAT-41 LAW-P1 — the three sets COVER PaneKind":
     # window's `VerificationVM`.
     # PLAT-59 added the three Visual Replay panes, drawn in the vocabulary from
     # the session's `VisualReplayPanesVM`.
-    ck card(allPanes()) == 24
+    # Editor-Hosted-Front-Ends §E15 added `paneMacroExpansion`, drawn in the
+    # vocabulary from the session's `MacroExpansionVM`.
+    ck card(allPanes()) == 25
     # PLAT-58 moved `paneRequests` into the vocabulary: it draws the
     # session's `RequestPanelVM`.
     # PLAT-63's Verification is in the vocabulary from its first day.
     # PLAT-62 moved `paneConstraints`, the last accepted exception, into the
     # vocabulary: it draws the window's `ConstraintsVM`.
-    ck card(PaneVocabularyPanes) == 23
+    # §E15's `paneMacroExpansion` is in the vocabulary from its first day.
+    ck card(PaneVocabularyPanes) == 24
     ck card(PaneNativePanes) == 1
     ck card(PaneAcceptedExceptions) == 0
     ck paneFileTree in PaneVocabularyPanes

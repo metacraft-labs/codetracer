@@ -102,6 +102,7 @@ import viewmodels/errors_vm
 import viewmodels/build_vm
 # PLAT-60 — the Low Level Code pane's ViewModel.
 import viewmodels/low_level_code_vm
+import viewmodels/macro_expansion_vm   # §E15: the Macro Expansion pane
 import viewmodels/verification_vm   # PLAT-63: the Verification pane
 import viewmodels/visual_replay_panes_vm   # PLAT-59: the Visual Replay panes
 
@@ -182,7 +183,11 @@ const
                                          # from the session's
                                          # `VisualReplayPanesVM`.
                                          paneVideoPlayer, panePixelHistory,
-                                         paneShaderDebug}
+                                         paneShaderDebug,
+                                         # Editor-Hosted-Front-Ends §E15: the
+                                         # open macro expansions, from the
+                                         # session's `MacroExpansionVM`.
+                                         paneMacroExpansion}
     ## The panes expressed in the vocabulary. A CLOSED SET a test asserts, not
     ## a list a reader infers from which procs exist.
 
@@ -854,6 +859,45 @@ proc lowLevelCodePaneView*(vm: LowLevelCodeVM): PaneView =
                              expanded = true)
   result.entries = entriesOf(result.root)
 
+const MacroExpansionColumns* = @["", "row", "code"]
+  ## Editor-Hosted-Front-Ends §E15: the execution pointer's mark, the row in
+  ## its expansion (from 1) and the expanded code.
+
+proc macroExpansionPaneView*(vm: MacroExpansionVM): PaneView =
+  ## Editor-Hosted-Front-Ends §E15. THE MACRO EXPANSION PANE: each open
+  ## expansion's heading (the call, where the expansion is) over a table of
+  ## its lines, the debugger's marked — the ViewModel's `displayRows`, every
+  ## word its own.
+  result.pane = paneMacroExpansion
+  if vm.isNil:
+    result.report = "macro expansions have no ViewModel; no host attached one"
+    result.root = viewText("macroExpansion.report", result.report)
+    result.entries = entriesOf(result.root)
+    return
+  var children: seq[ViewNode] = @[]
+  var cells: seq[seq[string]] = @[]
+  proc flush() =
+    if cells.len > 0:
+      children.add viewTable("macroExpansion.rows", MacroExpansionColumns, cells)
+      cells = @[]
+  for r in vm.displayRows():
+    case r.kind
+    of merHeading:
+      flush()
+      children.add viewText("macroExpansion.heading", r.text)
+    of merNotice:
+      flush()
+      children.add viewText("macroExpansion.notice", r.text)
+    of merLine:
+      cells.add @[(if r.executing: "▶" else: ""), $r.number, r.text]
+  flush()
+  if children.len == 0:
+    children.add viewText("macroExpansion.empty", NoExpansionOpenText)
+    result.report = "no macro expansion open"
+  result.root = viewTreeNode("macroExpansion", MacroExpansionPaneTitle,
+                             children, expanded = true)
+  result.entries = entriesOf(result.root)
+
 const VerificationColumns* = @["kind", "title", "message", "location"]
   ## PLAT-63: a finding's row — its kind in words, its title, the verifier's
   ## message and its `file:line:column`.
@@ -1359,3 +1403,5 @@ proc paneView*(kind: PaneKind; vm: ViewModel; budget: Budget;
   of paneVideoPlayer: videoPlayerPaneView(VideoPlayerVM(vm))
   of panePixelHistory: pixelHistoryPaneView(PixelHistoryVM(vm))
   of paneShaderDebug: shaderDebugPaneView(ShaderDebugVM(vm))
+  # Editor-Hosted-Front-Ends §E15.
+  of paneMacroExpansion: macroExpansionPaneView(MacroExpansionVM(vm))

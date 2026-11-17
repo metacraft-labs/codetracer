@@ -71,6 +71,7 @@ import ./agent_activity_pane
 import ./problems_pane
 import ./requests_pane
 import ./low_level_code_pane
+import ./macro_expansion_pane   # Editor-Hosted-Front-Ends §E15
 import ./verification_pane   # PLAT-63
 import ./constraints_pane
 import ./shell_session_pane   # PLAT-61
@@ -215,6 +216,9 @@ type
     lowLevel*: LowLevelPaneModel
       ## PLAT-60. LOW LEVEL CODE, as a value: the session's `LowLevelCodeVM`
       ## the desktop's view draws too, read by `tui_session.lowLevelModelOf`.
+    macroExpansion*: MacroExpansionPaneModel
+      ## Editor-Hosted-Front-Ends §E15. The open macro expansions, as a value
+      ## (`tui_session.refreshMacroExpansion`).
       ## Not loaded by default.
     verification*: VerificationPaneModel
       ## PLAT-63. VERIFICATION, as a value: the window's `VerificationVM`,
@@ -955,6 +959,10 @@ proc paintPane(g: var StyledGrid; region: PaneRegion; model: ShellModel;
   elif region.pane == paneLowLevelCode and model.lowLevel.loaded:
     belowStrip:
       discard paintLowLevelCode(g, content, model.lowLevel)
+  # Editor-Hosted-Front-Ends §E15. MACRO EXPANSION — below the strip.
+  elif region.pane == paneMacroExpansion and model.macroExpansion.loaded:
+    belowStrip:
+      discard paintMacroExpansion(g, content, model.macroExpansion)
   # PLAT-63. VERIFICATION — its status and controls are content, so below
   # the strip.
   elif region.pane == paneVerification and model.verification.loaded:

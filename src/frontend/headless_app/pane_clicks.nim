@@ -169,6 +169,11 @@ type
     caTraceStaticBlock = "trace-static-block"
     caTraceConstant = "trace-constant"
     caTraceEval = "trace-eval"
+    caToggleMacroExpansion = "toggle-macro-expansion"
+      ## Editor-Hosted-Front-Ends §E15: Toggle Macro Expansion on the menu's
+      ## line — the expansion of the Nim macro call there opened beside the
+      ## source, or closed. Offered only by a front-end that draws the Macro
+      ## Expansion pane (`editorTextContextMenu`'s `macroExpansion`).
 
   ContextMenuKind* = enum
     cmkTab = "tab"
@@ -316,7 +321,8 @@ const ContextActionOperations*: array[ContextAction, string] = [
     caTraceMacro: "editor.trace-macro-at-cursor",
     caTraceStaticBlock: "editor.trace-static-block-at-cursor",
     caTraceConstant: "editor.trace-constant-at-cursor",
-    caTraceEval: "editor.trace-eval"]
+    caTraceEval: "editor.trace-eval",
+    caToggleMacroExpansion: "editor.toggle-macro-expansion"]
   ## The operation each context menu action runs (Input-Routing §3.2): the
   ## array's index type makes it total, and `test_plat64_operation_mapping`
   ## asserts every name is catalogued and none is listed twice.
@@ -339,6 +345,8 @@ const
   AddAllValuesToScratchpadLabel* = "Add all values to scratchpad"
   JumpToValueLabel* = "Jump to value"
   UnpinLabel* = "Unpin"
+  ToggleMacroExpansionLabel* = "Toggle Macro Expansion"
+    ## The catalogue's title for `editor.toggle-macro-expansion`.
   NoWordSelected* = "No word selected."
     ## The desktop's answer to a call jump with no word under the pointer
     ## (`ui/editor.createContextMenuItems`'s fallback handler).
@@ -486,7 +494,8 @@ func editorTextContextMenu*(path: string; line: int; lineText = "";
                             anyBreakpoints = false;
                             inlineBreakpoint = false;
                             inlineChord = "Shift+F9";
-                            nimTrace: openArray[NimTraceEntry] = []):
+                            nimTrace: openArray[NimTraceEntry] = [];
+                            macroExpansion = false):
     ContextMenuModel =
   ## The editor's right-click menu in a replay — `ui/editor.
   ## createContextMenuItems`' Debug branch, measured on the real desktop
@@ -544,6 +553,11 @@ func editorTextContextMenu*(path: string; line: int; lineText = "";
                            hint = "Enter<on line>")
   # The Nim trace entries close the menu, as on the desktop.
   result.addNimTraceEntries(nimTrace)
+  # Editor-Hosted-Front-Ends §E15, after them: the caller offers it on a Nim
+  # source line of a replay, when it draws the Macro Expansion pane (the
+  # desktop opens its expansions with the palette operation, inline).
+  if macroExpansion:
+    result.entries.add entry(ToggleMacroExpansionLabel, caToggleMacroExpansion)
 
 func editorEditContextMenu*(path: string; line: int; lineText = "";
                             column = 0;

@@ -81,6 +81,8 @@ import ../../viewmodel/host/native_requests_host   # PLAT-58: the Requests pane'
 import ../../viewmodel/host/native_visual_replay_host   # PLAT-59: the Visual Replay producer
 from isonim/core/async_compat import drainPlatformCallbacks
 import ../app/views/low_level_code_pane   # PLAT-60
+import ../app/views/macro_expansion_pane   # Editor-Hosted-Front-Ends §E15
+import viewmodels/macro_expansion_vm   # §E15: the open macro expansions
 import headless_app/low_level_menu   # PLAT-60: the row menu (K62)
 import ../../viewmodel/host/native_agent_host   # PLAT-54: Agent Activity's host
 from ../app/edit_binding import EditBuffer, moveCaretTo, caretLine, caretColumn   # the read-only document a result opens in
@@ -1176,6 +1178,84 @@ proc refreshLowLevel*(s: TuiSession; rt: TuiRuntime) =
       discard s.session.loadStopPanes()
   rt.app.lowLevel = lowLevelModelOf(vm, rt.app.lowLevel)
 
+# ---------------------------------------------------------------------------
+# Editor-Hosted-Front-Ends §E15: the Macro Expansion pane
+# ---------------------------------------------------------------------------
+
+proc macroExpansionModelOf*(vm: MacroExpansionVM;
+                            prior: MacroExpansionPaneModel):
+    MacroExpansionPaneModel =
+  ## The pane's value: the ViewModel's rows (`displayRows`), every word its
+  ## own, with the pane's own scroll kept.
+  result = MacroExpansionPaneModel(loaded: true, empty: NoExpansionOpenText,
+                                   executionRow: -1,
+                                   scrollTop: prior.scrollTop)
+  if vm.isNil:
+    return
+  for r in vm.displayRows():
+    if r.executing:
+      result.executionRow = result.rows.len
+    result.rows.add MacroExpansionPaneRow(
+      kind: (case r.kind
+             of merHeading: mpHeading
+             of merLine: mpLine
+             of merNotice: mpNotice),
+      text: r.text, number: r.number, executing: r.executing,
+      callPath: r.callPath, callLine: r.callLine)
+
+proc refreshMacroExpansion*(s: TuiSession; rt: TuiRuntime) =
+  ## The pane's value at this moment, and the pane brought beside the source
+  ## when an expansion is open that the screen does not show: one a stop
+  ## inside it opened (`MacroExpansionVM.adoptStop`), as well as one a toggle
+  ## opened.
+  if s.ended:
+    return
+  let vm = s.session.session.macroExpansionVM
+  if vm.isNil:
+    rt.app.macroExpansion = MacroExpansionPaneModel()
+    return
+  # A stop inside an expansion opened it (`adoptStop`) and asked for its
+  # text, whose answer runs on a drain.
+  drainPlatformCallbacks()
+  let before = rt.app.macroExpansion.rows.len
+  rt.app.macroExpansion = macroExpansionModelOf(vm, rt.app.macroExpansion)
+  if before == 0 and rt.app.macroExpansion.rows.len > 0:
+    let why = rt.showMacroExpansionPane()
+    if why.len > 0:
+      rt.app.notification = why
+  if rt.app.macroExpansion.executionRow >= 0:
+    let (_, screen) = rt.macroExpansionPaneScreen()
+    let rows = if screen.listRows > 0: screen.listRows
+               else: max(1, rt.hostedRows.getOrDefault(paneMacroExpansion, 0) - 1)
+    rt.app.macroExpansion.scrollTop = rt.app.macroExpansion.revealMacroRow(
+      rows, rt.app.macroExpansion.executionRow)
+
+proc toggleMacroExpansion*(s: TuiSession; rt: TuiRuntime; path: string;
+                           line: int): tuple[ok, opened: bool; detail: string] =
+  ## Toggle Macro Expansion on the call at `path:line` through the session's
+  ## `MacroExpansionVM` — the replay's answer, and the expansion's text, are
+  ## delivered here: `stdio_backend`'s send reads the reply at once, and its
+  ## future's callbacks run on the next drain, which this does — and the pane
+  ## refreshed. The
+  ## replay's expansion level for the call moved: from the next move on, a
+  ## stop inside the expansion is shown in it (or back on the call). The stop
+  ## the debugger is at now keeps the place it was reported at.
+  if s.ended:
+    return (false, false, EndedSessionNote)
+  let vm = s.session.session.macroExpansionVM
+  if vm.isNil:
+    return (false, false, "this session has no macro expansions")
+  # Until the replay answers (synchronously on this host), what the status
+  # line says.
+  var answer = (ok: true, detail: "Toggle Macro Expansion: asking the replay")
+  vm.toggle(path, line, proc(ok: bool; detail: string) =
+    answer = (ok, detail))
+  # The answer's callback, then the text fetch it starts.
+  drainPlatformCallbacks()
+  drainPlatformCallbacks()
+  result = (answer.ok, vm.expansions.val.len > 0, answer.detail)
+  s.refreshMacroExpansion(rt)
+
 proc actOnListing*(vm: LowLevelCodeVM; act: LowLevelAct;
                    answer: var LowLevelActResult): SourceLineRef =
   ## The ViewModel half of the pane's `act` — select, menu, a key, the sync
@@ -1696,6 +1776,7 @@ proc refresh*(s: TuiSession; rt: TuiRuntime) =
   s.refreshRequests(rt)
   # PLAT-60: the Low Level Code pane, this session's.
   s.refreshLowLevel(rt)
+  s.refreshMacroExpansion(rt)
   # PLAT-61: the Shell pane, this session's.
   s.refreshShell(rt)
 

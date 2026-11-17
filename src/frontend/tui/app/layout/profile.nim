@@ -136,7 +136,10 @@ proc terminalCapability*(): PaneCapability =
      paneShell,
      # PLAT-59: the Visual Replay panes (`views/frame_viewer.nim`,
      # `views/visual_replay_panes.nim`).
-     paneVideoPlayer, panePixelHistory, paneShaderDebug},
+     paneVideoPlayer, panePixelHistory, paneShaderDebug,
+     # Editor-Hosted-Front-Ends §E15: the open macro expansions
+     # (`views/macro_expansion_pane.nim`).
+     paneMacroExpansion},
     [(paneDebugControls, "the terminal draws the debugger controls in its " &
                          "top bar, not as a pane"),
      (paneFlow, "the terminal draws flow inside the source pane")])
