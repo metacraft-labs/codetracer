@@ -162,7 +162,9 @@ const
     ("onCancelLoad", "origin_binding.nim"),
   ]
 
-  ExpectedAppModules = 131
+  ExpectedAppModules = 132
+    ## 2026-11-18: 131 → 132, `views/macro_expansion_pane.nim` (`ac499b2cead`,
+    ## Toggle Macro Expansion's pane; landed without re-counting).
     ## 2026-11-12: 129 → 131, `tests/personas/personas.nim` (`39414d8cde1`, the
     ## captured terminal personas; landed without re-counting) and
     ## `views/focus_locator.nim` (`47a2d0393d2`, the screen-reader mode's
@@ -318,7 +320,9 @@ const
     ## parse, requested and reconciled off the render path). Their threads are
     ## `host/`'s, so nothing else under `app/` moved.
 
-  ExpectedStyleLiterals = 394
+  ExpectedStyleLiterals = 400
+    ## 2026-11-18: 394 → 400, measured — the six in the new
+    ## `views/macro_expansion_pane.nim` (`ac499b2cead`).
     ## 2026-11-09: 384 → 394, measured — nine in the new
     ## `views/visual_replay_panes.nim` (`919620c00`) and one,
     ## `BreakpointHintStyle`, in an existing file (`ffec0f79a`).
@@ -474,7 +478,8 @@ const
     ## reachability guard's bucket B). They were deleted to bring that ratchet
     ## back under its ceiling, and `views/search.nim` had no other literal, so
     ## it leaves the styled-file count. No painted colour changed.
-  ExpectedStyledFiles = 48
+  ExpectedStyledFiles = 49
+    ## 2026-11-18: +1, `views/macro_expansion_pane.nim`.
     ## 2026-11-09: +1, `views/visual_replay_panes.nim`.
     ## 2026-11-05 (PLAT-61): +1, `views/shell_session_pane.nim`.
     ## 2026-11-04 (PLAT-62): +1, `views/constraints_pane.nim`.
