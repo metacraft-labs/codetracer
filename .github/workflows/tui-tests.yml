@@ -78,6 +78,16 @@ jobs:
           submodules: recursive
           token: ${{ steps.ci_token.outputs.token }}
 
+      - name: Sample memory in the background
+        # The top processes by resident memory every 15 seconds, to a file this
+        # job uploads when it does not succeed: a runner that reaches its 20 GiB
+        # cap OOM-kills processes and the guard's annotation names none (TUI
+        # shard 5/8 of run 43996043232). Best effort; the runner ends it with
+        # the job. ci/test/memory-sampler-test.sh holds both steps here.
+        run: |
+          nohup bash ci/lib/memory-sampler.sh "${{ runner.temp }}/memory-samples.log" 15 >/dev/null 2>&1 &
+          echo "memory sampler started (pid $!)"
+
       # EVERY AUTHENTICATED CLONE IS IN THIS BLOCK, at the top of the job: the
       # installation token minted above expires an hour after it is minted (see
       # `viewmodel-tests`), and this job's bound is longer than that.
@@ -281,3 +291,14 @@ jobs:
           name: tui-test-logs-${{ matrix.shard }}
           path: test-logs/
           retention-days: 30
+
+      - name: Upload the memory samples
+        # What held the memory when the job failed or was cancelled; an OOM kill
+        # lands as either.
+        if: ${{ failure() || cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: memory-samples-tui-${{ matrix.shard }}
+          path: ${{ runner.temp }}/memory-samples.log
+          if-no-files-found: ignore
+          retention-days: 7

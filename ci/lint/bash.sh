@@ -353,6 +353,11 @@ lint_step "a stale extraHeader cannot outlive its token" \
 lint_step "a build job pushes its closure, best effort, from dev and agents" \
 	bash ci/test/push-built-closure-test.sh
 
+# The TUI and GPUI shards sample their top processes by RSS and upload the log
+# when they fail, so an OOM kill at the runner's cap names its culprit.
+lint_step "a shard that fails uploads what held its memory" \
+	bash ci/test/memory-sampler-test.sh
+
 # A GPUI shard gives a bare host the Vulkan driver, cursor theme and D-Bus
 # session configuration the window and its compositor need.
 lint_step "a GPUI shard provisions what a bare host lacks" \

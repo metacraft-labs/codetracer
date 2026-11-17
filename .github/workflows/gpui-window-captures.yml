@@ -61,6 +61,16 @@ jobs:
           submodules: recursive
           token: ${{ steps.ci_token.outputs.token }}
 
+      - name: Sample memory in the background
+        # The top processes by resident memory every 15 seconds, to a file this
+        # job uploads when it does not succeed: a runner that reaches its 20 GiB
+        # cap OOM-kills processes and the guard's annotation names none (TUI
+        # shard 5/8 of run 43996043232). Best effort; the runner ends it with
+        # the job. ci/test/memory-sampler-test.sh holds both steps here.
+        run: |
+          nohup bash ci/lib/memory-sampler.sh "${{ runner.temp }}/memory-samples.log" 15 >/dev/null 2>&1 &
+          echo "memory sampler started (pid $!)"
+
       - name: Read the isonim-gpui pin
         # The ONE pin this repo keeps for isonim-gpui is flake.lock's; the
         # clone below takes it from there rather than from a second copy of
@@ -328,3 +338,14 @@ jobs:
         # budget is capped at what the limit leaves, so it never cancels the
         # job (push-built-closure-test.sh holds the two numbers equal).
         run: bash ci/deploy/push-built-closure.sh --gcroots "${CT_GCROOT_DIR:-$RUNNER_TEMP/ct-gcroots}" --flake-inputs
+
+      - name: Upload the memory samples
+        # What held the memory when the job failed or was cancelled; an OOM kill
+        # lands as either.
+        if: ${{ failure() || cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: memory-samples-gpui-${{ matrix.shard }}
+          path: ${{ runner.temp }}/memory-samples.log
+          if-no-files-found: ignore
+          retention-days: 7
