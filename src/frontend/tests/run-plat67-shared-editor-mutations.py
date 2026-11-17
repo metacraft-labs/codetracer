@@ -278,7 +278,7 @@ ARMS = [
               "    if false:")],
      [browser("caseUnifiedDiffBandPresses")],
      "the unified diff: the click that ends a boundary drag reveals more lines"),
-    ("R43", [(DIFF, '  bindElementOperation(unfold, "diff.show-unchanged-region", showAll)',
+    ("R43", [(DIFF, '  bindElementOperation(unfold, "diff.show-unchanged-region", unfoldRegion)',
               '  discard unfold')],
      [browser("caseUnifiedDiffBandPresses")],
      "the unified diff: the band's unfold control carries no operation, a press on it does nothing"),

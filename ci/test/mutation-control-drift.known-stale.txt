@@ -277,14 +277,6 @@ src/frontend/tui/tests/plat61-shell-mutation-control.sha256	src/frontend/ui/key_
 src/frontend/tui/tests/plat64-input-routing-mutation-control.sha256	src/frontend/ui/key_router.nim	85bb146a2e059ff37e5bf922568d8ffe23c6c923417d80ea41851627fcac19e6	f5d4458bc335c3bebe92ee56e407174ab0995d851d07cfc1ee99f419a07447e5
 src/frontend/tui/tests/plat70e-origin-mutation-control.sha256	src/frontend/ui/key_router.nim	85bb146a2e059ff37e5bf922568d8ffe23c6c923417d80ea41851627fcac19e6	f5d4458bc335c3bebe92ee56e407174ab0995d851d07cfc1ee99f419a07447e5
 
-# The browser suite's typing case now undoes a second group when the two keys
-# reached the core apart (a loaded host); the shared editor harness owes a
-# re-grade of its browser-graded arms. The unified diff's band now routes its
-# presses (the unfold control, the label's double click, a handle's click),
-# and the browser suite presses them through the router.
-src/frontend/tests/plat67-shared-editor-mutation-control.sha256	src/frontend/tests/shared_editor_chromium_test.nim	4a3e39edfc34a44c98f4a6d53db550ab32e92508f4d1c262b871a0685fa7e956	9695a076fc615ecd5ac3e2044d513e60bf0d5e2a86574303b8f2fde0720745de
-src/frontend/tests/plat67-shared-editor-mutation-control.sha256	src/frontend/ui/shared_diff_editor.nim	b0ddcfd2377dcc6eaee2a1cf2aadebdd52b8a63b26c7b59205684f486d4f58f2	e6bffb0c77e69709feb41010d8bb5d4bb8c8f6c13f70ba32148dee3a3f05390f
-
 # plat49: graded at 1cb8dbac0d; d5699320f5  moved
 # src/frontend/tui/app/runtime.nim,src/frontend/tui/host/tui_session.nim after
 # the grade. Re-grade the arms whose needles sit in them.
