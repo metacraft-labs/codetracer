@@ -1,0 +1,19 @@
+scenario: 1
+name: tests/mcr-recording-replays-from-the-stage-cache
+pack: codetracer
+summary: >-
+  A recording `record-program` makes with MCR of a compiled program (a Nim
+  program built by the stock compiler; its MCR recording names the binary by
+  path and does not bundle it) replays from the stage's cache: the replay
+  starts and stops in nim_flow_test.nim. The stage records it where
+  it is replayed from, not in a staging folder renamed into place, which
+  left the recording naming a binary that no longer existed.
+
+stage:
+  - use: record-program
+    with: { program: src/db-backend/test-programs/nim/nim_flow_test.nim, nim: stock }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 300s }
+  - wait: { until: { at: status-line, location: { contains: "nim_flow_test.nim" } }, timeout: 120s }

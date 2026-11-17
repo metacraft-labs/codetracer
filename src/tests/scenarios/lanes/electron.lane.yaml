@@ -392,6 +392,7 @@ applicable:
   - ../multi-replay/tab-strip-adds-switches-and-closes.yaml
   - ../keymaps/presses-on-pane-elements-run-their-rows.yaml
   - ../keymaps/removed-press-row-does-nothing.yaml
+  - ../tests/mcr-recording-replays-from-the-stage-cache.yaml
   - ../noir-space-ship/scratchpad-collects-every-kind.yaml
   - ../noir-space-ship/tracepoint-disable-and-enable.yaml
   - ../noir-space-ship/tracepoint-logs-damage-and-regeneration.yaml

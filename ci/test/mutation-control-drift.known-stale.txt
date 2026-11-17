@@ -236,7 +236,7 @@ src/frontend/tui/tests/plat51-parity-mutation-control.sha256	src/frontend/tui/te
 # needles sit in them.
 src/frontend/viewmodel/tests/unit/plat17-wasm-mutation-control.sha256	justfile	e0b0f1e05b1e7907a3cc8a424293bf7353eb6f4cd1bf6a624ce1d927128d1443	f545a5dd3dafd64411def5226f4136c5a226558cdaf7ae1cd990f00bac7bb404
 src/frontend/viewmodel/tests/unit/plat33-collab-mutation-control.sha256	justfile	e0b0f1e05b1e7907a3cc8a424293bf7353eb6f4cd1bf6a624ce1d927128d1443	f545a5dd3dafd64411def5226f4136c5a226558cdaf7ae1cd990f00bac7bb404
-src/tests/scenarios/plat66-pack-mutation-control.sha256	ci/test/scenarios.sh	4edebac246b9c375f8b5e181b3fb621774088543476bea5c556b0e1d642c0e77	417fb6ef694f5fae748eb77f6072670d866b643c2fc53fc548f7acbba399f7e0
+src/tests/scenarios/plat66-pack-mutation-control.sha256	ci/test/scenarios.sh	4edebac246b9c375f8b5e181b3fb621774088543476bea5c556b0e1d642c0e77	9a18568110d632f5b205c1de4351a6d177b8dd22bcef360ba21ac1b878b5ca99
 
 # The shared editor on every editor surface (ui/editor_surface: the macro
 # expansions, low-level views, a recording-with-diff's removed lines, the

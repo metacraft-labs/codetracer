@@ -27,6 +27,7 @@ import ../../../frontend/tui/tests/fixtures/[plat53_noir_project, plat55_noir_bu
                                             plat62_noir_circuit, plat63_verno_projects]
 import ../../../frontend/viewmodel/tests/unit/build_fixtures/plat56_c_build
 import results
+from ../../../ct/trace/ctfs_sources import readCtfsMetaDat
 import ../../../tools/demo_request_session
 import ../../../frontend/tui/tests/fixtures/visual_fixture
 import ../../../ct/review_session
@@ -58,13 +59,6 @@ type
 
 proc repo*(): string = fixture_provider.repoRoot()
 
-proc prependPath*(s: StageState; dir: string) =
-  ## `dir` first on the front-end's `PATH`, ahead of what earlier stages put
-  ## there (and of this process's own `PATH` when none did): stages compose,
-  ## so a stand-in tool added by one never drops the `ct` another put there.
-  let rest = s.launch.env.getOrDefault("PATH", getEnv("PATH"))
-  s.launch.env["PATH"] = dir & (if rest.len > 0: ":" & rest else: "")
-
 proc newStageState*(root = ""): StageState =
   ## A fresh, isolated state root for one run.
   let base =
@@ -89,14 +83,6 @@ proc newStageState*(root = ""): StageState =
                  ("CODETRACER_TUI_LAYOUT_DIR", base / "layout")]:
     createDir(v)
     result.launch.env[k] = v
-  # THE `ct` UNDER TEST IS THE ONE ON THE FRONT-END'S PATH, as an installed
-  # product's is: what the user runs inside it — a build script in the Shell
-  # pane, a task that records — finds `ct` by name. Without this it found
-  # whatever the host's PATH held, or nothing on a CI runner ("ct: command
-  # not found" in the Shell pane).
-  let ct = findCtBinary()
-  if ct.len > 0:
-    result.prependPath(ct.parentDir)
 
 proc configDir*(s: StageState): string =
   ## The product's configuration directory for this run
@@ -120,24 +106,84 @@ proc resolveProgram(program: string): string =
     return "test-programs" / program
   program
 
+proc recordingIncompleteMarker*(dest: string): string =
+  ## Beside a cached recording while `ct record` is writing it, and removed
+  ## once the recording is whole (`ctRecord`). A cache entry with the marker
+  ## present is absent: a later run records again.
+  dest & ".incomplete"
+
+proc recordedTraceIn(dir: string): string =
+  ## The recording `ct record -o dir` made: `dir` itself, or a folder in it.
+  if isUsableTraceDir(dir):
+    return dir
+  for kind, path in walkDir(dir):
+    if kind == pcDir and isUsableTraceDir(path):
+      return path
+  ""
+
+proc staleRecordedProgram*(program: string): bool =
+  ## A recorded program path a replay cannot load: one under a `.partial`
+  ## staging folder (the stage once recorded there and renamed the folder
+  ## into place, so the recording named a path that no longer existed), or
+  ## an absolute path that is gone. An MCR recording of a compiled program
+  ## loads its binary from this path; "" (nothing recorded) is not stale.
+  if program.len == 0: return false
+  if ".partial" & $DirSep in program or program.endsWith(".partial"): return true
+  program.isAbsolute and not fileExists(program)
+
+proc recordedProgramOf(dest: string): string =
+  ## The program the `.ct` container in `dest` (or one level down) records,
+  ## or "" when there is none to read.
+  var dirs = @[dest]
+  for kind, path in walkDir(dest):
+    if kind == pcDir: dirs.add path
+  for d in dirs:
+    for kind, path in walkDir(d):
+      if kind in {pcFile, pcLinkToFile} and path.endsWith(".ct"):
+        try: return readCtfsMetaDat(path).program
+        except CatchableError: return ""
+  ""
+
+proc isWholeCachedRecording*(dest: string): bool =
+  ## A cache entry a run may replay: a recording `replay-server` can open,
+  ## that this build's reader reads, that `ct record` finished writing, and
+  ## whose recorded program is still where the recording says (an entry from
+  ## before the stage recorded in place names a `.partial` path; it is
+  ## recorded again, once).
+  let recorded = recordedTraceIn(dest)
+  recorded.len > 0 and cachedRecordingRefusal(recorded).len == 0 and
+    not fileExists(recordingIncompleteMarker(dest)) and
+    not staleRecordedProgram(recordedProgramOf(dest))
+
 proc ctRecord(s: StageState; program, backend, lang, dest: string; workDir = "";
               stylusTrace = ""; nimExe = ""): string =
   ## `ct record` of `program` into `dest` — the binary, subcommand and
   ## options a user records with (`--backend`, `--lang`) — and the recording
   ## it made. A missing recorder is a failed stage, named by `ct record`.
   ##
-  ## `dest` is the fixture cache's entry, so the recording is made in a
-  ## staging folder beside it and renamed into place only once `ct record`
-  ## has finished and exited 0. Recorded straight into `dest`, a recording
-  ## the stage's time limit cut off (the backend's process tree is stopped)
-  ## stayed there half written: a `.ct` without its folded `filemap.bin`,
-  ## which the cache then handed to every later run, and every one failed
-  ## replaying it ("PROVENANCE: ... the trace carries no filemap.bin", the
-  ## Crystal sudoku scenarios once a loaded run timed out recording them).
+  ## `dest` is the fixture cache's entry, and the recording is made IN it,
+  ## at the path it is replayed from. A recording names files inside its own
+  ## folder by absolute path — an MCR trace its program binary, a Nim
+  ## program's debug info the generated C in its `nimcache/`, beside which
+  ## the `.c.map` source maps are read — so a recording made in a staging
+  ## folder and renamed into place named a folder that was gone: the MCR
+  ## replay refused the program ("PROVENANCE … refusing to place host-derived
+  ## bytes for '<dest>.partial/<program>'"), and an rr replay of a Nim
+  ## program found no source maps.
+  ##
+  ## Recorded straight into `dest` with nothing else, though, a recording the
+  ## stage's time limit cut off (the backend's process tree is stopped) stayed
+  ## there half written — a `.ct` without its folded `filemap.bin`, which the
+  ## cache then handed to every later run ("PROVENANCE: ... the trace carries
+  ## no filemap.bin", the Crystal sudoku scenarios once a loaded run timed out
+  ## recording them). So the marker `<dest>.incomplete` is written before
+  ## `ct record` starts and removed only once it exited 0 and left a
+  ## recording; `isWholeCachedRecording` treats an entry with the marker as
+  ## absent.
+  let marker = recordingIncompleteMarker(dest)
   removeDir(dest)
   createDir(dest.parentDir)
-  let staging = dest & ".partial"
-  removeDir(staging)
+  writeFile(marker, "ct record of " & program & " in progress\n")
   let ct = findCtBinary()
   if ct.len == 0: raise newException(IOError, "record-program: `ct` is not built")
   let cmd = (if nimExe.len > 0: "CODETRACER_NIM_EXE_PATH=" & quoteShell(nimExe) & " " else: "") &
@@ -145,27 +191,19 @@ proc ctRecord(s: StageState; program, backend, lang, dest: string; workDir = "";
             (if backend.len > 0: "--backend " & quoteShell(backend) & " " else: "") &
             (if lang.len > 0: "--lang " & quoteShell(lang) & " " else: "") &
             (if stylusTrace.len > 0: "--stylus-trace " & quoteShell(stylusTrace) & " " else: "") &
-            "-o " & quoteShell(staging) & " " & quoteShell(program)
+            "-o " & quoteShell(dest) & " " & quoteShell(program)
   let (output, code) = execCmdEx(cmd, workingDir = workDir)
   if code != 0:
-    removeDir(staging)
+    removeDir(dest)
     raise newException(IOError, "record-program " & program & ": `ct record` exited " &
                        $code & "\n" & output)
-  var recorded = ""
-  if isUsableTraceDir(staging):
-    recorded = staging
-  else:
-    for kind, path in walkDir(staging):
-      if kind == pcDir and isUsableTraceDir(path):
-        recorded = path
-        break
+  let recorded = recordedTraceIn(dest)
   if recorded.len == 0:
-    removeDir(staging)
-    raise newException(IOError, "record-program " & program & ": no recording in " & staging)
-  # One rename, so a later run never finds a half-written entry under the
-  # name it looks the recording up by.
-  moveDir(staging, dest)
-  if recorded == staging: dest else: dest / recorded.relativePath(staging)
+    removeDir(dest)
+    raise newException(IOError, "record-program " & program & ": no recording in " & dest)
+  # Last: the entry is whole from here on.
+  removeFile(marker)
+  recorded
 
 proc buildSbf(crate: string): string =
   ## A Solana program crate compiled to SBF the way its author builds it
@@ -277,8 +315,8 @@ proc recordProgram*(s: StageState; program, backend: string; lang = "";
         # Not a Noir project: there is no probe for this recorder, so record
         # directly and let `ct record` name what is missing.
         let dest = fixtureCacheRoot(repo()) / (name & "-scenario")
-        if isUsableTraceDir(dest) and cachedRecordingRefusal(dest).len == 0:
-          return dest
+        if isWholeCachedRecording(dest):
+          return recordedTraceIn(dest)
         # A Solana crate is compiled to SBF, and a PolkaVM guest crate to its
         # RISC-V ELF, first: `ct record` records the compiled program.
         if stylusTrace.len > 0:
@@ -402,7 +440,7 @@ proc fixtureProject*(s: StageState; name: string) =
     for f in walkDirRec(s.root / "verno-bin"):
       if f.extractFilename == "verno":
         setFilePermissions(f, {fpUserRead, fpUserWrite, fpUserExec})
-    s.prependPath(s.root / "verno-bin")
+    s.launch.env["PATH"] = (s.root / "verno-bin") & ":" & getEnv("PATH")
   of "verno-run", "verno-held", "verno-proved":
     # pw8: PLAT-63's `typeerr` package under its own name (a finding's
     # location is spelled from the package's parent, `typeerr/src/main.nr`)
@@ -422,7 +460,7 @@ proc fixtureProject*(s: StageState; name: string) =
     if name == "verno-proved":
       writeFile(s.root / "verno-bin" / "recorded-output.txt", "")
       writeFile(script, readFile(script).replace("\nexit 1\n", "\nexit 0\n"))
-    s.prependPath(s.root / "verno-bin")
+    s.launch.env["PATH"] = (s.root / "verno-bin") & ":" & getEnv("PATH")
     s.launch.project = pkg
     s.launch.workDir = pkg
     return
@@ -615,7 +653,7 @@ proc stubAgent*(s: StageState; agent: string) =
   createDir(dir)
   writeExecutable(dir / "codex-acp",
     "#!/bin/sh\nexec " & quoteShell(node) & " " & quoteShell(script) & " \"$@\"\n")
-  s.prependPath(dir)
+  s.launch.env["PATH"] = dir & ":" & getEnv("PATH")
   s.launch.env["CT_FAKE_ACP_LOG"] = dir / "methods.log"
   if agent == "live":
     # The native front-ends speak ACP themselves and start the agent the

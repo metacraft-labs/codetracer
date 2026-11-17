@@ -8,6 +8,7 @@
 #                                           (SCENARIO_LANE_SHARD=i/n: one shard of it)
 #   ci/test/scenarios.sh run <flavour> <scenario.yaml> [dvs run args…]
 #   ci/test/scenarios.sh binding-test       the bindings' own tests (bindings/*/*.test.ts)
+#   ci/test/scenarios.sh stage-test         the stage tool's own tests (stages/*_test.nim)
 #
 # The pack, its scenarios and its lanes are under src/tests/scenarios
 # (README.md there). The general-purpose runner and backends are siblings of
@@ -214,6 +215,7 @@ lane)
 	# product's large panes in bounded time fails here, by name, rather than as
 	# scenarios timing out.
 	if [ "${flavour}" = electron ]; then "$0" binding-test || exit 1; fi
+	"$0" stage-test || exit 1
 	lane_file="${S}/lanes/${flavour}.lane.yaml"
 	# SCENARIO_LANE_SHARD=i/n runs one shard of the lane: every n-th entry of
 	# its `applicable:` list (ci/test/scenario-lane-shard.py), so a CI matrix
@@ -244,6 +246,17 @@ run)
 	esac
 	"$(runner_of "${flavour}")" run "${scenario}" --pack "${S}/pack/codetracer.pack.yaml" \
 		--backend "$(backend_of "${flavour}")" --build "${build_dir}" "${settle[@]}" "$@"
+	;;
+stage-test)
+	# The stage tool's own tests (stages/*_test.nim): what a stage decides
+	# without a product build (e.g. which fixture-cache entries are whole).
+	rc=0
+	for t in "${root}/${S}"/stages/*_test.nim; do
+		echo "== ${t#"${root}/"}"
+		nim c -r "${nim_common[@]}" --nimcache:"${nimcache}/stage-test-$(basename "${t}" .nim)" \
+			-o:"${bin}/$(basename "${t}" .nim)" "${t}" || rc=1
+	done
+	exit "${rc}"
 	;;
 binding-test)
 	# The bindings' own tests: what a binding reads from a real page, without a
