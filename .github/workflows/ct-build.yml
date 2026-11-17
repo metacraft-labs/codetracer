@@ -139,3 +139,19 @@ jobs:
           path: ${{ runner.temp }}/ct-build-products.tar.gz
           retention-days: 2
           compression-level: 0
+
+      - name: Push the dev shells this job realised to the cache
+        # Best effort and last: the shards wait for this job, so the push has a
+        # budget (CT_CACHE_PUSH_BUDGET, 15 minutes), and the script exits 0 on
+        # any failure. It fills the cache when the lock has moved faster than
+        # cache-push.yml can finish (run 44048043714 found nothing built on the
+        # lock 64a81f1844c moved to). Only dev and agents write the shared
+        # cache; ci/test/push-built-closure-test.sh holds both rules.
+        if: ${{ !cancelled() && steps.ct.outcome == 'success' && (github.ref_name == 'dev' || github.ref_name == 'agents') }}
+        continue-on-error: true
+        timeout-minutes: 20
+        env:
+          ATTIC_ENDPOINT: ${{ vars.ATTIC_ENDPOINT }}
+          ATTIC_CACHE: ${{ vars.ATTIC_CACHE }}
+          ATTIC_TOKEN: ${{ secrets.ATTIC_TOKEN }}
+        run: bash ci/deploy/push-built-closure.sh --gcroots "${CT_GCROOT_DIR:-$RUNNER_TEMP/ct-gcroots}" --flake-inputs

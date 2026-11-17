@@ -6004,6 +6004,23 @@ jobs:
         # source for 1h36m on a cold runner (run 43935388749, cancelled).
         run: nix build --print-build-logs '.?submodules=1#codetracer'
 
+      - name: Push the build to the cache
+        # #codetracer and the realised paths it was built from, so the next run
+        # substitutes them: run 44048043714's nixos leg built Noir, db-backend,
+        # backend-manager and codetracer from source here (122 minutes) because
+        # no cache push had finished on the moved lock. Best effort: a budget
+        # (CT_CACHE_PUSH_BUDGET, 15 minutes), exit 0 on any failure, and only
+        # dev and agents write the shared cache
+        # (ci/test/push-built-closure-test.sh).
+        if: ${{ !cancelled() && matrix.platform == 'nixos' && steps.ct.outcome == 'success' && (github.ref_name == 'dev' || github.ref_name == 'agents') }}
+        continue-on-error: true
+        timeout-minutes: 20
+        env:
+          ATTIC_ENDPOINT: ${{ vars.ATTIC_ENDPOINT }}
+          ATTIC_CACHE: ${{ vars.ATTIC_CACHE }}
+          ATTIC_TOKEN: ${{ secrets.ATTIC_TOKEN }}
+        run: bash ci/deploy/push-built-closure.sh --codetracer --flake-inputs
+
       # The build above can outlast the job's first token on a cold runner.
       - name: Refresh the GitHub token
         id: fresh_token
@@ -6088,30 +6105,19 @@ jobs:
           # Cargo's default libgit2 transport does not read gitconfig, so the
           # git CLI has to be forced for the private ``lldb-sys.rs``
           # dependency. The CREDENTIAL it then uses is already installed
-          # job-wide by ``Setup dev env`` above, so nothing is configured here.
-          #
-          # That step runs the shared ``setup-nix``, which exports
-          #
-          #   GIT_CONFIG_KEY_0=http.https://github.com/metacraft-labs/.extraHeader
-          #
-          # through $GITHUB_ENV. Four things make it sufficient here, and each
-          # was checked rather than assumed:
-          #
-          #   * ``Setup dev env`` is unconditional on this job -- it is not
-          #     gated on ``matrix.platform`` -- so the macOS leg gets it too.
-          #   * ``lldb-sys.rs`` lives at github.com/metacraft-labs/lldb-sys.rs,
-          #     and git matches ``http.<url>.*`` by scheme + host + port +
-          #     slash-delimited path prefix, so the metacraft-labs scope covers
-          #     it (and nothing outside the org).
-          #   * GIT_CONFIG_COUNT/KEY_n/VALUE_n are ordinary environment
-          #     variables, so they survive ``nix develop --command`` into
-          #     cargo's child git processes. Verified directly: inside a
-          #     ``nix develop`` shell, ``git config --get-all`` resolves the
-          #     header from the environment alone.
-          #   * The same scoped-header + git-CLI combination already fetches
-          #     this exact dependency in ``visual-replay-regression-gate``,
-          #     which builds its own per-repo header and neutralises
-          #     ~/.gitconfig entirely.
+          # job-wide, so nothing is configured here: "Provision dependency
+          # siblings from repro.lock" registers ci/git-credential-job-netrc.sh
+          # as the github.com credential helper through GIT_CONFIG_KEY_n /
+          # GIT_CONFIG_VALUE_n in $GITHUB_ENV, and blanks the metacraft-labs
+          # extraHeader setup-nix exported, which would otherwise go stale an
+          # hour after its token was minted (codetracer-pm issues/2026-11-17-a-
+          # ci-step-longer-than-an-hour-sends-metacraft-labs-git-requests-a-
+          # stale-token.md). lldb-sys.rs is private, so the git CLI cargo
+          # runs gets a 401 and asks the helper, which hands out the job's
+          # current token. GIT_CONFIG_* are ordinary environment variables and
+          # survive ``nix develop --command`` into cargo's child git
+          # processes (verified: inside a ``nix develop`` shell,
+          # ``git config --get-all`` resolves them from the environment alone).
           #
           # What used to be here was a GLOBAL catch-all rewriting every
           # github.com URL to carry the token as userinfo. Unlike a
@@ -6653,11 +6659,29 @@ jobs:
           cp -a "$SRC" "$DEST"
 
       - name: Build CodeTracer
+        id: ct_build
         # No --override-input: the staged libs/ copies are the revisions flake.lock
         # pins (sibling-provisioning-test holds the spellings to it), and
         # overriding them changed Noir's derivation, which then built from
         # source for 1h36m on a cold runner (run 43935388749, cancelled).
         run: nix build --print-build-logs '.?submodules=1#codetracer'
+
+      - name: Push the build to the cache
+        # #codetracer and the realised paths it was built from, so the next run
+        # substitutes them: run 44048043714's nixos leg built Noir, db-backend,
+        # backend-manager and codetracer from source here (122 minutes) because
+        # no cache push had finished on the moved lock. Best effort: a budget
+        # (CT_CACHE_PUSH_BUDGET, 15 minutes), exit 0 on any failure, and only
+        # dev and agents write the shared cache
+        # (ci/test/push-built-closure-test.sh).
+        if: ${{ !cancelled() && steps.ct_build.outcome == 'success' && (github.ref_name == 'dev' || github.ref_name == 'agents') }}
+        continue-on-error: true
+        timeout-minutes: 20
+        env:
+          ATTIC_ENDPOINT: ${{ vars.ATTIC_ENDPOINT }}
+          ATTIC_CACHE: ${{ vars.ATTIC_CACHE }}
+          ATTIC_TOKEN: ${{ secrets.ATTIC_TOKEN }}
+        run: bash ci/deploy/push-built-closure.sh --codetracer --flake-inputs
 
       # The build above can outlast the job's first token on a cold runner.
       - name: Refresh the GitHub token
@@ -8424,10 +8448,12 @@ jobs:
         if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
         run: python3 ci/test/dev-shell-gcroot-test.py
 
-      - name: A clone after a long step uses a token minted after it
+      - name: Late git fetches use a token minted late
         # An installation token lives an hour; clones that followed sibling
         # provisioning or a nix build with the job's first token failed with
-        # "Invalid username or token" (run 43996043232). python3 and PyYAML.
+        # "Invalid username or token" (run 43996043232). Also: no job that
+        # registers the credential helper sets an extraHeader after it.
+        # python3 and PyYAML.
         if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
         run: python3 ci/test/late-clone-token-test.py
 

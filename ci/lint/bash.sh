@@ -342,6 +342,17 @@ lint_step "a visual-recording scenario lands on a shard that builds the player" 
 lint_step "a late git fetch gets a freshly minted GitHub token" \
 	bash ci/test/github-token-freshness-test.sh
 
+# In a job that registers the credential helper, a github.com extraHeader is
+# blanked so the helper answers; the control reproduces the stale-header
+# failure against a local git server.
+lint_step "a stale extraHeader cannot outlive its token" \
+	bash ci/test/git-credential-header-test.sh
+
+# A job pushes what it built to the cache, from dev and agents only, and never
+# fails for it.
+lint_step "a build job pushes its closure, best effort, from dev and agents" \
+	bash ci/test/push-built-closure-test.sh
+
 # A GPUI shard gives a bare host the Vulkan driver, cursor theme and D-Bus
 # session configuration the window and its compositor need.
 lint_step "a GPUI shard provisions what a bare host lacks" \

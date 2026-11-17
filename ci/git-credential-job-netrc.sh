@@ -27,7 +27,10 @@ while IFS= read -r line && [ -n "$line" ]; do
 	host=*) host="${line#host=}" ;;
 	esac
 done
-[ "$protocol" = https ] && [ "$host" = github.com ] || exit 0
+# CT_GIT_CREDENTIAL_ORIGIN ("<protocol> <host>") points it at a local git
+# server in ci/test/git-credential-header-test.sh; CI never sets it.
+want_origin="${CT_GIT_CREDENTIAL_ORIGIN:-https github.com}"
+[ "$protocol $host" = "$want_origin" ] || exit 0
 
 netrc="${MCL_JOB_CREDENTIALS_DIR:-}/netrc"
 [ -n "${MCL_JOB_CREDENTIALS_DIR:-}" ] && [ -r "$netrc" ] || exit 0

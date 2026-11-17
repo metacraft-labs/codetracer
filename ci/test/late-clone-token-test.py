@@ -16,6 +16,14 @@ run time instead, by ci/test/github-token-freshness-test.sh.
 
 Negative control: with every such clone pointed back at `steps.ci_token`, the
 checker must name each of them.
+
+Second rule: a job that registers the git credential helper (every job using
+provision-repro-lock-siblings) sets no github.com extraHeader after it. The
+registration blanks the job's header, because git sends a header before it
+would ask a helper and a header fixed at a step's start outlives its token
+(ci/test/git-credential-header-test.sh reproduces that against a local git
+server). A later step that set one again would bring the defect back.
+Negative control: one such step injected into every helper job is named.
 """
 
 import copy
@@ -69,6 +77,36 @@ def defects(workflows):
     return found
 
 
+HEADER = re.compile(r"extraheader", re.IGNORECASE)
+
+
+def registers_helper(step):
+    return "provision-repro-lock-siblings" in (step.get("uses") or "")
+
+
+def header_defects(workflows):
+    found = []
+    for name, wf in workflows.items():
+        for job_name, job in (wf.get("jobs") or {}).items():
+            registered = False
+            for step in job.get("steps") or []:
+                if registers_helper(step):
+                    registered = True
+                    continue
+                if not registered:
+                    continue
+                run = "\n".join(
+                    line for line in str(step.get("run") or "").splitlines() if not line.lstrip().startswith("#")
+                )
+                text = yaml.safe_dump({"env": step.get("env"), "with": step.get("with"), "run": run})
+                if HEADER.search(text):
+                    found.append(
+                        f"{name}: job '{job_name}', step '{step.get('name')}' sets an extraHeader "
+                        "after the credential helper was registered"
+                    )
+    return found
+
+
 def main():
     workflows = {p.name: yaml.safe_load(p.read_text()) for p in sorted(WORKFLOWS.glob("*.yml"))}
     failures = 0
@@ -104,6 +142,39 @@ def main():
         print(f"  FAIL with {expected} late clone(s) reverted to the job's first token, the checker named {caught}")
     else:
         print(f"  ok   negative control: all {expected} late clone(s) reverted to the first token are named")
+
+    live = header_defects(workflows)
+    if live:
+        failures += 1
+        print("  FAIL a job that registers the credential helper sets an extraHeader after it")
+        for d in live:
+            print(f"         {d}")
+    else:
+        print("  ok   no job that registers the credential helper sets an extraHeader after it")
+
+    injected = copy.deepcopy(workflows)
+    jobs = 0
+    for wf in injected.values():
+        for job in (wf.get("jobs") or {}).values():
+            steps = job.get("steps") or []
+            for i, step in enumerate(steps):
+                if registers_helper(step):
+                    steps.insert(i + 1, {
+                        "name": "inject a header",
+                        "env": {"GIT_CONFIG_KEY_0": "http.https://github.com/metacraft-labs/.extraHeader"},
+                        "run": "true",
+                    })
+                    jobs += 1
+                    break
+    caught = len(header_defects(injected))
+    if jobs == 0:
+        failures += 1
+        print("  FAIL no job registers the credential helper: the header check proves nothing")
+    elif caught != jobs:
+        failures += 1
+        print(f"  FAIL with a header step injected into {jobs} helper job(s), the checker named {caught}")
+    else:
+        print(f"  ok   negative control: a header step injected into each of {jobs} helper job(s) is named")
 
     if failures:
         sys.exit(1)
