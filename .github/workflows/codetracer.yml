@@ -6270,6 +6270,17 @@ jobs:
           fi
           echo "ruby recorder native extension: $found"
 
+      - name: Mint a token for the clone below
+        # The clone runs after the nix build, provisioning and ct-mcr, over an
+        # hour into the job on a cold runner: the token minted after the build
+        # (fresh_token) had expired by then (run 43996043232: "Invalid username
+        # or token").
+        id: clone_token
+        uses: ./.github/actions/refresh-github-token
+        with:
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+
       - name: Clone codetracer-js-recorder sibling
         # NOT gated to macOS, unlike the two clones above, and not for symmetry
         # -- the suite below needs this on both legs and neither leg has it.
@@ -6303,7 +6314,7 @@ jobs:
           repo: metacraft-labs/codetracer-js-recorder
           ref: dev
           path: ${{ github.workspace }}/../codetracer-js-recorder
-          gh-token: ${{ steps.fresh_token.outputs.token || steps.ci_token.outputs.token }}
+          gh-token: ${{ steps.clone_token.outputs.token }}
           submodules: 'false'
 
       - name: Build codetracer-js-recorder sibling

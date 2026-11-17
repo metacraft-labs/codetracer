@@ -113,9 +113,20 @@ require_locked_checkout() {
 		else
 			echo "Ref '$ref' is not known to the existing checkout; fetching it." >&2
 		fi
-		if git -C "$dir" fetch --quiet origin "$ref" 2>/dev/null; then
-			want="$(git -C "$dir" rev-parse --verify --quiet 'FETCH_HEAD^{commit}' 2>/dev/null)" || want=""
-		fi
+		# The checkout's own `origin` first, then the repository's canonical
+		# URL: a persistent runner's leftover checkout can carry an `origin`
+		# this job's credential does not cover (run 43996043232: the fetch
+		# failed and nothing said why). Each failure is shown, not discarded.
+		local url="https://github.com/metacraft-labs/codetracer-native-backend"
+		local src
+		for src in origin "$url"; do
+			if git -C "$dir" fetch --quiet "$src" "$ref"; then
+				want="$(git -C "$dir" rev-parse --verify --quiet 'FETCH_HEAD^{commit}' 2>/dev/null)" || want=""
+				[[ -n $want ]] && break
+			else
+				echo "  (fetching $ref from '$src' failed; origin is '$(git -C "$dir" remote get-url origin 2>/dev/null || echo none)')" >&2
+			fi
+		done
 	fi
 
 	if [[ -z $want ]]; then
