@@ -921,6 +921,17 @@ storybook-stories:
 isonim-editor-codetracer *args:
   bash scripts/isonim-editor-codetracer.sh "$@"
 
+# e2e_codetracer_instance_layouts_fit_and_100: builds the IsoNim Editor
+# instance into its own tree, serves it on a free loopback port and checks, in
+# headless Chromium at 1920x1080 and in both themes, that every full-window
+# layout story (Layouts L1 to L14) opened at the Wide screen type fits the
+# preview area and shows at 100% with scrollbars, by measurement. Screenshots,
+# measurements.json and results.json land in
+# build/isonim-editor-codetracer-layouts/layouts/.
+# See tools/isonim-editor/layouts-fit-and-100.mjs.
+test-isonim-editor-layouts-fit-and-100:
+  bash scripts/isonim-editor-codetracer.sh --layouts-fit-and-100
+
 # The compile is a script, not a recipe body, so `ci/test/stale-artefact-guards-test.sh`
 # can run the stamp against a stub `nim`. The stamp is what lets the bundle read as
 # fresh when nim wrote the same bytes and left its mtime alone; see the header of

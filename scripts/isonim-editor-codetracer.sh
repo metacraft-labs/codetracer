@@ -15,9 +15,19 @@
 #       comment on a story reaches an agent session. It builds StoryBook
 #       (`just storybook-build`) for that comparison.
 #       Exits 0 when every check passes, 1 otherwise.
+#   just isonim-editor-codetracer --layouts-fit-and-100
+#       Build it, serve it on a free loopback port with agent sessions
+#       disabled, and run e2e_codetracer_instance_layouts_fit_and_100
+#       (tools/isonim-editor/layouts-fit-and-100.mjs) in a headless browser:
+#       each full-window layout story (Layouts L1 to L14), opened in the page
+#       preview at the Wide screen type (1920x1080) in a 1920x1080 window and
+#       in both themes, fits the preview area and shows at 100% with
+#       scrollbars, by measurement. Exits 0 when every check passes, 1
+#       otherwise.
 #
 # What it builds, all under build/isonim-editor-codetracer/ (git-ignored;
-# build/isonim-editor-codetracer-smoke/ for --smoke):
+# build/isonim-editor-codetracer-smoke/ for --smoke,
+# build/isonim-editor-codetracer-layouts/ for --layouts-fit-and-100):
 #   - the stories: `just build-storybook-components` writes StoryBook's story
 #     files from src/frontend/stories/codetracer_stories.nim and builds the
 #     components bundle both surfaces mount stories with;
@@ -52,6 +62,7 @@ isonim="${ISONIM_EDITOR_ROOT:-$workspace/isonim}"
 port=6106
 bind=0.0.0.0
 smoke=0
+layouts=0
 
 die() {
 	echo "isonim-editor-codetracer: $*" >&2
@@ -61,6 +72,7 @@ die() {
 while [ $# -gt 0 ]; do
 	case "$1" in
 	--smoke) smoke=1 ;;
+	--layouts-fit-and-100) layouts=1 ;;
 	--port)
 		[ $# -ge 2 ] || die "--port needs a value"
 		port="$2"
@@ -73,15 +85,17 @@ while [ $# -gt 0 ]; do
 		shift
 		;;
 	--bind=*) bind="${1#--bind=}" ;;
-	*) die "unknown argument: $1 (expected --smoke, --port N, --bind ADDR)" ;;
+	*) die "unknown argument: $1 (expected --smoke, --layouts-fit-and-100, --port N, --bind ADDR)" ;;
 	esac
 	shift
 done
+[ "$smoke" -eq 1 ] && [ "$layouts" -eq 1 ] && die "--smoke and --layouts-fit-and-100 are separate runs"
 
-# The smoke builds its own tree, so a smoke run never rewrites the files a
-# served instance is loading.
+# A check builds its own tree, so it never rewrites the files a served
+# instance is loading.
 out="$repo/build/isonim-editor-codetracer"
 [ "$smoke" -eq 1 ] && out="$out-smoke"
+[ "$layouts" -eq 1 ] && out="$out-layouts"
 www="$out/www"
 
 for tool in nim node python3 just; do
@@ -197,6 +211,64 @@ fi
 server=(python3 "$isonim/tools/editor_server.py" --directory "$www"
 	--project-root "$repo" --daemon-binary "$daemon")
 
+# An agent backend that refuses every session: the instance's beyond
+# loopback, and the one the layouts check runs with (it starts no session).
+write_no_agent_config() {
+	no_agent="$out/no-agent.sh"
+	cat >"$no_agent" <<'EOF'
+#!/bin/sh
+echo "Agent sessions are disabled on this editor instance: it is served beyond loopback and the editor's agent routes are unauthenticated. Serve it with --bind 127.0.0.1 to use agents." >&2
+exit 1
+EOF
+	chmod +x "$no_agent"
+	printf '[agent]\nbackend = "custom"\ncommand = "%s"\nargs = []\nprimer_enabled = false\n' "$no_agent" >"$out/no-agent.toml"
+}
+
+# Serve on a free loopback port with the agent config $1, logging into the
+# directory $2. Sets server_pid and url; the server is stopped on exit.
+stop_server() {
+	if [ -n "${server_pid:-}" ] && kill -0 "$server_pid" 2>/dev/null; then
+		kill -TERM "$server_pid" 2>/dev/null || true
+		wait "$server_pid" 2>/dev/null || true
+	fi
+}
+start_check_server() {
+	"${server[@]}" --port 0 --bind 127.0.0.1 --config "$1" >"$2/server.out" 2>"$2/server.err" &
+	server_pid=$!
+	trap stop_server EXIT
+	url=""
+	for _ in $(seq 1 600); do
+		url="$(sed -n 's|^Editor listening on \(http://[^ ]*\)/$|\1|p' "$2/server.out" | head -n 1)"
+		[ -n "$url" ] && break
+		kill -0 "$server_pid" 2>/dev/null || {
+			cat "$2/server.err" >&2
+			die "the editor server exited before listening"
+		}
+		sleep 0.5
+	done
+	[ -n "$url" ] || die "the editor server did not start listening in 300 s (log: $2/server.err)"
+	url="${url/0.0.0.0/127.0.0.1}"
+}
+
+if [ "$layouts" -eq 1 ]; then
+	layouts_dir="$out/layouts"
+	rm -rf "$layouts_dir"
+	mkdir -p "$layouts_dir"
+	write_no_agent_config
+	start_check_server "$out/no-agent.toml" "$layouts_dir"
+	status=0
+	node "$repo/tools/isonim-editor/layouts-fit-and-100.mjs" --url "$url" --out "$layouts_dir" \
+		--stories "$repo/storybook/stories/generated/stories.json" || status=$?
+	stop_server
+	trap - EXIT
+	if [ "$status" -eq 0 ]; then
+		echo "isonim-editor-codetracer: layouts fit and 100% PASSED (screenshots and measurements in $layouts_dir)"
+	else
+		echo "isonim-editor-codetracer: layouts fit and 100% FAILED (screenshots and measurements in $layouts_dir)" >&2
+	fi
+	exit "$status"
+fi
+
 if [ "$smoke" -eq 0 ]; then
 	# The editor's agent routes are unauthenticated: whoever reaches the
 	# server can start an agent session that runs commands in this checkout.
@@ -206,14 +278,7 @@ if [ "$smoke" -eq 0 ]; then
 	case "$bind" in
 	127.* | localhost | ::1) ;;
 	*)
-		no_agent="$out/no-agent.sh"
-		cat >"$no_agent" <<'EOF'
-#!/bin/sh
-echo "Agent sessions are disabled on this editor instance: it is served beyond loopback and the editor's agent routes are unauthenticated. Serve it with --bind 127.0.0.1 to use agents." >&2
-exit 1
-EOF
-		chmod +x "$no_agent"
-		printf '[agent]\nbackend = "custom"\ncommand = "%s"\nargs = []\nprimer_enabled = false\n' "$no_agent" >"$out/no-agent.toml"
+		write_no_agent_config
 		server+=(--config "$out/no-agent.toml")
 		echo "    agent sessions disabled: $bind is not a loopback address"
 		;;
@@ -235,31 +300,11 @@ if [ ! -x "$fake_agent" ]; then
 fi
 printf '[agent]\nbackend = "custom"\ncommand = "%s"\nargs = []\nprimer_enabled = false\n' "$fake_agent" >"$smoke_dir/review.toml"
 
+# The fake agent's settings reach the server (and the agent it spawns) only:
+# assignments before a function call are exported for that call alone.
 FAKE_ACP_CONTENT_LOG="$smoke_dir/agent-prompts.jsonl" \
 	FAKE_ACP_REPLY="CODETRACER_EDITOR_SMOKE_REPLY" \
-	"${server[@]}" --port 0 --bind 127.0.0.1 --config "$smoke_dir/review.toml" \
-	>"$smoke_dir/server.out" 2>"$smoke_dir/server.err" &
-server_pid=$!
-stop_server() {
-	if kill -0 "$server_pid" 2>/dev/null; then
-		kill -TERM "$server_pid" 2>/dev/null || true
-		wait "$server_pid" 2>/dev/null || true
-	fi
-}
-trap stop_server EXIT
-
-url=""
-for _ in $(seq 1 600); do
-	url="$(sed -n 's|^Editor listening on \(http://[^ ]*\)/$|\1|p' "$smoke_dir/server.out" | head -n 1)"
-	[ -n "$url" ] && break
-	kill -0 "$server_pid" 2>/dev/null || {
-		cat "$smoke_dir/server.err" >&2
-		die "the editor server exited before listening"
-	}
-	sleep 0.5
-done
-[ -n "$url" ] || die "the editor server did not start listening in 300 s (log: $smoke_dir/server.err)"
-url="${url/0.0.0.0/127.0.0.1}"
+	start_check_server "$smoke_dir/review.toml" "$smoke_dir"
 
 status=0
 node "$repo/tools/isonim-editor/smoke.mjs" --url "$url" --out "$smoke_dir" \
