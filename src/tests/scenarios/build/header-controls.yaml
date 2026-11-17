@@ -1,0 +1,26 @@
+scenario: 1
+name: build/header-controls
+pack: codetracer
+summary: >-
+  Docking the BUILD panel from its footer strip tab shows its header
+  controls: Run build, Stop, Clear and the auto-scroll toggle.
+
+stage:
+  - use: record-program
+    with: { program: py_console_logs/main.py }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - wait: { until: { at: 'strip-tab[label="BUILD"]', present: true }, timeout: 30s }
+  - expect: { at: 'strip-tab[label="BUILD"]', edge: bottom }
+  - click: { at: 'strip-tab[label="BUILD"]' }
+  - wait: { until: { at: build-panel, present: true }, timeout: 30s }
+  - expect: { at: 'docked-panel[edge="bottom"]', present: true }
+  - expect: { at: build-panel, where: docked }
+  - expect: { at: 'build-panel/panel-button[label="Run build (no re-record)"]', present: true }
+  # Nothing is running, so Stop is there but disabled.
+  - expect: { at: 'build-panel/panel-button[label="Stop build"]', enabled: false }
+  - expect: { at: 'build-panel/panel-button[label="Clear build output"]', present: true }
+  - expect: { at: 'build-panel/panel-button[label="Toggle auto-scroll"]', active: true }
+  - capture: { name: build-docked }

@@ -5,8 +5,12 @@
 ## submenu. The panel's config is serialised, removed from the source window,
 ## and recreated in the target window via Electron IPC.
 ##
-## The panel carries its `sessionId` so that mixed-session windows (M22) route
-## DAP events through the correct ReplaySession.
+## A pane belongs to a tab, and the tab shows a replay. Tab ids are per
+## window, so between windows a pane's session is named by its REPLAY: a pane
+## can go to another window that has a tab showing the same replay, and the
+## main process puts it in that tab (`index/window.onPanelDetach`). "Send to
+## New Window" opens a window that shows the tab's session with only the pane
+## in its layout (`index/window.openSessionWindow`).
 
 when defined(ctWeb):
   {.error: "ui/panel_transfer.nim moves a pane BETWEEN APPLICATION WINDOWS over " &
@@ -20,7 +24,7 @@ when defined(ctWeb):
            "what the web profile's `capMultiWindow` degradation already says." .}
 
 import
-  std / [ jsffi, jsconsole, strformat, asyncjs ],
+  std / [ jsffi, jsconsole, asyncjs ],
   kdom,
   ../types,
   ../lib/[ jslib, logging ]
@@ -31,10 +35,17 @@ import
 
 var electron* {.importc.}: JsObject
 
-# The session ID that this renderer window is bound to.  Defaults to 0
-# (main window).  For secondary windows, this is set by
-# registerInitSessionHandler / CODETRACER::init-session IPC.
+# The tab a window opened for a session shows it in (its first, 0), and the
+# replay, as `CODETRACER::init-session` said (`registerInitSessionHandler`).
 var currentSessionId*: int = 0
+var currentReplayId*: int = -1
+
+proc noOtherWindows(): JsObject {.importjs: "({windows: []})".}
+var knownOtherWindows* = noOtherWindows()
+  ## The other open windows, as the main process last said
+  ## (`CODETRACER::windows-changed` when a window opens, closes or is
+  ## retitled; `CODETRACER::list-windows-reply`): `{ windows: [{ id, title,
+  ## replayIds }] }`.
 
 proc ipcRenderer(): JsObject =
   ## Lazily obtain the ipcRenderer; returns nil/undefined when not in Electron.
@@ -47,10 +58,18 @@ proc ipcRenderer(): JsObject =
 # ---------------------------------------------------------------------------
 
 proc serializePanelConfig*(contentItem: GoldenContentItem): JsObject =
-  ## Serialise a GL component's config + state for cross-window transfer.
-  ## The returned JsObject is a plain JSON-compatible config that can be
-  ## sent over IPC and used with `layout.addItem` on the receiving side.
-  contentItem.toConfig().toJs
+  ## Serialise a GL component for cross-window transfer: an UNRESOLVED
+  ## component item config (type, component type, state, title), what
+  ## `addItem` and a layout's `root` take on the receiving side. Not
+  ## `toConfig()`'s resolved one, whose numeric sizes GoldenLayout refuses in
+  ## an unresolved layout.
+  let resolved = contentItem.toConfig().toJs
+  js{
+    "type": cstring"component",
+    "componentType": resolved[cstring"componentType"],
+    "componentState": resolved[cstring"componentState"],
+    "title": resolved[cstring"title"]
+  }
 
 # ---------------------------------------------------------------------------
 # Receiving side: attach a panel that arrived from another window
@@ -83,7 +102,8 @@ proc detachAndSendPanel*(
   sessionId: int
 ) =
   ## Serialise the panel, remove it from the local GL instance, and send
-  ## it to the target window via the main process.
+  ## it to the target window via the main process. `sessionId` is the id of
+  ## the tab the pane belongs to.
   let ipc = ipcRenderer()
   if ipc.isNil or ipc.isUndefined:
     cerror "panel_transfer: ipcRenderer not available"
@@ -122,15 +142,28 @@ proc requestWindowList*(): Future[JsObject] =
       resolve(response))
     ipc.send(cstring"CODETRACER::list-windows", js{}))
 
+proc showsReplay(win: JsObject; replayId: int): bool =
+  ## Whether a window of a `windows-changed` / `list-windows-reply` list has
+  ## a tab showing `replayId`.
+  let replays = win["replayIds"]
+  if replayId < 0 or replays.isNil or replays.isUndefined:
+    return false
+  for i in 0 ..< cast[int](replays.length):
+    if replays[i].to(int) == replayId:
+      return true
+  false
+
 proc buildSendToWindowMenuItems*(
   contentItem: GoldenContentItem,
   sessionId: int,
+  replayId: int,
   windows: JsObject
 ): seq[ContextMenuItem] =
-  ## Build context menu items for each available target window.
-  ## Only windows that belong to the same session are shown as active
-  ## transfer targets — cross-session transfer is blocked because the
-  ## target window's GL instance is bound to a different trace.
+  ## The pane tab menu's transfer entries for a pane of the tab `sessionId`,
+  ## whose replay is `replayId`: "Send to: <title>" for each other window
+  ## showing that replay, and "Send to New Window". A window of another
+  ## replay is not offered: the pane would show trace A in a window of
+  ## trace B.
   var items: seq[ContextMenuItem] = @[]
   let winArray = windows["windows"]
   let winLen = cast[int](winArray.length)
@@ -140,15 +173,17 @@ proc buildSendToWindowMenuItems*(
       let win = winArray[i]
       let windowId = win["id"].to(int)
       let windowTitle = win["title"].to(cstring)
-      let winSessionId = win["sessionId"].to(int)
       # Capture for closure.
       let capturedWindowId = windowId
       let capturedSessionId = sessionId
       let capturedItem = contentItem
 
-      if winSessionId == sessionId:
+      if win.showsReplay(replayId):
         # Compatible window — same session/trace.
-        let label = cstring(fmt"Send to: {windowTitle}")
+        # Joined as JS strings: through a Nim `string` a title's non-ASCII
+        # characters (the "—" of "main.py — CodeTracer") would be cut to
+        # their low byte.
+        let label = cstring"Send to: " & windowTitle
         items.add(ContextMenuItem(
           name: label,
           hint: cstring"",
@@ -157,8 +192,8 @@ proc buildSendToWindowMenuItems*(
         ))
       # Incompatible windows (different session) are silently omitted.
 
-  # Always offer "Send to New Window" which creates a secondary window
-  # bound to this panel's session.
+  # Always offer "Send to New Window", which opens a window showing this
+  # pane's session with the pane alone.
   let capturedNewSessionId = sessionId
   let capturedNewItem = contentItem
   items.add(ContextMenuItem(
@@ -175,27 +210,28 @@ proc buildSendToWindowMenuItems*(
 # IPC listener for the receiving side (renderer process)
 # ---------------------------------------------------------------------------
 
-proc registerPanelAttachHandler*(layout: GoldenLayout) =
+var panelAttachRegistered = false
+
+proc registerPanelAttachHandler*(layout: GoldenLayout;
+                                 hasTab: proc(sessionId: int): bool) =
   ## Register the IPC handler that listens for incoming panel configs
   ## from other windows.  Call this once after the GL layout is initialised.
+  ## The main process names the tab of this window that shows the pane's
+  ## replay (`sessionId`); a pane for a tab this window does not have is
+  ## refused.
   let ipc = ipcRenderer()
-  if ipc.isNil or ipc.isUndefined:
+  if ipc.isNil or ipc.isUndefined or panelAttachRegistered:
     return
+  panelAttachRegistered = true
 
   ipc.on(cstring"CODETRACER::panel-attach", proc(event: JsObject, payload: JsObject) =
     let config = payload["panelConfig"]
     let sid = payload["sessionId"].to(int)
-    # M22: Validate that the incoming panel belongs to the session this
-    # window is displaying.  The main process already enforces this, but
-    # we double-check on the renderer side for defence in depth.
-    # ``currentSessionId`` is set by the ``CODETRACER::init-session`` IPC
-    # handler when a secondary window is created, or defaults to 0 for
-    # the main window.
-    if sid != currentSessionId:
-      cerror "panel_transfer: rejecting panel from session " & $sid &
-        " - this window serves session " & $currentSessionId
+    if not hasTab.isNil and not hasTab(sid):
+      cerror "panel_transfer: rejecting a pane for tab " & $sid &
+        ", which this window does not have"
       return
-    console.log cstring"panel_transfer: attaching panel from session ", sid
+    console.log cstring"panel_transfer: attaching a pane of tab ", sid
     handlePanelAttach(layout, config))
 
 proc registerInitSessionHandler*() =
@@ -208,4 +244,16 @@ proc registerInitSessionHandler*() =
 
   ipc.on(cstring"CODETRACER::init-session", proc(event: JsObject, payload: JsObject) =
     currentSessionId = payload["sessionId"].to(int)
+    if not payload["replayId"].isUndefined:
+      currentReplayId = payload["replayId"].to(int)
     console.log cstring"panel_transfer: bound to session ", currentSessionId)
+
+proc registerWindowListHandler*() =
+  ## Keep `knownOtherWindows` current: the main process says when a window
+  ## opens, closes or is retitled (`CODETRACER::windows-changed`), so the
+  ## pane tab menu lists the windows open now.
+  let ipc = ipcRenderer()
+  if ipc.isNil or ipc.isUndefined:
+    return
+  ipc.on(cstring"CODETRACER::windows-changed", proc(event: JsObject, payload: JsObject) =
+    knownOtherWindows = payload)

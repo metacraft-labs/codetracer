@@ -272,13 +272,16 @@ export async function extractLayoutAnswers(
         // a mark on the same line, because a line that is both is a line the
         // debugger is stopped on and a user reads the stop first.
         if (el.querySelector(".gutter-highlight-active")) names.push("execution");
-        if (el.querySelector(".gutter-breakpoint-enabled")) names.push("breakpoint");
-        else if (el.querySelector(".gutter-breakpoint-disabled"))
-          names.push("breakpoint-disabled");
-        if (
-          el.querySelector(".gutter-trace") ||
-          el.querySelector(".gutter-disabled-trace")
-        )
+        // The marks are Monaco glyph-margin decorations (Editor-Pane.md MC.5).
+        const data = (globalThis as any).data;
+        const monacoEditor = data?.ui?.editors?.[data?.services?.editor?.active]?.monacoEditor;
+        const glyphs: string[] = (monacoEditor?.getModel?.()?.getLineDecorations?.(line) ?? [])
+          .map((d: any) => d.options?.glyphMarginClassName ?? "");
+        const has = (name: string) => glyphs.some((g) => g.split(/\s+/).includes(name));
+        if (has("gutter-glyph-breakpoint") || has("gutter-glyph-breakpoint-tracepoint"))
+          names.push("breakpoint");
+        else if (has("gutter-glyph-breakpoint-disabled")) names.push("breakpoint-disabled");
+        if (has("gutter-glyph-tracepoint") || has("gutter-glyph-breakpoint-tracepoint"))
           names.push("tracepoint");
         if (names.length > 0) parts.push(`${line}=${names.join("+")}`);
       }
@@ -381,15 +384,15 @@ export async function extractLayoutAnswers(
         const g = gutters(editor);
         let gutterToken = "editor.lineNumber.foreground";
         for (const el of g) {
-          if (el.querySelector(".gutter-breakpoint-enabled")) {
+          if (document.querySelector(".cgmr.gutter-glyph-breakpoint")) {
             gutterToken = "gutter.breakpoint.enabled";
             break;
           }
-          if (el.querySelector(".gutter-breakpoint-disabled")) {
+          if (document.querySelector(".cgmr.gutter-glyph-breakpoint-disabled")) {
             gutterToken = "gutter.breakpoint.disabled";
             break;
           }
-          if (el.querySelector(".gutter-trace")) {
+          if (document.querySelector(".cgmr.gutter-glyph-tracepoint")) {
             gutterToken = "gutter.tracepoint";
             break;
           }

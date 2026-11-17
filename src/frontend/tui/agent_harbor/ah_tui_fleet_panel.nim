@@ -1,0 +1,288 @@
+## tui/agent_harbor/ah_tui_fleet_panel.nim — CTF-P1b. The terminal view of
+## the Agent Harbor fleet (`FleetSnapshotVM`): the section head, the filter
+## chips with their counts, the column names when the panel is wide, and
+## one row per session — its mark, title, status and meta, its failure, its
+## latest activity and `+N` to unfold the rest.
+##
+## The same parts, order and words as the web prototype
+## (`isonim_agent_harbor_fleet_view.nim`) and GPUI
+## (`gpui/agent_harbor/ah_fleet_panel.nim`); the words are
+## `agent_harbor_words`'. Areas are told apart by background: the head, the filters and the column names
+## are three bands, and the rows alternate their ground where the web draws a
+## hairline under each; the selected row is the action role's; `+N` unfolds
+## a row's activity with a click.
+
+import std/strutils
+import isonim/core/signals
+import nim_agents_isonim_viewmodels/agent_harbor/fleet_vm
+from ../../viewmodel/views/agent_harbor_words import
+  filterLabel, filterCount, metaParts, metaPartsShort, withheldNote, headerSummary,
+  AgentHarborFleetLoadingText, AgentHarborFleetEmptyText,
+  AgentHarborFleetFilteredEmptyText, AgentHarborFleetEmptyCellText, activityLineIsError,
+  filterCountInk
+
+import ./ah_tui_canvas
+import ./ah_tui_initiative_panels
+
+export fleet_vm, ah_tui_canvas
+
+const
+  ColumnsFromPx = 960        ## `@container ah-fleet (min-width: 60rem)`
+  NarrowHeaderPx = 640       ## `@container ah-fleet (max-width: 40rem)`
+  DurationCells = 80 div CellPx
+  AgeCells = 64 div CellPx
+
+type
+  FleetGrid = object
+    session, share: int
+
+proc fleetGrid(width: int; anyInitiative: bool): FleetGrid =
+  ## The wide grid: the session column two shares, agent / host /
+  ## initiative one each, then duration and age.
+  let shares = if anyInitiative: 5 else: 4
+  let columns = if anyInitiative: 7 else: 6
+  let free = width - 2 - 2 - DurationCells - AgeCells - (columns - 1)
+  let share = max(1, free div shares)
+  FleetGrid(session: 2 * share, share: share)
+
+proc markOf(p: AhPalette; category: FleetCategory): MarkStyle =
+  case category
+  of fcNeedsInput: MarkStyle(colour: p.iconWarning)
+  of fcRunning: MarkStyle(colour: p.iconSuccess)
+  of fcQueued: MarkStyle(colour: p.iconInfo)
+  of fcFailed: MarkStyle(colour: p.iconError)
+  of fcEnded: MarkStyle(colour: p.endedMark)
+
+proc statusColour(p: AhPalette; category: FleetCategory): string =
+  case category
+  of fcNeedsInput: p.textWarning
+  of fcRunning: p.textSuccess
+  of fcFailed: p.textError
+  else: p.textLabel
+
+proc agentText(row: FleetRow): string =
+  if row.agentCount > 1: row.agentLabel & " \xC3\x97" & $row.agentCount else: row.agentLabel
+
+proc cell(c: var AhCanvas; parent: AhNode; row, col, width: int; s, name: string;
+          right = false; colour = ""; before = -1) =
+  ## One grid cell; an empty one says "—" in the disabled role. `before`:
+  ## where the next cell's text starts (`text`'s `before`).
+  let empty = s.len == 0
+  let shown = if empty: AgentHarborFleetEmptyCellText else: s
+  let n = c.node(parent, row, col, width, 1, [("col", name)])
+  if empty: n.tag("empty", "true")
+  discard c.text(n, row, col, width, shown,
+                 if empty: c.p.textDisabled elif colour.len > 0: colour else: c.p.textLabel,
+                 alignRight = right, before = before)
+
+proc titleLineFits(row: FleetRow; grid: FleetGrid): bool =
+  ## Whether a wide row's title, status word and short meta fit its Session
+  ## column on one line, keeping a gutter: they end at least two cells before
+  ## the Agent column (the column's own gap and one more), so the meta never
+  ## reads as the start of the agent's cell (`… 5ca1ab1e Codex 0.9.4`).
+  widthOf(row.title) + 2 + widthOf(row.statusLabel) + 1 +
+    widthOf(row.metaPartsShort.join(Middot)) <= grid.session - 1
+
+proc titleLinesFit(rows: openArray[FleetRow]; grid: FleetGrid): bool =
+  ## Whether every row's title line fits (`titleLineFits`): the list's rows
+  ## take one shape, all with the status on the title's line or all with it
+  ## on a line of its own, so a list never alternates three- and two-line
+  ## rows (the web's rows are all one shape).
+  for row in rows:
+    if not row.titleLineFits(grid): return false
+  true
+
+proc drawRow(c: var AhCanvas; parent: AhNode; vm: FleetSnapshotVM; row: FleetRow;
+             index, top, col, width: int; columns, anyInitiative: bool;
+             grid: FleetGrid; oneLineAll: bool): int =
+  let id = row.id
+  let sel = row.selected
+  let selText = c.p.selectedText
+  let shown = if row.expanded: row.activity.len else: min(1, row.activity.len)
+  let mainW = if columns: grid.session else: width - 3 - widthOf(row.ageLabel) - 2
+  let metaWords = (if columns: row.metaPartsShort else: row.metaParts).join(Middot)
+  # Wide: the title and meta share a line when every row's do
+  # (`titleLinesFit`).
+  let oneLine = columns and oneLineAll
+  let height = (if oneLine: 1 else: 2) + (if row.failureText.len > 0: 1 else: 0) + shown
+  let ground = if sel: c.p.action elif index mod 2 == 1: c.tone.band else: c.tone.body
+  if ground == c.tone.body:
+    # A row on the panel's ground is an item of the list: the stripes and
+    # the selection are the areas set off from it.
+    c.fill(top, col, width, height, ground)
+  else:
+    c.area("fleet-row", top, col, width, height, ground)
+  let n = c.node(parent, top, col, width, height,
+                 [("row", id), ("category", $row.category), ("selected", $sel),
+                  ("expanded", $row.expanded)])
+  c.target(top, col, width, height, proc() = vm.select(id))
+  discard c.mark(n, top, col + 1, c.p.markOf(row.category))
+  let mc = col + 3
+  # What follows the main column on the first line: the agent's column when
+  # wide, the age at sidebar width. A text cut before it keeps its gap.
+  let nextAt = mc + mainW + 1
+  discard c.text(n, top, mc, if oneLine: widthOf(row.title) else: mainW, row.title,
+                 if sel: selText elif row.titleIsPlaceholder: c.p.textCaption else: c.p.textBody,
+                 fact = "title", before = nextAt)
+  var r = top + 1
+  var metaRow = top + 1
+  var metaCol = mc
+  if oneLine:
+    metaRow = top
+    metaCol = mc + widthOf(row.title) + 2
+    r = top + 1
+  else:
+    r = top + 2
+  let sw = c.text(n, metaRow, metaCol, mainW - (metaCol - mc), row.statusLabel,
+                  if sel: selText else: c.p.statusColour(row.category), fact = "status")
+  let room = mainW - (metaCol - mc) - sw - 1
+  if room > 0:
+    discard c.text(n, metaRow, metaCol + sw + 1, room, metaWords,
+                   if sel: selText else: c.p.textCaption, fact = "meta",
+                   before = if metaRow == top: nextAt else: -1)
+  else:
+    discard c.node(n, metaRow, metaCol + sw, 0, 1, [("meta-hidden", metaWords)])
+  if row.failureText.len > 0:
+    discard c.text(n, r, mc, mainW, row.failureText, if sel: selText else: c.p.textError,
+                   fact = "failure")
+    inc r
+  for i in 0 ..< shown:
+    let hasChip = i == 0 and row.activity.len + row.activityMore > 1
+    var label = ""
+    if hasChip:
+      let hidden = row.activity.len - 1 + row.activityMore
+      label = " " & (if row.expanded: "less" else: "+" & $hidden) & " "
+    # An activity line the viewmodel marks as an error is red only where no
+    # failure line above already says it in red (`activityLineIsError`, the
+    # rule the three front-ends share).
+    let errorInk = activityLineIsError(row, i)
+    let tw = c.text(n, r, mc, mainW - (if hasChip: widthOf(label) + 1 else: 0),
+                    row.activity[i],
+                    if sel: selText elif errorInk: c.p.textError else: c.p.rowDetail,
+                    fact = "activity")
+    if hasChip:
+      let at = mc + tw + 1
+      # A chip on its own ground on every row: on the selected row the
+      # action surface's hover step (`tone.chipOnAction`, where the web
+      # outlines it in the selection's text colour), so it still reads as a
+      # control on the selection; elsewhere the chip's ground.
+      discard c.put(r, at, label, if sel: selText else: c.p.textLabel,
+                    bg = if sel: c.tone.chipOnAction else: c.tone.chip)
+      discard c.node(n, r, at + 1, widthOf(label) - 2, 1,
+                     [("activity-more", label.strip), ("outlined", $sel)])
+      c.target(r, at, widthOf(label), 1, proc() = vm.toggleExpanded(id))
+    inc r
+  if columns:
+    let colour = if sel: selText else: ""
+    var at = mc + grid.session + 1
+    # The duration is right-aligned in its column: where its text starts.
+    let durationAt = mc + grid.session + 1 + (grid.share + 1) * (if anyInitiative: 3 else: 2) +
+                     DurationCells - widthOf(if row.durationLabel.len > 0: row.durationLabel
+                                             else: AgentHarborFleetEmptyCellText)
+    c.cell(n, top, at, grid.share, row.agentText, "agent", colour = colour,
+           before = at + grid.share + 1)
+    at += grid.share + 1
+    c.cell(n, top, at, grid.share, row.host, "host", colour = colour,
+           before = if anyInitiative: at + grid.share + 1 else: durationAt)
+    at += grid.share + 1
+    if anyInitiative:
+      c.cell(n, top, at, grid.share, row.initiative, "initiative", colour = colour,
+             before = durationAt)
+      at += grid.share + 1
+    c.cell(n, top, at, DurationCells, row.durationLabel, "duration", right = true,
+           colour = colour)
+    discard c.text(n, top, col + width - 1 - AgeCells, AgeCells, row.ageLabel,
+                   if sel: selText else: c.p.textBodySubtle, fact = "age", alignRight = true)
+  else:
+    let aw = widthOf(row.ageLabel)
+    discard c.text(n, top, col + width - 1 - aw, aw, row.ageLabel,
+                   if sel: selText else: c.p.textBodySubtle, fact = "age")
+  height
+
+proc drawFleetPanel*(c: var AhCanvas; vm: FleetSnapshotVM; row, col, width, height: int) =
+  let ready = vm.state.val == asReady
+  let host = c.node(nil, row, col, width, height,
+                    [("surface", "agent-harbor-fleet"), ("state", stateName(vm.state.val))])
+  c.area("panel", row, col, width, height, c.tone.body)
+  var r = row
+  r += c.drawSectionHeader(host, r, col, width, "Agent Harbor sessions", vm.sourceLabel,
+                           if ready: vm.headerSummary else: "",
+                           caveat = if ready: vm.withheldNote else: "",
+                           narrow = width * CellPx <= NarrowHeaderPx)
+  let columns = width * CellPx >= ColumnsFromPx
+  let anyInitiative = ready and vm.anyInitiative
+  let grid = fleetGrid(width, anyInitiative)
+  if ready:
+    # The filter chips, wrapping, on their own band.
+    let counts = vm.counts
+    var chips: seq[(FleetFilter, int, int)]
+    for filter in FleetFilter:
+      let n = counts.filterCount(filter)
+      chips.add (filter, n, widthOf(filterLabel(filter)) + 1 + widthOf($n) + 2)
+    var lines = 1
+    var used = 1
+    for (_, _, w) in chips:
+      if used + w > width - 1 and used > 1:
+        inc lines
+        used = 1
+      used += w + 1
+    c.area("filters", r, col, width, lines, c.tone.filters)
+    var at = col + 1
+    var fr = r
+    for (filter, n, w) in chips:
+      if at + w > col + width - 1 and at > col + 1:
+        inc fr
+        at = col + 1
+      let active = filter == vm.filter.val
+      let chosen = filter
+      let chip = c.node(host, fr, at, w, 1, [("filter", $filter), ("filter-count", $n),
+                                             ("active", $active)])
+      if active: c.fill(fr, at, w, 1, c.tone.chosen)
+      let lw = c.put(fr, at + 1, filterLabel(filter),
+                     if active: c.p.textBody else: c.p.textLabel)
+      let ink = filterCountInk(n, active)
+      discard c.put(fr, at + 1 + lw + 1, $n,
+                    if ink.body: c.p.textBody elif ink.disabled: c.p.textDisabled
+                    else: c.p.textCaption)
+      discard c.node(chip, fr, at + 1 + lw + 1, widthOf($n), 1, [("count-of", $filter)])
+      c.target(fr, at, w, 1, proc() = vm.setFilter(chosen))
+      at += w + 1
+    r += lines
+  if columns:
+    # Under the filters' band, or straight under the head when there are no
+    # filters yet (loading, an error): never on the ground just above it.
+    c.area("columns", r, col, width, 1, if ready: c.tone.head else: c.tone.filters)
+    let names = c.node(host, r, col, width, 1, [("columns", "")])
+    var at = col + 3
+    c.cell(names, r, at, grid.session, "Session", "session")
+    at += grid.session + 1
+    c.cell(names, r, at, grid.share, "Agent", "agent")
+    at += grid.share + 1
+    c.cell(names, r, at, grid.share, "Host", "host")
+    at += grid.share + 1
+    if anyInitiative:
+      c.cell(names, r, at, grid.share, "Initiative", "initiative")
+      at += grid.share + 1
+    c.cell(names, r, at, DurationCells, "Duration", "duration", right = true)
+    c.cell(names, r, col + width - 1 - AgeCells, AgeCells, "Active", "age", right = true)
+    inc r
+  let bodyH = row + height - r
+  case vm.state.val
+  of asIdle, asLoading:
+    c.notice(host, r, col, width, bodyH, AgentHarborFleetLoadingText, "loading")
+  of asError:
+    let target = vm
+    c.errorBlock(host, r, col, width, bodyH, "Could not load the sessions", vm.error.val,
+                 proc() = target.load())
+  of asReady:
+    let rows = vm.rows
+    if rows.len == 0:
+      c.notice(host, r, col, width, bodyH,
+               if vm.counts.listed == 0: AgentHarborFleetEmptyText
+               else: AgentHarborFleetFilteredEmptyText, "empty")
+      return
+    let list = c.node(host, r, col, width, bodyH, [("rows", "list")])
+    let oneLineAll = columns and titleLinesFit(rows, grid)
+    for i, fr in rows:
+      r += c.drawRow(list, vm, fr, i, r, col, width, columns, anyInitiative, grid,
+                     oneLineAll)

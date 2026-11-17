@@ -1,0 +1,28 @@
+scenario: 1
+name: terminal/clicks-call-trace-menu
+pack: codetracer
+summary: >-
+  A right click on a call opens the call trace's menu: on a leaf call Expand
+  Call Children is disabled; on apply_op, Collapse Call Children is enabled
+  (and Expand Full Callstack is not offered), and choosing it folds the call's
+  children away.
+stage:
+  - use: record-program
+    with: { program: calc }
+  - use: open-recording
+    with: { width: 200, height: 50 }
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - wait: call-trace.loaded
+  - click: { at: 'call-trace/call[#6]', anchor: name, button: right }
+  - wait: { until: { at: 'context-menu/menu-item[label="Expand Call Children"]', present: true }, timeout: 10s }
+  - expect: { at: 'context-menu/menu-item[label="Expand Call Children"]', enabled: false }
+  - key: Esc
+  - wait: { until: { at: context-menu, absent: true }, timeout: 10s }
+  - click: { at: 'call-trace/call[#5]', anchor: name, button: right }
+  - wait: { until: { at: 'context-menu/menu-item[label="Collapse Call Children"]', present: true }, timeout: 10s }
+  - expect: { at: 'context-menu/menu-item[label="Collapse Call Children"]', enabled: true }
+  - expect: { at: context-menu, assert: 'lacks("Expand Full Callstack")' }
+  - click: { at: 'context-menu/menu-item[label="Collapse Call Children"]' }
+  - wait: { until: { at: 'pane[title="Call Trace"]', assert: 'lacks-row("add #5(left=2, right=3)")' }, timeout: 10s }
+  - expect: { at: 'call-trace/call[#5]', name: apply_op }

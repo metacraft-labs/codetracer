@@ -1,0 +1,21 @@
+scenario: 1
+name: command-palette/symbol-choice-by-enter-focuses-editor
+pack: codetracer
+summary: >-
+  Choosing a `:sym` symbol of an already open file with Enter closes the
+  palette and leaves the keyboard in the editor it is shown in.
+
+stage:
+  - use: record-program
+    with: { program: noir_example }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - wait: { until: { at: 'editor[file="main.nr"]', present: true }, timeout: 60s }
+  - chord: Ctrl+p
+  - type: ":sym main"
+  - wait: { until: { at: omnibox, assert: "offers(symbol, main)" }, timeout: 10s }
+  - key: Enter
+  - expect: { at: omnibox, absent: true }
+  - expect: { at: 'editor[file="main.nr"]', focused: true }

@@ -1,0 +1,8651 @@
+# ct record: 293 argv cases through ct's loader (the parse probe)
+
+### 1: no program
+argv: ct "record"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The required option 'recordProgram' was not specified\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 2: program
+argv: ct "record" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 3: program and args
+argv: ct "record" "prog" "a" "b"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @["a", "b"]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 4: program and args that look like options
+argv: ct "record" "prog" "-x" "--y"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'x'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 5: program then a ct option
+argv: ct "record" "prog" "--lang" "python"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = "python"
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 6: program then -o
+argv: ct "record" "prog" "-o" "/out"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "/out"
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 7: args after a word
+argv: ct "record" "prog" "a" "-o" "/out" "b"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "/out"
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @["a", "b"]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 8: --lang <v>
+argv: ct "record" "--lang" "python" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = "python"
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 9: --lang=<v>
+argv: ct "record" "--lang=python" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = "python"
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 10: --lang:<v>
+argv: ct "record" "--lang:python" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = "python"
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 11: --lang python
+argv: ct "record" "--lang" "python" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = "python"
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 12: --lang=python
+argv: ct "record" "--lang=python" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = "python"
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 13: --lang ruby
+argv: ct "record" "--lang" "ruby" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = "ruby"
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 14: --lang=ruby
+argv: ct "record" "--lang=ruby" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = "ruby"
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 15: --lang\x20
+argv: ct "record" "--lang" "" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 16: --lang=
+argv: ct "record" "--lang=" "prog"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The required option 'recordProgram' was not specified\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 17: --lang empty
+argv: ct "record" "--lang" "" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 18: --lang= (empty)
+argv: ct "record" "--lang=" "prog"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The required option 'recordProgram' was not specified\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 19: --lang= <v> (next word)
+argv: ct "record" "--lang=" "python" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = "python"
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 20: --lang -x (value starts with -)
+argv: ct "record" "--lang" "-x" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = "-x"
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 21: --lang --x (value starts with --)
+argv: ct "record" "--lang" "--x" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = "--x"
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 22: --lang --new-tab <v> (an option between it and its value)
+argv: ct "record" "--lang" "--new-tab" "python" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = "--new-tab"
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "python"
+  recordArgs = @["prog"]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 23: --lang repeated, last wins
+argv: ct "record" "--lang" "python" "--lang" "" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 24: --lang missing value (last)
+argv: ct "record" "prog" "--lang"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The option '\e[34m--lang\e[0m' requires a value\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 25: --lang missing value (before the rest)
+argv: ct "record" "--lang" "prog"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The required option 'recordProgram' was not specified\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 26: --LANG <v> (style variant)
+argv: ct "record" "--LANG" "python" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = "python"
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 27: --l_ang <v> (style variant)
+argv: ct "record" "--l_ang" "python" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = "python"
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 28: --output-folder <v>
+argv: ct "record" "--output-folder" "/out" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "/out"
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 29: --output-folder=<v>
+argv: ct "record" "--output-folder=/out" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "/out"
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 30: --output-folder:<v>
+argv: ct "record" "--output-folder:/out" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "/out"
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 31: -o <v>
+argv: ct "record" "-o" "/out" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "/out"
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 32: -o=<v>
+argv: ct "record" "-o=/out" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "/out"
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 33: -o:<v>
+argv: ct "record" "-o:/out" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "/out"
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 34: -o<v> (attached)
+argv: ct "record" "-o/out" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "/out"
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 35: -O <v> (other case)
+argv: ct "record" "-O" "/out" "prog"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'O'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 36: --o <v> (the letter as a long option)
+argv: ct "record" "--o" "/out" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "/out"
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 37: --output-folder /out
+argv: ct "record" "--output-folder" "/out" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "/out"
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 38: --output-folder=/out
+argv: ct "record" "--output-folder=/out" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "/out"
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 39: --output-folder rel
+argv: ct "record" "--output-folder" "rel" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "rel"
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 40: --output-folder=rel
+argv: ct "record" "--output-folder=rel" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "rel"
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 41: --output-folder empty
+argv: ct "record" "--output-folder" "" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = ""
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 42: --output-folder= (empty)
+argv: ct "record" "--output-folder=" "prog"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The required option 'recordProgram' was not specified\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 43: --output-folder= <v> (next word)
+argv: ct "record" "--output-folder=" "/out" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "/out"
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 44: --output-folder -x (value starts with -)
+argv: ct "record" "--output-folder" "-x" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "-x"
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 45: --output-folder --x (value starts with --)
+argv: ct "record" "--output-folder" "--x" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "--x"
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 46: --output-folder --new-tab <v> (an option between it and its value)
+argv: ct "record" "--output-folder" "--new-tab" "/out" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "--new-tab"
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "/out"
+  recordArgs = @["prog"]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 47: --output-folder repeated, last wins
+argv: ct "record" "--output-folder" "/out" "--output-folder" "rel" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "rel"
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 48: --output-folder missing value (last)
+argv: ct "record" "prog" "--output-folder"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The option '\e[34m--output-folder\e[0m' requires a value\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 49: --output-folder missing value (before the rest)
+argv: ct "record" "--output-folder" "prog"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The required option 'recordProgram' was not specified\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 50: --OUTPUT-FOLDER <v> (style variant)
+argv: ct "record" "--OUTPUT-FOLDER" "/out" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "/out"
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 51: --o_utput-folder <v> (style variant)
+argv: ct "record" "--o_utput-folder" "/out" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "/out"
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 52: --output_folder <v> (style variant)
+argv: ct "record" "--output_folder" "/out" "prog"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'output_folder'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 53: --outputfolder <v> (style variant)
+argv: ct "record" "--outputfolder" "/out" "prog"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'outputfolder'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 54: --backend <v>
+argv: ct "record" "--backend" "mcr" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = "mcr"
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 55: --backend=<v>
+argv: ct "record" "--backend=mcr" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = "mcr"
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 56: --backend:<v>
+argv: ct "record" "--backend:mcr" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = "mcr"
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 57: --backend mcr
+argv: ct "record" "--backend" "mcr" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = "mcr"
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 58: --backend=mcr
+argv: ct "record" "--backend=mcr" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = "mcr"
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 59: --backend rr
+argv: ct "record" "--backend" "rr" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = "rr"
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 60: --backend=rr
+argv: ct "record" "--backend=rr" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = "rr"
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 61: --backend ttd
+argv: ct "record" "--backend" "ttd" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = "ttd"
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 62: --backend=ttd
+argv: ct "record" "--backend=ttd" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = "ttd"
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 63: --backend bad bogus
+argv: ct "record" "--backend" "bogus" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = "bogus"
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 64: --backend=bad bogus
+argv: ct "record" "--backend=bogus" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = "bogus"
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 65: --backend empty
+argv: ct "record" "--backend" "" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 66: --backend= (empty)
+argv: ct "record" "--backend=" "prog"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The required option 'recordProgram' was not specified\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 67: --backend= <v> (next word)
+argv: ct "record" "--backend=" "mcr" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = "mcr"
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 68: --backend -x (value starts with -)
+argv: ct "record" "--backend" "-x" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = "-x"
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 69: --backend --x (value starts with --)
+argv: ct "record" "--backend" "--x" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = "--x"
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 70: --backend --new-tab <v> (an option between it and its value)
+argv: ct "record" "--backend" "--new-tab" "mcr" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = "--new-tab"
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "mcr"
+  recordArgs = @["prog"]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 71: --backend repeated, last wins
+argv: ct "record" "--backend" "mcr" "--backend" "ttd" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = "ttd"
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 72: --backend missing value (last)
+argv: ct "record" "prog" "--backend"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The option '\e[34m--backend\e[0m' requires a value\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 73: --backend missing value (before the rest)
+argv: ct "record" "--backend" "prog"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The required option 'recordProgram' was not specified\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 74: --BACKEND <v> (style variant)
+argv: ct "record" "--BACKEND" "mcr" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = "mcr"
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 75: --b_ackend <v> (style variant)
+argv: ct "record" "--b_ackend" "mcr" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = "mcr"
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 76: --export <v>
+argv: ct "record" "--export" "/e.zip" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = "/e.zip"
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 77: --export=<v>
+argv: ct "record" "--export=/e.zip" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = "/e.zip"
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 78: --export:<v>
+argv: ct "record" "--export:/e.zip" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = "/e.zip"
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 79: -e <v>
+argv: ct "record" "-e" "/e.zip" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = "/e.zip"
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 80: -e=<v>
+argv: ct "record" "-e=/e.zip" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = "/e.zip"
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 81: -e:<v>
+argv: ct "record" "-e:/e.zip" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = "/e.zip"
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 82: -e<v> (attached)
+argv: ct "record" "-e/e.zip" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = "/e.zip"
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 83: -E <v> (other case)
+argv: ct "record" "-E" "/e.zip" "prog"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'E'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 84: --e <v> (the letter as a long option)
+argv: ct "record" "--e" "/e.zip" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = "/e.zip"
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 85: --export /e.zip
+argv: ct "record" "--export" "/e.zip" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = "/e.zip"
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 86: --export=/e.zip
+argv: ct "record" "--export=/e.zip" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = "/e.zip"
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 87: --export empty
+argv: ct "record" "--export" "" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 88: --export= (empty)
+argv: ct "record" "--export=" "prog"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The required option 'recordProgram' was not specified\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 89: --export= <v> (next word)
+argv: ct "record" "--export=" "/e.zip" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = "/e.zip"
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 90: --export -x (value starts with -)
+argv: ct "record" "--export" "-x" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = "-x"
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 91: --export --x (value starts with --)
+argv: ct "record" "--export" "--x" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = "--x"
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 92: --export --new-tab <v> (an option between it and its value)
+argv: ct "record" "--export" "--new-tab" "/e.zip" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = "--new-tab"
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "/e.zip"
+  recordArgs = @["prog"]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 93: --export repeated, last wins
+argv: ct "record" "--export" "/e.zip" "--export" "/e.zip" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = "/e.zip"
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 94: --export missing value (last)
+argv: ct "record" "prog" "--export"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The option '\e[34m--export\e[0m' requires a value\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 95: --export missing value (before the rest)
+argv: ct "record" "--export" "prog"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The required option 'recordProgram' was not specified\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 96: --EXPORT <v> (style variant)
+argv: ct "record" "--EXPORT" "/e.zip" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = "/e.zip"
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 97: --e_xport <v> (style variant)
+argv: ct "record" "--e_xport" "/e.zip" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = "/e.zip"
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 98: --stylus-trace <v>
+argv: ct "record" "--stylus-trace" "/s.json" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = "/s.json"
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 99: --stylus-trace=<v>
+argv: ct "record" "--stylus-trace=/s.json" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = "/s.json"
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 100: --stylus-trace:<v>
+argv: ct "record" "--stylus-trace:/s.json" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = "/s.json"
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 101: -t <v>
+argv: ct "record" "-t" "/s.json" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = "/s.json"
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 102: -t=<v>
+argv: ct "record" "-t=/s.json" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = "/s.json"
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 103: -t:<v>
+argv: ct "record" "-t:/s.json" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = "/s.json"
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 104: -t<v> (attached)
+argv: ct "record" "-t/s.json" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = "/s.json"
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 105: -T <v> (other case)
+argv: ct "record" "-T" "/s.json" "prog"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'T'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 106: --t <v> (the letter as a long option)
+argv: ct "record" "--t" "/s.json" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = "/s.json"
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 107: --stylus-trace /s.json
+argv: ct "record" "--stylus-trace" "/s.json" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = "/s.json"
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 108: --stylus-trace=/s.json
+argv: ct "record" "--stylus-trace=/s.json" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = "/s.json"
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 109: --stylus-trace empty
+argv: ct "record" "--stylus-trace" "" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 110: --stylus-trace= (empty)
+argv: ct "record" "--stylus-trace=" "prog"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The required option 'recordProgram' was not specified\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 111: --stylus-trace= <v> (next word)
+argv: ct "record" "--stylus-trace=" "/s.json" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = "/s.json"
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 112: --stylus-trace -x (value starts with -)
+argv: ct "record" "--stylus-trace" "-x" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = "-x"
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 113: --stylus-trace --x (value starts with --)
+argv: ct "record" "--stylus-trace" "--x" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = "--x"
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 114: --stylus-trace --new-tab <v> (an option between it and its value)
+argv: ct "record" "--stylus-trace" "--new-tab" "/s.json" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = "--new-tab"
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "/s.json"
+  recordArgs = @["prog"]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 115: --stylus-trace repeated, last wins
+argv: ct "record" "--stylus-trace" "/s.json" "--stylus-trace" "/s.json" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = "/s.json"
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 116: --stylus-trace missing value (last)
+argv: ct "record" "prog" "--stylus-trace"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The option '\e[34m--stylus-trace\e[0m' requires a value\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 117: --stylus-trace missing value (before the rest)
+argv: ct "record" "--stylus-trace" "prog"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The required option 'recordProgram' was not specified\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 118: --STYLUS-TRACE <v> (style variant)
+argv: ct "record" "--STYLUS-TRACE" "/s.json" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = "/s.json"
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 119: --s_tylus-trace <v> (style variant)
+argv: ct "record" "--s_tylus-trace" "/s.json" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = "/s.json"
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 120: --stylus_trace <v> (style variant)
+argv: ct "record" "--stylus_trace" "/s.json" "prog"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'stylus_trace'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 121: --stylustrace <v> (style variant)
+argv: ct "record" "--stylustrace" "/s.json" "prog"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'stylustrace'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 122: --address <v>
+argv: ct "record" "--address" "0xabc" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = "0xabc"
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 123: --address=<v>
+argv: ct "record" "--address=0xabc" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = "0xabc"
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 124: --address:<v>
+argv: ct "record" "--address:0xabc" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = "0xabc"
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 125: -a <v>
+argv: ct "record" "-a" "0xabc" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = "0xabc"
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 126: -a=<v>
+argv: ct "record" "-a=0xabc" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = "0xabc"
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 127: -a:<v>
+argv: ct "record" "-a:0xabc" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = "0xabc"
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 128: -a<v> (attached)
+argv: ct "record" "-a0xabc" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = "0xabc"
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 129: -A <v> (other case)
+argv: ct "record" "-A" "0xabc" "prog"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'A'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 130: --a <v> (the letter as a long option)
+argv: ct "record" "--a" "0xabc" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = "0xabc"
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 131: --address 0xabc
+argv: ct "record" "--address" "0xabc" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = "0xabc"
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 132: --address=0xabc
+argv: ct "record" "--address=0xabc" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = "0xabc"
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 133: --address empty
+argv: ct "record" "--address" "" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 134: --address= (empty)
+argv: ct "record" "--address=" "prog"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The required option 'recordProgram' was not specified\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 135: --address= <v> (next word)
+argv: ct "record" "--address=" "0xabc" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = "0xabc"
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 136: --address -x (value starts with -)
+argv: ct "record" "--address" "-x" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = "-x"
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 137: --address --x (value starts with --)
+argv: ct "record" "--address" "--x" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = "--x"
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 138: --address --new-tab <v> (an option between it and its value)
+argv: ct "record" "--address" "--new-tab" "0xabc" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = "--new-tab"
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "0xabc"
+  recordArgs = @["prog"]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 139: --address repeated, last wins
+argv: ct "record" "--address" "0xabc" "--address" "0xabc" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = "0xabc"
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 140: --address missing value (last)
+argv: ct "record" "prog" "--address"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The option '\e[34m--address\e[0m' requires a value\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 141: --address missing value (before the rest)
+argv: ct "record" "--address" "prog"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The required option 'recordProgram' was not specified\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 142: --ADDRESS <v> (style variant)
+argv: ct "record" "--ADDRESS" "0xabc" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = "0xabc"
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 143: --a_ddress <v> (style variant)
+argv: ct "record" "--a_ddress" "0xabc" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = "0xabc"
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 144: --socket <v>
+argv: ct "record" "--socket" "/sock" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = "/sock"
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 145: --socket=<v>
+argv: ct "record" "--socket=/sock" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = "/sock"
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 146: --socket:<v>
+argv: ct "record" "--socket:/sock" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = "/sock"
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 147: --socket /sock
+argv: ct "record" "--socket" "/sock" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = "/sock"
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 148: --socket=/sock
+argv: ct "record" "--socket=/sock" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = "/sock"
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 149: --socket empty
+argv: ct "record" "--socket" "" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 150: --socket= (empty)
+argv: ct "record" "--socket=" "prog"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The required option 'recordProgram' was not specified\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 151: --socket= <v> (next word)
+argv: ct "record" "--socket=" "/sock" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = "/sock"
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 152: --socket -x (value starts with -)
+argv: ct "record" "--socket" "-x" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = "-x"
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 153: --socket --x (value starts with --)
+argv: ct "record" "--socket" "--x" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = "--x"
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 154: --socket --new-tab <v> (an option between it and its value)
+argv: ct "record" "--socket" "--new-tab" "/sock" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = "--new-tab"
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "/sock"
+  recordArgs = @["prog"]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 155: --socket repeated, last wins
+argv: ct "record" "--socket" "/sock" "--socket" "/sock" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = "/sock"
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 156: --socket missing value (last)
+argv: ct "record" "prog" "--socket"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The option '\e[34m--socket\e[0m' requires a value\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 157: --socket missing value (before the rest)
+argv: ct "record" "--socket" "prog"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The required option 'recordProgram' was not specified\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 158: --SOCKET <v> (style variant)
+argv: ct "record" "--SOCKET" "/sock" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = "/sock"
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 159: --s_ocket <v> (style variant)
+argv: ct "record" "--s_ocket" "/sock" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = "/sock"
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 160: --with-diff <v>
+argv: ct "record" "--with-diff" "last-commit" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = "last-commit"
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 161: --with-diff=<v>
+argv: ct "record" "--with-diff=last-commit" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = "last-commit"
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 162: --with-diff:<v>
+argv: ct "record" "--with-diff:last-commit" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = "last-commit"
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 163: --with-diff last-commit
+argv: ct "record" "--with-diff" "last-commit" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = "last-commit"
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 164: --with-diff=last-commit
+argv: ct "record" "--with-diff=last-commit" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = "last-commit"
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 165: --with-diff HEAD~1
+argv: ct "record" "--with-diff" "HEAD~1" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = "HEAD~1"
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 166: --with-diff=HEAD~1
+argv: ct "record" "--with-diff=HEAD~1" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = "HEAD~1"
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 167: --with-diff empty
+argv: ct "record" "--with-diff" "" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 168: --with-diff= (empty)
+argv: ct "record" "--with-diff=" "prog"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The required option 'recordProgram' was not specified\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 169: --with-diff= <v> (next word)
+argv: ct "record" "--with-diff=" "last-commit" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = "last-commit"
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 170: --with-diff -x (value starts with -)
+argv: ct "record" "--with-diff" "-x" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = "-x"
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 171: --with-diff --x (value starts with --)
+argv: ct "record" "--with-diff" "--x" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = "--x"
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 172: --with-diff --new-tab <v> (an option between it and its value)
+argv: ct "record" "--with-diff" "--new-tab" "last-commit" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = "--new-tab"
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "last-commit"
+  recordArgs = @["prog"]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 173: --with-diff repeated, last wins
+argv: ct "record" "--with-diff" "last-commit" "--with-diff" "HEAD~1" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = "HEAD~1"
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 174: --with-diff missing value (last)
+argv: ct "record" "prog" "--with-diff"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The option '\e[34m--with-diff\e[0m' requires a value\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 175: --with-diff missing value (before the rest)
+argv: ct "record" "--with-diff" "prog"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The required option 'recordProgram' was not specified\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 176: --WITH-DIFF <v> (style variant)
+argv: ct "record" "--WITH-DIFF" "last-commit" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = "last-commit"
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 177: --w_ith-diff <v> (style variant)
+argv: ct "record" "--w_ith-diff" "last-commit" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = "last-commit"
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 178: --with_diff <v> (style variant)
+argv: ct "record" "--with_diff" "last-commit" "prog"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'with_diff'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 179: --withdiff <v> (style variant)
+argv: ct "record" "--withdiff" "last-commit" "prog"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'withdiff'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 180: --store-trace-folder-for-pid <v>
+argv: ct "record" "--store-trace-folder-for-pid" "123" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 123
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 181: --store-trace-folder-for-pid=<v>
+argv: ct "record" "--store-trace-folder-for-pid=123" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 123
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 182: --store-trace-folder-for-pid:<v>
+argv: ct "record" "--store-trace-folder-for-pid:123" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 123
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 183: --store-trace-folder-for-pid 123
+argv: ct "record" "--store-trace-folder-for-pid" "123" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 123
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 184: --store-trace-folder-for-pid=123
+argv: ct "record" "--store-trace-folder-for-pid=123" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 123
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 185: --store-trace-folder-for-pid 0
+argv: ct "record" "--store-trace-folder-for-pid" "0" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 186: --store-trace-folder-for-pid=0
+argv: ct "record" "--store-trace-folder-for-pid=0" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 187: --store-trace-folder-for-pid bad pid
+argv: ct "record" "--store-trace-folder-for-pid" "pid" "prog"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Error while processing the \e[34mstore-trace-folder-for-pid=pid\e[0m parameter: invalid integer: pid\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 188: --store-trace-folder-for-pid=bad pid
+argv: ct "record" "--store-trace-folder-for-pid=pid" "prog"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Error while processing the \e[34mstore-trace-folder-for-pid=pid\e[0m parameter: invalid integer: pid\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 189: --store-trace-folder-for-pid bad 1e3
+argv: ct "record" "--store-trace-folder-for-pid" "1e3" "prog"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Error while processing the \e[34mstore-trace-folder-for-pid=1e3\e[0m parameter: invalid integer: 1e3\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 190: --store-trace-folder-for-pid=bad 1e3
+argv: ct "record" "--store-trace-folder-for-pid=1e3" "prog"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Error while processing the \e[34mstore-trace-folder-for-pid=1e3\e[0m parameter: invalid integer: 1e3\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 191: --store-trace-folder-for-pid empty
+argv: ct "record" "--store-trace-folder-for-pid" "" "prog"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Error while processing the \e[34mstore-trace-folder-for-pid=\e[0m parameter: invalid integer: \e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 192: --store-trace-folder-for-pid= (empty)
+argv: ct "record" "--store-trace-folder-for-pid=" "prog"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Error while processing the \e[34mstore-trace-folder-for-pid=prog\e[0m parameter: invalid integer: prog\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 193: --store-trace-folder-for-pid= <v> (next word)
+argv: ct "record" "--store-trace-folder-for-pid=" "123" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 123
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 194: --store-trace-folder-for-pid -x (value starts with -)
+argv: ct "record" "--store-trace-folder-for-pid" "-x" "prog"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Error while processing the \e[34mstore-trace-folder-for-pid=-x\e[0m parameter: invalid integer: -x\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 195: --store-trace-folder-for-pid --x (value starts with --)
+argv: ct "record" "--store-trace-folder-for-pid" "--x" "prog"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Error while processing the \e[34mstore-trace-folder-for-pid=--x\e[0m parameter: invalid integer: --x\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 196: --store-trace-folder-for-pid --new-tab <v> (an option between it and its value)
+argv: ct "record" "--store-trace-folder-for-pid" "--new-tab" "123" "prog"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Error while processing the \e[34mstore-trace-folder-for-pid=--new-tab\e[0m parameter: invalid integer: --new-tab\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 197: --store-trace-folder-for-pid repeated, last wins
+argv: ct "record" "--store-trace-folder-for-pid" "123" "--store-trace-folder-for-pid" "0" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 198: --store-trace-folder-for-pid missing value (last)
+argv: ct "record" "prog" "--store-trace-folder-for-pid"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The option '\e[34m--store-trace-folder-for-pid\e[0m' requires a value\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 199: --store-trace-folder-for-pid missing value (before the rest)
+argv: ct "record" "--store-trace-folder-for-pid" "prog"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Error while processing the \e[34mstore-trace-folder-for-pid=prog\e[0m parameter: invalid integer: prog\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 200: --STORE-TRACE-FOLDER-FOR-PID <v> (style variant)
+argv: ct "record" "--STORE-TRACE-FOLDER-FOR-PID" "123" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 123
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 201: --s_tore-trace-folder-for-pid <v> (style variant)
+argv: ct "record" "--s_tore-trace-folder-for-pid" "123" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 123
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 202: --store_trace_folder_for_pid <v> (style variant)
+argv: ct "record" "--store_trace_folder_for_pid" "123" "prog"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'store_trace_folder_for_pid'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 203: --storetracefolderforpid <v> (style variant)
+argv: ct "record" "--storetracefolderforpid" "123" "prog"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'storetracefolderforpid'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 204: --upload
+argv: ct "record" "--upload" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = true
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 205: --upload=true
+argv: ct "record" "--upload=true" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = true
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 206: --upload=false
+argv: ct "record" "--upload=false" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 207: --upload=on
+argv: ct "record" "--upload=on" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = true
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 208: --upload=off
+argv: ct "record" "--upload=off" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 209: --upload=yes
+argv: ct "record" "--upload=yes" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = true
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 210: --upload=no
+argv: ct "record" "--upload=no" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 211: --upload=1
+argv: ct "record" "--upload=1" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = true
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 212: --upload=0
+argv: ct "record" "--upload=0" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 213: --upload=maybe
+argv: ct "record" "--upload=maybe" "prog"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Error while processing the \e[34mupload=maybe\e[0m parameter: 'maybe' is not a valid boolean value. Supported values are on/off, yes/no, true/false or 1/0\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 214: --upload=
+argv: ct "record" "--upload=" "prog"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Error while processing the \e[34mupload=prog\e[0m parameter: 'prog' is not a valid boolean value. Supported values are on/off, yes/no, true/false or 1/0\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 215: --upload:false
+argv: ct "record" "--upload:false" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 216: --upload false (next word)
+argv: ct "record" "--upload" "false" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = true
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "false"
+  recordArgs = @["prog"]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 217: --upload twice
+argv: ct "record" "--upload" "--upload" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = true
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 218: --no-upload
+argv: ct "record" "--no-upload" "prog"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'no-upload'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 219: --UPLOAD (style variant)
+argv: ct "record" "--UPLOAD" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = true
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 220: --u_pload (style variant)
+argv: ct "record" "--u_pload" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = true
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 221: --use-interpose
+argv: ct "record" "--use-interpose" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = true
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 222: --use-interpose=true
+argv: ct "record" "--use-interpose=true" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = true
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 223: --use-interpose=false
+argv: ct "record" "--use-interpose=false" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 224: --use-interpose=on
+argv: ct "record" "--use-interpose=on" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = true
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 225: --use-interpose=off
+argv: ct "record" "--use-interpose=off" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 226: --use-interpose=yes
+argv: ct "record" "--use-interpose=yes" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = true
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 227: --use-interpose=no
+argv: ct "record" "--use-interpose=no" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 228: --use-interpose=1
+argv: ct "record" "--use-interpose=1" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = true
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 229: --use-interpose=0
+argv: ct "record" "--use-interpose=0" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 230: --use-interpose=maybe
+argv: ct "record" "--use-interpose=maybe" "prog"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Error while processing the \e[34muse-interpose=maybe\e[0m parameter: 'maybe' is not a valid boolean value. Supported values are on/off, yes/no, true/false or 1/0\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 231: --use-interpose=
+argv: ct "record" "--use-interpose=" "prog"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Error while processing the \e[34muse-interpose=prog\e[0m parameter: 'prog' is not a valid boolean value. Supported values are on/off, yes/no, true/false or 1/0\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 232: --use-interpose:false
+argv: ct "record" "--use-interpose:false" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 233: --use-interpose false (next word)
+argv: ct "record" "--use-interpose" "false" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = true
+  recordServer = false
+  recordPortable = false
+  recordProgram = "false"
+  recordArgs = @["prog"]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 234: --use-interpose twice
+argv: ct "record" "--use-interpose" "--use-interpose" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = true
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 235: --no-use-interpose
+argv: ct "record" "--no-use-interpose" "prog"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'no-use-interpose'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 236: --USE-INTERPOSE (style variant)
+argv: ct "record" "--USE-INTERPOSE" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = true
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 237: --u_se-interpose (style variant)
+argv: ct "record" "--u_se-interpose" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = true
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 238: --use_interpose (style variant)
+argv: ct "record" "--use_interpose" "prog"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'use_interpose'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 239: --useinterpose (style variant)
+argv: ct "record" "--useinterpose" "prog"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'useinterpose'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 240: --server
+argv: ct "record" "--server" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = true
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 241: --server=true
+argv: ct "record" "--server=true" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = true
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 242: --server=false
+argv: ct "record" "--server=false" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 243: --server=on
+argv: ct "record" "--server=on" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = true
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 244: --server=off
+argv: ct "record" "--server=off" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 245: --server=yes
+argv: ct "record" "--server=yes" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = true
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 246: --server=no
+argv: ct "record" "--server=no" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 247: --server=1
+argv: ct "record" "--server=1" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = true
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 248: --server=0
+argv: ct "record" "--server=0" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 249: --server=maybe
+argv: ct "record" "--server=maybe" "prog"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Error while processing the \e[34mserver=maybe\e[0m parameter: 'maybe' is not a valid boolean value. Supported values are on/off, yes/no, true/false or 1/0\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 250: --server=
+argv: ct "record" "--server=" "prog"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Error while processing the \e[34mserver=prog\e[0m parameter: 'prog' is not a valid boolean value. Supported values are on/off, yes/no, true/false or 1/0\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 251: --server:false
+argv: ct "record" "--server:false" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 252: --server false (next word)
+argv: ct "record" "--server" "false" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = true
+  recordPortable = false
+  recordProgram = "false"
+  recordArgs = @["prog"]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 253: --server twice
+argv: ct "record" "--server" "--server" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = true
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 254: --no-server
+argv: ct "record" "--no-server" "prog"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'no-server'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 255: --SERVER (style variant)
+argv: ct "record" "--SERVER" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = true
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 256: --s_erver (style variant)
+argv: ct "record" "--s_erver" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = true
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 257: --portable
+argv: ct "record" "--portable" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = true
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 258: --portable=true
+argv: ct "record" "--portable=true" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = true
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 259: --portable=false
+argv: ct "record" "--portable=false" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 260: --portable=on
+argv: ct "record" "--portable=on" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = true
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 261: --portable=off
+argv: ct "record" "--portable=off" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 262: --portable=yes
+argv: ct "record" "--portable=yes" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = true
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 263: --portable=no
+argv: ct "record" "--portable=no" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 264: --portable=1
+argv: ct "record" "--portable=1" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = true
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 265: --portable=0
+argv: ct "record" "--portable=0" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 266: --portable=maybe
+argv: ct "record" "--portable=maybe" "prog"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Error while processing the \e[34mportable=maybe\e[0m parameter: 'maybe' is not a valid boolean value. Supported values are on/off, yes/no, true/false or 1/0\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 267: --portable=
+argv: ct "record" "--portable=" "prog"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Error while processing the \e[34mportable=prog\e[0m parameter: 'prog' is not a valid boolean value. Supported values are on/off, yes/no, true/false or 1/0\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 268: --portable:false
+argv: ct "record" "--portable:false" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 269: --portable false (next word)
+argv: ct "record" "--portable" "false" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = true
+  recordProgram = "false"
+  recordArgs = @["prog"]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 270: --portable twice
+argv: ct "record" "--portable" "--portable" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = true
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 271: --no-portable
+argv: ct "record" "--no-portable" "prog"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'no-portable'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 272: --PORTABLE (style variant)
+argv: ct "record" "--PORTABLE" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = true
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 273: --p_ortable (style variant)
+argv: ct "record" "--p_ortable" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = true
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 274: -oe (cluster)
+argv: ct "record" "-oe" "x" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "e"
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "x"
+  recordArgs = @["prog"]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 275: -o/out (attached)
+argv: ct "record" "-o/out" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "/out"
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 276: env <APP>_LANG
+argv: ct "record" "prog"
+env: <APP>_LANG="ruby"
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = "ruby"
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 277: env <APP>_LANG, flag wins
+argv: ct "record" "--lang" "python" "prog"
+env: <APP>_LANG="ruby"
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = "python"
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 278: env <APP>_RECORDPROGRAM (the positional)
+argv: ct "record"
+env: <APP>_RECORDPROGRAM="envprog"
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "envprog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 279: env <APP>_RECORDARGS (the list positional)
+argv: ct "record" "prog"
+env: <APP>_RECORDARGS="a1"
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @["a1"]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 280: env <APP>_STORE_TRACE_FOLDER_FOR_PID=x
+argv: ct "record" "prog"
+env: <APP>_STORE_TRACE_FOLDER_FOR_PID="x"
+exit: 1
+--- stdout
+--- stderr
+Error while processing the \e[34mstore-trace-folder-for-pid=x\e[0m parameter: invalid integer: x\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 281: env <APP>_PORTABLE=on
+argv: ct "record" "prog"
+env: <APP>_PORTABLE="on"
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = true
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 282: env CODETRACER_PORTABLE (read later, not by the loader)
+argv: ct "record" "prog"
+env: CODETRACER_PORTABLE="on"
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 283: unknown long option
+argv: ct "record" "--bogus" "prog"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'bogus'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 284: unknown long option with value
+argv: ct "record" "--bogus=1" "prog"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'bogus'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 285: unknown short option
+argv: ct "record" "-Z" "prog"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'Z'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 286: lone -
+argv: ct "record" "-" "prog"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option ''\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 287: lone -- then a word
+argv: ct "record" "--" "w" "prog"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option ''\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 288: --=v
+argv: ct "record" "--=v" "prog"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option ''\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 289: extra positional
+argv: ct "record" "prog" "extra1" "extra2" "extra3" "extra4" "extra5"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @["extra1", "extra2", "extra3", "extra4", "extra5"]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 290: global --cwd after the command
+argv: ct "record" "--cwd" "/w" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = some("/w")
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 291: global --new-tab after the command
+argv: ct "record" "--new-tab" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = true
+  newWindow = false
+  cmd = record
+  recordLang = ""
+  recordOutputFolder = "."
+  recordBackend = ""
+  recordExportFile = ""
+  recordStylusTrace = ""
+  recordAddress = ""
+  recordSocket = ""
+  recordWithDiff = ""
+  recordStoreTraceFolderForPid = 0
+  recordUpload = false
+  recordUseInterpose = false
+  recordServer = false
+  recordPortable = false
+  recordProgram = "prog"
+  recordArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 292: --version after the command
+argv: ct "record" "--version" "prog"
+env: (none)
+exit: 0
+--- stdout
+CodeTracer version: <VERSION>
+\e[0m
+(no newline at end of stdout)
+--- stderr
+--- end
+
+### 293: -h after the command
+argv: ct "record" "-h" "prog"
+env: (none)
+exit: 0
+--- stdout
+<the short help page clispec renders for this request: ct record>
+--- stderr
+--- end

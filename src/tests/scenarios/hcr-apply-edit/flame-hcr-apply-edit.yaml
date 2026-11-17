@@ -1,0 +1,27 @@
+scenario: 1
+name: hcr-apply-edit/flame-hcr-apply-edit
+pack: codetracer
+summary: >-
+  With the hot-code-reload flame demo prepared, "Apply Edit & Hot-Reload" is
+  found in the command palette, and running it reports the edit applied to
+  the running flame. (The flame's own frame-for-frame verdict and the
+  command's report are the demo's checks, read after the run.)
+
+stage:
+  - use: record-program
+    with: { program: py_console_logs/main.py }
+  - use: hcr-flame
+    with: { platform: linux, edit: "rise_speed=5.4" }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 180s }
+  - chord: Ctrl+P
+  - wait: { until: { at: omnibox, present: true }, timeout: 15s }
+  - type: ":Apply Edit"
+  - wait: { until: { at: 'omnibox/option[label="Apply Edit & Hot-Reload"]', present: true }, timeout: 15s }
+  - click: { at: 'omnibox/option[label="Apply Edit & Hot-Reload"]' }
+    settle: false
+  - wait:
+      until: { at: status-line, assert: "notifies(\"Apply Edit & Hot-Reload: applied\")" }
+      timeout: 180s

@@ -1,0 +1,23 @@
+scenario: 1
+name: vcs/file-under-commit-scrolls-the-document
+pack: codetracer
+summary: >-
+  In a whole-commit document, a click on src/main.nim under the expanded
+  commit scrolls the document so that file's section starts at the top.
+
+stage:
+  - use: project-fixture
+    with: { name: vcs-document }
+  - use: open-project
+    with: { folder: $project }
+
+steps:
+  - wait: { until: { at: 'pane-tab[label="VCS"]', present: true }, timeout: 120s }
+  - wait: { until: settled, timeout: 30s }
+  - click: 'pane-tab[label="VCS"]'
+  - wait: { until: { at: 'vcs/commit[message="touch both files"]', present: true }, timeout: 60s }
+  - click: { at: 'vcs/commit[message="touch both files"]', anchor: header }
+  - wait: { until: { at: 'diff-section[path="src/main.nim"]', offset: { gt: 200 } }, timeout: 30s }
+  - wait: { until: { at: 'vcs/commit[message="touch both files"]/commit-file[name="main.nim"]', present: true }, timeout: 30s }
+  - click: 'vcs/commit[message="touch both files"]/commit-file[name="main.nim"]'
+  - wait: { until: { at: 'diff-section[path="src/main.nim"]', offset: { one-of: [-3, -2, -1, 0, 1, 2, 3] } }, timeout: 15s }

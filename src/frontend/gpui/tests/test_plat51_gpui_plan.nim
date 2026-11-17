@@ -43,7 +43,7 @@ import styles/generated/design_tokens
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads this spelling
 # as the suite's RUNTIME assertion count.
-const ExpectedAssertions = 93
+const ExpectedAssertions = 95
   ## 104 -> 90, measured 2026-10-22 with `__name__`'s history under both
   ## engine rules: since `12d7cd18b` a value's history keeps an entry only
   ## when the value CHANGED, so `__name__` (bound once) has 1 entry where it
@@ -52,6 +52,8 @@ const ExpectedAssertions = 93
   ## so exactly.
   ## 90 -> 93, 2026-10-23: the Call Trace's track case also presses the
   ## track where a call row is drawn under it (three checks).
+  ## 93 -> 95, 2026-11-09: the editor's menu grew to 11 entries (the inline
+  ## breakpoint rows), and the Shift + right-click case checks each of them.
 
 var countedAssertions = 0
 

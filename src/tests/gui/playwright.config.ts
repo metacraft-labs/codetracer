@@ -1,6 +1,11 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { defineConfig, type ReporterDescription } from "@playwright/test";
+import { installSyncChildTimeouts } from "./lib/sync-child-timeout";
+
+// Playwright loads this file in every worker: from here every synchronous
+// child process a test starts ends before the test does.
+installSyncChildTimeouts();
 
 /**
  * Resolve the Chromium executable for Playwright's browser fixtures.

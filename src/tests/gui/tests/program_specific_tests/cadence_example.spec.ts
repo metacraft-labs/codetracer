@@ -1,38 +1,17 @@
 /**
- * Playwright UI tests for the Cadence (Flow) example.
+ * The Cadence example's language detection, checked without launching the
+ * application: the file extension's classification and the recorder probe.
  *
- * These tests verify that the CodeTracer UI renders a Cadence trace
- * correctly, covering:
- *   - Editor pane loading the .cdc source file
- *   - Status bar showing the correct source location after trace load
- *   - Event log populated with at least one event
- *   - Call trace pane showing the Cadence call tree
- *   - Variable state pane available after navigating to a call frame
- *
- * ## Prerequisites
- *
- * Recording a Cadence trace requires the Cadence recorder pipeline:
- *   1. `codetracer-cadence-recorder` binary available via
- *      `CODETRACER_CADENCE_RECORDER_PATH` or on PATH.
- *
- * Because this pipeline is not yet wired into `ct record`, all tests that
- * require a live trace are guarded by `test.skip(!cadencePipelineAvailable, ...)`.
- * They will run automatically once `ct record <path>.cdc` is integrated.
- *
- * The structural tests at the bottom run unconditionally and verify the
- * language-detection logic without launching Electron.
+ * What a user sees of a Cadence recording (its entry, its call trace, its
+ * values, stepping, a column breakpoint) is a scenario now:
+ * src/tests/scenarios/languages/cadence-recording-smoke.yaml and cadence-column-breakpoint.yaml.
  */
 
 import * as childProcess from "node:child_process";
 import * as process from "node:process";
 
-import { test, expect, readyOnEntryTest as readyOnEntry, loadedEventLog } from "../../lib/fixtures";
-import { StatusBar } from "../../page-objects/status_bar";
-import { StatePanel } from "../../page-objects/state";
-import { LayoutPage } from "../../page-objects/layout-page";
-import { retry } from "../../lib/retry-helpers";
+import { test, expect } from "../../lib/fixtures";
 import { resolveRecorderTestProgram } from "../../lib/sibling-test-programs";
-import { defineRecorderColumnBreakpointSuite } from "../../lib/column-aware-helpers";
 
 // ---------------------------------------------------------------------------
 // Tool-availability guards
@@ -56,190 +35,11 @@ function hasCadenceRecorder(): boolean {
   }
 }
 
-// Evaluated at collection time so skip decisions are instant.
+// Evaluated at collection time; the structural test below checks the probe does not throw.
 const cadenceRecorderAvailable = hasCadenceRecorder();
 // Test program lives in the codetracer-cadence-recorder sibling repo.
 const cadenceTestProgram = resolveRecorderTestProgram("cadence", "cadence/flow_test.cdc");
 const cadencePipelineAvailable = cadenceRecorderAvailable && cadenceTestProgram !== null;
-
-// ---------------------------------------------------------------------------
-// Test suite: basic layout (title, entry status)
-// ---------------------------------------------------------------------------
-
-// TODO(skipped): All 8 UI tests skipped because cadencePipelineAvailable is false.
-//   The codetracer-cadence-recorder binary is detected, but resolveRecorderTestProgram("cadence",
-//   "cadence/flow_test.cdc") likely returns null because the test program file does not exist
-//   at the expected path in the sibling repo.
-//   Hypothesis: Verify the test program exists at codetracer-flow-recorder/test-programs/cadence/flow_test.cdc
-//   or check if the Cadence recorder binary does not pass the --version check.
-test.describe("cadence_example — basic layout", () => {
-  test.skip(
-    !cadencePipelineAvailable,
-    "Cadence recorder pipeline not available (need codetracer-cadence-recorder)",
-  );
-
-  test.setTimeout(90_000);
-  test.use({ sourcePath: cadenceTestProgram ?? "", launchMode: "trace" });
-
-  test("we can access the browser window, not just dev tools", async ({ ctPage }) => {
-    const title = await ctPage.title();
-    expect(title).toContain("CodeTracer");
-    await ctPage.focus("div");
-  });
-
-  test("correct entry status path/line", async ({ ctPage }) => {
-    await readyOnEntry(ctPage);
-
-    const statusBar = new StatusBar(ctPage, ctPage.locator("#status-base"));
-    const location = await statusBar.location();
-    expect(location.path.endsWith("flow_test.cdc")).toBeTruthy();
-    expect(location.line).toBeGreaterThanOrEqual(1);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// Test suite: event log
-// ---------------------------------------------------------------------------
-
-test.describe("cadence_example — event log", () => {
-  test.skip(
-    !cadencePipelineAvailable,
-    "Cadence recorder pipeline not available (need codetracer-cadence-recorder)",
-  );
-
-  test.setTimeout(90_000);
-  test.use({ sourcePath: cadenceTestProgram ?? "", launchMode: "trace" });
-
-  test("event log has at least one event", async ({ ctPage }) => {
-    await loadedEventLog(ctPage);
-
-    // Read rendered rows from .eventLog-dense-table tbody, not the footer
-    // counter — the footer is in a remount-prone DOM path that the
-    // IsoNim event-log shell clobbers back to "0" (see loadedEventLog
-    // comment in fixtures.ts). M5/noir established this pattern.
-    const denseRows = ctPage.locator(".eventLog-dense-table tbody tr");
-    const count = await denseRows.count();
-    expect(count).toBeGreaterThanOrEqual(1);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// Test suite: state panel
-// ---------------------------------------------------------------------------
-
-test.describe("cadence_example — state panel", () => {
-  test.skip(
-    !cadencePipelineAvailable,
-    "Cadence recorder pipeline not available (need codetracer-cadence-recorder)",
-  );
-
-  test.setTimeout(90_000);
-  test.use({ sourcePath: cadenceTestProgram ?? "", launchMode: "trace" });
-
-  test("state panel loaded initially", async ({ ctPage }) => {
-    await readyOnEntry(ctPage);
-
-    const statePanel = new StatePanel(ctPage);
-    await expect(statePanel.codeStateLine()).toContainText(" | ");
-  });
-
-  test("state panel shows decoded Cadence variables", async ({ ctPage }) => {
-    await readyOnEntry(ctPage);
-    const statePanel = new StatePanel(ctPage);
-    const values = await statePanel.values();
-    const varNames = Object.keys(values);
-    expect(varNames.length).toBeGreaterThan(0);
-    // Cadence uses named variables from the source (e.g. "a", "result").
-    const hasVariable = varNames.some(
-      (name) => name.length > 0,
-    );
-    expect(hasVariable).toBeTruthy();
-  });
-});
-
-// ---------------------------------------------------------------------------
-// Test suite: call trace pane
-// ---------------------------------------------------------------------------
-
-test.describe("cadence_example — call trace", () => {
-  test.skip(
-    !cadencePipelineAvailable,
-    "Cadence recorder pipeline not available (need codetracer-cadence-recorder)",
-  );
-
-  test.setTimeout(90_000);
-  test.use({ sourcePath: cadenceTestProgram ?? "", launchMode: "trace" });
-
-  test("call trace shows compute function entry", async ({ ctPage }) => {
-    await readyOnEntry(ctPage);
-    const layout = new LayoutPage(ctPage);
-    const callTraceTabs = await layout.callTraceTabs();
-    expect(callTraceTabs.length).toBeGreaterThan(0);
-    const callTrace = callTraceTabs[0];
-    await callTrace.tabButton().click();
-    await callTrace.waitForReady();
-    const entries = await callTrace.getEntries();
-    expect(entries.length).toBeGreaterThan(0);
-    const firstName = await entries[0].functionName();
-    expect(firstName.length).toBeGreaterThan(0);
-  });
-
-  test("continue", async ({ ctPage }) => {
-    await readyOnEntry(ctPage);
-    const statusBar = new StatusBar(ctPage, ctPage.locator("#status-base"));
-    const initialLocation = await statusBar.location();
-    const layout = new LayoutPage(ctPage);
-    await layout.continueButton().click();
-    await retry(
-      async () => {
-        const status = ctPage.locator("#stable-status");
-        const className = (await status.getAttribute("class")) ?? "";
-        return className.includes("ready-status");
-      },
-      { maxAttempts: 60, delayMs: 500 },
-    );
-    const newLocation = await statusBar.location();
-    expect(newLocation.line).toBeGreaterThanOrEqual(1);
-  });
-
-  test("next", async ({ ctPage }) => {
-    await readyOnEntry(ctPage);
-    const statusBar = new StatusBar(ctPage, ctPage.locator("#status-base"));
-    const initialLocation = await statusBar.location();
-    const layout = new LayoutPage(ctPage);
-    await layout.nextButton().click();
-    await retry(
-      async () => {
-        const status = ctPage.locator("#stable-status");
-        const className = (await status.getAttribute("class")) ?? "";
-        return className.includes("ready-status");
-      },
-      { maxAttempts: 60, delayMs: 500 },
-    );
-    const newLocation = await statusBar.location();
-    expect(newLocation.line).not.toBe(initialLocation.line);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// Test suite: column-aware breakpoints (M1/M6)
-//
-// Flow/Cadence's recorder maps `DbStep.column` from Cadence's parser
-// `ast.Position{Line, Column}` records.  `flow_test.cdc` line 4 is
-// `    let sum_val: Int = a + b` inside `compute`; the 4-space indent
-// puts `let` at column 5.
-// ---------------------------------------------------------------------------
-
-defineRecorderColumnBreakpointSuite({
-  language: "cadence_example",
-  skipReason:
-    "Cadence recorder pipeline not available (need codetracer-cadence-recorder)",
-  pipelineAvailable: cadencePipelineAvailable,
-  sourcePath: cadenceTestProgram ?? "",
-  sourceFileName: "flow_test.cdc",
-  targetLine: 4,
-  targetColumn: 5,
-});
 
 // ---------------------------------------------------------------------------
 // Structural tests — run unconditionally, no Electron launch needed

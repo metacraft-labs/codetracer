@@ -117,3 +117,7 @@
 [submodule "libs/nim-unittest2"]
 	path = libs/nim-unittest2
 	url = https://github.com/status-im/nim-unittest2.git
+[submodule "libs/nim-cli-spec"]
+	path = libs/nim-cli-spec
+	url = https://github.com/metacraft-labs/nim-cli-spec
+	branch = agents

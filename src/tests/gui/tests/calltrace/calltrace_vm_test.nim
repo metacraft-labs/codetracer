@@ -19,8 +19,8 @@
 ## ViewModel's own logic — which commands it sends and how it reacts to the
 ## store. The mock only records the commands and plays no engine logic; the
 ## cases write the store exactly as the real decoders do. The real engine is
-## covered end to end by the Playwright specs (e.g.
-## `noir-space-ship/calltrace-search-jump.spec.ts`).
+## covered end to end by the desktop scenarios (e.g.
+## `src/tests/scenarios/noir-space-ship/call-trace-search-results-jump.yaml`).
 ##
 ## Compile and run:
 ##   nim c -r src/frontend/viewmodel/tests/test_calltrace_vm.nim

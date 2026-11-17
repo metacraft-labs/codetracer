@@ -389,6 +389,19 @@ proc submit*(model: var CommandLineModel): (CommandLineAction, string) =
   model.clearTransient()
   (claSubmitted, line)
 
+func isFieldDeleteKey*(key: string): bool =
+  ## A key that deletes in the field, by its canonical name or its byte.
+  key in ["Backspace", "Delete", "\x7f", "\b"]
+
+func isFieldMoveKey*(key: string): bool =
+  ## A key that edits nothing: it commits, cancels, completes or moves.
+  key in ["Enter", "Esc", "\r", "\n", "\x1b", "Tab", "\t", "Left", "Right",
+          "Up", "Down", "Home", "End"]
+
+func isFieldCommitKey*(key: string): bool =
+  ## The key that commits the field.
+  key == "Enter"
+
 proc applyKey*(model: var CommandLineModel; token: string;
                candidates: openArray[string] = []): CommandLineAction =
   ## One input token against the prompt.

@@ -1,0 +1,1385 @@
+# ct arb: 81 argv cases through ct's loader (the parse probe)
+
+### 1: bare
+argv: ct "arb"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = arb
+  arbitrumRpcUrl = "localhost"
+  arbCommand = noCommand
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 2: --arbitrum-rpc-url <v>
+argv: ct "arb" "--arbitrum-rpc-url" "http://n.test:8547"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = arb
+  arbitrumRpcUrl = "http://n.test:8547"
+  arbCommand = noCommand
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 3: --arbitrum-rpc-url=<v>
+argv: ct "arb" "--arbitrum-rpc-url=http://n.test:8547"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = arb
+  arbitrumRpcUrl = "http://n.test:8547"
+  arbCommand = noCommand
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 4: --arbitrum-rpc-url:<v>
+argv: ct "arb" "--arbitrum-rpc-url:http://n.test:8547"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = arb
+  arbitrumRpcUrl = "http://n.test:8547"
+  arbCommand = noCommand
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 5: --arbitrum-rpc-url http://n.test:8547
+argv: ct "arb" "--arbitrum-rpc-url" "http://n.test:8547"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = arb
+  arbitrumRpcUrl = "http://n.test:8547"
+  arbCommand = noCommand
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 6: --arbitrum-rpc-url=http://n.test:8547
+argv: ct "arb" "--arbitrum-rpc-url=http://n.test:8547"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = arb
+  arbitrumRpcUrl = "http://n.test:8547"
+  arbCommand = noCommand
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 7: --arbitrum-rpc-url empty
+argv: ct "arb" "--arbitrum-rpc-url" ""
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = arb
+  arbitrumRpcUrl = ""
+  arbCommand = noCommand
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 8: --arbitrum-rpc-url= (empty)
+argv: ct "arb" "--arbitrum-rpc-url="
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = arb
+  arbitrumRpcUrl = ""
+  arbCommand = noCommand
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 9: --arbitrum-rpc-url= <v> (next word)
+argv: ct "arb" "--arbitrum-rpc-url=" "http://n.test:8547"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = arb
+  arbitrumRpcUrl = "http://n.test:8547"
+  arbCommand = noCommand
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 10: --arbitrum-rpc-url -x (value starts with -)
+argv: ct "arb" "--arbitrum-rpc-url" "-x"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = arb
+  arbitrumRpcUrl = "-x"
+  arbCommand = noCommand
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 11: --arbitrum-rpc-url --x (value starts with --)
+argv: ct "arb" "--arbitrum-rpc-url" "--x"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = arb
+  arbitrumRpcUrl = "--x"
+  arbCommand = noCommand
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 12: --arbitrum-rpc-url --new-tab <v> (an option between it and its value)
+argv: ct "arb" "--arbitrum-rpc-url" "--new-tab" "http://n.test:8547"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The subcommand 'arb' does not accept arguments\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 13: --arbitrum-rpc-url repeated, last wins
+argv: ct "arb" "--arbitrum-rpc-url" "http://n.test:8547" "--arbitrum-rpc-url" "http://n.test:8547"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = arb
+  arbitrumRpcUrl = "http://n.test:8547"
+  arbCommand = noCommand
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 14: --arbitrum-rpc-url missing value (last)
+argv: ct "arb" "--arbitrum-rpc-url"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The option '\e[34m--arbitrum-rpc-url\e[0m' requires a value\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 15: --ARBITRUM-RPC-URL <v> (style variant)
+argv: ct "arb" "--ARBITRUM-RPC-URL" "http://n.test:8547"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = arb
+  arbitrumRpcUrl = "http://n.test:8547"
+  arbCommand = noCommand
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 16: --a_rbitrum-rpc-url <v> (style variant)
+argv: ct "arb" "--a_rbitrum-rpc-url" "http://n.test:8547"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = arb
+  arbitrumRpcUrl = "http://n.test:8547"
+  arbCommand = noCommand
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 17: --arbitrum_rpc_url <v> (style variant)
+argv: ct "arb" "--arbitrum_rpc_url" "http://n.test:8547"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'arbitrum_rpc_url'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 18: --arbitrumrpcurl <v> (style variant)
+argv: ct "arb" "--arbitrumrpcurl" "http://n.test:8547"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'arbitrumrpcurl'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 19: --arbitrum-rpc-url <v>
+argv: ct "arb" "--arbitrum-rpc-url" "http://n.test:8547" "explorer"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = arb
+  arbitrumRpcUrl = "http://n.test:8547"
+  arbCommand = explorer
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 20: --arbitrum-rpc-url=<v>
+argv: ct "arb" "--arbitrum-rpc-url=http://n.test:8547" "explorer"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = arb
+  arbitrumRpcUrl = "http://n.test:8547"
+  arbCommand = explorer
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 21: --arbitrum-rpc-url:<v>
+argv: ct "arb" "--arbitrum-rpc-url:http://n.test:8547" "explorer"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = arb
+  arbitrumRpcUrl = "http://n.test:8547"
+  arbCommand = explorer
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 22: --arbitrum-rpc-url http://n.test:8547
+argv: ct "arb" "--arbitrum-rpc-url" "http://n.test:8547" "explorer"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = arb
+  arbitrumRpcUrl = "http://n.test:8547"
+  arbCommand = explorer
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 23: --arbitrum-rpc-url=http://n.test:8547
+argv: ct "arb" "--arbitrum-rpc-url=http://n.test:8547" "explorer"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = arb
+  arbitrumRpcUrl = "http://n.test:8547"
+  arbCommand = explorer
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 24: --arbitrum-rpc-url empty
+argv: ct "arb" "--arbitrum-rpc-url" "" "explorer"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = arb
+  arbitrumRpcUrl = ""
+  arbCommand = explorer
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 25: --arbitrum-rpc-url= (empty)
+argv: ct "arb" "--arbitrum-rpc-url=" "explorer"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = arb
+  arbitrumRpcUrl = "explorer"
+  arbCommand = noCommand
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 26: --arbitrum-rpc-url= <v> (next word)
+argv: ct "arb" "--arbitrum-rpc-url=" "http://n.test:8547" "explorer"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = arb
+  arbitrumRpcUrl = "http://n.test:8547"
+  arbCommand = explorer
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 27: --arbitrum-rpc-url -x (value starts with -)
+argv: ct "arb" "--arbitrum-rpc-url" "-x" "explorer"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = arb
+  arbitrumRpcUrl = "-x"
+  arbCommand = explorer
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 28: --arbitrum-rpc-url --x (value starts with --)
+argv: ct "arb" "--arbitrum-rpc-url" "--x" "explorer"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = arb
+  arbitrumRpcUrl = "--x"
+  arbCommand = explorer
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 29: --arbitrum-rpc-url --new-tab <v> (an option between it and its value)
+argv: ct "arb" "--arbitrum-rpc-url" "--new-tab" "http://n.test:8547" "explorer"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The subcommand 'arb' does not accept arguments\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 30: --arbitrum-rpc-url repeated, last wins
+argv: ct "arb" "--arbitrum-rpc-url" "http://n.test:8547" "--arbitrum-rpc-url" "http://n.test:8547" "explorer"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = arb
+  arbitrumRpcUrl = "http://n.test:8547"
+  arbCommand = explorer
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 31: --arbitrum-rpc-url missing value (last)
+argv: ct "arb" "explorer" "--arbitrum-rpc-url"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The option '\e[34m--arbitrum-rpc-url\e[0m' requires a value\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 32: --arbitrum-rpc-url missing value (before the rest)
+argv: ct "arb" "--arbitrum-rpc-url" "explorer"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = arb
+  arbitrumRpcUrl = "explorer"
+  arbCommand = noCommand
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 33: --ARBITRUM-RPC-URL <v> (style variant)
+argv: ct "arb" "--ARBITRUM-RPC-URL" "http://n.test:8547" "explorer"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = arb
+  arbitrumRpcUrl = "http://n.test:8547"
+  arbCommand = explorer
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 34: --a_rbitrum-rpc-url <v> (style variant)
+argv: ct "arb" "--a_rbitrum-rpc-url" "http://n.test:8547" "explorer"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = arb
+  arbitrumRpcUrl = "http://n.test:8547"
+  arbCommand = explorer
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 35: --arbitrum_rpc_url <v> (style variant)
+argv: ct "arb" "--arbitrum_rpc_url" "http://n.test:8547" "explorer"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'arbitrum_rpc_url'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 36: --arbitrumrpcurl <v> (style variant)
+argv: ct "arb" "--arbitrumrpcurl" "http://n.test:8547" "explorer"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'arbitrumrpcurl'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 37: subcommand explorer
+argv: ct "arb" "explorer"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = arb
+  arbitrumRpcUrl = "localhost"
+  arbCommand = explorer
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 38: subcommand deploy
+argv: ct "arb" "deploy"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = arb
+  arbitrumRpcUrl = "localhost"
+  arbCommand = deploy
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 39: subcommand listRecentTx
+argv: ct "arb" "listRecentTx"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = arb
+  arbitrumRpcUrl = "localhost"
+  arbCommand = listRecentTx
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 40: subcommand listrecenttx
+argv: ct "arb" "listrecenttx"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = arb
+  arbitrumRpcUrl = "localhost"
+  arbCommand = listRecentTx
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 41: subcommand list-recent-tx
+argv: ct "arb" "list-recent-tx"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The subcommand 'arb' does not accept arguments\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 42: subcommand noCommand
+argv: ct "arb" "noCommand"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = arb
+  arbitrumRpcUrl = "localhost"
+  arbCommand = noCommand
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 43: subcommand Explorer
+argv: ct "arb" "Explorer"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = arb
+  arbitrumRpcUrl = "localhost"
+  arbCommand = explorer
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 44: subcommand bogus
+argv: ct "arb" "bogus"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The subcommand 'arb' does not accept arguments\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 45: record no tx
+argv: ct "arb" "record"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The required option 'arbRecordTransaction' was not specified\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 46: record tx
+argv: ct "arb" "record" "0xabc"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = arb
+  arbitrumRpcUrl = "localhost"
+  arbCommand = record
+  arbRecordTransaction = "0xabc"
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 47: record two txs
+argv: ct "arb" "record" "0xabc" "0xdef"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The subcommand 'record' does not accept additional arguments\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 48: replay tx
+argv: ct "arb" "replay" "0xabc"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = arb
+  arbitrumRpcUrl = "localhost"
+  arbCommand = replay
+  arbReplayTransaction = "0xabc"
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 49: replay no tx
+argv: ct "arb" "replay"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The required option 'arbReplayTransaction' was not specified\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 50: rpc url after the subcommand
+argv: ct "arb" "explorer" "--arbitrum-rpc-url" "u"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = arb
+  arbitrumRpcUrl = "u"
+  arbCommand = explorer
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 51: help word
+argv: ct "arb" "help"
+env: (none)
+exit: 0
+--- stdout
+<the long help page clispec renders for this request: ct arb>
+--- stderr
+--- end
+
+### 52: version word
+argv: ct "arb" "version"
+env: (none)
+exit: 0
+--- stdout
+CodeTracer version: <VERSION>
+\e[0m
+(no newline at end of stdout)
+--- stderr
+--- end
+
+### 53: explorer help word
+argv: ct "arb" "explorer" "help"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The subcommand 'explorer' does not accept arguments\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 54: record --help
+argv: ct "arb" "record" "--help"
+env: (none)
+exit: 0
+--- stdout
+<the long help page clispec renders for this request: ct arb record>
+--- stderr
+--- end
+
+### 55: two subcommands
+argv: ct "arb" "explorer" "deploy"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The subcommand 'explorer' does not accept arguments\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 56: a StartupCommand word
+argv: ct "arb" "list"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The subcommand 'arb' does not accept arguments\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 57: env <APP>_ARBITRUM_RPC_URL
+argv: ct "arb"
+env: <APP>_ARBITRUM_RPC_URL="http://env.test"
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = arb
+  arbitrumRpcUrl = "http://env.test"
+  arbCommand = noCommand
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 58: env <APP>_ARBCOMMAND=deploy
+argv: ct "arb"
+env: <APP>_ARBCOMMAND="deploy"
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = arb
+  arbitrumRpcUrl = "localhost"
+  arbCommand = noCommand
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 59: env <APP>_ARBRECORDTRANSACTION
+argv: ct "arb" "record"
+env: <APP>_ARBRECORDTRANSACTION="0xenv"
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = arb
+  arbitrumRpcUrl = "localhost"
+  arbCommand = record
+  arbRecordTransaction = "0xenv"
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 60: unknown long option
+argv: ct "arb" "--bogus"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'bogus'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 61: unknown long option with value
+argv: ct "arb" "--bogus=1"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'bogus'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 62: unknown short option
+argv: ct "arb" "-Z"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'Z'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 63: lone -
+argv: ct "arb" "-"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option ''\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 64: lone -- then a word
+argv: ct "arb" "--" "w"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option ''\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 65: --=v
+argv: ct "arb" "--=v"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option ''\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 66: extra positional
+argv: ct "arb" "extra1" "extra2" "extra3" "extra4" "extra5"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The subcommand 'arb' does not accept arguments\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 67: global --cwd after the command
+argv: ct "arb" "--cwd" "/w"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = some("/w")
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = arb
+  arbitrumRpcUrl = "localhost"
+  arbCommand = noCommand
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 68: global --new-tab after the command
+argv: ct "arb" "--new-tab"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = true
+  newWindow = false
+  cmd = arb
+  arbitrumRpcUrl = "localhost"
+  arbCommand = noCommand
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 69: --version after the command
+argv: ct "arb" "--version"
+env: (none)
+exit: 0
+--- stdout
+CodeTracer version: <VERSION>
+\e[0m
+(no newline at end of stdout)
+--- stderr
+--- end
+
+### 70: -h after the command
+argv: ct "arb" "-h"
+env: (none)
+exit: 0
+--- stdout
+<the short help page clispec renders for this request: ct arb>
+--- stderr
+--- end
+
+### 71: unknown long option
+argv: ct "arb" "explorer" "--bogus"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'bogus'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 72: unknown long option with value
+argv: ct "arb" "explorer" "--bogus=1"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'bogus'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 73: unknown short option
+argv: ct "arb" "explorer" "-Z"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'Z'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 74: lone -
+argv: ct "arb" "explorer" "-"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option ''\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 75: lone -- then a word
+argv: ct "arb" "explorer" "--" "w"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option ''\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 76: --=v
+argv: ct "arb" "explorer" "--=v"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option ''\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 77: extra positional
+argv: ct "arb" "explorer" "extra1" "extra2" "extra3" "extra4" "extra5"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The subcommand 'explorer' does not accept arguments\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 78: global --cwd after the command
+argv: ct "arb" "explorer" "--cwd" "/w"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = some("/w")
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = arb
+  arbitrumRpcUrl = "localhost"
+  arbCommand = explorer
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 79: global --new-tab after the command
+argv: ct "arb" "explorer" "--new-tab"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = true
+  newWindow = false
+  cmd = arb
+  arbitrumRpcUrl = "localhost"
+  arbCommand = explorer
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 80: --version after the command
+argv: ct "arb" "explorer" "--version"
+env: (none)
+exit: 0
+--- stdout
+CodeTracer version: <VERSION>
+\e[0m
+(no newline at end of stdout)
+--- stderr
+--- end
+
+### 81: -h after the command
+argv: ct "arb" "explorer" "-h"
+env: (none)
+exit: 0
+--- stdout
+<the short help page clispec renders for this request: ct arb explorer>
+--- stderr
+--- end

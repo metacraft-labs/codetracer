@@ -20,6 +20,8 @@ import ./editing_keymap
 import ./emacs_keymap
 import ./kakoune_keymap
 import ./navigation_keymap
+import ./overlay_rows
+import ./pointer_rows
 import ./vim_keymap
 
 proc withNavigation(def: KeymapDefinition): KeymapDefinition =
@@ -27,15 +29,15 @@ proc withNavigation(def: KeymapDefinition): KeymapDefinition =
   ## navigation rows are checked as a base of their own first, so a conflict
   ## among them refuses the base exactly as a data base's would.
   result = def
-  let nav = definitionOf(def.model, NavigationRows & ModalSurfaceRows)
+  let nav = definitionOf(def.model, NavigationRows & ModalSurfaceRows & OverlayRows & PointerRows)
   result.keymap = newEditingKeymap(def.keymap.bindings & nav.keymap.bindings)
 
 proc buildBase(model: BaseKeymap): KeymapDefinition =
   ## **ONE `case`, total over the enum**, so a fifth base does not compile
   ## rather than resolving to the default and looking like it works.
   case model
-  of bkCua: definitionOf(bkCua, CuaRows)
-  of bkEmacs: definitionOf(bkEmacs, EmacsRows)
+  of bkCua: definitionOf(bkCua, CuaRows & OverlayRows & PointerRows)
+  of bkEmacs: definitionOf(bkEmacs, EmacsRows & OverlayRows & PointerRows)
   of bkVim: withNavigation(vimKeymap())
   of bkKakoune: withNavigation(kakouneKeymap())
 

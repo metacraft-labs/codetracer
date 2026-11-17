@@ -457,6 +457,13 @@ proc loadConfig*(main: js, startOptions: StartOptions, home: cstring = cstring""
   try:
     let config = cast[Config](yaml.load(s))
     config.shortcutMap = initShortcutMap(config.bindings)
+    # The developer setting's per-launch override (`common/config.nim`,
+    # `sharedEditor`): `1` turns the shared editor on, `0` off.
+    let sharedEditorEnv = nodeProcess.env[cstring"CODETRACER_SHARED_EDITOR"]
+    if sharedEditorEnv == cstring"1":
+      config.sharedEditor = true
+    elif sharedEditorEnv == cstring"0":
+      config.sharedEditor = false
     return config
   except CatchableError:
     errorPrint "load config or init shortcut map error: ", getCurrentExceptionMsg()

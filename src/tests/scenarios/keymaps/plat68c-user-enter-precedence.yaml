@@ -1,0 +1,34 @@
+scenario: 1
+name: keymaps/plat68c-user-enter-precedence
+pack: codetracer
+summary: >-
+  VS Code's precedence through input: a user row binding Enter to Step Over
+  with no `when` takes Enter from the call trace's own row, so Enter in the
+  call trace steps; the shortcut reference lists the base row as shadowed by
+  "your row 1".
+
+stage:
+  - use: record-program
+    with: { program: calc }
+  - use: plant-config
+    with:
+      file: keybindings.json
+      content: |
+        [ { "key": "enter", "command": "debugger.step-over" } ]
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 180s }
+  - wait: { until: call-trace.loaded, timeout: 120s }
+  - expect: { at: 'editor[file="main.py"]', assert: "stopped-at(1)" }
+  - chord: Alt+C
+  - expect: { at: call-trace, focused: true }
+  - key: Enter
+    settle: false
+  - wait: { until: { at: 'editor[file="main.py"]', assert: "stopped-at(2)" }, timeout: 60s }
+  - wait: { until: replay-idle, timeout: 60s }
+  - chord: Alt+C
+  - chord: Ctrl+K Ctrl+S
+  - wait: { until: { at: shortcuts-dialog, present: true }, timeout: 20s }
+  - expect: { at: shortcuts-dialog, scope: { contains: calltrace } }
+  - expect: { at: 'shortcuts-dialog/binding-row[operation="list.activate", key="Enter"]', shadowed-by: "your row 1", text: { contains: "shadowed by your row 1" } }

@@ -20,7 +20,7 @@
 ##
 ## Works on both the C and JS backends.
 
-import std/[json, options]
+import std/[json, options, strutils]
 
 import isonim/core/batch as batchModule
 
@@ -43,12 +43,31 @@ type
     applied*: int
     refused*: int
       ## Messages applied and refused, for tests and diagnostics.
+    localOwners: seq[string]
+      ## Key prefixes (`fileTree.`) of the signals THIS side owns: the
+      ## primary's values for them are not applied (`ownedLocally`).
 
-proc createSyncSubscriber*(session: SessionViewModel): SyncSubscriber =
+proc createSyncSubscriber*(session: SessionViewModel;
+                           localOwners: openArray[string] = []
+                          ): SyncSubscriber =
   ## A subscriber that writes `session`'s mirrored signals. Purely
   ## imperative: it creates no effect.
+  ##
+  ## `localOwners` names the ViewModels whose state the mirror's own side
+  ## produces, by key prefix (`"fileTree."`): their entries in the primary's
+  ## snapshots and batches are skipped. See `mirror_session
+  ## .HostedPageOwnedSignals` for the one deployment that has any.
   SyncSubscriber(registry: syncedSignalsOf(session),
-                 collabCore: session.collabCore)
+                 collabCore: session.collabCore,
+                 localOwners: @localOwners)
+
+proc ownedLocally(sub: SyncSubscriber; key: string): bool =
+  ## Whether the signal `key` is one this side owns, so the primary's value
+  ## for it is not applied.
+  for prefix in sub.localOwners:
+    if key.startsWith(prefix):
+      return true
+  false
 
 proc follow*(sub: SyncSubscriber; sessionId: string) =
   ## Follow `sessionId` from its next snapshot on. Until that snapshot
@@ -71,9 +90,15 @@ proc applyEntries(sub: SyncSubscriber; entries: JsonNode) =
   ## session's. The second pass writes back exactly the entries that now
   ## differ; it changes no store value, so it wakes no effect that would
   ## derive them again.
+  ##
+  ## A signal this side owns (`ownedLocally`) is skipped: its value here is
+  ## not the primary's to replace.
   var found: seq[(SyncedSignal, JsonNode)]
   for entry in entries:
-    let s = sub.registry.find(entry{"key"}.getStr(""))
+    let key = entry{"key"}.getStr("")
+    if sub.ownedLocally(key):
+      continue
+    let s = sub.registry.find(key)
     if s.isSome:
       found.add (s.get, entry{"value"})
   batchModule.batch proc() =

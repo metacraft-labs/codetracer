@@ -4,6 +4,13 @@
  * first awaits real metadata/backend I/O before the second runs. No loader,
  * backend or routing is replaced. The optimistic Welcome loading flags are
  * seeded because direct IPC dispatch deliberately bypasses the click adapter.
+ *
+ * This stays a lower-tier test: no user input overlaps two loads closely
+ * enough for the main process to refuse one. At user pace both loads
+ * succeed, which a scenario covers
+ * (src/tests/scenarios/multi-replay/two-tabs-choosing-at-once-each-load-their-own.yaml),
+ * as is opening a recording in a new tab
+ * (src/tests/scenarios/multi-replay/shell-recording-opens-in-a-new-tab.yaml).
  */
 import * as path from "node:path";
 import { test, expect, recordTestProgram, testProgramsPath } from "../../lib/fixtures";
@@ -76,25 +83,4 @@ test("overlapping loads refuse only the second tab and a retry loads its own rec
   await expect.poll(() => ctPage.evaluate(() => String((window as any).data.sessions[2].trace?.recordingId ?? "")),
     { timeout: 120_000 }).toBe(secondRecording);
   expect(await ctPage.evaluate(() => String((window as any).data.sessions[1].trace.recordingId))).toBe(firstRecording);
-});
-
-test("open-trace-in-tab creates one tab before starting one addressed load", async ({ ctPage }) => {
-  const layout = new LayoutPage(ctPage);
-  await layout.waitForTraceLoaded();
-  await layout.waitForAllComponentsLoaded();
-  const recording = recordTestProgram(path.join(testProgramsPath, "py_checklist", "basics.py"));
-  await ctPage.evaluate((traceId) => {
-    (window as any).__newTabLoads = [];
-    require("electron").ipcRenderer.on("CODETRACER::dap-replay-selected", (_event: unknown, payload: any) => {
-      (window as any).__newTabLoads.push({ tab: payload.tab, recordingId: payload.trace?.recordingId });
-    });
-    (window as any).data.ipc.send("CODETRACER::open-trace-in-tab", { traceId });
-  }, recording);
-  await expect(ctPage.locator(".session-tab")).toHaveCount(2, { timeout: 120_000 });
-  await expect.poll(() => ctPage.evaluate(() => String((window as any).data.sessions[1].trace?.recordingId ?? "")),
-    { timeout: 120_000 }).toBe(recording);
-  const result = await ctPage.evaluate(() => ({ loads: (window as any).__newTabLoads,
-    id: Number((window as any).data.sessions[1].id), count: (window as any).data.sessions.length }));
-  expect(result.count).toBe(2);
-  expect(result.loads).toEqual([{ tab: result.id, recordingId: recording }]);
 });

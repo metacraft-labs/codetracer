@@ -1,0 +1,20 @@
+scenario: 1
+name: languages/noir-opens-at-entry
+pack: codetracer
+summary: >-
+  A Noir recording opens at its entry, main.nr line 17: the status line
+  says so, the state pane shows that line, and the event log has the
+  program's events.
+
+stage:
+  - use: record-program
+    with: { program: noir_example }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 180s }
+  - expect: { at: window, title: { contains: CodeTracer } }
+  - wait: { until: { at: status-line, location: { matches: "main\\.nr:17#" } }, timeout: 60s }
+  - wait: { until: { at: variables, code-line: { contains: "17 | " } }, timeout: 60s }
+  - click: 'pane-tab[label="EVENT LOG"]'
+  - wait: { until: event-log.loaded, timeout: 60s }

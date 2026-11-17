@@ -271,8 +271,20 @@ proc drawConstraints*(r: GpuiRenderer; pane: GpuiElement; vm: ConstraintsVM;
       let text = row.count & " " & row.name &
                  (if row.args.len > 0: " " & row.args else: "")
       r.setAttribute(el, "data-ct-constraint-text", text)
-      r.appendChild(el, textRun(r, cut(text, lay.list.w - ConstraintsIndentPx),
-                                main))
+      # Where the opcode came from ends the row, while the opcode keeps the
+      # larger part of it: its operands run long and it is what the row is about.
+      let room = lay.list.w - ConstraintsIndentPx
+      let place = whereText(row.source)
+      let placePx = if place.len > 0 and pxOf(place) + ConstraintsGapPx <= room div 2:
+                      pxOf(place)
+                    else: 0
+      let textPx = if placePx > 0: room - placePx - ConstraintsGapPx else: room
+      r.setStyle(el, "gap", $ConstraintsGapPx & "px")
+      r.appendChild(el, textRun(r, cut(text, textPx), main, textPx))
+      if placePx > 0:
+        let where = textRun(r, place, ConstraintsCaptionColour, placePx)
+        r.setAttribute(where, "data-ct-constraint-part", "where")
+        r.appendChild(el, where)
     r.appendChild(pane, el)
   if lay.provenance.h > 0:
     let el = lineElement(r, lay.provenance.w, ConstraintsLinePx)

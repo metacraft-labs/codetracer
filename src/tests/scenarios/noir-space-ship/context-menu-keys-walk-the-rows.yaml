@@ -1,0 +1,35 @@
+scenario: 1
+name: noir-space-ship/context-menu-keys-walk-the-rows
+pack: codetracer
+summary: >-
+  In a flow value's context menu, Down highlights the first row and the
+  next, End the last, Down wraps to the first, Up back to the last, Home
+  the first; Escape closes it.
+
+stage:
+  - use: record-program
+    with: { program: noir_space_ship }
+  - use: open-recording
+    with: { width: 2400, height: 1300 }
+
+steps:
+  - wait: { until: replay-idle, timeout: 180s }
+  - wait: { until: { at: 'editor[file="main.nr"]/flow-value[line="38", name="asteroid_masses_negative"]', present: true }, timeout: 60s }
+  - click: { at: 'editor[file="main.nr"]/flow-value[line="38", name="asteroid_masses_negative"]', button: right }
+  - wait: { until: { at: context-menu, present: true }, timeout: 30s }
+  - expect: { at: context-menu, count: 3 }
+  - expect: { at: context-menu, assert: "highlights-none" }
+  - key: Down
+  - expect: { at: context-menu, assert: 'highlights("Jump to value")' }
+  - key: Down
+  - expect: { at: context-menu, assert: 'highlights("Add value to scratchpad")' }
+  - key: End
+  - expect: { at: context-menu, assert: 'highlights("Add all values to scratchpad")' }
+  - key: Down
+  - expect: { at: context-menu, assert: 'highlights("Jump to value")' }
+  - key: Up
+  - expect: { at: context-menu, assert: 'highlights("Add all values to scratchpad")' }
+  - key: Home
+  - expect: { at: context-menu, assert: 'highlights("Jump to value")' }
+  - key: Esc
+  - wait: { until: { at: context-menu, absent: true }, timeout: 10s }

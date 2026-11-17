@@ -1,0 +1,18 @@
+scenario: 1
+name: terminal/keys-status-label
+pack: codetracer
+summary: >-
+  The status line names the keymap: CUA shows its name, never NORMAL; the
+  palette, a pushed layer, names itself (PALETTE) and Esc returns to CUA.
+stage:
+  - use: record-program
+    with: { program: calc }
+  - use: open-recording
+    with: { width: 200, height: 50 }
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - expect: { at: status-line, assert: ['says("CUA [DEBUG]")', 'lacks("NORMAL")'] }
+  - chord: Ctrl+P
+  - wait: { until: { at: status-line, assert: 'says("PALETTE [DEBUG]")' }, timeout: 10s }
+  - key: Esc
+  - wait: { until: { at: status-line, assert: 'says("CUA [DEBUG]")' }, timeout: 10s }

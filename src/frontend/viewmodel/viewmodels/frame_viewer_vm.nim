@@ -34,6 +34,15 @@ type
     count*: int             ## Number of valid samples (<= FrameFetchWindowSize).
     nextSlot*: int          ## Write cursor; wraps modulo window size.
 
+  FramePicture* = object
+    ## The shown frame's pixels, for a front-end that draws them itself (the
+    ## terminal's cell tiers, the GPUI window): RGBA8888, `width * height *
+    ## 4` bytes, `width` x `height` being the IMAGE's size (the framebuffer
+    ## scaled to fit the size asked for). `frame` is the frame it shows.
+    width*, height*: int
+    pixels*: string
+    frame*: int
+
   FrameViewerVM* = ref object of ViewModel
     client*: VisualReplayClient
     store*: ReplayDataStore
@@ -83,6 +92,21 @@ type
     ##
     ## Consumed by VideoPlayerVM to drive the M5 buffering detection.
     medianFetchMs*: Signal[int]
+    picture*: Signal[FramePicture]
+      ## The last frame's pixels, KEPT while the next one loads (unlike
+      ## `frameImageSrc`, which a load clears): a scrub shows the frame it
+      ## left until the one it asked for lands. Empty pixels when the client
+      ## sends images rather than pixels (the desktop's).
+    shownDraw*: Signal[int]
+      ## The draw call the shown image is the framebuffer after, counted
+      ## over the whole recording; -1 when the player did not say.
+    frameDrawStart*: Signal[int]
+    frameDrawCount*: Signal[int]
+      ## The shown frame's draw calls: the first one's whole-recording index
+      ## and how many (0 when the player did not say). The nested draw-call
+      ## scrubber's range.
+    drawInFrame*: Signal[int]
+      ## Which of them is shown, counted within the frame; -1 when unknown.
 
 # ---------------------------------------------------------------------------
 # Pure ring-buffer helpers (no signals, no I/O) — unit-tested directly.
@@ -168,6 +192,23 @@ proc setFrame(vm: FrameViewerVM; frame: VisualReplayFrame) =
     vm.currentGeid.val = frame.geid
   if frame.frame.isSome:
     vm.currentFrame.val = frame.frame.get
+  if frame.pixels.len > 0 and
+     frame.pixels.len == frame.width * frame.height * 4:
+    vm.picture.val = FramePicture(width: frame.width, height: frame.height,
+                                  pixels: frame.pixels,
+                                  frame: vm.currentFrame.val)
+  vm.shownDraw.val = frame.drawIndex
+  if frame.frameDrawCount > 0 and frame.frameDrawStart >= 0:
+    vm.frameDrawStart.val = frame.frameDrawStart
+    vm.frameDrawCount.val = frame.frameDrawCount
+    vm.drawInFrame.val =
+      if frame.drawIndex >= frame.frameDrawStart:
+        frame.drawIndex - frame.frameDrawStart
+      else: -1
+  else:
+    vm.frameDrawStart.val = -1
+    vm.frameDrawCount.val = 0
+    vm.drawInFrame.val = -1
 
 proc failFrame(vm: FrameViewerVM; message: string) =
   vm.loading.val = false
@@ -296,6 +337,36 @@ proc loadFrameForDraw*(vm: FrameViewerVM; draw: int;
           vm.lastStoreGeid = targetGeid
           vm.store.requestSeekToGeid(targetGeid.get)
       vm.loadDrawCalls(),
+    onError = proc(message: string) =
+      vm.recordFetchLatency(startMs)
+      if vm.isCurrentFrameRequest(serial):
+        vm.failFrame(message))
+
+proc loadDrawInFrame*(vm: FrameViewerVM; draw: int; frame = -1) =
+  ## Show the framebuffer after draw call `draw` OF THE FRAME SHOWN, counted
+  ## within that frame — the nested draw-call scrubber (CodeTracer-TUI-
+  ## Graphics.md §4: "a second axis, … a nested scrubber INSIDE this pane").
+  ## Clamped to the frame's draw calls when the player said how many there
+  ## are. `frame` names another frame (the draw step's roll into the next
+  ## one); its draw calls are then not known yet and `draw` is not clamped.
+  let other = frame >= 0 and frame != vm.currentFrame.val
+  let target = if frame >= 0: frame else: vm.currentFrame.val
+  let count = if other: 0 else: vm.frameDrawCount.val
+  let k = if count > 0: max(0, min(draw, count - 1)) else: max(0, draw)
+  let start = if other: -1 else: vm.frameDrawStart.val
+  vm.reloadShown = proc() = vm.loadDrawInFrame(k, target)
+  let serial = vm.beginFrameLoad()
+  let startMs = nowMs()
+  if not other:
+    vm.drawInFrame.val = k
+  let fut = vm.client.getFrameInFrame(target, k, start)
+  async_compat.onComplete(fut,
+    onSuccess = proc(frameData: VisualReplayFrame) =
+      vm.recordFetchLatency(startMs)
+      if not vm.isCurrentFrameRequest(serial):
+        return
+      vm.setFrame(frameData)
+      vm.loading.val = false,
     onError = proc(message: string) =
       vm.recordFetchLatency(startMs)
       if vm.isCurrentFrameRequest(serial):
@@ -431,6 +502,11 @@ proc createFrameViewerVM*(client: VisualReplayClient;
       selectedDrawCall: createSignal(none(int)),
       medianFetchMs: createSignal(-1),
       clearFrames: createSignal(newSeq[int]()),
+      picture: createSignal(FramePicture(frame: -1)),
+      shownDraw: createSignal(-1),
+      frameDrawStart: createSignal(-1),
+      frameDrawCount: createSignal(0),
+      drawInFrame: createSignal(-1),
       disposeProc: dispose,
     )
     vm.bindReplayStore(store)

@@ -1,0 +1,25 @@
+scenario: 1
+name: deepreview/no-calltrace-full-file-says-what-is-missing
+pack: codetracer
+summary: >-
+  A review collected without a call trace opens on its one file (lib.rs) in
+  the VCS panel, without the replay panels; and opening lib.rs itself, which
+  the dataset carries no text for, is reported by name ("no source text" for
+  src/lib.rs) rather than opening nothing in silence.
+
+stage:
+  - use: open-review
+    with: { dataset: src/tests/gui/tests/deepreview/fixtures/no-calltrace-review.json }
+
+steps:
+  - wait: { until: { at: vcs, present: true }, timeout: 120s }
+  - wait: { until: settled, timeout: 30s }
+  - expect: { at: vcs, count: 1, error: "" }
+  - expect: { at: 'vcs/changed-file[name="lib.rs"]', present: true }
+  - expect: { at: window, assert: 'has-pane("VCS")' }
+  - expect: { at: window, assert: 'lacks-pane("CALLTRACE")' }
+  - expect: { at: review-state, legacy-panel: 0 }
+  - click: vcs/diff-toggle
+  - wait: { until: { at: vcs, unified-diff: false }, timeout: 30s }
+  - click: 'vcs/changed-file[name="lib.rs"]'
+  - wait: { until: { at: review-state, notices: { matches: "no source text.*src/lib.rs" } }, timeout: 30s }

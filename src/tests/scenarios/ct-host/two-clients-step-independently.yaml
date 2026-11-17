@@ -1,0 +1,60 @@
+scenario: 1
+name: ct-host/two-clients-step-independently
+pack: codetracer
+summary: >-
+  Two browsers on one `ct host` (CLI/ct/host.md, "Sessions are isolated"):
+  each steps its own replay, the other stays where it was the whole time it
+  is watched, and a reload of one resumes that browser's own position, not
+  the other's and not the start.
+
+stage:
+  - use: record-program
+    with: { program: noir_space_ship }
+  - use: open-recording
+    with: { deployment: web }
+
+clients:
+  a: { open: stage }
+  b: { open: host-page, isolation: separate }
+
+steps:
+  - beat: both-open-at-the-start
+    steps:
+      - wait: { until: call-trace.loaded, timeout: 360s }
+        as: a
+      - wait: { until: { at: 'editor[file="main.nr"]', current-line: 13 }, timeout: 60s }
+        as: a
+      - wait: { until: call-trace.loaded, timeout: 360s }
+        as: b
+      - wait: { until: { at: 'editor[file="main.nr"]', current-line: 13 }, timeout: 60s }
+        as: b
+
+  - beat: a-steps
+    as: a
+    steps:
+      - click: 'toolbar/toolbar-button[label="next-image"]'
+        settle: false
+      - wait: { until: { at: 'editor[file="main.nr"]', current-line: 15 }, timeout: 60s }
+      - wait: { until: replay-idle, timeout: 60s }
+      - click: 'toolbar/toolbar-button[label="next-image"]'
+        settle: false
+      - wait: { until: { at: 'editor[file="main.nr"]', current-line: 17 }, timeout: 60s }
+  - expect: { at: 'editor[file="main.nr"]', current-line: 13, holds: 2s }
+    as: b
+
+  - beat: b-steps
+    as: b
+    steps:
+      - click: 'toolbar/toolbar-button[label="next-image"]'
+        settle: false
+      - wait: { until: { at: 'editor[file="main.nr"]', current-line: 15 }, timeout: 60s }
+  - expect: { at: 'editor[file="main.nr"]', current-line: 17, holds: 2s }
+    as: a
+
+  - reload: b
+  - wait: { until: call-trace.loaded, timeout: 360s }
+    as: b
+  - wait: { until: { at: 'editor[file="main.nr"]', current-line: 15 }, timeout: 60s }
+    as: b
+  - expect: { at: 'editor[file="main.nr"]', current-line: 17 }
+    as: a

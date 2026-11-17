@@ -3,7 +3,7 @@
 // (the tokenizers the desktop's editor colours source with) as plain JSON the
 // terminal's highlighter interprets (`src/frontend/tui/app/syntax/monarch.nim`).
 //
-//   node scripts/monarch-languages.mjs <out.json>
+//   node scripts/monarch-languages.mjs <out.json> [<desktop-out.json>]
 //
 // The definitions are read from the pinned `monaco-editor` in `node_modules`
 // (the same version `src/public/third_party/monaco-editor` links), so the
@@ -137,10 +137,22 @@ function rules(json, rulesIn, out) {
   return out;
 }
 
+// CodeTracer's own Monarch definitions, which the desktop registers with
+// Monaco itself (`src/frontend/languages/*.js`). With a second output path
+// they are exported there, in the same form, for the desktop's shared editor
+// (`ui/shared_editor` adds them with `monarch.addMonarchDefinitions`), so it
+// colours those languages as Monaco does. The terminal keeps its tree-sitter
+// grammars for them (`lexical.GrammarExtensions`) and does not link them.
+const OWN = { nim: ["src/frontend/languages/nimLanguage.js", "nimLanguage"] };
+const ownOut = process.argv[3];
+
 const result = { monacoVersion: pkg.version, languages: {} };
-for (const id of LANGUAGES) {
-  const mod = await import(pathToFileURL(path.join(stage, id + ".mjs")).href);
-  const json = mod.language;
+const own = { monacoVersion: pkg.version, languages: {} };
+for (const id of [...LANGUAGES, ...(ownOut ? Object.keys(OWN) : [])]) {
+  const mod = OWN[id]
+    ? await import(pathToFileURL(path.join(repo, OWN[id][0])).href)
+    : await import(pathToFileURL(path.join(stage, id + ".mjs")).href);
+  const json = OWN[id] ? mod[OWN[id][1]] : mod.language;
   const words = {};
   const strings = {};
   const regexes = {};
@@ -164,7 +176,7 @@ for (const id of LANGUAGES) {
     { open: "<", close: ">", token: "delimiter.angle" },
   ]).map((b) => (Array.isArray(b) ? { open: b[0], close: b[1], token: b[2] } : b))
     .map((b) => ({ open: b.open, close: b.close, token: b.token + postfix }));
-  result.languages[id] = {
+  (OWN[id] ? own : result).languages[id] = {
     ignoreCase: !!json.ignoreCase,
     unicode: !!json.unicode,
     includeLF: !!json.includeLF,
@@ -183,3 +195,4 @@ const out = process.argv[2];
 const text = JSON.stringify(result) + "\n";
 if (out) fs.writeFileSync(out, text);
 else process.stdout.write(text);
+if (ownOut) fs.writeFileSync(ownOut, JSON.stringify(own) + "\n");

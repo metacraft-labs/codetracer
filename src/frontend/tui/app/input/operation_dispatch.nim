@@ -63,6 +63,7 @@ const
     ("editor.scroll-half-page-down", kaHalfPageDown),
     ("editor.center-on-pointer", kaCenterOnPointer),
     ("editor.toggle-breakpoint", kaToggleBreakpoint),
+    ("editor.toggle-inline-breakpoint", kaToggleInlineBreakpoint),
     ("list.expand", kaExpandNode),
     ("list.collapse", kaCollapseNode),
     ("variables.toggle-hex-dec", kaToggleHexDec),

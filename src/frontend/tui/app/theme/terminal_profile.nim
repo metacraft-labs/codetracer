@@ -18,15 +18,23 @@
 ## combination of the width probe (P0–P6) and every rank of the precedence
 ## (§5.2) be swept in the fast lane.
 ##
-## ## Documentation, not measurement
+## ## Documentation, checked against the real terminals where they run
 ##
 ## The identity tables below (which terminals draw Symbols for Legacy
 ## Computing themselves, which accept an OSC 52 write, which implement DEC
-## 2026) are the spec's §3.2 READINGS of each project's documentation and
-## source. They are not measurements; the real-emulator lane that would earn
-## them (§13.4) is listed as owed in the milestone. Each row names its source.
+## 2026) are the spec's §3.2 readings of each project's documentation and
+## source. The `tui-real-emulators` lane (§13.4) holds them to the real
+## terminals it can run — kitty, Ghostty, foot, xterm, Alacritty and tmux —
+## on every run: the Legacy Computing row is drawn exactly where `auto` would
+## turn it on, and an OSC 52 write is taken exactly where the clipboard axis
+## says `osc52`. VTE, Windows Terminal, iTerm2 and the rest stay readings.
+## Each row names its source.
 
 import std/[algorithm, json, options, strutils]
+
+import ./pointer_protocol
+
+export pointer_protocol
 
 export options
 
@@ -85,6 +93,11 @@ type
     probe*: Option[bool]
       ## `terminal-probe`: false turns the start-up round off (§4.8 rule 4).
     reduceMotion*: Option[bool]
+    pointerShapes*: Option[PointerShapesChoice]
+      ## `pointer-shapes`: Pointer-Affordances §5.6.
+    screenReader*: Option[bool]
+      ## `screen-reader` (§9.4 SR-D1): `auto` says nothing, so the hints of
+      ## SR-D2 decide below every rank.
 
   ScopedChoices* = object
     ## A `[terminal "<glob>"]` section (§5.3, OQ-T6).
@@ -135,10 +148,13 @@ proc merge*(above, below: TerminalChoices): TerminalChoices =
   if above.colors.isSome: result.colors = above.colors
   if above.probe.isSome: result.probe = above.probe
   if above.reduceMotion.isSome: result.reduceMotion = above.reduceMotion
+  if above.pointerShapes.isSome: result.pointerShapes = above.pointerShapes
+  if above.screenReader.isSome: result.screenReader = above.screenReader
 
 proc isEmpty*(c: TerminalChoices): bool =
   c.glyphs.isNone and c.modernUnicode.isNone and c.ambiguousWidth.isNone and
-    c.colors.isNone and c.probe.isNone and c.reduceMotion.isNone
+    c.colors.isNone and c.probe.isNone and c.reduceMotion.isNone and
+    c.pointerShapes.isNone and c.screenReader.isNone
 
 # ---------------------------------------------------------------------------
 # Glob matching for `[terminal "<glob>"]`
@@ -337,6 +353,19 @@ proc parseCpr*(token: string): (bool, int, int) =
   except ValueError:
     (false, 0, 0)
 
+proc parseMarkedCpr*(token: string): (bool, int, int) =
+  ## DECXCPR's answer, `CSI ? <row> ; <col> R`, with the page some terminals
+  ## add (`CSI ? r ; c ; p R`) → `(ok, row, col)`.
+  if not (token.len >= 7 and token.startsWith("\x1b[?") and token[^1] == 'R'):
+    return (false, 0, 0)
+  let parts = token[3 ..< token.len - 1].split(';')
+  if parts.len notin [2, 3]:
+    return (false, 0, 0)
+  try:
+    (true, parseInt(parts[0]), parseInt(parts[1]))
+  except ValueError:
+    (false, 0, 0)
+
 proc versionAtLeast*(have, want: string): bool =
   ## Dotted numeric comparison; a missing component is 0. A version that is
   ## not numeric at all is NOT at least anything (an unknown version cannot
@@ -394,7 +423,10 @@ const
     ## version (XTVERSION or DA2). Windows Terminal (≥ 1.25), Alacritty
     ## (≥ 0.17) and xterm.js with WebGL also draw these code points, but none
     ## of them reports a version the probe can read, so `auto` cannot check
-    ## the minimum and leaves them off. DOCUMENTATION-DERIVED, not measured.
+    ## the minimum and leaves them off. kitty, Ghostty and foot are MEASURED
+    ## by the real-emulator lane (all four of the card's Legacy Computing
+    ## glyphs drawn as their shapes, on kitty 0.44.0, Ghostty 1.3.1 and foot
+    ## 1.25.0); VTE's row is still its documentation's.
 
   SyncIdentities*: array[7, (string, string)] = [
     ("kitty", ""), ("foot", "1.8.0"), ("wezterm", ""), ("ghostty", ""),
@@ -467,8 +499,8 @@ type
 
 const
   WidthProbeText*: array[WidthProbe, string] = [
-    "…", "▕", "\U0001FB87", "⏮", "中",
-    "\U0001F469‍\U0001F4BB"]
+    "…", "▕", "\u{1FB87}", "⏮", "中",
+    "\u{1F469}\u{200D}\u{1F4BB}"]
 
 proc noWidthAnswers*(): array[WidthProbe, int] =
   for p in WidthProbe:

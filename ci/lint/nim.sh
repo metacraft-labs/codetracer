@@ -39,8 +39,7 @@ source ci/lib/codetracer-home.sh
 # no sandbox here, or in the sandboxed run itself.
 ct_user_state_stage_sandbox lint-nim bash ci/lint/nim.sh "$@"
 ct_export_scratch_codetracer_home lint-nim
-# shellcheck disable=SC2154 # set by ct_export_scratch_codetracer_home
-trap 'rm -rf ${ct_scratch_home_created:+"$ct_scratch_home_created"}' EXIT
+trap 'ct_remove_scratch_codetracer_home lint-nim' EXIT
 
 # See the note in ci/lint/bash.sh: the stage names its tools before it runs, so
 # a shell missing one says so by name instead of failing obscurely inside a
@@ -912,6 +911,14 @@ lint_step "Keymap clean code: contract suite" \
 
 lint_step "Keymap clean code: one resolver, one decoder per device, one modifier order, bases as data" \
 	bash ci/test/keymap-clean-code.sh
+
+# Input-Routing-And-Keymaps.md §9 IR-1: no view module binds a chord or switches
+# on a key name. Its contract suite plants each violation first.
+lint_step "Input routing: contract suite" \
+	bash ci/test/input-routing-gate-test.sh
+
+lint_step "Input routing: no view switches on a key name" \
+	bash ci/test/input-routing-gate.sh
 
 # PLAT-2's verification gate: no surface formats a value by a path that
 # bypasses the one presenter, and the presenter is pure.

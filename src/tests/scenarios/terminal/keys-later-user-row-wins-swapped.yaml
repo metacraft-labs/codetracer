@@ -1,0 +1,22 @@
+scenario: 1
+name: terminal/keys-later-user-row-wins-swapped
+pack: codetracer
+summary: >-
+  The same two user rows in the other order: the later one, step-over, fires
+  — Ctrl+Alt+U steps over to line 2 instead of jumping to the end.
+stage:
+  - use: record-program
+    with: { program: calc }
+  - use: plant-config
+    with:
+      file: keybindings.json
+      content: |
+        [{ "key": "ctrl+alt+u", "command": "debugger.jump-to-end" },
+         { "key": "ctrl+alt+u", "command": "debugger.step-over" }]
+  - use: open-recording
+    with: { width: 200, height: 50 }
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - chord: Ctrl+Alt+U
+  - wait: { until: { at: 'editor[file="main.py"]', assert: "stopped-at(2)" }, timeout: 30s }
+  - expect: { at: replay-position, assert: "before(171)" }

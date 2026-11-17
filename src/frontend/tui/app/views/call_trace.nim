@@ -506,16 +506,18 @@ type
       ## fraction).
 
 proc callTraceHitAt*(m: CallTraceModel; area: CellArea;
-                     row, col: int): CallTraceHit =
-  ## PLAT-49 part B: what a press at `(row, col)` is on, for the pane painted
-  ## into `area` by `paintCallTrace` — the same rows, the same top, the same
-  ## segments, so a click and the drawing cannot disagree. A row whose section
-  ## has not arrived is not a call yet.
+                     geo: CallTraceGeometry; lines: seq[CallTraceLine];
+                     row, col: int; wantArg = true): CallTraceHit =
+  ## `callTraceHitAt` against the pane's geometry and body lines computed
+  ## once by the caller (`callTraceGeometry`, `bodyLines` of the same `m` and
+  ## `area`), for a caller that hit-tests many cells of one painting — the
+  ## pane server's hotspots test every cell, and measuring the pane again for
+  ## each one cost half a second per published frame. `wantArg = false`
+  ## leaves `arg` at -1 and skips walking the row's segments for it.
   if area.width <= 0 or area.height <= 1 or row <= area.row or
      row >= area.row + area.height or col < area.col or
      col >= area.col + area.width:
     return CallTraceHit(kind: cthNone, arg: -1)
-  let geo = m.callTraceGeometry(area)
   let bodyRows = geo.bodyRows
   if row >= area.row + 1 + bodyRows:
     # PLAT-70 Part I: the horizontal bar's row (the runtime's bar route).
@@ -526,7 +528,6 @@ proc callTraceHitAt*(m: CallTraceModel; area: CellArea;
     return CallTraceHit(kind: (if hit.kind == shThumb: cthThumb
                                else: cthTrack),
                         index: -1, arg: -1, fraction: hit.fraction)
-  let lines = m.bodyLines(area)
   let at = row - area.row - 1
   if at < 0 or at >= lines.len or lines[at].detail >= 0:
     return CallTraceHit(kind: cthNone, arg: -1)
@@ -546,10 +547,24 @@ proc callTraceHitAt*(m: CallTraceModel; area: CellArea;
   # and its value (the desktop's `.call-arg`).
   var x = origin
   var arg = -1
-  for seg in callRowSegments(call):
-    let w = cellWidthOf(seg.text)
-    if col >= x and col < x + w:
-      arg = seg.arg - 1
-      break
-    x += w
+  if wantArg:
+    for seg in callRowSegments(call):
+      let w = cellWidthOf(seg.text)
+      if col >= x and col < x + w:
+        arg = seg.arg - 1
+        break
+      x += w
   CallTraceHit(kind: cthRow, index: index.int64, arg: arg)
+
+proc callTraceHitAt*(m: CallTraceModel; area: CellArea;
+                     row, col: int): CallTraceHit =
+  ## PLAT-49 part B: what a press at `(row, col)` is on, for the pane painted
+  ## into `area` by `paintCallTrace` — the same rows, the same top, the same
+  ## segments, so a click and the drawing cannot disagree. A row whose section
+  ## has not arrived is not a call yet.
+  if area.width <= 0 or area.height <= 1 or row <= area.row or
+     row >= area.row + area.height or col < area.col or
+     col >= area.col + area.width:
+    return CallTraceHit(kind: cthNone, arg: -1)
+  m.callTraceHitAt(area, m.callTraceGeometry(area), m.bodyLines(area),
+                   row, col)

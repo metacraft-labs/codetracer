@@ -1,0 +1,28 @@
+scenario: 1
+name: search/fif-row-opens-file-and-f4-walks
+pack: codetracer
+summary: >-
+  A click on a Find in Files row opens its file at its line; F4 selects and
+  opens the next result, wrapping past the last to the first, and Shift+F4
+  goes back to the last.
+
+stage:
+  - use: record-program
+    with: { program: multi_root/app/main.py }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - wait: { until: editor.loaded, timeout: 60s }
+  - chord: Ctrl+p
+  - type: ":grep scale"
+  - key: Enter
+  - wait: { until: { at: find-in-files, count: 4 }, timeout: 30s }
+  - click: 'find-in-files/fif-match[location="pkg/extra.py:4"]'
+  - wait: { until: { at: 'editor[file="extra.py"]', active: true }, timeout: 20s }
+  - wait: { until: { at: 'editor[file="extra.py"]', assert: 'shows-text("def scale(value, factor):")' }, timeout: 20s }
+  - key: F4
+  - wait: { until: { at: find-in-files, selected: "app/main.py:26" }, timeout: 10s }
+  - wait: { until: { at: 'editor[file="main.py"]', active: true }, timeout: 20s }
+  - chord: Shift+F4
+  - wait: { until: { at: find-in-files, selected: "pkg/extra.py:4" }, timeout: 10s }

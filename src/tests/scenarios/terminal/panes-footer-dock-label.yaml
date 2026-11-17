@@ -1,0 +1,27 @@
+scenario: 1
+name: terminal/panes-footer-dock-label
+pack: codetracer
+summary: >-
+  The footer's auto-hide panels are labels on the status row; a click on
+  BUILD docks the Build pane open in the arrangement ("No build has run."), it
+  stays when the pointer leaves, and a second click closes it again.
+stage:
+  - use: record-program
+    with: { program: calc }
+  - use: open-recording
+    with: { width: 200, height: 50 }
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - expect: { at: 'dock-label[label="Build Output"]', present: true }
+  - expect: { at: 'dock-label[label="Problems"]', present: true }
+  - expect: { at: 'dock-label[label="Find in Files"]', present: true }
+  - expect: { at: 'dock-label[label="Requests"]', present: true }
+  - expect: { at: 'pane[title="Build Output"]', absent: true }
+  - click: { at: 'dock-label[label="Build Output"]' }
+  - wait: { until: { at: 'pane[title="Build Output"]', present: true }, timeout: 10s }
+  - expect: { at: 'pane[title="Build Output"]', assert: 'shows("No build has run.")' }
+  - expect: { at: status-line, assert: 'lacks("openDocked")' }
+  - move: { at: 'editor[file="main.py"]' }
+  - expect: { at: 'pane[title="Build Output"]', present: true }
+  - click: { at: 'dock-label[label="Build Output"]' }
+  - wait: { until: { at: 'pane[title="Build Output"]', absent: true }, timeout: 10s }

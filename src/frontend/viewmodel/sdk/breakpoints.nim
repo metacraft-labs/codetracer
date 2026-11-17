@@ -17,7 +17,7 @@
 ## A DISABLED breakpoint is not sent — the engine holds only the armed ones —
 ## and stays a row of the point list until it is deleted (PLAT-50).
 
-import std/[json, options]
+import std/[json, options, tables]
 from std/os import extractFilename
 
 import isonim/core/signals
@@ -25,6 +25,7 @@ from isonim/core/async_compat import nil
 
 import ../backend/backend_service
 import ../store/[replay_data_store, types]
+import ../viewmodels/action_sink
 
 export BreakpointSpec
 
@@ -38,6 +39,19 @@ proc heldBreakpoints*(store: ReplayDataStore; path: string): seq[BreakpointSpec]
       result.add BreakpointSpec(line: r.line, column: r.column,
                                 condition: r.condition,
                                 logMessage: r.logMessage, enabled: r.enabled)
+
+proc breakpointResolution*(store: ReplayDataStore; path: string;
+                           line, column: int): string =
+  ## How far `path:line` (at `column`, 0 for the whole line) has got: the
+  ## row's `resolution` — `requested` while held before the engine answered,
+  ## `verified` once the engine bound it (`applyVerifiedBreakpoints`) — or ""
+  ## when there is no such breakpoint.
+  if store.isNil:
+    return
+  for r in store.pointList.rows.val:
+    if r.kind == PointKindBreakpoint and r.path == path and r.line == line and
+       r.column == column:
+      return r.resolution
 
 func breakpointAt*(held: openArray[BreakpointSpec];
                    line: int): Option[BreakpointSpec] =
@@ -53,10 +67,10 @@ proc breakpointAt*(store: ReplayDataStore; path: string;
 
 func plannedToggle*(held: openArray[BreakpointSpec];
                     line: int): seq[BreakpointSpec] =
-  ## A gutter click: the breakpoint on `line` removed if there is one (armed
-  ## or not — toggling a disabled breakpoint removes it, as the desktop's
-  ## gutter does), else a whole-line breakpoint added. Every other
-  ## breakpoint is kept as it is.
+  ## A press on the glyph column: the breakpoint on `line` removed if there is
+  ## one (armed or not, line or column, as VS Code's glyph click removes every
+  ## breakpoint on the line), else a whole-line breakpoint added. Every other
+  ## line is kept as it is. The engine binds one breakpoint per line.
   var removing = false
   for sp in held:
     if sp.line == line: removing = true
@@ -66,30 +80,94 @@ func plannedToggle*(held: openArray[BreakpointSpec];
 
 func plannedAnchored*(held: openArray[BreakpointSpec]; line, column: int;
                       condition = ""; logMessage = ""): seq[BreakpointSpec] =
-  ## A breakpoint at `line` anchored at `column` — the desktop's Alt+click
-  ## (Column-Aware Navigation M6), with an optional condition (M9) or log
-  ## message (M10). It REPLACES whatever the line had (one breakpoint per
-  ## line) and is never a toggle.
+  ## A breakpoint at `line` anchored at `column` (Column-Aware Navigation M6),
+  ## with an optional condition (M9) or log message (M10). It REPLACES whatever
+  ## the line had (the engine binds one breakpoint per line) and is never a
+  ## toggle.
   for sp in held:
     if sp.line != line: result.add sp
   result.add BreakpointSpec(line: line, column: max(0, column),
                             condition: condition, logMessage: logMessage,
                             enabled: true)
 
+func plannedInlineToggle*(held: openArray[BreakpointSpec];
+                          line, column: int): seq[BreakpointSpec] =
+  ## `toggle-inline-breakpoint` at a caret on column 2 or later: the column
+  ## breakpoint there removed if the line has one, else one put there in place
+  ## of whatever the line had (Editor-Pane.md § Inline breakpoints).
+  for sp in held:
+    if sp.line == line and sp.column == column:
+      for other in held:
+        if other.line != line: result.add other
+      return
+  result = plannedAnchored(held, line, column)
+
+func inlineBreakpointPlan*(held: openArray[BreakpointSpec]; line, column,
+                           lineMaxColumn: int;
+                           columnsSupported = true): seq[BreakpointSpec] =
+  ## The one rule for the caret's column, every front-end's: clamped to the
+  ## line's last column; column 1 is a line breakpoint (Column-Aware M6's
+  ## invariant), and so is every column when the recorder does not advertise
+  ## column breakpoints.
+  var col = max(1, column)
+  if lineMaxColumn >= 1:
+    col = min(col, lineMaxColumn)
+  if col < 2 or not columnsSupported:
+    plannedToggle(held, line)
+  else:
+    plannedInlineToggle(held, line, col)
+
+func columnBreakpointAt*(held: openArray[BreakpointSpec];
+                         line, column: int): bool =
+  ## Whether a column breakpoint is bound there: the menu's Add / Remove.
+  for sp in held:
+    if sp.line == line and sp.column == column and column >= 2:
+      return true
+
 func plannedEnabled*(held: openArray[BreakpointSpec]; line: int;
                      enabled: bool): Option[seq[BreakpointSpec]] =
   ## The breakpoint on `line` armed or disarmed, everything else kept; `none`
   ## when the line has no breakpoint (a right-click on an empty gutter slot
-  ## does nothing).
+  ## does nothing). Its line breakpoint when it has one, which a column
+  ## breakpoint on the same line does not follow.
   var found = false
   var plan: seq[BreakpointSpec] = @[]
+  let target = breakpointAt(held, line)
   for sp in held:
     var s = sp
-    if s.line == line:
+    if target.isSome and s.line == line and s.column == target.get.column:
       found = true
       s.enabled = enabled
     plan.add s
   if found: some(plan) else: none(seq[BreakpointSpec])
+
+func conditionTarget*(held: openArray[BreakpointSpec];
+                      line, column: int): Option[BreakpointSpec] =
+  ## The breakpoint "Edit breakpoint condition" is about: the column
+  ## breakpoint at `column` when the line has one there, else the line's
+  ## breakpoint (whatever its column); `none` when the line has none.
+  if column >= 2:
+    for sp in held:
+      if sp.line == line and sp.column == column:
+        return some(sp)
+  breakpointAt(held, line)
+
+func plannedCondition*(held: openArray[BreakpointSpec]; line, column: int;
+                       condition: string): Option[seq[BreakpointSpec]] =
+  ## `conditionTarget`'s breakpoint with `condition` ("" clears it), its line,
+  ## column and armed state kept, every other breakpoint as it is; `none` when
+  ## the line has no breakpoint (Breakpoints-And-Tracepoints.md § Conditional
+  ## breakpoints).
+  let target = conditionTarget(held, line, column)
+  if target.isNone:
+    return none(seq[BreakpointSpec])
+  var plan: seq[BreakpointSpec] = @[]
+  for sp in held:
+    var s = sp
+    if s.line == line and s.column == target.get.column:
+      s.condition = condition
+    plan.add s
+  some(plan)
 
 proc setBreakpointsArgs*(path: string; plan: openArray[BreakpointSpec]): JsonNode =
   ## The `setBreakpoints` arguments for `path`'s planned set: the ARMED
@@ -152,10 +230,32 @@ proc requestBreakpoints*(store: ReplayDataStore; path: string;
   if store.isNil:
     if not onDone.isNil: onDone(false)
     return
+  ##
+  ## ONLY THE LATEST REQUEST'S ANSWER IS APPLIED. Two changes in quick
+  ## succession — delete a line's breakpoint, then anchor a new one there —
+  ## send two requests, and the first one's answer (an empty set) can arrive
+  ## after the second set is held. Applied then, it deleted the breakpoint
+  ## just placed, and the second answer was the only thing that could bring
+  ## it back.
   store.applyVerifiedBreakpoints(path, plan, resolution = "requested")
+  ##
+  ## A MIRROR'S CHANGE IS MADE BY ITS PRIMARY. On a `ct host` page the store
+  ## is the mirror's, over a backend that never answers, so a request sent
+  ## from here never reached the replay: the gutter showed the breakpoint
+  ## and Continue ran past it.
+  ## The planned set is handed to the server's session (`actionSink`,
+  ## `action_relay`'s `breakpoints` / `set`), which sends it over its own
+  ## connection to the replay; its rows, at `requested` and then as the
+  ## engine verified them, reach this store with its next batches. `onDone`
+  ## is not called then: the answer is the primary's.
+  if store.actionSink.forwards("breakpoints", "set",
+      %*{"path": path, "plan": sinkArg(plan)}):
+    return
   if store.backend.isNil:
     if not onDone.isNil: onDone(false)
     return
+  let generation = store.breakpointRequests.getOrDefault(path) + 1
+  store.breakpointRequests[path] = generation
   let theStore = store
   let thePath = path
   let thePlan = plan
@@ -163,7 +263,7 @@ proc requestBreakpoints*(store: ReplayDataStore; path: string;
     store.backend.send("setBreakpoints", setBreakpointsArgs(path, plan)),
     proc(response: JsonNode) =
       let ok = responseSucceeded(response)
-      if ok:
+      if ok and theStore.breakpointRequests.getOrDefault(thePath) == generation:
         theStore.applyVerifiedBreakpoints(thePath,
           answeredBreakpoints(thePlan, responseBody(response)))
       if not onDone.isNil: onDone(ok),
@@ -186,11 +286,29 @@ proc setAnchoredBreakpoint*(store: ReplayDataStore; path: string;
   store.requestBreakpoints(path, plannedAnchored(store.heldBreakpoints(path),
     line, column, condition, logMessage))
 
+proc toggleInlineBreakpoint*(store: ReplayDataStore; path: string; line, column,
+                             lineMaxColumn: int; columnsSupported = true) =
+  ## Shift+F9 and the context menu's inline entry, at the caret.
+  store.requestBreakpoints(path, inlineBreakpointPlan(
+    store.heldBreakpoints(path), line, column, lineMaxColumn, columnsSupported))
+
 proc setBreakpointEnabled*(store: ReplayDataStore; path: string; line: int;
                            enabled: bool): bool =
   ## Arm or disarm the breakpoint on `line`; false (nothing sent) when the
   ## line has none.
   let plan = plannedEnabled(store.heldBreakpoints(path), line, enabled)
+  if plan.isNone:
+    return false
+  store.requestBreakpoints(path, plan.get)
+  true
+
+proc setBreakpointCondition*(store: ReplayDataStore; path: string;
+                             line, column: int; condition: string): bool =
+  ## Give the breakpoint at `line` (the column breakpoint at `column` when
+  ## there is one) `condition`, or clear it with ""; false (nothing sent) when
+  ## the line has none (`plannedCondition`).
+  let plan = plannedCondition(store.heldBreakpoints(path), line, column,
+                              condition)
   if plan.isNone:
     return false
   store.requestBreakpoints(path, plan.get)

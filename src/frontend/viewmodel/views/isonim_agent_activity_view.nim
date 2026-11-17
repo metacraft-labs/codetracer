@@ -12,6 +12,7 @@
 ## is the session itself ("There is no 'DeepReview section' in this panel").
 
 import std/[options, tables, math, strutils, sets]
+import ./field_keys
 
 import isonim/core/[signals, computation, owner, batch]
 import isonim/dsl/[ui, components]
@@ -271,9 +272,15 @@ when defined(js):
       img.style.cssText = 'max-width:90vw;max-height:90vh;object-fit:contain;border-radius:0.5em;box-shadow:0 0.5em 3em rgba(0,0,0,0.7);cursor:default;';
       img.onclick = function(e) { e.stopPropagation(); };
       ov.appendChild(img);
-      ov.onclick = function() { ov.remove(); };
-      function onKey(e) { if (e.key === 'Escape') { ov.remove(); document.removeEventListener('keydown', onKey); } }
-      document.addEventListener('keydown', onKey);
+      function dismiss() {
+        var list = globalThis.__ctDismissals || [];
+        var at = list.indexOf(dismiss);
+        if (at >= 0) list.splice(at, 1);
+        ov.remove();
+        return true;
+      }
+      ov.onclick = dismiss;
+      (globalThis.__ctDismissals = globalThis.__ctDismissals || []).push(dismiss);
       document.body.appendChild(ov);
     })(#)
   """.}
@@ -450,7 +457,7 @@ proc attachInputEvents[R, N](r: R; input: N; vm: AgentActivityVM;
       callbacks.invokeFocus())
     r.addEventListener(input, "input", proc() =
       vm.invokeInputChange(callbacks, r.readInputElementValue(input)))
-    r.addEventListener(input, "keydown", proc() =
+    r.addEventListener(input, KeyDownEvent, proc() =
       callbacks.invokeSubmit())
   else:
     when defined(js):
@@ -460,9 +467,9 @@ proc attachInputEvents[R, N](r: R; input: N; vm: AgentActivityVM;
       isonim_dom.addEventListener(isonim_dom.Node(input), cstring"input",
         proc(ev: isonim_dom.Event) =
           vm.invokeInputChange(callbacks, readInputValue(isonim_dom.Node(input))))
-      isonim_dom.addEventListener(isonim_dom.Node(input), cstring"keydown",
+      isonim_dom.addEventListener(isonim_dom.Node(input), cstring KeyDownEvent,
         proc(ev: isonim_dom.Event) =
-          if ev.eventKey() == cstring"Enter" and not ev.shiftKey():
+          if fieldKeyOf($ev.eventKey()) == fkCommit and not ev.shiftKey():
             ev.preventKeyDefault()
             if not vm.isLoading.val:
               callbacks.invokeSubmit()

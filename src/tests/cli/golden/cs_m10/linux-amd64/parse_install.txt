@@ -1,0 +1,2387 @@
+# ct install: 109 argv cases through ct's loader (the parse probe)
+
+### 1: bare
+argv: ct "install"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = install
+  installCtOnPath = true
+  installCtDesktopFile = true
+  installBpf = true
+  installAgentHarbor = true
+  installJson = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 2: --path
+argv: ct "install" "--path"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = install
+  installCtOnPath = true
+  installCtDesktopFile = true
+  installBpf = true
+  installAgentHarbor = true
+  installJson = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 3: -p
+argv: ct "install" "-p"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = install
+  installCtOnPath = true
+  installCtDesktopFile = true
+  installBpf = true
+  installAgentHarbor = true
+  installJson = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 4: -P (other case)
+argv: ct "install" "-P"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'P'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 5: --p (the letter as a long option)
+argv: ct "install" "--p"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = install
+  installCtOnPath = true
+  installCtDesktopFile = true
+  installBpf = true
+  installAgentHarbor = true
+  installJson = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 6: --path=true
+argv: ct "install" "--path=true"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = install
+  installCtOnPath = true
+  installCtDesktopFile = true
+  installBpf = true
+  installAgentHarbor = true
+  installJson = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 7: --path=false
+argv: ct "install" "--path=false"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = install
+  installCtOnPath = false
+  installCtDesktopFile = true
+  installBpf = true
+  installAgentHarbor = true
+  installJson = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 8: --path=on
+argv: ct "install" "--path=on"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = install
+  installCtOnPath = true
+  installCtDesktopFile = true
+  installBpf = true
+  installAgentHarbor = true
+  installJson = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 9: --path=off
+argv: ct "install" "--path=off"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = install
+  installCtOnPath = false
+  installCtDesktopFile = true
+  installBpf = true
+  installAgentHarbor = true
+  installJson = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 10: --path=yes
+argv: ct "install" "--path=yes"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = install
+  installCtOnPath = true
+  installCtDesktopFile = true
+  installBpf = true
+  installAgentHarbor = true
+  installJson = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 11: --path=no
+argv: ct "install" "--path=no"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = install
+  installCtOnPath = false
+  installCtDesktopFile = true
+  installBpf = true
+  installAgentHarbor = true
+  installJson = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 12: --path=1
+argv: ct "install" "--path=1"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = install
+  installCtOnPath = true
+  installCtDesktopFile = true
+  installBpf = true
+  installAgentHarbor = true
+  installJson = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 13: --path=0
+argv: ct "install" "--path=0"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = install
+  installCtOnPath = false
+  installCtDesktopFile = true
+  installBpf = true
+  installAgentHarbor = true
+  installJson = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 14: --path=maybe
+argv: ct "install" "--path=maybe"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Error while processing the \e[34mpath=maybe\e[0m parameter: 'maybe' is not a valid boolean value. Supported values are on/off, yes/no, true/false or 1/0\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 15: --path=
+argv: ct "install" "--path="
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = install
+  installCtOnPath = true
+  installCtDesktopFile = true
+  installBpf = true
+  installAgentHarbor = true
+  installJson = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 16: --path:false
+argv: ct "install" "--path:false"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = install
+  installCtOnPath = false
+  installCtDesktopFile = true
+  installBpf = true
+  installAgentHarbor = true
+  installJson = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 17: --path false (next word)
+argv: ct "install" "--path" "false"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The subcommand 'install' does not accept arguments\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 18: --path twice
+argv: ct "install" "--path" "--path"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = install
+  installCtOnPath = true
+  installCtDesktopFile = true
+  installBpf = true
+  installAgentHarbor = true
+  installJson = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 19: --no-path
+argv: ct "install" "--no-path"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'no-path'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 20: --PATH (style variant)
+argv: ct "install" "--PATH"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = install
+  installCtOnPath = true
+  installCtDesktopFile = true
+  installBpf = true
+  installAgentHarbor = true
+  installJson = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 21: --p_ath (style variant)
+argv: ct "install" "--p_ath"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = install
+  installCtOnPath = true
+  installCtDesktopFile = true
+  installBpf = true
+  installAgentHarbor = true
+  installJson = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 22: --desktop
+argv: ct "install" "--desktop"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = install
+  installCtOnPath = true
+  installCtDesktopFile = true
+  installBpf = true
+  installAgentHarbor = true
+  installJson = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 23: -d
+argv: ct "install" "-d"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = install
+  installCtOnPath = true
+  installCtDesktopFile = true
+  installBpf = true
+  installAgentHarbor = true
+  installJson = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 24: -D (other case)
+argv: ct "install" "-D"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'D'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 25: --d (the letter as a long option)
+argv: ct "install" "--d"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = install
+  installCtOnPath = true
+  installCtDesktopFile = true
+  installBpf = true
+  installAgentHarbor = true
+  installJson = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 26: --desktop=true
+argv: ct "install" "--desktop=true"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = install
+  installCtOnPath = true
+  installCtDesktopFile = true
+  installBpf = true
+  installAgentHarbor = true
+  installJson = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 27: --desktop=false
+argv: ct "install" "--desktop=false"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = install
+  installCtOnPath = true
+  installCtDesktopFile = false
+  installBpf = true
+  installAgentHarbor = true
+  installJson = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 28: --desktop=on
+argv: ct "install" "--desktop=on"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = install
+  installCtOnPath = true
+  installCtDesktopFile = true
+  installBpf = true
+  installAgentHarbor = true
+  installJson = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 29: --desktop=off
+argv: ct "install" "--desktop=off"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = install
+  installCtOnPath = true
+  installCtDesktopFile = false
+  installBpf = true
+  installAgentHarbor = true
+  installJson = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 30: --desktop=yes
+argv: ct "install" "--desktop=yes"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = install
+  installCtOnPath = true
+  installCtDesktopFile = true
+  installBpf = true
+  installAgentHarbor = true
+  installJson = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 31: --desktop=no
+argv: ct "install" "--desktop=no"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = install
+  installCtOnPath = true
+  installCtDesktopFile = false
+  installBpf = true
+  installAgentHarbor = true
+  installJson = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 32: --desktop=1
+argv: ct "install" "--desktop=1"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = install
+  installCtOnPath = true
+  installCtDesktopFile = true
+  installBpf = true
+  installAgentHarbor = true
+  installJson = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 33: --desktop=0
+argv: ct "install" "--desktop=0"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = install
+  installCtOnPath = true
+  installCtDesktopFile = false
+  installBpf = true
+  installAgentHarbor = true
+  installJson = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 34: --desktop=maybe
+argv: ct "install" "--desktop=maybe"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Error while processing the \e[34mdesktop=maybe\e[0m parameter: 'maybe' is not a valid boolean value. Supported values are on/off, yes/no, true/false or 1/0\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 35: --desktop=
+argv: ct "install" "--desktop="
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = install
+  installCtOnPath = true
+  installCtDesktopFile = true
+  installBpf = true
+  installAgentHarbor = true
+  installJson = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 36: --desktop:false
+argv: ct "install" "--desktop:false"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = install
+  installCtOnPath = true
+  installCtDesktopFile = false
+  installBpf = true
+  installAgentHarbor = true
+  installJson = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 37: --desktop false (next word)
+argv: ct "install" "--desktop" "false"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The subcommand 'install' does not accept arguments\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 38: --desktop twice
+argv: ct "install" "--desktop" "--desktop"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = install
+  installCtOnPath = true
+  installCtDesktopFile = true
+  installBpf = true
+  installAgentHarbor = true
+  installJson = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 39: --no-desktop
+argv: ct "install" "--no-desktop"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'no-desktop'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 40: --DESKTOP (style variant)
+argv: ct "install" "--DESKTOP"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = install
+  installCtOnPath = true
+  installCtDesktopFile = true
+  installBpf = true
+  installAgentHarbor = true
+  installJson = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 41: --d_esktop (style variant)
+argv: ct "install" "--d_esktop"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = install
+  installCtOnPath = true
+  installCtDesktopFile = true
+  installBpf = true
+  installAgentHarbor = true
+  installJson = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 42: --bpf
+argv: ct "install" "--bpf"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = install
+  installCtOnPath = true
+  installCtDesktopFile = true
+  installBpf = true
+  installAgentHarbor = true
+  installJson = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 43: --bpf=true
+argv: ct "install" "--bpf=true"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = install
+  installCtOnPath = true
+  installCtDesktopFile = true
+  installBpf = true
+  installAgentHarbor = true
+  installJson = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 44: --bpf=false
+argv: ct "install" "--bpf=false"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = install
+  installCtOnPath = true
+  installCtDesktopFile = true
+  installBpf = false
+  installAgentHarbor = true
+  installJson = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 45: --bpf=on
+argv: ct "install" "--bpf=on"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = install
+  installCtOnPath = true
+  installCtDesktopFile = true
+  installBpf = true
+  installAgentHarbor = true
+  installJson = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 46: --bpf=off
+argv: ct "install" "--bpf=off"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = install
+  installCtOnPath = true
+  installCtDesktopFile = true
+  installBpf = false
+  installAgentHarbor = true
+  installJson = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 47: --bpf=yes
+argv: ct "install" "--bpf=yes"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = install
+  installCtOnPath = true
+  installCtDesktopFile = true
+  installBpf = true
+  installAgentHarbor = true
+  installJson = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 48: --bpf=no
+argv: ct "install" "--bpf=no"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = install
+  installCtOnPath = true
+  installCtDesktopFile = true
+  installBpf = false
+  installAgentHarbor = true
+  installJson = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 49: --bpf=1
+argv: ct "install" "--bpf=1"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = install
+  installCtOnPath = true
+  installCtDesktopFile = true
+  installBpf = true
+  installAgentHarbor = true
+  installJson = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 50: --bpf=0
+argv: ct "install" "--bpf=0"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = install
+  installCtOnPath = true
+  installCtDesktopFile = true
+  installBpf = false
+  installAgentHarbor = true
+  installJson = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 51: --bpf=maybe
+argv: ct "install" "--bpf=maybe"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Error while processing the \e[34mbpf=maybe\e[0m parameter: 'maybe' is not a valid boolean value. Supported values are on/off, yes/no, true/false or 1/0\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 52: --bpf=
+argv: ct "install" "--bpf="
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = install
+  installCtOnPath = true
+  installCtDesktopFile = true
+  installBpf = true
+  installAgentHarbor = true
+  installJson = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 53: --bpf:false
+argv: ct "install" "--bpf:false"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = install
+  installCtOnPath = true
+  installCtDesktopFile = true
+  installBpf = false
+  installAgentHarbor = true
+  installJson = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 54: --bpf false (next word)
+argv: ct "install" "--bpf" "false"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The subcommand 'install' does not accept arguments\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 55: --bpf twice
+argv: ct "install" "--bpf" "--bpf"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = install
+  installCtOnPath = true
+  installCtDesktopFile = true
+  installBpf = true
+  installAgentHarbor = true
+  installJson = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 56: --no-bpf
+argv: ct "install" "--no-bpf"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'no-bpf'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 57: --BPF (style variant)
+argv: ct "install" "--BPF"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = install
+  installCtOnPath = true
+  installCtDesktopFile = true
+  installBpf = true
+  installAgentHarbor = true
+  installJson = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 58: --b_pf (style variant)
+argv: ct "install" "--b_pf"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = install
+  installCtOnPath = true
+  installCtDesktopFile = true
+  installBpf = true
+  installAgentHarbor = true
+  installJson = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 59: --agent-harbor
+argv: ct "install" "--agent-harbor"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = install
+  installCtOnPath = true
+  installCtDesktopFile = true
+  installBpf = true
+  installAgentHarbor = true
+  installJson = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 60: --agent-harbor=true
+argv: ct "install" "--agent-harbor=true"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = install
+  installCtOnPath = true
+  installCtDesktopFile = true
+  installBpf = true
+  installAgentHarbor = true
+  installJson = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 61: --agent-harbor=false
+argv: ct "install" "--agent-harbor=false"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = install
+  installCtOnPath = true
+  installCtDesktopFile = true
+  installBpf = true
+  installAgentHarbor = false
+  installJson = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 62: --agent-harbor=on
+argv: ct "install" "--agent-harbor=on"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = install
+  installCtOnPath = true
+  installCtDesktopFile = true
+  installBpf = true
+  installAgentHarbor = true
+  installJson = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 63: --agent-harbor=off
+argv: ct "install" "--agent-harbor=off"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = install
+  installCtOnPath = true
+  installCtDesktopFile = true
+  installBpf = true
+  installAgentHarbor = false
+  installJson = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 64: --agent-harbor=yes
+argv: ct "install" "--agent-harbor=yes"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = install
+  installCtOnPath = true
+  installCtDesktopFile = true
+  installBpf = true
+  installAgentHarbor = true
+  installJson = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 65: --agent-harbor=no
+argv: ct "install" "--agent-harbor=no"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = install
+  installCtOnPath = true
+  installCtDesktopFile = true
+  installBpf = true
+  installAgentHarbor = false
+  installJson = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 66: --agent-harbor=1
+argv: ct "install" "--agent-harbor=1"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = install
+  installCtOnPath = true
+  installCtDesktopFile = true
+  installBpf = true
+  installAgentHarbor = true
+  installJson = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 67: --agent-harbor=0
+argv: ct "install" "--agent-harbor=0"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = install
+  installCtOnPath = true
+  installCtDesktopFile = true
+  installBpf = true
+  installAgentHarbor = false
+  installJson = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 68: --agent-harbor=maybe
+argv: ct "install" "--agent-harbor=maybe"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Error while processing the \e[34magent-harbor=maybe\e[0m parameter: 'maybe' is not a valid boolean value. Supported values are on/off, yes/no, true/false or 1/0\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 69: --agent-harbor=
+argv: ct "install" "--agent-harbor="
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = install
+  installCtOnPath = true
+  installCtDesktopFile = true
+  installBpf = true
+  installAgentHarbor = true
+  installJson = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 70: --agent-harbor:false
+argv: ct "install" "--agent-harbor:false"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = install
+  installCtOnPath = true
+  installCtDesktopFile = true
+  installBpf = true
+  installAgentHarbor = false
+  installJson = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 71: --agent-harbor false (next word)
+argv: ct "install" "--agent-harbor" "false"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The subcommand 'install' does not accept arguments\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 72: --agent-harbor twice
+argv: ct "install" "--agent-harbor" "--agent-harbor"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = install
+  installCtOnPath = true
+  installCtDesktopFile = true
+  installBpf = true
+  installAgentHarbor = true
+  installJson = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 73: --no-agent-harbor
+argv: ct "install" "--no-agent-harbor"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'no-agent-harbor'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 74: --AGENT-HARBOR (style variant)
+argv: ct "install" "--AGENT-HARBOR"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = install
+  installCtOnPath = true
+  installCtDesktopFile = true
+  installBpf = true
+  installAgentHarbor = true
+  installJson = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 75: --a_gent-harbor (style variant)
+argv: ct "install" "--a_gent-harbor"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = install
+  installCtOnPath = true
+  installCtDesktopFile = true
+  installBpf = true
+  installAgentHarbor = true
+  installJson = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 76: --agent_harbor (style variant)
+argv: ct "install" "--agent_harbor"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'agent_harbor'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 77: --agentharbor (style variant)
+argv: ct "install" "--agentharbor"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'agentharbor'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 78: --json
+argv: ct "install" "--json"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = install
+  installCtOnPath = true
+  installCtDesktopFile = true
+  installBpf = true
+  installAgentHarbor = true
+  installJson = true
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 79: --json=true
+argv: ct "install" "--json=true"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = install
+  installCtOnPath = true
+  installCtDesktopFile = true
+  installBpf = true
+  installAgentHarbor = true
+  installJson = true
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 80: --json=false
+argv: ct "install" "--json=false"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = install
+  installCtOnPath = true
+  installCtDesktopFile = true
+  installBpf = true
+  installAgentHarbor = true
+  installJson = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 81: --json=on
+argv: ct "install" "--json=on"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = install
+  installCtOnPath = true
+  installCtDesktopFile = true
+  installBpf = true
+  installAgentHarbor = true
+  installJson = true
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 82: --json=off
+argv: ct "install" "--json=off"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = install
+  installCtOnPath = true
+  installCtDesktopFile = true
+  installBpf = true
+  installAgentHarbor = true
+  installJson = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 83: --json=yes
+argv: ct "install" "--json=yes"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = install
+  installCtOnPath = true
+  installCtDesktopFile = true
+  installBpf = true
+  installAgentHarbor = true
+  installJson = true
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 84: --json=no
+argv: ct "install" "--json=no"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = install
+  installCtOnPath = true
+  installCtDesktopFile = true
+  installBpf = true
+  installAgentHarbor = true
+  installJson = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 85: --json=1
+argv: ct "install" "--json=1"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = install
+  installCtOnPath = true
+  installCtDesktopFile = true
+  installBpf = true
+  installAgentHarbor = true
+  installJson = true
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 86: --json=0
+argv: ct "install" "--json=0"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = install
+  installCtOnPath = true
+  installCtDesktopFile = true
+  installBpf = true
+  installAgentHarbor = true
+  installJson = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 87: --json=maybe
+argv: ct "install" "--json=maybe"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Error while processing the \e[34mjson=maybe\e[0m parameter: 'maybe' is not a valid boolean value. Supported values are on/off, yes/no, true/false or 1/0\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 88: --json=
+argv: ct "install" "--json="
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = install
+  installCtOnPath = true
+  installCtDesktopFile = true
+  installBpf = true
+  installAgentHarbor = true
+  installJson = true
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 89: --json:false
+argv: ct "install" "--json:false"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = install
+  installCtOnPath = true
+  installCtDesktopFile = true
+  installBpf = true
+  installAgentHarbor = true
+  installJson = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 90: --json false (next word)
+argv: ct "install" "--json" "false"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The subcommand 'install' does not accept arguments\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 91: --json twice
+argv: ct "install" "--json" "--json"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = install
+  installCtOnPath = true
+  installCtDesktopFile = true
+  installBpf = true
+  installAgentHarbor = true
+  installJson = true
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 92: --no-json
+argv: ct "install" "--no-json"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'no-json'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 93: --JSON (style variant)
+argv: ct "install" "--JSON"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = install
+  installCtOnPath = true
+  installCtDesktopFile = true
+  installBpf = true
+  installAgentHarbor = true
+  installJson = true
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 94: --j_son (style variant)
+argv: ct "install" "--j_son"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = install
+  installCtOnPath = true
+  installCtDesktopFile = true
+  installBpf = true
+  installAgentHarbor = true
+  installJson = true
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 95: -pd (cluster)
+argv: ct "install" "-pd"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = install
+  installCtOnPath = true
+  installCtDesktopFile = true
+  installBpf = true
+  installAgentHarbor = true
+  installJson = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 96: -p=false -d=false
+argv: ct "install" "-p=false" "-d=false"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = install
+  installCtOnPath = false
+  installCtDesktopFile = false
+  installBpf = true
+  installAgentHarbor = true
+  installJson = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 97: env <APP>_PATH=false
+argv: ct "install"
+env: <APP>_PATH="false"
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = install
+  installCtOnPath = false
+  installCtDesktopFile = true
+  installBpf = true
+  installAgentHarbor = true
+  installJson = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 98: env <APP>_AGENT_HARBOR=0
+argv: ct "install"
+env: <APP>_AGENT_HARBOR="0"
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = install
+  installCtOnPath = true
+  installCtDesktopFile = true
+  installBpf = true
+  installAgentHarbor = false
+  installJson = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 99: unknown long option
+argv: ct "install" "--bogus"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'bogus'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 100: unknown long option with value
+argv: ct "install" "--bogus=1"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'bogus'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 101: unknown short option
+argv: ct "install" "-Z"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'Z'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 102: lone -
+argv: ct "install" "-"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option ''\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 103: lone -- then a word
+argv: ct "install" "--" "w"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option ''\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 104: --=v
+argv: ct "install" "--=v"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option ''\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 105: extra positional
+argv: ct "install" "extra1" "extra2" "extra3" "extra4" "extra5"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The subcommand 'install' does not accept arguments\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 106: global --cwd after the command
+argv: ct "install" "--cwd" "/w"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = some("/w")
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = install
+  installCtOnPath = true
+  installCtDesktopFile = true
+  installBpf = true
+  installAgentHarbor = true
+  installJson = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 107: global --new-tab after the command
+argv: ct "install" "--new-tab"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = true
+  newWindow = false
+  cmd = install
+  installCtOnPath = true
+  installCtDesktopFile = true
+  installBpf = true
+  installAgentHarbor = true
+  installJson = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 108: --version after the command
+argv: ct "install" "--version"
+env: (none)
+exit: 0
+--- stdout
+CodeTracer version: <VERSION>
+\e[0m
+(no newline at end of stdout)
+--- stderr
+--- end
+
+### 109: -h after the command
+argv: ct "install" "-h"
+env: (none)
+exit: 0
+--- stdout
+<the short help page clispec renders for this request: ct install>
+--- stderr
+--- end

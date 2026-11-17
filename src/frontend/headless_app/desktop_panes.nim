@@ -133,10 +133,27 @@ const
     # no default.
     paneVerification: DesktopPane(placement: dpLayout,
                                   content: Content.Verification,
-                                  label: "verificationComponent-0")]
+                                  label: "verificationComponent-0"),
+    # PLAT-59: the Visual Replay panes, which the desktop adds when a
+    # recording carries graphics (`visual_replay_layout.addVisualReplayTabs`)
+    # and no default places.
+    paneVideoPlayer: DesktopPane(placement: dpLayout,
+                                 content: Content.VideoPlayer,
+                                 label: "videoPlayerComponent-0"),
+    panePixelHistory: DesktopPane(placement: dpLayout,
+                                  content: Content.PixelHistory,
+                                  label: "pixelHistoryComponent-0"),
+    paneShaderDebug: DesktopPane(placement: dpLayout,
+                                 content: Content.ShaderDebug,
+                                 label: "shaderDebugComponent-0"),
+    # Editor-Hosted-Front-Ends §E15: the desktop draws a macro expansion
+    # inline under its call (a view zone of the editor), not as a pane.
+    paneMacroExpansion: DesktopPane(placement: dpNone,
+                                    content: Content.EditorView, label: "")]
     ## **THE TABLE.** Indexed by `PaneKind`, so a `PaneKind` added without a
     ## row does not compile. One-to-one on the rows that have a `Content`
-    ## (`dpNone` is the one row without), asserted by the suite.
+    ## (the `dpNone` rows — flow and the macro expansions, both overlays of
+    ## the editor — have none), asserted by the suite.
 
 
 proc desktopCapability*(): PaneCapability =
@@ -148,8 +165,8 @@ proc desktopCapability*(): PaneCapability =
   for p in PaneKind:
     if PaneContent[p].placement == dpNone:
       reasons.add (p, "the desktop draws " & $p & " inside another pane " &
-                      "(flow is an overlay of the editor), not as a pane of " &
-                      "its own")
+                      "(an overlay of the editor: flow, the macro " &
+                      "expansions), not as a pane of its own")
     else:
       drawable.incl p
   paneCapability(feDesktop, drawable, reasons)

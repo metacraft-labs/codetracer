@@ -20,6 +20,15 @@ if [ -n "$(ls -A . 2>/dev/null)" ]; then
 	echo "plat47-vcs-fixture: $dir is not empty" >&2
 	exit 1
 fi
+# Forget the repository a caller's environment names. A git hook, `git rebase
+# --exec` or a harness run from one exports GIT_DIR (and its siblings); with it
+# set, every git command below acts on THAT repository instead of the one made
+# here, and `git config user.*` wrote this fixture's identity, with signing
+# off, into codetracer's own shared .git/config (2026-11-13: 164 commits on
+# agents authored as "CodeTracer Fixture"). `--local-env-vars` is git's own
+# list of the variables that point git at a repository.
+# shellcheck disable=SC2046 # one variable name per word is the point
+unset $(git rev-parse --local-env-vars)
 export GIT_AUTHOR_NAME="CodeTracer Fixture" GIT_AUTHOR_EMAIL="fixture@codetracer.invalid"
 export GIT_COMMITTER_NAME="CodeTracer Fixture" GIT_COMMITTER_EMAIL="fixture@codetracer.invalid"
 export GIT_AUTHOR_DATE="2026-09-28T12:00:00Z" GIT_COMMITTER_DATE="2026-09-28T12:00:00Z"

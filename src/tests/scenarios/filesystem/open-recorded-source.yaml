@@ -1,0 +1,31 @@
+scenario: 1
+name: filesystem/open-recorded-source
+pack: codetracer
+summary: >-
+  Clicking source folders > src > shield.nr in the Files pane of a Noir
+  recording opens shield.nr as the active editor, under the path the
+  recording names it by (the recording's absolute workdir), not the tree's
+  relative path: a breakpoint pressed into it is one the replay stops at
+  (Continue stops on line 5 of shield.nr).
+
+stage:
+  - use: record-program
+    with: { program: noir_space_ship }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 180s }
+  - wait: { until: { at: 'editor[file="main.nr"]', active: true }, timeout: 60s }
+  - click: 'pane-tab[label="FILES"]'
+  - wait: { until: { at: 'filesystem/file-node[name="shield.nr"]', present: true }, timeout: 60s }
+  - click: 'filesystem/file-node[name="shield.nr"]'
+  - wait: { until: { at: 'editor[file="shield.nr"]', active: true }, timeout: 30s }
+  - expect: { at: 'pane-tab[label="src/shield.nr"]', active: true }
+  - expect: { at: 'pane-tab[label="src/main.nr"]', active: false }
+  - click: { at: 'editor[file="shield.nr"]/line[number="5"]', anchor: glyph }
+  - wait: { until: { at: 'editor[file="shield.nr"]/line[number="5"]', glyph: breakpoint }, timeout: 10s }
+  - click: 'toolbar/toolbar-button[label="continue-image"]'
+    settle: false
+  - wait: { until: replay-idle, timeout: 60s }
+  - wait: { until: { at: 'editor[file="shield.nr"]', current-line: 5 }, timeout: 60s }
+  - expect: { at: 'editor[file="shield.nr"]', active: true }

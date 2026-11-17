@@ -1,0 +1,21 @@
+scenario: 1
+name: editor/ctrl-double-click-leaves-no-selection
+pack: codetracer
+summary: >-
+  Ctrl+double-click on a word jumps and ends with no selection: the jump
+  collapses the word a double click would select.
+
+stage:
+  - use: record-program
+    with: { program: src/db-backend/tests/fixtures/origin/python/simple_trivial_chain/main.py }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - wait: { until: { at: 'editor[file="main.py"]/line[number="8"]', text: "def main() -> None:" }, timeout: 60s }
+  - expect: { at: 'editor[file="main.py"]', read-only: true }
+  - click: { at: 'editor[file="main.py"]/line[number="8"]', anchor: column(3), count: 2, modifiers: [Ctrl] }
+    settle: false
+  - wait: { until: replay-idle, timeout: 60s }
+  - wait: settled
+  - expect: { at: 'editor[file="main.py"]', selected-text: "", selection-count: 1 }

@@ -120,9 +120,8 @@ else
 fi
 
 echo
-if [ "$failures" -eq 0 ]; then
-	echo "build-siblings toolchain-stage bound: all checks passed"
-	exit 0
+if [ "$failures" -ne 0 ]; then
+	echo "build-siblings toolchain-stage bound: $failures check(s) failed" >&2
+	exit 1
 fi
-echo "build-siblings toolchain-stage bound: $failures check(s) failed" >&2
-exit 1
+echo "build-siblings toolchain-stage bound: all checks passed"

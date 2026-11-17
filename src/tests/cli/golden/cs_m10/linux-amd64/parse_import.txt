@@ -1,0 +1,213 @@
+# ct import: 16 argv cases through ct's loader (the parse probe)
+
+### 1: no arguments
+argv: ct "import"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The required option 'importTraceZipPath' was not specified\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 2: 1 argument(s)
+argv: ct "import" "zip1"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = import
+  importTraceZipPath = "zip1"
+  importOutputPath = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 3: 2 argument(s)
+argv: ct "import" "zip1" "out1"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = import
+  importTraceZipPath = "zip1"
+  importOutputPath = "out1"
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 4: one argument too many
+argv: ct "import" "zip1" "out1" "surplus"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The subcommand 'import' does not accept additional arguments\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 5: an argument starting with -
+argv: ct "import" "-a" "out1"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'a'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 6: unknown long option
+argv: ct "import" "--bogus" "zip1" "out1"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'bogus'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 7: unknown long option with value
+argv: ct "import" "--bogus=1" "zip1" "out1"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'bogus'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 8: unknown short option
+argv: ct "import" "-Z" "zip1" "out1"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'Z'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 9: lone -
+argv: ct "import" "-" "zip1" "out1"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option ''\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 10: lone -- then a word
+argv: ct "import" "--" "w" "zip1" "out1"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option ''\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 11: --=v
+argv: ct "import" "--=v" "zip1" "out1"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option ''\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 12: extra positional
+argv: ct "import" "zip1" "out1" "extra1" "extra2" "extra3" "extra4" "extra5"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The subcommand 'import' does not accept additional arguments\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 13: global --cwd after the command
+argv: ct "import" "--cwd" "/w" "zip1" "out1"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = some("/w")
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = import
+  importTraceZipPath = "zip1"
+  importOutputPath = "out1"
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 14: global --new-tab after the command
+argv: ct "import" "--new-tab" "zip1" "out1"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = true
+  newWindow = false
+  cmd = import
+  importTraceZipPath = "zip1"
+  importOutputPath = "out1"
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 15: --version after the command
+argv: ct "import" "--version" "zip1" "out1"
+env: (none)
+exit: 0
+--- stdout
+CodeTracer version: <VERSION>
+\e[0m
+(no newline at end of stdout)
+--- stderr
+--- end
+
+### 16: -h after the command
+argv: ct "import" "-h" "zip1" "out1"
+env: (none)
+exit: 0
+--- stdout
+<the short help page clispec renders for this request: ct import>
+--- stderr
+--- end

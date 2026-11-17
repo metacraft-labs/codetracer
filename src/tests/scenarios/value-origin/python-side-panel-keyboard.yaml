@@ -1,0 +1,49 @@
+scenario: 1
+name: value-origin/python-side-panel-keyboard
+pack: codetracer
+summary: >-
+  "Show in side panel" under `c`'s expanded chain opens the Origin Chain
+  panel with three hops and the terminator 10, focused; Down, Down, Right,
+  Left, Up and Enter seek the replay to the first hop (`c = b`, line 11), and
+  with the panel focused again by a click, Esc dismisses it.
+
+stage:
+  - use: record-program
+    with: { program: src/db-backend/tests/fixtures/origin/python/simple_trivial_chain/main.py }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - click: 'toolbar/toolbar-button[label="run-to-entry-image"]'
+    settle: false
+  - wait: { until: replay-idle, timeout: 60s }
+  - wait: { until: { at: 'editor[file="main.py"]', current-line: { gt: 0 } }, timeout: 60s }
+  - click: { at: 'editor[file="main.py"]/line[number="12"]', anchor: glyph }
+  - click: 'toolbar/toolbar-button[label="continue-image"]'
+    settle: false
+  - wait: { until: { at: 'editor[file="main.py"]', current-line: 12 }, timeout: 60s }
+  - wait: { until: { at: variables, assert: 'value-of("c", "10")' }, timeout: 60s }
+
+  - click: { at: 'variables/variable[name="c"]', anchor: name, button: right }
+  - wait: { until: { at: context-menu, assert: 'offers("Show value origin")' }, timeout: 15s }
+  - click: 'context-menu/menu-item[label="Show value origin"]'
+  - wait: { until: { at: 'variables/variable[name="c"]/origin-chain/panel-button[label="Show in side panel"]', present: true }, timeout: 30s }
+  - wheel: { at: variables, direction: down, amount: 10 }
+  - wait: { until: { at: 'variables/variable[name="c"]/origin-chain/panel-button[label="Show in side panel"]', geometry: { visible: true } }, timeout: 15s }
+  - click: 'variables/variable[name="c"]/origin-chain/panel-button[label="Show in side panel"]'
+  - wait: { until: { at: origin-panel, count: 3 }, timeout: 30s }
+  - expect: { at: origin-panel, terminator: { contains: "10" }, focused: true }
+
+  - key: Down
+  - key: Down
+  - key: Right
+  - key: Left
+  - key: Up
+  - key: Enter
+    settle: false
+  - wait: { until: { at: 'editor[file="main.py"]', current-line: 11 }, timeout: 30s }
+  - wait: { until: settled, timeout: 30s }
+  - click: origin-panel
+  - wait: { until: { at: origin-panel, focused: true }, timeout: 15s }
+  - key: Esc
+  - wait: { until: { at: origin-panel, present: false }, timeout: 15s }

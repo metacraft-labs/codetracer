@@ -1,0 +1,23 @@
+scenario: 1
+name: languages/tolk-opens-at-entry
+pack: codetracer
+summary: >-
+  A Tolk recording opens at its entry in flow_test.tolk: the status line names the
+  file, and the state pane shows the line it stopped on. (The program writes
+  nothing and the TON recorder records no events, so the event log is empty.)
+
+stage:
+  - use: record-program
+    with: { program: ../codetracer-ton-recorder/test-programs/tolk/flow_test.tolk }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 240s }
+  - expect: { at: window, title: { contains: CodeTracer } }
+  - wait: { until: { at: status-line, location: { matches: "flow_test\\.tolk:1#" } }, timeout: 60s }
+  - wait: { until: { at: variables, code-line: { contains: " | " } }, timeout: 60s }
+  # flow_test.tolk prints nothing and throws nothing, so its event log is
+  # empty: shown, with no rows.
+  - click: 'pane-tab[label="EVENT LOG"]'
+  - wait: settled
+  - expect: { at: event-log, count: 0 }

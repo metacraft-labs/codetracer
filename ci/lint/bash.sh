@@ -315,6 +315,69 @@ lint_step "shellcheck: sibling cargo locks guard" \
 lint_step "contract suite: the sibling Cargo.lock guard runs on agents" \
 	bash ci/test/sibling-cargo-locks-workflow-test.sh
 
+# GitHub refuses a workflow file of 512,000 bytes or more, and the refusal shows
+# only on the run page: every push starts a run that fails at once and runs no
+# job (codetracer.yml at 513,291 bytes, 2026-11-14).
+lint_step "workflow files stay under GitHub's size limit" \
+	bash ci/test/workflow-file-size-test.sh
+
+# A CI job runs a scenario lane in shards (SCENARIO_LANE_SHARD); the shards
+# must cover the lane exactly, or a scenario silently stops running.
+lint_step "scenario lane shards cover their lane exactly" \
+	bash ci/test/scenario-lane-shard-test.sh
+
+# The TUI job runs the Nim test lanes in shards (NIM_TEST_LANE_SHARD); the
+# shards must cover each lane exactly, or a suite silently stops running.
+lint_step "Nim test lane shards cover their lane exactly" \
+	bash ci/test/nim-test-lane-shard-test.sh
+
+# The TUI shard whose scenario slice uses the visual-recording stage builds the
+# visual replay player; the slice decides it, not a shard number.
+lint_step "a visual-recording scenario lands on a shard that builds the player" \
+	bash ci/test/scenario-slice-uses-stage-test.sh
+
+# A git fetch late in a job gets a recently minted token: the refresher renews
+# by age and on request, and the credential helper asks before handing out an
+# old one.
+lint_step "a late git fetch gets a freshly minted GitHub token" \
+	bash ci/test/github-token-freshness-test.sh
+
+# In a job that registers the credential helper, a github.com extraHeader is
+# blanked so the helper answers; the control reproduces the stale-header
+# failure against a local git server.
+lint_step "a stale extraHeader cannot outlive its token" \
+	bash ci/test/git-credential-header-test.sh
+
+# A job pushes what it built to the cache, from dev and agents only, and never
+# fails for it.
+lint_step "a build job pushes its closure, best effort, from dev and agents" \
+	bash ci/test/push-built-closure-test.sh
+
+# The TUI and GPUI shards sample their top processes by RSS and upload the log
+# when they fail, so an OOM kill at the runner's cap names its culprit.
+lint_step "a shard that fails uploads what held its memory" \
+	bash ci/test/memory-sampler-test.sh
+
+# On a CI runner the dev shell re-anchors Repro hooks an older pinned build
+# wrote into a persistent runner's checkout; on a workstation it does not.
+lint_step "a CI dev shell re-anchors hooks another Repro build wrote" \
+	bash ci/test/ci-hooks-re-anchor-test.sh
+
+# A GPUI shard gives a bare host the Vulkan driver, cursor theme and D-Bus
+# session configuration the window and its compositor need.
+lint_step "a GPUI shard provisions what a bare host lacks" \
+	bash ci/test/gpui-host-provisioning-test.sh
+
+# A step that runs past an earlier failure and needs ct waits on the ct build,
+# or the earlier failure resurfaces as a second, misleading `ct ENOENT`.
+# The VCS fixture builds a git repository; run under a caller's GIT_DIR it
+# once wrote its identity into codetracer's own .git/config.
+lint_step "the VCS fixture touches no repository but its own" \
+	bash ci/test/plat47-vcs-fixture-test.sh
+
+lint_step "steps that need ct wait on the ct build" \
+	bash ci/test/ct-build-gate-test.sh
+
 # Not covered by the `ci/**/*.sh` glob above, and it runs in the deploy lane on
 # every push to `cloud`, where a shell defect would surface as a deploy failure
 # rather than as a lint one.

@@ -1,0 +1,4995 @@
+# ct (no command) and the global options: 255 argv cases through ct's loader (the parse probe)
+
+### 1: no arguments
+argv: ct (none)
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = noCommand
+  noCmdArgs = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 2: the empty word
+argv: ct ""
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+ct has no such subcommand\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 3: unknown command
+argv: ct "frobnicate"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+ct has no such subcommand\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 4: unknown command that looks like an option
+argv: ct "--frobnicate"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'frobnicate'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 5: -h
+argv: ct "-h"
+env: (none)
+exit: 0
+--- stdout
+<the short help page clispec renders for this request: ct>
+--- stderr
+--- end
+
+### 6: -H
+argv: ct "-H"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'H'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 7: --version
+argv: ct "--version"
+env: (none)
+exit: 0
+--- stdout
+CodeTracer version: <VERSION>
+\e[0m
+(no newline at end of stdout)
+--- stderr
+--- end
+
+### 8: --VERSION
+argv: ct "--VERSION"
+env: (none)
+exit: 0
+--- stdout
+CodeTracer version: <VERSION>
+\e[0m
+(no newline at end of stdout)
+--- stderr
+--- end
+
+### 9: -v
+argv: ct "-v"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'v'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 10: version (a word)
+argv: ct "version"
+env: (none)
+exit: 0
+--- stdout
+CodeTracer version: <VERSION>
+\e[0m
+(no newline at end of stdout)
+--- stderr
+--- end
+
+### 11: --version=1
+argv: ct "--version=1"
+env: (none)
+exit: 0
+--- stdout
+CodeTracer version: <VERSION>
+\e[0m
+(no newline at end of stdout)
+--- stderr
+--- end
+
+### 12: lone -
+argv: ct "-"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option ''\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 13: lone --
+argv: ct "--"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option ''\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 14: -- then a word
+argv: ct "--" "list"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option ''\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 15: --=v
+argv: ct "--=v"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option ''\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 16: -=v
+argv: ct "-=v"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option '='\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 17: noCommand (the default's name)
+argv: ct "noCommand"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = noCommand
+  noCmdArgs = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 18: nocommand
+argv: ct "nocommand"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = noCommand
+  noCmdArgs = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 19: command word LIST
+argv: ct "LIST"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = list
+  listFormat = "text"
+  listTarget = "local"
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 20: command word List
+argv: ct "List"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = list
+  listFormat = "text"
+  listTarget = "local"
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 21: command word l_ist
+argv: ct "l_ist"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = list
+  listFormat = "text"
+  listTarget = "local"
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 22: command word get_default_org
+argv: ct "get_default_org"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+ct has no such subcommand\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 23: command word getdefaultorg
+argv: ct "getdefaultorg"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+ct has no such subcommand\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 24: command word GET-DEFAULT-ORG
+argv: ct "GET-DEFAULT-ORG"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = get-default-org
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 25: command word startbackend
+argv: ct "startbackend"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The required option 'backendKind' was not specified\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 26: command word START_BACKEND
+argv: ct "START_BACKEND"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The required option 'backendKind' was not specified\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 27: command word StartBackend
+argv: ct "StartBackend"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The required option 'backendKind' was not specified\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 28: command word start-backend
+argv: ct "start-backend"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+ct has no such subcommand\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 29: command word ctdescribecommands
+argv: ct "ctdescribecommands"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+ct has no such subcommand\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 30: command word Import
+argv: ct "Import"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The required option 'importTraceZipPath' was not specified\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 31: command word TRACE
+argv: ct "TRACE"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace
+  traceCommand = noCommand
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 32: command word gfx_replay
+argv: ct "gfx_replay"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+ct has no such subcommand\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 33: command word gfxreplay
+argv: ct "gfxreplay"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+ct has no such subcommand\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 34: command word listrecenttx
+argv: ct "listrecenttx"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+ct has no such subcommand\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 35: command word lis
+argv: ct "lis"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+ct has no such subcommand\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 36: --cwd <v>
+argv: ct "--cwd" "/w"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = some("/w")
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = noCommand
+  noCmdArgs = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 37: --cwd=<v>
+argv: ct "--cwd=/w"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = some("/w")
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = noCommand
+  noCmdArgs = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 38: --cwd:<v>
+argv: ct "--cwd:/w"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = some("/w")
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = noCommand
+  noCmdArgs = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 39: --cwd /w
+argv: ct "--cwd" "/w"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = some("/w")
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = noCommand
+  noCmdArgs = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 40: --cwd=/w
+argv: ct "--cwd=/w"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = some("/w")
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = noCommand
+  noCmdArgs = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 41: --cwd rel/dir
+argv: ct "--cwd" "rel/dir"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = some("rel/dir")
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = noCommand
+  noCmdArgs = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 42: --cwd=rel/dir
+argv: ct "--cwd=rel/dir"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = some("rel/dir")
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = noCommand
+  noCmdArgs = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 43: --cwd empty
+argv: ct "--cwd" ""
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = some("")
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = noCommand
+  noCmdArgs = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 44: --cwd= (empty)
+argv: ct "--cwd="
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = some("")
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = noCommand
+  noCmdArgs = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 45: --cwd= <v> (next word)
+argv: ct "--cwd=" "/w"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = some("/w")
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = noCommand
+  noCmdArgs = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 46: --cwd -x (value starts with -)
+argv: ct "--cwd" "-x"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = some("-x")
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = noCommand
+  noCmdArgs = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 47: --cwd --x (value starts with --)
+argv: ct "--cwd" "--x"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = some("--x")
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = noCommand
+  noCmdArgs = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 48: --cwd --new-tab <v> (an option between it and its value)
+argv: ct "--cwd" "--new-tab" "/w"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+ct has no such subcommand\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 49: --cwd repeated, last wins
+argv: ct "--cwd" "/w" "--cwd" "rel/dir"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = some("rel/dir")
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = noCommand
+  noCmdArgs = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 50: --cwd missing value (last)
+argv: ct "--cwd"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The option '\e[34m--cwd\e[0m' requires a value\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 51: --CWD <v> (style variant)
+argv: ct "--CWD" "/w"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = some("/w")
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = noCommand
+  noCmdArgs = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 52: --c_wd <v> (style variant)
+argv: ct "--c_wd" "/w"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = some("/w")
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = noCommand
+  noCmdArgs = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 53: --env-file <v>
+argv: ct "--env-file" "a.env"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @["a.env"]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = noCommand
+  noCmdArgs = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 54: --env-file=<v>
+argv: ct "--env-file=a.env"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @["a.env"]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = noCommand
+  noCmdArgs = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 55: --env-file:<v>
+argv: ct "--env-file:a.env"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @["a.env"]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = noCommand
+  noCmdArgs = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 56: --env-file a.env
+argv: ct "--env-file" "a.env"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @["a.env"]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = noCommand
+  noCmdArgs = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 57: --env-file=a.env
+argv: ct "--env-file=a.env"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @["a.env"]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = noCommand
+  noCmdArgs = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 58: --env-file b.env
+argv: ct "--env-file" "b.env"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @["b.env"]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = noCommand
+  noCmdArgs = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 59: --env-file=b.env
+argv: ct "--env-file=b.env"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @["b.env"]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = noCommand
+  noCmdArgs = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 60: --env-file empty
+argv: ct "--env-file" ""
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[""]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = noCommand
+  noCmdArgs = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 61: --env-file= (empty)
+argv: ct "--env-file="
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[""]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = noCommand
+  noCmdArgs = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 62: --env-file= <v> (next word)
+argv: ct "--env-file=" "a.env"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @["a.env"]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = noCommand
+  noCmdArgs = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 63: --env-file -x (value starts with -)
+argv: ct "--env-file" "-x"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @["-x"]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = noCommand
+  noCmdArgs = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 64: --env-file --x (value starts with --)
+argv: ct "--env-file" "--x"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @["--x"]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = noCommand
+  noCmdArgs = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 65: --env-file --new-tab <v> (an option between it and its value)
+argv: ct "--env-file" "--new-tab" "a.env"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+ct has no such subcommand\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 66: --env-file repeated, last wins
+argv: ct "--env-file" "a.env" "--env-file" "b.env"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @["a.env", "b.env"]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = noCommand
+  noCmdArgs = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 67: --env-file missing value (last)
+argv: ct "--env-file"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The option '\e[34m--env-file\e[0m' requires a value\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 68: --ENV-FILE <v> (style variant)
+argv: ct "--ENV-FILE" "a.env"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @["a.env"]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = noCommand
+  noCmdArgs = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 69: --e_nv-file <v> (style variant)
+argv: ct "--e_nv-file" "a.env"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @["a.env"]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = noCommand
+  noCmdArgs = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 70: --env_file <v> (style variant)
+argv: ct "--env_file" "a.env"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'env_file'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 71: --envfile <v> (style variant)
+argv: ct "--envfile" "a.env"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'envfile'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 72: --env0-file <v>
+argv: ct "--env0-file" "a.env0"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @["a.env0"]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = noCommand
+  noCmdArgs = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 73: --env0-file=<v>
+argv: ct "--env0-file=a.env0"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @["a.env0"]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = noCommand
+  noCmdArgs = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 74: --env0-file:<v>
+argv: ct "--env0-file:a.env0"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @["a.env0"]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = noCommand
+  noCmdArgs = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 75: --env0-file a.env0
+argv: ct "--env0-file" "a.env0"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @["a.env0"]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = noCommand
+  noCmdArgs = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 76: --env0-file=a.env0
+argv: ct "--env0-file=a.env0"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @["a.env0"]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = noCommand
+  noCmdArgs = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 77: --env0-file b.env0
+argv: ct "--env0-file" "b.env0"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @["b.env0"]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = noCommand
+  noCmdArgs = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 78: --env0-file=b.env0
+argv: ct "--env0-file=b.env0"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @["b.env0"]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = noCommand
+  noCmdArgs = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 79: --env0-file empty
+argv: ct "--env0-file" ""
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[""]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = noCommand
+  noCmdArgs = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 80: --env0-file= (empty)
+argv: ct "--env0-file="
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[""]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = noCommand
+  noCmdArgs = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 81: --env0-file= <v> (next word)
+argv: ct "--env0-file=" "a.env0"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @["a.env0"]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = noCommand
+  noCmdArgs = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 82: --env0-file -x (value starts with -)
+argv: ct "--env0-file" "-x"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @["-x"]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = noCommand
+  noCmdArgs = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 83: --env0-file --x (value starts with --)
+argv: ct "--env0-file" "--x"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @["--x"]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = noCommand
+  noCmdArgs = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 84: --env0-file --new-tab <v> (an option between it and its value)
+argv: ct "--env0-file" "--new-tab" "a.env0"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+ct has no such subcommand\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 85: --env0-file repeated, last wins
+argv: ct "--env0-file" "a.env0" "--env0-file" "b.env0"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @["a.env0", "b.env0"]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = noCommand
+  noCmdArgs = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 86: --env0-file missing value (last)
+argv: ct "--env0-file"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The option '\e[34m--env0-file\e[0m' requires a value\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 87: --ENV0-FILE <v> (style variant)
+argv: ct "--ENV0-FILE" "a.env0"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @["a.env0"]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = noCommand
+  noCmdArgs = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 88: --e_nv0-file <v> (style variant)
+argv: ct "--e_nv0-file" "a.env0"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @["a.env0"]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = noCommand
+  noCmdArgs = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 89: --env0_file <v> (style variant)
+argv: ct "--env0_file" "a.env0"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'env0_file'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 90: --env0file <v> (style variant)
+argv: ct "--env0file" "a.env0"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'env0file'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 91: --tmp-env-file <v>
+argv: ct "--tmp-env-file" "t.env"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @["t.env"]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = noCommand
+  noCmdArgs = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 92: --tmp-env-file=<v>
+argv: ct "--tmp-env-file=t.env"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @["t.env"]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = noCommand
+  noCmdArgs = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 93: --tmp-env-file:<v>
+argv: ct "--tmp-env-file:t.env"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @["t.env"]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = noCommand
+  noCmdArgs = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 94: --tmp-env-file t.env
+argv: ct "--tmp-env-file" "t.env"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @["t.env"]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = noCommand
+  noCmdArgs = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 95: --tmp-env-file=t.env
+argv: ct "--tmp-env-file=t.env"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @["t.env"]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = noCommand
+  noCmdArgs = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 96: --tmp-env-file u.env
+argv: ct "--tmp-env-file" "u.env"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @["u.env"]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = noCommand
+  noCmdArgs = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 97: --tmp-env-file=u.env
+argv: ct "--tmp-env-file=u.env"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @["u.env"]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = noCommand
+  noCmdArgs = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 98: --tmp-env-file empty
+argv: ct "--tmp-env-file" ""
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[""]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = noCommand
+  noCmdArgs = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 99: --tmp-env-file= (empty)
+argv: ct "--tmp-env-file="
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[""]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = noCommand
+  noCmdArgs = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 100: --tmp-env-file= <v> (next word)
+argv: ct "--tmp-env-file=" "t.env"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @["t.env"]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = noCommand
+  noCmdArgs = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 101: --tmp-env-file -x (value starts with -)
+argv: ct "--tmp-env-file" "-x"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @["-x"]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = noCommand
+  noCmdArgs = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 102: --tmp-env-file --x (value starts with --)
+argv: ct "--tmp-env-file" "--x"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @["--x"]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = noCommand
+  noCmdArgs = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 103: --tmp-env-file --new-tab <v> (an option between it and its value)
+argv: ct "--tmp-env-file" "--new-tab" "t.env"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+ct has no such subcommand\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 104: --tmp-env-file repeated, last wins
+argv: ct "--tmp-env-file" "t.env" "--tmp-env-file" "u.env"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @["t.env", "u.env"]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = noCommand
+  noCmdArgs = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 105: --tmp-env-file missing value (last)
+argv: ct "--tmp-env-file"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The option '\e[34m--tmp-env-file\e[0m' requires a value\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 106: --TMP-ENV-FILE <v> (style variant)
+argv: ct "--TMP-ENV-FILE" "t.env"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @["t.env"]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = noCommand
+  noCmdArgs = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 107: --t_mp-env-file <v> (style variant)
+argv: ct "--t_mp-env-file" "t.env"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @["t.env"]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = noCommand
+  noCmdArgs = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 108: --tmp_env_file <v> (style variant)
+argv: ct "--tmp_env_file" "t.env"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'tmp_env_file'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 109: --tmpenvfile <v> (style variant)
+argv: ct "--tmpenvfile" "t.env"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'tmpenvfile'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 110: --tmp-env0-file <v>
+argv: ct "--tmp-env0-file" "t.env0"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @["t.env0"]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = noCommand
+  noCmdArgs = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 111: --tmp-env0-file=<v>
+argv: ct "--tmp-env0-file=t.env0"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @["t.env0"]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = noCommand
+  noCmdArgs = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 112: --tmp-env0-file:<v>
+argv: ct "--tmp-env0-file:t.env0"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @["t.env0"]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = noCommand
+  noCmdArgs = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 113: --tmp-env0-file t.env0
+argv: ct "--tmp-env0-file" "t.env0"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @["t.env0"]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = noCommand
+  noCmdArgs = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 114: --tmp-env0-file=t.env0
+argv: ct "--tmp-env0-file=t.env0"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @["t.env0"]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = noCommand
+  noCmdArgs = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 115: --tmp-env0-file u.env0
+argv: ct "--tmp-env0-file" "u.env0"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @["u.env0"]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = noCommand
+  noCmdArgs = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 116: --tmp-env0-file=u.env0
+argv: ct "--tmp-env0-file=u.env0"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @["u.env0"]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = noCommand
+  noCmdArgs = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 117: --tmp-env0-file empty
+argv: ct "--tmp-env0-file" ""
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[""]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = noCommand
+  noCmdArgs = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 118: --tmp-env0-file= (empty)
+argv: ct "--tmp-env0-file="
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[""]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = noCommand
+  noCmdArgs = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 119: --tmp-env0-file= <v> (next word)
+argv: ct "--tmp-env0-file=" "t.env0"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @["t.env0"]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = noCommand
+  noCmdArgs = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 120: --tmp-env0-file -x (value starts with -)
+argv: ct "--tmp-env0-file" "-x"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @["-x"]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = noCommand
+  noCmdArgs = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 121: --tmp-env0-file --x (value starts with --)
+argv: ct "--tmp-env0-file" "--x"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @["--x"]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = noCommand
+  noCmdArgs = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 122: --tmp-env0-file --new-tab <v> (an option between it and its value)
+argv: ct "--tmp-env0-file" "--new-tab" "t.env0"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+ct has no such subcommand\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 123: --tmp-env0-file repeated, last wins
+argv: ct "--tmp-env0-file" "t.env0" "--tmp-env0-file" "u.env0"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @["t.env0", "u.env0"]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = noCommand
+  noCmdArgs = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 124: --tmp-env0-file missing value (last)
+argv: ct "--tmp-env0-file"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The option '\e[34m--tmp-env0-file\e[0m' requires a value\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 125: --TMP-ENV0-FILE <v> (style variant)
+argv: ct "--TMP-ENV0-FILE" "t.env0"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @["t.env0"]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = noCommand
+  noCmdArgs = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 126: --t_mp-env0-file <v> (style variant)
+argv: ct "--t_mp-env0-file" "t.env0"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @["t.env0"]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = noCommand
+  noCmdArgs = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 127: --tmp_env0_file <v> (style variant)
+argv: ct "--tmp_env0_file" "t.env0"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'tmp_env0_file'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 128: --tmpenv0file <v> (style variant)
+argv: ct "--tmpenv0file" "t.env0"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'tmpenv0file'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 129: --inspect <v>
+argv: ct "--inspect" "9229"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = some("9229")
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = noCommand
+  noCmdArgs = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 130: --inspect=<v>
+argv: ct "--inspect=9229"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = some("9229")
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = noCommand
+  noCmdArgs = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 131: --inspect:<v>
+argv: ct "--inspect:9229"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = some("9229")
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = noCommand
+  noCmdArgs = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 132: --inspect 9229
+argv: ct "--inspect" "9229"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = some("9229")
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = noCommand
+  noCmdArgs = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 133: --inspect=9229
+argv: ct "--inspect=9229"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = some("9229")
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = noCommand
+  noCmdArgs = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 134: --inspect 0.0.0.0:9229
+argv: ct "--inspect" "0.0.0.0:9229"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = some("0.0.0.0:9229")
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = noCommand
+  noCmdArgs = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 135: --inspect=0.0.0.0:9229
+argv: ct "--inspect=0.0.0.0:9229"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = some("0.0.0.0:9229")
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = noCommand
+  noCmdArgs = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 136: --inspect empty
+argv: ct "--inspect" ""
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = some("")
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = noCommand
+  noCmdArgs = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 137: --inspect= (empty)
+argv: ct "--inspect="
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = some("")
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = noCommand
+  noCmdArgs = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 138: --inspect= <v> (next word)
+argv: ct "--inspect=" "9229"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = some("9229")
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = noCommand
+  noCmdArgs = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 139: --inspect -x (value starts with -)
+argv: ct "--inspect" "-x"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = some("-x")
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = noCommand
+  noCmdArgs = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 140: --inspect --x (value starts with --)
+argv: ct "--inspect" "--x"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = some("--x")
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = noCommand
+  noCmdArgs = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 141: --inspect --new-tab <v> (an option between it and its value)
+argv: ct "--inspect" "--new-tab" "9229"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+ct has no such subcommand\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 142: --inspect repeated, last wins
+argv: ct "--inspect" "9229" "--inspect" "0.0.0.0:9229"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = some("0.0.0.0:9229")
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = noCommand
+  noCmdArgs = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 143: --inspect missing value (last)
+argv: ct "--inspect"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The option '\e[34m--inspect\e[0m' requires a value\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 144: --INSPECT <v> (style variant)
+argv: ct "--INSPECT" "9229"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = some("9229")
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = noCommand
+  noCmdArgs = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 145: --i_nspect <v> (style variant)
+argv: ct "--i_nspect" "9229"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = some("9229")
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = noCommand
+  noCmdArgs = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 146: --remote-debugging-port <v>
+argv: ct "--remote-debugging-port" "9222"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = some("9222")
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = noCommand
+  noCmdArgs = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 147: --remote-debugging-port=<v>
+argv: ct "--remote-debugging-port=9222"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = some("9222")
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = noCommand
+  noCmdArgs = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 148: --remote-debugging-port:<v>
+argv: ct "--remote-debugging-port:9222"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = some("9222")
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = noCommand
+  noCmdArgs = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 149: --remote-debugging-port 9222
+argv: ct "--remote-debugging-port" "9222"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = some("9222")
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = noCommand
+  noCmdArgs = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 150: --remote-debugging-port=9222
+argv: ct "--remote-debugging-port=9222"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = some("9222")
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = noCommand
+  noCmdArgs = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 151: --remote-debugging-port 0
+argv: ct "--remote-debugging-port" "0"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = some("0")
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = noCommand
+  noCmdArgs = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 152: --remote-debugging-port=0
+argv: ct "--remote-debugging-port=0"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = some("0")
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = noCommand
+  noCmdArgs = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 153: --remote-debugging-port empty
+argv: ct "--remote-debugging-port" ""
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = some("")
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = noCommand
+  noCmdArgs = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 154: --remote-debugging-port= (empty)
+argv: ct "--remote-debugging-port="
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = some("")
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = noCommand
+  noCmdArgs = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 155: --remote-debugging-port= <v> (next word)
+argv: ct "--remote-debugging-port=" "9222"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = some("9222")
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = noCommand
+  noCmdArgs = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 156: --remote-debugging-port -x (value starts with -)
+argv: ct "--remote-debugging-port" "-x"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = some("-x")
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = noCommand
+  noCmdArgs = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 157: --remote-debugging-port --x (value starts with --)
+argv: ct "--remote-debugging-port" "--x"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = some("--x")
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = noCommand
+  noCmdArgs = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 158: --remote-debugging-port --new-tab <v> (an option between it and its value)
+argv: ct "--remote-debugging-port" "--new-tab" "9222"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+ct has no such subcommand\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 159: --remote-debugging-port repeated, last wins
+argv: ct "--remote-debugging-port" "9222" "--remote-debugging-port" "0"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = some("0")
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = noCommand
+  noCmdArgs = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 160: --remote-debugging-port missing value (last)
+argv: ct "--remote-debugging-port"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The option '\e[34m--remote-debugging-port\e[0m' requires a value\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 161: --REMOTE-DEBUGGING-PORT <v> (style variant)
+argv: ct "--REMOTE-DEBUGGING-PORT" "9222"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = some("9222")
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = noCommand
+  noCmdArgs = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 162: --r_emote-debugging-port <v> (style variant)
+argv: ct "--r_emote-debugging-port" "9222"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = some("9222")
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = noCommand
+  noCmdArgs = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 163: --remote_debugging_port <v> (style variant)
+argv: ct "--remote_debugging_port" "9222"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'remote_debugging_port'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 164: --remotedebuggingport <v> (style variant)
+argv: ct "--remotedebuggingport" "9222"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'remotedebuggingport'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 165: --remote-debugging-pipe
+argv: ct "--remote-debugging-pipe"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = true
+  newTab = false
+  newWindow = false
+  cmd = noCommand
+  noCmdArgs = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 166: --remote-debugging-pipe=true
+argv: ct "--remote-debugging-pipe=true"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = true
+  newTab = false
+  newWindow = false
+  cmd = noCommand
+  noCmdArgs = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 167: --remote-debugging-pipe=false
+argv: ct "--remote-debugging-pipe=false"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = noCommand
+  noCmdArgs = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 168: --remote-debugging-pipe=on
+argv: ct "--remote-debugging-pipe=on"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = true
+  newTab = false
+  newWindow = false
+  cmd = noCommand
+  noCmdArgs = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 169: --remote-debugging-pipe=off
+argv: ct "--remote-debugging-pipe=off"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = noCommand
+  noCmdArgs = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 170: --remote-debugging-pipe=yes
+argv: ct "--remote-debugging-pipe=yes"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = true
+  newTab = false
+  newWindow = false
+  cmd = noCommand
+  noCmdArgs = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 171: --remote-debugging-pipe=no
+argv: ct "--remote-debugging-pipe=no"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = noCommand
+  noCmdArgs = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 172: --remote-debugging-pipe=1
+argv: ct "--remote-debugging-pipe=1"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = true
+  newTab = false
+  newWindow = false
+  cmd = noCommand
+  noCmdArgs = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 173: --remote-debugging-pipe=0
+argv: ct "--remote-debugging-pipe=0"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = noCommand
+  noCmdArgs = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 174: --remote-debugging-pipe=maybe
+argv: ct "--remote-debugging-pipe=maybe"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Error while processing the \e[34mremote-debugging-pipe=maybe\e[0m parameter: 'maybe' is not a valid boolean value. Supported values are on/off, yes/no, true/false or 1/0\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 175: --remote-debugging-pipe=
+argv: ct "--remote-debugging-pipe="
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = true
+  newTab = false
+  newWindow = false
+  cmd = noCommand
+  noCmdArgs = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 176: --remote-debugging-pipe:false
+argv: ct "--remote-debugging-pipe:false"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = noCommand
+  noCmdArgs = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 177: --remote-debugging-pipe false (next word)
+argv: ct "--remote-debugging-pipe" "false"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+ct has no such subcommand\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 178: --remote-debugging-pipe twice
+argv: ct "--remote-debugging-pipe" "--remote-debugging-pipe"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = true
+  newTab = false
+  newWindow = false
+  cmd = noCommand
+  noCmdArgs = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 179: --no-remote-debugging-pipe
+argv: ct "--no-remote-debugging-pipe"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'no-remote-debugging-pipe'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 180: --REMOTE-DEBUGGING-PIPE (style variant)
+argv: ct "--REMOTE-DEBUGGING-PIPE"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = true
+  newTab = false
+  newWindow = false
+  cmd = noCommand
+  noCmdArgs = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 181: --r_emote-debugging-pipe (style variant)
+argv: ct "--r_emote-debugging-pipe"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = true
+  newTab = false
+  newWindow = false
+  cmd = noCommand
+  noCmdArgs = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 182: --remote_debugging_pipe (style variant)
+argv: ct "--remote_debugging_pipe"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'remote_debugging_pipe'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 183: --remotedebuggingpipe (style variant)
+argv: ct "--remotedebuggingpipe"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'remotedebuggingpipe'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 184: --new-tab
+argv: ct "--new-tab"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = true
+  newWindow = false
+  cmd = noCommand
+  noCmdArgs = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 185: --new-tab=true
+argv: ct "--new-tab=true"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = true
+  newWindow = false
+  cmd = noCommand
+  noCmdArgs = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 186: --new-tab=false
+argv: ct "--new-tab=false"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = noCommand
+  noCmdArgs = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 187: --new-tab=on
+argv: ct "--new-tab=on"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = true
+  newWindow = false
+  cmd = noCommand
+  noCmdArgs = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 188: --new-tab=off
+argv: ct "--new-tab=off"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = noCommand
+  noCmdArgs = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 189: --new-tab=yes
+argv: ct "--new-tab=yes"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = true
+  newWindow = false
+  cmd = noCommand
+  noCmdArgs = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 190: --new-tab=no
+argv: ct "--new-tab=no"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = noCommand
+  noCmdArgs = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 191: --new-tab=1
+argv: ct "--new-tab=1"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = true
+  newWindow = false
+  cmd = noCommand
+  noCmdArgs = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 192: --new-tab=0
+argv: ct "--new-tab=0"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = noCommand
+  noCmdArgs = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 193: --new-tab=maybe
+argv: ct "--new-tab=maybe"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Error while processing the \e[34mnew-tab=maybe\e[0m parameter: 'maybe' is not a valid boolean value. Supported values are on/off, yes/no, true/false or 1/0\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 194: --new-tab=
+argv: ct "--new-tab="
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = true
+  newWindow = false
+  cmd = noCommand
+  noCmdArgs = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 195: --new-tab:false
+argv: ct "--new-tab:false"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = noCommand
+  noCmdArgs = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 196: --new-tab false (next word)
+argv: ct "--new-tab" "false"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+ct has no such subcommand\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 197: --new-tab twice
+argv: ct "--new-tab" "--new-tab"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = true
+  newWindow = false
+  cmd = noCommand
+  noCmdArgs = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 198: --no-new-tab
+argv: ct "--no-new-tab"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'no-new-tab'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 199: --NEW-TAB (style variant)
+argv: ct "--NEW-TAB"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = true
+  newWindow = false
+  cmd = noCommand
+  noCmdArgs = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 200: --n_ew-tab (style variant)
+argv: ct "--n_ew-tab"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = true
+  newWindow = false
+  cmd = noCommand
+  noCmdArgs = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 201: --new_tab (style variant)
+argv: ct "--new_tab"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'new_tab'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 202: --newtab (style variant)
+argv: ct "--newtab"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'newtab'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 203: --new-window
+argv: ct "--new-window"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = true
+  cmd = noCommand
+  noCmdArgs = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 204: --new-window=true
+argv: ct "--new-window=true"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = true
+  cmd = noCommand
+  noCmdArgs = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 205: --new-window=false
+argv: ct "--new-window=false"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = noCommand
+  noCmdArgs = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 206: --new-window=on
+argv: ct "--new-window=on"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = true
+  cmd = noCommand
+  noCmdArgs = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 207: --new-window=off
+argv: ct "--new-window=off"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = noCommand
+  noCmdArgs = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 208: --new-window=yes
+argv: ct "--new-window=yes"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = true
+  cmd = noCommand
+  noCmdArgs = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 209: --new-window=no
+argv: ct "--new-window=no"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = noCommand
+  noCmdArgs = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 210: --new-window=1
+argv: ct "--new-window=1"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = true
+  cmd = noCommand
+  noCmdArgs = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 211: --new-window=0
+argv: ct "--new-window=0"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = noCommand
+  noCmdArgs = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 212: --new-window=maybe
+argv: ct "--new-window=maybe"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Error while processing the \e[34mnew-window=maybe\e[0m parameter: 'maybe' is not a valid boolean value. Supported values are on/off, yes/no, true/false or 1/0\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 213: --new-window=
+argv: ct "--new-window="
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = true
+  cmd = noCommand
+  noCmdArgs = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 214: --new-window:false
+argv: ct "--new-window:false"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = noCommand
+  noCmdArgs = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 215: --new-window false (next word)
+argv: ct "--new-window" "false"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+ct has no such subcommand\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 216: --new-window twice
+argv: ct "--new-window" "--new-window"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = true
+  cmd = noCommand
+  noCmdArgs = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 217: --no-new-window
+argv: ct "--no-new-window"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'no-new-window'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 218: --NEW-WINDOW (style variant)
+argv: ct "--NEW-WINDOW"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = true
+  cmd = noCommand
+  noCmdArgs = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 219: --n_ew-window (style variant)
+argv: ct "--n_ew-window"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = true
+  cmd = noCommand
+  noCmdArgs = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 220: --new_window (style variant)
+argv: ct "--new_window"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'new_window'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 221: --newwindow (style variant)
+argv: ct "--newwindow"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'newwindow'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 222: --new-tab --new-window
+argv: ct "--new-tab" "--new-window"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = true
+  newWindow = true
+  cmd = noCommand
+  noCmdArgs = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 223: every global option, then a command
+argv: ct "--cwd=/w" "--env-file" "a" "--env0-file=b" "--tmp-env-file" "c" "--tmp-env0-file" "d" "--inspect=1" "--remote-debugging-port" "2" "--remote-debugging-pipe" "--new-window" "list"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = some("/w")
+  envFiles = @["a"]
+  env0Files = @["b"]
+  tmpEnvFiles = @["c"]
+  tmpEnv0Files = @["d"]
+  inspect = some("1")
+  remoteDebuggingPort = some("2")
+  remoteDebuggingPipe = true
+  newTab = false
+  newWindow = true
+  cmd = list
+  listFormat = "text"
+  listTarget = "local"
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 224: -- matches the first option (cwd)
+argv: ct "--" "/w" "list"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option ''\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 225: unknown short cluster
+argv: ct "-xyz"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'x'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 226: env <APP>_CWD
+argv: ct "list"
+env: <APP>_CWD="/from-env"
+exit: 0
+--- stdout
+PARSED
+  cwd = some("/from-env")
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = list
+  listFormat = "text"
+  listTarget = "local"
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 227: env <APP>_CWD, flag wins
+argv: ct "--cwd" "/flag" "list"
+env: <APP>_CWD="/from-env"
+exit: 0
+--- stdout
+PARSED
+  cwd = some("/flag")
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = list
+  listFormat = "text"
+  listTarget = "local"
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 228: env <APP>_ENV_FILE
+argv: ct "list"
+env: <APP>_ENV_FILE="e.env"
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @["e.env"]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = list
+  listFormat = "text"
+  listTarget = "local"
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 229: env <APP>_NEW_TAB=true
+argv: ct "list"
+env: <APP>_NEW_TAB="true"
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = true
+  newWindow = false
+  cmd = list
+  listFormat = "text"
+  listTarget = "local"
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 230: env <APP>_NEW_TAB=maybe
+argv: ct "list"
+env: <APP>_NEW_TAB="maybe"
+exit: 1
+--- stdout
+--- stderr
+Error while processing the \e[34mnew-tab=maybe\e[0m parameter: 'maybe' is not a valid boolean value. Supported values are on/off, yes/no, true/false or 1/0\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 231: env <APP>_NEW_TAB= (empty)
+argv: ct "list"
+env: <APP>_NEW_TAB=""
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = true
+  newWindow = false
+  cmd = list
+  listFormat = "text"
+  listTarget = "local"
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 232: env <APP>_REMOTE_DEBUGGING_PIPE=1
+argv: ct (none)
+env: <APP>_REMOTE_DEBUGGING_PIPE="1"
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = true
+  newTab = false
+  newWindow = false
+  cmd = noCommand
+  noCmdArgs = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 233: env <APP>_CMD=list (the discriminator)
+argv: ct (none)
+env: <APP>_CMD="list"
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = noCommand
+  noCmdArgs = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 234: env <APP>_cwd (lower case: not read)
+argv: ct "list"
+env: <APP>_cwd="/lower"
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = list
+  listFormat = "text"
+  listTarget = "local"
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 235: env CT_CWD (another prefix: not read)
+argv: ct "list"
+env: CT_CWD="/ct"
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = list
+  listFormat = "text"
+  listTarget = "local"
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 236: env CODETRACER_CWD (another prefix: not read)
+argv: ct "list"
+env: CODETRACER_CWD="/c"
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = list
+  listFormat = "text"
+  listTarget = "local"
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 237: COMP_LINE "ct " COMP_POINT 3
+argv: ct (none)
+env: COMP_LINE="ct " COMP_POINT="3"
+exit: 0
+--- stdout
+noCommand
+replay
+run
+remote
+install
+upload
+download
+login
+set-default-org
+get-default-org
+activate
+check-license
+build
+record
+record-test
+console
+host
+import
+arb
+ci
+index-diff
+edit
+review
+list
+print
+help
+electron
+trace-metadata
+start_backend
+trace
+gfx-replay
+doctor
+ct-describe-commands
+ct-help
+ct-complete
+ct-completions
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = noCommand
+  noCmdArgs = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 238: COMP_LINE "ct rec" COMP_POINT 6
+argv: ct (none)
+env: COMP_LINE="ct rec" COMP_POINT="6"
+exit: 0
+--- stdout
+record
+record-test
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = noCommand
+  noCmdArgs = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 239: COMP_LINE "ct record --" COMP_POINT 12
+argv: ct (none)
+env: COMP_LINE="ct record --" COMP_POINT="12"
+exit: 0
+--- stdout
+--lang=
+--output-folder=
+--backend=
+--export=
+--stylus-trace=
+--address=
+--socket=
+--with-diff=
+--store-trace-folder-for-pid=
+--upload
+--use-interpose
+--server
+--portable
+--recordProgram=
+--recordArgs=
+--cwd=
+--env-file=
+--env0-file=
+--tmp-env-file=
+--tmp-env0-file=
+--inspect=
+--remote-debugging-port=
+--remote-debugging-pipe
+--new-tab
+--new-window
+--cmd=
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = noCommand
+  noCmdArgs = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 240: COMP_LINE "ct record -" COMP_POINT 11
+argv: ct (none)
+env: COMP_LINE="ct record -" COMP_POINT="11"
+exit: 0
+--- stdout
+--lang=
+--output-folder=
+-o=
+--backend=
+--export=
+-e=
+--stylus-trace=
+-t=
+--address=
+-a=
+--socket=
+--with-diff=
+--store-trace-folder-for-pid=
+--upload
+--use-interpose
+--server
+--portable
+--recordProgram=
+--recordArgs=
+--cwd=
+--env-file=
+--env0-file=
+--tmp-env-file=
+--tmp-env0-file=
+--inspect=
+--remote-debugging-port=
+--remote-debugging-pipe
+--new-tab
+--new-window
+--cmd=
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = noCommand
+  noCmdArgs = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 241: COMP_LINE "ct print -" COMP_POINT 10
+argv: ct (none)
+env: COMP_LINE="ct print -" COMP_POINT="10"
+exit: 0
+--- stdout
+--printPath=
+--filter=
+-f=
+--function=
+--limit=
+-n=
+--format=
+--verify
+--follow
+-F
+--cwd=
+--env-file=
+--env0-file=
+--tmp-env-file=
+--tmp-env0-file=
+--inspect=
+--remote-debugging-port=
+--remote-debugging-pipe
+--new-tab
+--new-window
+--cmd=
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = noCommand
+  noCmdArgs = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 242: COMP_LINE "ct upload --omniscient-db " COMP_POINT 26
+argv: ct (none)
+env: COMP_LINE="ct upload --omniscient-db " COMP_POINT="26"
+exit: 0
+--- stdout
+off
+on
+lazy
+pre-prepared
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = noCommand
+  noCmdArgs = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 243: COMP_LINE "ct upload --omniscient-db=" COMP_POINT 26
+argv: ct (none)
+env: COMP_LINE="ct upload --omniscient-db=" COMP_POINT="26"
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = noCommand
+  noCmdArgs = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 244: COMP_LINE "ct trace " COMP_POINT 9
+argv: ct (none)
+env: COMP_LINE="ct trace " COMP_POINT="9"
+exit: 0
+--- stdout
+noCommand
+extract-gfx
+export
+omniscient-prep
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = noCommand
+  noCmdArgs = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 245: COMP_LINE "ct ci " COMP_POINT 6
+argv: ct (none)
+env: COMP_LINE="ct ci " COMP_POINT="6"
+exit: 0
+--- stdout
+noCommand
+start
+attach
+exec
+finish
+run
+log
+status
+cancel
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = noCommand
+  noCmdArgs = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 246: COMP_LINE "ct ci exec --" COMP_POINT 13
+argv: ct (none)
+env: COMP_LINE="ct ci exec --" COMP_POINT="13"
+exit: 0
+--- stdout
+--monitor-processes
+--record
+--ciExecProgram=
+--ciExecArgs=
+--token=
+--base-url=
+--ciCommand=
+--cwd=
+--env-file=
+--env0-file=
+--tmp-env-file=
+--tmp-env0-file=
+--inspect=
+--remote-debugging-port=
+--remote-debugging-pipe
+--new-tab
+--new-window
+--cmd=
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = noCommand
+  noCmdArgs = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 247: COMP_LINE "ct --e" COMP_POINT 6
+argv: ct (none)
+env: COMP_LINE="ct --e" COMP_POINT="6"
+exit: 0
+--- stdout
+--env-file=
+--env0-file=
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = noCommand
+  noCmdArgs = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 248: COMP_LINE "ct arb " COMP_POINT 7
+argv: ct (none)
+env: COMP_LINE="ct arb " COMP_POINT="7"
+exit: 0
+--- stdout
+noCommand
+explorer
+record
+replay
+deploy
+listRecentTx
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = noCommand
+  noCmdArgs = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 249: COMP_LINE "ct record " COMP_POINT 10
+argv: ct (none)
+env: COMP_LINE="ct record " COMP_POINT="10"
+exit: 0
+--- stdout
+--lang=
+--output-folder=
+-o=
+--backend=
+--export=
+-e=
+--stylus-trace=
+-t=
+--address=
+-a=
+--socket=
+--with-diff=
+--store-trace-folder-for-pid=
+--upload
+--use-interpose
+--server
+--portable
+--recordProgram=
+--recordArgs=
+--cwd=
+--env-file=
+--env0-file=
+--tmp-env-file=
+--tmp-env0-file=
+--inspect=
+--remote-debugging-port=
+--remote-debugging-pipe
+--new-tab
+--new-window
+--cmd=
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = noCommand
+  noCmdArgs = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 250: COMP_LINE "ct list" COMP_POINT 3
+argv: ct (none)
+env: COMP_LINE="ct list" COMP_POINT="3"
+exit: 0
+--- stdout
+login
+list
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = noCommand
+  noCmdArgs = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 251: COMP_LINE "ct " COMP_POINT 99
+argv: ct (none)
+env: COMP_LINE="ct " COMP_POINT="99"
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = noCommand
+  noCmdArgs = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 252: COMP_LINE "ct x" COMP_POINT -5
+argv: ct (none)
+env: COMP_LINE="ct x" COMP_POINT="-5"
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = noCommand
+  noCmdArgs = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 253: COMP_LINE with a bad COMP_POINT
+argv: ct (none)
+env: COMP_LINE="ct " COMP_POINT="x"
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = noCommand
+  noCmdArgs = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 254: COMP_LINE without COMP_POINT
+argv: ct (none)
+env: COMP_LINE="ct li"
+exit: 0
+--- stdout
+check-license
+console
+ci
+ct-describe-commands
+ct-help
+ct-complete
+ct-completions
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = noCommand
+  noCmdArgs = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 255: COMP_LINE with argv
+argv: ct "list" "--format" "json"
+env: COMP_LINE="ct li" COMP_POINT="5"
+exit: 0
+--- stdout
+list
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = noCommand
+  noCmdArgs = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end

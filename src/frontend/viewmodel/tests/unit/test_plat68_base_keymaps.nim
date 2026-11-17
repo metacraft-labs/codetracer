@@ -37,8 +37,11 @@
 import std/[strutils, tables, unittest]
 
 import ../../editing_core
+import ../../keymap/[overlay_rows, pointer_rows]
 
-const ExpectedAssertions = 1192
+const ExpectedAssertions = 1222
+  ## +8 on 2026-11-08, measured: CUA's four `Ctrl+K T` rows and the four
+  ## catalogued `editor.trace-*` operations they bind.
   ## +5 on 2026-10-30 (PLAT-70 Part E): CUA's `Menu`, `Ctrl+K Shift+F10` and
   ## `Ctrl+Shift+O` (`variables.show-value-origin`), Emacs's `Menu` and
   ## `Ctrl+Shift+O` — one `when` assertion per shipped row.
@@ -145,7 +148,7 @@ suite "PLAT-68 KL-2: the data bases cover the vocabulary, filed or bound":
     test "covered + filed == operations, disjoint, nothing private: " & $base:
       let def = keymapOf(base)
       ck def.model == base
-      ck def.keymap.bindings.len == rowsOf(base).len
+      ck def.keymap.bindings.len == rowsOf(base).len + OverlayRows.len + PointerRows.len
       ck coverageGaps(def).len == 0
       ck coverageOverlaps(def).len == 0
       ck unpublishedOperations(def.keymap, base).len == 0

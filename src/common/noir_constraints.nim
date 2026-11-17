@@ -67,6 +67,19 @@ type
       ## execute but are not constrained, so their opcodes cost witness
       ## generation time and not proof size.
 
+  ConstraintOpcodePlace* = object
+    ## Where the compiler says an opcode came from, in the project's sources,
+    ## or why it does not say (`constraints_listing.placeOpcodes`).
+    placed*: bool
+    path*: string
+      ## Project-relative, `/`-separated; "" when not placed.
+    line*: int
+      ## 1-based; 0 when not placed.
+    column*: int
+      ## 1-based; 0 when not placed.
+    reason*: string
+      ## Why it is not placed; "" when it is, or before anything has asked.
+
   ConstraintOpcode* = object
     ## ONE PRINTED ROW OF THE COMPILER'S OWN LISTING, kept rather than tallied.
     ##
@@ -82,8 +95,8 @@ type
     index*: int
       ## The opcode's position in its function, 0-based. THIS IS THE ANCHOR
       ## KEY: `debug_symbols.acir_locations` is an opcode-indexed map, so a row
-      ## that did not carry its index could never be tied to a source span.
-      ## Nothing anchors yet; the index is kept so that it can.
+      ## that did not carry its index could never be tied to a source span
+      ## (`constraints_listing.placeOpcodes` is what ties it).
     name*: string
       ## `ASSERT`, `BRILLIG CALL`, `BLACKBOX::RANGE` — the first token as the
       ## compiler printed it.
@@ -91,6 +104,7 @@ type
       ## Everything after the first token, verbatim. NOT re-formatted: the
       ## compiler's spacing is the compiler's, and a pane that tidied it would
       ## be showing something other than what was generated.
+    place*: ConstraintOpcodePlace
 
   ConstraintFunction* = object
     name*: string

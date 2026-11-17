@@ -1,0 +1,25 @@
+scenario: 1
+name: auto-hide/pin-creates-strip-tab
+pack: codetracer
+summary: >-
+  Before anything is pinned, only the footer's four standalone panes have
+  strip tabs and the side strips are empty; a pane tab's Pin to Bottom
+  moves that pane out of the layout onto the footer's strip.
+
+stage:
+  - use: record-program
+    with: { program: py_console_logs/main.py }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - wait: { until: { at: window, strip-tabs: { count: 4 } }, timeout: 30s }
+  - expect: { at: window, strip-tabs: { unordered: ["bottom:BUILD", "bottom:PROBLEMS", "bottom:FIND IN FILES", "bottom:REQUESTS"] } }
+  - click: { at: 'pane-tab[label="EVENT LOG"]' }
+  - click: { at: 'pane-tab[label="EVENT LOG"]', button: right }
+  - wait: { until: { at: context-menu, assert: 'offers("Pin to Bottom")' }, timeout: 15s }
+  - click: { at: 'context-menu/menu-item[label="Pin to Bottom"]' }
+  - wait: { until: { at: 'strip-tab[label="EVENT LOG"]', present: true }, timeout: 15s }
+  - expect: { at: 'strip-tab[label="EVENT LOG"]', edge: bottom }
+  - expect: { at: window, strip-tabs: { count: 5 } }
+  - expect: { at: window, assert: 'lacks-pane("EVENT LOG")' }

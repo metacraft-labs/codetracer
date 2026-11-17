@@ -60,18 +60,16 @@ from ../viewmodel/viewmodels/generated_code_anchors import
 
 from ../viewmodel/viewmodels/noir_build_producer import rendererPathFor
 
-from ../viewmodel/store/types as vmtypes import LowLevelInstruction
-from ../viewmodel/viewmodels/low_level_code_vm import showGeneratedListing
 from ./panel_host import panelSession
-
-const NO_HIGH_LEVEL_LINE = -1
-  ## `LowLevelInstruction.highLevelLine` is the LEGACY per-row back-pointer the
-  ## asm loader fills, and `isonim_low_level_code_view.sourceCrossRef` suppresses
-  ## the row's source span when it is not positive. It is left unset on purpose:
-  ## this listing's source correspondence is the ANCHOR SET, which is a range of
-  ## rows per source region, and writing a single line onto each row would be a
-  ## second, coarser mapping beside the real one — disagreeing with it wherever
-  ## an anchor covers more than one row, which is most of them.
+from ../event_helpers import warnMessage
+from isonim/core/signals import val
+from isonim/core/computation import createEffect
+from isonim/core/batch import untrack
+from ../viewmodel/store/replay_data_store import ReplayDataStore
+from ../viewmodel/store/stop_timeline import stopIdentityOf
+from ../viewmodel/viewmodels/nim_c_producer import NimCTargetId
+import ../viewmodel/viewmodels/generated_code_presenter as presenter
+from ../../common/trace_source_paths import selfContainedSourcePayloadCandidates
 
 from ../viewmodel/viewmodels/noir_anchor_producer import
   readArtefactJson, produceAnchors, aroOk
@@ -80,6 +78,30 @@ from ../viewmodel/viewmodels/generated_code_vm import
   GeneratedCodeVM, GeneratedListing, GeneratedRow, createGeneratedCodeVM,
   openListing, noteBuildStarted, noteBuildFailed,
   noteCursorMoved, noteActiveTabChanged, noteSourceEdited
+
+from ../viewmodel/viewmodels/low_level_code_vm import LowLevelCodeVM,
+  showGeneratedListing, clearInstructions, setActiveOffset
+from ../viewmodel/store/types import StopLocation
+from ../viewmodel/viewmodels/nim_c_producer import isGeneratedNimC
+
+proc revealRowNow(): bool {.importjs: """
+  (function() {
+    var rows = document.querySelectorAll(
+      '.low-level-code .low-level-code-instruction.active-instruction');
+    for (var i = 0; i < rows.length; i++) {
+      if (rows[i].offsetParent !== null) {
+        rows[i].scrollIntoView({block: 'center'});
+        return true;
+      }
+    }
+    return false;
+  })()""".}
+  ## Scroll the shown pane's anchored row into view; false while there is
+  ## none yet.
+
+proc compilingText*(path: string): string =
+  ## What the pane says while Edit mode's compile runs.
+  "compiling " & path.extractFilename & " to C…"
 
 var generatedCodeVMInstance*: GeneratedCodeVM
 
@@ -217,6 +239,262 @@ proc buildListing(t: GeneratedCodeTarget; sourcePath: string):
     support: support,
     listingAbsence: absence), "")
 
+# ---------------------------------------------------------------------------
+# Nim's generated C (Generated-Code-Listing §13.4)
+# ---------------------------------------------------------------------------
+
+proc revealActiveGeneratedRow(attempt: int = 0) =
+  ## Bring the row the listing anchored the caret's line to into view — the
+  ## pane draws every row, and a module's C runs to thousands of lines, so
+  ## without this the answer is on screen only when it is near the top. The
+  ## pane may have been placed by this very gesture, and its rows arrive with
+  ## the presenter's (possibly asynchronous) read, so it is looked for over a
+  ## few frames. The shown tab's pane is the one with a layout box.
+  let found = revealRowNow()
+  if not found and attempt < 40:
+    discard windowSetTimeout(proc() = revealActiveGeneratedRow(attempt + 1), 50)
+
+proc readDiskText(path: string; done: proc(r: presenter.RecordedText)) =
+  ## `path` read by the desktop's own file read (`renderer.readFileUtf8`,
+  ## the platform facade), which the Nim source maps are read by too
+  ## (`nim_sourcemap.loadFrontendSourcemap`).
+  proc run() {.async.} =
+    var text = cstring""
+    var failure = ""
+    try:
+      text = await readFileUtf8(cstring(path))
+    except:
+      failure = getCurrentExceptionMsg()
+    if failure.len > 0:
+      done((ok: false, text: "", message: "could not read " & path & ": " &
+            failure))
+    else:
+      done((ok: true, text: $text, message: ""))
+  discard run()
+
+proc onDiskCopyOf*(path: string; onDisk: openArray[cstring]): string =
+  ## Where on disk the main process found `path`, a nimcache file: `path`
+  ## itself when it named it, else the one it named with the same file name
+  ## (a recording's bundled C names the folder `ct record` compiled into,
+  ## which an imported or moved recording no longer is). "" when it named
+  ## none.
+  for f in onDisk:
+    if $f == path:
+      return path
+  let name = path.extractFilename
+  for f in onDisk:
+    if ($f).extractFilename == name:
+      return $f
+  ""
+
+proc readFirstOf(paths: seq[string]; at: int;
+                 done: proc(r: presenter.RecordedText)) =
+  ## The first of `paths` that reads, else the last one's failure.
+  readDiskText(paths[at], proc(r: presenter.RecordedText) =
+    if r.ok or at + 1 >= paths.len:
+      done(r)
+    else:
+      readFirstOf(paths, at + 1, done))
+
+proc recordedReadCandidates*(trace: Trace; path: string;
+                             onDisk: openArray[cstring]): seq[string] =
+  ## Where the desktop reads a file of the recording `path` names: as its
+  ## editor opens one (`index/config`'s `selfContainedReadPathCandidates`,
+  ## then the path itself) — an imported recording's own copy under
+  ## `files/` first — and then, for a nimcache file, where the main process
+  ## found it on disk (a `.c.map` is in no recording's `files/`).
+  if not trace.isNil and trace.imported:
+    var folders: seq[string] = @[]
+    for f in trace.sourceFolders:
+      folders.add $f
+    for payload in selfContainedSourcePayloadCandidates(path, $trace.workdir,
+                                                        folders):
+      result.add $trace.outputFolder / "files" / payload
+  result.add path
+  let disk = onDiskCopyOf(path, onDisk)
+  if disk.len > 0 and disk notin result:
+    result.add disk
+
+proc followStopWithGeneratedC(data: Data; store: ReplayDataStore;
+                              pane: LowLevelCodeVM)
+
+proc markStopCRow(pane: LowLevelCodeVM; cLine: int) =
+  ## A listing of the stop's own C file marks the stop's C line, which the
+  ## engine names (`StopLocation.cLine`; a C listing's rows are numbered by
+  ## their line). A Nim line maps to several C rows — a loop's header, its
+  ## body, a block opener the source map also gives the line — and the first
+  ## of them is often not where the program is stopped.
+  if pane.isNil or cLine <= 0:
+    return
+  for row in pane.instructions.val:
+    if row.offset == int64(cLine):
+      pane.setActiveOffset(int64(cLine))
+      return
+
+proc showRecordedGeneratedC(data: Data; t: GeneratedCodeTarget; path: string;
+                            line: int; stopCLine = 0) =
+  ## Debug mode: the C of the recording, read the way the desktop's editor
+  ## reads the recording's files (`recordedReadCandidates`) — together with
+  ## the nimcache files a `ct record` recording keeps beside it, which the
+  ## main process names (`index/nim_sourcemap_paths.findNimcacheCPaths`).
+  ##
+  ## NOT through the session's source provider, as the terminal and GPUI
+  ## read it: the desktop's backend has no route for the DAP `source`
+  ## request (`dap.dapCommandToEventKind` raises "no ct event kind for
+  ## command: source"), so a `DapSourceProvider` over it throws on the first
+  ## file.
+  let session = panelSession()
+  if session.isNil:
+    data.viewsApi.warnMessage(cstring(
+      "View Generated C Source: there is no recording to read it from"))
+    return
+  data.openLowLevelCode()
+  var files: seq[string] = @[]
+  if not session.fileTreeVM.isNil:
+    presenter.recordedPathsOf(session.fileTreeVM.rootEntry.val, files)
+  let onDisk = data.activeSession.nimcacheFiles
+  # The nimcache's C files are candidates too, unless the file tree already
+  # offers the same module's C.
+  var names: seq[string] = @[]
+  for f in files:
+    names.add f.extractFilename
+  for f in onDisk:
+    let p = $f
+    if isGeneratedNimC(p) and p.extractFilename notin names:
+      files.add p
+  let trace = data.trace
+  followStopWithGeneratedC(data, session.store, session.lowLevelCodeVM)
+  let refused = presenter.showGeneratedCode(generatedCodeVMInstance,
+    session.lowLevelCodeVM, t.id, path, line, session.store.stop.val, files,
+    proc(p: string; done: proc(r: presenter.RecordedText)) =
+      readFirstOf(recordedReadCandidates(trace, p, onDisk), 0, done),
+    proc(failure: string) =
+      if failure.len > 0:
+        data.viewsApi.warnMessage(cstring(failure))
+      else:
+        markStopCRow(session.lowLevelCodeVM, stopCLine)
+        revealActiveGeneratedRow())
+  if refused.len > 0:
+    data.viewsApi.warnMessage(cstring(refused))
+
+var stopFollowers: seq[ReplayDataStore] = @[]
+
+proc followStopWithGeneratedC(data: Data; store: ReplayDataStore;
+                              pane: LowLevelCodeVM) =
+  ## GCL-D28: a generated C listing follows the stop. At each new stop in a
+  ## Nim source the listing is shown again for the stop's line, the way View
+  ## Generated C Source showed it for the caret: the stop's own C file when
+  ## the engine names it, the row of the stop's line marked. The stop loader
+  ## asks for no machine code while the listing is in the pane, which is what
+  ## used to replace it at the first step. View Disassembly clears the listing
+  ## (`showDisassembly`), and with it this follower's reason to act.
+  if store.isNil or pane.isNil or store in stopFollowers:
+    return
+  stopFollowers.add store
+  createEffect proc() =
+    let stop = store.stop.val
+    let identity = stopIdentityOf(store.debugger.val)
+    untrack(proc() =
+      let shownAt = pane.generatedAtStop.val
+      if shownAt.len == 0 or shownAt == identity or data.trace.isNil or
+         not presenter.isNimSource(stop.path) or stop.line <= 0:
+        return
+      var t: GeneratedCodeTarget
+      if targetById(NimCTargetId, t):
+        showRecordedGeneratedC(data, t, stop.path, stop.line,
+          (if stop.cPath.len > 0: stop.cLine else: 0)))
+
+type PendingNimCCompile = object
+  ## Edit mode's compile in flight: the request the main process will answer,
+  ## and the caret it was asked for.
+  id: int
+  targetId: string
+  path: string
+  line: int
+
+var pendingNimCCompile: PendingNimCCompile
+var nimCCompileRequests = 0
+
+proc showEditModeGeneratedC(data: Data; t: GeneratedCodeTarget; path: string;
+                            line: int) =
+  ## Edit mode (HSF-E11): there is no recording, so the main process compiles
+  ## the SAVED file to C now (`index/nim_c_listing`, the same compile as the
+  ## native front-ends' `native_nim_c_compiler`). The pane says so while it
+  ## runs; `onNimCListingCompiled` shows the answer.
+  if data.ipc.isNil or data.ipc.isUndefined:
+    data.viewsApi.warnMessage(cstring("View Generated C Source: compiling " &
+      "a Nim file to C needs the desktop app"))
+    return
+  data.openLowLevelCode()
+  inc nimCCompileRequests
+  pendingNimCCompile = PendingNimCCompile(id: nimCCompileRequests,
+    targetId: t.id, path: path, line: line)
+  generatedCodeVMInstance.noteBuildStarted(t, path, line)
+  let session = panelSession()
+  if not session.isNil and not session.lowLevelCodeVM.isNil:
+    # §8: while the build runs the surface is open and says so — never the
+    # previous listing, which describes a file that may have changed since.
+    discard session.lowLevelCodeVM.showGeneratedListing(@[], @[],
+      ArtefactSupport(), path, line, compilingText(path))
+  data.ipc.send(cstring"CODETRACER::nim-c-listing-compile",
+    js{source: cstring(path), requestId: nimCCompileRequests})
+
+proc onNimCListingCompiled*(sender: js; response: JsObject) =
+  ## `index/nim_c_listing` answered. An answer to a request since superseded
+  ## by another is dropped: the pane shows the latest question's listing.
+  # Read by key: `response.ok` would be `results.ok(response)` here.
+  let requestId = response[cstring"requestId"]
+  let id = if requestId.isNil or requestId.isUndefined: -1
+           else: requestId.to(int)
+  if id != pendingNimCCompile.id:
+    return
+  var t: GeneratedCodeTarget
+  if not targetById(pendingNimCCompile.targetId, t):
+    return
+  initGeneratedCodeVM()
+  let pending = pendingNimCCompile
+  let session = panelSession()
+  let pane = if session.isNil: nil else: session.lowLevelCodeVM
+  let okField = response[cstring"compiled"]
+  let ok = not okField.isNil and not okField.isUndefined and okField.to(bool)
+  if not ok:
+    let messageField = response[cstring"message"]
+    let message =
+      if messageField.isNil or messageField.isUndefined: "nim failed"
+      else: $messageField.to(cstring)
+    let failure = "could not compile " & pending.path.extractFilename &
+                  " to C: " & message
+    presenter.present(generatedCodeVMInstance, pane, t, GeneratedListing(),
+                      failure, pending.path, pending.line)
+    data.viewsApi.warnMessage(cstring(failure))
+    return
+  var cFiles: seq[string] = @[]
+  for f in response[cstring"cFiles"].to(seq[cstring]):
+    cFiles.add $f
+  let refused = presenter.showGeneratedCode(generatedCodeVMInstance, pane,
+    t.id, pending.path, pending.line, StopLocation(), cFiles,
+    proc(p: string; done: proc(r: presenter.RecordedText)) =
+      readDiskText(p, done),
+    proc(failure: string) =
+      if failure.len > 0:
+        data.viewsApi.warnMessage(cstring(failure))
+      else:
+        revealActiveGeneratedRow())
+  if refused.len > 0:
+    data.viewsApi.warnMessage(cstring(refused))
+
+proc showDisassembly*(data: Data) =
+  ## The View menu's **View Disassembly**: the Low Level Code pane with the
+  ## stop's machine code (§13.4, "Assembly"). The pane is where a generated C
+  ## listing is shown too, and the stop loader leaves a listing painted at
+  ## the stop alone (`LowLevelCodeVM.generatedAtStop`), so one on screen is
+  ## cleared first, which has the loader ask for the machine code again.
+  let session = panelSession()
+  if not session.isNil and not session.lowLevelCodeVM.isNil and
+     session.lowLevelCodeVM.generatedAtStop.val.len > 0:
+    session.lowLevelCodeVM.clearInstructions()
+  data.openLowLevelCode()
+
 proc generatedCodeCommandsAt*(path: cstring): seq[TargetCommand] =
   ## What the editor's context menu offers over `path`. GCL-D17's table lives
   ## in `commandsForPath`; this supplies its inputs.
@@ -248,50 +526,30 @@ proc showGeneratedCode*(data: Data; path: cstring; line: int;
   if generatedCodeVMInstance.isNil:
     return
 
-  generatedCodeVMInstance.noteBuildStarted(t, $path, line)
+  if t.id == presenter.firstTargetOf("x.nim"):
+    # Generated-Code-Listing §13.4: Nim's generated C, shown by the shared
+    # presenter — the operation every surface runs. Debug mode reads it from
+    # the recording; Edit mode, which has none, compiles the file now.
+    if data.trace.isNil:
+      showEditModeGeneratedC(data, t, $path, line)
+    else:
+      showRecordedGeneratedC(data, t, $path, line)
+    return
 
   let (listing, failure) = buildListing(t, $path)
-  if failure.len > 0:
-    generatedCodeVMInstance.noteBuildFailed(failure)
-    # THE SURFACE STILL OPENS, carrying the reason. §8: a build that fails must
-    # show WHY rather than resolving into an empty listing, and a command that
-    # silently does nothing is the same defect as a listing nobody paints.
-    data.openLowLevelCode()
-    let session = panelSession()
-    if not session.isNil:
-      discard session.lowLevelCodeVM.showGeneratedListing(
-        @[], @[], ArtefactSupport(), $path, line, failure)
-    return
-  generatedCodeVMInstance.openListing(listing, line)
-
-  # AND SOMETHING PAINTS IT. `Generated-Code-Listing.md` §7 asks for an editor
-  # TAB; this opens the Low Level Code PANE, and the divergence is deliberate
-  # and recorded rather than glossed.
-  #
-  # `openTab(name, ViewInstructions)` is what §0 observes `openAlternativeView`
-  # already doing, and it is the wrong instrument here: that view is fed by
+  # AND SOMETHING PAINTS IT — the Low Level Code PANE, not the editor TAB
+  # §7 asks for, deliberately: `openTab(name, ViewInstructions)` is fed by
   # `CtLoadAsmFunction` against a recording's asm and knows nothing about a
-  # compile artefact, so the tab would have opened EMPTY. A surface a user
-  # invokes and finds blank is precisely the defect this thread exists to
-  # close, and matching the spec's noun while reintroducing it would have been
-  # the worse divergence.
-  #
-  # The pane already renders what the spec asks the surface to render: a
-  # fidelity badge per row (GCL-A7), the three not-aligned states told apart
-  # (GCL-A8) and the sync toggle's visible state — all asserted against the
-  # view in `test_low_level_code_view_anchors.nim`. The tab is the right long
-  # answer and it needs a view of its own; this is the surface that exists.
+  # compile artefact, so the tab would have opened EMPTY. The pane renders
+  # what §7 asks of the surface (fidelity badges, GCL-A7; the not-aligned
+  # states, GCL-A8; the sync toggle — `test_low_level_code_view_anchors`).
+  # A build that fails still opens it, carrying the reason (§8). Painting it
+  # is the shared presenter's, as for every producer and every surface.
   data.openLowLevelCode()
-  var rows: seq[LowLevelInstruction] = @[]
-  for r in listing.rows:
-    rows.add LowLevelInstruction(
-      name: r.text, args: "", other: r.annotation, offset: r.index,
-      highLevelPath: "", highLevelLine: NO_HIGH_LEVEL_LINE)
   let session = panelSession()
-  if not session.isNil:
-    discard session.lowLevelCodeVM.showGeneratedListing(
-      rows, listing.anchors, listing.support, $path, line,
-      listing.listingAbsence)
+  presenter.present(generatedCodeVMInstance,
+    (if session.isNil: nil else: session.lowLevelCodeVM), t, listing, failure,
+    $path, line)
 
 # `showFirstGeneratedCodeTarget` WAS HERE AND IS DELETED, with
 # `generated_code_operation.keybindingTarget` behind it.

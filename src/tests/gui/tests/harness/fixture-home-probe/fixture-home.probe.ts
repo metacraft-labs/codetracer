@@ -16,12 +16,15 @@ const fixtureTest = (() => {
   } finally {
     const home = process.env.CODETRACER_HOME;
     const xdg = process.env.XDG_CONFIG_HOME;
+    const codex = process.env.CODEX_HOME;
     fs.writeFileSync(path.join(out, `${process.pid}.json`), JSON.stringify({
       pid: process.pid,
       home,
       xdg,
+      codex,
       homeExists: home !== undefined && fs.existsSync(home),
       xdgExists: xdg !== undefined && fs.existsSync(xdg),
+      codexExists: codex !== undefined && fs.existsSync(codex),
       markerExists: home !== undefined && fs.existsSync(path.join(home, ".codetracer-test-home")),
     }));
   }
@@ -34,13 +37,16 @@ test("fixture home lifecycle probe", () => {
   const imported = JSON.parse(fs.readFileSync(path.join(out, `${process.pid}.json`), "utf8")) as {
     home: string;
     xdg: string;
+    codex: string;
     markerExists: boolean;
   };
   const home = process.env.CODETRACER_HOME;
   const xdg = process.env.XDG_CONFIG_HOME;
   expect(home).toBe(imported.home);
   expect(xdg).toBe(imported.xdg);
+  expect(process.env.CODEX_HOME).toBe(imported.codex);
   if (!home || !xdg) throw new Error("fixtures must keep both homes set while tests run");
+  expect(fs.existsSync(imported.codex), "CODEX_HOME must stay alive during the test").toBe(true);
   expect(fs.existsSync(home), "CODETRACER_HOME must stay alive during the test").toBe(true);
   expect(fs.existsSync(xdg), "XDG_CONFIG_HOME must stay alive during the test").toBe(true);
   expect(fs.existsSync(path.join(home, ".codetracer-test-home"))).toBe(imported.markerExists);

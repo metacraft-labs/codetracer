@@ -1,0 +1,21 @@
+scenario: 1
+name: agent-activity-deepreview/test-run-in-flight
+pack: codetracer
+summary: >-
+  A `ct test` run still in flight renders at once as running — "1 running",
+  no passed or failed — and its running test offers no recording.
+
+stage:
+  - use: review-dataset
+    with: { variant: test-run-partial }
+  - use: open-review
+
+steps:
+  - wait: { until: { at: vcs, present: true }, timeout: 60s }
+  # the window has finished loading the review
+  - wait: { until: settled, timeout: 30s }
+  - wait: { until: { at: agent-activity, test-runs: 1 }, timeout: 30s }
+  - expect: { at: agent-activity/test-run-card, running: true, status: "1 running" }
+  - click: { at: agent-activity/test-run-card, anchor: header }
+  - wait: { until: { at: 'agent-activity/test-run-card/test-row[name="test_add"]', present: true }, timeout: 15s }
+  - expect: { at: 'agent-activity/test-run-card/test-row[name="test_add"]', outcome: running, has-actions: false }

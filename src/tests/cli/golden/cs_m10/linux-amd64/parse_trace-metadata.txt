@@ -1,0 +1,5349 @@
+# ct trace-metadata: 207 argv cases through ct's loader (the parse probe)
+
+### 1: bare
+argv: ct "trace-metadata"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace-metadata
+  recordingMetadataIdArg = none
+  traceMetadataPathArg = none
+  traceMetadataRecordPidArg = none
+  traceMetadataProgramArg = none
+  traceMetadataRecent = false
+  traceMetadataRecentFolders = false
+  traceMetadataAddRecentFolder = none
+  traceMetadataRecentLimit = 4
+  traceMetadataImportCt = none
+  traceMetadataImportSource = none
+  traceMetadataTest = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 2: --id <v>
+argv: ct "trace-metadata" "--id" "0190d7a0"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace-metadata
+  recordingMetadataIdArg = some("0190d7a0")
+  traceMetadataPathArg = none
+  traceMetadataRecordPidArg = none
+  traceMetadataProgramArg = none
+  traceMetadataRecent = false
+  traceMetadataRecentFolders = false
+  traceMetadataAddRecentFolder = none
+  traceMetadataRecentLimit = 4
+  traceMetadataImportCt = none
+  traceMetadataImportSource = none
+  traceMetadataTest = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 3: --id=<v>
+argv: ct "trace-metadata" "--id=0190d7a0"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace-metadata
+  recordingMetadataIdArg = some("0190d7a0")
+  traceMetadataPathArg = none
+  traceMetadataRecordPidArg = none
+  traceMetadataProgramArg = none
+  traceMetadataRecent = false
+  traceMetadataRecentFolders = false
+  traceMetadataAddRecentFolder = none
+  traceMetadataRecentLimit = 4
+  traceMetadataImportCt = none
+  traceMetadataImportSource = none
+  traceMetadataTest = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 4: --id:<v>
+argv: ct "trace-metadata" "--id:0190d7a0"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace-metadata
+  recordingMetadataIdArg = some("0190d7a0")
+  traceMetadataPathArg = none
+  traceMetadataRecordPidArg = none
+  traceMetadataProgramArg = none
+  traceMetadataRecent = false
+  traceMetadataRecentFolders = false
+  traceMetadataAddRecentFolder = none
+  traceMetadataRecentLimit = 4
+  traceMetadataImportCt = none
+  traceMetadataImportSource = none
+  traceMetadataTest = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 5: --id 0190d7a0
+argv: ct "trace-metadata" "--id" "0190d7a0"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace-metadata
+  recordingMetadataIdArg = some("0190d7a0")
+  traceMetadataPathArg = none
+  traceMetadataRecordPidArg = none
+  traceMetadataProgramArg = none
+  traceMetadataRecent = false
+  traceMetadataRecentFolders = false
+  traceMetadataAddRecentFolder = none
+  traceMetadataRecentLimit = 4
+  traceMetadataImportCt = none
+  traceMetadataImportSource = none
+  traceMetadataTest = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 6: --id=0190d7a0
+argv: ct "trace-metadata" "--id=0190d7a0"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace-metadata
+  recordingMetadataIdArg = some("0190d7a0")
+  traceMetadataPathArg = none
+  traceMetadataRecordPidArg = none
+  traceMetadataProgramArg = none
+  traceMetadataRecent = false
+  traceMetadataRecentFolders = false
+  traceMetadataAddRecentFolder = none
+  traceMetadataRecentLimit = 4
+  traceMetadataImportCt = none
+  traceMetadataImportSource = none
+  traceMetadataTest = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 7: --id empty
+argv: ct "trace-metadata" "--id" ""
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace-metadata
+  recordingMetadataIdArg = some("")
+  traceMetadataPathArg = none
+  traceMetadataRecordPidArg = none
+  traceMetadataProgramArg = none
+  traceMetadataRecent = false
+  traceMetadataRecentFolders = false
+  traceMetadataAddRecentFolder = none
+  traceMetadataRecentLimit = 4
+  traceMetadataImportCt = none
+  traceMetadataImportSource = none
+  traceMetadataTest = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 8: --id= (empty)
+argv: ct "trace-metadata" "--id="
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace-metadata
+  recordingMetadataIdArg = some("")
+  traceMetadataPathArg = none
+  traceMetadataRecordPidArg = none
+  traceMetadataProgramArg = none
+  traceMetadataRecent = false
+  traceMetadataRecentFolders = false
+  traceMetadataAddRecentFolder = none
+  traceMetadataRecentLimit = 4
+  traceMetadataImportCt = none
+  traceMetadataImportSource = none
+  traceMetadataTest = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 9: --id= <v> (next word)
+argv: ct "trace-metadata" "--id=" "0190d7a0"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace-metadata
+  recordingMetadataIdArg = some("0190d7a0")
+  traceMetadataPathArg = none
+  traceMetadataRecordPidArg = none
+  traceMetadataProgramArg = none
+  traceMetadataRecent = false
+  traceMetadataRecentFolders = false
+  traceMetadataAddRecentFolder = none
+  traceMetadataRecentLimit = 4
+  traceMetadataImportCt = none
+  traceMetadataImportSource = none
+  traceMetadataTest = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 10: --id -x (value starts with -)
+argv: ct "trace-metadata" "--id" "-x"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace-metadata
+  recordingMetadataIdArg = some("-x")
+  traceMetadataPathArg = none
+  traceMetadataRecordPidArg = none
+  traceMetadataProgramArg = none
+  traceMetadataRecent = false
+  traceMetadataRecentFolders = false
+  traceMetadataAddRecentFolder = none
+  traceMetadataRecentLimit = 4
+  traceMetadataImportCt = none
+  traceMetadataImportSource = none
+  traceMetadataTest = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 11: --id --x (value starts with --)
+argv: ct "trace-metadata" "--id" "--x"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace-metadata
+  recordingMetadataIdArg = some("--x")
+  traceMetadataPathArg = none
+  traceMetadataRecordPidArg = none
+  traceMetadataProgramArg = none
+  traceMetadataRecent = false
+  traceMetadataRecentFolders = false
+  traceMetadataAddRecentFolder = none
+  traceMetadataRecentLimit = 4
+  traceMetadataImportCt = none
+  traceMetadataImportSource = none
+  traceMetadataTest = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 12: --id --new-tab <v> (an option between it and its value)
+argv: ct "trace-metadata" "--id" "--new-tab" "0190d7a0"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The subcommand 'trace-metadata' does not accept arguments\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 13: --id repeated, last wins
+argv: ct "trace-metadata" "--id" "0190d7a0" "--id" "0190d7a0"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace-metadata
+  recordingMetadataIdArg = some("0190d7a0")
+  traceMetadataPathArg = none
+  traceMetadataRecordPidArg = none
+  traceMetadataProgramArg = none
+  traceMetadataRecent = false
+  traceMetadataRecentFolders = false
+  traceMetadataAddRecentFolder = none
+  traceMetadataRecentLimit = 4
+  traceMetadataImportCt = none
+  traceMetadataImportSource = none
+  traceMetadataTest = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 14: --id missing value (last)
+argv: ct "trace-metadata" "--id"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The option '\e[34m--id\e[0m' requires a value\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 15: --ID <v> (style variant)
+argv: ct "trace-metadata" "--ID" "0190d7a0"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace-metadata
+  recordingMetadataIdArg = some("0190d7a0")
+  traceMetadataPathArg = none
+  traceMetadataRecordPidArg = none
+  traceMetadataProgramArg = none
+  traceMetadataRecent = false
+  traceMetadataRecentFolders = false
+  traceMetadataAddRecentFolder = none
+  traceMetadataRecentLimit = 4
+  traceMetadataImportCt = none
+  traceMetadataImportSource = none
+  traceMetadataTest = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 16: --i_d <v> (style variant)
+argv: ct "trace-metadata" "--i_d" "0190d7a0"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace-metadata
+  recordingMetadataIdArg = some("0190d7a0")
+  traceMetadataPathArg = none
+  traceMetadataRecordPidArg = none
+  traceMetadataProgramArg = none
+  traceMetadataRecent = false
+  traceMetadataRecentFolders = false
+  traceMetadataAddRecentFolder = none
+  traceMetadataRecentLimit = 4
+  traceMetadataImportCt = none
+  traceMetadataImportSource = none
+  traceMetadataTest = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 17: --path <v>
+argv: ct "trace-metadata" "--path" "/t"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace-metadata
+  recordingMetadataIdArg = none
+  traceMetadataPathArg = some("/t")
+  traceMetadataRecordPidArg = none
+  traceMetadataProgramArg = none
+  traceMetadataRecent = false
+  traceMetadataRecentFolders = false
+  traceMetadataAddRecentFolder = none
+  traceMetadataRecentLimit = 4
+  traceMetadataImportCt = none
+  traceMetadataImportSource = none
+  traceMetadataTest = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 18: --path=<v>
+argv: ct "trace-metadata" "--path=/t"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace-metadata
+  recordingMetadataIdArg = none
+  traceMetadataPathArg = some("/t")
+  traceMetadataRecordPidArg = none
+  traceMetadataProgramArg = none
+  traceMetadataRecent = false
+  traceMetadataRecentFolders = false
+  traceMetadataAddRecentFolder = none
+  traceMetadataRecentLimit = 4
+  traceMetadataImportCt = none
+  traceMetadataImportSource = none
+  traceMetadataTest = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 19: --path:<v>
+argv: ct "trace-metadata" "--path:/t"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace-metadata
+  recordingMetadataIdArg = none
+  traceMetadataPathArg = some("/t")
+  traceMetadataRecordPidArg = none
+  traceMetadataProgramArg = none
+  traceMetadataRecent = false
+  traceMetadataRecentFolders = false
+  traceMetadataAddRecentFolder = none
+  traceMetadataRecentLimit = 4
+  traceMetadataImportCt = none
+  traceMetadataImportSource = none
+  traceMetadataTest = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 20: --path /t
+argv: ct "trace-metadata" "--path" "/t"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace-metadata
+  recordingMetadataIdArg = none
+  traceMetadataPathArg = some("/t")
+  traceMetadataRecordPidArg = none
+  traceMetadataProgramArg = none
+  traceMetadataRecent = false
+  traceMetadataRecentFolders = false
+  traceMetadataAddRecentFolder = none
+  traceMetadataRecentLimit = 4
+  traceMetadataImportCt = none
+  traceMetadataImportSource = none
+  traceMetadataTest = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 21: --path=/t
+argv: ct "trace-metadata" "--path=/t"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace-metadata
+  recordingMetadataIdArg = none
+  traceMetadataPathArg = some("/t")
+  traceMetadataRecordPidArg = none
+  traceMetadataProgramArg = none
+  traceMetadataRecent = false
+  traceMetadataRecentFolders = false
+  traceMetadataAddRecentFolder = none
+  traceMetadataRecentLimit = 4
+  traceMetadataImportCt = none
+  traceMetadataImportSource = none
+  traceMetadataTest = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 22: --path empty
+argv: ct "trace-metadata" "--path" ""
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace-metadata
+  recordingMetadataIdArg = none
+  traceMetadataPathArg = some("")
+  traceMetadataRecordPidArg = none
+  traceMetadataProgramArg = none
+  traceMetadataRecent = false
+  traceMetadataRecentFolders = false
+  traceMetadataAddRecentFolder = none
+  traceMetadataRecentLimit = 4
+  traceMetadataImportCt = none
+  traceMetadataImportSource = none
+  traceMetadataTest = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 23: --path= (empty)
+argv: ct "trace-metadata" "--path="
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace-metadata
+  recordingMetadataIdArg = none
+  traceMetadataPathArg = some("")
+  traceMetadataRecordPidArg = none
+  traceMetadataProgramArg = none
+  traceMetadataRecent = false
+  traceMetadataRecentFolders = false
+  traceMetadataAddRecentFolder = none
+  traceMetadataRecentLimit = 4
+  traceMetadataImportCt = none
+  traceMetadataImportSource = none
+  traceMetadataTest = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 24: --path= <v> (next word)
+argv: ct "trace-metadata" "--path=" "/t"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace-metadata
+  recordingMetadataIdArg = none
+  traceMetadataPathArg = some("/t")
+  traceMetadataRecordPidArg = none
+  traceMetadataProgramArg = none
+  traceMetadataRecent = false
+  traceMetadataRecentFolders = false
+  traceMetadataAddRecentFolder = none
+  traceMetadataRecentLimit = 4
+  traceMetadataImportCt = none
+  traceMetadataImportSource = none
+  traceMetadataTest = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 25: --path -x (value starts with -)
+argv: ct "trace-metadata" "--path" "-x"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace-metadata
+  recordingMetadataIdArg = none
+  traceMetadataPathArg = some("-x")
+  traceMetadataRecordPidArg = none
+  traceMetadataProgramArg = none
+  traceMetadataRecent = false
+  traceMetadataRecentFolders = false
+  traceMetadataAddRecentFolder = none
+  traceMetadataRecentLimit = 4
+  traceMetadataImportCt = none
+  traceMetadataImportSource = none
+  traceMetadataTest = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 26: --path --x (value starts with --)
+argv: ct "trace-metadata" "--path" "--x"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace-metadata
+  recordingMetadataIdArg = none
+  traceMetadataPathArg = some("--x")
+  traceMetadataRecordPidArg = none
+  traceMetadataProgramArg = none
+  traceMetadataRecent = false
+  traceMetadataRecentFolders = false
+  traceMetadataAddRecentFolder = none
+  traceMetadataRecentLimit = 4
+  traceMetadataImportCt = none
+  traceMetadataImportSource = none
+  traceMetadataTest = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 27: --path --new-tab <v> (an option between it and its value)
+argv: ct "trace-metadata" "--path" "--new-tab" "/t"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The subcommand 'trace-metadata' does not accept arguments\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 28: --path repeated, last wins
+argv: ct "trace-metadata" "--path" "/t" "--path" "/t"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace-metadata
+  recordingMetadataIdArg = none
+  traceMetadataPathArg = some("/t")
+  traceMetadataRecordPidArg = none
+  traceMetadataProgramArg = none
+  traceMetadataRecent = false
+  traceMetadataRecentFolders = false
+  traceMetadataAddRecentFolder = none
+  traceMetadataRecentLimit = 4
+  traceMetadataImportCt = none
+  traceMetadataImportSource = none
+  traceMetadataTest = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 29: --path missing value (last)
+argv: ct "trace-metadata" "--path"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The option '\e[34m--path\e[0m' requires a value\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 30: --PATH <v> (style variant)
+argv: ct "trace-metadata" "--PATH" "/t"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace-metadata
+  recordingMetadataIdArg = none
+  traceMetadataPathArg = some("/t")
+  traceMetadataRecordPidArg = none
+  traceMetadataProgramArg = none
+  traceMetadataRecent = false
+  traceMetadataRecentFolders = false
+  traceMetadataAddRecentFolder = none
+  traceMetadataRecentLimit = 4
+  traceMetadataImportCt = none
+  traceMetadataImportSource = none
+  traceMetadataTest = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 31: --p_ath <v> (style variant)
+argv: ct "trace-metadata" "--p_ath" "/t"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace-metadata
+  recordingMetadataIdArg = none
+  traceMetadataPathArg = some("/t")
+  traceMetadataRecordPidArg = none
+  traceMetadataProgramArg = none
+  traceMetadataRecent = false
+  traceMetadataRecentFolders = false
+  traceMetadataAddRecentFolder = none
+  traceMetadataRecentLimit = 4
+  traceMetadataImportCt = none
+  traceMetadataImportSource = none
+  traceMetadataTest = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 32: --record-pid <v>
+argv: ct "trace-metadata" "--record-pid" "42"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace-metadata
+  recordingMetadataIdArg = none
+  traceMetadataPathArg = none
+  traceMetadataRecordPidArg = some(42)
+  traceMetadataProgramArg = none
+  traceMetadataRecent = false
+  traceMetadataRecentFolders = false
+  traceMetadataAddRecentFolder = none
+  traceMetadataRecentLimit = 4
+  traceMetadataImportCt = none
+  traceMetadataImportSource = none
+  traceMetadataTest = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 33: --record-pid=<v>
+argv: ct "trace-metadata" "--record-pid=42"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace-metadata
+  recordingMetadataIdArg = none
+  traceMetadataPathArg = none
+  traceMetadataRecordPidArg = some(42)
+  traceMetadataProgramArg = none
+  traceMetadataRecent = false
+  traceMetadataRecentFolders = false
+  traceMetadataAddRecentFolder = none
+  traceMetadataRecentLimit = 4
+  traceMetadataImportCt = none
+  traceMetadataImportSource = none
+  traceMetadataTest = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 34: --record-pid:<v>
+argv: ct "trace-metadata" "--record-pid:42"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace-metadata
+  recordingMetadataIdArg = none
+  traceMetadataPathArg = none
+  traceMetadataRecordPidArg = some(42)
+  traceMetadataProgramArg = none
+  traceMetadataRecent = false
+  traceMetadataRecentFolders = false
+  traceMetadataAddRecentFolder = none
+  traceMetadataRecentLimit = 4
+  traceMetadataImportCt = none
+  traceMetadataImportSource = none
+  traceMetadataTest = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 35: -r <v>
+argv: ct "trace-metadata" "-r" "42"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace-metadata
+  recordingMetadataIdArg = none
+  traceMetadataPathArg = none
+  traceMetadataRecordPidArg = some(42)
+  traceMetadataProgramArg = none
+  traceMetadataRecent = false
+  traceMetadataRecentFolders = false
+  traceMetadataAddRecentFolder = none
+  traceMetadataRecentLimit = 4
+  traceMetadataImportCt = none
+  traceMetadataImportSource = none
+  traceMetadataTest = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 36: -r=<v>
+argv: ct "trace-metadata" "-r=42"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace-metadata
+  recordingMetadataIdArg = none
+  traceMetadataPathArg = none
+  traceMetadataRecordPidArg = some(42)
+  traceMetadataProgramArg = none
+  traceMetadataRecent = false
+  traceMetadataRecentFolders = false
+  traceMetadataAddRecentFolder = none
+  traceMetadataRecentLimit = 4
+  traceMetadataImportCt = none
+  traceMetadataImportSource = none
+  traceMetadataTest = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 37: -r:<v>
+argv: ct "trace-metadata" "-r:42"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace-metadata
+  recordingMetadataIdArg = none
+  traceMetadataPathArg = none
+  traceMetadataRecordPidArg = some(42)
+  traceMetadataProgramArg = none
+  traceMetadataRecent = false
+  traceMetadataRecentFolders = false
+  traceMetadataAddRecentFolder = none
+  traceMetadataRecentLimit = 4
+  traceMetadataImportCt = none
+  traceMetadataImportSource = none
+  traceMetadataTest = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 38: -r<v> (attached)
+argv: ct "trace-metadata" "-r42"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace-metadata
+  recordingMetadataIdArg = none
+  traceMetadataPathArg = none
+  traceMetadataRecordPidArg = some(42)
+  traceMetadataProgramArg = none
+  traceMetadataRecent = false
+  traceMetadataRecentFolders = false
+  traceMetadataAddRecentFolder = none
+  traceMetadataRecentLimit = 4
+  traceMetadataImportCt = none
+  traceMetadataImportSource = none
+  traceMetadataTest = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 39: -R <v> (other case)
+argv: ct "trace-metadata" "-R" "42"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'R'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 40: --r <v> (the letter as a long option)
+argv: ct "trace-metadata" "--r" "42"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace-metadata
+  recordingMetadataIdArg = none
+  traceMetadataPathArg = none
+  traceMetadataRecordPidArg = some(42)
+  traceMetadataProgramArg = none
+  traceMetadataRecent = false
+  traceMetadataRecentFolders = false
+  traceMetadataAddRecentFolder = none
+  traceMetadataRecentLimit = 4
+  traceMetadataImportCt = none
+  traceMetadataImportSource = none
+  traceMetadataTest = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 41: --record-pid 42
+argv: ct "trace-metadata" "--record-pid" "42"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace-metadata
+  recordingMetadataIdArg = none
+  traceMetadataPathArg = none
+  traceMetadataRecordPidArg = some(42)
+  traceMetadataProgramArg = none
+  traceMetadataRecent = false
+  traceMetadataRecentFolders = false
+  traceMetadataAddRecentFolder = none
+  traceMetadataRecentLimit = 4
+  traceMetadataImportCt = none
+  traceMetadataImportSource = none
+  traceMetadataTest = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 42: --record-pid=42
+argv: ct "trace-metadata" "--record-pid=42"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace-metadata
+  recordingMetadataIdArg = none
+  traceMetadataPathArg = none
+  traceMetadataRecordPidArg = some(42)
+  traceMetadataProgramArg = none
+  traceMetadataRecent = false
+  traceMetadataRecentFolders = false
+  traceMetadataAddRecentFolder = none
+  traceMetadataRecentLimit = 4
+  traceMetadataImportCt = none
+  traceMetadataImportSource = none
+  traceMetadataTest = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 43: --record-pid bad x
+argv: ct "trace-metadata" "--record-pid" "x"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Error while processing the \e[34mrecord-pid=x\e[0m parameter: invalid integer: x\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 44: --record-pid=bad x
+argv: ct "trace-metadata" "--record-pid=x"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Error while processing the \e[34mrecord-pid=x\e[0m parameter: invalid integer: x\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 45: --record-pid empty
+argv: ct "trace-metadata" "--record-pid" ""
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Error while processing the \e[34mrecord-pid=\e[0m parameter: invalid integer: \e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 46: --record-pid= (empty)
+argv: ct "trace-metadata" "--record-pid="
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Error while processing the \e[34mrecord-pid=\e[0m parameter: invalid integer: \e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 47: --record-pid= <v> (next word)
+argv: ct "trace-metadata" "--record-pid=" "42"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace-metadata
+  recordingMetadataIdArg = none
+  traceMetadataPathArg = none
+  traceMetadataRecordPidArg = some(42)
+  traceMetadataProgramArg = none
+  traceMetadataRecent = false
+  traceMetadataRecentFolders = false
+  traceMetadataAddRecentFolder = none
+  traceMetadataRecentLimit = 4
+  traceMetadataImportCt = none
+  traceMetadataImportSource = none
+  traceMetadataTest = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 48: --record-pid -x (value starts with -)
+argv: ct "trace-metadata" "--record-pid" "-x"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Error while processing the \e[34mrecord-pid=-x\e[0m parameter: invalid integer: -x\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 49: --record-pid --x (value starts with --)
+argv: ct "trace-metadata" "--record-pid" "--x"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Error while processing the \e[34mrecord-pid=--x\e[0m parameter: invalid integer: --x\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 50: --record-pid --new-tab <v> (an option between it and its value)
+argv: ct "trace-metadata" "--record-pid" "--new-tab" "42"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Error while processing the \e[34mrecord-pid=--new-tab\e[0m parameter: invalid integer: --new-tab\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 51: --record-pid repeated, last wins
+argv: ct "trace-metadata" "--record-pid" "42" "--record-pid" "42"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace-metadata
+  recordingMetadataIdArg = none
+  traceMetadataPathArg = none
+  traceMetadataRecordPidArg = some(42)
+  traceMetadataProgramArg = none
+  traceMetadataRecent = false
+  traceMetadataRecentFolders = false
+  traceMetadataAddRecentFolder = none
+  traceMetadataRecentLimit = 4
+  traceMetadataImportCt = none
+  traceMetadataImportSource = none
+  traceMetadataTest = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 52: --record-pid missing value (last)
+argv: ct "trace-metadata" "--record-pid"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The option '\e[34m--record-pid\e[0m' requires a value\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 53: --RECORD-PID <v> (style variant)
+argv: ct "trace-metadata" "--RECORD-PID" "42"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace-metadata
+  recordingMetadataIdArg = none
+  traceMetadataPathArg = none
+  traceMetadataRecordPidArg = some(42)
+  traceMetadataProgramArg = none
+  traceMetadataRecent = false
+  traceMetadataRecentFolders = false
+  traceMetadataAddRecentFolder = none
+  traceMetadataRecentLimit = 4
+  traceMetadataImportCt = none
+  traceMetadataImportSource = none
+  traceMetadataTest = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 54: --r_ecord-pid <v> (style variant)
+argv: ct "trace-metadata" "--r_ecord-pid" "42"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace-metadata
+  recordingMetadataIdArg = none
+  traceMetadataPathArg = none
+  traceMetadataRecordPidArg = some(42)
+  traceMetadataProgramArg = none
+  traceMetadataRecent = false
+  traceMetadataRecentFolders = false
+  traceMetadataAddRecentFolder = none
+  traceMetadataRecentLimit = 4
+  traceMetadataImportCt = none
+  traceMetadataImportSource = none
+  traceMetadataTest = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 55: --record_pid <v> (style variant)
+argv: ct "trace-metadata" "--record_pid" "42"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'record_pid'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 56: --recordpid <v> (style variant)
+argv: ct "trace-metadata" "--recordpid" "42"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'recordpid'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 57: --program <v>
+argv: ct "trace-metadata" "--program" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace-metadata
+  recordingMetadataIdArg = none
+  traceMetadataPathArg = none
+  traceMetadataRecordPidArg = none
+  traceMetadataProgramArg = some("prog")
+  traceMetadataRecent = false
+  traceMetadataRecentFolders = false
+  traceMetadataAddRecentFolder = none
+  traceMetadataRecentLimit = 4
+  traceMetadataImportCt = none
+  traceMetadataImportSource = none
+  traceMetadataTest = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 58: --program=<v>
+argv: ct "trace-metadata" "--program=prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace-metadata
+  recordingMetadataIdArg = none
+  traceMetadataPathArg = none
+  traceMetadataRecordPidArg = none
+  traceMetadataProgramArg = some("prog")
+  traceMetadataRecent = false
+  traceMetadataRecentFolders = false
+  traceMetadataAddRecentFolder = none
+  traceMetadataRecentLimit = 4
+  traceMetadataImportCt = none
+  traceMetadataImportSource = none
+  traceMetadataTest = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 59: --program:<v>
+argv: ct "trace-metadata" "--program:prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace-metadata
+  recordingMetadataIdArg = none
+  traceMetadataPathArg = none
+  traceMetadataRecordPidArg = none
+  traceMetadataProgramArg = some("prog")
+  traceMetadataRecent = false
+  traceMetadataRecentFolders = false
+  traceMetadataAddRecentFolder = none
+  traceMetadataRecentLimit = 4
+  traceMetadataImportCt = none
+  traceMetadataImportSource = none
+  traceMetadataTest = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 60: --program prog
+argv: ct "trace-metadata" "--program" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace-metadata
+  recordingMetadataIdArg = none
+  traceMetadataPathArg = none
+  traceMetadataRecordPidArg = none
+  traceMetadataProgramArg = some("prog")
+  traceMetadataRecent = false
+  traceMetadataRecentFolders = false
+  traceMetadataAddRecentFolder = none
+  traceMetadataRecentLimit = 4
+  traceMetadataImportCt = none
+  traceMetadataImportSource = none
+  traceMetadataTest = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 61: --program=prog
+argv: ct "trace-metadata" "--program=prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace-metadata
+  recordingMetadataIdArg = none
+  traceMetadataPathArg = none
+  traceMetadataRecordPidArg = none
+  traceMetadataProgramArg = some("prog")
+  traceMetadataRecent = false
+  traceMetadataRecentFolders = false
+  traceMetadataAddRecentFolder = none
+  traceMetadataRecentLimit = 4
+  traceMetadataImportCt = none
+  traceMetadataImportSource = none
+  traceMetadataTest = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 62: --program empty
+argv: ct "trace-metadata" "--program" ""
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace-metadata
+  recordingMetadataIdArg = none
+  traceMetadataPathArg = none
+  traceMetadataRecordPidArg = none
+  traceMetadataProgramArg = some("")
+  traceMetadataRecent = false
+  traceMetadataRecentFolders = false
+  traceMetadataAddRecentFolder = none
+  traceMetadataRecentLimit = 4
+  traceMetadataImportCt = none
+  traceMetadataImportSource = none
+  traceMetadataTest = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 63: --program= (empty)
+argv: ct "trace-metadata" "--program="
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace-metadata
+  recordingMetadataIdArg = none
+  traceMetadataPathArg = none
+  traceMetadataRecordPidArg = none
+  traceMetadataProgramArg = some("")
+  traceMetadataRecent = false
+  traceMetadataRecentFolders = false
+  traceMetadataAddRecentFolder = none
+  traceMetadataRecentLimit = 4
+  traceMetadataImportCt = none
+  traceMetadataImportSource = none
+  traceMetadataTest = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 64: --program= <v> (next word)
+argv: ct "trace-metadata" "--program=" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace-metadata
+  recordingMetadataIdArg = none
+  traceMetadataPathArg = none
+  traceMetadataRecordPidArg = none
+  traceMetadataProgramArg = some("prog")
+  traceMetadataRecent = false
+  traceMetadataRecentFolders = false
+  traceMetadataAddRecentFolder = none
+  traceMetadataRecentLimit = 4
+  traceMetadataImportCt = none
+  traceMetadataImportSource = none
+  traceMetadataTest = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 65: --program -x (value starts with -)
+argv: ct "trace-metadata" "--program" "-x"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace-metadata
+  recordingMetadataIdArg = none
+  traceMetadataPathArg = none
+  traceMetadataRecordPidArg = none
+  traceMetadataProgramArg = some("-x")
+  traceMetadataRecent = false
+  traceMetadataRecentFolders = false
+  traceMetadataAddRecentFolder = none
+  traceMetadataRecentLimit = 4
+  traceMetadataImportCt = none
+  traceMetadataImportSource = none
+  traceMetadataTest = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 66: --program --x (value starts with --)
+argv: ct "trace-metadata" "--program" "--x"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace-metadata
+  recordingMetadataIdArg = none
+  traceMetadataPathArg = none
+  traceMetadataRecordPidArg = none
+  traceMetadataProgramArg = some("--x")
+  traceMetadataRecent = false
+  traceMetadataRecentFolders = false
+  traceMetadataAddRecentFolder = none
+  traceMetadataRecentLimit = 4
+  traceMetadataImportCt = none
+  traceMetadataImportSource = none
+  traceMetadataTest = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 67: --program --new-tab <v> (an option between it and its value)
+argv: ct "trace-metadata" "--program" "--new-tab" "prog"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The subcommand 'trace-metadata' does not accept arguments\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 68: --program repeated, last wins
+argv: ct "trace-metadata" "--program" "prog" "--program" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace-metadata
+  recordingMetadataIdArg = none
+  traceMetadataPathArg = none
+  traceMetadataRecordPidArg = none
+  traceMetadataProgramArg = some("prog")
+  traceMetadataRecent = false
+  traceMetadataRecentFolders = false
+  traceMetadataAddRecentFolder = none
+  traceMetadataRecentLimit = 4
+  traceMetadataImportCt = none
+  traceMetadataImportSource = none
+  traceMetadataTest = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 69: --program missing value (last)
+argv: ct "trace-metadata" "--program"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The option '\e[34m--program\e[0m' requires a value\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 70: --PROGRAM <v> (style variant)
+argv: ct "trace-metadata" "--PROGRAM" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace-metadata
+  recordingMetadataIdArg = none
+  traceMetadataPathArg = none
+  traceMetadataRecordPidArg = none
+  traceMetadataProgramArg = some("prog")
+  traceMetadataRecent = false
+  traceMetadataRecentFolders = false
+  traceMetadataAddRecentFolder = none
+  traceMetadataRecentLimit = 4
+  traceMetadataImportCt = none
+  traceMetadataImportSource = none
+  traceMetadataTest = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 71: --p_rogram <v> (style variant)
+argv: ct "trace-metadata" "--p_rogram" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace-metadata
+  recordingMetadataIdArg = none
+  traceMetadataPathArg = none
+  traceMetadataRecordPidArg = none
+  traceMetadataProgramArg = some("prog")
+  traceMetadataRecent = false
+  traceMetadataRecentFolders = false
+  traceMetadataAddRecentFolder = none
+  traceMetadataRecentLimit = 4
+  traceMetadataImportCt = none
+  traceMetadataImportSource = none
+  traceMetadataTest = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 72: --recent
+argv: ct "trace-metadata" "--recent"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace-metadata
+  recordingMetadataIdArg = none
+  traceMetadataPathArg = none
+  traceMetadataRecordPidArg = none
+  traceMetadataProgramArg = none
+  traceMetadataRecent = true
+  traceMetadataRecentFolders = false
+  traceMetadataAddRecentFolder = none
+  traceMetadataRecentLimit = 4
+  traceMetadataImportCt = none
+  traceMetadataImportSource = none
+  traceMetadataTest = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 73: --recent=true
+argv: ct "trace-metadata" "--recent=true"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace-metadata
+  recordingMetadataIdArg = none
+  traceMetadataPathArg = none
+  traceMetadataRecordPidArg = none
+  traceMetadataProgramArg = none
+  traceMetadataRecent = true
+  traceMetadataRecentFolders = false
+  traceMetadataAddRecentFolder = none
+  traceMetadataRecentLimit = 4
+  traceMetadataImportCt = none
+  traceMetadataImportSource = none
+  traceMetadataTest = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 74: --recent=false
+argv: ct "trace-metadata" "--recent=false"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace-metadata
+  recordingMetadataIdArg = none
+  traceMetadataPathArg = none
+  traceMetadataRecordPidArg = none
+  traceMetadataProgramArg = none
+  traceMetadataRecent = false
+  traceMetadataRecentFolders = false
+  traceMetadataAddRecentFolder = none
+  traceMetadataRecentLimit = 4
+  traceMetadataImportCt = none
+  traceMetadataImportSource = none
+  traceMetadataTest = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 75: --recent=on
+argv: ct "trace-metadata" "--recent=on"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace-metadata
+  recordingMetadataIdArg = none
+  traceMetadataPathArg = none
+  traceMetadataRecordPidArg = none
+  traceMetadataProgramArg = none
+  traceMetadataRecent = true
+  traceMetadataRecentFolders = false
+  traceMetadataAddRecentFolder = none
+  traceMetadataRecentLimit = 4
+  traceMetadataImportCt = none
+  traceMetadataImportSource = none
+  traceMetadataTest = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 76: --recent=off
+argv: ct "trace-metadata" "--recent=off"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace-metadata
+  recordingMetadataIdArg = none
+  traceMetadataPathArg = none
+  traceMetadataRecordPidArg = none
+  traceMetadataProgramArg = none
+  traceMetadataRecent = false
+  traceMetadataRecentFolders = false
+  traceMetadataAddRecentFolder = none
+  traceMetadataRecentLimit = 4
+  traceMetadataImportCt = none
+  traceMetadataImportSource = none
+  traceMetadataTest = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 77: --recent=yes
+argv: ct "trace-metadata" "--recent=yes"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace-metadata
+  recordingMetadataIdArg = none
+  traceMetadataPathArg = none
+  traceMetadataRecordPidArg = none
+  traceMetadataProgramArg = none
+  traceMetadataRecent = true
+  traceMetadataRecentFolders = false
+  traceMetadataAddRecentFolder = none
+  traceMetadataRecentLimit = 4
+  traceMetadataImportCt = none
+  traceMetadataImportSource = none
+  traceMetadataTest = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 78: --recent=no
+argv: ct "trace-metadata" "--recent=no"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace-metadata
+  recordingMetadataIdArg = none
+  traceMetadataPathArg = none
+  traceMetadataRecordPidArg = none
+  traceMetadataProgramArg = none
+  traceMetadataRecent = false
+  traceMetadataRecentFolders = false
+  traceMetadataAddRecentFolder = none
+  traceMetadataRecentLimit = 4
+  traceMetadataImportCt = none
+  traceMetadataImportSource = none
+  traceMetadataTest = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 79: --recent=1
+argv: ct "trace-metadata" "--recent=1"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace-metadata
+  recordingMetadataIdArg = none
+  traceMetadataPathArg = none
+  traceMetadataRecordPidArg = none
+  traceMetadataProgramArg = none
+  traceMetadataRecent = true
+  traceMetadataRecentFolders = false
+  traceMetadataAddRecentFolder = none
+  traceMetadataRecentLimit = 4
+  traceMetadataImportCt = none
+  traceMetadataImportSource = none
+  traceMetadataTest = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 80: --recent=0
+argv: ct "trace-metadata" "--recent=0"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace-metadata
+  recordingMetadataIdArg = none
+  traceMetadataPathArg = none
+  traceMetadataRecordPidArg = none
+  traceMetadataProgramArg = none
+  traceMetadataRecent = false
+  traceMetadataRecentFolders = false
+  traceMetadataAddRecentFolder = none
+  traceMetadataRecentLimit = 4
+  traceMetadataImportCt = none
+  traceMetadataImportSource = none
+  traceMetadataTest = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 81: --recent=maybe
+argv: ct "trace-metadata" "--recent=maybe"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Error while processing the \e[34mrecent=maybe\e[0m parameter: 'maybe' is not a valid boolean value. Supported values are on/off, yes/no, true/false or 1/0\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 82: --recent=
+argv: ct "trace-metadata" "--recent="
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace-metadata
+  recordingMetadataIdArg = none
+  traceMetadataPathArg = none
+  traceMetadataRecordPidArg = none
+  traceMetadataProgramArg = none
+  traceMetadataRecent = true
+  traceMetadataRecentFolders = false
+  traceMetadataAddRecentFolder = none
+  traceMetadataRecentLimit = 4
+  traceMetadataImportCt = none
+  traceMetadataImportSource = none
+  traceMetadataTest = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 83: --recent:false
+argv: ct "trace-metadata" "--recent:false"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace-metadata
+  recordingMetadataIdArg = none
+  traceMetadataPathArg = none
+  traceMetadataRecordPidArg = none
+  traceMetadataProgramArg = none
+  traceMetadataRecent = false
+  traceMetadataRecentFolders = false
+  traceMetadataAddRecentFolder = none
+  traceMetadataRecentLimit = 4
+  traceMetadataImportCt = none
+  traceMetadataImportSource = none
+  traceMetadataTest = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 84: --recent false (next word)
+argv: ct "trace-metadata" "--recent" "false"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The subcommand 'trace-metadata' does not accept arguments\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 85: --recent twice
+argv: ct "trace-metadata" "--recent" "--recent"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace-metadata
+  recordingMetadataIdArg = none
+  traceMetadataPathArg = none
+  traceMetadataRecordPidArg = none
+  traceMetadataProgramArg = none
+  traceMetadataRecent = true
+  traceMetadataRecentFolders = false
+  traceMetadataAddRecentFolder = none
+  traceMetadataRecentLimit = 4
+  traceMetadataImportCt = none
+  traceMetadataImportSource = none
+  traceMetadataTest = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 86: --no-recent
+argv: ct "trace-metadata" "--no-recent"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'no-recent'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 87: --RECENT (style variant)
+argv: ct "trace-metadata" "--RECENT"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace-metadata
+  recordingMetadataIdArg = none
+  traceMetadataPathArg = none
+  traceMetadataRecordPidArg = none
+  traceMetadataProgramArg = none
+  traceMetadataRecent = true
+  traceMetadataRecentFolders = false
+  traceMetadataAddRecentFolder = none
+  traceMetadataRecentLimit = 4
+  traceMetadataImportCt = none
+  traceMetadataImportSource = none
+  traceMetadataTest = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 88: --r_ecent (style variant)
+argv: ct "trace-metadata" "--r_ecent"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace-metadata
+  recordingMetadataIdArg = none
+  traceMetadataPathArg = none
+  traceMetadataRecordPidArg = none
+  traceMetadataProgramArg = none
+  traceMetadataRecent = true
+  traceMetadataRecentFolders = false
+  traceMetadataAddRecentFolder = none
+  traceMetadataRecentLimit = 4
+  traceMetadataImportCt = none
+  traceMetadataImportSource = none
+  traceMetadataTest = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 89: --recent-folders
+argv: ct "trace-metadata" "--recent-folders"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace-metadata
+  recordingMetadataIdArg = none
+  traceMetadataPathArg = none
+  traceMetadataRecordPidArg = none
+  traceMetadataProgramArg = none
+  traceMetadataRecent = false
+  traceMetadataRecentFolders = true
+  traceMetadataAddRecentFolder = none
+  traceMetadataRecentLimit = 4
+  traceMetadataImportCt = none
+  traceMetadataImportSource = none
+  traceMetadataTest = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 90: --recent-folders=true
+argv: ct "trace-metadata" "--recent-folders=true"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace-metadata
+  recordingMetadataIdArg = none
+  traceMetadataPathArg = none
+  traceMetadataRecordPidArg = none
+  traceMetadataProgramArg = none
+  traceMetadataRecent = false
+  traceMetadataRecentFolders = true
+  traceMetadataAddRecentFolder = none
+  traceMetadataRecentLimit = 4
+  traceMetadataImportCt = none
+  traceMetadataImportSource = none
+  traceMetadataTest = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 91: --recent-folders=false
+argv: ct "trace-metadata" "--recent-folders=false"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace-metadata
+  recordingMetadataIdArg = none
+  traceMetadataPathArg = none
+  traceMetadataRecordPidArg = none
+  traceMetadataProgramArg = none
+  traceMetadataRecent = false
+  traceMetadataRecentFolders = false
+  traceMetadataAddRecentFolder = none
+  traceMetadataRecentLimit = 4
+  traceMetadataImportCt = none
+  traceMetadataImportSource = none
+  traceMetadataTest = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 92: --recent-folders=on
+argv: ct "trace-metadata" "--recent-folders=on"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace-metadata
+  recordingMetadataIdArg = none
+  traceMetadataPathArg = none
+  traceMetadataRecordPidArg = none
+  traceMetadataProgramArg = none
+  traceMetadataRecent = false
+  traceMetadataRecentFolders = true
+  traceMetadataAddRecentFolder = none
+  traceMetadataRecentLimit = 4
+  traceMetadataImportCt = none
+  traceMetadataImportSource = none
+  traceMetadataTest = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 93: --recent-folders=off
+argv: ct "trace-metadata" "--recent-folders=off"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace-metadata
+  recordingMetadataIdArg = none
+  traceMetadataPathArg = none
+  traceMetadataRecordPidArg = none
+  traceMetadataProgramArg = none
+  traceMetadataRecent = false
+  traceMetadataRecentFolders = false
+  traceMetadataAddRecentFolder = none
+  traceMetadataRecentLimit = 4
+  traceMetadataImportCt = none
+  traceMetadataImportSource = none
+  traceMetadataTest = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 94: --recent-folders=yes
+argv: ct "trace-metadata" "--recent-folders=yes"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace-metadata
+  recordingMetadataIdArg = none
+  traceMetadataPathArg = none
+  traceMetadataRecordPidArg = none
+  traceMetadataProgramArg = none
+  traceMetadataRecent = false
+  traceMetadataRecentFolders = true
+  traceMetadataAddRecentFolder = none
+  traceMetadataRecentLimit = 4
+  traceMetadataImportCt = none
+  traceMetadataImportSource = none
+  traceMetadataTest = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 95: --recent-folders=no
+argv: ct "trace-metadata" "--recent-folders=no"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace-metadata
+  recordingMetadataIdArg = none
+  traceMetadataPathArg = none
+  traceMetadataRecordPidArg = none
+  traceMetadataProgramArg = none
+  traceMetadataRecent = false
+  traceMetadataRecentFolders = false
+  traceMetadataAddRecentFolder = none
+  traceMetadataRecentLimit = 4
+  traceMetadataImportCt = none
+  traceMetadataImportSource = none
+  traceMetadataTest = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 96: --recent-folders=1
+argv: ct "trace-metadata" "--recent-folders=1"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace-metadata
+  recordingMetadataIdArg = none
+  traceMetadataPathArg = none
+  traceMetadataRecordPidArg = none
+  traceMetadataProgramArg = none
+  traceMetadataRecent = false
+  traceMetadataRecentFolders = true
+  traceMetadataAddRecentFolder = none
+  traceMetadataRecentLimit = 4
+  traceMetadataImportCt = none
+  traceMetadataImportSource = none
+  traceMetadataTest = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 97: --recent-folders=0
+argv: ct "trace-metadata" "--recent-folders=0"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace-metadata
+  recordingMetadataIdArg = none
+  traceMetadataPathArg = none
+  traceMetadataRecordPidArg = none
+  traceMetadataProgramArg = none
+  traceMetadataRecent = false
+  traceMetadataRecentFolders = false
+  traceMetadataAddRecentFolder = none
+  traceMetadataRecentLimit = 4
+  traceMetadataImportCt = none
+  traceMetadataImportSource = none
+  traceMetadataTest = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 98: --recent-folders=maybe
+argv: ct "trace-metadata" "--recent-folders=maybe"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Error while processing the \e[34mrecent-folders=maybe\e[0m parameter: 'maybe' is not a valid boolean value. Supported values are on/off, yes/no, true/false or 1/0\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 99: --recent-folders=
+argv: ct "trace-metadata" "--recent-folders="
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace-metadata
+  recordingMetadataIdArg = none
+  traceMetadataPathArg = none
+  traceMetadataRecordPidArg = none
+  traceMetadataProgramArg = none
+  traceMetadataRecent = false
+  traceMetadataRecentFolders = true
+  traceMetadataAddRecentFolder = none
+  traceMetadataRecentLimit = 4
+  traceMetadataImportCt = none
+  traceMetadataImportSource = none
+  traceMetadataTest = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 100: --recent-folders:false
+argv: ct "trace-metadata" "--recent-folders:false"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace-metadata
+  recordingMetadataIdArg = none
+  traceMetadataPathArg = none
+  traceMetadataRecordPidArg = none
+  traceMetadataProgramArg = none
+  traceMetadataRecent = false
+  traceMetadataRecentFolders = false
+  traceMetadataAddRecentFolder = none
+  traceMetadataRecentLimit = 4
+  traceMetadataImportCt = none
+  traceMetadataImportSource = none
+  traceMetadataTest = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 101: --recent-folders false (next word)
+argv: ct "trace-metadata" "--recent-folders" "false"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The subcommand 'trace-metadata' does not accept arguments\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 102: --recent-folders twice
+argv: ct "trace-metadata" "--recent-folders" "--recent-folders"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace-metadata
+  recordingMetadataIdArg = none
+  traceMetadataPathArg = none
+  traceMetadataRecordPidArg = none
+  traceMetadataProgramArg = none
+  traceMetadataRecent = false
+  traceMetadataRecentFolders = true
+  traceMetadataAddRecentFolder = none
+  traceMetadataRecentLimit = 4
+  traceMetadataImportCt = none
+  traceMetadataImportSource = none
+  traceMetadataTest = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 103: --no-recent-folders
+argv: ct "trace-metadata" "--no-recent-folders"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'no-recent-folders'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 104: --RECENT-FOLDERS (style variant)
+argv: ct "trace-metadata" "--RECENT-FOLDERS"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace-metadata
+  recordingMetadataIdArg = none
+  traceMetadataPathArg = none
+  traceMetadataRecordPidArg = none
+  traceMetadataProgramArg = none
+  traceMetadataRecent = false
+  traceMetadataRecentFolders = true
+  traceMetadataAddRecentFolder = none
+  traceMetadataRecentLimit = 4
+  traceMetadataImportCt = none
+  traceMetadataImportSource = none
+  traceMetadataTest = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 105: --r_ecent-folders (style variant)
+argv: ct "trace-metadata" "--r_ecent-folders"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace-metadata
+  recordingMetadataIdArg = none
+  traceMetadataPathArg = none
+  traceMetadataRecordPidArg = none
+  traceMetadataProgramArg = none
+  traceMetadataRecent = false
+  traceMetadataRecentFolders = true
+  traceMetadataAddRecentFolder = none
+  traceMetadataRecentLimit = 4
+  traceMetadataImportCt = none
+  traceMetadataImportSource = none
+  traceMetadataTest = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 106: --recent_folders (style variant)
+argv: ct "trace-metadata" "--recent_folders"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'recent_folders'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 107: --recentfolders (style variant)
+argv: ct "trace-metadata" "--recentfolders"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'recentfolders'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 108: --add-recent-folder <v>
+argv: ct "trace-metadata" "--add-recent-folder" "/f"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace-metadata
+  recordingMetadataIdArg = none
+  traceMetadataPathArg = none
+  traceMetadataRecordPidArg = none
+  traceMetadataProgramArg = none
+  traceMetadataRecent = false
+  traceMetadataRecentFolders = false
+  traceMetadataAddRecentFolder = some("/f")
+  traceMetadataRecentLimit = 4
+  traceMetadataImportCt = none
+  traceMetadataImportSource = none
+  traceMetadataTest = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 109: --add-recent-folder=<v>
+argv: ct "trace-metadata" "--add-recent-folder=/f"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace-metadata
+  recordingMetadataIdArg = none
+  traceMetadataPathArg = none
+  traceMetadataRecordPidArg = none
+  traceMetadataProgramArg = none
+  traceMetadataRecent = false
+  traceMetadataRecentFolders = false
+  traceMetadataAddRecentFolder = some("/f")
+  traceMetadataRecentLimit = 4
+  traceMetadataImportCt = none
+  traceMetadataImportSource = none
+  traceMetadataTest = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 110: --add-recent-folder:<v>
+argv: ct "trace-metadata" "--add-recent-folder:/f"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace-metadata
+  recordingMetadataIdArg = none
+  traceMetadataPathArg = none
+  traceMetadataRecordPidArg = none
+  traceMetadataProgramArg = none
+  traceMetadataRecent = false
+  traceMetadataRecentFolders = false
+  traceMetadataAddRecentFolder = some("/f")
+  traceMetadataRecentLimit = 4
+  traceMetadataImportCt = none
+  traceMetadataImportSource = none
+  traceMetadataTest = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 111: --add-recent-folder /f
+argv: ct "trace-metadata" "--add-recent-folder" "/f"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace-metadata
+  recordingMetadataIdArg = none
+  traceMetadataPathArg = none
+  traceMetadataRecordPidArg = none
+  traceMetadataProgramArg = none
+  traceMetadataRecent = false
+  traceMetadataRecentFolders = false
+  traceMetadataAddRecentFolder = some("/f")
+  traceMetadataRecentLimit = 4
+  traceMetadataImportCt = none
+  traceMetadataImportSource = none
+  traceMetadataTest = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 112: --add-recent-folder=/f
+argv: ct "trace-metadata" "--add-recent-folder=/f"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace-metadata
+  recordingMetadataIdArg = none
+  traceMetadataPathArg = none
+  traceMetadataRecordPidArg = none
+  traceMetadataProgramArg = none
+  traceMetadataRecent = false
+  traceMetadataRecentFolders = false
+  traceMetadataAddRecentFolder = some("/f")
+  traceMetadataRecentLimit = 4
+  traceMetadataImportCt = none
+  traceMetadataImportSource = none
+  traceMetadataTest = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 113: --add-recent-folder empty
+argv: ct "trace-metadata" "--add-recent-folder" ""
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace-metadata
+  recordingMetadataIdArg = none
+  traceMetadataPathArg = none
+  traceMetadataRecordPidArg = none
+  traceMetadataProgramArg = none
+  traceMetadataRecent = false
+  traceMetadataRecentFolders = false
+  traceMetadataAddRecentFolder = some("")
+  traceMetadataRecentLimit = 4
+  traceMetadataImportCt = none
+  traceMetadataImportSource = none
+  traceMetadataTest = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 114: --add-recent-folder= (empty)
+argv: ct "trace-metadata" "--add-recent-folder="
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace-metadata
+  recordingMetadataIdArg = none
+  traceMetadataPathArg = none
+  traceMetadataRecordPidArg = none
+  traceMetadataProgramArg = none
+  traceMetadataRecent = false
+  traceMetadataRecentFolders = false
+  traceMetadataAddRecentFolder = some("")
+  traceMetadataRecentLimit = 4
+  traceMetadataImportCt = none
+  traceMetadataImportSource = none
+  traceMetadataTest = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 115: --add-recent-folder= <v> (next word)
+argv: ct "trace-metadata" "--add-recent-folder=" "/f"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace-metadata
+  recordingMetadataIdArg = none
+  traceMetadataPathArg = none
+  traceMetadataRecordPidArg = none
+  traceMetadataProgramArg = none
+  traceMetadataRecent = false
+  traceMetadataRecentFolders = false
+  traceMetadataAddRecentFolder = some("/f")
+  traceMetadataRecentLimit = 4
+  traceMetadataImportCt = none
+  traceMetadataImportSource = none
+  traceMetadataTest = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 116: --add-recent-folder -x (value starts with -)
+argv: ct "trace-metadata" "--add-recent-folder" "-x"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace-metadata
+  recordingMetadataIdArg = none
+  traceMetadataPathArg = none
+  traceMetadataRecordPidArg = none
+  traceMetadataProgramArg = none
+  traceMetadataRecent = false
+  traceMetadataRecentFolders = false
+  traceMetadataAddRecentFolder = some("-x")
+  traceMetadataRecentLimit = 4
+  traceMetadataImportCt = none
+  traceMetadataImportSource = none
+  traceMetadataTest = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 117: --add-recent-folder --x (value starts with --)
+argv: ct "trace-metadata" "--add-recent-folder" "--x"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace-metadata
+  recordingMetadataIdArg = none
+  traceMetadataPathArg = none
+  traceMetadataRecordPidArg = none
+  traceMetadataProgramArg = none
+  traceMetadataRecent = false
+  traceMetadataRecentFolders = false
+  traceMetadataAddRecentFolder = some("--x")
+  traceMetadataRecentLimit = 4
+  traceMetadataImportCt = none
+  traceMetadataImportSource = none
+  traceMetadataTest = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 118: --add-recent-folder --new-tab <v> (an option between it and its value)
+argv: ct "trace-metadata" "--add-recent-folder" "--new-tab" "/f"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The subcommand 'trace-metadata' does not accept arguments\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 119: --add-recent-folder repeated, last wins
+argv: ct "trace-metadata" "--add-recent-folder" "/f" "--add-recent-folder" "/f"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace-metadata
+  recordingMetadataIdArg = none
+  traceMetadataPathArg = none
+  traceMetadataRecordPidArg = none
+  traceMetadataProgramArg = none
+  traceMetadataRecent = false
+  traceMetadataRecentFolders = false
+  traceMetadataAddRecentFolder = some("/f")
+  traceMetadataRecentLimit = 4
+  traceMetadataImportCt = none
+  traceMetadataImportSource = none
+  traceMetadataTest = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 120: --add-recent-folder missing value (last)
+argv: ct "trace-metadata" "--add-recent-folder"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The option '\e[34m--add-recent-folder\e[0m' requires a value\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 121: --ADD-RECENT-FOLDER <v> (style variant)
+argv: ct "trace-metadata" "--ADD-RECENT-FOLDER" "/f"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace-metadata
+  recordingMetadataIdArg = none
+  traceMetadataPathArg = none
+  traceMetadataRecordPidArg = none
+  traceMetadataProgramArg = none
+  traceMetadataRecent = false
+  traceMetadataRecentFolders = false
+  traceMetadataAddRecentFolder = some("/f")
+  traceMetadataRecentLimit = 4
+  traceMetadataImportCt = none
+  traceMetadataImportSource = none
+  traceMetadataTest = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 122: --a_dd-recent-folder <v> (style variant)
+argv: ct "trace-metadata" "--a_dd-recent-folder" "/f"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace-metadata
+  recordingMetadataIdArg = none
+  traceMetadataPathArg = none
+  traceMetadataRecordPidArg = none
+  traceMetadataProgramArg = none
+  traceMetadataRecent = false
+  traceMetadataRecentFolders = false
+  traceMetadataAddRecentFolder = some("/f")
+  traceMetadataRecentLimit = 4
+  traceMetadataImportCt = none
+  traceMetadataImportSource = none
+  traceMetadataTest = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 123: --add_recent_folder <v> (style variant)
+argv: ct "trace-metadata" "--add_recent_folder" "/f"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'add_recent_folder'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 124: --addrecentfolder <v> (style variant)
+argv: ct "trace-metadata" "--addrecentfolder" "/f"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'addrecentfolder'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 125: --limit <v>
+argv: ct "trace-metadata" "--limit" "10"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace-metadata
+  recordingMetadataIdArg = none
+  traceMetadataPathArg = none
+  traceMetadataRecordPidArg = none
+  traceMetadataProgramArg = none
+  traceMetadataRecent = false
+  traceMetadataRecentFolders = false
+  traceMetadataAddRecentFolder = none
+  traceMetadataRecentLimit = 10
+  traceMetadataImportCt = none
+  traceMetadataImportSource = none
+  traceMetadataTest = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 126: --limit=<v>
+argv: ct "trace-metadata" "--limit=10"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace-metadata
+  recordingMetadataIdArg = none
+  traceMetadataPathArg = none
+  traceMetadataRecordPidArg = none
+  traceMetadataProgramArg = none
+  traceMetadataRecent = false
+  traceMetadataRecentFolders = false
+  traceMetadataAddRecentFolder = none
+  traceMetadataRecentLimit = 10
+  traceMetadataImportCt = none
+  traceMetadataImportSource = none
+  traceMetadataTest = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 127: --limit:<v>
+argv: ct "trace-metadata" "--limit:10"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace-metadata
+  recordingMetadataIdArg = none
+  traceMetadataPathArg = none
+  traceMetadataRecordPidArg = none
+  traceMetadataProgramArg = none
+  traceMetadataRecent = false
+  traceMetadataRecentFolders = false
+  traceMetadataAddRecentFolder = none
+  traceMetadataRecentLimit = 10
+  traceMetadataImportCt = none
+  traceMetadataImportSource = none
+  traceMetadataTest = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 128: --limit 10
+argv: ct "trace-metadata" "--limit" "10"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace-metadata
+  recordingMetadataIdArg = none
+  traceMetadataPathArg = none
+  traceMetadataRecordPidArg = none
+  traceMetadataProgramArg = none
+  traceMetadataRecent = false
+  traceMetadataRecentFolders = false
+  traceMetadataAddRecentFolder = none
+  traceMetadataRecentLimit = 10
+  traceMetadataImportCt = none
+  traceMetadataImportSource = none
+  traceMetadataTest = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 129: --limit=10
+argv: ct "trace-metadata" "--limit=10"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace-metadata
+  recordingMetadataIdArg = none
+  traceMetadataPathArg = none
+  traceMetadataRecordPidArg = none
+  traceMetadataProgramArg = none
+  traceMetadataRecent = false
+  traceMetadataRecentFolders = false
+  traceMetadataAddRecentFolder = none
+  traceMetadataRecentLimit = 10
+  traceMetadataImportCt = none
+  traceMetadataImportSource = none
+  traceMetadataTest = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 130: --limit 0
+argv: ct "trace-metadata" "--limit" "0"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace-metadata
+  recordingMetadataIdArg = none
+  traceMetadataPathArg = none
+  traceMetadataRecordPidArg = none
+  traceMetadataProgramArg = none
+  traceMetadataRecent = false
+  traceMetadataRecentFolders = false
+  traceMetadataAddRecentFolder = none
+  traceMetadataRecentLimit = 0
+  traceMetadataImportCt = none
+  traceMetadataImportSource = none
+  traceMetadataTest = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 131: --limit=0
+argv: ct "trace-metadata" "--limit=0"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace-metadata
+  recordingMetadataIdArg = none
+  traceMetadataPathArg = none
+  traceMetadataRecordPidArg = none
+  traceMetadataProgramArg = none
+  traceMetadataRecent = false
+  traceMetadataRecentFolders = false
+  traceMetadataAddRecentFolder = none
+  traceMetadataRecentLimit = 0
+  traceMetadataImportCt = none
+  traceMetadataImportSource = none
+  traceMetadataTest = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 132: --limit bad x
+argv: ct "trace-metadata" "--limit" "x"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Error while processing the \e[34mlimit=x\e[0m parameter: invalid integer: x\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 133: --limit=bad x
+argv: ct "trace-metadata" "--limit=x"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Error while processing the \e[34mlimit=x\e[0m parameter: invalid integer: x\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 134: --limit empty
+argv: ct "trace-metadata" "--limit" ""
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Error while processing the \e[34mlimit=\e[0m parameter: invalid integer: \e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 135: --limit= (empty)
+argv: ct "trace-metadata" "--limit="
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Error while processing the \e[34mlimit=\e[0m parameter: invalid integer: \e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 136: --limit= <v> (next word)
+argv: ct "trace-metadata" "--limit=" "10"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace-metadata
+  recordingMetadataIdArg = none
+  traceMetadataPathArg = none
+  traceMetadataRecordPidArg = none
+  traceMetadataProgramArg = none
+  traceMetadataRecent = false
+  traceMetadataRecentFolders = false
+  traceMetadataAddRecentFolder = none
+  traceMetadataRecentLimit = 10
+  traceMetadataImportCt = none
+  traceMetadataImportSource = none
+  traceMetadataTest = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 137: --limit -x (value starts with -)
+argv: ct "trace-metadata" "--limit" "-x"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Error while processing the \e[34mlimit=-x\e[0m parameter: invalid integer: -x\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 138: --limit --x (value starts with --)
+argv: ct "trace-metadata" "--limit" "--x"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Error while processing the \e[34mlimit=--x\e[0m parameter: invalid integer: --x\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 139: --limit --new-tab <v> (an option between it and its value)
+argv: ct "trace-metadata" "--limit" "--new-tab" "10"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Error while processing the \e[34mlimit=--new-tab\e[0m parameter: invalid integer: --new-tab\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 140: --limit repeated, last wins
+argv: ct "trace-metadata" "--limit" "10" "--limit" "0"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace-metadata
+  recordingMetadataIdArg = none
+  traceMetadataPathArg = none
+  traceMetadataRecordPidArg = none
+  traceMetadataProgramArg = none
+  traceMetadataRecent = false
+  traceMetadataRecentFolders = false
+  traceMetadataAddRecentFolder = none
+  traceMetadataRecentLimit = 0
+  traceMetadataImportCt = none
+  traceMetadataImportSource = none
+  traceMetadataTest = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 141: --limit missing value (last)
+argv: ct "trace-metadata" "--limit"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The option '\e[34m--limit\e[0m' requires a value\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 142: --LIMIT <v> (style variant)
+argv: ct "trace-metadata" "--LIMIT" "10"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace-metadata
+  recordingMetadataIdArg = none
+  traceMetadataPathArg = none
+  traceMetadataRecordPidArg = none
+  traceMetadataProgramArg = none
+  traceMetadataRecent = false
+  traceMetadataRecentFolders = false
+  traceMetadataAddRecentFolder = none
+  traceMetadataRecentLimit = 10
+  traceMetadataImportCt = none
+  traceMetadataImportSource = none
+  traceMetadataTest = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 143: --l_imit <v> (style variant)
+argv: ct "trace-metadata" "--l_imit" "10"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace-metadata
+  recordingMetadataIdArg = none
+  traceMetadataPathArg = none
+  traceMetadataRecordPidArg = none
+  traceMetadataProgramArg = none
+  traceMetadataRecent = false
+  traceMetadataRecentFolders = false
+  traceMetadataAddRecentFolder = none
+  traceMetadataRecentLimit = 10
+  traceMetadataImportCt = none
+  traceMetadataImportSource = none
+  traceMetadataTest = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 144: --import-ct <v>
+argv: ct "trace-metadata" "--import-ct" "/t.ct"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace-metadata
+  recordingMetadataIdArg = none
+  traceMetadataPathArg = none
+  traceMetadataRecordPidArg = none
+  traceMetadataProgramArg = none
+  traceMetadataRecent = false
+  traceMetadataRecentFolders = false
+  traceMetadataAddRecentFolder = none
+  traceMetadataRecentLimit = 4
+  traceMetadataImportCt = some("/t.ct")
+  traceMetadataImportSource = none
+  traceMetadataTest = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 145: --import-ct=<v>
+argv: ct "trace-metadata" "--import-ct=/t.ct"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace-metadata
+  recordingMetadataIdArg = none
+  traceMetadataPathArg = none
+  traceMetadataRecordPidArg = none
+  traceMetadataProgramArg = none
+  traceMetadataRecent = false
+  traceMetadataRecentFolders = false
+  traceMetadataAddRecentFolder = none
+  traceMetadataRecentLimit = 4
+  traceMetadataImportCt = some("/t.ct")
+  traceMetadataImportSource = none
+  traceMetadataTest = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 146: --import-ct:<v>
+argv: ct "trace-metadata" "--import-ct:/t.ct"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace-metadata
+  recordingMetadataIdArg = none
+  traceMetadataPathArg = none
+  traceMetadataRecordPidArg = none
+  traceMetadataProgramArg = none
+  traceMetadataRecent = false
+  traceMetadataRecentFolders = false
+  traceMetadataAddRecentFolder = none
+  traceMetadataRecentLimit = 4
+  traceMetadataImportCt = some("/t.ct")
+  traceMetadataImportSource = none
+  traceMetadataTest = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 147: --import-ct /t.ct
+argv: ct "trace-metadata" "--import-ct" "/t.ct"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace-metadata
+  recordingMetadataIdArg = none
+  traceMetadataPathArg = none
+  traceMetadataRecordPidArg = none
+  traceMetadataProgramArg = none
+  traceMetadataRecent = false
+  traceMetadataRecentFolders = false
+  traceMetadataAddRecentFolder = none
+  traceMetadataRecentLimit = 4
+  traceMetadataImportCt = some("/t.ct")
+  traceMetadataImportSource = none
+  traceMetadataTest = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 148: --import-ct=/t.ct
+argv: ct "trace-metadata" "--import-ct=/t.ct"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace-metadata
+  recordingMetadataIdArg = none
+  traceMetadataPathArg = none
+  traceMetadataRecordPidArg = none
+  traceMetadataProgramArg = none
+  traceMetadataRecent = false
+  traceMetadataRecentFolders = false
+  traceMetadataAddRecentFolder = none
+  traceMetadataRecentLimit = 4
+  traceMetadataImportCt = some("/t.ct")
+  traceMetadataImportSource = none
+  traceMetadataTest = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 149: --import-ct empty
+argv: ct "trace-metadata" "--import-ct" ""
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace-metadata
+  recordingMetadataIdArg = none
+  traceMetadataPathArg = none
+  traceMetadataRecordPidArg = none
+  traceMetadataProgramArg = none
+  traceMetadataRecent = false
+  traceMetadataRecentFolders = false
+  traceMetadataAddRecentFolder = none
+  traceMetadataRecentLimit = 4
+  traceMetadataImportCt = some("")
+  traceMetadataImportSource = none
+  traceMetadataTest = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 150: --import-ct= (empty)
+argv: ct "trace-metadata" "--import-ct="
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace-metadata
+  recordingMetadataIdArg = none
+  traceMetadataPathArg = none
+  traceMetadataRecordPidArg = none
+  traceMetadataProgramArg = none
+  traceMetadataRecent = false
+  traceMetadataRecentFolders = false
+  traceMetadataAddRecentFolder = none
+  traceMetadataRecentLimit = 4
+  traceMetadataImportCt = some("")
+  traceMetadataImportSource = none
+  traceMetadataTest = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 151: --import-ct= <v> (next word)
+argv: ct "trace-metadata" "--import-ct=" "/t.ct"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace-metadata
+  recordingMetadataIdArg = none
+  traceMetadataPathArg = none
+  traceMetadataRecordPidArg = none
+  traceMetadataProgramArg = none
+  traceMetadataRecent = false
+  traceMetadataRecentFolders = false
+  traceMetadataAddRecentFolder = none
+  traceMetadataRecentLimit = 4
+  traceMetadataImportCt = some("/t.ct")
+  traceMetadataImportSource = none
+  traceMetadataTest = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 152: --import-ct -x (value starts with -)
+argv: ct "trace-metadata" "--import-ct" "-x"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace-metadata
+  recordingMetadataIdArg = none
+  traceMetadataPathArg = none
+  traceMetadataRecordPidArg = none
+  traceMetadataProgramArg = none
+  traceMetadataRecent = false
+  traceMetadataRecentFolders = false
+  traceMetadataAddRecentFolder = none
+  traceMetadataRecentLimit = 4
+  traceMetadataImportCt = some("-x")
+  traceMetadataImportSource = none
+  traceMetadataTest = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 153: --import-ct --x (value starts with --)
+argv: ct "trace-metadata" "--import-ct" "--x"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace-metadata
+  recordingMetadataIdArg = none
+  traceMetadataPathArg = none
+  traceMetadataRecordPidArg = none
+  traceMetadataProgramArg = none
+  traceMetadataRecent = false
+  traceMetadataRecentFolders = false
+  traceMetadataAddRecentFolder = none
+  traceMetadataRecentLimit = 4
+  traceMetadataImportCt = some("--x")
+  traceMetadataImportSource = none
+  traceMetadataTest = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 154: --import-ct --new-tab <v> (an option between it and its value)
+argv: ct "trace-metadata" "--import-ct" "--new-tab" "/t.ct"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The subcommand 'trace-metadata' does not accept arguments\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 155: --import-ct repeated, last wins
+argv: ct "trace-metadata" "--import-ct" "/t.ct" "--import-ct" "/t.ct"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace-metadata
+  recordingMetadataIdArg = none
+  traceMetadataPathArg = none
+  traceMetadataRecordPidArg = none
+  traceMetadataProgramArg = none
+  traceMetadataRecent = false
+  traceMetadataRecentFolders = false
+  traceMetadataAddRecentFolder = none
+  traceMetadataRecentLimit = 4
+  traceMetadataImportCt = some("/t.ct")
+  traceMetadataImportSource = none
+  traceMetadataTest = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 156: --import-ct missing value (last)
+argv: ct "trace-metadata" "--import-ct"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The option '\e[34m--import-ct\e[0m' requires a value\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 157: --IMPORT-CT <v> (style variant)
+argv: ct "trace-metadata" "--IMPORT-CT" "/t.ct"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace-metadata
+  recordingMetadataIdArg = none
+  traceMetadataPathArg = none
+  traceMetadataRecordPidArg = none
+  traceMetadataProgramArg = none
+  traceMetadataRecent = false
+  traceMetadataRecentFolders = false
+  traceMetadataAddRecentFolder = none
+  traceMetadataRecentLimit = 4
+  traceMetadataImportCt = some("/t.ct")
+  traceMetadataImportSource = none
+  traceMetadataTest = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 158: --i_mport-ct <v> (style variant)
+argv: ct "trace-metadata" "--i_mport-ct" "/t.ct"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace-metadata
+  recordingMetadataIdArg = none
+  traceMetadataPathArg = none
+  traceMetadataRecordPidArg = none
+  traceMetadataProgramArg = none
+  traceMetadataRecent = false
+  traceMetadataRecentFolders = false
+  traceMetadataAddRecentFolder = none
+  traceMetadataRecentLimit = 4
+  traceMetadataImportCt = some("/t.ct")
+  traceMetadataImportSource = none
+  traceMetadataTest = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 159: --import_ct <v> (style variant)
+argv: ct "trace-metadata" "--import_ct" "/t.ct"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'import_ct'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 160: --importct <v> (style variant)
+argv: ct "trace-metadata" "--importct" "/t.ct"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'importct'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 161: --import-source <v>
+argv: ct "trace-metadata" "--import-source" "/src"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace-metadata
+  recordingMetadataIdArg = none
+  traceMetadataPathArg = none
+  traceMetadataRecordPidArg = none
+  traceMetadataProgramArg = none
+  traceMetadataRecent = false
+  traceMetadataRecentFolders = false
+  traceMetadataAddRecentFolder = none
+  traceMetadataRecentLimit = 4
+  traceMetadataImportCt = none
+  traceMetadataImportSource = some("/src")
+  traceMetadataTest = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 162: --import-source=<v>
+argv: ct "trace-metadata" "--import-source=/src"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace-metadata
+  recordingMetadataIdArg = none
+  traceMetadataPathArg = none
+  traceMetadataRecordPidArg = none
+  traceMetadataProgramArg = none
+  traceMetadataRecent = false
+  traceMetadataRecentFolders = false
+  traceMetadataAddRecentFolder = none
+  traceMetadataRecentLimit = 4
+  traceMetadataImportCt = none
+  traceMetadataImportSource = some("/src")
+  traceMetadataTest = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 163: --import-source:<v>
+argv: ct "trace-metadata" "--import-source:/src"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace-metadata
+  recordingMetadataIdArg = none
+  traceMetadataPathArg = none
+  traceMetadataRecordPidArg = none
+  traceMetadataProgramArg = none
+  traceMetadataRecent = false
+  traceMetadataRecentFolders = false
+  traceMetadataAddRecentFolder = none
+  traceMetadataRecentLimit = 4
+  traceMetadataImportCt = none
+  traceMetadataImportSource = some("/src")
+  traceMetadataTest = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 164: --import-source /src
+argv: ct "trace-metadata" "--import-source" "/src"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace-metadata
+  recordingMetadataIdArg = none
+  traceMetadataPathArg = none
+  traceMetadataRecordPidArg = none
+  traceMetadataProgramArg = none
+  traceMetadataRecent = false
+  traceMetadataRecentFolders = false
+  traceMetadataAddRecentFolder = none
+  traceMetadataRecentLimit = 4
+  traceMetadataImportCt = none
+  traceMetadataImportSource = some("/src")
+  traceMetadataTest = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 165: --import-source=/src
+argv: ct "trace-metadata" "--import-source=/src"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace-metadata
+  recordingMetadataIdArg = none
+  traceMetadataPathArg = none
+  traceMetadataRecordPidArg = none
+  traceMetadataProgramArg = none
+  traceMetadataRecent = false
+  traceMetadataRecentFolders = false
+  traceMetadataAddRecentFolder = none
+  traceMetadataRecentLimit = 4
+  traceMetadataImportCt = none
+  traceMetadataImportSource = some("/src")
+  traceMetadataTest = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 166: --import-source empty
+argv: ct "trace-metadata" "--import-source" ""
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace-metadata
+  recordingMetadataIdArg = none
+  traceMetadataPathArg = none
+  traceMetadataRecordPidArg = none
+  traceMetadataProgramArg = none
+  traceMetadataRecent = false
+  traceMetadataRecentFolders = false
+  traceMetadataAddRecentFolder = none
+  traceMetadataRecentLimit = 4
+  traceMetadataImportCt = none
+  traceMetadataImportSource = some("")
+  traceMetadataTest = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 167: --import-source= (empty)
+argv: ct "trace-metadata" "--import-source="
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace-metadata
+  recordingMetadataIdArg = none
+  traceMetadataPathArg = none
+  traceMetadataRecordPidArg = none
+  traceMetadataProgramArg = none
+  traceMetadataRecent = false
+  traceMetadataRecentFolders = false
+  traceMetadataAddRecentFolder = none
+  traceMetadataRecentLimit = 4
+  traceMetadataImportCt = none
+  traceMetadataImportSource = some("")
+  traceMetadataTest = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 168: --import-source= <v> (next word)
+argv: ct "trace-metadata" "--import-source=" "/src"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace-metadata
+  recordingMetadataIdArg = none
+  traceMetadataPathArg = none
+  traceMetadataRecordPidArg = none
+  traceMetadataProgramArg = none
+  traceMetadataRecent = false
+  traceMetadataRecentFolders = false
+  traceMetadataAddRecentFolder = none
+  traceMetadataRecentLimit = 4
+  traceMetadataImportCt = none
+  traceMetadataImportSource = some("/src")
+  traceMetadataTest = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 169: --import-source -x (value starts with -)
+argv: ct "trace-metadata" "--import-source" "-x"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace-metadata
+  recordingMetadataIdArg = none
+  traceMetadataPathArg = none
+  traceMetadataRecordPidArg = none
+  traceMetadataProgramArg = none
+  traceMetadataRecent = false
+  traceMetadataRecentFolders = false
+  traceMetadataAddRecentFolder = none
+  traceMetadataRecentLimit = 4
+  traceMetadataImportCt = none
+  traceMetadataImportSource = some("-x")
+  traceMetadataTest = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 170: --import-source --x (value starts with --)
+argv: ct "trace-metadata" "--import-source" "--x"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace-metadata
+  recordingMetadataIdArg = none
+  traceMetadataPathArg = none
+  traceMetadataRecordPidArg = none
+  traceMetadataProgramArg = none
+  traceMetadataRecent = false
+  traceMetadataRecentFolders = false
+  traceMetadataAddRecentFolder = none
+  traceMetadataRecentLimit = 4
+  traceMetadataImportCt = none
+  traceMetadataImportSource = some("--x")
+  traceMetadataTest = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 171: --import-source --new-tab <v> (an option between it and its value)
+argv: ct "trace-metadata" "--import-source" "--new-tab" "/src"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The subcommand 'trace-metadata' does not accept arguments\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 172: --import-source repeated, last wins
+argv: ct "trace-metadata" "--import-source" "/src" "--import-source" "/src"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace-metadata
+  recordingMetadataIdArg = none
+  traceMetadataPathArg = none
+  traceMetadataRecordPidArg = none
+  traceMetadataProgramArg = none
+  traceMetadataRecent = false
+  traceMetadataRecentFolders = false
+  traceMetadataAddRecentFolder = none
+  traceMetadataRecentLimit = 4
+  traceMetadataImportCt = none
+  traceMetadataImportSource = some("/src")
+  traceMetadataTest = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 173: --import-source missing value (last)
+argv: ct "trace-metadata" "--import-source"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The option '\e[34m--import-source\e[0m' requires a value\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 174: --IMPORT-SOURCE <v> (style variant)
+argv: ct "trace-metadata" "--IMPORT-SOURCE" "/src"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace-metadata
+  recordingMetadataIdArg = none
+  traceMetadataPathArg = none
+  traceMetadataRecordPidArg = none
+  traceMetadataProgramArg = none
+  traceMetadataRecent = false
+  traceMetadataRecentFolders = false
+  traceMetadataAddRecentFolder = none
+  traceMetadataRecentLimit = 4
+  traceMetadataImportCt = none
+  traceMetadataImportSource = some("/src")
+  traceMetadataTest = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 175: --i_mport-source <v> (style variant)
+argv: ct "trace-metadata" "--i_mport-source" "/src"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace-metadata
+  recordingMetadataIdArg = none
+  traceMetadataPathArg = none
+  traceMetadataRecordPidArg = none
+  traceMetadataProgramArg = none
+  traceMetadataRecent = false
+  traceMetadataRecentFolders = false
+  traceMetadataAddRecentFolder = none
+  traceMetadataRecentLimit = 4
+  traceMetadataImportCt = none
+  traceMetadataImportSource = some("/src")
+  traceMetadataTest = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 176: --import_source <v> (style variant)
+argv: ct "trace-metadata" "--import_source" "/src"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'import_source'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 177: --importsource <v> (style variant)
+argv: ct "trace-metadata" "--importsource" "/src"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'importsource'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 178: --test
+argv: ct "trace-metadata" "--test"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace-metadata
+  recordingMetadataIdArg = none
+  traceMetadataPathArg = none
+  traceMetadataRecordPidArg = none
+  traceMetadataProgramArg = none
+  traceMetadataRecent = false
+  traceMetadataRecentFolders = false
+  traceMetadataAddRecentFolder = none
+  traceMetadataRecentLimit = 4
+  traceMetadataImportCt = none
+  traceMetadataImportSource = none
+  traceMetadataTest = true
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 179: --test=true
+argv: ct "trace-metadata" "--test=true"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace-metadata
+  recordingMetadataIdArg = none
+  traceMetadataPathArg = none
+  traceMetadataRecordPidArg = none
+  traceMetadataProgramArg = none
+  traceMetadataRecent = false
+  traceMetadataRecentFolders = false
+  traceMetadataAddRecentFolder = none
+  traceMetadataRecentLimit = 4
+  traceMetadataImportCt = none
+  traceMetadataImportSource = none
+  traceMetadataTest = true
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 180: --test=false
+argv: ct "trace-metadata" "--test=false"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace-metadata
+  recordingMetadataIdArg = none
+  traceMetadataPathArg = none
+  traceMetadataRecordPidArg = none
+  traceMetadataProgramArg = none
+  traceMetadataRecent = false
+  traceMetadataRecentFolders = false
+  traceMetadataAddRecentFolder = none
+  traceMetadataRecentLimit = 4
+  traceMetadataImportCt = none
+  traceMetadataImportSource = none
+  traceMetadataTest = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 181: --test=on
+argv: ct "trace-metadata" "--test=on"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace-metadata
+  recordingMetadataIdArg = none
+  traceMetadataPathArg = none
+  traceMetadataRecordPidArg = none
+  traceMetadataProgramArg = none
+  traceMetadataRecent = false
+  traceMetadataRecentFolders = false
+  traceMetadataAddRecentFolder = none
+  traceMetadataRecentLimit = 4
+  traceMetadataImportCt = none
+  traceMetadataImportSource = none
+  traceMetadataTest = true
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 182: --test=off
+argv: ct "trace-metadata" "--test=off"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace-metadata
+  recordingMetadataIdArg = none
+  traceMetadataPathArg = none
+  traceMetadataRecordPidArg = none
+  traceMetadataProgramArg = none
+  traceMetadataRecent = false
+  traceMetadataRecentFolders = false
+  traceMetadataAddRecentFolder = none
+  traceMetadataRecentLimit = 4
+  traceMetadataImportCt = none
+  traceMetadataImportSource = none
+  traceMetadataTest = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 183: --test=yes
+argv: ct "trace-metadata" "--test=yes"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace-metadata
+  recordingMetadataIdArg = none
+  traceMetadataPathArg = none
+  traceMetadataRecordPidArg = none
+  traceMetadataProgramArg = none
+  traceMetadataRecent = false
+  traceMetadataRecentFolders = false
+  traceMetadataAddRecentFolder = none
+  traceMetadataRecentLimit = 4
+  traceMetadataImportCt = none
+  traceMetadataImportSource = none
+  traceMetadataTest = true
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 184: --test=no
+argv: ct "trace-metadata" "--test=no"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace-metadata
+  recordingMetadataIdArg = none
+  traceMetadataPathArg = none
+  traceMetadataRecordPidArg = none
+  traceMetadataProgramArg = none
+  traceMetadataRecent = false
+  traceMetadataRecentFolders = false
+  traceMetadataAddRecentFolder = none
+  traceMetadataRecentLimit = 4
+  traceMetadataImportCt = none
+  traceMetadataImportSource = none
+  traceMetadataTest = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 185: --test=1
+argv: ct "trace-metadata" "--test=1"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace-metadata
+  recordingMetadataIdArg = none
+  traceMetadataPathArg = none
+  traceMetadataRecordPidArg = none
+  traceMetadataProgramArg = none
+  traceMetadataRecent = false
+  traceMetadataRecentFolders = false
+  traceMetadataAddRecentFolder = none
+  traceMetadataRecentLimit = 4
+  traceMetadataImportCt = none
+  traceMetadataImportSource = none
+  traceMetadataTest = true
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 186: --test=0
+argv: ct "trace-metadata" "--test=0"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace-metadata
+  recordingMetadataIdArg = none
+  traceMetadataPathArg = none
+  traceMetadataRecordPidArg = none
+  traceMetadataProgramArg = none
+  traceMetadataRecent = false
+  traceMetadataRecentFolders = false
+  traceMetadataAddRecentFolder = none
+  traceMetadataRecentLimit = 4
+  traceMetadataImportCt = none
+  traceMetadataImportSource = none
+  traceMetadataTest = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 187: --test=maybe
+argv: ct "trace-metadata" "--test=maybe"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Error while processing the \e[34mtest=maybe\e[0m parameter: 'maybe' is not a valid boolean value. Supported values are on/off, yes/no, true/false or 1/0\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 188: --test=
+argv: ct "trace-metadata" "--test="
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace-metadata
+  recordingMetadataIdArg = none
+  traceMetadataPathArg = none
+  traceMetadataRecordPidArg = none
+  traceMetadataProgramArg = none
+  traceMetadataRecent = false
+  traceMetadataRecentFolders = false
+  traceMetadataAddRecentFolder = none
+  traceMetadataRecentLimit = 4
+  traceMetadataImportCt = none
+  traceMetadataImportSource = none
+  traceMetadataTest = true
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 189: --test:false
+argv: ct "trace-metadata" "--test:false"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace-metadata
+  recordingMetadataIdArg = none
+  traceMetadataPathArg = none
+  traceMetadataRecordPidArg = none
+  traceMetadataProgramArg = none
+  traceMetadataRecent = false
+  traceMetadataRecentFolders = false
+  traceMetadataAddRecentFolder = none
+  traceMetadataRecentLimit = 4
+  traceMetadataImportCt = none
+  traceMetadataImportSource = none
+  traceMetadataTest = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 190: --test false (next word)
+argv: ct "trace-metadata" "--test" "false"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The subcommand 'trace-metadata' does not accept arguments\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 191: --test twice
+argv: ct "trace-metadata" "--test" "--test"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace-metadata
+  recordingMetadataIdArg = none
+  traceMetadataPathArg = none
+  traceMetadataRecordPidArg = none
+  traceMetadataProgramArg = none
+  traceMetadataRecent = false
+  traceMetadataRecentFolders = false
+  traceMetadataAddRecentFolder = none
+  traceMetadataRecentLimit = 4
+  traceMetadataImportCt = none
+  traceMetadataImportSource = none
+  traceMetadataTest = true
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 192: --no-test
+argv: ct "trace-metadata" "--no-test"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'no-test'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 193: --TEST (style variant)
+argv: ct "trace-metadata" "--TEST"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace-metadata
+  recordingMetadataIdArg = none
+  traceMetadataPathArg = none
+  traceMetadataRecordPidArg = none
+  traceMetadataProgramArg = none
+  traceMetadataRecent = false
+  traceMetadataRecentFolders = false
+  traceMetadataAddRecentFolder = none
+  traceMetadataRecentLimit = 4
+  traceMetadataImportCt = none
+  traceMetadataImportSource = none
+  traceMetadataTest = true
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 194: --t_est (style variant)
+argv: ct "trace-metadata" "--t_est"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace-metadata
+  recordingMetadataIdArg = none
+  traceMetadataPathArg = none
+  traceMetadataRecordPidArg = none
+  traceMetadataProgramArg = none
+  traceMetadataRecent = false
+  traceMetadataRecentFolders = false
+  traceMetadataAddRecentFolder = none
+  traceMetadataRecentLimit = 4
+  traceMetadataImportCt = none
+  traceMetadataImportSource = none
+  traceMetadataTest = true
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 195: a positional
+argv: ct "trace-metadata" "word"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The subcommand 'trace-metadata' does not accept arguments\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 196: env <APP>_LIMIT=9
+argv: ct "trace-metadata"
+env: <APP>_LIMIT="9"
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace-metadata
+  recordingMetadataIdArg = none
+  traceMetadataPathArg = none
+  traceMetadataRecordPidArg = none
+  traceMetadataProgramArg = none
+  traceMetadataRecent = false
+  traceMetadataRecentFolders = false
+  traceMetadataAddRecentFolder = none
+  traceMetadataRecentLimit = 9
+  traceMetadataImportCt = none
+  traceMetadataImportSource = none
+  traceMetadataTest = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 197: unknown long option
+argv: ct "trace-metadata" "--bogus"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'bogus'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 198: unknown long option with value
+argv: ct "trace-metadata" "--bogus=1"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'bogus'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 199: unknown short option
+argv: ct "trace-metadata" "-Z"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'Z'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 200: lone -
+argv: ct "trace-metadata" "-"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option ''\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 201: lone -- then a word
+argv: ct "trace-metadata" "--" "w"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option ''\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 202: --=v
+argv: ct "trace-metadata" "--=v"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option ''\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 203: extra positional
+argv: ct "trace-metadata" "extra1" "extra2" "extra3" "extra4" "extra5"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The subcommand 'trace-metadata' does not accept arguments\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 204: global --cwd after the command
+argv: ct "trace-metadata" "--cwd" "/w"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = some("/w")
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace-metadata
+  recordingMetadataIdArg = none
+  traceMetadataPathArg = none
+  traceMetadataRecordPidArg = none
+  traceMetadataProgramArg = none
+  traceMetadataRecent = false
+  traceMetadataRecentFolders = false
+  traceMetadataAddRecentFolder = none
+  traceMetadataRecentLimit = 4
+  traceMetadataImportCt = none
+  traceMetadataImportSource = none
+  traceMetadataTest = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 205: global --new-tab after the command
+argv: ct "trace-metadata" "--new-tab"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = true
+  newWindow = false
+  cmd = trace-metadata
+  recordingMetadataIdArg = none
+  traceMetadataPathArg = none
+  traceMetadataRecordPidArg = none
+  traceMetadataProgramArg = none
+  traceMetadataRecent = false
+  traceMetadataRecentFolders = false
+  traceMetadataAddRecentFolder = none
+  traceMetadataRecentLimit = 4
+  traceMetadataImportCt = none
+  traceMetadataImportSource = none
+  traceMetadataTest = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 206: --version after the command
+argv: ct "trace-metadata" "--version"
+env: (none)
+exit: 0
+--- stdout
+CodeTracer version: <VERSION>
+\e[0m
+(no newline at end of stdout)
+--- stderr
+--- end
+
+### 207: -h after the command
+argv: ct "trace-metadata" "-h"
+env: (none)
+exit: 0
+--- stdout
+<the short help page clispec renders for this request: ct trace-metadata>
+--- stderr
+--- end

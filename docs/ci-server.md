@@ -356,7 +356,9 @@ of which is not written down anywhere else and is the decisive one.
 1. THE PUBLISH TAIL IS AT THE END OF THE RUN, SO CANCELLATION LANDS ON IT.
    Trace the `needs:` graph: `push-tag` waits on all four build jobs, which
    wait on all four lints; `create-release` waits on `push-tag`;
-   `push-to-attic` waits on the whole test and lib-check tier. Every job that
+   the cache push (`push-to-attic`, since 2026-11-16 its own workflow,
+   `cache-push.yml`, outside this graph) waited on the whole test and
+   lib-check tier. Every job that
    PUBLISHES anything is therefore the last thing a run does. With
    `cancel-in-progress: true`, a push that arrives while a run is in its
    final tier kills precisely the jobs that were about to ship, and ships
@@ -380,7 +382,8 @@ of which is not written down anywhere else and is the decisive one.
    behind a started run" had a six-hour worst case per job and no computable
    ceiling for the run. All forty-two are now bounded, and the longest path
    through `needs:` that a PUSH can take is
-     test-ui-tests (150) -> push-to-attic (60) = 210 minutes.
+     test-ui-tests (150) -> push-to-attic (60) = 210 minutes
+   (now test-ui-tests alone: the cache push left this file).
    A started mainline run can hold its group for at most three and a half
    hours of EXECUTION, and the argument for `false` no longer has to appeal
    to an unbounded quantity.

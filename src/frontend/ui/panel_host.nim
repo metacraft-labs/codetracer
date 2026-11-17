@@ -95,6 +95,13 @@ var renderers: array[Content, PanelRenderer]
   ## and agent panes): the module that owns it registers how to render it
   ## (`setPanelRenderer`).
   ## Per pane, set by the module that owns the pane's host behaviour.
+const WindowChromeKinds = {Content.CommandPalette}
+  ## Panes of the window's own chrome (the caption bar's command prompt):
+  ## drawn whichever tab is shown, never left empty.
+
+var chromeSession: SessionViewModel
+  ## The session the window's chrome last rendered over.
+
 var shownSession: SessionViewModel
   ## The session of the tab on screen; nil until the renderer has one. What
   ## a host shows when no resolver is installed (a single-session page), and
@@ -152,6 +159,8 @@ proc render(m: PanelMount; session: SessionViewModel) =
   ## replacing whatever it rendered before.
   m.unrender()
   m.session = session
+  if m.kind in WindowChromeKinds and not session.isNil:
+    chromeSession = session
   let host = m.host
   let node = dom_api.Node(host)
   while not dom_api.isNodeNil(node.firstChild):
@@ -247,6 +256,16 @@ proc sessionFor(host: dom_api.Element): SessionViewModel =
   ## session where no resolver is installed.
   if resolveSession.isNil: shownSession else: resolveSession(host)
 
+proc sessionForMount(host: dom_api.Element; kind: Content): SessionViewModel =
+  ## The session `kind`'s pane in `host` shows. A pane of the window's chrome
+  ## keeps the session it last showed while the tab on screen has none (a
+  ## "+" tab's welcome screen): the caption bar's command prompt stays drawn
+  ## there — faded and inert, `welcome_screen.styl` — instead of an empty
+  ## gap where the chrome was rebuilt.
+  result = sessionFor(host)
+  if result.isNil and kind in WindowChromeKinds:
+    result = chromeSession
+
 proc prepare(session: SessionViewModel) =
   ## What a session's panes need from the host once, before the first of
   ## them renders. Idempotent: both only set a mode on the ViewModel.
@@ -281,7 +300,7 @@ proc mountPanel*(host: dom_api.Element; kind: Content): PanelMount =
   doAssert kind in PanelHostKinds, $kind & " is not mounted by the panel host"
   result = PanelMount(host: host, kind: kind)
   live.add result
-  let session = sessionFor(host)
+  let session = sessionForMount(host, kind)
   if session.isNil:
     waiting.add result
   else:
@@ -316,7 +335,7 @@ proc refreshPanelSessions*() =
   for m in live:
     if m.disposed:
       continue
-    let session = sessionFor(m.host)
+    let session = sessionForMount(m.host, m.kind)
     if session.isNil or session == m.session:
       continue
     if not m.session.isNil and m.session notin touched:

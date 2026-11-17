@@ -2,9 +2,14 @@
 ## tracepoints, drawn by the IsoNim view every front-end shares
 ## (`viewmodel/views/isonim_point_list_view`) over the ViewModel session's
 ## `PointListVM` — the SAME `store.pointList.rows` the native front-ends
-## read, fed by one decoder (`ReplayDataStore.applyVerifiedBreakpoints` for
-## breakpoints the engine verified, `applyTracepointResults` for sweeps,
-## `point_collection_source` for project definitions).
+## read. On the desktop those rows are written by
+## `ReplayDataStore.applyVerifiedBreakpoints` for breakpoints the engine
+## verified (the debugger service's `setBreakpoints` answer),
+## `point_collection_source` for project definitions, and the tracepoint
+## editor (`ui/trace`) for tracepoints: `sdk/tracepoints.declareTracepoint`
+## holds one as a row from the moment its editor opens, run or not,
+## `applyTracepointResults` annotates the rows with a run's answer, and
+## closing the editor removes its row (codetracer#886).
 ##
 ## PLAT-40. Until 2026-09-23 `utils.makeComponent`'s arm for this pane was
 ## commented out and its `else` raised, so the pane could not be constructed

@@ -108,6 +108,7 @@ type
     kaHalfPageDown = "half-page-down"
     kaCenterOnPointer = "center-on-pointer"
     kaToggleBreakpoint = "toggle-breakpoint"
+    kaToggleInlineBreakpoint = "toggle-inline-breakpoint"
 
     # ---- §4.2 Variables Tree ----------------------------------------------
     kaExpandNode = "expand-node"
@@ -328,6 +329,7 @@ proc specAction*(action: KeyAction): string =
   of kaHalfPageUp, kaHalfPageDown: "Half Page Up / Down"
   of kaCenterOnPointer: "Center on Execution Pointer"
   of kaToggleBreakpoint: "Toggle Breakpoint"
+  of kaToggleInlineBreakpoint: "Toggle Inline Breakpoint"
   of kaExpandNode: "Expand Node"
   of kaCollapseNode: "Collapse Node"
   of kaToggleHexDec: "Toggle Hex / Dec"

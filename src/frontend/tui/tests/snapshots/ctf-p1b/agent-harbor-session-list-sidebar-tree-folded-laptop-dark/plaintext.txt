@@ -1,0 +1,56 @@
+ SESSIONS                                             «
+ 14 sessions · 2 need input · 2 idle ·
+ 7 running · 1 queued · 1 failed · 1 ended
+ invented working set: 14 sessions over 4 initiatives
+ ▸ ● Telemetry upload retries 1/4 1 needs input · 2 ru…
+ ▸ ● CI runner migration   4/10 1 needs input · 1 idle…
+ ▾ ● Route cache on the new storage layer   2/6 1 idle…
+ ○ Migrate cached routes without a cold start        5m
+   idle Telegram · Codex 0.9.4 · host-f
+   assistant: Routes migrate in 50k batches with no co…
+ ● Port the route cache to the new storage layer     1m
+   running CLI · Codex 0.9.4 · host-b
+   assistant: Moving RouteCache::get and ::put onto th…
+ ● Benchmark route cache reads on the new layer      2m
+   failed CodeTracer · Codex 0.9.4 · host-d
+   assistant: The read benchmark crashed at 6 M lookup…
+ ▾ ● Settings redesign                    3/8 2 running
+ ● Split the settings page into tabs                 2m
+   running WebUI · Grok 1.2.0 · host-c
+   assistant: Splitting SettingsPage into General, Acc…
+ ● Add search to the settings page                   3m
+   running TUI · Grok 1.2.0 · host-e
+   assistant: Indexing every setting's label and help…
+ ▾   No initiative                 1 running · 1 queued
+ ● Replace the hand-rolled JSON writer               6m
+   running CLI · Codex 0.9.4 · host-b
+   assistant: Replacing the hand-rolled JSON writer wi…
+ ● Profile the importer on the large fixture         6m
+   queued CodeTracer · Grok 1.2.0 · host-a
+   assistant: Queued; waiting for an agent slot to pro…
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    

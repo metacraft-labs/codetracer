@@ -259,6 +259,7 @@ const
     projectRootPath / "libs/parsetoml/src",
     projectRootPath / "libs/nim-result",
     projectRootPath / "libs/nim-confutils",
+    projectRootPath / "libs/nim-cli-spec/src",
     projectRootPath / "libs/nimcrypto",
     projectRootPath / "libs/zip",
     projectRootPath / "libs/jsony/src",
@@ -286,13 +287,29 @@ const
   ]
 
 when defined(windows):
-  const
-    ExeSuffix = ".exe"
-    CargoTargetBase = "C:/tmp/codetracer"
+  const ExeSuffix = ".exe"
 else:
-  const
-    ExeSuffix = ""
-    CargoTargetBase = "/tmp/codetracer"
+  const ExeSuffix = ""
+
+# The Cargo target directory of this checkout's repro build, relative to the
+# checkout. It used to be the host-global `/tmp/codetracer` (`C:/tmp/...`),
+# and two measured failures came from that alone (codetracer-pm
+# issues/2026-10-05-ui-tup-cargo-targets-collide-across-workspaces-and-compilers.md):
+# another account owned the directory, so `.cargo-lock` could not be opened
+# (2026-10-27), and macOS's /tmp cleanup emptied an `out/` a built
+# `replay-server` still loaded `libmcr_emulator.dylib` from (2026-10-12).
+#
+# It is a CONSTANT, not a per-compiler path like the tup build's, because the
+# graph is: reprobuild reuses the provider snapshot and the lowered-graph
+# cache across invocations that differ only in the ambient environment
+# (reprobuild docs/user-guide/idiomatic-reprobuild.md §4.4), so a compiler
+# probed here would be frozen at the first build. The compiler binding happens
+# when the build RUNS instead: `repro-cargo-target-slot` below, an uncacheable
+# action ordered before both Cargo actions, runs
+# `ci/lib/tup-cargo-target.sh --repro-slot`, which checks the slot's owner
+# marker (the same marker, written by the same file, as a tup base) and swaps
+# in a directory for the compiler about to run when it names another one.
+const ReproCargoSlot = "build/repro-cargo-targets/active"
 
 when defined(linux) or defined(macosx):
   const NativeDynlibOverrides = @[
@@ -580,6 +597,86 @@ package codeTracer:
     # (`isonim-tui`, whose package is `isonim_tui`): the repro.lock dep is
     # `codetracer-image-diff`, and its package `image_diff` resolves from it.
     "codetracer-image-diff >=0"
+
+    # EVERY ENTRY BELOW IS A SIBLING THIS REPOSITORY'S BUILD, TESTS OR CI READ
+    # FROM A CHECKOUT BESIDE IT. `uses:` is the only place a dependency is
+    # declared and `repro.lock` is derived from it (reprobuild 5a1326957), so a
+    # sibling a job checks out by bare name -- `provision-repro-lock-siblings`,
+    # `setup-db-backend-siblings`' `extra-siblings`, a `siblings:` block -- but
+    # that this list omits is a sibling the lock cannot pin. Each names its
+    # consumer. Siblings that build nothing carry a minimal `repro.nim` so they
+    # can be named here.
+    #
+    # The test lanes' scenario runner, its backends and the terminal harness
+    # (DemoVideoScript*, GuiAssert, TermAssert, TermAssertClient, nim-libvterm)
+    # are NOT here: no build compiles them, and ci/test/siblings/repro.nim
+    # declares them for the test lock that provision-repro-lock-siblings
+    # clones `test-siblings` from.
+    #
+    # Read from source by config.nims (`../<name>/src` on the Nim path), so
+    # every `ct` build reaches them; also named in the deploy-web-codetracer
+    # and launcher-recorder-e2e `siblings:` blocks.
+    "isonim-gpui >=0"
+    "nim-termctl >=0"
+    "nim-pty >=0"
+    # `ct` imports `runquota_process` (config.nims; the "Clone runquota
+    # sibling" steps in codetracer.yml).
+    "runquota >=0"
+    # io-mon's capture half, put on the Nim path by config.nims and cloned by
+    # the codetracer.yml jobs that compile it.
+    "nim-shm-queue >=0"
+    "nim-shm-gset >=0"
+    # The db-backend Cargo path dependencies and the replay-server build
+    # (.github/actions/setup-db-backend-siblings, scripts/build-siblings.sh,
+    # scripts/detect-siblings.sh, .github/sibling-repos).
+    "codetracer-trace-format >=0"
+    "codetracer-native-recorder >=0"
+    "codetracer-native-backend >=0"
+    "codetracer-visual-replay >=0"
+    # The recorders the GUI / launcher / cross-process lanes record with
+    # (.github/sibling-repos, scripts/detect-siblings.sh,
+    # scripts/build-siblings.sh, launcher-recorder-e2e*.yml, beam-flow.yml,
+    # request-panel-sidecar-retirement.yml, cross-repo-tests.yml).
+    "codetracer-launcher >=0"
+    "codetracer-python-recorder >=0"
+    "codetracer-ruby-recorder >=0"
+    "codetracer-js-recorder >=0"
+    "codetracer-beam-recorder >=0"
+    "codetracer-evm-recorder >=0"
+    "codetracer-wasm-recorder >=0"
+    "codetracer-wasm-instrumenter >=0"
+    # Test programs scripts/detect-siblings.sh locates for the recording lanes.
+    "codetracer-native-test-programs >=0"
+    # The `isonim-review` daemon: IsoNim's `isonim-review-build` compiles it
+    # with `--path:../nim-faststreams` and `--path:../nim-stew` (codetracer.yml
+    # `extra-siblings`).
+    "nim-faststreams >=0"
+    "nim-stew >=0"
+    # The observability GUI specs (src/tests/gui/tests/observability-m34-*
+    # and -m29-*) and the MCP dive-in gateway test
+    # (`just t_mcp_dive_in_fetch_sends_token_only_to_gateway`).
+    "codetracer-observability-cli >=0"
+    "codetracer-observability-e2e >=0"
+    "codetracer-observability-grafana >=0"
+    "codetracer-observability-jaeger >=0"
+    # The scenario inventory's extension rows (ci/test/scenario-inventory.py).
+    "codetracer-vscode-extension >=0"
+    # The plat68 keymap mutation runner puts `../isonim-examples` on its Nim
+    # path (src/frontend/viewmodel/tests/unit/run-plat68-keymaps-mutations.py).
+    "isonim-examples >=0"
+    # The HCR flame scenarios' coordinator driver, patchable-profile emitter
+    # and in-target agent (codetracer.yml's desktop scenario `siblings:`).
+    "reprobuild >=0"
+    # ci/test/identity-live-device-grant.sh reads infra's shared SSO
+    # descriptor and drives isonim-platform's local stack;
+    # ci/test/host-image-serves-in-incus-vm.sh uses isonim-platform's
+    # sessionctl.
+    "infra >=0"
+    "isonim-platform >=0"
+    # ci/test/sibling-provisioning-test.sh verifies the git-auth pin in
+    # provision-repro-lock-siblings against a checkout beside this one
+    # (codetracer.yml's "Clone metacraft-github-actions beside the checkout").
+    "metacraft-github-actions >=0"
 
     # Windows-only build tools. ``nsis`` (the Nullsoft Scriptable
     # Install System compiler) is what the ``windows-installer``
@@ -1358,16 +1455,56 @@ package codeTracer:
     let hasDbBackendRecordInput = fileExists("src/ct/db_backend_record.nim")
     let hasCtInput = fileExists("src/ct/codetracer.nim")
 
+    # See ReproCargoSlot. Two steps, because the compiler the Cargo actions
+    # run is not on a shell action's PATH: the engine provisions it onto the
+    # Cargo edge alone, as a sub-tool.
+    #
+    # 1. The PROBE, built by the same `cargo.build` machinery as the real
+    #    crates, so it gets the same provisioned toolchain. Its build script
+    #    records the absolute path of the rustc Cargo resolved
+    #    (ci/lib/repro-cargo-probe/build.rs). Cacheable: the engine keys it on
+    #    the cargo tool's identity, so it rebuilds when the toolchain changes,
+    #    which is exactly when its answer changes. Its target is inside the
+    #    slot root but is not a slot, so nothing rotates or reaps it.
+    # 2. The SLOT, uncacheable so it runs on every build before either real
+    #    Cargo action can write into the slot: the refusals (a link, another
+    #    user's directory, an object the build did not put there, another
+    #    checkout's marker) must hold every time, and a compiler change must
+    #    be seen before Cargo mixes two compilers' artefacts in one target.
+    const reproCargoProbeBinary =
+      "build/repro-cargo-targets/probe/debug/ct-repro-cargo-probe" & ExeSuffix
+    let reproCargoProbe = cargo.build(
+      locked = true,
+      manifestPath = "ci/lib/repro-cargo-probe/Cargo.toml",
+      targetDir = "build/repro-cargo-targets/probe",
+      actionId = "repro-cargo-compiler-probe",
+      extraInputs = @[
+        "ci/lib/repro-cargo-probe/Cargo.toml",
+        "ci/lib/repro-cargo-probe/Cargo.lock",
+        "ci/lib/repro-cargo-probe/build.rs",
+        "ci/lib/repro-cargo-probe/src/main.rs"
+      ],
+      extraOutputs = @[reproCargoProbeBinary])
+    let reproCargoTargetSlot = ctShell(
+      actionIdValue = "repro-cargo-target-slot",
+      commandValue = "bash ci/lib/tup-cargo-target.sh --repro-slot --rustc-probe " &
+        reproCargoProbeBinary & " .",
+      extraInputsValue = ["ci/lib/tup-cargo-target.sh", "ci/lib/nim-cache-root.sh",
+        reproCargoProbeBinary],
+      afterValue = [reproCargoProbe],
+      cacheableValue = false)
+
     if fileExists("src/backend-manager/Cargo.toml"):
       let sessionManagerBinary =
-        CargoTargetBase & "/backend_manager_target/release/session-manager" &
+        ReproCargoSlot & "/backend_manager_target/release/session-manager" &
           ExeSuffix
       let sessionManagerBuild = cargo.build(
         locked = true,
         release = true,
         manifestPath = "src/backend-manager/Cargo.toml",
-        targetDir = CargoTargetBase & "/backend_manager_target",
+        targetDir = ReproCargoSlot & "/backend_manager_target",
         actionId = "backend-session-manager-cargo",
+        after = @[reproCargoTargetSlot],
         extraInputs = @[
           "src/backend-manager/Cargo.toml",
           "src/backend-manager/Cargo.lock"
@@ -1383,12 +1520,26 @@ package codeTracer:
 
     if fileExists("src/db-backend/Cargo.toml"):
       let replayServerBinary =
-        CargoTargetBase & "/db_backend_target/debug/replay-server" & ExeSuffix
+        ReproCargoSlot & "/db_backend_target/debug/replay-server" & ExeSuffix
+      # The emulator library `replay-server` links. Its only run-time search
+      # path is its own directory (`$ORIGIN` / `@loader_path`, set in
+      # src/db-backend/build.rs, which deploys the library beside the binary
+      # in the profile directory), so the installed copy below needs the
+      # library installed beside it too. It used to find it through an
+      # rpath into the Cargo target's `out/` (`/tmp/codetracer/...` here),
+      # which macOS's /tmp cleanup emptied (2026-10-12).
+      const emulatorLibraryName =
+        when defined(windows): "mcr_emulator.dll"
+        elif defined(macosx): "libmcr_emulator.dylib"
+        else: "libmcr_emulator.so"
+      let emulatorLibrary =
+        ReproCargoSlot & "/db_backend_target/debug/" & emulatorLibraryName
       let replayServerBuild = cargo.build(
         locked = true,
         manifestPath = "src/db-backend/Cargo.toml",
-        targetDir = CargoTargetBase & "/db_backend_target",
+        targetDir = ReproCargoSlot & "/db_backend_target",
         actionId = "db-replay-server-cargo",
+        after = @[reproCargoTargetSlot],
         extraInputs = @[
           "src/db-backend/Cargo.toml",
           "src/db-backend/Cargo.lock",
@@ -1397,14 +1548,22 @@ package codeTracer:
           "libs/tree-sitter-nim/src/parser.c",
           "libs/tree-sitter-nim/src/scanner.c"
         ],
-        extraOutputs = @[replayServerBinary])
+        extraOutputs = @[replayServerBinary, emulatorLibrary])
       let replayServer = fs.copyFile(
         source = replayServerBinary,
         output = buildDebugPath("bin/replay-server" & ExeSuffix),
         actionId = "db-replay-server",
         after = @[replayServerBuild])
-      target("replay-server", replayServer)
+      let replayServerEmulator = fs.copyFile(
+        source = emulatorLibrary,
+        output = buildDebugPath("bin/" & emulatorLibraryName),
+        actionId = "db-replay-server-emulator-library",
+        after = @[replayServerBuild])
+      # `replay-server` names a replay-server THAT STARTS: the binary and the
+      # library it loads from beside itself.
+      target("replay-server", [replayServer, replayServerEmulator])
       codetracerActions.add(replayServer)
+      codetracerActions.add(replayServerEmulator)
 
     # Nim cache dirs. Both platforms derive the root from the ambient
     # temporary directory (``%TEMP%`` on Windows, ``$TMPDIR`` on POSIX,
@@ -2381,7 +2540,8 @@ package codeTracer:
       gateRustTestCrateCoverage,
       gateTestLaneCoverage,
       gateSiblingProvisioning,
-      gateSiblingInputBranch]
+      gateSiblingInputBranch,
+      gateReproLockAgreement]
 
     for gateAction in ctGateTestActions:
       auxiliaryActionIds.add(gateAction.id)

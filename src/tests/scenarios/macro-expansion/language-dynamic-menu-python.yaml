@@ -1,0 +1,22 @@
+scenario: 1
+name: macro-expansion/language-dynamic-menu-python
+pack: codetracer
+summary: >-
+  A Python recording's View menu has none of the Nim views or tracing
+  commands.
+
+stage:
+  - use: record-program
+    with: { program: py_console_logs/main.py }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 180s }
+  - wait: { until: call-trace.loaded, timeout: 120s }
+  - click: { at: menu-bar }
+  - hover: { at: 'menu-bar/menu[label="View"]', for: 500ms }
+  - wait: { until: { at: 'menu-bar/menu-item[label="Reset Layout"]', present: true }, timeout: 10s }
+  - expect: { at: menu-bar, assert: "lacks(\"View Generated C Source\")" }
+  - expect: { at: menu-bar, assert: "lacks(\"View Disassembly\")" }
+  - expect: { at: menu-bar, assert: "lacks(\"Trace Macro at Cursor\")" }
+  - expect: { at: menu-bar, assert: "lacks(\"Trace Static Block at Cursor\")" }

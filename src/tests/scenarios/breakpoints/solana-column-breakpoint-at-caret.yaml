@@ -1,0 +1,35 @@
+scenario: 1
+name: breakpoints/solana-column-breakpoint-at-caret
+pack: codetracer
+summary: >-
+  In the Solana recording, Shift+F9 with the caret at line 17 column 24
+  (the `add(a, b)` call of `let sum_val` in `process_instruction`) sets a column
+  breakpoint there, its marker drawn at that column, and Continue from
+  `process_instruction`'s entry stops on line 17.
+
+stage:
+  - use: record-program
+    with: { program: solana_example, lang: solana }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 240s }
+  - click: 'pane-tab[label="CALLTRACE"]'
+  - wait: { until: call-trace.loaded, timeout: 120s }
+  # The call trace opens deep inside the entrypoint's account
+  # deserialisation; process_instruction is reached through its search.
+  - click: { at: 'search-box[pane="call-trace"]' }
+  - type: process_instruction
+  - key: Enter
+  - wait: { until: { at: 'search-box[pane="call-trace"]/search-result[#1]', present: true }, timeout: 60s }
+  - click: 'search-box[pane="call-trace"]/search-result[#1]'
+    settle: false
+  - wait: { until: { at: 'editor[file="solana_flow_test.rs"]', current-line: { gt: 0 } }, timeout: 60s }
+  - wait: replay-idle
+  - wait: { until: { at: 'editor[file="solana_flow_test.rs"]/line[number="17"]', present: true }, timeout: 20s }
+  - click: { at: 'editor[file="solana_flow_test.rs"]/line[number="17"]', anchor: caret(24) }
+  - chord: Shift+F9
+  - wait: { until: { at: 'editor[file="solana_flow_test.rs"]/line[number="17"]', inline-breakpoints: ["24"] }, timeout: 20s }
+  - click: 'toolbar/toolbar-button[label="continue-image"]'
+    settle: false
+  - wait: { until: { at: 'editor[file="solana_flow_test.rs"]', current-line: 17 }, timeout: 60s }

@@ -1,0 +1,16 @@
+scenario: 1
+name: gpui/welcome-from-the-plus
+pack: codetracer
+summary: >-
+  Ctrl+N (the strip's +) opens a new tab on the Welcome screen, which lists the desktop's options.
+
+stage:
+  - use: record-program
+    with: { program: calc }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - chord: Ctrl+N
+  - wait: { until: { at: session-strip, count: 2 }, timeout: 30s }
+  - wait: { until: { at: 'pane[title="Welcome"]', assert: 'has-row("Record new trace")' }, timeout: 30s }

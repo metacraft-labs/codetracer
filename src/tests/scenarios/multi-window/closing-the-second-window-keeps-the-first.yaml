@@ -1,0 +1,60 @@
+scenario: 1
+name: multi-window/closing-the-second-window-keeps-the-first
+pack: codetracer
+summary: >-
+  Closing a window opened for the session leaves the first window working:
+  its tab menus no longer list the closed window, and it still steps the
+  replay the two windows shared.
+
+stage:
+  - use: record-program
+    with: { program: py_console_logs/main.py }
+  - use: open-recording
+
+clients:
+  main: { open: stage }
+
+steps:
+  - wait: { until: replay-idle, timeout: 180s }
+    as: main
+  - wait: { until: { at: status-line, location: { matches: "main.py:1#" } }, timeout: 60s }
+    as: main
+  - click: session-strip/session-add
+    as: main
+  - wait: { until: { at: session-strip, count: 2 }, timeout: 30s }
+    as: main
+  - click: { at: 'session-strip/session-tab[title="main.py"]', button: right }
+    as: main
+  - wait: { until: { at: 'context-menu/menu-item[label="Open in New Window"]', present: true }, timeout: 15s }
+    as: main
+  - click: 'context-menu/menu-item[label="Open in New Window"]'
+    as: main
+  - open-client: { name: second, open: app-window }
+  - wait: { until: { at: status-line, location: { matches: "main.py:1#" } }, timeout: 120s }
+    as: second
+  - click: 'session-strip/session-tab[title="main.py"]'
+    as: main
+  - click: { at: 'pane-tab[label="EVENT LOG"]', button: right }
+    as: main
+  - wait: { until: { at: 'context-menu/menu-item[label="Send to: main.py — CodeTracer"]', present: true }, timeout: 15s }
+    as: main
+  - key: Esc
+    as: main
+  - wait: { until: { at: context-menu, absent: true }, timeout: 10s }
+    as: main
+  - close-client: second
+  - click: { at: 'pane-tab[label="EVENT LOG"]', button: right }
+    as: main
+  - wait: { until: { at: 'context-menu/menu-item[label="Send to New Window"]', present: true }, timeout: 15s }
+    as: main
+  - expect: { at: 'context-menu/menu-item[label="Send to: main.py — CodeTracer"]', absent: true, holds: 1s }
+    as: main
+  - key: Esc
+    as: main
+  - wait: { until: { at: context-menu, absent: true }, timeout: 10s }
+    as: main
+  - click: 'toolbar/toolbar-button[label="next-image"]'
+    settle: false
+    as: main
+  - wait: { until: { at: status-line, location: { matches: "main.py:8#" } }, timeout: 60s }
+    as: main

@@ -1,0 +1,14 @@
+# MUST FAIL the scenario linter (ci/test/scenarios.sh lint checks that it
+# does): a stage call smuggled into the steps. After the stage, a scenario is
+# only input, observation and synchronisation.
+scenario: 1
+name: tests/lint-must-fail/stage-in-steps
+pack: codetracer
+summary: A stage procedure called from the steps.
+stage:
+  - use: nim-project
+  - use: open-recording
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - use: plant-config
+    with: { file: keybindings.json, content: "[]" }

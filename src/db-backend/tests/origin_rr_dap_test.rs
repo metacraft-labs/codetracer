@@ -157,11 +157,7 @@ fn test_origin_rr_cpp_memcpy_forward() {
 // Test #8 + #9 — Rust canonical + clone forwarder.
 // ---------------------------------------------------------------------------
 
-#[test]
-#[ignore = "pending: end-to-end body not written; see tests/fixtures/origin/rust/simple_trivial_chain/ANSWERS.md"]
-fn test_origin_rr_rust_simple_trivial_chain() {
-    unimplemented_end_to_end("test_origin_rr_rust_simple_trivial_chain", "rust/simple_trivial_chain");
-}
+// `test_origin_rr_rust_simple_trivial_chain` is in the `rr` module below.
 
 #[test]
 #[ignore = "pending: end-to-end body not written; see tests/fixtures/origin/rust/clone_forwarder/ANSWERS.md"]
@@ -273,6 +269,7 @@ fn test_origin_rr_fixture_files_committed() {
     assert_fixture_exists("c", "release_build_elided", "main.c");
     assert_fixture_exists("cpp", "memcpy_forward", "main.cpp");
     assert_fixture_exists("rust", "clone_forwarder", "main.rs");
+    assert_fixture_exists("rust", "rewritten_after_copy", "main.rs");
     assert_fixture_exists("nim", "implicit_result", "main.nim");
     assert_fixture_exists("go", "multi_return_with_err", "main.go");
 }
@@ -447,6 +444,27 @@ mod rr {
         }
     }
 
+    /// A DAP client for a test that asserts a WHOLE chain in one request.
+    ///
+    /// A request's time limit is 5 s and an rr hop's 1.5 s by default, and on a
+    /// loaded host a walk can need more: under `stress-ng --cpu 64` at load
+    /// about 108, `test_rr_origin_chain_after_run_to_entry_twice_and_continue`
+    /// stopped after its first hop with "wall-clock budget exhausted (5000
+    /// ms)", once in eight full runs. Cutting a chain off at the limit is the
+    /// designed behaviour, covered by the tests that set a 1 ms limit and the
+    /// per-hop cap test; these tests are about the chain's answer, so they
+    /// raise both limits (`CT_ORIGIN_WALL_CLOCK_MS` and
+    /// `CT_RR_ORIGIN_PER_HOP_WALL_CLOCK_MS`, honoured under
+    /// `CODETRACER_IN_UI_TEST`), as the desktop scenarios do.
+    fn start_client_for_a_whole_chain() -> test_harness::DapStdioTestClient {
+        test_harness::DapStdioTestClient::start_with_env(&[
+            ("CODETRACER_IN_UI_TEST", "1"),
+            ("CT_ORIGIN_WALL_CLOCK_MS", "60000"),
+            ("CT_RR_ORIGIN_PER_HOP_WALL_CLOCK_MS", "10000"),
+        ])
+        .expect("DAP stdio client should start")
+    }
+
     fn send_rr_origin_chain_request(
         client: &mut test_harness::DapStdioTestClient,
         variable_name: &str,
@@ -471,7 +489,7 @@ mod rr {
         );
         client.send_message(&req).expect("send ct/originChain");
         let response = client
-            .read_until_response_msg("ct/originChain", Duration::from_secs(60))
+            .read_until_response_msg("ct/originChain", Duration::from_secs(300))
             .expect("read ct/originChain response");
         match response {
             DapMessage::Response(response) => {
@@ -516,7 +534,7 @@ mod rr {
         let recording = record_rr_fixture_with_regenerate("c", "cross_thread_copy", "main.c", &ct_native_replay);
         let breakpoint_line = fixture_line_containing("c", "cross_thread_copy", "main.c", "printf(\"%d\\n\", local)");
 
-        let mut client = test_harness::DapStdioTestClient::start().expect("DAP stdio client should start");
+        let mut client = start_client_for_a_whole_chain();
         client
             .initialize_and_launch_rr(&recording, &ct_native_replay)
             .expect("RR DAP launch should succeed");
@@ -561,6 +579,111 @@ mod rr {
         assert!(
             (cross_thread_hop.confidence - 0.6).abs() < f32::EPSILON,
             "CrossThreadCopy confidence must be exactly 0.6 per the RR guard: hop={cross_thread_hop:?}"
+        );
+    }
+
+    /// A walk that crossed threads returns the replay to the stop it was
+    /// asked at, so a second query there answers like the first (spec §6.3,
+    /// "The replay after a walk"). The desktop's "Show in side panel" is
+    /// that second query. Before the replay was returned, the walk left it
+    /// at the writer thread's write, where `local` has no storage, and the
+    /// second query failed with `EvaluateWithAddress(local) … no valid
+    /// storage address`.
+    #[test]
+    fn test_origin_rr_cross_thread_copy_second_query_answers_like_the_first() {
+        let ct_native_replay = rr_backend("cross_thread_copy_second_query");
+        require_tool("gcc", "--version", "cross_thread_copy_second_query");
+        let recording = record_rr_fixture_with_regenerate("c", "cross_thread_copy", "main.c", &ct_native_replay);
+        let breakpoint_line = fixture_line_containing("c", "cross_thread_copy", "main.c", "printf(\"%d\\n\", local)");
+
+        let mut client = start_client_for_a_whole_chain();
+        client
+            .initialize_and_launch_rr(&recording, &ct_native_replay)
+            .expect("RR DAP launch should succeed");
+        client
+            .set_breakpoint(&recording.source_path, breakpoint_line)
+            .expect("set breakpoint at cross_thread_copy printf");
+        let location = client
+            .continue_to_breakpoint()
+            .expect("continue to cross_thread_copy printf breakpoint");
+        assert_eq!(
+            location.line, breakpoint_line as i64,
+            "stopped at the wrong line: {location:?}"
+        );
+
+        // The desktop asks at the current stop (`stepId` -1), both times.
+        let first = send_rr_origin_chain_request(&mut client, "local", -1, DEFAULT_ORIGIN_MAX_HOPS);
+        assert!(
+            first.hops.iter().any(|hop| hop.kind == OriginKind::CrossThreadCopy),
+            "the first query must cross threads for this test to mean anything: {first:?}"
+        );
+        let second = send_rr_origin_chain_request(&mut client, "local", -1, DEFAULT_ORIGIN_MAX_HOPS);
+        let shape = |chain: &OriginChain| {
+            (
+                chain
+                    .hops
+                    .iter()
+                    .map(|hop| {
+                        (
+                            hop.kind,
+                            hop.location.path.clone(),
+                            hop.location.line,
+                            hop.source_expr.clone(),
+                        )
+                    })
+                    .collect::<Vec<_>>(),
+                chain.terminator.kind,
+                chain.terminator.expression.clone(),
+            )
+        };
+        assert_eq!(
+            shape(&second),
+            shape(&first),
+            "a second query at the same stop must answer like the first"
+        );
+    }
+
+    /// A hop whose reverse continue runs past the per-hop cap still takes the
+    /// write it found: the cap bounds re-issues, not the reverse continue
+    /// that finds the write (spec §6.3, "Per-hop cap"). The cap is set to
+    /// 1 ms, so every hop here runs past it — what a loaded host did to the
+    /// 1,500 ms cap, which used to end the chain at its first hop with "rr
+    /// per-hop wall-clock cap (1500 ms) tripped".
+    #[test]
+    fn test_origin_rr_cross_thread_copy_takes_a_write_found_after_the_per_hop_cap() {
+        let ct_native_replay = rr_backend("cross_thread_copy_slow_hop");
+        require_tool("gcc", "--version", "cross_thread_copy_slow_hop");
+        let recording = record_rr_fixture_with_regenerate("c", "cross_thread_copy", "main.c", &ct_native_replay);
+        let breakpoint_line = fixture_line_containing("c", "cross_thread_copy", "main.c", "printf(\"%d\\n\", local)");
+
+        // The request's own limit is raised as in `start_client_for_a_whole_chain`:
+        // this test is about the per-hop cap, not about a loaded host cutting
+        // the walk off at 5 s.
+        let mut client = test_harness::DapStdioTestClient::start_with_env(&[
+            ("CODETRACER_IN_UI_TEST", "1"),
+            ("CT_RR_ORIGIN_PER_HOP_WALL_CLOCK_MS", "1"),
+            ("CT_ORIGIN_WALL_CLOCK_MS", "60000"),
+        ])
+        .expect("DAP stdio client should start");
+        client
+            .initialize_and_launch_rr(&recording, &ct_native_replay)
+            .expect("RR DAP launch should succeed");
+        client
+            .set_breakpoint(&recording.source_path, breakpoint_line)
+            .expect("set breakpoint at cross_thread_copy printf");
+        client
+            .continue_to_breakpoint()
+            .expect("continue to cross_thread_copy printf breakpoint");
+
+        let chain = send_rr_origin_chain_request(&mut client, "local", -1, DEFAULT_ORIGIN_MAX_HOPS);
+        assert_ne!(
+            chain.terminator.kind,
+            TerminatorKind::OutOfBudget,
+            "a found write must be taken however long its reverse continue ran: {chain:?}"
+        );
+        assert!(
+            chain.hops.iter().any(|hop| hop.kind == OriginKind::CrossThreadCopy),
+            "the chain must reach the writer thread's write: {chain:?}"
         );
     }
 
@@ -748,9 +871,11 @@ mod rr {
             session_id: String::new(),
             classify_source: true,
         };
+        // A whole-chain answer: the request's limit raised, as in
+        // `start_client_for_a_whole_chain`, so a loaded host cannot cut it off.
         let budget = OriginBudget {
             max_hops: DEFAULT_ORIGIN_MAX_HOPS,
-            wall_clock_ms: db_backend::task::DEFAULT_ORIGIN_WALL_CLOCK_MS,
+            wall_clock_ms: 60_000,
             max_steps_scanned: db_backend::task::DEFAULT_ORIGIN_MAX_STEPS_SCANNED,
         };
         let chain = db_backend::recreator_origin::run_rr_origin_chain(
@@ -777,6 +902,477 @@ mod rr {
             chain.terminator.kind,
             TerminatorKind::ReadFromExternal,
             "direct origin probe should terminate at the writer thread boundary: {chain:?}"
+        );
+    }
+
+    /// Test #8: the Rust canonical chain, end to end through the DAP server,
+    /// asked the way the desktop asks it (at the current stop).
+    /// `tests/fixtures/origin/rust/simple_trivial_chain/ANSWERS.md`:
+    /// `c = b`, `b = a`, `a = 10`, ending at the literal.
+    #[test]
+    fn test_origin_rr_rust_simple_trivial_chain() {
+        let ct_native_replay = rr_backend("rust_simple_trivial_chain");
+        require_tool("rustc", "--version", "rust_simple_trivial_chain");
+        let recording = record_rr_fixture_with_regenerate("rust", "simple_trivial_chain", "main.rs", &ct_native_replay);
+        let breakpoint_line = fixture_line_containing("rust", "simple_trivial_chain", "main.rs", "println!");
+
+        let mut client = start_client_for_a_whole_chain();
+        client
+            .initialize_and_launch_rr(&recording, &ct_native_replay)
+            .expect("RR DAP launch should succeed");
+        client
+            .set_breakpoint(&recording.source_path, breakpoint_line)
+            .expect("set breakpoint at the println");
+        let location = client.continue_to_breakpoint().expect("continue to the println");
+        assert_eq!(
+            location.line, breakpoint_line as i64,
+            "stopped at the wrong line: {location:?}"
+        );
+
+        let chain = send_rr_origin_chain_request(&mut client, "c", -1, DEFAULT_ORIGIN_MAX_HOPS);
+        let shape: Vec<(OriginKind, i64, String)> = chain
+            .hops
+            .iter()
+            .map(|hop| (hop.kind, hop.location.line, hop.source_expr.clone()))
+            .collect();
+        let line_of = |needle: &str| fixture_line_containing("rust", "simple_trivial_chain", "main.rs", needle) as i64;
+        assert_eq!(
+            chain.hops.iter().map(|hop| hop.location.line).collect::<Vec<_>>(),
+            vec![
+                line_of("let c: i32 = b"),
+                line_of("let b: i32 = a"),
+                line_of("let a: i32 = 10")
+            ],
+            "the chain walks c <- b <- a: hops={shape:?} terminator={:?} {:?}",
+            chain.terminator.kind,
+            chain.terminator.expression
+        );
+        assert_eq!(
+            chain.hops.iter().map(|hop| hop.kind).collect::<Vec<_>>(),
+            vec![OriginKind::TrivialCopy, OriginKind::TrivialCopy, OriginKind::Literal],
+            "hops={shape:?}"
+        );
+        assert_eq!(
+            chain.terminator.kind,
+            TerminatorKind::Literal,
+            "the chain ends at the literal 10: {:?}",
+            chain.terminator
+        );
+    }
+
+    /// The line of the stop a `ct/complete-move` after `command` reports.
+    fn move_line(client: &mut test_harness::DapStdioTestClient, command: &str) -> i64 {
+        let req = client
+            .dap_client_mut()
+            .request(command, serde_json::json!({ "threadId": 1 }));
+        client
+            .send_message(&req)
+            .unwrap_or_else(|e| panic!("send {command}: {e}"));
+        match client
+            .read_until_event_msg("ct/complete-move", Duration::from_secs(300))
+            .unwrap_or_else(|e| panic!("{command} reported no stop: {e}"))
+        {
+            DapMessage::Event(event) => event.body["location"]["line"]
+                .as_i64()
+                .unwrap_or_else(|| panic!("{command}: no line in {}", event.body)),
+            other => panic!("{command}: expected ct/complete-move, got {other:?}"),
+        }
+    }
+
+    /// The desktop's first moves on an rr recording, twice: run to entry,
+    /// continue to a breakpoint, run to entry again, continue again. The
+    /// second run to entry restarts rr's replay from a later point
+    /// (`vRun;;t…`), which is where the desktop's replay died.
+    #[test]
+    fn test_rr_run_to_entry_twice_then_continue_to_a_breakpoint() {
+        let ct_native_replay = rr_backend("rr_run_to_entry_twice");
+        require_tool("rustc", "--version", "rr_run_to_entry_twice");
+        let recording = record_rr_fixture_with_regenerate("rust", "simple_trivial_chain", "main.rs", &ct_native_replay);
+        let breakpoint_line = fixture_line_containing("rust", "simple_trivial_chain", "main.rs", "println!");
+        let mut client = test_harness::DapStdioTestClient::start().expect("DAP stdio client should start");
+        client
+            .initialize_and_launch_rr(&recording, &ct_native_replay)
+            .expect("RR DAP launch should succeed");
+        client
+            .set_breakpoint(&recording.source_path, breakpoint_line)
+            .expect("set breakpoint at the println");
+        for round in 0..2 {
+            let entry = move_line(&mut client, "ct/run-to-entry");
+            assert!(
+                entry > 0 && entry < breakpoint_line as i64,
+                "round {round}: run to entry stopped at line {entry}"
+            );
+            let stop = move_line(&mut client, "continue");
+            assert_eq!(
+                stop, breakpoint_line as i64,
+                "round {round}: continue stopped at line {stop}"
+            );
+        }
+    }
+
+    /// The desktop's order: run to entry, THEN set the breakpoint, then
+    /// continue — twice. A breakpoint set after rr restarted its replay must
+    /// stop the continue.
+    #[test]
+    fn test_rr_breakpoint_set_after_run_to_entry_stops_the_continue() {
+        let ct_native_replay = rr_backend("rr_breakpoint_after_run_to_entry");
+        require_tool("rustc", "--version", "rr_breakpoint_after_run_to_entry");
+        let recording = record_rr_fixture_with_regenerate("rust", "simple_trivial_chain", "main.rs", &ct_native_replay);
+        let breakpoint_line = fixture_line_containing("rust", "simple_trivial_chain", "main.rs", "println!");
+        let mut client = test_harness::DapStdioTestClient::start().expect("DAP stdio client should start");
+        client
+            .initialize_and_launch_rr(&recording, &ct_native_replay)
+            .expect("RR DAP launch should succeed");
+        for round in 0..2 {
+            let entry = move_line(&mut client, "ct/run-to-entry");
+            assert!(
+                entry > 0 && entry < breakpoint_line as i64,
+                "round {round}: run to entry stopped at line {entry}"
+            );
+            client
+                .set_breakpoint(&recording.source_path, breakpoint_line)
+                .expect("set breakpoint at the println");
+            let stop = move_line(&mut client, "continue");
+            assert_eq!(
+                stop, breakpoint_line as i64,
+                "round {round}: continue stopped at line {stop}"
+            );
+        }
+    }
+
+    /// As `ct record` leaves an rr recording: packed (`rr pack`), so the
+    /// replay maps the trace's own copies of the binary and its libraries.
+    /// The desktop opens such recordings, and there a run to entry, a
+    /// breakpoint and a continue killed rr's replay ("Tracee died
+    /// unexpectedly").
+    #[test]
+    fn test_rr_packed_recording_run_to_entry_then_breakpoint_then_continue() {
+        let ct_native_replay = rr_backend("rr_packed_run_to_entry");
+        require_tool("rustc", "--version", "rr_packed_run_to_entry");
+        let recording = record_rr_fixture_with_regenerate("rust", "simple_trivial_chain", "main.rs", &ct_native_replay);
+        let rr_dir = if recording.trace_dir.join("rr").is_dir() {
+            recording.trace_dir.join("rr")
+        } else {
+            recording.trace_dir.clone()
+        };
+        let packed = Command::new("rr")
+            .arg("pack")
+            .arg(&rr_dir)
+            .output()
+            .expect("run rr pack");
+        assert!(
+            packed.status.success(),
+            "rr pack failed: {}",
+            String::from_utf8_lossy(&packed.stderr)
+        );
+        let breakpoint_line = fixture_line_containing("rust", "simple_trivial_chain", "main.rs", "println!");
+        let mut client = test_harness::DapStdioTestClient::start().expect("DAP stdio client should start");
+        client
+            .initialize_and_launch_rr(&recording, &ct_native_replay)
+            .expect("RR DAP launch should succeed");
+        for round in 0..2 {
+            let entry = move_line(&mut client, "ct/run-to-entry");
+            assert!(
+                entry > 0 && entry < breakpoint_line as i64,
+                "round {round}: run to entry stopped at line {entry}"
+            );
+            client
+                .set_breakpoint(&recording.source_path, breakpoint_line)
+                .expect("set breakpoint at the println");
+            let stop = move_line(&mut client, "continue");
+            assert_eq!(
+                stop, breakpoint_line as i64,
+                "round {round}: continue stopped at line {stop}"
+            );
+        }
+    }
+
+    /// The desktop's whole path on a packed recording: run to entry twice
+    /// (the second restarts rr's replay from a later point), a breakpoint
+    /// set after it, a continue to it, then the value origin of `c` -- whose
+    /// walk first saves the replay position, which makes rr clone the
+    /// replayed process for a checkpoint. In the desktop rr's replay died
+    /// there ("remote clone failed with errno ESRCH").
+    #[test]
+    fn test_rr_packed_recording_origin_chain_after_run_to_entry_and_continue() {
+        origin_chain_after_run_to_entry_twice_and_continue("rr_packed_origin_after_continue", true);
+    }
+
+    /// The same path on the recording as recorded (not packed).
+    #[test]
+    fn test_rr_origin_chain_after_run_to_entry_twice_and_continue() {
+        origin_chain_after_run_to_entry_twice_and_continue("rr_origin_after_run_to_entry_twice", false);
+    }
+
+    fn origin_chain_after_run_to_entry_twice_and_continue(name: &str, pack: bool) {
+        let ct_native_replay = rr_backend(name);
+        require_tool("rustc", "--version", name);
+        let recording = record_rr_fixture_with_regenerate("rust", "simple_trivial_chain", "main.rs", &ct_native_replay);
+        if pack {
+            let rr_dir = if recording.trace_dir.join("rr").is_dir() {
+                recording.trace_dir.join("rr")
+            } else {
+                recording.trace_dir.clone()
+            };
+            let packed = Command::new("rr")
+                .arg("pack")
+                .arg(&rr_dir)
+                .output()
+                .expect("run rr pack");
+            assert!(
+                packed.status.success(),
+                "rr pack failed: {}",
+                String::from_utf8_lossy(&packed.stderr)
+            );
+        }
+        let breakpoint_line = fixture_line_containing("rust", "simple_trivial_chain", "main.rs", "println!");
+        let mut client = start_client_for_a_whole_chain();
+        client
+            .initialize_and_launch_rr(&recording, &ct_native_replay)
+            .expect("RR DAP launch should succeed");
+        let first = move_line(&mut client, "ct/run-to-entry");
+        let entry = move_line(&mut client, "ct/run-to-entry");
+        assert_eq!(entry, first, "a second run to entry stopped elsewhere");
+        client
+            .set_breakpoint(&recording.source_path, breakpoint_line)
+            .expect("set breakpoint at the println");
+        let stop = move_line(&mut client, "continue");
+        assert_eq!(stop, breakpoint_line as i64, "continue stopped at line {stop}");
+        let line_of = |needle: &str| fixture_line_containing("rust", "simple_trivial_chain", "main.rs", needle) as i64;
+        let chain = send_rr_origin_chain_request(&mut client, "c", -1, DEFAULT_ORIGIN_MAX_HOPS);
+        assert_eq!(
+            chain.hops.iter().map(|hop| hop.location.line).collect::<Vec<_>>(),
+            vec![
+                line_of("let c: i32 = b"),
+                line_of("let b: i32 = a"),
+                line_of("let a: i32 = 10")
+            ],
+            "the chain walks c <- b <- a: terminator={:?} {:?}",
+            chain.terminator.kind,
+            chain.terminator.expression
+        );
+    }
+
+    /// Send a desktop request and wait for its response (its body).
+    fn desktop_request(client: &mut test_harness::DapStdioTestClient, command: &str, args: serde_json::Value) {
+        let req = client.dap_client_mut().request(command, args);
+        client
+            .send_message(&req)
+            .unwrap_or_else(|e| panic!("send {command}: {e}"));
+        client
+            .read_until_response_msg(command, Duration::from_secs(300))
+            .unwrap_or_else(|e| panic!("{command}: no response: {e}"));
+    }
+
+    /// The desktop's requests on opening an rr recording, in its order (taken
+    /// from a desktop run's DAP log): run to entry, the State pane's locals
+    /// (first with the language not yet known, then as Rust), run to entry
+    /// again from the toolbar, a breakpoint, continue.
+    #[test]
+    fn test_rr_desktop_order_with_locals_then_continue_to_a_breakpoint() {
+        let ct_native_replay = rr_backend("rr_desktop_order_with_locals");
+        require_tool("rustc", "--version", "rr_desktop_order_with_locals");
+        let recording = record_rr_fixture_with_regenerate("rust", "simple_trivial_chain", "main.rs", &ct_native_replay);
+        let breakpoint_line = fixture_line_containing("rust", "simple_trivial_chain", "main.rs", "println!");
+        let mut client = test_harness::DapStdioTestClient::start().expect("DAP stdio client should start");
+        client
+            .initialize_and_launch_rr(&recording, &ct_native_replay)
+            .expect("RR DAP launch should succeed");
+        let entry = move_line(&mut client, "ct/run-to-entry");
+        let locals = |lang: &str, ticks: i64| serde_json::json!({"countBudget":3000,"depthLimit":7,"lang":lang,"minCountLimit":50,"rrTicks":ticks,"watchExpressions":[]});
+        desktop_request(&mut client, "ct/load-locals", locals("c", 0));
+        desktop_request(&mut client, "ct/load-locals", locals("rust", 0));
+        let again = move_line(&mut client, "ct/run-to-entry");
+        assert_eq!(again, entry, "the second run to entry stopped elsewhere");
+        client
+            .set_breakpoint(&recording.source_path, breakpoint_line)
+            .expect("set breakpoint at the println");
+        let stop = move_line(&mut client, "continue");
+        assert_eq!(stop, breakpoint_line as i64, "continue stopped at line {stop}");
+    }
+
+    /// Send `ct/originChain` with `continuation_token`; the chain, or the
+    /// failed response's `(originErrorCode, message)`.
+    fn send_rr_origin_chain_continuation(
+        client: &mut test_harness::DapStdioTestClient,
+        variable_name: &str,
+        continuation_token: Option<String>,
+    ) -> Result<OriginChain, (u64, String)> {
+        let args = CtOriginChainArguments {
+            variable_name: variable_name.to_string(),
+            variable_path: Vec::new(),
+            frame_id: -1,
+            step_id: -1,
+            thread_id: 0,
+            max_hops: DEFAULT_ORIGIN_MAX_HOPS,
+            lazy: false,
+            continuation_token,
+            session_id: String::new(),
+            classify_source: true,
+        };
+        let req = client.dap_client_mut().request(
+            "ct/originChain",
+            serde_json::to_value(args).expect("origin args serialize"),
+        );
+        client.send_message(&req).expect("send ct/originChain");
+        let response = client
+            .read_until_response_msg("ct/originChain", Duration::from_secs(300))
+            .expect("read ct/originChain response");
+        match response {
+            DapMessage::Response(response) if response.success => {
+                Ok(serde_json::from_value(response.body)
+                    .unwrap_or_else(|e| panic!("failed to decode OriginChain: {e}")))
+            }
+            DapMessage::Response(response) => Err((
+                response.body["originErrorCode"].as_u64().unwrap_or(0),
+                response.message.unwrap_or_default(),
+            )),
+            other => panic!("expected ct/originChain response, got {other:?}"),
+        }
+    }
+
+    /// `rust/rewritten_after_copy` in one request: `c`'s chain follows `b`
+    /// back from the copy, to `b = a`, not to the later `b = 7`.
+    ///
+    /// rr counts ticks per conditional branch, so the whole of `main` here has
+    /// one tick count, and `b = 7` has the tick count of the copy before it:
+    /// the worker's reverse continue (`forward_replay_to_previous_source_watchpoint`
+    /// in codetracer-native-backend) must stop at the point it is asked from,
+    /// not at its tick count. The continued walk below is where taking `b = 7`
+    /// was seen; this one holds the same answer for the walk in one request.
+    /// The limits are raised so that a loaded host cannot cut the chain off.
+    #[test]
+    fn test_origin_rr_rust_rewritten_after_copy_follows_b_from_the_copy() {
+        let ct_native_replay = rr_backend("rust_rewritten_after_copy_whole");
+        require_tool("rustc", "--version", "rust_rewritten_after_copy_whole");
+        let recording = record_rr_fixture_with_regenerate("rust", "rewritten_after_copy", "main.rs", &ct_native_replay);
+        let line_of = |needle: &str| fixture_line_containing("rust", "rewritten_after_copy", "main.rs", needle) as i64;
+
+        let mut client = test_harness::DapStdioTestClient::start_with_env(&[
+            ("CODETRACER_IN_UI_TEST", "1"),
+            ("CT_ORIGIN_WALL_CLOCK_MS", "60000"),
+            ("CT_RR_ORIGIN_PER_HOP_WALL_CLOCK_MS", "10000"),
+        ])
+        .expect("DAP stdio client should start");
+        client
+            .initialize_and_launch_rr(&recording, &ct_native_replay)
+            .expect("RR DAP launch should succeed");
+        client
+            .set_breakpoint(&recording.source_path, line_of("println!") as u32)
+            .expect("set breakpoint at the println");
+        client.continue_to_breakpoint().expect("continue to the println");
+
+        let chain = send_rr_origin_chain_request(&mut client, "c", -1, DEFAULT_ORIGIN_MAX_HOPS);
+        assert_eq!(
+            chain
+                .hops
+                .iter()
+                .map(|hop| (hop.location.line, hop.source_expr.clone()))
+                .collect::<Vec<_>>(),
+            vec![
+                (line_of("let c: i32 = b"), "b".to_string()),
+                (line_of("let mut b: i32 = a"), "a".to_string()),
+                (line_of("let a: i32 = 10"), "10".to_string()),
+            ],
+            "terminator {:?}",
+            chain.terminator
+        );
+        assert_eq!(chain.terminator.kind, TerminatorKind::Literal, "{:?}", chain.terminator);
+    }
+
+    /// A chain the request's time limit cut off continues from where it
+    /// stopped (spec §5.3.1, "A replay walk's continuation").
+    ///
+    /// The limit is 1 ms (`CT_ORIGIN_WALL_CLOCK_MS` under a UI test), so
+    /// every request walks exactly one hop — at least one always, however
+    /// little time is left — and comes back cut off, with a continuation.
+    /// Three requests then walk `c = b`, `b = a`, `a = 10`.
+    ///
+    /// `rust/rewritten_after_copy` writes `b` again after the copy: a
+    /// continuation that resumed anywhere but at the copy (the replay is back
+    /// at the `println!` between requests) follows `b` to `b = 7` instead.
+    /// A continuation is good once: used again, it is refused with 6106.
+    #[test]
+    fn test_origin_rr_cut_off_chain_continues_from_where_it_stopped() {
+        let ct_native_replay = rr_backend("rust_rewritten_after_copy");
+        require_tool("rustc", "--version", "rust_rewritten_after_copy");
+        let recording = record_rr_fixture_with_regenerate("rust", "rewritten_after_copy", "main.rs", &ct_native_replay);
+        let line_of = |needle: &str| fixture_line_containing("rust", "rewritten_after_copy", "main.rs", needle) as i64;
+        let breakpoint_line = line_of("println!") as u32;
+
+        let mut client = test_harness::DapStdioTestClient::start_with_env(&[
+            ("CODETRACER_IN_UI_TEST", "1"),
+            ("CT_ORIGIN_WALL_CLOCK_MS", "1"),
+        ])
+        .expect("DAP stdio client should start");
+        client
+            .initialize_and_launch_rr(&recording, &ct_native_replay)
+            .expect("RR DAP launch should succeed");
+        client
+            .set_breakpoint(&recording.source_path, breakpoint_line)
+            .expect("set breakpoint at the println");
+        client.continue_to_breakpoint().expect("continue to the println");
+
+        let mut pages = Vec::new();
+        let mut token = None;
+        let mut first_token = None;
+        for page in 0..3 {
+            let chain = send_rr_origin_chain_continuation(&mut client, "c", token.clone())
+                .unwrap_or_else(|e| panic!("request {page} of the chain failed: {e:?}"));
+            assert_eq!(chain.hops.len(), 1, "request {page} walks exactly one hop: {chain:?}");
+            if page < 2 {
+                assert!(
+                    chain.truncated && chain.terminator.kind == TerminatorKind::OutOfBudget,
+                    "request {page} is cut off by the time limit: {chain:?}"
+                );
+                assert!(
+                    chain.continuation_token.is_some(),
+                    "request {page} can be continued: {chain:?}"
+                );
+            }
+            if page == 0 {
+                first_token = chain.continuation_token.clone();
+            }
+            token = chain.continuation_token.clone();
+            pages.push(chain);
+        }
+        let hops: Vec<(i64, OriginKind, String)> = pages
+            .iter()
+            .flat_map(|chain| chain.hops.iter())
+            .map(|hop| (hop.location.line, hop.kind, hop.source_expr.clone()))
+            .collect();
+        assert_eq!(
+            hops,
+            vec![
+                (line_of("let c: i32 = b"), OriginKind::TrivialCopy, "b".to_string()),
+                (line_of("let mut b: i32 = a"), OriginKind::TrivialCopy, "a".to_string()),
+                (line_of("let a: i32 = 10"), OriginKind::Literal, "10".to_string()),
+            ],
+            "the continued chain walks c <- b <- a, following b from the copy and not from the println"
+        );
+        let last = pages.last().expect("three pages");
+        assert_eq!(last.terminator.kind, TerminatorKind::Literal, "{last:?}");
+        assert!(
+            !last.truncated && last.continuation_token.is_none(),
+            "a chain that reached its origin has nothing to continue: {last:?}"
+        );
+
+        let reused = send_rr_origin_chain_continuation(&mut client, "c", first_token);
+        match reused {
+            Err((code, message)) => {
+                assert_eq!(code, 6106, "a used continuation is refused as invalid: {message}");
+                assert!(message.contains("no longer holds"), "{message}");
+            }
+            Ok(chain) => panic!("a used continuation must be refused, got {chain:?}"),
+        }
+
+        // The replay is where the user stopped: a fresh query starts from
+        // the println again.
+        let fresh = send_rr_origin_chain_continuation(&mut client, "c", None).expect("fresh query");
+        assert_eq!(
+            fresh.hops.iter().map(|hop| hop.location.line).collect::<Vec<_>>(),
+            vec![line_of("let c: i32 = b")],
+            "{fresh:?}"
         );
     }
 

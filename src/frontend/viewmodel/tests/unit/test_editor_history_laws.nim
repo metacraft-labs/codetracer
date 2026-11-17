@@ -82,7 +82,7 @@ template counted(condition: untyped) =
   inc countedAssertions
   check condition
 
-const ExpectedAssertions = 3290
+const ExpectedAssertions = 3292
   ## +1 on 2026-10-24: PLAT-70 Part C's `find_match.nim` joined the
   ## editor directory, one more module scanned.
   ## **AND AGAIN ON 2026-09-20: PLAT-33 ADDED `collab_text.nim`, THE SEVENTH
@@ -207,7 +207,7 @@ proc codeOnly(src: string): string =
 # §35 — the directory this milestone's module lives in, enumerated
 # ---------------------------------------------------------------------------
 
-const ScannedModules = ["anchor.nim", "change_set.nim", "collab_text.nim",
+const ScannedModules = ["word_classifier.nim", "anchor.nim", "change_set.nim", "collab_text.nim",
                     "decoration.nim",
                         "document_version.nim", "editor_state.nim",
                         "find_match.nim",
@@ -304,7 +304,7 @@ suite "PLAT-32 — the suite's own non-vacuity":
     for name in EditorDirModules:
       checkpoint(name & " is in the directory and must be scanned")
       counted name in ScannedModules
-    counted ScannedModules.len == 20
+    counted ScannedModules.len == 21
     counted "history.nim" in EditorDirModules
 
   test "§30a — THE ORACLE IS NOT A SECOND CALL TO THE MODEL":

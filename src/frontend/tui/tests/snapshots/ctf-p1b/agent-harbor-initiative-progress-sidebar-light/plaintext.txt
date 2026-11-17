@@ -1,0 +1,56 @@
+ Initiative Progress  ⚲ ✕
+ INITIATIVE PROGRESS
+ Telemetry upload retries
+                     1 of 4 milestones · 25%
+ ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+ ● 1 completed  ● 1 in progress  ● 2 planned
+ Telemetry uploads that fail are retried
+ with exponential backoff and jitter instead
+ of being dropped on the first collector
+ error, and the queue survives a restart.
+ The specification is agreed; the persisted
+ queue's data model is being written, and
+ the retry budget waits on it.
+ CURRENT TR-M1: Data model
+ IN PROGRESS (1)
+ ● TR-M1   Data model
+   CURRENT 1/3 deliverables ·
+           Tests: 2 pending
+ PLANNED (2)
+ ● TR-M2   Core change
+   2/3 deliverables · Tests: 2 pending
+ ● TR-M3   Front-end
+   0/3 deliverables · Tests: 2 pending
+ COMPLETED (1)
+ ● TR-M0   Specification
+   3/3 deliverables · Tests: 2 passing
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             

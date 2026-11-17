@@ -8,6 +8,16 @@ echo '##########################################################################
 
 node_modules/.bin/webpack
 
+# The roots src/Tuprules.tup imports and refuses to parse without: the Cargo
+# target base and the per-checkout Nim cache root, from one command.
+# `tup generate` bakes them into the generated script, so they must be set
+# here, before the generate. The helper creates the Cargo base before the
+# generated script's cargo commands need it, refuses one it cannot prove
+# belongs to this checkout and compiler, and (`--reap`, a build) removes this
+# checkout's older-compiler bases.
+ct_tup_cargo_env="$(bash ci/lib/tup-cargo-target.sh --reap --export "$PWD")"
+eval "$ct_tup_cargo_env"
+
 pushd src
 
 # Use tup generate, because FUSE may not be supported on the CI runners.

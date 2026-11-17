@@ -93,14 +93,12 @@ suite "legacy value, generated targets and review sliders retain each item":
     measurable(middle)
     measurable(last)
     var selected: seq[string]
-    let pending = bindReviewLoopSliders(7, @[
+    bindReviewLoopSliders(7, @[
       ReviewLoopZone(functionKey: "first", loopIndex: 1, total: 4),
       ReviewLoopZone(functionKey: "middle", loopIndex: 2, total: 5),
       ReviewLoopZone(functionKey: "last", loopIndex: 3, total: 6)],
       proc(key: string; index, iteration: int) =
         selected.add key & ":" & $index & ":" & $iteration)
-    check not pending
-    if pending: failExit()
     slide(first, 2)
     slide(middle, 3)
     check selected == @["first:1:2", "middle:2:3"]

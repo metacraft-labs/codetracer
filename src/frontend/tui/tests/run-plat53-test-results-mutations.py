@@ -196,8 +196,8 @@ ARMS = [
              "    if false:")],
      [(TBL, TBL_HOST)],
      "§8.4: the wheel does not scroll the list"),
-    ("T6", [(RUNTIME, "       rt.runTestsKeyOperation(res.operation, outcome):",
-             "       false:")],
+    ("T6", [(RUNTIME, "               ask(rt.runTestsKeyOperation(c.name, outcome)))",
+             "               ask(false))")],
      [(TBL, TBL_HOST)],
      "§8.4: the keys do not move the selection; Enter is not `⏵`"),
     ("T7", [(SOURCE, "                      vm.openButtonTitle(row, shiftReachable = false),",
@@ -264,7 +264,9 @@ ARMS = [
     ("R9", [(VIEW, "    discard vm.testTabs.val", "    discard")],
      [(DSPEC, None)],
      "§9.4: the desktop's ⏵ title is not redrawn when the test gets a tab"),
-    ("M1", [(RUNTIME, "  if not rt.maximize.active or not rt.layoutBindingEnabled():\n    return rt.layoutGeometry()",
+    # M1 RE-AIMED 2026-11-13: the geometry now reads the maximize the frame
+    # SHOWS (`shownMaximize`, `47a2d0393d`); same defect.
+    ("M1", [(RUNTIME, "  if not rt.shownMaximize.active or not rt.layoutBindingEnabled():\n    return rt.layoutGeometry()",
              "  if true:\n    return rt.layoutGeometry()")],
      [(TBL, TBL_MAX), (PTY, PTY_TAB)],
      "CodeTracer-TUI §4.4: a maximized pane's presses go to the arrangement under it"),

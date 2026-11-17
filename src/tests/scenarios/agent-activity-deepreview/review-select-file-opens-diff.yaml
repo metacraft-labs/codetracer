@@ -1,0 +1,23 @@
+scenario: 1
+name: agent-activity-deepreview/review-select-file-opens-diff
+pack: codetracer
+summary: >-
+  Selecting a changed file in a review opens its diff tab in front, and
+  selecting another moves to its diff; no roll-up reappears.
+
+stage:
+  - use: review-dataset
+    with: { variant: plain }
+  - use: open-review
+
+steps:
+  - wait: { until: { at: vcs, present: true }, timeout: 60s }
+  - wait: { until: settled, timeout: 30s }
+  - wait: { until: { at: vcs, count: 3 }, timeout: 30s }
+  - click: { at: 'vcs/changed-file[name="utils.rs"]' }
+  - wait: { until: { at: window, assert: 'in-front("Diff: utils.rs")' }, timeout: 15s }
+  - click: { at: 'vcs/changed-file[name="main.rs"]' }
+  - wait: { until: { at: window, assert: 'in-front("Diff: main.rs")' }, timeout: 15s }
+  - expect: { at: 'vcs/changed-file[name="main.rs"]', selected: true }
+  - expect: { at: 'vcs/changed-file[name="utils.rs"]', selected: false }
+  - expect: { at: window, assert: 'has-pane("AGENT ACTIVITY")' }

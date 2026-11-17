@@ -12,7 +12,8 @@ import
   ui_imports,
   ../communication,
   ../viewmodel/store/replay_data_store,
-  ../viewmodel/viewmodels/[frame_viewer_vm, video_player_vm, visual_replay_client],
+  ../viewmodel/viewmodels/[frame_viewer_vm, video_player_vm, visual_replay_client,
+                           visual_replay_panes_vm],
   ../viewmodel/views/isonim_video_player_view,
   pixel_history,
   shader_debug,
@@ -23,10 +24,37 @@ import isonim/core/signals
 import isonim/web/dom_api as dom_api
 import isonim/web/web_renderer
 import ./panel_host
+import ../viewmodel/input/dom_pointer
+from std/jsffi import JsObject, to, `[]`
 from ../viewmodel/session_vm import SessionViewModel
 
+var visualReplayPanesInstance: VisualReplayPanesVM
+  ## The three Visual Replay panes' ONE model (`visual_replay_panes_vm`): the
+  ## frame, the transport, the pixel history and the shader debugger over
+  ## one player — the model the terminal and the GPUI window draw too.
 var videoPlayerFrameVMInstance: FrameViewerVM
 var videoPlayerVMInstance: VideoPlayerVM
+
+proc ensureVisualReplayPanes(store: ReplayDataStore = nil): VisualReplayPanesVM =
+  ## The panes' model, made on first use with no player yet (`setClient`
+  ## gives it the session's). The Pixel History and Shader Debug panes take
+  ## their ViewModels from it, so a picked pixel's history is asked of the
+  ## player the frame came from.
+  if visualReplayPanesInstance.isNil:
+    visualReplayPanesInstance = createVisualReplayPanesVM(
+      createInactiveVisualReplayClient(""), store)
+    videoPlayerFrameVMInstance = visualReplayPanesInstance.frame
+    videoPlayerVMInstance = visualReplayPanesInstance.player
+  elif not store.isNil:
+    visualReplayPanesInstance.frame.bindReplayStore(store)
+    visualReplayPanesInstance.history.bindReplayStore(store)
+    visualReplayPanesInstance.shader.bindReplayStore(store)
+  visualReplayPanesInstance
+
+pixel_history.pixelHistoryVMProvider = proc(): PixelHistoryVM =
+  ensureVisualReplayPanes().history
+shader_debug.shaderDebugVMProvider = proc(): ShaderDebugVM =
+  ensureVisualReplayPanes().shader
 
 proc currentVideoPlayerVM*(): VideoPlayerVM =
   ## Accessor used by the global ClientAction dispatcher in ``ui_js.nim`` to
@@ -54,11 +82,13 @@ proc syncVisualReplaySessionIntoPlayerVM*() =
   ## endpoints are picked up.
   if videoPlayerFrameVMInstance.client.isNil or
       videoPlayerFrameVMInstance.client.playerUrl != normalizedPlayerUrl(playerUrl):
-    videoPlayerFrameVMInstance.client =
+    # ONE client for the four ViewModels: the history and the shader of a
+    # picked pixel are asked of the player that drew the frame.
+    visualReplayPanesInstance.setClient(
       if playerUrl.len > 0:
         createHttpVisualReplayClient(playerUrl)
       else:
-        createInactiveVisualReplayClient(playerUrl)
+        createInactiveVisualReplayClient(playerUrl))
   videoPlayerFrameVMInstance.setVisualReplayConnection(
     session.visualReplayAvailable,
     playerUrl,
@@ -71,26 +101,9 @@ proc syncVisualReplaySessionIntoPlayerVM*() =
     videoPlayerFrameVMInstance.loadInfo()
 
 proc initVideoPlayerVM(store: ReplayDataStore = nil) =
-  if not videoPlayerVMInstance.isNil:
-    if not store.isNil:
-      videoPlayerFrameVMInstance.bindReplayStore(store)
-    syncVisualReplaySessionIntoPlayerVM()
-    return
-  let session = data.activeSession
-  let playerUrl =
-    if session.visualReplayPlayerUrl.isNil: ""
-    else: $session.visualReplayPlayerUrl
-  videoPlayerFrameVMInstance = createFrameViewerVM(
-    createInactiveVisualReplayClient(playerUrl),
-    store)
-  ## Picker commits and conventional clicks route to the same downstream
-  ## panes — pixel history and shader debug — so the StateView tabs populate
-  ## regardless of how the pixel was selected.
-  videoPlayerFrameVMInstance.onPixelSelected =
-    proc(x, y, frame: int; geid: Option[uint64]) =
-      pixel_history.loadPixelHistoryFromFrameViewer(x, y, frame)
-      shader_debug.loadShaderDebugFromFrameViewer(x, y, frame, geid)
-  videoPlayerVMInstance = createVideoPlayerVM(videoPlayerFrameVMInstance)
+  # The panes' model joins a picked pixel to its history and its shader,
+  # and a history row to the frame and the shader (`visual_replay_panes_vm`).
+  discard ensureVisualReplayPanes(store)
   syncVisualReplaySessionIntoPlayerVM()
 
 when defined(js):
@@ -355,3 +368,31 @@ setPanelDecorator(Content.VideoPlayer,
 method register*(self: VideoPlayerComponent, api: MediatorWithSubscribers) =
   self.api = api
   initVideoPlayerVM()
+
+# A press on the frame picks the pixel under it (K72): the pointer row
+# `video-player.select-pixel`, performed on the stage the key router's hit
+# test found (`input/dom_pointer`), at the press's position over the frame
+# image. With the picker on, the pick is made where the press is (the
+# magnifier moved there first, for a press with no motion before it); with it
+# off, the press still selects the pixel, for Pixel History.
+proc imageRectOf(stage: JsObject): JsObject {.importjs: """
+  ((s) => { const i = s && s.querySelector && s.querySelector('.video-player-image');
+            return i ? i.getBoundingClientRect() : null; })(#)""".}
+
+registerElementOperation("video-player.select-pixel", proc(p: ElementPress): bool =
+  let vm = videoPlayerVMInstance
+  let rect = imageRectOf(p.element)
+  if vm.isNil or rect.isNil:
+    return false
+  let x = p.event[cstring"clientX"].to(float) - rect[cstring"left"].to(float)
+  let y = p.event[cstring"clientY"].to(float) - rect[cstring"top"].to(float)
+  let w = rect[cstring"width"].to(float)
+  let h = rect[cstring"height"].to(float)
+  if vm.pickerState.val == PickerActive:
+    vm.updateMagnifier(x, y, w, h)
+    vm.commitPickedPixel()
+    vm.magnifier.val = none(MagnifierPosition)
+    vm.magnifierCenterColor.val = none(VisualReplayPixelColor)
+  else:
+    vm.frameVm.selectPixelFromRenderedPoint(x, y, w, h)
+  true)

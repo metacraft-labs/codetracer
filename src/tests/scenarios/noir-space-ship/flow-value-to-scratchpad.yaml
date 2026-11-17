@@ -1,0 +1,38 @@
+scenario: 1
+name: noir-space-ship/flow-value-to-scratchpad
+pack: codetracer
+summary: >-
+  In calculate_damage, Ctrl+click on the flow's shield_pct value adds it to
+  the scratchpad, and its context menu's "Add value to scratchpad" adds the
+  damage value: each a row of its own, with its value.
+
+stage:
+  - use: record-program
+    with: { program: noir_space_ship }
+  - use: open-recording
+    with: { width: 2400, height: 1300 }
+
+steps:
+  - wait: { until: replay-idle, timeout: 180s }
+  - click: 'pane-tab[label="CALLTRACE"]'
+  - wait: { until: call-trace.loaded, timeout: 60s }
+  - wait: { until: { at: 'call-trace/call[name="iterate_asteroids"]', present: true }, timeout: 60s }
+  - wait: { until: { at: 'call-trace/call[name="calculate_damage", arguments="(initial_shield=0x2710, remaining_shield=0x2710, mass=0x64)"]', present: true }, timeout: 60s }
+  - click: { at: 'call-trace/call[name="calculate_damage", arguments="(initial_shield=0x2710, remaining_shield=0x2710, mass=0x64)"]', anchor: name }
+    settle: false
+  - wait: { until: { at: 'editor[file="shield.nr"]', current-line: 22 }, timeout: 60s }
+  - wait: { until: replay-idle, timeout: 60s }
+  # the editor's stack maximised, so the flow's values beside long lines show
+  - click: { at: 'pane-tab[label="src/shield.nr"]', button: right }
+  - click: 'context-menu/menu-item[label="Maximise container"]'
+  - wait: { until: { at: 'editor[file="shield.nr"]/flow-value[line="26", name="shield_pct"]', present: true }, timeout: 60s }
+  - click: { at: 'editor[file="shield.nr"]/flow-value[line="26", name="shield_pct"]', modifiers: [Ctrl] }
+  - click: { at: 'editor[file="shield.nr"]/flow-value[line="27", name="damage"]', button: right }
+  - wait: { until: { at: 'context-menu/menu-item[label="Add value to scratchpad"]', present: true }, timeout: 30s }
+  - click: 'context-menu/menu-item[label="Add value to scratchpad"]'
+  - click: { at: 'pane-tab[label="src/shield.nr"]', button: right }
+  - click: 'context-menu/menu-item[label="Minimise container"]'
+  - click: 'pane-tab[label="SCRATCHPAD"]'
+  - wait: { until: { at: scratchpad, count: 2 }, timeout: 30s }
+  - expect: { at: 'scratchpad/scratch-entry[expression="shield_pct"]', value: { matches: "[0-9]" } }
+  - expect: { at: 'scratchpad/scratch-entry[expression="damage"]', value: { matches: "[0-9]" } }

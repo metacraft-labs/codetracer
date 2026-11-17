@@ -42,7 +42,7 @@
 when defined(js):
   {.error: "src/frontend/tui/host is native-only: it spawns replay-server.".}
 
-import std/[json, os, sets, strutils, tables]
+import std/[algorithm, json, os, sets, strutils, tables]
 
 import codetracer_embed
 import headless_session
@@ -60,6 +60,8 @@ import ../../viewmodel/store/types as store_types
 import ../../viewmodel/viewmodels/inline_value_timeline
 
 import viewmodels/filesystem_vm   # the replay file tree the Files pane lists
+import viewmodels/generated_code_presenter   # Generated-Code-Listing §13.4
+from viewmodels/nim_c_producer import isGeneratedNimC   # `<trace>/nimcache/`
 import viewmodels/calltrace_vm    # CALLTRACE_BUFFER, the desktop's pre-fetch
 import ../../viewmodel/pane_viewport   # HSF-V2: the pane's cells as a Viewport
 import viewmodels/scratchpad_vm   # PLAT-50: the scratchpad pane
@@ -76,8 +78,11 @@ import ../app/views/requests_pane   # PLAT-58
 import ../app/views/shell_session_pane   # PLAT-61
 import ../../viewmodel/host/native_shell_host   # PLAT-61: the Shell pane's session
 import ../../viewmodel/host/native_requests_host   # PLAT-58: the Requests pane's host
+import ../../viewmodel/host/native_visual_replay_host   # PLAT-59: the Visual Replay producer
 from isonim/core/async_compat import drainPlatformCallbacks
 import ../app/views/low_level_code_pane   # PLAT-60
+import ../app/views/macro_expansion_pane   # Editor-Hosted-Front-Ends §E15
+import viewmodels/macro_expansion_vm   # §E15: the open macro expansions
 import headless_app/low_level_menu   # PLAT-60: the row menu (K62)
 import ../../viewmodel/host/native_agent_host   # PLAT-54: Agent Activity's host
 from ../app/edit_binding import EditBuffer, moveCaretTo, caretLine, caretColumn   # the read-only document a result opens in
@@ -114,9 +119,14 @@ type
     controls*: DebugControlsVM
     origin*: OriginChainVM
     frames*: FrameViewerVM
-      ## PLAT-51: the frame viewer's ViewModel, when a producer opened one
-      ## (PLAT-59 wires the producer; nil until then). The pane's own
-      ## scrubber asks it for frames (`pcFrameSeek`).
+      ## PLAT-51: the frame viewer's ViewModel, when a producer opened one —
+      ## the Visual Replay panes' (`visual`), nil for a recording that
+      ## carries no graphics. The overlay's scrubber asks it for frames
+      ## (`pcFrameSeek`).
+    visual*: NativeVisualReplay
+      ## PLAT-59: the recording's player and the client the Visual Replay
+      ## panes ask through (`viewmodel/host/native_visual_replay_host`); nil
+      ## when the recording carries no graphics.
     provider*: SourceProvider
     valueTimeline*: ValueTimeline
       ## CTUI-7's step-to-step diff. Carried across stops, because a diff is by
@@ -179,6 +189,13 @@ type
       ## over this session's store (so a live agent's session is the one
       ## this session's tab reports), a recorded session it was handed, and
       ## the files and recordings its cards open.
+
+proc refused*(s: TuiSession): bool =
+  ## The engine refused this session's recording, and it opened for its
+  ## graphics (`native_host.openLocalTrace`). Nothing can write to its replay,
+  ## so it is also `ended`; but no *Stop* ended it, and it stays a replay's tab:
+  ## Debug mode, the Visual Replay panes alive.
+  not s.isNil and not s.session.isNil and s.session.engineRefusal.len > 0
 
 proc ended*(s: TuiSession): bool =
   ## M76: whether the session's replay has ended — by this host's *Stop*
@@ -267,6 +284,10 @@ proc close*(s: TuiSession) =
   s.closed = true
   s.agent.close()
   s.shell.closeNativeShell()
+  # PLAT-59: the player and its worker.
+  if not s.visual.isNil:
+    s.visual.close()
+    s.visual = nil
   s.source.dispose()
   s.session.close()
 
@@ -930,6 +951,164 @@ proc requestsAct*(s: TuiSession; rt: TuiRuntime;
 # PLAT-60: the Low Level Code pane
 # ---------------------------------------------------------------------------
 
+
+# ---------------------------------------------------------------------------
+# PLAT-59: the Visual Replay panes — the producer and the panes' acts
+# ---------------------------------------------------------------------------
+
+proc visualPanes*(s: TuiSession): VisualReplayPanesVM =
+  if s.isNil or s.session.isNil or s.session.session.isNil: nil
+  else: s.session.session.visualReplay
+
+proc refreshVisual*(s: TuiSession; rt: TuiRuntime) =
+  ## The three panes' values at this moment, from the session's
+  ## `VisualReplayPanesVM`; and whether the panes have work due soon.
+  let panes = s.visualPanes
+  if panes.isNil:
+    rt.visualBusy = false
+    return
+  let (cols, rows) = rt.videoPictureSize()
+  rt.app.frameViewer = videoPlayerModelFor(panes, rt.app.frameViewer,
+    rt.imageCapability, initDegradedStateSnapshot(), cols, rows)
+  rt.app.pixelHistory = pixelHistoryPaneModelFor(panes, rt.app.pixelHistory)
+  rt.app.shaderDebug = shaderDebugPaneModelFor(panes)
+  rt.visualBusy = panes.player.playState.val == Playing or
+                  panes.player.frameScrub.held or
+                  panes.player.drawScrub.held or s.visual.busy
+
+proc refreshVisualIfShown*(s: TuiSession; rt: TuiRuntime): bool =
+  ## Refresh the Visual Replay panes when the session has them. Whether it
+  ## did.
+  if s.isNil or s.visualPanes.isNil:
+    return false
+  s.refreshVisual(rt)
+  true
+
+proc attachVisualReplay*(s: TuiSession; rt: TuiRuntime; folder: string;
+                         wakeWrite: cint = -1) =
+  ## THE PRODUCER (Visual-Replay.md § Activation): a recording that carries
+  ## graphics gets its player, the Visual Replay panes over it — the
+  ## session's `VisualReplayPanesVM`, the one GPUI and the desktop draw too —
+  ## and the three panes added to the layout as the desktop adds them; one
+  ## that carries none has them removed. A player that cannot start still
+  ## gets the panes, which say why.
+  # A session the engine refused is `ended` from the start, and its graphics
+  # are exactly what it still has to show.
+  let refusal = s.session.engineRefusal
+  if s.ended and not s.refused:
+    return
+  if refusal.len > 0:
+    rt.noteEngineRefusal(sessionRefusedWords(refusal))
+  let h = startVisualReplay(folder, wakeWrite)
+  if h.isNil:
+    return
+  s.visual = h
+  let panes = h.panesFor(s.session.session.store)
+  # The terminal draws the framebuffer's own pixels: cells down-sample it
+  # and §5's magnifier addresses its pixels 1:1.
+  panes.frame.setFrameSize(0, 0)
+  s.session.session.visualReplay = panes
+  s.frames = panes.frame
+
+proc syncVisualLayout*(s: TuiSession; rt: TuiRuntime) =
+  ## The Visual Replay panes in the layout exactly when the shown session's
+  ## recording carries graphics (Visual-Replay.md § Activation, steps 3 and
+  ## 4), and their values read.
+  discard rt.setVisualReplayPanes(not s.visualPanes.isNil)
+  if s.visualPanes.isNil:
+    rt.app.frameViewer = initFrameViewerModel()
+    rt.app.pixelHistory = PixelHistoryPaneModel()
+    rt.app.shaderDebug = ShaderDebugPaneModel()
+    rt.visualBusy = false
+  else:
+    s.refreshVisual(rt)
+
+proc pumpVisual*(s: TuiSession; rt: TuiRuntime; nowMs: int64): bool =
+  ## The idle tick: the player's answers applied, a held scrubber's
+  ## coalesced frame asked for, playback advanced. Whether a pane changed.
+  let panes = s.visualPanes
+  if panes.isNil or (s.ended and not s.refused):
+    return false
+  var changed = s.visual.pump()
+  if panes.player.pumpScrub(float(nowMs)):
+    changed = true
+  if panes.player.playState.val == Playing:
+    panes.player.tickPlayback(float(nowMs))
+    changed = true
+  drainPlatformCallbacks()
+  if changed or rt.visualBusy:
+    s.refreshVisual(rt)
+  changed
+
+proc visualMoved(s: TuiSession; rt: TuiRuntime): bool =
+  ## A history row's navigation sent `ct/seek-to-geid`: when the engine
+  ## answered with a move, every pane reads the new position.
+  var stopped = false
+  for e in s.session.backend.eventQueue:
+    if e{"event"}.getStr("") == "stopped":
+      stopped = true
+  if not stopped:
+    return false
+  try:
+    s.session.settleAfterSeek()
+  except CatchableError:
+    return false
+  true
+
+proc visualAct*(s: TuiSession; rt: TuiRuntime;
+                act: VisualAct): VisualActResult =
+  ## A Visual Replay pane's act, done through the session's
+  ## `VisualReplayPanesVM`; the panes refreshed.
+  let panes = s.visualPanes
+  if panes.isNil:
+    return VisualActResult(note: "this recording carries no graphics")
+  result.changed = true
+  case act.kind
+  of vaPlayer:
+    discard panes.player.dispatchVideoPlayerAction(act.action)
+  of vaScrubBegin:
+    panes.player.beginScrub(act.axis, act.position, act.nowMs)
+  of vaScrubDrag:
+    discard panes.player.dragScrub(act.axis, act.position, act.nowMs)
+  of vaScrubRelease:
+    panes.player.releaseScrub(act.axis, act.position, act.nowMs)
+  of vaPickPixel:
+    panes.player.exitPickerMode()
+    panes.frame.selectPixel(act.x, act.y)
+    rt.showVisualPane(panePixelHistory)
+    result.note = "pixel " & $act.x & ", " & $act.y & " of frame " &
+      $panes.frame.currentFrame.val & ": its history and its shader"
+  of vaPickerState:
+    if act.on:
+      if panes.player.pickerState.val != PickerActive:
+        panes.player.enterPickerMode()
+    else:
+      panes.player.cancelPicker()
+  of vaHistorySelect:
+    panes.selectHistoryEntry(act.index)
+  of vaHistoryActivate:
+    if not panes.activateHistoryEntry(act.index):
+      result.note = "that draw call is no longer listed"
+    else:
+      let e = panes.history.entries.val[act.index]
+      result.note = drawText(e) & " (" & geidText(e) & ")"
+      if s.visualMoved(rt):
+        result.moved = true
+  of vaShaderStep:
+    case act.button
+    of sbFirst: panes.shader.stepFirst()
+    of sbBack: panes.shader.stepBackward()
+    of sbStep: panes.shader.stepForward()
+    of sbLast: panes.shader.stepLast()
+  of vaTick:
+    discard
+  drainPlatformCallbacks()
+  if not s.visual.isNil:
+    discard s.visual.pump()
+  if result.moved:
+    s.moved(rt)
+  s.refreshVisual(rt)
+
 proc lowLevelModelOf*(vm: LowLevelCodeVM;
                       prior: LowLevelPaneModel): LowLevelPaneModel =
   ## The session's `LowLevelCodeVM` as the pane's value: the header's words
@@ -937,7 +1116,8 @@ proc lowLevelModelOf*(vm: LowLevelCodeVM;
   ## (`displayRows`). The reading position (`scrollTop`) is the pane's own,
   ## kept.
   result = LowLevelPaneModel(loaded: not vm.isNil, scrollTop: prior.scrollTop,
-                             executionRow: -1, selectedRow: -1, linkedRow: -1)
+                             executionRow: -1, selectedRow: -1, linkedRow: -1,
+                             activeRow: -1)
   if vm.isNil:
     return
   result.error = vm.errorMessage.val
@@ -970,6 +1150,7 @@ proc lowLevelModelOf*(vm: LowLevelCodeVM;
       if d.executing: result.executionRow = at
       if d.selected: result.selectedRow = at
       if d.linked and result.linkedRow < 0: result.linkedRow = at
+      if d.active and result.activeRow < 0: result.activeRow = at
 
 proc refreshLowLevel*(s: TuiSession; rt: TuiRuntime) =
   ## The pane's value at this moment. Whether the pane is on screen is told
@@ -977,6 +1158,14 @@ proc refreshLowLevel*(s: TuiSession; rt: TuiRuntime) =
   ## engine for the listing only while it is, and asks at once when it
   ## becomes shown.
   if s.ended:
+    return
+  # EDIT MODE'S LISTING IS NOT THE REPLAY'S: it is the C the edited file
+  # compiles to (`edit_services`, HSF-E11), held by the host's own
+  # `LowLevelCodeVM`. A replay session toggled into Edit mode shows that
+  # one, and the stop's listing again once it is back in Debug mode.
+  if rt.app.modes.product == pmEdit and
+     not rt.editServices.editLowLevelModel.isNil:
+    rt.app.lowLevel = rt.editServices.editLowLevelModel(rt.app.lowLevel)
     return
   let vm = s.session.session.lowLevelCodeVM
   if vm.isNil:
@@ -989,6 +1178,138 @@ proc refreshLowLevel*(s: TuiSession; rt: TuiRuntime) =
       discard s.session.loadStopPanes()
   rt.app.lowLevel = lowLevelModelOf(vm, rt.app.lowLevel)
 
+# ---------------------------------------------------------------------------
+# Editor-Hosted-Front-Ends §E15: the Macro Expansion pane
+# ---------------------------------------------------------------------------
+
+proc macroExpansionModelOf*(vm: MacroExpansionVM;
+                            prior: MacroExpansionPaneModel):
+    MacroExpansionPaneModel =
+  ## The pane's value: the ViewModel's rows (`displayRows`), every word its
+  ## own, with the pane's own scroll kept.
+  result = MacroExpansionPaneModel(loaded: true, empty: NoExpansionOpenText,
+                                   executionRow: -1,
+                                   scrollTop: prior.scrollTop)
+  if vm.isNil:
+    return
+  for r in vm.displayRows():
+    if r.executing:
+      result.executionRow = result.rows.len
+    result.rows.add MacroExpansionPaneRow(
+      kind: (case r.kind
+             of merHeading: mpHeading
+             of merLine: mpLine
+             of merNotice: mpNotice),
+      text: r.text, number: r.number, executing: r.executing,
+      callPath: r.callPath, callLine: r.callLine)
+
+proc refreshMacroExpansion*(s: TuiSession; rt: TuiRuntime) =
+  ## The pane's value at this moment, and the pane brought beside the source
+  ## when an expansion is open that the screen does not show: one a stop
+  ## inside it opened (`MacroExpansionVM.adoptStop`), as well as one a toggle
+  ## opened.
+  if s.ended:
+    return
+  let vm = s.session.session.macroExpansionVM
+  if vm.isNil:
+    rt.app.macroExpansion = MacroExpansionPaneModel()
+    return
+  # A stop inside an expansion opened it (`adoptStop`) and asked for its
+  # text, whose answer runs on a drain.
+  drainPlatformCallbacks()
+  let before = rt.app.macroExpansion.rows.len
+  rt.app.macroExpansion = macroExpansionModelOf(vm, rt.app.macroExpansion)
+  if before == 0 and rt.app.macroExpansion.rows.len > 0:
+    let why = rt.showMacroExpansionPane()
+    if why.len > 0:
+      rt.app.notification = why
+  if rt.app.macroExpansion.executionRow >= 0:
+    let (_, screen) = rt.macroExpansionPaneScreen()
+    let rows = if screen.listRows > 0: screen.listRows
+               else: max(1, rt.hostedRows.getOrDefault(paneMacroExpansion, 0) - 1)
+    rt.app.macroExpansion.scrollTop = rt.app.macroExpansion.revealMacroRow(
+      rows, rt.app.macroExpansion.executionRow)
+
+proc toggleMacroExpansion*(s: TuiSession; rt: TuiRuntime; path: string;
+                           line: int): tuple[ok, opened: bool; detail: string] =
+  ## Toggle Macro Expansion on the call at `path:line` through the session's
+  ## `MacroExpansionVM` — the replay's answer, and the expansion's text, are
+  ## delivered here: `stdio_backend`'s send reads the reply at once, and its
+  ## future's callbacks run on the next drain, which this does — and the pane
+  ## refreshed. The
+  ## replay's expansion level for the call moved: from the next move on, a
+  ## stop inside the expansion is shown in it (or back on the call). The stop
+  ## the debugger is at now keeps the place it was reported at.
+  if s.ended:
+    return (false, false, EndedSessionNote)
+  let vm = s.session.session.macroExpansionVM
+  if vm.isNil:
+    return (false, false, "this session has no macro expansions")
+  # Until the replay answers (synchronously on this host), what the status
+  # line says.
+  var answer = (ok: true, detail: "Toggle Macro Expansion: asking the replay")
+  vm.toggle(path, line, proc(ok: bool; detail: string) =
+    answer = (ok, detail))
+  # The answer's callback, then the text fetch it starts.
+  drainPlatformCallbacks()
+  drainPlatformCallbacks()
+  result = (answer.ok, vm.expansions.val.len > 0, answer.detail)
+  s.refreshMacroExpansion(rt)
+
+proc actOnListing*(vm: LowLevelCodeVM; act: LowLevelAct;
+                   answer: var LowLevelActResult): SourceLineRef =
+  ## The ViewModel half of the pane's `act` — select, menu, a key, the sync
+  ## toggle, the editor's caret — shared by a replay session (`lowLevelAct`)
+  ## and Edit mode's listing of the compiled C (`edit_services`, which has
+  ## no replay). Answers the source line a press, Enter or Go to Source Line
+  ## goes to (`line` 0 for none); what "go" means is the caller's (a replay
+  ## moves the debugger, Edit mode moves the editor's caret), and so is a
+  ## step (`llaStep`), which only a replay can take. Its words, menu and
+  ## copied text go to `answer`.
+  var jump = SourceLineRef()
+  case act.kind
+  of llaPress:
+    vm.selectInstruction(act.index)
+    jump = vm.jumpTargetOf(act.index)
+    if jump.line <= 0:
+      answer.note = NoSourceLineReason
+  of llaActivate:
+    jump = vm.jumpTargetOf(vm.selected.val)
+    if vm.selected.val < 0:
+      answer.note = "no instruction is selected"
+    elif jump.line <= 0:
+      answer.note = NoSourceLineReason
+  of llaRowMenu:
+    vm.selectInstruction(act.index)
+    answer.menu = vm.lowLevelRowContextMenuOf(act.index)
+  of llaMenuChoice:
+    let (isLowLevel, wanted) = lowLevelMenuActionOf(act.action)
+    if isLowLevel:
+      let index = int(act.target.index)
+      let rows = vm.instructions.val
+      if index < 0 or index >= rows.len or
+         rows[index].offset != act.target.line:
+        answer.note = "that instruction is no longer listed"
+      else:
+        let outcome = vm.runRowMenu(index, wanted, send = false)
+        answer.note = outcome.note
+        answer.copied = outcome.copied
+        jump = outcome.jumpTo
+  of llaKey:
+    if vm.moveSelection(act.operation, act.page) < 0:
+      answer.note = "the listing has no instruction"
+  of llaToggleSync:
+    vm.setSyncEnabled(not vm.syncSettings.val.enabled)
+    answer.note = "source syncing is " &
+      (if vm.syncSettings.val.enabled: "on" else: "off")
+  of llaClearSelection:
+    vm.selectInstruction(NoSelectedInstruction)
+  of llaSourceCursor:
+    vm.setSourceCursor(act.path, act.line)
+  of llaStep:
+    discard
+  jump
+
 proc lowLevelAct*(s: TuiSession; rt: TuiRuntime;
                   act: LowLevelAct): LowLevelActResult =
   ## The pane's act done through the session's `LowLevelCodeVM` (and, for a
@@ -999,47 +1320,8 @@ proc lowLevelAct*(s: TuiSession; rt: TuiRuntime;
   let vm = s.session.session.lowLevelCodeVM
   if vm.isNil:
     return LowLevelActResult(note: "this session has no low-level code")
-  var jump = SourceLineRef()
-  case act.kind
-  of llaPress:
-    vm.selectInstruction(act.index)
-    jump = vm.jumpTargetOf(act.index)
-    if jump.line <= 0:
-      result.note = NoSourceLineReason
-  of llaActivate:
-    jump = vm.jumpTargetOf(vm.selected.val)
-    if vm.selected.val < 0:
-      result.note = "no instruction is selected"
-    elif jump.line <= 0:
-      result.note = NoSourceLineReason
-  of llaRowMenu:
-    vm.selectInstruction(act.index)
-    result.menu = vm.lowLevelRowContextMenuOf(act.index)
-  of llaMenuChoice:
-    let (isLowLevel, wanted) = lowLevelMenuActionOf(act.action)
-    if isLowLevel:
-      let index = int(act.target.index)
-      let rows = vm.instructions.val
-      if index < 0 or index >= rows.len or
-         rows[index].offset != act.target.line:
-        result.note = "that instruction is no longer listed"
-      else:
-        let outcome = vm.runRowMenu(index, wanted, send = false)
-        result.note = outcome.note
-        result.copied = outcome.copied
-        jump = outcome.jumpTo
-  of llaKey:
-    if vm.moveSelection(act.operation, act.page) < 0:
-      result.note = "the listing has no instruction"
-  of llaToggleSync:
-    vm.setSyncEnabled(not vm.syncSettings.val.enabled)
-    result.note = "source syncing is " &
-      (if vm.syncSettings.val.enabled: "on" else: "off")
-  of llaClearSelection:
-    vm.selectInstruction(NoSelectedInstruction)
-  of llaSourceCursor:
-    vm.setSourceCursor(act.path, act.line)
-  of llaStep:
+  let jump = actOnListing(vm, act, result)
+  if act.kind == llaStep:
     let request = vm.instructionStepRequest(act.operation)
     if request.offered:
       try:
@@ -1494,6 +1776,7 @@ proc refresh*(s: TuiSession; rt: TuiRuntime) =
   s.refreshRequests(rt)
   # PLAT-60: the Low Level Code pane, this session's.
   s.refreshLowLevel(rt)
+  s.refreshMacroExpansion(rt)
   # PLAT-61: the Shell pane, this session's.
   s.refreshShell(rt)
 
@@ -1623,6 +1906,34 @@ proc refresh*(s: TuiSession; rt: TuiRuntime) =
     selectedVariable: "",
     functions: @[])
 
+proc followPaneViewport*(s: TuiSession; rt: TuiRuntime; pane: PaneKind) =
+  ## `pane`'s rectangle changed size at the SAME stop: the pane reports its
+  ## new viewport and holds what that viewport shows (Viewport-Driven-Loading
+  ## V1), without rebuilding every pane from the stop as `refresh` does. That
+  ## rebuild re-asks the engine for the stack, every variable's origin and
+  ## the event log's first page; repeated for every frame of a dragged split,
+  ## it is what the editor-hosted front-ends waited on.
+  ##
+  ## A pane not listed here draws what it holds at any size.
+  if s.ended:
+    return
+  case pane
+  of paneCalltrace:
+    s.pageCallTrace(rt)
+  of paneState:
+    # The stop loader sizes the NEXT stop's locals from it (HSF-V2).
+    if not s.state.isNil:
+      s.state.setViewport(cellPaneViewport(
+        rt.paneBodyRows(paneState), rt.paneBodyCols(paneState),
+        rt.app.variables.scrollTop))
+  of paneEventLog:
+    rt.app.eventLog.ensureWindow(rt.app.eventLog.scrollTop,
+                                 rt.eventLogBodyRows)
+  of paneTerminalOutput:
+    rt.app.terminalOutput.ensureShown(rt.terminalOutputRows())
+  else:
+    discard
+
 proc recordedSourceText*(s: TuiSession; path: string):
     tuple[ok: bool, text, message: string] =
   ## PLAT-68: a file of the RECORDING, whole — the source provider's
@@ -1749,12 +2060,12 @@ proc applyPaneClick(s: TuiSession; rt: TuiRuntime; c: PaneClickRequest) =
       if vm.view.val == tvLines and c.text == $tvScreen:
         rt.app.notification = "this recording's output drives no screen"
     s.refreshTerminalOutput(rt)
-  of pcColumnBreakpoint:
-    # K14: the desktop's Alt+click (`lineActionClickAt` →
-    # `addColumnBreakpoint`).
-    if session.setColumnBreakpoint(c.path, c.line, c.column):
-      rt.app.notification = "a breakpoint at line " & $c.line & ", column " &
-                            $c.column
+  of pcToggleInlineBreakpoint:
+    # Shift+F9 and the menu's entry (Editor-Pane.md § Inline breakpoints). Clamped
+    # to the line's last column by the one rule; column 1 is a line breakpoint.
+    if session.toggleInlineBreakpoint(c.path, c.line, c.column, c.lastColumn):
+      rt.app.notification = "inline breakpoint toggled at line " & $c.line &
+                            ", column " & $c.column
     else:
       rt.app.notification = "the engine refused a breakpoint at " & c.path &
                             ":" & $c.line & ":" & $c.column
@@ -1853,6 +2164,9 @@ proc applyPaneClick(s: TuiSession; rt: TuiRuntime; c: PaneClickRequest) =
     rt.app.viewedFile = c.path
     s.showViewedFile(rt)
     if rt.app.viewedFile.len > 0:
+      # M102 (#877): the editor that shows it is brought forward — re-added
+      # when its tab was closed, activated when it is behind another tab.
+      rt.revealEditor()
       rt.app.notification = "opened " & c.path
   of pcToggleFolder:
     # K18: the desktop's `FilesystemVM.toggleExpanded`.
@@ -1930,6 +2244,20 @@ proc applyPaneClick(s: TuiSession; rt: TuiRuntime; c: PaneClickRequest) =
     s.refresh(rt)
     s.noteWhere(rt)
 
+proc testStopDelayMs(): int =
+  ## TEST-ONLY: how long to hold a move's answer before drawing its stop —
+  ## `CODETRACER_TEST_DELAY_STOP_MS`, read only when `CODETRACER_IN_UI_TEST`
+  ## is set, so no user's session ever waits on it. The scenario pack sets
+  ## it (stage `delay-stop-drawing`) to widen the window between "the
+  ## replay answered" and "the window shows the stop" from one frame to a
+  ## measurable one: a sync condition that fires early (`replay-idle`
+  ## before the stop is drawn) is then observable instead of hidden in that
+  ## frame. The window keeps showing the move in flight meanwhile.
+  if getEnv("CODETRACER_IN_UI_TEST").len == 0:
+    return 0
+  try: max(0, parseInt(getEnv("CODETRACER_TEST_DELAY_STOP_MS", "0")))
+  except ValueError: 0
+
 proc applyOutcome*(s: TuiSession; rt: TuiRuntime; outcome: RuntimeOutcome) =
   ## What the host does with one token's outcome. The session-level half —
   ## settling a move, going to a call, toggling its children, waiting for an
@@ -1982,6 +2310,9 @@ proc applyOutcome*(s: TuiSession; rt: TuiRuntime; outcome: RuntimeOutcome) =
       s.applyOutcome(rt, again)
   elif outcome.awaitsMove:
     s.pumpMove()
+    let held = testStopDelayMs()
+    if held > 0:
+      os.sleep(held)
     rt.app.viewedFile = ""
     s.refresh(rt)
   elif outcome.refreshesSession:
@@ -2065,6 +2396,37 @@ proc seekToStartupTick*(s: TuiSession; rt: TuiRuntime; tick: int64): string =
     s.refresh(rt)
   outcome.detail
 
+proc anyGeneratedNimC(files: openArray[string]): bool =
+  for f in files:
+    if isGeneratedNimC(f):
+      return true
+
+proc recordingNimcacheFiles*(tracePath: string): seq[string] =
+  ## The generated C files of a recording's `nimcache/` folder (absolute,
+  ## sorted): where `ct record` keeps a Nim program's C and source maps.
+  let dir = tracePath / "nimcache"
+  if not dirExists(dir):
+    return
+  for kind, f in walkDir(dir):
+    if kind in {pcFile, pcLinkToFile} and isGeneratedNimC(f):
+      result.add f
+  result.sort()
+
+proc readInsideTrace*(tracePath, path: string;
+                      fallback: tuple[ok: bool, text, message: string]):
+    tuple[ok: bool, text, message: string] =
+  ## `path` read from disk when it lies inside the recording's folder
+  ## (resolved, so `..` cannot leave it), else `fallback` — what the source
+  ## provider answered.
+  let root = absolutePath(tracePath).normalizedPath
+  let full = absolutePath(path).normalizedPath
+  if not full.startsWith(root & DirSep) or not fileExists(full):
+    return fallback
+  try:
+    (true, readFile(full), "")
+  except IOError, OSError:
+    fallback
+
 proc header*(s: TuiSession; rt: TuiRuntime) =
   ## Point the runtime at this session — the one shown: the trace's NAME
   ## where §3.1's header row reads it, and (PLAT-68) the reader the Debug-mode
@@ -2078,6 +2440,41 @@ proc header*(s: TuiSession; rt: TuiRuntime) =
   rt.editServices.readSource = proc(path: string): EditReadResult =
     let read = s.recordedSourceText(path)
     EditReadResult(ok: read.ok, text: read.text, message: read.message)
+  # Generated-Code-Listing §13.4: "View Generated C Source" — the listing
+  # built by the shared presenter from THIS recording's files, read as the
+  # Debug-mode editor reads them, and shown in the Low Level Code pane.
+  let owner = s
+  rt.editServices.showGeneratedCode = proc(targetId, path: string;
+                                           line: int): string =
+    let core = owner.session.session
+    var files: seq[string] = @[]
+    if not core.fileTreeVM.isNil:
+      recordedPathsOf(core.fileTreeVM.rootEntry.val, files)
+    # A recording `ct record` made of a Nim program keeps its generated C
+    # (and the `.c.map` beside each file) in `<trace>/nimcache/`
+    # (`recorder_dispatch.nimNativeCompileArgs`), which the recording's
+    # file tree does not list: offered from there when the tree has none.
+    let nimcache = recordingNimcacheFiles(owner.session.tracePath)
+    if not files.anyGeneratedNimC:
+      files.add nimcache
+    # The terminal's provider answers at once, so the listing is in the pane
+    # (and the pane's model rebuilt from it) before this returns.
+    var failure = ""
+    let refused = showGeneratedCode(core.generatedCodeVM, core.lowLevelCodeVM,
+      targetId, path, line, core.store.stop.val, files,
+      proc(p: string; done: proc(r: RecordedText)) =
+        # Through the source provider, as the Debug-mode editor reads; a
+        # file of the trace folder the provider does not serve (the
+        # nimcache's C and maps) from disk — and nothing outside the folder.
+        let read = owner.recordedSourceText(p)
+        if read.ok:
+          done(read)
+        else:
+          done(readInsideTrace(owner.session.tracePath, p, read)),
+      proc(why: string) =
+        failure = why
+        owner.refreshLowLevel(rt))
+    if refused.len > 0: refused else: failure
   # M76: the session's `DebugControlsVM` Stop (installed by `native_host`)
   # does this terminal's half too — Edit mode, the runtime forgetting the
   # session — whichever caller reaches it, so a Stop from anywhere leaves

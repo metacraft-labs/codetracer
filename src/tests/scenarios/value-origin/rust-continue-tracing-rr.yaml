@@ -1,0 +1,45 @@
+scenario: 1
+name: value-origin/rust-continue-tracing-rr
+pack: codetracer
+summary: >-
+  In an rr recording of a Rust chain whose middle variable is written again after
+  the copy, stopped at the println!, `c`'s chain is cut off after every hop
+  (the request's time limit is 1 ms) and shows "Continue tracing"; two clicks
+  continue it to `c = b`, `b = a`, `a = 10`, ending at 10.
+  The middle hop is `b = a`, not the later `b = 7`: each continuation goes on
+  from where the walk stopped.
+
+stage:
+  - use: record-program
+    with: { program: src/db-backend/tests/fixtures/origin/rust/rewritten_after_copy/main.rs, backend: rr }
+  # Every request walks one hop: at least one always, and no more within 1 ms.
+  # The MCR recording of the same chain is `rust-continue-tracing`.
+  - use: front-end-options
+    with: { env: { CT_RR_ORIGIN_PER_HOP_WALL_CLOCK_MS: "10000", CT_ORIGIN_WALL_CLOCK_MS: "1" } }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 180s }
+  - click: 'toolbar/toolbar-button[label="run-to-entry-image"]'
+    settle: false
+  - wait: { until: replay-idle, timeout: 120s }
+  - wait: { until: { at: 'editor[file="main.rs"]', current-line: { gt: 0 } }, timeout: 120s }
+  - click: { at: 'editor[file="main.rs"]/line[number="11"]', anchor: glyph }
+  - click: 'toolbar/toolbar-button[label="continue-image"]'
+    settle: false
+  - wait: { until: { at: 'editor[file="main.rs"]', current-line: 11 }, timeout: 120s }
+  - wait: { until: { at: variables, assert: 'value-of("c", "10")' }, timeout: 120s }
+
+  - click: { at: 'variables/variable[name="c"]', anchor: name, button: right }
+  - wait: { until: { at: context-menu, assert: 'offers("Show value origin")' }, timeout: 15s }
+  - click: 'context-menu/menu-item[label="Show value origin"]'
+  - wait: { until: { at: 'variables/variable[name="c"]/origin-chain', hops: [c = b] }, timeout: 120s }
+  - wheel: { at: variables, direction: down, amount: 10 }
+  - wait: { until: { at: 'variables/variable[name="c"]/origin-chain/panel-button[label="Continue tracing"]', geometry: { visible: true } }, timeout: 15s }
+  - click: 'variables/variable[name="c"]/origin-chain/panel-button[label="Continue tracing"]'
+  - wait: { until: { at: 'variables/variable[name="c"]/origin-chain', hops: [c = b, b = a] }, timeout: 120s }
+  - wait: { until: { at: 'variables/variable[name="c"]/origin-chain/panel-button[label="Continue tracing"]', geometry: { visible: true } }, timeout: 30s }
+  - click: 'variables/variable[name="c"]/origin-chain/panel-button[label="Continue tracing"]'
+  - wait: { until: { at: 'variables/variable[name="c"]/origin-chain', hops: [c = b, b = a, a = 10] }, timeout: 120s }
+  - expect: { at: 'variables/variable[name="c"]/origin-chain', terminator: "10" }
+  - expect: { at: 'variables/variable[name="c"]/origin-chain', count: 3 }

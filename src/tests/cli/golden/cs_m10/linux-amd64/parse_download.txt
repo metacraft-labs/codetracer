@@ -1,0 +1,1761 @@
+# ct download: 88 argv cases through ct's loader (the parse probe)
+
+### 1: no url
+argv: ct "download"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The required option 'traceDownloadUrl' was not specified\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 2: url
+argv: ct "download" "https://x.test/t/1"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = download
+  traceDownloadUrl = "https://x.test/t/1"
+  downloadToken = none
+  downloadBaseUrl = none
+  downloadPasswordFile = none
+  downloadPasswordStdin = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 3: two urls
+argv: ct "download" "u1" "u2"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The subcommand 'download' does not accept additional arguments\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 4: --token <v>
+argv: ct "download" "--token" "tok" "https://x.test/t/1"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = download
+  traceDownloadUrl = "https://x.test/t/1"
+  downloadToken = some("tok")
+  downloadBaseUrl = none
+  downloadPasswordFile = none
+  downloadPasswordStdin = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 5: --token=<v>
+argv: ct "download" "--token=tok" "https://x.test/t/1"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = download
+  traceDownloadUrl = "https://x.test/t/1"
+  downloadToken = some("tok")
+  downloadBaseUrl = none
+  downloadPasswordFile = none
+  downloadPasswordStdin = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 6: --token:<v>
+argv: ct "download" "--token:tok" "https://x.test/t/1"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = download
+  traceDownloadUrl = "https://x.test/t/1"
+  downloadToken = some("tok")
+  downloadBaseUrl = none
+  downloadPasswordFile = none
+  downloadPasswordStdin = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 7: --token tok
+argv: ct "download" "--token" "tok" "https://x.test/t/1"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = download
+  traceDownloadUrl = "https://x.test/t/1"
+  downloadToken = some("tok")
+  downloadBaseUrl = none
+  downloadPasswordFile = none
+  downloadPasswordStdin = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 8: --token=tok
+argv: ct "download" "--token=tok" "https://x.test/t/1"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = download
+  traceDownloadUrl = "https://x.test/t/1"
+  downloadToken = some("tok")
+  downloadBaseUrl = none
+  downloadPasswordFile = none
+  downloadPasswordStdin = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 9: --token empty
+argv: ct "download" "--token" "" "https://x.test/t/1"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = download
+  traceDownloadUrl = "https://x.test/t/1"
+  downloadToken = some("")
+  downloadBaseUrl = none
+  downloadPasswordFile = none
+  downloadPasswordStdin = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 10: --token= (empty)
+argv: ct "download" "--token=" "https://x.test/t/1"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The required option 'traceDownloadUrl' was not specified\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 11: --token= <v> (next word)
+argv: ct "download" "--token=" "tok" "https://x.test/t/1"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = download
+  traceDownloadUrl = "https://x.test/t/1"
+  downloadToken = some("tok")
+  downloadBaseUrl = none
+  downloadPasswordFile = none
+  downloadPasswordStdin = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 12: --token -x (value starts with -)
+argv: ct "download" "--token" "-x" "https://x.test/t/1"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = download
+  traceDownloadUrl = "https://x.test/t/1"
+  downloadToken = some("-x")
+  downloadBaseUrl = none
+  downloadPasswordFile = none
+  downloadPasswordStdin = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 13: --token --x (value starts with --)
+argv: ct "download" "--token" "--x" "https://x.test/t/1"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = download
+  traceDownloadUrl = "https://x.test/t/1"
+  downloadToken = some("--x")
+  downloadBaseUrl = none
+  downloadPasswordFile = none
+  downloadPasswordStdin = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 14: --token --new-tab <v> (an option between it and its value)
+argv: ct "download" "--token" "--new-tab" "tok" "https://x.test/t/1"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The subcommand 'download' does not accept additional arguments\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 15: --token repeated, last wins
+argv: ct "download" "--token" "tok" "--token" "tok" "https://x.test/t/1"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = download
+  traceDownloadUrl = "https://x.test/t/1"
+  downloadToken = some("tok")
+  downloadBaseUrl = none
+  downloadPasswordFile = none
+  downloadPasswordStdin = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 16: --token missing value (last)
+argv: ct "download" "https://x.test/t/1" "--token"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The option '\e[34m--token\e[0m' requires a value\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 17: --token missing value (before the rest)
+argv: ct "download" "--token" "https://x.test/t/1"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The required option 'traceDownloadUrl' was not specified\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 18: --TOKEN <v> (style variant)
+argv: ct "download" "--TOKEN" "tok" "https://x.test/t/1"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = download
+  traceDownloadUrl = "https://x.test/t/1"
+  downloadToken = some("tok")
+  downloadBaseUrl = none
+  downloadPasswordFile = none
+  downloadPasswordStdin = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 19: --t_oken <v> (style variant)
+argv: ct "download" "--t_oken" "tok" "https://x.test/t/1"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = download
+  traceDownloadUrl = "https://x.test/t/1"
+  downloadToken = some("tok")
+  downloadBaseUrl = none
+  downloadPasswordFile = none
+  downloadPasswordStdin = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 20: --base-url <v>
+argv: ct "download" "--base-url" "https://b.test" "https://x.test/t/1"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = download
+  traceDownloadUrl = "https://x.test/t/1"
+  downloadToken = none
+  downloadBaseUrl = some("https://b.test")
+  downloadPasswordFile = none
+  downloadPasswordStdin = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 21: --base-url=<v>
+argv: ct "download" "--base-url=https://b.test" "https://x.test/t/1"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = download
+  traceDownloadUrl = "https://x.test/t/1"
+  downloadToken = none
+  downloadBaseUrl = some("https://b.test")
+  downloadPasswordFile = none
+  downloadPasswordStdin = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 22: --base-url:<v>
+argv: ct "download" "--base-url:https://b.test" "https://x.test/t/1"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = download
+  traceDownloadUrl = "https://x.test/t/1"
+  downloadToken = none
+  downloadBaseUrl = some("https://b.test")
+  downloadPasswordFile = none
+  downloadPasswordStdin = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 23: --base-url https://b.test
+argv: ct "download" "--base-url" "https://b.test" "https://x.test/t/1"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = download
+  traceDownloadUrl = "https://x.test/t/1"
+  downloadToken = none
+  downloadBaseUrl = some("https://b.test")
+  downloadPasswordFile = none
+  downloadPasswordStdin = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 24: --base-url=https://b.test
+argv: ct "download" "--base-url=https://b.test" "https://x.test/t/1"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = download
+  traceDownloadUrl = "https://x.test/t/1"
+  downloadToken = none
+  downloadBaseUrl = some("https://b.test")
+  downloadPasswordFile = none
+  downloadPasswordStdin = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 25: --base-url empty
+argv: ct "download" "--base-url" "" "https://x.test/t/1"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = download
+  traceDownloadUrl = "https://x.test/t/1"
+  downloadToken = none
+  downloadBaseUrl = some("")
+  downloadPasswordFile = none
+  downloadPasswordStdin = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 26: --base-url= (empty)
+argv: ct "download" "--base-url=" "https://x.test/t/1"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The required option 'traceDownloadUrl' was not specified\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 27: --base-url= <v> (next word)
+argv: ct "download" "--base-url=" "https://b.test" "https://x.test/t/1"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = download
+  traceDownloadUrl = "https://x.test/t/1"
+  downloadToken = none
+  downloadBaseUrl = some("https://b.test")
+  downloadPasswordFile = none
+  downloadPasswordStdin = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 28: --base-url -x (value starts with -)
+argv: ct "download" "--base-url" "-x" "https://x.test/t/1"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = download
+  traceDownloadUrl = "https://x.test/t/1"
+  downloadToken = none
+  downloadBaseUrl = some("-x")
+  downloadPasswordFile = none
+  downloadPasswordStdin = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 29: --base-url --x (value starts with --)
+argv: ct "download" "--base-url" "--x" "https://x.test/t/1"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = download
+  traceDownloadUrl = "https://x.test/t/1"
+  downloadToken = none
+  downloadBaseUrl = some("--x")
+  downloadPasswordFile = none
+  downloadPasswordStdin = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 30: --base-url --new-tab <v> (an option between it and its value)
+argv: ct "download" "--base-url" "--new-tab" "https://b.test" "https://x.test/t/1"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The subcommand 'download' does not accept additional arguments\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 31: --base-url repeated, last wins
+argv: ct "download" "--base-url" "https://b.test" "--base-url" "https://b.test" "https://x.test/t/1"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = download
+  traceDownloadUrl = "https://x.test/t/1"
+  downloadToken = none
+  downloadBaseUrl = some("https://b.test")
+  downloadPasswordFile = none
+  downloadPasswordStdin = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 32: --base-url missing value (last)
+argv: ct "download" "https://x.test/t/1" "--base-url"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The option '\e[34m--base-url\e[0m' requires a value\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 33: --base-url missing value (before the rest)
+argv: ct "download" "--base-url" "https://x.test/t/1"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The required option 'traceDownloadUrl' was not specified\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 34: --BASE-URL <v> (style variant)
+argv: ct "download" "--BASE-URL" "https://b.test" "https://x.test/t/1"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = download
+  traceDownloadUrl = "https://x.test/t/1"
+  downloadToken = none
+  downloadBaseUrl = some("https://b.test")
+  downloadPasswordFile = none
+  downloadPasswordStdin = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 35: --b_ase-url <v> (style variant)
+argv: ct "download" "--b_ase-url" "https://b.test" "https://x.test/t/1"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = download
+  traceDownloadUrl = "https://x.test/t/1"
+  downloadToken = none
+  downloadBaseUrl = some("https://b.test")
+  downloadPasswordFile = none
+  downloadPasswordStdin = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 36: --base_url <v> (style variant)
+argv: ct "download" "--base_url" "https://b.test" "https://x.test/t/1"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'base_url'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 37: --baseurl <v> (style variant)
+argv: ct "download" "--baseurl" "https://b.test" "https://x.test/t/1"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'baseurl'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 38: --password-file <v>
+argv: ct "download" "--password-file" "pw.txt" "https://x.test/t/1"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = download
+  traceDownloadUrl = "https://x.test/t/1"
+  downloadToken = none
+  downloadBaseUrl = none
+  downloadPasswordFile = some("pw.txt")
+  downloadPasswordStdin = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 39: --password-file=<v>
+argv: ct "download" "--password-file=pw.txt" "https://x.test/t/1"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = download
+  traceDownloadUrl = "https://x.test/t/1"
+  downloadToken = none
+  downloadBaseUrl = none
+  downloadPasswordFile = some("pw.txt")
+  downloadPasswordStdin = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 40: --password-file:<v>
+argv: ct "download" "--password-file:pw.txt" "https://x.test/t/1"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = download
+  traceDownloadUrl = "https://x.test/t/1"
+  downloadToken = none
+  downloadBaseUrl = none
+  downloadPasswordFile = some("pw.txt")
+  downloadPasswordStdin = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 41: --password-file pw.txt
+argv: ct "download" "--password-file" "pw.txt" "https://x.test/t/1"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = download
+  traceDownloadUrl = "https://x.test/t/1"
+  downloadToken = none
+  downloadBaseUrl = none
+  downloadPasswordFile = some("pw.txt")
+  downloadPasswordStdin = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 42: --password-file=pw.txt
+argv: ct "download" "--password-file=pw.txt" "https://x.test/t/1"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = download
+  traceDownloadUrl = "https://x.test/t/1"
+  downloadToken = none
+  downloadBaseUrl = none
+  downloadPasswordFile = some("pw.txt")
+  downloadPasswordStdin = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 43: --password-file -
+argv: ct "download" "--password-file" "-" "https://x.test/t/1"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = download
+  traceDownloadUrl = "https://x.test/t/1"
+  downloadToken = none
+  downloadBaseUrl = none
+  downloadPasswordFile = some("-")
+  downloadPasswordStdin = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 44: --password-file=-
+argv: ct "download" "--password-file=-" "https://x.test/t/1"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = download
+  traceDownloadUrl = "https://x.test/t/1"
+  downloadToken = none
+  downloadBaseUrl = none
+  downloadPasswordFile = some("-")
+  downloadPasswordStdin = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 45: --password-file empty
+argv: ct "download" "--password-file" "" "https://x.test/t/1"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = download
+  traceDownloadUrl = "https://x.test/t/1"
+  downloadToken = none
+  downloadBaseUrl = none
+  downloadPasswordFile = some("")
+  downloadPasswordStdin = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 46: --password-file= (empty)
+argv: ct "download" "--password-file=" "https://x.test/t/1"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The required option 'traceDownloadUrl' was not specified\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 47: --password-file= <v> (next word)
+argv: ct "download" "--password-file=" "pw.txt" "https://x.test/t/1"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = download
+  traceDownloadUrl = "https://x.test/t/1"
+  downloadToken = none
+  downloadBaseUrl = none
+  downloadPasswordFile = some("pw.txt")
+  downloadPasswordStdin = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 48: --password-file -x (value starts with -)
+argv: ct "download" "--password-file" "-x" "https://x.test/t/1"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = download
+  traceDownloadUrl = "https://x.test/t/1"
+  downloadToken = none
+  downloadBaseUrl = none
+  downloadPasswordFile = some("-x")
+  downloadPasswordStdin = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 49: --password-file --x (value starts with --)
+argv: ct "download" "--password-file" "--x" "https://x.test/t/1"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = download
+  traceDownloadUrl = "https://x.test/t/1"
+  downloadToken = none
+  downloadBaseUrl = none
+  downloadPasswordFile = some("--x")
+  downloadPasswordStdin = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 50: --password-file --new-tab <v> (an option between it and its value)
+argv: ct "download" "--password-file" "--new-tab" "pw.txt" "https://x.test/t/1"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The subcommand 'download' does not accept additional arguments\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 51: --password-file repeated, last wins
+argv: ct "download" "--password-file" "pw.txt" "--password-file" "-" "https://x.test/t/1"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = download
+  traceDownloadUrl = "https://x.test/t/1"
+  downloadToken = none
+  downloadBaseUrl = none
+  downloadPasswordFile = some("-")
+  downloadPasswordStdin = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 52: --password-file missing value (last)
+argv: ct "download" "https://x.test/t/1" "--password-file"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The option '\e[34m--password-file\e[0m' requires a value\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 53: --password-file missing value (before the rest)
+argv: ct "download" "--password-file" "https://x.test/t/1"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The required option 'traceDownloadUrl' was not specified\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 54: --PASSWORD-FILE <v> (style variant)
+argv: ct "download" "--PASSWORD-FILE" "pw.txt" "https://x.test/t/1"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = download
+  traceDownloadUrl = "https://x.test/t/1"
+  downloadToken = none
+  downloadBaseUrl = none
+  downloadPasswordFile = some("pw.txt")
+  downloadPasswordStdin = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 55: --p_assword-file <v> (style variant)
+argv: ct "download" "--p_assword-file" "pw.txt" "https://x.test/t/1"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = download
+  traceDownloadUrl = "https://x.test/t/1"
+  downloadToken = none
+  downloadBaseUrl = none
+  downloadPasswordFile = some("pw.txt")
+  downloadPasswordStdin = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 56: --password_file <v> (style variant)
+argv: ct "download" "--password_file" "pw.txt" "https://x.test/t/1"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'password_file'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 57: --passwordfile <v> (style variant)
+argv: ct "download" "--passwordfile" "pw.txt" "https://x.test/t/1"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'passwordfile'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 58: --password-stdin
+argv: ct "download" "--password-stdin" "https://x.test/t/1"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = download
+  traceDownloadUrl = "https://x.test/t/1"
+  downloadToken = none
+  downloadBaseUrl = none
+  downloadPasswordFile = none
+  downloadPasswordStdin = true
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 59: --password-stdin=true
+argv: ct "download" "--password-stdin=true" "https://x.test/t/1"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = download
+  traceDownloadUrl = "https://x.test/t/1"
+  downloadToken = none
+  downloadBaseUrl = none
+  downloadPasswordFile = none
+  downloadPasswordStdin = true
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 60: --password-stdin=false
+argv: ct "download" "--password-stdin=false" "https://x.test/t/1"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = download
+  traceDownloadUrl = "https://x.test/t/1"
+  downloadToken = none
+  downloadBaseUrl = none
+  downloadPasswordFile = none
+  downloadPasswordStdin = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 61: --password-stdin=on
+argv: ct "download" "--password-stdin=on" "https://x.test/t/1"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = download
+  traceDownloadUrl = "https://x.test/t/1"
+  downloadToken = none
+  downloadBaseUrl = none
+  downloadPasswordFile = none
+  downloadPasswordStdin = true
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 62: --password-stdin=off
+argv: ct "download" "--password-stdin=off" "https://x.test/t/1"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = download
+  traceDownloadUrl = "https://x.test/t/1"
+  downloadToken = none
+  downloadBaseUrl = none
+  downloadPasswordFile = none
+  downloadPasswordStdin = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 63: --password-stdin=yes
+argv: ct "download" "--password-stdin=yes" "https://x.test/t/1"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = download
+  traceDownloadUrl = "https://x.test/t/1"
+  downloadToken = none
+  downloadBaseUrl = none
+  downloadPasswordFile = none
+  downloadPasswordStdin = true
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 64: --password-stdin=no
+argv: ct "download" "--password-stdin=no" "https://x.test/t/1"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = download
+  traceDownloadUrl = "https://x.test/t/1"
+  downloadToken = none
+  downloadBaseUrl = none
+  downloadPasswordFile = none
+  downloadPasswordStdin = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 65: --password-stdin=1
+argv: ct "download" "--password-stdin=1" "https://x.test/t/1"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = download
+  traceDownloadUrl = "https://x.test/t/1"
+  downloadToken = none
+  downloadBaseUrl = none
+  downloadPasswordFile = none
+  downloadPasswordStdin = true
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 66: --password-stdin=0
+argv: ct "download" "--password-stdin=0" "https://x.test/t/1"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = download
+  traceDownloadUrl = "https://x.test/t/1"
+  downloadToken = none
+  downloadBaseUrl = none
+  downloadPasswordFile = none
+  downloadPasswordStdin = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 67: --password-stdin=maybe
+argv: ct "download" "--password-stdin=maybe" "https://x.test/t/1"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Error while processing the \e[34mpassword-stdin=maybe\e[0m parameter: 'maybe' is not a valid boolean value. Supported values are on/off, yes/no, true/false or 1/0\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 68: --password-stdin=
+argv: ct "download" "--password-stdin=" "https://x.test/t/1"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Error while processing the \e[34mpassword-stdin=https://x.test/t/1\e[0m parameter: 'https://x.test/t/1' is not a valid boolean value. Supported values are on/off, yes/no, true/false or 1/0\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 69: --password-stdin:false
+argv: ct "download" "--password-stdin:false" "https://x.test/t/1"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = download
+  traceDownloadUrl = "https://x.test/t/1"
+  downloadToken = none
+  downloadBaseUrl = none
+  downloadPasswordFile = none
+  downloadPasswordStdin = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 70: --password-stdin false (next word)
+argv: ct "download" "--password-stdin" "false" "https://x.test/t/1"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The subcommand 'download' does not accept additional arguments\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 71: --password-stdin twice
+argv: ct "download" "--password-stdin" "--password-stdin" "https://x.test/t/1"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = download
+  traceDownloadUrl = "https://x.test/t/1"
+  downloadToken = none
+  downloadBaseUrl = none
+  downloadPasswordFile = none
+  downloadPasswordStdin = true
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 72: --no-password-stdin
+argv: ct "download" "--no-password-stdin" "https://x.test/t/1"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'no-password-stdin'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 73: --PASSWORD-STDIN (style variant)
+argv: ct "download" "--PASSWORD-STDIN" "https://x.test/t/1"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = download
+  traceDownloadUrl = "https://x.test/t/1"
+  downloadToken = none
+  downloadBaseUrl = none
+  downloadPasswordFile = none
+  downloadPasswordStdin = true
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 74: --p_assword-stdin (style variant)
+argv: ct "download" "--p_assword-stdin" "https://x.test/t/1"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = download
+  traceDownloadUrl = "https://x.test/t/1"
+  downloadToken = none
+  downloadBaseUrl = none
+  downloadPasswordFile = none
+  downloadPasswordStdin = true
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 75: --password_stdin (style variant)
+argv: ct "download" "--password_stdin" "https://x.test/t/1"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'password_stdin'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 76: --passwordstdin (style variant)
+argv: ct "download" "--passwordstdin" "https://x.test/t/1"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'passwordstdin'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 77: env <APP>_TRACEDOWNLOADURL
+argv: ct "download"
+env: <APP>_TRACEDOWNLOADURL="https://env.test"
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = download
+  traceDownloadUrl = "https://env.test"
+  downloadToken = none
+  downloadBaseUrl = none
+  downloadPasswordFile = none
+  downloadPasswordStdin = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 78: unknown long option
+argv: ct "download" "--bogus" "https://x.test/t/1"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'bogus'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 79: unknown long option with value
+argv: ct "download" "--bogus=1" "https://x.test/t/1"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'bogus'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 80: unknown short option
+argv: ct "download" "-Z" "https://x.test/t/1"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'Z'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 81: lone -
+argv: ct "download" "-" "https://x.test/t/1"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option ''\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 82: lone -- then a word
+argv: ct "download" "--" "w" "https://x.test/t/1"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option ''\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 83: --=v
+argv: ct "download" "--=v" "https://x.test/t/1"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option ''\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 84: extra positional
+argv: ct "download" "https://x.test/t/1" "extra1" "extra2" "extra3" "extra4" "extra5"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The subcommand 'download' does not accept additional arguments\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 85: global --cwd after the command
+argv: ct "download" "--cwd" "/w" "https://x.test/t/1"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = some("/w")
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = download
+  traceDownloadUrl = "https://x.test/t/1"
+  downloadToken = none
+  downloadBaseUrl = none
+  downloadPasswordFile = none
+  downloadPasswordStdin = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 86: global --new-tab after the command
+argv: ct "download" "--new-tab" "https://x.test/t/1"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = true
+  newWindow = false
+  cmd = download
+  traceDownloadUrl = "https://x.test/t/1"
+  downloadToken = none
+  downloadBaseUrl = none
+  downloadPasswordFile = none
+  downloadPasswordStdin = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 87: --version after the command
+argv: ct "download" "--version" "https://x.test/t/1"
+env: (none)
+exit: 0
+--- stdout
+CodeTracer version: <VERSION>
+\e[0m
+(no newline at end of stdout)
+--- stderr
+--- end
+
+### 88: -h after the command
+argv: ct "download" "-h" "https://x.test/t/1"
+env: (none)
+exit: 0
+--- stdout
+<the short help page clispec renders for this request: ct download>
+--- stderr
+--- end

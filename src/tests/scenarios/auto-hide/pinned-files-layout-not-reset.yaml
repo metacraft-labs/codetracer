@@ -1,0 +1,28 @@
+scenario: 1
+name: auto-hide/pinned-files-layout-not-reset
+pack: codetracer
+summary: >-
+  An edit layout saved while FILES was pinned to the left (so the layout
+  itself has no Filesystem panel) is not taken for a corrupt one: Edit mode
+  opens on it unchanged, with FILES back on the left strip.
+
+stage:
+  - use: plant-config
+    with:
+      file: default_edit_layout.json
+      content: '{"settings": {"constrainDragToContainer": true, "reorderEnabled": true}, "dimensions": {"borderWidth": 4, "headerHeight": 32}, "root": {"type": "row", "content": [{"type": "stack", "size": "100%", "activeItemIndex": 0, "content": [{"type": "component", "componentType": "genericUiComponent", "componentState": {"id": 0, "label": "eventLogComponent-0", "content": 8}, "title": "EVENTS"}]}]}}'
+  - use: plant-config
+    with:
+      file: auto_hide_state.json
+      content: '{"panels": [{"edge": 0, "title": "FILES", "content": 9, "componentId": 0, "overlayWidth": 320, "overlayHeight": 0, "config": {"type": "component", "componentType": "genericUiComponent", "componentState": {"id": 0, "label": "filesystemComponent-0", "content": 9, "isEditor": false}, "title": "FILES"}}]}'
+  - use: open-project
+    with: { folder: py_console_logs }
+
+steps:
+  - wait: { until: { at: 'strip-tab[label="FILES"]', present: true }, timeout: 60s }
+  - expect: { at: 'strip-tab[label="FILES"]', edge: left }
+  # the saved layout (its one event-log stack), not a reset one (which
+  # would bring back FILES and VCS)
+  - expect: { at: window, assert: 'has-pane("EVENT LOG")' }
+  - expect: { at: window, assert: 'lacks-pane("FILES")' }
+  - expect: { at: window, assert: 'lacks-pane("VCS")' }

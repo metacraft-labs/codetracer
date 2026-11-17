@@ -1,4 +1,6 @@
 /**
+ * Ported to the scenario src/tests/scenarios/editor/incremental-find-walks-and-keeps-the-match.yaml and editor/find-cancel-and-return-restores-the-view.yaml; kept as ci/test/run-plat70c-find-mutations.py grades it.
+ *
  * plat70c-incremental-find.spec.ts — PLAT-70 Part C (Find-And-Incremental-
  * Search.md §3, §4) on the desktop, where the CUA rows are Monaco's own
  * widget, in the real Electron app on a real recording of `calc`:

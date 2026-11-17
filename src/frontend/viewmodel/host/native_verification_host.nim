@@ -22,8 +22,8 @@
 ##   different roots in its two tiers (`VerificationVM.sourceCandidates`), and
 ##   only a host can look.
 ##
-## The desktop's renderer has no process launcher, so the desktop pane draws
-## no Run control (`VerificationPanelModel.canRun`); see the milestone's note.
+## The desktop runs the same action through its main process
+## (`index/verification_runner`), driven by `ui/verification`.
 
 import std/[options, os]
 
@@ -35,12 +35,6 @@ import ../viewmodels/counterexample_session_vm
 import ./project_action_runner
 
 export verification_vm, counterexample_session_vm
-
-const
-  NoVernoActionReason* =
-    "this project declares no Verno action (.vscode/tasks.json or " &
-    "package.json)"
-  NoProjectReason* = "this window has no project to verify"
 
 type
   NativeVerificationHost* = ref object

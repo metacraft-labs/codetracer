@@ -1,0 +1,22 @@
+scenario: 1
+name: terminal/keymaps-flag-holds-for-the-session
+pack: codetracer
+summary: >-
+  `--keymap=emacs` overrides a stored Vim preference for the session, and
+  `:keymap` says so (keymap emacs (flag)).
+stage:
+  - use: write-project
+    with: { files: { doc.txt: "alpha\n    beta\ngamma\n" } }
+  - use: plant-state
+    with: { file: keymap, content: "vim\n" }
+  - use: select-keymap
+    with: { preset: emacs }
+  - use: open-project
+    with: { folder: $project, file: doc.txt, width: 160, height: 40 }
+steps:
+  - wait: { until: ready, timeout: 60s }
+  - chord: Alt+x
+  - wait: { until: { at: status-line, assert: 'says("PALETTE ")' }, timeout: 10s }
+  - type: ":keymap"
+  - key: Enter
+  - wait: { until: { at: status-line, assert: 'says("keymap emacs (flag)")' }, timeout: 10s }

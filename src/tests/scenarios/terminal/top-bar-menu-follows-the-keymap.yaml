@@ -1,0 +1,35 @@
+scenario: 1
+name: terminal/top-bar-menu-follows-the-keymap
+pack: codetracer
+summary: >-
+  The program menu opens from its key and from a click on its button; its
+  Debug folder cascades, and every entry's shortcut is the active keymap's
+  (Vim: Continue c, Step Over n, Step In s, Step Out f, Reverse Continue r c,
+  Reverse Step Over p, Reverse Step In b, Reverse Step Out r f).
+stage:
+  - use: record-program
+    with: { program: calc }
+  - use: select-keymap
+    with: { preset: vim }
+  - use: open-recording
+    with: { width: 200, height: 50 }
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - key: F12
+  - wait: { until: { at: 'dropdown[level="1"]', present: true }, timeout: 10s }
+  - expect: { at: 'dropdown[level="1"]', assert: 'offers("Edit")' }
+  - expect: { at: 'dropdown[level="1"]/dropdown-item[label="Debug"]', folder: true }
+  - key: Esc
+  - wait: { until: { at: 'dropdown[level="1"]', absent: true }, timeout: 10s }
+  - click: { at: 'menu-bar/menu[label="Menu"]' }
+  - wait: { until: { at: 'dropdown[level="1"]', present: true }, timeout: 10s }
+  - click: { at: 'dropdown[level="1"]/dropdown-item[label="Debug"]' }
+  - wait: { until: { at: 'dropdown[level="2"]', present: true }, timeout: 10s }
+  - expect: { at: 'dropdown[level="2"]/dropdown-item[label="Continue"]', shortcut: "c" }
+  - expect: { at: 'dropdown[level="2"]/dropdown-item[label="Step Over"]', shortcut: "n" }
+  - expect: { at: 'dropdown[level="2"]/dropdown-item[label="Step In"]', shortcut: "s" }
+  - expect: { at: 'dropdown[level="2"]/dropdown-item[label="Step Out"]', shortcut: "f" }
+  - expect: { at: 'dropdown[level="2"]/dropdown-item[label="Reverse Continue"]', shortcut: "r c" }
+  - expect: { at: 'dropdown[level="2"]/dropdown-item[label="Reverse Step Over"]', shortcut: "p" }
+  - expect: { at: 'dropdown[level="2"]/dropdown-item[label="Reverse Step In"]', shortcut: "b" }
+  - expect: { at: 'dropdown[level="2"]/dropdown-item[label="Reverse Step Out"]', shortcut: "r f" }

@@ -94,6 +94,10 @@ struct WorkerStopLine {
 pub struct ReplayWorkerStartError {
     /// The parsed stop reason, when the worker wrote a machine-readable one.
     pub stop_reason: Option<WorkerStopReason>,
+    /// The error the worker exited with, in its own words (see
+    /// [`worker_exit_error`]), when its stderr holds one: what the user is
+    /// shown when there is no stop reason.
+    pub worker_error: Option<String>,
     /// The untyped detail (transport error plus raw worker stderr), kept for
     /// diagnostics and for every failure the worker does not classify.
     pub detail: String,
@@ -138,6 +142,15 @@ impl std::fmt::Display for ReplayWorkerStartError {
                 "replay worker for pid {} refused to start: {}",
                 self.worker_pid, reason.code
             ),
+            // The worker said why: that, and that the replay did not start, is
+            // what the user reads (`Multi-Window-Tab-Management.md` item 7).
+            // Not the pid or the worker's log lines, which differ between
+            // attempts and name source files of the worker; they are logged.
+            None if self.worker_error.is_some() => write!(
+                f,
+                "The replay could not start: {}",
+                self.worker_error.as_deref().unwrap_or_default()
+            ),
             None => write!(
                 f,
                 "failed to initialize replay-worker transport for pid {}: {}",
@@ -148,6 +161,21 @@ impl std::fmt::Display for ReplayWorkerStartError {
 }
 
 impl Error for ReplayWorkerStartError {}
+
+/// The error a replay worker exited with, from its stderr: a Rust `main` that
+/// returns `Err` writes `Error: <the error's Debug form>` as its last words,
+/// and a string error's Debug form is a quoted, escaped literal, which is read
+/// back here. `None` when the worker wrote no such line.
+pub fn worker_exit_error(stderr: &str) -> Option<String> {
+    let line = stderr.lines().map(str::trim).find(|line| line.starts_with("Error: "))?;
+    let error = line["Error: ".len()..].trim();
+    let unquoted = if error.starts_with('"') {
+        serde_json::from_str::<String>(error).unwrap_or_else(|_| error.trim_matches('"').to_string())
+    } else {
+        error.to_string()
+    };
+    (!unquoted.is_empty()).then_some(unquoted)
+}
 
 /// A replay worker that went away while a query was in flight: it closed its
 /// connection without answering, or the connection broke under the query.
@@ -245,6 +273,199 @@ fn replay_query_timeout() -> Duration {
         .unwrap_or_else(|| Duration::from_secs(10))
 }
 
+/// The longest a query waits for a worker that is still working (see
+/// [`WorkerProgress`]): `CODETRACER_REPLAY_QUERY_MAX_SECS`, 600 s by default.
+fn replay_query_ceiling() -> Duration {
+    std::env::var("CODETRACER_REPLAY_QUERY_MAX_SECS")
+        .ok()
+        .and_then(|raw| raw.parse::<u64>().ok())
+        .filter(|seconds| *seconds > 0)
+        .map(Duration::from_secs)
+        .unwrap_or_else(|| Duration::from_secs(600))
+}
+
+fn is_read_timeout(e: &std::io::Error) -> bool {
+    e.kind() == std::io::ErrorKind::WouldBlock || e.kind() == std::io::ErrorKind::TimedOut
+}
+
+/// Whether a replay worker that has not answered within the read timeout is
+/// still working on the query: the CPU time of its process tree (the worker,
+/// the rr it started and the program rr replays) grew since the last look.
+/// A worker that hangs (blocked, deadlocked) uses no CPU and is given up on
+/// at the read timeout, as before; a slow one is waited for, up to
+/// [`replay_query_ceiling`].
+///
+/// Linux reads the CPU times from `/proc`. Elsewhere a worker is never
+/// known to be working, so the read timeout alone decides, as before.
+/// Whether a query that outlives its read timeout is waited on while the
+/// worker is busy (`WorkerProgress`), rather than ending in a timeout that
+/// replaces the worker.
+///
+/// Only a query that moves the replay holding the user's position: killing
+/// that worker loses where the user stands, and those queries (a run to
+/// entry, a step, a reverse continue) are the ones a loaded host makes slow.
+/// The side replays (`flow`, `tracepoint`) hold no position of the user's,
+/// and every other query is a read. For them the timeout stays the cure for
+/// a worker that is busy but no longer answering: a CPU-using worker tree is
+/// not proof that the query is being answered. Waiting on every query left
+/// an MCR call trace's flow undrawn for over a minute, where the timeout and
+/// a fresh worker had drawn it in seconds (C, D and Crystal sudoku,
+/// 2026-11-15).
+fn waits_on_a_busy_worker(worker_name: &str, raw_json: &str) -> bool {
+    const SIDE_REPLAYS: &[&str] = &["flow", "tracepoint"];
+    const MOTIONS: &[&str] = &[
+        "RunToEntry",
+        "Step",
+        "JumpToCall",
+        "EventJump",
+        "CallstackJump",
+        "TracepointJump",
+        "LocationJump",
+        "RestoreAt",
+        "SeekToGeid",
+        "SeekToTicks",
+        "ReverseContinue",
+        "SaveReplayPosition",
+        "RestoreReplayPosition",
+    ];
+    !SIDE_REPLAYS.contains(&worker_name) && MOTIONS.contains(&replay_query_kind(raw_json).as_str())
+}
+
+struct WorkerProgress {
+    pid: Option<u32>,
+    last: Option<std::collections::HashMap<u32, u64>>,
+    ceiling: Duration,
+}
+
+impl WorkerProgress {
+    fn new(pid: Option<u32>) -> Self {
+        Self {
+            pid,
+            last: pid.and_then(worker_tree_cpu_ticks),
+            ceiling: replay_query_ceiling(),
+        }
+    }
+
+    /// Whether the worker's processes used CPU since the last look: one of
+    /// them that was there before has more CPU time, or one is new.
+    ///
+    /// Per process, not a total. rr discards the processes it is done with
+    /// (an old replay session, a checkpoint), so a total over the live
+    /// processes can fall while rr works, and a fall read as "no progress"
+    /// gave up on a working worker.
+    fn still_working(&mut self, waited: Duration) -> bool {
+        if waited >= self.ceiling {
+            return false;
+        }
+        let Some(now) = self.pid.and_then(worker_tree_cpu_ticks) else {
+            return false;
+        };
+        let progressed = self.last.as_ref().is_some_and(|before| used_cpu_since(before, &now));
+        self.last = Some(now);
+        progressed
+    }
+}
+
+/// Whether a process in `now` has more CPU time than in `before`, or was not
+/// there before.
+fn used_cpu_since(before: &std::collections::HashMap<u32, u64>, now: &std::collections::HashMap<u32, u64>) -> bool {
+    now.iter()
+        .any(|(pid, ticks)| before.get(pid).is_none_or(|earlier| ticks > earlier))
+}
+
+/// CPU ticks (user + system) of every process doing the worker's work: the
+/// worker's descendants, and every process a tracer among them traces.
+///
+/// The traced ones are not always descendants. rr keeps a replay's
+/// checkpoints as forks of the replayed process, and when it moves the
+/// replay on it kills the old process and goes on with a fork, whose parent
+/// is then gone: the fork is reparented (to init or a subreaper), still
+/// traced by rr, and it is where the replay runs. Counted only by parentage,
+/// the worker looked idle while rr replayed in that fork, and a reverse
+/// continue on a loaded host was given up at its read timeout (under
+/// `stress-ng --cpu 64` at load about 90, after 20.8 s).
+#[cfg(target_os = "linux")]
+fn worker_tree_cpu_ticks(pid: u32) -> Option<std::collections::HashMap<u32, u64>> {
+    use std::collections::{HashMap, HashSet};
+    let mut ticks: HashMap<u32, u64> = HashMap::new();
+    let mut seen: HashSet<u32> = HashSet::new();
+    let mut pending = vec![pid];
+    // Processes traced by a process of the tree, by tracer: read once per
+    // look, and only when the tree reaches them.
+    let mut traced_by: Option<HashMap<u32, Vec<u32>>> = None;
+    while let Some(current) = pending.pop() {
+        if !seen.insert(current) || seen.len() > 4096 {
+            continue;
+        }
+        let Some(cpu) = process_cpu_ticks(current) else {
+            if current == pid {
+                return None;
+            }
+            continue;
+        };
+        ticks.insert(current, cpu);
+        if let Ok(tasks) = std::fs::read_dir(format!("/proc/{current}/task")) {
+            for task in tasks.flatten() {
+                if let Ok(children) = std::fs::read_to_string(task.path().join("children")) {
+                    pending.extend(
+                        children
+                            .split_whitespace()
+                            .filter_map(|child| child.parse::<u32>().ok()),
+                    );
+                }
+            }
+        }
+        let traced = traced_by.get_or_insert_with(processes_by_tracer);
+        if let Some(tracees) = traced.get(&current) {
+            pending.extend(tracees.iter().copied());
+        }
+    }
+    Some(ticks)
+}
+
+/// utime + stime of `pid`, from /proc/<pid>/stat.
+#[cfg(target_os = "linux")]
+fn process_cpu_ticks(pid: u32) -> Option<u64> {
+    let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+    // The command name may hold spaces and parentheses: fields after the last ')'.
+    let after_comm = &stat[stat.rfind(')')? + 1..];
+    let fields: Vec<&str> = after_comm.split_whitespace().collect();
+    let field = |index: usize| fields.get(index).and_then(|f| f.parse::<u64>().ok()).unwrap_or(0);
+    Some(field(11) + field(12))
+}
+
+/// Every traced process of the host, by its tracer (`TracerPid` in
+/// /proc/<pid>/status).
+#[cfg(target_os = "linux")]
+fn processes_by_tracer() -> std::collections::HashMap<u32, Vec<u32>> {
+    let mut by_tracer: std::collections::HashMap<u32, Vec<u32>> = std::collections::HashMap::new();
+    let Ok(entries) = std::fs::read_dir("/proc") else {
+        return by_tracer;
+    };
+    for entry in entries.flatten() {
+        let Some(pid) = entry.file_name().to_str().and_then(|name| name.parse::<u32>().ok()) else {
+            continue;
+        };
+        let Ok(status) = std::fs::read_to_string(format!("/proc/{pid}/status")) else {
+            continue;
+        };
+        let tracer = status
+            .lines()
+            .find_map(|line| line.strip_prefix("TracerPid:"))
+            .and_then(|value| value.trim().parse::<u32>().ok())
+            .unwrap_or(0);
+        if tracer != 0 {
+            by_tracer.entry(tracer).or_default().push(pid);
+        }
+    }
+    by_tracer
+}
+
+#[cfg(not(target_os = "linux"))]
+fn worker_tree_cpu_ticks(_pid: u32) -> Option<std::collections::HashMap<u32, u64>> {
+    None
+}
+
 fn replay_worker_startup_timeout() -> Duration {
     std::env::var("CODETRACER_REPLAY_WORKER_STARTUP_TIMEOUT_SECS")
         .ok()
@@ -280,7 +501,17 @@ pub struct RecreatorReplaySession {
     /// Whether a query after the worker died may start a replacement. See
     /// [`RecreatorReplaySession::without_respawn_after_worker_death`].
     respawn_after_worker_death: bool,
+    /// The replay positions handed out as the points cut-off value-origin
+    /// chains continue from (`recreator_origin`, spec §5.3.1), oldest first.
+    /// An rr position holds a checkpoint, a forked copy of the replayed
+    /// process, so only the newest [`MAX_ORIGIN_CONTINUATIONS`] are kept:
+    /// handing out one more lets go of the oldest.
+    origin_continuations: std::collections::VecDeque<serde_json::Value>,
 }
+
+/// How many cut-off value-origin chains can be continued at once in one
+/// replay (see `RecreatorReplaySession::origin_continuations`).
+pub const MAX_ORIGIN_CONTINUATIONS: usize = 4;
 
 #[derive(Debug)]
 pub struct ReplayWorker {
@@ -558,8 +789,10 @@ impl ReplayWorker {
                      raw detail: {detail}"
                 );
             }
+            warn!("replay worker pid {worker_pid} failed to start: {detail}");
             return Err(Box::new(ReplayWorkerStartError {
                 stop_reason,
+                worker_error: worker_stderr.as_deref().and_then(worker_exit_error),
                 detail,
                 worker_pid,
             }));
@@ -814,6 +1047,7 @@ impl ReplayWorker {
     pub fn dispatch_replay_query(&mut self, query: ReplayQuery) -> Result<String, Box<dyn Error>> {
         let raw_json = serde_json::to_string(&query)?;
 
+        let worker_pid = self.process.as_ref().map(Child::id);
         let Some(stream) = self.stream.as_mut() else {
             return Err(format!("the replay worker is not connected; cannot send: {raw_json}").into());
         };
@@ -832,10 +1066,44 @@ impl ReplayWorker {
             ));
         }
 
-        let mut res = "".to_string();
         debug!("wait to read");
 
-        let read_result = BufReader::new(stream).read_line(&mut res);
+        // For a query that moves the user's replay, the read timeout is a
+        // bound on a worker that stopped working, not on a slow one: when it
+        // passes while the worker's process tree (the worker, rr and the
+        // replayed program) is still using CPU, the wait goes on, up to
+        // `replay_query_ceiling`. Killing a healthy worker for being slow lost
+        // the user's position: on a loaded host an rr `RunToEntry` or reverse
+        // continue took more than 10 s, the worker was stopped, and the next
+        // query (a value-origin walk) found no worker. Every other query keeps
+        // the plain timeout (`waits_on_a_busy_worker`).
+        let waits_on_busy = waits_on_a_busy_worker(&self.name, &raw_json);
+        let mut progress = WorkerProgress::new(worker_pid);
+        let mut line = Vec::new();
+        let read_result = {
+            let mut reader = BufReader::new(stream);
+            loop {
+                match reader.read_until(b'\n', &mut line) {
+                    Err(e)
+                        if waits_on_busy
+                            && is_read_timeout(&e)
+                            && progress.still_working(Duration::from_millis(
+                                crate::wall_clock::monotonic_ms().saturating_sub(started_ms),
+                            )) =>
+                    {
+                        info!(
+                            "worker {}[{}] has not answered {} yet but is still working; waiting on",
+                            self.name,
+                            self.index,
+                            replay_query_kind(&raw_json)
+                        );
+                        continue;
+                    }
+                    other => break other,
+                }
+            }
+        };
+        let mut res = String::from_utf8_lossy(&line).into_owned();
         if let Err(e) = read_result {
             // Capture these before cleanup kills/reaps the worker: that time
             // is not part of the query wait, and its PID is lost on cleanup.
@@ -848,7 +1116,7 @@ impl ReplayWorker {
             // so it is closed and the worker stopped; the next query starts a
             // fresh one.
             self.abandon_connection();
-            let message = if e.kind() == std::io::ErrorKind::WouldBlock || e.kind() == std::io::ErrorKind::TimedOut {
+            let message = if is_read_timeout(&e) {
                 let message = format!(
                     "dispatch_replay_query timed out (configured timeout {query_timeout:?}; elapsed {elapsed:?}) \
                      waiting for worker {}[{}] pid {worker_pid:?} response to: {raw_json}",
@@ -1048,6 +1316,45 @@ fn call_search_name_filter(pattern: &str) -> Result<String, Box<dyn Error>> {
 }
 
 impl RecreatorReplaySession {
+    /// Keep `mark` as the point a cut-off value-origin chain continues from.
+    /// When that makes more than [`MAX_ORIGIN_CONTINUATIONS`], the oldest is
+    /// let go (`ReplayQuery::ForgetReplayPosition`): its chain can no longer
+    /// be continued, and says so when asked (`take_origin_continuation`).
+    pub fn hold_origin_continuation(&mut self, mark: serde_json::Value) {
+        self.origin_continuations.push_back(mark);
+        while self.origin_continuations.len() > MAX_ORIGIN_CONTINUATIONS {
+            if let Some(oldest) = self.origin_continuations.pop_front()
+                && let Err(e) = self
+                    .stable
+                    .dispatch_replay_query(ReplayQuery::ForgetReplayPosition { mark: oldest })
+            {
+                warn!("origin_chain: letting go of an old continuation point failed: {e}");
+            }
+        }
+    }
+
+    /// Take back a point [`Self::hold_origin_continuation`] holds, to
+    /// continue its chain from. `false` when it is not held: let go for a
+    /// newer one, continued already (an rr point is good for one return), or
+    /// handed out by a worker that has since been replaced.
+    pub fn take_origin_continuation(&mut self, mark: &serde_json::Value) -> bool {
+        match self.origin_continuations.iter().position(|held| held == mark) {
+            Some(index) => {
+                self.origin_continuations.remove(index);
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Forget every held continuation point without asking the worker: it
+    /// is gone, and its points with it.
+    fn drop_origin_continuations(&mut self) {
+        self.origin_continuations.clear();
+    }
+}
+
+impl RecreatorReplaySession {
     pub fn new(name: &str, index: usize, ct_rr_args: RecreatorArgs) -> RecreatorReplaySession {
         let mut stable = ReplayWorker::new_with_recording_id(
             name,
@@ -1073,6 +1380,7 @@ impl RecreatorReplaySession {
             materialization_cache: MaterializationCache::new(),
             materialization_cache_ctfs_path: default_materialization_cache_ctfs_path(&ct_rr_args.rr_trace_folder),
             respawn_after_worker_death: true,
+            origin_continuations: std::collections::VecDeque::new(),
         }
     }
 
@@ -1114,6 +1422,8 @@ impl RecreatorReplaySession {
                 return Err(Box::new(death.clone()));
             }
             eprintln!("[rr-dispatcher] starting worker for '{}'", self.name);
+            // The points a dead worker handed out went with it.
+            self.drop_origin_continuations();
             let res = self.stable.start();
             if let Err(e) = res {
                 eprintln!("[rr-dispatcher] worker start FAILED: {:?}", e);
@@ -1242,10 +1552,12 @@ impl ReplaySession for RecreatorReplaySession {
 
     fn run_to_entry(&mut self) -> Result<(), Box<dyn Error>> {
         self.ensure_active_stable()?;
+        // The worker removes the breakpoints its run to entry set for itself
+        // and keeps every other one. A `DeleteBreakpoints` here used to clear
+        // them, and with them the user's: a breakpoint set before "run to
+        // entry" was gone after it, and the next continue ran to the end of
+        // the recording (`test_rr_run_to_entry_twice_then_continue_to_a_breakpoint`).
         let _ok = self.stable.dispatch_replay_query(ReplayQuery::RunToEntry)?;
-        if let Err(err) = self.stable.dispatch_replay_query(ReplayQuery::DeleteBreakpoints) {
-            warn!("failed to clear internal run-to-entry breakpoints: {err}");
-        }
         Ok(())
     }
 
@@ -1808,6 +2120,110 @@ mod tests {
     use super::*;
     use codetracer_trace_types::{TypeKind, TypeRecord, TypeSpecificInfo};
 
+    /// A worker whose work runs in a process it traces but is not the parent
+    /// of (rr's reparented checkpoint fork, `worker_tree_cpu_ticks`) is seen
+    /// working. The "worker" here is a python tracer that, as rr does, keeps a
+    /// process whose parent has gone: an intermediate starts a busy loop in a
+    /// session of its own, the tracer seizes it, and the intermediate exits.
+    /// The tracer itself only waits, so all the CPU is the orphan's.
+    ///
+    /// CONTROL: without the traced processes the orphan is not part of the
+    /// worker, and the worker reads as idle (asserted below on the parentage
+    /// walk alone).
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_worker_is_working_while_a_process_it_traces_runs_elsewhere() {
+        const TRACER: &str = r#"
+import ctypes, os, sys
+libc = ctypes.CDLL(None, use_errno=True)
+r, w = os.pipe(); gr, gw = os.pipe()
+mid = os.fork()
+if mid == 0:
+    orphan = os.fork()
+    if orphan == 0:
+        os.setsid()
+        while True:
+            pass
+    os.write(w, f"{orphan}\n".encode()); os.read(gr, 1); os._exit(0)
+orphan = int(os.read(r, 64).decode())
+if libc.ptrace(0x4206, orphan, None, None) != 0:
+    sys.exit("PTRACE_SEIZE failed: errno %d" % ctypes.get_errno())
+print(orphan, flush=True)
+os.write(gw, b"x"); os.waitpid(mid, 0)
+while True:
+    try:
+        _, st = os.waitpid(orphan, 0x40000000)
+    except ChildProcessError:
+        break
+    if os.WIFEXITED(st) or os.WIFSIGNALED(st):
+        break
+    libc.ptrace(7, orphan, None, os.WSTOPSIG(st) if os.WIFSTOPPED(st) else 0)
+"#;
+        let Ok(mut tracer) = std::process::Command::new("python3")
+            .arg("-c")
+            .arg(TRACER)
+            .stdout(std::process::Stdio::piped())
+            .spawn()
+        else {
+            panic!("python3 is required (the codetracer dev shell has it)");
+        };
+        let mut first = String::new();
+        std::io::BufRead::read_line(&mut std::io::BufReader::new(tracer.stdout.take().unwrap()), &mut first).unwrap();
+        let orphan: u32 = first.trim().parse().unwrap_or_else(|_| panic!("tracer said {first:?}"));
+        let cleanup = |tracer: &mut std::process::Child| {
+            unsafe { libc::kill(orphan as i32, libc::SIGKILL) };
+            let _ = tracer.kill();
+            let _ = tracer.wait();
+        };
+
+        let tree = worker_tree_cpu_ticks(tracer.id()).unwrap();
+        let mut progress = WorkerProgress::new(Some(tracer.id()));
+        std::thread::sleep(Duration::from_millis(500));
+        let working = progress.still_working(Duration::from_secs(11));
+
+        // The control: the parentage walk alone (no tracer map) does not
+        // reach the orphan, so its CPU is not the worker's.
+        let only_children: Vec<u32> = std::fs::read_dir(format!("/proc/{}/task", tracer.id()))
+            .unwrap()
+            .flatten()
+            .filter_map(|task| std::fs::read_to_string(task.path().join("children")).ok())
+            .flat_map(|children| {
+                children
+                    .split_whitespace()
+                    .filter_map(|c| c.parse::<u32>().ok())
+                    .collect::<Vec<_>>()
+            })
+            .collect();
+        cleanup(&mut tracer);
+
+        assert!(
+            !only_children.contains(&orphan),
+            "the busy process must not be a child of the worker, or this tests nothing"
+        );
+        assert!(
+            tree.contains_key(&orphan),
+            "the traced orphan {orphan} is part of the worker: {tree:?}"
+        );
+        assert!(working, "a worker whose traced process burns CPU is working");
+    }
+
+    /// A process of the worker that ends between two looks (rr discarding an
+    /// old session) does not hide the work the others did, and a worker
+    /// whose processes all stood still is idle.
+    #[test]
+    fn a_process_that_ends_does_not_hide_progress() {
+        let before: std::collections::HashMap<u32, u64> = [(1, 100), (2, 5000)].into_iter().collect();
+        let moved: std::collections::HashMap<u32, u64> = [(1, 101)].into_iter().collect();
+        assert!(
+            used_cpu_since(&before, &moved),
+            "pid 1 used CPU although the total fell from 5100 to 101"
+        );
+        let still: std::collections::HashMap<u32, u64> = [(1, 100)].into_iter().collect();
+        assert!(!used_cpu_since(&before, &still), "nothing moved");
+        let new_process: std::collections::HashMap<u32, u64> = [(1, 100), (3, 0)].into_iter().collect();
+        assert!(used_cpu_since(&before, &new_process), "a new process is work");
+    }
+
     #[test]
     fn call_search_filter_never_excludes_a_rust_regex_match() {
         let names = [
@@ -2200,6 +2616,7 @@ mod tests {
             materialization_cache: MaterializationCache::new(),
             materialization_cache_ctfs_path: None,
             respawn_after_worker_death: true,
+            origin_continuations: std::collections::VecDeque::new(),
         };
 
         let materialized = session.re_execute_and_materialize(10, 20).unwrap();
@@ -2277,6 +2694,7 @@ mod tests {
             materialization_cache: MaterializationCache::new(),
             materialization_cache_ctfs_path: None,
             respawn_after_worker_death: true,
+            origin_continuations: std::collections::VecDeque::new(),
         };
 
         assert_eq!(
@@ -2382,6 +2800,27 @@ mod tests {
             "the exit must carry the status: {}",
             death.exit
         );
+    }
+
+    /// The worker's own error is what a start failure shows the user, read
+    /// back from the `Error: "…"` line a failing Rust `main` writes, among
+    /// the worker's log lines.
+    #[test]
+    fn a_start_failure_shows_the_workers_own_error() {
+        let stderr = "src/rr_engine.rs:253 2026-11-12T06:22:45.597 [INFO] - start rr replay\n\
+                      Error: \"rr could not replay this recording: rr: Trace file `/t/version' not found.\"\n\
+                      src/main_non_windows.inc.rs:695 2026-11-12T06:22:45.655 [ERROR] - replay error\n";
+        let error = ReplayWorkerStartError {
+            stop_reason: None,
+            worker_error: worker_exit_error(stderr),
+            detail: format!("worker exited; worker stderr: {stderr}"),
+            worker_pid: 42,
+        };
+        assert_eq!(
+            error.to_string(),
+            "The replay could not start: rr could not replay this recording: rr: Trace file `/t/version' not found."
+        );
+        assert_eq!(worker_exit_error("no error line here\n"), None);
     }
 
     /// A session built `without_respawn_after_worker_death` answers every

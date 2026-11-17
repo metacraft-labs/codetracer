@@ -31,6 +31,8 @@ import
   ui_imports, trace,
   # The toolbar's history, for the mouse's back and forward buttons.
   ./debug_toolbar,
+  ../viewmodel/input/dom_pointer,
+  ../viewmodel/viewmodels/history_cursor,
   ./shortcut_labels,
   ./shortcut_presets,
   ./shortcut_dialog,
@@ -113,16 +115,29 @@ proc openShortcutsDialog*() =
 var pointerInstalled = false
 
 proc configureShortcuts* =
-  ## The keyboard (`installKeyRouter`) and the two pointer gestures this
-  ## module still owns. Idempotent: the renderer's start-up paths (init, no
-  ## trace, the welcome screen) all call it, and each used to add another
-  ## `mousedown` listener.
+  ## The keyboard (`installKeyRouter`), the procedures for the mouse's side
+  ## buttons, and the command palette's press. Idempotent: the renderer's
+  ## start-up paths (init, no trace, the welcome screen) all call it, and each
+  ## used to add another `mousedown` listener.
+  ##
+  ## The side buttons are pointer rows (`BackClick` / `ForwardClick` →
+  ## `navigation.back` / `navigation.forward`, `pointer_rows`), resolved by
+  ## the window's one pointer listener (`dom_pointer`); what is here is the
+  ## procedure each runs — the toolbar's history, as its buttons move it.
   installKeyRouter()
   if pointerInstalled:
     return
   pointerInstalled = true
-  kdom.document.addEventListener("mousedown", proc(e: Event) =
-    # Command palette active state control
+  registerElementOperation("navigation.back", proc(p: ElementPress): bool =
+    moveInDebugHistory(hdOlder)
+    true)
+  registerElementOperation("navigation.forward", proc(p: ElementPress): bool =
+    moveInDebugHistory(hdNewer)
+    true)
+  # The command palette: a press inside it keeps it open and its input
+  # focused (`search` refocuses the input and selects the first result); a
+  # press outside closes it.
+  kdom.document.addEventListener("mousedown", proc(e: Event) =  # ir1-gate: outside press
     let element = getElementById("command-view")
     if element != nil:
       let rect = element.getBoundingClientRect()
@@ -137,8 +152,4 @@ proc configureShortcuts* =
         data.ui.commandPalette.inAgentMode = false
         if not data.ui.commandPalette.agent.isNil and not data.ui.commandPalette.agent.shell.isNil:
           data.ui.commandPalette.agent.shell.initialized = false
-
-    let mouseButton = cast[int](e.toJs.button)
-    if mouseButton == MouseButtonBack or mouseButton == MouseButtonForward:
-      moveInDebugHistory(historyDirectionOfMouseButton(mouseButton))
   )

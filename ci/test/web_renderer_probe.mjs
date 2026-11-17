@@ -299,9 +299,7 @@ try {
         document.querySelectorAll('.gutter-runtest')).map((e) => {
           const r = e.getBoundingClientRect();
           const row = e.closest('.gutter');
-          const marker = row
-            ? row.querySelector('[class*="gutter-breakpoint"], [class*="gutter-no-breakpoint"]')
-            : null;
+          const marker = document.querySelector('.monaco-editor .glyph-margin');
           const m = marker ? marker.getBoundingClientRect() : null;
           return {
             line: e.getAttribute('data-runtest-line'),
@@ -335,8 +333,6 @@ try {
           pointer: '[class*="gutter-highlight"], [class*="gutter-no-highlight"]',
           lineNumber: '.gutter-line',
           vcs: '.diff-line',
-          breakpoint: '[class*="gutter-no-breakpoint"], [class*="gutter-breakpoint-"]',
-          tracepoint: '[class*="gutter-no-trace"], [class*="gutter-trace"], [class*="gutter-disabled-trace"]',
         };
         const bands = {};
         for (const [name, s] of Object.entries(sel)) {
@@ -378,7 +374,13 @@ try {
           const r = c.getBoundingClientRect();
           return { left: Math.round(r.left), right: Math.round(r.right) };
         })();
+        // The breakpoint and tracepoint marks are Monaco's glyph margin, left of
+        // the numbers (Editor-Pane.md MC.5).
+        const g = document.querySelector('.monaco-editor .glyph-margin');
+        const gr = g ? g.getBoundingClientRect() : null;
         return {
+          glyph: gr ? { left: Math.round(gr.left), right: Math.round(gr.right),
+                        width: Math.round(gr.width) } : null,
           line: gut.getAttribute('data-line'),
           gutter: (r => ({ left: Math.round(r.left), right: Math.round(r.right), width: Math.round(r.width) }))(gut.getBoundingClientRect()),
           chevron: chev,

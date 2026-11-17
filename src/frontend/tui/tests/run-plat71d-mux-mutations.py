@@ -31,7 +31,7 @@ IN_BINARY = {CAPS, PROBE}
 
 TMUXID = "*::§3.3, §4.5: through tmux the outer terminal is tmux's client"
 TA12 = "*::TA-12: the cache gives frame 0, and a live answer always beats it"
-P_TA14 = "*::TA-14: under a real tmux, one display spawn and no passthrough"
+P_TA14 = "*::TA-14: under a real tmux, one display spawn and no passthrough query but OSC 22's"
 P_TA11 = "*::TA-11: the tmux spawn runs beside the round, not before it"
 P_SLOW = "*::a slow link is measured and makes the session link-conservative"
 P_LATE = "*::late answers over a slow link are applied and make it conservative"

@@ -17,6 +17,55 @@ ah-rem(px)
 
 AH_ROW_DOT = 0.5rem
 
+// ---------------------------------------------------------------------------
+// Cut text (CTF-P1c D6)
+// ---------------------------------------------------------------------------
+// A one-line text the views mark `data-ah-cut` is cut in code
+// (`views/ah_cut_text.nim`): CSS's `text-overflow: ellipsis` cannot drop the
+// space or separator a cut leaves before its "…", so those rules carry none.
+// While the text is cut, the element keeps its whole text in the DOM, drawn
+// transparent, so its size is that of the whole text as under CSS's ellipsis,
+// and the cut text (`data-ah-shown`) is drawn over it from where the text
+// starts (`--ah-cut-indent`), in the element's own colour. A `::before` of
+// the element keeps its ink. A reader and the accessibility tree get the
+// whole text, once; a selection copies the whole text.
+//
+// Two rules below keep CSS's ellipsis: `.ah-milestone-meta`, a line of spans
+// in two colours (the failing count in the error role) that one drawn string
+// cannot colour, and which the progress panel gives its whole width, so it
+// is shown whole; and `.ah-playback-readout`, a flex container, whose
+// `text-overflow` applies to no text (its moment and time are flex items;
+// the moment is cut here).
+[data-ah-shown]
+  position: relative
+  -webkit-text-fill-color: transparent
+
+  &::before
+    -webkit-text-fill-color: currentColor
+
+  &::after
+    // Empty alternative text (CSS Generated Content 3, `content: <content> /
+    // <alt>`, https://www.w3.org/TR/css-content-3/#alt): the accessibility
+    // tree reads the element's whole text once, not the drawn cut beside it.
+    content: unquote('attr(data-ah-shown) / ""')
+    position: absolute
+    top: 0
+    right: 0
+    bottom: 0
+    left: 0
+    padding: inherit
+    text-indent: var(--ah-cut-indent, 0)
+    white-space: nowrap
+    overflow: hidden
+    pointer-events: none
+    -webkit-text-fill-color: currentColor
+
+// The session tab strip's label shares `.session-tab-label` with the
+// desktop's strip (session_tabs.styl), which keeps CSS's ellipsis; the
+// Agent Harbor views' label is cut in code.
+.session-tab-label[data-ah-cut]
+  text-overflow: clip
+
 .agent-harbor-fleet
   height: 100%
   display: flex
@@ -74,7 +123,6 @@ AH_ROW_DOT = 0.5rem
   color: colors-ui-text-primary-caption
   white-space: nowrap
   overflow: hidden
-  text-overflow: ellipsis
 
 // The VCS diff-toggle row (`.vcs-diff-toggle`): small toggles on the panel
 // surface, the active one raised.
@@ -102,7 +150,6 @@ AH_ROW_DOT = 0.5rem
   padding: 0 0.5rem
   border: 0.0625rem solid transparent
   border-radius: ah-rem(border-border-radius-control)
-  cursor: pointer
   font-family: inherit
   font-size: ah-rem(type-ui-size-label-md)
   color: colors-ui-text-primary-label
@@ -122,7 +169,10 @@ AH_ROW_DOT = 0.5rem
     background: colors-ui-surface-primary-secondary-hover
     color: colors-ui-text-primary-body
 
-  &.ah-fleet-filter-empty .ah-fleet-filter-count
+  // A 0 is quieter than a count, except on the active filter, whose count
+  // keeps the body role on its fill (the disabled role falls to about
+  // 2.2:1 there).
+  &.ah-fleet-filter-empty:not(.ah-fleet-filter-active) .ah-fleet-filter-count
     color: colors-ui-text-primary-disabled
 
 .ah-fleet-filter-count
@@ -164,7 +214,6 @@ AH_ROW_DOT = 0.5rem
   // The hairline the VCS panel draws between its sections; the divider
   // roles' Dark values sit too close to the panel surface to be seen.
   border-bottom: 0.0625rem solid colors-ui-border-secondary
-  cursor: pointer
   user-select: none
 
   &:hover
@@ -227,8 +276,10 @@ AH_ROW_DOT = 0.5rem
 .ah-fleet-cat-failed .ah-fleet-dot
   background: colors-ui-icon-error-primary
 
+// Ended: grey, but in Light a grey that keeps 3:1 on every surface a mark
+// sits on (icon-subtle fell to 1.42:1 on the active tab).
 .ah-fleet-cat-ended .ah-fleet-dot
-  background: colors-ui-icon-primary-subtle
+  background: by-mode(colors-ui-icon-primary-subtle, colors-ui-icon-primary-default-hover)
 
 .ah-fleet-row-main
   display: flex
@@ -243,7 +294,6 @@ AH_ROW_DOT = 0.5rem
   color: colors-ui-text-primary-body
   white-space: nowrap
   overflow: hidden
-  text-overflow: ellipsis
 
 .ah-fleet-row-meta
   display: flex
@@ -272,7 +322,6 @@ AH_ROW_DOT = 0.5rem
   min-width: 0
   white-space: nowrap
   overflow: hidden
-  text-overflow: ellipsis
 
 // Said once, in the header: the server withholds the prompts, so the rows
 // are titled by what else names them. Plain, not italic.
@@ -290,7 +339,6 @@ AH_ROW_DOT = 0.5rem
   color: colors-ui-text-primary-caption
   white-space: nowrap
   overflow: hidden
-  text-overflow: ellipsis
 
 .ah-fleet-row-failure
   font-size: ah-rem(type-ui-size-caption-md)
@@ -298,7 +346,6 @@ AH_ROW_DOT = 0.5rem
   color: colors-ui-text-error-primary
   white-space: nowrap
   overflow: hidden
-  text-overflow: ellipsis
 
 .ah-fleet-row-activity
   display: flex
@@ -324,7 +371,6 @@ AH_ROW_DOT = 0.5rem
   color: colors-ui-text-primary-caption
   white-space: nowrap
   overflow: hidden
-  text-overflow: ellipsis
 
 // "+N" / "less": unfolds a row's other activity lines. A text control in
 // the label role, like the VCS panel's small toggles at rest.
@@ -340,7 +386,6 @@ AH_ROW_DOT = 0.5rem
   font-size: ah-rem(type-ui-size-caption-md)
   line-height: ah-rem(type-ui-lineheight-caption-md)
   color: colors-ui-text-primary-label
-  cursor: pointer
 
   &:hover
     background: colors-ui-surface-primary-secondary-hover
@@ -359,7 +404,6 @@ AH_ROW_DOT = 0.5rem
   color: colors-ui-text-primary-label
   white-space: nowrap
   overflow: hidden
-  text-overflow: ellipsis
 
 .ah-fleet-meta-short
   display: none
@@ -436,9 +480,6 @@ AH_ROW_DOT = 0.5rem
   .ah-fleet-meta-short
     display: inline
 
-.ah-fleet-activity-error
-  color: colors-ui-text-error-primary
-
 // The commit-row timestamp column (`.vcs-commit-time-col`).
 // On the title's first line: the same line box as the title.
 .ah-fleet-row-age
@@ -487,7 +528,6 @@ AH_ROW_DOT = 0.5rem
   font-size: ah-rem(type-ui-size-label-md)
   color: colors-ui-text-primary-label
   background: colors-ui-surface-primary-secondary
-  cursor: pointer
 
   &:hover
     background: colors-ui-surface-primary-secondary-hover
@@ -514,7 +554,9 @@ AH_MARK = 0.5rem
   width: AH_MARK
   height: AH_MARK
   border-radius: 50%
-  background: colors-ui-icon-primary-subtle
+  // An ended session's mark (no other rule applies to it): grey, in Light
+  // a grey that keeps 3:1 on the active tab (#b5ae9f) and every panel.
+  background: by-mode(colors-ui-icon-primary-subtle, colors-ui-icon-primary-default-hover)
 
 .ah-att-needs-input .ah-tab-mark
   background: colors-ui-icon-warning-primary
@@ -535,6 +577,17 @@ AH_MARK = 0.5rem
 // The wrapper the view returns stays out of the caption bar's flex row.
 .ah-tab-strip-host
   display: contents
+
+// Stories only (`Initiative Tabs: Popup Over A Panel` and the menus' `Over A
+// Panel` stories): the panel that lies under the caption bar in the shell.
+// `#menu` is fixed at the window's top and paints its own ground, so the
+// panel fills the window behind it and
+// shows below it, where the bar's popup and menus drop.
+.ah-story-panel-under
+  position: fixed
+  inset: 0
+  z-index: 0
+  background: colors-ui-surface-base-panel
 
 // A tab holds a mark and an origin besides its title, so it may grow past
 // the plain strip's 10em before its title is cut.
@@ -618,7 +671,6 @@ AH_MARK = 0.5rem
   flex: 1 1 auto
   min-width: 0
   overflow: hidden
-  text-overflow: ellipsis
 
 // Several lines: the strip wraps and the caption bar grows with it.
 .ah-tab-strip.ah-tab-strip-wrap
@@ -666,7 +718,6 @@ AH_MARK = 0.5rem
 .ah-tab-strip .session-tab.ah-tab-notice
   flex: 0 1 auto
   max-width: none
-  cursor: default
   opacity: 1
   gap: 0.5rem
   background-color: colors-ui-surface-primary-secondary-hover
@@ -691,7 +742,6 @@ AH_MARK = 0.5rem
   font-family: inherit
   font-size: ah-rem(type-ui-size-caption-md)
   color: colors-ui-text-primary-label
-  cursor: pointer
 
   &:hover
     background: colors-ui-surface-primary-secondary-hover
@@ -760,7 +810,6 @@ AH_MARK = 0.5rem
   font-size: ah-rem(type-ui-size-body-md)
   line-height: 1
   color: colors-ui-text-primary-label
-  cursor: pointer
 
   &:hover
     background: colors-ui-surface-primary-secondary-hover
@@ -783,19 +832,23 @@ AH_MARK = 0.5rem
   user-select: none
   min-width: 0
 
-// The title keeps at least half the line; the counts give way first.
+// The title keeps at least half the line; the counts give way first (they
+// shrink a hundred times faster), down to their floor, the first count's
+// number and its "…" (`1…`, `data-ah-floor`, kept by `ah_cut_text`; CTF-P1c
+// D7). On a line too short for half of it beside the rest at that floor
+// (`--ah-floor-rest`, set by `ah_cut_text`), the title gives way instead.
 .ah-session-group-title
   flex: 1 1 auto
-  min-width: 50%
+  min-width: unquote("min(50%, calc(100% - var(--ah-floor-rest, 0px)))")
   font-size: ah-rem(type-ui-size-label-md)
   font-weight: 600
   color: colors-ui-text-primary-label
   white-space: nowrap
   overflow: hidden
-  text-overflow: ellipsis
 
 // One line: the counts are cut before the title is (they shrink a hundred
-// times faster).
+// times faster), never below their floor (`data-ah-floor`, whose width
+// `ah_cut_text` gives them as their `min-width`).
 .ah-session-group-counts
   flex: 0 100 auto
   max-width: 40%
@@ -804,7 +857,6 @@ AH_MARK = 0.5rem
   color: colors-ui-text-primary-caption
   white-space: nowrap
   overflow: hidden
-  text-overflow: ellipsis
 
 .ah-session-group-focus .ah-session-group-title
   color: colors-ui-text-primary-body
@@ -816,7 +868,6 @@ AH_MARK = 0.5rem
   column-gap: 0.5rem
   align-items: start
   padding: 0.3125rem PANEL_INSET
-  cursor: pointer
   user-select: none
 
   .ah-tab-mark
@@ -860,7 +911,6 @@ AH_MARK = 0.5rem
   color: colors-ui-text-primary-body
   white-space: nowrap
   overflow: hidden
-  text-overflow: ellipsis
 
 .ah-session-row-meta
   display: flex
@@ -883,9 +933,10 @@ AH_MARK = 0.5rem
 .ah-att-failed .ah-session-row-status
   color: colors-ui-text-error-primary
 
-// An ended session's status word is as quiet as its grey mark.
+// An ended session's status word is as quiet as its grey mark; in Light
+// the label role, since the caption fell to 2.59:1 on the raised row.
 .ah-att-ended .ah-session-row-status
-  color: colors-ui-text-primary-caption
+  color: by-mode(colors-ui-text-primary-caption, colors-ui-text-primary-label)
 
 .ah-session-list-source
   flex-shrink: 0
@@ -895,14 +946,12 @@ AH_MARK = 0.5rem
   color: colors-ui-text-primary-caption
   white-space: nowrap
   overflow: hidden
-  text-overflow: ellipsis
 
 .ah-session-row-meta-text,
 .ah-session-row-detail
   min-width: 0
   white-space: nowrap
   overflow: hidden
-  text-overflow: ellipsis
 
 .ah-session-row-detail
   font-size: ah-rem(type-ui-size-caption-md)
@@ -1009,7 +1058,6 @@ AH_MARK = 0.5rem
   flex-direction: column
   gap: 0.375rem
   padding: 0.625rem PANEL_INSET
-  cursor: pointer
   user-select: none
 
   // Dark's card surface is darker than the panel and reads as a hole; the
@@ -1066,7 +1114,6 @@ AH_MARK = 0.5rem
   color: colors-ui-text-primary-body
   white-space: nowrap
   overflow: hidden
-  text-overflow: ellipsis
 
 .ah-initiative-progress-text
   flex-shrink: 0
@@ -1110,7 +1157,6 @@ AH_MARK = 0.5rem
   color: colors-ui-text-primary-body
   white-space: nowrap
   overflow: hidden
-  text-overflow: ellipsis
 
 .ah-initiative-meta-text
   flex: 1 1 auto
@@ -1118,7 +1164,6 @@ AH_MARK = 0.5rem
   color: colors-ui-text-primary-caption
   white-space: nowrap
   overflow: hidden
-  text-overflow: ellipsis
 
 // Wraps under the meta text when the row is narrow, cut if it still does
 // not fit.
@@ -1153,7 +1198,6 @@ AH_MARK = 0.5rem
   color: colors-ui-text-primary-body
   white-space: nowrap
   overflow: hidden
-  text-overflow: ellipsis
 
 .ah-initiative-session-status
   font-size: ah-rem(type-ui-size-caption-md)
@@ -1276,7 +1320,6 @@ AH_MARK = 0.5rem
   color: colors-ui-text-primary-body
   white-space: nowrap
   overflow: hidden
-  text-overflow: ellipsis
 
 .ah-milestone-current-tag
   flex-shrink: 0
@@ -1370,7 +1413,7 @@ AH_MARK = 0.5rem
 .ah-ist-ended > .ah-tab-mark,
 .ah-ist-ended > .ah-popup-head > .ah-tab-mark,
 .ah-ist-ended > .ah-initiative-info > .ah-initiative-head > .ah-tab-mark
-  background: colors-ui-icon-primary-subtle
+  background: by-mode(colors-ui-icon-primary-subtle, colors-ui-icon-primary-default-hover)
 
 // `n/m` milestones: tabular figures, quieter than the name.
 .ah-tab-progress
@@ -1415,7 +1458,6 @@ AH_MARK = 0.5rem
   line-height: 1
   font-variant-numeric: tabular-nums
   color: colors-ui-text-primary-label
-  cursor: pointer
 
   &:hover
     background: colors-ui-surface-primary-secondary-hover
@@ -1477,7 +1519,6 @@ AH_MARK = 0.5rem
   font-size: ah-rem(type-ui-size-label-md)
   line-height: 1
   color: colors-ui-text-primary-label
-  cursor: pointer
 
   &:hover
     background: colors-ui-surface-primary-tertiary-hover
@@ -1502,7 +1543,6 @@ AH_MARK = 0.5rem
 
 .ah-inbox-empty .ah-inbox-step
   color: colors-ui-text-primary-disabled
-  cursor: default
 
 .ah-inbox-auto.ah-inbox-hidden
   display: none
@@ -1525,7 +1565,6 @@ AH_MARK = 0.5rem
   font-size: ah-rem(type-ui-size-label-md)
   color: colors-ui-text-primary-label
   white-space: nowrap
-  cursor: pointer
   -webkit-app-region: no-drag
 
   &:hover
@@ -1546,6 +1585,12 @@ AH_MARK = 0.5rem
 .ah-initiative-tab-bar.ah-elsewhere-open-bar .ah-elsewhere-menu,
 .ah-initiative-tab-bar.overflow-open .ah-overflow-menu
   display: flex
+
+// A strip's `+N` menu, the session strip's and the initiative bar's, keeps
+// `session-tab-overflow-menu`'s height under the caption bar, but not its
+// `right: 0.25em`: it hangs from its chip, its right edge on the chip's, kept
+// inside the window. Where the chip ends depends on the tabs before it, so
+// the view places it (`hangOverflowMenu`).
 
 // The bar clips what overflows it (`.session-tab-bar`); an open menu hangs
 // below it, whichever menu it is.
@@ -1571,7 +1616,6 @@ AH_MARK = 0.5rem
   dropdown-surface()
   color: colors-ui-text-primary-body
   white-space: normal
-  cursor: default
 
 .ah-popup-head
   display: flex
@@ -1585,7 +1629,6 @@ AH_MARK = 0.5rem
   font-size: ah-rem(type-ui-size-body-md)
   font-weight: 600
   overflow: hidden
-  text-overflow: ellipsis
   white-space: nowrap
 
 .ah-popup-state
@@ -1616,7 +1659,6 @@ AH_MARK = 0.5rem
 
 // The initiatives tree in the session list: a fold control per node.
 .ah-session-group-header
-  cursor: pointer
 
   .ah-tab-mark
     align-self: center
@@ -1675,6 +1717,28 @@ AH_MARK = 0.5rem
     border-radius: 50%
     background: colors-ui-icon-warning-primary
 
+// A `+N` chip takes the most severe status of what it hides: a failure
+// gives it the error colour and a failure mark (the session strip's, the
+// initiative bar's and the recording switcher's chips alike).
+.ah-tab-strip .ah-tab-overflow-count.ah-att-failed,
+.ah-rec-more.ah-att-failed,
+.ah-rec-more.ah-att-needs-input
+  gap: 0.25rem
+
+  &::before
+    content: ""
+    width: AH_MARK
+    height: AH_MARK
+    border-radius: 50%
+    background: colors-ui-icon-error-primary
+
+.ah-tab-strip .ah-tab-overflow-count.ah-att-failed,
+.ah-rec-more.ah-att-failed
+  color: colors-ui-text-error-primary !important
+
+.ah-rec-more.ah-att-needs-input::before
+  background: colors-ui-icon-warning-primary
+
 // Notices are outlined, not filled: a filled one read as the active tab.
 .ah-tab-strip .session-tab.ah-tab-notice
   background-color: transparent
@@ -1722,9 +1786,10 @@ AH_MARK = 0.5rem
   .ah-fleet-no-initiative .ah-fleet-head
     max-width: 62rem
 
-// An empty cell says so quietly instead of reading as a gap.
-.ah-fleet-col:empty::before
-  content: "\2014"
+// An empty cell says so quietly instead of reading as a gap: the view draws
+// the shared placeholder (`agent_harbor_words.AgentHarborFleetEmptyCellText`,
+// an em dash) in the disabled role.
+.ah-fleet-col-empty
   color: colors-ui-text-primary-disabled
 
 // The +N chip on a selected row takes the selection's text, no fill.
@@ -1767,7 +1832,6 @@ AH_MARK = 0.5rem
   width: 0.75rem
   font-size: ah-rem(type-ui-size-caption-md)
   color: colors-ui-text-primary-label
-  cursor: pointer
 
 .ah-initiative-row-folded .ah-initiative-sessions
   display: none
@@ -1789,7 +1853,6 @@ AH_MARK = 0.5rem
   font-family: inherit
   font-size: ah-rem(type-ui-size-caption-md)
   color: colors-ui-text-primary-label
-  cursor: pointer
 
   &:hover
     background: colors-ui-surface-primary-tertiary-hover
@@ -1911,9 +1974,6 @@ AH_MARK = 0.5rem
 .ah-inbox-position
   color: colors-ui-text-primary-label
 
-.ah-inbox-empty .ah-inbox-step
-  opacity: 0.5
-
 // The chip and its menu: the menu drops from the chip.
 .ah-elsewhere-anchor
   position: relative
@@ -2018,6 +2078,15 @@ AH_MARK = 0.5rem
 .ah-fleet-activity-line,
 .ah-session-row-detail
   color: by-mode(colors-ui-text-primary-caption, colors-ui-text-primary-label)
+
+// An error-level activity line is red only on a row with no failure line
+// (the view sets the class from `agent_harbor_words.activityLineIsError`):
+// a failure line already says the fault in red, and two red lines read as
+// one fault twice. After the rule above, which it must override; a selected
+// row's own text colour (`.ah-fleet-row-selected ...`, more specific) still
+// wins over it.
+.ah-fleet-activity-error
+  color: colors-ui-text-error-primary
 
 // The overflow chip keeps the right-hand group's
 // spacing from the sessions chip.
@@ -2218,10 +2287,6 @@ AH_MARK = 0.5rem
 .ah-ms-seg.ah-ms-planned
   background: by-mode(colors-ui-icon-primary-subtle, colors-ui-border-primary)
 
-
-  .session-tab.ah-initiative-tab .session-tab-label
-    min-width: 4.5rem
-
 // The selected initiative in Dark: an action-colour tint over the panel,
 // distinct from every band, light enough that the status colours on it keep
 // their contrast; the focus bar a little wider.
@@ -2331,6 +2396,19 @@ AH_MARK = 0.5rem
     background-color: colors-ui-surface-primary-secondary-hover !important
     color: colors-ui-text-primary-body
 
+// Previous / Next with nothing waiting have nowhere to go (the steps wrap, so
+// an empty inbox is the only state in which they are disabled): drawn in the
+// disabled role at full opacity, as CodeTracer's own disabled buttons are
+// (`button:disabled`, button.styl), and they do not light up under the
+// pointer. One class more than the ghost rule above, which would otherwise
+// paint them in the label role, as it did while this read `opacity: 0.5`.
+.ah-initiative-tab-bar .ah-inbox-empty .ah-inbox-step
+  color: colors-ui-text-primary-disabled
+
+  &:hover
+    background-color: transparent !important
+    color: colors-ui-text-primary-disabled
+
 .ah-tab-strip.overflow-open .ah-tab-overflow-count,
 .ah-elsewhere.ah-elsewhere-open
   background-color: colors-ui-surface-primary-tertiary !important
@@ -2405,7 +2483,6 @@ AH_MARK = 0.5rem
   max-width: 12rem
   min-width: 0
   overflow: hidden
-  text-overflow: ellipsis
   white-space: nowrap
   font-size: ah-rem(type-ui-size-caption-md)
   color: colors-ui-text-primary-label
@@ -2516,3 +2593,77 @@ AH_MARK = 0.5rem
 .ah-tab-strip .session-tab-overflow-menu
   max-width: calc(100vw - 0.75rem)
   box-sizing: border-box
+
+// ---------------------------------------------------------------------------
+// The story hosts' playback bar (isonim_agent_harbor_playback_view.nim): the
+// StoryBook host's chrome under a playback story, fixed along the bottom of
+// the canvas; the story's frame ends above it (`.ct-storybook-playback`,
+// storybook/stories/lib/surfaces.js). 1.75rem high, as the GPUI story host's
+// bar (`gpui/agent_harbor/ah_playback_bar.nim`).
+// ---------------------------------------------------------------------------
+
+.ah-playback
+  position: fixed
+  left: 0
+  right: 0
+  bottom: 0
+  height: 1.75rem
+  box-sizing: border-box
+  display: flex
+  align-items: center
+  gap: 0.25rem
+  padding: 0 0.5rem
+  overflow: hidden
+  white-space: nowrap
+  background: colors-ui-surface-primary-default
+  border-top: 0.0625rem solid colors-ui-border-primary
+  color: colors-ui-text-primary-body
+  font-size: ah-rem(type-ui-size-caption-md)
+  z-index: 10
+
+.ah-playback-button
+  flex: 0 0 auto
+  height: 1.25rem
+  padding: 0 0.5rem
+  border: 0.0625rem solid colors-ui-border-primary
+  border-radius: ah-rem(border-border-radius-control)
+  background: colors-ui-surface-primary-secondary
+  font-family: inherit
+  font-size: inherit
+  color: colors-ui-text-primary-label
+
+.ah-playback-readout
+  flex: 1 1 auto
+  min-width: 0
+  display: flex
+  gap: 0.5rem
+  padding-left: 0.5rem
+  overflow: hidden
+  text-overflow: ellipsis
+
+.ah-playback-moment
+  min-width: 0
+  overflow: hidden
+
+.ah-playback-time
+  flex-shrink: 0
+  color: colors-ui-text-primary-caption
+  font-variant-numeric: tabular-nums
+
+// A button shows its word; on a bar under PlaybackCompactBelowPx (720px,
+// 45rem: `stories/agent_harbor_playback.nim`) its glyph alone, so the readout
+// keeps room for the moment at the sidebar's 360px. The bar spans the
+// viewport, so the viewport's width is the bar's; the query stops just short
+// of 45rem (719.98px) because the rule is "narrower than".
+.ah-playback-glyph
+  display: none
+
+@media (max-width: 44.99875rem)
+  .ah-playback-button
+    padding: 0 0.375rem
+
+  .ah-playback-word
+    display: none
+
+  .ah-playback-glyph
+    display: inline

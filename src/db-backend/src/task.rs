@@ -2161,6 +2161,32 @@ pub const DEFAULT_ORIGIN_MAX_STEPS_SCANNED: u64 = 100_000;
 /// Conservative wall-clock cap. The classifier itself is microsecond-cheap
 /// so the budget normally trips first via `max_steps_scanned`.
 pub const DEFAULT_ORIGIN_WALL_CLOCK_MS: u32 = 5_000;
+/// The variable a UI test sets to change [`DEFAULT_ORIGIN_WALL_CLOCK_MS`]
+/// for one replay server, read only with `CODETRACER_IN_UI_TEST=1` (see
+/// [`origin_wall_clock_ms`]).
+pub const ORIGIN_WALL_CLOCK_UI_TEST_ENV: &str = "CT_ORIGIN_WALL_CLOCK_MS";
+/// The largest time limit a UI test may give a value-origin request.
+pub const ORIGIN_WALL_CLOCK_UI_TEST_MAX_MS: u32 = 120_000;
+
+/// The time limit of one value-origin request (spec §6.1.7 `wall_clock_ms`).
+///
+/// [`DEFAULT_ORIGIN_WALL_CLOCK_MS`], except under a UI test
+/// (`CODETRACER_IN_UI_TEST=1`), which may set [`ORIGIN_WALL_CLOCK_UI_TEST_ENV`]
+/// to anything from 1 ms to [`ORIGIN_WALL_CLOCK_UI_TEST_MAX_MS`]: higher, so
+/// a scenario on a loaded host walks its whole chain in one request, or as
+/// low as 1 ms, so a test sees a chain cut off after each hop and continued
+/// (spec §5.3.1). The per-hop cap has its own variable
+/// (`recreator_origin::rr_per_hop_wall_clock_ms`).
+pub fn origin_wall_clock_ms() -> u32 {
+    if std::env::var("CODETRACER_IN_UI_TEST").ok().as_deref() != Some("1") {
+        return DEFAULT_ORIGIN_WALL_CLOCK_MS;
+    }
+    std::env::var(ORIGIN_WALL_CLOCK_UI_TEST_ENV)
+        .ok()
+        .and_then(|raw| raw.trim().parse::<u32>().ok())
+        .map(|ms| ms.clamp(1, ORIGIN_WALL_CLOCK_UI_TEST_MAX_MS))
+        .unwrap_or(DEFAULT_ORIGIN_WALL_CLOCK_MS)
+}
 /// Snapshot cap for Computational hops (spec §6.1 `snapshot_operands`).
 pub const ORIGIN_OPERAND_SNAPSHOT_CAP: usize = 16;
 

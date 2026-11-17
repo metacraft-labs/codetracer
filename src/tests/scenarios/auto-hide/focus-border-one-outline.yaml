@@ -1,0 +1,28 @@
+scenario: 1
+name: auto-hide/focus-border-one-outline
+pack: codetracer
+summary: >-
+  Only one selection outline is on screen at a time: with a left pane
+  docked and outlined, the overlay opened from the status bar takes the
+  outline, and the docked and stack outlines stand down.
+
+stage:
+  - use: record-program
+    with: { program: py_console_logs/main.py }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - wait: { until: { at: window, strip-tabs: { count: 4 } }, timeout: 30s }
+  - click: { at: 'pane-tab[label="EVENT LOG"]' }
+  - click: { at: 'pane-tab[label="EVENT LOG"]', button: right }
+  - wait: { until: { at: 'context-menu/menu-item[label="Pin to Left"]', present: true }, timeout: 15s }
+  - click: { at: 'context-menu/menu-item[label="Pin to Left"]' }
+  - wait: { until: { at: 'strip-tab[label="EVENT LOG"]', edge: left }, timeout: 15s }
+  - click: { at: 'strip-tab[label="EVENT LOG"]' }
+  - wait: { until: { at: 'selection-outline[kind="docked"]', present: true }, timeout: 15s }
+  - hover: { at: 'strip-tab[label="BUILD"]', for: 500ms }
+  - wait: { until: { at: 'selection-outline[kind="overlay"]', present: true }, timeout: 15s }
+  - expect: { at: auto-hide-overlay, present: true }
+  - expect: { at: 'selection-outline[kind="docked"]', absent: true }
+  - expect: { at: 'selection-outline[kind="stack"]', absent: true }

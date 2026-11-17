@@ -139,7 +139,10 @@ TUISESSION = "src/frontend/tui/host/tui_session.nim"
 SESSDRIVER = "src/frontend/tui/host/session_driver.nim"
 NATIVEHOST = "src/frontend/tui/host/native_host.nim"
 GPUILEAVES = "src/frontend/gpui/app/leaves.nim"
-GESTURES = "src/frontend/gpui/window_gestures.nim"
+# `window_gestures.nim` left the subjects 2026-11-14: since `24a718a9f2` a
+# label click is a press of the label (`layout.toggle-docked-pane`, decided in
+# `gpui/main.nim` from the committed layout), and the direction the gesture
+# computes no longer decides anything (FT11, re-aimed below, SURVIVED there).
 # `ui/event_log.nim` and `ui/calltrace.nim` are no longer subjects: the
 # desktop draws both panes through the ONE generic view each
 # (`1c18341dd`, `730399e0e`) and decodes the call trace with the shared
@@ -185,7 +188,7 @@ SUBJECTS = [TOPBAR, SHELL, BINDING, RUNTIME, ROLES, STATUS, VARS, TUIMAIN,
             GPUIMAIN, PRODMODE, CARET,
             CALLVM, EVLOGVM, STORE, INTERACT, LAYMODEL, HOVER, SESSTABS,
             CALLVIEW, EVLOGVIEW, TUISESSION, NATIVEHOST, GPUILEAVES,
-            GESTURES, SESSDRIVER, OMNISRC,
+            SESSDRIVER, OMNISRC,
             FOOTERINFO, TUIAPP, DESKEVLOGVIEW, GPUISHELL, GLHIT]
 SUITES = [VMU, T1, REF, PROF, PTY, GPLAN, DESKTOP_GATE,
           VMU2, T2, REF2, PTY2, GPLAN2, DESKTOP_GATE_B]
@@ -405,9 +408,13 @@ ARMS = [
         "        if dr.item >= 0 and lv.items[dr.item].index == entered:\n          row = 1\n",
         R_TERMMENU,
         "the terminal's submenu starts at the top, not level with its folder"),
+    # MN3 RE-AIMED 2026-11-09: `e91f95ce8` routes Right to the named
+    # operation `menu.enter-folder`; the defect is unchanged.
     Arm("MN3", RUNTIME,
-        '  of "Right": discard vm.enterFolder()\n',
-        '  of "Right": vm.moveHighlight(1)\n',
+        '  programMenu.bindOp("menu.enter-folder", act do:\n'
+        '    discard rt.app.menu.enterFolder())\n',
+        '  programMenu.bindOp("menu.enter-folder", act do:\n'
+        '    rt.app.menu.moveHighlight(1))\n',
         P_MENU,
         "Right on a folder moves the highlight instead of opening the submenu"),
     Arm("GM1", WINTOP,
@@ -415,9 +422,13 @@ ARMS = [
         "          y = r.rect.y - 4\n      x = px\n",
         R_GPUIMENU,
         "GPUI's submenu popover opens over its parent"),
+    # GM2 RE-AIMED 2026-11-09: `e91f95ce8` routes GPUI's Right to the named
+    # operation `menu.enter-folder`; the defect is unchanged.
     Arm("GM2", GPUIMAIN,
-        '    of "right": discard gMenu.enterFolder()\n',
-        '    of "right": gMenu.moveHighlight(1)\n',
+        '  programMenu.bindOp("menu.enter-folder", act do:\n'
+        '    discard gMenu.enterFolder()\n',
+        '  programMenu.bindOp("menu.enter-folder", act do:\n'
+        '    gMenu.moveHighlight(1)\n',
         G_MENU,
         "GPUI's Right key moves the highlight instead of opening the submenu"),
 
@@ -713,9 +724,11 @@ ARMS = [
         "  let toggleCol = origin + call.depth * CallRowIndentCells + 1\n",
         S2_HIT,
         "a press on the toggle is read one cell to the left of it"),
+    # CT8 RE-AIMED 2026-11-09: `e91f95ce8` runs a row press as the named
+    # operation `calltrace.go-to-call`; the defect is unchanged.
     Arm("CT8", RUNTIME,
-        "      of cthRow:\n        outcome.jumpsToCall = true\n",
-        "      of cthRow:\n        outcome.jumpsToCall = false\n",
+        '  onTarget("calltrace.go-to-call"):\n    outcome.jumpsToCall = true\n',
+        '  onTarget("calltrace.go-to-call"):\n    outcome.jumpsToCall = false\n',
         P2_JUMP,
         "a click on a call-trace row goes nowhere"),
     # CT9 RE-AIMED 2026-10-23: `ad7805dbd` moved the terminal's toggle into
@@ -732,9 +745,11 @@ ARMS = [
         "GPUI draws the arguments in the body text, not their colour"),
     # CT11 RE-AIMED 2026-10-23: `ad7805dbd`: GPUI's row press goes to the
     # call through the shared driver (`session_driver.jumpToCall`).
+    # CT11 RE-AIMED again 2026-11-09: `e91f95ce8` runs GPUI's row press as
+    # the named operation `calltrace.go-to-call`.
     Arm("CT11", GPUIMAIN,
-        "  let why = gSession.jumpToCall(row.index)\n",
-        "  let why = \"\"\n",
+        "    let why = gSession.jumpToCall(c.target.index)\n",
+        "    let why = \"\"\n",
         G2_JUMP,
         "a press on a GPUI call-trace row goes nowhere"),
     Arm("CT12", NATIVEHOST,
@@ -931,9 +946,14 @@ ARMS = [
         "      # the pointer rested on a label, a dismissal due after it left.\n      let hoverChanged = false or\n",
         P2_HOVER,
         "the terminal's loop never runs the hover's clock"),
-    Arm("FT11", GESTURES,
-        "        let cmd = if layout.docked[at].open: cmdCloseDocked(was.source)\n                  else: cmdOpenDocked(was.source)\n",
-        "        let cmd = cmdCloseDocked(was.source)\n",
+    # FT11 RE-AIMED 2026-11-14: `24a718a9f2` routes a label's click through
+    # the pointer keymap; `layout.toggle-docked-pane` in the window docks the
+    # pane open or closes it. Graded in `window_gestures.nim` after that
+    # change it SURVIVED (no case noticed): the code it mutated no longer
+    # decides. Same defect, in the code that now carries it.
+    Arm("FT11", GPUIMAIN,
+        "    applyGestureCommand(r, if open: cmdCloseDocked(c.target.pane)\n                           else: cmdOpenDocked(c.target.pane))\n",
+        "    applyGestureCommand(r, cmdCloseDocked(c.target.pane))\n",
         G2_DOCK,
         "a GPUI label click never docks its pane open"),
     # FT12 RE-AIMED 2026-10-17: the desktop's layout runs directly into its

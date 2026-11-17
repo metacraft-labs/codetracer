@@ -1,0 +1,20 @@
+scenario: 1
+name: terminal/panes-drop-zone-joins-the-stack
+pack: codetracer
+summary: >-
+  Dragging the Call Trace tab onto the middle of the Variables pane drops it
+  into that stack (a moveTab), and the Call Trace tab is then on the
+  Variables pane's strip.
+stage:
+  - use: record-program
+    with: { program: calc }
+  - use: open-recording
+    with: { width: 200, height: 50 }
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - drag:
+      from: 'pane-tab[label="Call Trace"]'
+      to: 'pane[title="Variables"]'
+  - wait: { until: { at: status-line, assert: 'says("applied")' }, timeout: 10s }
+  - expect: { at: status-line, assert: 'says("moveTab(calltrace")' }
+  - expect: { at: 'pane[title="Call Trace"]', tabs: { contains: "Variables" } }

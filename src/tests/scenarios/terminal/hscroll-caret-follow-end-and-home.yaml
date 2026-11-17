@@ -1,0 +1,22 @@
+scenario: 1
+name: terminal/hscroll-caret-follow-end-and-home
+pack: codetracer
+summary: >-
+  The editor scrolls sideways to follow the caret: End on the wide source
+  line brings its end (`<<RIGHT-EDGE>>`) into view; Home brings its start
+  (`<<LEFT-EDGE>>`) back — without moving the replay.
+stage:
+  - use: record-program
+    with: { program: wide_lines/main.py }
+  - use: open-recording
+    with: { width: 200, height: 50 }
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - wait: { until: { at: 'editor[file="main.py"]/line[number="26"]', text: { contains: "WIDE_SOURCE = \"<<LEFT-EDGE>>" } }, timeout: 30s }
+  - expect: { at: replay-position, tick: 1 }
+  - click: { at: 'editor[file="main.py"]/line[number="26"]', anchor: text-start }
+  - key: End
+  - wait: { until: { at: 'editor[file="main.py"]/line[number="26"]', text: { contains: "<<RIGHT-EDGE>>\"" } }, timeout: 10s }
+  - key: Home
+  - wait: { until: { at: 'editor[file="main.py"]/line[number="26"]', text: { contains: "<<LEFT-EDGE>>" } }, timeout: 10s }
+  - expect: { at: replay-position, tick: 1 }

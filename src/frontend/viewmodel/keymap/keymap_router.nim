@@ -108,7 +108,7 @@ func deliverable(delivery: KeyDelivery; chords: seq[string]): bool =
   if delivery.frontEnd != feTerminal or delivery.keyProtocol != kpLegacy:
     return true
   for c in chords:
-    if not legacyEncodable(c): return false
+    if not isPointerChord(c) and not legacyEncodable(c): return false
   true
 
 func removes(r: UserRow; b: EditingBinding): bool =
@@ -119,7 +119,10 @@ func removes(r: UserRow; b: EditingBinding): bool =
     (r.whenText.len == 0 or b.scope.whenText == r.whenText)
 
 proc bindingOf(r: UserRow; base: BaseKeymap): EditingBinding =
-  let table = tableOfOperation(r.operation)
+  ## A row whose key is a pointer gesture is the pointer keymap's, whatever
+  ## operation it names.
+  let table = if r.chords.len > 0 and isPointerChord(r.chords[0]): PointerTable
+              else: tableOfOperation(r.operation)
   EditingBinding(
     model: base,
     scope: BindingScope(modes: {}, products: {},
@@ -329,6 +332,25 @@ proc route*(router: var KeymapRouter; facts: SessionFacts; path: ScopePath;
       result.operation = elsewhere.operation
       result.argument = elsewhere.argument
 
+proc routePointer*(router: KeymapRouter; facts: SessionFacts; path: ScopePath;
+                   navMode: NavigationMode; gesture: string): EditingResolution =
+  ## **ONE POINTER GESTURE ON THE ELEMENT `path` ENDS IN, TO A RESOLUTION**
+  ## (Input-Routing §5.1). The hit-tested element is the end of the path, so its
+  ## pane and kind are `paneKind` and `elementKind` to a row's `when`. The user's
+  ## pointer rows, then the base's, through the one resolver; a gesture has no
+  ## pending prefix and types no text.
+  let scope = router.scopeFor(facts, path, navMode, false)
+  var layers: seq[ResolutionLayer] = @[]
+  for source in [lsUser, lsBase]:
+    let km = if source == lsUser: router.userByTable.getOrDefault(PointerTable)
+             else: router.baseByTable.getOrDefault(PointerTable)
+    if km.bindingCount == 0: continue
+    let trie = trieFor(km, scope, PointerTable, laterFirst = source == lsUser)
+    if trie.nodeCount > 1:
+      layers.add ResolutionLayer(name: $source & ":" & PointerTable,
+                                 source: source, trie: trie, atFocus: true)
+  resolveLayers(layers, PendingChords(), 0, false, gesture, 0)
+
 proc cancelPending*(router: var KeymapRouter) =
   router.pending = PendingChords()
 
@@ -372,6 +394,22 @@ proc unmountOwner*(router: var KeymapRouter; owner: string): seq[PushedLayer] =
   let (next, popped) = router.stack.unmount(owner)
   router.stack = next
   popped
+
+proc syncOwnedLayers*(router: var KeymapRouter; owner: string;
+                      wanted: openArray[tuple[table, label: string]]) =
+  ## The layers `owner` pushes are exactly `wanted`, oldest first: a pane's
+  ## modes (the Video Player's picker and, over it, the terminal's magnifier)
+  ## follow its state here rather than being pushed and popped at each place
+  ## that opens or closes one. Unchanged when they already are; otherwise the
+  ## owner's layers are replaced, whatever else was pushed since.
+  var have: seq[tuple[table, label: string]] = @[]
+  for l in router.stack.layers:
+    if l.owner == owner: have.add (l.table, l.label)
+  if have == @wanted:
+    return
+  discard router.unmountOwner(owner)
+  for w in wanted:
+    discard router.pushLayer(w.table, owner, w.label)
 
 # ---------------------------------------------------------------------------
 # What the user is shown

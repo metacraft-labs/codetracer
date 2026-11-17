@@ -1,3 +1,4 @@
+import ../viewmodel/views/field_keys
 import
   std / [strformat, strutils, jsffi, math],
   kdom,
@@ -522,9 +523,9 @@ proc tableFooterDom*(table: DataTableComponent): Node =
   let input = document.createElement(cstring"input")
   input.setAttribute(cstring"class", cstring"data-tables-footer-input ct-input-small mx-2")
   input.value = cstring($(table.startRow))
-  input.addEventListener(cstring"keydown", proc(ev: Event) =
+  input.addEventListener(cstring KeyDownEvent, proc(ev: Event) =
     let keyboardEvent = cast[KeyboardEvent](ev)
-    if keyboardEvent.keyCode == ENTER_KEY_CODE:
+    if fieldKeyOfCode(keyboardEvent.keyCode) == fkCommit:
       table.inputFieldChange = false
       scrollTable(table, ev.target.value)
     else:

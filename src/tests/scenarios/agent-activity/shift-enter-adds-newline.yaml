@@ -1,0 +1,29 @@
+scenario: 1
+name: agent-activity/shift-enter-adds-newline
+pack: codetracer
+summary: >-
+  Shift+Enter in the Agent Activity prompt adds a line and sends nothing;
+  Enter then sends both lines and clears the box.
+
+stage:
+  - use: record-program
+    with: { program: py_console_logs/main.py }
+  - use: stub-agent
+    with: { agent: refusing }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - click: { at: 'pane-tab[label="AGENT ACTIVITY"]' }
+  - wait: { until: { at: agent-activity/agent-prompt, present: true }, timeout: 30s }
+  - wait: { until: agent-session-open, timeout: 60s }
+  - click: { at: agent-activity/agent-prompt }
+  - type: "first line"
+  - chord: Shift+Enter
+  - type: "second line"
+  - expect: { at: agent-activity/agent-prompt, value: "first line\nsecond line" }
+  - expect: { at: agent-activity, failed-turns: 0 }
+  - expect: { at: agent-activity, assert: 'silent-about("first line")' }
+  - key: Enter
+  - wait: { until: { at: agent-activity, failed-turns: 1 }, timeout: 30s }
+  - expect: { at: agent-activity/agent-prompt, value: "" }

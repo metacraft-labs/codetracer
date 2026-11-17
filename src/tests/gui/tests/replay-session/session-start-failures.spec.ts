@@ -21,6 +21,10 @@
  *    `success: false`, and the GUI must show that answer
  *    (`CODETRACER::trace-load-error`, an error notification) rather than an
  *    editor with no backend behind it.
+ * 4. The replay server starts, but every replay worker it starts for the
+ *    trace fails (`ct-native-replay` cannot start rr: "Failed to determine
+ *    RR port from output"). The desktop showed nothing and waited for a
+ *    stop that never came; it must show the failure, naming it.
  *
  * What is real: the build's `ct`, Electron, main process, renderer and
  * session manager. Cases 1 and 2 start `ct` directly rather than through the
@@ -28,7 +32,9 @@
  * (`lib/socket-path-bound.ts`) and both cases end before a window exists.
  * Cases 2 and 3 run from a prefix that mirrors the build's through symbolic
  * links and leaves one binary out (`lib/prefix-without.ts`): that is the
- * missing prerequisite under test, and nothing else is replaced.
+ * missing prerequisite under test, and nothing else is replaced. Case 4
+ * records a real rr recording and opens a copy whose rr event log has been
+ * emptied, so the real rr refuses to replay it; everything else is real.
  *
  * POSIX only: on Windows the session manager listens on TCP (no socket path
  * to be too long) and Electron is launched directly rather than through
@@ -46,10 +52,13 @@ import {
   codetracerInstallDir,
   codetracerPath,
   codetracerPrefix,
+  recordTestProgram,
+  traceFolderForId,
 } from "../../lib/fixtures";
 import { prefixWithout } from "../../lib/prefix-without";
 import { maxUnixSocketPathBytes, scratchBase } from "../../lib/socket-path-bound";
 import { StatusBar } from "../../page-objects/status_bar";
+import { cRrSpecSkipReason, originFixturePath } from "../../lib/value-origin-fixtures";
 
 const isWindows = process.platform === "win32";
 
@@ -246,5 +255,58 @@ test.describe("a replay that cannot start is reported to the user", () => {
       seen.some((text) => text.includes(missing)),
       `no notification named the missing replay command ${missing}; shown: ${JSON.stringify(seen)}`,
     ).toBe(true);
+  });
+});
+
+test.describe("a replay whose every worker fails to start is reported to the user", () => {
+  test.skip(isWindows, "rr recordings are Linux-only");
+  test.skip(cRrSpecSkipReason() !== null, cRrSpecSkipReason() ?? "");
+
+  // A real rr recording, copied, with the `version` file of its rr trace
+  // removed: rr refuses to replay it ("There is no trace there"), so every
+  // `ct-native-replay` worker the replay server starts fails before rr
+  // reports its port. Made when the test runs (see the case above for why).
+  test.use({
+    launchMode: "trace-folder",
+    // eslint-disable-next-line no-empty-pattern -- Playwright reads a fixture's dependencies from this pattern; it has none
+    sourcePath: async ({}, use) => {
+      const recordingId = recordTestProgram(originFixturePath("c", "cross_thread_copy"), "rr");
+      const traceFolder = fs.mkdtempSync(path.join(scratchBase(), "ct-ssf-rr-"));
+      try {
+        fs.cpSync(traceFolderForId(recordingId), traceFolder, { recursive: true });
+        const version = path.join(traceFolder, "rr", "version");
+        expect(fs.existsSync(version), `the rr recording has no version file at ${version}`).toBe(true);
+        // The recorder leaves its files read-only.
+        fs.chmodSync(path.dirname(version), 0o755);
+        fs.rmSync(version);
+        await use(traceFolder);
+      } finally {
+        fs.rmSync(traceFolder, { recursive: true, force: true });
+      }
+    },
+  });
+
+  test("the failure is shown once, in rr's words", async ({ ctPage }) => {
+    const statusBar = new StatusBar(ctPage, ctPage.locator("#status-base"));
+    // Multi-Window-Tab-Management.md item 7: one notification that says the
+    // replay did not start and why, in the engine's words. Not the worker's
+    // pid, log lines or "no port".
+    const expected = /^The replay could not start: rr could not replay this recording: .*There is no trace there/;
+    const seen: string[] = [];
+    const deadline = Date.now() + REFUSAL_DEADLINE_MS;
+    while (Date.now() < deadline && !seen.some((text) => expected.test(text))) {
+      for (const text of await statusBar.activeNotificationTexts()) {
+        if (!seen.includes(text)) seen.push(text);
+      }
+      await ctPage.waitForTimeout(POLL_MS);
+    }
+    expect(
+      seen.some((text) => expected.test(text)),
+      `no notification said the replay could not start, in rr's words; shown: ${JSON.stringify(seen)}`,
+    ).toBe(true);
+    // Every worker the server starts fails the same way; the user is told once.
+    await ctPage.waitForTimeout(5_000);
+    const shown = (await statusBar.activeNotificationTexts()).filter((text) => /replay/i.test(text));
+    expect(shown, `the failure must be shown once; shown: ${JSON.stringify(shown)}`).toHaveLength(1);
   });
 });

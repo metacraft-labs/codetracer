@@ -6,8 +6,10 @@ import
   shell_sessions,
   hcr_launch,
   build_runner,
+  verification_runner,
   file_tree_operations,
   tab_answers,
+  window_routing,
   ipc_subsystems/[ dap, socket, acp_ipc ],
   results,
   ../lib/[ jslib, misc_lib, electron_lib ],
@@ -391,11 +393,21 @@ proc configureIpcMain* =
     # process, and stopped (`index/build_runner`, Build-Output-Pane.md §4.2).
     "build-start"
     "build-cancel"
+    # The Verification pane's Run / Stop: the project's declared Verno action
+    # run by the main process (`index/verification_runner`,
+    # Verification-Payload-Contract-v1.md §11).
+    "verification-start"
+    "verification-cancel"
     # The edit-mode toolbar's Run and the palette's **Project: Run** pair:
     # `ct record <project folder>`, answered with
     # `CODETRACER::program-run-settled` (`index/traces.onRunProgram`,
     # Edit-Mode-Toolbar.md §9.4).
     "run-program"
+    # Edit mode's View Generated C Source: the edited Nim file compiled to C,
+    # answered with `CODETRACER::nim-c-listing-compiled`
+    # (`index/traces.onNimCListingCompile` over `index/nim_c_listing`,
+    # Generated-Code-Listing.md §13.4).
+    "nim-c-listing-compile"
     "restart-subsystem"
 
     # welcome screen options
@@ -407,6 +419,9 @@ proc configureIpcMain* =
     "load-recent-transaction"
     "open-trace-dialog"
     "load-trace-file"
+    # A Nim compile-time trace the Trace Macro / Static Block / Constant
+    # actions name: imported first, then opened (`index/traces.onLoadNimTraceFile`).
+    "load-nim-trace-file"
     # AA-3 — read the review dataset an evidence tool call in the Agent
     # Activity session feed names, and either report its shape or enter a
     # review over it (`index/review_dataset.onOpenReviewDataset`).
@@ -682,14 +697,28 @@ proc ready*(): Future[void] {.async.} =
         discard await waitForResponseFromInstall()
 
   debugPrint "index: creating window"
-  mainWindow = createMainWindow(config)
-  registerMainWindow()
+  let firstWindow = createMainWindow(config)
+  when not defined(server):
+    # The desktop's windows are `window_routing`'s: `mainWindow` is the
+    # window whose request is being served (else the first still open), and
+    # what it is sent goes to the windows `window_routing.routeSend` names.
+    discard registerDesktopWindow(firstWindow)
+    mainWindow = windowRouter()
+    firstWindow.setMenuBarVisibility(false)
+    firstWindow.setMenu(jsNull)
+    # A replay no open window shows any more (its windows closed) stops.
+    replayOrphaned = proc(replayId: int) =
+      stopReplayProcess(replayId)
+    # A window's tab may stop its replay only when no other window shows it:
+    # closing a tab or pressing Stop in one window leaves another window
+    # showing the same replay working.
+    replayStopAllowed = proc(replayId: int): bool =
+      releaseReplay(currentWindow(), replayId)
+  else:
+    mainWindow = firstWindow
   infoPrint "index: main window created"
   sendLspStatusToRenderer()
 
-  when not defined(server):
-    mainWindow.setMenuBarVisibility(false)
-    mainWindow.setMenu(jsNull)
   # TODO cleanup code
   data.pluginClient = PluginClient(
     cancelled: false,
@@ -700,25 +729,23 @@ proc ready*(): Future[void] {.async.} =
     startOptions: data.startOptions)
 
   when not defined(server):
-    # we hook output code in send for debug
-    var internalSend = mainWindow.webContents.send
-
-    mainWindow.webContents.send = proc(id: cstring, data: js) =
-      # debug "send", _ = $id
-      # too much content sometimes here, just log we did it
-      if id == "filenames-loaded":
-        debugPrint cstring"frontend ... <=== index: ", id, "[..not shown to optimize send time..]"
-      else:
-        debugPrint cstring"frontend ... <=== index: ", id
-      debugIndex fmt"frontend ... <=== index: {id}"  # TODO? too big: {Json.stringify(data, nil, 2.toJs)}"
-      debugSend(mainWindow.webContents, internalSend, id, data)
-
+    discard
   else:
+    proc wireValue(value: js): js {.importjs: """
+      (function(v) {
+        if (typeof v !== "bigint") return v;
+        return Number.isSafeInteger(Number(v)) ? Number(v) : v.toString();
+      })(#)""".}
+      ## A Nim `int64` is a JS BigInt, and `JSON.stringify` throws on one. This
+      ## send runs inside async handlers, so the throw was a rejection nobody
+      ## read: `tab-load` was answered with nothing and a browser's editor
+      ## never opened. The page's half is `ui_js.wireSafe`, with the same rule.
+
     proc replacer(key: cstring, value: js): js =
       if key == cstring"m_type":
         undefined
       else:
-        value
+        wireValue(value)
 
     proc dapReceiveEventKey(response: js): cstring =
       ## Extract the inner DAP event name from a ``dap-receive-event``

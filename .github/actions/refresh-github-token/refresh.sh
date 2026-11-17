@@ -85,6 +85,9 @@ if [ -n "$cred_dir" ] && [ -f "$cred_dir/nix-access-tokens.conf" ]; then
 		mv -f "$tmp" "$job_netrc"
 		echo "refreshed github.com in the job netrc"
 	fi
+	# When this token was minted, for keep-refreshing.sh and the git credential
+	# helper (ci/git-credential-job-netrc.sh), which renew a token by its age.
+	date +%s >"$cred_dir/github-token-minted-at"
 fi
 
 # The Nix netrc: git+https inputs, which Nix fetches by running git.
@@ -102,11 +105,17 @@ if [ -f "$netrc" ] && grep -q 'machine github.com' "$netrc"; then
 	echo "refreshed github.com in $netrc"
 fi
 
-# The git extraHeader setup-dev-env exports for the rest of the job.
+# The git extraHeader setup-dev-env exports for the rest of the job. An entry
+# ci/register-git-credential-helper.sh blanked stays blank: the helper answers
+# for it, with a token it renews by age.
 for i in $(seq 0 $((${GIT_CONFIG_COUNT:-0} - 1))); do
-	key_var="GIT_CONFIG_KEY_$i"
+	key_var="GIT_CONFIG_KEY_$i" value_var="GIT_CONFIG_VALUE_$i"
 	case "${!key_var:-}" in
 	http.https://github.com/*.extraHeader | http.https://github.com/*.extraheader)
+		if [ -z "${!value_var:-}" ]; then
+			echo "left ${!key_var} blank: the git credential helper answers for it"
+			continue
+		fi
 		echo "GIT_CONFIG_VALUE_$i=AUTHORIZATION: basic $basic" >>"$GITHUB_ENV"
 		echo "refreshed ${!key_var} for later steps"
 		;;

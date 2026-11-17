@@ -250,7 +250,11 @@ def step_builds(step, repo, recipes, repo_root):
 
 
 def main(argv):
-    paths = argv[1:] or [".github/workflows/codetracer.yml"]
+    # codetracer.yml and the reusable workflows it calls (its stubs have no steps).
+    paths = argv[1:] or [".github/workflows/codetracer.yml",
+                         ".github/workflows/tui-tests.yml",
+                         ".github/workflows/gpui-window-captures.yml",
+                         ".github/workflows/ct-build.yml"]
     violations = []
     clones_seen = 0
     # ci/verdict/<this file> -> ci/verdict -> ci -> repo root: three levels.

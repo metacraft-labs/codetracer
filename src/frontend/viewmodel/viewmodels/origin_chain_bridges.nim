@@ -36,6 +36,8 @@ proc wireOriginChainBridges*(stateVM: StateVM; originVM: OriginChainVM;
   ##   chain at this stop is not held: fetch it for the in-row block, once
   ##   per row per stop, leaving the side panel, its chain and its pending
   ##   request alone (§3.2.1).
+  ## - `StateVM.onContinueOriginChainProc` / `originChainContinuing` — the
+  ##   in-row chain's "Continue tracing" for a cut-off chain (§5.3.1).
   ## - `StateVM.originChainLookup` — the chain the in-row block draws: the
   ##   row's own chain, answered at the current stop
   ##   (`OriginChainVM.rowChainAt`).
@@ -51,6 +53,10 @@ proc wireOriginChainBridges*(stateVM: StateVM; originVM: OriginChainVM;
   stateVM.onLoadOriginChainProc = proc(expression: string;
                                        location: Location) =
     originVM.loadRowChain(expression, location)
+  stateVM.onContinueOriginChainProc = proc(expression: string) =
+    originVM.continueRowChain(expression)
+  stateVM.originChainContinuing = proc(expression: string): bool =
+    originVM.isContinuing(continuationKey(expression))
   stateVM.originChainLookup = proc(name: string): Option[OriginChain] =
     # Reactive in both the stop and the answers: a move hides the previous
     # stop's chain at once, and an answer draws as soon as it lands.

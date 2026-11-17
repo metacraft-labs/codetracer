@@ -140,7 +140,7 @@ fi
 # Spot-check across all four runner classes, so that a regression in how one
 # class of job is parsed cannot hide behind a total.
 for job in lint-bash lint-rust dev-build dmg-build appimage-cross-distro \
-	test-non-gui test-ui-tests viewmodel-tests push-to-attic create-release \
+	test-non-gui test-ui-tests viewmodel-tests create-release \
 	ci-verdict docs-scope reprobuild-macos-smoke windows-bootstrap-smoke \
 	queue-watchdog; do
 	if grep -q ": $job: no \`timeout-minutes\`" <<<"$neg_out"; then

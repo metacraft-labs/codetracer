@@ -27,7 +27,7 @@
  * `expandComputationalOperands`, `pinChain`, `copyAsMarkdown`,
  * `breadcrumbChips`, `keyboardNavigate`).
  */
-import type { Locator, Page } from "@playwright/test";
+import { expect, type Locator, type Page } from "@playwright/test";
 
 export const ORIGIN_SIDE_PANEL_SELECTOR = "aside#ct-origin-chain-side-panel";
 
@@ -54,8 +54,8 @@ export class OriginChainPanePageObject {
 
   /**
    * Click the inline badge on the named row. The production click
-   * handler toggles the in-row chain expansion AND opens the dedicated
-   * side panel per spec §3.2.1 / §3.2.2.
+   * handler toggles the in-row chain expansion (spec §3.2.1); it does
+   * not open the side panel.
    */
   async clickBadge(variableName: string): Promise<void> {
     await this.badge(variableName).click();
@@ -91,6 +91,46 @@ export class OriginChainPanePageObject {
   }
 
   /**
+   * The expanded chain's "Show in side panel" button (spec §3.2.2), drawn
+   * at the bottom of the in-row chain once the row holds its chain
+   * (`isonim_state_view.renderVariableRow`).
+   */
+  showInSidePanelButton(variableName: string): Locator {
+    return this.inlineChain(variableName)
+      .locator("button.ct-origin-show-in-side-panel")
+      .first();
+  }
+
+  /**
+   * Right-click the row → "Show value origin", and wait for what that does
+   * since 2026-10-29 (spec §3.1, §3.2.1): the chain expands IN PLACE under
+   * the row, and the side panel stays closed.
+   */
+  async showValueOriginInPlace(variableName: string): Promise<void> {
+    const panelWasOpen = await this.sidePanel().isVisible();
+    await this.rightClickRow(variableName);
+    await this.clickShowValueOriginMenuItem();
+    await expect(this.inlineChain(variableName), "the chain expands under the row")
+      .toBeVisible({ timeout: 15_000 });
+    if (!panelWasOpen) {
+      await expect(this.sidePanel(), "the row menu does not open the side panel")
+        .toBeHidden();
+    }
+  }
+
+  /**
+   * From the row's expanded chain, open the dedicated side panel through
+   * its "Show in side panel" (spec §3.2.2) and wait for it.
+   */
+  async openInSidePanel(variableName: string): Promise<void> {
+    const button = this.showInSidePanelButton(variableName);
+    await expect(button, "the expanded chain offers \"Show in side panel\"")
+      .toBeVisible({ timeout: 15_000 });
+    await button.click();
+    await expect(this.sidePanel()).toBeVisible({ timeout: 15_000 });
+  }
+
+  /**
    * Click the n-th hop inside the in-row chain (0-based). Triggers
    * `OriginChainVM.onSeekToHop` → `ct/history-jump` → editor scrolls.
    */
@@ -108,11 +148,17 @@ export class OriginChainPanePageObject {
     return this.page.locator(ORIGIN_SIDE_PANEL_SELECTOR);
   }
 
-  /** Hop list inside the side panel. */
+  /**
+   * Hop list inside the side panel: the `li.ct-origin-hop` rows
+   * `renderPanelDom` draws, one per hop, without the terminator row.
+   *
+   * This used to be every `li` filtered by `hasNot:
+   * .ct-origin-terminator-row`. `hasNot` tests an element's DESCENDANTS, and
+   * the terminator row carries that class itself, so it was counted as a
+   * hop and every chain read one hop long.
+   */
   sidePanelHops(): Locator {
-    return this.sidePanel().locator("section > ol > li").filter({
-      hasNot: this.page.locator(".ct-origin-terminator-row"),
-    });
+    return this.sidePanel().locator("section > ol > li.ct-origin-hop");
   }
 
   /** Side-panel terminator row (final `<li class="ct-origin-terminator-row">`). */
@@ -262,9 +308,10 @@ export class OriginChainPanePageObject {
 
   /**
    * After the right-click menu opens, click the "Show value origin"
-   * entry. The production code path: menu entry's `action()` invokes
-   * `StateVM.onShowOrigin` → `OriginChainVM.onShowOrigin` (via the
-   * bridge installed by `ui/state.nim::wireOriginChainBridges`).
+   * entry. The production code path is the badge's
+   * (`isonim_state_view.buildVariableRowContextMenu`): it toggles the
+   * row's in-place chain and loads it when needed
+   * (`OriginChainVM.loadRowChain`); the side panel stays closed.
    */
   async clickShowValueOriginMenuItem(): Promise<void> {
     await this.page.locator("text=Show value origin").first().click();

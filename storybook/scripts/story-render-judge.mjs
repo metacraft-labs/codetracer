@@ -58,6 +58,20 @@
 //                Scratchpad, a value popup) drawn cut, with no ellipsis: the
 //                name is a fixed part of the row and the value is what gives
 //                up width.
+//   cut-edge     An Agent Harbor view's cut text breaks the views' one rule
+//                for a cut (CTF-P1c D6): a text cut in code
+//                (`views/ah_cut_text.nim`, `data-ah-shown`) keeps a space or
+//                a separator before its "…" (`ahCutTextDangles`, the shared
+//                `agent_harbor_words.danglesBeforeEllipsis`, exported to the
+//                page); a text is cut below its floor (`data-ah-floor`,
+//                a tree node's counts' `1…`, CTF-P1c D7); a text marked to
+//                be cut in code (`data-ah-cut`)
+//                overflows and is not cut; or a text in an Agent Harbor view
+//                is cut by CSS's `text-overflow: ellipsis`, which cannot
+//                drop either. The render check adds what `probeCutTexts`
+//                finds: a drawn cut the accessibility tree reads beside its
+//                whole text, and, with each tree node's line narrowed, counts
+//                below their floor or pushed past the line.
 //
 // What a story is meant to show comes from its declaration
 // (`src/frontend/stories/codetracer_stories.nim`, `state`, emitted into
@@ -109,7 +123,9 @@ export const MESSAGE_WORDING = {
 // The categories a verdict can carry. A capture records the ones it was
 // judged under (`capture-verdicts.json`), so an image judged before a rule
 // existed can be told from one judged under it.
-export const JUDGE_RULES = ["placeholder", "empty", "error", "type-size", "missing-glyph", "icon-ink", "name-cut"];
+export const JUDGE_RULES = [
+  "placeholder", "empty", "error", "type-size", "missing-glyph", "icon-ink", "name-cut", "cut-edge",
+];
 export const MISSING_TEXT = "No structure story registered";
 export const MISSING_CLASS = "ct-storybook-missing";
 // Elements whose text is chrome rather than content: controls, tabs and the
@@ -127,8 +143,13 @@ export function loadStoryDeclarations(repoRoot) {
   return JSON.parse(readFileSync(join(repoRoot, "storybook", "stories", "generated", "stories.json"), "utf8"));
 }
 
-export function storyUrl(baseUrl, storyId, theme) {
-  return `${baseUrl.replace(/\/$/, "")}/iframe.html?id=${storyId}&viewMode=story&globals=theme:${theme}`;
+// `moment` (optional) opens a playback story at one of its scenario's named
+// moments: the StoryBook global `moment` (`.storybook/preview.js`), a second
+// `key:value` pair in the same `globals` parameter, `;`-separated
+// (https://storybook.js.org/docs/essentials/toolbars-and-globals#setting-globals-via-url).
+export function storyUrl(baseUrl, storyId, theme, moment = "") {
+  const globals = moment ? `theme:${theme};moment:${moment}` : `theme:${theme}`;
+  return `${baseUrl.replace(/\/$/, "")}/iframe.html?id=${storyId}&viewMode=story&globals=${globals}`;
 }
 
 // --- In the page: what the story drew ----------------------------------------
@@ -397,6 +418,46 @@ function inspectStory({ statePatterns, stateText, messageWording, missingText, m
       }
     }
   }
+  // Cut text in an Agent Harbor view (`cut-edge`). A line overflows when
+  // its text, as laid out (a Range over it, overflow included), ends past
+  // the element's content box.
+  const cutTexts = [];
+  const overflows = (el) => {
+    const box = el.getBoundingClientRect();
+    if (box.width <= 0 || !el.textContent) return false;
+    const style = getComputedStyle(el);
+    const right = box.right - parseFloat(style.borderRightWidth || 0) - parseFloat(style.paddingRight || 0);
+    const range = document.createRange();
+    range.selectNodeContents(el);
+    return range.getBoundingClientRect().right > right + 0.01;
+  };
+  const AGENT_HARBOR = "[class^='ah-'], [class*=' ah-'], [class*='agent-harbor']";
+  for (const el of root.querySelectorAll("*")) {
+    if (!visible(el)) continue;
+    const shown = el.getAttribute("data-ah-shown");
+    if (shown !== null) {
+      if (typeof globalThis.ahCutTextDangles !== "function") {
+        cutTexts.push({ problem: "cut-rule-missing", text: shown });
+      } else if (globalThis.ahCutTextDangles(shown)) {
+        cutTexts.push({ problem: "dangles", text: shown, full: el.textContent.slice(0, 120) });
+      }
+      const floor = el.getAttribute("data-ah-floor");
+      if (floor && [...shown].length < [...floor].length) {
+        cutTexts.push({ problem: "below-floor", text: shown, floor });
+      }
+      continue;
+    }
+    if (!el.closest(AGENT_HARBOR)) continue;
+    if (el.hasAttribute("data-ah-cut")) {
+      if (overflows(el)) cutTexts.push({ problem: "uncut", text: el.textContent.slice(0, 120) });
+    } else if (getComputedStyle(el).textOverflow === "ellipsis" &&
+               !/flex|grid/.test(getComputedStyle(el).display) && overflows(el)) {
+      // `text-overflow` cuts a block's own inline content; a flex or grid
+      // container's children are items it does not cut.
+      cutTexts.push({ problem: "css", text: el.textContent.slice(0, 120), cls: el.className });
+    }
+  }
+
   // A layout drawn without the harness's panel frames (the standalone app
   // shell) is judged as one box, as a panel is.
   if (contentBoxes.length === 0) contentBoxes.push(pageBox(content, kind || "story"));
@@ -542,6 +603,7 @@ function inspectStory({ statePatterns, stateText, messageWording, missingText, m
     replySizes,
     cutNames,
     iconControls,
+    cutTexts,
     contentBox: { width: Math.round(box.width), height: Math.round(box.height) },
     contentBoxes,
   };
@@ -550,8 +612,7 @@ function inspectStory({ statePatterns, stateText, messageWording, missingText, m
 // --- The verdict ------------------------------------------------------------------
 
 // The verdict for one rendered story: a list of failures, each with its
-// category (`placeholder`, `empty`, `error`, `type-size`). An empty list is a
-// pass.
+// category (one of `JUDGE_RULES`). An empty list is a pass.
 export function judge(story, observed) {
   const failures = [];
   const add = (category, message) => failures.push({ category, message });
@@ -611,6 +672,28 @@ export function judge(story, observed) {
   if (nothing && !onlyMessage) {
     add("empty", `the ${page.kind || "story"}'s content area (${page.contentBox.width}x${page.contentBox.height}) shows nothing beyond chrome` +
       (page.chromeText ? ` (chrome: "${page.chromeText.slice(0, 60)}")` : ""));
+  }
+  for (const c of page.cutTexts ?? []) {
+    if (c.problem === "dangles") {
+      add("cut-edge", `a cut text keeps a space or a separator before its "…": "${c.text}" (of "${c.full}")`);
+    } else if (c.problem === "below-floor") {
+      add("cut-edge", `a text is cut to "${c.text}", below its floor "${c.floor}"` +
+        (c.width ? ` on a ${c.width}px line` : ""));
+    } else if (c.problem === "uncut") {
+      add("cut-edge", `a text marked to be cut in code overflows and is not cut: "${c.text}"`);
+    } else if (c.problem === "read-twice") {
+      add("cut-edge", `a drawn cut is in the accessibility tree beside its whole text, read twice: "${c.text}"`);
+    } else if (c.problem === "floor-box") {
+      add("cut-edge", `the counts' box is narrower than their floor "${c.floor}" on a ${c.width}px line (${c.detail}): "${c.text}"`);
+    } else if (c.problem === "floor-overflow") {
+      add("cut-edge", `the counts are pushed past their line on a ${c.width}px line that has room for their floor "${c.floor}" (${c.detail}): the title did not give way`);
+    } else if (c.problem === "floor-unreached") {
+      add("cut-edge", `narrowing the line never brought the counts to their floor "${c.floor}": "${c.text}"`);
+    } else if (c.problem === "css") {
+      add("cut-edge", `an Agent Harbor text is cut by CSS's ellipsis, which cannot trim it (.${String(c.cls).split(" ").join(".")}): "${c.text}"`);
+    } else {
+      add("cut-edge", `a cut text is drawn but the page has no cut rule to check it by: "${c.text}"`);
+    }
   }
   for (const t of page.typeSizes ?? []) {
     add("type-size", `the ${t.panel} panel inherits ${t.size}, the window's type size is ${t.rootSize}` +
@@ -815,18 +898,148 @@ export async function inspectRenderedStory(page, story, observed) {
   return observed.page;
 }
 
+// probeCutTexts(page) -> problems, in the shape of `inspectStory`'s
+// `cutTexts` (verdict `cut-edge`): what the render check asks of the Agent
+// Harbor views' cut texts beyond the one settled frame `inspectStory` reads.
+// It changes the page (it narrows tree nodes), so only the render check runs
+// it, after its screenshot; the capture tool never does.
+//
+// - Read once. A cut text keeps its whole text in the DOM and draws the cut
+//   over it from `data-ah-shown` (`views/ah_cut_text.nim`); the drawn cut
+//   is generated content, which the accessibility tree reads unless the
+//   stylesheet gives it empty alternative text (CSS Generated Content 3,
+//   https://www.w3.org/TR/css-content-3/#alt). A drawn cut in the tree is a
+//   text a screen reader reads twice, whole and cut (`read-twice`).
+// - The counts' floor (CTF-P1c D7). Each tree node's counts
+//   (`data-ah-floor`, `1…`) are narrowed with their line, down to a line
+//   that holds only its fixed parts, the floor and the gaps: at no width may
+//   the counts be drawn below their floor or have a box narrower than it
+//   (`below-floor`, `floor-box`), be left overflowing and uncut (`uncut`), or,
+//   while the line has room for the floor, be pushed past its end because
+//   the title kept its half (`floor-overflow`). The sweep must bring the
+//   counts to their floor at least once, or it proved nothing
+//   (`floor-unreached`). Every width it needs is measured here, from the
+//   faces and the boxes, never read from what `ah_cut_text` computed.
+export async function probeCutTexts(page) {
+  const problems = [];
+  const drawn = await page.evaluate(() =>
+    [...document.querySelectorAll("[data-ah-shown]")]
+      .map((el) => el.getAttribute("data-ah-shown"))
+      .filter(Boolean));
+  if (drawn.length) {
+    const cdp = await page.context().newCDPSession(page);
+    try {
+      const { nodes } = await cdp.send("Accessibility.getFullAXTree");
+      const read = new Set(nodes
+        .filter((n) => !n.ignored && n.role?.value === "StaticText")
+        .map((n) => n.name?.value ?? ""));
+      for (const text of new Set(drawn)) {
+        if (read.has(text)) problems.push({ problem: "read-twice", text });
+      }
+    } finally {
+      await cdp.detach().catch(() => {});
+    }
+  }
+  problems.push(...await page.evaluate(async () => {
+    const found = [];
+    const px = (v) => parseFloat(v) || 0;
+    const frames = (n) => new Promise((resolve) => {
+      const step = (k) => (k === 0 ? resolve() : requestAnimationFrame(() => step(k - 1)));
+      step(n);
+    });
+    const measurer = document.createElement("span");
+    measurer.setAttribute("aria-hidden", "true");
+    measurer.style.cssText = "position:absolute;left:-10000px;top:0;visibility:hidden;white-space:pre";
+    document.body.appendChild(measurer);
+    const advance = (cs, text) => {
+      measurer.style.font = cs.font;
+      measurer.style.fontFeatureSettings = cs.fontFeatureSettings;
+      measurer.style.fontVariantNumeric = cs.fontVariantNumeric;
+      measurer.style.letterSpacing = cs.letterSpacing;
+      measurer.textContent = text;
+      return measurer.getBoundingClientRect().width;
+    };
+    const counts = [...document.querySelectorAll("[data-ah-floor]")]
+      .filter((el) => el.getBoundingClientRect().height > 0 && el.parentElement)
+      .slice(0, 3);
+    for (const el of counts) {
+      const line = el.parentElement;
+      const savedStyle = line.getAttribute("style");
+      const floor = el.getAttribute("data-ah-floor");
+      const cs = getComputedStyle(el);
+      const ls = getComputedStyle(line);
+      const ownEdges = px(cs.paddingLeft) + px(cs.paddingRight) + px(cs.borderLeftWidth) + px(cs.borderRightWidth);
+      const floorBox = advance(cs, floor) + ownEdges;
+      const lineEdges = px(ls.paddingLeft) + px(ls.paddingRight) + px(ls.borderLeftWidth) + px(ls.borderRightWidth);
+      const items = [...line.children].filter((c) => {
+        const s = getComputedStyle(c);
+        return s.display !== "none" && s.position !== "absolute" && s.position !== "fixed";
+      });
+      // What the line needs beside its cut texts: its fixed parts, the
+      // counts' floor and the gaps.
+      let rest = floorBox + px(ls.columnGap) * Math.max(0, items.length - 1);
+      for (const c of items) if (!c.hasAttribute("data-ah-cut")) rest += c.getBoundingClientRect().width;
+      const whole = line.getBoundingClientRect().width;
+      const widths = [whole * 0.6, whole * 0.45, whole * 0.3,
+                      rest + lineEdges + 48, rest + lineEdges + 24, rest + lineEdges + 12, rest + lineEdges + 4]
+        .map(Math.round).filter((w) => w > 0 && w < whole);
+      let reached = false;
+      for (const w of widths) {
+        line.style.flex = "none";
+        line.style.width = line.style.minWidth = line.style.maxWidth = `${w}px`;
+        await frames(4);
+        const lineBox = line.getBoundingClientRect();
+        const room = lineBox.width - lineEdges;
+        const lineRight = lineBox.right - px(ls.paddingRight) - px(ls.borderRightWidth);
+        const box = el.getBoundingClientRect();
+        const shown = el.getAttribute("data-ah-shown") ?? el.textContent;
+        if (shown === floor) reached = true;
+        if ([...shown].length < [...floor].length) {
+          found.push({ problem: "below-floor", text: shown, floor, width: w });
+        }
+        if (!el.hasAttribute("data-ah-shown")) {
+          const range = document.createRange();
+          range.selectNodeContents(el);
+          if (range.getBoundingClientRect().right > box.right - px(cs.paddingRight) - px(cs.borderRightWidth) + 0.01) {
+            found.push({ problem: "uncut", text: `${el.textContent} (its line ${w}px wide)` });
+          }
+        }
+        if (room >= rest + 1) {
+          if (box.width + 0.5 < floorBox) {
+            found.push({ problem: "floor-box", text: shown, floor, width: w,
+                         detail: `${box.width.toFixed(1)}px < ${floorBox.toFixed(1)}px` });
+          }
+          if (box.right > lineRight + 0.5) {
+            found.push({ problem: "floor-overflow", text: shown, floor, width: w,
+                         detail: `${(box.right - lineRight).toFixed(1)}px past the line` });
+          }
+        }
+      }
+      if (savedStyle === null) line.removeAttribute("style"); else line.setAttribute("style", savedStyle);
+      await frames(4);
+      if (widths.length && !reached) {
+        found.push({ problem: "floor-unreached", text: el.textContent, floor });
+      }
+    }
+    measurer.remove();
+    return found;
+  }));
+  return problems;
+}
+
 // renderAndJudge(page, baseUrl, story, theme, opts) -> { observed, failures }.
 // The whole sequence on a fresh page: watch it, open the story, settle,
 // inspect, judge. A failure to finish is a failure (`error`), never a pass.
 // `opts.beforeGoto(page)` runs after the watchers are installed (the render
 // check's plants route the bundle there); `opts.afterInspect(page, observed)`
 // runs on the settled page before the verdict (the render check's screenshot).
+// `opts.moment` opens a playback story at that named moment (`storyUrl`).
 export async function renderAndJudge(page, baseUrl, story, theme, opts = {}) {
-  const { timeoutMs = 90000, beforeGoto, afterInspect } = opts;
+  const { timeoutMs = 90000, beforeGoto, afterInspect, moment = "" } = opts;
   const observed = await watchStoryPage(page);
   try {
     if (beforeGoto) await beforeGoto(page);
-    await page.goto(storyUrl(baseUrl, story.id, theme), { waitUntil: "load", timeout: timeoutMs });
+    await page.goto(storyUrl(baseUrl, story.id, theme, moment), { waitUntil: "load", timeout: timeoutMs });
     await settleStory(page, observed, { timeoutMs });
     await inspectRenderedStory(page, story, observed);
     if (afterInspect) await afterInspect(page, observed);

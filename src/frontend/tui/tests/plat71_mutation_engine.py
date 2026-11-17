@@ -54,6 +54,8 @@ def lane_flags(lane):
 def suite_flags(suite):
     if "/real_terminal/" in suite:
         return lane_flags("tui-real-terminal")
+    if "/real_emulators/" in suite:
+        return []
     if suite.startswith("src/frontend/tui/"):
         return lane_flags("tui")
     return ["--path:src/frontend/viewmodel"]
@@ -149,6 +151,12 @@ class Harness:
                f"-o:{self.nimcache}/{stem}.out"] + suite_flags(suite) + [suite]
         if test_filter:
             cmd.append(test_filter)
+        if "/real_emulators/" in suite:
+            # The real-emulator lane compiles and runs in GuiAssert's dev
+            # shell (`ci/test/tui-real-emulators.sh`); the filter names the
+            # emulators (`CT_REAL_EMULATORS_ONLY`), not a test.
+            cmd = ["bash", "ci/test/tui-real-emulators.sh"]
+            env["CT_REAL_EMULATORS_ONLY"] = test_filter or ""
         try:
             p = subprocess.run(cmd, cwd=REPO, capture_output=True, text=True,
                                timeout=TIMEOUT, env=env)
@@ -202,7 +210,8 @@ class Harness:
             return 3
         only = set(filter(None, a.only.split(",")))
         selected = [arm for arm in self.arms if not only or arm[0] in only]
-        pty = lambda s: "/real_terminal/" in s  # noqa: E731
+        pty = lambda s: ("/real_terminal/" in s  # noqa: E731
+                         or "/real_emulators/" in s)
         needs_binary = any(pty(s) for arm in selected for s, _ in arm[2])
         binary_digest = None
         if needs_binary:

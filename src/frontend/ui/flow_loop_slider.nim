@@ -32,7 +32,12 @@
 ##      `array[2, bool]` to a `Uint8Array`, which noUiSlider rejects with
 ##      `Array.isArray`, and the throw took the whole render pass with it.
 
-import ui_imports
+import std/[dom, jsffi, jsconsole]
+
+# Kept to the DOM and noUiSlider (not `ui_imports`), so a browser suite can
+# load this module on its own: `flow_loop_slider_chromium_test.nim`.
+var noUiSlider {.importc.}: JsObject
+proc jsFloor(x: float): int {.importjs: "Math.floor(#)".}
 
 const
   FlowLoopSliderClass* = "flow-loop-slider"
@@ -71,10 +76,54 @@ proc flowLoopSliderIsMeasurable*(element: Node): bool =
     return false
   cast[Element](element).clientWidth > 0
 
+proc stopWaitingForLayout(element: Node) {.importjs: """
+  (function(el) {
+    if (el && el.__ctSliderLayoutObserver) {
+      el.__ctSliderLayoutObserver.disconnect();
+      el.__ctSliderLayoutObserver = null;
+      el.__ctSliderLayoutRetry = null;
+    }
+  })(#)""".}
+
+proc buildWhenLaidOut(element: Node; build: proc(): bool) {.importjs: """
+  (function(el, build) {
+    // The latest request wins: a control re-rendered before its first layout
+    // asks again with its current pass.
+    el.__ctSliderLayoutRetry = build;
+    if (el.__ctSliderLayoutObserver || typeof ResizeObserver === 'undefined') {
+      return;
+    }
+    var observer = new ResizeObserver(function() {
+      if (!el.isConnected) {
+        // The zone was replaced; its successor waits for itself.
+        observer.disconnect();
+        el.__ctSliderLayoutObserver = null;
+        el.__ctSliderLayoutRetry = null;
+        return;
+      }
+      if (el.clientWidth <= 0) { return; }
+      // Built on the next frame, not inside the observer's delivery: making
+      // the slider changes the box being observed, and a size change during
+      // delivery is the browser's `ResizeObserver loop` error.
+      requestAnimationFrame(function() {
+        var retry = el.__ctSliderLayoutRetry;
+        if (!el.__ctSliderLayoutObserver || !retry) { return; }
+        if (retry()) {
+          observer.disconnect();
+          el.__ctSliderLayoutObserver = null;
+          el.__ctSliderLayoutRetry = null;
+        }
+      });
+    });
+    el.__ctSliderLayoutObserver = observer;
+    observer.observe(el);
+  })(#, #)""".}
+
 proc destroyFlowLoopSlider*(element: Node) =
   ## Tear a slider down, if one was ever built over `element`.
   if element.isNil:
     return
+  stopWaitingForLayout(element)
   if not element.toJs.noUiSlider.isNil:
     element.toJs.noUiSlider.destroy()
     element.toJs.ctSliderMax = nil
@@ -117,28 +166,51 @@ proc ensureFlowLoopSlider*(element: Node; maxIteration, iteration: int;
     element.toJs.noUiSlider.destroy()
 
   try:
-    noUiSlider.create(element, js{
-      "start": iteration,
-      "range": js{
-        "min": FlowLoopSliderFirstIteration,
-        "max": maxIteration
-      },
-      "behaviour": cstring"drag-tap",
-      # Lesson 3. `"lower"` is noUiSlider's own shorthand for `[true, false]`,
-      # in a form that survives the Nim -> JS translation.
-      # https://refreshless.com/nouislider/slider-options/#section-connect
-      "connect": cstring"lower",
-      "step": 1,
-    })
+    let range = newJsObject()
+    range["min"] = FlowLoopSliderFirstIteration
+    range["max"] = maxIteration
+    let options = newJsObject()
+    options["start"] = iteration
+    options["range"] = range
+    options["behaviour"] = cstring"drag-tap"
+    # Lesson 3. `"lower"` is noUiSlider's own shorthand for `[true, false]`,
+    # in a form that survives the Nim -> JS translation.
+    # https://refreshless.com/nouislider/slider-options/#section-connect
+    options["connect"] = cstring"lower"
+    options["step"] = 1
+    discard noUiSlider.create(element, options)
   except:
     # A slider that cannot be constructed must not take the rest of the render
     # pass with it — the counter and its arrows are still usable without one.
-    cerror "flow: noUiSlider.create failed: " & getCurrentExceptionMsg()
+    console.error cstring("flow: noUiSlider.create failed: " & getCurrentExceptionMsg())
     return false
 
   element.toJs.ctSliderMax = maxIteration
   let handler = proc(values: seq[cstring], handle: int, unencoded: seq[float],
                      tap: bool, positions: seq[float]) =
-    onSlide(int(Math.floor(unencoded[0])))
+    onSlide(jsFloor(unencoded[0]))
   cast[JsObject](element).noUiSlider.on(cstring"slide", handler)
   true
+
+proc ensureFlowLoopSliderWhenLaidOut*(element: Node; maxIteration, iteration: int;
+                                      onSlide: proc(iteration: int)): bool =
+  ## `ensureFlowLoopSlider` for a host with no render pass of its own to come
+  ## back from — a review's loop control in a Monaco view zone.
+  ##
+  ## Lesson 1 says never build at zero width; this is the half that makes it
+  ## safe: when the element has no box yet, the slider is built the moment the
+  ## browser lays it out (a `ResizeObserver` on the element), however long that
+  ## takes. A zone revealed by a context expansion is laid out late, and the
+  ## bounded timer this replaces gave up first under load, leaving the control
+  ## without its slider for good.
+  ##
+  ## Returns whether the slider is in place now.
+  if ensureFlowLoopSlider(element, maxIteration, iteration, onSlide):
+    stopWaitingForLayout(element)
+    return true
+  if element.isNil or maxIteration <= FlowLoopSliderFirstIteration or
+     flowLoopSliderIsMeasurable(element):
+    return false
+  buildWhenLaidOut(element, proc(): bool =
+    ensureFlowLoopSlider(element, maxIteration, iteration, onSlide))
+  false

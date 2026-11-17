@@ -2,6 +2,7 @@ import
   service_imports,
   ../[ types, utils ],
   ../lib/[ logging, jslib ]
+from ../event_helpers import errorMessage
 
 proc switchHistory*(self: EditorService, path: cstring, editorView: EditorView) =
   clog "tabs: switchHistory: " & $path & " " & $editorView
@@ -103,6 +104,12 @@ data.services.editor.onOpenedTab = proc(self: EditorService, response: OpenedTab
   self.data.openTab(response.path, ViewSource) # , response.lang)
 
 
+var expansionOpenedHook*: proc(parent: EditorViewComponent) = nil
+  ## Installed by `ui/editor`: draws the parent editor's expansions
+  ## (`editorAfterRedraw` mounts each one's view zone). `openExpanded` only
+  ## records the expansion on its parent, and a `redraw` does not reach the
+  ## Monaco zones, so the expansion stayed undrawn until the replay next moved.
+
 proc openExpanded*(self: EditorService, location: types.Location) {.async.} =
   # isExpanded true
   let name = cstring(&"expanded-{location.expansionFirstLine}")
@@ -112,10 +119,10 @@ proc openExpanded*(self: EditorService, location: types.Location) {.async.} =
     self.expandedOpen[name] = TabInfo() # guard against next entering the function before loading all in the current call
 
   var parentName = cstring""
-  let parentLocation = location.expansionParents[0]
+  let parentLocation = location.expansionParent(0)
   var parentEditor: EditorViewComponent
   if location.expansionParents.len > 1:
-    let parentId = location.expansionParents[1][2] # (parent of parent)'s first line
+    let parentId = location.expansionParent(1)[2] # (parent of parent)'s first line
     parentName = cstring(&"expanded-{parentId}")
     if self.expandedOpen.hasKey(parentName):
       # let expanded = self.expandedOpen[parentName]
@@ -139,12 +146,16 @@ proc openExpanded*(self: EditorService, location: types.Location) {.async.} =
   editorComponent.topLevelEditor = parentEditor.topLevelEditor
   var tabLoadLocation = location #TODO is this a new one-level clone?
   tabLoadLocation.functionName = name
-  let tabInfo = await self.tabLoad(location, ViewMacroExpansion, self.data.trace.lang)
+  # `tabLoadLocation`, not `location`: an expansion's tab is named by its
+  # `functionName` (`tabLoad`), which only the copy carries.
+  let tabInfo = await self.tabLoad(tabLoadLocation, ViewMacroExpansion, self.data.trace.lang)
   self.expandedOpen[name] = tabInfo
   parentEditor.expanded[parentLocation[1]] = editorComponent
   editorComponent.tabInfo = tabInfo
   self.active = name
   self.data.redraw()
+  if not expansionOpenedHook.isNil:
+    expansionOpenedHook(parentEditor)
 
 # TODO init
 
@@ -153,7 +164,19 @@ data.services.editor.onExpansionResponse = proc(self: EditorService, location: t
   ## When the location has expansion data, open the expanded code inline.
   ## Otherwise, navigate to the resolved high-level source location.
   if location.isExpanded:
-    await self.openExpanded(location)
+    # The caller discards this future (`middleware`, the `CtUpdateExpansion
+    # Response` handler), so a failure here was silent: the expansion simply
+    # never appeared. It is said instead.
+    try:
+      await self.openExpanded(location)
+    except:
+      # A bare `except`: a JavaScript error (a `TypeError` from a missing
+      # editor) is not a `CatchableError` and would be re-raised into the
+      # discarded future.
+      let msg = getCurrentExceptionMsg()
+      cerror "editor: macro expansion could not be opened: " & msg
+      self.data.viewsApi.errorMessage(cstring(
+        "Toggle Macro Expansion: the expansion could not be opened: " & msg))
   elif location.highLevelPath.len > 0 and location.highLevelLine > 0:
     self.data.openTab(location.highLevelPath, ViewSource, line = location.highLevelLine)
 

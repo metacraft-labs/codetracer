@@ -74,6 +74,7 @@ import ./app/tui_app
 import ./host/build_runner
 import ./host/capabilities
 import ./host/edit_host
+import ./host/edit_services
 import ./host/headless
 import ./host/highlight_worker
 import ./host/file_worker
@@ -81,6 +82,7 @@ import ./host/key_journal
 import ./host/layout_store
 import ./host/native_host
 import ./app/views/low_level_code_pane   # PLAT-60: `LowLevelAct`
+import ./app/views/visual_replay_panes   # PLAT-59: `VisualAct`
 import ./host/pane_server
 from ../viewmodel/host/find_in_files import running   # PLAT-57
 from ../viewmodel/host/native_file_tree import wireNativeFileOperations,
@@ -103,6 +105,7 @@ from ../viewmodel/viewmodels/test_results_vm import TraceOpenPolicy,
   noteTestTab, forgetTestTab   # Test-Results-Pane.md §9
 import ./host/build_output_source   # PLAT-56
 from ../viewmodel/host/native_requests_host import wireRequests   # PLAT-58
+import ../viewmodel/host/native_nim_tracer   # Nim's compile-time tracing
 import ./app/views/requests_pane   # PLAT-58: `RequestsAct`
 import ./app/views/shell_session_pane   # PLAT-61: `ShellAct`
 # PLAT-49 part B: the session strip's sessions — opened, adopted, closed here.
@@ -118,6 +121,7 @@ from backend/stdio_backend import toBackendService
 from ./app/views/file_tree import FileTreeModel
 import ./host/control_icons
 import ./host/image_probe
+import ./host/frame_image   # PLAT-59: the Video Player's frame at tier 0
 import ./app/theme/palette
 import ../viewmodel/host/keymap_preference
 import ../viewmodel/host/keybindings_file
@@ -153,6 +157,10 @@ proc idleWaitMs(rt: TuiRuntime): int =
   ## a search streams (PLAT-57), or while a scrollbar fades (PLAT-70 Part H).
   if nativeFindInFiles.running:
     return SearchPollMs
+  # PLAT-59: the Visual Replay panes' clock (playback, a held scrubber, a
+  # frame on its way).
+  if rt.visualBusy:
+    return VisualTickMs
   # PLAT-70 Part B: a truncated cell's tooltip is due too (500 ms of rest).
   var due = rt.autoHideDueMs()
   let hover = rt.cellHoverDueMs()
@@ -171,111 +179,6 @@ proc idleWaitMs(rt: TuiRuntime): int =
     return IdlePollMs
   clamp(int(due - nowMs()), 1, IdlePollMs)
 
-type
-  EditHostState = ref object
-    ## The one piece of Edit-mode state a LOOP owns rather than `app/`: the
-    ## process behind `:build` / `:run`.
-    ##
-    ## A `ref` AND NOT A `var` LOCAL, because `startBuild`'s closure has to
-    ## write it and Nim does not let a closure capture a `var` parameter. It is
-    ## also what lets `wireEditServices` be one function called from two loops
-    ## instead of two copies of the same five closures — §14's construction
-    ## rule, and the copy that would have been forgotten is the entrypoint's,
-    ## because no suite compiles this module.
-    running: RunningBuild
-
-proc wireEditServices(rt: TuiRuntime; root: string; keymapFlag: string;
-                      listFiles: proc(): EditListResult): EditHostState =
-  ## Hand `rt` the four capabilities `app/` may not have: read a file, write a
-  ## file, list the project, start a process.
-  ##
-  ## **BOTH LOOPS CALL THIS**, and that is the whole reason it exists as a
-  ## function. `ct edit --ui=tui` obviously needs them; `ct replay --ui=tui`
-  ## needs them too, because `Ctrl+F5` reaches Edit mode from a replay session
-  ## and CodeTracer-TUI-Edit-Mode.md §6 says it must: *"the toggle moves
-  ## between them within one session, as on the desktop."* Until PLAT-16's
-  ## landing pass the replay loop wired none of them, so that toggle arrived at
-  ## an editor with no reader — and §2.1's stale-trace notice, which needs a
-  ## recording AND an edit at the same time, had no route in the product on
-  ## which it could fire at all.
-  ##
-  ## `listFiles` is the parameter because it is the one that differs: see
-  ## `runtime.EditServices.listFiles` for why one loop can walk the project
-  ## before it claims the terminal and the other must not walk it at all until
-  ## asked.
-  let state = EditHostState()
-  # PLAT-51: THE ROOT IS READ AT EACH CALL — a welcome tab's "Open folder"
-  # re-roots the session's Edit mode (`app.projectRoot`), and every service
-  # follows it.
-  proc rootOf(): string =
-    if rt.app.projectRoot.len > 0: rt.app.projectRoot else: root
-  rt.editServices.readFile = proc(relative: string): EditReadResult =
-    try:
-      EditReadResult(ok: true, text: readProjectFile(rootOf(), relative))
-    except TuiHostError as e:
-      EditReadResult(ok: false, message: e.msg)
-  rt.editServices.writeFile = proc(relative, text: string): EditWriteResult =
-    try:
-      writeProjectFile(rootOf(), relative, text)
-      EditWriteResult(ok: true)
-    except TuiHostError as e:
-      EditWriteResult(ok: false, message: e.msg)
-  rt.editServices.readConfig = proc(spelled: string): EditReadResult =
-    try:
-      EditReadResult(ok: true, text: readUserConfigFile(rootOf(), spelled))
-    except TuiHostError as e:
-      EditReadResult(ok: false, message: e.msg)
-  rt.editServices.listFiles = listFiles
-  # K19: Edit mode's Files menu acts on the disk here, in-process, by the
-  # index process's rules (`native_file_tree`).
-  rt.editServices.wireFileTree = proc(vm: FilesystemVM;
-                                      openedFolder: proc(): string;
-                                      done: proc(r: FileTreeOperationResult)) =
-    wireNativeFileOperations(vm, openedFolder, done)
-  # PLAT-43. The keymap model this session starts under is the one the user
-  # last chose, read through the same `selectKeymap` a typed `:keymap` goes
-  # through. A stored value that is not a model is REFUSED BY NAME on the
-  # status line and the session runs the product default — never a silent
-  # fallback a user cannot tell from a working preference.
-  #
-  # PLAT-68: precedence is the `--keymap` flag (this session only, never
-  # stored), then the stored preference, then `cua` (Base-Keymaps §3.6). A
-  # stored `default` — PLAT-43's name for the product default — is read as
-  # `cua` and rewritten, and the notice says so once.
-  let keymapPreference = sessionKeymap(keymapFlag)
-  rt.selectBase(keymapPreference.model,
-                case keymapPreference.reason
-                of "flag": ksFlag
-                of "stored": ksStored
-                else: ksDefault)
-  if keymapPreference.status in {kplRefused, kplMigrated}:
-    rt.keymapNotice = keymapPreference.message
-    rt.app.notification = keymapPreference.message
-  rt.editServices.saveKeymap = proc(model: BaseKeymap): string =
-    saveKeymapPreference(model)
-  rt.editServices.startBuild = proc(kind: BuildKind;
-                                    cmd: string): BuildStartResult =
-    state.running = startBuild(kind, cmd, rootOf(), nowMonoMs())
-    rt.app.build = state.running.session
-    if state.running.session.verdict == bvRunning:
-      BuildStartResult(ok: true, message: $kind & " started: " & cmd)
-    else:
-      BuildStartResult(ok: false, message: describeVerdict(state.running.session))
-  # Build-Output-Pane.md §3.6: a build TASK — its command in its own working
-  # directory, named, read by its problem matcher.
-  rt.editServices.projectDir = proc(): string = rootOf()
-  rt.editServices.startTask = proc(cmd, dir, task,
-                                   matcher: string): BuildStartResult =
-    state.running = startBuild(bkBuild, cmd, (if dir.len > 0: dir
-                                              else: rootOf()), nowMonoMs())
-    state.running.session.taskName = task
-    state.running.session.problemMatcher = matcher
-    rt.app.build = state.running.session
-    if state.running.session.verdict == bvRunning:
-      BuildStartResult(ok: true, message: "")
-    else:
-      BuildStartResult(ok: false, message: describeVerdict(state.running.session))
-  state
 
 proc wireKeybindings(rt: TuiRuntime): ref KeybindingsLoad =
   ## PLAT-68: THE ONE USER KEYMAP (Base-Keymaps-And-Layer-Stack.md §3.5) —
@@ -397,6 +300,8 @@ proc adoptMouseMetrics(driver: TerminalDriver; n: StartupNegotiation) =
     driver.enablePixelMouse()
 
 var gIconState: ControlIconState
+var gFrameImage: FrameImageState
+  ## PLAT-59: what the terminal holds of the Video Player's tier-0 frame.
   ## What the terminal already holds of the controls' pictures (one terminal
   ## per process).
 
@@ -460,28 +365,18 @@ proc drainHighlights(rt: TuiRuntime; worker: HighlightWorker;
     if rt.deliverFileJob(res):
       result = true
 
-proc advanceBuild(rt: TuiRuntime; state: EditHostState;
-                  report: bool): bool =
-  ## Advance a running build by one tick. Returns whether the screen changed.
-  ##
-  ## `report` is what tells the two call sites apart, and they are different on
-  ## purpose: on an IDLE tick nothing else is competing for the status line, so
-  ## a verdict goes there; right after a KEY the line belongs to whatever the
-  ## key just said (`:cancel` says *"cancelling …"*), and overwriting it would
-  ## take the user's own answer away from them one tick later.
-  ##
-  ## `pollBuild` does not block — `host/build_runner.nim`'s header carries the
-  ## measurement that says so, and the suite that keeps it true is
-  ## `tests/test_build_runner_process.nim`.
-  if state.isNil or state.running.isNil:
-    return false
-  result = pollBuild(state.running, nowMonoMs())
-  if result and report:
-    rt.app.notification = describeVerdict(state.running.session)
-
 var gCaretSupport = caretShapes
   ## PLAT-49: whether the running terminal shapes its cursor (`interactive`
   ## decides it once, from `TERM` / `TERM_PROGRAM` / `TMUX`).
+
+proc projectPointer(driver: TerminalDriver; rt: TuiRuntime; token: string) =
+  ## Pointer-Affordances §5.3: each mouse report's shape, written on change.
+  ## A Shift-modified report is the terminal's own (`handleToken`).
+  if driver.pointer.caps.dialect == pdOff:
+    return
+  let (isMouse, event) = decodeMouse(token)
+  if isMouse and not event.shift:
+    driver.setPointerShape(rt.pointerShapeAt(event))
 
 proc paint(driver: TerminalDriver; rt: TuiRuntime) =
   ## One frame of `rt` onto `driver`.
@@ -491,15 +386,28 @@ proc paint(driver: TerminalDriver; rt: TuiRuntime) =
   ## does not move the cursor. §3.3.6's prompt DOES move it, so it goes in the
   ## epilogue — `docs/tui-testing.md` records why those two are different hooks
   ## and what it costs a reader of the frame barrier.
-  let screen = rt.shellScreenOf()
+  var screen = rt.shellScreenOf()
+  # Terminal-Adaptation §9.4 (the screen-reader mode): find the focused
+  # element on the frame; a focus change is announced on the status line,
+  # so the frame is painted again with it (SR-D5, SR-D7).
+  if rt.followFocus(screen):
+    screen = rt.shellScreenOf()
   var epilogue = ""
   # PLAT-48: the debugger controls as the desktop's marks, placed over the
-  # cells the top bar reserved — only on a terminal measured to draw them.
+  # cells the top bar reserved — only on a terminal measured to draw them,
+  # and never in the screen-reader mode, which reads text (SR-D3).
   let mode = rt.caps.mode
-  epilogue.add controlIconBytes(gIconState, screen.topBarLayout,
-                                rt.app.controlsEnabledOf(),
-                                RoleColourTable[mode][srChromeText].fgRgb,
-                                RoleColourTable[mode][srChromeMuted].fgRgb)
+  if not rt.caps.screenReader:
+    epilogue.add controlIconBytes(gIconState, screen.topBarLayout,
+                                  rt.app.controlsEnabledOf(),
+                                  RoleColourTable[mode][srChromeText].fgRgb,
+                                  RoleColourTable[mode][srChromeMuted].fgRgb)
+  # PLAT-59: the Video Player's frame at tier 0, transmitted over the cells
+  # the pane reserved (taken down when they go).
+  let frameRect =
+    if rt.app.frameViewer.transmitsProtocol: rt.videoPlayerScreen().screen.protocolRect
+    else: CellArea()
+  epilogue.add frameImageBytes(gFrameImage, frameRect, rt.app.frameViewer)
   let (prompting, row, col) = rt.promptCursor()
   if prompting:
     epilogue.add "\x1b[" & $(row + 1) & ";" & $(col + 1) & "H" &
@@ -517,14 +425,24 @@ proc paint(driver: TerminalDriver; rt: TuiRuntime) =
       gCaretSupport)
   # PLAT-51: A WELCOME TAB'S FORM owns the caret when it is open (the
   # omnibar's and the prompt's win, being over it).
+  var formCaret = false
   if not prompting and not caret.shown:
     let wv = rt.app.welcomeViewOf()
     if wv.shown:
       let wc = welcomeCursor(wv, screen.welcomeLayout)
       if wc.on:
+        formCaret = true
         epilogue.add caretBytes(
           TextCaret(row: wc.row, col: wc.col, visible: true, shape: ckBar),
           gCaretSupport)
+  # Terminal-Adaptation §9.4 SR-D5: THE CURSOR FOLLOWS FOCUS in the
+  # screen-reader mode — shown, a steady block, on the focused element, so a
+  # screen reader's review cursor tracks it. A prompt, the omnibar and a
+  # form keep the caret they own.
+  if rt.caps.screenReader and rt.focusSpot.found and not prompting and
+     not caret.shown and not formCaret:
+    epilogue.add "\x1b[" & $(rt.focusSpot.row + 1) & ";" &
+                 $(rt.focusSpot.col + 1) & "H\x1b[2 q" & ShowCursorBytes
   # PLAT-50: TEXT A CLICK COPIED (the editor menu's Copy) goes to the
   # terminal's clipboard — OSC 52 (`ESC ] 52 ; c ; <base64> BEL`, xterm's
   # "Manipulate Selection Data",
@@ -638,7 +556,13 @@ proc reportCapabilities(command: TuiCommand): int =
     let driver = newTerminalDriver(caps)
     driver.start()
     try:
-      negotiated = driver.negotiateOnTerminal(flags, prefs).caps
+      # A one-shot report has no frame to protect: it waits for the fence
+      # up to the late-reply window, and inside tmux for the outer
+      # terminal's wrapped OSC 22 answer too, so a slow terminal is
+      # reported from its answers and not from the environment alone.
+      negotiated = driver.negotiateOnTerminal(
+        flags, prefs, timeoutMs = diagnosticProbeTimeoutMs(),
+        pointerGraceMs = DiagnosticPointerGraceMs).caps
     finally:
       driver.stop()
   if command.capabilitiesJson:
@@ -665,13 +589,14 @@ proc wireTerminalService(rt: TuiRuntime; n: StartupNegotiation;
       var c = TerminalChoices()
       if not choicesOf(which, value, c):
         return "'" & value & "' is not a value of " & $which
-      if which in {lsGlyphs, lsAmbiguousWidth, lsColors, lsReduceMotion} and
-         value == "auto":
+      if which in {lsGlyphs, lsAmbiguousWidth, lsColors, lsReduceMotion,
+                   lsScreenReader} and value == "auto":
         # `auto` at rank 1 SAYS NOTHING: drop an earlier `:set` of this axis.
         case which
         of lsGlyphs: n.session.glyphs = none(GlyphsChoice)
         of lsAmbiguousWidth: n.session.ambiguousWidth = none(AmbiguousChoice)
         of lsColors: n.session.colors = none(ColorsChoice)
+        of lsScreenReader: n.session.screenReader = none(bool)
         else: n.session.reduceMotion = none(bool)
       discard n.setSessionChoice(driver, c)
       rt.adoptCaps(n.caps)
@@ -687,6 +612,8 @@ proc wireTerminalService(rt: TuiRuntime; n: StartupNegotiation;
          of lsColors: "colours " & $caps.colors
          of lsReduceMotion: "motion " &
            (if caps.reduceMotion: "reduced" else: "animated")
+         of lsScreenReader: "screen reader " &
+           (if caps.screenReader: "on" else: "off")
          else: "applied"),
     setForThisTerminal: proc(which: LayoutSetting; value: string): string =
       let name = n.caps.identity.name
@@ -812,6 +739,16 @@ proc interactive(command: TuiCommand): int =
   let projectRoot = getCurrentDir()
   app.projectRoot = projectRoot
   let rt = newTuiRuntime(app, negotiation.caps, size.cols, size.rows)
+  # A MOVE IN FLIGHT IS DRAWN AS ONE. Sending a move blocks this loop until
+  # the replay answers (the native backend's request, then `pumpMove`), so the
+  # frame painted just before it is sent says what the replay is doing and
+  # the badge never reads PAUSED over the stop being left. Skipped when the
+  # next key is already waiting (that key's frame replaces it before a
+  # terminal could show it). Reset to PAUSED once the token is applied.
+  rt.moveStarting = proc(action: KeyAction) =
+    if not driver.inputPending():
+      app.replayStatus = statusWhileMoving(action)
+      paint(driver, rt)
   # Opening a replay gives its editor the keyboard. Seed this before the
   # layout binding copies the focus; restoring a saved layout then keeps it
   # only while the editor is visible. Empty shells keep projection order.
@@ -980,6 +917,12 @@ proc interactive(command: TuiCommand): int =
       if app.recordingOpener.isNil: "this terminal cannot open " & path
       else: app.recordingOpener(path))
     session.refresh(rt)
+    # PLAT-59: the image decision the Video Player draws at, and the
+    # recording's graphics — its player and the Visual Replay panes.
+    rt.imageCapability = resolveImageCapability(readTerminalEnv(),
+      readImageEnv(), rt.caps, command.flags)
+    session.attachVisualReplay(rt, folder, highlights.wakeWriteFd)
+    session.syncVisualLayout(rt)
   except DapStalledError as e:
     driver.stop()
     for line in stalledAfterOpenReport(TuiProgramName, folder, e.msg):
@@ -1010,7 +953,7 @@ proc interactive(command: TuiCommand): int =
     ## the desktop's new tab starts from the current one.
     if not sessions.hasKey(int(id)):
       return
-    let fromEnded = not session.isNil and session.ended
+    let fromEnded = not session.isNil and session.ended and not session.refused
     session = sessions[int(id)]
     shownId = id
     let slot = app.shell.activeSlot()
@@ -1018,7 +961,7 @@ proc interactive(command: TuiCommand): int =
       # The DEBUG arrangement, even when the tab is left in Edit mode: a
       # slot holds a replay arrangement (`runtime.debugArrangementOf`).
       slot.layout = rt.debugArrangementOf().clone()
-    if session.ended:
+    if session.ended and not session.refused:
       # M76: a tab whose session *Stop* ended is an edit tab: nothing of a
       # replay is shown in it, and its workspace is Edit mode.
       rt.forgetSession()
@@ -1035,6 +978,7 @@ proc interactive(command: TuiCommand): int =
     app.fileTree = FileTreeModel()      # this session's files (`refresh`)
     session.setViewportHeight(rt.sourcePaneRows())
     session.refresh(rt)
+    session.syncVisualLayout(rt)        # PLAT-59: this recording's graphics
     app.refreshOmnibarIndex()
     app.notification = describe(session)
 
@@ -1085,6 +1029,9 @@ proc interactive(command: TuiCommand): int =
     opened.wireShell(proc(path: string): string =
       if app.recordingOpener.isNil: "this terminal cannot open " & path
       else: app.recordingOpener(path))
+    # PLAT-59: this recording's graphics (its panes are placed when its tab
+    # is shown, `showSession`).
+    opened.attachVisualReplay(rt, path, highlights.wakeWriteFd)
     sessions[int(slot.id)] = opened
     # M76: OPENED FROM A TAB WHOSE SESSION *STOP* ENDED — *File › Open
     # Trace…* (or *Record New Trace…*) chosen there, whose welcome tab
@@ -1180,14 +1127,27 @@ proc interactive(command: TuiCommand): int =
     session.requestsAct(rt, act)
   # PLAT-60: the Low Level Code pane — a press, a menu, a key, the sync
   # toggle, the editor's caret, a step — done through the shown session's
-  # `LowLevelCodeVM`.
+  # `LowLevelCodeVM` — in Edit mode, Edit mode's listing of the compiled C
+  # (HSF-E11, `edit_services.editLowLevelAct`).
   app.lowLevelAct = proc(act: LowLevelAct): LowLevelActResult =
-    session.lowLevelAct(rt, act)
+    if app.modes.product == pmEdit: rt.editLowLevelAct(edit, act)
+    else: session.lowLevelAct(rt, act)
+  # Editor-Hosted-Front-Ends §E15: Toggle Macro Expansion, through the shown
+  # session's `MacroExpansionVM`.
+  app.toggleMacroExpansion = proc(path: string; line: int):
+      tuple[ok, opened: bool; detail: string] =
+    session.toggleMacroExpansion(rt, path, line)
   # PLAT-61: the Shell pane — a key, a press on a recorded command, the
   # scrollback — done through the shown session's `ShellVM`; its shell is
   # pumped on the idle tick below.
   app.shellAct = proc(act: ShellAct): ShellActResult =
     session.shellAct(rt, act)
+  # PLAT-59: the Visual Replay panes — the transport, the scrubbers, the
+  # picker, a history row, a shader step — done through the shown session's
+  # `VisualReplayPanesVM`; its answers, playback and a held scrubber's
+  # coalesced frame are pumped on the idle tick below.
+  app.visualAct = proc(act: VisualAct): VisualActResult =
+    session.visualAct(rt, act)
 
   # PLAT-47 deliverable 4: the VCS pane reads the directory the desktop's VCS
   # panel reads for a replay — the process's own working directory.
@@ -1445,6 +1405,16 @@ proc interactive(command: TuiCommand): int =
       app.recentFolders.insert(path, 0)
       rt.enterProductMode(pmEdit)
       ""
+  proc openNimTrace(request: TraceOpenRequest): string =
+    ## A Nim trace's recording, opened where `request.policy` says: a new
+    ## session tab, or in place of the current tab's session.
+    if app.recordingOpener.isNil:
+      return "this terminal cannot open " & request.tracePath
+    if request.policy != topCurrentTab:
+      return app.recordingOpener(request.tracePath)
+    replaceTab = int(shownId)
+    try: app.recordingOpener(request.tracePath)
+    finally: replaceTab = -1
   proc pollRecording(): bool =
     ## The background `ct record`, once it finishes: its recording opened
     ## in the tab that asked, or the failure on that tab's screen.
@@ -1532,6 +1502,12 @@ proc interactive(command: TuiCommand): int =
       if graphicsProbe.open and nowMs() > graphicsProbe.deadlineMs:
         # No answer: the terminal draws no pictures. The default stays.
         graphicsProbe.open = false
+        # PLAT-59: and the Video Player draws its frame as cells.
+        rt.imageCapability = resolveImageCapability(readTerminalEnv(),
+          readImageEnv(), rt.caps, command.flags,
+          GraphicsProbe(attempted: true, answered: true, kitty: false))
+        if session.refreshVisualIfShown(rt):
+          paint(driver, rt)
       discard rt.clipboardReadDue(driver)
       if not graphicsProbe.open and not rt.clipboardRead.open:
         negotiation.closeReplyWindow(driver)
@@ -1564,8 +1540,13 @@ proc interactive(command: TuiCommand): int =
       let requestsChanged = session.pumpRequests(rt, nowMs())
       # PLAT-61: what the Shell pane's shell wrote and reported.
       let shellChanged = session.pumpShell(rt)
-      # PLAT-51: a welcome tab's recording, when it finishes.
-      let recorded = pollRecording()
+      # PLAT-59: the player's answers, playback, a held scrubber's frame.
+      let visualChanged = session.pumpVisual(rt, nowMs())
+      # PLAT-51: a welcome tab's recording, when it finishes; a Nim trace's
+      # too.
+      # HSF-E11: Edit mode's generated C, when its compile settles.
+      let recorded = pollRecording() or advanceNimTrace(rt, edit, openNimTrace) or
+                     advanceGeneratedC(rt, edit)
       # PLAT-49 part B: the auto-hide hover's clock — a preview due after
       # the pointer rested on a label, a dismissal due after it left.
       let hoverChanged = rt.tickAutoHide(nowMs()) or
@@ -1581,7 +1562,7 @@ proc interactive(command: TuiCommand): int =
       if drainHighlights(rt, highlights, files) or built or vcsChanged or
          hoverChanged or frameOwed or recorded or keysChanged or searched or
          barsChanged or testsChanged or agentChanged or problemsChanged or
-         requestsChanged or verified or constraintsChanged or shellChanged:
+         requestsChanged or verified or constraintsChanged or shellChanged or visualChanged:
         paint(driver, rt)
         frameOwed = false
     of dekResize:
@@ -1599,6 +1580,7 @@ proc interactive(command: TuiCommand): int =
       discard vcs.followViewport(rt)
       paint(driver, rt)
     of dekFocus:
+      driver.pointerFocusChanged(ev.focused)
       # THE VCS PANE'S SECOND TRIGGER (VCS-Panel.md's auto-refresh, the
       # desktop's window `focus` listener in `ui/vcs.nim`): the terminal
       # window regained focus (`CSI I`, DECSET 1004), so the repository is
@@ -1616,6 +1598,13 @@ proc interactive(command: TuiCommand): int =
       # the user chose otherwise. Never a key, never journalled.
       if isGraphicsProbeReply(ev.token):
         graphicsProbe.open = false
+        # PLAT-59: the path MEASURED: the Video Player's frame goes at tier 0
+        # only where the Kitty query came back.
+        rt.imageCapability = resolveImageCapability(readTerminalEnv(),
+          readImageEnv(), rt.caps, command.flags,
+          GraphicsProbe(attempted: true, answered: true,
+                        kitty: ev.token.contains(";OK")))
+        session.refreshVisual(rt)
         if ev.token.contains(";OK"):
           rt.app.graphicsDrawn = true
           if not rt.app.iconsChosen:
@@ -1632,12 +1621,18 @@ proc interactive(command: TuiCommand): int =
           app.notification = capabilityNote(negotiation.caps, hintsOn)
           paint(driver, rt)
         continue
+      # §4.3: A STRING (OSC / DCS / APC) IS NEVER A KEY. One that no query of
+      # this session accounts for — a terminal's late answer after the reply
+      # window, an unsolicited report — is dropped, never typed.
+      if isStringToken(ev.token):
+        continue
       # RECORDED BEFORE IT IS HANDLED, so the journal of a session that quit on
       # this token still contains it. A `q` written down only after the loop
       # decided to stop would be a journal that replays to a different screen
       # than the one it recorded.
       journal.note(ev.token)
       let outcome = rt.handleToken(ev.token, nowMs())
+      driver.projectPointer(rt, ev.token)
       if outcome.quit:
         running = false
       else:
@@ -1652,6 +1647,8 @@ proc interactive(command: TuiCommand): int =
         if not vcs.applyClick(rt, outcome.paneClick) and
            not tests.applyClick(rt, outcome.paneClick):
           session.applyOutcome(rt, outcome)
+        # the move (if the token made one) has been drawn at its stop
+        app.replayStatus = esPaused
         # V6: THE VCS HISTORY FOLLOWS ITS LIST. The token may have scrolled the
         # pane, revealed its tab or committed an arrangement that resized it;
         # a list that now reaches the last commit read reads more at once.
@@ -1891,6 +1888,10 @@ proc editInteractive(command: TuiCommand): int =
   let files = startFiles(rt, root, highlights)
   defer: files.stop()
 
+  # HSF-E11: the Low Level Code pane shows Edit mode's generated C, from the
+  # services' own listing (this loop has no replay).
+  app.lowLevelAct = proc(act: LowLevelAct): LowLevelActResult =
+    rt.editLowLevelAct(edit, act)
   # THE SAME FUNCTION THE TOGGLE CALLS. Opening the first file and filling the
   # tree used to be written out here as well as in `app/runtime.nim`; two
   # copies of one behaviour is §14's subject, and this is the copy no suite
@@ -1978,7 +1979,9 @@ proc editInteractive(command: TuiCommand): int =
       # is the whole of §5's cancellability requirement: the key that cancels is
       # read while the compiler runs, and the clock that bounds an unattended
       # session is checked on every tick. See `host/build_runner.pollBuild`.
-      let built = advanceBuild(rt, edit, report = true)
+      let built = advanceBuild(rt, edit, report = true) or
+                  advanceNimTrace(rt, edit, nil) or
+                  advanceGeneratedC(rt, edit)
       let vcsChanged = vcs.tick(rt)
       let testsChanged = tests.tick(rt)
       let problemsTicked = problems.tick(rt, nowMonoMs())
@@ -2015,7 +2018,10 @@ proc editInteractive(command: TuiCommand): int =
           app.notification = capabilityNote(negotiation.caps, hintsOn)
           paint(driver, rt)
         continue
+      if isStringToken(ev.token):
+        continue   # §4.3: a late or unsolicited answer, never a key
       let outcome = rt.handleToken(ev.token, nowMs())
+      driver.projectPointer(rt, ev.token)
       if outcome.quit:
         loop = false
       else:

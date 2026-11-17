@@ -1,0 +1,48 @@
+scenario: 1
+name: multi-window/a-file-opened-in-the-second-window-opens-there
+pack: codetracer
+summary: >-
+  In a window opened for the session, a file clicked in its own Files pane
+  opens in that window's editor, and the first window's editor does not
+  open it.
+
+stage:
+  - use: record-program
+    with: { program: noir_space_ship }
+  - use: open-recording
+
+clients:
+  main: { open: stage }
+
+steps:
+  - wait: { until: replay-idle, timeout: 360s }
+    as: main
+  - wait: { until: { at: 'editor[file="main.nr"]', present: true }, timeout: 60s }
+    as: main
+  - click: session-strip/session-add
+    as: main
+  - wait: { until: { at: session-strip, count: 2 }, timeout: 30s }
+    as: main
+  - click: { at: 'session-strip/session-tab[title="zk_shields"]', button: right }
+    as: main
+  - wait: { until: { at: 'context-menu/menu-item[label="Open in New Window"]', present: true }, timeout: 15s }
+    as: main
+  - click: 'context-menu/menu-item[label="Open in New Window"]'
+    as: main
+  - open-client: { name: second, open: app-window }
+  - wait: { until: { at: 'editor[file="main.nr"]', present: true }, timeout: 120s }
+    as: second
+  - click: 'pane-tab[label="FILES"]'
+    as: second
+  - wait: { until: { at: 'filesystem/file-node[name="shield.nr"]', present: true }, timeout: 60s }
+    as: second
+  - click: 'filesystem/file-node[name="shield.nr"]'
+    as: second
+  - wait: { until: { at: 'editor[file="shield.nr"]', active: true }, timeout: 60s }
+    as: second
+  - click: 'session-strip/session-tab[title="zk_shields"]'
+    as: main
+  - wait: { until: { at: 'editor[file="main.nr"]', present: true }, timeout: 30s }
+    as: main
+  - expect: { at: 'editor[file="shield.nr"]', absent: true, holds: 2s }
+    as: main

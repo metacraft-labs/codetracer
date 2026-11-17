@@ -1,0 +1,16 @@
+scenario: 1
+name: languages/lean-sudoku-event-log-populated
+pack: codetracer
+summary: >-
+  A Lean Sudoku solver recording opens and its event log lists the program's
+  events.
+
+stage:
+  - use: record-program
+    with: { program: lean_sudoku_solver/Main.lean, backend: rr }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 240s }
+  - click: 'pane-tab[label="EVENT LOG"]'
+  - wait: { until: event-log.loaded, timeout: 120s }

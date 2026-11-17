@@ -88,6 +88,23 @@ const
     ## and for the same reason: the number is compared against a fixed gate on a
     ## shared host, so the figure that matters is the one the machine can do
     ## rather than the one a scheduler happened to allow.
+  PaintRatioGate = 4.0
+    ## The paint's gate: expand+paint may take at most this many times the
+    ## expansion MEASURED IN THE SAME RUN. A ratio, not a second 15 ms.
+    ##
+    ## CTUI-7's number is the expansion's, and that gate stays absolute. The
+    ## paint gate is this file's own addition, and an absolute bound on it
+    ## judged the host rather than the code. Best-of-40 does not filter out
+    ## sharing a physical core with another busy thread: that slows the whole
+    ## process for the length of a run. On a 24-thread hybrid i9-12900K shared
+    ## with a CI runner fleet (codetracer dev a3986b0de1, 2026-11-09), the same
+    ## binary measured expand+paint 9.7 ms on one run and 15.6 to 20.1 ms on
+    ## the next, at load 13 to 17. Expand-only moved in step, 3.4 to 6.8 ms,
+    ## and so did the CI reading that recorded the failure (6.3 and 18.1 ms).
+    ## Their ratio did not: 2.76 to 2.97 over every reading, on a performance
+    ## core, an efficiency core, quiet and contended. So the ratio is what a
+    ## paint regression moves and host contention does not, and 4.0 leaves a
+    ## third of headroom over the worst reading.
 
   ChecksNavigation = 6
   ChecksFirstPage = 9
@@ -281,7 +298,10 @@ suite "CTUI-7: a 600-member node pages rather than materialising itself":
       # ALONE, which is what CTUI-7's sentence names; the second adds the paint,
       # which is what a user waits for. Reporting only the first would gate on
       # the cheaper half, and reporting only the second would hide which half
-      # moved when it regresses.
+      # moved when it regresses. The expansion is gated at CTUI-7's 15 ms; the
+      # paint is gated as a multiple of the expansion from the same run
+      # (`PaintRatioGate`), because a fixed bound on it failed on a contended
+      # host with the code unchanged.
       model.collapseNode(widePath)
       let gateStartPopulations = model.populations
       var bestMs = 1.0e9
@@ -308,11 +328,14 @@ suite "CTUI-7: a 600-member node pages rather than materialising itself":
            " ms, expand+paint best " & formatFloat(bestMs, ffDecimal, 3) &
            " ms over " & $GateIterations & " expansions of a " & $declared &
            "-member node (page " & $PageSize & ", pane " & $PaneWidth & "x" &
-           $PaneHeight & ", gate < " & formatFloat(GateMs, ffDecimal, 0) & ")"
+           $PaneHeight & ", expansion gate < " & $GateMs.int &
+           " ms, expand+paint < " & formatFloat(PaintRatioGate, ffDecimal, 1) &
+           "x the expansion: " &
+           formatFloat(bestMs / max(bestExpandMs, 0.001), ffDecimal, 2) & "x)"
       ck samples == GateIterations
       ck paintedRows == GateIterations * PaneHeight
       ck bestExpandMs < GateMs
-      ck bestMs < GateMs
+      ck bestMs < PaintRatioGate * bestExpandMs
       # THE WORK WAS DONE: one population per iteration, and the node was
       # really empty at the top of each one.
       ck model.populations == gateStartPopulations + GateIterations

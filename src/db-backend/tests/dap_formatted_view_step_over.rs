@@ -505,3 +505,55 @@ fn formatted_view_next_statement_advances_one_formatted_statement_per_invocation
          (formatted ({FMT_LINE_S4}, {FMT_COL_S4})); landed at {landed_3:?}",
     );
 }
+
+/// STRICT — the stop a formatted-view `next` reports names the formatted
+/// view as its source everywhere the GUI reads it: `path` and
+/// `highLevelPath` both point at the materialised view, at its line. The
+/// desktop opens a stop's editor by `highLevelPath`; left as the recorded
+/// path, the editor showed the minified text under the formatted file's
+/// name and the formatted lines past its end were never drawn.
+#[test]
+fn formatted_view_stop_names_the_view_as_its_high_level_source() {
+    let trace_dir = trace_dir_for("test_high_level_path");
+    let mut handler = build_handler(true, &trace_dir);
+
+    let (tx, rx) = mpsc::channel::<DapMessage>();
+    let request = Request {
+        base: ProtocolMessage {
+            seq: 1,
+            type_: "request".to_string(),
+        },
+        command: "next".to_string(),
+        arguments: serde_json::json!({ "threadId": 1 }),
+    };
+    handler.next_dap(request, None, tx).expect("dap next succeeds");
+
+    let mut location = None;
+    while let Ok(msg) = rx.try_recv() {
+        if let DapMessage::Event(e) = msg
+            && e.event == "ct/complete-move"
+        {
+            location = Some(e.body["location"].clone());
+        }
+    }
+    let location = location.expect("the next reports its stop (ct/complete-move)");
+    let path = location["path"].as_str().expect("the stop names a path").to_string();
+    assert!(
+        path.ends_with(FORMATTED_VIEW_NAME),
+        "the stop's path is the formatted view's source: {location}"
+    );
+    assert_eq!(
+        location["highLevelPath"],
+        serde_json::json!(path),
+        "the stop's high-level path is the formatted view's too: {location}"
+    );
+    assert_eq!(
+        location["highLevelLine"], location["line"],
+        "at the view's line: {location}"
+    );
+    assert_eq!(
+        location["line"],
+        serde_json::json!(FMT_LINE_S2),
+        "one formatted line on"
+    );
+}

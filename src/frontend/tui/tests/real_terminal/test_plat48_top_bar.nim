@@ -174,13 +174,20 @@ proc cellFind(line, needle: string; start = 0): int =
   let at = line.find(needle, start)
   if at < 0: -1 else: line[0 ..< at].runeLen
 
-proc esc(sess: var TuiTestSession) =
-  ## One `Esc` KEY: a lone `ESC` byte, then quiet for longer than the
-  ## binary's escape delay (`EscDelayMs`, 50 ms) — two `ESC`s sent back to
-  ## back are framed as ONE key, exactly as a terminal's would be.
+proc escUntil(sess: var TuiTestSession; cols, row: int; gone: string;
+               timeoutMs = 30000) =
+  ## One `Esc` KEY, then wait until row `row` no longer shows `gone` — the
+  ## menu level that Esc closes. Waiting for the close before the next key is
+  ## what keeps two Escs two keys. Until 2026-11-05 this was a fixed 200 ms
+  ## pause, and a binary busy past it read both ESC bytes in one burst. The
+  ## framer delivers `ESC ESC` as one `Esc` (`host/terminal_driver`), so the
+  ## first level stayed open and the rest of the case went through the wrong
+  ## menu. Past the deadline the case goes on, and its next check fails on
+  ## what is drawn.
   sess.send(Esc)
-  sleep(200)
-  discard sess.drainOutput(40)
+  let deadline = getMonoTime() + initDuration(milliseconds = timeoutMs)
+  while sess.rowOf(cols, row).contains(gone) and getMonoTime() < deadline:
+    sleep(25)
 
 proc click(sess: var TuiTestSession; row, col: int) =
   sess.send("\x1b[<0;" & $(col + 1) & ";" & $(row + 1) & "M")
@@ -243,15 +250,15 @@ suite "PLAT-48 on a real terminal: the menu":
           if rest == chord or rest.startsWith(chord & " "):
             found = true
       ck found
-    sess.esc()
-    sess.esc()
+    sess.escUntil(Cols, debugRow, "Continue")   # the Debug cascade
+    sess.escUntil(Cols, 3, " Edit ")            # the first level
     # BY CLICK: the root button, then the Debug folder.
     sess.click(0, 1)
     discard sess.waitRow(Cols, debugRow, "Debug")
     sess.click(debugRow, 2)
     discard sess.waitRow(Cols, debugRow + 1, "Step Over")
-    sess.esc()
-    sess.esc()
+    sess.escUntil(Cols, debugRow, "Continue")
+    sess.escUntil(Cols, 3, " Edit ")
     # REBIND: Step Over becomes Ctrl+N (its other chords removed) in the
     # user's `keybindings.json`, re-read on `:keys reload`; the dropdown says so.
     writeFile(keybindings, """[

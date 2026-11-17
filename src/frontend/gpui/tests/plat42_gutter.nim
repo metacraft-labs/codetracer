@@ -14,7 +14,7 @@
 ## that each lane has a fixed cell index). It costs one more byte before the
 ## first digit and `MaxLaneBytes` below is what that budget is spent against.
 
-import std/strutils
+import std/[math, strutils]
 
 const MaxLaneBytes = 12
   ## The two lanes' glyphs, the lane gap and the number field's padding are at
@@ -27,6 +27,28 @@ const MaxLaneBytes = 12
   ## negative case `gutterLineOf("def f(): return 1") == -1` holds because the
   ## `1` sits at byte 16, and a limit that reached it would turn a line of code
   ## into line 1.
+
+const
+  FlowCh* = 10.18
+    ## The desktop flow container's `ch` in px: a row's first chip is at
+    ## `(line length + 1) * FlowCh` from the code's left (`ui/flow.nim`'s
+    ## `calc(<len>ch + 1ch)`, measured on the desktop's six reference states).
+  ChipVisiblePx* = 30
+    ## A chip whose left is this far inside the code column's right edge is on
+    ## screen whole enough to be found (the window record keeps boxes >= 12 px).
+
+func chipLeftPx*(lineRunes: int): int =
+  ## Where a row's first inline-value chip starts, in px from the code column.
+  int(round(float(lineRunes + 1) * FlowCh))
+
+func chipOnScreen*(lineRunes, codeWidth: int): bool =
+  ## Whether a GPUI window whose code column shows `codeWidth` px can show the
+  ## first chip of a line `lineRunes` long. Since the shared default layout
+  ## (2026-10-17) that column is 360 px at 1920x1080, so a value after a line
+  ## longer than about 31 characters is off the editor's edge — drawn, and
+  ## not on screen. The terminal, 220 columns wide, shows it: a comparison of
+  ## the two media has nothing to compare on such a line.
+  chipLeftPx(lineRunes) + ChipVisiblePx <= codeWidth
 
 func gutterLineOf*(text: string): int =
   ## The line number a row's text starts with, or -1.
@@ -78,6 +100,31 @@ func valueCommentName*(text: string): string =
   if i + 1 < text.len and text[i] == ' ' and text[i + 1] != ' ': name
   else: ""
 
+func chipName*(text: string; clipped: bool): string =
+  ## The name a CHIP shows, read as `valueCommentName` reads it — or, when
+  ## the pane's edge clipped the chip, its name alone: a clipped chip may end
+  ## before its value starts (measured 2026-11-08 on `returned-calltrace`:
+  ## since the shared default layout the editor's code column is 360 px and
+  ## the stop's own chip, 301 px in, shows `result` of `results @[…]`). Still
+  ## the grammar's name and nothing in front of it, so code and an eye cell
+  ## stay "": the text must be exactly that name, or that name and more.
+  result = valueCommentName(text)
+  if result.len > 0 or not clipped: return
+  var i = 0
+  var name = ""
+  if i < text.len and text[i] == '<':
+    name.add '<'
+    inc i
+  if i >= text.len or not (text[i].isAlphaAscii or text[i] == '_'): return ""
+  while i < text.len and (text[i].isAlphaNumeric or text[i] == '_'):
+    name.add text[i]
+    inc i
+  if name[0] == '<':
+    if i < text.len and text[i] == '>':
+      name.add '>'
+      inc i
+  result = if i == text.len or text[i] == ' ': name else: ""
+
 func legiblyNames*(comment, name: string): bool =
   ## Whether a value comment's legible name is `name` — all of it, or, when
   ## the pane clipped it, a prefix of at least two characters.
@@ -102,6 +149,12 @@ when isMainModule:
   doAssert valueCommentName("<stdout CHNCCKS") == ""
   doAssert valueCommentName("/* mul: <fun...") == ""
   doAssert valueCommentName("") == ""
+  # A clipped chip may show its name alone; an unclipped one may not.
+  doAssert chipName("result", clipped = true) == "result"
+  doAssert chipName("result", clipped = false) == ""
+  doAssert chipName("results a[]", clipped = true) == "results"
+  doAssert chipName("results.append(value)", clipped = true) == ""
+  doAssert chipName("& mul <fun", clipped = true) == ""
   doAssert legiblyNames("re", "results")
   doAssert not legiblyNames("r", "results")
   doAssert not legiblyNames("mu", "results")

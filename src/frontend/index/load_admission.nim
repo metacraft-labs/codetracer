@@ -33,6 +33,7 @@ proc isLoadOperation*(channel: string): bool =
     "CODETRACER::load-recent-trace", "CODETRACER::open-trace-in-tab",
     "CODETRACER::load-recent-transaction", "CODETRACER::load-trace-by-record-process-id",
     "CODETRACER::open-local-trace", "CODETRACER::load-trace-file",
+    "CODETRACER::load-nim-trace-file",
     "CODETRACER::open-folder-dialog", "CODETRACER::load-recent-folder",
     "CODETRACER::open-trace-dialog", "CODETRACER::record-from-launch",
     "CODETRACER::record-with-launch-config", "CODETRACER::init-edit-mode",

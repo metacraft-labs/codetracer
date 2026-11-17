@@ -1,0 +1,27 @@
+scenario: 1
+name: auto-hide/sidebar-empty-edges
+pack: codetracer
+summary: >-
+  With nothing pinned to the sides, the saved presentations draw no empty
+  icon groups, and the left one (minimal) shows once a pane is pinned there.
+
+stage:
+  - use: record-program
+    with: { program: py_console_logs/main.py }
+  - use: plant-config
+    with:
+      file: auto_hide_state.json
+      content: '{"panels": [], "leftMinimal": true, "rightMinimal": false}'
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - wait: { until: { at: window, strip-tabs: { count: 4 } }, timeout: 30s }
+  - expect: { at: 'sidebar[edge="left"]', assert: "no-icons" }
+  - expect: { at: 'sidebar[edge="right"]', assert: "no-icons" }
+  - click: { at: 'pane-tab[label="EVENT LOG"]' }
+  - click: { at: 'pane-tab[label="EVENT LOG"]', button: right }
+  - wait: { until: { at: 'context-menu/menu-item[label="Pin to Left"]', present: true }, timeout: 15s }
+  - click: { at: 'context-menu/menu-item[label="Pin to Left"]' }
+  - wait: { until: { at: 'sidebar[edge="left"]/panel-button[label="Use normal left sidebar"]', present: true }, timeout: 15s }
+  - expect: { at: 'sidebar[edge="left"]', zone-visible: true, minimal: true }

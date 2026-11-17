@@ -1,0 +1,17 @@
+scenario: 1
+name: deepreview/review-names-its-changeset
+pack: codetracer
+summary: >-
+  A review names its commit and its changeset in the VCS panel: the
+  abbreviated commit, "3 files", and the stats "+16 -10".
+
+stage:
+  - use: open-review
+    with: { dataset: src/tests/gui/tests/deepreview/fixtures/sample-review.json }
+
+steps:
+  - wait: { until: { at: vcs, present: true }, timeout: 120s }
+  - expect: { at: vcs, commit: { contains: "a1b2c3d4e5f6..." } }
+  - expect: { at: vcs, commit: { contains: "3 files" } }
+  - expect: { at: vcs, stats: { contains: "3 files" } }
+  - expect: { at: vcs, stats: { contains: "+16 -10" } }

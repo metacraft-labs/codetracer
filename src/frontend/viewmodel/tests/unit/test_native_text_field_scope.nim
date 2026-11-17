@@ -39,8 +39,10 @@
 ##
 ## The DOM half (reading those facts off `document.activeElement`) is
 ## `ui/key_router.desktopScopePath`, graded end to end by
-## `src/tests/gui/tests/agent-activity/enter_submits_prompt.spec.ts` and
-## `src/tests/gui/tests/keymaps/plat68b-desktop-text-fields.spec.ts`.
+## `src/tests/gui/tests/agent-activity/enter_submits_prompt.spec.ts` and the
+## desktop's text-field scenarios (`src/tests/scenarios/keymaps/
+## plat68b-call-trace-search-enter.yaml`, `plat68b-find-widget-keys.yaml`,
+## `plat68b-tracepoint-editor-keys.yaml`).
 ##
 ## ## No mocks
 ## The shipped CUA base and the shipped router, driven with canonical key

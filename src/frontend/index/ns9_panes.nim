@@ -131,11 +131,18 @@ proc noirSourcesUnder(projectRoot: string): seq[NoirSourceFile] =
     result.add NoirSourceFile(path: $entry.path.to(cstring),
                               content: $entry.content.to(cstring))
 
-proc nodeNargoInfo(projectRoot: cstring): JsObject {.importjs: """
-  (function (root) {
+proc nodeReadText(path: cstring): cstring {.importjs: """
+  (function (p) {
+    try { return require('fs').readFileSync(p, 'utf8'); }
+    catch (e) { return ''; }
+  })(#)""".}
+  ## The text of `path`, "" when it cannot be read.
+
+proc nodeNargoInfo(projectRoot: cstring; args: JsObject): JsObject {.importjs: """
+  (function (root, args) {
     try {
       const cp = require('child_process');
-      const res = cp.spawnSync('nargo', ['info', '--json'], {
+      const res = cp.spawnSync('nargo', args, {
         cwd: root, encoding: 'utf8', timeout: 60000,
         maxBuffer: 8 * 1024 * 1024 });
       if (res.error) {
@@ -150,20 +157,22 @@ proc nodeNargoInfo(projectRoot: cstring): JsObject {.importjs: """
     } catch (e) {
       return { failed: true, output: '', message: String((e && e.message) || e) };
     }
-  })(#)""".}
-  ## `nargo info --json` run in `root`, as `{failed, message, output}` with
+  })(#, #)""".}
+  ## `nargo` with `args` run in `root`, as `{failed, message, output}` with
   ## JavaScript-string fields.
 
-proc nargoInfoAnswer(projectRoot: string):
-    tuple[answer: ConstraintsAnswer, output: string] =
-  ## `nargo info --json` for one project root, through the shared rule
+proc nargoInfoAnswer(projectRoot: string): ConstraintsAnswer =
+  ## The project's measurement (`NargoInfoArgs`), through the shared rule
   ## (`constraints_answer`) the terminal and the GPUI window answer their own
   ## pane with: every failure is a sentence, never an empty report.
   let hasMarker = projectRoot.len > 0 and
                   fileExistsIn(projectRoot, NoirProjectMarker)
   if absenceBeforeRun(projectRoot, hasMarker).len > 0:
-    return (constraintsAnswer(projectRoot, hasMarker, NargoInfoRun()), "")
-  let answer = nodeNargoInfo(cstring(projectRoot))
+    return constraintsAnswer(projectRoot, hasMarker, NargoInfoRun())
+  var args: seq[cstring] = @[]
+  for arg in NargoInfoArgs:
+    args.add cstring(arg)
+  let answer = nodeNargoInfo(cstring(projectRoot), args.toJs)
   var run = NargoInfoRun(started: true)
   if answer.failed.to(bool):
     let message = $answer.message.to(cstring)
@@ -173,7 +182,7 @@ proc nargoInfoAnswer(projectRoot: string):
     run.message = message
   else:
     run.output = $answer.output.to(cstring)
-  (constraintsAnswer(projectRoot, hasMarker, run), run.output)
+  constraintsAnswer(projectRoot, hasMarker, run)
 
 proc sourcesJson(files: seq[NoirSourceFile]): string =
   ## The sources the Constraints rows are placed against, for the renderer
@@ -187,31 +196,39 @@ proc onNs9Panes*(sender: js, response: jsobject(folder=cstring)) =
   ## Answer both halves. Sent unconditionally rather than lazily: the panes are
   ## visible in edit mode, so an answer neither of them can use is still an
   ## answer they must show instead of staying blank.
+  ##
+  ## A tab holding a recording asks only about the circuit (`only:
+  ## "constraints"`, `ui/constraints.askToMeasure`), the first time it shows the
+  ## pane: it is not a test session, and its Test Results must not change.
   let folder = $response.folder
-
-  # THE ANSWER IS THE SHARED RULE's (`test_catalog_answer`), which the
-  # terminal and the GPUI window answer their own pane with; this host only
-  # says whether the marker exists and reads the sources, with node's `fs`.
-  let answer = testCatalogAnswer(folder,
-    folder.len > 0 and fileExistsIn(folder, NoirProjectMarker),
-    proc(): seq[NoirSourceFile] = noirSourcesUnder(folder))
-  var catalogJson = ""
-  let catalogAbsence = answer.absence
-  if answer.hasCatalog:
-    catalogJson = pretty(answer.catalog.toJson())
+  let onlyField = response.toJs["only"]
+  let onlyConstraints = not onlyField.isUndefined and not onlyField.isNull and
+                        $onlyField.to(cstring) == ConstraintsOnlyAsk
 
   # `tab` is the asking renderer tab, echoed on both answers so each reaches
   # that tab's panes (`ui_js.ns9PanesTarget`); undefined from a sender that
   # names none.
   let tab = response.toJs["tab"]
-  mainWindow.webContents.send "CODETRACER::ns9-panes-catalog", js{
-    catalog: cstring(catalogJson),
-    absence: cstring(catalogAbsence),
-    replayOpenIn: cstring($replayOpenInFor(folder)),
-    tab: tab
-  }
 
-  let (measured, info) = nargoInfoAnswer(folder)
+  if not onlyConstraints:
+    # THE ANSWER IS THE SHARED RULE's (`test_catalog_answer`), which the
+    # terminal and the GPUI window answer their own pane with; this host only
+    # says whether the marker exists and reads the sources, with node's `fs`.
+    let answer = testCatalogAnswer(folder,
+      folder.len > 0 and fileExistsIn(folder, NoirProjectMarker),
+      proc(): seq[NoirSourceFile] = noirSourcesUnder(folder))
+    var catalogJson = ""
+    let catalogAbsence = answer.absence
+    if answer.hasCatalog:
+      catalogJson = pretty(answer.catalog.toJson())
+    mainWindow.webContents.send "CODETRACER::ns9-panes-catalog", js{
+      catalog: cstring(catalogJson),
+      absence: cstring(catalogAbsence),
+      replayOpenIn: cstring($replayOpenInFor(folder)),
+      tab: tab
+    }
+
+  let measured = nargoInfoAnswer(folder)
   # PLAT-62: the sources the rows are placed against, read where the circuit
   # was measured.
   let sources =
@@ -219,7 +236,15 @@ proc onNs9Panes*(sender: js, response: jsobject(folder=cstring)) =
   mainWindow.webContents.send "CODETRACER::ns9-panes-constraints", js{
     # `nargo info`'s own JSON, parsed by the renderer with the parser every
     # host uses; empty with the reason when there is no report.
-    info: cstring(if measured.hasReport: info else: ""),
+    info: cstring(measured.infoJson),
+    # The printed opcodes and the compiled program that places them, joined
+    # by the renderer with the same procs the native hosts use
+    # (`constraints_listing`).
+    listing: cstring(measured.listing),
+    artefact: (if measured.hasReport:
+                 nodeReadText(cstring(artefactPathUnder(folder,
+                                                        measured.report.package)))
+               else: cstring""),
     provenance: cstring(NargoInfoProvenance),
     absence: cstring(measured.absence),
     sources: cstring(sources),

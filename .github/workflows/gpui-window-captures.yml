@@ -1,0 +1,351 @@
+name: GPUI window captures
+# Called from codetracer.yml (job `gpui-window-captures`), which keeps the trigger, the
+# concurrency group and ci-verdict's `needs:`. Split out because codetracer.yml
+# reached GitHub's 512,000-byte limit (ci/test/workflow-file-size-test.sh).
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  gpui-window-captures:
+    runs-on: [self-hosted, linux, x64]  # the label isonim-gpui's "GUI tests (headless sway)" job runs green on
+    # NEW, NO SAMPLE YET. The work is two cargo builds of isonim-gpui's shim
+    # (windowed and featureless; incremental on a runner that kept its work
+    # tree), `just build-once`, three windowed front-end builds' worth of Nim,
+    # and three captures of 2-5 minutes each on this host class. 90m is a
+    # generous first bound, to be tightened from the first green runs.
+    timeout-minutes: 90
+    # The GPUI scenario lane does not fit one 90-minute job (70 runs at about
+    # 6 minutes each, run 43806398582), so it runs as 20 shards: 10 left each
+    # shard about 8 runs of 5-11 minutes, about 55 minutes before a cold
+    # runner's ~30 of provisioning (run 43935388749, shard 4). Shard 1 also
+    # carries the capture steps, and takes a light slice
+    # (ci/test/scenario-lane-shard.py; scenario-lane-shard-test.sh holds the
+    # shards' union to the lane).
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]
+    name: GPUI window captures (headless sway) (${{ matrix.shard }}/20)
+    # WHY THIS JOB EXISTS. The GPUI window suites assert records measured off
+    # a real window (`src/tests/visual/plat4{5,7,8}-…json`); until this job
+    # nothing re-took them, so a record stopped describing the window the
+    # first time the window changed (PLAT-45's and PLAT-47's predated the
+    # top bar). Here each capture runs on a headless sway, its frames are
+    # measured into the record, and the suite asserts THAT — this commit's
+    # window, not the file last committed. The two capabilities the
+    # known-dark list recorded as missing — a windowed shim and a
+    # compositor — are isonim-gpui's own CI job's, on this runner label
+    # (codetracer-specs issues/2026-09-26-window-capture-gates-recorded-
+    # blocked-although-ci-can-run-them.md).
+    steps:
+      - name: Record when the job started
+        # For the cache push at the end, whose budget is what the job's time
+        # limit leaves.
+        run: echo "CT_JOB_STARTED_AT=$(date +%s)" >>"$GITHUB_ENV"
+
+      - name: Generate CI token
+        id: ci_token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+          owner: metacraft-labs
+
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          submodules: recursive
+          token: ${{ steps.ci_token.outputs.token }}
+
+      - name: Sample memory in the background
+        # The top processes by resident memory every 15 seconds, to a file this
+        # job uploads when it does not succeed: a runner that reaches its 20 GiB
+        # cap OOM-kills processes and the guard's annotation names none (TUI
+        # shard 5/8 of run 43996043232). Best effort; the runner ends it with
+        # the job. ci/test/memory-sampler-test.sh holds both steps here.
+        run: |
+          nohup bash ci/lib/memory-sampler.sh "${{ runner.temp }}/memory-samples.log" 15 >/dev/null 2>&1 &
+          echo "memory sampler started (pid $!)"
+
+      - name: Read the isonim-gpui pin
+        # The ONE pin this repo keeps for isonim-gpui is flake.lock's; the
+        # clone below takes it from there rather than from a second copy of
+        # the SHA in this file.
+        #
+        # jq, not python3: this step runs before any Nix provisioning, on the
+        # runner's own PATH, and the persistent NixOS runners have no python3
+        # there -- the step died with `python3: command not found` on every run
+        # since the job was added, so nothing after it had ever run in CI. jq
+        # is declared on every self-hosted runner. `-e` makes a missing node
+        # or a null rev an error rather than the string "null" handed to the
+        # clone below. ci/test/sibling-provisioning-test.sh section 5 fails a
+        # pre-dev-shell step that reaches for a tool its runner lacks.
+        id: gpui_pin
+        run: |
+          set -euo pipefail
+          rev="$(jq -er '.nodes["isonim-gpui"].locked.rev' flake.lock)"
+          echo "rev=${rev}" >> "${GITHUB_OUTPUT}"
+
+      # Every authenticated clone near the top: the installation token expires
+      # an hour after it is minted (see `viewmodel-tests`).
+      - name: Clone isonim-gpui sibling
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
+        with:
+          repo: metacraft-labs/isonim-gpui
+          ref: ${{ steps.gpui_pin.outputs.rev }}
+          path: ${{ github.workspace }}/../isonim-gpui
+          gh-token: ${{ steps.ci_token.outputs.token }}
+          submodules: 'false'
+
+      - name: Clone GuiAssert sibling
+        # PLAT-45's window record reads the frames through GuiAssert's pixel
+        # readers (`--path:../GuiAssert/src`), the declared cross-repo edge
+        # the `gpui-shell` and `screen-oracle` lanes carry. PLAT-69's
+        # scenarios drive the window on GuiAssert's desktop-environment
+        # targets (`gui_assert/desktop_env`), which are on its `agents`
+        # branch until they reach `dev`.
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
+        with:
+          repo: metacraft-labs/GuiAssert
+          ref: agents
+          path: ${{ github.workspace }}/../GuiAssert
+          gh-token: ${{ steps.ci_token.outputs.token }}
+          submodules: 'false'
+
+      - name: Clone runquota sibling
+        # `just build-once` compiles `ct`, which imports `runquota_process`
+        # (see `cross-process-linux`).
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
+        with:
+          repo: metacraft-labs/runquota
+          ref: dev
+          path: ${{ github.workspace }}/../runquota
+          gh-token: ${{ steps.ci_token.outputs.token }}
+          submodules: 'false'
+
+      - name: Setup db-backend siblings
+        uses: ./.github/actions/setup-db-backend-siblings
+        with:
+          env-flavor: nix
+          gh-token: ${{ steps.ci_token.outputs.token }}
+          substituters: ${{ vars.ATTIC_SUBSTITUTER }}
+          trusted-public-keys: ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
+          attic-token: ${{ secrets.ATTIC_TOKEN }}
+          attic-cache: ${{ vars.ATTIC_CACHE }}
+
+      - name: Provision dependency siblings from repro.lock
+        id: provision
+        uses: ./.github/actions/provision-repro-lock-siblings
+        with:
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+          # From the test lock, ci/test/siblings/repro.lock: the scenario lane builds
+          # its runner and backend from these (ci/test/scenarios.sh).
+          test-siblings: DemoVideoScript,DemoVideoScript-GuiAssert,GuiAssert
+
+      - name: Give Vulkan a software driver where the host has none
+        # The windowed GPUI front-end draws through wgpu/Vulkan. The GPU hosts
+        # carry a driver; an ephemeral garm VM has no Vulkan ICD at all, and
+        # every window there aborted with "Failed to create surface for any
+        # enabled backend" (run 43935388749, shard 2). Mesa's lavapipe, from
+        # this flake's nixpkgs, is the fallback; a host with an ICD keeps its.
+        run: |
+          if ls /run/opengl-driver/share/vulkan/icd.d/*.json /etc/vulkan/icd.d/*.json /usr/share/vulkan/icd.d/*.json >/dev/null 2>&1; then
+            echo "the host has a Vulkan driver; keeping it"
+          else
+            mesa="$(nix build --no-link --print-out-paths --inputs-from . nixpkgs#mesa | head -n 1)"
+            icd="${mesa}/share/vulkan/icd.d/lvp_icd.x86_64.json"
+            test -f "${icd}"
+            echo "no Vulkan driver on this host; using lavapipe (${icd})"
+            echo "VK_ICD_FILENAMES=${icd}" >> "${GITHUB_ENV}"
+            echo "VK_DRIVER_FILES=${icd}" >> "${GITHUB_ENV}"
+          fi
+
+      - name: Give the window a cursor theme where the host has none
+        # The scenario binding names the theme the window loads its pointer
+        # shapes from; an ephemeral garm VM has none, and gpui/pointer-shapes
+        # failed there with "no cursor theme on this machine" (run
+        # 43996043232, shard 9). Adwaita, from this flake's nixpkgs, through
+        # XCURSOR_PATH, which the binding reads first.
+        run: |
+          if [ -d /run/current-system/sw/share/icons/Adwaita/cursors ]; then
+            echo "the host has the Adwaita cursor theme; keeping it"
+          else
+            theme="$(nix build --no-link --print-out-paths --inputs-from . nixpkgs#adwaita-icon-theme | head -n 1)"
+            test -d "${theme}/share/icons/Adwaita/cursors"
+            echo "XCURSOR_PATH=${theme}/share/icons" >> "${GITHUB_ENV}"
+          fi
+
+      - name: Give dbus-run-session a session bus configuration where the host has none
+        # GuiAssert starts sway through nixpkgs' wrapper, which runs it under
+        # dbus-run-session; that reads /etc/dbus-1/session.conf, which an
+        # ephemeral garm VM does not have, so sway never started and every
+        # window-manager capture failed ("Failed to open
+        # /etc/dbus-1/session.conf", run 43996043232, shard 1). The host gets
+        # the configuration from this flake's nixpkgs dbus; a host that has
+        # one keeps its own.
+        run: |
+          if [ -e /etc/dbus-1/session.conf ]; then
+            echo "the host has /etc/dbus-1/session.conf; keeping it"
+          else
+            dbus="$(nix build --no-link --print-out-paths --inputs-from . nixpkgs#dbus.out)"
+            test -f "${dbus}/share/dbus-1/session.conf"
+            sudo mkdir -p /etc/dbus-1
+            sudo ln -s "${dbus}/share/dbus-1/session.conf" /etc/dbus-1/session.conf
+            # A GC root for the job, so the linked file outlives no collection.
+            nix-store --add-root "${RUNNER_TEMP}/dbus-session-conf-root" --realise "${dbus}" >/dev/null
+          fi
+
+      - name: Restore ct and the windowed shim from the ct-build job
+        # ct-build.yml builds them once per run (this job `needs:` it): ct,
+        # replay-server and the bundles (src/build-debug), and isonim-gpui's
+        # windowed shim and virtual pointer. Each shard used to run
+        # build-once itself, 24-43 minutes on a cold garm VM.
+        id: ct
+        uses: actions/download-artifact@v4
+        with:
+          name: ct-build-products
+          path: ${{ runner.temp }}/ct-build
+
+      - name: Unpack them beside the siblings
+        run: tar -xzf "${RUNNER_TEMP}/ct-build/ct-build-products.tar.gz" -C ..
+
+      - name: Build the windowed GPUI front-end the scenario lane opens
+        # Linked here, against the restored shim, because the front-end pins
+        # the shim's absolute path (-d:gpuiShimPath) and runners differ in
+        # theirs. Shard 1's captures step relinks it too.
+        id: gpui-window
+        env:
+          CT_GPUI_SHIM_PREBUILT: "1"
+        run: nix develop .#devShells.x86_64-linux.default --command bash ci/test/gpui-window-captures.sh --build-only
+
+      - name: Re-take and assert the GPUI window captures
+        if: ${{ matrix.shard == 1 }}
+        env:
+          CT_GPUI_SHIM_PREBUILT: "1"
+        # isonim-gpui's windowed shim and virtual pointer are built in ITS
+        # dev shell (the one that declares the X/Wayland libraries and the
+        # compositor tools); the recipe enters it itself.
+        run: nix develop .#devShells.x86_64-linux.default --command just gpui-window-captures
+
+      - name: Scenarios — the GPUI lane
+        # The windowed `build/bin/codetracer-gpui-window` and its shim, built by
+        # the step above, on DemoVideoScript-GuiAssert's private Xvfb: read by
+        # vision (GuiAssert's capture and OCR), driven by OS-level input.
+        # GuiAssert's capture and input helpers are built in GuiAssert's own
+        # dev shell, which declares their X and Wayland libraries.
+        if: ${{ !cancelled() && steps.ct.outcome == 'success' && steps.gpui-window.outcome != 'failure' }}
+        env:
+          SCENARIO_LANE_SHARD: ${{ matrix.shard }}/20
+        run: |
+          (cd ../GuiAssert && nix develop --profile "${CT_GCROOT_DIR:-$RUNNER_TEMP}/GuiAssert-shell" --command bash helpers/linux/build.sh "${{ github.workspace }}/build/gui-assert-helpers")
+          nix develop .#devShells.x86_64-linux.default --command bash -c '
+            set -e
+            export GUI_ASSERT_HELPER_DIR="$PWD/build/gui-assert-helpers"
+            just scenario-build dvs stage gpui
+            bash ci/test/scenarios.sh lane gpui
+            if [ "${SCENARIO_LANE_SHARD%%/*}" = 1 ]; then bash ci/test/scenario-broken-run.sh gpui; fi'
+
+      - name: Upload the failed scenario runs (GPUI)
+        if: ${{ failure() }}
+        uses: metacraft-labs/DemoVideoScript/.github/actions/upload-failed-runs@028ea4f6704fc5377e2c6b7021a9e048c15c9f92
+        with:
+          build-dir: build
+          name: scenario-runs-gpui-${{ matrix.shard }}
+
+      - name: PLAT-35's GPUI arm as a real window, one per parity scenario
+        # Linux has no headless GPUI renderer, so PLAT-35's GPUI frames on
+        # Linux are a real window on GuiAssert's headless sway -- this job's
+        # compositor, windowed shim and GuiAssert checkout. One window per
+        # scenario in `src/tests/visual/scenarios.json`; a scenario with no
+        # settled frame at its declared size fails by name. Runs after the
+        # step above, which builds the same windowed shim and records the
+        # `calc` trace it opens; `!cancelled()` so a red capture above does
+        # not hide whether this one works.
+        if: ${{ !cancelled() && steps.ct.outcome == 'success' && matrix.shard == 1 }}
+        run: nix develop .#devShells.x86_64-linux.default --command just plat35-capture-gpui-window
+
+      - name: CTF-P1b's Agent Harbor stories as real windows, against the web layout
+        # One `codetracer-gpui-story` window per story, theme and size on
+        # GuiAssert's headless sway (the same windowed shim and GuiAssert
+        # checkout as above), then the `agent-harbor-gpui-captures` lane:
+        # each capture's laid-out regions against the committed web record
+        # (`src/tests/visual/agent-harbor-web-regions.json`) within PLAT-35's
+        # pane-rectangle tolerance; a missing or blank capture fails by name.
+        # CTF-P1c: the same for each playback story at each named moment of
+        # its scenario (`build/ctf-p1c/gpui/`), against the committed
+        # `src/tests/visual/agent-harbor-web-regions-at-moments.json`.
+        if: ${{ !cancelled() && steps.ct.outcome == 'success' && matrix.shard == 1 }}
+        run: nix develop .#devShells.x86_64-linux.default --command just ctf-p1b-gpui-captures
+
+      - name: The terminal front-end in real terminal emulators
+        # Terminal-Adaptation §13.4's `tui-real-emulators` lane, here because
+        # this job has what it needs: GuiAssert's checkout and dev shell (the
+        # headless sway foot runs on, Xvfb, tesseract) and the recursive
+        # checkout `build-tui`'s grammars come from. kitty, xterm, Ghostty
+        # and Alacritty on Xvfb, foot on the headless sway, tmux in kitty,
+        # each from this commit's pinned nixpkgs: the committed persona
+        # re-captured and compared, the profile, the glyph test card read by
+        # OCR and pixels, OSC 52 accepted or refused against the profile. An
+        # emulator this runner cannot provide or start is a counted
+        # MISSING-PREREQ skip, never a failure; `!cancelled()` so a red GPUI
+        # capture does not hide it.
+        if: ${{ !cancelled() && steps.ct.outcome == 'success' && matrix.shard == 1 }}
+        run: nix develop .#devShells.x86_64-linux.default --command just test-tui-real-emulators
+
+      - name: Upload the frames
+        if: ${{ failure() && matrix.shard == 1 }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: gpui-window-captures
+          path: |
+            build/plat45/
+            build/plat47-gpui/
+            build/plat48-gpui/
+            build/plat69/
+            build/plat35/gpui-window/
+            build/ctf-p1b/
+            build/ctf-p1c/
+            build/real-emulators/out/
+            src/tests/visual/plat45-gpui-arrangement.json
+            src/tests/visual/plat47-gpui-window.json
+            src/tests/visual/plat48-gpui-window.json
+          retention-days: 7
+
+      - name: Push the dev shells this shard realised to the cache
+        # The shells ct-build and every shard realise (ci, default, isonim-gpui,
+        # GuiAssert), and the flake's inputs, so the next run substitutes them
+        # when the lock has moved faster than cache-push.yml can finish (run
+        # 44048043714 found nothing built on the lock 64a81f1844c moved to).
+        # Pushed here, at the end of ONE shard, not in ct-build: every shard
+        # waits for ct-build to finish, and nothing waits for a shard. Best
+        # effort (a 15-minute budget, exit 0 on any failure, continue-on-error),
+        # and only dev and agents write the shared cache
+        # (ci/test/push-built-closure-test.sh).
+        if: ${{ !cancelled() && matrix.shard == 1 && steps.provision.outcome == 'success' && (github.ref_name == 'dev' || github.ref_name == 'agents') }}
+        continue-on-error: true
+        timeout-minutes: 20
+        env:
+          ATTIC_ENDPOINT: ${{ vars.ATTIC_ENDPOINT }}
+          ATTIC_CACHE: ${{ vars.ATTIC_CACHE }}
+          ATTIC_TOKEN: ${{ secrets.ATTIC_TOKEN }}
+          CT_JOB_TIMEOUT_MINUTES: 90
+        # CT_JOB_TIMEOUT_MINUTES is this job's timeout-minutes: the push's
+        # budget is capped at what the limit leaves, so it never cancels the
+        # job (push-built-closure-test.sh holds the two numbers equal).
+        run: bash ci/deploy/push-built-closure.sh --gcroots "${CT_GCROOT_DIR:-$RUNNER_TEMP/ct-gcroots}" --flake-inputs
+
+      - name: Upload the memory samples
+        # What held the memory when the job failed or was cancelled; an OOM kill
+        # lands as either.
+        if: ${{ failure() || cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: memory-samples-gpui-${{ matrix.shard }}
+          path: ${{ runner.temp }}/memory-samples.log
+          if-no-files-found: ignore
+          retention-days: 7

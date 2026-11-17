@@ -1,5 +1,5 @@
 {
-  "D1": "not bytes.contains(\"\\ePtmux;\")",
+  "D1": "foreign.len == 0",
   "D2": "asked < 900",
   "D3": "j.axis(\"linkConservative\").getBool",
   "D4": "screen.contains(\"slow link\")",

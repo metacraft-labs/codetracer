@@ -593,8 +593,8 @@ when defined(js):
   discard
 
 else:
-  import std/[asyncdispatch, asyncfile, asyncnet, nativesockets, os, osproc,
-              strtabs]
+  import std/[asyncdispatch, asyncfile, asyncnet, monotimes, nativesockets,
+              os, osproc, strtabs, times]
   when defined(posix):
     import std/posix
   when defined(ssl):
@@ -829,6 +829,16 @@ else:
   # Process
   # -------------------------------------------------------------------------
 
+  const
+    KillReapDeadlineMs = 5_000
+      ## How long `rawKill` waits for a SIGKILLed child to become reapable.
+      ## Normally it takes well under a millisecond; on a heavily loaded host
+      ## tens of milliseconds. Only a child stuck in uninterruptible sleep gets
+      ## near this, and that case is reported rather than waited out forever.
+    KillReapPollNs = 200_000
+      ## 0.2 ms between `waitpid(WNOHANG)` polls: long enough to give the dying
+      ## child the CPU, short enough that the common case costs one pause.
+
   proc rawKill(p: PluginProcess) =
     ## The closer registered for the process handle, and the whole of
     ## §8.1.1's "Deactivation closes them — the reason a plugin cannot leak a
@@ -879,21 +889,69 @@ else:
     else:
       try: p.proc0.kill()
       except CatchableError, Defect: discard
-    # Reap. `peekExitCode` is `waitpid(WNOHANG)`; the child was just SIGKILLed
-    # so it is at most microseconds away, and the bounded spin is what keeps
-    # this synchronous closer from becoming a blocking wait.
-    var spins = 0
-    while spins < 20000:
+    # Reap. `peekExitCode` is `waitpid(WNOHANG)`.
+    #
+    # ## THE BOUND IS WALL-CLOCK TIME, NOT A NUMBER OF POLLS (fixed 2026-11-10)
+    #
+    # This was `while spins < 20000`, on the reasoning that a SIGKILLed child
+    # is "at most microseconds away". It is not, on a loaded host: SIGKILL is
+    # delivered when the kernel next schedules the target, and the exit path
+    # (closing its descriptors, tearing down its mm) runs on the target's own
+    # time slice. 20000 non-blocking `waitpid`s finish in a few milliseconds of
+    # this process's CPU, so whenever the child had not been scheduled in that
+    # window the loop gave up, set `reaped` anyway, and left a ZOMBIE that
+    # nothing would ever collect — `/proc/<pid>` present, `kill(pid, 0)` = 0,
+    # for the rest of CodeTracer's life. Measured on a 32-core CI host under
+    # 48 parallel copies of `test_plugin_io_sdk`: 16 of 600 runs failed the
+    # "no surviving child" assertions on exactly that zombie.
+    #
+    # So the loop now polls until the child IS reaped, yielding the CPU between
+    # polls so the dying child can run, up to `KillReapDeadlineMs`. That bound
+    # is still what keeps this synchronous closer from becoming an unbounded
+    # blocking wait: the only process SIGKILL cannot finish promptly is one in
+    # uninterruptible sleep (`D`, e.g. on a hung network mount), and the editor
+    # must not freeze behind it. A child still unreaped at the deadline is NOT
+    # marked reaped — `awaitExit` can still collect it — and the closer raises
+    # instead of the teardown claiming a success it did not have. The handle
+    # stays live, so a later sweep can retry it; the host's reclaim path
+    # (`closeAll` with a failures list) records the failure in
+    # `reclaimFailures`, which `report()` names.
+    let deadline = getMonoTime() + initDuration(milliseconds = KillReapDeadlineMs)
+    while true:
       var code = -1
       try:
         code = p.proc0.peekExitCode()
       except CatchableError, Defect:
-        break
+        # The POSIX `peekExitCode` does not raise; another platform's might,
+        # and a closer that cannot ask has nothing more it can do.
+        p.reaped = true
+        return
       if code >= 0:
         p.exitCode = code
+        p.reaped = true
+        return
+      # `peekExitCode` answers -1 both for "still dying" and for a failed
+      # `waitpid` (`ECHILD`: somebody else already collected it). A pid the
+      # kernel no longer knows at all is the second, and there is nothing left
+      # to reap — so do not wait out the deadline for it. A zombie still
+      # answers `kill(pid, 0)`, so this cannot mistake the first for it.
+      when defined(posix):
+        if posix.kill(Pid(p.pid), cint(0)) != 0 and errno == ESRCH:
+          p.reaped = true
+          return
+      if getMonoTime() >= deadline:
         break
-      inc spins
-    p.reaped = true
+      # The pause is `nanosleep`, not `os.sleep`: `sleep` is on the blocking
+      # list `plugin-reactive-boundary-test.sh` holds this module to. Off
+      # POSIX there is no pause and no child either — `spawnInner` refuses
+      # there — so the loop is unreachable rather than a busy wait.
+      when defined(posix):
+        var pause = Timespec(tv_sec: posix.Time(0), tv_nsec: KillReapPollNs)
+        var rest: Timespec
+        discard posix.nanosleep(pause, rest)
+    raise newException(OSError,
+      "'" & p.name & "' (pid " & $p.pid & ") was sent SIGKILL and had not " &
+      "exited after " & $KillReapDeadlineMs & " ms; it is left unreaped")
 
   proc resolveExecutable*(name: string): string =
     ## §8.1.1's "the host resolves it against a declared set and its own PATH

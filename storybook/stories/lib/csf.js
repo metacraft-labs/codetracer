@@ -16,11 +16,21 @@ import { plays } from "./plays.js";
  * `frameTitle` is the panel's own name for its golden-layout tab, where the
  * story's name says which state it shows; null: the story's name.
  */
+/** The `key=value;…` options `mountCodeTracerStory` takes, from the globals. */
+function storyOptions(globals) {
+  const moment = globals?.moment ?? "";
+  return moment ? `moment=${moment}` : "";
+}
+
 export function story(kind, name, fixture = "populated", storyName = null, check = "", frameTitle = null) {
   const extra = check ? plays[check] : null;
   return {
     name: storyName ?? name,
-    render: () => renderSurface(kind, name, fixture, frameTitle ?? storyName),
+    // The story host's settings for this story, from StoryBook's globals:
+    // `moment` opens a playback story at a named moment
+    // (`?id=<story>&globals=moment:<name>`; `.storybook/preview.js`).
+    render: (_args, context) =>
+      renderSurface(kind, name, fixture, frameTitle ?? storyName, storyOptions(context?.globals)),
     play: async (context) => {
       if (check && typeof extra !== "function") {
         throw new Error(`story ${storyName ?? name}: no play check named "${check}" in lib/plays.js`);

@@ -13,9 +13,15 @@ import ./panel_host
 from ../viewmodel/session_vm import SessionViewModel
 
 var shaderDebugVMInstance: ShaderDebugVM
+var shaderDebugVMProvider*: proc(): ShaderDebugVM
+  ## The Visual Replay panes' model's Shader Debug (`ui/video_player`).
 
 proc initShaderDebugVM(store: ReplayDataStore = nil) =
   if not shaderDebugVMInstance.isNil:
+    shaderDebugVMInstance.bindReplayStore(store)
+    return
+  if not shaderDebugVMProvider.isNil:
+    shaderDebugVMInstance = shaderDebugVMProvider()
     shaderDebugVMInstance.bindReplayStore(store)
     return
   shaderDebugVMInstance = createShaderDebugVM(

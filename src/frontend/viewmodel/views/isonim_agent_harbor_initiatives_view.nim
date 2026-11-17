@@ -23,6 +23,9 @@ when defined(js):
 
 import isonim/core/[signals, computation]
 import isonim/dsl/[ui, components]
+# Its one-line texts (`data-ah-cut`) are cut in code, by the views' one rule
+# for a cut (`ah_cut_text`, CTF-P1c D6).
+import ./ah_cut_text
 
 when defined(js):
   import isonim/web/web_renderer
@@ -77,7 +80,7 @@ proc renderSessionLine[R](r: R; item: SessionItem): auto =
     tdiv(class = "ah-initiative-session ah-att-" & $item.attention, title = item.tooltip):
       span(class = "ah-tab-mark"):
         discard
-      span(class = "ah-initiative-session-title"):
+      span(`data-ah-cut` = "line", class = "ah-initiative-session-title"):
         text item.title
       span(class = "ah-initiative-session-status"):
         text item.statusLabel
@@ -161,7 +164,7 @@ proc renderInitiativeRow[R](r: R; vm: InitiativesVM;
             text chevron
           span(class = "ah-tab-mark"):
             discard
-          span(class = "ah-initiative-title"):
+          span(`data-ah-cut` = "line", class = "ah-initiative-title"):
             text row.title
           span(class = "ah-initiative-progress-text", title = row.progressLong):
             text row.progressText
@@ -170,11 +173,11 @@ proc renderInitiativeRow[R](r: R; vm: InitiativesVM;
           tdiv(class = "ah-initiative-current", title = row.currentMilestone):
             span(class = "ah-initiative-label"):
               text "Current"
-            span(class = "ah-initiative-current-text"):
+            span(`data-ah-cut` = "line", class = "ah-initiative-current-text"):
               text row.currentMilestone
         if meta.len > 0:
           tdiv(class = "ah-initiative-meta"):
-            span(class = "ah-initiative-meta-text"):
+            span(`data-ah-cut` = "line", class = "ah-initiative-meta-text"):
               text meta.join(" \xC2\xB7 ")
       tdiv(ref = sessions, class = "ah-initiative-sessions", role = "group")
   r.appendRendered(barHost, renderMilestoneBar(r, row.statusCounts))
@@ -215,7 +218,7 @@ proc renderAgentHarborInitiativesPanel*[R, N](r: R; vm: InitiativesVM;
         tdiv(class = "ah-fleet-section-header"):
           span(class = "ah-fleet-title"):
             text "Initiatives"
-          span(class = "ah-fleet-source", title = vm.sourceLabel):
+          span(`data-ah-cut` = "line", class = "ah-fleet-source", title = vm.sourceLabel):
             text vm.sourceLabel
           span(class = "ah-fleet-summary"):
             text summary
@@ -257,7 +260,7 @@ proc renderMilestone[R](r: R; m: MilestoneLine): auto =
         tdiv(class = "ah-milestone-title"):
           span(class = "ah-milestone-id"):
             text m.id
-          span(class = "ah-milestone-name"):
+          span(`data-ah-cut` = "line", class = "ah-milestone-name"):
             text m.title
         # The current milestone is tagged in its meta line, so every title
         # starts in the same column; failing tests read in the error role.
@@ -305,7 +308,7 @@ proc renderAgentHarborProgressPanel*[R, N](r: R; vm: InitiativeProgressVM;
         tdiv(class = "ah-fleet-section-header"):
           span(class = "ah-fleet-title"):
             text "Initiative progress"
-          span(class = "ah-fleet-source", title = title):
+          span(`data-ah-cut` = "line", class = "ah-fleet-source", title = title):
             text title
           span(class = "ah-fleet-summary"):
             text headline
@@ -338,7 +341,7 @@ proc renderAgentHarborProgressPanel*[R, N](r: R; vm: InitiativeProgressVM;
                 tdiv(class = "ah-initiative-current"):
                   span(class = "ah-initiative-label"):
                     text "Current"
-                  span(class = "ah-initiative-current-text"):
+                  span(`data-ah-cut` = "line", class = "ah-initiative-current-text"):
                     text current
         r.appendRendered(barHost, renderMilestoneBar(r, vm.statusCounts, labelled = true))
         for group in vm.groups:

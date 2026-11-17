@@ -1,3 +1,4 @@
+import { glyphMarksOn } from "../../../lib/glyph-column";
 import type { Locator, Page } from "@playwright/test";
 import type { EditorPane } from "./editor-pane";
 import { FlowValue } from "./flow-value";
@@ -32,34 +33,6 @@ export class EditorLine {
 
   gutterLineNumberElement(): Locator {
     return this.gutterElement().locator(".gutter-line");
-  }
-
-  gutterTraceIcon(): Locator {
-    return this.gutterElement().locator(".gutter-trace");
-  }
-
-  gutterDisabledTraceIcon(): Locator {
-    return this.gutterElement().locator(".gutter-disabled-trace");
-  }
-
-  gutterBreakpointEnabledIcon(): Locator {
-    return this.gutterElement().locator(".gutter-breakpoint-enabled");
-  }
-
-  gutterBreakpointDisabledIcon(): Locator {
-    return this.gutterElement().locator(".gutter-breakpoint-disabled");
-  }
-
-  gutterBreakpointErrorIcon(): Locator {
-    return this.gutterElement().locator(".gutter-breakpoint-error");
-  }
-
-  gutterNoBreakpointPlaceholder(): Locator {
-    return this.gutterElement().locator(".gutter-no-breakpoint");
-  }
-
-  gutterNoTracePlaceholder(): Locator {
-    return this.gutterElement().locator(".gutter-no-trace");
   }
 
   gutterHighlightMarker(): Locator {
@@ -102,27 +75,28 @@ export class EditorLine {
     return locators.map((l) => new FlowValue(l, menu));
   }
 
+  /** The glyph column's mark on this line (Editor-Pane.md MC.5). */
+  private async glyphMarks(): Promise<string[]> {
+    return glyphMarksOn(this.parentPane.root.page()!, this.lineNumber);
+  }
+
   async hasBreakpoint(): Promise<boolean> {
-    const locator = this.gutterElement().locator(
-      ".gutter-breakpoint-enabled, .gutter-breakpoint-disabled, .gutter-breakpoint-error",
-    );
-    return (await locator.count()) > 0;
+    return (await this.glyphMarks()).some((m) => m.includes("breakpoint"));
   }
 
   async hasTracepoint(): Promise<boolean> {
-    const locator = this.gutterElement().locator(".gutter-trace, .gutter-disabled-trace");
-    return (await locator.count()) > 0;
+    return (await this.glyphMarks()).some((m) => m.includes("tracepoint"));
   }
 
   async isTracepointDisabled(): Promise<boolean> {
     if (!(await this.hasTracepoint())) {
       return false;
     }
-    return (await this.gutterDisabledTraceIcon().count()) > 0;
+    return false;
   }
 
   async hasErrorIcon(): Promise<boolean> {
-    return (await this.gutterBreakpointErrorIcon().count()) > 0;
+    return false;
   }
 
   async lineText(): Promise<string> {

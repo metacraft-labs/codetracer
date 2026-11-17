@@ -133,6 +133,10 @@ type
       ## PLAT-60: the line the Low Level Code listing's selected instruction
       ## came from — the cross-reference from an instruction back to its
       ## source — drawn on the hover ground across the code. 0: none.
+    hintLine*: int
+      ## The line whose empty glyph cell the pointer is over (gesture 7a).
+    extraCarets*: seq[tuple[line, column: int]]
+      ## The other cursors, 1-based display columns (Alt+click, MC.4).
     caretLine*: int
     caretColumn*: int
       ## PLAT-51 (CodeTracer-TUI.md §3.3.2, Editor-Pane.md "The caret in a
@@ -617,6 +621,7 @@ proc paintSourcePane*(g: var StyledGrid; area: CellArea;
       isExecutionLine = line == model.executionLine and line > 0,
       provenance = model.provenance,
       isInspectionLine = line == model.inspectionLine and line > 0)
+    spec.hinted = line == model.hintLine
     if model.gutterMode == gutExecutionCounts:
       spec.numberText = model.heat.heatCountText(line, g.glyphs)
       spec.numberStyle = model.heat.heatStyle(line)
@@ -743,6 +748,14 @@ proc paintSourcePane*(g: var StyledGrid; area: CellArea;
         paintCellBand(g, row, codeCol, codeW, left, m.fromColumn, m.toColumn,
                       (if m.current: srSurfaceFindMatchCurrent
                        else: srSurfaceFindMatch))
+    for extra in model.extraCarets:
+      if extra.line == line and extra.column - left >= 1 and
+         extra.column - left <= codeW:
+        g.restyle(row, codeCol + extra.column - left - 1, 1,
+                  proc(s: CellStyle): CellStyle =
+                    var out2 = s
+                    out2.reverse = true
+                    out2)
     # PLAT-51: THE CARET, over everything — its cell reversed (a caret past
     # the line's end sits on the blank cell after it).
     if line == model.caretLine and line > 0 and
@@ -799,6 +812,12 @@ type
     line*: int
       ## The source line pressed, 0 for none.
     onGutter*: bool
+    gutterCell*: int
+      ## The cell of the gutter pressed, from its left edge; -1 off the gutter.
+    gutterWidth*: int
+    pixelColumn*: float
+      ## The pane's code origin, in cells from the screen's left edge, for a
+      ## pixel report's caret boundary.
     column*: int
       ## The code column pressed (1-based cell of the line's text); 0 on the
       ## gutter or past the code column.
@@ -814,7 +833,7 @@ proc sourceClickTargetAt*(model: SourcePaneModel; area: CellArea;
   ## A press at `(row, col)` on the pane `paintSourcePane` painted into
   ## `area`, read back by the same arithmetic: the line, the gutter or the
   ## code column, and on a line with inline values which one it is on.
-  result = SourceClickTarget(value: -1)
+  result = SourceClickTarget(value: -1, gutterCell: -1)
   if area.width <= 0 or area.height <= 1 or row <= area.row or
      row >= area.row + area.height or col < area.col or
      col >= area.col + area.width:
@@ -834,8 +853,11 @@ proc sourceClickTargetAt*(model: SourcePaneModel; area: CellArea;
   if line < 1 or (model.totalLineCount > 0 and line > model.totalLineCount):
     return
   result.line = line
+  result.gutterWidth = gutW
+  result.pixelColumn = float(area.col + gutW - view.leftCol)
   if col < area.col + gutW:
     result.onGutter = true
+    result.gutterCell = col - area.col
     return
   let codeCol = area.col + gutW
   result.column = col - codeCol + 1 + view.leftCol

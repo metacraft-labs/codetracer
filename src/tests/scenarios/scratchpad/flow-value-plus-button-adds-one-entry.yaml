@@ -1,0 +1,35 @@
+scenario: 1
+name: scratchpad/flow-value-plus-button-adds-one-entry
+pack: codetracer
+summary: >-
+  The `+` shown beside a value the editor draws, while the pointer rests on
+  it, adds exactly one entry to the scratchpad.
+
+stage:
+  - use: record-program
+    with: { program: noir_space_ship }
+  - use: open-recording
+    # Wide enough that the values drawn beside the code are on screen.
+    with: { width: 2400, height: 1300 }
+
+steps:
+  - wait: { until: replay-idle, timeout: 180s }
+  # Into iterate_asteroids, whose loop body draws short values on screen,
+  # then step so the values beside the code are drawn again.
+  - wait: { until: { at: 'call-trace/call[name="iterate_asteroids"]', present: true }, timeout: 60s }
+  - click: { at: 'call-trace/call[name="iterate_asteroids"]', anchor: name }
+  - wait: replay-idle
+  - click: 'toolbar/toolbar-button[label="next-image"]'
+    settle: false
+  - wait: replay-idle
+  - click: 'toolbar/toolbar-button[label="next-image"]'
+    settle: false
+  - wait: replay-idle
+  - click: 'pane-tab[label="SCRATCHPAD"]'
+  - wait: { until: { at: scratchpad, count: 0 }, timeout: 10s }
+  - wait: { until: { at: 'editor[file="shield.nr"]/flow-value[name="mass", line="5"]', shown: true }, timeout: 60s }
+  - hover: { at: 'editor[file="shield.nr"]/flow-value[name="mass", line="5"]', for: 500ms }
+  - wait: { until: { at: 'value-actions/panel-button[label="Add to scratchpad"]', present: true }, timeout: 10s }
+  - click: 'value-actions/panel-button[label="Add to scratchpad"]'
+  - wait: { until: { at: scratchpad, count: 1 }, timeout: 20s }
+  - expect: { at: 'scratchpad/scratch-entry[expression="mass"]', present: true }

@@ -359,6 +359,12 @@ impl EventDb {
         self.sort_global_table();
     }
 
+    /// A tracepoint hit as an Event Log row. The row's content is TEXT: every
+    /// front-end shows it as text (the desktop's log, the terminal, GPUI,
+    /// VS Code), so an error is written `<error: msg>` — the value
+    /// presenter's form (`common/value_presentation/presenter.nim`) — and
+    /// never as markup. It used to be `<span class=error-trace>msg</span>`,
+    /// which the desktop's log showed literally, tags and all.
     fn convert_stop_to_program_event(&self, trace: &Stop) -> ProgramEvent {
         let mut res: String = Default::default();
         if trace.error_message.is_empty() {
@@ -368,11 +374,11 @@ impl EventDb {
                 if value.kind != TypeKind::Error {
                     res += &(format!("{}={} ", name, value.text_repr()));
                 } else {
-                    res += &(format!("{}=<span class=error-trace>{}</span>", name, value.msg));
+                    res += &(format!("{}=<error: {}> ", name, value.msg));
                 }
             }
         } else {
-            res += &format!("<span class=error-trace>{}</span>", trace.error_message);
+            res += &format!("<error: {}>", trace.error_message);
         }
         ProgramEvent {
             kind: EventLogKind::TraceLogEvent,
@@ -734,6 +740,7 @@ impl EventDb {
 mod tests {
     use super::*;
     use crate::task::{SearchValue, StopType, TableArgs, UpdateTableArgs};
+    use crate::value::{Type, Value};
 
     fn event(kind: EventLogKind, content: &str, rr_ticks: i64, rr_event_id: usize) -> ProgramEvent {
         ProgramEvent {
@@ -791,6 +798,32 @@ mod tests {
         assert_eq!(traced[0].direct_location_rr_ticks, 7);
         assert_eq!(traced[0].max_rr_ticks, 1314);
         Ok(())
+    }
+
+    #[test]
+    fn a_tracepoint_error_is_text_in_the_event_log_not_markup() {
+        let mut db = EventDb::new();
+        let mut missing = Value::new(TypeKind::Error, Type::new(TypeKind::Error, "error"));
+        missing.msg = "No such symbol in the current context: \"b\"".to_string();
+        let mut stop = Stop::new("program.js".to_string(), 1, vec![], 3, 0, 0, StopType::Trace);
+        stop.locals = vec![StringAndValueTuple {
+            field0: "b".to_string(),
+            field1: missing,
+        }];
+        let mut failed = Stop::new("program.js".to_string(), 1, vec![], 4, 0, 1, StopType::Trace);
+        failed.error_message = "the expression did not parse".to_string();
+        db.register_tracepoint_results(&[stop, failed]);
+        let contents: Vec<String> = db
+            .single_tables
+            .iter()
+            .filter(|table| table.kind != DbEventKind::Record)
+            .flat_map(|table| table.events.iter())
+            .map(|event| event.content.clone())
+            .collect();
+        assert_eq!(contents.len(), 2);
+        assert!(contents.contains(&"b=<error: No such symbol in the current context: \"b\"> ".to_string()));
+        assert!(contents.contains(&"<error: the expression did not parse>".to_string()));
+        assert!(contents.iter().all(|c| !c.contains("<span")), "{contents:?}");
     }
 
     #[test]

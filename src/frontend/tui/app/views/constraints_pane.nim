@@ -26,7 +26,8 @@
 ## are never cut. The rightmost column is the list's scrollbar when it
 ## overflows. The selected row — the cursor a press, the keyboard and the
 ## row menu share — is drawn on the selection surface; a row a press takes to
-## its source is drawn in the text colour, one placed nowhere muted.
+## its source is drawn in the text colour, one placed nowhere muted. An opcode's
+## row ends with the line it came from, as a function's does.
 
 import std/strutils
 
@@ -243,11 +244,24 @@ proc paintConstraints*(g: var StyledGrid; area: CellArea;
     if r.opcode:
       let text = r.count & " " & r.name &
                  (if r.args.len > 0: " " & r.args else: "")
-      result.painted.add repeat(' ', ConstraintsOpcodeIndent) &
-        g.paintCell(ry, area.col + ConstraintsOpcodeIndent,
-                    width - ConstraintsOpcodeIndent, text,
+      let room = width - ConstraintsOpcodeIndent
+      # Where the opcode came from, at the row's end, while the opcode keeps
+      # the larger part of the row: its operands run long and it is what the
+      # row is about.
+      let whereCells = cellWidthOf(r.where)
+      let placeCells = if whereCells > 0 and whereCells + ConstraintsGapCells <= room div 2:
+                         whereCells
+                       else: 0
+      let textCells = if placeCells > 0: room - placeCells - ConstraintsGapCells
+                      else: room
+      var line = repeat(' ', ConstraintsOpcodeIndent) &
+        g.paintCell(ry, area.col + ConstraintsOpcodeIndent, textCells, text,
                     if muted: ConstraintsMutedStyle
                     else: ConstraintsTextStyle)
+      if placeCells > 0:
+        line.add " " & g.paintCell(ry, area.col + width - placeCells, placeCells,
+                                   r.where, ConstraintsMutedStyle)
+      result.painted.add line
       continue
     template col(i: int): int = area.col + fit.starts[i]
     var text = g.paintCell(ry, col(0), fit.widths[0], r.name, main)

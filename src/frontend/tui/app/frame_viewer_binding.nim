@@ -100,8 +100,9 @@ import std/options
 import codetracer_embed
 
 import ./views/frame_viewer
+import ./views/visual_replay_panes
 
-export frame_viewer
+export frame_viewer, visual_replay_panes
 
 const
   FrameViewerPaneDegradations*: set[PaneDegradation] = {
@@ -369,3 +370,126 @@ proc applyFrameSeek*(frames: FrameViewerVM; model: var FrameViewerModel;
   model.frameIndex = f
   if not frames.isNil:
     frames.loadFrameByIndex(f)
+
+# ---------------------------------------------------------------------------
+# PLAT-59: the Visual Replay PANES, from their shared model
+# ---------------------------------------------------------------------------
+#
+# The three panes the desktop adds for a recording that carries graphics —
+# Video Player, Pixel History, Shader Debug — read ONE model
+# (`VisualReplayPanesVM`, the desktop's and GPUI's too). What is the
+# terminal's own and stays in the pane's value between frames: the
+# magnifier (§5's second stage), the scrubbers' hold, the history's scroll.
+
+proc rasterKeyOf(p: FramePicture): string =
+  $p.frame & ":" & $p.width & "x" & $p.height & ":" & $p.pixels.len & ":" &
+    (if p.pixels.len >= 16: p.pixels[0 ..< 16] else: p.pixels) &
+    (if p.pixels.len >= 32: p.pixels[^16 .. ^1] else: "")
+
+proc videoPlayerModelFor*(panes: VisualReplayPanesVM;
+                          prev: FrameViewerModel;
+                          capability: ImageCapability;
+                          core: DegradedStateSnapshot;
+                          pictureCols, pictureRows: int): FrameViewerModel =
+  ## The Video Player pane's value: the frame (its PIXELS, which a cell tier
+  ## renders), the transport, both scrubbers — and, from `prev`, what the
+  ## pane itself holds (the magnifier, a scrubber held, the raster already
+  ## decoded for this frame).
+  result = frameViewerModelFor(panes.frame, nil, capability, core,
+                               open = true, magnified = prev.magnified,
+                               magnifier = prev.magnifier)
+  result.pane = true
+  result.open = false   # a pane, not PLAT-15's overlay
+  let pic = panes.frame.picture.val
+  if pic.pixels.len > 0 and pic.pixels.len == pic.width * pic.height * 4 and
+     pic.width > 0 and pic.height > 0:
+    let key = rasterKeyOf(pic)
+    if prev.hasRaster and prev.rasterKey == key:
+      result.raster = prev.raster
+    else:
+      var bytes = newSeq[byte](pic.pixels.len)
+      copyMem(addr bytes[0], unsafeAddr pic.pixels[0], pic.pixels.len)
+      result.raster = initRgbaImage(pic.width, pic.height, bytes)
+    result.rasterKey = key
+    result.hasRaster = true
+    result.encodedBytes = 0
+    # The picture's own size: the terminal asks for frames unscaled, so it
+    # is the framebuffer's and §5's coordinates are source pixels.
+    result.sourceWidth = pic.width
+    result.sourceHeight = pic.height
+  let player = panes.player
+  result.transport = VideoTransport(
+    playing: player.playState.val == Playing,
+    reverse: player.direction.val == Reverse,
+    rate: player.rate.val.rateNumber,
+    buffering: player.bufferingDegraded.val,
+    picker: player.pickerState.val == PickerActive,
+    loading: panes.frame.loading.val,
+    error: panes.playerError.val)
+  result.frameIndex = player.scrubPosition(scrubFrame)
+  result.scrubbing = player.frameScrub.held
+  result.drawCount = panes.frame.frameDrawCount.val
+  result.drawInFrame = player.scrubPosition(scrubDraw)
+  result.drawScrubbing = player.drawScrub.held
+  result.frameWords = player.frameLabel()
+  result.drawWords = player.drawLabel()
+  result.gap = result.resolveGap(pictureCols, pictureRows)
+  result.degradedMessage =
+    if panes.playerError.val.len > 0 and result.gap == fdgPlayerAbsent:
+      panes.playerError.val
+    else:
+      degradedMessageFor(frameViewerDegradation(core, result.gap), result.gap)
+
+proc rgbOf(c: VisualReplayPixelColor): Rgb =
+  rgb(colorByte(c.r), colorByte(c.g), colorByte(c.b))
+
+proc pixelHistoryPaneModelFor*(panes: VisualReplayPanesVM;
+                               prev: PixelHistoryPaneModel):
+    PixelHistoryPaneModel =
+  ## The Pixel History pane's value, in the desktop's words.
+  result.loaded = not panes.isNil
+  result.scrollTop = prev.scrollTop
+  result.selected = -1
+  if panes.isNil:
+    return
+  let h = panes.history
+  result.header = h.pixelText()
+  result.loading = h.loading.val
+  result.error = h.error.val
+  result.empty = PixelHistoryEmptyText
+  for i, e in h.entries.val:
+    result.rows.add HistoryPaneRow(
+      index: i, draw: drawText(e), geid: geidText(e), pass: passText(e),
+      tests: testsText(e), passed: e.passed,
+      pre: rgbOf(e.preColor), shader: rgbOf(e.shaderOutput),
+      post: rgbOf(e.postColor),
+      preText: colorText(e.preColor), shaderText: colorText(e.shaderOutput),
+      postText: colorText(e.postColor))
+  if h.selectedEntry.val.isSome:
+    result.selected = h.selectedEntry.val.get
+
+proc shaderDebugPaneModelFor*(panes: VisualReplayPanesVM):
+    ShaderDebugPaneModel =
+  ## The Shader Debug pane's value, in the desktop's words.
+  result.loaded = not panes.isNil
+  if panes.isNil:
+    return
+  let sd = panes.shader
+  result.context = sd.contextText()
+  result.loading = sd.loading.val
+  result.error = sd.error.val
+  result.empty = ShaderDebugEmptyText
+  result.hasInfo = sd.debugInfo.val.isSome
+  result.stage = sd.stageText()
+  result.step = sd.stepText()
+  result.stepIndex = sd.currentStepIndex.val
+  result.stepCount = sd.stepCount()
+  result.sourceLines = sd.sourceLinesOf()
+  result.currentLine = sd.currentSourceLine()
+  result.instruction = sd.instructionText()
+  for v in sd.variablesOf():
+    result.variables.add ShaderValueRow(name: v.name, valueType: v.valueType,
+                                        value: v.value)
+  for v in sd.registersOf():
+    result.registers.add ShaderValueRow(name: v.name, valueType: v.valueType,
+                                        value: v.value)

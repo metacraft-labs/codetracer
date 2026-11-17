@@ -48,13 +48,15 @@
 #      through a `siblings:` block, through one of this repo's
 #      `.github/actions/setup-*-siblings` composites, or through a `clone-repo`
 #      step -- except for pairs recorded in KNOWN_GAPS below.
-#      SCOPE, stated rather than implied: the scanner matches the literal
-#      command in a non-comment line, so a job that reaches build-once through
-#      a wrapper script is out of its reach. `visual-replay-regression-gate` is
+#      A job counts when a non-comment line runs `scripts/build-once.sh` or
+#      `just <recipe>` for `build-once` or any justfile recipe whose
+#      prerequisites reach it (`test-gui`, ...), read from the justfile.
+#      SCOPE, stated rather than implied: a job that reaches build-once through
+#      a wrapper SCRIPT is out of its reach. `visual-replay-regression-gate` is
 #      the one such job today -- it names `just build-once` only in prose and
 #      drives it from ci/, and it happens to provision all nine anyway. A
-#      wrapper is therefore a way to escape this check; adding the wrapper's
-#      name to the pattern is how to close that.
+#      wrapper script is therefore a way to escape this check; adding the
+#      wrapper's name to the pattern is how to close that.
 #   3. KNOWN_GAPS is shrink-only: a recorded gap that has been fixed must be
 #      deleted from the list rather than left to rot, so the exception list
 #      cannot quietly become the specification.
@@ -67,10 +69,12 @@
 #      launcher-recorder-e2e logs for d05e45f9 contain the recipe failure and
 #      not one word of the report above.
 #   5. Every sibling the `ct` compile imports (io-mon, nim-stackable-hooks, via
-#      src/ct_test/incremental/io_mon_capture.nim) is in the REQUIRED tier:
-#      the preflight accepts a workspace of exactly the required siblings and
-#      refuses one missing either repo, by name, even when only the repo's
-#      `*_SRC` variable (which tup strips) points at a copy.
+#      src/ct_test/incremental/io_mon_capture.nim; nim-pty, via
+#      src/common/shell_session.nim) is in the REQUIRED tier: the import chain
+#      from src/ct/codetracer.nim to the importing module still holds, and the
+#      preflight accepts a workspace of exactly the required siblings and
+#      refuses one missing any of those repos, by name, even when only the
+#      repo's `*_SRC` variable (which tup strips) points at a copy.
 #
 # # No mocks
 #
@@ -127,24 +131,15 @@ readonly PREFLIGHT="$REPO_ROOT/scripts/require-siblings.sh"
 # the lock is generated and then silently dropped), then drop the `=<sha>` from
 # the two entries in launcher-recorder-e2e.yml's `siblings:` block.
 #
-# THE REMAINING FOUR ARE A DIFFERENT CASE and are recorded as FOUND, not as
-# accepted. This suite's first run reported them, they are static facts about
-# the workflow file, and no CI run has yet corroborated them because neither
-# job has reached `build-once` recently -- `viewmodel-tests` died in `Setup dev
-# env` on a branch with no lock and then on an unrelated nixpkgs fetch, and
+# THE WINDOWS-INSTALLER ENTRIES ARE A DIFFERENT CASE and are recorded as
+# FOUND, not as accepted. This suite's first run reported them, they are static
+# facts about the workflow file, and no CI run has yet corroborated them because
 # `windows-installer-build` is release-gated and reports `skipped`. They are
-# listed rather than fixed because fixing them means editing jobs this change
+# listed rather than fixed because fixing them means editing a job this change
 # cannot exercise; each line says what is missing and what would close it.
+# (Two viewmodel-tests entries stood here too; they closed once that job
+# provisioned the lock-pinned siblings, and the suite asked for their removal.)
 KNOWN_GAPS=(
-	# viewmodel-tests provisions the IsoNim family through
-	# .github/actions/setup-isonim-siblings and adds codetracer-trace-format-nim,
-	# codetracer-js-recorder and runquota as clone-repo steps -- but not
-	# codetracer-trace-format (whose column in the required table is
-	# deliberately override-free) nor codetracer-native-recorder. Both ARE in
-	# the published lock, so both close with a bare entry.
-	"codetracer.yml|viewmodel-tests|codetracer-trace-format"
-	"codetracer.yml|viewmodel-tests|codetracer-native-recorder"
-
 	# windows-installer-build runs `bash scripts/build-once.sh` directly with an
 	# `env-flavor: windows-diy` setup-dev-env whose siblings: block carries only
 	# the three db-backend repos. The preflight is driver-agnostic -- it runs
@@ -320,6 +315,60 @@ unset _repro_provides
 # -----------------------------------------------------------------------------
 echo "every job that runs 'just build-once' provisions the required siblings"
 
+# The `just` recipes that run build-once: `build-once` itself and every recipe
+# whose prerequisites reach it, transitively, read from the justfile. A job
+# running `just test-gui` (`test-gui *args: build-once build-siblings`) starts
+# the same preflight as one running `just build-once`, and matching only the
+# literal let `test-ui-tests-rr` clone three repos and pass this check
+# (codetracer-pm issue 2026-11-08-ct-core-imports-nim-pty-which-the-sibling-
+# check-calls-optional).
+build_once_recipes() { # <justfile> ; echoes one recipe name per line
+	awk '
+		# A recipe header: `[@]name [params...]: [deps...]` at column 0. Skip
+		# assignments (`x := ...`), settings, attributes and comments. Quoted
+		# strings are blanked first: a parameter default (`port="3000"`) or a
+		# dependency argument may hold `=`, `:` or `#`, and an earlier pattern
+		# that refused any `=` before the colon silently skipped every recipe
+		# with a defaulted parameter.
+		{
+			line = $0
+			gsub(/"[^"]*"/, "\"\"", line); gsub(/\047[^\047]*\047/, "\"\"", line)
+		}
+		line ~ /^[@A-Za-z0-9_-]+([ \t][^:]*)?:([ \t]|$)/ && line !~ /:=/ {
+			name = line; sub(/[ \t:].*/, "", name); sub(/^@/, "", name)
+			deps = line; sub(/^[^:]*:/, "", deps); sub(/#.*/, "", deps)
+			n = split(deps, toks, /[ \t]+/)
+			for (i = 1; i <= n; i++) {
+				t = toks[i]; gsub(/[()]/, "", t)
+				if (t != "" && t !~ /^&&$/) edges[name] = edges[name] " " t
+			}
+			names[name] = 1
+		}
+		END {
+			reach["build-once"] = 1
+			do {
+				changed = 0
+				for (r in names) {
+					if (r in reach) continue
+					n = split(edges[r], toks, " ")
+					for (i = 1; i <= n; i++) if (toks[i] in reach) { reach[r] = 1; changed = 1; break }
+				}
+			} while (changed)
+			for (r in reach) print r
+		}
+	' "$1"
+}
+
+BUILD_ONCE_RECIPES="$(build_once_recipes "$REPO_ROOT/justfile" | sort)"
+if ! grep -qx 'test-gui' <<<"$BUILD_ONCE_RECIPES"; then
+	fail "the justfile recipes that run build-once are readable" \
+		"recipe test-gui (whose prerequisites name build-once) is not among them:" \
+		"$(tr '\n' ' ' <<<"$BUILD_ONCE_RECIPES")" \
+		"the recipe parser regressed, so jobs that reach build-once through a" \
+		"recipe would silently drop out of this scan."
+fi
+build_once_pattern="scripts/build-once\\.sh|just[[:space:]]+(-[^[:space:]]+[[:space:]]+)*($(tr '\n' '|' <<<"$BUILD_ONCE_RECIPES" | sed 's/|$//'))([[:space:]\"'\'']|$)"
+
 gaps_seen=()
 missing_reports=()
 build_once_jobs=0
@@ -377,7 +426,7 @@ for wf in "$WORKFLOW_DIR"/*.yml; do
 		#
 		# A herestring feeds `grep` from a temporary file: no pipe, no writer,
 		# no EPIPE, and the exit status is `grep`'s own in every case.
-		grep -qE 'just build-once|scripts/build-once\.sh' <<<"$job_code" || continue
+		grep -qE "$build_once_pattern" <<<"$job_code" || continue
 		build_once_jobs=$((build_once_jobs + 1))
 
 		# What this job provisions: its own inline blocks, plus the blocks of
@@ -386,8 +435,12 @@ for wf in "$WORKFLOW_DIR"/*.yml; do
 		printf '%s\n' "$job_body" >"$job_tmp"
 		provided=" $(sibling_names_in_block "$job_tmp" | tr '\n' ' ') "
 		rm -f "$job_tmp"
+		# A composite counts only when a `uses:` line of the job's code names
+		# it. Matching anywhere in the body credited `test-ui-tests-rr` with
+		# setup-db-backend-siblings' siblings because a comment in its
+		# `siblings:` block cites that action's file for the refresh rule.
 		for comp in "${!COMPOSITE_PROVIDES[@]}"; do
-			if grep -q "actions/$comp" <<<"$job_body"; then
+			if grep -qE "^[[:space:]]*(-[[:space:]]+)?uses:[[:space:]]*[^#[:space:]]*actions/$comp([@/[:space:]]|\$)" <<<"$job_code"; then
 				provided="${provided}${COMPOSITE_PROVIDES[$comp]} "
 			fi
 		done
@@ -395,7 +448,7 @@ for wf in "$WORKFLOW_DIR"/*.yml; do
 		while IFS= read -r repo_line; do
 			leaf="${repo_line##*/}"
 			[ -n "$leaf" ] && provided="${provided}${leaf} "
-		done < <(printf '%s\n' "$job_body" | sed -n 's/^[ \t]*repo:[ \t]*\([A-Za-z0-9_.-]*\/[A-Za-z0-9_.-]*\).*$/\1/p')
+		done < <(printf '%s\n' "$job_code" | sed -n 's/^[ \t]*repo:[ \t]*\([A-Za-z0-9_.-]*\/[A-Za-z0-9_.-]*\).*$/\1/p')
 
 		while IFS= read -r name; do
 			[ -n "$name" ] || continue
@@ -533,34 +586,98 @@ fi
 # -----------------------------------------------------------------------------
 # 6. Every sibling the `ct` compile imports is in the REQUIRED tier.
 #
-# The defect being pinned (codetracer-pm issue 2026-10-30-require-siblings-
-# calls-io-mon-advisory-but-build-once-cannot-compile-ct-without-it): io-mon
-# and nim-stackable-hooks sat in the ADVISORY tier, so a workspace without them
-# passed the preflight ("optional sibling repo(s) are missing ... The build
-# continues") and then failed in tup on `cannot open file: io_mon/depfile`.
-# `src/ct_test/incremental/io_mon_capture.nim` imports both unconditionally and
-# is reached from every `ct` build (src/ct/codetracer.nim ->
-# ../ct_test/incremental_cli -> incremental/io_mon_capture).
+# The defects being pinned:
 #
-# Executed, not grepped: the real preflight runs against a throwaway workspace
-# holding the probe file of every REQUIRED row and nothing else. It must
+#   * codetracer-pm issue 2026-10-30-require-siblings-calls-io-mon-advisory-
+#     but-build-once-cannot-compile-ct-without-it: io-mon and
+#     nim-stackable-hooks sat in the ADVISORY tier, so a workspace without them
+#     passed the preflight ("optional sibling repo(s) are missing ... The build
+#     continues") and then failed in tup on `cannot open file: io_mon/depfile`.
+#     `src/ct_test/incremental/io_mon_capture.nim` imports both
+#     unconditionally and is reached from every `ct` build.
+#   * codetracer-pm issue 2026-11-08-ct-core-imports-nim-pty-which-the-
+#     sibling-check-calls-optional: the same mistake for nim-pty. Since
+#     4e856d570 `src/common/shell_session.nim` imports `nim_pty`, and `ct`
+#     compiles it for `ct shell-session` (src/ct/codetracer.nim ->
+#     shell_session_command -> ../common/shell_session). The preflight still
+#     called nim-pty a TUI-only advisory sibling, the launcher-recorder-e2e
+#     workflow did not clone it, and its `Build the codetracer-desktop core`
+#     step died on `shell_session.nim(40, 8) Error: cannot open file: nim_pty`.
+#
+# Statically checked first: each row carries the chain of imports from
+# src/ct/codetracer.nim to the module that imports the sibling, and every link
+# is verified against the source -- the importing file names the next module,
+# and that module resolves to the next file in the chain. So a row cannot
+# outlive the imports it stands for, and a reader can see WHY `ct` needs it.
+#
+# Then executed, not grepped: the real preflight runs against a throwaway
+# workspace holding the probe file of every REQUIRED row and nothing else. It
+# must
 #   a. accept that workspace (the control -- otherwise b proves nothing, and it
 #      also pins that nim-shm-queue / nim-shm-gset, which `ct`'s
 #      `io_mon/depfile` closure does not reach, are NOT required);
 #   b. refuse it, naming the repo, once one of CT_IMPORT_SIBLINGS is removed;
 #   c. still refuse when only the repo's *_SRC variable points at a copy,
 #      because tup strips those variables before `config.nims` reads them.
-# The module list is checked against io_mon_capture.nim's imports first, so
-# the list below cannot outlive the imports it stands for.
+#      nim-pty has no such variable (config.nims and src/Tuprules.tup reach it
+#      only as ../nim-pty/src), so its row leaves the column empty and c does
+#      not apply to it.
 # -----------------------------------------------------------------------------
 echo "every sibling the ct compile imports is a REQUIRED sibling"
 
-readonly CT_IMPORT_MODULE="$REPO_ROOT/src/ct_test/incremental/io_mon_capture.nim"
-# repo | module imported by CT_IMPORT_MODULE | env var tup does not export
+# repo | module the chain's last file imports | env var tup does not export
+#   (empty: none exists) | import chain
+#
+# The chain is space-separated `<file>:<import spelling>` links, starting at
+# src/ct/codetracer.nim. Each spelling, resolved against its file's directory,
+# must name the next link's file; the last link's spelling is the sibling's
+# module.
 CT_IMPORT_SIBLINGS=(
-	"io-mon|io_mon/depfile|IO_MON_SRC"
-	"nim-stackable-hooks|stackable_hooks/propagation|NIM_STACKABLE_HOOKS_SRC"
+	"io-mon|io_mon/depfile|IO_MON_SRC|src/ct/codetracer.nim:../ct_test/incremental_cli src/ct_test/incremental_cli.nim:incremental/io_mon_capture src/ct_test/incremental/io_mon_capture.nim:io_mon/depfile"
+	"nim-stackable-hooks|stackable_hooks/propagation|NIM_STACKABLE_HOOKS_SRC|src/ct/codetracer.nim:../ct_test/incremental_cli src/ct_test/incremental_cli.nim:incremental/io_mon_capture src/ct_test/incremental/io_mon_capture.nim:stackable_hooks/propagation"
+	"nim-pty|nim_pty||src/ct/codetracer.nim:shell_session_command src/ct/shell_session_command.nim:../common/shell_session src/common/shell_session.nim:nim_pty"
 )
+
+# True when <file> imports <spelling>: on a non-comment line, as a whole token
+# of an `import` statement, a bracketed `std/[...]` list, or a line of a
+# multi-line `import` block (src/ct/codetracer.nim uses one). Indentation is
+# allowed, because `ct shell-session` is imported under `when not defined(js)`.
+file_imports() { # <file> <spelling>
+	local pattern
+	pattern="$(printf '%s' "$2" | sed 's/[.]/\\./g')"
+	# Herestring, not a pipe: `grep -q` stops at its first match, and under
+	# `pipefail` the SIGPIPE that kills a still-writing `sed` would turn a
+	# match into a failure (see the note on job scanning in assertion 3).
+	grep -qE "(^|[[:space:],\[])${pattern}([[:space:],]|\]|$)" <<<"$(sed 's/#.*//' "$1")"
+}
+
+# Echoes "" when the chain holds, else the first broken link, described.
+check_import_chain() { # <module> <chain>
+	local module="$1" link file spelling expected="" prev_dir=""
+	local -a links
+	read -r -a links <<<"$2"
+	for link in "${links[@]}"; do
+		file="${link%%:*}"
+		spelling="${link#*:}"
+		if [ -n "$expected" ] && [ "$file" != "$expected" ]; then
+			printf '%s' "the chain jumps: the previous link resolves to $expected, not $file"
+			return
+		fi
+		if [ ! -f "$REPO_ROOT/$file" ]; then
+			printf '%s' "$file does not exist"
+			return
+		fi
+		if ! file_imports "$REPO_ROOT/$file" "$spelling"; then
+			printf '%s' "$file no longer imports $spelling"
+			return
+		fi
+		prev_dir="$(dirname "$file")"
+		expected="$(realpath -m --relative-to="$REPO_ROOT" "$REPO_ROOT/$prev_dir/$spelling.nim")"
+	done
+	if [ "$spelling" != "$module" ]; then
+		printf '%s' "the chain ends at $spelling, not at the sibling module $module"
+	fi
+}
 
 # Build a workspace with every REQUIRED row's probe present, minus $2 (a repo
 # name, or empty). Echoes the workspace root.
@@ -606,13 +723,16 @@ run_tier_preflight() { # <workspace root> [VAR=value...]
 }
 
 for entry in "${CT_IMPORT_SIBLINGS[@]}"; do
-	IFS='|' read -r name module _ <<<"$entry"
-	if grep -qE "^import[[:space:]]+${module}([[:space:]]|$)" "$CT_IMPORT_MODULE"; then
-		ok "io_mon_capture.nim still imports $module (from $name)"
+	IFS='|' read -r name module _ chain <<<"$entry"
+	broken="$(check_import_chain "$module" "$chain")"
+	if [ -z "$broken" ]; then
+		ok "src/ct/codetracer.nim still reaches \`import $module\` (from $name): ${chain// / -> }"
 	else
-		fail "io_mon_capture.nim still imports $module (from $name)" \
-			"the import is gone, so this entry of CT_IMPORT_SIBLINGS no longer stands" \
-			"for anything -- drop it here, and reconsider $name's tier in the preflight."
+		fail "src/ct/codetracer.nim still reaches \`import $module\` (from $name)" \
+			"$broken." \
+			"This entry of CT_IMPORT_SIBLINGS no longer stands for what it says: re-trace" \
+			"the chain, or, if \`ct\` really stopped importing $module, drop the entry and" \
+			"reconsider $name's tier in the preflight."
 	fi
 done
 
@@ -628,7 +748,7 @@ else
 fi
 
 for entry in "${CT_IMPORT_SIBLINGS[@]}"; do
-	IFS='|' read -r name module var <<<"$entry"
+	IFS='|' read -r name module var _ <<<"$entry"
 	omit_ws="$(make_tier_workspace "without-$name" "$name")"
 	omit_out="$(run_tier_preflight "$omit_ws")"
 	omit_rc=$?
@@ -644,6 +764,10 @@ for entry in "${CT_IMPORT_SIBLINGS[@]}"; do
 	fi
 
 	# A copy of the repo reachable ONLY through the variable tup strips.
+	if [ -z "$var" ]; then
+		echo "  skip $name has no *_SRC override variable to test (the build reaches it only as ../$name/src)"
+		continue
+	fi
 	alias_dir="$tier_fixture_root/alias-$name/src"
 	mkdir -p "$alias_dir/$(dirname "$module")"
 	: >"$alias_dir/$module.nim"

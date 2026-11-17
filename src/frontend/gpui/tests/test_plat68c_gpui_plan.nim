@@ -36,7 +36,7 @@ import ./gpui_child_env
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads this spelling
 # as the suite's RUNTIME assertion count.
-const ExpectedAssertions = 35
+const ExpectedAssertions = 37
 
 var countedAssertions = 0
 
@@ -179,6 +179,21 @@ suite "PLAT-68 GPUI: Debug mode's F-keys are the desktop's (CUA-Keymap.md §4)":
     if inert.len == 1:
       ck "`save`" in inert[0] and "editing session" in inert[0]
       ck plan.values("data-ct-footer-note") == @[inert[0]["inert ".len .. ^1]]
+    # ... and it is drawn where it can be read: inside the window, after the
+    # footer's docked labels, with room for its words (it was once placed
+    # past the window's right edge, one pixel wide)
+    let note = plan.nodesWith("data-ct-footer-note")
+    let labels = plan.nodesWith("data-ct-dock-slot")
+    ck note.len == 1 and labels.len > 0
+    if note.len == 1 and labels.len > 0:
+      proc px(n: JsonNode; key: string): int =
+        parseInt(n["styles"][key].getStr.replace("px", ""))
+      var labelsEnd = 0
+      for l in labels: labelsEnd = max(labelsEnd, l.px("left") + l.px("w"))
+      let x = note[0].px("left")
+      let w = note[0].px("w")
+      checkpoint "note at " & $x & " width " & $w & ", labels end at " & $labelsEnd
+      ck x > labelsEnd and x + w <= W and w >= 100
 
 suite "PLAT-68 GPUI: the letters under CUA (OQ-1)":
 

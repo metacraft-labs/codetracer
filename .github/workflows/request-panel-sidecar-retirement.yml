@@ -101,6 +101,17 @@ jobs:
           app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
           private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
 
+      - name: Mint a token for the clones below
+        # An installation token lives an hour, and the clones below come after
+        # 'Provision dependency siblings from repro.lock', which can take most of
+        # one on a cold runner: hand them a token minted here, not the job's first
+        # (ci/test/late-clone-token-test.py).
+        id: late_token
+        uses: ./.github/actions/refresh-github-token
+        with:
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+
       # The six recorder siblings, cloned into the workspace-sibling layout
       # `workspaceRoot() / lang.recorderRepo` resolves (see
       # src/tests/gui/tests/request-panel/request_span_languages.nim).
@@ -118,7 +129,7 @@ jobs:
           repo: metacraft-labs/codetracer-python-recorder
           ref: stable
           path: ${{ github.workspace }}/../codetracer-python-recorder
-          gh-token: ${{ steps.ci_token.outputs.token }}
+          gh-token: ${{ steps.late_token.outputs.token }}
           submodules: 'false'
 
       - name: Clone codetracer-ruby-recorder sibling
@@ -127,7 +138,7 @@ jobs:
           repo: metacraft-labs/codetracer-ruby-recorder
           ref: dev
           path: ${{ github.workspace }}/../codetracer-ruby-recorder
-          gh-token: ${{ steps.ci_token.outputs.token }}
+          gh-token: ${{ steps.late_token.outputs.token }}
           submodules: 'false'
 
       - name: Clone codetracer-php-recorder sibling
@@ -136,7 +147,7 @@ jobs:
           repo: metacraft-labs/codetracer-php-recorder
           ref: dev
           path: ${{ github.workspace }}/../codetracer-php-recorder
-          gh-token: ${{ steps.ci_token.outputs.token }}
+          gh-token: ${{ steps.late_token.outputs.token }}
           submodules: 'false'
 
       - name: Clone codetracer-beam-recorder sibling
@@ -145,7 +156,7 @@ jobs:
           repo: metacraft-labs/codetracer-beam-recorder
           ref: dev
           path: ${{ github.workspace }}/../codetracer-beam-recorder
-          gh-token: ${{ steps.ci_token.outputs.token }}
+          gh-token: ${{ steps.late_token.outputs.token }}
           submodules: 'false'
 
       - name: Clone codetracer-js-recorder sibling
@@ -154,7 +165,7 @@ jobs:
           repo: metacraft-labs/codetracer-js-recorder
           ref: dev
           path: ${{ github.workspace }}/../codetracer-js-recorder
-          gh-token: ${{ steps.ci_token.outputs.token }}
+          gh-token: ${{ steps.late_token.outputs.token }}
           submodules: 'false'
 
       - name: Clone codetracer-native-recorder sibling
@@ -163,7 +174,7 @@ jobs:
           repo: metacraft-labs/codetracer-native-recorder
           ref: dev
           path: ${{ github.workspace }}/../codetracer-native-recorder
-          gh-token: ${{ steps.ci_token.outputs.token }}
+          gh-token: ${{ steps.late_token.outputs.token }}
           submodules: 'false'
 
       - name: Allow direnv in the cloned recorder siblings

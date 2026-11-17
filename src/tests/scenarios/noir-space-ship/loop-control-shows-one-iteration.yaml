@@ -1,0 +1,79 @@
+scenario: 1
+name: noir-space-ship/loop-control-shows-one-iteration
+pack: codetracer
+summary: >-
+  Iterations typed into the loop control out of order (0, 2, 5, 7, 3), each
+  committed by leaving the field, each move the replay to the loop body's
+  first line and show that iteration's values, and only that iteration's.
+
+stage:
+  - use: record-program
+    with: { program: noir_space_ship }
+  - use: open-recording
+    with: { width: 2400, height: 1300 }
+
+steps:
+  - wait: { until: replay-idle, timeout: 180s }
+  - click: 'pane-tab[label="CALLTRACE"]'
+  - wait: { until: call-trace.loaded, timeout: 60s }
+  - wait: { until: { at: 'call-trace/call[name="iterate_asteroids"]', present: true }, timeout: 60s }
+  - click: { at: 'call-trace/call[name="iterate_asteroids"]', anchor: name }
+    settle: false
+  - wait: { until: { at: 'editor[file="shield.nr"]', active: true }, timeout: 60s }
+  - wait: { until: replay-idle, timeout: 60s }
+  - wait: { until: { at: 'editor[file="shield.nr"]/loop-control', present: true }, timeout: 60s }
+  - click: { at: 'editor[file="shield.nr"]/loop-control', anchor: field }
+    settle: false
+  - wait: { until: { at: 'editor[file="shield.nr"]/loop-control', focused: true }, timeout: 30s }
+  - chord: Ctrl+a
+  - type: "0"
+  - key: Tab
+    settle: false
+  - wait: { until: { at: 'editor[file="shield.nr"]/loop-control', iteration: 0 }, timeout: 60s }
+  - wait: { until: { at: 'editor[file="shield.nr"]/flow-value[line="5", name="mass"]', iteration: 0 }, timeout: 60s }
+  - wait: { until: { at: 'editor[file="shield.nr"]', current-line: 5 }, timeout: 60s }
+  - wait: { until: replay-idle, timeout: 60s }
+  - click: { at: 'editor[file="shield.nr"]/loop-control', anchor: field }
+    settle: false
+  - wait: { until: { at: 'editor[file="shield.nr"]/loop-control', focused: true }, timeout: 30s }
+  - chord: Ctrl+a
+  - type: "2"
+  - key: Tab
+    settle: false
+  - wait: { until: { at: 'editor[file="shield.nr"]/loop-control', iteration: 2 }, timeout: 60s }
+  - wait: { until: { at: 'editor[file="shield.nr"]/flow-value[line="5", name="mass"]', iteration: 2 }, timeout: 60s }
+  - wait: { until: { at: 'editor[file="shield.nr"]', current-line: 5 }, timeout: 60s }
+  - wait: { until: replay-idle, timeout: 60s }
+  - click: { at: 'editor[file="shield.nr"]/loop-control', anchor: field }
+    settle: false
+  - wait: { until: { at: 'editor[file="shield.nr"]/loop-control', focused: true }, timeout: 30s }
+  - chord: Ctrl+a
+  - type: "5"
+  - key: Tab
+    settle: false
+  - wait: { until: { at: 'editor[file="shield.nr"]/loop-control', iteration: 5 }, timeout: 60s }
+  - wait: { until: { at: 'editor[file="shield.nr"]/flow-value[line="5", name="mass"]', iteration: 5 }, timeout: 60s }
+  - wait: { until: { at: 'editor[file="shield.nr"]', current-line: 5 }, timeout: 60s }
+  - wait: { until: replay-idle, timeout: 60s }
+  - click: { at: 'editor[file="shield.nr"]/loop-control', anchor: field }
+    settle: false
+  - wait: { until: { at: 'editor[file="shield.nr"]/loop-control', focused: true }, timeout: 30s }
+  - chord: Ctrl+a
+  - type: "7"
+  - key: Tab
+    settle: false
+  - wait: { until: { at: 'editor[file="shield.nr"]/loop-control', iteration: 7 }, timeout: 60s }
+  - wait: { until: { at: 'editor[file="shield.nr"]/flow-value[line="5", name="mass"]', iteration: 7 }, timeout: 60s }
+  - wait: { until: { at: 'editor[file="shield.nr"]', current-line: 5 }, timeout: 60s }
+  - wait: { until: replay-idle, timeout: 60s }
+  - click: { at: 'editor[file="shield.nr"]/loop-control', anchor: field }
+    settle: false
+  - wait: { until: { at: 'editor[file="shield.nr"]/loop-control', focused: true }, timeout: 30s }
+  - chord: Ctrl+a
+  - type: "3"
+  - key: Tab
+    settle: false
+  - wait: { until: { at: 'editor[file="shield.nr"]/loop-control', iteration: 3 }, timeout: 60s }
+  - wait: { until: { at: 'editor[file="shield.nr"]/flow-value[line="5", name="mass"]', iteration: 3 }, timeout: 60s }
+  - wait: { until: { at: 'editor[file="shield.nr"]', current-line: 5 }, timeout: 60s }
+  - wait: { until: replay-idle, timeout: 60s }

@@ -1,0 +1,28 @@
+scenario: 1
+name: docs/terminal-trace-macro
+pack: codetracer
+summary: >-
+  The documentation capture of "Tracing a macro" on the terminal: the Nim
+  project's recording, the caret on the macro call, the shortcut, and the new
+  session tab stopped in the macro's body. Run deterministically on the
+  terminal flavour by `ci/test/docs-captures.sh`; the page cites the captures
+  by this scenario's name and the capture names, never by a path.
+
+stage:
+  - use: nim-project
+  - use: open-recording
+    # the terminal's own unit: cells
+    with: { width: 160, height: 40 }
+
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - wait: { until: editor.loaded, timeout: 60s }
+  - click: { at: 'editor[file="tracing.nim"]/line[number="26"]', anchor: text-start }
+  - expect: { at: 'editor[file="tracing.nim"]', assert: "caret-at(26)" }
+  - capture: { name: caret-on-the-macro-call }
+  - chord: { bound: editor.trace-macro-at-cursor }
+    settle: false
+  - wait: { until: { at: session-strip, count: 2 }, timeout: 180s }
+  - wait: { until: replay-idle, timeout: 120s }
+  - expect: { at: 'editor[file="tracing.nim"]', assert: "stopped-within(3, 4)" }
+  - capture: { name: the-macro-traced-in-a-new-tab }

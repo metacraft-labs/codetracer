@@ -1,0 +1,34 @@
+scenario: 1
+name: edit-mode/tabs-keep-their-own-bar
+pack: codetracer
+summary: >-
+  With a replay in the first tab, "+" then the welcome screen's Open Folder
+  (the folder dialog answered with a Noir crate) opens an edit tab with the
+  edit bar; back on the replay's tab the stepping controls return, and on the
+  edit tab the edit bar again.
+
+stage:
+  - use: project-fixture
+    with: { name: noir-build }
+  - use: front-end-options
+    with: { env: { CODETRACER_TEST_OPEN_FOLDER_DIALOG_PATH: $project } }
+  - use: record-program
+    with: { program: py_console_logs/main.py }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - wait: { until: { at: 'toolbar/toolbar-button[label="next-image"]', present: true }, timeout: 60s }
+  - click: 'session-strip/session-add'
+  - wait: { until: { at: 'welcome/welcome-action[label="Open folder"]', present: true }, timeout: 30s }
+  - click: 'welcome/welcome-action[label="Open folder"]'
+  - wait: { until: { at: 'edit-toolbar/panel-button[label="Build"]', present: true }, timeout: 60s }
+  - expect: { at: welcome, present: false }
+  - expect: { at: session-strip, count: 2 }
+  - expect: { at: 'toolbar/toolbar-button[label="next-image"]', present: false }
+  - click: 'session-strip/session-tab[#1]'
+  - wait: { until: { at: 'toolbar/toolbar-button[label="next-image"]', present: true }, timeout: 30s }
+  - expect: { at: edit-toolbar, present: false }
+  - click: 'session-strip/session-tab[#2]'
+  - wait: { until: { at: 'edit-toolbar/panel-button[label="Build"]', present: true }, timeout: 30s }
+  - expect: { at: 'toolbar/toolbar-button[label="next-image"]', present: false }

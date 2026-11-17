@@ -1,0 +1,23 @@
+scenario: 1
+name: keymaps/plat68b-alt-d-opens-debug
+pack: codetracer
+summary: >-
+  Alt+D opens the program menu's Debug folder (Reverse Step Over among its entries); Escape twice closes the menu.
+
+stage:
+  - use: record-program
+    with: { program: calc }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 180s }
+  - wait: { until: call-trace.loaded, timeout: 120s }
+  - expect: { at: 'editor[file="main.py"]', assert: "stopped-at(1)" }
+  - click: { at: 'editor[file="main.py"]/line[number="1"]', anchor: text-start }
+  - expect: { at: 'editor[file="main.py"]', focused: true }
+  - chord: Alt+D
+  - expect: { at: menu-bar, open: true }
+  - expect: { at: menu-bar, assert: "offers(\"Reverse Step Over\")" }
+  - key: Esc
+  - key: Esc
+  - expect: { at: menu-bar, open: false }

@@ -1,0 +1,26 @@
+scenario: 1
+name: auto-hide/strip-tab-click-docks
+pack: codetracer
+summary: >-
+  A click on a pinned pane's strip tab docks the pane at its edge (no
+  overlay), and a second click on the tab collapses it again.
+
+stage:
+  - use: record-program
+    with: { program: py_console_logs/main.py }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - wait: { until: { at: window, strip-tabs: { count: 4 } }, timeout: 30s }
+  - click: { at: 'pane-tab[label="EVENT LOG"]' }
+  - click: { at: 'pane-tab[label="EVENT LOG"]', button: right }
+  - wait: { until: { at: 'context-menu/menu-item[label="Pin to Bottom"]', present: true }, timeout: 15s }
+  - click: { at: 'context-menu/menu-item[label="Pin to Bottom"]' }
+  - wait: { until: { at: 'strip-tab[label="EVENT LOG"]', present: true }, timeout: 15s }
+  - click: { at: 'strip-tab[label="EVENT LOG"]' }
+  - wait: { until: { at: 'docked-panel[edge="bottom"]', present: true }, timeout: 15s }
+  - wait: { until: event-log.loaded, timeout: 30s }
+  - expect: { at: auto-hide-overlay, absent: true }
+  - click: { at: 'strip-tab[label="EVENT LOG"]' }
+  - wait: { until: { at: 'docked-panel[edge="bottom"]', absent: true }, timeout: 15s }

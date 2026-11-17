@@ -1,0 +1,34 @@
+scenario: 1
+name: re-record/ctrl-r-saves-and-records-anew
+pack: codetracer
+summary: >-
+  In a replay of a scratch main.py, Ctrl+E makes the editor writable; an
+  edit then Ctrl+R saves it and records the program again: the new
+  recording opens and its event log has the edited program's output.
+
+stage:
+  - use: write-project
+    with: { files: { main.py: "print(\"initial\")\n" } }
+  - use: record-program
+    with: { program: $project/main.py }
+
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - wait: { until: { at: 'editor[file="main.py"]', assert: 'shows-text("initial")' }, timeout: 60s }
+  - chord: Ctrl+E
+  - wait: { until: { at: 'editor[file="main.py"]', read-only: false }, timeout: 30s }
+  - click: { at: 'editor[file="main.py"]/line[number="1"]', anchor: text-start }
+  - chord: Ctrl+A
+  - type: "print(\"re-recorded marker\")"
+  - wait: { until: { at: 'editor[file="main.py"]', assert: 'shows-text("re-recorded marker")' }, timeout: 15s }
+  - chord: Ctrl+R
+    settle: false
+  - wait: { until: { at: 'pane-tab[label="EVENT LOG"]', present: true }, timeout: 180s }
+  - click: 'pane-tab[label="EVENT LOG"]'
+    settle: false
+  - wait: { until: { at: event-log, assert: 'has-output("re-recorded marker")' }, timeout: 180s }
+  - wait: { until: replay-idle, timeout: 60s }
+  - expect: { at: window, mode: debug }
+  - expect: { at: 'editor[file="main.py"]', assert: 'shows-text("re-recorded marker")' }

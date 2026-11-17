@@ -25,17 +25,15 @@
  *
  * What this asserts
  * -----------------
- *   1. After the startup trace has loaded, tab 0's `replayId` — on the
- *      session and on its `DapApi`, which names it on every request — is the
- *      replay the session manager started for it: 0, the first replay a fresh
- *      session manager starts (each `ctPage` launches its own).
- *   2. Stop (SHIFT+F5) in tab 0 sends `close-replay-session` for that replay.
- *   3. Closing tab 0 (beside a second tab) sends `close-replay-session` for
- *      that replay.
- *
- * The renderer's outgoing IPC is observed by wrapping `data.ipc.send` in the
- * page — the main process's realm is not reachable from `page.evaluate`. The
- * wrapper records and forwards; the message still reaches the main process.
+ *   After the startup trace has loaded, tab 0's `replayId` — on the session
+ *   and on its `DapApi`, which names it on every request — is the replay the
+ *   session manager started for it: 0, the first replay a fresh session
+ *   manager starts (each `ctPage` launches its own). The id lives in renderer
+ *   state no user sees, so this stays a lower-tier test. What a user sees of
+ *   the defect — Stop, and closing tab 0 beside a second tab, ending the
+ *   startup replay — are scenarios now
+ *   (src/tests/scenarios/multi-replay/stop-ends-the-first-tabs-replay.yaml,
+ *   closing-the-first-tab-keeps-the-second.yaml).
  */
 
 import { test, expect } from "../../lib/fixtures";
@@ -52,27 +50,6 @@ async function firstTabReplay(page: Page): Promise<{ session: number; dap: numbe
     if (!s || !s.dapApi) return null;
     return { session: Number(s.replayId), dap: Number(s.dapApi.replayId), hasReplay: Boolean(s.dapApi.hasReplay) };
   });
-}
-
-async function recordIpc(page: Page): Promise<void> {
-  await page.evaluate(() => {
-    const d = (window as any).data;
-    const w = window as any;
-    w.__ctSent = [];
-    const original = d.ipc.send.bind(d.ipc);
-    d.ipc.send = (channel: string, payload: any) => {
-      w.__ctSent.push({ channel: String(channel), payload: JSON.parse(JSON.stringify(payload ?? null)) });
-      return original(channel, payload);
-    };
-  });
-}
-
-async function closeReplayIds(page: Page): Promise<number[]> {
-  return page.evaluate(() =>
-    ((window as any).__ctSent ?? [])
-      .filter((m: any) => m.channel === "CODETRACER::close-replay-session")
-      .map((m: any) => Number(m.payload?.replayId)),
-  );
 }
 
 async function waitForFirstTabReady(page: Page): Promise<void> {
@@ -99,41 +76,5 @@ test.describe("the window's first tab knows its startup replay", () => {
     expect(seen, "tab 0's replay after startup").toEqual({
       session: STARTUP_REPLAY, dap: STARTUP_REPLAY, hasReplay: true,
     });
-  });
-
-  test("Stop in tab 0 ends the replay started for it", async ({ ctPage }) => {
-    await waitForFirstTabReady(ctPage);
-    await recordIpc(ctPage);
-    await ctPage.locator("body").click({ position: { x: 5, y: 5 } }).catch(() => {});
-    await ctPage.keyboard.press("Shift+F5");
-    let ids: number[] = [];
-    try {
-      await retry(async () => {
-        ids = await closeReplayIds(ctPage);
-        return ids.length > 0;
-      }, { maxAttempts: 20, delayMs: 500 });
-    } catch {
-      // Asserted below.
-    }
-    expect(ids, "close-replay-session sent by Stop in tab 0").toEqual([STARTUP_REPLAY]);
-  });
-
-  test("closing tab 0 ends the replay started for it", async ({ ctPage }) => {
-    await waitForFirstTabReady(ctPage);
-    await ctPage.locator(".session-tab-add").click();
-    await retry(async () => (await ctPage.locator(".session-tab").count()) >= 2,
-      { maxAttempts: 30, delayMs: 250 });
-    await recordIpc(ctPage);
-    await ctPage.locator("#session-tab-0 .session-tab-close").click();
-    let ids: number[] = [];
-    try {
-      await retry(async () => {
-        ids = await closeReplayIds(ctPage);
-        return ids.length > 0;
-      }, { maxAttempts: 20, delayMs: 500 });
-    } catch {
-      // Asserted below.
-    }
-    expect(ids, "close-replay-session sent by closing tab 0").toEqual([STARTUP_REPLAY]);
   });
 });

@@ -1,0 +1,34 @@
+scenario: 1
+name: multi-replay/load-answer-reaches-the-tab-that-asked
+pack: codetracer
+summary: >-
+  A recording chosen in a "+" tab, followed at once by a click on the first
+  tab, loads into the tab that asked: the first tab keeps its own recording,
+  and the second shows the chosen one when it is shown.
+
+stage:
+  - use: record-program
+    with: { program: py_console_logs/main.py }
+  - use: add-recording
+    with: { program: py_checklist/basics.py }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - wait: { until: { at: 'editor[file="main.py"]', present: true }, timeout: 60s }
+  - click: session-strip/session-add
+  - wait: { until: { at: 'welcome/recent[name="basics.py"]', present: true }, timeout: 30s }
+  - click: 'welcome/recent[name="basics.py"]'
+    settle: false
+  - click: 'session-strip/session-tab[title="main.py"]'
+    settle: false
+  - wait: { until: { at: 'session-strip/session-tab[title="main.py"]', active: true }, timeout: 30s }
+  - wait: { until: { at: session-strip, assert: 'has-tab("basics.py")' }, timeout: 120s }
+  - wait: { until: replay-idle, timeout: 120s }
+  - expect: { at: 'editor[file="main.py"]', present: true }
+  - expect: { at: 'editor[file="basics.py"]', absent: true }
+  - expect: { at: status-line, location: { contains: "main.py" } }
+  - click: 'session-strip/session-tab[title="basics.py"]'
+  - wait: { until: { at: 'editor[file="basics.py"]', present: true }, timeout: 120s }
+  - expect: { at: 'editor[file="main.py"]', absent: true }
+  - wait: { until: { at: status-line, location: { contains: "basics.py" } }, timeout: 60s }

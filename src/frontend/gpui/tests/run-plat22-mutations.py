@@ -175,7 +175,7 @@ ARMS = [
     # PER-LINE STATUS
     # ------------------------------------------------------------------
     Arm("E1", ROWS,
-        "      if p.enabled:\n        return emBreakpoint",
+        "      if p.enabled:\n        sawArmed = true",
         "      if p.enabled:\n        sawTracepoint = true",
         SUITE_EDIT,
         "PER-LINE STATUS comes from the points, and a breakpoint beats a tracepoint",

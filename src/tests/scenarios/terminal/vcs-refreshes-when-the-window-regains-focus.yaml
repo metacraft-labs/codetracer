@@ -1,0 +1,26 @@
+scenario: 1
+name: terminal/vcs-refreshes-when-the-window-regains-focus
+pack: codetracer
+summary: >-
+  In Edit mode with the VCS pane shown, a file another program creates in the
+  repository is listed by the pane's own periodic re-read; a second one,
+  created just after that re-read, is listed as soon as the terminal window
+  regains the focus, well before the next re-read is due (5 s).
+requires: [termassert]
+stage:
+  - use: fixture-project
+    with: { name: vcs-repo }
+  - use: open-project
+    with: { folder: $project, width: 200, height: 50 }
+steps:
+  - wait: { until: ready, timeout: 60s }
+  - click: { at: 'pane-tab[label="VCS"]' }
+  - wait: { until: { at: 'pane[title="VCS"]', assert: 'has-row("WORKING TREE (3)")' }, timeout: 30s }
+  - act: { use: write-file, with: { file: by-the-interval.txt, content: "listed by the periodic re-read\n" } }
+  - wait: { until: { at: 'pane[title="VCS"]', assert: 'has-row("? by-the-interval.txt")' }, timeout: 15s }
+  - act: { use: write-file, with: { file: by-the-focus.txt, content: "listed when the window regains the focus\n" } }
+  - ext: termassert.window-focus
+    with: { focused: false }
+  - ext: termassert.window-focus
+    with: { focused: true }
+  - wait: { until: { at: 'pane[title="VCS"]', assert: 'has-row("? by-the-focus.txt")' }, timeout: 2500ms }

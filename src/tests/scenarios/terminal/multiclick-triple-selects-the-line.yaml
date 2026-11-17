@@ -1,0 +1,20 @@
+scenario: 1
+name: terminal/multiclick-triple-selects-the-line
+pack: codetracer
+summary: >-
+  In Edit mode three presses select the whole line, its line break included:
+  typing replaces the line, and the next line moves up beside the typed text.
+stage:
+  - use: write-project
+    with:
+      files:
+        fixture.txt: "snake_case_name = other.attr(x)\n    leading indentation\na == b and p->q\na.b\n\nprice λx 3€ end\nlast line no terminator"
+  - use: open-project
+    with: { folder: $project, file: fixture.txt, width: 160, height: 40 }
+steps:
+  - wait: { until: ready, timeout: 60s }
+  - wait: { until: { at: 'editor[file="fixture.txt"]', assert: 'shows-text("snake_case_name")' }, timeout: 20s }
+  - click: { at: 'editor[file="fixture.txt"]/line[number="1"]', anchor: "column(3)", count: 3 }
+  - type: "Z"
+  - wait: { until: { at: 'editor[file="fixture.txt"]/line[number="1"]', text: "Z    leading indentation" }, timeout: 10s }
+  - expect: { at: 'editor[file="fixture.txt"]', assert: 'lacks-text("snake_case_name")' }

@@ -1,0 +1,68 @@
+scenario: 1
+name: auto-hide/sidebar-toggles-independently
+pack: codetracer
+summary: >-
+  The status bar's sidebar toggles switch each side between normal and
+  minimal on its own; a docked right pane stays docked when the left side
+  changes; the minimal sidebar's tab list opens a pane in the overlay on
+  their own edge.
+
+stage:
+  - use: record-program
+    with: { program: py_console_logs/main.py }
+  - use: plant-config
+    with:
+      file: auto_hide_state.json
+      content: '{"panels": [{"edge": 0, "title": "FILES", "content": 9, "componentId": 0, "overlayWidth": 320, "overlayHeight": 0, "config": {"type": "component", "componentType": "genericUiComponent", "componentState": {"id": 0, "label": "filesystemComponent-0", "content": 9, "isEditor": false}, "title": "FILES"}}, {"edge": 1, "title": "EVENTS", "content": 8, "componentId": 1, "overlayWidth": 320, "overlayHeight": 0, "config": {"type": "component", "componentType": "genericUiComponent", "componentState": {"id": 1, "label": "eventLogComponent-1", "content": 8}, "title": "EVENTS"}}]}'
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - wait: { until: { at: 'sidebar[edge="left"]', present: true }, timeout: 30s }
+  - expect: { at: 'sidebar[edge="left"]', minimal: false, toggle: open, zone-visible: true, mode-buttons: 0 }
+  - expect: { at: 'sidebar[edge="right"]', minimal: false, toggle: open, zone-visible: true, mode-buttons: 0 }
+  - wait: { until: { at: window, strip-tabs: { count: 6 } }, timeout: 30s }
+
+  - beat: left-minimal
+    steps:
+      - click: { at: 'strip-tab[label="EVENTS"]' }
+      - wait: { until: { at: 'docked-panel[edge="right"]', present: true }, timeout: 15s }
+      - click: { at: 'sidebar[edge="left"]/panel-button[label="Use minimal left sidebar"]' }
+      - wait: { until: { at: 'sidebar[edge="left"]', minimal: true }, timeout: 15s }
+      - expect: { at: 'sidebar[edge="right"]', minimal: false, toggle: open }
+      - expect: { at: 'sidebar[edge="left"]', toggle: close }
+      - expect: { at: 'docked-panel[edge="right"]', present: true }
+      - expect: { at: 'sidebar[edge="left"]/panel-button[label="Pinned left sidebar tabs"]', present: true }
+
+  - beat: right-minimal
+    steps:
+      - click: { at: 'sidebar[edge="right"]/panel-button[label="Use minimal right sidebar"]' }
+      - wait: { until: { at: 'sidebar[edge="right"]', minimal: true }, timeout: 15s }
+      - expect: { at: 'sidebar[edge="left"]', minimal: true }
+      - expect: { at: 'docked-panel[edge="right"]', absent: true }
+      - expect: { at: 'sidebar[edge="right"]/panel-button[label="Pinned right sidebar tabs"]', present: true }
+      - expect: { at: 'sidebar[edge="left"]', geometry: { left-of: 'sidebar[edge="right"]' } }
+
+  - beat: icons-open-overlays
+    steps:
+      - click: { at: 'sidebar[edge="left"]/panel-button[label="Pinned left sidebar tabs"]' }
+      - wait: { until: { at: 'sidebar[edge="left"]/panel-button[label="FILES"]', present: true }, timeout: 15s }
+      - click: { at: 'sidebar[edge="left"]/panel-button[label="FILES"]' }
+      - wait: { until: { at: auto-hide-overlay, edge: left }, timeout: 15s }
+      - key: Esc
+      - wait: { until: { at: auto-hide-overlay, absent: true }, timeout: 15s }
+      - click: { at: 'sidebar[edge="right"]/panel-button[label="Pinned right sidebar tabs"]' }
+      - wait: { until: { at: 'sidebar[edge="right"]/panel-button[label="EVENTS"]', present: true }, timeout: 15s }
+      - click: { at: 'sidebar[edge="right"]/panel-button[label="EVENTS"]' }
+      - wait: { until: { at: auto-hide-overlay, edge: right }, timeout: 15s }
+      - key: Esc
+      - wait: { until: { at: auto-hide-overlay, absent: true }, timeout: 15s }
+
+  - beat: back-to-normal
+    steps:
+      - click: { at: 'sidebar[edge="left"]/panel-button[label="Use normal left sidebar"]' }
+      - wait: { until: { at: 'sidebar[edge="left"]', minimal: false }, timeout: 15s }
+      - expect: { at: 'sidebar[edge="right"]', minimal: true }
+      - click: { at: 'sidebar[edge="right"]/panel-button[label="Use normal right sidebar"]' }
+      - wait: { until: { at: 'sidebar[edge="right"]', minimal: false }, timeout: 15s }
+      - expect: { at: 'sidebar[edge="left"]', minimal: false }

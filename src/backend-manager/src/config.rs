@@ -4,6 +4,8 @@
 //!
 //! 1. **Environment variables** — `CODETRACER_DAEMON_TTL`, `CODETRACER_MAX_SESSIONS`,
 //!    `CODETRACER_DAEMON_SOCKET`, `CODETRACER_DAEMON_LOG`, `CODETRACER_DAEMON_CONFIG`.
+//!    (`CODETRACER_DAP_INIT_TIMEOUT_SECS`, the per-step DAP init bound, is read
+//!    per open by `dap_init` and is not in the config file.)
 //! 2. **Config file** — A simple `KEY=VALUE` file (one per line, `#` comments).
 //!    The default location is `~/.codetracer/daemon.conf`, overridable via
 //!    `CODETRACER_DAEMON_CONFIG`.

@@ -1,0 +1,21 @@
+scenario: 1
+name: terminal/keys-later-user-row-wins
+pack: codetracer
+summary: >-
+  Two user rows for one chord in one scope: the later one fires — Ctrl+Alt+U
+  bound to step-over, then to jump-to-end, jumps to the end.
+stage:
+  - use: record-program
+    with: { program: calc }
+  - use: plant-config
+    with:
+      file: keybindings.json
+      content: |
+        [{ "key": "ctrl+alt+u", "command": "debugger.step-over" },
+         { "key": "ctrl+alt+u", "command": "debugger.jump-to-end" }]
+  - use: open-recording
+    with: { width: 200, height: 50 }
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - chord: Ctrl+Alt+U
+  - wait: { until: { at: replay-position, tick: 171 }, timeout: 30s }

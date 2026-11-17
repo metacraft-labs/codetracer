@@ -23,9 +23,11 @@ import std/strutils
 
 import ../../../common/noir_constraints
 import ../../../ct_test/frameworks/noir_test_syntax
+import ./constraints_listing
 from ./no_project_folder import NoProjectFolderText
 
 export noir_constraints, NoirSourceFile, NoirProjectMarker
+export constraints_listing
 
 const
   NotANoirCrateText* =
@@ -37,8 +39,12 @@ const
     "measured. Install the Noir toolchain to see constraint counts."
   NargoFailedStem* = "nargo info could not measure this project: "
   NargoInfoProvenance* = "nargo info --json, run just now"
-  NargoInfoArgs* = ["info", "--json"]
-    ## The command every host runs, in the project's folder.
+  ConstraintsOnlyAsk* = "constraints"
+    ## `only` on `CODETRACER::ns9-panes`: answer the circuit's half alone.
+  NargoInfoArgs* = ["info", "--json", "--print-acir"]
+    ## The command every host runs, in the project's folder: the report, the
+    ## printed opcodes ahead of it on the same output, and the compiled program
+    ## left at `artefactPathUnder` (`constraints_listing`'s header).
 
 type
   NargoInfoRun* = object
@@ -59,6 +65,10 @@ type
     report*: ConstraintReport
     absence*: string
       ## "" when `hasReport`.
+    infoJson*: string
+      ## `nargo info`'s JSON, verbatim, when `hasReport`.
+    listing*: string
+      ## The printed opcodes, verbatim; "" when it printed none.
 
 proc absenceBeforeRun*(folder: string; hasMarker: bool): string =
   ## Why there is nothing to run for `folder`, or "" when `nargo` should run.
@@ -91,7 +101,14 @@ proc constraintsAnswer*(folder: string; hasMarker: bool;
   let failed = absenceOfRun(run)
   if failed.len > 0:
     return ConstraintsAnswer(absence: failed)
-  let report = parseNargoInfoJson(run.output, NargoInfoProvenance)
+  let (listing, info) = splitInfoOutput(run.output)
+  let report = parseNargoInfoJson(info, NargoInfoProvenance)
   if report.absence.len > 0:
     return ConstraintsAnswer(absence: report.absence)
-  ConstraintsAnswer(hasReport: true, report: report)
+  ConstraintsAnswer(hasReport: true, report: report.attachListing(listing),
+                    infoJson: info, listing: listing)
+
+proc artefactPathUnder*(folder, package: string): string =
+  ## Where `nargo` leaves `package`'s compiled program under `folder`, joined
+  ## here because the desktop's main process has no `std/os`.
+  folder.strip(leading = false, chars = {'/', '\\'}) & "/target/" & package & ".json"

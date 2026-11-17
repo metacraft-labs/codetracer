@@ -12,7 +12,8 @@
 ##   progress popup (executive summary, milestones by status, current
 ##   milestone, its sessions);
 ## - a tab per open session launched for no initiative;
-## - the `+N` overflow chip, and "+" right after the last tab;
+## - the `+N` overflow chip, its menu hanging from it as the session strip's
+##   does (`hangOverflowMenu`), and "+" right after the last tab;
 ## - at the bar's end, as ghost controls (no fill until hovered): the
 ##   sessions started elsewhere, a count badge and `Agent Harbor sessions`
 ##   (on a compact bar the badge alone, its label in the tooltip), a menu
@@ -28,6 +29,9 @@ when defined(js):
 
 import isonim/core/[signals, computation]
 import isonim/dsl/[ui, components]
+# Its one-line texts (`data-ah-cut`) are cut in code, by the views' one rule
+# for a cut (`ah_cut_text`, CTF-P1c D6).
+import ./ah_cut_text
 
 when defined(js):
   import isonim/web/web_renderer
@@ -35,6 +39,8 @@ when defined(js):
 
 import nim_agents_isonim_viewmodels/agent_harbor/initiative_tabs_vm
 import ./isonim_session_tabs_view
+when defined(js):
+  from ./isonim_agent_harbor_session_tabs_view import hangOverflowMenu, onFontsLoaded
 import ./isonim_recording_switcher_view
 import ./isonim_agent_harbor_initiatives_view
 
@@ -60,7 +66,7 @@ proc renderPopupSession[R](r: R; item: SessionItem): auto =
     tdiv(class = "ah-initiative-session ah-att-" & $item.attention, title = item.tooltip):
       span(class = "ah-tab-mark"):
         discard
-      span(class = "ah-initiative-session-title"):
+      span(`data-ah-cut` = "line", class = "ah-initiative-session-title"):
         text item.title
       span(class = "ah-initiative-session-status"):
         text item.statusLabel
@@ -73,7 +79,7 @@ proc renderPopup[R](r: R; popup: InitiativePopup): auto =
       tdiv(class = "ah-popup-head"):
         span(class = "ah-tab-mark"):
           discard
-        span(class = "ah-popup-title"):
+        span(`data-ah-cut` = "line", class = "ah-popup-title"):
           text popup.title
         span(class = "ah-popup-state ah-popup-state-" & $popup.state):
           text stateWord(popup.state)
@@ -84,7 +90,7 @@ proc renderPopup[R](r: R; popup: InitiativePopup): auto =
         tdiv(class = "ah-initiative-current"):
           span(class = "ah-initiative-label"):
             text "Current"
-          span(class = "ah-initiative-current-text"):
+          span(`data-ah-cut` = "line", class = "ah-initiative-current-text"):
             text popup.currentMilestone
       if popup.executiveSummary.len > 0:
         tdiv(class = "ah-popup-summary"):
@@ -106,7 +112,7 @@ proc renderInitiativeTab[R](r: R; vm: InitiativeTabStripVM; tab: StripTab): auto
          onclick = proc() = discard vm.activate(key)):
       span(class = "ah-tab-mark"):
         discard
-      span(class = SessionTabLabelClass):
+      span(`data-ah-cut` = "line", class = SessionTabLabelClass):
         text tab.title
       span(class = "ah-tab-progress"):
         text tab.progressText
@@ -137,7 +143,7 @@ proc renderSessionTab[R](r: R; vm: InitiativeTabStripVM; tab: StripTab): auto =
          onclick = proc() = discard vm.activate(key)):
       span(class = "ah-tab-mark"):
         discard
-      span(class = SessionTabLabelClass):
+      span(`data-ah-cut` = "line", class = SessionTabLabelClass):
         text tab.title
       if tab.session.originShort.len > 0:
         span(class = "ah-tab-origin", title = "started from " & tab.session.originLabel):
@@ -152,7 +158,7 @@ proc renderOverflowTab[R](r: R; vm: InitiativeTabStripVM; tab: StripTab): auto =
          title = tab.tooltip, onclick = proc() = discard vm.activate(key)):
       span(class = "ah-tab-mark"):
         discard
-      span(class = "ah-tab-overflow-title"):
+      span(`data-ah-cut` = "line", class = "ah-tab-overflow-title"):
         text tab.title
       if tab.progressText.len > 0:
         span(class = "ah-tab-progress"):
@@ -166,11 +172,11 @@ proc renderElsewhereItem[R](r: R; vm: InitiativeTabStripVM; entry: ElsewhereSess
          title = entry.item.tooltip, onclick = proc() = discard vm.openSession(id)):
       span(class = "ah-tab-mark"):
         discard
-      span(class = "ah-tab-overflow-title"):
+      span(`data-ah-cut` = "line", class = "ah-tab-overflow-title"):
         text entry.item.title
       # Its initiative beside its state: where it opens (inside that
       # initiative's tab, or as a tab of its own).
-      span(class = "ah-elsewhere-initiative" &
+      span(`data-ah-cut` = "line", class = "ah-elsewhere-initiative" &
                    (if entry.initiativeTitle.len == 0: " ah-elsewhere-no-initiative" else: ""),
            title = (if entry.initiativeTitle.len > 0: "initiative: " & entry.initiativeTitle
                     else: "launched for no initiative")):
@@ -192,8 +198,12 @@ proc renderInbox[R](r: R; vm: InitiativeTabStripVM): auto =
   let compact = vm.compact
   let positionText = if none: "inbox empty" else: position
   let autoLabel = (if compact: "Auto: " else: "Auto-switch: ") & (if auto: "on" else: "off")
+  # A toolbar (WAI-ARIA `toolbar`: a set of controls): the steps, the
+  # position they read out and the auto-switch toggle. Its `ah-inbox-empty`
+  # modifier is the control's state with nothing waiting, not an empty-state
+  # message of the bar.
   ui(r):
-    tdiv(class = "ah-inbox" & (if none: " ah-inbox-empty" else: ""), role = "group",
+    tdiv(class = "ah-inbox" & (if none: " ah-inbox-empty" else: ""), role = "toolbar",
          title = "Sessions waiting for you"):
       button(class = "ah-inbox-step", title = "Previous session (inbox)",
              onclick = proc() = discard target.stepInbox(-1)):
@@ -260,7 +270,7 @@ proc renderAgentHarborInitiativeTabBar*[R, N](r: R; vm: InitiativeTabStripVM): N
     of asIdle, asLoading:
       let notice = ui(r):
         tdiv(class = SessionTabClass & " ah-tab-notice ah-tab-loading"):
-          span(class = SessionTabLabelClass):
+          span(`data-ah-cut` = "line", class = SessionTabLabelClass):
             text "Loading initiatives\xE2\x80\xA6"
       r.appendRendered(bar, notice)
     of asError:
@@ -268,7 +278,7 @@ proc renderAgentHarborInitiativeTabBar*[R, N](r: R; vm: InitiativeTabStripVM): N
       let message = "Initiatives unavailable: " & vm.error.val
       let notice = ui(r):
         tdiv(class = SessionTabClass & " ah-tab-notice ah-tab-error", title = message):
-          span(class = SessionTabLabelClass):
+          span(`data-ah-cut` = "line", class = SessionTabLabelClass):
             text message
           button(class = "ah-tab-retry", onclick = proc() = target.load()):
             text "Retry"
@@ -278,7 +288,7 @@ proc renderAgentHarborInitiativeTabBar*[R, N](r: R; vm: InitiativeTabStripVM): N
       if tabs.len == 0:
         let notice = ui(r):
           tdiv(class = SessionTabClass & " ah-tab-notice ah-tab-empty"):
-            span(class = SessionTabLabelClass):
+            span(`data-ah-cut` = "line", class = SessionTabLabelClass):
               text "No initiative is running."
         r.appendRendered(bar, notice)
       # One line: the tabs that fit, the active one always among them, and
@@ -291,18 +301,13 @@ proc renderAgentHarborInitiativeTabBar*[R, N](r: R; vm: InitiativeTabStripVM): N
           r.appendRendered(bar, renderSessionTab(r, vm, tabs[i]))
       if line.overflow.len > 0:
         let target = vm
-        # A hidden tab that needs the reader marks the chip, as in the
-        # session strip.
-        var hiddenWaits = 0
-        for i in line.overflow:
-          if tabs[i].kind == stkInitiative and tabs[i].state == isNeedsInput or
-              tabs[i].kind == stkSession and tabs[i].session.attention == saNeedsInput:
-            inc hiddenWaits
+        # The chip takes the most severe status of the tabs it hides, as
+        # in the session strip (`hiddenBarTabs`).
+        let hidden = hiddenBarTabs(tabs, line.overflow)
         let chip = ui(r):
           tdiv(class = SessionTabOverflowClass & " ah-tab-overflow-count" &
-                       (if hiddenWaits > 0: " ah-att-needs-input" else: ""),
-               title = $line.overflow.len & " more tabs" &
-                       (if hiddenWaits > 0: ", " & $hiddenWaits & " needing input" else: ""),
+                       (if hidden.severity != hsNone: " ah-att-" & $hidden.severity else: ""),
+               title = chipTitle(hidden, "tab", "tabs"),
                onclick = proc() = target.overflowOpen.val = not target.overflowOpen.val):
             text "+" & $line.overflow.len
         r.appendRendered(bar, chip)
@@ -344,6 +349,11 @@ proc renderAgentHarborInitiativeTabBar*[R, N](r: R; vm: InitiativeTabStripVM): N
       (if vm.overflowOpen.val: " overflow-open" else: "") &
       (if vm.elsewhereOpen.val: " ah-elsewhere-open-bar" else: "") &
       (if vm.popupId.val.len > 0: " ah-popup-open" else: ""))
+    # Open, the menu is drawn only now (the bar's `overflow-open`), so it is
+    # placed only now.
+    when defined(js):
+      when N is isonim_dom.Element:
+        if vm.overflowOpen.val: hangOverflowMenu(bar)
   host
 
 when defined(js):
@@ -359,5 +369,7 @@ when defined(js):
     let measure = proc() =
       let width = measureWidth(container)
       if width > 0 and width != vm.stripWidth.val: vm.stripWidth.val = width
+      hangOverflowMenu(container)
     measure()
     onResize(measure)
+    onFontsLoaded(proc() = hangOverflowMenu(container))

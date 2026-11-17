@@ -1,4 +1,6 @@
 /**
+ * Ported to the scenario src/tests/scenarios/editor/writable-after-stop.yaml and editor/read-only-toggle-after-stop.yaml; kept as lib/mode-switch.ts and ci/test/editor-resize-follows-pane.sh name it, and its staged read-only disagreement (test 2) is fault injection with no input path.
+ *
  * THE EDITOR IS WRITABLE AGAIN AFTER STOP.
  *
  * Reported: "After stopping a debug session, the editor remains read-only I

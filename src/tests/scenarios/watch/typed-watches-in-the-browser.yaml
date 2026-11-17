@@ -1,0 +1,40 @@
+scenario: 1
+name: watch/typed-watches-in-the-browser
+pack: codetracer
+summary: >-
+  In the web deployment, the Variables pane is one list with no tab strip;
+  watches typed into its input are listed — initial_shield beside the local
+  of that name, and the one element asteroid_masses_positive[1] = 2000
+  (0x7d0) — and `initial_shield + 1` is
+  listed, marked not valid, saying the recording only holds the values that
+  were actually recorded — without disturbing the other watches.
+
+stage:
+  - use: record-program
+    with: { program: noir_space_ship/ }
+  - use: open-recording
+    with: { deployment: web }
+
+steps:
+  - wait: { until: replay-idle, timeout: 180s }
+  - wait: { until: { at: 'variables/text-field[label="watch"]', present: true }, timeout: 60s }
+  - wait: { until: { at: 'editor[file="main.nr"]', present: true }, timeout: 120s }
+  - wait: { until: settled, timeout: 60s }
+  - expect: { at: variables, tab-strip: false }
+
+  - click: 'variables/text-field[label="watch"]'
+  - type: initial_shield
+  - key: Enter
+  - wait: { until: { at: variables, count: { gt: 4 } }, timeout: 60s }
+
+  - click: 'variables/text-field[label="watch"]'
+  - type: "asteroid_masses_positive[1]"
+  - key: Enter
+  - wait: { until: { at: 'variables/variable[name="asteroid_masses_positive[1]"]', value: { matches: "^[^0-9]*(2000|0x7d0)[^0-9a-fx]*$" } }, timeout: 60s }
+
+  - click: 'variables/text-field[label="watch"]'
+  - type: initial_shield + 1
+  - key: Enter
+  - wait: { until: { at: 'variables/variable[name="initial_shield + 1"]', text: { contains: cannot evaluate } }, timeout: 60s }
+  - expect: { at: 'variables/variable[name="initial_shield + 1"]', invalid: true, text: { contains: only holds the values that were actually recorded } }
+  - expect: { at: 'variables/variable[name="asteroid_masses_positive[1]"]', value: { matches: "^[^0-9]*(2000|0x7d0)[^0-9a-fx]*$" } }

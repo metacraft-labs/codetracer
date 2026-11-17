@@ -69,3 +69,7 @@ func report*(c: KeyCheck; bound: openArray[string]): string =
   if missing.len > 0:
     result.add "; not seen, and usually taken before the terminal " &
                "application: " & missing.join(", ")
+
+func endsKeyCheck*(name: string): bool =
+  ## The key that ends a check rather than being reported by it.
+  name == "Esc"

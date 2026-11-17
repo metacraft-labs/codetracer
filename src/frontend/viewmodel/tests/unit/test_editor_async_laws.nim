@@ -89,7 +89,7 @@ template counted(condition: untyped) =
   inc countedAssertions
   check condition
 
-const ExpectedAssertions = 1778
+const ExpectedAssertions = 1780
   ## +2 on 2026-10-24: PLAT-70 Part C's `find_match.nim` joined the editor
   ## directory, so the §35 scan covers one more module.
   ## **+1 ON 2026-09-23: `-` on a version is asserted refused** (the case
@@ -260,7 +260,7 @@ const
   VersionSource = staticRead("../../editor/document_version.nim")
   GeneratorSource = staticRead("../generators/async_generator.nim")
 
-const ScannedModules = ["anchor.nim", "change_set.nim", "collab_text.nim",
+const ScannedModules = ["word_classifier.nim", "anchor.nim", "change_set.nim", "collab_text.nim",
                     "decoration.nim",
                         "document_version.nim", "editor_state.nim",
                         "find_match.nim", "history.nim",

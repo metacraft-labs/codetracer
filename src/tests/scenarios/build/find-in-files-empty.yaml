@@ -1,0 +1,19 @@
+scenario: 1
+name: build/find-in-files-empty
+pack: codetracer
+summary: >-
+  Docking FIND IN FILES from the footer's strip shows the search pane in its
+  empty state: the prompt to search and no match rows.
+
+stage:
+  - use: record-program
+    with: { program: py_console_logs/main.py }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - wait: { until: { at: 'strip-tab[label="FIND IN FILES"]', present: true }, timeout: 30s }
+  - click: { at: 'strip-tab[label="FIND IN FILES"]' }
+  - wait: { until: { at: find-in-files, present: true }, timeout: 30s }
+  - expect: { at: find-in-files, where: docked, count: 0 }
+  - expect: { at: find-in-files, text: { contains: "Type a query above and press Enter to search" } }

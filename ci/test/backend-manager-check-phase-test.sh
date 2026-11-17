@@ -5,16 +5,24 @@
 #
 # WHY THIS EXISTS
 # ---------------
-# That checkPhase excludes two things from the nix build sandbox:
+# That checkPhase excludes three things from the nix build sandbox:
 #
 #   1. one unit test  — browser_stream_host::tests::a_real_browser_recording_...
-#   2. one whole test TARGET — tests/real_recording_integration.rs
+#   2. one integration test — meta_dat_real_mcr_recording's
+#      a_native_recording_and_each_of_its_slices_name_the_recording
+#   3. one whole test TARGET — tests/real_recording_integration.rs
 #
-# Both are excluded because the sandbox cannot supply what they need, not
-# because they are unimportant. An exclusion like that has one characteristic
-# failure mode: it quietly grows, until "the build is green" means "the tests
-# stopped running". The checkPhase carries guards against exactly that. Guards
-# that are never exercised are decoration, so this suite exercises them.
+# All three are excluded because the sandbox -- or, for (2), the builder's
+# hardware -- cannot supply what they need, not because they are unimportant.
+# (2) records with a real ct-mcr, which refuses a host without CPUID faulting;
+# Nix schedules the derivation on any x86_64-linux builder, so leaving it in
+# made the package build pass or fail by machine. The stub below models that
+# refusal, which is what makes this suite red against a phase that runs it.
+#
+# An exclusion like that has one characteristic failure mode: it quietly
+# grows, until "the build is green" means "the tests stopped running". The
+# checkPhase carries guards against exactly that. Guards that are never
+# exercised are decoration, so this suite exercises them.
 #
 # WHAT IT TESTS AGAINST
 # ---------------------
@@ -118,6 +126,8 @@ fi
 rm -f "$CHECK_PHASE_FILE.err"
 
 BROWSER_TEST=browser_stream_host::tests::a_real_browser_recording_is_a_ct_with_a_complete_boundary_log
+MCR_TARGET=meta_dat_real_mcr_recording
+MCR_TEST=a_native_recording_and_each_of_its_slices_name_the_recording
 EXCLUDED_TARGET=real_recording_integration
 
 # -----------------------------------------------------------------------------
@@ -130,6 +140,14 @@ EXCLUDED_TARGET=real_recording_integration
 #   tests/meta_dat_metadata_loading   21 passed
 #   tests/real_recording_integration   4 passed; 75 failed; 7 ignored  -> exit 101
 #
+# plus tests/meta_dat_real_mcr_recording.rs as job 128586976683 (codetracer
+# agents 9670eb831, runner high-mem-server-mcl-003) reported it: 39 unit tests
+# of src/meta_dat.rs and src/trace_metadata.rs it compiles in through #[path],
+# which pass anywhere, and the one recording test, which failed there because
+# that host has no CPUID faulting:
+#
+#   tests/meta_dat_real_mcr_recording 39 passed; 1 failed               -> exit 101
+#
 # The crate is binary-only (no [lib], no src/lib.rs), which is why the phase
 # selects --bins and not --lib.
 # -----------------------------------------------------------------------------
@@ -137,7 +155,7 @@ make_stub_crate() {
 	local dir="$1"
 	mkdir -p "$dir/tests" "$dir/src" "$dir/bin"
 	: >"$dir/src/main.rs"
-	for t in dive_in_url_fetch_test mcp_origin_test meta_dat_metadata_loading "$EXCLUDED_TARGET"; do
+	for t in dive_in_url_fetch_test mcp_origin_test meta_dat_metadata_loading "$MCR_TARGET" "$EXCLUDED_TARGET"; do
 		: >"$dir/tests/$t.rs"
 	done
 
@@ -147,9 +165,9 @@ make_stub_crate() {
 set -u
 
 declare -a SELECTED=()
+declare -a SKIPS=()
 want_bins=0
 listing=0
-skip_name=""
 saw_ddash=0
 explicit_target_selection=0
 
@@ -165,7 +183,7 @@ while [ \$# -gt 0 ]; do
 		;;
 	--test) shift; SELECTED+=("\$1"); explicit_target_selection=1 ;;
 	--list) [ "\$saw_ddash" = 1 ] && listing=1 ;;
-	--skip) shift; skip_name="\$1" ;;
+	--skip) shift; SKIPS+=("\$1") ;;
 	esac
 	shift
 done
@@ -174,14 +192,24 @@ done
 # PRE-FIX behaviour, and modelling it is what makes the red test red.
 if [ "\$explicit_target_selection" = 0 ]; then
 	want_bins=1
-	SELECTED=(dive_in_url_fetch_test mcp_origin_test meta_dat_metadata_loading $EXCLUDED_TARGET)
+	SELECTED=(dive_in_url_fetch_test mcp_origin_test meta_dat_metadata_loading $MCR_TARGET $EXCLUDED_TARGET)
 fi
+
+# libtest's --skip is a substring filter; one per excluded name.
+skipped() { # test name
+	local s
+	for s in "\${SKIPS[@]:-}"; do
+		[ -n "\$s" ] && case "\$1" in *"\$s"*) return 0 ;; esac
+	done
+	return 1
+}
 
 count_for() {
 	case "\$1" in
 	dive_in_url_fetch_test) echo 1 ;;
 	mcp_origin_test) echo 12 ;;
 	meta_dat_metadata_loading) echo 21 ;;
+	$MCR_TARGET) echo 39 ;;
 	$EXCLUDED_TARGET) echo 86 ;;
 	*) echo 0 ;;
 	esac
@@ -194,6 +222,7 @@ if [ "\$listing" = 1 ]; then
 	fi
 	for t in "\${SELECTED[@]:-}"; do
 		[ -z "\$t" ] && continue
+		[ "\$t" = "$MCR_TARGET" ] && echo "$MCR_TEST: test"
 		n=\$(count_for "\$t")
 		for i in \$(seq 1 "\$n"); do echo "\${t}_case_\$i: test"; done
 	done
@@ -208,7 +237,7 @@ emit_ok() { # name, passed, ignored, filtered
 }
 
 if [ "\$want_bins" = 1 ]; then
-	if [ -n "\$skip_name" ]; then
+	if skipped "$BROWSER_TEST"; then
 		emit_ok "unittests src/main.rs" 204 0 1
 	else
 		emit_ok "unittests src/main.rs" 205 0 0
@@ -228,6 +257,22 @@ for t in "\${SELECTED[@]:-}"; do
 		echo "MISSING PREREQUISITE: CODETRACER_RR_BACKEND_PATH is not set"
 		echo "test result: FAILED. 4 passed; 75 failed; 7 ignored; 0 measured; 0 filtered out; finished in 0.05s"
 		echo "error: test failed, to rerun pass \\\`--test $EXCLUDED_TARGET\\\`"
+		rc=101
+		continue
+	fi
+	if [ "\$t" = "$MCR_TARGET" ]; then
+		if skipped "$MCR_TEST"; then
+			emit_ok "tests/$MCR_TARGET.rs" 39 0 1
+			continue
+		fi
+		# The refusal job 128586976683 logged on a builder without CPUID
+		# faulting.
+		echo "     Running tests/$MCR_TARGET.rs"
+		echo "test $MCR_TEST ... FAILED"
+		echo "ct-mcr record failed (exit status: 1); a host without CPUID faulting is refused by design (Multi-Core-Recorder.md §8.3)."
+		echo "[ct_interpose] FATAL (cpu input): this host refused CPUID faulting (arch_prctl(ARCH_SET_CPUID, 0)); CPUID answers differ per core and cannot be captured per execution without it"
+		echo "test result: FAILED. 39 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.20s"
+		echo "error: test failed, to rerun pass \\\`--test $MCR_TARGET\\\`"
 		rc=101
 		continue
 	fi
@@ -331,6 +376,12 @@ echo "-- the fix itself ------------------------------------------------------"
 expect_pass "checkPhase succeeds against a crate whose rr suite cannot run" \
 	"$CHECK_PHASE_FILE"
 
+# THE RED TEST for the CPUID-faulting exclusion. The stub's recording test
+# fails as it did on high-mem-server-mcl-003 whenever it is not skipped, so a
+# phase that runs it fails here for the reason the package build failed there.
+expect_pass "checkPhase succeeds on a builder without CPUID faulting" \
+	"$CHECK_PHASE_FILE"
+
 out="$(run_phase "$CHECK_PHASE_FILE")"
 # The same here-string rule as in `expect_killed`, and this is the site where
 # the direction matters: the condition is INVERTED — a match is the failure —
@@ -353,7 +404,7 @@ fi
 # still executed. This is the assertion that would catch "we fixed the build by
 # switching the tests off".
 missing=""
-for t in dive_in_url_fetch_test mcp_origin_test meta_dat_metadata_loading; do
+for t in dive_in_url_fetch_test mcp_origin_test meta_dat_metadata_loading "$MCR_TARGET"; do
 	grep -q "Running tests/$t.rs" <<<"$out" || missing="$missing $t"
 done
 grep -q "Running unittests src/main.rs" <<<"$out" || missing="$missing bins"
@@ -389,7 +440,7 @@ expect_killed "M3 excluded target runs and passes (the false green)" \
 
 # M4 — the single-test exclusion goes stale (test renamed upstream), which
 # would make --skip a no-op and quietly reintroduce a test that cannot run.
-m4="$(mutate "s/^excluded=browser_stream_host.*/excluded=browser_stream_host::tests::renamed_upstream/")"
+m4="$(mutate "s/^\\(\\s*\\)$BROWSER_TEST\$/\\1browser_stream_host::tests::renamed_upstream/")"
 expect_killed "M4 single-test exclusion no longer matches any test" \
 	"$m4" "is not in this crate's test list"
 
@@ -401,8 +452,10 @@ expect_killed "M4 single-test exclusion no longer matches any test" \
 # suite was first written. It compares the run against the listing of the SAME
 # selection, so narrowing the selection shrinks both sides and they stay
 # consistent. That is why the checkPhase also checks the selection against
-# tests/*.rs on disk. M5 is the mutation that found that hole.
-m5="$(mutate "s|for testFile in tests/\*.rs; do|for testFile in tests/dive_in_url_fetch_test.rs; do|")"
+# tests/*.rs on disk. M5 is the mutation that found that hole. The narrowed
+# glob drops dive_in_url_fetch_test and keeps the targets the by-name
+# exclusions list from, so it is this guard, not theirs, that has to answer.
+m5="$(mutate "s|for testFile in tests/\*.rs; do|for testFile in tests/m*.rs; do|")"
 expect_killed "M5 a kept target silently drops out of the run" \
 	"$m5" "dropped out of the selection"
 
@@ -411,7 +464,7 @@ expect_killed "M6 a kept target under-reports its test count" \
 	"$CHECK_PHASE_FILE" "Coverage in" STUB_UNDERREPORT=mcp_origin_test
 
 # M7 — the accounting guard is neutered outright.
-m7="$(mutate "s/if \[ \"\$accounted\" -ne \"\$((listed - 1))\" \]; then/if false; then/")"
+m7="$(mutate "s/if \[ \"\$accounted\" -ne \"\$expected\" \]; then/if false; then/")"
 if run_phase "$m7" STUB_UNDERREPORT=mcp_origin_test >/dev/null; then
 	pass "M7 control: with the accounting guard removed, M6's defect goes unnoticed"
 else
@@ -435,11 +488,24 @@ expect_killed "M8 the crate's unit tests drop out of listing and run" \
 # test) but are no longer RUN. 204 of the 238 tests this lane covers vanish
 # while every earlier guard is happy.
 # shellcheck disable=SC2016 # a sed pattern naming a literal shell variable
-m9="$(mutate 's/$cargoTestTargets -- --skip/--test dive_in_url_fetch_test --test mcp_origin_test --test meta_dat_metadata_loading -- --skip/')"
+m9="$(mutate 's/$cargoTestTargets -- "${skipArgs/--test dive_in_url_fetch_test --test mcp_origin_test --test meta_dat_metadata_loading --test meta_dat_real_mcr_recording -- "${skipArgs/')"
 expect_killed "M9 unit tests are listed but silently not run" \
 	"$m9" "unit tests did not run"
 
-rm -f "$CHECK_PHASE_FILE" "$m1" "$m2" "$m4" "$m5" "$m7" "$m8" "$m9"
+# M10 — the CPUID-faulting exclusion goes stale (the recording test is renamed
+# upstream), so its --skip filters nothing and the test is back in a lane whose
+# builders may lack the hardware it needs.
+m10="$(mutate "s/^\\(\\s*\\)$MCR_TEST\$/\\1a_native_recording_renamed_upstream/")"
+expect_killed "M10 CPUID-faulting exclusion no longer matches any test" \
+	"$m10" "is not in this crate's test list"
+
+# M11 — the CPUID-faulting exclusion is dropped. This is the phase as it stood
+# when job 128586976683 failed, and it must fail here for the same reason.
+m11="$(mutate "/^\\s*$MCR_TEST\$/d")"
+expect_killed "M11 CPUID-faulting test is put back into the run" \
+	"$m11" "this host refused CPUID faulting"
+
+rm -f "$CHECK_PHASE_FILE" "$m1" "$m2" "$m4" "$m5" "$m7" "$m8" "$m9" "$m10" "$m11"
 
 # =============================================================================
 echo

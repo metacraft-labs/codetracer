@@ -1,0 +1,49 @@
+scenario: 1
+name: multi-window/pane-sent-to-a-new-window-shows-there
+pack: codetracer
+summary: >-
+  "Send to New Window" on the EVENT LOG tab opens a second window that
+  shows the event log with this recording's events, while the first window
+  no longer has the pane; a pane sent to that window from the first window's
+  tab menu ("Send to: …") shows there too.
+
+stage:
+  - use: record-program
+    with: { program: py_console_logs/main.py }
+  - use: open-recording
+
+clients:
+  main: { open: stage }
+
+steps:
+  - wait: { until: replay-idle, timeout: 180s }
+    as: main
+  - wait: { until: { at: 'pane-tab[label="EVENT LOG"]', present: true }, timeout: 60s }
+    as: main
+  - click: { at: 'pane-tab[label="EVENT LOG"]', button: right }
+    as: main
+  - wait: { until: { at: 'context-menu/menu-item[label="Send to New Window"]', present: true }, timeout: 15s }
+    as: main
+  - click: 'context-menu/menu-item[label="Send to New Window"]'
+    as: main
+  - wait: { until: { at: 'pane-tab[label="EVENT LOG"]', absent: true }, timeout: 30s }
+    as: main
+  - open-client: { name: second, open: app-window }
+  - wait: { until: event-log.loaded, timeout: 120s }
+    as: second
+  - expect: { at: event-log, assert: 'has-output("print using print")' }
+    as: second
+  - expect: { at: window, assert: 'lacks-pane("EVENT LOG")' }
+    as: main
+  # The main process tells every window when another opens or is retitled,
+  # so the first tab menu opened after the second window drew lists it.
+  - click: { at: 'pane-tab[label="CALLTRACE"]', button: right }
+    as: main
+  - wait: { until: { at: 'context-menu/menu-item[label="Send to: main.py — CodeTracer"]', present: true }, timeout: 15s }
+    as: main
+  - click: 'context-menu/menu-item[label="Send to: main.py — CodeTracer"]'
+    as: main
+  - wait: { until: { at: 'pane-tab[label="CALLTRACE"]', absent: true }, timeout: 30s }
+    as: main
+  - wait: { until: { at: 'pane-tab[label="CALLTRACE"]', present: true }, timeout: 60s }
+    as: second

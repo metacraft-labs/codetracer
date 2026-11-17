@@ -1,0 +1,56 @@
+ Sessions  ⚲ ✕
+ SESSIONS  40 sessions · 6 need input · 8 idle · 16 running · 4 queued · 2 failed · 4 ended
+ invented working set: 40 sessions over 5 initiatives
+ ▾ ● Telemetry upload retries                                                                                                                 1/4 2 need input · 2 idle · 2 running
+ ● Retry telemetry uploads with exponential backoff                                    needs input CodeTracer · Claude 2.1.0 · host-a                                           now
+   assistant: Should a 429 from the collector count against the retry budget, or wait…
+ ● Report dropped telemetry batches on the status page                                 needs input CLI · Codex 0.9.4 · host-b                                                    4m
+   assistant: Should the status page show dropped batches per hour or since start-up?
+ ○ Test telemetry retries against a flaky collector                                    idle CodeTracer · Grok 1.2.0 · host-a                                                     2m
+   assistant: The flaky-collector test runs in 12 s and delivers every batch exactly…
+ ○ Persist the telemetry queue across restarts                                         idle Telegram · Codex 0.9.4 · host-f                                                      5m
+   assistant: The queue is fsynced before each send and survives a kill -9; 10 of 10…
+ ● Document the telemetry retry settings                                               running Telegram · Opencode 0.6.1 · host-f                                               now
+   assistant: Writing the retry settings table in docs/telemetry.md from the config s…
+ ● Add jitter to the telemetry retry delays                                            running TUI · Grok 1.2.0 · host-e                                                         3m
+   assistant: Spreading the retry delays with full jitter; measuring the spread over…
+ ● Cap the telemetry retry budget per hour                                             completed CodeTracer · Opencode 0.6.1 · host-d                                            1m
+   assistant: The budget is a rolling hour of 120 retries; past it the oldest batch i…
+ ▾ ● Settings redesign                                                                                                                        3/8 2 need input · 2 idle · 2 running
+ ● Add search to the settings page                                                     needs input CLI · Opencode 0.6.1 · host-b                                                now
+   assistant: Should a search hit in another tab switch to it, or list the hits acros…
+ ● Show which settings need a restart                                                  needs input WebUI · Claude 2.1.0 · host-c                                                 4m
+   assistant: Offer to restart from the banner, or only say that a restart is needed?
+ ○ Reset a settings tab to its defaults                                                idle CLI · Codex 0.9.4 · host-b                                                           2m
+   assistant: Each tab resets to its defaults after a confirmation; account fields ar…
+ ○ Move the account settings into their own tab                                        idle CodeTracer · Claude 2.1.0 · host-a                                                   5m
+   assistant: Account settings live in their own tab, including two-factor enrolment.…
+ ● Split the settings page into tabs                                                   running WebUI · Grok 1.2.0 · host-c                                                       2m
+   assistant: Splitting SettingsPage into General, Account, Notifications and Advance…
+ ● Keep unsaved settings when switching tabs                                           running Telegram · Codex 0.9.4 · host-f                                                   3m
+   assistant: Keeping each tab's draft in the settings store instead of the tab compo…
+ ● Add keyboard navigation to the settings tabs                                        completed TUI · Grok 1.2.0 · host-e                                                       1m
+   assistant: The settings tabs follow the ARIA tabs pattern; focus never leaves the…
+ ▾ ● Release 3.0                                                                                                                             5/12 2 need input · 1 idle · 2 running
+ ● Trim the 3.0 release bundle under 40 MB                                             needs input WebUI · Grok 1.2.0 · host-c                                                  now
+   assistant: May the locale data load on first use, which needs network on first sta…
+ ● Tag the 3.0 release candidate                                                       needs input CodeTracer · Opencode 0.6.1 · host-d                                          4m
+   assistant: Publish the release candidate to the beta track, or only to nightly?
+ ○ Rename the units module's helpers for 3.0                                           idle CLI · Opencode 0.6.1 · host-b                                                        5m
+   assistant: The units helpers are renamed, with deprecated aliases until 4.0. Ready…
+ ● Remove the deprecated sync API for 3.0                                              running CodeTracer · Codex 0.9.4 · host-d                                                 2m
+   assistant: Removing sync_fetch, sync_store and their 31 tests.
+ ● Draft the 3.0 release notes                                                         running CodeTracer · Claude 2.1.0 · host-a                                                3m
+   assistant: Grouping the 214 commits since 2.9 into the release notes' sections.
+ ● Bump the minimum supported runtime for 3.0                                          completed Telegram · Codex 0.9.4 · host-f                                                 1m
+   assistant: 3.0 requires runtime 1.82; four compatibility shims removed.
+ ● Write the upgrade guide for 3.0                                                     completed TUI · Claude 2.1.0 · host-e                                                     4m
+   assistant: The 3.0 upgrade guide covers every breaking change with a before and af…
+ ▾ ● Route cache on the new storage layer                                                                                              2/6 1 idle · 4 running · 1 queued · 1 failed
+ ○ Expire stale routes when the storage layer compacts                                 idle CodeTracer · Codex 0.9.4 · host-d                                                   now
+   assistant: Compaction drops expired routes; no stale route is served after it. Rea…
+ ● Port the route cache to the new storage layer                                       running CLI · Codex 0.9.4 · host-b                                                        1m
+   assistant: Moving RouteCache::get and ::put onto the storage layer's batch API.
+ ● Fix the route cache eviction race                                                   running CodeTracer · Claude 2.1.0 · host-a                                                1m
+   assistant: Reproducing the eviction race with 32 threads under loom.
+ ● Migrate cached routes without a cold start                                          running Telegram · Opencode 0.6.1 · host-f                                                4m

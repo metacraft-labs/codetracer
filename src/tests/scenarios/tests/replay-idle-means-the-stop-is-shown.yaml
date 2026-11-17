@@ -1,0 +1,33 @@
+scenario: 1
+name: tests/replay-idle-means-the-stop-is-shown
+pack: codetracer
+summary: >-
+  The pack's `replay-idle` condition holds only once the window shows where
+  the replay stopped: after a step, an observation right after the wait, with
+  no other synchronisation, sees the editor on the new stop. (The check that a
+  binding's sync condition does not fire early: the pack's mutation grade
+  plants one that does.)
+
+# THE ONE STAND-IN: `delay-stop-drawing`. The front-ends draw a stop in the
+# same frame as the state `replay-idle` reads, and the input's settle waits
+# past that frame, so an early `replay-idle` would pass here by luck of
+# scheduling. The stage makes the front-end hold each move's answer three
+# seconds before drawing the stop (a test-only hook, honoured only under
+# CODETRACER_IN_UI_TEST), while the window keeps showing the move in flight —
+# the terminal's badge reads STEPPING, the desktop's status stays busy. A
+# correct `replay-idle` waits those seconds out; one that fires early reads
+# the editor still on line 1. Nothing else about the replay is altered: the
+# recording, the replay server and the front-end are the real ones.
+stage:
+  - use: record-program
+    with: { program: calc }
+  - use: delay-stop-drawing
+    with: { ms: 3000 }
+  - use: open-recording
+
+steps:
+  - wait: { until: { at: 'editor[file="main.py"]', assert: "stopped-at(1)" }, timeout: 120s }
+  - wait: { until: replay-idle, timeout: 60s }
+  - chord: { bound: debugger.step-over }
+  - wait: { until: replay-idle, timeout: 60s }
+  - expect: { at: 'editor[file="main.py"]', assert: "stopped-at(2)" }

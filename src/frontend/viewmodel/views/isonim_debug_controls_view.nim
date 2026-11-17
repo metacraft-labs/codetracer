@@ -21,6 +21,7 @@
 ## `renderTopbar` is what the menu shell puts in its toolbar host: this panel
 ## or the edit-mode toolbar, chosen by `DebugControlsVM.topbarSurface`.
 
+import ../input/press_menu
 import std/[options, strutils]
 
 import isonim/core/[signals, computation]
@@ -34,6 +35,7 @@ when defined(js):
   from isonim/core/owner import onCleanup
   import isonim/web/web_renderer
   import isonim/web/dom_api as isonim_dom
+  import ./dismissals
 
 import ../viewmodels/[debug_controls_vm, edit_mode_toolbar]
 # A generic view is instantiated where it is called, and the `ui` macro's
@@ -136,19 +138,12 @@ template isHistoryDomElement(N: typedesc): bool =
 
 proc bindHistoryContextMenu[R, N](r: R; button: N;
                                  vm: DebugControlsVM; kind: HistoryListKind) =
-  ## Native contextmenu events are separate from click events in IsoNim.
-  ## Suppress the browser menu and leave left-click navigation untouched.
-  when isHistoryDomElement(N):
-    isonim_dom.addEventListener(isonim_dom.Node(button), cstring"contextmenu",
-      proc(ev: isonim_dom.Event) =
-        ev.historyPreventDefault()
-        ev.historyStopPropagation()
-        vm.openHistoryMenu(kind))
-  elif N is MockNode:
-    r.addEventListener(button, "contextmenu", proc(ev: MockEvent) =
-      ev.preventDefault()
-      ev.stopPropagation()
-      vm.openHistoryMenu(kind))
+  ## A history button carries its menu (`input/press_menu`): a right press
+  ## opens the list of the places it goes back or forward to; a left press
+  ## still navigates.
+  bindPressMenu(r, button, proc(x, y: int; ctrl, shift: bool): bool =
+    vm.openHistoryMenu(kind)
+    true)
 
 proc bindHistoryMenuDismissal[R, N](r: R; host, back, forward: N;
                                    vm: DebugControlsVM) =
@@ -164,18 +159,16 @@ proc bindHistoryMenuDismissal[R, N](r: R; host, back, forward: N;
       let outside: isonim_dom.EventHandler = proc(ev: isonim_dom.Event) =
         if not historyEventInside(host, ev):
           vm.stopJump()
-      let escape: isonim_dom.EventHandler = proc(ev: isonim_dom.Event) =
-        if historyEventKey(ev) == cstring"Escape":
-          ev.historyPreventDefault()
-          ev.historyStopPropagation()
-          vm.stopJump()
-          focusHistoryControl(anchor)
+      let escape = proc(): bool =
+        vm.stopJump()
+        focusHistoryControl(anchor)
+        true
       let doc = isonim_dom.Node(isonim_dom.document)
-      isonim_dom.addEventListener(doc, cstring"pointerdown", outside)
-      isonim_dom.addEventListener(doc, cstring"keydown", escape)
+      isonim_dom.addEventListener(doc, cstring"pointerdown", outside)  # ir1-gate: outside press
+      registerDismissal(escape)
       onCleanup proc() =
         isonim_dom.removeEventListener(doc, cstring"pointerdown", outside)
-        isonim_dom.removeEventListener(doc, cstring"keydown", escape)
+        unregisterDismissal(escape)
 
 proc historyEntryLabel*(entry: JumpEntry): string =
   ## How a jump-history entry reads in the list: where, and when.

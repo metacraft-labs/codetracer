@@ -37,6 +37,9 @@ import ./layout_model
 # (`viewmodels/agent_prompt_context`, re-exported by `codetracer_embed`).
 from codetracer_embed import AgentAddContextItem, label,
   AgentNoEditorSelectionReason
+# The editor's Nim trace entries (`viewmodels/nim_tracing_vm`).
+from codetracer_embed import NimTraceAction, nimTraceLabelOf,
+  nimTraceOperationOf
 
 type
   ClickGesture* = enum
@@ -100,6 +103,7 @@ type
     caJumpForwardToCall = "jump-forward-to-call"
     caJumpBackwardToCall = "jump-backward-to-call"
     caAddBreakpoint = "add-breakpoint"
+    caToggleInlineBreakpoint = "toggle-inline-breakpoint"
     caDeleteBreakpoint = "delete-breakpoint"
     caEnableBreakpoint = "enable-breakpoint"
     caDisableBreakpoint = "disable-breakpoint"
@@ -157,6 +161,19 @@ type
       ## name `ContextTarget.text`.
     caConstraintCopyName = "constraint-copy-name"
     caConstraintCopySourceLocation = "constraint-copy-source-location"
+    caTraceMacro = "trace-macro"
+      ## Nim's compile-time tracing (`viewmodels/nim_tracing_vm`): the
+      ## editor's four entries, offered where the caret is on what they
+      ## trace; each runs its `editor.trace-*` operation at the menu's line
+      ## and column.
+    caTraceStaticBlock = "trace-static-block"
+    caTraceConstant = "trace-constant"
+    caTraceEval = "trace-eval"
+    caToggleMacroExpansion = "toggle-macro-expansion"
+      ## Editor-Hosted-Front-Ends §E15: Toggle Macro Expansion on the menu's
+      ## line — the expansion of the Nim macro call there opened beside the
+      ## source, or closed. Offered only by a front-end that draws the Macro
+      ## Expansion pane (`editorTextContextMenu`'s `macroExpansion`).
 
   ContextMenuKind* = enum
     cmkTab = "tab"
@@ -213,6 +230,8 @@ type
       ## The editor column pressed, 1-based (0: none).
     index*: int64
       ## A call-trace row's call index.
+    tick*: uint64
+      ## An event's or a history entry's moment.
     token*: string
       ## The word under the pointer in the editor — what the call jumps send
       ## (`callTokenAt`); empty when the press was not on a word.
@@ -243,6 +262,71 @@ type
     anchorRow*, anchorCol*: int
       ## Where it was opened: a cell (terminal) or, scaled, a pixel (GPUI).
 
+const ContextActionOperations*: array[ContextAction, string] = [
+    caNone: "",
+    caPinLeft: "layout.pin-pane-left",
+    caPinBottom: "layout.pin-pane-bottom",
+    caPinRight: "layout.pin-pane-right",
+    caPinTop: "layout.pin-pane-top",
+    caUnpin: "layout.unpin-pane",
+    caClosePane: "layout.close-pane",
+    caMaximise: "layout.maximize-pane",
+    caCopy: "editor.copy-at",
+    caFind: "find.open",
+    caJumpToLine: "debugger.smart-jump",
+    caRunToCursor: "debugger.run-to-cursor",
+    caJumpBackwardToLine: "debugger.jump-backward-to-line",
+    caJumpToCall: "debugger.source-call-jump",
+    caJumpForwardToCall: "debugger.jump-forward-to-call",
+    caJumpBackwardToCall: "debugger.jump-backward-to-call",
+    caAddBreakpoint: "editor.add-breakpoint",
+    caToggleInlineBreakpoint: "editor.toggle-inline-breakpoint",
+    caDeleteBreakpoint: "editor.delete-breakpoint",
+    caEnableBreakpoint: "editor.enable-breakpoint",
+    caDisableBreakpoint: "editor.disable-breakpoint",
+    caDeleteBreakpointsInFile: "editor.delete-breakpoints-in-file",
+    caDeleteAllBreakpoints: "editor.delete-all-breakpoints",
+    caAddTracepoint: "editor.toggle-tracepoint",
+    caToggleCallChildren: "calltrace.toggle-call",
+    caToggleValueHistory: "variables.value-history",
+    caShowValueOrigin: "variables.show-value-origin",
+    caAddValueToScratchpad: "scratchpad.add-value",
+    caAddAllValuesToScratchpad: "scratchpad.add-all-values",
+    caJumpToValue: "variables.jump-to-value",
+    caFileCreate: "file-tree.create",
+    caFileRename: "file-tree.rename",
+    caFileDelete: "file-tree.delete",
+    caFileEdit: "file-tree.edit",
+    caAgentAttachUpload: "agent-activity.attach-upload",
+    caAgentAttachFilesFolders: "agent-activity.attach-files-folders",
+    caAgentAttachEditorSelection: "agent-activity.attach-editor-selection",
+    caAgentAttachRecording: "agent-activity.attach-recording",
+    caRequestGoToHandler: "requests.go-to-handler",
+    caRequestCopyUrl: "requests.copy-url",
+    caRequestFilterMethod: "requests.filter-method",
+    caRequestFilterStatus: "requests.filter-status",
+    caRequestClearFilters: "requests.clear-filters",
+    caLowLevelGoToSourceLine: "low-level.go-to-source-line",
+    caLowLevelShowSourceLine: "low-level.show-source-line",
+    caLowLevelCopyInstruction: "low-level.copy-instruction",
+    caLowLevelCopySourceLocation: "low-level.copy-source-location",
+    caVerificationGoToSource: "verification.go-to-source",
+    caVerificationOpenCounterexample: "verification.open-counterexample",
+    caVerificationCopyMessage: "verification.copy-message",
+    caVerificationCopyLocation: "verification.copy-location",
+    caVerificationCloseCounterexample: "verification.close-counterexample",
+    caConstraintGoToSource: "constraints.go-to-source",
+    caConstraintCopyName: "constraints.copy-name",
+    caConstraintCopySourceLocation: "constraints.copy-source-location",
+    caTraceMacro: "editor.trace-macro-at-cursor",
+    caTraceStaticBlock: "editor.trace-static-block-at-cursor",
+    caTraceConstant: "editor.trace-constant-at-cursor",
+    caTraceEval: "editor.trace-eval",
+    caToggleMacroExpansion: "editor.toggle-macro-expansion"]
+  ## The operation each context menu action runs (Input-Routing §3.2): the
+  ## array's index type makes it total, and `test_plat64_operation_mapping`
+  ## asserts every name is catalogued and none is listed twice.
+
 const
   DesktopTabMenuLabels* = ["Pin to Left", "Pin to Bottom", "Pin to Right",
                            "Close"]
@@ -261,6 +345,8 @@ const
   AddAllValuesToScratchpadLabel* = "Add all values to scratchpad"
   JumpToValueLabel* = "Jump to value"
   UnpinLabel* = "Unpin"
+  ToggleMacroExpansionLabel* = "Toggle Macro Expansion"
+    ## The catalogue's title for `editor.toggle-macro-expansion`.
   NoWordSelected* = "No word selected."
     ## The desktop's answer to a call jump with no word under the pointer
     ## (`ui/editor.createContextMenuItems`'s fallback handler).
@@ -360,6 +446,44 @@ func dockLabelContextMenu*(pane: PaneKind; edge: LayoutEdge): ContextMenuModel =
   result.entries.add entry(DesktopTabMenuLabels[3], caClosePane)
 
 type
+  NimTraceEntry* = tuple[label: string; action: ContextAction; hint: string]
+    ## One of the editor's Nim trace entries, as the caller decided it from
+    ## the document and the caret (`nim_tracing_vm.availableNimTraceActions`)
+    ## and the active base's chord.
+
+func nimTraceContextAction*(action: NimTraceAction): ContextAction =
+  case action
+  of ntaMacro: caTraceMacro
+  of ntaStaticBlock: caTraceStaticBlock
+  of ntaConstant: caTraceConstant
+  of ntaEval: caTraceEval
+
+func nimTraceActionOf*(action: ContextAction): tuple[found: bool;
+                                                    action: NimTraceAction] =
+  case action
+  of caTraceMacro: (true, ntaMacro)
+  of caTraceStaticBlock: (true, ntaStaticBlock)
+  of caTraceConstant: (true, ntaConstant)
+  of caTraceEval: (true, ntaEval)
+  else: (false, ntaMacro)
+
+proc nimTraceEntriesOf*(actions: set[NimTraceAction];
+                        chordOf: proc(operation: string): string):
+    seq[NimTraceEntry] =
+  ## The entries for the actions the caret offers, in the actions' order,
+  ## each hinted with its chord in the active base (`chordOf`, "" for none).
+  for a in NimTraceAction:
+    if a in actions:
+      let op = nimTraceOperationOf(a)
+      result.add (nimTraceLabelOf(a), nimTraceContextAction(a),
+                  (if chordOf.isNil: "" else: chordOf(op)))
+
+func addNimTraceEntries(menu: var ContextMenuModel;
+                        entries: openArray[NimTraceEntry]) =
+  for e in entries:
+    menu.entries.add entry(e.label, e.action, hint = e.hint)
+
+type
   LineBreakpoint* = enum
     ## The breakpoint on the line a menu is opened on.
     lbNone, lbEnabled, lbDisabled
@@ -367,7 +491,12 @@ type
 func editorTextContextMenu*(path: string; line: int; lineText = "";
                             column = 0; token = ""; tokenError = "";
                             breakpoint = lbNone; fileHasBreakpoints = false;
-                            anyBreakpoints = false): ContextMenuModel =
+                            anyBreakpoints = false;
+                            inlineBreakpoint = false;
+                            inlineChord = "Shift+F9";
+                            nimTrace: openArray[NimTraceEntry] = [];
+                            macroExpansion = false):
+    ContextMenuModel =
   ## The editor's right-click menu in a replay — `ui/editor.
   ## createContextMenuItems`' Debug branch, measured on the real desktop
   ## (`plat50-desktop-capture.spec.ts`, `menus.editorText` and
@@ -399,7 +528,7 @@ func editorTextContextMenu*(path: string; line: int; lineText = "";
   case breakpoint
   of lbNone:
     result.entries.add entry("Add breakpoint", caAddBreakpoint,
-                             hint = "<click line number gutter>")
+                             hint = "<click left of the line number>")
   of lbEnabled:
     result.entries.add entry("Disable breakpoint", caDisableBreakpoint)
     result.entries.add entry("Delete breakpoint", caDeleteBreakpoint,
@@ -408,6 +537,13 @@ func editorTextContextMenu*(path: string; line: int; lineText = "";
     result.entries.add entry("Enable breakpoint", caEnableBreakpoint)
     result.entries.add entry("Delete breakpoint", caDeleteBreakpoint,
                              hint = "<click on the red dot>")
+  # Editor-Pane.md § Inline breakpoints: directly after the line breakpoint's
+  # entries, at the press (a right press places the caret first). Its hint is
+  # the active base's chord, read from the keymap by the caller.
+  result.entries.add entry(
+    (if inlineBreakpoint: "Remove Inline Breakpoint"
+     else: "Add Inline Breakpoint"),
+    caToggleInlineBreakpoint, hint = inlineChord)
   if fileHasBreakpoints:
     result.entries.add entry("Delete breakpoints in file",
                              caDeleteBreakpointsInFile)
@@ -415,6 +551,28 @@ func editorTextContextMenu*(path: string; line: int; lineText = "";
     result.entries.add entry("Delete ALL breakpoints", caDeleteAllBreakpoints)
   result.entries.add entry("Add tracepoint", caAddTracepoint,
                            hint = "Enter<on line>")
+  # The Nim trace entries close the menu, as on the desktop.
+  result.addNimTraceEntries(nimTrace)
+  # Editor-Hosted-Front-Ends §E15, after them: the caller offers it on a Nim
+  # source line of a replay, when it draws the Macro Expansion pane (the
+  # desktop opens its expansions with the palette operation, inline).
+  if macroExpansion:
+    result.entries.add entry(ToggleMacroExpansionLabel, caToggleMacroExpansion)
+
+func editorEditContextMenu*(path: string; line: int; lineText = "";
+                            column = 0;
+                            nimTrace: openArray[NimTraceEntry] = []):
+    ContextMenuModel =
+  ## The editor's right-click menu in EDIT mode on the native front-ends:
+  ## the entries that MAKE a recording rather than navigate one — the Nim
+  ## trace entries — which the desktop offers in both its menus
+  ## (`ui/editor.createContextMenuItems`, Mode-Transitions.md §8.3). Empty
+  ## where the caret offers none; a front-end opens no menu then.
+  result = ContextMenuModel(
+    kind: cmkEditorText,
+    target: ContextTarget(pane: paneEditor, path: path, line: line,
+                          column: column, text: lineText))
+  result.addNimTraceEntries(nimTrace)
 
 func callTraceContextMenu*(index: int64; hasChildren,
                            expanded: bool): ContextMenuModel =
@@ -726,7 +884,7 @@ func k(id, target: string; gestures: set[ClickGesture];
                  desktop: desktop, sharedOp: sharedOp, terminal: terminal,
                  gpui: gpui, note: note)
 
-const ClickInventory*: array[68, ClickBehaviour] = [
+const ClickInventory*: array[75, ClickBehaviour] = [
   k("K1", "Top bar: menu button / item", {cgClick},
     "open the menu; run the item / enter the folder", "MenuVM",
     nsExisting, nsExisting, "PLAT-48/49"),
@@ -749,9 +907,9 @@ const ClickInventory*: array[68, ClickBehaviour] = [
     "auto_hide_hover", nsExisting, nsExisting, "PLAT-49 part B"),
   k("K9", "Divider", {cgDrag}, "resize", "lcSetWeight", nsExisting,
     nsExisting, "PLAT-6/47"),
-  k("K10", "Editor gutter", {cgClick}, "toggle a breakpoint on the line",
+  k("K10", "Editor gutter: glyph column", {cgClick}, "toggle a breakpoint on the line",
     "toggleBreakpoint", nsDone, nsDone),
-  k("K11", "Editor gutter", {cgRightClick},
+  k("K11", "Editor gutter: glyph column", {cgRightClick},
     "enable / disable the line's breakpoint", "setBreakpointEnabled",
     nsDone, nsDone,
     "the desktop's own handler did nothing on a marker; fixed by PLAT-50"),
@@ -759,10 +917,11 @@ const ClickInventory*: array[68, ClickBehaviour] = [
     "sourceLineJump(smart)", nsDone, nsDone),
   k("K13", "Editor text", {cgRightClick},
     "menu: Copy, Find, the line and call jumps, the breakpoint entries, " &
-      "Add tracepoint",
+      "Add / Remove Inline Breakpoint, Add tracepoint",
     "editorTextContextMenu", nsDone, nsDone),
-  k("K14", "Editor text", {cgAltClick}, "a column-anchored breakpoint",
-    "setColumnBreakpoint", nsDone, nsDone),
+  k("K14", "Editor text", {cgAltClick}, "add a cursor",
+    "add-cursor-at-point", nsDone, nsDone,
+    "was a column-anchored breakpoint; column breakpoints are set at the caret"),
   k("K15", "Editor text: a call", {cgCtrlAltClick}, "Jump to call",
     "sourceCallJump", nsDone, nsDone),
   k("K16", "Editor gutter: run-test control", {cgClick},
@@ -859,7 +1018,8 @@ const ClickInventory*: array[68, ClickBehaviour] = [
   k("K42", "Auto-hide label", {cgRightClick},
     "menu: Pin to the other edges, Unpin, Close", "dockLabelContextMenu",
     nsDone, nsDone),
-  k("K43", "Pane tab: pin button", {cgClick}, "pin the pane to the left",
+  k("K43", "Pane tab: pin button", {cgClick},
+    "pin the pane to an auto-hide edge (the desktop's sidebar, GPUI's bottom)",
     "cmdDock", nsNotApplicable, nsExisting,
     "the terminal strip draws no pin glyph (its tab menu pins, K7); " &
       "GPUI's button is PLAT-49 part B's"),
@@ -960,7 +1120,95 @@ const ClickInventory*: array[68, ClickBehaviour] = [
   k("K68", "Constraints: row", {cgRightClick},
     "menu: Go to Source, Copy Name, Copy Source Location",
     "ConstraintsVM.rowMenu", nsDone, nsDone,
-    "PLAT-62 added the menu on all three front-ends")]
+    "PLAT-62 added the menu on all three front-ends"),
+  k("K69", "Video Player: transport control", {cgClick},
+    "Jump to Start, Rewind, Play / Pause, Fast Forward, Jump to End, the " &
+      "draw-call and frame steps, the Pixel Picker",
+    "VideoPlayerVM.dispatchVideoPlayerAction", nsDone, nsDone,
+    "PLAT-59: the transport row; the terminal's controls are `[|<]` …"),
+  k("K70", "Video Player: frame scrubber", {cgClick, cgDrag},
+    "seek to the frame under the pointer; a drag coalesces its requests " &
+      "and settles on the release",
+    "VideoPlayerVM.beginScrub / dragScrub / releaseScrub", nsDone, nsDone,
+    "PLAT-59: the desktop's Scrub Slider, the pane's bottom track natively"),
+  k("K71", "Video Player: draw-call scrubber", {cgClick, cgDrag},
+    "show the framebuffer after that draw call of the frame (the desktop " &
+      "steps draw calls with its buttons)",
+    "VideoPlayerVM.beginScrub(scrubDraw)", nsDone, nsDone,
+    "PLAT-59: the nested track under the frame scrubber, native only"),
+  k("K72", "Video Player: frame", {cgClick},
+    "the picker's commit: the pixel's history and shader (without the " &
+      "picker, the pixel is selected)",
+    "FrameViewerVM.selectPixel", nsDone, nsDone,
+    "PLAT-59: the terminal's press opens §5's magnifier first; a press " &
+      "on a magnified pixel commits it"),
+  k("K73", "Pixel History: row", {cgClick},
+    "go to the draw call's event; the Video Player shows that draw call; " &
+      "the Shader Debug pane loads its fragment",
+    "VisualReplayPanesVM.activateHistoryEntry", nsDone, nsDone,
+    "PLAT-59: the desktop's click shows the draw call too now"),
+  k("K74", "Shader Debug: step button", {cgClick},
+    "First / Back / Step / Last",
+    "ShaderDebugVM.stepFirst / stepBackward / stepForward / stepLast",
+    nsDone, nsDone, "PLAT-59"),
+  k("K75", "Editor gutter: line numbers",
+    {cgClick, cgDrag, cgRightClick, cgAltClick},
+    "select the line; drag selects lines, Shift+click extends by lines where " &
+      "the medium delivers it; Alt+click adds a whole-line cursor; right click " &
+      "opens the editor menu",
+    "select-line-at, extend-by-unit-to", nsDone, nsDone)]
+
+const
+  GestureMachine* = "gesture"
+    ## A row whose drag goes to a gesture machine (`layout_interaction`), not an
+    ## operation (Input-Routing §5.2).
+
+  ClickOperations*: seq[tuple[id, operation: string]] = @[
+    ## Each behaviour as the OPERATION its element declares (Input-Routing
+    ## §5.1). The rows `pointer_rows` holds resolve through the pointer keymap;
+    ## `test_plat64_operation_mapping` asserts every row a front-end implements
+    ## is here and names an operation that exists.
+    ("K1", "menu.toggle"), ("K2", "debugger.step-over"),
+    ("K3", "palette.open-commands"), ("K4", "session-tabs.activate"),
+    ("K4", "session-tabs.close-tab"), ("K4", "session-tabs.new"),
+    ("K5", "layout.activate-tab"), ("K6", GestureMachine),
+    ("K7", "context-menu.open"), ("K8", "layout.reveal-next-docked"),
+    ("K8", "layout.toggle-docked-pane"),
+    ("K9", GestureMachine), ("K10", "editor.toggle-breakpoint"),
+    ("K11", "editor.enable-breakpoint"), ("K12", "debugger.smart-jump"),
+    ("K13", "context-menu.open"), ("K14", "editor.add-column-breakpoint"),
+    ("K15", "debugger.source-call-jump"), ("K17", "file-tree.activate"),
+    ("K18", "file-tree.activate"), ("K19", "context-menu.open"),
+    ("K20", "calltrace.go-to-call"), ("K21", "calltrace.toggle-call"),
+    ("K22", "context-menu.open"), ("K23", "context-menu.open"),
+    ("K24", "event-log.jump"), ("K25", "event-log.show-content"),
+    ("K26", "event-log.sort"), ("K27", "variables.toggle-expand"),
+    ("K28", "context-menu.open"),
+    ("K29", "variables.hide-other-process-watches"),
+    ("K31", "point-list.select"), ("K32", "terminal-output.jump-to-write"),
+    ("K33", "scratchpad.remove"), ("K34", "vcs.open-file-diff"),
+    ("K35", "search.open-result"), ("K36", "scratchpad.add-value"),
+    ("K37", "status.copy-path"), ("K38", "calltrace.go-to-call"),
+    ("K40", "variables.value-history"), ("K41", "variables.value-origin"),
+    ("K42", "context-menu.open"), ("K43", "layout.pin-pane-left"),
+    ("K43", "layout.pin-pane-bottom"),
+    ("K53", "vcs.toggle-commit"), ("K58", "requests.select"),
+    ("K59", "context-menu.open"), ("K60", "requests.filter-method"),
+    ("K61", "low-level.go-to-source-line"), ("K62", "context-menu.open"),
+    ("K63", "low-level.toggle-sync"), ("K64", "verification.go-to-source"),
+    ("K65", "context-menu.open"), ("K66", "verification.run"),
+    ("K66", "verification.stop"),
+    ("K67", "constraints.go-to-source"), ("K68", "context-menu.open"),
+    ("K69", "video-player.toggle-play"), ("K70", "video-player.seek-frame"),
+    ("K71", "video-player.seek-draw"), ("K72", "video-player.select-pixel"),
+    ("K73", "pixel-history.activate"), ("K74", "shader-debug.step"),
+    ("K75", "editor.select-line-at")]
+
+func clickOperationOf*(id: string): string =
+  ## The operation inventory row `id` declares, or "".
+  for (k, op) in ClickOperations:
+    if k == id: return op
+  ""
 
 func behaviour*(id: string): ClickBehaviour =
   ## The inventory row named `id` (`K1` …); an empty value for an unknown id.

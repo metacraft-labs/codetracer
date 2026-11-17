@@ -1,0 +1,1651 @@
+# ct gfx-replay: 84 argv cases through ct's loader (the parse probe)
+
+### 1: bare (gfx-stream required)
+argv: ct "gfx-replay"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The required option 'gfx-stream' was not specified\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 2: --gfx-stream <v>
+argv: ct "gfx-replay" "--gfx-stream" "/g"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = gfx-replay
+  gfxReplayGfxStream = "/g"
+  gfxReplayHttp = false
+  gfxReplayPort = none
+  gfxReplayBackend = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 3: --gfx-stream=<v>
+argv: ct "gfx-replay" "--gfx-stream=/g"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = gfx-replay
+  gfxReplayGfxStream = "/g"
+  gfxReplayHttp = false
+  gfxReplayPort = none
+  gfxReplayBackend = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 4: --gfx-stream:<v>
+argv: ct "gfx-replay" "--gfx-stream:/g"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = gfx-replay
+  gfxReplayGfxStream = "/g"
+  gfxReplayHttp = false
+  gfxReplayPort = none
+  gfxReplayBackend = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 5: --gfx-stream /g
+argv: ct "gfx-replay" "--gfx-stream" "/g"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = gfx-replay
+  gfxReplayGfxStream = "/g"
+  gfxReplayHttp = false
+  gfxReplayPort = none
+  gfxReplayBackend = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 6: --gfx-stream=/g
+argv: ct "gfx-replay" "--gfx-stream=/g"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = gfx-replay
+  gfxReplayGfxStream = "/g"
+  gfxReplayHttp = false
+  gfxReplayPort = none
+  gfxReplayBackend = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 7: --gfx-stream empty
+argv: ct "gfx-replay" "--gfx-stream" ""
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = gfx-replay
+  gfxReplayGfxStream = ""
+  gfxReplayHttp = false
+  gfxReplayPort = none
+  gfxReplayBackend = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 8: --gfx-stream= (empty)
+argv: ct "gfx-replay" "--gfx-stream="
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = gfx-replay
+  gfxReplayGfxStream = ""
+  gfxReplayHttp = false
+  gfxReplayPort = none
+  gfxReplayBackend = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 9: --gfx-stream= <v> (next word)
+argv: ct "gfx-replay" "--gfx-stream=" "/g"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = gfx-replay
+  gfxReplayGfxStream = "/g"
+  gfxReplayHttp = false
+  gfxReplayPort = none
+  gfxReplayBackend = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 10: --gfx-stream -x (value starts with -)
+argv: ct "gfx-replay" "--gfx-stream" "-x"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = gfx-replay
+  gfxReplayGfxStream = "-x"
+  gfxReplayHttp = false
+  gfxReplayPort = none
+  gfxReplayBackend = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 11: --gfx-stream --x (value starts with --)
+argv: ct "gfx-replay" "--gfx-stream" "--x"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = gfx-replay
+  gfxReplayGfxStream = "--x"
+  gfxReplayHttp = false
+  gfxReplayPort = none
+  gfxReplayBackend = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 12: --gfx-stream --new-tab <v> (an option between it and its value)
+argv: ct "gfx-replay" "--gfx-stream" "--new-tab" "/g"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The subcommand 'gfx-replay' does not accept arguments\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 13: --gfx-stream repeated, last wins
+argv: ct "gfx-replay" "--gfx-stream" "/g" "--gfx-stream" "/g"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = gfx-replay
+  gfxReplayGfxStream = "/g"
+  gfxReplayHttp = false
+  gfxReplayPort = none
+  gfxReplayBackend = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 14: --gfx-stream missing value (last)
+argv: ct "gfx-replay" "--gfx-stream"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The option '\e[34m--gfx-stream\e[0m' requires a value\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 15: --GFX-STREAM <v> (style variant)
+argv: ct "gfx-replay" "--GFX-STREAM" "/g"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = gfx-replay
+  gfxReplayGfxStream = "/g"
+  gfxReplayHttp = false
+  gfxReplayPort = none
+  gfxReplayBackend = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 16: --g_fx-stream <v> (style variant)
+argv: ct "gfx-replay" "--g_fx-stream" "/g"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = gfx-replay
+  gfxReplayGfxStream = "/g"
+  gfxReplayHttp = false
+  gfxReplayPort = none
+  gfxReplayBackend = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 17: --gfx_stream <v> (style variant)
+argv: ct "gfx-replay" "--gfx_stream" "/g"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'gfx_stream'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 18: --gfxstream <v> (style variant)
+argv: ct "gfx-replay" "--gfxstream" "/g"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'gfxstream'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 19: --http
+argv: ct "gfx-replay" "--http" "--gfx-stream" "/g"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = gfx-replay
+  gfxReplayGfxStream = "/g"
+  gfxReplayHttp = true
+  gfxReplayPort = none
+  gfxReplayBackend = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 20: --http=true
+argv: ct "gfx-replay" "--http=true" "--gfx-stream" "/g"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = gfx-replay
+  gfxReplayGfxStream = "/g"
+  gfxReplayHttp = true
+  gfxReplayPort = none
+  gfxReplayBackend = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 21: --http=false
+argv: ct "gfx-replay" "--http=false" "--gfx-stream" "/g"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = gfx-replay
+  gfxReplayGfxStream = "/g"
+  gfxReplayHttp = false
+  gfxReplayPort = none
+  gfxReplayBackend = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 22: --http=on
+argv: ct "gfx-replay" "--http=on" "--gfx-stream" "/g"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = gfx-replay
+  gfxReplayGfxStream = "/g"
+  gfxReplayHttp = true
+  gfxReplayPort = none
+  gfxReplayBackend = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 23: --http=off
+argv: ct "gfx-replay" "--http=off" "--gfx-stream" "/g"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = gfx-replay
+  gfxReplayGfxStream = "/g"
+  gfxReplayHttp = false
+  gfxReplayPort = none
+  gfxReplayBackend = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 24: --http=yes
+argv: ct "gfx-replay" "--http=yes" "--gfx-stream" "/g"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = gfx-replay
+  gfxReplayGfxStream = "/g"
+  gfxReplayHttp = true
+  gfxReplayPort = none
+  gfxReplayBackend = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 25: --http=no
+argv: ct "gfx-replay" "--http=no" "--gfx-stream" "/g"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = gfx-replay
+  gfxReplayGfxStream = "/g"
+  gfxReplayHttp = false
+  gfxReplayPort = none
+  gfxReplayBackend = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 26: --http=1
+argv: ct "gfx-replay" "--http=1" "--gfx-stream" "/g"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = gfx-replay
+  gfxReplayGfxStream = "/g"
+  gfxReplayHttp = true
+  gfxReplayPort = none
+  gfxReplayBackend = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 27: --http=0
+argv: ct "gfx-replay" "--http=0" "--gfx-stream" "/g"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = gfx-replay
+  gfxReplayGfxStream = "/g"
+  gfxReplayHttp = false
+  gfxReplayPort = none
+  gfxReplayBackend = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 28: --http=maybe
+argv: ct "gfx-replay" "--http=maybe" "--gfx-stream" "/g"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Error while processing the \e[34mhttp=maybe\e[0m parameter: 'maybe' is not a valid boolean value. Supported values are on/off, yes/no, true/false or 1/0\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 29: --http=
+argv: ct "gfx-replay" "--http=" "--gfx-stream" "/g"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = gfx-replay
+  gfxReplayGfxStream = "/g"
+  gfxReplayHttp = true
+  gfxReplayPort = none
+  gfxReplayBackend = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 30: --http:false
+argv: ct "gfx-replay" "--http:false" "--gfx-stream" "/g"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = gfx-replay
+  gfxReplayGfxStream = "/g"
+  gfxReplayHttp = false
+  gfxReplayPort = none
+  gfxReplayBackend = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 31: --http false (next word)
+argv: ct "gfx-replay" "--http" "false" "--gfx-stream" "/g"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The subcommand 'gfx-replay' does not accept arguments\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 32: --http twice
+argv: ct "gfx-replay" "--http" "--http" "--gfx-stream" "/g"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = gfx-replay
+  gfxReplayGfxStream = "/g"
+  gfxReplayHttp = true
+  gfxReplayPort = none
+  gfxReplayBackend = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 33: --no-http
+argv: ct "gfx-replay" "--no-http" "--gfx-stream" "/g"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'no-http'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 34: --HTTP (style variant)
+argv: ct "gfx-replay" "--HTTP" "--gfx-stream" "/g"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = gfx-replay
+  gfxReplayGfxStream = "/g"
+  gfxReplayHttp = true
+  gfxReplayPort = none
+  gfxReplayBackend = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 35: --h_ttp (style variant)
+argv: ct "gfx-replay" "--h_ttp" "--gfx-stream" "/g"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = gfx-replay
+  gfxReplayGfxStream = "/g"
+  gfxReplayHttp = true
+  gfxReplayPort = none
+  gfxReplayBackend = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 36: --port <v>
+argv: ct "gfx-replay" "--port" "8080" "--gfx-stream" "/g"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = gfx-replay
+  gfxReplayGfxStream = "/g"
+  gfxReplayHttp = false
+  gfxReplayPort = some(8080)
+  gfxReplayBackend = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 37: --port=<v>
+argv: ct "gfx-replay" "--port=8080" "--gfx-stream" "/g"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = gfx-replay
+  gfxReplayGfxStream = "/g"
+  gfxReplayHttp = false
+  gfxReplayPort = some(8080)
+  gfxReplayBackend = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 38: --port:<v>
+argv: ct "gfx-replay" "--port:8080" "--gfx-stream" "/g"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = gfx-replay
+  gfxReplayGfxStream = "/g"
+  gfxReplayHttp = false
+  gfxReplayPort = some(8080)
+  gfxReplayBackend = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 39: --port 8080
+argv: ct "gfx-replay" "--port" "8080" "--gfx-stream" "/g"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = gfx-replay
+  gfxReplayGfxStream = "/g"
+  gfxReplayHttp = false
+  gfxReplayPort = some(8080)
+  gfxReplayBackend = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 40: --port=8080
+argv: ct "gfx-replay" "--port=8080" "--gfx-stream" "/g"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = gfx-replay
+  gfxReplayGfxStream = "/g"
+  gfxReplayHttp = false
+  gfxReplayPort = some(8080)
+  gfxReplayBackend = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 41: --port bad x
+argv: ct "gfx-replay" "--port" "x" "--gfx-stream" "/g"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Error while processing the \e[34mport=x\e[0m parameter: invalid integer: x\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 42: --port=bad x
+argv: ct "gfx-replay" "--port=x" "--gfx-stream" "/g"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Error while processing the \e[34mport=x\e[0m parameter: invalid integer: x\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 43: --port empty
+argv: ct "gfx-replay" "--port" "" "--gfx-stream" "/g"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Error while processing the \e[34mport=\e[0m parameter: invalid integer: \e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 44: --port= (empty)
+argv: ct "gfx-replay" "--port=" "--gfx-stream" "/g"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Error while processing the \e[34mport=\e[0m parameter: invalid integer: \e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 45: --port= <v> (next word)
+argv: ct "gfx-replay" "--port=" "8080" "--gfx-stream" "/g"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = gfx-replay
+  gfxReplayGfxStream = "/g"
+  gfxReplayHttp = false
+  gfxReplayPort = some(8080)
+  gfxReplayBackend = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 46: --port -x (value starts with -)
+argv: ct "gfx-replay" "--port" "-x" "--gfx-stream" "/g"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Error while processing the \e[34mport=-x\e[0m parameter: invalid integer: -x\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 47: --port --x (value starts with --)
+argv: ct "gfx-replay" "--port" "--x" "--gfx-stream" "/g"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Error while processing the \e[34mport=--x\e[0m parameter: invalid integer: --x\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 48: --port --new-tab <v> (an option between it and its value)
+argv: ct "gfx-replay" "--port" "--new-tab" "8080" "--gfx-stream" "/g"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Error while processing the \e[34mport=--new-tab\e[0m parameter: invalid integer: --new-tab\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 49: --port repeated, last wins
+argv: ct "gfx-replay" "--port" "8080" "--port" "8080" "--gfx-stream" "/g"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = gfx-replay
+  gfxReplayGfxStream = "/g"
+  gfxReplayHttp = false
+  gfxReplayPort = some(8080)
+  gfxReplayBackend = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 50: --port missing value (last)
+argv: ct "gfx-replay" "--gfx-stream" "/g" "--port"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The option '\e[34m--port\e[0m' requires a value\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 51: --port missing value (before the rest)
+argv: ct "gfx-replay" "--port" "--gfx-stream" "/g"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Error while processing the \e[34mport=--gfx-stream\e[0m parameter: invalid integer: --gfx-stream\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 52: --PORT <v> (style variant)
+argv: ct "gfx-replay" "--PORT" "8080" "--gfx-stream" "/g"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = gfx-replay
+  gfxReplayGfxStream = "/g"
+  gfxReplayHttp = false
+  gfxReplayPort = some(8080)
+  gfxReplayBackend = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 53: --p_ort <v> (style variant)
+argv: ct "gfx-replay" "--p_ort" "8080" "--gfx-stream" "/g"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = gfx-replay
+  gfxReplayGfxStream = "/g"
+  gfxReplayHttp = false
+  gfxReplayPort = some(8080)
+  gfxReplayBackend = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 54: --backend <v>
+argv: ct "gfx-replay" "--backend" "software" "--gfx-stream" "/g"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = gfx-replay
+  gfxReplayGfxStream = "/g"
+  gfxReplayHttp = false
+  gfxReplayPort = none
+  gfxReplayBackend = "software"
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 55: --backend=<v>
+argv: ct "gfx-replay" "--backend=software" "--gfx-stream" "/g"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = gfx-replay
+  gfxReplayGfxStream = "/g"
+  gfxReplayHttp = false
+  gfxReplayPort = none
+  gfxReplayBackend = "software"
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 56: --backend:<v>
+argv: ct "gfx-replay" "--backend:software" "--gfx-stream" "/g"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = gfx-replay
+  gfxReplayGfxStream = "/g"
+  gfxReplayHttp = false
+  gfxReplayPort = none
+  gfxReplayBackend = "software"
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 57: --backend software
+argv: ct "gfx-replay" "--backend" "software" "--gfx-stream" "/g"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = gfx-replay
+  gfxReplayGfxStream = "/g"
+  gfxReplayHttp = false
+  gfxReplayPort = none
+  gfxReplayBackend = "software"
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 58: --backend=software
+argv: ct "gfx-replay" "--backend=software" "--gfx-stream" "/g"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = gfx-replay
+  gfxReplayGfxStream = "/g"
+  gfxReplayHttp = false
+  gfxReplayPort = none
+  gfxReplayBackend = "software"
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 59: --backend hardware
+argv: ct "gfx-replay" "--backend" "hardware" "--gfx-stream" "/g"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = gfx-replay
+  gfxReplayGfxStream = "/g"
+  gfxReplayHttp = false
+  gfxReplayPort = none
+  gfxReplayBackend = "hardware"
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 60: --backend=hardware
+argv: ct "gfx-replay" "--backend=hardware" "--gfx-stream" "/g"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = gfx-replay
+  gfxReplayGfxStream = "/g"
+  gfxReplayHttp = false
+  gfxReplayPort = none
+  gfxReplayBackend = "hardware"
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 61: --backend empty
+argv: ct "gfx-replay" "--backend" "" "--gfx-stream" "/g"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = gfx-replay
+  gfxReplayGfxStream = "/g"
+  gfxReplayHttp = false
+  gfxReplayPort = none
+  gfxReplayBackend = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 62: --backend= (empty)
+argv: ct "gfx-replay" "--backend=" "--gfx-stream" "/g"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = gfx-replay
+  gfxReplayGfxStream = "/g"
+  gfxReplayHttp = false
+  gfxReplayPort = none
+  gfxReplayBackend = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 63: --backend= <v> (next word)
+argv: ct "gfx-replay" "--backend=" "software" "--gfx-stream" "/g"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = gfx-replay
+  gfxReplayGfxStream = "/g"
+  gfxReplayHttp = false
+  gfxReplayPort = none
+  gfxReplayBackend = "software"
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 64: --backend -x (value starts with -)
+argv: ct "gfx-replay" "--backend" "-x" "--gfx-stream" "/g"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = gfx-replay
+  gfxReplayGfxStream = "/g"
+  gfxReplayHttp = false
+  gfxReplayPort = none
+  gfxReplayBackend = "-x"
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 65: --backend --x (value starts with --)
+argv: ct "gfx-replay" "--backend" "--x" "--gfx-stream" "/g"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = gfx-replay
+  gfxReplayGfxStream = "/g"
+  gfxReplayHttp = false
+  gfxReplayPort = none
+  gfxReplayBackend = "--x"
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 66: --backend --new-tab <v> (an option between it and its value)
+argv: ct "gfx-replay" "--backend" "--new-tab" "software" "--gfx-stream" "/g"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The subcommand 'gfx-replay' does not accept arguments\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 67: --backend repeated, last wins
+argv: ct "gfx-replay" "--backend" "software" "--backend" "hardware" "--gfx-stream" "/g"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = gfx-replay
+  gfxReplayGfxStream = "/g"
+  gfxReplayHttp = false
+  gfxReplayPort = none
+  gfxReplayBackend = "hardware"
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 68: --backend missing value (last)
+argv: ct "gfx-replay" "--gfx-stream" "/g" "--backend"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The option '\e[34m--backend\e[0m' requires a value\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 69: --backend missing value (before the rest)
+argv: ct "gfx-replay" "--backend" "--gfx-stream" "/g"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The subcommand 'gfx-replay' does not accept arguments\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 70: --BACKEND <v> (style variant)
+argv: ct "gfx-replay" "--BACKEND" "software" "--gfx-stream" "/g"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = gfx-replay
+  gfxReplayGfxStream = "/g"
+  gfxReplayHttp = false
+  gfxReplayPort = none
+  gfxReplayBackend = "software"
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 71: --b_ackend <v> (style variant)
+argv: ct "gfx-replay" "--b_ackend" "software" "--gfx-stream" "/g"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = gfx-replay
+  gfxReplayGfxStream = "/g"
+  gfxReplayHttp = false
+  gfxReplayPort = none
+  gfxReplayBackend = "software"
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 72: a positional
+argv: ct "gfx-replay" "--gfx-stream" "/g" "word"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The subcommand 'gfx-replay' does not accept arguments\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 73: env <APP>_GFX_STREAM
+argv: ct "gfx-replay"
+env: <APP>_GFX_STREAM="/envg"
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = gfx-replay
+  gfxReplayGfxStream = "/envg"
+  gfxReplayHttp = false
+  gfxReplayPort = none
+  gfxReplayBackend = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 74: unknown long option
+argv: ct "gfx-replay" "--bogus" "--gfx-stream" "/g"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'bogus'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 75: unknown long option with value
+argv: ct "gfx-replay" "--bogus=1" "--gfx-stream" "/g"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'bogus'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 76: unknown short option
+argv: ct "gfx-replay" "-Z" "--gfx-stream" "/g"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'Z'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 77: lone -
+argv: ct "gfx-replay" "-" "--gfx-stream" "/g"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option ''\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 78: lone -- then a word
+argv: ct "gfx-replay" "--" "w" "--gfx-stream" "/g"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option ''\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 79: --=v
+argv: ct "gfx-replay" "--=v" "--gfx-stream" "/g"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option ''\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 80: extra positional
+argv: ct "gfx-replay" "--gfx-stream" "/g" "extra1" "extra2" "extra3" "extra4" "extra5"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The subcommand 'gfx-replay' does not accept arguments\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 81: global --cwd after the command
+argv: ct "gfx-replay" "--cwd" "/w" "--gfx-stream" "/g"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = some("/w")
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = gfx-replay
+  gfxReplayGfxStream = "/g"
+  gfxReplayHttp = false
+  gfxReplayPort = none
+  gfxReplayBackend = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 82: global --new-tab after the command
+argv: ct "gfx-replay" "--new-tab" "--gfx-stream" "/g"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = true
+  newWindow = false
+  cmd = gfx-replay
+  gfxReplayGfxStream = "/g"
+  gfxReplayHttp = false
+  gfxReplayPort = none
+  gfxReplayBackend = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 83: --version after the command
+argv: ct "gfx-replay" "--version" "--gfx-stream" "/g"
+env: (none)
+exit: 0
+--- stdout
+CodeTracer version: <VERSION>
+\e[0m
+(no newline at end of stdout)
+--- stderr
+--- end
+
+### 84: -h after the command
+argv: ct "gfx-replay" "-h" "--gfx-stream" "/g"
+env: (none)
+exit: 0
+--- stdout
+<the short help page clispec renders for this request: ct gfx-replay>
+--- stderr
+--- end

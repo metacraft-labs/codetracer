@@ -304,11 +304,11 @@ when defined(js):
     let docNode = isonim_dom.Node(isonim_dom.document)
     if platformIsMac():
       vm.redirectKeyName = "Cmd"
-    isonim_dom.addEventListener(docNode, cstring"keydown",
+    isonim_dom.addEventListener(docNode, cstring"keydown",  # ir1-gate: not a key: only the held modifiers are read
       proc(ev: isonim_dom.Event) =
         vm.setShiftHeld(eventShiftKey(ev))
         vm.setRedirectHeld(eventRedirectKey(ev)))
-    isonim_dom.addEventListener(docNode, cstring"keyup",
+    isonim_dom.addEventListener(docNode, cstring"keyup",  # ir1-gate: not a key: only the held modifiers are read
       proc(ev: isonim_dom.Event) =
         vm.setShiftHeld(eventShiftKey(ev))
         vm.setRedirectHeld(eventRedirectKey(ev)))

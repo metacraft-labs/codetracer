@@ -41,7 +41,8 @@ import
   # so) precisely so a non-Electron caller can use it; `onNoTrace` reads the
   # editor's declared width out of the layout config with it.
   index/[layout_config_repair, editor_working_set],
-  ui/[test_results, constraints, generated_code, point_list, editor_points],
+  ui/[test_results, constraints, generated_code, point_list, editor_points,
+      verification],
   # ONE LAYOUT PER MODE. `applyModeLayout` below is this module's only caller;
   # everything about where a mode's arrangement lives is in there.
   ui/mode_layouts,
@@ -55,6 +56,9 @@ import
   # everything variable goes in as text, and that rule is worth being able to
   # test without loading the renderer.
   ui/hcr_live_edit_panel,
+  # The developer setting `sharedEditor`: its palette toggle.
+  ui/shared_editor_flag,
+  ui/formatted_source_view,
   # THE CONTAINER DEPLOYMENT'S CLIENT — WD1b. `container_boot` performs §6.3's
   # handshake over the socket `startIPC` opens below and installs the platform
   # the server describes; `browser_tab` supplies the ten operations that are
@@ -124,6 +128,10 @@ when not defined(ctWeb):
 # own in `ui/web_noir_build`.
 when not defined(ctWeb):
   import ui/desktop_edit_toolbar
+  # A window opened for a session (`index/window.openSessionWindow`) learns
+  # its tab and replay, and every window keeps the list of the others.
+  from ui/panel_transfer import registerInitSessionHandler,
+    registerWindowListHandler
 
 from dom import Element, getAttribute, Node, preventDefault, document,
                 getElementById, querySelectorAll, querySelector
@@ -134,6 +142,20 @@ proc jsMissing(value: JsObject): bool {.
   importjs: "((function(v) { return v === undefined || v === null; })(#))".}
 
 proc stringifyJsObject(o: JsObject): cstring {.importjs: "JSON.stringify(#)".}
+
+proc wireSafe(response: js): js {.importjs: """
+  (function(value) {
+    if (value === undefined || value === null) return value;
+    return JSON.parse(JSON.stringify(value, (_, v) =>
+      typeof v === "bigint"
+        ? (Number.isSafeInteger(Number(v)) ? Number(v) : v.toString())
+        : v));
+  })(#)""".}
+  ## What socket.io can send. A Nim `int64` is a JS BigInt, which Electron's
+  ## structured clone carries and `JSON.stringify` refuses by throwing, so in web
+  ## mode a message with one (`tab-load`'s location) never left and the editor
+  ## opened with no tab. A number too large for a double keeps its digits as a
+  ## string, the form the host's JSON readers already take for a large tick.
 
 proc parseJsonFromJsObject(o: JsObject): JsonNode =
   ## Convert a raw DAP payload into a stdlib `JsonNode`.
@@ -279,6 +301,9 @@ proc hideWelcomeScreenSurface() =
 import viewmodel/session_vm
 import ui/session_viewmodels
 import ui/panel_host   # the panes it mounts render their tab's ViewModels
+import ui/pointer_stamp
+from viewmodel/keymap/editing_keymap import BaseKeymap, bkCua, bkEmacs, bkVim,
+  bkKakoune
 from ui/pane_host_lookup import tabOfPaneHost
 from isonim/web/dom_api as isonim_dom import nil
 import viewmodel/sdk/[debugger_session, trace_source]
@@ -294,6 +319,7 @@ import viewmodel/collab/[front_end_adapter, invite_bootstrap, join_session,
 import viewmodel/app/isonim_app
 import viewmodel/views/tooltips
 import viewmodel/viewmodels/visual_replay_layout
+import viewmodel/viewmodels/nim_tracing_vm   # the palette's Nim trace entries
 import viewmodel/viewmodels/deepreview_layout
 from viewmodel/viewmodels/product_menu import productMenuTree, MenuItem, mikFolder
 from isonim/core/batch as isoBatch import batch
@@ -744,6 +770,21 @@ proc nimSpecificViewItems(data: Data): seq[MenuNode] =
       aTraceStaticBlockAtCursor)
   ]
 
+var editModeLang = LangUnknown
+  ## The language of the project Edit mode opened (`onNoTrace`), which
+  ## `effectiveTraceLang` answers while no recording is loaded.
+
+proc editProjectLang(lang: Lang; filenames: seq[string]): Lang =
+  ## The Edit-mode project's language: the one the main process classified,
+  ## else Nim when the project holds a Nim source (the classification reads a
+  ## save's project, which a folder opened for the first time has not got).
+  if lang != LangUnknown:
+    return lang
+  for f in filenames:
+    if f.endsWith(".nim"):
+      return LangNim
+  LangUnknown
+
 proc effectiveTraceLang(data: Data): Lang =
   ## Resolve the language of the currently loaded trace defensively.
   ##
@@ -755,7 +796,10 @@ proc effectiveTraceLang(data: Data): Lang =
   ## reflects reality on traces that were recorded before that
   ## upstream classifier fix landed.
   if data.trace.isNil:
-    return LangUnknown
+    # Edit mode has no recording: its project's language, so View Generated
+    # C Source — which compiles the edited file then (Generated-Code-Listing
+    # §13.4, HSF-E11) — is in the menu of a Nim project too.
+    return editModeLang
   if data.trace.lang != LangUnknown:
     return data.trace.lang
   let program = $data.trace.program
@@ -1888,10 +1932,37 @@ proc refreshCommandPaletteMenuIndex*(data: Data) =
                            aTestsOpenInCurrentTab),
                           # …and the palette pair.
                           (RunTestLabel, aTestsRun),
-                          (RunTestInCurrentTabLabel, aTestsRunInCurrentTab)]:
+                          (RunTestInCurrentTabLabel, aTestsRunInCurrentTab),
+                          # Nim's compile-time tracing (the natives'
+                          # `omnibar_sources.nimTraceCommands`).
+                          (NimTracePaletteLabels[0], aTraceMacroAtCursor),
+                          (NimTracePaletteLabels[1], aTraceStaticBlockAtCursor),
+                          (NimTracePaletteLabels[2], aTraceConstantAtCursor),
+                          (NimTracePaletteLabels[3], aTraceEval),
+                          # The developer setting `sharedEditor`.
+                          (ToggleSharedEditorLabel, aToggleSharedEditor),
+                          # A minified source's formatted view.
+                          (ToggleFormattedSourceViewLabel,
+                           aToggleFormattedSourceView)]:
     data.ui.commandPalette.interpreter.commands[cstring(label)] = Command(
       name: cstring(label), kind: ActionCommand, action: action,
       shortcut: displayedChord(action))
+  if sharedEditorEnabled(data.config):
+    # The base keymap, while the shared editor (whose modal state the core
+    # keeps) is the editor: Monaco has no Vim or Kakoune modes. A parent
+    # command with the four bases as its subcommands, so `:Keymap: vim` picks
+    # the base by name (the palette reads `Parent: argument`).
+    let keymaps = Command(name: cstring"Keymap", kind: ParentCommand,
+                          subcommands: @[])
+    for (label, action) in [("Keymap CUA", aKeymapCua),
+                            ("Keymap Emacs", aKeymapEmacs),
+                            ("Keymap Vim", aKeymapVim),
+                            ("Keymap Kakoune", aKeymapKakoune)]:
+      data.ui.commandPalette.interpreter.commands[cstring(label)] = Command(
+        name: cstring(label), kind: ActionCommand, action: action,
+        shortcut: displayedChord(action))
+      keymaps.subcommands.add cstring(label)
+    data.ui.commandPalette.interpreter.commands[cstring"Keymap"] = keymaps
   if not debug_toolbar.projectRunRoute.isNil:
     # Edit-Mode-Toolbar.md §9.4: the project's Run at the command's
     # destination (the natives' `omnibar_sources.replayOpenCommands`), where
@@ -2122,6 +2193,7 @@ window.__ctApplyVisualReplayTabs = function() {
 
 proc callInitLayoutUnchecked(config: GoldenLayoutResolvedConfig) =
   initLayout(config)
+  installPointerStamp()
 
 proc tryInitLayout*(data: Data) =
   ## Mount the GoldenLayout tree once both the page and the init event are in.
@@ -3265,6 +3337,7 @@ proc onTraceLoaded(
     # traceKind=cstring,
     dontAskAgain=bool,
     sourcemapPaths=seq[cstring],
+    generatedCPaths=seq[cstring],
     macroSourcemapPath=cstring,
     visualReplayAvailable=bool,
     visualReplayPlayerUrl=cstring,
@@ -3276,6 +3349,9 @@ proc onTraceLoaded(
   hideWelcomeScreenSurface()
 
   normalizeTraceProgramForUi(response.trace)
+  data.services.editor.forgetSourceRevisions(
+    if data.trace.isNil: cstring"" else: data.trace.outputFolder,
+    response.trace.outputFolder)
   data.trace = response.trace
   requestSessionTabsRender(data)
   data.setEditorsReadOnlyState(true)
@@ -3311,6 +3387,14 @@ proc onTraceLoaded(
     data.activeSession.sourcemap = await loadFrontendSourcemap(response.sourcemapPaths, readFileUtf8)
   else:
     data.activeSession.sourcemap = FrontendSourcemap(loaded: false)
+  # The nimcache's C files and their maps, which View Generated C Source
+  # reads from disk when the replay does not serve them (§13.4).
+  data.activeSession.nimcacheFiles = @[]
+  if data.trace.lang == LangNim:
+    # (Absent from a host whose index predates the field.)
+    if not seqIsNil(response.generatedCPaths):
+      for p in response.generatedCPaths: data.activeSession.nimcacheFiles.add p
+    for p in response.sourcemapPaths: data.activeSession.nimcacheFiles.add p
 
   # S6: Track whether a macro sourcemap is available for this trace.
   # The backend loads the macro_sourcemap files during trace setup and handles
@@ -3599,6 +3683,11 @@ proc onStartDeepReview*(sender: js, response: jsobject(config=Config, startOptio
 
   data.ui.initEventReceived = true
   data.tryInitLayout()
+  # The keyboard and the window's one pointer listener (`dom_pointer`), as
+  # `onNoTrace` and `onInit` install them. A dataset review reaches neither,
+  # and without them every press routed through the pointer keymap did
+  # nothing in a review — its call and loop step buttons among them.
+  configureShortcuts()
 
   # The review's first modified file is opened by `tryInitLayout` itself, as
   # soon as the GoldenLayout tree exists (DeepReview-GUI.md §7 step 2).  It
@@ -3842,6 +3931,12 @@ proc onNoTrace(
   data.homedir = response.home
   data.services.debugger.paths = response.filenames
   data.services.debugger.functions = response.functions
+  editModeLang =
+    if data.startOptions.edit:
+      editProjectLang(response.lang,
+                      if seqIsNil(response.filenames): @[]
+                      else: response.filenames)
+    else: LangUnknown
   data.ui.menuNode = data.webTechMenu(baseName(response.path))
 
   # A NEW PROJECT ASKS FOR LSP AGAIN.
@@ -4291,9 +4386,12 @@ proc onSavedFile(sender: js, response: jsobject(name=cstring)) =
       var label = $response.name
       if tokens.len >= 2:
         label = tokens[1]
-      editor.contentItem.setTitle(cstring(label))
-      editor.contentItem.config.componentState.label = response.name
-      editor.contentItem.config.componentState.fullPath = response.name
+      # An editor the layout does not hold as a GoldenLayout item (one an
+      # IsoNim pane mounted) has no `contentItem` and no title to refresh.
+      if not editor.contentItem.isNil:
+        editor.contentItem.setTitle(cstring(label))
+        editor.contentItem.config.componentState.label = response.name
+        editor.contentItem.config.componentState.fullPath = response.name
   except:
     cerror "saved-file: could not refresh the editor tab for " &
       $response.name & ": " & getCurrentExceptionMsg()
@@ -4331,6 +4429,9 @@ proc onSavedFile(sender: js, response: jsobject(name=cstring)) =
     # every install and after every save" and it had one call site, in a
     # one-shot startup block.
     debug_toolbar.refreshEditToolbar()
+  # THE RECORDINGS' TABS THAT SHOW THE PANE describe the same project, so they
+  # measure again too, as a native window does on a save.
+  constraints.remeasureRecordingTabs()
 
   data.redraw()
 
@@ -4585,8 +4686,15 @@ proc onNs9PanesConstraints(
   if not rawSources.isUndefined and not rawSources.isNull:
     constraintsVM.setSources(
       constraints.sourcesFromJson($rawSources.to(cstring)))
-  constraintsVM.setReport(
-    parseNargoInfoJson($response.info, $response.provenance))
+  let totals = parseNargoInfoJson($response.info, $response.provenance)
+  # The browser's host answers with the bundled counts alone: it has no listing
+  # to say anything about, and the pane says totals are what it holds.
+  let listing = response.toJs[cstring"listing"]
+  if listing.isUndefined or listing.isNull:
+    constraintsVM.setReport(totals)
+  else:
+    constraints.setMeasuredReport(constraintsVM, totals,
+      $listing.to(cstring), $response.toJs[cstring"artefact"].to(cstring))
 
 # ---------------------------------------------------------------------------
 # THE DESKTOP TEST-RUNNER HOST
@@ -4617,6 +4725,34 @@ proc saveReplayOpenIn(data: Data; policy: TraceOpenPolicy) =
     return
   data.ipc.send cstring"CODETRACER::replay-open-in-save",
     js{workspace: cstring(workspace), policy: cstring($policy)}
+
+proc viewGeneratedCAtCaret(data: Data) =
+  ## The View menu's **View Generated C Source**: the active editor's caret,
+  ## through the Generated Code Listing operation
+  ## (`generated_code.showGeneratedCode`, target `nim.c`).
+  let active = data.services.editor.active
+  if not data.ui.editors.hasKey(active):
+    data.viewsApi.warnMessage(cstring(
+      "View Generated C Source: there is no file in the editor"))
+    return
+  let editor = data.ui.editors[active]
+  if not ($editor.path).endsWith(".nim"):
+    data.viewsApi.warnMessage(cstring("View Generated C Source: " &
+      ($editor.path).extractFilename & " is not a Nim source"))
+    return
+  generated_code.showGeneratedCode(data, editor.path, editor.caretLine(),
+                                   "nim.c")
+
+proc runNimTraceInActiveEditor(data: Data; action: NimTraceAction) =
+  ## The palette's **Nim: Trace … at Cursor** entries and the
+  ## `editor.trace-*` chords (`client_actions`): the active editor's caret,
+  ## traced through the shared ViewModel (`editor.runNimTraceAtCaret`).
+  let active = data.services.editor.active
+  if not data.ui.editors.hasKey(active):
+    data.viewsApi.warnMessage(cstring(nimTraceLabelOf(action) &
+                                      ": there is no file in the editor"))
+    return
+  data.ui.editors[active].runNimTraceAtCaret(action)
 
 proc runTestFromPalette(data: Data; policy: TraceOpenPolicy) =
   ## The palette's **Tests: Run** / **Tests: Run in Current Tab** (§9.3):
@@ -4666,6 +4802,32 @@ proc onProgramRunSettled(sender: js,
                    else: $response.recordingId),
     errorMessage = (if response.errorMessage.isNil: ""
                     else: $response.errorMessage))
+
+# THE VERIFICATION PANE'S RUN (`ui/verification`'s host,
+# `index/verification_runner`, Verification-Payload-Contract-v1.md §11): the
+# main process runs the project's declared Verno action and answers with these
+# four; the pane's VM is the window's, so none of them is routed to a tab.
+
+proc onVerificationRunning(sender: js, response: js) =
+  verification.noteDesktopVerificationRunning()
+
+proc onVerificationOutput(sender: js,
+                          response: jsobject(stream=cstring, data=cstring)) =
+  verification.noteDesktopVerificationOutput(
+    if response.stream.isNil: "stdout" else: $response.stream,
+    if response.data.isNil: "" else: $response.data)
+
+proc onVerificationExit(sender: js, response: js) =
+  let code = response["code"]
+  verification.settleDesktopVerification(
+    if code.isNull or code.isUndefined: none(int) else: some(code.to(int)),
+    cancelled = not response["cancelled"].isUndefined and
+                response["cancelled"].to(bool))
+
+proc onVerificationFailedToStart(sender: js,
+                                 response: jsobject(reason=cstring)) =
+  verification.failDesktopVerification(
+    if response.reason.isNil: "could not start" else: $response.reason)
 
 proc onReplayOpenIn(sender: js,
                     response: jsobject(workspace=cstring, policy=cstring,
@@ -5141,6 +5303,9 @@ proc stampAskingTab(data: Data) =
 
 proc configureIPC(data: Data) =
   stampAskingTab(data)
+  when not defined(ctWeb):
+    registerInitSessionHandler()
+    registerWindowListHandler()
   uiIpcHandlers("CODETRACER::"):
     "hcr-apply-edit-result"
     # H6 — where the live-edit SESSION is: launching, ready, or failed by name.
@@ -5169,6 +5334,15 @@ proc configureIPC(data: Data) =
     # AND WHAT SETTLES THE PROJECT'S RUN (Edit-Mode-Toolbar.md §9.4). See
     # `onProgramRunSettled`.
     "program-run-settled"
+    # Edit mode's View Generated C Source: the main process compiled the
+    # edited Nim file to C (`index/nim_c_listing`). See
+    # `generated_code.onNimCListingCompiled`.
+    "nim-c-listing-compiled"
+    # The Verification pane's run (`index/verification_runner`).
+    "verification-running"
+    "verification-output"
+    "verification-exit"
+    "verification-failed-to-start"
     # Test-Results-Pane.md §9.3: a workspace's `replay-open-in` written. See
     # `onReplayOpenIn`.
     "replay-open-in"
@@ -5543,6 +5717,14 @@ proc addBreakpointAtPosition*(data: Data) =
   debuggerService.addBreakpoint(activeEditorPath, line)
   editor.refreshEditorLine(line)
 
+proc toggleInlineBreakpointAtCaret*(data: Data) =
+  ## Shift+F9 (Editor-Pane.md § Inline breakpoints).
+  data.pointsOperationsSetup()
+  let pos = editor.monacoEditor.getPosition()
+  if not pos.isNil:
+    editor.toggleInlineBreakpointAt(activeEditorPath, cast[int](pos.lineNumber),
+                                    cast[int](pos.column))
+
 proc removeBreakpointAtPosition*(data: Data) =
   data.pointsOperationsSetup()
   debuggerService.deleteBreakpoint(activeEditorPath, line)
@@ -5669,7 +5851,15 @@ proc thunkM5AddColumnBreakpoint(path: cstring, line, column: int,
   ## ``data.services.debugger.addColumnBreakpoint.call(svc, path, line,
   ## column, "i > 100")``.  Empty/missing condition preserves the M1
   ## unconditional behaviour.
-  data.services.debugger.addColumnBreakpoint(path, line, column, condition)
+  ##
+  ## "Missing" has to be handled here: a JS caller that passes three
+  ## arguments leaves ``condition`` ``undefined`` — Nim's default value
+  ## applies only to Nim callers — and converting ``undefined`` to a Nim
+  ## string throws in ``cstrToNimstr``.
+  let cond =
+    if cast[JsObject](condition).isUndefined or condition.isNil: cstring""
+    else: condition
+  data.services.debugger.addColumnBreakpoint(path, line, column, cond)
 
 proc thunkM5AddColumnTracepoint(path: cstring, line, column: int,
                                 logMessage: cstring) =
@@ -5705,16 +5895,26 @@ proc thunkM5InstallSourceViewForTest(
   data.services.debugger.installSourceViewForTest(
     recordedPath, formattedViewPath, sourcemapV3Json)
 
-proc thunkM5DapSendCtRequest(kindOrdinal: int, rawValue: JsObject) =
+proc thunkM5DapSendCtRequest(kindName: cstring, rawValue: JsObject) =
   ## The M3 GUI spec drives a plain DAP ``next`` via
-  ## ``data.dapApi.sendCtRequest(DapNext, {threadId: 1})`` — the same
+  ## ``data.dapApi.sendCtRequest("DapNext", {threadId: 1})`` — the same
   ## pipeline ``DebuggerService.step`` uses for the F10 keybind path.
   ## Without an exposed method dispatch the spec fails with
   ## "Neither dapApi.sendCtRequest nor services.debugger.stepForward
-  ## is reachable".  We re-route through the underlying Nim proc with
-  ## the ordinal coerced back to ``CtEventKind`` (the wire enum is a
-  ## plain ordinal in JS).
-  data.dapApi.sendCtRequest(cast[CtEventKind](kindOrdinal), rawValue)
+  ## is reachable".  We re-route through the underlying Nim proc.
+  ##
+  ## The kind is taken BY NAME. It used to be the ``CtEventKind`` ordinal,
+  ## which the spec hard-coded: when a member was added before ``DapNext``
+  ## the spec's 22 became ``DapNextResponse``, and the request it sent
+  ## failed with nothing naming the cause. A name that is not a
+  ## ``CtEventKind`` throws, naming it.
+  let kind =
+    try:
+      parseEnum[CtEventKind]($kindName)
+    except ValueError:
+      raise newException(ValueError,
+        "dapApi.sendCtRequest: no CtEventKind named '" & $kindName & "'")
+  data.dapApi.sendCtRequest(kind, rawValue)
 
 proc installM5ColumnAwareServiceMethods() =
   ## Attach the M1/M2/M3 service procs and the M3 DAP-pipeline
@@ -6242,23 +6442,20 @@ var actions*: array[ClientAction, ClientActionHandler] = [
   aRecordNewTrace: proc(actionData: JsObject) = data.showRecordNewTraceDialog(),
   aRecordFromLaunch: proc(actionData: JsObject) = data.recordFromLaunchConfig(actionData),
   aNewTraceTab: proc(actionData: JsObject) = createNewSession(data), aViewGeneratedCSource: # aNewTraceTab
-  # Language-specific View items.  The real implementations live
-  # behind the Nim langserver / sourcemap flow (S3/S6/S7) and are not
-  # all wired up yet — for now they surface a non-fatal info toast so
-  # the action is observable.  The menu shape is the contract these
-  # entries protect; behaviour will land in follow-up milestones.
+  # The View menu's language-specific items (Generated-Code-Listing §13.4):
+  # the Generated Code Listing operation for the active editor's caret, and
+  # the Low Level Code pane — the stop's machine code, the generated C's for
+  # a Nim recording. (Until 2026-11-12 both showed "not yet wired up".)
   proc(actionData: JsObject) = # aViewGeneratedCSource
-    data.viewsApi.successMessage(
-      cstring"View Generated C Source is not yet wired up"),
+    data.viewGeneratedCAtCaret(),
   aViewDisassembly: proc(actionData: JsObject) = # aViewDisassembly
-    data.viewsApi.successMessage(
-      cstring"View Disassembly is not yet wired up"),
+    generated_code.showDisassembly(data),
   aTraceMacroAtCursor: proc(actionData: JsObject) = # aTraceMacroAtCursor
-    data.viewsApi.successMessage(
-      cstring"Trace Macro at Cursor is not yet wired up"),
+    ## Nim's compile-time tracing at the active editor's caret
+    ## (`trace_macro.startNimTrace`, through the shared ViewModel).
+    data.runNimTraceInActiveEditor(ntaMacro),
   aTraceStaticBlockAtCursor: proc(actionData: JsObject) = # aTraceStaticBlockAtCursor
-    data.viewsApi.successMessage(
-      cstring"Trace Static Block at Cursor is not yet wired up"),
+    data.runNimTraceInActiveEditor(ntaStaticBlock),
   aCollabInvite: proc(actionData: JsObject) = # aCollabInvite
     openCollabInviteDialog(@[
       cstring(cgpViewer.presetName),
@@ -6269,10 +6466,10 @@ var actions*: array[ClientAction, ClientActionHandler] = [
     agentic_session_launcher.startAgenticWorktreeSessionFromCommandPalette(),
   videoPlayerTogglePlay: # --- M4 Visual Replay / Video Player handlers ----------------------------
   # Each handler delegates to ``dispatchVideoPlayerAction`` on the live
-  # VideoPlayerVM instance.  Focus scoping is enforced by the pane's own keys
-  # in ``ui/key_router.nim`` (``videoPlayerKey``, asked before the router)
-  # — they check ``videoPlayerHasFocus()`` before calling these
-  # handlers, so the handlers themselves do not re-check focus.  This keeps
+  # VideoPlayerVM instance.  Focus scoping is the keymap's: the player's rows
+  # (``keymap/overlay_rows``) are its pane's, and ``ui/key_router.nim`` puts
+  # that pane on the scope path while ``videoPlayerHasFocus()`` — so the
+  # handlers themselves do not re-check focus.  This keeps
   # the handlers usable from menus, the command palette, and the Playwright
   # test hook (``__CODETRACER_TEST__.videoPlayerAction``) without requiring a
   # focused panel.  When the VM is not constructed (no visual recording
@@ -6399,6 +6596,33 @@ var actions*: array[ClientAction, ClientActionHandler] = [
     runProgramIn(data, topNewTab),
   aRunProgramInCurrentTab: proc(actionData: JsObject) = # aRunProgramInCurrentTab
     runProgramIn(data, topCurrentTab),
+  aInlineBreakpoint: proc(actionData: JsObject) = data.toggleInlineBreakpointAtCaret(),
+  aConstraints: proc(actionData: JsObject) = # aConstraints
+    data.openLayoutTab(Content.Constraints),
+  aTraceConstantAtCursor: proc(actionData: JsObject) = # aTraceConstantAtCursor
+    data.runNimTraceInActiveEditor(ntaConstant),
+  aTraceEval: proc(actionData: JsObject) = # aTraceEval
+    data.runNimTraceInActiveEditor(ntaEval),
+  aToggleSharedEditor: proc(actionData: JsObject) = # aToggleSharedEditor
+    ## The developer setting `sharedEditor`, switched in this window: every
+    ## open source editor re-mounts with the other editor.
+    setSharedEditorOverride(not sharedEditorEnabled(data.config))
+    remountSourceEditors(data)
+    refreshCommandPaletteMenuIndex(data),
+  aKeymapCua: proc(actionData: JsObject) = selectDesktopKeymap(bkCua),
+  aKeymapEmacs: proc(actionData: JsObject) = selectDesktopKeymap(bkEmacs),
+  aKeymapVim: proc(actionData: JsObject) = selectDesktopKeymap(bkVim),
+  aKeymapKakoune: proc(actionData: JsObject) = selectDesktopKeymap(bkKakoune),
+  aToggleFormattedSourceView: proc(actionData: JsObject) = # aToggleFormattedSourceView
+    ## A minified source's formatted view, on or off for this session
+    ## (`ui/formatted_source_view`): the replay server steps by the view's
+    ## lines and the editor follows it from the next stop.
+    let dbg = data.services.debugger
+    let path = $dbg.location.path
+    let t = toggledFormattedView(dbg.formattedSourceView, path)
+    dbg.formattedSourceView = t.on
+    dbg.setActiveSourceView(cstring(t.viewPath))
+    data.viewsApi.infoMessage(cstring(t.notice)),
 ]
 
 data.actions = actions
@@ -8035,7 +8259,7 @@ when not defined(ctWeb):
             if not data.connection.connected:
               showDisconnectedWarning(data, data.connection.reason, data.connection.detail)
             console.log cstring"=> ", id, response
-            socket.emit(id, response),
+            socket.emit(id, wireSafe(response)),
           on: proc(id: cstring, code: js) = socket.on(id, proc(response: cstring) =
             console.log cstring"<= ", id, response
             code.call(code, undefined, JSON.parse(response))

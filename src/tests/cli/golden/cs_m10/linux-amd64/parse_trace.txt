@@ -1,0 +1,2566 @@
+# ct trace: 145 argv cases through ct's loader (the parse probe)
+
+### 1: bare
+argv: ct "trace"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace
+  traceCommand = noCommand
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 2: subcommand bogus
+argv: ct "trace" "bogus"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The subcommand 'trace' does not accept arguments\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 3: subcommand noCommand
+argv: ct "trace" "noCommand"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace
+  traceCommand = noCommand
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 4: subcommand EXPORT
+argv: ct "trace" "EXPORT"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The required option 'output' was not specified\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 5: subcommand extract_gfx
+argv: ct "trace" "extract_gfx"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The subcommand 'trace' does not accept arguments\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 6: subcommand extractgfx
+argv: ct "trace" "extractgfx"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The subcommand 'trace' does not accept arguments\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 7: subcommand omniscient_prep
+argv: ct "trace" "omniscient_prep"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The subcommand 'trace' does not accept arguments\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 8: help word
+argv: ct "trace" "help"
+env: (none)
+exit: 0
+--- stdout
+<the long help page clispec renders for this request: ct trace>
+--- stderr
+--- end
+
+### 9: extract-gfx bare
+argv: ct "trace" "extract-gfx"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The required option 'output-dir' was not specified\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 10: extract-gfx path only
+argv: ct "trace" "extract-gfx" "t.ct"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The required option 'output-dir' was not specified\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 11: extract-gfx -o only
+argv: ct "trace" "extract-gfx" "-o" "/d"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The required option 'traceExtractGfxPath' was not specified\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 12: --output-dir <v>
+argv: ct "trace" "extract-gfx" "--output-dir" "/d" "t.ct"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace
+  traceCommand = extract-gfx
+  traceExtractGfxOutputDir = "/d"
+  traceExtractGfxPath = "t.ct"
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 13: --output-dir=<v>
+argv: ct "trace" "extract-gfx" "--output-dir=/d" "t.ct"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace
+  traceCommand = extract-gfx
+  traceExtractGfxOutputDir = "/d"
+  traceExtractGfxPath = "t.ct"
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 14: --output-dir:<v>
+argv: ct "trace" "extract-gfx" "--output-dir:/d" "t.ct"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace
+  traceCommand = extract-gfx
+  traceExtractGfxOutputDir = "/d"
+  traceExtractGfxPath = "t.ct"
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 15: -o <v>
+argv: ct "trace" "extract-gfx" "-o" "/d" "t.ct"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace
+  traceCommand = extract-gfx
+  traceExtractGfxOutputDir = "/d"
+  traceExtractGfxPath = "t.ct"
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 16: -o=<v>
+argv: ct "trace" "extract-gfx" "-o=/d" "t.ct"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace
+  traceCommand = extract-gfx
+  traceExtractGfxOutputDir = "/d"
+  traceExtractGfxPath = "t.ct"
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 17: -o:<v>
+argv: ct "trace" "extract-gfx" "-o:/d" "t.ct"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace
+  traceCommand = extract-gfx
+  traceExtractGfxOutputDir = "/d"
+  traceExtractGfxPath = "t.ct"
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 18: -o<v> (attached)
+argv: ct "trace" "extract-gfx" "-o/d" "t.ct"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace
+  traceCommand = extract-gfx
+  traceExtractGfxOutputDir = "/d"
+  traceExtractGfxPath = "t.ct"
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 19: -O <v> (other case)
+argv: ct "trace" "extract-gfx" "-O" "/d" "t.ct"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'O'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 20: --o <v> (the letter as a long option)
+argv: ct "trace" "extract-gfx" "--o" "/d" "t.ct"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace
+  traceCommand = extract-gfx
+  traceExtractGfxOutputDir = "/d"
+  traceExtractGfxPath = "t.ct"
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 21: --output-dir /d
+argv: ct "trace" "extract-gfx" "--output-dir" "/d" "t.ct"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace
+  traceCommand = extract-gfx
+  traceExtractGfxOutputDir = "/d"
+  traceExtractGfxPath = "t.ct"
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 22: --output-dir=/d
+argv: ct "trace" "extract-gfx" "--output-dir=/d" "t.ct"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace
+  traceCommand = extract-gfx
+  traceExtractGfxOutputDir = "/d"
+  traceExtractGfxPath = "t.ct"
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 23: --output-dir empty
+argv: ct "trace" "extract-gfx" "--output-dir" "" "t.ct"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace
+  traceCommand = extract-gfx
+  traceExtractGfxOutputDir = ""
+  traceExtractGfxPath = "t.ct"
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 24: --output-dir= (empty)
+argv: ct "trace" "extract-gfx" "--output-dir=" "t.ct"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The required option 'traceExtractGfxPath' was not specified\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 25: --output-dir= <v> (next word)
+argv: ct "trace" "extract-gfx" "--output-dir=" "/d" "t.ct"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace
+  traceCommand = extract-gfx
+  traceExtractGfxOutputDir = "/d"
+  traceExtractGfxPath = "t.ct"
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 26: --output-dir -x (value starts with -)
+argv: ct "trace" "extract-gfx" "--output-dir" "-x" "t.ct"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace
+  traceCommand = extract-gfx
+  traceExtractGfxOutputDir = "-x"
+  traceExtractGfxPath = "t.ct"
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 27: --output-dir --x (value starts with --)
+argv: ct "trace" "extract-gfx" "--output-dir" "--x" "t.ct"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace
+  traceCommand = extract-gfx
+  traceExtractGfxOutputDir = "--x"
+  traceExtractGfxPath = "t.ct"
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 28: --output-dir --new-tab <v> (an option between it and its value)
+argv: ct "trace" "extract-gfx" "--output-dir" "--new-tab" "/d" "t.ct"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The subcommand 'extract-gfx' does not accept additional arguments\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 29: --output-dir repeated, last wins
+argv: ct "trace" "extract-gfx" "--output-dir" "/d" "--output-dir" "/d" "t.ct"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace
+  traceCommand = extract-gfx
+  traceExtractGfxOutputDir = "/d"
+  traceExtractGfxPath = "t.ct"
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 30: --output-dir missing value (last)
+argv: ct "trace" "extract-gfx" "t.ct" "--output-dir"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The option '\e[34m--output-dir\e[0m' requires a value\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 31: --output-dir missing value (before the rest)
+argv: ct "trace" "extract-gfx" "--output-dir" "t.ct"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The required option 'traceExtractGfxPath' was not specified\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 32: --OUTPUT-DIR <v> (style variant)
+argv: ct "trace" "extract-gfx" "--OUTPUT-DIR" "/d" "t.ct"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace
+  traceCommand = extract-gfx
+  traceExtractGfxOutputDir = "/d"
+  traceExtractGfxPath = "t.ct"
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 33: --o_utput-dir <v> (style variant)
+argv: ct "trace" "extract-gfx" "--o_utput-dir" "/d" "t.ct"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace
+  traceCommand = extract-gfx
+  traceExtractGfxOutputDir = "/d"
+  traceExtractGfxPath = "t.ct"
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 34: --output_dir <v> (style variant)
+argv: ct "trace" "extract-gfx" "--output_dir" "/d" "t.ct"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'output_dir'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 35: --outputdir <v> (style variant)
+argv: ct "trace" "extract-gfx" "--outputdir" "/d" "t.ct"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'outputdir'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 36: unknown long option
+argv: ct "trace" "extract-gfx" "--bogus" "-o" "/d" "t.ct"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'bogus'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 37: unknown long option with value
+argv: ct "trace" "extract-gfx" "--bogus=1" "-o" "/d" "t.ct"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'bogus'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 38: unknown short option
+argv: ct "trace" "extract-gfx" "-Z" "-o" "/d" "t.ct"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'Z'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 39: lone -
+argv: ct "trace" "extract-gfx" "-" "-o" "/d" "t.ct"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option ''\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 40: lone -- then a word
+argv: ct "trace" "extract-gfx" "--" "w" "-o" "/d" "t.ct"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option ''\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 41: --=v
+argv: ct "trace" "extract-gfx" "--=v" "-o" "/d" "t.ct"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option ''\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 42: extra positional
+argv: ct "trace" "extract-gfx" "-o" "/d" "t.ct" "extra1" "extra2" "extra3" "extra4" "extra5"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The subcommand 'extract-gfx' does not accept additional arguments\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 43: global --cwd after the command
+argv: ct "trace" "extract-gfx" "--cwd" "/w" "-o" "/d" "t.ct"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = some("/w")
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace
+  traceCommand = extract-gfx
+  traceExtractGfxOutputDir = "/d"
+  traceExtractGfxPath = "t.ct"
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 44: global --new-tab after the command
+argv: ct "trace" "extract-gfx" "--new-tab" "-o" "/d" "t.ct"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = true
+  newWindow = false
+  cmd = trace
+  traceCommand = extract-gfx
+  traceExtractGfxOutputDir = "/d"
+  traceExtractGfxPath = "t.ct"
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 45: --version after the command
+argv: ct "trace" "extract-gfx" "--version" "-o" "/d" "t.ct"
+env: (none)
+exit: 0
+--- stdout
+CodeTracer version: <VERSION>
+\e[0m
+(no newline at end of stdout)
+--- stderr
+--- end
+
+### 46: -h after the command
+argv: ct "trace" "extract-gfx" "-h" "-o" "/d" "t.ct"
+env: (none)
+exit: 0
+--- stdout
+<the short help page clispec renders for this request: ct trace extract-gfx>
+--- stderr
+--- end
+
+### 47: export bare
+argv: ct "trace" "export"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The required option 'output' was not specified\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 48: export path only
+argv: ct "trace" "export" "t.ct"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The required option 'output' was not specified\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 49: --output <v>
+argv: ct "trace" "export" "--output" "/e.ct" "t.ct"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace
+  traceCommand = export
+  traceExportPortable = false
+  traceExportOutput = "/e.ct"
+  traceExportPath = "t.ct"
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 50: --output=<v>
+argv: ct "trace" "export" "--output=/e.ct" "t.ct"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace
+  traceCommand = export
+  traceExportPortable = false
+  traceExportOutput = "/e.ct"
+  traceExportPath = "t.ct"
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 51: --output:<v>
+argv: ct "trace" "export" "--output:/e.ct" "t.ct"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace
+  traceCommand = export
+  traceExportPortable = false
+  traceExportOutput = "/e.ct"
+  traceExportPath = "t.ct"
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 52: -o <v>
+argv: ct "trace" "export" "-o" "/e.ct" "t.ct"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace
+  traceCommand = export
+  traceExportPortable = false
+  traceExportOutput = "/e.ct"
+  traceExportPath = "t.ct"
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 53: -o=<v>
+argv: ct "trace" "export" "-o=/e.ct" "t.ct"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace
+  traceCommand = export
+  traceExportPortable = false
+  traceExportOutput = "/e.ct"
+  traceExportPath = "t.ct"
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 54: -o:<v>
+argv: ct "trace" "export" "-o:/e.ct" "t.ct"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace
+  traceCommand = export
+  traceExportPortable = false
+  traceExportOutput = "/e.ct"
+  traceExportPath = "t.ct"
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 55: -o<v> (attached)
+argv: ct "trace" "export" "-o/e.ct" "t.ct"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace
+  traceCommand = export
+  traceExportPortable = false
+  traceExportOutput = "/e.ct"
+  traceExportPath = "t.ct"
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 56: -O <v> (other case)
+argv: ct "trace" "export" "-O" "/e.ct" "t.ct"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'O'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 57: --o <v> (the letter as a long option)
+argv: ct "trace" "export" "--o" "/e.ct" "t.ct"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace
+  traceCommand = export
+  traceExportPortable = false
+  traceExportOutput = "/e.ct"
+  traceExportPath = "t.ct"
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 58: --output /e.ct
+argv: ct "trace" "export" "--output" "/e.ct" "t.ct"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace
+  traceCommand = export
+  traceExportPortable = false
+  traceExportOutput = "/e.ct"
+  traceExportPath = "t.ct"
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 59: --output=/e.ct
+argv: ct "trace" "export" "--output=/e.ct" "t.ct"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace
+  traceCommand = export
+  traceExportPortable = false
+  traceExportOutput = "/e.ct"
+  traceExportPath = "t.ct"
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 60: --output empty
+argv: ct "trace" "export" "--output" "" "t.ct"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace
+  traceCommand = export
+  traceExportPortable = false
+  traceExportOutput = ""
+  traceExportPath = "t.ct"
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 61: --output= (empty)
+argv: ct "trace" "export" "--output=" "t.ct"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The required option 'traceExportPath' was not specified\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 62: --output= <v> (next word)
+argv: ct "trace" "export" "--output=" "/e.ct" "t.ct"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace
+  traceCommand = export
+  traceExportPortable = false
+  traceExportOutput = "/e.ct"
+  traceExportPath = "t.ct"
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 63: --output -x (value starts with -)
+argv: ct "trace" "export" "--output" "-x" "t.ct"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace
+  traceCommand = export
+  traceExportPortable = false
+  traceExportOutput = "-x"
+  traceExportPath = "t.ct"
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 64: --output --x (value starts with --)
+argv: ct "trace" "export" "--output" "--x" "t.ct"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace
+  traceCommand = export
+  traceExportPortable = false
+  traceExportOutput = "--x"
+  traceExportPath = "t.ct"
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 65: --output --new-tab <v> (an option between it and its value)
+argv: ct "trace" "export" "--output" "--new-tab" "/e.ct" "t.ct"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The subcommand 'export' does not accept additional arguments\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 66: --output repeated, last wins
+argv: ct "trace" "export" "--output" "/e.ct" "--output" "/e.ct" "t.ct"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace
+  traceCommand = export
+  traceExportPortable = false
+  traceExportOutput = "/e.ct"
+  traceExportPath = "t.ct"
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 67: --output missing value (last)
+argv: ct "trace" "export" "t.ct" "--output"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The option '\e[34m--output\e[0m' requires a value\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 68: --output missing value (before the rest)
+argv: ct "trace" "export" "--output" "t.ct"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The required option 'traceExportPath' was not specified\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 69: --OUTPUT <v> (style variant)
+argv: ct "trace" "export" "--OUTPUT" "/e.ct" "t.ct"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace
+  traceCommand = export
+  traceExportPortable = false
+  traceExportOutput = "/e.ct"
+  traceExportPath = "t.ct"
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 70: --o_utput <v> (style variant)
+argv: ct "trace" "export" "--o_utput" "/e.ct" "t.ct"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace
+  traceCommand = export
+  traceExportPortable = false
+  traceExportOutput = "/e.ct"
+  traceExportPath = "t.ct"
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 71: --portable
+argv: ct "trace" "export" "--portable" "-o" "/e.ct" "t.ct"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace
+  traceCommand = export
+  traceExportPortable = true
+  traceExportOutput = "/e.ct"
+  traceExportPath = "t.ct"
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 72: --portable=true
+argv: ct "trace" "export" "--portable=true" "-o" "/e.ct" "t.ct"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace
+  traceCommand = export
+  traceExportPortable = true
+  traceExportOutput = "/e.ct"
+  traceExportPath = "t.ct"
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 73: --portable=false
+argv: ct "trace" "export" "--portable=false" "-o" "/e.ct" "t.ct"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace
+  traceCommand = export
+  traceExportPortable = false
+  traceExportOutput = "/e.ct"
+  traceExportPath = "t.ct"
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 74: --portable=on
+argv: ct "trace" "export" "--portable=on" "-o" "/e.ct" "t.ct"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace
+  traceCommand = export
+  traceExportPortable = true
+  traceExportOutput = "/e.ct"
+  traceExportPath = "t.ct"
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 75: --portable=off
+argv: ct "trace" "export" "--portable=off" "-o" "/e.ct" "t.ct"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace
+  traceCommand = export
+  traceExportPortable = false
+  traceExportOutput = "/e.ct"
+  traceExportPath = "t.ct"
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 76: --portable=yes
+argv: ct "trace" "export" "--portable=yes" "-o" "/e.ct" "t.ct"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace
+  traceCommand = export
+  traceExportPortable = true
+  traceExportOutput = "/e.ct"
+  traceExportPath = "t.ct"
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 77: --portable=no
+argv: ct "trace" "export" "--portable=no" "-o" "/e.ct" "t.ct"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace
+  traceCommand = export
+  traceExportPortable = false
+  traceExportOutput = "/e.ct"
+  traceExportPath = "t.ct"
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 78: --portable=1
+argv: ct "trace" "export" "--portable=1" "-o" "/e.ct" "t.ct"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace
+  traceCommand = export
+  traceExportPortable = true
+  traceExportOutput = "/e.ct"
+  traceExportPath = "t.ct"
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 79: --portable=0
+argv: ct "trace" "export" "--portable=0" "-o" "/e.ct" "t.ct"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace
+  traceCommand = export
+  traceExportPortable = false
+  traceExportOutput = "/e.ct"
+  traceExportPath = "t.ct"
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 80: --portable=maybe
+argv: ct "trace" "export" "--portable=maybe" "-o" "/e.ct" "t.ct"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Error while processing the \e[34mportable=maybe\e[0m parameter: 'maybe' is not a valid boolean value. Supported values are on/off, yes/no, true/false or 1/0\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 81: --portable=
+argv: ct "trace" "export" "--portable=" "-o" "/e.ct" "t.ct"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace
+  traceCommand = export
+  traceExportPortable = true
+  traceExportOutput = "/e.ct"
+  traceExportPath = "t.ct"
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 82: --portable:false
+argv: ct "trace" "export" "--portable:false" "-o" "/e.ct" "t.ct"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace
+  traceCommand = export
+  traceExportPortable = false
+  traceExportOutput = "/e.ct"
+  traceExportPath = "t.ct"
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 83: --portable false (next word)
+argv: ct "trace" "export" "--portable" "false" "-o" "/e.ct" "t.ct"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The subcommand 'export' does not accept additional arguments\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 84: --portable twice
+argv: ct "trace" "export" "--portable" "--portable" "-o" "/e.ct" "t.ct"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace
+  traceCommand = export
+  traceExportPortable = true
+  traceExportOutput = "/e.ct"
+  traceExportPath = "t.ct"
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 85: --no-portable
+argv: ct "trace" "export" "--no-portable" "-o" "/e.ct" "t.ct"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'no-portable'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 86: --PORTABLE (style variant)
+argv: ct "trace" "export" "--PORTABLE" "-o" "/e.ct" "t.ct"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace
+  traceCommand = export
+  traceExportPortable = true
+  traceExportOutput = "/e.ct"
+  traceExportPath = "t.ct"
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 87: --p_ortable (style variant)
+argv: ct "trace" "export" "--p_ortable" "-o" "/e.ct" "t.ct"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace
+  traceCommand = export
+  traceExportPortable = true
+  traceExportOutput = "/e.ct"
+  traceExportPath = "t.ct"
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 88: unknown long option
+argv: ct "trace" "export" "--bogus" "-o" "/e.ct" "t.ct"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'bogus'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 89: unknown long option with value
+argv: ct "trace" "export" "--bogus=1" "-o" "/e.ct" "t.ct"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'bogus'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 90: unknown short option
+argv: ct "trace" "export" "-Z" "-o" "/e.ct" "t.ct"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'Z'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 91: lone -
+argv: ct "trace" "export" "-" "-o" "/e.ct" "t.ct"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option ''\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 92: lone -- then a word
+argv: ct "trace" "export" "--" "w" "-o" "/e.ct" "t.ct"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option ''\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 93: --=v
+argv: ct "trace" "export" "--=v" "-o" "/e.ct" "t.ct"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option ''\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 94: extra positional
+argv: ct "trace" "export" "-o" "/e.ct" "t.ct" "extra1" "extra2" "extra3" "extra4" "extra5"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The subcommand 'export' does not accept additional arguments\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 95: global --cwd after the command
+argv: ct "trace" "export" "--cwd" "/w" "-o" "/e.ct" "t.ct"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = some("/w")
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace
+  traceCommand = export
+  traceExportPortable = false
+  traceExportOutput = "/e.ct"
+  traceExportPath = "t.ct"
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 96: global --new-tab after the command
+argv: ct "trace" "export" "--new-tab" "-o" "/e.ct" "t.ct"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = true
+  newWindow = false
+  cmd = trace
+  traceCommand = export
+  traceExportPortable = false
+  traceExportOutput = "/e.ct"
+  traceExportPath = "t.ct"
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 97: --version after the command
+argv: ct "trace" "export" "--version" "-o" "/e.ct" "t.ct"
+env: (none)
+exit: 0
+--- stdout
+CodeTracer version: <VERSION>
+\e[0m
+(no newline at end of stdout)
+--- stderr
+--- end
+
+### 98: -h after the command
+argv: ct "trace" "export" "-h" "-o" "/e.ct" "t.ct"
+env: (none)
+exit: 0
+--- stdout
+<the short help page clispec renders for this request: ct trace export>
+--- stderr
+--- end
+
+### 99: omniscient-prep bare
+argv: ct "trace" "omniscient-prep"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The required option 'traceOmniscientPrepPath' was not specified\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 100: omniscient-prep path
+argv: ct "trace" "omniscient-prep" "t.ct"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace
+  traceCommand = omniscient-prep
+  traceOmniscientPrepMode = "on"
+  traceOmniscientPrepPath = "t.ct"
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 101: --mode <v>
+argv: ct "trace" "omniscient-prep" "--mode" "on" "t.ct"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace
+  traceCommand = omniscient-prep
+  traceOmniscientPrepMode = "on"
+  traceOmniscientPrepPath = "t.ct"
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 102: --mode=<v>
+argv: ct "trace" "omniscient-prep" "--mode=on" "t.ct"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace
+  traceCommand = omniscient-prep
+  traceOmniscientPrepMode = "on"
+  traceOmniscientPrepPath = "t.ct"
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 103: --mode:<v>
+argv: ct "trace" "omniscient-prep" "--mode:on" "t.ct"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace
+  traceCommand = omniscient-prep
+  traceOmniscientPrepMode = "on"
+  traceOmniscientPrepPath = "t.ct"
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 104: --mode on
+argv: ct "trace" "omniscient-prep" "--mode" "on" "t.ct"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace
+  traceCommand = omniscient-prep
+  traceOmniscientPrepMode = "on"
+  traceOmniscientPrepPath = "t.ct"
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 105: --mode=on
+argv: ct "trace" "omniscient-prep" "--mode=on" "t.ct"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace
+  traceCommand = omniscient-prep
+  traceOmniscientPrepMode = "on"
+  traceOmniscientPrepPath = "t.ct"
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 106: --mode lazy
+argv: ct "trace" "omniscient-prep" "--mode" "lazy" "t.ct"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace
+  traceCommand = omniscient-prep
+  traceOmniscientPrepMode = "lazy"
+  traceOmniscientPrepPath = "t.ct"
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 107: --mode=lazy
+argv: ct "trace" "omniscient-prep" "--mode=lazy" "t.ct"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace
+  traceCommand = omniscient-prep
+  traceOmniscientPrepMode = "lazy"
+  traceOmniscientPrepPath = "t.ct"
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 108: --mode bogus
+argv: ct "trace" "omniscient-prep" "--mode" "bogus" "t.ct"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace
+  traceCommand = omniscient-prep
+  traceOmniscientPrepMode = "bogus"
+  traceOmniscientPrepPath = "t.ct"
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 109: --mode=bogus
+argv: ct "trace" "omniscient-prep" "--mode=bogus" "t.ct"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace
+  traceCommand = omniscient-prep
+  traceOmniscientPrepMode = "bogus"
+  traceOmniscientPrepPath = "t.ct"
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 110: --mode empty
+argv: ct "trace" "omniscient-prep" "--mode" "" "t.ct"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace
+  traceCommand = omniscient-prep
+  traceOmniscientPrepMode = ""
+  traceOmniscientPrepPath = "t.ct"
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 111: --mode= (empty)
+argv: ct "trace" "omniscient-prep" "--mode=" "t.ct"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The required option 'traceOmniscientPrepPath' was not specified\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 112: --mode= <v> (next word)
+argv: ct "trace" "omniscient-prep" "--mode=" "on" "t.ct"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace
+  traceCommand = omniscient-prep
+  traceOmniscientPrepMode = "on"
+  traceOmniscientPrepPath = "t.ct"
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 113: --mode -x (value starts with -)
+argv: ct "trace" "omniscient-prep" "--mode" "-x" "t.ct"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace
+  traceCommand = omniscient-prep
+  traceOmniscientPrepMode = "-x"
+  traceOmniscientPrepPath = "t.ct"
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 114: --mode --x (value starts with --)
+argv: ct "trace" "omniscient-prep" "--mode" "--x" "t.ct"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace
+  traceCommand = omniscient-prep
+  traceOmniscientPrepMode = "--x"
+  traceOmniscientPrepPath = "t.ct"
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 115: --mode --new-tab <v> (an option between it and its value)
+argv: ct "trace" "omniscient-prep" "--mode" "--new-tab" "on" "t.ct"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The subcommand 'omniscient-prep' does not accept additional arguments\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 116: --mode repeated, last wins
+argv: ct "trace" "omniscient-prep" "--mode" "on" "--mode" "bogus" "t.ct"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace
+  traceCommand = omniscient-prep
+  traceOmniscientPrepMode = "bogus"
+  traceOmniscientPrepPath = "t.ct"
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 117: --mode missing value (last)
+argv: ct "trace" "omniscient-prep" "t.ct" "--mode"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The option '\e[34m--mode\e[0m' requires a value\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 118: --mode missing value (before the rest)
+argv: ct "trace" "omniscient-prep" "--mode" "t.ct"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The required option 'traceOmniscientPrepPath' was not specified\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 119: --MODE <v> (style variant)
+argv: ct "trace" "omniscient-prep" "--MODE" "on" "t.ct"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace
+  traceCommand = omniscient-prep
+  traceOmniscientPrepMode = "on"
+  traceOmniscientPrepPath = "t.ct"
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 120: --m_ode <v> (style variant)
+argv: ct "trace" "omniscient-prep" "--m_ode" "on" "t.ct"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace
+  traceCommand = omniscient-prep
+  traceOmniscientPrepMode = "on"
+  traceOmniscientPrepPath = "t.ct"
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 121: unknown long option
+argv: ct "trace" "omniscient-prep" "--bogus" "t.ct"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'bogus'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 122: unknown long option with value
+argv: ct "trace" "omniscient-prep" "--bogus=1" "t.ct"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'bogus'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 123: unknown short option
+argv: ct "trace" "omniscient-prep" "-Z" "t.ct"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'Z'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 124: lone -
+argv: ct "trace" "omniscient-prep" "-" "t.ct"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option ''\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 125: lone -- then a word
+argv: ct "trace" "omniscient-prep" "--" "w" "t.ct"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option ''\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 126: --=v
+argv: ct "trace" "omniscient-prep" "--=v" "t.ct"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option ''\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 127: extra positional
+argv: ct "trace" "omniscient-prep" "t.ct" "extra1" "extra2" "extra3" "extra4" "extra5"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The subcommand 'omniscient-prep' does not accept additional arguments\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 128: global --cwd after the command
+argv: ct "trace" "omniscient-prep" "--cwd" "/w" "t.ct"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = some("/w")
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace
+  traceCommand = omniscient-prep
+  traceOmniscientPrepMode = "on"
+  traceOmniscientPrepPath = "t.ct"
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 129: global --new-tab after the command
+argv: ct "trace" "omniscient-prep" "--new-tab" "t.ct"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = true
+  newWindow = false
+  cmd = trace
+  traceCommand = omniscient-prep
+  traceOmniscientPrepMode = "on"
+  traceOmniscientPrepPath = "t.ct"
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 130: --version after the command
+argv: ct "trace" "omniscient-prep" "--version" "t.ct"
+env: (none)
+exit: 0
+--- stdout
+CodeTracer version: <VERSION>
+\e[0m
+(no newline at end of stdout)
+--- stderr
+--- end
+
+### 131: -h after the command
+argv: ct "trace" "omniscient-prep" "-h" "t.ct"
+env: (none)
+exit: 0
+--- stdout
+<the short help page clispec renders for this request: ct trace omniscient-prep>
+--- stderr
+--- end
+
+### 132: env <APP>_TRACECOMMAND=export
+argv: ct "trace"
+env: <APP>_TRACECOMMAND="export"
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace
+  traceCommand = noCommand
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 133: env <APP>_OUTPUT
+argv: ct "trace" "export" "t.ct"
+env: <APP>_OUTPUT="/env.ct"
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace
+  traceCommand = export
+  traceExportPortable = false
+  traceExportOutput = "/env.ct"
+  traceExportPath = "t.ct"
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 134: env <APP>_MODE
+argv: ct "trace" "omniscient-prep" "t.ct"
+env: <APP>_MODE="lazy"
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace
+  traceCommand = omniscient-prep
+  traceOmniscientPrepMode = "lazy"
+  traceOmniscientPrepPath = "t.ct"
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 135: unknown long option
+argv: ct "trace" "--bogus"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'bogus'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 136: unknown long option with value
+argv: ct "trace" "--bogus=1"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'bogus'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 137: unknown short option
+argv: ct "trace" "-Z"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'Z'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 138: lone -
+argv: ct "trace" "-"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option ''\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 139: lone -- then a word
+argv: ct "trace" "--" "w"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option ''\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 140: --=v
+argv: ct "trace" "--=v"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option ''\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 141: extra positional
+argv: ct "trace" "extra1" "extra2" "extra3" "extra4" "extra5"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The subcommand 'trace' does not accept arguments\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 142: global --cwd after the command
+argv: ct "trace" "--cwd" "/w"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = some("/w")
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = trace
+  traceCommand = noCommand
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 143: global --new-tab after the command
+argv: ct "trace" "--new-tab"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = true
+  newWindow = false
+  cmd = trace
+  traceCommand = noCommand
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 144: --version after the command
+argv: ct "trace" "--version"
+env: (none)
+exit: 0
+--- stdout
+CodeTracer version: <VERSION>
+\e[0m
+(no newline at end of stdout)
+--- stderr
+--- end
+
+### 145: -h after the command
+argv: ct "trace" "-h"
+env: (none)
+exit: 0
+--- stdout
+<the short help page clispec renders for this request: ct trace>
+--- stderr
+--- end

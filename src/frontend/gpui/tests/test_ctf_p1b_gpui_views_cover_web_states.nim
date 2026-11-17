@@ -39,7 +39,7 @@
 ## Trap 13 / §29 (`Verification-Harness-Traps.md`): every helper that calls
 ## `check` is a template; the procs return the mismatches they found.
 
-import std/[os, sets, strutils, unittest]
+import std/[math, os, sets, strutils, unittest]
 
 import isonim_gpui/renderer
 from isonim_gpui/bindings import gpui_reset_tree
@@ -48,9 +48,13 @@ import ../../stories/codetracer_stories
 import ../../../../tools/stories/emit_storybook_stories
 import ../agent_harbor/ah_stories
 import ../agent_harbor/ah_session_views
+import ../agent_harbor/ah_fleet_panel
+from ../agent_harbor/ah_theme import textWidth, textPx, CaptionPx, InsetPx, MarkPx
+import nim_agents/agent_harbor/fleet_records
 import nim_agents_isonim_viewmodels/agent_harbor/[fleet_vm, session_tabs_vm,
-  initiative_tabs_vm, initiatives_vm, initiative_progress_vm]
-from ../../viewmodel/views/agent_harbor_words import tabLabelOf, filterCount
+  initiative_tabs_vm, initiatives_vm, initiative_progress_vm, data_source, fixture_source]
+from ../../viewmodel/views/agent_harbor_words import tabLabelOf, filterCount,
+  activityLineIsError, countsFloor
 
 const
   AgentHarborSectionTitle = "CodeTracer/Agent Harbor"
@@ -131,6 +135,11 @@ proc commonState(view: GpuiElement; state: AsyncState; error: string;
   if state in {asIdle, asLoading}:
     problems.expect("loading notice", view.values("notice").contains("loading"), true)
 
+proc severityOf(failed, waiting: bool): string =
+  ## What a `+N` chip says of what it hides, by the brief's rule written out
+  ## here: a failure over a wait over nothing.
+  if failed: "failed" elif waiting: "needs-input" else: "none"
+
 proc checkSessionTabs(view: GpuiElement; vm: SessionTabStripVM): seq[string] =
   result.expect("state", view.attr("state"), stateName(vm.state.val))
   commonState(view, vm.state.val, vm.error.val, result)
@@ -166,6 +175,12 @@ proc checkSessionTabs(view: GpuiElement; vm: SessionTabStripVM): seq[string] =
   result.expect("active tab", active, vm.activeId.val)
   result.expect("+N chip", view.values("overflow"),
                 if overflow.len > 0: @[$overflow.len] else: @[])
+  var failed, waiting = false
+  for i in overflow:
+    failed = failed or tabs[i].attention == saFailed
+    waiting = waiting or tabs[i].attention == saNeedsInput
+  result.expect("+N chip's status", view.values("overflow-severity"),
+                if overflow.len > 0: @[severityOf(failed, waiting)] else: @[])
   var menuItems: seq[string]
   let menu = view.first("menu")
   if menu != nil: menuItems = menu.values("menu-item")
@@ -227,16 +242,39 @@ proc checkInitiativeTabs(view: GpuiElement; vm: InitiativeTabStripVM): seq[strin
   result.expect("active tab", active, vm.activeTab.val)
   result.expect("+N chip", view.values("overflow"),
                 if layout.overflow.len > 0: @[$layout.overflow.len] else: @[])
+  var barFailed, barWaiting = false
+  for i in layout.overflow:
+    let t = tabs[i]
+    if t.kind == stkInitiative:
+      barFailed = barFailed or t.state == isBlocked
+      barWaiting = barWaiting or t.state == isNeedsInput
+    else:
+      barFailed = barFailed or t.session.attention == saFailed
+      barWaiting = barWaiting or t.session.attention == saNeedsInput
+  result.expect("+N chip's status", view.values("overflow-severity"),
+                if layout.overflow.len > 0: @[severityOf(barFailed, barWaiting)] else: @[])
   # The active initiative's recording switcher.
   var wantedNumbers: seq[string]
-  var wantedHidden: seq[string]
+  var wantedHidden, wantedHiddenStatus: seq[string]
   for t in tabs:
     if t.active and t.kind == stkInitiative:
       let buttons = vm.recordingButtonsOf(t.id)
       for b in buttons.buttons: wantedNumbers.add $b.number
-      if buttons.hidden > 0: wantedHidden.add $buttons.hidden
+      if buttons.hidden > 0:
+        wantedHidden.add $buttons.hidden
+        # The hidden recordings are those whose numbers are not shown.
+        var shown: seq[int]
+        for b in buttons.buttons: shown.add b.number
+        var failed, missing = false
+        for e in vm.recordingButtonsOf(t.id, maxShown = high(int)).buttons:
+          if e.number notin shown:
+            failed = failed or e.state == rsFailed
+            missing = missing or e.state == rsMissing
+        wantedHiddenStatus.add severityOf(failed, missing)
   result.expect("recording buttons", view.values("recording"), wantedNumbers)
   result.expect("recordings behind +N", view.values("recordings-hidden"), wantedHidden)
+  result.expect("recordings' +N status", view.values("recordings-hidden-severity"),
+                wantedHiddenStatus)
   # The progress popup of the hovered initiative.
   let popupId = vm.popupId.val
   result.expect("popup", view.values("popup"), if popupId.len > 0: @[popupId] else: @[])
@@ -315,6 +353,31 @@ proc checkProgress(view: GpuiElement; vm: InitiativeProgressVM): seq[string] =
   result.expect("executive summary", view.values("executive-summary"),
                 @[if summary.len > 0: summary else: "The plan states no executive summary."])
 
+proc fleetInkProblems(view: GpuiElement; vm: FleetSnapshotVM; p: AhPalette): seq[string] =
+  ## The inks the shared rules decide (the views tag each as `ink`, the
+  ## colour they hand the text): an activity line red only on a row with no
+  ## failure line (`activityLineIsError`), else the caption role, the
+  ## selection's text on the selected row; the active filter's count in the
+  ## body role even at 0, another 0 in the disabled role.
+  for row in vm.rows:
+    for e in view.all("row"):
+      if e.attr("row") != row.id: continue
+      for i, a in e.all("activity"):
+        let wanted = if row.selected: p.selectedText
+                     elif activityLineIsError(row, i): p.textError else: p.rowDetail
+        if a.attr("ink") != wanted:
+          result.add "activity line " & $i & " of " & row.shortId &
+                     (if row.failureText.len > 0: " (under a failure line)" else: "") &
+                     " is drawn in " & a.attr("ink") & ", not " & wanted
+  for e in view.all("filter"):
+    let n = parseInt(e.attr("filter-count"))
+    let wanted = if e.attr("active") == "true": p.textBody
+                 elif n == 0: p.textDisabled else: p.textCaption
+    let count = e.first("ink")
+    if count.isNil or count.attr("ink") != wanted:
+      result.add "the count of filter " & e.attr("filter") & " is drawn in " &
+                 (if count.isNil: "nothing" else: count.attr("ink")) & ", not " & wanted
+
 proc checkFleet(view: GpuiElement; vm: FleetSnapshotVM): seq[string] =
   result.expect("state", view.attr("state"), stateName(vm.state.val))
   commonState(view, vm.state.val, vm.error.val, result)
@@ -347,6 +410,46 @@ proc checkFleet(view: GpuiElement; vm: FleetSnapshotVM): seq[string] =
         let shown = if row.expanded: row.activity.len else: min(1, row.activity.len)
         result.expect("activity of " & row.shortId, e.values("activity"), row.activity[0 ..< shown])
         result.expect("title of " & row.shortId, e.first("title").attr("title"), row.title)
+
+proc inkProblems(m: AhStoryMount; mode: DesignMode): seq[string] =
+  ## The colours the shared rules decide, by surface: the fleet's
+  ## (`fleetInkProblems`), and the inbox's Previous / Next in the disabled
+  ## role while nothing waits.
+  let p = ahPalette(mode)
+  case m.surface
+  of "agent-harbor-fleet":
+    if m.fleet.state.val == asReady: result = fleetInkProblems(m.view, m.fleet, p)
+  of "agent-harbor-initiative-tabs":
+    # Previous / Next: the disabled role while nothing waits, the label role
+    # while something does (what the browser computes). Each step is drawn
+    # at full opacity: the colour alone says whether it can be pressed.
+    let empty = m.initiativeTabs.inboxPosition.len == 0
+    let wanted = if empty: p.textDisabled else: p.textLabel
+    for e in m.view.all("step"):
+      if e.attr("step") != (if empty: "disabled" else: "enabled"):
+        result.add "the inbox step " & e.attr("button") & " is marked " & e.attr("step") &
+                   " while the inbox is " & (if empty: "empty" else: "not empty")
+      if e.attr("ink") != wanted:
+        result.add "the inbox step " & e.attr("button") & " (" & e.attr("step") &
+                   ") is drawn in " & e.attr("ink") & ", not " & wanted
+      # The pointer over it: the hand only where it can be pressed, the
+      # default arrow where it cannot (the browser's pointer stamp gives a
+      # step in an empty inbox no hit kind). Spelled as the CSS names, not
+      # through `cursorOf`, so the check does not share the view's rule.
+      let cursor = if empty: "default" else: "pointer"
+      if e.attr("cursor") != cursor:
+        result.add "the inbox step " & e.attr("button") & " (" & e.attr("step") &
+                   ") shows the " & e.attr("cursor") & " cursor, not " & cursor
+    # Auto-switch on: its dot in the action border role in both modes
+    # (`.ah-inbox-auto-on::before`: `colors-ui-border-action`).
+    for e in m.view.all("auto-switch"):
+      if e.attr("auto-switch") != "true": continue
+      let dot = e.first("mark")
+      if dot.isNil or dot.attr("mark") != p.borderAction:
+        result.add "the auto-switch dot is " &
+                   (if dot.isNil: "not drawn" else: "drawn in " & dot.attr("mark")) &
+                   ", not in the action border colour " & p.borderAction
+  else: discard
 
 proc checkStory(m: AhStoryMount): seq[string] =
   ## The drawn tree against the viewmodel the story built; empty when they
@@ -384,7 +487,7 @@ proc renderStory(story: CodeTracerStory; w, h: int; mode: DesignMode;
     let m = r.mountAgentHarborStoryGpui(story.surface, story.fixture, w, h, mode,
                                         frameTitle)
     result.mount = m
-    result.problems = checkStory(m) & drawnTextProblems(m.root)
+    result.problems = checkStory(m) & drawnTextProblems(m.root) & inkProblems(m, mode)
     if not r.verifyRenderPlan(m.root):
       result.problems.add "the shadow tree builds no valid render plan"
     if frameTitle.len > 0 and m.root.first("frame-title").attr("frame-title") != frameTitle:
@@ -504,6 +607,140 @@ suite "CTF-P1b: the comparison can fail":
       m.dispose()
     ck ahPalette(dmDark).panel != ahPalette(dmLight).panel
 
+proc fixtureSnapshot(): FleetSnapshot =
+  var got: ref FleetSnapshot
+  newFixtureDataSource().loadFleet proc(answer: DataResult[FleetSnapshot]) =
+    doAssert answer.ok, answer.error
+    got = new FleetSnapshot
+    got[] = answer.value
+  doAssert not got.isNil, "the fixture source answers synchronously"
+  got[]
+
+suite "CTF-P1b: the fleet's and the inbox's inks follow the shared rules":
+  test "an error-level activity line: red without a failure line, caption under one":
+    # The story data holds error-level activity only under failure lines, so
+    # the other case is made from it: one failed session of the embedded
+    # synthetic fleet given the running status, served through the
+    # production `SnapshotDataSource` seam.
+    # A failed row shows its reason once, as its failure line, so the line
+    # the reason was read from is no activity line under it (the fleet
+    # viewmodel leaves it out); an error-level line under a failure line is
+    # an OLDER, different error. Every other failed session is given one,
+    # oldest in its history, so that case is on screen too.
+    var snapshot = fixtureSnapshot()
+    var id = ""
+    for s in snapshot.sessions.mitems:
+      if id.len == 0 and s.status == fsFailed:
+        for a in s.recent:
+          if a.level == "error": id = s.id
+        if id.len > 0:
+          s.status = fsRunning
+          s.rawStatus = "running"
+      elif s.status == fsFailed:
+        s.recent.insert(FleetActivity(kind: fakLog, level: "error",
+                                      text: "error: an earlier attempt failed"), 0)
+    ck id.len > 0
+    for mode in Modes:
+      gpui_reset_tree()
+      let p = ahPalette(mode)
+      let vm = newFleetSnapshotVM(newSnapshotDataSource(snapshot))
+      vm.load()
+      let host = r.createElement("div")
+      r.drawFleetPanel(host, vm, p, 1440)
+      ck fleetInkProblems(host, vm, p).len == 0
+      var red, quiet: GpuiElement
+      for row in vm.rows:
+        for e in host.all("row"):
+          if e.attr("row") != row.id: continue
+          for i, a in e.all("activity"):
+            if row.activityLevels[i] != "error": continue
+            if row.failureText.len == 0 and red.isNil: red = a
+            elif row.failureText.len > 0 and quiet.isNil: quiet = a
+      ck not red.isNil and not quiet.isNil
+      ck red.attr("ink") == p.textError
+      ck quiet.attr("ink") == p.rowDetail
+      # Negative control: the two inks swapped are both reported.
+      r.tag(red, "ink", p.rowDetail)
+      r.tag(quiet, "ink", p.textError)
+      let problems = fleetInkProblems(host, vm, p).join(" ")
+      ck problems.contains("of " & id[0 ..< 8] & " is drawn in " & p.rowDetail)
+      ck problems.contains("(under a failure line) is drawn in " & p.textError)
+      vm.dispose()
+
+  test "a pressable arrow with nothing waiting, and the active 0 quiet, are reported":
+    for (surface, fixture) in [("agent-harbor-initiative-tabs", "empty"),
+                               ("agent-harbor-fleet", "empty")]:
+      gpui_reset_tree()
+      let m = r.mountAgentHarborStoryGpui(surface, fixture, 1440, 900, dmLight)
+      ck inkProblems(m, dmLight).len == 0
+      let p = ahPalette(dmLight)
+      if surface == "agent-harbor-fleet":
+        for f in m.view.all("filter"):
+          if f.attr("active") == "true": r.tag(f.first("ink"), "ink", p.textDisabled)
+        ck inkProblems(m, dmLight).join(" ").contains("the count of filter")
+      else:
+        r.tag(m.view.first("step"), "ink", p.textLabel)
+        ck inkProblems(m, dmLight).join(" ").contains("the inbox step")
+      m.dispose()
+
+  test "an arrow drawn disabled while a session waits is reported":
+    for mode in [dmDark, dmLight]:
+      gpui_reset_tree()
+      let m = r.mountAgentHarborStoryGpui("agent-harbor-initiative-tabs", "next",
+                                          1440, 900, mode)
+      ck inkProblems(m, mode).len == 0
+      let step = m.view.first("step")
+      ck step.attr("step") == "enabled"
+      r.tag(step, "ink", ahPalette(mode).textDisabled)
+      ck inkProblems(m, mode).join(" ").contains("the inbox step")
+      m.dispose()
+
+  test "a disabled arrow under the pressable cursor is reported":
+    for mode in [dmDark, dmLight]:
+      gpui_reset_tree()
+      let m = r.mountAgentHarborStoryGpui("agent-harbor-initiative-tabs", "empty",
+                                          1440, 900, mode)
+      ck inkProblems(m, mode).len == 0
+      let step = m.view.first("step")
+      ck step.attr("step") == "disabled"
+      r.tag(step, "cursor", "pointer")
+      ck inkProblems(m, mode).join(" ").contains("shows the pointer cursor")
+      m.dispose()
+
+  test "the auto-switch dot in the action surface's colour is reported":
+    # Light only: in Dark the action surface and the action border are one
+    # colour (#6366f1), which is why the defect showed only in Light.
+    for mode in [dmLight]:
+      gpui_reset_tree()
+      let m = r.mountAgentHarborStoryGpui("agent-harbor-initiative-tabs", "auto-switch",
+                                          1440, 900, mode)
+      ck inkProblems(m, mode).len == 0
+      let toggle = m.view.first("auto-switch")
+      ck toggle.attr("auto-switch") == "true"
+      r.tag(toggle.first("mark"), "mark", ahPalette(mode).action)
+      ck inkProblems(m, mode).join(" ").contains("the auto-switch dot is drawn in " &
+                                                 ahPalette(mode).action)
+      m.dispose()
+
+suite "CTF-P1c D7: a tree node's counts keep their floor":
+  test "the counts never go below their floor, and the title gives way first":
+    # The limits `drawGroupHeader` hands GPUI's flex layout. At a laptop's
+    # and a sidebar's width the title keeps half the line; on a node about
+    # 20 terminal cells (200px) wide the title's least drops below half,
+    # and the counts' least stays their floor, `1…`, a pixel over its
+    # words.
+    const counts = "1 needs input \xC2\xB7 2 running"
+    let floorPx = int(ceil(textWidth(countsFloor(counts), CaptionPx))) + 1
+    for widthPx in [1440, 360]:
+      let w = groupHeaderWidths(widthPx, counts, "1/4", marked = true)
+      ck w.titleMin == (widthPx - 2 * InsetPx) div 2
+      ck w.countsMin == floorPx
+    let narrow = groupHeaderWidths(200, counts, "10/12", marked = true)
+    ck narrow.countsMin == floorPx
+    ck narrow.titleMin < (200 - 2 * InsetPx) div 2
+    ck narrow.titleMin + narrow.countsMin + 12 + MarkPx +
+       textPx("10/12", CaptionPx, tabular = true) + 4 * 8 <= 200 - 2 * InsetPx
+
 suite "CTF-P1b: the GPUI views share the viewmodels, not the web views":
   test "no GPUI Agent Harbor view imports a web view or the web renderer":
     # The words both front-ends say live in `viewmodel/views/agent_harbor_words`,
@@ -526,4 +763,4 @@ suite "CTF-P1b: the GPUI views share the viewmodels, not the web views":
 
 suite "CTF-P1b: assertion count":
   test "every assertion ran":
-    check countedAssertions == 28
+    check countedAssertions == 67

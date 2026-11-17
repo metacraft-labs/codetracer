@@ -1,0 +1,34 @@
+scenario: 1
+name: noir-space-ship/scratchpad-collects-every-kind
+pack: codetracer
+summary: >-
+  The scratchpad collects a call-trace argument, a flow value from its
+  menu, and a flow value by Ctrl+click: one row each, three rows. (A
+  tracepoint row's right-click opens no menu, so no row is added from the
+  trace log.)
+
+stage:
+  - use: record-program
+    with: { program: noir_space_ship }
+  - use: open-recording
+    with: { width: 2400, height: 1300 }
+
+steps:
+  - wait: { until: replay-idle, timeout: 180s }
+  - click: 'pane-tab[label="CALLTRACE"]'
+  - wait: { until: call-trace.loaded, timeout: 60s }
+  - wait: { until: { at: 'call-trace/call[name="main"]/call-argument[name="initial_shield"]', present: true }, timeout: 60s }
+  - click: { at: 'call-trace/call[name="main"]/call-argument[name="initial_shield"]', button: right }
+  - click: 'context-menu/menu-item[label="Add value to scratchpad"]'
+  - wait: { until: { at: 'editor[file="main.nr"]/flow-value[line="38", name="asteroid_masses_negative"]', present: true }, timeout: 60s }
+  - click: { at: 'editor[file="main.nr"]/flow-value[line="38", name="asteroid_masses_negative"]', button: right }
+  - click: 'context-menu/menu-item[label="Add value to scratchpad"]'
+  - wait: { until: { at: 'call-trace/call[name="calculate_damage", arguments="(initial_shield=0x2710, remaining_shield=0x2710, mass=0x64)"]', present: true }, timeout: 60s }
+  - click: { at: 'call-trace/call[name="calculate_damage", arguments="(initial_shield=0x2710, remaining_shield=0x2710, mass=0x64)"]', anchor: name }
+    settle: false
+  - wait: { until: { at: 'editor[file="shield.nr"]', current-line: 22 }, timeout: 60s }
+  - wait: { until: replay-idle, timeout: 60s }
+  - wait: { until: { at: 'editor[file="shield.nr"]/flow-value[line="27", name="damage"]', present: true }, timeout: 60s }
+  - click: { at: 'editor[file="shield.nr"]/flow-value[line="27", name="damage"]', modifiers: [Ctrl] }
+  - click: 'pane-tab[label="SCRATCHPAD"]'
+  - wait: { until: { at: scratchpad, count: 3 }, timeout: 30s }

@@ -1,0 +1,199 @@
+# ct doctor: 15 argv cases through ct's loader (the parse probe)
+
+### 1: no arguments
+argv: ct "doctor"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = doctor
+  doctorLanguage = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 2: 1 argument(s)
+argv: ct "doctor" "lang1"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = doctor
+  doctorLanguage = "lang1"
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 3: one argument too many
+argv: ct "doctor" "lang1" "surplus"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The subcommand 'doctor' does not accept additional arguments\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 4: an argument starting with -
+argv: ct "doctor" "-a"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'a'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 5: unknown long option
+argv: ct "doctor" "--bogus" "lang1"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'bogus'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 6: unknown long option with value
+argv: ct "doctor" "--bogus=1" "lang1"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'bogus'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 7: unknown short option
+argv: ct "doctor" "-Z" "lang1"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'Z'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 8: lone -
+argv: ct "doctor" "-" "lang1"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option ''\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 9: lone -- then a word
+argv: ct "doctor" "--" "w" "lang1"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option ''\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 10: --=v
+argv: ct "doctor" "--=v" "lang1"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option ''\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 11: extra positional
+argv: ct "doctor" "lang1" "extra1" "extra2" "extra3" "extra4" "extra5"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The subcommand 'doctor' does not accept additional arguments\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 12: global --cwd after the command
+argv: ct "doctor" "--cwd" "/w" "lang1"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = some("/w")
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = doctor
+  doctorLanguage = "lang1"
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 13: global --new-tab after the command
+argv: ct "doctor" "--new-tab" "lang1"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = true
+  newWindow = false
+  cmd = doctor
+  doctorLanguage = "lang1"
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 14: --version after the command
+argv: ct "doctor" "--version" "lang1"
+env: (none)
+exit: 0
+--- stdout
+CodeTracer version: <VERSION>
+\e[0m
+(no newline at end of stdout)
+--- stderr
+--- end
+
+### 15: -h after the command
+argv: ct "doctor" "-h" "lang1"
+env: (none)
+exit: 0
+--- stdout
+<the short help page clispec renders for this request: ct doctor>
+--- stderr
+--- end

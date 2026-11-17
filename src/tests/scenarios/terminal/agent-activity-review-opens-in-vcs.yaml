@@ -1,0 +1,24 @@
+scenario: 1
+name: terminal/agent-activity-review-opens-in-vcs
+pack: codetracer
+summary: >-
+  With a review's agent session beside the recording, Agent Activity shows
+  the session's evidence cards; back at the start of the session, the first
+  card's [Open review] enters that collection's review, and the VCS pane
+  then shows its title (Iteration one), CHANGED FILES and main.rs.
+stage:
+  - use: record-program
+    with: { program: calc }
+  - use: review-session
+    with: { run: evidence }
+  - use: open-recording
+    with: { width: 200, height: 50 }
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - click: { at: 'pane-tab[label="Agent Activity"]' }
+  - wait: { until: { at: 'pane[title="Agent Activity"]', assert: 'has-row("Collected review evidence")' }, timeout: 60s }
+  - wheel: { at: 'pane[title="Agent Activity"]', direction: up, amount: 30 }
+  - wait: { until: { at: 'pane[title="Agent Activity"]', assert: 'has-row("Collecting the first review")' }, timeout: 30s }
+  - click: { at: 'pane[title="Agent Activity"]/row[#4]/cell[text="[Open review]"]' }
+  - click: { at: 'pane-tab[label="VCS"]' }
+  - wait: { until: { at: 'pane[title="VCS"]', assert: ['has-row("Iteration one")', 'has-row("CHANGED FILES")', 'has-row("main.rs")'] }, timeout: 60s }

@@ -50,6 +50,24 @@ suite "planning a breakpoint change":
     check plan[0].column == 9
     check plan[0].condition == "i > 2"
 
+  test "a condition goes on the breakpoint it names, and needs one":
+    let held = @[BreakpointSpec(line: 2, enabled: true),
+                 BreakpointSpec(line: 5, column: 7, enabled: false)]
+    check plannedCondition(held, 9, 0, "x > 1").isNone
+    # the line breakpoint, whichever column the menu was opened at
+    let onLine = plannedCondition(held, 2, 4, "x > 1").get
+    check breakpointAt(onLine, 2).get.condition == "x > 1"
+    check breakpointAt(onLine, 2).get.column == 0
+    check breakpointAt(onLine, 5).get.condition == ""
+    # a column breakpoint keeps its column and its disarmed state
+    let atColumn = plannedCondition(held, 5, 7, "i > 1").get
+    check breakpointAt(atColumn, 5).get.column == 7
+    check breakpointAt(atColumn, 5).get.condition == "i > 1"
+    check not breakpointAt(atColumn, 5).get.enabled
+    # "" clears it
+    let cleared = plannedCondition(atColumn, 5, 7, "").get
+    check breakpointAt(cleared, 5).get.condition == ""
+
   test "enabling needs a breakpoint on the line":
     let held = @[BreakpointSpec(line: 2, enabled: true)]
     check plannedEnabled(held, 9, false).isNone
@@ -102,6 +120,25 @@ suite "the store's breakpoints, through the session backend":
     check bound.len == 1 and bound[0].line == 5
     check bound.len == 1 and bound[0].resolution == "verified"
 
+  test "an answer to a superseded request does not replace the newer set":
+    # Delete a line's breakpoint, then anchor a new one on it before the
+    # engine answers the delete: the delete's answer arrives first and must
+    # not remove the breakpoint held since.
+    let mock = newMockBackendService()
+    mock.deferResponses = true
+    let store = createReplayDataStore(mock.toBackendService())
+    store.applyVerifiedBreakpoints("/src/g.nim", @[2])
+    check store.deleteBreakpoint("/src/g.nim", 2)
+    store.setAnchoredBreakpoint("/src/g.nim", 2, 3, condition = "i > 1")
+    check mock.pendingDeferredCount == 2
+    mock.settleDeferred(answer([]))          # the delete's answer
+    var rows = store.rowsOf("/src/g.nim")
+    check rows.len == 1 and rows[0].column == 3 and rows[0].condition == "i > 1"
+    mock.settleDeferred(answer([2]))         # the anchored one's answer
+    rows = store.rowsOf("/src/g.nim")
+    check rows.len == 1 and rows[0].column == 3 and
+      rows[0].condition == "i > 1" and rows[0].resolution == "verified"
+
   test "a refused request leaves the requested set standing":
     let mock = newMockBackendService()
     mock.expect("setBreakpoints", %*{"type": "response",
@@ -132,6 +169,23 @@ suite "the store's breakpoints, through the session backend":
     drainPlatformCallbacks()
     let rows = store.rowsOf("/src/d.nim")
     check rows.len == 1 and rows[0].logMessage == "x={x}" and rows[0].column == 4
+
+  test "a condition is sent with its breakpoint and stays on the row":
+    let mock = newMockBackendService()
+    mock.expect("setBreakpoints", answer([6]))
+    mock.expect("setBreakpoints", answer([6]))
+    let store = createReplayDataStore(mock.toBackendService())
+    store.toggleBreakpoint("/src/g.nim", 6)
+    drainPlatformCallbacks()
+    check store.setBreakpointCondition("/src/g.nim", 6, 0, "n mod 3 == 0")
+    drainPlatformCallbacks()
+    var sent: JsonNode = nil
+    for c in mock.receivedCommands:
+      if c.command == "setBreakpoints": sent = c.args
+    check sent["breakpoints"][0]["condition"].getStr == "n mod 3 == 0"
+    let rows = store.rowsOf("/src/g.nim")
+    check rows.len == 1 and rows[0].condition == "n mod 3 == 0"
+    check not store.setBreakpointCondition("/src/g.nim", 7, 0, "x")
 
   test "resending sends every file's set again":
     let mock = newMockBackendService(autoRespond = true)

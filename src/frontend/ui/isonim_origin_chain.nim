@@ -36,7 +36,7 @@ import std/[options, sequtils, strformat, strutils]
 
 import isonim/core/signals
 
-import ../viewmodel/viewmodels/[origin_chain_types, origin_chain_vm]
+import ../viewmodel/viewmodels/[origin_chain_types, origin_chain_vm, state_pane_keys]
 import origin_badge
 
 type
@@ -217,6 +217,35 @@ proc hopAriaLabel*(hop: OriginHop; index: int): string =
     of okUnknown:         "unknown"
   fmt"hop {index + 1}: {kindLabel} at step {hop.stepId}"
 
+proc frameTransitionLabel*(transition: FrameTransition): string =
+  ## A hop's call crossing as the side panel prints it:
+  ## "↘ into helper" (a parameter pass), "↗ back to main" (a return).
+  case transition.kind
+  of ftkParameterPass:
+    "↘ into " & (if transition.toFunction.len > 0: transition.toFunction
+                 else: "the callee")
+  of ftkReturnCapture:
+    "↗ back to " & (if transition.toFunction.len > 0: transition.toFunction
+                    else: "the caller")
+
+const LowConfidenceBelow* = 0.7
+  ## A hop whose confidence is below this is a low-confidence hop
+  ## (Value-Origin-Tracking.md §3.2.2, "Side panel"; §13.6 holds an ambiguous
+  ## write below it).
+
+proc hopConfidenceLabel*(confidence: float): string =
+  ## A hop's confidence as the side panel prints it: two decimals at most,
+  ## one at least ("0.6", "0.75", "1.0"). The wire carries an f32, so a
+  ## recorded 0.6 arrives as 0.6000000238…; rounding is what keeps it "0.6".
+  result = formatFloat(confidence, ffDecimal, 2)
+  if result.endsWith("0") and not result.endsWith(".0"):
+    result.setLen(result.len - 1)
+
+proc isLowConfidence*(confidence: float): bool =
+  ## Compared at the precision the label shows, so a hop that reads "0.7" is
+  ## not flagged low because its f32 is 0.69999….
+  hopConfidenceLabel(confidence).parseFloat < LowConfidenceBelow
+
 proc focusNextHop*(panel: var OriginChainPanel; chain: OriginChain) =
   ## ↓ key. Wraps from the last hop back to 0.
   if chain.hops.len == 0:
@@ -278,6 +307,10 @@ iterator items*(panel: OriginChainPanel): int =
 
 when defined(js):
   import std/dom
+  import ../viewmodel/input/dom_pointer
+
+  const ContinueChainOperation = "origin-chain.continue"
+    ## The operation the side panel's "Continue tracing" carries.
 
   # ---------------------------------------------------------------------
   # Per-row event handlers.
@@ -293,6 +326,14 @@ when defined(js):
   # call creates a real per-handler scope, so each closure keeps its own
   # values.
   # ---------------------------------------------------------------------
+
+  proc breadcrumbEntryHandler(vm: OriginChainVM; index: int): proc(ev: Event) =
+    ## A press on a query breadcrumb goes back to it (§3.3,
+    ## `OriginChainVM.onSelectBreadcrumb`). A factory, so each entry's
+    ## closure holds its own index (Nim closures in a loop share the loop's
+    ## variables).
+    result = proc(_: Event) =
+      vm.onSelectBreadcrumb(index)
 
   proc breadcrumbChipHandler(vm: OriginChainVM;
                              chip: BreadcrumbChip): proc(ev: Event) =
@@ -312,13 +353,22 @@ when defined(js):
           vm.onSwitchToSpan(s)
           return
 
-  proc hopSeekHandler(vm: OriginChainVM; index: int): proc(ev: Event) =
+  proc insideOperands(ev: Event): bool {.importjs:
+    "(#.target.closest('details') !== null)".}
+
+  proc hopRowClickHandler(vm: OriginChainVM; index: int): proc(ev: Event) =
+    ## A press anywhere on the row, through the rule every front-end's click
+    ## on a hop goes through (`state_pane_keys.stateRowClick`). The operand
+    ## snapshots under the row open and close by themselves.
     let hopIndex = index
-    result = proc(_: Event) =
+    result = proc(ev: Event) =
       let active = vm.activeChain.val
-      if active.isNone:
+      if active.isNone or insideOperands(ev):
         return
-      vm.seekToHopInOwningProcess(active.get, hopIndex)
+      let effect = stateRowClick(active.get.chainKeyRows,
+                                 StateCursor(hop: hopIndex))
+      if effect.kind == skeSeek:
+        vm.seekToHopInOwningProcess(active.get, effect.hop)
 
   proc renderPanelDom*(parent: Node;
                        vm: OriginChainVM;
@@ -380,11 +430,17 @@ when defined(js):
                                breadcrumbChipHandler(vm, chipCopy))
         nav.appendChild(crumb)
     else:
-      for entry in vm.breadcrumbStack.val:
+      let entries = vm.breadcrumbStack.val
+      for index, entry in entries:
         let crumb = document.createElement(cstring"button")
         crumb.setAttribute(cstring"class",
                            cstring"breadcrumb-chip ct-origin-breadcrumb-entry")
         crumb.innerText = cstring(entry.variableName & "@" & $entry.stepId)
+        if index == entries.len - 1:
+          # The query the panel shows: announced as the current step.
+          crumb.setAttribute(cstring"aria-current", cstring"step")
+        crumb.addEventListener(cstring"click",
+                               breadcrumbEntryHandler(vm, index))
         nav.appendChild(crumb)
     section.appendChild(nav)
 
@@ -421,8 +477,31 @@ when defined(js):
       # `seekToHopInOwningProcess` also rotates the active recording
       # when the hop lives in a sibling process, so a chain that walked
       # a boundary can be navigated back across it.
-      button.addEventListener(cstring"click", hopSeekHandler(vm, hopIndex))
       li.appendChild(button)
+      # The hop's confidence, as text (§3.2.2 "Side panel", §13.0): the
+      # number, and for a low-confidence hop the "!" glyph with its label.
+      let confidence = document.createElement(cstring"span")
+      confidence.setAttribute(cstring"class", cstring"ct-origin-hop-confidence")
+      confidence.textContent =
+        cstring("confidence " & hopConfidenceLabel(hop.confidence))
+      li.appendChild(confidence)
+      if hop.frameTransition.isSome:
+        # The hop crosses a call (spec §4.1 `FrameTransition`): ↘ into the
+        # callee for a parameter pass, ↗ back to the caller for a return.
+        let transition = document.createElement(cstring"span")
+        transition.setAttribute(cstring"class", cstring"ct-origin-frame-transition")
+        transition.textContent = cstring(frameTransitionLabel(hop.frameTransition.get))
+        li.appendChild(transition)
+      if isLowConfidence(hop.confidence):
+        let low = document.createElement(cstring"span")
+        low.setAttribute(cstring"class", cstring"ct-origin-low-confidence")
+        let glyph = document.createElement(cstring"span")
+        glyph.setAttribute(cstring"aria-hidden", cstring"true")
+        glyph.textContent = cstring"!"
+        low.appendChild(glyph)
+        low.appendChild(document.createTextNode(cstring" low confidence"))
+        li.appendChild(low)
+      li.addEventListener(cstring"click", hopRowClickHandler(vm, hopIndex))
       if hop.operandSnapshots.len > 0:
         let details = document.createElement(cstring"details")
         let summary = document.createElement(cstring"summary")
@@ -449,6 +528,25 @@ when defined(js):
     ol.appendChild(termLi)
 
     let footer = document.createElement(cstring"footer")
+    if chain.canContinue:
+      # "Continue tracing" (spec §5.3.1): the engine cut this chain off at
+      # its limits; it goes on from where it stopped.
+      let continueBtn = document.createElement(cstring"button")
+      continueBtn.setAttribute(cstring"class", cstring"ct-origin-continue-chain")
+      let continuing = vm.isContinuing(SidePanelContinuation)
+      continueBtn.innerText =
+        if continuing: cstring"Continuing…" else: cstring"Continue tracing"
+      if continuing:
+        continueBtn.setAttribute(cstring"disabled", cstring"true")
+      # The press is routed (Input-Routing §5.1): the button carries its
+      # operation, performed on the panel's chain.
+      continueBtn.setAttribute(cstring OperationAttribute,
+                               cstring ContinueChainOperation)
+      let continuedVm = vm
+      registerElementOperation(ContinueChainOperation, proc(p: ElementPress): bool =
+        continuedVm.continueActiveChain()
+        true)
+      footer.appendChild(continueBtn)
     let pinBtn = document.createElement(cstring"button")
     pinBtn.innerText = cstring"Pin to scratchpad"
     let pinHandler = proc(_: Event) =

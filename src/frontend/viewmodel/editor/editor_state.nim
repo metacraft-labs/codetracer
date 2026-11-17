@@ -91,6 +91,32 @@ type
     emReplace = "replace"
     emOperatorPending = "operator-pending"
 
+  PointerUnit* = enum
+    ## What a pointer gesture selects by (Editor-Pane.md MC.4). `puNone` means
+    ## no gesture holds an anchor.
+    puNone = "none"
+    puCharacter = "character"
+    puWord = "word"
+    puLine = "line"
+    puDocument = "document"
+    puColumn = "column"
+
+  PointerAnchor* = object
+    ## The unit a multi-click or a line-number press selected, Monaco's
+    ## `SingleCursorState.selectionStart` with its `SelectionStartKind`. A drag
+    ## and a Shift+press extend from it a whole unit at a time and never shrink
+    ## below it.
+    ##
+    ## `selection` is the selection the gesture left. The anchor is alive only
+    ## while that is still the document's selection (`pointerAnchorAlive`), so
+    ## a key, a find or an edit ends it without any of them knowing it exists.
+    unit*: PointerUnit
+    first*, last*: int
+      ## Byte offsets of the unit, `[first, last)`.
+    columnLine*, columnFrom*: int
+      ## `puColumn`: the 0-based line and display column the block grew from.
+    selection*: EditorSelection
+
   RegisterKind* = enum
     ## Whether a register's payload was taken linewise. `paste-after` puts a
     ## linewise payload on the NEXT line and a charwise one after the caret,
@@ -250,6 +276,11 @@ type
       ## same rule (`mapLinesThrough`) but, being this state's own sets, simply
       ## lose a deleted line.
 
+    pointerAnchor*: PointerAnchor
+      ## The pointer gesture's anchor unit (Editor-Pane.md MC.4).
+    wordSeparators*: string
+      ## `editor.wordSeparators`, the pointer's word (MC.3). Empty means the
+      ## default, `word_classifier.UsualWordSeparators`.
     search*: SearchState
     comments*: LanguageComments
     indentUnit*: string
@@ -321,6 +352,11 @@ proc initEditorState*(doc: string; selection = default(EditorSelection);
     filters: @[],
     history: initHistory())
 
+func pointerAnchorAlive*(st: EditorState): bool =
+  ## Whether a pointer gesture's anchor still describes the selection: any
+  ## selection change that did not come from the pointer ends it (MC.4).
+  st.pointerAnchor.unit != puNone and st.pointerAnchor.selection == st.selection
+
 func `==`*(a, b: Register): bool =
   a.text == b.text and a.kind == b.kind
 
@@ -358,7 +394,8 @@ func `==`*(a, b: EditorState): bool =
     a.search == b.search and a.comments == b.comments and
     a.indentUnit == b.indentUnit and a.parse == b.parse and
     a.filters == b.filters and
-    a.history == b.history
+    a.history == b.history and a.wordSeparators == b.wordSeparators and
+    a.pointerAnchor == b.pointerAnchor
 
 func primaryHead*(st: EditorState): int =
   ## The head of the primary range. Raises through `mainRange` on the zero

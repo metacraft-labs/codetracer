@@ -29,6 +29,7 @@ export table_overflow
 
 when defined(js):
   import std/jsffi
+  import ../input/dom_pointer
 
   const
     TableCellAttribute* = "data-ct-cell"
@@ -95,6 +96,8 @@ when defined(js):
       const w = c.measureText('0000000000').width / 10;
       return w > 0 ? w : 8;
     })(#)""".}
+  proc containsJs(a, b: JsObject): bool {.importjs:
+    "((a, b) => !!a && !!b && a.contains(b))(#, #)".}
   proc attr(el: JsObject; name: cstring): cstring
     {.importjs: "(#.getAttribute(#) || '')".}
   proc hasAttr(el: JsObject; name: cstring): bool
@@ -102,7 +105,11 @@ when defined(js):
     ## Whether the attribute is present at all: `attr` answers "" both for a
     ## missing attribute and for one set to "".
   proc setAttr(el: JsObject; name, value: cstring)
-    {.importjs: "#.setAttribute(#, #)".}
+    {.importjs: "(function(e,n,v){if(e.getAttribute(n)!==v)e.setAttribute(n,v);})(#,#,#)".}
+    ## Writes only a CHANGED value. The fit pass runs on every repaint of a
+    ## table, and nearly every cell's verdict is the one it already carries;
+    ## an unconditional `setAttribute` made a DOM mutation of each, which a
+    ## `MutationObserver` (the pointer stamp's, a test's) has to process.
   proc removeAttr(el: JsObject; name: cstring)
     {.importjs: "#.removeAttribute(#)".}
   proc queryAll(el: JsObject; sel: cstring): seq[JsObject]
@@ -383,25 +390,64 @@ when defined(js):
     result = openDetail.toggleDetail(pane, key, column)
     refreshTablePanes()
 
+  const ShowDetail = "list.show-detail"
+    ## What a press on a cut cell's `…` runs: its row's full text under it
+    ## (the operation the keyboard reaches it by).
+
+  proc paneOfCell(cell: JsObject): TablePaneDom =
+    for t in tablePanes:
+      if t.root.containsJs(cell): return t
+
+  proc onEllipsis(cell, ev: JsObject): bool =
+    ## Whether a press at `ev` is on `cell`'s `…`: its last character.
+    if cell.isNil or cell.attr(TableCutAttribute).len == 0: return false
+    let r = cell.rectOf
+    let x = ev.clientX.to(float)
+    x >= r.right.to(float) - 1.5 * cell.jsCharPx and x <= r.right.to(float)
+
+  proc ellipsisHit(target, ev: JsObject): ElementHit =
+    ## The table panes' own hit test (§5.3; `dom_pointer.registerHitTest`):
+    ## the `…` of a cut cell, a part no selector names, is an element of
+    ## kind `value` carrying `list.show-detail`, pressed on the press (the
+    ## row's click must not follow it).
+    let cell = target.closest(cstring("[" & TableCellAttribute & "]"))
+    if paneOfCell(cell).isNil or not onEllipsis(cell, ev):
+      return
+    ElementHit(element: cell, kind: "value", operation: ShowDetail,
+               pressDown: true)
+
+  var ellipsisRouted = false
+
+  proc routeEllipsisPresses() =
+    ## A press on a `…` is routed (Input-Routing-And-Keymaps.md §5.1): the
+    ## hit test above names it, the router decides (a user's row first), and
+    ## this is the procedure for `list.show-detail` on a cut cell.
+    if ellipsisRouted: return
+    ellipsisRouted = true
+    registerHitTest("*", ellipsisHit)
+    let previous = elementOperationProcedure(ShowDetail)
+    registerElementOperation(ShowDetail, proc(p: ElementPress): bool =
+      let t = paneOfCell(p.element)
+      if t.isNil or p.element.attr(TableCellAttribute).len == 0:
+        return (if previous.isNil: false else: previous(p))
+      dismissHover()
+      let parts = p.element.parts
+      lastPressedTablePane = t.pane
+      t.pressedKey = parts.key
+      discard toggleTableDetail(parts.pane, parts.key, parts.column)
+      # The click that ends the press goes no further (`onClick`).
+      t.swallowClick = true
+      true)
+
   proc onPress(t: TablePaneDom; ev: JsObject) =
-    ## A press in the pane: the row it is on becomes the pane's row; a press
-    ## on a cut cell's `…` (its last character) opens its row's detail and
-    ## goes no further — the row's own click (a jump) does not run.
+    ## A press in the pane: a shown hover goes, and the row it is on becomes
+    ## the pane's row (its focus). A press on a cut cell's `…` is routed
+    ## (`ellipsisHit`) and does not reach here.
     dismissHover()
     let cell = ev.target.closest(cstring("[" & TableCellAttribute & "]"))
     lastPressedTablePane = t.pane
     if cell.isNil: return
     t.pressedKey = cell.parts.key
-    if cell.attr(TableCutAttribute).len == 0: return
-    let r = cell.rectOf
-    let x = ev.clientX.to(float)
-    if x >= r.right.to(float) - 1.5 * cell.jsCharPx and
-       x <= r.right.to(float):
-      let p = cell.parts
-      discard toggleTableDetail(p.pane, p.key, p.column)
-      t.swallowClick = true
-      discard ev.preventDefault()
-      discard ev.stopPropagation()
 
   proc onClick(t: TablePaneDom; ev: JsObject) =
     ## The click that ends a `…` press goes no further (a row's click jumps
@@ -432,7 +478,8 @@ when defined(js):
     let onLeave = proc(ev: JsObject) =
       if hover.pointerOver("", "", "", "", false, int64(nowMs())): hideTooltip()
     root.listen(cstring"mouseleave", onLeave, false)
-    root.listen(cstring"mousedown", proc(ev: JsObject) = t.onPress(ev), true)
+    routeEllipsisPresses()
+    root.listen(cstring"mousedown", proc(ev: JsObject) = t.onPress(ev), true)  # ir1-gate: focus (the pane's row)
     root.listen(cstring"click", proc(ev: JsObject) = t.onClick(ev), true)
     root.listen(cstring"dblclick", proc(ev: JsObject) = t.onClick(ev), true)
     t.observer = newObserver(proc() = t.schedule())

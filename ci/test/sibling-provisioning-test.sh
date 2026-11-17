@@ -262,7 +262,12 @@ echo "siblings: entries pin a reproducible revision"
 # 15 -> 14: test-ui-tests no longer lists `nim-stackable-hooks=dev`.
 # provision-repro-lock-siblings now clones it at the revision repro.lock pins.
 # Converted by deletion.
-readonly BRANCH_TIP_CEILING=14
+#
+# 14 -> 11 (2026-11-17): codetracer.yml's two `nim-stackable-hooks=dev` entries
+# and its `codetracer-js-recorder=dev` name the commits both locks lock
+# (073193067, 1df4100fb), now that flake.nix follows those repositories'
+# `agents` branches.
+readonly BRANCH_TIP_CEILING=11
 
 # Classify one sibling entry's ref text. Factored out of the scanner so it can
 # be exercised directly by the self-test below: a detector that silently stops
@@ -475,54 +480,37 @@ echo "the from-source dependency siblings resolve from this repo's repro.lock"
 
 readonly LOCK_ACTION="$ACTIONS_DIR/provision-repro-lock-siblings/action.yml"
 readonly REPRO_LOCK="$REPO_ROOT/repro.lock"
-# The dependency set `repro.lock`'s `codetracer` node declares, in the order it
-# declares them. Pinned here so that a repo silently added to or dropped from
-# the lock is a failure rather than a quiet change of what CI provisions.
+# The dependency set is DERIVED, not pinned here. It used to be a 61-name list
+# re-taken from repro.lock by hand (last on 2026-11-14), compared against the
+# `codetracer` node's `depends`. Two things retired that:
 #
-# It is the whole develop set: the from-source build inputs AND the siblings
-# the test lanes are run against (recorders, native backend, trace format),
-# which `clone-siblings` resolves by bare name from this lock. Several of the
-# latter are private, and none is something a Nim build compiles, so the
-# provisioning action clones only the build-input subset below.
+#   * reprobuild 5a1326957 takes a repo's dependencies only from its
+#     `repro.nim` `uses:` and records the lock as a GRAPH: the root's `depends`
+#     lists the DIRECT dependencies, and the `deps` entries hold the whole
+#     transitive set the recipes derive. The develop set is therefore every
+#     `deps` entry other than codetracer's own.
+#   * The owner rule is that `repro.nim` is the one declaration and the lock
+#     holds exactly what it derives. A second hand-kept list here was a second
+#     declaration, and on 2026-11-15 it disagreed with the lock in 48 places.
 #
-# Re-taken from repro.lock on 2026-10-22 at codetracer `2b2ba87ae`. The lock had
-# grown from 17 members to 50 (its relocks since the last update added the
-# IsoNim renderer, TermAssert, observability and native-runtime siblings), and
-# its build-input subset from 6 to 13: `codetracer-trace-format-nim` and the
-# IsoNim libraries the lock now solves as packages. The current lock also
-# declares a private-recordings test input, which is not a build input.
+# So the assertions below check the lock against `repro.nim` and against what
+# the workflows check out, with no list of names of their own:
 #
-# Not every build input is public: `codetracer-image-diff` is private, so the
-# clone needs a credential, and assertion "the clone is given the job's
-# credential" below checks that it gets one. (This comment once said all of
-# them were public, backed by an assertion that read the lock's `visibility`
-# field. That field is a reprobuild configuration tier and says "public" for
-# every entry, private repositories included, so it could not catch this.)
+#   1. the develop set is exactly the closure of the root's direct `depends`
+#      over the `deps` graph (nothing dangling, nothing orphaned), each direct
+#      member is declared in `repro.nim` (a `uses:` entry, or the `../<name>/`
+#      source import that brings in `reprobuild-packages`), and every sibling a
+#      workflow checks out BY BARE NAME -- resolved against this lock -- is a
+#      member;
+#   2. `provision-repro-lock-siblings` clones the whole declared set: the
+#      owner's decision (2026-11-16, "clone all"). Every `uses:` sibling is now
+#      a solved package, so the lock no longer separates Nim build inputs from
+#      test-lane siblings, and the selector returns every develop-set member
+#      that is a solved package -- computed here independently;
+#   3. every member carries a 40-hex revision.
 #
-# 13 -> 18 (2026-10-31): test-certificates-tools and codetracer-image-diff were
-# already solved as packages, and this list had not followed them. io-mon and
-# nim-stackable-hooks are new: `ct` imports both, so repro.nim now declares them
-# from source, and io-mon brings nim-shm-queue with it. nim-shm-gset is not solved
-# as a package, so jobs that compile io-mon's capture half still name it.
-# infra and isonim-platform are test dependencies, not solved build inputs:
-# ci/test/identity-live-device-grant.sh reads infra's shared SSO descriptor and
-# supports isonim-platform's local stack, while ct-host-container-gate uses
-# isonim-platform's sessionctl through host-image-serves-in-incus-vm.sh.
-# Keep both in the full develop-set inventory without adding them to the
-# build-input subset cloned by provision-repro-lock-siblings.
-#
-# 18 -> 19 (2026-11-05): nim-agents-isonim-viewmodels. The StoryBook components
-# bundle imports it, and config.nims put it on the search path while the lock
-# did not name it, so no lane provisioned it (codetracer-pm issue
-# 2026-11-05-codetracer-imports-nim-agents-isonim-viewmodels-without-declaring-it.md).
-# ci/test/nim-config-siblings-pinned-test.sh now fails a sibling the Nim
-# configs read and the lock does not pin.
-readonly LOCK_DECLARED_DEPS='isonim,isonim-tui,codetracer-trace-format-nim,nim-everywhere,nim-agent-harbor,nim-agents,nim-agents-isonim-viewmodels,nim-acp,test-certificates-tools,io-mon,nim-stackable-hooks,codetracer-image-diff,isonim-render-serve,nim-termctl,nim-pty,nim-shm-queue,isonim-gpui,isonim-freya,isonim-cocoa,reprobuild-packages,TermAssert,TermAssertClient,codetracer-beam-recorder,codetracer-ci,codetracer-evm-recorder,codetracer-js-recorder,codetracer-launcher,codetracer-native-backend,codetracer-native-recorder,codetracer-native-test-programs,codetracer-observability-cli,codetracer-observability-e2e,codetracer-observability-grafana,codetracer-observability-jaeger,codetracer-private-recordings,codetracer-python-recorder,codetracer-ruby-recorder,codetracer-test-mirror,codetracer-trace-format,codetracer-visual-replay,codetracer-vscode-extension,codetracer-wasm-instrumenter,codetracer-wasm-recorder,isonim-examples,metacraft-github-actions,ngx-isonim,nim-faststreams,nim-libvterm,nim-shm-gset,nim-stew,reprobuild,runquota,tree-sitter-aiken,tree-sitter-nim,infra,isonim-platform'
-# The build-input subset of that set (members that are also solved packages,
-# i.e. what `repro.nim` `uses` from source), as
-# `ci/repro-lock-build-input-siblings.sh` derives it from the lock. This is
-# what `provision-repro-lock-siblings` clones.
-readonly LOCK_BUILD_INPUT_SIBLINGS='isonim,isonim-tui,codetracer-trace-format-nim,nim-everywhere,nim-agent-harbor,nim-agents,nim-agents-isonim-viewmodels,nim-acp,test-certificates-tools,io-mon,nim-stackable-hooks,codetracer-image-diff,isonim-render-serve,nim-termctl,nim-pty,nim-shm-queue,isonim-gpui,isonim-freya,isonim-cocoa'
+# The test lanes' siblings are not in this set: ci/test/siblings/repro.lock
+# pins them, and the TEST LOCK assertions further down check that lock.
 readonly BUILD_INPUT_SELECTOR="$REPO_ROOT/ci/repro-lock-build-input-siblings.sh"
 
 # Anti-vacuity first: the action must exist and must still invoke the command
@@ -597,38 +585,133 @@ else
 		"${lock_action_handwritten[@]}"
 fi
 
-# The lock itself: the `codetracer` node's `depends` field is the declaration
-# `repro develop --all` resolves.
+# The lock itself. `deps` entries open `{ name = "<n>", ` followed by
+# `self = "true", ` (codetracer's own, v3), `path = "<p>", ` (v2) or directly
+# `coord_kind`; codetracer's entry is the one marked self (or at path ".").
+lock_root_depends=""
+lock_develop_set=""
+declare -A lock_edges=()
 if [ -f "$REPRO_LOCK" ]; then
-	actual_deps="$(grep -o 'name = "codetracer", \(self = "true"\|path = "\."\)[^}]*depends = "[^"]*"' "$REPRO_LOCK" |
+	lock_root_depends="$(grep -o 'name = "codetracer", \(self = "true"\|path = "\."\)[^}]*depends = "[^"]*"' "$REPRO_LOCK" |
 		sed 's/.*depends = "//; s/"$//' | head -n 1)"
-else
-	actual_deps="<repro.lock not found>"
+	while IFS=$'\t' read -r dep_name dep_depends; do
+		lock_edges["$dep_name"]="$dep_depends"
+		lock_develop_set="${lock_develop_set:+$lock_develop_set,}$dep_name"
+	done < <(grep -o '{ name = "[^"]*", \(path = "[^"]*", \)\?coord_kind = [^}]*' "$REPRO_LOCK" |
+		grep -v '^{ name = "codetracer", path = "\.", ' |
+		sed -n 's/^{ name = "\([^"]*\)", .*depends = "\([^"]*\)".*/\1\t\2/p')
 fi
 
-if [ "$actual_deps" = "$LOCK_DECLARED_DEPS" ]; then
-	ok "repro.lock declares the dependency set CI provisions ($actual_deps)"
+# Compared as SETS (sorted, duplicates kept so a repeated name still differs):
+# `repro lock` does not keep the order of `depends` stable across refreshes.
+sorted_dep_set() { tr ',' '\n' <<<"$1" | sed '/^$/d' | LC_ALL=C sort; }
+
+# 1a. The develop set is the closure of the root's direct dependencies.
+closure=""
+pending="$lock_root_depends"
+declare -A seen=()
+while [ -n "$pending" ]; do
+	IFS=',' read -r -a _frontier <<<"$pending"
+	pending=""
+	for dep in "${_frontier[@]}"; do
+		[ -n "$dep" ] && [ -z "${seen[$dep]:-}" ] || continue
+		seen["$dep"]=1
+		closure="${closure:+$closure,}$dep"
+		pending="${pending:+$pending,}${lock_edges[$dep]:-}"
+	done
+done
+unset seen
+if [ -n "$lock_root_depends" ] &&
+	[ "$(sorted_dep_set "$closure")" = "$(sorted_dep_set "$lock_develop_set")" ]; then
+	ok "repro.lock's develop set is the closure of codetracer's direct dependencies ($(sorted_dep_set "$lock_develop_set" | wc -l) siblings)"
 else
-	fail "repro.lock declares the dependency set CI provisions" \
-		"this is the develop set: the build-input subset is what" \
-		"provision-repro-lock-siblings clones, and every member is what" \
-		"clone-siblings resolves a bare sibling name against" \
-		"expected: $LOCK_DECLARED_DEPS" \
-		"actual:   $actual_deps"
+	fail "repro.lock's develop set is the closure of codetracer's direct dependencies" \
+		"every \`deps\` entry must be reached from the root's \`depends\`, and every" \
+		"name an edge reaches must have its own entry; anything else is a lock" \
+		"'repro lock refresh' did not write" \
+		"reached but no entry:   $(comm -23 <(sorted_dep_set "$closure") <(sorted_dep_set "$lock_develop_set") | paste -sd, -)" \
+		"entry but not reached:  $(comm -13 <(sorted_dep_set "$closure") <(sorted_dep_set "$lock_develop_set") | paste -sd, -)" \
+		"root depends: ${lock_root_depends:-<none>}"
 fi
 
-# ... of which the build inputs are the part a Nim build clones.
+# 1b. Each direct dependency is declared in repro.nim, the one declaration.
+undeclared_direct=()
+IFS=',' read -r -a _direct <<<"$lock_root_depends"
+for dep in "${_direct[@]}"; do
+	[ -n "$dep" ] || continue
+	grep -Eq "^[[:space:]]*\"$dep [^\"]*\"|import \"\.\./$dep/" "$REPO_ROOT/repro.nim" ||
+		undeclared_direct+=("$dep")
+done
+if [ -n "$lock_root_depends" ] && [ "${#undeclared_direct[@]}" -eq 0 ]; then
+	ok "every direct dependency in repro.lock is declared in repro.nim (${#_direct[@]})"
+else
+	fail "every direct dependency in repro.lock is declared in repro.nim" \
+		"repro.lock records what repro.nim derives; a direct dependency repro.nim" \
+		"does not name is a pin nothing declares" \
+		"root depends: ${lock_root_depends:-<none>}" \
+		"not in repro.nim: ${undeclared_direct[*]-}"
+fi
+
+# 1c. Every sibling a workflow checks out by BARE name is resolved against
+# this lock (`clone-siblings`: a bare or trailing-`=` entry falls back to the
+# lock), so each must be a member. `siblings:` blocks are scanned above;
+# `extra-siblings:` blocks feed the same `siblings:` input of
+# setup-db-backend-siblings. `test-siblings:` names resolve against the test
+# lock instead, and are checked with it below.
+bare_names=()
+while IFS= read -r bare; do
+	[ -n "$bare" ] && bare_names+=("$bare")
+done < <(
+	for wf in "${SIBLING_SOURCE_FILES[@]}"; do
+		awk '
+			/^[[:space:]]*(siblings|extra-siblings): *\|/ { match($0, /^[[:space:]]*/); key = RLENGTH; inb = 1; next }
+			inb {
+				if ($0 ~ /^[[:space:]]*$/) { inb = 0; next }
+				match($0, /^[[:space:]]*/); if (RLENGTH <= key) { inb = 0; next }
+				line = $0; sub(/#.*/, "", line); gsub(/[[:space:]]/, "", line)
+				if (line == "" || line ~ /\$\{\{/) next
+				if (line !~ /=/ || line ~ /=$/) { sub(/=$/, "", line); print line }
+			}' "$wf"
+	done | LC_ALL=C sort -u
+)
+unlocked_bare=()
+for bare in "${bare_names[@]}"; do
+	[[ ",$lock_develop_set," == *",$bare,"* ]] || unlocked_bare+=("$bare")
+done
+if [ "${#bare_names[@]}" -gt 0 ] && [ "${#unlocked_bare[@]}" -eq 0 ]; then
+	ok "every sibling the workflows check out by bare name is in repro.lock (${#bare_names[@]})"
+else
+	fail "every sibling the workflows check out by bare name is in repro.lock" \
+		"clone-siblings resolves a bare name against this lock, so a name it does" \
+		"not pin fails the clone; declare it in repro.nim 'uses:' and relock" \
+		"found ${#bare_names[@]} bare name(s)" \
+		"not in repro.lock: ${unlocked_bare[*]-}"
+fi
+
+# 2. ... and provision-repro-lock-siblings clones all of it: every member that
+# is a solved package, computed here without the selector.
+expected_build_inputs=()
+IFS=',' read -r -a _members <<<"$lock_develop_set"
+for dep in "${_members[@]}"; do
+	grep -Eq "\\{ name = \"$dep\", version = \"[^\"]*\", source = \"$dep\"" "$REPRO_LOCK" &&
+		expected_build_inputs+=("$dep")
+done
 if [ -x "$BUILD_INPUT_SELECTOR" ]; then
 	actual_build_inputs="$("$BUILD_INPUT_SELECTOR" "$REPRO_LOCK" 2>&1)" || true
 else
 	actual_build_inputs="<$BUILD_INPUT_SELECTOR is missing or not executable>"
 fi
-if [ "$actual_build_inputs" = "$LOCK_BUILD_INPUT_SIBLINGS" ]; then
-	ok "the lock's build-input siblings are the set provision-repro-lock-siblings clones ($actual_build_inputs)"
+expected_joined="$(
+	IFS=','
+	echo "${expected_build_inputs[*]}"
+)"
+if [ "${#expected_build_inputs[@]}" -gt 0 ] &&
+	[ "$(sorted_dep_set "$actual_build_inputs")" = "$(sorted_dep_set "$expected_joined")" ]; then
+	ok "provision-repro-lock-siblings clones every solved sibling in repro.lock (${#expected_build_inputs[@]})"
 else
-	fail "the lock's build-input siblings are the set provision-repro-lock-siblings clones" \
+	fail "provision-repro-lock-siblings clones every solved sibling in repro.lock" \
 		"this is what every job using the action checks out next to codetracer" \
-		"expected: $LOCK_BUILD_INPUT_SIBLINGS" \
+		"expected: $expected_joined" \
 		"actual:   $actual_build_inputs"
 fi
 
@@ -644,6 +727,243 @@ if [ "$path_free_inputs" = "$actual_build_inputs" ]; then
 else
 	fail "path-free v3 locks select the same build-input siblings" \
 		"expected: $actual_build_inputs" "actual: $path_free_inputs"
+fi
+
+# THE TEST LOCK. The siblings the test lanes run against and no build compiles
+# -- the scenario runner, its backends and the terminal harness -- are pinned
+# by ci/test/siblings/repro.lock, a project of its own nested here, and not by
+# repro.lock. repro.lock is refreshed from repro.nim on every push, and
+# repro.nim names only what the product is built from, so each refresh dropped
+# them, and each time every scenario job stopped at "'--only=DemoVideoScript'
+# names no repo in this workspace's lock set" (codetracer-pm issue
+# 2026-11-15-repro-lock-refreshes-drop-the-scenario-lanes-test-siblings).
+readonly TEST_LOCK="$REPO_ROOT/ci/test/siblings/repro.lock"
+# The scenario siblings, and the repositories a workflow clones at an explicit
+# ref that repro.nim does not declare (2026-11-17).
+readonly TEST_LOCK_DECLARED_DEPS='DemoVideoScript,DemoVideoScript-TermAssert,DemoVideoScript-GuiAssert,DemoVideoScript-Playwright,GuiAssert,TermAssert,TermAssertClient,nim-libvterm,nim-pty,codetracer-cairo-recorder,codetracer-cardano-recorder,codetracer-circom-recorder,codetracer-flow-recorder,codetracer-fuel-recorder,codetracer-leo-recorder,codetracer-miden-recorder,codetracer-move-recorder,codetracer-php-recorder,codetracer-polkavm-recorder,codetracer-solana-recorder,codetracer-ton-recorder,codetracer-flame-demo,codetracer-pm,codetracer-visual-replay-fixtures,test-certificates-spec,codetracer-example-recordings'
+# The members that are ONLY test siblings. They must not come back into
+# repro.lock: two locks pinning one repository is two answers to "which
+# revision?", and the product lock's answer is the one a refresh deletes.
+readonly TEST_ONLY_SIBLINGS='DemoVideoScript,DemoVideoScript-TermAssert,DemoVideoScript-GuiAssert,DemoVideoScript-Playwright,GuiAssert'
+
+# lock_rev <lock> <name> -> the revision the lock's deps entry records, or ''.
+lock_rev() {
+	grep -o "name = \"$2\", \\(self = \"true\", \\)\\?coord_kind = \"vcs\", url = \"[^\"]*\", revision = \"[0-9a-f]*\"" "$1" 2>/dev/null |
+		sed 's/.*revision = "//; s/"$//' | head -n 1
+}
+
+# The test lock's closure: every entry it pins. Its root entry's `depends`
+# names only the direct dependencies (reprobuild 0.2.25 records the graph), and
+# DemoVideoScript, GuiAssert and the terminal harness arrive through the
+# backends.
+if [ -f "$TEST_LOCK" ]; then
+	test_lock_deps="$(grep -o '{ name = "[^"]*", coord_kind = "vcs"' "$TEST_LOCK" |
+		sed 's/{ name = "//; s/".*//' | paste -sd, -)"
+else
+	test_lock_deps="<$TEST_LOCK not found>"
+fi
+if [ "$(sorted_dep_set "$test_lock_deps")" = "$(sorted_dep_set "$TEST_LOCK_DECLARED_DEPS")" ]; then
+	ok "the test lock declares the test siblings ($test_lock_deps)"
+else
+	fail "the test lock declares the test siblings" \
+		"ci/test/siblings/repro.lock is what provision-repro-lock-siblings clones" \
+		"every test-siblings name from" \
+		"missing from the test lock: $(comm -23 <(sorted_dep_set "$TEST_LOCK_DECLARED_DEPS") <(sorted_dep_set "$test_lock_deps") | paste -sd, -)" \
+		"not declared here:          $(comm -13 <(sorted_dep_set "$TEST_LOCK_DECLARED_DEPS") <(sorted_dep_set "$test_lock_deps") | paste -sd, -)"
+fi
+
+test_lock_defects=()
+IFS=',' read -r -a _test_declared <<<"$TEST_LOCK_DECLARED_DEPS"
+for name in "${_test_declared[@]}"; do
+	rev="$(lock_rev "$TEST_LOCK" "$name")"
+	if ! [[ $rev =~ ^[0-9a-f]{40}$ ]]; then
+		test_lock_defects+=("$name: the test lock records no 40-hex revision ('$rev')")
+		continue
+	fi
+	# A repository both locks pin must be one commit: nim-pty is a build input
+	# of ct AND what TermAssert drives, and the TUI lanes compile both halves
+	# against the one ../nim-pty checkout.
+	product_rev="$(lock_rev "$REPRO_LOCK" "$name")"
+	if [ -n "$product_rev" ] && [ "$product_rev" != "$rev" ]; then
+		test_lock_defects+=("$name: the test lock pins $rev, repro.lock pins $product_rev")
+	fi
+done
+IFS=',' read -r -a _test_only <<<"$TEST_ONLY_SIBLINGS"
+for name in "${_test_only[@]}"; do
+	if [ -n "$(lock_rev "$REPRO_LOCK" "$name")" ]; then
+		test_lock_defects+=("$name is pinned by repro.lock too; it belongs to the test lock only")
+	fi
+done
+if [ "${#test_lock_defects[@]}" -eq 0 ]; then
+	ok "every test sibling has one 40-hex pin, and the two locks agree where both pin a repo"
+else
+	fail "every test sibling has one 40-hex pin, and the two locks agree where both pin a repo" \
+		"${test_lock_defects[@]}"
+fi
+
+# The action clones test-siblings from the test lock: `repro develop` reads the
+# lock of the project it runs in, so it has to run in ci/test/siblings.
+if [ -f "$LOCK_ACTION" ] && grep -q 'cd ci/test/siblings && exec repro develop --all --only=' "$LOCK_ACTION"; then
+	ok "provision-repro-lock-siblings clones test-siblings from the test lock"
+else
+	fail "provision-repro-lock-siblings clones test-siblings from the test lock" \
+		"its test-siblings must be resolved by 'repro develop' run in ci/test/siblings;" \
+		"from the codetracer root they resolve against repro.lock, which does not pin them"
+fi
+
+# Every name a job passes as test-siblings is one the test lock pins; anything
+# else stops that job at "names no repo in this workspace's lock set".
+test_sibling_defects=()
+while IFS= read -r hit; do
+	file="${hit%%:*}"
+	rest="${hit#*:}"
+	line="${rest%%:*}"
+	value="$(sed 's/.*test-siblings:[[:space:]]*//; s/[[:space:]]*$//' <<<"${rest#*:}")"
+	IFS=',' read -r -a _named <<<"$value"
+	for name in "${_named[@]}"; do
+		if ! grep -qx -- "$name" <(sorted_dep_set "$test_lock_deps"); then
+			test_sibling_defects+=("${file##*/}:$line: '$name' is not in the test lock")
+		fi
+	done
+done < <(grep -n -H -E '^[[:space:]]+test-siblings:[[:space:]]*[A-Za-z]' "$WORKFLOW_DIR"/*.yml 2>/dev/null)
+if [ "${#test_sibling_defects[@]}" -eq 0 ]; then
+	ok "every test-siblings name is one the test lock pins"
+else
+	fail "every test-siblings name is one the test lock pins" "${test_sibling_defects[@]}"
+fi
+
+# EVERY REPO A WORKFLOW CLONES IS DECLARED BY A LOCK. A sibling that no lock
+# declares is one `repro lock refresh` is free to drop, or never had, and each
+# such drop surfaced only when a job died on it. So every clone in the
+# workflows and the composite actions is matched against the two locks' develop
+# sets: a BARE `siblings:` / `extra-siblings:` entry is resolved by
+# `clone-siblings` against repro.lock, so repro.lock must declare it; an entry
+# with an explicit `=<ref>`, and a `clone-repo` / `checkout` of a
+# `metacraft-labs/<repo>`, must be declared by one of the two (a ref chosen in a
+# workflow is still a dependency some repro.nim owns). `test-siblings` names are
+# checked against the test lock above.
+cloned_repos() {
+	local f label
+	for f in "$WORKFLOW_DIR"/*.yml "$ACTIONS_DIR"/*/action.yml; do
+		[ -f "$f" ] || continue
+		label="${f#"$REPO_ROOT"/}"
+		awk -v F="$label" '
+			/^[ \t]+(siblings|extra-siblings): \|[ \t]*$/ { inblock = 1; next }
+			inblock {
+				if ($0 ~ /^[ \t]*$/ || $0 ~ /^[ \t]*#/ || index($0, "${{") > 0) next
+				if ($0 ~ /^[ \t]+[A-Za-z0-9_.-]+(=[^ \t]+)?[ \t]*(#.*)?$/) {
+					entry = $1
+					kind = (index(entry, "=") > 0) ? "ref" : "bare"
+					sub(/=.*/, "", entry)
+					print F ":" NR " " kind " " entry
+					next
+				}
+				inblock = 0
+			}
+			/^[ \t]+repo(sitory)?:[ \t]*metacraft-labs\/[A-Za-z0-9_.-]+[ \t]*$/ {
+				name = $2
+				sub(/^metacraft-labs\//, "", name)
+				print F ":" NR " clone " name
+			}
+		' "$f"
+	done
+}
+
+# The repos a workflow clones that neither lock declares, each with the reason.
+# Keep it short: an entry leaves as soon as its repo can be declared, and an
+# entry whose repo a lock does declare is itself a failure, so the list cannot
+# go stale.
+declare -A CLONED_BUT_UNDECLARED=(
+)
+
+root_set="$(sorted_dep_set "$lock_develop_set")"
+test_set="$(sorted_dep_set "$test_lock_deps")"
+undeclared_clones=()
+for name in "${!CLONED_BUT_UNDECLARED[@]}"; do
+	if grep -qx -- "$name" <<<"$root_set" || grep -qx -- "$name" <<<"$test_set"; then
+		undeclared_clones+=("'$name' is declared by a lock now; remove it from CLONED_BUT_UNDECLARED")
+	fi
+done
+cloned_count=0
+while read -r where kind name; do
+	[ -n "$name" ] || continue
+	[ "$name" = codetracer ] && continue
+	cloned_count=$((cloned_count + 1))
+	in_root=0
+	in_test=0
+	grep -qx -- "$name" <<<"$root_set" && in_root=1
+	grep -qx -- "$name" <<<"$test_set" && in_test=1
+	if [ "$kind" = bare ]; then
+		if [ "$in_root" -eq 0 ]; then
+			if [ "$in_test" -eq 1 ]; then
+				undeclared_clones+=("$where: '$name' is a bare entry, which clone-siblings resolves against repro.lock, but only the test lock declares it; pass it as provision-repro-lock-siblings' test-siblings")
+			else
+				undeclared_clones+=("$where: '$name' (bare) is declared by neither repro.lock nor the test lock")
+			fi
+		fi
+	elif [ "$in_root" -eq 0 ] && [ "$in_test" -eq 0 ] && [ -z "${CLONED_BUT_UNDECLARED[$name]:-}" ]; then
+		undeclared_clones+=("$where: '$name' ($kind) is declared by neither repro.lock nor the test lock")
+	fi
+done < <(cloned_repos)
+if [ "$cloned_count" -eq 0 ]; then
+	fail "every repo a workflow clones is declared by repro.lock or the test lock" \
+		"no clone was found at all, so this checked nothing"
+elif [ "${#undeclared_clones[@]}" -eq 0 ]; then
+	ok "every repo a workflow clones is declared by repro.lock or the test lock ($cloned_count clones)"
+else
+	fail "every repo a workflow clones is declared by repro.lock or the test lock" \
+		"declare a test-only sibling in ci/test/siblings/repro.nim, a product one in" \
+		"repro.nim, and refresh that lock" \
+		"${undeclared_clones[@]}"
+fi
+
+# ONE PACKAGE CATALOG. ci/repro-lock-catalog-agreement.sh fails when a sibling's
+# own repro.lock pins another reprobuild-packages revision than repro.lock;
+# reprobuild refuses to compile a solve against two catalogs, which is how the
+# arm64-macosx re-solve died (root 2c58192a, runquota 15ceea67). It must run
+# after the clone, and it must tell agreement from disagreement.
+readonly CATALOG_CHECK="$REPO_ROOT/ci/repro-lock-catalog-agreement.sh"
+catalog_fixture="$(mktemp -d)"
+cat_rev_a=1111111111111111111111111111111111111111
+cat_rev_b=2222222222222222222222222222222222222222
+cat_entry() { printf '{ name = "reprobuild-packages", coord_kind = "vcs", url = "https://github.com/metacraft-labs/reprobuild-packages", revision = "%s", integrity = "git-sha1:%s", version = "", visibility = "public", participation = "", depends = "", tags = "" }' "$1" "$1"; }
+mkdir -p "$catalog_fixture/root" "$catalog_fixture/alpha" "$catalog_fixture/beta"
+printf 'deps = [{ name = "root", self = "true", coord_kind = "vcs", url = "", revision = "", integrity = "", version = "", visibility = "public", participation = "", depends = "alpha,beta,reprobuild-packages", tags = "" }, %s]\n' "$(cat_entry $cat_rev_a)" >"$catalog_fixture/root/repro.lock"
+printf 'deps = [%s]\n' "$(cat_entry $cat_rev_a)" >"$catalog_fixture/alpha/repro.lock"
+printf 'deps = [%s]\n' "$(cat_entry $cat_rev_a)" >"$catalog_fixture/beta/repro.lock"
+catalog_agree_rc=0
+bash "$CATALOG_CHECK" "$catalog_fixture/root/repro.lock" "$catalog_fixture" >/dev/null 2>&1 || catalog_agree_rc=$?
+printf 'deps = [%s]\n' "$(cat_entry $cat_rev_b)" >"$catalog_fixture/beta/repro.lock"
+catalog_disagree_rc=0
+catalog_disagree_out="$(bash "$CATALOG_CHECK" "$catalog_fixture/root/repro.lock" "$catalog_fixture" 2>&1)" || catalog_disagree_rc=$?
+rm -rf "$catalog_fixture"
+catalog_defects=()
+[ "$catalog_agree_rc" -eq 0 ] || catalog_defects+=("it rejects siblings that pin the root's catalog (rc $catalog_agree_rc)")
+[ "$catalog_disagree_rc" -eq 1 ] || catalog_defects+=("it accepts a sibling that pins another catalog (rc $catalog_disagree_rc)")
+grep -q 'beta pins reprobuild-packages' <<<"$catalog_disagree_out" || catalog_defects+=("its refusal does not name the sibling")
+grep -q 'bash ci/repro-lock-catalog-agreement.sh repro.lock \.\.' "$LOCK_ACTION" || catalog_defects+=("provision-repro-lock-siblings does not run it on the cloned siblings")
+if [ "${#catalog_defects[@]}" -eq 0 ]; then
+	ok "every cloned sibling's lock must pin repro.lock's package catalog, and the check tells the two apart"
+else
+	fail "every cloned sibling's lock must pin repro.lock's package catalog, and the check tells the two apart" "${catalog_defects[@]}"
+fi
+
+# The scenario jobs upload a failed run with DemoVideoScript's own action. It
+# is the runner's code, so it is pinned to the runner's revision.
+dvs_pin="$(lock_rev "$TEST_LOCK" DemoVideoScript)"
+upload_defects=()
+while IFS= read -r hit; do
+	sha="${hit##*@}"
+	sha="${sha%%[[:space:]]*}"
+	if [ "$sha" != "$dvs_pin" ]; then
+		upload_defects+=("${hit%%:*}: upload-failed-runs@$sha, the test lock pins DemoVideoScript at $dvs_pin")
+	fi
+done < <(grep -n -H -o 'metacraft-labs/DemoVideoScript/.github/actions/upload-failed-runs@[0-9a-f]*' "$WORKFLOW_DIR"/*.yml 2>/dev/null |
+	sed 's|^\([^:]*/\)\{0,1\}||')
+if [ "${#upload_defects[@]}" -eq 0 ]; then
+	ok "upload-failed-runs is pinned to the DemoVideoScript revision the test lock pins"
+else
+	fail "upload-failed-runs is pinned to the DemoVideoScript revision the test lock pins" "${upload_defects[@]}"
 fi
 
 # The selector runs in a raw `shell: bash` step BEFORE the dev shell, and on
@@ -824,7 +1144,7 @@ if [ -f "$LOCK_ACTION" ]; then
 		*'repro develop --all'*) ls_develops[cur]=$((ls_develops[cur] + 1)) ;;
 		esac
 		case "$stripped" in
-		*'nix develop .#ci --command true'*) ls_realises[cur]=1 ;;
+		*'nix develop .#ci --command true'* | *'nix develop .#ci --profile '*' --command true'*) ls_realises[cur]=1 ;;
 		esac
 		case "$stripped" in
 		*GIT_CONFIG_COUNT* | *GIT_CONFIG_KEY_* | *GIT_CONFIG_VALUE_* | *GIT_CONFIG_PARAMETERS*)
@@ -1037,7 +1357,7 @@ fi
 # other lock.
 unpinned_deps=()
 if [ -f "$REPRO_LOCK" ]; then
-	IFS=',' read -r -a _declared <<<"$LOCK_DECLARED_DEPS"
+	IFS=',' read -r -a _declared <<<"$lock_develop_set"
 	for dep in "${_declared[@]}"; do
 		rev="$(grep -o "name = \"$dep\"[^}]*revision = \"[^\"]*\"" "$REPRO_LOCK" |
 			sed 's/.*revision = "//; s/"$//' | head -n 1)"
@@ -1107,7 +1427,7 @@ fi
 # nim-stackable-hooks stays out until its two flake.lock nodes agree (see the
 # ceiling note above); its entries are `=dev` anyway.
 # ---------------------------------------------------------------------------
-readonly FLAKE_PINNED_SIBLINGS='codetracer-trace-format codetracer-trace-format-nim codetracer-native-recorder codetracer-native-backend codetracer-visual-replay io-mon isonim isonim-tui isonim-gpui nim-everywhere nim-termctl nim-pty nim-acp nim-agent-harbor nim-agents'
+readonly FLAKE_PINNED_SIBLINGS='codetracer-trace-format codetracer-trace-format-nim codetracer-native-recorder codetracer-native-backend codetracer-visual-replay io-mon isonim isonim-tui isonim-gpui nim-everywhere nim-termctl nim-pty nim-acp nim-agent-harbor nim-agents reprobuild'
 
 # jq, not python3: jq is on every runner this suite is meant to run on -- the
 # stock ubuntu-latest of `ci-contract-suites` and the self-hosted NixOS and
@@ -1960,6 +2280,10 @@ untokened_submodule_checkouts=()
 # workflow, or the whole file for a composite action (which has no jobs but can
 # still declare steps and consume their outputs).
 declare -A SCOPE_MINT_IDS=()
+# Steps that run ./.github/actions/refresh-github-token, by job: its `token`
+# output is a fresh mint of the same App token, so a later step may name it.
+# Kept apart from SCOPE_MINT_IDS so a refresh is never a "second mint".
+declare -A SCOPE_REFRESH_IDS=()
 # Parallel list of "scope<TAB>id<TAB>where" consumer records, validated after
 # each file is fully read -- a consumer may legally precede its mint in the
 # file even though it cannot precede it at runtime.
@@ -2121,6 +2445,12 @@ scan_credential_file() {
 		esac
 
 		case "$stripped" in
+		'uses: ./.github/actions/refresh-github-token' | '- uses: ./.github/actions/refresh-github-token')
+			[ -n "$cur_step_id" ] && SCOPE_REFRESH_IDS["$wf_name|$scope"]+=" $cur_step_id"
+			;;
+		esac
+
+		case "$stripped" in
 		'uses: actions/checkout@'* | '- uses: actions/checkout@'*)
 			in_checkout=1
 			checkout_line="$line_no"
@@ -2249,7 +2579,7 @@ for record in ${CONSUMER_RECORDS+"${CONSUMER_RECORDS[@]}"}; do
 	tail_="${record#*	}"
 	ref_id="${tail_%%	*}"
 	where="${tail_#*	}"
-	declared="${SCOPE_MINT_IDS[$key]-}"
+	declared="${SCOPE_MINT_IDS[$key]-}${SCOPE_REFRESH_IDS[$key]-}"
 	case " $declared " in
 	*" $ref_id "*) ;;
 	*)
@@ -2812,7 +3142,19 @@ echo
 # expired inside a cold realisation of that shell.
 # 40 -> 42: every mint supplies the private key from its owning context, and
 # mutation controls prove that missing or wrong-source inputs are rejected.
-readonly EXPECTED_ASSERTIONS=42
+# 42 -> 47 (2026-11-16): the test lock, ci/test/siblings/repro.lock. It declares
+# the test siblings; each has one 40-hex pin and agrees with repro.lock where
+# both pin a repo; the action clones test-siblings from it; every
+# test-siblings name is in it; upload-failed-runs follows its DemoVideoScript.
+# 47 -> 49 (2026-11-17): the fixed develop-set list is replaced by checks
+# derived from repro.lock and repro.nim. "repro.lock declares the dependency
+# set CI provisions" became three: the develop set is the closure of the
+# root's direct dependencies, each direct dependency is declared in repro.nim,
+# and every bare-name workflow sibling is in the lock. The build-input
+# assertion now expects every solved sibling ("clone all").
+# 49 -> 51 (2026-11-17): every repo a workflow clones is declared by a lock,
+# and every cloned sibling's lock pins repro.lock's package catalog.
+readonly EXPECTED_ASSERTIONS=51
 if [ "$assertions" -ne "$EXPECTED_ASSERTIONS" ]; then
 	printf 'FAIL: ran %d assertions, expected %d\n' "$assertions" "$EXPECTED_ASSERTIONS"
 	failures=$((failures + 1))

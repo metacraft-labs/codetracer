@@ -435,27 +435,37 @@ jobs:
             # again 2026-10-27: deploy run 40431335005 failed at "renderer: did
             # not build" -- `isonim_menu_shell_view.nim` calls
             # `firstElementChild`, which isonim 45673bba does not define.
-            # isonim and isonim-tui refreshed again 2026-11-01.
-            isonim=6a72640a17341b9d8cd64c5d58093516707a7ae9
-            isonim-tui=ff295f7be6d7efc095ef4d249b1df0577d969c89
-            isonim-gpui=65e7c654802f1641ef64aa1eb759c7f46f70f1bc
-            nim-everywhere=1ef439320e7c11cad9a11a13960e94d37afe8482
-            nim-termctl=16a81f4d2fc90598a4c61b72aaf93b51162bed3e
-            nim-pty=2845abd58dd2073475177301590c8b51aa5c9094
-            nim-acp=9f3c80611590cdd8c0dc1b9f7ad31b9741260cb6
-            nim-agent-harbor=4e9b8208b312a949a15dfcf1f3eb9491da78ad64
-            nim-agents=35f30a9543375ac9af873d69ced375295a92b3d0
+            # isonim and isonim-tui refreshed again 2026-11-01; isonim-tui and
+            # isonim-gpui again 2026-11-09, after the flake.lock re-pin ffbaf94f3;
+            # isonim-gpui again 2026-11-11, after cfdda1ce1; isonim-tui again
+            # 2026-11-12 (its web driver reads the browser's capabilities).
+            # nim-agents 2026-11-14, after flake.lock moved it (7736bcea7ff).
+            # isonim, isonim-gpui, nim-everywhere, nim-termctl, nim-pty, nim-acp and
+            # nim-agent-harbor 2026-11-15, after the lock re-pin 7cae04a33.
+            # isonim, nim-pty and nim-agents 2026-11-16, to the revisions
+            # flake.lock and repro.lock pin (they had moved past this list).
+            isonim=03183989147a6e5d109bf03638dc49bb74ecf248
+            isonim-tui=8e43ce06f7f078530c7a8585c210ad7648fa0051
+            isonim-gpui=2db29d9fa463ee6975ba436844553993a385661f
+            nim-everywhere=2f5b67a5dafd96ca5d57c9270fc3c2da2c5f2b0b
+            nim-termctl=63560ed41ce0fea563431a44db9e9d852cd703dd
+            nim-pty=6ffb8d788e8a740ca78ec29c7a3a489a13818bcb
+            nim-acp=0bf10b4c35064a08d8c96eb912190521322017e2
+            nim-agent-harbor=9694f6b41be21315243df1b19cabd02c5f271d7d
+            nim-agents=e2a1a7aaf8f93a0c214435bce7611210c7080292
             # THE REPROBUILD-PACKAGES CATALOG, pinned to the revision the
-            # locked reprobuild (flake.lock `reprobuild`, 9ceb532d) is tested
+            # locked reprobuild (flake.lock `reprobuild`, 372aece6) is tested
             # against: its own `.github/sibling-repos` pins
-            # `reprobuild-packages=eed38ecc…`. `repro.nim`'s `uses:` names
+            # `reprobuild-packages=b68b01d3…`. `repro.nim`'s `uses:` names
             # `shellcheck`, which that reprobuild no longer bundles; the
-            # catalog defines it from eed38ec on. The flake input
-            # `reprobuild-packages` tracks the catalog's `dev`, which does not
-            # define it yet, so the `.#ci` shell's REPROBUILD_PACKAGES_ROOT
-            # cannot evaluate `repro.nim` ("no reachable catalog defines it").
-            # The bundle build points REPROBUILD_PACKAGES_ROOT here instead.
-            reprobuild-packages=eed38eccb797876e43517ac62c40fd1ea0b5b5c7
+            # catalog defines it from eed38ec on. The bundle build points
+            # REPROBUILD_PACKAGES_ROOT here. TO REFRESH: when flake.lock moves
+            # `reprobuild`, copy the `reprobuild-packages=` line from that
+            # revision's `.github/sibling-repos`. (The flake input
+            # `reprobuild-packages`, 2c58192, is a later catalog commit that
+            # also defines it; this entry deliberately follows reprobuild's
+            # tested pairing rather than the flake input.)
+            reprobuild-packages=b68b01d3a775709869b1f2ba5f7f70f01873f20c
 
       - name: Remove sibling checkouts this job did not clone
         # Persistent runners keep earlier jobs' sibling clones beside the

@@ -1,0 +1,506 @@
+{
+  "_comment": [
+    "CTF-P1b — THE REGIONS OF AN AGENT HARBOR STORY, NAMING NO RENDERER'S LAYOUT.",
+    "",
+    "Each region is one part of a story's drawing — the view, its frame's title",
+    "tab, the head and the rows of a panel or list, the active tab, the +N chip,",
+    "the '+' control, a hover popup, an open dropdown, a loading / empty / error",
+    "notice — and says which element it is in EACH renderer, in that renderer's",
+    "own terms: `web` is a CSS selector over the web views' classes (the first",
+    "visible match in document order, `document.querySelector`), `gpui` the",
+    "`data-ah-*` facts the GPUI views put on the element (every one present; a",
+    "non-empty value must match exactly). It is read by both capture paths and",
+    "transcribed into neither: `tools/visual-review/capture-storybook.mjs",
+    "--regions` (the browser's `getBoundingClientRect`) and `codetracer-gpui-story",
+    "--regions` (GPUI's own layout, read back through isonim-gpui's",
+    "`layout_bounds`). Where it is laid out is each renderer's own answer.",
+    "",
+    "A region a story does not draw is absent from both sides' answer; a region",
+    "one side draws and the other does not is a failure of",
+    "`test_ctf_p1b_gpui_capture_matches_web_layout`, which compares the two",
+    "answers with PLAT-35's pane-rectangle comparator (`layout_questions",
+    ".compareAnswer`, `PaneRectangleTolerancePp`: 2 hundredths of the viewport",
+    "per edge, never raised).",
+    "",
+    "A region marked `fill` is also checked for its BACKGROUND, which no layout",
+    "answer carries: the web capture records the colour the browser composites",
+    "behind the element (its own background over its ancestors'), and the layout",
+    "test reads the GPUI frame's pixel 4px in from the region's right edge, half",
+    "way down -- inside the element's padding, clear of its text -- against it.",
+    "",
+    "The ROW regions (`*-first`, `*-last`) are single rows of a list: the first",
+    "one, and (`\"pick\": \"last-whole\"`) the last one drawn whole, its bottom",
+    "edge inside the viewport. A list compared as one block keeps its outer box when every",
+    "row inside it is drawn a few pixels taller, so the rows drift down unseen;",
+    "the first row's height and the last visible row's position catch that",
+    "drift. A region with a `pick` also reports its `index` among the visible",
+    "matches on both sides, and the layout test requires the two to agree: two",
+    "different rows that each sit near the bottom of their window can be within",
+    "the tolerance of each other by position alone.",
+    "",
+    "`milestone-bar` and `milestone-legend` are the first milestone bar drawn",
+    "and the counts beside (or, labelled, under) it. A bar can be the wrong",
+    "width while the row around it keeps its box: the web gives the legend",
+    "`min-width: 9rem` so the bars of all rows end together, and a view that",
+    "did not drew its bar about 70px wider.",
+    "",
+    "A region with `px` (a list of its edges among `x`, `y`, `w`, `h`) is also",
+    "compared on those edges IN PIXELS, to within `PxTolerance` (2px) of the",
+    "web's, on top of the pane-rectangle comparison, which it does not replace.",
+    "Two hundredths of a 1440px viewport are 29px: a tab 9px narrower than the",
+    "web's, an error reason on 19px lines instead of 16px, a head 8px short or a",
+    "notice running into the strip's 8px inset all pass it. These regions are",
+    "the ones whose size the views compute themselves (the single-line tabs'",
+    "Flexbox shrink, the inbox position's minimum, the strip notice's budget,",
+    "the error reason's line pitch, the list head's rows, the docked summary's",
+    "offset; the initiative bar's tabs, `+N` and \"+\", the `bar-*` regions,",
+    "whose places follow from the inactive tabs' widths; and a tab bar's",
+    "`caption`, whose height follows from its lines), so a pixel-level answer",
+    "is the one that can fail.",
+    "",
+    "`bar-overflow-menu` is the initiative bar's `+N` menu alone (`menu` is",
+    "whichever dropdown is open). It hangs from its chip, `bar-overflow`: the",
+    "layout test holds its right edge to the chip's on each side, shifted only",
+    "as far as the window requires. `strip-overflow-menu` and `strip-overflow`",
+    "are the session strip's menu and chip, held to the same rule.",
+    "",
+    "`bar-active-tab-label`, `-progress` and `-recordings` are the initiative bar's",
+    "active tab's title, its `n/m` and its recording buttons. They are compared as",
+    "pane rectangles only, not in pixels: GPUI sets each run of text in a box its",
+    "width rounded up to a whole pixel, so a row of runs differs from the browser's",
+    "by up to a pixel a run. What must agree exactly is whether the title is cut",
+    "(`elision`, below): two hosts can give the tab the same width and still cut",
+    "its title in one and not the other. `playback-readout` and",
+    "`playback-moment` are the story hosts' playback bar's readout and the moment",
+    "it names, whose width (`px`) is what the bar left it: a moment cut to two",
+    "letters on one side, or dropped, is a different width from the whole one.",
+    "",
+    "A region with `elision` is a line of text, and each side also reports whether",
+    "it is cut (`cut`: its words wider than its box; the browser measures them",
+    "with a Range, GPUI from the width the view says they take, `data-ah-text-px`).",
+    "`same`: cut on both sides or on neither -- a box can be the same width on",
+    "both sides within every tolerance and still cut the words on one (a 0.2px",
+    "shortfall elides a title). `never`: cut on neither side."
+  ],
+  "schemaVersion": 1,
+  "regions": [
+    {
+      "name": "surface",
+      "web": ".ah-tab-caption, .ah-session-list, .agent-harbor-initiatives, .agent-harbor-progress, .agent-harbor-fleet",
+      "gpui": {
+        "data-ah-surface": ""
+      }
+    },
+    {
+      "name": "frame-header",
+      "web": ".lm_header",
+      "gpui": {
+        "data-ah-frame-header": ""
+      }
+    },
+    {
+      "name": "head",
+      "web": ".ah-fleet-head, .ah-session-list-head",
+      "gpui": {
+        "data-ah-head": ""
+      }
+    },
+    {
+      "name": "rows",
+      "web": ".ah-fleet-list, .ah-session-list-rows",
+      "gpui": {
+        "data-ah-rows": ""
+      }
+    },
+    {
+      "name": "active-tab",
+      "web": ".session-tab.active",
+      "gpui": {
+        "data-ah-tab": "",
+        "data-ah-active": "true"
+      },
+      "fill": true
+    },
+    {
+      "name": "active-row",
+      "web": ".ah-session-row-active",
+      "gpui": {
+        "data-ah-row": "",
+        "data-ah-active": "true"
+      },
+      "fill": true
+    },
+    {
+      "name": "selected-row",
+      "web": ".ah-fleet-row-selected, .ah-initiative-row-selected",
+      "gpui": {
+        "data-ah-selected": "true"
+      },
+      "fill": true
+    },
+    {
+      "name": "overflow",
+      "web": ".session-tab-overflow",
+      "gpui": {
+        "data-ah-overflow": ""
+      }
+    },
+    {
+      "name": "add",
+      "web": ".session-tab-add",
+      "gpui": {
+        "data-ah-add": ""
+      }
+    },
+    {
+      "name": "controls",
+      "web": ".ah-bar-controls",
+      "gpui": {
+        "data-ah-controls": ""
+      }
+    },
+    {
+      "name": "popup",
+      "web": ".ah-initiative-popup",
+      "gpui": {
+        "data-ah-popup": ""
+      }
+    },
+    {
+      "name": "menu",
+      "web": ".session-tab-overflow-menu",
+      "gpui": {
+        "data-ah-menu": ""
+      }
+    },
+    {
+      "name": "notice",
+      "web": ".empty-overlay, .ah-fleet-error, .ah-tab-loading, .ah-tab-error, .ah-tab-empty",
+      "gpui": {
+        "data-ah-notice": ""
+      }
+    },
+    {
+      "name": "fleet-row-first",
+      "web": ".ah-fleet-row",
+      "gpui": {
+        "data-ah-row": "",
+        "data-ah-category": ""
+      },
+      "pick": "first"
+    },
+    {
+      "name": "fleet-row-last",
+      "web": ".ah-fleet-row",
+      "gpui": {
+        "data-ah-row": "",
+        "data-ah-category": ""
+      },
+      "pick": "last-whole"
+    },
+    {
+      "name": "session-row-first",
+      "web": ".ah-session-row",
+      "gpui": {
+        "data-ah-row": "",
+        "data-ah-attention": ""
+      },
+      "pick": "first"
+    },
+    {
+      "name": "session-row-last",
+      "web": ".ah-session-row",
+      "gpui": {
+        "data-ah-row": "",
+        "data-ah-attention": ""
+      },
+      "pick": "last-whole"
+    },
+    {
+      "name": "initiative-row-first",
+      "web": ".ah-initiative-row",
+      "gpui": {
+        "data-ah-initiative": ""
+      },
+      "pick": "first"
+    },
+    {
+      "name": "initiative-row-last",
+      "web": ".ah-initiative-row",
+      "gpui": {
+        "data-ah-initiative": ""
+      },
+      "pick": "last-whole"
+    },
+    {
+      "name": "session-line-first",
+      "web": ".ah-initiative-session",
+      "gpui": {
+        "data-ah-session": ""
+      },
+      "pick": "first"
+    },
+    {
+      "name": "session-line-last",
+      "web": ".ah-initiative-session",
+      "gpui": {
+        "data-ah-session": ""
+      },
+      "pick": "last-whole"
+    },
+    {
+      "name": "milestone-row-first",
+      "web": ".ah-milestone",
+      "gpui": {
+        "data-ah-milestone": ""
+      },
+      "pick": "first"
+    },
+    {
+      "name": "milestone-row-last",
+      "web": ".ah-milestone",
+      "gpui": {
+        "data-ah-milestone": ""
+      },
+      "pick": "last-whole"
+    },
+    {
+      "name": "milestone-bar",
+      "web": ".ah-ms-bar",
+      "gpui": {
+        "data-ah-ms-bar": ""
+      }
+    },
+    {
+      "name": "milestone-legend",
+      "web": ".ah-ms-legend",
+      "gpui": {
+        "data-ah-ms-legend": ""
+      }
+    },
+    {
+      "name": "menu-item-first",
+      "web": ".ah-tab-overflow-item",
+      "gpui": {
+        "data-ah-menu-item": ""
+      },
+      "pick": "first"
+    },
+    {
+      "name": "menu-item-last",
+      "web": ".ah-tab-overflow-item",
+      "gpui": {
+        "data-ah-menu-item": ""
+      },
+      "pick": "last-whole"
+    },
+    {
+      "name": "inactive-tab-first",
+      "web": ".ah-tab-strip:not(.ah-initiative-tab-bar) .session-tab.ah-tab:not(.active)",
+      "gpui": {
+        "data-ah-session-tab": "",
+        "data-ah-active": "false"
+      },
+      "pick": "first",
+      "px": [
+        "x",
+        "w"
+      ]
+    },
+    {
+      "name": "inactive-tab-last",
+      "web": ".ah-tab-strip:not(.ah-initiative-tab-bar) .session-tab.ah-tab:not(.active)",
+      "gpui": {
+        "data-ah-session-tab": "",
+        "data-ah-active": "false"
+      },
+      "pick": "last-whole",
+      "px": [
+        "x",
+        "w"
+      ]
+    },
+    {
+      "name": "strip-notice",
+      "web": ".ah-tab-strip .session-tab.ah-tab-notice",
+      "gpui": {
+        "data-ah-strip-notice": ""
+      },
+      "px": [
+        "x",
+        "w"
+      ]
+    },
+    {
+      "name": "error-reason",
+      "web": ".ah-fleet-error-message",
+      "gpui": {
+        "data-ah-error-reason": ""
+      },
+      "px": [
+        "y",
+        "h"
+      ]
+    },
+    {
+      "name": "list-head",
+      "web": ".ah-session-list-head",
+      "gpui": {
+        "data-ah-head": "sessions"
+      },
+      "px": [
+        "h"
+      ]
+    },
+    {
+      "name": "list-summary",
+      "web": ".ah-session-list-summary",
+      "gpui": {
+        "data-ah-list-summary": ""
+      },
+      "px": [
+        "x"
+      ]
+    },
+    {
+      "name": "inbox-position",
+      "web": ".ah-inbox-position",
+      "gpui": {
+        "data-ah-inbox-slot": ""
+      },
+      "px": [
+        "x",
+        "w"
+      ]
+    },
+    {
+      "name": "bar-tab-first",
+      "web": ".ah-initiative-tab-bar .session-tab.ah-tab:not(.ah-tab-notice):not(.active)",
+      "gpui": {
+        "data-ah-bar-tab": "",
+        "data-ah-active": "false"
+      },
+      "pick": "first",
+      "px": [
+        "x",
+        "w"
+      ]
+    },
+    {
+      "name": "bar-tab-last",
+      "web": ".ah-initiative-tab-bar .session-tab.ah-tab:not(.ah-tab-notice):not(.active)",
+      "gpui": {
+        "data-ah-bar-tab": "",
+        "data-ah-active": "false"
+      },
+      "pick": "last-whole",
+      "px": [
+        "x",
+        "w"
+      ]
+    },
+    {
+      "name": "bar-active-tab",
+      "web": ".ah-initiative-tab-bar .session-tab.ah-tab:not(.ah-tab-notice).active",
+      "gpui": {
+        "data-ah-bar-tab": "",
+        "data-ah-active": "true"
+      },
+      "px": [
+        "x",
+        "w"
+      ]
+    },
+    {
+      "name": "bar-overflow",
+      "web": ".ah-initiative-tab-bar .session-tab-overflow",
+      "gpui": {
+        "data-ah-bar-overflow": ""
+      },
+      "px": [
+        "x"
+      ]
+    },
+    {
+      "name": "bar-add",
+      "web": ".ah-initiative-tab-bar .session-tab-add",
+      "gpui": {
+        "data-ah-bar-add": ""
+      },
+      "px": [
+        "x"
+      ]
+    },
+    {
+      "name": "bar-overflow-menu",
+      "web": ".ah-initiative-tab-bar .ah-overflow-menu",
+      "gpui": {
+        "data-ah-bar-menu": "overflow"
+      }
+    },
+    {
+      "name": "strip-overflow",
+      "web": ".ah-tab-strip:not(.ah-initiative-tab-bar) > .session-tab-overflow",
+      "gpui": {
+        "data-ah-strip-overflow": ""
+      }
+    },
+    {
+      "name": "strip-overflow-menu",
+      "web": ".ah-tab-strip:not(.ah-initiative-tab-bar) > .session-tab-overflow-menu",
+      "gpui": {
+        "data-ah-strip-menu": "overflow"
+      }
+    },
+    {
+      "name": "caption",
+      "web": ".ah-tab-caption",
+      "gpui": {
+        "data-ah-caption": ""
+      },
+      "px": [
+        "h"
+      ]
+    },
+    {
+      "name": "bar-active-tab-label",
+      "web": ".ah-initiative-tab-bar .session-tab.ah-tab:not(.ah-tab-notice).active .session-tab-label",
+      "gpui": {
+        "data-ah-bar-tab-label": "true"
+      },
+      "elision": "same"
+    },
+    {
+      "name": "playback-readout",
+      "web": ".ah-playback .ah-playback-readout",
+      "gpui": {
+        "data-ah-playback-readout": ""
+      }
+    },
+    {
+      "name": "playback-moment",
+      "web": ".ah-playback .ah-playback-moment",
+      "gpui": {
+        "data-ah-playback-moment": ""
+      },
+      "px": [
+        "w"
+      ],
+      "elision": "never"
+    },
+    {
+      "name": "bar-active-tab-progress",
+      "web": ".ah-initiative-tab-bar .session-tab.ah-tab:not(.ah-tab-notice).active .ah-tab-progress",
+      "gpui": {
+        "data-ah-bar-tab-progress": "true"
+      }
+    },
+    {
+      "name": "bar-active-tab-recordings",
+      "web": ".ah-initiative-tab-bar .session-tab.ah-tab:not(.ah-tab-notice).active .ah-tab-recordings",
+      "gpui": {
+        "data-ah-recordings": ""
+      }
+    }
+  ]
+}

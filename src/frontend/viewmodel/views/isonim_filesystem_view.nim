@@ -57,6 +57,7 @@
 ##   handle the dynamic content).
 
 import std/[strutils, tables]
+import ./field_keys
 when defined(js):
   # Enter and Space on a `role="button"` row are its click.
   import ./isonim_activation
@@ -274,11 +275,13 @@ when defined(js):
         if not run.isNil:
           run())
 
-  proc showFileTreeMenu(vm: FilesystemVM; path: string; ev: isonim_dom.Event) =
-    var items: seq[ContextMenuItem] = @[]
+  proc fileTreeMenuItems*(vm: FilesystemVM; path: string): seq[ContextMenuItem] =
+    ## A node's menu (`FilesystemVM.openFileTreeMenu`) as the shared
+    ## right-click menu's items. A right press anywhere on the row (its
+    ## whole-row band, icon or label) is the pointer row `context-menu.open`,
+    ## performed by the front-end with these (`input/dom_pane_presses`).
     for entry in vm.openFileTreeMenu(path):
-      items.add toContextMenuItem(entry)
-    showContextMenu(items, ev.eventClientX(), ev.eventClientY())
+      result.add toContextMenuItem(entry)
 
 # This module's own names for the two event calls. Generic code that called
 # `preventDefault` would leave it an open symbol (kdom and mock_dom both
@@ -293,23 +296,6 @@ template isDomElement(N: typedesc): bool =
 proc fsPreventDefault(ev: MockEvent) = ev.preventDefault()
 proc fsStopPropagation(ev: MockEvent) = ev.stopPropagation()
 
-proc bindRowContextMenu[R, N](r: R; vm: FilesystemVM; row: N; path: string) =
-  ## A right-click anywhere on the row (its whole-row band, icon or label)
-  ## opens that row's menu. The browser's own menu is suppressed, and the
-  ## event stops at the row so an enclosing folder's row does not open its
-  ## menu on top. A factory, so each row's closure owns its own `path`.
-  mixin addEventListener
-  when isDomElement(N):
-    isonim_dom.addEventListener(isonim_dom.Node(row), cstring"contextmenu",
-      proc(ev: isonim_dom.Event) =
-        ev.fsPreventDefault()
-        ev.fsStopPropagation()
-        showFileTreeMenu(vm, path, ev))
-  elif N is MockNode:
-    r.addEventListener(row, "contextmenu", proc(ev: MockEvent) =
-      ev.fsPreventDefault()
-      ev.fsStopPropagation()
-      discard vm.openFileTreeMenu(path))
 
 proc renderNameField[R, N](r: R; vm: FilesystemVM;
                            edit: FileTreeNameEdit): N =
@@ -338,16 +324,17 @@ proc renderNameField[R, N](r: R; vm: FilesystemVM;
   when isDomElement(N):
     setFieldValue(input, cstring(vm.nameEditDraft))
     let inputNode = isonim_dom.Node(input)
-    isonim_dom.addEventListener(inputNode, cstring"keydown",
+    isonim_dom.addEventListener(inputNode, cstring KeyDownEvent,
       proc(ev: isonim_dom.Event) =
         ev.fsStopPropagation()
-        let key = $ev.eventKey()
-        if key == "Enter":
+        case fieldKeyOf($ev.eventKey())
+        of fkCommit:
           ev.fsPreventDefault()
           discard vm.commitNameEdit($fieldValue(input))
-        elif key == "Escape":
+        of fkCancel:
           ev.fsPreventDefault()
-          vm.cancelNameEdit())
+          vm.cancelNameEdit()
+        else: discard)
     isonim_dom.addEventListener(inputNode, cstring"input",
       proc(ev: isonim_dom.Event) =
         vm.nameEditDraft = $fieldValue(input))
@@ -356,7 +343,7 @@ proc renderNameField[R, N](r: R; vm: FilesystemVM;
         cancelIfStillShown(input, proc() =
           if vm.nameEdit.val.kind != fneNone:
             vm.cancelNameEdit()))
-    for eventName in [cstring"click", cstring"dblclick", cstring"mousedown",
+    for eventName in [cstring"click", cstring"dblclick", cstring"mousedown",  # ir1-gate: propagation
                       cstring"contextmenu"]:
       # The field sits inside the row: a click in it is not a click on the
       # row, and a right-click in it edits text rather than opening the
@@ -366,12 +353,12 @@ proc renderNameField[R, N](r: R; vm: FilesystemVM;
     focusFieldSoon(input)
   elif N is MockNode:
     r.setInputValue(input, vm.nameEditDraft)
-    r.addEventListener(input, "keydown", proc(ev: MockEvent) =
+    r.addEventListener(input, KeyDownEvent, proc(ev: MockEvent) =
       ev.fsStopPropagation()
-      if ev.key == "Enter":
-        discard vm.commitNameEdit(r.inputValue(input))
-      elif ev.key == "Escape":
-        vm.cancelNameEdit())
+      case fieldKeyOf(ev.key)
+      of fkCommit: discard vm.commitNameEdit(r.inputValue(input))
+      of fkCancel: vm.cancelNameEdit()
+      else: discard)
     r.addEventListener(input, "input", proc() =
       vm.nameEditDraft = r.inputValue(input))
     # The mock has no focus moves of its own: a "blur" fired by a test is
@@ -393,12 +380,6 @@ proc renderCreateFieldNode[R, N](r: R; vm: FilesystemVM;
   r.appendChild(node, renderNameField[R, N](r, vm, edit))
   node
 
-proc entryAction(vm: FilesystemVM; path: string; isFolder: bool): proc() =
-  ## A row's activation: a folder toggles, a file opens. A factory, so each
-  ## row's closure owns its own path (see `diffOpenHandler`).
-  result = proc() =
-    if isFolder: vm.toggleExpanded(path) else: vm.openFile(path)
-
 proc folderToggle(vm: FilesystemVM; path: string; isFolder: bool): proc() =
   ## The twisty: a folder toggles; a file's twisty does nothing.
   result = proc() =
@@ -415,10 +396,10 @@ proc renderEntry[R, N](r: R; vm: FilesystemVM; entry: FilesystemEntryNode;
   let expandedFlag = vm.isExpanded(entry.path)
   let nodeId = jstreeNodeId(entry)
   let isFolder = entry.isFolder
-  let activate = entryAction(vm, entry.path, isFolder)
   var anchor, children: N
   let row = ui(r):
     li(class = jstreeNodeClass(entry, expandedFlag, isLast), id = nodeId,
+       `data-ct-path` = entry.path,
        role = "treeitem", `aria-selected` = "false",
        `aria-level` = $level,
        `aria-labelledby` = (if nodeId.len > 0: nodeId & "_anchor" else: ""),
@@ -432,26 +413,19 @@ proc renderEntry[R, N](r: R; vm: FilesystemVM; entry: FilesystemEntryNode;
         discard
       a(ref = anchor, class = "jstree-anchor",
         id = (if nodeId.len > 0: nodeId & "_anchor" else: ""),
-        href = "#", tabindex = "-1"):
+        href = "#", tabindex = "-1",
+        `data-ct-path` = entry.path,
+        `data-ct-folder` = (if isFolder: "true" else: "false")):
         i(class = jstreeIconClass(entry), role = "presentation"):
           discard
         text entry.text
       ul(ref = children, class = "jstree-children", role = "group"):
         discard
-  # The anchor's click activates the row. In a browser the click must also
-  # not follow the `#` link nor reach the tree beneath, which needs the event.
-  when defined(js):
-    when N is isonim_dom.Element:
-      isonim_dom.addEventListener(isonim_dom.Node(anchor), cstring"click",
-        proc(ev: isonim_dom.Event) =
-          ev.fsPreventDefault()
-          ev.fsStopPropagation()
-          activate())
-    else:
-      r.addEventListener(anchor, "click", activate)
-  else:
-    r.addEventListener(anchor, "click", activate)
-  bindRowContextMenu[R, N](r, vm, row, entry.path)
+  # A press on the anchor activates the row (a folder toggles, a file opens):
+  # the pointer row `file-tree.activate`, performed by the front-end on the
+  # anchor's `data-ct-path` / `data-ct-folder` (on a DOM front-end
+  # `input/pane_presses`, run by `input/dom_pointer`, which also keeps the
+  # `#` link from being followed).
   # The name field, when Create or Rename is open on this row. Reading
   # `nameEdit` here makes the panel's render effect follow it.
   let edit = vm.nameEdit.val

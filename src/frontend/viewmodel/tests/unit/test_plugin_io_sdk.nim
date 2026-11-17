@@ -145,10 +145,19 @@ proc processState(pid: int): string =
       return ""
     ""
 
+const DeadStates = ["", "Z", "X", "x"]
+  ## Every state a dead process can be READ in. `Z` is killed and awaiting its
+  ## parent's `waitpid`; `X` (`x` on pre-2.6.33 kernels) is the instant the
+  ## kernel is releasing it after that `waitpid` — proc(5) calls it "should
+  ## never be seen", and it is seen: a grandchild reaped by the reparenting
+  ## subreaper between two reads of its `/proc/<pid>/stat` showed `X` in 1 of
+  ## 200 runs on a loaded 32-core host, and the suite called that alive.
+  ## https://man7.org/linux/man-pages/man5/proc_pid_stat.5.html
+
 proc processIsAlive(pid: int): bool =
   ## A killed-but-unreaped process still answers kill(pid, 0). Query its
   ## state so the grandchild check distinguishes dead from running.
-  processState(pid) notin ["", "Z"]
+  processState(pid) notin DeadStates
 
 proc openSocketCount(): int =
   ## Count sockets, not dispatcher pipes/event descriptors. Both platform
@@ -1623,7 +1632,9 @@ suite "PLAT-8 F5: no surviving child means no surviving GRANDCHILD":
     ck posix.kill(Pid(tornPid), cint(0)) != 0
     # THE GRANDCHILD IS NOT OURS TO REAP, and the assertion says exactly what
     # is true rather than the strongest-looking thing. It is dead — its state
-    # is `Z` (killed, awaiting the reparented reaper) or it is gone — and it
+    # is `Z` (killed, awaiting the reparented reaper), `X` (being released by
+    # that reaper at the moment of the read; see `DeadStates`) or it is gone
+    # — and it
     # is emphatically not RUNNING, which is the state the finding measured:
     # `after deactivate: child alive=false grandchild alive=true`. Asserting
     # `/proc/<grandchild>` is gone would be asserting that `init` has already
@@ -1631,7 +1642,7 @@ suite "PLAT-8 F5: no surviving child means no surviving GRANDCHILD":
     # not a property of the teardown at all.
     let grandState = processState(tornGrand)
     checkpoint "grandchild state after teardown: '" & grandState & "'"
-    ck grandState in ["", "Z"]
+    ck grandState in DeadStates
     ck not processIsAlive(tornGrand)
 
     # THE CONTROL SURVIVES, BOTH GENERATIONS. A `killpg` that reached

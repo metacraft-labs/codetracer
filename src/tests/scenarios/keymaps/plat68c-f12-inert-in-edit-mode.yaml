@@ -1,0 +1,17 @@
+scenario: 1
+name: keymaps/plat68c-f12-inert-in-edit-mode
+pack: codetracer
+summary: >-
+  A key inert in this product mode says so: F12 (Step Out) in Edit mode puts
+  its reason — it needs a replay session — on the status bar.
+
+stage:
+  - use: open-project
+    with: { folder: calc, file: main.py }
+
+steps:
+  - wait: { until: editor.loaded, timeout: 120s }
+  - click: { at: 'editor[file="main.py"]/line[number="1"]', anchor: text-start }
+  - key: F12
+  - wait: { until: { at: status-line, assert: "notifies(\"needs a replay session\")" }, timeout: 10s }
+  - expect: { at: status-line, notifications: { count: 1 } }

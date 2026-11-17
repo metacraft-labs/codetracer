@@ -1,0 +1,35 @@
+scenario: 1
+name: languages/solana-call-trace-and-stepping
+pack: codetracer
+summary: >-
+  In a Solana recording the call trace lists `process_instruction`; Next moves the replay
+  to another line, and Continue runs on.
+
+stage:
+  - use: record-program
+    with: { program: solana_example, lang: solana }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 240s }
+  - click: 'pane-tab[label="CALLTRACE"]'
+  - wait: { until: call-trace.loaded, timeout: 120s }
+  # The call trace opens deep inside the entrypoint's account
+  # deserialisation; process_instruction is reached through its search.
+  - click: { at: 'search-box[pane="call-trace"]' }
+  - type: process_instruction
+  - key: Enter
+  - wait: { until: { at: 'search-box[pane="call-trace"]/search-result[#1]', present: true }, timeout: 60s }
+  - click: 'search-box[pane="call-trace"]/search-result[#1]'
+    settle: false
+  # Into process_instruction, then Next steps over `add(a, b)` to the
+  # following line.
+  - wait: replay-idle
+  - wait: { until: { at: status-line, location: { matches: "solana_flow_test\\.rs:1[45]#" } }, timeout: 60s }
+  - click: 'toolbar/toolbar-button[label="next-image"]'
+    settle: false
+  - wait: { until: { at: status-line, location: { matches: "solana_flow_test\\.rs:1[5-8]#" } }, timeout: 60s }
+  - wait: replay-idle
+  - click: 'toolbar/toolbar-button[label="continue-image"]'
+    settle: false
+  - wait: replay-idle

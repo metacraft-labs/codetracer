@@ -194,6 +194,14 @@ type
     isExpanded*: bool
     expansionFirstLine*: int
       ## A macro expansion's first line, when the stop is inside one.
+    expansionLastLine*: int
+      ## …and its last line: `path` (the compiler's `expanded.nim`) lines
+      ## `expansionFirstLine .. expansionLastLine` are the expansion.
+    expansionCallPath*: string
+    expansionCallLine*: int
+      ## The macro call the expansion is of (`expansionParents[0]`), when the
+      ## stop is inside one: what a source shows while the stop is in the
+      ## expansion (Editor-Hosted-Front-Ends §E15).
     rrTicks*: uint64
     cPath*: string
     cLine*: int

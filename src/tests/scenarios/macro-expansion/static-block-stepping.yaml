@@ -1,0 +1,29 @@
+scenario: 1
+name: macro-expansion/static-block-stepping
+pack: codetracer
+summary: >-
+  With a Nim recording open, right-clicking a `static:` line offers "Trace
+  Static Block Execution"; choosing it traces the block and opens its
+  recording in a new session tab whose editor shows the .nim file, stopped in
+  the block.
+
+stage:
+  - use: nim-project
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - wait: { until: editor.loaded, timeout: 60s }
+  - expect: { at: session-strip, count: 1 }
+  - expect: { at: 'editor[file="tracing.nim"]/line[number="17"]', text: { contains: "static:" } }
+  - click: { at: 'editor[file="tracing.nim"]/line[number="17"]', anchor: text-start, button: right }
+  - wait: { until: { at: context-menu, present: true }, timeout: 15s }
+  - expect: { at: context-menu, assert: "offers(\"Trace Static Block Execution\")" }
+  - click: { at: 'context-menu/menu-item[label="Trace Static Block Execution"]' }
+    settle: false
+  - wait: { until: { at: session-strip, count: 2 }, timeout: 180s }
+  - wait: { until: replay-idle, timeout: 120s }
+  - expect:
+      at: 'editor[file="tracing.nim"]'
+      active: true
+      assert: "stopped-within(18, 21)"

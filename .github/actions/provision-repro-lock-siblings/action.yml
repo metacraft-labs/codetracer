@@ -130,7 +130,10 @@ description: |
   only acceptable route.) Today the GPUI and TUI frontends import them
   (``just build-gpui``, ``just build-tui``, ``just test-tui``) and the plat37
   shim gate reads ``isonim-gpui/tools``; ``just build-once`` compiles none of
-  that, so ``scripts/require-siblings.sh`` keeps them ADVISORY. When this was
+  that for ``isonim-gpui`` and ``nim-termctl``, so
+  ``scripts/require-siblings.sh`` keeps those two ADVISORY. ``nim-pty`` is
+  REQUIRED there since 2026-11-08: ``ct`` itself imports ``nim_pty`` through
+  ``src/common/shell_session.nim`` (``ct shell-session``). When this was
   written nothing compiled against them. If a sibling ever does become a real
   dependency, the fix is to declare it in ``repro.nim``/``repro.lock`` so the
   lock pins it -- not to clone it here off a branch tip.
@@ -165,6 +168,13 @@ description: |
   siblings itself.
 
 inputs:
+  root-default-shell:
+    description: >
+      Also realise and GC-root this repository's default dev shell for the rest
+      of the job ("true"), as every long-build job runs from it. "false" for a
+      job that never enters it.
+    required: false
+    default: "true"
   app-id:
     description: >
       The GitHub App id (the CI_TOKEN_PROVIDER_APP_ID secret). The action
@@ -180,10 +190,35 @@ inputs:
       The GitHub App private key (the CI_TOKEN_PROVIDER_PRIVATE_KEY secret).
       See app-id.
     required: true
+  test-siblings:
+    description: >
+      Siblings a job's tests run against, comma-separated, cloned next to the
+      build inputs at the revisions the TEST lock pins:
+      `ci/test/siblings/repro.lock`, a project of its own nested in this repo,
+      not this repo's `repro.lock`. The scenario lanes name the scenario runner
+      and their backend (DemoVideoScript, DemoVideoScript-TermAssert,
+      DemoVideoScript-GuiAssert with GuiAssert, DemoVideoScript-Playwright),
+      which `ci/test/scenarios.sh` builds from `../<name>`; the terminal lane
+      also names TermAssert, TermAssertClient and nim-libvterm. Names only.
+      They live in their own lock because `repro.lock` is refreshed from
+      `repro.nim`, which declares only what the product is built from, and
+      each refresh dropped them (codetracer-pm issue
+      2026-11-15-repro-lock-refreshes-drop-the-scenario-lanes-test-siblings).
+    required: false
+    default: ""
 
 runs:
   using: composite
   steps:
+    # Nix fetches Cargo git dependencies (Agave's, Sui's) by running `git`
+    # with no credential of its own, and the job's git credential covers only
+    # github.com/metacraft-labs/, so those fetches went out anonymously and
+    # failed `nix develop` on a 401 ("could not read Username"). From here on
+    # git answers a github.com challenge from the job netrc; see the helper.
+    - name: Give git the job's token for github.com
+      shell: bash
+      run: bash "${GITHUB_WORKSPACE}/ci/register-git-credential-helper.sh"
+
     # Realise the dev shell BEFORE the token is minted. On a cold runner this
     # can take most of an hour (45 minutes in release job 126333283602), and
     # an installation token lives exactly one. Done inside the credential window,
@@ -191,10 +226,75 @@ runs:
     # shell needs no git credential of its own here: Nix fetches the flake's
     # private inputs with the job-wide `access-tokens` and netrc that
     # setup-nix wrote, exactly as this step did before the clone took a token.
+    # Keep the job's token fresh from here on. Started BEFORE the dev shell is
+    # realised: that alone can outlast the token's hour on a cold runner (the
+    # macOS leg's ran 81 minutes, run 43765077986), and the git credential
+    # helper registered above reads the job netrc this rewrites. The step after
+    # the clone is often longer than the token's hour too (the TUI job's
+    # `just build-once` ran 85 minutes), and a build script inside it can still
+    # start Nix fetches late
+    # in the step: the release build got "401 Bad credentials" from
+    # db-backend's build.rs 49 minutes into its AppImage step. refresh-github-
+    # token's keep-refreshing.sh re-mints at 35 minutes (and when the git
+    # credential helper finds the token old) and rewrites every
+    # store refresh.sh knows, the job's credential files included, which every
+    # new `nix` process reads. The runner ends it with the job. grep, sed and
+    # awk come from the shell below because a nix-darwin runner has none on
+    # its PATH outside the dev shell.
+    - name: Keep the token fresh for the rest of the job
+      shell: bash
+      working-directory: ${{ github.workspace }}
+      env:
+        APP_ID: ${{ inputs.app-id }}
+        APP_PRIVATE_KEY: ${{ inputs.private-key }}
+      run: |
+        log="$RUNNER_TEMP/keep-refreshing-github-token.log"
+        nohup nix shell nixpkgs#openssl nixpkgs#curl nixpkgs#jq \
+          nixpkgs#gnugrep nixpkgs#gnused nixpkgs#gawk nixpkgs#coreutils -c \
+          bash "${GITHUB_WORKSPACE}/.github/actions/refresh-github-token/keep-refreshing.sh" \
+          >"$log" 2>&1 &
+        echo "token refresher started (pid $!); log: $log"
+
+    # The flake's locked inputs are fetched first, while the job's token is
+    # fresh. A running `nix` reads its access-tokens once, at start, so an
+    # input the evaluation reaches only late (it builds as it evaluates) got
+    # "401 Bad credentials" 81 minutes in (codetracer-python-recorder's
+    # tarball, macOS, run 43765077986). Best effort: a Nix without
+    # `flake prefetch-inputs` fetches them lazily, as before.
     - name: Realise the CI dev shell
       shell: bash
       working-directory: ${{ github.workspace }}
-      run: nix develop .#ci --command true
+      run: |
+        # A fetch that fails on the network (run 43996043232, GPUI shard 19:
+        # "Could not resolve host: github.com" from one garm VM) is retried,
+        # three attempts in all, 30 s then 60 s apart; nix's own retry inside a
+        # download lasts seconds, not the minute a resolver hiccup can.
+        retry_net() {
+          local attempt
+          for attempt in 1 2 3; do
+            "$@" && return 0
+            [ "$attempt" = 3 ] && return 1
+            echo "::warning::'$*' failed (attempt $attempt of 3); retrying in $((attempt * 30)) s" >&2
+            sleep $((attempt * 30))
+          done
+        }
+        retry_net nix flake prefetch-inputs || echo "nix flake prefetch-inputs failed or is unsupported; inputs are fetched lazily" >&2
+        # GC ROOTS FOR THE JOB'S DEV SHELLS, in RUNNER_TEMP (the runner empties
+        # it when the job ends). `nix develop --command` replaces itself with
+        # the command, so the store paths a long build runs from are rooted by
+        # nothing while it runs, and a host whose daemon collects below
+        # min-free deleted part of Nim's lib/ under a compiling ct_cli (macOS
+        # runner m3-mcl-001, run 43935388749: `cannot open file:
+        # std/private/osseps`). The sibling dev shells the job enters root
+        # themselves the same way, under CT_GCROOT_DIR
+        # (ci/test/dev-shell-gcroot-test.sh).
+        roots="$RUNNER_TEMP/ct-gcroots"
+        mkdir -p "$roots"
+        echo "CT_GCROOT_DIR=$roots" >>"$GITHUB_ENV"
+        retry_net nix develop .#ci --profile "$roots/codetracer-ci" --command true
+        if [ "${{ inputs.root-default-shell }}" = true ]; then
+          retry_net nix develop --profile "$roots/codetracer-default" --command true
+        fi
 
     # The clone's own token, minted only now, so that its hour starts after
     # the slow part. The caller's job token cannot be used: it was minted in
@@ -238,6 +338,26 @@ runs:
           siblings_root="$(cd .. && pwd)"
           nix develop .#ci --command \
             repro develop --all --only="${build_inputs}" --reset --into="${siblings_root}"
+          # The test siblings come from the test project's own lock. `repro
+          # develop` reads the lock of the project it runs in, so it runs in
+          # ci/test/siblings; --into puts them beside codetracer all the same.
+          test_siblings="${{ inputs.test-siblings }}"
+          if [ -n "${test_siblings}" ]; then
+            echo "Provisioning the test siblings from ci/test/siblings/repro.lock: ${test_siblings}"
+            nix develop .#ci --command bash -c \
+              'cd ci/test/siblings && exec repro develop --all --only="$1" --reset --into="$2"' \
+              provision-test-siblings "${test_siblings}" "${siblings_root}"
+          fi
+
+    # One package catalog for the whole graph. reprobuild compiles a solve's
+    # recipes against a single reprobuild-packages revision and refuses a
+    # compile that would mix two, so a sibling whose own repro.lock pins another
+    # catalog than repro.lock breaks every refresh and re-solve of this lock.
+    # bash builtins only, like the build-input selector.
+    - name: Every cloned sibling's lock pins repro.lock's package catalog
+      shell: bash
+      working-directory: ${{ github.workspace }}
+      run: bash ci/repro-lock-catalog-agreement.sh repro.lock ..
 
     # Hand the clone's fresh token to the rest of the job. Every store the
     # job's setup filled (nix.conf, NIX_CONFIG, the Nix netrc, the exported
@@ -255,30 +375,6 @@ runs:
       run: |
         nix develop .#ci --command \
           bash "${GITHUB_WORKSPACE}/.github/actions/refresh-github-token/refresh.sh"
-
-    # And keep it fresh. The step after this one is often longer than the
-    # token's hour on a cold runner (the TUI job's `just build-once` ran 85
-    # minutes), and a build script inside it can still start Nix fetches late
-    # in the step: the release build got "401 Bad credentials" from
-    # db-backend's build.rs 49 minutes into its AppImage step. refresh-github-
-    # token's keep-refreshing.sh re-mints every 40 minutes and rewrites every
-    # store refresh.sh knows, the job's credential files included, which every
-    # new `nix` process reads. The runner ends it with the job. grep, sed and
-    # awk come from the shell below because a nix-darwin runner has none on
-    # its PATH outside the dev shell.
-    - name: Keep the token fresh for the rest of the job
-      shell: bash
-      working-directory: ${{ github.workspace }}
-      env:
-        APP_ID: ${{ inputs.app-id }}
-        APP_PRIVATE_KEY: ${{ inputs.private-key }}
-      run: |
-        log="$RUNNER_TEMP/keep-refreshing-github-token.log"
-        nohup nix shell nixpkgs#openssl nixpkgs#curl nixpkgs#jq \
-          nixpkgs#gnugrep nixpkgs#gnused nixpkgs#gawk nixpkgs#coreutils -c \
-          bash "${GITHUB_WORKSPACE}/.github/actions/refresh-github-token/keep-refreshing.sh" \
-          >"$log" 2>&1 &
-        echo "token refresher started (pid $!); log: $log"
 
     - name: Seed isonim tailwind-styles.json placeholder
       # Still required after the switch. `scripts/build-tailwind.sh` PRODUCES

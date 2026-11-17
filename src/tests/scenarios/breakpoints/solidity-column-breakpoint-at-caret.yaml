@@ -1,0 +1,28 @@
+scenario: 1
+name: breakpoints/solidity-column-breakpoint-at-caret
+pack: codetracer
+summary: >-
+  In the Solidity token recording, Shift+F9 with the caret at line 139
+  column 9 (`_mint(alice, 1000);` in `run()`) sets a column breakpoint
+  there, its marker drawn at that column, and Continue from the entry stops
+  on line 139.
+
+stage:
+  - use: record-program
+    with: { program: solidity_example/SolidityExample.sol }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 240s }
+  - click: 'toolbar/toolbar-button[label="run-to-entry-image"]'
+    settle: false
+  - wait: { until: { at: 'editor[file="SolidityExample.sol"]', current-line: { gt: 0 } }, timeout: 60s }
+  - wait: replay-idle
+  - wheel: { at: 'editor[file="SolidityExample.sol"]', direction: down, amount: 80 }
+  - wait: { until: { at: 'editor[file="SolidityExample.sol"]/line[number="139"]', present: true }, timeout: 20s }
+  - click: { at: 'editor[file="SolidityExample.sol"]/line[number="139"]', anchor: caret(9) }
+  - chord: Shift+F9
+  - wait: { until: { at: 'editor[file="SolidityExample.sol"]/line[number="139"]', inline-breakpoints: ["9"] }, timeout: 20s }
+  - click: 'toolbar/toolbar-button[label="continue-image"]'
+    settle: false
+  - wait: { until: { at: 'editor[file="SolidityExample.sol"]', current-line: 139 }, timeout: 60s }

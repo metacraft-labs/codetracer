@@ -19,8 +19,8 @@ mod sibling_provisioning;
 // Confining rr recordings to cores rr can count on, on hybrid hosts.
 #[cfg(target_os = "linux")]
 pub mod rr_cpu_binding;
-pub use sibling_provisioning::{bash_command, codetracer_root, provision_sibling, workspace_root};
-use sibling_provisioning::{is_in_workspace_sibling, provision_once, safe_canonicalize};
+pub use sibling_provisioning::{CT_MCR_CMD_ENV, bash_command, codetracer_root, provision_sibling, workspace_root};
+use sibling_provisioning::{find_on_path, is_in_workspace_sibling, provision_once, safe_canonicalize};
 
 use db_backend::dap::{self, DapClient, DapMessage, LaunchRequestArguments};
 use db_backend::task::{CtLoadFlowArguments, FlowMode, Location};
@@ -980,13 +980,26 @@ pub struct DapStdioTestClient {
     client: DapClient,
 }
 
+/// The longest [`DapStdioTestClient::initialize_and_launch_rr`] and the
+/// breakpoint helpers wait for one answer (see `initialize_and_launch_rr`):
+/// bounds on a db-backend that stopped answering, not on a slow one.
+const RR_LAUNCH_STEP_TIMEOUT: Duration = Duration::from_secs(60);
+/// The longest they wait for a replay to stop (at the entry, at a breakpoint).
+const RR_LAUNCH_ENTRY_TIMEOUT: Duration = Duration::from_secs(300);
+
 impl DapStdioTestClient {
     /// Spawn `db-backend dap-server --stdio` and set up pipes.
     pub fn start() -> Result<Self, String> {
+        Self::start_with_env(&[])
+    }
+
+    /// [`Self::start`], with `envs` added to the server's environment.
+    pub fn start_with_env(envs: &[(&str, &str)]) -> Result<Self, String> {
         let db_backend_bin = env!("CARGO_BIN_EXE_replay-server");
         let mut child = Command::new(db_backend_bin)
             .arg("dap-server")
             .arg("--stdio")
+            .envs(envs.iter().copied())
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -1031,6 +1044,12 @@ impl DapStdioTestClient {
     ///
     /// Unlike `initialize_and_launch()` (for DB traces), this passes the
     /// `recreator_exe` so the backend can spawn the replay worker.
+    ///
+    /// The waits are bounds on a db-backend or worker that stopped answering,
+    /// not on a slow one: on a host at load 140 (24 threads, `stress-ng --cpu
+    /// 64` on top of the usual load) the initialize response alone took more
+    /// than the 5 s this used to allow, and the stop at the entry more than
+    /// 30 s, so a launch that was going to succeed failed the test.
     pub fn initialize_and_launch_rr(
         &mut self,
         recording: &TestRecording,
@@ -1039,10 +1058,10 @@ impl DapStdioTestClient {
         // Send initialize
         let init = self.client.request("initialize", json!({}));
         self.send(&init)?;
-        self.read_until_response("initialize", Duration::from_secs(5))?;
+        self.read_until_response("initialize", RR_LAUNCH_STEP_TIMEOUT)?;
 
         // Wait for initialized event
-        self.read_until_event("initialized", Duration::from_secs(5))?;
+        self.read_until_event("initialized", RR_LAUNCH_STEP_TIMEOUT)?;
 
         // Send configurationDone
         let conf_done = self.client.request("configurationDone", json!({}));
@@ -1078,9 +1097,9 @@ impl DapStdioTestClient {
         self.send(&launch)?;
 
         // Wait for stopped event (entry point)
-        self.read_until_event("stopped", Duration::from_secs(30))?;
+        self.read_until_event("stopped", RR_LAUNCH_ENTRY_TIMEOUT)?;
         // Consume the complete-move event
-        self.read_until_event("ct/complete-move", Duration::from_secs(5))?;
+        self.read_until_event("ct/complete-move", RR_LAUNCH_STEP_TIMEOUT)?;
 
         Ok(())
     }
@@ -1213,7 +1232,7 @@ impl DapStdioTestClient {
             }),
         );
         self.send(&set_bp)?;
-        let response = self.read_until_response("setBreakpoints", Duration::from_secs(5))?;
+        let response = self.read_until_response("setBreakpoints", RR_LAUNCH_STEP_TIMEOUT)?;
         require_verified_breakpoint(&response, source_path, line)
     }
 
@@ -1237,7 +1256,7 @@ impl DapStdioTestClient {
             }),
         );
         self.send(&set_bp)?;
-        let response = self.read_until_response("setBreakpoints", Duration::from_secs(5))?;
+        let response = self.read_until_response("setBreakpoints", RR_LAUNCH_STEP_TIMEOUT)?;
         require_verified_breakpoint(&response, source_path, line)
     }
 
@@ -1245,8 +1264,8 @@ impl DapStdioTestClient {
     pub fn continue_to_breakpoint_on_thread(&mut self, thread_id: i64) -> Result<Location, String> {
         let continue_req = self.client.request("continue", json!({ "threadId": thread_id }));
         self.send(&continue_req)?;
-        self.read_until_event("stopped", Duration::from_secs(30))?;
-        let complete_move = self.read_until_event("ct/complete-move", Duration::from_secs(10))?;
+        self.read_until_event("stopped", RR_LAUNCH_ENTRY_TIMEOUT)?;
+        let complete_move = self.read_until_event("ct/complete-move", RR_LAUNCH_STEP_TIMEOUT)?;
         match complete_move {
             DapMessage::Event(e) => serde_json::from_value(e.body["location"].clone())
                 .map_err(|e| format!("failed to parse location: {}", e)),
@@ -1259,10 +1278,10 @@ impl DapStdioTestClient {
         self.send(&continue_req)?;
 
         // Wait for stopped event
-        self.read_until_event("stopped", Duration::from_secs(30))?;
+        self.read_until_event("stopped", RR_LAUNCH_ENTRY_TIMEOUT)?;
 
         // Wait for complete-move event to get location
-        let complete_move = self.read_until_event("ct/complete-move", Duration::from_secs(5))?;
+        let complete_move = self.read_until_event("ct/complete-move", RR_LAUNCH_STEP_TIMEOUT)?;
 
         match complete_move {
             DapMessage::Event(e) => serde_json::from_value(e.body["location"].clone())
@@ -1622,39 +1641,6 @@ pub struct FlowTestConfig {
     pub expected_values: ExpectedFlowValues,
 }
 
-/// Look up a tool on the system PATH.
-/// Uses `which` on Unix (already used by existing find_ct_native_replay and find_wazero).
-fn find_on_path(name: &str) -> Option<PathBuf> {
-    #[cfg(unix)]
-    {
-        if let Ok(output) = Command::new("which").arg(name).output()
-            && output.status.success()
-        {
-            let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
-            if !path.is_empty() {
-                return Some(PathBuf::from(path));
-            }
-        }
-    }
-    #[cfg(windows)]
-    {
-        if let Ok(output) = Command::new("where").arg(name).output()
-            && output.status.success()
-        {
-            let path = String::from_utf8_lossy(&output.stdout)
-                .lines()
-                .next()
-                .unwrap_or("")
-                .trim()
-                .to_string();
-            if !path.is_empty() {
-                return Some(PathBuf::from(path));
-            }
-        }
-    }
-    None
-}
-
 // Provisioning workspace siblings: `sibling_provisioning.rs` (shared with
 // backend-manager's integration tests), re-exported at the top of this module.
 
@@ -1886,33 +1872,16 @@ pub fn is_mcr_available() -> bool {
 /// (XMR-B1, decision D9 of HS-M2), which the refusal names.
 pub const MCR_LINUX_MULTI_THREAD_REFUSAL: &str = "error: trace mode cannot serve this recording: ";
 
-/// The environment variable that names the `ct-mcr` binary to every process
-/// that records or replays MCR traces: `ct-native-replay`
-/// (`codetracer-native-backend/src/mcr_record.rs`), `ct`, and these tests.
-pub const CT_MCR_CMD_ENV: &str = "CODETRACER_CT_MCR_CMD";
-
 /// The `ct-mcr` binary (codetracer-native-recorder's `ct_cli`) the MCR
 /// backend uses, and the one every process this test starts will use.
 ///
-/// Search order, the rule of the other sibling finders (see "Provisioning
-/// workspace siblings" above):
-///
-/// 1. `CODETRACER_CT_MCR_CMD`, unless it names the workspace sibling's own
-///    build: an explicit override, used as given and never built. It must
-///    name a file; a dangling override panics rather than being ignored.
-/// 2. `ct-mcr` or `ct_cli` on `PATH`, unless the hit is the workspace
-///    sibling's own build.
-/// 3. The workspace's `codetracer-native-recorder` sibling, PROVISIONED: built
-///    or refreshed by `scripts/build-siblings.sh --only
-///    codetracer-native-recorder/ct-mcr` (see [`provision_sibling`]), which
-///    panics naming the remedy when the sibling is not checked out or does not
-///    build.
-///
-/// Steps 1 and 2 defer to step 3 for a hit inside the sibling because that is
-/// what the codetracer dev shell supplies (`scripts/detect-siblings.sh`
-/// exports `CODETRACER_CT_MCR_CMD` and puts `ct_cli/` on `PATH` whenever the
-/// sibling has been built once): it says the sibling was built at some point,
-/// not that the build is current.
+/// Found, or the sibling provisioned, by
+/// [`sibling_provisioning::resolve_ct_mcr`], the rule every Rust test that
+/// needs `ct-mcr` shares: `CODETRACER_CT_MCR_CMD`, then
+/// `CODETRACER_CT_MCR_PATH`, each used as given unless it names the
+/// sibling's own build; with neither set, `ct-mcr` or `ct_cli` on `PATH`
+/// outside the sibling; otherwise the sibling, built or refreshed by
+/// `scripts/build-siblings.sh`.
 ///
 /// Whatever was chosen is exported as `CODETRACER_CT_MCR_CMD` in this
 /// process, so the `ct-native-replay` and db-backend processes the test
@@ -1921,32 +1890,7 @@ pub const CT_MCR_CMD_ENV: &str = "CODETRACER_CT_MCR_CMD";
 ///
 /// So this returns `Some` or panics; the `Option` stays for the callers.
 pub fn find_ct_mcr() -> Option<PathBuf> {
-    const SIBLING: &str = "codetracer-native-recorder";
-    let chosen = if let Some(path) = env::var_os(CT_MCR_CMD_ENV).filter(|value| !value.is_empty())
-        && !is_in_workspace_sibling(Path::new(&path), SIBLING)
-    {
-        let path = PathBuf::from(path);
-        assert!(
-            path.is_file(),
-            "{CT_MCR_CMD_ENV}='{}' does not name a file. Unset it to build the workspace's \
-             {SIBLING}/ct_cli/ct_cli, or point it at a ct-mcr binary.",
-            path.display()
-        );
-        path
-    } else if let Some(path) = find_on_path("ct-mcr")
-        .or_else(|| find_on_path("ct_cli"))
-        .filter(|path| !is_in_workspace_sibling(path, SIBLING))
-    {
-        path
-    } else {
-        // The artifact is the one build-siblings.sh's entry names
-        // (`just build-ct-mcr` builds ct_cli in place).
-        provision_sibling(
-            "codetracer-native-recorder/ct-mcr",
-            SIBLING,
-            &format!("ct_cli/ct_cli{}", std::env::consts::EXE_SUFFIX),
-        )
-    };
+    let chosen = sibling_provisioning::resolve_ct_mcr();
     export_ct_mcr_cmd(&chosen);
     Some(chosen)
 }

@@ -1,0 +1,21 @@
+scenario: 1
+name: editor/alt-click-adds-a-cursor
+pack: codetracer
+summary: >-
+  Alt+click in the read-only editor adds a second cursor, and adds no
+  breakpoint.
+
+stage:
+  - use: record-program
+    with: { program: src/db-backend/tests/fixtures/origin/python/simple_trivial_chain/main.py }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - wait: { until: { at: 'editor[file="main.py"]/line[number="8"]', text: "def main() -> None:" }, timeout: 60s }
+  - expect: { at: 'editor[file="main.py"]', read-only: true }
+  - click: { at: 'editor[file="main.py"]/line[number="8"]', anchor: caret(2) }
+  - expect: { at: 'editor[file="main.py"]', selection-count: 1 }
+  - click: { at: 'editor[file="main.py"]/line[number="8"]', anchor: caret(6), modifiers: [Alt] }
+  - expect: { at: 'editor[file="main.py"]', selection-count: 2 }
+  - expect: { at: 'editor[file="main.py"]/line[number="8"]', glyph: "", inline-breakpoints: { count: 0 } }

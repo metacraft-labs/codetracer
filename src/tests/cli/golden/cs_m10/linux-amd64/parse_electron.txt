@@ -1,0 +1,397 @@
+# ct electron: 18 argv cases through ct's loader (the parse probe)
+
+### 1: bare
+argv: ct "electron"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = electron
+  electronAppArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 2: one word
+argv: ct "electron"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = electron
+  electronAppArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 3: words
+argv: ct "electron" "a" "b"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = electron
+  electronAppArgs = @["a", "b"]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 4: words that look like options
+argv: ct "electron" "-x" "--y=1" "--cwd" "/z"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = electron
+  electronAppArgs = @["-x", "--y=1", "--cwd", "/z"]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 5: a ct option first
+argv: ct "electron" "--new-tab" "a"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = electron
+  electronAppArgs = @["--new-tab", "a"]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 6: -- inside
+argv: ct "electron" "--" "a"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = electron
+  electronAppArgs = @["--", "a"]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 7: --help inside
+argv: ct "electron" "a" "--help"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = electron
+  electronAppArgs = @["a", "--help"]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 8: unknown long option
+argv: ct "electron" "--bogus"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = electron
+  electronAppArgs = @["--bogus"]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 9: unknown long option with value
+argv: ct "electron" "--bogus=1"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = electron
+  electronAppArgs = @["--bogus=1"]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 10: unknown short option
+argv: ct "electron" "-Z"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = electron
+  electronAppArgs = @["-Z"]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 11: lone -
+argv: ct "electron" "-"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = electron
+  electronAppArgs = @["-"]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 12: lone -- then a word
+argv: ct "electron" "--" "w"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = electron
+  electronAppArgs = @["--", "w"]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 13: --=v
+argv: ct "electron" "--=v"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = electron
+  electronAppArgs = @["--=v"]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 14: extra positional
+argv: ct "electron" "extra1" "extra2" "extra3" "extra4" "extra5"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = electron
+  electronAppArgs = @["extra1", "extra2", "extra3", "extra4", "extra5"]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 15: global --cwd after the command
+argv: ct "electron" "--cwd" "/w"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = electron
+  electronAppArgs = @["--cwd", "/w"]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 16: global --new-tab after the command
+argv: ct "electron" "--new-tab"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = electron
+  electronAppArgs = @["--new-tab"]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 17: --version after the command
+argv: ct "electron" "--version"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = electron
+  electronAppArgs = @["--version"]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 18: -h after the command
+argv: ct "electron" "-h"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = electron
+  electronAppArgs = @["-h"]
+VALIDATED replayInteractive = false
+--- stderr
+--- end

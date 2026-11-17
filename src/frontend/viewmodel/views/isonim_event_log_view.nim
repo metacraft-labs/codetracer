@@ -25,6 +25,7 @@
 ## decoration added under `when N is isonim_dom.Element`.
 
 import std/[math, options, strutils]
+import ./field_keys
 
 import isonim/core/[signals, computation]
 import isonim/dsl/ui
@@ -334,12 +335,16 @@ proc rowsTableStyle*(vm: EventLogVM): string =
 
 proc footerStart*(vm: EventLogVM): int =
   ## The footer's first row shown, counted from 1 (0 for an empty list).
+  ## Read off `shownViewport`, which every report writes at once: the footer
+  ## follows each scroll event, and only the window request is debounced
+  ## (Event-Log-Pane.md § Table Display; pxor #904, when it read the
+  ## debounced `viewport` and stood still until the scroll stopped).
   if vm.listTotal <= 0: 0
-  else: min(vm.listTotal, max(0, vm.viewport.val.firstRow) + 1)
+  else: min(vm.listTotal, max(0, vm.shownViewport.val.firstRow) + 1)
 
 proc footerEnd*(vm: EventLogVM): int =
-  ## The footer's last row shown.
-  let v = vm.viewport.val
+  ## The footer's last row shown (`shownViewport`, as `footerStart`).
+  let v = vm.shownViewport.val
   min(vm.listTotal, max(0, v.firstRow) + max(0, v.rows))
 
 proc footerClass*(vm: EventLogVM): string =
@@ -394,15 +399,13 @@ proc markerBoundaryChip*(row: MarkerEventRow): string =
 # Handlers, made by factories so each closes over its own value
 # ---------------------------------------------------------------------------
 
-proc onHeaderClick(vm: EventLogVM; col: EventLogColumn): proc() =
-  result = proc() = vm.sortBy(vm.order().clickedHeader(col))
-
-proc onRowClick(vm: EventLogVM; position: int): proc() =
-  ## A click selects the event and moves the debugger to it.
-  result = proc() =
-    let at = position - vm.store.eventLog.loadedStart.val
-    vm.selectRow(some(at))
-    vm.doubleClickRow(at)
+# A row's and a column header's presses are not this view's: the pointer
+# rows (`pointer_rows`: Click on a row jumps to the event, RightClick shows its
+# content, Click on a header orders by its column) resolve them and the
+# front-end's procedure performs them — on a DOM front-end `input/pane_presses`' (the right press's,
+# `ui/event_log.nim`'s),
+# on the element `input/dom_pointer` hit-tests, by its `data-position` and
+# `data-column`.
 
 proc onToggleColumn(vm: EventLogVM; col: EventLogColumn): proc() =
   result = proc() = discard vm.toggleColumn(col)
@@ -490,8 +493,7 @@ proc renderEventRow*[R, N](r: R; vm: EventLogVM; position: int;
        `data-max-rr-ticks` = $vm.rowAt(position).maxRRTicks,
        `data-source-generation` = $vm.rowAt(position).sourceGeneration,
        `data-source-digest` = vm.rowAt(position).sourceDigest,
-       role = "button", tabindex = "0",
-       onclick = onRowClick(vm, position)):
+       role = "button", tabindex = "0"):
       discard
 
   forEachKeyed[EventLogColumn, R, N](r, rowEl,
@@ -592,8 +594,8 @@ when defined(js):
       let shown = $vm.footerStart
       if not footerInput.isFocused:
         footerInput.setInputValue(cstring(shown))
-    onDomEvent(footerInput, cstring"keydown", proc(ev: JsObject) =
-      if ev.keyOf == cstring"Enter":
+    onDomEvent(footerInput, cstring KeyDownEvent, proc(ev: JsObject) =
+      if fieldKeyOf($ev.keyOf) == fkCommit:
         try:
           let row = max(1, parseInt($inputValueOf(footerInput)))
           scrollBody.setScrollTop(float(row - 1) * rowPx())
@@ -790,8 +792,7 @@ proc renderEventLogPanel*[R, N](r: R; vm: EventLogVM;
       ui(r):
         span(class = columnClass(col()), `data-column` = $col(),
              style = columnWidthStyle(vm, col()),
-             role = "button", tabindex = "0",
-             onclick = onHeaderClick(vm, col())):
+             role = "button", tabindex = "0"):
           span(class = "eventLog-column-label"):
             text columnHeaderText(vm, col())
           # Its separator: the grip a drag resizes the column by (§5.2).

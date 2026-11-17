@@ -440,8 +440,19 @@ proc reconcile*(vd: VersionedDocument; r: ProducerResult;
   # text inserted at either edge is not swallowed into the region. A highlight
   # that grew to cover text the parser never saw is exactly the failure a
   # single side would produce at one of the two ends.
+  #
+  # A POINT region has one position, so it takes one side: the start's. Its
+  # two edges are the same place, and text inserted exactly there is the one
+  # shape where the two sides answer differently — mapped separately, the
+  # start went after the new text and the end stayed before it, and the
+  # result came out inverted (`[1, 0)`), which the next reconcile of it then
+  # refused. An empty line's highlight is such a region: Vim's `O` opens one,
+  # and the first character typed into it while a parse was in flight ended
+  # the terminal UI.
   let movedFrom = delta.mapPos(r.evidenceFrom, sideAfter)
-  let movedTo = delta.mapPos(r.evidenceTo, sideBefore)
+  let movedTo =
+    if r.evidenceTo == r.evidenceFrom: movedFrom
+    else: delta.mapPos(r.evidenceTo, sideBefore)
   if movedFrom.kind != mapSurvived or movedTo.kind != mapSurvived:
     rep.record(r.producer, roDropped, drEvidenceDeleted)
     return Reconciled(producer: r.producer, outcome: roDropped,

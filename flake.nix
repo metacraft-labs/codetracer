@@ -138,7 +138,9 @@
     };
 
     codetracer-js-recorder = {
-      url = "github:metacraft-labs/codetracer-js-recorder";
+      # `/agents`, the recorder's agent mainline, like the other
+      # codetracer-family inputs.
+      url = "github:metacraft-labs/codetracer-js-recorder/agents";
       inputs.nixpkgs.follows = "nixpkgs";
       inputs.codetracer-trace-format-nim.follows = "codetracer-trace-format-nim";
       inputs.codetracer-trace-format.follows = "codetracer-trace-format";
@@ -343,10 +345,12 @@
     # we have to seed those paths from these flake inputs.  ``.envrc``
     # overrides each with a local checkout when present.
     codetracer-native-recorder = {
-      # CodeTracer's dev build needs the recorder integration branch:
-      # db-backend's emulator FFI contract moves with native-recorder
-      # dev, while stable is only the last released recorder snapshot.
-      url = "github:metacraft-labs/codetracer-native-recorder/dev";
+      # `/agents`, the recorder's agent mainline, like the other
+      # codetracer-family inputs: db-backend's emulator FFI contract moves
+      # with the recorder's integration work, which lands on `agents` before
+      # it is promoted to `dev`, and stable is only the last released
+      # recorder snapshot.
+      url = "github:metacraft-labs/codetracer-native-recorder/agents";
       flake = false;
     };
     codetracer-trace-format-nim = {
@@ -367,20 +371,17 @@
       # keeps this a flake.
       flake = true;
     };
-    # The native CLI used by backend-manager's recording tests imports the
-    # production CTFS visual-stream reader, even for a non-graphics recording.
+    # No derivation builds from these two. Their flake.lock revisions are the
+    # pins the CI sibling checkouts must name by SHA (`flake_rev` in
+    # ci/test/sibling-provisioning-test.sh, FLAKE_PINNED_SIBLINGS): the native
+    # CLI that ensure-ct-mcr builds imports visual-replay's CTFS visual-stream
+    # reader, and native-backend provides ct-native-replay.
     codetracer-visual-replay = {
       url = "github:metacraft-labs/codetracer-visual-replay/agents";
       flake = false;
     };
     codetracer-native-backend = {
       url = "github:metacraft-labs/codetracer-native-backend/agents";
-      flake = false;
-    };
-    # Match native-backend's Cargo.lock. Fetch this private source through
-    # Nix's authenticated flake fetcher, rather than fetchgit in the sandbox.
-    native-license-lldb-sys = {
-      url = "github:metacraft-labs/lldb-sys.rs/7db095133fc4a03b39822de33907f5d25efcbd7c";
       flake = false;
     };
 
@@ -390,25 +391,6 @@
     # this repository's libs/nim-stew gitlink for sandboxed recorder builds.
     nim-stew = {
       url = "github:status-im/nim-stew/9c3596d9de809a5933fd777cec1183c2cdf521ec";
-      flake = false;
-    };
-
-    # The sandboxed backend-manager test recorder (nix/packages/default.nix)
-    # compiles codetracer-native-recorder's ct_cli, whose record parser needs
-    # the metacraft-labs confutils fork at the exact commit its ct_cli.nimble
-    # pins (the `valueName` / `implicitValue` / `alsoSets` pragmas). The main
-    # source input carries no Git submodules, so these cannot come from
-    # libs/; serialization and faststreams match this repository's gitlinks.
-    nim-confutils = {
-      url = "github:metacraft-labs/nim-confutils/331c5fa2f741a6657c16404bfc9401b18d295f92";
-      flake = false;
-    };
-    nim-serialization = {
-      url = "github:status-im/nim-serialization/9eb88077063bf7e16357e1ed6aaa7c1391b4d7c4";
-      flake = false;
-    };
-    nim-faststreams = {
-      url = "github:status-im/nim-faststreams/37a183153c071539ab870f427c09a1376ba311b9";
       flake = false;
     };
 
@@ -430,11 +412,15 @@
     # compile time.  Workspace dev shells resolve these as sibling repos;
     # standalone Nix package builds need deterministic source fallbacks.
     io-mon = {
-      url = "github:metacraft-labs/io-mon/dev";
+      # `/agents`, io-mon's agent mainline: the capture model ct_test imports
+      # moves there before it is promoted to `dev`.
+      url = "github:metacraft-labs/io-mon/agents";
       flake = false;
     };
     nim-stackable-hooks = {
-      url = "github:metacraft-labs/nim-stackable-hooks/dev";
+      # `/agents`, the library's agent mainline, like io-mon above: the
+      # revision repro.lock pins is published there before it reaches `dev`.
+      url = "github:metacraft-labs/nim-stackable-hooks/agents";
       flake = false;
     };
 
@@ -446,11 +432,11 @@
     # nix/packages/default.nix: `ct test run`'s read-set capture). Move them
     # with `repro lock update`.
     nim-shm-queue = {
-      url = "github:metacraft-labs/nim-shm-queue/84fd76b174d4868e703ba3d599668ee340e0b6ea";
+      url = "github:metacraft-labs/nim-shm-queue/0d6049997d77421b6e4748f819657cf6042e9508";
       flake = false;
     };
     nim-shm-gset = {
-      url = "github:metacraft-labs/nim-shm-gset/953bd231a022243fcee96092234d7cf80f7042b0";
+      url = "github:metacraft-labs/nim-shm-gset/0b2896adc65d0d62c0ee84af1356c909da2975d0";
       flake = false;
     };
 
@@ -558,7 +544,7 @@
     # ``.envrc`` can override each with
     # ``--override-input isonim path:../isonim`` for local development.
     isonim = {
-      url = "github:metacraft-labs/isonim/dev";
+      url = "github:metacraft-labs/isonim/agents";
       flake = false;
     };
     # Facebook's Yoga, which ``isonim`` vendors as a GIT SUBMODULE at
@@ -601,11 +587,11 @@
       flake = false;
     };
     isonim-tui = {
-      url = "github:metacraft-labs/isonim-tui/dev";
+      url = "github:metacraft-labs/isonim-tui/agents";
       flake = false;
     };
     isonim-gpui = {
-      url = "github:metacraft-labs/isonim-gpui/dev";
+      url = "github:metacraft-labs/isonim-gpui/agents";
       flake = false;
     };
     nim-everywhere = {
@@ -613,15 +599,15 @@
       flake = false;
     };
     nim-termctl = {
-      url = "github:metacraft-labs/nim-termctl/dev";
+      url = "github:metacraft-labs/nim-termctl/agents";
       flake = false;
     };
     nim-pty = {
-      url = "github:metacraft-labs/nim-pty/dev";
+      url = "github:metacraft-labs/nim-pty/agents";
       flake = false;
     };
     nim-acp = {
-      url = "github:metacraft-labs/nim-acp/dev";
+      url = "github:metacraft-labs/nim-acp/agents";
       flake = false;
     };
     nim-agent-harbor = {
@@ -629,7 +615,7 @@
       flake = false;
     };
     nim-agents = {
-      url = "github:metacraft-labs/nim-agents/dev";
+      url = "github:metacraft-labs/nim-agents/agents";
       flake = false;
     };
 

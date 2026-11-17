@@ -234,12 +234,12 @@ ARMS = [
     ),
     Arm(
         "M4", RESOLVER,
-        "  if t.nodes[cur].binding >= 0:\n"
+        "  if t.nodeData[cur].binding >= 0:\n"
         '    let seqText = b.chords.join(" ")\n'
-        "    if seqText notin t.duplicates: t.duplicates.add seqText\n"
+        "    if seqText notin t.duplicateData: t.duplicateData.add seqText\n"
         "  else:\n"
-        "    t.nodes[cur].binding = index\n",
-        "  t.nodes[cur].binding = index\n",
+        "    t.nodeData[cur].binding = index\n",
+        "  t.nodeData[cur].binding = index\n",
         DUP_VIM_NORMAL,
         "**THE DUPLICATE DETECTOR IS DELETED AND THE SECOND ROW SILENTLY "
         "WINS.** This is §2.4's `move-line-up` defect one layer up: two rows "

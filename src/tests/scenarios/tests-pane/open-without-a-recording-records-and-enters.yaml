@@ -1,0 +1,24 @@
+scenario: 1
+name: tests-pane/open-without-a-recording-records-and-enters
+pack: codetracer
+summary: >-
+  A row's ⏵ before the test has a recording records it and enters the
+  recording in a new session tab, the edit session left in the first.
+
+stage:
+  - use: project-fixture
+    with: { name: noir-suite }
+  - use: open-project
+    with: { folder: $project }
+
+steps:
+  - wait: { until: { at: 'pane-tab[label="TESTS"]', present: true }, timeout: 120s }
+  - wait: { until: settled, timeout: 30s }
+  - click: 'pane-tab[label="TESTS"]'
+  - wait: { until: { at: test-results, count: 2 }, timeout: 120s }
+  - expect: { at: 'test-results/test-row[name="test_passes"]', recorded: false, open-mode: record-and-open }
+  - click: 'test-results/test-row[name="test_passes"]/panel-button[label="Open"]'
+    settle: false
+  - wait: { until: { at: session-strip, count: 2 }, timeout: 300s }
+  - wait: { until: replay-idle, timeout: 120s }
+  - expect: { at: window, mode: debug }

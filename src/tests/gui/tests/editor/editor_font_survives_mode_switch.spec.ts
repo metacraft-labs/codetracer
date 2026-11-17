@@ -1,4 +1,6 @@
 /**
+ * Ported to the scenario src/tests/scenarios/editor/font-survives-mode-switch.yaml; kept as ci/test/editor-resize-follows-pane.sh names it.
+ *
  * THE CODE FONT SURVIVES A MODE SWITCH.
  *
  * Reported against noirstudio.dev: "the font rendering changes across the

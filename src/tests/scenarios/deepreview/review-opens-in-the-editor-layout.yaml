@@ -1,0 +1,38 @@
+scenario: 1
+name: deepreview/review-opens-in-the-editor-layout
+pack: codetracer
+summary: >-
+  One `ct review` launch fills the three panels a review lives in and nothing
+  else: FILES, VCS and AGENT ACTIVITY are in the layout, with VCS, the first
+  modified file's diff tab and AGENT ACTIVITY in front; the replay-only panels
+  (CALLTRACE, EVENT LOG, TIMELINE, TERMINAL OUTPUT) are not; no standalone
+  DeepReview panel, element or test hook exists; the VCS header carries the
+  review's title, its stats and the view-mode toggle; and only the first
+  modified file is open.
+
+stage:
+  - use: open-review
+    with: { dataset: src/tests/gui/tests/deepreview/fixtures/sample-review.json }
+
+steps:
+  - wait: { until: { at: vcs, present: true }, timeout: 120s }
+  - wait: { until: { at: 'review-diff[file="src/main.rs"]', present: true }, timeout: 60s }
+  - wait: { until: settled, timeout: 30s }
+  - expect: { at: window, assert: 'has-pane("FILES")' }
+  - expect: { at: window, assert: 'has-pane("VCS")' }
+  - expect: { at: window, assert: 'has-pane("AGENT ACTIVITY")' }
+  - expect: { at: window, assert: 'in-front("VCS")' }
+  - expect: { at: window, assert: 'in-front("Diff: main.rs")' }
+  - expect: { at: window, assert: 'in-front("AGENT ACTIVITY")' }
+  - expect: { at: window, assert: 'lacks-pane("CALLTRACE")' }
+  - expect: { at: window, assert: 'lacks-pane("EVENT LOG")' }
+  - expect: { at: window, assert: 'lacks-pane("TIMELINE")' }
+  - expect: { at: window, assert: 'lacks-pane("TERMINAL OUTPUT")' }
+  - expect: { at: window, assert: 'lacks-pane("DEEP REVIEW")' }
+  - expect: { at: review-state, legacy-panel: 0, legacy-hooks: 0, diff-tabs: 1 }
+  - expect: { at: agent-activity, geometry: { visible: true }, roll-up: 0 }
+  - expect: { at: vcs, geometry: { visible: true }, title: { contains: "DeepReview: parser cleanup" } }
+  - expect: { at: vcs, stats: { contains: "3 files" } }
+  - expect: { at: vcs, stats: { contains: "+16 -10" } }
+  - expect: { at: vcs/diff-toggle, geometry: { visible: true }, unified: true }
+  - expect: { at: 'vcs/changed-file[name="main.rs"]', selected: true }

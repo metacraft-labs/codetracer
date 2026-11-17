@@ -1,0 +1,122 @@
+#!/usr/bin/env bash
+# =============================================================================
+# Bundle Nim tracing into an AppDir: the Nim language server the desktop starts
+# for Nim sources, and the trace-enabled nimsuggest it asks.
+#
+#   appimage-scripts/bundle_nim_tracing.sh <APP_DIR> <NIM_FORK> <NIMLANGSERVER>
+#
+#   NIM_FORK       the `nim-fork` package (`libexec/nimsuggest`, `lib/`, `config/`)
+#   NIMLANGSERVER  the `nimlangserver` package (`bin/nimlangserver`)
+#
+# Lays out
+#
+#   <APP_DIR>/bin/nimlangserver          loader wrapper -> nimlangserver.real
+#   <APP_DIR>/nim/libexec/nimsuggest     loader wrapper -> nimsuggest.real
+#   <APP_DIR>/nim/lib/, nim/config/      the compiler's standard library
+#
+# and AppRun points `CODETRACER_NIM_LS_COMMAND` and `CODETRACER_NIMSUGGEST` at
+# the two wrappers. Without them the desktop had no Nim language server and no
+# nimsuggest that answers trace queries, so Trace Static Block and Trace Macro
+# Execution could not work from the AppImage.
+#
+# WHY nimsuggest GETS ITS OWN COPY OF THE LOADER. Every bundled executable runs
+# through the bundled glibc loader (see build_appimage.sh), and a program
+# started as `ld.so prog` sees the LOADER as /proc/self/exe. nimsuggest finds
+# its standard library from that path (`<dir of exe>/../lib`). With the shared
+# loader in <APP_DIR>/bin it would look in <APP_DIR>/lib, which holds shared
+# libraries, not `system.nim`. A loader copy in nim/libexec/ makes the path
+# resolve to nim/lib.
+#
+# Runs after build_appimage.sh has bundled glibc into the AppDir, and copies
+# the loader and libc itself when they are not there yet (the AppDir the test
+# `ci/test/packaged-nim-tracing.sh --appimage` stages has nothing else in it).
+# Every library both programs need is copied into <APP_DIR>/lib.
+# =============================================================================
+set -euo pipefail
+
+APP_DIR="$1"
+NIM_FORK="$2"
+NIMLANGSERVER="$3"
+
+mkdir -p "${APP_DIR}/bin" "${APP_DIR}/lib" "${APP_DIR}/nim/libexec"
+
+cp -L "${NIMLANGSERVER}/bin/nimlangserver" "${APP_DIR}/bin/nimlangserver"
+cp -L "${NIM_FORK}/libexec/nimsuggest" "${APP_DIR}/nim/libexec/nimsuggest"
+rm -rf "${APP_DIR}/nim/lib" "${APP_DIR}/nim/config"
+cp -rL "${NIM_FORK}/lib" "${APP_DIR}/nim/lib"
+cp -rL "${NIM_FORK}/config" "${APP_DIR}/nim/config"
+chmod -R u+w "${APP_DIR}/bin" "${APP_DIR}/nim"
+
+BINARIES=("${APP_DIR}/bin/nimlangserver" "${APP_DIR}/nim/libexec/nimsuggest")
+
+# The loader and libc both programs were linked against.
+LOADER_SRC=$(patchelf --print-interpreter "${APP_DIR}/nim/libexec/nimsuggest")
+LOADER=$(basename "${LOADER_SRC}")
+GLIBC_DIR=$(dirname "${LOADER_SRC}")
+if [ ! -e "${APP_DIR}/bin/${LOADER}" ]; then
+	cp -L "${LOADER_SRC}" "${APP_DIR}/bin/${LOADER}"
+	for glibc_lib in libc.so.6 libm.so.6 libdl.so.2 libpthread.so.0 librt.so.1; do
+		if [ -e "${GLIBC_DIR}/${glibc_lib}" ]; then
+			cp -n -L "${GLIBC_DIR}/${glibc_lib}" "${APP_DIR}/lib/"
+		fi
+	done
+fi
+cp -L "${APP_DIR}/bin/${LOADER}" "${APP_DIR}/nim/libexec/${LOADER}"
+chmod +x "${APP_DIR}/bin/${LOADER}" "${APP_DIR}/nim/libexec/${LOADER}"
+
+# Their libraries (glibc excluded: it is the loader's matched pair). Two
+# sources: the NEEDED closure, and the libraries Nim loads with dlopen at run
+# time (PCRE, OpenSSL, and libgcc_s, which glibc dlopens for unwinding). Those
+# are found only through the binary's RPATH, which is rewritten below, so they
+# are taken from the directories it names.
+# Measured: without the second, nimsuggest stops at start-up with
+# "could not load: libpcre.so(.3|.1|)" and the language server answers every
+# trace query with "No trace result".
+for binary in "${BINARIES[@]}"; do
+	libs=$(lddtree -l "${binary}" 2>/dev/null | grep -v glibc | grep '^/nix' || true)
+	if [ -n "${libs}" ]; then
+		# shellcheck disable=SC2086
+		cp -n -L ${libs} "${APP_DIR}/lib/" 2>/dev/null || true
+	fi
+	IFS=: read -r -a rpath_dirs <<<"$(patchelf --print-rpath "${binary}")"
+	for rpath_dir in "${rpath_dirs[@]}"; do
+		case "${rpath_dir}" in
+		/nix/store/*-glibc-* | "") continue ;;
+		esac
+		for lib in "${rpath_dir}"/lib{pcre,ssl,crypto,gcc_s}.so*; do
+			[ -f "${lib}" ] && cp -n -L "${lib}" "${APP_DIR}/lib/"
+		done
+	done
+done
+chmod -R u+w "${APP_DIR}/lib"
+
+# The host's loader path, as build_appimage.sh sets on everything it bundles:
+# a binary run directly, bypassing its wrapper, then degrades instead of
+# failing to exec.
+if [ "$(uname -m)" = "aarch64" ]; then
+	HOST_INTERPRETER=/lib/ld-linux-aarch64.so.1
+else
+	HOST_INTERPRETER=/lib64/ld-linux-x86-64.so.2
+fi
+
+for binary in "${BINARIES[@]}"; do
+	dir=$(dirname "${binary}")
+	base=$(basename "${binary}")
+	rel_lib=$(realpath --relative-to="${dir}" "${APP_DIR}/lib")
+	patchelf --set-interpreter "${HOST_INTERPRETER}" "${binary}"
+	patchelf --remove-rpath "${binary}"
+	# shellcheck disable=SC2016
+	patchelf --set-rpath "\$ORIGIN/${rel_lib}" "${binary}"
+	mv "${binary}" "${dir}/${base}.real"
+	cat >"${binary}" <<EOF
+#!/usr/bin/env bash
+# GENERATED by appimage-scripts/bundle_nim_tracing.sh -- do not edit.
+# Runs ${base}.real against the glibc bundled in the AppImage, through the
+# loader copy beside it (so /proc/self/exe names this directory).
+_ctw_here=\$(dirname "\$(readlink -f "\${0}")")
+export CODETRACER_APP_FILENAME="\${_ctw_here}/${base}"
+exec "\${_ctw_here}/${LOADER}" --argv0 "\${_ctw_here}/${base}" --library-path "\${_ctw_here}/${rel_lib}" "\${_ctw_here}/${base}.real" "\$@"
+EOF
+	chmod +x "${binary}"
+done
+echo "Bundled Nim tracing: ${APP_DIR}/bin/nimlangserver, ${APP_DIR}/nim/libexec/nimsuggest"

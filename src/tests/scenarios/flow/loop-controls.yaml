@@ -1,0 +1,51 @@
+scenario: 1
+name: flow/loop-controls
+pack: codetracer
+summary: >-
+  With the caret on a loop header (`for i in 0..10`), the flow's iteration
+  slider has a real width; each click of the forward arrow advances the
+  iteration by exactly one and keeps the total; the backward arrow retreats
+  by one.
+
+stage:
+  - use: record-program
+    with: { program: noir_flow_loop }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 180s }
+  - wait: { until: { at: 'editor[file="main.nr"]', active: true }, timeout: 60s }
+  # Into the loop's body, as a user gets there: a breakpoint on its first line.
+  - click: { at: 'editor[file="main.nr"]/line[number="9"]', anchor: glyph }
+  - wait: { until: { at: 'editor[file="main.nr"]/line[number="9"]', glyph: breakpoint }, timeout: 10s }
+  - click: 'toolbar/toolbar-button[label="continue-image"]'
+    settle: false
+  - wait: { until: replay-idle, timeout: 60s }
+  - wait: { until: { at: 'editor[file="main.nr"]', current-line: 9 }, timeout: 60s }
+  - click: { at: 'editor[file="main.nr"]/line[number="8"]', anchor: text-end }
+  - wait: { until: { at: 'editor[file="main.nr"]/loop-control', present: true }, timeout: 60s }
+  - wait: { until: { at: 'editor[file="main.nr"]/loop-control', slider-width: { gt: 0 } }, timeout: 30s }
+  - expect: { at: 'editor[file="main.nr"]/loop-control', total: { ge: 9 } }
+  - expect: { at: 'editor[file="main.nr"]/loop-control', iteration: 0 }
+  - beat: forward
+    steps:
+      - click: { at: 'editor[file="main.nr"]/loop-control', anchor: forward }
+      - wait: { until: { at: 'editor[file="main.nr"]/loop-control', iteration: 1 }, timeout: 20s }
+      - click: { at: 'editor[file="main.nr"]/loop-control', anchor: forward }
+      - wait: { until: { at: 'editor[file="main.nr"]/loop-control', iteration: 2 }, timeout: 20s }
+      - click: { at: 'editor[file="main.nr"]/loop-control', anchor: forward }
+      - wait: { until: { at: 'editor[file="main.nr"]/loop-control', iteration: 3 }, timeout: 20s }
+      - click: { at: 'editor[file="main.nr"]/loop-control', anchor: forward }
+      - wait: { until: { at: 'editor[file="main.nr"]/loop-control', iteration: 4 }, timeout: 20s }
+      - click: { at: 'editor[file="main.nr"]/loop-control', anchor: forward }
+      - wait: { until: { at: 'editor[file="main.nr"]/loop-control', iteration: 5 }, timeout: 20s }
+      - expect: { at: 'editor[file="main.nr"]/loop-control', total: 10 }
+  - beat: backward
+    steps:
+      - click: { at: 'editor[file="main.nr"]/loop-control', anchor: backward }
+      - wait: { until: { at: 'editor[file="main.nr"]/loop-control', iteration: 4 }, timeout: 20s }
+      - click: { at: 'editor[file="main.nr"]/loop-control', anchor: backward }
+      - wait: { until: { at: 'editor[file="main.nr"]/loop-control', iteration: 3 }, timeout: 20s }
+      - click: { at: 'editor[file="main.nr"]/loop-control', anchor: backward }
+      - wait: { until: { at: 'editor[file="main.nr"]/loop-control', iteration: 2 }, timeout: 20s }
+      - expect: { at: 'editor[file="main.nr"]/loop-control', total: 10 }

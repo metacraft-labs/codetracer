@@ -183,6 +183,10 @@ type
       ## every move (`followDebuggerCall`). The desktop and the web turn it
       ## on; the terminal does not, because it keeps its call-stack cursor in
       ## `selectedEntry`.
+    selectedForMove: string
+      ## The stop at which a row's call was selected AHEAD of the move the
+      ## selection makes (`selectCallForMove`), or "" when there is none. The
+      ## follow leaves the selection alone at the stop that move lands on.
 
     # -- Search-result reveal (codetracer#860) --
     revealScroll*: Signal[RevealScroll]
@@ -489,6 +493,22 @@ proc selectCall*(vm: CalltraceVM; callKey: string) =
     return
   vm.selectedCallKey.val = callKey
   vm.followSelectedCall()
+
+proc selectCallForMove*(vm: CalltraceVM; callKey: string) =
+  ## `selectCall`, for a selection that is about to MOVE the session there: a
+  ## click on a row selects its call and then jumps to it
+  ## (`doubleClickEntry`). Following the debugger's call must not undo it.
+  ##
+  ## A call that immediately calls another records no step in between, so
+  ## several frames are open at its first step, and the engine reports the
+  ## INNERMOST of them as current when the jump lands. Following that stop
+  ## replaced the clicked row's mark with a deeper frame: on a deep Aztec
+  ## capture, 6 of 31 row clicks did (`Map::at` marked
+  ## `Poseidon2::hash_internal`). Click-Navigation.md §2.1-§2.3 asks for the
+  ## clicked row to be the one marked. So the follow skips the stop the move
+  ## lands on, and follows again from the next move.
+  vm.selectedForMove = stopIdentityOf(vm.store.debugger.val)
+  vm.selectCall(callKey)
 
 proc followDebuggerCall*(vm: CalltraceVM; follow = true) =
   ## Make the selection follow the call the debugger is in after every move
@@ -1173,6 +1193,16 @@ proc createCalltraceVM*(store: ReplayDataStore;
         if not vm.followsDebuggerCall or stop == followedStop or current < 0:
           return
         if answered != stop:
+          return
+        # A ROW SELECTED FOR THIS MOVE stays selected (`selectCallForMove`):
+        # the stop it was chosen at is the one before the move, so the first
+        # stop after it is the move's, and following it would mark the
+        # innermost frame at the clicked call's step instead.
+        if vm.selectedForMove.len > 0:
+          if stop == vm.selectedForMove:
+            return
+          vm.selectedForMove = ""
+          followedStop = stop
           return
         let at = current - start
         if at < 0 or at >= lines.len.int64:

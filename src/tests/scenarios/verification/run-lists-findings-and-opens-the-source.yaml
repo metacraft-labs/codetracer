@@ -1,0 +1,28 @@
+scenario: 1
+name: verification/run-lists-findings-and-opens-the-source
+pack: codetracer
+summary: >-
+  A run to the end lists the findings by kind (pipeline error (2)) with the
+  run's report attached and the verdict "failed before reaching the prover";
+  a press on the first finding opens src/main.nr with the caret on line 2.
+
+stage:
+  - use: fixture-project
+    with: { name: verno-run }
+  - use: open-project
+    with: { folder: $project }
+
+steps:
+  - wait: { until: { at: window, mode: edit }, timeout: 120s }
+  - wait: { until: settled, timeout: 30s }
+  - chord: Ctrl+p
+  - type: ":Verification"
+  - wait: { until: { at: omnibox, assert: "offers(command, Verification)" }, timeout: 15s }
+  - key: Enter
+  - wait: { until: { at: verification-panel, present: true }, timeout: 30s }
+  - click: 'verification-panel/panel-button[label="Run"]'
+    settle: false
+  - wait: { until: { at: verification-panel, phase: finished }, timeout: 60s }
+  - expect: { at: verification-panel, groups: [pipeline error (2)], payload: attached, status: { matches: "^failed before reaching the prover" }, run: Verify with Verno, count: 2 }
+  - click: 'verification-panel/finding[#1]'
+  - wait: { until: { at: 'editor[file="main.nr"]', caret-line: 2 }, timeout: 30s }

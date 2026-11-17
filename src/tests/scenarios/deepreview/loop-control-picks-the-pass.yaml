@@ -1,0 +1,33 @@
+scenario: 1
+name: deepreview/loop-control-picks-the-pass
+pack: codetracer
+summary: >-
+  Revealing the lines above compute's loop shows its in-editor loop control
+  (`iteration 1 / 3`, one per loop), and the values
+  of that pass (`<i>`, `<acc>`). Stepping forward twice reaches the last pass,
+  whose values differ and are fewer, and stops there (next disabled); stepping
+  back goes to pass 2.
+
+stage:
+  - use: open-review
+    with: { dataset: src/tests/gui/tests/deepreview/fixtures/sample-review.json }
+
+steps:
+  - wait: { until: { at: vcs, present: true }, timeout: 120s }
+  - wait: { until: { at: 'review-diff[file="src/main.rs"]', present: true }, timeout: 60s }
+  - wait: { until: settled, timeout: 30s }
+  - wait: { until: { at: 'review-diff[file="src/main.rs"]', boundaries: { gt: 0 } }, timeout: 30s }
+  - click: 'review-diff[file="src/main.rs"]/review-boundary[direction="above"]'
+  - wait: { until: { at: 'review-diff[file="src/main.rs"]/review-loop[function="compute"]', label: "iteration 1 / 3" }, timeout: 30s }
+  - wait: { until: { at: 'review-diff[file="src/main.rs"]', values: { matches: "<i>.*|<acc>" } }, timeout: 30s }
+  - expect: { at: 'review-diff[file="src/main.rs"]', values: { contains: "<acc>" } }
+  - expect: { at: 'review-diff[file="src/main.rs"]', values: { contains: "<i>" } }
+  - click: 'review-diff[file="src/main.rs"]/review-loop[function="compute"]/step-button[direction="next"]'
+  - wait: { until: { at: 'review-diff[file="src/main.rs"]/review-loop[function="compute"]', label: "iteration 2 / 3" }, timeout: 30s }
+  - click: 'review-diff[file="src/main.rs"]/review-loop[function="compute"]/step-button[direction="next"]'
+  - wait: { until: { at: 'review-diff[file="src/main.rs"]/review-loop[function="compute"]', label: "iteration 3 / 3" }, timeout: 30s }
+  - wait: { until: { at: 'review-diff[file="src/main.rs"]', values: { contains: "<acc> 3" } }, timeout: 30s }
+  - expect: { at: 'review-diff[file="src/main.rs"]', values: { contains: "<i>" } }
+  - expect: { at: 'review-diff[file="src/main.rs"]/review-loop[function="compute"]/step-button[direction="next"]', enabled: false }
+  - click: 'review-diff[file="src/main.rs"]/review-loop[function="compute"]/step-button[direction="prev"]'
+  - wait: { until: { at: 'review-diff[file="src/main.rs"]/review-loop[function="compute"]', label: "iteration 2 / 3" }, timeout: 30s }

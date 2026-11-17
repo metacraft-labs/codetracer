@@ -112,5 +112,77 @@ else
 		"CODETRACER_NIM_BIN='$nim_bin'"
 fi
 
+# The libpcre the sibling's bin/nim is given. bin/nim dlopen()s libpcre, so
+# the detector puts its directory on LD_LIBRARY_PATH. It used to append `/lib`
+# to whatever `nix build nixpkgs#pcre.out` printed; once the floating registry
+# dropped `pcre` that printed nothing, `/lib` went on the path, and the host's
+# glibc broke every Nix binary in the shell. Without a resolvable libpcre the
+# path must be left alone and the gap reported.
+printf '\nthe libpcre the sibling build is given\n'
+
+# A `nix` that records its arguments and fails, as the registry lookup did.
+nix_log="$tmp_root/nix-args.log"
+pcre_bin="$tmp_root/pcre-shell/bin"
+mkdir -p "$pcre_bin"
+printf '#!/bin/sh\necho "$*" >>"%s"\nexit 1\n' "$nix_log" >"$pcre_bin/nix"
+chmod +x "$pcre_bin/nix"
+
+ld_path=""
+recorder_ld_path=""
+detect_err=""
+run_detect_pcre() {
+	# $1: CT_PCRE_LIB_DIR for the run ("" leaves it unset).
+	local raw
+	: >"$nix_log"
+	# shellcheck disable=SC2016  # $1..$3 belong to the INNER shell.
+	raw="$(env -u CODETRACER_NIM_BIN -u DETECT_SIBLINGS_QUIET -u CT_PCRE_LIB_DIR \
+		-u CODETRACER_RECORDER_LD_LIBRARY_PATH \
+		PATH="$pcre_bin:$shell_bin:$PATH" LD_LIBRARY_PATH=/preset \
+		bash -c '
+			[ -n "$3" ] && export CT_PCRE_LIB_DIR="$3"
+			source "$1" "$2/codetracer" >/dev/null 2>"$4"
+			echo "LD=${LD_LIBRARY_PATH:-}"
+			echo "REC=${CODETRACER_RECORDER_LD_LIBRARY_PATH:-}"
+		' _ "$DETECT" "$ws" "$1" "$tmp_root/detect.err")"
+	ld_path="$(sed -n 's/^LD=//p' <<<"$raw")"
+	recorder_ld_path="$(sed -n 's/^REC=//p' <<<"$raw")"
+	detect_err="$(cat "$tmp_root/detect.err")"
+}
+
+run_detect_pcre ""
+if [ "$ld_path" = "/preset" ] && [ -z "$recorder_ld_path" ]; then
+	ok "an unresolvable libpcre leaves LD_LIBRARY_PATH alone (no host /lib)"
+else
+	fail "an unresolvable libpcre leaves LD_LIBRARY_PATH alone (no host /lib)" \
+		"LD_LIBRARY_PATH='$ld_path'; CODETRACER_RECORDER_LD_LIBRARY_PATH='$recorder_ld_path'"
+fi
+if grep -q 'WARNING: .*libpcre' <<<"$detect_err"; then
+	ok "an unresolvable libpcre is reported"
+else
+	fail "an unresolvable libpcre is reported" "stderr: $detect_err"
+fi
+if grep -q -- '--inputs-from .*nixpkgs#pcre.out' "$nix_log"; then
+	ok "the fallback lookup resolves nixpkgs from codetracer's flake.lock, not the registry"
+else
+	fail "the fallback lookup resolves nixpkgs from codetracer's flake.lock, not the registry" \
+		"nix was called with: $(tr '\n' ';' <"$nix_log")"
+fi
+
+shell_pcre="$tmp_root/pcre-from-shell/lib"
+mkdir -p "$shell_pcre"
+run_detect_pcre "$shell_pcre"
+if [ "$ld_path" = "$shell_pcre:/preset" ] && [ "$recorder_ld_path" = "$shell_pcre" ]; then
+	ok "the dev shell's CT_PCRE_LIB_DIR is put on both library paths"
+else
+	fail "the dev shell's CT_PCRE_LIB_DIR is put on both library paths" \
+		"LD_LIBRARY_PATH='$ld_path'; CODETRACER_RECORDER_LD_LIBRARY_PATH='$recorder_ld_path'"
+fi
+if [ ! -s "$nix_log" ] && ! grep -q 'libpcre' <<<"$detect_err"; then
+	ok "with CT_PCRE_LIB_DIR set, nix is not consulted and nothing is reported"
+else
+	fail "with CT_PCRE_LIB_DIR set, nix is not consulted and nothing is reported" \
+		"nix was called with: $(tr '\n' ';' <"$nix_log")" "stderr: $detect_err"
+fi
+
 printf '\n%d of %d assertions failed\n' "$failures" "$assertions"
 [ "$failures" -eq 0 ]

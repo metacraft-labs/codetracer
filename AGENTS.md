@@ -198,9 +198,10 @@ Suites that drive a recorder or tool from a sibling checkout (BEAM, JS and
 Ruby recorders, `ct-native-replay`, `ct-mcr`, `ct-print`, and the `ct-instrument` +
 JS recorder + `session-manager` set the materialised cross-process
 recordings are made with) provision it themselves: when no override names a
-tool, the finder in `tests/test_harness/mod.rs` (and, for `ct-native-replay`
-and the Ruby recorder, `src/backend-manager/tests/real_recording_integration.rs`,
-through the same `tests/test_harness/sibling_provisioning.rs`) runs
+tool, the finder in `tests/test_harness/mod.rs` (and, for `ct-native-replay`,
+`ct-mcr` and the Ruby recorder, the backend-manager tests
+`real_recording_integration.rs` and `meta_dat_real_mcr_recording.rs`, through
+the same `tests/test_harness/sibling_provisioning.rs`) runs
 `scripts/build-siblings.sh --only <key>` (or
 `scripts/provision-cross-process-recording.sh`) once per test binary, under
 a file lock shared by concurrent test binaries, and uses what it built. A
@@ -219,9 +220,12 @@ Playwright worker can run `build-siblings.sh` for the same key at once.
   variable (`CT_NATIVE_REPLAY_PATH`, `CODETRACER_CT_MCR_CMD`, `CODETRACER_JS_RECORDER_PATH`,
   `CODETRACER_BEAM_RECORDER_BIN`, `CODETRACER_RUBY_RECORDER_PATH`,
   `CODETRACER_CT_PRINT`, `CODETRACER_RECORD_WEB_BIN`, …), or a tool on
-  `PATH` that is not the sibling's own build output. `CODETRACER_CT_MCR_CMD`
-  naming the sibling's own `ct_cli` (as the dev shell exports it) is not an
-  override: that build is refreshed like any other.
+  `PATH` that is not the sibling's own build output. For `ct-mcr` the
+  variables are the two `ct` reads, in its order: `CODETRACER_CT_MCR_CMD`,
+  then `CODETRACER_CT_MCR_PATH`; a tool on `PATH` counts only when neither is
+  set. A variable naming the sibling's own `ct_cli` (as the dev shell exports
+  `CODETRACER_CT_MCR_CMD`) is not an override: that build is refreshed like
+  any other.
 
 ### rr recordings on hybrid (P-core + E-core) hosts
 
@@ -266,6 +270,12 @@ Full table: codetracer-specs `spec/Architecture/Per-User-State-Locations.md`.
   Windows run wrote into a real `trace_index.db` (2026-09-23).
 - When YOU drive `ct`, the TUI or the GUI to verify something, export a scratch
   `CODETRACER_HOME` too. When launching for the user, do not.
+- `CODETRACER_HOME` does not move a third-party tool's state. Every GUI launch
+  starts the Agent Activity pane's agent, `codex-acp`, whose login and session
+  list live in `CODEX_HOME` (default `~/.codex`); the Playwright fixtures give
+  it a scratch one per worker. When YOU launch the GUI or `ct host` to verify
+  something, export a scratch `CODEX_HOME` as well, and to exercise the pane
+  put the stub agent on `PATH` (`tests/agent-activity/acp-stub-agent-harness.ts`).
 - `src/common/ct_home_isolation_test.nim` fails a harness that stops setting it,
   a suite that redirects a home variable without it, and a resolver that
   ignores it.
@@ -291,7 +301,7 @@ and the specs live under `src/tests/gui/tests/` (the config's `testDir`). Write 
 there: `just test-e2e`, `just test-gui` and `just test-gui-prebuilt` all run
 `npx playwright test` from `src/tests/gui/`, so a spec anywhere else is run by no recipe and no
 CI lane. Spec arguments are relative to `src/tests/gui/`, e.g.
-`just test-e2e tests/sudoku/nim-sudoku.spec.ts`.
+`just test-e2e tests/sudoku/pascal-sudoku.spec.ts`.
 
 The tests launch the real Electron app via the `ct` binary at `$CODETRACER_E2E_CT_PATH` when
 that is set (CI points it at the nix build), otherwise at `$CODETRACER_BUILD_DIR/bin/ct` (the
@@ -403,6 +413,11 @@ These commands work when your outer shell is zsh: the capture is evaluated in
 Bash. Keep `&&` so a failed source stops the requested command, and leave stderr
 visible. A capture is checkout-specific and temporary; regenerate it after
 changing the checkout, flake inputs or garbage-collecting its Nix store paths.
+It records the checkout it was taken in and runs the shell hook there, so
+sourcing it from any directory gives that checkout's PATH (`node_modules/.bin`
+included) and build directory, and leaves you in the directory you sourced it
+from. If that checkout has been moved or removed, sourcing returns 1 before
+changing anything.
 
 Raw `nix print-dev-env` output is Bash code. Do not source it directly from zsh
 or remove its `LINENO=` assignment: zsh treats `LINENO` as read-only and stops

@@ -1,0 +1,60 @@
+scenario: 1
+name: debug-controls/tooltip-crossing-leaves-no-wake
+pack: codetracer
+summary: >-
+  A pointer travelling across the whole strip of controls leaves no wake of
+  tooltips behind it: whatever the control under the pointer shows, no
+  control it has left keeps a tooltip on screen.
+
+stage:
+  - use: record-program
+    with: { program: py_console_logs/main.py }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - wait: { until: { at: 'toolbar/toolbar-button[label="next-image"]', present: true }, timeout: 60s }
+  - wait: { until: editor.loaded, timeout: 60s }
+  - move: { at: 'editor[file="main.py"]/line[number="1"]', anchor: text-start }
+  - wait: { until: { at: toolbar, assert: no-tooltip }, timeout: 30s }
+  - move: { at: 'toolbar/toolbar-button[label="history-back-image"]', pace: quick }
+    settle: false
+  - wait: { until: { at: toolbar, assert: "no-tooltip-but(history-back-image)" }, timeout: 1s }
+  - move: { at: 'toolbar/toolbar-button[label="history-forward-image"]', pace: quick }
+    settle: false
+  - wait: { until: { at: toolbar, assert: "no-tooltip-but(history-forward-image)" }, timeout: 1s }
+  - move: { at: 'toolbar/toolbar-button[label="reverse-next-image"]', pace: quick }
+    settle: false
+  - wait: { until: { at: toolbar, assert: "no-tooltip-but(reverse-next-image)" }, timeout: 1s }
+  - move: { at: 'toolbar/toolbar-button[label="next-image"]', pace: quick }
+    settle: false
+  - wait: { until: { at: toolbar, assert: "no-tooltip-but(next-image)" }, timeout: 1s }
+  - move: { at: 'toolbar/toolbar-button[label="reverse-step-in-image"]', pace: quick }
+    settle: false
+  - wait: { until: { at: toolbar, assert: "no-tooltip-but(reverse-step-in-image)" }, timeout: 1s }
+  - move: { at: 'toolbar/toolbar-button[label="step-in-image"]', pace: quick }
+    settle: false
+  - wait: { until: { at: toolbar, assert: "no-tooltip-but(step-in-image)" }, timeout: 1s }
+  - move: { at: 'toolbar/toolbar-button[label="reverse-step-out-image"]', pace: quick }
+    settle: false
+  - wait: { until: { at: toolbar, assert: "no-tooltip-but(reverse-step-out-image)" }, timeout: 1s }
+  - move: { at: 'toolbar/toolbar-button[label="step-out-image"]', pace: quick }
+    settle: false
+  - wait: { until: { at: toolbar, assert: "no-tooltip-but(step-out-image)" }, timeout: 1s }
+  - move: { at: 'toolbar/toolbar-button[label="reverse-continue-image"]', pace: quick }
+    settle: false
+  - wait: { until: { at: toolbar, assert: "no-tooltip-but(reverse-continue-image)" }, timeout: 1s }
+  - move: { at: 'toolbar/toolbar-button[label="continue-image"]', pace: quick }
+    settle: false
+  - wait: { until: { at: toolbar, assert: "no-tooltip-but(continue-image)" }, timeout: 1s }
+  - move: { at: 'toolbar/toolbar-button[label="run-to-entry-image"]', pace: quick }
+    settle: false
+  - wait: { until: { at: toolbar, assert: "no-tooltip-but(run-to-entry-image)" }, timeout: 1s }
+  - move: { at: 'toolbar/toolbar-button[label="reset-operation-image"]', pace: quick }
+    settle: false
+  - wait: { until: { at: toolbar, assert: "no-tooltip-but(reset-operation-image)" }, timeout: 1s }
+  - move: { at: 'toolbar/toolbar-button[label="run-tests-image"]', pace: quick }
+    settle: false
+  - wait: { until: { at: toolbar, assert: "no-tooltip-but(run-tests-image)" }, timeout: 1s }
+  - move: { at: 'editor[file="main.py"]/line[number="1"]', anchor: text-start }
+  - expect: { at: toolbar, assert: no-tooltip }

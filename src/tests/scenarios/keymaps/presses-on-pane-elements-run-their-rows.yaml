@@ -1,0 +1,36 @@
+scenario: 1
+name: keymaps/presses-on-pane-elements-run-their-rows
+pack: codetracer
+summary: >-
+  On the desktop a press on a pane's element does what the pointer keymap's
+  row for it says: a press on a call's name goes to that call (the editor
+  stops in add's body), a press on a call's toggle collapses its children, a
+  press on an Event Log row jumps to that event, and a press on a column's
+  header sorts the rows by it.
+
+stage:
+  - use: record-program
+    with: { program: calc }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 180s }
+  - wait: { until: call-trace.loaded, timeout: 120s }
+  - expect: { at: 'editor[file="main.py"]', assert: "stopped-at(1)" }
+  - click: { at: 'call-trace/call[name="add", arguments="(left=2, right=3)"]', anchor: name }
+    settle: false
+  - wait: { until: { at: 'editor[file="main.py"]', assert: "stopped-within(29, 31)" }, timeout: 60s }
+  - wait: { until: replay-idle, timeout: 60s }
+  - wait: { until: { at: 'call-trace/call[name="main"]', expanded: true }, timeout: 30s }
+  - click: { at: 'call-trace/call[name="main"]', anchor: expander }
+  - wait: { until: { at: 'call-trace/call[name="main"]', expanded: false }, timeout: 30s }
+  - click: 'pane-tab[label="EVENT LOG"]'
+  - wait: { until: event-log.loaded, timeout: 60s }
+  # the third event: the line `6 * 7 = 42` printed
+  - click: { at: 'event-log/event[#3]' }
+    settle: false
+  - wait: { until: { at: 'editor[file="main.py"]', assert: "stopped-at(111)" }, timeout: 60s }
+  - wait: { until: replay-idle, timeout: 60s }
+  - expect: { at: event-log, sort: "" }
+  - click: 'table-pane[pane="event-log"]/column-header[column="tick"]'
+  - wait: { until: { at: 'table-pane[pane="event-log"]/column-header[column="tick"]', sorted: { matches: "^[▲▼]$" } }, timeout: 30s }

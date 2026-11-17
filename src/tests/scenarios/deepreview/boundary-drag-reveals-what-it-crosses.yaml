@@ -1,0 +1,23 @@
+scenario: 1
+name: deepreview/boundary-drag-reveals-what-it-crosses
+pack: codetracer
+summary: >-
+  Dragging the upper boundary handle three lines down reveals lines in
+  proportion to the gesture: between 2 and 5 of the 12 hidden lines, starting
+  with line 14.
+
+stage:
+  - use: open-review
+    with: { dataset: src/tests/gui/tests/deepreview/fixtures/sample-review.json }
+
+steps:
+  - wait: { until: { at: vcs, present: true }, timeout: 120s }
+  - wait: { until: { at: 'review-diff[file="src/main.rs"]', present: true }, timeout: 60s }
+  - wait: { until: settled, timeout: 30s }
+  - wait: { until: { at: 'review-diff[file="src/main.rs"]', boundaries: 2 }, timeout: 30s }
+  - drag:
+      from: 'review-diff[file="src/main.rs"]/review-boundary[direction="above"]'
+      to: { at: 'review-diff[file="src/main.rs"]/review-boundary[direction="above"]', anchor: down-3 }
+  - wait: { until: { at: 'review-diff[file="src/main.rs"]/review-boundary[direction="above"]', hidden: { lt: 11 } }, timeout: 30s }
+  - expect: { at: 'review-diff[file="src/main.rs"]/review-boundary[direction="above"]', hidden: { ge: 7 } }
+  - expect: { at: 'review-diff[file="src/main.rs"]', assert: 'shows-new-line("14")' }

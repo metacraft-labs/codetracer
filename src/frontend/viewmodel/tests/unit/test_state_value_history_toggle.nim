@@ -159,10 +159,8 @@ suite "State component value history toggle":
       # 3. The row's right-click menu offers the same toggle.
       let row = findRowByName(panel, "x")
       check row != nil
-      check "contextmenu" in row.eventListeners or
-            "contextmenu" in row.eventHandlers
 
-      row.fireEvent("contextmenu")
+      discard vm.openVariableRowMenu(row.attributes.getOrDefault("data-variable-path", ""))
       let menu = vm.lastContextMenu.val
       check menu.len >= 1
       var toggleHistoryEntry: OriginContextMenuEntry

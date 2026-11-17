@@ -1,0 +1,52 @@
+scenario: 1
+name: multi-replay/second-recording-in-a-new-tab
+pack: codetracer
+summary: >-
+  A recording opened from the welcome screen's Recent traces in a "+" tab
+  opens there with its own file, event log, call trace and terminal output,
+  every pane of the tab drawn (scratchpad, Agent Activity, VCS, tests), and
+  each tab keeps its own recording across tab clicks.
+
+stage:
+  - use: record-program
+    with: { program: py_console_logs/main.py }
+  - use: add-recording
+    with: { program: py_checklist/basics.py }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - wait: { until: { at: 'editor[file="main.py"]', present: true }, timeout: 60s }
+  - click: session-strip/session-add
+  - wait: { until: { at: 'welcome/recent[name="basics.py"]', present: true }, timeout: 30s }
+  - click: 'welcome/recent[name="basics.py"]'
+    settle: false
+  - wait: { until: { at: 'session-strip/session-tab[title="basics.py"]', active: true }, timeout: 120s }
+  - wait: { until: { at: 'editor[file="basics.py"]', present: true }, timeout: 120s }
+  - wait: { until: replay-idle, timeout: 120s }
+  - expect: { at: 'editor[file="main.py"]', absent: true }
+  - expect: { at: status-line, location: { contains: "basics.py" } }
+  - click: 'pane-tab[label="CALLTRACE"]'
+  - wait: { until: call-trace.loaded, timeout: 60s }
+  - click: 'pane-tab[label="EVENT LOG"]'
+  - wait: { until: event-log.loaded, timeout: 60s }
+  - expect: { at: event-log, assert: 'has-output("1. literals")' }
+  # every pane of the second tab is drawn, with its own data
+  - click: 'pane-tab[label="TERMINAL OUTPUT"]'
+  - wait: { until: { at: terminal-output, assert: 'shows("1. literals")' }, timeout: 60s }
+  - click: 'pane-tab[label="SCRATCHPAD"]'
+  - wait: { until: { at: scratchpad, present: true }, timeout: 30s }
+  - click: 'pane-tab[label="AGENT ACTIVITY"]'
+  - wait: { until: { at: agent-activity, present: true }, timeout: 30s }
+  - click: 'pane-tab[label="VCS"]'
+  - wait: { until: { at: vcs, present: true }, timeout: 30s }
+  - click: 'pane-tab[label="TESTS"]'
+  - wait: { until: { at: test-results, present: true }, timeout: 30s }
+  - click: 'session-strip/session-tab[title="main.py"]'
+  - wait: { until: { at: 'editor[file="main.py"]', present: true }, timeout: 60s }
+  - expect: { at: 'editor[file="basics.py"]', absent: true }
+  - wait: { until: { at: status-line, location: { contains: "main.py" } }, timeout: 60s }
+  - click: 'session-strip/session-tab[title="basics.py"]'
+  - wait: { until: { at: 'editor[file="basics.py"]', present: true }, timeout: 60s }
+  - expect: { at: 'editor[file="main.py"]', absent: true }
+  - wait: { until: { at: status-line, location: { contains: "basics.py" } }, timeout: 60s }

@@ -1,0 +1,32 @@
+scenario: 1
+name: status-bar/edit-session-no-debugger-timeout
+pack: codetracer
+summary: >-
+  An Edit-mode session keeps its edit-commands toolbar, and past the
+  debugger's 30-second liveness interval no "initialize got no answer from
+  the debugger" notice appears in the status bar, nor in the notification
+  history View > Notifications opens.
+
+stage:
+  - use: open-project
+    with: { folder: test-programs }
+
+steps:
+  - wait: { until: { at: edit-toolbar-strip, shown: true }, timeout: 120s }
+  - wait: settled
+  - hover: { at: status-line, for: 32s }
+  - expect: { at: status-line, assert: ['lacks("initialize got no answer")', 'notifies-nothing-of("initialize got no answer")'] }
+  - expect: { at: edit-toolbar-strip, shown: true }
+  # The notification history, opened from View > Notifications as a user
+  # opens it, holds no such notice either.
+  - click: menu-bar
+  - wait: { until: { at: 'menu-bar/menu[label="View"]', present: true }, timeout: 10s }
+  - hover: { at: 'menu-bar/menu[label="View"]', for: 300ms }
+  - wait: { until: { at: 'menu-bar/menu-item[label="Notifications"]', present: true }, timeout: 10s }
+  - hover: { at: 'menu-bar/menu-item[label="Filesystem"]', for: 200ms }
+  - wait: settled
+  - click: 'menu-bar/menu-item[label="Notifications"]'
+  - wait: { until: { at: notification-history, present: true }, timeout: 10s }
+  - wait: settled
+  - expect: { at: notification-history, present: true }
+  - expect: { at: notification-history, assert: 'never-says("initialize got no answer")' }

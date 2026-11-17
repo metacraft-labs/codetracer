@@ -1,6 +1,7 @@
-import std/strutils,
+import std/[strutils, options],
   ../../common/[trace_index],
-  json_serialization
+  json_serialization,
+  nim_trace_import
 
 # `Trace.lang` crosses the `ct trace-metadata` -> Electron main process hop
 # as the enum's NAME, never its ordinal (LRS-4, 2026-09-21).  The rule that
@@ -16,8 +17,21 @@ proc traceMetadata*(
     idArg: Option[string], pathArg: Option[string],
     programArg: Option[string], recordPidArg: Option[int],
     recent: bool, recentFolders: bool, addRecentFolder: Option[string],
-    recentLimit: int, test: bool) =
-  if idArg.isSome:
+    recentLimit: int, importCt: Option[string], importSource: Option[string],
+    test: bool) =
+  if importCt.isSome:
+    # The desktop's Nim trace route: register the nimsuggest `.ct` in a folder
+    # of its own and print its row. A failure exits non-zero with the reason
+    # on stderr, which the main process reads as "not imported".
+    try:
+      let trace = importNimTraceFile(importCt.get,
+        importSource.get(""))
+      echo Json.encode(trace)
+    except CatchableError as e:
+      stderr.writeLine "ct trace-metadata: could not import " &
+        importCt.get & ": " & e.msg
+      quit(1)
+  elif idArg.isSome:
     let trace = trace_index.find(idArg.get, test)
     echo Json.encode(trace)
   elif pathArg.isSome:

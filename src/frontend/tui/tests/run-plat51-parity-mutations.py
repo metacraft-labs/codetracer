@@ -44,7 +44,7 @@ PART B (deliverables 8-11, and the future-output issue):
   | claim | arms |
   |---|---|
   | the drop zones are GoldenLayout's, ported | H1 (a surface tie goes to the later area), H2 / H6 (a tab's left half is its first third), H3 (the joining middle is half the body), H4 / H5 (the drag measures with the pane still in), B6 / B7 (1016 never adopted), B17 (a pixel decided half a cell off), B13 (pinned colour flags skip the pointer's questions), W3 (no placeholder in the window) |
-  | the focus highlight | B3 / B14 (no focused strip), B4 (the louder token), B5 (a bare flag taken), B16 (a remembered preference ignored), W1 (the window's focused strip on the unfocused ground), W2 (a press moves no focus) |
+  | the focus highlight | B3 / B14 (no focused strip), B4 (the louder token), B5 (a bare flag taken), B16 (a remembered preference ignored), W1 (the window's focused strip on the unfocused ground), W2 (a press moves no focus), W6 (a press in the editor's text moves the keys but leaves the strip where it was) |
   | live reflow | B1 / B15 (nothing re-laid-out while held), B2 (every motion commits), W5 (the window draws the committed arrangement) |
   | the Welcome Screen on a new tab | B10 (the + opens the omnibar), B11 (Record new trace refused), B12 (a recording made outside the state root), W4 (the window's + opens nothing) |
   | the future keeps its colour, dimmed | B8 (future output at full strength), B9 (not the desktop's 0.5 composite) |
@@ -313,6 +313,8 @@ Z_PIXEL = "without 1016 a report is its cell's centre; with 1016 it is its pixel
 Z_RECORD = "Record new trace runs a real ct record and opens the recording in the tab"
 Z_COMPOSITE = "the desktop's colours, a click landing at the desktop's tick"
 W_FOCUS = "one strip on the focus colour; a press moves it; the command turns it off, remembered"
+W_EDITOR_FOCUS = ("a press in the editor's text, after another pane had the focus, "
+                  "moves the strip to the editor")
 W_LIVE = "held 80 px along, the panes have moved; nothing is written until the release"
 W_DROP = "the carried pane is out of the arrangement; the placeholder; the outer band"
 W_WELCOME = "the + opens it: the desktop's start options in its order, the recent panels"
@@ -362,7 +364,7 @@ CASE_SUITE = {
     B_FUTURE: TOUT, B_PROBE: CAPRES,
     Z_FOCUS: PTYB, Z_EDGES: PTYB, Z_LIVE: PTYB, Z_PIXEL: PTYB, Z_RECORD: PTYB,
     Z_COMPOSITE: TOUTPTY,
-    W_FOCUS: GPLANB, W_LIVE: GPLANB, W_DROP: GPLANB, W_WELCOME: GPLANB,
+    W_FOCUS: GPLANB, W_EDITOR_FOCUS: GPLANB, W_LIVE: GPLANB, W_DROP: GPLANB, W_WELCOME: GPLANB,
     N_STATE: SCRUBT, N_FILES: SCRUBT, N_VCS: SCRUBT, N_WHEEL: SCRUBT,
     N_PRESS: SCRUBT, Y_HISTORY: PTY,
     Q_VCS_DRAW: GPLANM71, Q_VCS_MOVE: GPLANM71, Q_FILES_DRAW: GPLANM71,
@@ -468,8 +470,12 @@ ARMS = [
     Arm("T8", RUNTIME,
         # RE-AIMED 2026-10-21 (M76): the caret line is `editorCaretLine`, shared
         # with the program menu's "Add a Tracepoint"; same arm, its one call.
-        "    rt.openTracepointEditorAt(rt.app.source.path, rt.editorCaretLine())\n",
-        "    discard rt.editorCaretLine()\n",
+        # RE-AIMED again 2026-11-09: `e91f95ce8` binds it as the named
+        # operation `editor.toggle-tracepoint`; same arm, its one call.
+        '  session.bindOp("editor.toggle-tracepoint",\n'
+        "             act(rt.openTracepointEditorAt(rt.app.source.path, rt.editorCaretLine())))\n",
+        '  session.bindOp("editor.toggle-tracepoint", act do:\n'
+        "    discard rt.editorCaretLine())\n",
         P_CARET, "Alt+t and Ctrl+Enter do not open the tracepoint editor"),
     Arm("T14", TDRIVER,
         "      if (b >= ' ' and b <= '~') or b == '\\x7f' or b < ' ':\n        let alt = Esc & $b\n",
@@ -477,9 +483,11 @@ ARMS = [
         Y_CARET, "the framer drops Alt's ESC: a real terminal's Alt+T is a bare t"),
     # T15 RE-AIMED 2026-10-12 (PLAT-68 Phase B): an Alt chord is the key
     # alone when the router resolves it to nothing.
+    # T15 RE-AIMED 2026-11-13: the bare key is now handed to
+    # `handleTokenUnwatched` (the screen-reader mode's split); same defect.
     Arm("T15", RUNTIME,
-        "     rt.probeKey(rt.lastKey).kind == erNothing:\n    return rt.handleToken(token[1 .. 1], nowMs)\n",
-        "     false:\n    return rt.handleToken(token[1 .. 1], nowMs)\n",
+        "     rt.probeKey(rt.lastKey).kind == erNothing:\n    return rt.handleTokenUnwatched(token[1 .. 1], nowMs)\n",
+        "     false:\n    return rt.handleTokenUnwatched(token[1 .. 1], nowMs)\n",
         P_CARET, "an unbound Alt+<char> is swallowed instead of being the character"),
     Arm("T9", RUNTIME,
         "    if isMouse and event.shift:\n",
@@ -550,9 +558,13 @@ ARMS = [
         "  if path in open:\n    open.excl path\n  else:\n    try:\n      discard gSession.loadValueHistory(path, gpuiRowBudget())\n",
         "  if true:\n    open.excl path\n  else:\n    try:\n      discard gSession.loadValueHistory(path, gpuiRowBudget())\n",
         G_HISTORY, "GPUI's history control never opens the history"),
+    # G6 RE-AIMED 2026-11-09: ffec0f79a moved the caret placement into the
+    # shared pointer model (`editor_pointer.pressEditor`); GPUI's own part is
+    # the hit it hands that model. The defect points the press at the caret
+    # that is already there, so a click in the code places no caret.
     Arm("G6", GMAIN,
-        "      placeCaret(r, path, c.line, column)\n",
-        "      discard column\n",
+        "  result.offset = d.offsetAtView(line - 1, result.displayColumn)\n",
+        "  result.offset = d.offsetAtView(d.caretLine - 1, d.caretViewColumn)\n",
         G_CARET, "a click in GPUI's code places no caret"),
     Arm("G7", GMAIN,
         "  gCtxMenu.openAt(menu, y, x)\n",
@@ -727,6 +739,13 @@ ARMS += [
         "    if pressedPane.len > 0 and (pressedPane != gFocusPane or not gFocusShown):\n",
         "    if false:\n",
         W_FOCUS, "a press in the window moves no focus"),
+    # W6 (2026-11-14): a press in the editor's text reaches the editor's
+    # row before the window root, so the editor must show the focus it
+    # takes; without the redraw the strip stays on the pane pressed before.
+    Arm("W6", GMAIN,
+        "      traceGesture(\"focus \" & $paneEditor)\n      discard drawArrangement(r)\n",
+        "      traceGesture(\"focus \" & $paneEditor)\n",
+        W_EDITOR_FOCUS, "a press in the editor's text leaves the focus strip on the pane pressed before"),
     Arm("W3", GMAIN,
         "      let gapAt = if ph.found and ph.stackPath == n.path: ph.index else: -1\n",
         "      let gapAt = -1\n",
@@ -1021,6 +1040,36 @@ def engine_target_dir() -> Path:
     """The cargo target directory `REPLAY_SERVER_BIN` was built into
     (`<target>/<profile>/replay-server`)."""
     return Path(os.environ["REPLAY_SERVER_BIN"]).resolve().parents[1]
+
+
+def engine_binary() -> Path:
+    """The replay-server `build_engine` writes: cargo's `dev` profile output
+    in `engine_target_dir()`."""
+    return engine_target_dir() / "debug" / (
+        "replay-server" + (".exe" if os.name == "nt" else ""))
+
+
+def engine_binary_problem() -> str:
+    """Why an engine arm could not be graded with this `REPLAY_SERVER_BIN`,
+    or "" when it can.
+
+    The suites run the replay-server `REPLAY_SERVER_BIN` names
+    (`src/common/replay_server_path`'s first candidate) and `build_engine`
+    writes `<target>/debug/replay-server`. When those are two files, the
+    mutated engine is built and never run: graded at 69206138e with
+    `REPLAY_SERVER_BIN=src/build-debug/bin/replay-server`, E1 SURVIVED
+    because every suite ran the unmutated `bin/` copy, while the same
+    mutant run through `src/build-debug/debug/replay-server` failed the
+    killer case (`knownTotal` 62, not 70). The suites' own provenance check
+    does not catch it: it is opt-in (`CODETRACER_REQUIRE_REPLAY_REVISION`),
+    and it compares a binary with the checkout's sources, which are the
+    mutant's while the arm runs."""
+    named = Path(os.environ["REPLAY_SERVER_BIN"]).resolve()
+    built = engine_binary().resolve()
+    if named != built:
+        return (f"REPLAY_SERVER_BIN is {named}, but an engine arm rebuilds "
+                f"{built}; export REPLAY_SERVER_BIN={built}")
+    return ""
 
 
 def run_cargo_engine(path: str, filt: str, case: str | None) -> RunResult:
@@ -1387,6 +1436,12 @@ def main() -> int:
     install_restore_on_signal()
 
     wanted = [a for a in ARMS if not only or a.id in only]
+    # An engine arm is graded only if the suites run the engine it rebuilds.
+    if any(path in ENGINE_SUBJECTS for a in wanted for path, _f, _r in a.edits()):
+        problem = engine_binary_problem()
+        if problem:
+            print(f"REFUSING TO RUN: {problem}")
+            return 1
     print("\n== control ==")
     if any(CASE_SUITE[a.killer] in BINARY_SUITES for a in wanted) and \
        not build_tui():

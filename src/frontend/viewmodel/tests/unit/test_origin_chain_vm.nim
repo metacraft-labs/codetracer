@@ -32,7 +32,7 @@
 ## Compile + run:
 ##   nim c -r src/frontend/viewmodel/tests/unit/test_origin_chain_vm.nim
 
-import std/[json, options, sets, strutils, tables, unicode, unittest]
+import std/[json, options, sequtils, sets, strutils, tables, unicode, unittest]
 
 import isonim/core/async_compat
 import isonim/core/[signals, computation, owner]
@@ -50,6 +50,7 @@ import ../../viewmodels/[
   command_palette_vm,
 ]
 import ../../views/[state_view, isonim_state_view, isonim_scratchpad_view]
+from ../../input/pane_presses import pressState
 
 proc drain() =
   ## Flush whatever the reactive layer resolved synchronously.
@@ -949,13 +950,11 @@ suite "M4 — State Pane renders inline origin badge per row":
       # listener (registered via the DSL's ``oncontextmenu = handler``
       # rewrite — see ``isonim/dsl/transform.nim::eventName``).  Without
       # this the handler is silently absent and the menu wouldn't open.
-      check "contextmenu" in row.eventListeners or
-            "contextmenu" in row.eventHandlers
       # Fire the right-click — the handler reads the row's live state
       # and publishes the menu through ``StateVM.lastContextMenu`` so
       # tests can interrogate the entries without touching the
       # JS-only ``showContextMenu`` primitive.
-      row.fireEvent("contextmenu")
+      discard stateVM.openVariableRowMenu(row.attributes.getOrDefault("data-variable-path", ""))
       let menu = stateVM.lastContextMenu.val
       check menu.len >= 1
       var showOriginEntry: OriginContextMenuEntry
@@ -1387,6 +1386,40 @@ suite "M86 — the origin badge and Pin to scratchpad, through the production br
       check w.origin.breadcrumbStack.val.len == 0
       dispose()
 
+  test "the expanded chain's \"Show in side panel\" opens the side panel on the row's chain":
+    # §3.2.2: the affordance at the bottom of the expanded chain is the side
+    # panel's door from the State pane. It is hidden until the row holds a
+    # chain, and a press opens the panel with that variable's chain and one
+    # breadcrumb, through the production bridge.
+    createRoot proc(dispose: proc()) =
+      let w = makeWiredOrigin()
+      w.showEagerRow("c")
+      w.mock.expect("ct/originChain", twoHopChainPayload("c"))
+      let panel = renderStatePanel[MockRenderer, MockNode](MockRenderer(), w.state)
+      let row = findRowNamed(panel, "c")
+      check row != nil
+      let open = findByClass(row, "ct-origin-show-in-side-panel")
+      check open != nil
+      check open != nil and open.styles.getOrDefault("display", "") == "none"
+      findBadgeForRow(panel, "c").fireEvent("click")
+      drain()
+      check open != nil and open.styles.getOrDefault("display", "") == "inline-block"
+      check not w.origin.sidePanelOpen.val
+
+      w.mock.clearReceivedCommands()
+      w.mock.expect("ct/originChain", twoHopChainPayload("c"))
+      open.fireEvent("click")
+      drain()
+      let sent = originChainRequests(w.mock)
+      check sent.len == 1 and sent[0]["variableName"].getStr == "c"
+      check w.origin.sidePanelOpen.val
+      check w.origin.activeChain.val.isSome and
+        w.origin.activeChain.val.get.queryVariable == "c" and
+        w.origin.activeChain.val.get.hops.len == 2
+      check w.origin.breadcrumbStack.val.len == 1 and
+        w.origin.breadcrumbStack.val[0].variableName == "c"
+      dispose()
+
   test "collapsing, and re-expanding a row whose chain is held, send nothing":
     createRoot proc(dispose: proc()) =
       let w = makeWiredOrigin()
@@ -1487,6 +1520,34 @@ suite "M86 — the origin badge and Pin to scratchpad, through the production br
       check originChainRequests(w.mock).len == 2
       dispose()
 
+  test "\"Show value origin\" on a row with no origin summary loads its chain in place":
+    # A backend that sends no `originSummary` with its locals (the native
+    # ones) draws no badge, but the row menu still offers "Show value
+    # origin", and it must load the chain (§3.1, "loading it when needed"),
+    # not expand the row to nothing.
+    createRoot proc(dispose: proc()) =
+      let w = makeWiredOrigin()
+      w.store.updateLocals(@[makeVariable("c", "10", "int")])
+      drain()
+      w.mock.clearReceivedCommands()
+      w.mock.expect("ct/originChain", twoHopChainPayload("c"))
+      let panel = renderStatePanel[MockRenderer, MockNode](MockRenderer(), w.state)
+      let row = findRowNamed(panel, "c")
+      check row != nil
+      discard w.state.openVariableRowMenu(row.attributes.getOrDefault("data-variable-path", ""))
+      var showOrigin: proc() = nil
+      for entry in w.state.lastContextMenu.val:
+        if entry.label == "Show value origin":
+          showOrigin = entry.action
+      check not showOrigin.isNil
+      showOrigin()
+      drain()
+      let requests = originChainRequests(w.mock)
+      check requests.len == 1 and requests[0]["variableName"].getStr == "c"
+      check not w.origin.sidePanelOpen.val
+      check findAllByClass(row, "ct-origin-inline-chain-hop").len == 2
+      dispose()
+
   test "one \"Show value origin\" from the row menu sends one ct/originChain":
     # One gesture, one backward walk: each `ct/originChain` spends its own
     # budget (§6.1.7), so a second request for the same expression costs the
@@ -1510,7 +1571,7 @@ suite "M86 — the origin badge and Pin to scratchpad, through the production br
           findRow(child)
       findRow(panel)
       check row != nil
-      row.fireEvent("contextmenu")
+      discard w.state.openVariableRowMenu(row.attributes.getOrDefault("data-variable-path", ""))
       var showOrigin: proc() = nil
       for entry in w.state.lastContextMenu.val:
         if entry.label == "Show value origin":
@@ -1578,6 +1639,55 @@ suite "M86 — the origin badge and Pin to scratchpad, through the production br
       check w.origin.breadcrumbStack.val.len == 1 and
         w.origin.breadcrumbStack.val[0].variableName == "c"
       check not w.origin.loading.val
+      dispose()
+
+  test "a breadcrumb goes back to the chain its query was answered with":
+    # §3.3: the breadcrumbs list the queries the user navigated through,
+    # "allowing easy back-up". Going back pops the later queries and shows
+    # the earlier chain again WITHOUT asking: asked again after a move, a
+    # current-stop query would answer about a different moment.
+    createRoot proc(dispose: proc()) =
+      let w = makeWiredOrigin()
+      w.mock.expect("ct/originChain", twoHopChainPayload("c"))
+      w.state.onShowOrigin("c", Location(file: "fixture.py", line: 3))
+      drain()
+      w.mock.expect("ct/originChain", twoHopChainPayload("d"))
+      w.state.onShowOrigin("d", Location(file: "fixture.py", line: 3))
+      drain()
+      check w.origin.breadcrumbStack.val.len == 2
+      check w.origin.activeChain.val.get.queryVariable == "d"
+
+      w.mock.clearReceivedCommands()
+      w.origin.onSelectBreadcrumb(0)
+      drain()
+      check originChainRequests(w.mock).len == 0
+      check w.origin.breadcrumbStack.val.len == 1 and
+        w.origin.breadcrumbStack.val[0].variableName == "c"
+      check w.origin.activeChain.val.isSome and
+        w.origin.activeChain.val.get.queryVariable == "c"
+      check w.origin.sidePanelOpen.val
+      check not w.origin.loading.val
+      # The breadcrumb shown, or one out of range, changes nothing.
+      w.origin.onSelectBreadcrumb(0)
+      w.origin.onSelectBreadcrumb(5)
+      drain()
+      check w.origin.breadcrumbStack.val.len == 1
+      check originChainRequests(w.mock).len == 0
+      dispose()
+
+  test "a breadcrumb whose answer never arrived is asked again":
+    createRoot proc(dispose: proc()) =
+      let w = makeWiredOrigin()
+      w.origin.onPushBreadcrumb(BreadcrumbEntry(variableName: "c", stepId: 7))
+      w.origin.onPushBreadcrumb(BreadcrumbEntry(variableName: "d", stepId: -1))
+      w.mock.expect("ct/originChain", twoHopChainPayload("c"))
+      w.origin.onSelectBreadcrumb(0)
+      drain()
+      let sent = originChainRequests(w.mock)
+      check sent.len == 1 and sent[0]["variableName"].getStr == "c"
+      check w.origin.breadcrumbStack.val.len == 1
+      check w.origin.activeChain.val.isSome and
+        w.origin.activeChain.val.get.queryVariable == "c"
       dispose()
 
   test "Pin to scratchpad, through the production bridge, reaches ScratchpadVM.chainEntries":
@@ -1678,3 +1788,193 @@ suite "M86 — the origin badge and Pin to scratchpad, through the production br
     check originVM.loading.val
     check originVM.rejectChainAnswer("req-3")
     check not originVM.loading.val
+
+proc cutOffChainPayload(variable: string): JsonNode =
+  ## The first request's answer when the request's time limit cut the walk
+  ## off after one hop (spec §5.3.1): `variable = b`, truncated, with a
+  ## continuation.
+  %*{
+    "queryVariable": variable,
+    "queryStepId": -1,
+    "hops": [
+      {"kind": "trivialCopy", "targetExpr": variable, "sourceExpr": "b",
+       "sourceVariable": "b",
+       "location": {"path": "main.rs", "line": 7, "rrTicks": 3},
+       "sourceText": "let " & variable & ": i32 = b;", "stepId": -1,
+       "operandSnapshots": [], "truncatedOperands": false,
+       "confidence": 0.95},
+    ],
+    "terminator": {"kind": "outOfBudget",
+                   "expression": "wall-clock budget exhausted (1 ms)"},
+    "truncated": true,
+    "continuationToken": "token-after-c",
+    "metrics": {"stepsScanned": 1, "elapsedMs": 6, "classifierHits": 1},
+    "confidence": 0.95,
+  }
+
+proc restOfChainPayload(variable: string): JsonNode =
+  ## The continuation's answer: the hops after the first, to the literal.
+  %*{
+    "queryVariable": variable,
+    "queryStepId": -1,
+    "hops": [
+      {"kind": "trivialCopy", "targetExpr": "b", "sourceExpr": "a",
+       "sourceVariable": "a",
+       "location": {"path": "main.rs", "line": 6, "rrTicks": 3},
+       "sourceText": "let mut b: i32 = a;", "stepId": -1,
+       "operandSnapshots": [], "truncatedOperands": false,
+       "confidence": 0.95},
+      {"kind": "literal", "targetExpr": "a", "sourceExpr": "10",
+       "location": {"path": "main.rs", "line": 5, "rrTicks": 3},
+       "sourceText": "let a: i32 = 10;", "stepId": -1,
+       "operandSnapshots": [], "truncatedOperands": false,
+       "confidence": 0.95},
+    ],
+    "terminator": {"kind": "literal", "expression": "10"},
+    "truncated": false,
+    "metrics": {"stepsScanned": 2, "elapsedMs": 9, "classifierHits": 2},
+    "confidence": 0.95,
+  }
+
+proc pressContinue(state: StateVM; button: MockNode): bool =
+  ## A press on the in-row "Continue tracing": the view holds no handler; the
+  ## press is routed to the operation the button carries
+  ## (`data-ct-operation`), performed over the row's `data-variable-name`
+  ## as the DOM front-ends' pointer routing performs it.
+  let reader = proc(name: string): string =
+    var n = button
+    while not n.isNil:
+      if name in n.attributes: return n.attributes[name]
+      n = n.parent
+    ""
+  pressState(state, button.attributes.getOrDefault("data-ct-operation", ""), reader)
+
+suite "Continue tracing: a cut-off chain goes on from where it stopped (spec §5.3.1)":
+
+  test "a cut-off row shows Continue tracing; a click appends the rest and the button goes":
+    createRoot proc(dispose: proc()) =
+      let w = makeWiredOrigin()
+      w.showEagerRow("c")
+      w.mock.expect("ct/originChain", cutOffChainPayload("c"))
+      let panel = renderStatePanel[MockRenderer, MockNode](MockRenderer(), w.state)
+      findBadgeForRow(panel, "c").fireEvent("click")
+      drain()
+      let row = findRowNamed(panel, "c")
+      let more = findByClass(row, "ct-origin-continue-chain")
+      check more != nil
+      check more != nil and more.styles.getOrDefault("display", "") == "inline-block"
+      check more != nil and more.textContent.contains("Continue tracing")
+      let blocks = findAllByClass(panel, "ct-origin-inline-chain")
+      check blocks.len == 1 and
+        findAllByClass(blocks[0], "ct-origin-inline-chain-hop").len == 1
+
+      w.mock.clearReceivedCommands()
+      w.mock.expect("ct/originChain", restOfChainPayload("c"))
+      check pressContinue(w.state, more)
+      drain()
+      let sent = originChainRequests(w.mock)
+      check sent.len == 1
+      check sent.len == 1 and sent[0]["variableName"].getStr == "c" and
+        sent[0]{"continuationToken"}.getStr == "token-after-c"
+      check blocks.len == 1 and
+        findAllByClass(blocks[0], "ct-origin-inline-chain-hop").len == 3
+      let terminatorRow = findByClass(blocks[0], "ct-origin-inline-chain-terminator")
+      check terminatorRow != nil and terminatorRow.textContent.contains("10")
+      check more.styles.getOrDefault("display", "") == "none"
+      # Continuing is a row's business: the side panel stays as it was.
+      check not w.origin.sidePanelOpen.val
+      check w.origin.activeChain.val.isNone
+      dispose()
+
+  test "a refused continuation keeps the hops, says why, and drops the button":
+    createRoot proc(dispose: proc()) =
+      let w = makeWiredOrigin()
+      w.showEagerRow("c")
+      w.mock.expect("ct/originChain", cutOffChainPayload("c"))
+      let panel = renderStatePanel[MockRenderer, MockNode](MockRenderer(), w.state)
+      findBadgeForRow(panel, "c").fireEvent("click")
+      drain()
+      let more = findByClass(findRowNamed(panel, "c"), "ct-origin-continue-chain")
+      w.mock.expect("ct/originChain", %*{"success": false,
+        "message": "the replay no longer holds the point this chain continues from"})
+      check pressContinue(w.state, more)
+      drain()
+      let blocks = findAllByClass(panel, "ct-origin-inline-chain")
+      check blocks.len == 1 and
+        findAllByClass(blocks[0], "ct-origin-inline-chain-hop").len == 1
+      let terminatorRow = findByClass(blocks[0], "ct-origin-inline-chain-terminator")
+      check terminatorRow != nil and
+        terminatorRow.textContent.contains("cannot continue: the replay no longer holds")
+      check more.styles.getOrDefault("display", "") == "none"
+      dispose()
+
+  test "appendChainPage keeps the walked hops and ends where the continuation ends":
+    let shown = parseOriginChain(cutOffChainPayload("c"))
+    check shown.canContinue
+    let whole = appendChainPage(shown, parseOriginChain(restOfChainPayload("c")))
+    check whole.hops.mapIt(it.targetExpr & " = " & it.sourceExpr) ==
+      @["c = b", "b = a", "a = 10"]
+    check whole.terminator.expression == "10"
+    check not whole.truncated and whole.continuationToken.isNone
+    check not whole.canContinue
+
+  test "the side panel's Continue tracing appends to its own chain":
+    createRoot proc(dispose: proc()) =
+      let w = makeWiredOrigin()
+      w.showEagerRow("c")
+      w.mock.expect("ct/originChain", cutOffChainPayload("c"))
+      w.origin.onShowOrigin("c", Location())
+      drain()
+      check w.origin.activeChain.val.isSome and
+        w.origin.activeChain.val.get.canContinue
+      w.mock.clearReceivedCommands()
+      w.mock.expect("ct/originChain", restOfChainPayload("c"))
+      w.origin.continueActiveChain()
+      drain()
+      check originChainRequests(w.mock).len == 1
+      check w.origin.activeChain.val.isSome and
+        w.origin.activeChain.val.get.hops.len == 3 and
+        not w.origin.activeChain.val.get.canContinue
+      dispose()
+
+suite "a Computational hop's operands are shown as values":
+  # The replay sends each operand snapshot's value as a ValueRecordWithType
+  # (`db-backend/src/value.rs`). The side panel printed that record verbatim
+  # (`a = {"i":10,"kind":"Int","typ":{…}}`); a reader sees the value.
+  proc snapshot(name: string; value: JsonNode): JsonNode =
+    %*{"name": name, "value": value, "sourceStep": 7}
+  let intTyp = %*{"kind": 7, "lang_type": "Int", "specific_info": {"kind": "None"}}
+
+  test "an Int operand reads as its number, with its language type":
+    let op = parseOperandSnapshot(snapshot("a", %*{"kind": "Int", "i": 10, "typ": intTyp}))
+    check op.name == "a"
+    check op.value == "10"
+    check op.typeName == "Int"
+    check op.sourceStep == 7
+
+  test "strings, booleans, sequences and references read as values":
+    check parseOperandSnapshot(snapshot("s", %*{"kind": "String", "text": "hi", "typ": intTyp})).value == "\"hi\""
+    check parseOperandSnapshot(snapshot("b", %*{"kind": "Bool", "b": true, "typ": intTyp})).value == "true"
+    check parseOperandSnapshot(snapshot("xs", %*{"kind": "Sequence", "is_slice": false, "typ": intTyp,
+      "elements": [{"kind": "Int", "i": 1, "typ": intTyp}, {"kind": "Int", "i": 2, "typ": intTyp}]})).value == "[1, 2]"
+    check parseOperandSnapshot(snapshot("p", %*{"kind": "Reference", "address": 4096, "mutable": false,
+      "typ": intTyp, "dereferenced": {"kind": "Int", "i": 5, "typ": intTyp}})).value == "5"
+
+  test "a value already sent as text is kept as it is":
+    check parseOperandSnapshot(snapshot("a", %"10")).value == "10"
+
+  test "the whole chain's Computational hop carries the rendered operands":
+    let chain = parseOriginChain(%*{
+      "queryVariable": "result", "queryStepId": 9,
+      "hops": [{"kind": "computational", "confidence": 1.0, "stepId": 9,
+                "location": {"path": "main.py", "line": 9, "rrTicks": 9},
+                "targetExpr": "result", "sourceExpr": "a + b", "sourceText": "result = a + b",
+                "truncatedOperands": false,
+                "operandSnapshots": [snapshot("a", %*{"kind": "Int", "i": 10, "typ": intTyp}),
+                                     snapshot("b", %*{"kind": "Int", "i": 32, "typ": intTyp})]}],
+      "terminator": {"kind": "computational", "expression": "a + b"},
+      "truncated": false, "confidence": 1.0})
+    check chain.hops.len == 1
+    check chain.hops[0].operandSnapshots.len == 2
+    check chain.hops[0].operandSnapshots[0].value == "10"
+    check chain.hops[0].operandSnapshots[1].value == "32"

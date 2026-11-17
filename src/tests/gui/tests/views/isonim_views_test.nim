@@ -28,6 +28,11 @@ import store/replay_data_store
 import viewmodels/build_output_model
 import viewmodels/state_vm
 import viewmodels/calltrace_vm
+import input/pane_presses
+import keymap/[base_keymaps, context_keys, editing_keymap, keymap_router,
+               scope_path]
+import viewmodels/product_mode
+from ../../../../common/key_names import kpNative
 import viewmodels/debug_controls_vm
 import viewmodels/event_log_vm
 import viewmodels/flow_vm
@@ -266,6 +271,45 @@ proc findAllByClass*(node: MockNode; cls: string): seq[MockNode] =
         break
   for child in node.children:
     result.add(findAllByClass(child, cls))
+
+# ---------------------------------------------------------------------------
+# A press through the router (Input-Routing-And-Keymaps.md §5.1)
+# ---------------------------------------------------------------------------
+#
+# The panes' rows, toggles and headers hold no press handler: on a DOM
+# front-end the window's one pointer listener (`input/dom_pointer`) hit-tests
+# the element, resolves the gesture through the router's pointer rows
+# (`keymap/pointer_rows`) and runs the pane's procedure for that operation
+# on the element's own `data-*` identity (`input/pane_presses`). `press`
+# does the same under `MockRenderer`: the shipped router over the shipped CUA
+# base keymap answers the operation for the element kind the hit test names,
+# and the pane's procedure (`perform`) runs it on the node's attributes, read
+# off the node or its nearest ancestor carrying them, as the DOM reader does.
+
+let pressRouter = initKeymapRouter(bkCua, KeyDelivery(frontEnd: feDesktop,
+  platform: pkLinux, keyProtocol: kpNative))
+
+proc readerOf(node: MockNode): AttributeReader =
+  result = proc(name: string): string =
+    var n = node
+    while not n.isNil:
+      if n.kind == mnkElement and name in n.attributes: return n.attributes[name]
+      n = n.parent
+    ""
+
+proc press(node: MockNode; paneKind: string; kind: ElementKind;
+           perform: proc(operation: string; attr: AttributeReader): bool;
+           gesture = "Click"): bool =
+  ## A press on `node`, an element of `kind` in `paneKind`, routed and
+  ## performed; false when no row names an operation or the procedure
+  ## declined.
+  let res = pressRouter.routePointer(
+    SessionFacts(product: pmDebug, replayLoaded: true),
+    @[element(ekWindow, "window"), pane(paneKind), element(kind, "")],
+    nmNormal, gesture)
+  if res.kind != erOperation:
+    return false
+  perform(res.operation, readerOf(node))
 
 proc findByTagOrNil*(node: MockNode; tag: string): MockNode =
   ## Find the first descendant (or self) with the given tag name, or nil.
@@ -916,16 +960,22 @@ suite "IsoNim Menu Shell — structure":
         onNodeClick: proc(path: seq[int]) = clickedPath = path,
         onSearchResultClick: proc(index: int) = searchIndex = index))
 
-    # `.menu-element` is the clickable leaf row; `launch_config.spec.ts`
-    # activates a launch configuration by clicking exactly this selector
+    # `.menu-element` is the entry's item; `launch_config.spec.ts` activates
+    # a launch configuration by clicking exactly this selector
     # (".menu-nested-elements .menu-element", catalogued in
-    # `codetracer-specs/Testing/UI-Test-Catalog.md`), so the class and the
-    # click handler have to sit on the same element.
+    # `codetracer-specs/Testing/UI-Test-Catalog.md`). The click handler is
+    # on the row around it, which the click reaches by bubbling — one
+    # handler, so one click runs the entry once
+    # (`session-chrome/menu_item_click_runs_once_test.nim`). The mock
+    # renderer does not bubble, so the click is delivered up the ancestors.
     let item = findByClass(menuPanel, "menu-element")
     check item != nil
     # Guarded — see the note above.
     if item != nil:
-      item.fireEvent("click")
+      var node = item
+      while node != nil:
+        node.fireEvent("click")
+        node = node.parent
       check clickedPath == @[1]
 
     let searchPanel = renderMenuShell[MockRenderer, MockNode](
@@ -2084,7 +2134,8 @@ suite "IsoNim Calltrace Panel — call lines":
 
       # Click the second row's name — the row's click target.
       check rows.len == 2
-      findById(panel, "local-call-text-1").fireEvent("click")
+      check findById(panel, "local-call-text-1").press("calltrace", ekRow,
+        proc(op: string; attr: AttributeReader): bool = pressCalltrace(vm, op, attr))
 
       check vm.selectedEntry.val.isSome
       check vm.selectedEntry.val.get == 1'i64
@@ -2143,7 +2194,9 @@ suite "IsoNim Calltrace Panel — call lines":
       let beforeCount = mock.receivedCommands.len
 
       check rows.len == 1
-      findById(panel, "local-call-text-0").fireEvent("dblclick")
+      check findById(panel, "local-call-text-0").press("calltrace", ekRow,
+        proc(op: string; attr: AttributeReader): bool = pressCalltrace(vm, op, attr),
+        gesture = "DoubleClick")
 
       drain()
 
@@ -2259,6 +2312,13 @@ proc calltraceJumpsSince(mock: MockBackendService; first: int): seq[JsonNode] =
     if mock.receivedCommands[i].command == "ct/calltrace-jump":
       result.add mock.receivedCommands[i].args
 
+proc pressSearchResult(vm: CalltraceVM; row: MockNode): bool =
+  ## A press on a search result as the page's pointer listener performs it
+  ## (Input-Routing-And-Keymaps.md §5.1): the operation the row carries, run
+  ## by its procedure (`pane_presses`) on the row's own attributes.
+  pressCalltrace(vm, row.attributes.getOrDefault("data-ct-operation", ""),
+                 proc(name: string): string = row.attributes.getOrDefault(name, ""))
+
 suite "IsoNim Calltrace Panel — search results":
 
   test "a search result jumps to its own match, not the last one":
@@ -2296,7 +2356,7 @@ suite "IsoNim Calltrace Panel — search results":
 
         # The FIRST row: the case the reporter saw land on the last match.
         let beforeFirst = mock.receivedCommands.len
-        rows[0].fireEvent("mousedown")
+        discard pressSearchResult(vm, rows[0])
         drain()
         let firstJumps = mock.calltraceJumpsSince(beforeFirst)
         check firstJumps.len == 1
@@ -2313,7 +2373,7 @@ suite "IsoNim Calltrace Panel — search results":
         # The MIDDLE row, carrying a source revision, so a shared capture of
         # either neighbour cannot pass for it.
         let beforeMiddle = mock.receivedCommands.len
-        rows[1].fireEvent("mousedown")
+        discard pressSearchResult(vm, rows[1])
         drain()
         let middleJumps = mock.calltraceJumpsSince(beforeMiddle)
         check middleJumps.len == 1
@@ -3331,7 +3391,8 @@ suite "IsoNim Event Log Panel — rows":
       let rows = eventRowsOf(panel)
 
       check vm.selectedRow.val.isNone
-      rows[1].fireEvent("click")
+      check rows[1].press("eventLog", ekRow,
+        proc(op: string; attr: AttributeReader): bool = pressEventLog(vm, op, attr))
       check vm.selectedRow.val.isSome
       check vm.selectedRow.val.get == 1
       check "selected" in rows[1].attributes["class"]
@@ -3376,11 +3437,12 @@ suite "IsoNim Event Log Panel — sorting":
       let header = findByClass(panel, "eventLog-column-header")
       let index = findByClass(header, "eventLog-index")
       check index != nil
-      index.fireEvent("click")
+      proc sort(op: string; attr: AttributeReader): bool = pressEventLog(vm, op, attr)
+      check index.press("eventLog", ekHeader, sort)
       check vm.order().column == elcIndex
       check vm.order().ascending
       check "▲" in index.textContent
-      index.fireEvent("click")
+      check index.press("eventLog", ekHeader, sort)
       check vm.order().column == elcIndex
       check not vm.order().ascending
       check "▼" in index.textContent
@@ -3400,7 +3462,9 @@ suite "IsoNim Event Log Panel — footer":
       store.applyEventLogRows(@[makeTestEvent(1, "event", 1, "a")], 0,
                               recordsTotal = 150)
       let panel = renderEventLog(vm)
-      vm.viewport.val = Viewport(rows: 20, firstRow: 40)
+      # Through `setViewport`, the one way a view reports (#904: the footer
+      # reads the report as SHOWN, not the debounced request's viewport).
+      vm.setViewport(Viewport(rows: 20, firstRow: 40))
 
       let footer = findByClass(panel, "data-tables-footer")
       check "41to60" in footer.attributes["class"]
@@ -4786,7 +4850,8 @@ suite "IsoNim Terminal Output Panel — interactions":
       let fragNode = lineNode.children[0]
 
       mock.clearReceivedCommands()
-      fragNode.fireEvent("click")
+      check fragNode.press("terminalOutput", ekRow,
+        proc(op: string; attr: AttributeReader): bool = pressTerminalOutput(vm, op, attr))
 
       let req = mock.findCommand("ct/event-jump")
       check req.isSome
@@ -4856,7 +4921,8 @@ suite "IsoNim Terminal Output Panel — PLAT-52":
       let lines = findAllByClass(panel, "terminal-line")
       check lines.len == 3
       mock.clearReceivedCommands()
-      lines[1].children[0].fireEvent("click")
+      check lines[1].children[0].press("terminalOutput", ekRow,
+        proc(op: string; attr: AttributeReader): bool = pressTerminalOutput(vm, op, attr))
       let jump = mock.findCommand("ct/event-jump")
       check jump.isSome
       check jump.get.args["directLocationRRTicks"].getInt == 20
@@ -6419,7 +6485,9 @@ suite "IsoNim Search Results Panel — interactions":
 
       let rows = findAllByClass(panel, "search-results-match-row")
       check rows.len == 1
-      rows[0].fireEvent("click")
+      if rows.len == 1:
+        check rows[0].press("search", ekRow,
+          proc(op: string; attr: AttributeReader): bool = pressSearchResults(vm, op, attr))
 
       check opened.len == 1
       check opened[0][0] == "src/main.nim"
@@ -6455,7 +6523,9 @@ suite "IsoNim Search Results Panel — interactions":
       check groups.len == 2
       let bGroupRows = findAllByClass(groups[1], "fif-match-row")
       check bGroupRows.len == 2
-      bGroupRows[1].fireEvent("click")
+      if bGroupRows.len == 2:
+        check bGroupRows[1].press("search", ekRow,
+          proc(op: string; attr: AttributeReader): bool = pressSearchResults(vm, op, attr))
 
       check opened.len == 1
       check opened[0][0] == "b.nim"
@@ -8303,7 +8373,8 @@ suite "IsoNim Low Level Code Panel — interactions":
 
       mock.clearReceivedCommands()
       let listContainer = findByClass(panel, "low-level-code-instructions")
-      instructionRowsOf(listContainer)[1].fireEvent("click")
+      check instructionRowsOf(listContainer)[1].press("lowLevelCode", ekRow,
+        proc(op: string; attr: AttributeReader): bool = pressLowLevel(vm, op, attr))
 
       check mock.receivedCommands.len == 1
       let sent = mock.receivedCommands[0]
@@ -8601,7 +8672,8 @@ suite "IsoNim Request Panel — selection":
       vm.addRequest("GET", "/b", 200, 0, 0, 0)
 
       let body = findByClass(panel, "request-table-body")
-      body.children[1].fireEvent("click")
+      check body.children[1].press("requests", ekRow,
+        proc(op: string; attr: AttributeReader): bool = pressRequests(vm, op, attr))
 
       check vm.selectedIndex.val == 1
       check "selected" in body.children[1].attributes["class"]
@@ -9758,11 +9830,12 @@ suite "IsoNim Filesystem Panel — tree rendering":
       let row = findByClass(panel, "jstree-anchor")
       check not vm.isExpanded("src")
 
-      row.fireEvent("click")
+      proc activate(op: string; attr: AttributeReader): bool = pressFileTree(vm, op, attr)
+      check row.press("fileTree", ekRow, activate)
       check vm.isExpanded("src")
 
       # The tree is rebuilt on the change: click the new anchor.
-      findByClass(panel, "jstree-anchor").fireEvent("click")
+      check findByClass(panel, "jstree-anchor").press("fileTree", ekRow, activate)
       check not vm.isExpanded("src")
 
       dispose()
@@ -9780,7 +9853,8 @@ suite "IsoNim Filesystem Panel — tree rendering":
         makeFsEntry("foo.nim", path = "/trace/files/foo.nim"),
       ]))
 
-      findByClass(panel, "jstree-anchor").fireEvent("click")
+      check findByClass(panel, "jstree-anchor").press("fileTree", ekRow,
+        proc(op: string; attr: AttributeReader): bool = pressFileTree(vm, op, attr))
       check openedPath == "/trace/files/foo.nim"
 
       dispose()
@@ -11566,10 +11640,12 @@ suite "IsoNim VCS Panel — structure":
       # with its path (the host scrolls to it), and the file's own button
       # opens that one file. No separate commit-diff button is left.
       findByClass(panel, "vcs-commit-header").fireEvent("click")
-      findByClass(panel, "vcs-commit-toggle").fireEvent("click")
+      proc vcs(op: string; attr: AttributeReader): bool =
+        pressVcs(vm, callbacks, op, attr)
+      check findByClass(panel, "vcs-commit-toggle").press("vcs", ekToggle, vcs)
       findByClass(panel, "vcs-accordion-file").fireEvent("click")
       check findByClassOrNil(panel, "vcs-commit-diff-btn") == nil
-      findByClass(panel, "vcs-file-diff-btn").fireEvent("click")
+      check findByClass(panel, "vcs-file-diff-btn").press("vcs", ekRow, vcs)
 
       check openedCommit == (0, "commit:abc123")
       check toggled == (0, true, false)
@@ -11759,7 +11835,8 @@ suite "IsoNim VCS Panel — structure":
       let commitButtons = findAllByClass(panel, "vcs-file-diff-btn")
       check commitButtons.len == 2
       if commitButtons.len == 2:
-        commitButtons[1].fireEvent("click")
+        check commitButtons[1].press("vcs", ekRow,
+          proc(op: string; attr: AttributeReader): bool = pressVcs(vm, callbacks, op, attr))
         check openedDiff == "commit:abc123:src/other.nim"
         # The button must not double as a row click.
         check selectedFile == ""
@@ -11775,7 +11852,8 @@ suite "IsoNim VCS Panel — structure":
       let reviewButtons = findAllByClass(panel, "vcs-file-diff-btn")
       check reviewButtons.len == 1
       if reviewButtons.len == 1:
-        reviewButtons[0].fireEvent("click")
+        check reviewButtons[0].press("vcs", ekRow,
+          proc(op: string; attr: AttributeReader): bool = pressVcs(vm, callbacks, op, attr))
         check openedDiff == "file:src/main.nim"
         check selectedFile == ""
 

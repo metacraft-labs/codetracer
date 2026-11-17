@@ -406,11 +406,35 @@ proc ipcAnswers(ipc: JsObject; ids: openArray[cstring]): bool =
       return false
   true
 
+proc recordedPathOfTreeEntry*(workdir, treePath: string): string =
+  ## The path a recording names the file at ``treePath`` of its Files tree
+  ## by. A recording's tree is rooted in the sources it carries
+  ## (Filesystem-Pane.md, "Imported (self-contained) traces"), so a payload
+  ## root and everything below it is RELATIVE (``src/shield.nr``), while its
+  ## steps, breakpoints and moves name the file under the recording's working
+  ## directory (``<workdir>/src/shield.nr``, as replay-server's locations
+  ## do). An absolute entry, and any entry when there is no working
+  ## directory, is already that path.
+  if treePath.len == 0 or workdir.len == 0 or isAbsolutePath(treePath):
+    return treePath
+  var relative = treePath
+  while relative.startsWith("./"):
+    relative = relative[2 .. ^1]
+  if workdir.endsWith("/") or workdir.endsWith("\\"):
+    workdir & relative
+  else:
+    workdir & "/" & relative
+
 proc wireFilesystemOpenBridge() =
   if filesystemVMInstance.isNil:
     return
   filesystemVMInstance.onOpenFile = proc(path: string) =
-    openTab(cstring(path))
+    # A replay's tree holds relative payload paths; open the file under the
+    # path the recording names it by (Filesystem-Pane.md, "Opening a file").
+    let workdir =
+      if data.isNil or data.trace.isNil or data.trace.workdir.isNil: ""
+      else: $data.trace.workdir
+    openTab(cstring(recordedPathOfTreeEntry(workdir, path)))
   # The context menu's host facts and requests (Filesystem-Pane.md
   # § "Context menu"); the ViewModel decides what they allow.
   filesystemVMInstance.hostFacts = proc(): FileTreeHostFacts =

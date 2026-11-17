@@ -250,27 +250,11 @@ fn require_ct_native_replay() -> Result<PathBuf, TestError> {
     require_command("ct-native-replay")
 }
 
+/// `ct-mcr`, found or the sibling provisioned by the harness's shared rule
+/// ([`test_harness::find_ct_mcr`]), which panics naming the remedy when
+/// neither an override nor a build answers.
 fn require_ct_mcr() -> Result<PathBuf, TestError> {
-    if let Ok(value) = std::env::var("CODETRACER_CT_MCR_CMD") {
-        let path = PathBuf::from(value);
-        if path.is_file() {
-            return Ok(path);
-        }
-        return Err(format!("CODETRACER_CT_MCR_CMD is set but is not a file: {}", path.display()).into());
-    }
-
-    let sibling = codetracer_repo_root()?
-        .join("../codetracer-native-recorder/ct_cli/ct_cli")
-        .canonicalize();
-    if let Ok(path) = sibling
-        && path.is_file()
-    {
-        return Ok(path);
-    }
-
-    find_on_path("ct-mcr")
-        .or_else(|| find_on_path("ct_cli"))
-        .ok_or_else(|| "ct-mcr must be available through CODETRACER_CT_MCR_CMD or PATH".into())
+    test_harness::find_ct_mcr().ok_or_else(|| "ct-mcr not found".into())
 }
 
 fn copy_dir_filtered(src: &Path, dst: &Path) -> Result<(), TestError> {

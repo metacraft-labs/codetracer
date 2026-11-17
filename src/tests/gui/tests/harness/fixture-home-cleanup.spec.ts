@@ -7,6 +7,7 @@
  */
 import { test, expect } from "@playwright/test";
 import * as fs from "node:fs";
+import * as os from "node:os";
 import * as path from "node:path";
 import { spawnSync } from "node:child_process";
 import { scratchBase } from "../../lib/socket-path-bound";
@@ -15,8 +16,10 @@ interface Snapshot {
   pid: number;
   home?: string;
   xdg: string;
+  codex?: string;
   homeExists: boolean;
   xdgExists: boolean;
+  codexExists: boolean;
   markerExists: boolean;
 }
 
@@ -44,6 +47,11 @@ function probe(options: Options): void {
   env.CT_FIXTURE_HOME_PROBE_BASE = options.base ? "1" : "0";
   env.CT_FIXTURE_HOME_PROBE_FAIL = options.fail ? "1" : "0";
   env.FORCE_COLOR = "0";
+  // The probe run inherits a CODEX_HOME the fixtures must not keep: theirs is
+  // always a scratch one of their own, whatever the runner had.
+  const inheritedCodexHome = path.join(root, "inherited-codex-home");
+  fs.mkdirSync(inheritedCodexHome);
+  env.CODEX_HOME = inheritedCodexHome;
   const overrideHome = path.join(root, options.rejectHome ? "deep-".repeat(30) : "home");
   const overrideXdg = path.join(root, "xdg");
   if (options.overrides || options.rejectHome) {
@@ -80,6 +88,16 @@ function probe(options: Options): void {
         expect(snapshot.home).toBeDefined();
         expect(fs.existsSync(snapshot.home!), `leaked CODETRACER_HOME: ${snapshot.home}`).toBe(!!options.overrides);
       }
+      if (!options.rejectHome) {
+        // The Codex home is the fixtures' own in every mode, overrides
+        // included (codetracer-pm issue 2026-11-12): never the inherited one,
+        // never the developer's, alive at import and removed after exit.
+        expect(snapshot.codex).toBeDefined();
+        expect(snapshot.codex).not.toBe(inheritedCodexHome);
+        expect(snapshot.codex).not.toBe(path.join(os.homedir(), ".codex"));
+        expect(snapshot.codexExists, JSON.stringify(snapshot)).toBe(true);
+        expect(fs.existsSync(snapshot.codex!), `leaked CODEX_HOME: ${snapshot.codex}`).toBe(false);
+      }
       if (options.overrides) {
         expect(snapshot.home).toBe(overrideHome);
         expect(snapshot.xdg).toBe(overrideXdg);
@@ -90,6 +108,12 @@ function probe(options: Options): void {
       if (!options.overrides) {
         fs.rmSync(snapshot.xdg, { recursive: true, force: true });
         if (snapshot.home) fs.rmSync(snapshot.home, { recursive: true, force: true });
+      }
+      // Only a home the fixtures made: a regression that kept an inherited
+      // one must not have this cleanup delete it.
+      if (snapshot.codex && path.dirname(snapshot.codex) === scratchBase() &&
+          path.basename(snapshot.codex).startsWith("codetracer-gui-codex-home-")) {
+        fs.rmSync(snapshot.codex, { recursive: true, force: true });
       }
     }
     fs.rmSync(root, { recursive: true, force: true });

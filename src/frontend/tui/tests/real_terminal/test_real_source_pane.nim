@@ -77,7 +77,7 @@ import ./lifecycle_support
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count, and inside a `const` block the
 # declaration is invisible to it.
-const ExpectedAssertions = 81
+const ExpectedAssertions = 85
 
 const
   Cols = 90
@@ -199,7 +199,8 @@ suite "CTUI-5 Tier 2: the source pane on a real terminal":
               ptrCell.bg.idx == ansiIndexOf(srLineExecution, background = true))
 
       # ---- BREAKPOINT RED, TRACEPOINT CYAN, DISABLED MUTED ------------------
-      # All three §3.3.2 indicators, on the same real screen.
+      # All three §3.3.2 indicators, and the combined breakpoint-and-tracepoint
+      # mark, on the same real screen.
       var markChecks = 0
       for (line, mark) in paneApp.SampleMarks:
         let row = 1 + line - model0.viewportTop
@@ -223,10 +224,17 @@ suite "CTUI-5 Tier 2: the source pane on a real terminal":
           ck cell.fg.kind == ckIndexed
           ck cell.fg.idx == ansiIndexOf(srGutterTracepoint)
           ck caBold in cell.attrs
+        of gmBreakpointTracepoint:
+          # Editor-Pane.md MC.5: one cell for both, so the mark is its own
+          # glyph and takes the breakpoint's red — a line that stops wins.
+          ck $cell.rune == BreakpointTracepointGlyph
+          ck cell.fg.kind == ckIndexed
+          ck cell.fg.idx == ansiIndexOf(srGutterBreakpoint)
+          ck caBold in cell.attrs
         of gmNone:
           ck false                        # unreachable; the table has no gmNone
       ck markChecks == paneApp.SampleMarks.len
-      ck markChecks == 3
+      ck markChecks == 4
 
       # ---- PROVENANCE, ON A REAL SCREEN, IN BOTH TREATMENTS -----------------
       # CTUI-5: "a file served `savUnverified` must not look identical to one

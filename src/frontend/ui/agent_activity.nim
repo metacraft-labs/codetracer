@@ -149,8 +149,8 @@ proc componentBySessionId(sessionId: cstring): AgentActivityComponent =
 
 proc editorLineNumber(self: AgentActivityComponent, line: int): cstring =
   let trueLineNumber = toCString(line - 1)
-  let lineHtml = cstring"<div class='gutter-line' onmousedown='event.stopPropagation()'>" & trueLineNumber & cstring"</div>"
-  result = cstring"<div class='gutter " & "' data-line=" & trueLineNumber & cstring" onmousedown='event.stopPropagation()'>" & lineHtml & cstring"</div>"
+  let lineHtml = cstring"<div class='gutter-line' onmousedown='event.stopPropagation()'>" & trueLineNumber & cstring"</div>"  # ir1-gate: propagation
+  result = cstring"<div class='gutter " & "' data-line=" & trueLineNumber & cstring" onmousedown='event.stopPropagation()'>" & lineHtml & cstring"</div>"  # ir1-gate: propagation
 
 proc currentSessionKey(self: AgentActivityComponent): cstring
 

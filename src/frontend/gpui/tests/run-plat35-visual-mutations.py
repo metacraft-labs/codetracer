@@ -155,18 +155,14 @@ ARMS = [
     # RE-AIMED 2026-10-18, PLAT-70 Part A: `renderEditorRow` also takes the
     # view its overflow markers are drawn against; the claim and the
     # mutation (the row loop draws nothing) are unchanged.
+    #
+    # RE-AIMED 2026-11-09: the row loop builds `rowEl` first (cross-reference
+    # decoration included) and appends it last, so the old needle quoting the
+    # `renderEditorRow` call no longer occurs. The claim and the mutation (the
+    # row loop draws nothing) are unchanged; the needle is now the append.
     Arm("M1", LEAVES,
-        "    r.appendChild(parent, renderEditorRow(r, row, runs[i], widest,\n"
-        "                                          scroll.leftCols,\n"
-        "                                          (if row.line == surface.caretLine:\n"
-        "                                             surface.caretColumn else: 0),\n"
-        "                                          selected, folds[i], depths[i],\n"
-        "                                          guideCounts[i],\n"
-        "                                          markersView =\n"
-        "                                            (if overflowMarkers and\n"
-        "                                                scroll.present: scroll.view\n"
-        "                                             else: HorizontalView())))",
-        "    discard selected",
+        "    r.appendChild(parent, rowEl)\n  if scroll.present:",
+        "    discard rowEl\n  if scroll.present:",
         SUITE,
         "stepped-editor / editor-row-count",
         CTL[LEAVES][0], CTL[LEAVES][1],

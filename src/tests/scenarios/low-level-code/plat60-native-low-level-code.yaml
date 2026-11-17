@@ -1,0 +1,36 @@
+scenario: 1
+name: low-level-code/plat60-native-low-level-code
+pack: codetracer
+summary: >-
+  On an rr recording of the native sudoku solver, Alt+1 shows the function's
+  machine code at numeric offsets under "Originating address: 0x…", the
+  header says a step goes by instruction, and after a press on the
+  instruction the replay is at (the function's entry, the listing's first
+  row), F10 moves it past the prologue to the first instruction of the
+  function's first line, the listing's fourth row. The rows, not the
+  offsets: where the program is loaded moves the offsets from one
+  recording and machine to the next. (Shift+F10 back is not here: it lands
+  outside the function; codetracer-pm issue 2026-11-14.)
+
+stage:
+  - use: record-program
+    with: { program: ../codetracer-native-test-programs/c/sudoku_solver/main.c, backend: rr }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 300s }
+  - chord: Alt+1
+    settle: false
+  - wait: { until: { at: low-level-code, count: { gt: 10 } }, timeout: 120s }
+  - expect: { at: low-level-code, address: { matches: "^Originating address: 0x[0-9A-Fa-f]+$" } }
+  - wait: { until: { at: low-level-code, stepping: "steps by instruction" }, timeout: 30s }
+  - expect: { at: low-level-code, assert: "all-offsets-match(\"^[0-9]+$\")" }
+  - click: { at: low-level-code, anchor: pointer }
+    settle: false
+  - wait: { until: replay-idle, timeout: 60s }
+  - expect: { at: low-level-code, pointer: { matches: "^[0-9]+$" }, pointer-index: 0 }
+  - key: F10
+    settle: false
+  - wait: { until: { at: low-level-code, pointer-index: 3 }, timeout: 60s }
+  - wait: { until: replay-idle, timeout: 60s }
+  - expect: { at: low-level-code, stepping: "steps by instruction" }

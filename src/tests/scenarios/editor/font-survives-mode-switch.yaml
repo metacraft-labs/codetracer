@@ -1,0 +1,25 @@
+scenario: 1
+name: editor/font-survives-mode-switch
+pack: codetracer
+summary: >-
+  The editor's code font — its family and its size — is the same before,
+  during (Ctrl+F5) and after (Stop) Debug mode.
+stage:
+  - use: open-project
+    with: { folder: test-programs }
+
+steps:
+  - wait: { until: { at: 'editor[file="main.nr"]/line[number="3"]', present: true }, timeout: 90s }
+  - expect: { at: window, mode: edit }
+  - expect: { at: 'editor[file="main.nr"]', font-family: { matches: "^SpaceMono," }, font-size: 16 }
+  - chord: Ctrl+F5
+    settle: false
+  - wait: { until: { at: window, mode: debug }, timeout: 60s }
+  - wait: { until: { at: 'toolbar/toolbar-button[label="stop-image"]', present: true }, timeout: 60s }
+  - wait: { until: { at: 'editor[file="main.nr"]/line[number="3"]', present: true }, timeout: 60s }
+  - expect: { at: 'editor[file="main.nr"]', font-family: { matches: "^SpaceMono," }, font-size: 16 }
+  - click: 'toolbar/toolbar-button[label="stop-image"]'
+    settle: false
+  - wait: { until: { at: window, mode: edit }, timeout: 60s }
+  - wait: { until: { at: 'editor[file="main.nr"]/line[number="3"]', present: true }, timeout: 60s }
+  - expect: { at: 'editor[file="main.nr"]', font-family: { matches: "^SpaceMono," }, font-size: 16 }

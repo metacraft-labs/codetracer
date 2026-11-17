@@ -26,6 +26,7 @@ import isonim/core/[signals, owner, async_compat, batch]
 import isonim/viewmodel
 
 import ../backend/backend_service
+import ../viewmodels/action_sink   # `actionSink`: a mirror's breakpoint changes
 import types, request_tracker, degraded_state, stop_timeline
 import ../viewport   # the windowed panes' debounce timer
 # PLAT-49 part B: a call's arguments and return value, rendered by the one
@@ -356,6 +357,12 @@ type
   ReplayDataStore* = ref object of ViewModel
     ## Central reactive store.  Created via `createReplayDataStore`.
     storeId*: int  ## Unique identity for diagnostics — assigned in createReplayDataStore.
+    breakpointRequests*: Table[string, int]
+      ## Per file, how many `setBreakpoints` requests have been sent
+      ## (`sdk/breakpoints.requestBreakpoints`). An answer is applied only
+      ## while its request is still the file's latest: answers can arrive
+      ## after a newer request was held, and an older answer applied then
+      ## would replace the newer set with the one it superseded.
     session*: Signal[SessionState]
     debugger*: Signal[DebuggerState]
     stop*: Signal[StopLocation]
@@ -389,6 +396,16 @@ type
       ## it makes. A jump from a pane that runs on the page (a Pixel History
       ## entry, a frame, an event) has to take that same connection, or it
       ## is sent to a backend that never answers. nil: `backend`.
+      ##
+      ## The same holds for the requests of the ViewModels whose state is
+      ## the page's own and is not mirrored from the server's session (the
+      ## step list, the origin chain, the event log's counterpart lookup):
+      ## they ask over this connection too (`directBackend`).
+    actionSink*: ActionSink
+      ## Where a MIRROR's store hands the changes it does not make itself:
+      ## a breakpoint change (`sdk/breakpoints.requestBreakpoints`, as
+      ## `breakpoints` / `set`). Set by `mirror_session` with the panels'
+      ## sinks; nil on a primary, which sends them over `backend`.
     requestTracker*: RequestTracker
     stops*: StopTimeline
       ## PLAT-29. The stops the debugger has been at, as versions — so a
@@ -657,16 +674,21 @@ proc enterHistoricalModeForNavigation*(store: ReplayDataStore) =
     store.session.val = session
     store.requestRecordingHead()
 
+proc directBackend*(store: ReplayDataStore): BackendService =
+  ## The connection this side's own requests to the replay take: the host's
+  ## `navigationBackend` when it set one (a `ct host` page's connection),
+  ## else `backend`. For a move made from a pane that runs on this side, and
+  ## for a query whose answer only this side keeps.
+  if store.navigationBackend.isNil: store.backend
+  else: store.navigationBackend
+
 proc requestHistoricalNavigation*(store: ReplayDataStore; command: string;
                                   args: JsonNode) =
   ## Send a navigation command that targets a recorded moment. When invoked
   ## from a live session, the UI enters historical mode immediately; the
   ## backend's complete-move event will refresh the exact debugger position.
   store.enterHistoricalModeForNavigation()
-  let backend =
-    if store.navigationBackend.isNil: store.backend
-    else: store.navigationBackend
-  discard backend.send(command, args)
+  discard store.directBackend.send(command, args)
 
 proc updateRecordingHead*(store: ReplayDataStore; rrTicks: uint64) =
   ## Mirror a backend recording-head update into session and timeline state.
@@ -1387,6 +1409,32 @@ proc updateDebuggerPosition*(store: ReplayDataStore;
   # about a stop the debugger has left.
   store.stops.observe(store.debugger.val)
 
+proc expansionCallSiteOf*(loc: JsonNode): tuple[path: string; line: int] =
+  ## The macro call a stop is inside the expansion of: `expansionParents[0]`
+  ## of a `Location` with `isExpanded` (`db-backend`
+  ## `apply_macro_expansion_level`), ("", 0) for any other. Each parent is
+  ## `(path, line, expansion's first line)`, which serde writes as a JSON
+  ## array; a `Field0..` object (Nim's tuple spelling) is read as well, as the
+  ## desktop's `utils.expansionParent` does.
+  if loc.isNil or loc.kind != JObject or
+     not loc.getOrDefault("isExpanded").getBool(false):
+    return ("", 0)
+  let parents = loc.getOrDefault("expansionParents")
+  if parents.isNil or parents.kind != JArray or parents.len == 0:
+    return ("", 0)
+  let first = parents[0]
+  case first.kind
+  of JArray:
+    if first.len >= 2:
+      result = (first[0].getStr(""), first[1].getInt(0))
+  of JObject:
+    result = (first.getOrDefault("Field0").getStr(""),
+              first.getOrDefault("Field1").getInt(0))
+  else:
+    discard
+  if result.path.len == 0 or result.line <= 0:
+    result = ("", 0)
+
 proc applyStopLocation*(store: ReplayDataStore; body: JsonNode) =
   ## Adopt the whole location a `ct/complete-move` event reports
   ## (`MoveState`: `location`, `cLocation`, `frameInfo`) as `stop` — what an
@@ -1408,6 +1456,8 @@ proc applyStopLocation*(store: ReplayDataStore; body: JsonNode) =
     stop.asmName = loc.getOrDefault("asmName").getStr("")
     stop.isExpanded = loc.getOrDefault("isExpanded").getBool(false)
     stop.expansionFirstLine = loc.getOrDefault("expansionFirstLine").getInt(0)
+    stop.expansionLastLine = loc.getOrDefault("expansionLastLine").getInt(0)
+    (stop.expansionCallPath, stop.expansionCallLine) = expansionCallSiteOf(loc)
     stop.rrTicks = loc.getOrDefault("rrTicks").getBiggestInt(0).uint64
     # Native moves carry the top frame's PC here. An explicitly selected
     # frame below overrides it; an absent PC stays absent rather than a tick.
@@ -1470,6 +1520,14 @@ proc applyCompleteMove*(store: ReplayDataStore; body: JsonNode) =
   if not loc.isNil and loc.kind == JObject:
     file = loc.getOrDefault("path").getStr("")
     line = loc.getOrDefault("line").getInt(0)
+    # A stop inside an expanded macro call (Editor-Hosted-Front-Ends §E15):
+    # the position every source follows is the CALL, and where in the
+    # expansion the stop is stays in `stop` (`applyStopLocation`), which the
+    # Macro Expansion pane draws. The position was the compiler's
+    # `expanded.nim`, and every source showed the whole generated file.
+    let call = expansionCallSiteOf(loc)
+    if call.line > 0:
+      (file, line) = call
     sourceGeneration = loc.getOrDefault("sourceGeneration").getInt(0)
     sourceDigest = loc.getOrDefault("sourceDigest").getStr("")
     if loc.hasKey("rrTicks"):

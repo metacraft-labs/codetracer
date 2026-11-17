@@ -12,7 +12,7 @@
   "B19": "seen[] ==",
   "B2": "false",
   "B20": "Unhandled exception: never: PALETTE [AssertionFailedError]",
-  "B21": "Unhandled exception: 'keymap emacs' never appeared within 20000 ms; screen:",
+  "B21": "Unhandled exception: 'keymap emacs (flag)' never appeared within 20000 ms; screen:",
   "B22": "r.answer(debugFacts(), WindowPath, key) == want",
   "B23": "not t.modifiersChanged({})",
   "B24": "s[row][col + at].underline != usNone",

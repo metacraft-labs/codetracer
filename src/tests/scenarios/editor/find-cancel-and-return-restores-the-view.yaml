@@ -1,0 +1,36 @@
+scenario: 1
+name: editor/find-cancel-and-return-restores-the-view
+pack: codetracer
+summary: >-
+  A find that scrolled the editor to a match far below is undone by the
+  palette's Find: Cancel and Return: the widget closes, the caret and its
+  selection are back where they were, the view is scrolled back, and the
+  replay never moves.
+
+stage:
+  - use: record-program
+    with: { program: calc }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - wait: { until: call-trace.loaded, timeout: 120s }
+  - wait: { until: { at: 'editor[file="main.py"]/line[number="31"]', text: { contains: "return left + right" } }, timeout: 60s }
+  - expect: { at: 'editor[file="main.py"]', first-visible: 1 }
+  - click: { at: 'editor[file="main.py"]/line[number="31"]', anchor: column(14) }
+  - expect: { at: 'editor[file="main.py"]', caret-line: 31, selected-text: "" }
+  - chord: Ctrl+f
+  - wait: { until: { at: 'editor[file="main.py"]', find-shown: true }, timeout: 20s }
+  # A match far below: the editor scrolls to it.
+  - type: checksum
+  - wait: { until: { at: 'editor[file="main.py"]', assert: "shows-line(112)" }, timeout: 10s }
+  - expect: { at: 'editor[file="main.py"]', first-visible: { gt: 1 } }
+  - chord: Ctrl+p
+  - type: ":Cancel and Return"
+  - wait: { until: { at: omnibox, assert: 'offers(command, "Cancel and Return")' }, timeout: 10s }
+  - key: Enter
+  - expect: { at: omnibox, absent: true }
+  - expect: { at: 'editor[file="main.py"]', find-shown: false }
+  - expect: { at: 'editor[file="main.py"]', caret-line: 31, selected-text: "", first-visible: 1 }
+  - expect: { at: 'editor[file="main.py"]', current-line: 1 }
+  - expect: { at: status-line, location: { matches: "main.py:1#" } }

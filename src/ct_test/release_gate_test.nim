@@ -244,6 +244,16 @@ suite "ct-test M16 release gate":
 
     checkCliLaneCovers(CliReplayGateTests)
 
+  test "cli_surface_gate_tests_exist_and_are_registered":
+    # CS-M10's golden of `ct`'s whole command line, on the same runner as the
+    # CLI lanes above.
+    for cliPath in CliSurfaceGateTests:
+      checkpoint(cliPath)
+      check fileExists(cliPath)
+      checkNoHardSkips(cliPath)
+
+    checkCliLaneCovers(CliSurfaceGateTests)
+
   test "no_mock_only_gui_test_features":
     for entry in GuiActionGateEntries:
       checkpoint(entry.action)

@@ -45,6 +45,17 @@ import ../../store/[replay_data_store, row_address]
 import ../../store/types as store_types
 import ../../viewmodels/[calltrace_vm, event_log_vm]
 import ../../views/[isonim_calltrace_view, isonim_event_log_view]
+import ../../input/pane_presses
+
+proc pressReaderOf(node: MockNode): AttributeReader =
+  ## What a DOM front-end's reader does (`input/dom_pane_presses.readerOf`):
+  ## the attribute on the node pressed or its nearest ancestor carrying it.
+  result = proc(name: string): string =
+    var n = node
+    while not n.isNil:
+      if name in n.attributes: return n.attributes[name]
+      n = n.parent
+    ""
 
 # Counted, so a loop over an empty list cannot pass by asserting nothing.
 const ExpectedAssertions = 87
@@ -213,9 +224,11 @@ suite "a host's link builder makes the row's control a link":
           ck box.children[0].attr("class") == "toggle-call"
           ck box.children[1] == texts[1]
           ck box.children[2].attr("class") == "call-args"
-        # A click on the link still goes to the call.
+        # A press on the link still goes to the call: the pointer row
+        # `calltrace.go-to-call`, performed by `pane_presses`.
         mock.clearReceivedCommands()
-        texts[1].fireEvent("click")
+        discard pressCalltrace(vm, "calltrace.go-to-call",
+                               pressReaderOf(texts[1]))
         drainPlatformCallbacks()
         ck mock.findCommand("ct/calltrace-jump").isSome
       # The href follows the row when the section moves under it.
@@ -265,10 +278,10 @@ suite "a host's link builder makes the row's control a link":
         # CONTROL: no position, no URL — and no `href` at all.
         ck links[2].attr("href") == "<unset>"
         ck links[1].parent.attr("data-ct-cell").endsWith("|" & $elcIndex)
-      # The row's click is unchanged.
+      # The row's press is unchanged: the pointer row `event-log.jump`.
       mock.clearReceivedCommands()
       if rows.len == 3:
-        rows[1].fireEvent("click")
+        discard pressEventLog(vm, "event-log.jump", pressReaderOf(rows[1]))
       drainPlatformCallbacks()
       ck mock.findCommand("ct/event-jump").isSome
       dispose()

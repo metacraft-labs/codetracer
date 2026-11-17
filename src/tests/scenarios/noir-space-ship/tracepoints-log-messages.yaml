@@ -1,0 +1,33 @@
+scenario: 1
+name: noir-space-ship/tracepoints-log-messages
+pack: codetracer
+summary: >-
+  A tracepoint on main.nr line 13 logging a message puts that message in the
+  event log; a second on line 24 lists its own row with its message.
+
+stage:
+  - use: record-program
+    with: { program: noir_space_ship }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 180s }
+  - wait: { until: { at: 'editor[file="main.nr"]/line[number="13"]', present: true }, timeout: 60s }
+  - click: { at: 'editor[file="main.nr"]/line[number="13"]', anchor: text-start }
+  - key: Enter
+  - wait: { until: { at: 'tracepoint-editor[line="13"]', focused: true }, timeout: 20s }
+  - type: 'log("This is a simple trace point")'
+  - chord: Ctrl+Enter
+    settle: false
+  - wait: { until: { at: 'trace-results[line="13"]', count: { ge: 1 } }, timeout: 120s }
+  - expect: { at: 'trace-results[line="13"]/trace-row[n="1"]', values: { contains: "This is a simple trace point" } }
+  - click: 'pane-tab[label="EVENT LOG"]'
+  - wait: { until: { at: event-log, assert: 'has-output("This is a simple trace point")' }, timeout: 60s }
+  - click: { at: 'editor[file="main.nr"]/line[number="24"]', anchor: text-start }
+  - key: Enter
+  - wait: { until: { at: 'tracepoint-editor[line="24"]', focused: true }, timeout: 20s }
+  - type: 'log("This is another simple trace point")'
+  - chord: Ctrl+Enter
+    settle: false
+  - wait: { until: { at: 'trace-results[line="24"]', count: { ge: 1 } }, timeout: 120s }
+  - expect: { at: 'trace-results[line="24"]/trace-row[n="1"]', values: { contains: "This is another simple trace point" } }

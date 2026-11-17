@@ -1,0 +1,21 @@
+scenario: 1
+name: multi-replay/stop-ends-the-first-tabs-replay
+pack: codetracer
+summary: >-
+  Stop (Shift+F5) in the window's first tab ends the replay started for it:
+  the debugger controls are gone and the tab is left editing its files.
+
+stage:
+  - use: record-program
+    with: { program: py_console_logs/main.py }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 180s }
+  - wait: { until: { at: 'toolbar/toolbar-button[label="next-image"]', present: true }, timeout: 60s }
+  - expect: { at: window, mode: debug }
+  - click: { at: 'editor[file="main.py"]/line[number="1"]', anchor: text-start }
+  - chord: Shift+F5
+    settle: false
+  - wait: { until: { at: window, mode: edit }, timeout: 60s }
+  - expect: { at: 'toolbar/toolbar-button[label="next-image"]', absent: true }

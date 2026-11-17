@@ -1,0 +1,25 @@
+scenario: 1
+name: terminal/clicks-event-log-goto-and-content
+pack: codetracer
+summary: >-
+  A click on an event goes to it (tick 68, line 111, and the status line says
+  so); a right click on another event shows its whole content over the body
+  without moving the replay, and Esc closes it.
+stage:
+  - use: record-program
+    with: { program: calc }
+  - use: open-recording
+    with: { width: 200, height: 50 }
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - wait: event-log.loaded
+  - click: { at: 'event-log/event[text="10 - 4 + 1 = 7"]' }
+  - wait: { until: { at: replay-position, tick: 68 }, timeout: 30s }
+  - expect: { at: status-line, assert: 'says("tick 68")' }
+  - expect: { at: 'editor[file="main.py"]', assert: "stopped-at(111)" }
+  - click: { at: 'event-log/event[text="6 * 7 = 42"]', button: right }
+  - wait: { until: { at: popup, title: { contains: "event #2 at tick 88" } }, timeout: 10s }
+  - expect: { at: popup, assert: 'shows("6 * 7 = 42")' }
+  - expect: { at: replay-position, tick: 68 }
+  - key: Esc
+  - wait: { until: { at: popup, absent: true }, timeout: 10s }

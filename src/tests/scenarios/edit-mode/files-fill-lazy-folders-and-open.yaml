@@ -1,0 +1,29 @@
+scenario: 1
+name: edit-mode/files-fill-lazy-folders-and-open
+pack: codetracer
+summary: >-
+  Editing a git repository, the window is in Edit mode with no welcome screen
+  and no stepping controls; the Files pane lists the folder's entries, its
+  folders fill in when expanded (src, then src/db), no "Loading..." is left,
+  and a click on store.nim opens it in the editor.
+
+stage:
+  - use: project-fixture
+    with: { name: git-lazy-tree }
+  - use: open-project
+    with: { folder: $project }
+
+steps:
+  - wait: { until: { at: 'filesystem/file-node[name="src"]', present: true }, timeout: 120s }
+  - wait: { until: settled, timeout: 30s }
+  - expect: { at: window, mode: edit }
+  - expect: { at: welcome, present: false }
+  - expect: { at: 'toolbar/toolbar-button[label="next-image"]', present: false }
+  - expect: { at: 'filesystem/file-node[name="README.md"]', present: true }
+  - click: 'filesystem/file-node[name="src"]'
+  - wait: { until: { at: 'filesystem/file-node[name="db"]', present: true }, timeout: 30s }
+  - click: 'filesystem/file-node[name="db"]'
+  - wait: { until: { at: 'filesystem/file-node[name="store.nim"]', present: true }, timeout: 30s }
+  - expect: { at: 'filesystem/file-node[name="Loading..."]', present: false }
+  - click: 'filesystem/file-node[name="store.nim"]'
+  - wait: { until: { at: 'editor[file="store.nim"]', assert: 'shows-text("lazy child")' }, timeout: 30s }

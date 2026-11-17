@@ -44,7 +44,7 @@ import ../../app/theme/roles
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads this spelling
 # as the suite's RUNTIME assertion count.
-const ExpectedAssertions = 50
+const ExpectedAssertions = 51
 
 var countedAssertions = 0
 
@@ -329,7 +329,12 @@ suite "PLAT-68 Phase B on a real terminal: selection and the clipboard":
 
   test "a pointer drag selects across lines":
     var sess = open()
-    let at = sess.clickLine11(3)
+    # The focusing click lands on ANOTHER cell than the drag's press. A second
+    # press on the same cell within `pointer.multi-click-interval` is a
+    # double-click (Editor-Pane.md MC.1), whose drag extends a whole word at a
+    # time (MC.4) and so takes in the word under the release. This case is the
+    # single-click drag, which selects by character.
+    let at = sess.clickLine11(6)
     # The press is held: motion with the left button (SGR 32), then release.
     sess.mouse(0, at.row, at.code + 2)
     sess.mouse(32, at.row + 1, at.code + 4)
@@ -337,6 +342,10 @@ suite "PLAT-68 Phase B on a real terminal: selection and the clipboard":
     sess.waitUntil("a two-line selection", proc(s: Snapshot): bool =
       s[at.row + 1][at.code].bgHex == selectionHex)
     let s = sess.snap()
+    # From the boundary before the pressed cell to the boundary before the
+    # cell under the release (MC.2, count 1 on terminal cells): neither the
+    # cell before the press nor the release's own cell is selected.
+    ck s[at.row][at.code + 1].bgHex != selectionHex
     ck s[at.row][at.code + 2].bgHex == selectionHex
     ck s[at.row + 1][at.code + 3].bgHex == selectionHex
     ck s[at.row + 1][at.code + 4].bgHex != selectionHex

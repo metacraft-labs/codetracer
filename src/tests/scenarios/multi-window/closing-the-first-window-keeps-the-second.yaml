@@ -1,0 +1,39 @@
+scenario: 1
+name: multi-window/closing-the-first-window-keeps-the-second
+pack: codetracer
+summary: >-
+  Closing the window the application opened with leaves a window opened for
+  its session working: the second window still steps the replay.
+
+stage:
+  - use: record-program
+    with: { program: py_console_logs/main.py }
+  - use: open-recording
+
+clients:
+  main: { open: stage }
+
+steps:
+  - wait: { until: replay-idle, timeout: 180s }
+    as: main
+  - wait: { until: { at: status-line, location: { matches: "main.py:1#" } }, timeout: 60s }
+    as: main
+  - click: session-strip/session-add
+    as: main
+  - wait: { until: { at: session-strip, count: 2 }, timeout: 30s }
+    as: main
+  - click: { at: 'session-strip/session-tab[title="main.py"]', button: right }
+    as: main
+  - wait: { until: { at: 'context-menu/menu-item[label="Open in New Window"]', present: true }, timeout: 15s }
+    as: main
+  - click: 'context-menu/menu-item[label="Open in New Window"]'
+    as: main
+  - open-client: { name: second, open: app-window }
+  - wait: { until: { at: status-line, location: { matches: "main.py:1#" } }, timeout: 120s }
+    as: second
+  - close-client: main
+  - click: 'toolbar/toolbar-button[label="next-image"]'
+    settle: false
+    as: second
+  - wait: { until: { at: status-line, location: { matches: "main.py:8#" } }, timeout: 60s }
+    as: second

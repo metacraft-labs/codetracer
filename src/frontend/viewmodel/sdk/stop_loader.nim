@@ -194,8 +194,10 @@ proc stopKey(l: StopLoader; pane: StopPane): string =
     let vm = l.session.lowLevelCodeVM
     let fn = store.asmFunction
     if vm.isNil or not vm.shown.val or (fn.key.len == 0 and fn.path.len == 0) or
-       vm.generatedAtStop.val == result:
-      # (The last: a generated-code listing painted at this stop.)
+       vm.generatedAtStop.val != "":
+      # (The last: a generated-code listing is in the pane. It follows the
+      # stop itself, GCL-D28 — `generated_code.followStopWithGeneratedC` —
+      # and the machine code would replace it.)
       result = ""
     else:
       result.add "\x02" & fn.path & "\x1f" & fn.name & "\x1f" & fn.key

@@ -1,0 +1,94 @@
+scenario: 1
+name: flow/window-handoff
+pack: codetracer
+summary: >-
+  Stepping from the module's flow window into main's leaves nothing behind:
+  after 15 step-ins (the module's main() call, line 116) the module's window
+  draws its globals (EXPRESSIONS on line 90); after 21 step-ins and a step
+  out (main, line 110) the `def main():` line shows only main's `return`
+  chip, once, and no chip of the module's window is left in the editor.
+
+stage:
+  - use: record-program
+    with: { program: calc/main.py }
+  - use: open-recording
+    with: { width: 2400, height: 1350 }
+
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - wait: { until: { at: 'editor[file="main.py"]', active: true }, timeout: 60s }
+  - click: 'toolbar/toolbar-button[label="step-in-image"]'
+    settle: false
+  - wait: { until: replay-idle, timeout: 60s }
+  - click: 'toolbar/toolbar-button[label="step-in-image"]'
+    settle: false
+  - wait: { until: replay-idle, timeout: 60s }
+  - click: 'toolbar/toolbar-button[label="step-in-image"]'
+    settle: false
+  - wait: { until: replay-idle, timeout: 60s }
+  - click: 'toolbar/toolbar-button[label="step-in-image"]'
+    settle: false
+  - wait: { until: replay-idle, timeout: 60s }
+  - click: 'toolbar/toolbar-button[label="step-in-image"]'
+    settle: false
+  - wait: { until: replay-idle, timeout: 60s }
+  - click: 'toolbar/toolbar-button[label="step-in-image"]'
+    settle: false
+  - wait: { until: replay-idle, timeout: 60s }
+  - click: 'toolbar/toolbar-button[label="step-in-image"]'
+    settle: false
+  - wait: { until: replay-idle, timeout: 60s }
+  - click: 'toolbar/toolbar-button[label="step-in-image"]'
+    settle: false
+  - wait: { until: replay-idle, timeout: 60s }
+  - click: 'toolbar/toolbar-button[label="step-in-image"]'
+    settle: false
+  - wait: { until: replay-idle, timeout: 60s }
+  - click: 'toolbar/toolbar-button[label="step-in-image"]'
+    settle: false
+  - wait: { until: replay-idle, timeout: 60s }
+  - click: 'toolbar/toolbar-button[label="step-in-image"]'
+    settle: false
+  - wait: { until: replay-idle, timeout: 60s }
+  - click: 'toolbar/toolbar-button[label="step-in-image"]'
+    settle: false
+  - wait: { until: replay-idle, timeout: 60s }
+  - click: 'toolbar/toolbar-button[label="step-in-image"]'
+    settle: false
+  - wait: { until: replay-idle, timeout: 60s }
+  - click: 'toolbar/toolbar-button[label="step-in-image"]'
+    settle: false
+  - wait: { until: replay-idle, timeout: 60s }
+  - click: 'toolbar/toolbar-button[label="step-in-image"]'
+    settle: false
+  - wait: { until: replay-idle, timeout: 60s }
+  - expect: { at: 'editor[file="main.py"]', current-line: 116 }
+  # Control: the module's own window is drawn (its EXPRESSIONS chip, line 90).
+  - wait: { until: { at: 'editor[file="main.py"]/line[number="90"]', flow-names: { contains: "EXPRESSIONS" } }, timeout: 30s }
+  - click: 'toolbar/toolbar-button[label="step-in-image"]'
+    settle: false
+  - wait: { until: replay-idle, timeout: 60s }
+  - click: 'toolbar/toolbar-button[label="step-in-image"]'
+    settle: false
+  - wait: { until: replay-idle, timeout: 60s }
+  - click: 'toolbar/toolbar-button[label="step-in-image"]'
+    settle: false
+  - wait: { until: replay-idle, timeout: 60s }
+  - click: 'toolbar/toolbar-button[label="step-in-image"]'
+    settle: false
+  - wait: { until: replay-idle, timeout: 60s }
+  - click: 'toolbar/toolbar-button[label="step-in-image"]'
+    settle: false
+  - wait: { until: replay-idle, timeout: 60s }
+  - click: 'toolbar/toolbar-button[label="step-in-image"]'
+    settle: false
+  - wait: { until: replay-idle, timeout: 60s }
+  - click: 'toolbar/toolbar-button[label="step-out-image"]'
+    settle: false
+  - wait: { until: replay-idle, timeout: 60s }
+  - expect: { at: 'editor[file="main.py"]', current-line: 110 }
+  - wait: { until: { at: 'editor[file="main.py"]/line[number="99"]', flow-names: { contains: "return" } }, timeout: 30s }
+  - wait: { until: settled }
+  - expect: { at: 'editor[file="main.py"]/line[number="99"]', flow-names: ["return"] }
+  # Nothing of the module's window is left behind.
+  - expect: { at: 'editor[file="main.py"]/line[number="90"]', flow-names: { count: 0 } }

@@ -227,6 +227,21 @@ func stateKey*(rows: openArray[StateKeyRow]; cursor: StateCursor;
   else:
     StateKeyEffect(kind: skeUnhandled, cursor: cursor)
 
+func chainKeyRows*(chain: OriginChain): seq[StateKeyRow] =
+  ## A chain drawn on its own (the desktop's origin panel): one stop per hop.
+  for i, hop in chain.hops:
+    result.add StateKeyRow(kind: srkHop, hop: i, tick: hop.location.rrTicks,
+                           hasOperands: hop.operandSnapshots.len > 0)
+
+func stateRowClick*(rows: openArray[StateKeyRow];
+                    at: StateCursor): StateKeyEffect =
+  ## A press on the row at `at`: what `Enter` does on it with the cursor there.
+  ## A hop seeks (Click-Navigation.md §2); every front-end's click on a hop row
+  ## comes through here, so a click and a key cannot disagree.
+  if rows.cursorIndex(at) < 0:
+    return StateKeyEffect(kind: skeNone, cursor: at)
+  stateKey(rows, at, "list.activate")
+
 func operandKey*(path: string; hop: int): string =
   ## The key of hop `hop` of `path`'s chain in a set of hops whose operands
   ## are shown (`StateVM.openOperands`, the terminal's model).

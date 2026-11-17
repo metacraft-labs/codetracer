@@ -585,3 +585,164 @@ fn a_marker_lookup_resolves_a_counterpart_in_a_sibling_recording() {
     );
     assert_eq!(counterpart.get("keyValue").and_then(|v| v.as_str()), Some("req-0001"));
 }
+
+/// Send one `ct/` request naming the recording by the session's thread id,
+/// as the renderer does after a process switch, and return its response.
+fn routed_ct_request(
+    client: &mut DapStdioTestClient,
+    command: &str,
+    mut arguments: serde_json::Value,
+    thread_id: i64,
+) -> db_backend::dap::Response {
+    if let Some(obj) = arguments.as_object_mut() {
+        obj.insert("threadId".to_string(), serde_json::json!(thread_id));
+    }
+    let request = client.dap_client_mut().request(command, arguments);
+    client.send_message(&request).expect("send the routed request");
+    match client
+        .read_until_response_msg(command, Duration::from_secs(60))
+        .expect("a response to the routed request")
+    {
+        DapMessage::Response(r) => r,
+        other => panic!("expected a response to {command}, got {other:?}"),
+    }
+}
+
+/// The panes of a switched-to recording are answered about that recording.
+///
+/// After the user picks another process, the renderer stamps that
+/// recording's thread id on every request (`dap.nim` `dispatchCtRequest`).
+/// The `ct/` argument types refuse unknown fields, and the router passed
+/// the routing field through, so `ct/load-locals`, `ct/load-flow` and
+/// `ct/load-calltrace-section` were all refused ("unknown field
+/// `threadId`"): the Variables pane said "No variables" and the call
+/// trace kept the previous recording's calls.
+#[test]
+fn requests_routed_to_a_switched_recording_are_answered_about_it() {
+    let manifest = recording_root().join("session.toml");
+    let server_source = source_root().join("backend/server.js");
+
+    let mut client = DapStdioTestClient::start().expect("start db-backend");
+    client
+        .initialize_and_launch_session(&manifest)
+        .expect("launch the three-trace session");
+
+    let source = std::fs::read_to_string(&server_source).expect("read the demo server source");
+    let line = source
+        .lines()
+        .position(|l| l.contains("const balance = payload.balance"))
+        .map(|idx| idx as u32 + 1)
+        .expect("the demo server must bind `balance` from the request payload");
+    let entries = list_processes(&mut client);
+    let backend_thread = thread_id_for_role(&entries, ROLE_BACKEND);
+    assert_ne!(
+        backend_thread,
+        thread_id_for_role(&entries, ROLE_FRONTEND_JS),
+        "the recordings have thread ids of their own"
+    );
+
+    client
+        .set_breakpoint_on_thread(&server_source, line, backend_thread)
+        .expect("set a breakpoint in the server recording");
+    let location = client
+        .continue_to_breakpoint_on_thread(backend_thread)
+        .expect("run to the balance binding");
+
+    let locals = routed_ct_request(
+        &mut client,
+        "ct/load-locals",
+        serde_json::json!({
+            "rrTicks": location.rr_ticks.0,
+            "countBudget": 3000,
+            "minCountLimit": 50,
+            "lang": "javascript",
+            "watchExpressions": [],
+            "depthLimit": -1,
+        }),
+        backend_thread,
+    );
+    assert!(locals.success, "ct/load-locals refused: {:?}", locals.message);
+    let names: Vec<String> = locals
+        .body
+        .get("locals")
+        .and_then(|l| l.as_array())
+        .map(|l| {
+            l.iter()
+                .filter_map(|v| v.get("expression").and_then(|e| e.as_str()).map(str::to_string))
+                .collect()
+        })
+        .unwrap_or_default();
+    assert!(
+        names.iter().any(|n| n == "balance"),
+        "the server recording's locals at the binding include `balance`; got {names:?}"
+    );
+
+    let calltrace = routed_ct_request(
+        &mut client,
+        "ct/load-calltrace-section",
+        serde_json::json!({
+            "location": serde_json::to_value(&location).expect("serialise the location"),
+            "startCallLineIndex": 0,
+            "depth": 10,
+            "height": 20,
+            "rawIgnorePatterns": "",
+            "autoCollapsing": true,
+            "optimizeCollapse": true,
+            "renderCallLineIndex": 0,
+        }),
+        backend_thread,
+    );
+    assert!(
+        calltrace.success,
+        "ct/load-calltrace-section refused: {:?}",
+        calltrace.message
+    );
+}
+
+/// A move into a sibling recording reports its stop as THAT recording's
+/// thread.
+///
+/// A client follows a `stopped` event to the thread it names: VS Code
+/// focuses that thread and shows its top frame. Every recording's handler
+/// named thread 1, the first recording's, so a jump the Event Log's
+/// boundary chip routed into the server recording moved the server's
+/// replay while VS Code went on showing the browser's stop. The server
+/// recording's stop must name the thread `ct/listProcesses` gives it.
+#[test]
+fn a_stop_in_a_sibling_recording_names_that_recordings_thread() {
+    let manifest = recording_root().join("session.toml");
+
+    let mut client = DapStdioTestClient::start().expect("start db-backend");
+    client
+        .initialize_and_launch_session(&manifest)
+        .expect("launch the three-trace session");
+
+    let entries = list_processes(&mut client);
+    let backend_thread = thread_id_for_role(&entries, ROLE_BACKEND);
+    assert_ne!(backend_thread, 1, "the server recording is not the session's first");
+
+    // The step the server received the browser's request at (the
+    // `recv account-balance` firing; see the fixture's ANSWERS.md).
+    let request = client.dap_client_mut().request(
+        "ct/goto-ticks",
+        serde_json::json!({ "threadId": backend_thread, "ticks": 43 }),
+    );
+    client.send_message(&request).expect("send ct/goto-ticks");
+
+    let mut named = Vec::new();
+    loop {
+        match client.read_until_event_msg("stopped", Duration::from_secs(60)) {
+            Ok(DapMessage::Event(e)) => {
+                let thread = e.body.get("threadId").and_then(|t| t.as_i64());
+                named.push(thread);
+                if thread == Some(backend_thread) {
+                    break;
+                }
+            }
+            Ok(other) => panic!("expected a stopped event, got {other:?}"),
+            Err(err) => {
+                panic!("no stop named the server recording's thread {backend_thread}; stops named {named:?}: {err}")
+            }
+        }
+    }
+}

@@ -1,0 +1,38 @@
+scenario: 1
+name: session-chrome/new-tab-opens-welcome-under-intact-caption
+pack: codetracer
+summary: >-
+  The caption bar lays out the logo, the fourteen debug controls and the
+  omnibox in one row without overlap and meets the content below it; the
+  omnibox takes a click and typing; and `+` opens a welcome tab whose screen
+  fills the view under the same caption bar, the omnibox still in its place
+  but faded and inert.
+
+stage:
+  - use: record-program
+    with: { program: py_console_logs/main.py }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - wait: { until: { at: caption-bar/caption-controls, buttons: 14 }, timeout: 30s }
+  - expect: { at: caption-bar, fixed: true, opaque: true, seam: { le: 1 }, placeholder: "Navigate to file or run a :command" }
+  - expect: { at: caption-bar/caption-logo, has-image: true }
+  - expect: { at: caption-bar/caption-controls, geometry: { right-of: caption-bar/caption-logo, inside: caption-bar } }
+  - expect: { at: caption-bar/caption-omnibox, enabled: true, dimmed: false, geometry: { right-of: caption-bar/caption-controls, inside: caption-bar } }
+  - click: caption-bar/caption-omnibox
+  - expect: { at: caption-bar/caption-omnibox, focused: true }
+  - type: ":new trace"
+  - expect: { at: caption-bar/caption-omnibox, value: ":new trace" }
+  - wait: { until: { at: omnibox, count: { gt: 0 } }, timeout: 10s }
+  - key: Esc
+  - click: 'caption-bar/caption-tabs/panel-button[label="New tab"]'
+  - wait: { until: { at: session-strip, count: 2 }, timeout: 30s }
+  - wait: { until: { at: welcome, present: true }, timeout: 30s }
+  - expect: { at: welcome-view, geometry: { below: caption-bar, spans-width-of: caption-bar } }
+  - expect: { at: welcome, geometry: { inside: welcome-view } }
+  - expect: { at: caption-bar, seam: { le: 1 } }
+  - expect: { at: caption-bar/caption-controls, buttons: 14, geometry: { right-of: caption-bar/caption-logo } }
+  # With no trace to act on, the prompt stays in its place, faded and
+  # ignoring the pointer, like the debugger controls beside it.
+  - expect: { at: caption-bar/caption-omnibox, dimmed: true, inert: true, geometry: { right-of: caption-bar/caption-controls } }

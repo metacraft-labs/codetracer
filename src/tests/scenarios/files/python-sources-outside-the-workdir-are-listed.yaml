@@ -1,0 +1,24 @@
+scenario: 1
+name: files/python-sources-outside-the-workdir-are-listed
+pack: codetracer
+summary: >-
+  The Files panel of a Python replay whose runner (app/main.py) imports
+  modules from beside its folder (app/../shared) lists those modules too,
+  as the terminal does: helpers.py appears under shared, and clicking it
+  opens it in the editor.
+
+stage:
+  - use: record-program
+    with: { program: multi_root/app/main.py }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 180s }
+  - wait: { until: { at: 'editor[file="main.py"]', present: true }, timeout: 60s }
+  - click: 'pane-tab[label="FILES"]'
+  - wait: { until: { at: 'filesystem/file-node[name="shared"]', present: true }, timeout: 60s }
+  - wait: { until: { at: 'filesystem/file-node[name="helpers.py"]', present: true }, timeout: 60s }
+  - expect: { at: 'filesystem/file-node[name="app"]', present: true }
+  - expect: { at: filesystem, empty: false, loading: false }
+  - click: 'filesystem/file-node[name="helpers.py"]'
+  - wait: { until: { at: 'editor[file="helpers.py"]', active: true }, timeout: 30s }

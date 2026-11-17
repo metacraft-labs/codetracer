@@ -1,0 +1,26 @@
+scenario: 1
+name: keymaps/plat68b-find-widget-keys
+pack: codetracer
+summary: >-
+  Monaco's find widget, opened with Ctrl+F in the read-only editor, takes its
+  letters (an `f` is not Step Out there) and its Enter (find next, not a
+  tracepoint): the query is what was typed and the focus stays in the widget.
+
+stage:
+  - use: record-program
+    with: { program: py_calltrace_collapse/main.py }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 180s }
+  - wait: { until: call-trace.loaded, timeout: 120s }
+  - click: { at: 'editor[file="main.py"]/line[number="1"]', anchor: text-start }
+  - chord: Ctrl+F
+  - wait: { until: { at: 'editor[file="main.py"]', find-focused: true }, timeout: 10s }
+  - type: def
+  - expect: { at: 'editor[file="main.py"]', find-query: def, find-focused: true }
+  - expect: { at: 'editor[file="main.py"]', assert: "stopped-at(1)" }
+  - key: Enter
+  - expect: { at: 'editor[file="main.py"]', find-focused: true }
+  - expect: { at: tracepoint-editor, absent: true }
+  - expect: { at: 'editor[file="main.py"]', assert: "stopped-at(1)" }

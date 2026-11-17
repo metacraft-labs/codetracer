@@ -202,6 +202,47 @@ _tlf_vm_unit_candidates() {
 		_tlf_reject '/test_collab_[a-z0-9_]*\.nim$'
 }
 
+# _TLF_NATIVE_RECORDING_IMPORT_RE — a suite that `import`s
+# `fixtures/native_recording` (by any relative spelling, alone or in a list).
+# That fixture records `codetracer-native-test-programs` under rr and replays it
+# through `ct-native-replay`, so the suites that import it run only where rr
+# works and that binary has been built. `tui` rejects them and `tui-native`
+# keeps them: one pattern for both directions, so the two lanes partition the
+# directory by construction. See the `tui-native` lane for why.
+_TLF_NATIVE_RECORDING_IMPORT_RE='^[[:space:]]*import[[:space:]]+.*fixtures/native_recording([[:space:],]|$)'
+
+# _tlf_tui_tier1_candidates — every Tier-1 TUI suite, before the rr split: the
+# directories the `tui` lane discovers over. `tui` and `tui-native` both start
+# here, so a directory added to one is added to the other.
+_tlf_tui_tier1_candidates() {
+	# Discovery, one level deep. `real_terminal/` is the Tier-2 lane
+	# (`tui-real-terminal`) and needs three sibling `--path`s the Tier-1
+	# lanes must not carry: a Tier-1
+	# suite that could compile against TermAssert would be one edit away
+	# from spawning a pty in the fast lane, and the split is what keeps
+	# "asserted in process" and "asserted on a terminal" answerable
+	# separately.
+	_tlf_glob src/frontend/tui/tests 'test_*.nim'
+	# CTUI-3's three layout suites live under `app/tests/` because the
+	# milestone names them there, and the placement is load-bearing rather
+	# than cosmetic: `tests/test_tui_facade_boundary.nim` walks EVERY
+	# `.nim` file under `app/`, so a suite that sat there and reached for
+	# `host/` or `std/posix` would redden that guard. That is exactly the
+	# rule CTUI-3 asks for — SIGWINCH belongs to `host/resize.nim`, and the
+	# Tier-1 reflow suite must therefore go through `h.resize` instead.
+	# Same Tier-1 flags as the directory above; still no TermAssert.
+	_tlf_glob src/frontend/tui/app/tests 'test_*.nim'
+	# CTUI-12's launcher-routing suite. It lives at
+	# `src/tests/launcher/` because the milestone names it there, and the
+	# placement is right for what it is: it drives the `ct` LAUNCHER — a
+	# binary from a sibling repository — over component bundles this
+	# repository's packaging scripts assemble, so it belongs to neither
+	# `app/` (which may not spawn a process) nor `tests/real_terminal/`
+	# (it needs no pty). Tier-1 flags are harmless to it: it links no
+	# grammar archive and imports no `isonim_tui`.
+	_tlf_glob src/tests/launcher 'test_*.nim'
+}
+
 # _tlf_reject PATTERN... — filter stdin, dropping any line matching any of the
 # given `grep -E` patterns. Every call site must say WHY each pattern is there;
 # an unexplained exclusion is the defect this whole file is about.
@@ -269,8 +310,12 @@ agent-api-contract
 bpf
 book-isonim
 tui
+tui-native
 tui-real-terminal
+tui-real-emulators
 gpui-shell
+gpui-native
+agent-harbor-gpui-captures
 ui-selection
 ct-host-admission
 ct-host-manifest
@@ -316,8 +361,12 @@ test_lane_description() {
 	bpf) echo "BPF monitor unit / native / integration suites" ;;
 	book-isonim) echo "docs/book-isonim SSG suites" ;;
 	tui) echo "CodeTracer TUI Tier-1 suites (isonim-tui harness, no terminal)" ;;
+	tui-native) echo "CodeTracer TUI Tier-1 suites over an rr recording of a native program (need rr, ct-native-replay and codetracer-native-test-programs; run by the rr CI job)" ;;
 	tui-real-terminal) echo "CodeTracer TUI Tier-2 suites (TermAssert: real pty + libvterm)" ;;
+	tui-real-emulators) echo "CodeTracer TUI in REAL terminal emulators (kitty, xterm, Ghostty, Alacritty on Xvfb; foot on GuiAssert's headless sway; tmux in kitty): personas captured and compared, the profile, the glyph test card read by OCR and pixels, OSC 52 against the profile" ;;
 	gpui-shell) echo "PLAT-20 GPUI shell: the dock projection against gpui-kit's own fixtures, and the shell/leaf split through the real isonim-gpui shim" ;;
+	gpui-native) echo "GPUI suites over an rr recording of a native program (need rr, ct-native-replay, codetracer-native-test-programs and build/bin/codetracer-gpui; run by the rr CI job)" ;;
+	agent-harbor-gpui-captures) echo "CTF-P1b and CTF-P1c: the GPUI window captures of the Agent Harbor stories, and of the playback stories at each named moment, against the committed web layout records (just ctf-p1b-gpui-captures takes both sets of captures on headless sway first)" ;;
 	ui-selection) echo 'PLAT-1 --ui front-end selection, end to end: the real launcher, the real ct, the real TUI and a real ct host server' ;;
 	ct-host-admission) echo 'ct host admission, session isolation and lifetime, end to end: the real ct host refuses a client without its session secret or from a foreign origin, gives every client its own replay and session, and leaves no process behind when it is signalled or killed; and it refuses a trace container it cannot read with one error line naming the reason' ;;
 	ct-host-manifest) echo 'ct host --manifest slice selection, end to end: the real ct host opens the mcr_slices slice the replay start (or CODETRACER_START_SLICE_KEY) names, refuses one it does not list' ;;
@@ -413,6 +462,15 @@ test_lane_recipe() {
 		# nimble requires ../../../isonim-docs) and runs the book's own
 		# Justfile; under the runner every file is a COMPILE ERROR.
 		echo "test-book-isonim"
+		;;
+	tui-real-emulators)
+		# Terminal-Adaptation §13.4. `ci/test/tui-real-emulators.sh` provides
+		# the emulators from the pinned nixpkgs, builds nothing of its own,
+		# and compiles and runs the suite in GuiAssert's dev shell, which
+		# declares the headless sway, grim, its Wayland helpers, Xvfb and
+		# tesseract; under the runner the suite would find none of them. An
+		# emulator that cannot run is a counted `MISSING-PREREQ SKIP:`.
+		echo "test-tui-real-emulators"
 		;;
 	screen-oracle)
 		# PLAT-39. `test_plat39_record.nim` is the portable gate
@@ -586,7 +644,7 @@ test_lane_parity_partner() {
 # macOS, so there the answer is empty and the run is unchanged.
 test_lane_run_library_path() {
 	case "$1" in
-	gpui-shell | tui | vm-collab-integration)
+	gpui-shell | gpui-native | tui | tui-native | vm-collab-integration)
 		echo "${CODETRACER_GPUI_RUNTIME_LIB_PATH:-}"
 		;;
 	*) echo "" ;;
@@ -706,7 +764,7 @@ test_lane_extra_flags() {
 		# file entry points.
 		echo "--path:../GuiAssert/src"
 		;;
-	gpui-shell)
+	gpui-shell | gpui-native)
 		# PLAT-20. `--path:src/frontend/viewmodel` for the same reason every
 		# `vm-*` lane carries it: `codetracer_embed` is imported by bare module
 		# name. `src/frontend` itself is already on the path from
@@ -736,11 +794,16 @@ test_lane_extra_flags() {
 		# The path is spelled the way GuiAssert's own `config.nims` expects
 		# (`switch("path", "src")`), so modules are imported as
 		# `gui_assert/<module>`.
+		#
+		# `gpui-native` is `gpui-shell`'s rr-recording half (see that lane)
+		# and compiles the same kind of suite, so it takes these flags.
 		echo "--path:src/frontend/viewmodel --path:../GuiAssert/src"
 		;;
 
-	tui | tui-real-terminal)
+	tui | tui-native | tui-real-terminal)
 		# THE TUI LANES. Three groups of flags, and each is load-bearing.
+		# `tui-native` is `tui`'s rr-recording half (see that lane) and
+		# compiles the same kind of Tier-1 suite, so it takes `tui`'s flags.
 		#
 		#   --path:src/frontend/viewmodel
 		#       `codetracer_embed` — the Embed SDK facade, and the only door
@@ -1067,6 +1130,10 @@ test_lane_files() {
 		echo src/frontend/tests/debug_toolbar_follows_active_tab_test.nim
 		echo src/frontend/tests/agent_editor_selection_dom_test.nim
 		echo src/frontend/tests/origin_chain_wiring_test.nim
+		# `origin_side_panel_confidence_test.nim` holds the origin side panel
+		# to printing each hop's confidence, and the low-confidence label
+		# below 0.7 (Value-Origin-Tracking.md §3.2.2 "Side panel").
+		echo src/frontend/tests/origin_side_panel_confidence_test.nim
 		# `session_viewmodels_test.nim` holds each window tab to owning its
 		# ViewModels: the panel host renders a tab's panes over that tab's
 		# session, a hidden tab's move updates its own store only, each tab has
@@ -1078,6 +1145,13 @@ test_lane_files() {
 		# for the closed tab reaches no tab, and every request a tab sends names
 		# the replay the Backend Manager answered for it beside the tab's id.
 		echo src/frontend/tests/tab_session_ids_test.nim
+		# `source_revisions_across_recordings_test.nim`: a recording loaded in
+		# place of another (Ctrl+R) does not show the replaced recording's
+		# source at its stops.
+		echo src/frontend/tests/source_revisions_across_recordings_test.nim
+		# `status_notifications_across_reload_test.nim`: a notice on screen when
+		# a trace load rebuilds the layout stays on the rebuilt status bar.
+		echo src/frontend/tests/status_notifications_across_reload_test.nim
 		# `low_level_code_markup_dom_test.nim`: a source line in the Low Level
 		# Code pane is text in a real DOM, whatever markup it contains (HSF-D3).
 		echo src/frontend/tests/low_level_code_markup_dom_test.nim
@@ -1093,6 +1167,24 @@ test_lane_files() {
 		# Front-Ends D10), a plain click on a shared row's link is the row's
 		# click and does not navigate; a modified click is the browser's.
 		echo src/frontend/tests/row_links_dom_test.nim
+		# `breakpoint_condition_dialog_dom_test.nim`: the "Edit breakpoint
+		# condition" dialog's OK and Cancel are buttons carrying their
+		# operations, pressed through the window's one pointer listener and
+		# the router (a user's row takes the press); its field's Enter and
+		# Escape are the field's, and Escape elsewhere is a dismissal.
+		echo src/frontend/tests/breakpoint_condition_dialog_dom_test.nim
+		# `story_playback_bar_dom_test.nim`: the web story host's playback
+		# bar's buttons carry their operations, pressed through the page's one
+		# pointer listener and the router as StoryBook wires it; a user's row
+		# takes the press.
+		echo src/frontend/tests/story_playback_bar_dom_test.nim
+		# `element_operations_dom_test.nim`: an element carrying its operation
+		# with the procedure bound to it, pressed through the window's one
+		# pointer listener — on its click, on its press inside Monaco, outside
+		# every pane, as an inline value (Ctrl+Click the scratchpad's), the
+		# mouse's side buttons as pointer rows, a cut cell's `…`; a user's row
+		# takes each over.
+		echo src/frontend/tests/element_operations_dom_test.nim
 		# `event_log_scroll_area_dom_test.nim`: the Event Log's scroll area is as
 		# tall as the whole log, in a real DOM, whatever the table's fit does.
 		echo src/frontend/tests/event_log_scroll_area_dom_test.nim
@@ -1163,6 +1255,22 @@ test_lane_files() {
 		# Measuring a pane stays out of the browser's ResizeObserver delivery.
 		# Only a browser has that delivery loop; jsdom observes nothing.
 		echo src/frontend/tests/pane_measure_resize_loop_chromium_test.nim
+		# A review's loop slider is built when its control is laid out, however
+		# late that is: a ResizeObserver and a real layout, which only a
+		# browser has.
+		echo src/frontend/tests/flow_loop_slider_chromium_test.nim
+		# The desktop's shared editor (the `sharedEditor` developer setting):
+		# trusted clicks, an input method's composition, the accessibility
+		# tree a screen reader reads, a forced-colours theme — what only a
+		# browser decides about the editor's DOM.
+		echo src/frontend/tests/shared_editor_chromium_test.nim
+		# …and its language features against the dev shell's real
+		# `nimlangserver`, spoken to over stdio by the runner.
+		echo src/frontend/tests/shared_editor_lsp_chromium_test.nim
+		# A side overlay's hide finishes when its slide-out animation ends,
+		# even when the renderer's timers stall. Animation events and timer
+		# scheduling are a browser's; jsdom runs neither.
+		echo src/frontend/tests/auto_hide_slide_out_chromium_test.nim
 		;;
 
 	main-process)
@@ -1201,6 +1309,13 @@ test_lane_files() {
 		# reaches the tab owning the replay that sent it, and a tab with no
 		# replay is not run on another tab's.
 		echo src/frontend/tests/dap_replay_selection_test.nim
+		# `desktop_window_routing_test.nim` drives `index/window_routing.nim`
+		# and the DAP router with two desktop windows: an answer reaches the
+		# window that asked (across awaits), a replay's events reach every
+		# window showing it under each window's own tab id, a window opened
+		# for a tab is sent that tab's session, and one window's tab cannot
+		# stop a replay another window shows.
+		echo src/frontend/tests/desktop_window_routing_test.nim
 		echo src/frontend/tests/index_server_binds_loopback_test.nim
 		echo src/frontend/tests/facade_endpoint_verbs_test.nim
 		#
@@ -1258,6 +1373,16 @@ test_lane_files() {
 		# and nothing under `src/frontend/index/` called it. It writes two probe
 		# files under `codetracerExeDir` and removes them.
 		echo src/frontend/tests/facade_endpoint_over_socket_test.nim
+		#
+		# `facade_endpoint_answers_while_git_runs_test.nim` starts the same
+		# real server with two socket.io clients and a `git` on the server's
+		# PATH that takes 0.8 s per run: while client A's `vcs.status`,
+		# `vcs.contentId` or `process.run` is outstanding, client B's
+		# `fs.readText` must be answered first and promptly, and the server's
+		# event loop must keep turning (`CLI/ct/host.md`, "A facade verb never
+		# holds the server's event loop"). Needs `git` and `sh` on PATH;
+		# writes only under one `mkdtemp` directory, which it removes.
+		echo src/frontend/tests/facade_endpoint_answers_while_git_runs_test.nim
 		#
 		# `index_serves_one_deployment_descriptor_test.nim` is §7's "it arrives
 		# differently per deployment and is the SAME document": it fetches
@@ -1434,6 +1559,7 @@ test_lane_files() {
 			src/frontend/tests/frontend_lang_test.nim \
 			src/frontend/tests/ipc_registry_test.nim \
 			src/frontend/tests/monaco_operations_test.nim \
+			src/frontend/tests/nim_c_listing_test.nim \
 			src/frontend/tests/nim_sourcemap_test.nim \
 			src/frontend/tests/run_to_cursor_test.nim \
 			src/frontend/tests/scratchpad_add_dispatch_test.nim \
@@ -1977,7 +2103,11 @@ test_lane_files() {
 				'/request-panel/js_request_panel_vm_test\.nim$' \
 				'/request-panel/native_request_panel_vm_test\.nim$' \
 				'/request-panel/remote_request_panel_vm_test\.nim$' \
+				'/integration/recording_fixtures_test\.nim$' \
 				'/request-panel/request_span_conformance_test\.nim$'
+		# recording_fixtures_test exercises the real filesystem lookup of a
+		# published recording (`std/os`'s `fileExists` has no JS backend); it
+		# stays in `vm-native`, where the boundary it tests exists.
 		# agentic-coding/* import std/osproc, whose `quoteShell` does not exist
 		# on the JS target. `certificate_indicator_native_test.nim` (SB-1) is the
 		# same error for the same reason and one more besides: it drives the
@@ -2184,31 +2314,35 @@ test_lane_files() {
 		;;
 
 	tui)
-		# Discovery, one level deep. `real_terminal/` is the Tier-2 lane below
-		# and needs three sibling `--path`s this lane must not carry: a Tier-1
-		# suite that could compile against TermAssert would be one edit away
-		# from spawning a pty in the fast lane, and the split is what keeps
-		# "asserted in process" and "asserted on a terminal" answerable
-		# separately.
-		_tlf_glob src/frontend/tui/tests 'test_*.nim'
-		# CTUI-3's three layout suites live under `app/tests/` because the
-		# milestone names them there, and the placement is load-bearing rather
-		# than cosmetic: `tests/test_tui_facade_boundary.nim` walks EVERY
-		# `.nim` file under `app/`, so a suite that sat there and reached for
-		# `host/` or `std/posix` would redden that guard. That is exactly the
-		# rule CTUI-3 asks for — SIGWINCH belongs to `host/resize.nim`, and the
-		# Tier-1 reflow suite must therefore go through `h.resize` instead.
-		# Same Tier-1 flags as the directory above; still no TermAssert.
-		_tlf_glob src/frontend/tui/app/tests 'test_*.nim'
-		# CTUI-12's launcher-routing suite. It lives at
-		# `src/tests/launcher/` because the milestone names it there, and the
-		# placement is right for what it is: it drives the `ct` LAUNCHER — a
-		# binary from a sibling repository — over component bundles this
-		# repository's packaging scripts assemble, so it belongs to neither
-		# `app/` (which may not spawn a process) nor `tests/real_terminal/`
-		# (it needs no pty). Tier-1 flags are harmless to it: it links no
-		# grammar archive and imports no `isonim_tui`.
-		_tlf_glob src/tests/launcher 'test_*.nim'
+		# The Tier-1 suites (`_tlf_tui_tier1_candidates` says where they are
+		# discovered and why there), MINUS the ones that record a native
+		# program under rr: those are the `tui-native` lane below. Selected by
+		# what the file IMPORTS, not by its name, so the next suite that
+		# reaches for `fixtures/native_recording` moves with no edit here.
+		_tlf_tui_tier1_candidates |
+			_tlf_reject_matching_file "${_TLF_NATIVE_RECORDING_IMPORT_RE}"
+		;;
+
+	tui-native)
+		# The Tier-1 suites that open an rr recording of a native program:
+		# every one that imports `fixtures/native_recording`, which records
+		# `codetracer-native-test-programs` with rr and replays it through
+		# `ct-native-replay` (`../codetracer-native-backend`). Same directories
+		# and same flags as `tui`; a lane of its own because of WHERE it can
+		# run. rr does not work on the generic Linux CI hosts the `tui-tests`
+		# job runs on (`rr record /bin/true` hangs there), and that job builds
+		# no `ct-native-replay`, so in the `tui` lane these suites skipped every
+		# case and the lane — which fails an all-skipped file — was red
+		# (codetracer-pm
+		# `issues/2026-11-09-tui-job-runs-plat60-and-plat65-without-their-prerequisites.md`).
+		# `just test-tui-native` runs this lane in `test-ui-tests-rr`, the job
+		# the workflow routes rr work to: it sets rr up
+		# (`ci/setup-rr-backend.sh`), clones the native test programs, and
+		# builds `ct-native-replay` through `just test-gui` first.
+		# `ci/test/native-recording-suites-run-where-rr-is-test.py` holds every
+		# job that runs such a suite to those prerequisites.
+		_tlf_tui_tier1_candidates |
+			_tlf_keep_matching_file "${_TLF_NATIVE_RECORDING_IMPORT_RE}"
 		;;
 
 	gpui-shell)
@@ -2221,7 +2355,42 @@ test_lane_files() {
 		# them here would mean giving this lane the grammar archive and the
 		# tree-sitter link flags, i.e. giving the GPUI lane a terminal
 		# renderer, which is exactly what the split forbids.
-		_tlf_glob src/frontend/gpui/tests 'test_*.nim'
+		#
+		# MINUS the suites that open an rr recording of a native program
+		# (every one that imports `fixtures/native_recording`): they are the
+		# `gpui-native` lane below, for the reason `tui-native` exists.
+		_tlf_glob src/frontend/gpui/tests 'test_*.nim' |
+			_tlf_reject_matching_file "${_TLF_NATIVE_RECORDING_IMPORT_RE}"
+		;;
+
+	gpui-native)
+		# The GPUI suites that open an rr recording of a native program: every
+		# one under `src/frontend/gpui/tests/` that imports
+		# `fixtures/native_recording` (PLAT-60's Low Level Code pane over a C
+		# program). They need rr, `ct-native-replay` and the native test
+		# programs, none of which the `gpui-shell` hosts have, so there they
+		# skipped every case. `just test-gpui-native` builds `ct-native-replay`
+		# and the GPUI binary first; CI runs it in `test-ui-tests-rr`, the job
+		# the workflow routes rr work to, after its rr setup and `just
+		# test-gui`. `ci/test/native-recording-suites-run-where-rr-is-test.py`
+		# holds every job that runs such a suite to those prerequisites.
+		_tlf_glob src/frontend/gpui/tests 'test_*.nim' |
+			_tlf_keep_matching_file "${_TLF_NATIVE_RECORDING_IMPORT_RE}"
+		;;
+
+	agent-harbor-gpui-captures)
+		# CTF-P1b. `test_ctf_p1b_gpui_capture_matches_web_layout.nim` reads the
+		# git-ignored GPUI window captures `ci/test/ctf-p1b-gpui-story-capture.sh`
+		# takes on GuiAssert's headless sway (`build/ctf-p1b/gpui/`) and the
+		# committed web record, so it is not in `gpui-shell`, whose recipe opens
+		# no window. `just ctf-p1b-gpui-captures` captures first and then runs
+		# this lane; the `gpui-window-captures` CI job runs that recipe.
+		# CTF-P1c's `test_ctf_p1c_gpui_capture_matches_web_layout_at_moments.nim`
+		# is the same check over the playback stories at each named moment
+		# (`build/ctf-p1c/gpui/`, which the same recipe takes); the shared
+		# judge, `ctf_layout_judge.nim`, is not a `test_*` file and runs alone
+		# in no lane.
+		_tlf_glob src/tests/visual/agent_harbor 'test_*.nim'
 		;;
 
 	screen-oracle)
@@ -2275,6 +2444,13 @@ test_lane_files() {
 		# `src/build-debug/bin/ct` (or CODETRACER_CT_BIN), `node` and
 		# socket.io-client. `just test-ct-host-manifest` builds them.
 		_tlf_find src/tests/ct_host_manifest 'test_*.nim'
+		;;
+
+	tui-real-emulators)
+		# The real emulators (Terminal-Adaptation §13.4): discovery over the
+		# lane's own directory, which no Tier-1 or Tier-2 glob reaches (both
+		# are one level deep under `tests/`, or `real_terminal/`).
+		_tlf_find src/frontend/tui/tests/real_emulators 'test_*.nim'
 		;;
 
 	tui-real-terminal)

@@ -17,10 +17,12 @@ for sibling in codetracer-wasm-recorder codetracer-wasm-instrumenter codetracer-
 	grep -Eq "^[[:space:]]+${sibling}[[:space:]]*$" <<<"$lane" || fail "$sibling must resolve from the committed lock"
 	# Check the command in the same step as its working directory: merely naming
 	# the producer does not build it, and another producer's build is no substitute.
-	awk -v directory="../$sibling" '
+	# It enters that environment with a GC root (ci/test/dev-shell-gcroot-test.py).
+	cmd="        run: nix develop . --profile \"\${CT_GCROOT_DIR:-\$RUNNER_TEMP}/${sibling}-shell\" --command just build"
+	awk -v directory="../$sibling" -v cmd="$cmd" '
     /^      - / { selected = 0 }
     $1 == "working-directory:" { selected = ($2 == directory) }
-    selected && $0 == "        run: nix develop . --command just build" { found = 1 }
+    selected && $0 == cmd { found = 1 }
     END { exit !found }
   ' <<<"$lane" || fail "$sibling must be built in its own development environment"
 done

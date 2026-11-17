@@ -2,7 +2,12 @@
  * M5 — Playwright spec for the Python `simple_trivial_chain` Value
  * Origin fixture.
  *
- * Covers M5 verification entries:
+ * The three-hop chain, the hop that seeks the editor and the side panel's
+ * keys are the scenarios `src/tests/scenarios/value-origin/python-chain-*`
+ * and `python-side-panel-keyboard.yaml`; the axe-core scan stays here, a
+ * privileged observation no scenario step can make.
+ *
+ * Covered M5 verification entries:
  *
  *   - e2e_origin_python_trivial_chain_renders_three_hops
  *   - e2e_origin_python_click_hop_seeks_editor
@@ -13,6 +18,11 @@
  * ANSWERS.md asserts the chain for `c` at the `print(c)` line walks
  * `c -> b -> a -> Literal(10)`.
  *
+ * Right-click → "Show value origin" expands the chain IN PLACE under the
+ * row (Value-Origin-Tracking.md §3.1, §3.2.1; until 2026-10-29 it opened
+ * the side panel). The side panel is reached from the expanded chain's
+ * "Show in side panel" (§3.2.2), which the a11y and keyboard cases use.
+ *
  * The spec uses `test.use({ sourcePath: <absolute>, launchMode: "trace" })`
  * so the existing harness's `recordTestProgram(fullSourcePath)` path
  * records the trace on demand via `ct record`. When the Python
@@ -21,6 +31,7 @@
  * `origin_python_dap_test.rs::require_python_recorder`) the spec
  * SKIPs itself with the same reason.
  */
+import type { Page } from "@playwright/test";
 import { AxeBuilder } from "@axe-core/playwright";
 import { expect, readyOnEntryTest as readyOnEntry, test } from "../../lib/fixtures";
 import { LayoutPage } from "../../page-objects/layout-page";
@@ -42,149 +53,62 @@ test.beforeAll(() => {
   test.skip(reason !== null, reason ?? "");
 });
 
-test("e2e_origin_python_trivial_chain_renders_three_hops", async ({ ctPage }) => {
-  await readyOnEntry(ctPage);
-  const layout = new LayoutPage(ctPage);
-  const origin = new OriginChainPanePageObject(ctPage);
+/** ANSWERS.md, as the in-row chain draws it (`lhs = rhs` per hop, newest
+ *  first, then the terminator). */
+const EXPECTED_HOPS = ["c = b", "b = a", "a = 10"];
 
-  // ---- Drive the program to the `print(c)` line --------------------------
-  // The fixture's `main()` walks the three assignments + `print(c)`. We
-  // step in then step over until `c` appears in the State Pane locals.
+/** Run to the entry, then step until the State Pane shows local `c` (the
+ *  `print(c)` line). */
+async function stepToPrintC(page: Page, layout: LayoutPage): Promise<void> {
   await layout.runToEntryButton().click();
-  await ctPage.waitForTimeout(750);
-
+  await page.waitForTimeout(750);
   const statePane = (await layout.programStateTabs(true))[0];
   expect(statePane, "State Pane must be present").toBeDefined();
-  let cVisible = (await statePane.variableValueText("c")) !== "";
+  // Until `c` holds its value, not merely until it is listed: a local can be
+  // listed before its assignment runs (uninitialised in Rust), and its
+  // origin there is not the chain.
+  let cVisible = (await statePane.variableValue("c")) === "10";
   for (let i = 0; i < 12 && !cVisible; i++) {
     await layout.nextButton().click();
-    await ctPage.waitForTimeout(500);
-    cVisible = (await statePane.variableValueText("c")) !== "";
+    await page.waitForTimeout(500);
+    cVisible = (await statePane.variableValue("c")) === "10";
   }
   expect(cVisible, "stepping to the print(c) line must surface local `c`").toBe(true);
-
-  // ---- Right-click `c` → "Show value origin" -----------------------------
-  await origin.rightClickRow("c");
-  await origin.clickShowValueOriginMenuItem();
-
-  // The side panel mounts on the document body when
-  // `OriginChainVM.sidePanelOpen` flips. Wait for the host overlay.
-  await expect(origin.sidePanel()).toBeVisible({ timeout: 15_000 });
-
-  // Three hops + terminator row per fixture ANSWERS.md.
-  await expect(origin.sidePanelHops()).toHaveCount(3, { timeout: 15_000 });
-  await expect(origin.sidePanelTerminator()).toBeVisible();
-  await expect(origin.sidePanelTerminator()).toContainText("10");
-});
-
-test("e2e_origin_python_click_hop_seeks_editor", async ({ ctPage }) => {
-  await readyOnEntry(ctPage);
-  const layout = new LayoutPage(ctPage);
-  const origin = new OriginChainPanePageObject(ctPage);
-
-  await layout.runToEntryButton().click();
-  await ctPage.waitForTimeout(750);
-  const statePane = (await layout.programStateTabs(true))[0];
-  for (let i = 0; i < 12; i++) {
-    if ((await statePane.variableValueText("c")) !== "") {
-      break;
-    }
-    await layout.nextButton().click();
-    await ctPage.waitForTimeout(500);
-  }
-
-  await origin.rightClickRow("c");
-  await origin.clickShowValueOriginMenuItem();
-  await expect(origin.sidePanel()).toBeVisible({ timeout: 15_000 });
-
-  // Capture the editor's current highlighted line, click hop 1 (the
-  // middle TrivialCopy → `b = a`), then assert the line moves.
-  const editorTabs = await layout.editorTabs(true);
-  const editor = editorTabs.find((e) => e.fileName === "main.py");
-  expect(editor, "the fixture editor tab must be open").toBeDefined();
-  const beforeLine = await editor!.highlightedLineNumber();
-
-  await origin.clickSidePanelHop(1);
-  await ctPage.waitForTimeout(750);
-
-  let afterLine = await editor!.highlightedLineNumber();
-  for (let i = 0; i < 5 && afterLine === beforeLine; i++) {
-    await ctPage.waitForTimeout(500);
-    afterLine = await editor!.highlightedLineNumber();
-  }
-  expect(afterLine, "clicking a hop must seek the editor").not.toBe(beforeLine);
-});
+}
 
 test("e2e_origin_python_trivial_chain_a11y", async ({ ctPage }) => {
   await readyOnEntry(ctPage);
   const layout = new LayoutPage(ctPage);
   const origin = new OriginChainPanePageObject(ctPage);
+  await stepToPrintC(ctPage, layout);
 
-  await layout.runToEntryButton().click();
-  await ctPage.waitForTimeout(750);
-  const statePane = (await layout.programStateTabs(true))[0];
-  for (let i = 0; i < 12; i++) {
-    if ((await statePane.variableValueText("c")) !== "") {
-      break;
-    }
-    await layout.nextButton().click();
-    await ctPage.waitForTimeout(500);
-  }
+  await origin.showValueOriginInPlace("c");
+  await expect(origin.expandedChainHops("c")).toHaveText(EXPECTED_HOPS, { timeout: 15_000 });
 
-  await origin.rightClickRow("c");
-  await origin.clickShowValueOriginMenuItem();
-  await expect(origin.sidePanel()).toBeVisible({ timeout: 15_000 });
+  // axe-core scan scoped to this feature's surfaces (the broader editor
+  // is governed by a separate top-level a11y suite): first the chain
+  // under the row, then the side panel its "Show in side panel" opens.
+  // Legacy mode: the default mode finishes the run in a new blank page,
+  // and Electron refuses to create one (`Target.createTarget: Not
+  // supported`). Legacy mode runs axe inside this page.
+  const inPlace = await new AxeBuilder({ page: ctPage })
+    .setLegacyMode(true)
+    .include('[data-variable-name="c"] .ct-origin-inline-chain')
+    .analyze();
+  expect(
+    inPlace.violations,
+    `a11y violations on the in-row origin chain: ${JSON.stringify(inPlace.violations, null, 2)}`,
+  ).toEqual([]);
 
-  // axe-core scan scoped to the side-panel host element to keep the
-  // assertion focused on this feature's surface (the broader editor
-  // is governed by a separate top-level a11y suite).
+  await origin.openInSidePanel("c");
+  await expect(origin.sidePanelHops()).toHaveCount(3, { timeout: 15_000 });
   const results = await new AxeBuilder({ page: ctPage })
+    .setLegacyMode(true)
     .include("aside#ct-origin-chain-side-panel")
     .analyze();
-
   expect(
     results.violations,
     `a11y violations on Origin Chain Panel: ${JSON.stringify(results.violations, null, 2)}`,
   ).toEqual([]);
 });
 
-test("e2e_origin_keyboard_navigation", async ({ ctPage }) => {
-  // Verifies the host-installed keyboard handlers (see
-  // `ui/state.nim::ensureOriginSidePanelHost::onKey`):
-  //   ↓ / ↑  → focusNextHop / focusPrevHop  (changes `panel.focusedHop`)
-  //   Enter  → enterHop → OriginChainVM.onSeekToHop
-  //   →      → expandFocusedOperands
-  //   ←      → collapseFocusedOperands
-  //   Esc    → dismissPanel + closeSidePanel  (host hides)
-  await readyOnEntry(ctPage);
-  const layout = new LayoutPage(ctPage);
-  const origin = new OriginChainPanePageObject(ctPage);
-
-  await layout.runToEntryButton().click();
-  await ctPage.waitForTimeout(750);
-  const statePane = (await layout.programStateTabs(true))[0];
-  for (let i = 0; i < 12; i++) {
-    if ((await statePane.variableValueText("c")) !== "") {
-      break;
-    }
-    await layout.nextButton().click();
-    await ctPage.waitForTimeout(500);
-  }
-
-  await origin.rightClickRow("c");
-  await origin.clickShowValueOriginMenuItem();
-  await expect(origin.sidePanel()).toBeVisible({ timeout: 15_000 });
-
-  // Walk through the chain via the keyboard.
-  await origin.keyboardNavigate("ArrowDown");
-  await origin.keyboardNavigate("ArrowDown");
-  await origin.keyboardNavigate("ArrowRight"); // expand operands (no-op for trivial copy)
-  await origin.keyboardNavigate("ArrowLeft");  // collapse again
-  await origin.keyboardNavigate("ArrowUp");
-  await origin.keyboardNavigate("Enter");
-
-  // Esc dismisses the panel.
-  await origin.keyboardNavigate("Escape");
-  // The display flips back to none after the React effect re-renders.
-  await expect(origin.sidePanel()).toBeHidden({ timeout: 5_000 });
-});

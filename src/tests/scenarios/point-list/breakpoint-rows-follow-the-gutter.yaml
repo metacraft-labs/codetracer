@@ -1,0 +1,38 @@
+scenario: 1
+name: point-list/breakpoint-rows-follow-the-gutter
+pack: codetracer
+summary: >-
+  A breakpoint set in the gutter before the Breakpoints & Tracepoints pane
+  is opened is a row of the pane; one set while the pane is open is added to it;
+  removing the first from the gutter removes exactly its row.
+
+stage:
+  - use: record-program
+    with: { program: noir_space_ship }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 180s }
+  - wait: { until: editor.loaded, timeout: 60s }
+  # shield.nr, through the call trace: calculate_damage's lines 26 and 34 ran
+  - click: 'pane-tab[label="CALLTRACE"]'
+  - wait: { until: call-trace.loaded, timeout: 60s }
+  - wait: { until: { at: 'call-trace/call[name="iterate_asteroids"]', present: true }, timeout: 60s }
+  - click: { at: 'call-trace/call[name="iterate_asteroids"]', anchor: name }
+  - wait: { until: { at: 'editor[file="shield.nr"]/line[number="26"]', present: true }, timeout: 60s }
+  - click: { at: 'editor[file="shield.nr"]/line[number="26"]', anchor: glyph }
+  - wait: { until: { at: 'editor[file="shield.nr"]/line[number="26"]', glyph: breakpoint }, timeout: 30s }
+  # View › Breakpoints & Tracepoints, found in the command palette
+  - chord: Ctrl+p
+  - wait: { until: { at: omnibox, focused: true }, timeout: 10s }
+  - type: ":Breakpoints"
+  - wait: { until: { at: 'omnibox/option[label="Breakpoints & Tracepoints"]', kind: command }, timeout: 10s }
+  - click: 'omnibox/option[label="Breakpoints & Tracepoints"]'
+  - wait: { until: { at: breakpoints, present: true }, timeout: 60s }
+  - wait: { until: { at: breakpoints, locations: [ "shield.nr:26" ] }, timeout: 60s }
+  - expect: { at: 'breakpoints/point[location="shield.nr:26"]', kind: breakpoint }
+  - click: { at: 'editor[file="shield.nr"]/line[number="34"]', anchor: glyph }
+  - wait: { until: { at: breakpoints, locations: { unordered: [ "shield.nr:26", "shield.nr:34" ] } }, timeout: 60s }
+  - click: { at: 'editor[file="shield.nr"]/line[number="26"]', anchor: glyph }
+  - wait: { until: { at: breakpoints, locations: [ "shield.nr:34" ] }, timeout: 60s }
+  - expect: { at: 'breakpoints/point[location="shield.nr:26"]', absent: true }

@@ -14,13 +14,14 @@
 # Usage (source it, then call):
 #   source ci/lib/codetracer-home.sh
 #   ct_export_scratch_codetracer_home <label>
-#   trap '_ct_rc=$?; rm -rf ${ct_scratch_home_created:+"$ct_scratch_home_created"}; ct_user_state_guard_exit <label> "$_ct_rc"' EXIT
+#   trap '_ct_rc=$?; ct_remove_scratch_codetracer_home <label>; ct_user_state_guard_exit <label> "$_ct_rc"' EXIT
 #
 # A caller that already exported a SCRATCH `CODETRACER_HOME` (inside the temp
 # directory, or marked with a `.codetracer-test-home` file — the rule every
 # test program applies) keeps it, so a lane started by another lane shares its root. The
 # directory it CREATES is named in `ct_scratch_home_created` (empty when an
-# inherited one was kept), so a lane removes only what it made.
+# inherited one was kept), so a lane removes only what it made:
+# `ct_remove_scratch_codetracer_home`, below, from the EXIT trap.
 #
 # The export also STARTS the user-state guard below, and the trap's last
 # command checks it: a lane whose tests all passed but which wrote the
@@ -55,6 +56,38 @@ ct_export_scratch_codetracer_home() {
 	ct_scratch_home_created="$(mktemp -d "${tmp}/ct-home-${label}.XXXXXX")" || return 1
 	# The line that matters: ct_home_isolation_test pins it verbatim.
 	export CODETRACER_HOME="${ct_scratch_home_created}"
+}
+
+# REMOVING THE HOME: every entry point that exports a scratch home removes the
+# one it made from its EXIT trap, by calling this. Until 2026-11-11 the two
+# Windows lanes (ci/test/windows-headless-tests.sh,
+# ci/test/windows-rust-components-tests.sh) left theirs in place on purpose,
+# because a Windows process still holding a file in it would have made a plain
+# `rm -rf` fail the run, so every run left a `ct-home-<label>.*` in the
+# runner's temp directory for good; on a persistent self-hosted runner that
+# only grows. This one never fails the caller: it retries for a few seconds
+# (the process holding the file is usually exiting) and then says what it
+# could not remove. `CT_KEEP_SCRATCH_HOME=1` keeps the home for debugging
+# (what a recording, a replay or the GUI left there) and says where it is.
+# ci/test/lane-user-state-guard-test.sh fails an entry point that exports a
+# home and does not call this, and drives all three outcomes.
+ct_remove_scratch_codetracer_home() {
+	local label="${1:-lane}" d="${ct_scratch_home_created:-}" _
+	[ -n "${d}" ] && [ -e "${d}" ] || return 0
+	if [ "${CT_KEEP_SCRATCH_HOME:-}" = 1 ]; then
+		echo "${label}: CT_KEEP_SCRATCH_HOME=1: kept the scratch CODETRACER_HOME ${d}" >&2
+		return 0
+	fi
+	for _ in 1 2 3 4 5; do
+		# `|| :`: the caller's trap may run under `set -e`, and a failed
+		# removal must not end it before the guard has been checked.
+		rm -rf "${d}" 2>/dev/null || :
+		[ -e "${d}" ] || return 0
+		sleep 1
+	done
+	echo "WARNING: ${label}: could not remove the scratch CODETRACER_HOME ${d}" \
+		"(a process may still hold a file in it); remove it by hand" >&2
+	return 0
 }
 
 # THE USER-STATE GUARD: read the developer's own CodeTracer state before a
@@ -192,12 +225,351 @@ ct_user_state_snapshot() {
 # `ct_user_state_sandbox_enable` proves the mechanism on a scratch tree before
 # it is trusted, so a host where it silently does nothing is never taken for
 # one where it works.
+#
+# It then mounts each REAL directory a run will mount, the same way, because
+# the scratch tree cannot stand in for them. In the sandbox's new user
+# namespace every mount inherited from the host is locked, and the kernel
+# refuses a lower layer that has a locked mount beneath it ("overlayfs: failed
+# to clone lowerpath"; `mount` itself says only "wrong fs type, bad option").
+# A missing `~/.local/state/codetracer` puts the overlay on `~/.local/state`,
+# and a host that bind-mounts anything under it (agent-harbor mounts its own
+# directories under `~/.config`, `~/.cache` and `~/.local/share`) then failed
+# every file of a lane before it ran, as "DID NOT RUN (exit 32)", on
+# nixos-ci-bare-004 (codetracer-specs issue
+# `2026-11-15-user-state-sandbox-probe-passes-on-tmp-and-every-lane-file-fails-to-mount-on-zfs-home.md`).
+# A directory whose overlay is refused stays with the snapshot comparison
+# instead, named in one line; the others stay sandboxed.
 
 _ct_uss_enabled=""
 _ct_uss_guarded=()
 _ct_uss_mounts=()
 _ct_uss_subs=()
 _ct_uss_layer=()
+
+# THE RUNQUOTA ENDPOINT INSIDE THE SANDBOX (Linux): forwarded through a private
+# relay that the caller owns, started OUTSIDE the sandbox.
+#
+# The sandbox maps only the caller's own uid and gid, so every file another
+# account owns reads as the overflow id (65534) inside it. The provisioned
+# RunQuota endpoint, `/run/runquota`, belongs to the `runquota` account, and
+# RunQuota refuses a rendezvous directory whose owner is not the configured
+# daemon owner: inside the sandbox it cannot tell the real `runquota` account
+# from any other unmapped user, so every `repro exec` a sandboxed entry point
+# started was refused (codetracer-specs issue
+# `2026-11-15-user-state-sandbox-hides-the-runquota-endpoint-owner-so-repro-exec-is-refused.md`).
+# Relaxing that check, or starting a per-user daemon instead, is ruled out by
+# reprobuild-specs `spec/RunQuota-Host-Configuration.md`, "Explicit private
+# endpoint policy (POSIX)": an untrusted host endpoint keeps its refusal.
+#
+# So the trust decision is made where the owner IS visible, outside, and by
+# RunQuota itself rather than by a copy of its rules here:
+#
+#   1. The endpoint is resolved as `runquota_ipc.defaultEndpoint` resolves it
+#      on POSIX: `RUNQUOTA_SOCKET`, else `/run/runquota/runquotad.sock`
+#      (`hostWideEndpointDir / endpointSocketName`). Nothing is done when it
+#      does not exist, or when it and its directory are the caller's own uid
+#      and gid: then they read the same inside, and the sandbox behaves as it
+#      always did.
+#   2. The endpoint's DIRECTORY is PINNED (device, inode, owner, group, mode),
+#      with the socket's owner, group and mode beside it; `runquota status` is
+#      run against the endpoint from outside, and both are read again; any
+#      change in between forwards nothing. (The pin cannot prove which inode
+#      RunQuota inspected meanwhile: swapping another directory in and back
+#      needs write access to the parent and a directory the daemon account
+#      owns to swap in, and RunQuota's own inspect-then-connect has the same
+#      window under a writable parent.) A refusal, an endpoint that
+#      does not answer, or no `runquota` on PATH means NO relay; the sandboxed
+#      run then meets the same refusal it would meet outside, and one line
+#      here says why.
+#   3. The relay (below) listens in a fresh `mktemp -d` directory, mode 0700,
+#      socket 0600, both the caller's: exactly the private policy's endpoint.
+#      For each connection it checks the directory against the pin (any change
+#      refuses that connection) and connects through a descriptor of the pinned
+#      directory, so a directory swapped in after the check is never the one
+#      used.
+#
+#      THE DIRECTORY IS THE TRUST ANCHOR, NOT THE SOCKET'S INODE. RunQuota
+#      accepted a directory owned by the configured daemon account and not
+#      writable by group or others, so only that account (or root) can put a
+#      socket in it. A daemon that restarts binds a NEW socket there, and the
+#      run must go on reaching it, as it would outside; pinning the socket's
+#      inode refused every connection after a restart. What is checked of the
+#      socket, through the directory descriptor and without following a link,
+#      is what tells the daemon's socket from something else in its place: it
+#      is a socket, it has the directory's owner and group, and it has the mode
+#      it had when RunQuota verified it.
+#   4. The sandboxed command gets `RUNQUOTA_SOCKET=<relay socket>` and
+#      `RUNQUOTA_ENDPOINT_SCOPE=private`, the policy's "the caller runs its own
+#      endpoint at RUNQUOTA_SOCKET" case. The daemon sees the relay's peer
+#      credentials, which are the caller's own, so per-user attribution is
+#      unchanged.
+#
+# The relay is python3 (stdlib only, `-I -S`), because every shell these entry
+# points run in carries it, and a byte pump with half-close, a per-connection
+# `lstat` and a connect through a directory descriptor is not expressible in
+# bash; socat would need its own pin hook and is not in every shell. It lives
+# only as long as the shell that started it: `ct_user_state_sandbox_stop` ends
+# it, and if that shell dies first the kernel's parent-death signal does
+# (PR_SET_PDEATHSIG, with a parent poll as the fallback). Either way it removes
+# its directory on the way out.
+
+_ct_uss_relay_pid=""
+_ct_uss_relay_owner=""
+_ct_uss_relay_dir=""
+_ct_uss_relay_env=()
+
+# shellcheck disable=SC2016 # python source, not shell
+_ct_uss_relay_program='import os, signal, socket, stat, sys, threading
+name, parent, endpoint, relay_dir, dir_pin, sock_mode = sys.argv[1:7]
+parent = int(parent)
+directory, base = os.path.split(endpoint)
+listen_path = os.path.join(relay_dir, "rq.sock")
+
+def say(text):
+    try:
+        sys.stderr.write(name + ": " + text + "\n")
+        sys.stderr.flush()
+    except OSError:
+        pass
+
+def finish(*_):
+    for path in (listen_path, listen_path + ".tmp"):
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
+    try:
+        os.rmdir(relay_dir)
+    except OSError:
+        pass
+    os._exit(0)
+
+for sig in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP, signal.SIGPIPE):
+    signal.signal(sig, finish)
+try:
+    import ctypes
+    ctypes.CDLL(None).prctl(1, int(signal.SIGTERM), 0, 0, 0)  # PR_SET_PDEATHSIG
+except Exception:
+    pass  # the parent poll in the accept loop still ends the relay
+if os.getppid() != parent:
+    finish()
+
+def pin(st):
+    # The same fields, in the same form, as `stat -c "%d %i %u %g %f"`.
+    return "%d %d %d %d %x" % (st.st_dev, st.st_ino, st.st_uid, st.st_gid, st.st_mode)
+
+try:
+    dir_fd = os.open(directory, os.O_PATH | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC)
+except OSError as error:
+    say("cannot open the endpoint directory %s: %s" % (directory, error))
+    finish()
+via = "/proc/self/fd/%d/%s" % (dir_fd, base)
+
+dir_uid, dir_gid = (int(field) for field in dir_pin.split()[2:4])
+
+def changed():
+    # Empty when the endpoint is still in the directory RunQuota verified,
+    # and its socket is one only the owner of the directory could have put there.
+    try:
+        if pin(os.fstat(dir_fd)) != dir_pin or pin(os.lstat(directory)) != dir_pin:
+            return "its directory %s was replaced or changed" % directory
+    except OSError as error:
+        return "its directory %s can no longer be inspected (%s)" % (directory, error)
+    try:
+        st = os.stat(base, dir_fd=dir_fd, follow_symlinks=False)
+    except OSError as error:
+        return "its socket %s cannot be inspected (%s)" % (endpoint, error)
+    if not stat.S_ISSOCK(st.st_mode):
+        return "its socket %s is not a socket" % endpoint
+    if (st.st_uid, st.st_gid) != (dir_uid, dir_gid):
+        return "its socket %s is owned by %d:%d, not by the directory owner %d:%d" % (
+            endpoint, st.st_uid, st.st_gid, dir_uid, dir_gid)
+    if "%x" % st.st_mode != sock_mode:
+        return "its socket %s has mode %o, not the %o it had when RunQuota verified it" % (
+            endpoint, stat.S_IMODE(st.st_mode), stat.S_IMODE(int(sock_mode, 16)))
+    return ""
+
+why = changed()
+if why:
+    say("the RunQuota endpoint changed before the relay started (%s); not relaying" % why)
+    finish()
+
+def pump(source, sink):
+    try:
+        while True:
+            data = source.recv(65536)
+            if not data:
+                break
+            sink.sendall(data)
+    except OSError:
+        pass
+    try:
+        sink.shutdown(socket.SHUT_WR)
+    except OSError:
+        pass
+
+def serve(client):
+    try:
+        why = changed()
+        if why:
+            say("refusing a connection: the RunQuota endpoint %s changed since "
+                "RunQuota verified it (%s)" % (endpoint, why))
+            return
+        upstream = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        try:
+            upstream.connect(via)
+        except OSError as error:
+            upstream.close()
+            say("cannot reach the RunQuota endpoint %s: %s" % (endpoint, error))
+            return
+        back = threading.Thread(target=pump, args=(upstream, client), daemon=True)
+        back.start()
+        pump(client, upstream)
+        back.join()
+        upstream.close()
+    finally:
+        client.close()
+
+os.umask(0o077)
+listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+listener.bind(listen_path + ".tmp")
+os.chmod(listen_path + ".tmp", 0o600)
+listener.listen(64)
+# Published under its final name only once it is listening and 0600.
+os.rename(listen_path + ".tmp", listen_path)
+listener.settimeout(0.5)
+while True:
+    if os.getppid() != parent:
+        finish()
+    try:
+        client, _ = listener.accept()
+    except socket.timeout:
+        continue
+    except OSError:
+        continue
+    client.settimeout(None)
+    threading.Thread(target=serve, args=(client,), daemon=True).start()
+'
+
+_ct_uss_pin() {
+	# The identity a relay is held to: device, inode, owner, group and raw
+	# mode of `$1`, not following a symbolic link.
+	stat -c '%d %i %u %g %f' -- "$1" 2>/dev/null
+}
+
+ct_user_state_sandbox_stop() {
+	# End this shell's relay (see above) and remove its directory. A subshell
+	# that inherited the variables forgets them and leaves its parent's relay
+	# alone.
+	if [ -n "${_ct_uss_relay_pid}" ] && [ "${_ct_uss_relay_owner}" = "${BASHPID}" ]; then
+		kill -TERM "${_ct_uss_relay_pid}" 2>/dev/null || :
+		for _ in $(seq 1 40); do
+			kill -0 "${_ct_uss_relay_pid}" 2>/dev/null || break
+			sleep 0.05
+		done
+		kill -KILL "${_ct_uss_relay_pid}" 2>/dev/null || :
+		wait "${_ct_uss_relay_pid}" 2>/dev/null || :
+		[ -z "${_ct_uss_relay_dir}" ] || rm -rf "${_ct_uss_relay_dir}"
+	fi
+	_ct_uss_relay_pid=""
+	_ct_uss_relay_owner=""
+	_ct_uss_relay_dir=""
+	_ct_uss_relay_env=()
+}
+
+_ct_uss_relay_start() {
+	# Steps 1-3 above, for caller uid `$1` and gid `$2`. Sets
+	# `_ct_uss_relay_env` to the assignments the sandboxed command gets, or
+	# leaves it empty when nothing is forwarded. Always returns 0: a relay
+	# that is not started leaves the run exactly as it was without one.
+	local uid="$1" gid="$2" note="user-state sandbox"
+	ct_user_state_sandbox_stop
+	local endpoint="${RUNQUOTA_SOCKET:-/run/runquota/runquotad.sock}"
+	case "${endpoint}" in
+	/*) ;;
+	*) return 0 ;; # repro and runquota refuse it themselves, by name
+	esac
+	[ -S "${endpoint}" ] || return 0
+	local directory="${endpoint%/*}"
+	[ -n "${directory}" ] || directory=/
+	local dir_pin sock_pin sock_mode
+	dir_pin="$(_ct_uss_pin "${directory}")" || return 0
+	sock_pin="$(_ct_uss_pin "${endpoint}")" || return 0
+	# `<dev> <ino> <uid> <gid> <mode>`: owned by the caller in both, as the
+	# caller's own daemon's endpoint is, reads the same inside.
+	local d_uid d_gid s_uid s_gid
+	read -r _ _ d_uid d_gid _ <<<"${dir_pin}"
+	read -r _ _ s_uid s_gid _ <<<"${sock_pin}"
+	if [ "${d_uid}:${d_gid}:${s_uid}:${s_gid}" = "${uid}:${gid}:${uid}:${gid}" ]; then
+		return 0
+	fi
+	if ! command -v runquota >/dev/null 2>&1; then
+		echo "${note}: not forwarding the RunQuota endpoint ${endpoint}: no \`runquota\` on PATH to verify it" >&2
+		return 0
+	fi
+	if ! command -v python3 >/dev/null 2>&1; then
+		echo "${note}: not forwarding the RunQuota endpoint ${endpoint}: no python3 on PATH for the relay" >&2
+		return 0
+	fi
+	local refusal
+	if ! refusal="$(timeout 20 runquota status 2>&1)"; then
+		echo "${note}: not forwarding the RunQuota endpoint ${endpoint}: RunQuota refuses it outside the sandbox too: $(printf '%s' "${refusal}" | tr '\n' ' ')" >&2
+		return 0
+	fi
+	# The directory exactly; the socket by owner, group and mode only, the
+	# fields the relay holds it to (a daemon that restarted meanwhile is fine).
+	# `|| now=""`: a socket that vanished meanwhile is a change, and under a
+	# caller's `set -e` a failed substitution must not end the caller instead.
+	local now
+	now="$(_ct_uss_pin "${endpoint}")" || now=""
+	if [ "$(_ct_uss_pin "${directory}")" != "${dir_pin}" ] ||
+		[ "${now#* * }" != "${sock_pin#* * }" ]; then
+		echo "${note}: not forwarding the RunQuota endpoint ${endpoint}: it changed while RunQuota verified it" >&2
+		return 0
+	fi
+	# Every connection requires the socket to carry the directory's owner and
+	# group (only the directory's owner can have put it there); one that does
+	# not now would be refused on every connection, so it is not relayed.
+	if [ "${d_uid}:${d_gid}" != "${s_uid}:${s_gid}" ]; then
+		echo "${note}: not forwarding the RunQuota endpoint ${endpoint}: its socket is owned by ${s_uid}:${s_gid}, not by the directory owner ${d_uid}:${d_gid}" >&2
+		return 0
+	fi
+	read -r _ _ _ _ sock_mode <<<"${sock_pin}"
+	# A socket path is limited to 108 bytes, so a long TMPDIR gives way to
+	# /tmp; the private policy only needs the directory to be the caller's,
+	# mode 0700, outside the host rendezvous directory.
+	local base="${TMPDIR:-/tmp}"
+	base="${base%/}"
+	[ "${#base}" -le 80 ] || base=/tmp
+	_ct_uss_relay_dir="$(mktemp -d "${base}/ct-uss-rq.XXXXXX")" || {
+		_ct_uss_relay_dir=""
+		echo "${note}: not forwarding the RunQuota endpoint ${endpoint}: cannot create a relay directory under ${base}" >&2
+		return 0
+	}
+	chmod 0700 "${_ct_uss_relay_dir}"
+	# Read here: in the arguments of a background command `BASHPID` would be
+	# expanded in the forked child, i.e. it would be the relay's own pid.
+	_ct_uss_relay_owner="${BASHPID}"
+	python3 -I -S -c "${_ct_uss_relay_program}" ct-uss-runquota-relay "${_ct_uss_relay_owner}" \
+		"${endpoint}" "${_ct_uss_relay_dir}" "${dir_pin}" "${sock_mode}" </dev/null >/dev/null &
+	_ct_uss_relay_pid=$!
+	for _ in $(seq 1 100); do
+		[ -S "${_ct_uss_relay_dir}/rq.sock" ] && break
+		kill -0 "${_ct_uss_relay_pid}" 2>/dev/null || break
+		sleep 0.05
+	done
+	# Owned by this process's own effective uid, which the sandbox maps to the
+	# uid its command runs as, so inside it reads as the caller's own.
+	if [ ! -S "${_ct_uss_relay_dir}/rq.sock" ] ||
+		[ "$(stat -c '%u %a' -- "${_ct_uss_relay_dir}")" != "${EUID} 700" ] ||
+		[ "$(stat -c '%u %a' -- "${_ct_uss_relay_dir}/rq.sock")" != "${EUID} 600" ]; then
+		echo "${note}: not forwarding the RunQuota endpoint ${endpoint}: the relay did not come up as a private endpoint in ${_ct_uss_relay_dir}" >&2
+		ct_user_state_sandbox_stop
+		return 0
+	fi
+	_ct_uss_relay_env=("RUNQUOTA_SOCKET=${_ct_uss_relay_dir}/rq.sock" RUNQUOTA_ENDPOINT_SCOPE=private)
+	echo "${note}: forwarding the RunQuota endpoint ${endpoint}, verified by RunQuota outside the sandbox, through the private relay ${_ct_uss_relay_dir}/rq.sock" >&2
+}
 
 ct_user_state_sandbox_covers() {
 	# 0 when the sandbox covers guarded directory `$1`: this shell's own, or
@@ -228,9 +600,37 @@ done
 shift
 exec unshare --user --map-user="${CT_USS_UID}" --map-group="${CT_USS_GID}" -- "$@"'
 
+# The probe of the real mount points, as one `bash -c` program: mount each
+# overlay given as `<lower> <upper> <work>` triples, in order and in one
+# namespace, as `_ct_uss_entry` will, and print each lower layer the kernel
+# refused, one per line. Nothing runs over the mounts and they go with the
+# namespace.
+# shellcheck disable=SC2016 # expanded by the inner shell, not here
+_ct_uss_probe_mounts='while [ $# -ge 3 ]; do
+	mount -t overlay overlay -o "lowerdir=$1,upperdir=$2,workdir=$3" "$1" 2>/dev/null ||
+		printf "%s\n" "$1"
+	shift 3
+done'
+
+_ct_uss_mounts_beneath() {
+	# The mount points strictly beneath directory `$1`, one per line, from
+	# this process's mount table (octal escapes such as `\040` decoded). Only
+	# for the message that names a refused directory.
+	local dir
+	dir="$(cd -P -- "$1" 2>/dev/null && pwd)" || return 0
+	local mp
+	while read -r _ _ _ _ mp _; do
+		mp="$(printf '%b' "${mp}")"
+		case "${mp}" in
+		"${dir}"/*) printf '%s\n' "${mp}" ;;
+		esac
+	done </proc/self/mountinfo 2>/dev/null | sort -u
+}
+
 ct_user_state_sandbox_enable() {
 	# Decide, once per lane, whether runs are sandboxed. Opt out with
 	# CT_USER_STATE_SANDBOX=0. Returns 0 when the sandbox is on.
+	ct_user_state_sandbox_stop
 	_ct_uss_enabled=""
 	_ct_uss_guarded=()
 	_ct_uss_mounts=()
@@ -260,24 +660,91 @@ ct_user_state_sandbox_enable() {
 ${uid}" ] && [ -f "${probe}/up/0/new" ] && [ ! -e "${probe}/lower/new" ]; then
 		ok=1
 	fi
-	chmod -R u+rwx "${probe}" 2>/dev/null
-	rm -rf "${probe}"
-	[ -n "${ok}" ] || return 1
-	local d parent
+	if [ -z "${ok}" ]; then
+		chmod -R u+rwx "${probe}" 2>/dev/null
+		rm -rf "${probe}"
+		return 1
+	fi
+	# Where each guarded directory would be mounted: itself, or its parent
+	# when it does not exist yet.
+	local d parent guarded=() mounts=() subs=()
 	while IFS= read -r d; do
 		parent="$(dirname "${d}")"
 		if [ -d "${d}" ]; then
-			_ct_uss_guarded+=("${d}")
-			_ct_uss_mounts+=("${d}")
-			_ct_uss_subs+=("")
+			guarded+=("${d}")
+			mounts+=("${d}")
+			subs+=("")
 		elif [ -d "${parent}" ]; then
-			_ct_uss_guarded+=("${d}")
-			_ct_uss_mounts+=("${parent}")
-			_ct_uss_subs+=("$(basename "${d}")")
+			guarded+=("${d}")
+			mounts+=("${parent}")
+			subs+=("$(basename "${d}")")
 		fi
 	done < <(ct_user_state_guard_dirs)
+	# Each distinct mount point once, in first-use order, as
+	# `ct_user_state_sandbox_prefix` mounts them.
+	local i k seen_mount targets=() args=()
+	for i in "${!mounts[@]}"; do
+		seen_mount=""
+		for k in "${targets[@]}"; do
+			[ "${k}" = "${mounts[$i]}" ] && seen_mount=1 && break
+		done
+		[ -n "${seen_mount}" ] && continue
+		k="${#targets[@]}"
+		targets+=("${mounts[$i]}")
+		mkdir -p "${probe}/real-up/${k}" "${probe}/real-work/${k}"
+		args+=("${mounts[$i]}" "${probe}/real-up/${k}" "${probe}/real-work/${k}")
+	done
+	local refused=""
+	if [ "${#args[@]}" -gt 0 ]; then
+		refused="$(unshare --user --map-root-user --mount bash -c \
+			"${_ct_uss_probe_mounts}" ct-user-state-sandbox-probe "${args[@]}" \
+			2>/dev/null)" || refused="$(printf '%s\n' "${targets[@]}")"
+	fi
+	chmod -R u+rwx "${probe}" 2>/dev/null
+	rm -rf "${probe}"
+	local target is_refused left beneath mp n
+	for target in "${targets[@]}"; do
+		is_refused=""
+		while IFS= read -r k; do
+			[ "${k}" = "${target}" ] && is_refused=1
+		done <<<"${refused}"
+		[ -n "${is_refused}" ] || continue
+		left=""
+		for i in "${!mounts[@]}"; do
+			[ "${mounts[$i]}" = "${target}" ] && left="${left:+${left}, }${guarded[$i]}"
+		done
+		# The first three, and how many more: a host can have many.
+		beneath=""
+		n=0
+		while IFS= read -r mp; do
+			n=$((n + 1))
+			[ "${n}" -le 3 ] && beneath="${beneath:+${beneath}, }${mp}"
+		done < <(_ct_uss_mounts_beneath "${target}")
+		[ "${n}" -le 3 ] || beneath="${beneath} and $((n - 3)) more"
+		if [ -n "${beneath}" ]; then
+			beneath="it has mounts beneath it, which the sandbox's user namespace locks: ${beneath}"
+		else
+			beneath="the kernel log says why"
+		fi
+		echo "user-state sandbox: overlayfs refuses ${target} as a lower layer here (${beneath}), so ${left} is compared around each run instead" >&2
+	done
+	for i in "${!mounts[@]}"; do
+		is_refused=""
+		while IFS= read -r k; do
+			[ "${k}" = "${mounts[$i]}" ] && is_refused=1
+		done <<<"${refused}"
+		[ -z "${is_refused}" ] || continue
+		_ct_uss_guarded+=("${guarded[$i]}")
+		_ct_uss_mounts+=("${mounts[$i]}")
+		_ct_uss_subs+=("${subs[$i]}")
+	done
+	# Nothing left to cover: no sandbox, and every directory is compared.
+	[ "${#_ct_uss_guarded[@]}" -gt 0 ] || return 1
 	export CT_USS_UID="${uid}" CT_USS_GID="${gid}"
 	_ct_uss_enabled=1
+	# Once per lane, like the probe: every run of this shell's sandbox reaches
+	# the host's RunQuota through the same relay.
+	_ct_uss_relay_start "${uid}" "${gid}"
 }
 
 ct_user_state_sandbox_prefix() {
@@ -306,7 +773,10 @@ ct_user_state_sandbox_prefix() {
 		fi
 		_ct_uss_layer+=("${found}")
 	done
-	ct_uss_cmd=(unshare --user --map-root-user --mount bash -c "${_ct_uss_entry}"
+	# The RunQuota relay's endpoint, when `ct_user_state_sandbox_enable`
+	# started one, is the one the sandboxed command reaches.
+	ct_uss_cmd=(${_ct_uss_relay_env[@]+env "${_ct_uss_relay_env[@]}"}
+		unshare --user --map-root-user --mount bash -c "${_ct_uss_entry}"
 		ct-user-state-sandbox ${args[@]+"${args[@]}"} --)
 }
 
@@ -397,6 +867,7 @@ ct_user_state_stage_sandbox() {
 	echo "${label}: running in a sandbox over the user's CodeTracer state ($(ct_user_state_guard_dirs_text))"
 	CT_USS_STAGE="${label}" CT_USS_STAGE_COVERED="${covered}" \
 		"${ct_uss_cmd[@]}" "$@" && rc=0 || rc=$?
+	ct_user_state_sandbox_stop
 	found="$(ct_user_state_sandbox_findings "${root}")"
 	if [ -n "${found}" ]; then
 		{

@@ -40,6 +40,11 @@ proc onStarted*(sender: js, response: js) {.async.} =
   # `keybindings.json` (imported once from the old files first), and again
   # whenever the file changes.
   startKeybindings()
+  # A window opened after startup answers its own handshake, and is sent its
+  # session then (`window.windowAnswersStarted`); the startup's window goes on
+  # below.
+  if windowAnswersStarted():
+    return
   if not startedFuture.isNil:
     startedReceived = true
     startedFuture()

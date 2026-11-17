@@ -15,7 +15,9 @@
  *
  * Users: `acp_prompt_failure.spec.ts` (#862, a refused prompt) and
  * `enter_submits_prompt.spec.ts` (Enter in the prompt submits it, and the
- * box resizes when the app empties it, including on Stop during a held turn).
+ * box resizes when the app empties it, including on Stop during a held turn),
+ * and `../harness/codex-home-isolation.spec.ts` (the agent a launch starts
+ * gets the worker's scratch `CODEX_HOME`, read from `envLogPath`).
  */
 
 import * as fs from "node:fs";
@@ -43,6 +45,13 @@ export interface StubAgent {
   dir: string;
   /** Where the stub appends the method of every message it receives. */
   logPath: string;
+  /**
+   * Where the wrapper appends, once per start, the `CODEX_HOME` the launched
+   * app gave it (`CODEX_HOME=<unset>` when it gave none): the state directory
+   * a real `codex-acp` would have read its login from and written its
+   * sessions to.
+   */
+  envLogPath: string;
 }
 
 /**
@@ -58,16 +67,19 @@ export interface StubAgent {
  * run a `.cmd` wrapper, and the specs skip there.
  */
 export function makeStubAgentDir(): StubAgent {
-  if (isWindows) return { dir: "", logPath: "" };
+  if (isWindows) return { dir: "", logPath: "", envLogPath: "" };
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ct-acp-stub-codex-acp-"));
   const logPath = path.join(dir, "methods.log");
+  const envLogPath = path.join(dir, "env.log");
   const wrapper = path.join(dir, "codex-acp");
   fs.writeFileSync(
     wrapper,
-    `#!/bin/sh\nexec "${process.execPath}" "${stubAgentPath}" "$@"\n`,
+    "#!/bin/sh\n" +
+      `printf 'CODEX_HOME=%s\\n' "\${CODEX_HOME-<unset>}" >> "${envLogPath}"\n` +
+      `exec "${process.execPath}" "${stubAgentPath}" "$@"\n`,
   );
   fs.chmodSync(wrapper, 0o755);
-  return { dir, logPath };
+  return { dir, logPath, envLogPath };
 }
 
 /** The `launchEnv` that makes the launched app start `stub`. */

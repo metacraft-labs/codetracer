@@ -204,10 +204,8 @@ test("e2e_origin_cross_tracer_three_recording_balance_chain", async ({ ctPage })
     `the gutter row for server.js:${balanceLine} must render before it can be clicked`,
   ).toHaveCount(1, { timeout: 30_000 });
 
-  // A left-click on the CodeTracer gutter toggles a line breakpoint
-  // (`lineActionClick` in `ui/editor.nim`) — the same user gesture the
-  // column-breakpoint specs drive.
-  await backendEditor!.gutterElement(balanceLine).click();
+  // A left press on the glyph column toggles a line breakpoint.
+  await backendEditor!.pressGlyph(balanceLine);
   await expect
     .poll(() => backendEditor!.hasBreakpointAt(balanceLine), { timeout: 30_000 })
     .toBeTruthy();

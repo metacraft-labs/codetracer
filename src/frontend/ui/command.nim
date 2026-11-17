@@ -37,6 +37,7 @@
 ## ---------------------------------------------------------------------------
 
 import ui_imports, kdom, ../renderer, command_interpreter, shell, ./agent_activity
+import ../viewmodel/views/field_keys
 import ./session_viewmodels
 from ./event_log import runColumnWidthCommand
 from ../viewmodel/viewmodels/omnibar_sources import ColumnWidthVerb
@@ -567,7 +568,9 @@ when defined(js):
     input.addEventListener(cstring"blur", proc(ev: Event) =
       input.markFieldClicked(false))
 
-    input.addEventListener(cstring"mousedown", proc(ev: Event) =
+    # A press in the field keeps the palette's input focused (and its first
+    # result selected, `search`); what a press DOES in it is the field's own.
+    input.addEventListener(cstring"mousedown", proc(ev: Event) =  # ir1-gate: focus
       input.markFieldClicked(true)
       input.focusElement()
       self.data.search(SearchFileRealTime, "".cstring))
@@ -576,10 +579,10 @@ when defined(js):
       let value = self.inputField.toJs.value.to(cstring)
       self.onInput(value))
 
-    input.addEventListener(cstring"keydown", proc(ev: Event) =
+    input.addEventListener(cstring KeyDownEvent, proc(ev: Event) =
       input.markFieldClicked(false)
-      let keyCode = cast[int](ev.toJs.keyCode)
-      if keyCode == DOWN_KEY_CODE:
+      let fieldKey = fieldKeyOfCode(cast[int](ev.toJs.keyCode))
+      if fieldKey == fkNext:
         ev.preventDefault()
         let resultsElDown = kdom.document.querySelector(cstring ".command-results")
         if not resultsElDown.isNil:
@@ -588,7 +591,7 @@ when defined(js):
         discard setTimeout(proc() =
           let fresh = kdom.document.getElementById(cstring CommandPaletteInputId)
           if not fresh.isNil: fresh.focusElement(), 16)
-      elif keyCode == UP_KEY_CODE:
+      elif fieldKey == fkPrevious:
         ev.preventDefault()
         let resultsElUp = kdom.document.querySelector(cstring ".command-results")
         if not resultsElUp.isNil:
@@ -597,11 +600,11 @@ when defined(js):
         discard setTimeout(proc() =
           let fresh = kdom.document.getElementById(cstring CommandPaletteInputId)
           if not fresh.isNil: fresh.focusElement(), 16)
-      elif keyCode == ENTER_KEY_CODE:
+      elif fieldKey == fkCommit:
         self.runQuery()
-      elif keyCode == ESC_KEY_CODE:
+      elif fieldKey == fkCancel:
         self.resetCommandPalette()
-      elif keyCode == TAB_KEY_CODE:
+      elif fieldKey == fkComplete:
         if self.inputPlaceholder != "" and self.inputPlaceholder != self.inputValue:
           ev.preventDefault()
           self.onTab())

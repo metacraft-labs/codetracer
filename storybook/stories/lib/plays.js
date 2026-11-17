@@ -81,6 +81,86 @@ const initiativesCheck = (assert) => hostCheck(".agent-harbor-initiatives", asse
 const progressCheck = (assert) => hostCheck(".agent-harbor-progress", assert);
 const initiativeTabsCheck = (assert) => hostCheck(".ah-initiative-tab-bar", assert);
 
+// What every story of the initiative bar with tabs must draw: the tabs, each
+// with its progress and its state class, and exactly one active.
+async function initiativeTabsDrawn(el) {
+  await waitFor(el, ".ah-initiative-tab");
+  expect(el.querySelectorAll(".ah-initiative-tab").length).toBeGreaterThan(0);
+  for (const tab of el.querySelectorAll(".ah-initiative-tab")) {
+    expect(tab.querySelector(".ah-tab-progress")?.textContent).toMatch(/^\d+\/\d+$/);
+    expect([...tab.classList].some((c) => c.startsWith("ah-ist-"))).toBe(true);
+  }
+  expect(el.querySelectorAll(".ah-initiative-tab.active").length).toBe(1);
+}
+
+// A strip's +N menu hangs from its chip: its right edge on the chip's right
+// edge, shifted only as far as it must be to stay inside the window on either
+// side. `bar` names the strip: the session strip or the initiative bar.
+async function overflowMenuHangs(el, bar) {
+  await waitFor(el, `${bar} > .session-tab-overflow-menu .session-tab-overflow-item`);
+  // A face arriving late moves the chip; the view places the menu again.
+  await document.fonts.ready;
+  await new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)));
+  const chip = el.querySelector(`${bar} > .ah-tab-overflow-count`).getBoundingClientRect();
+  const menu = el.querySelector(`${bar} > .session-tab-overflow-menu`).getBoundingClientRect();
+  const view = document.documentElement.clientWidth;
+  expect(menu.height).toBeGreaterThan(0);
+  const left = Math.max(0, Math.min(chip.right - menu.width, view - menu.width));
+  // To half a pixel: the browser places the menu in fractions of one.
+  expect(menu.left).toBeCloseTo(left, 0);
+  expect(menu.left).toBeGreaterThanOrEqual(-0.5);
+  expect(menu.right).toBeLessThanOrEqual(view + 0.5);
+  if (left === chip.right - menu.width) expect(menu.right).toBeCloseTo(chip.right, 0);
+}
+
+// The inbox's Previous / Next: the colour each arrow computes to, and the
+// colours of the two roles it may take in the theme in view. The disabled
+// role is read from a disabled `<button>` (CodeTracer's own `button:disabled`
+// rule), the label role from a `.ah-inbox-position` inside the bar (the
+// bar's rule draws the position in it). Transitions are held off while
+// reading, so a value is the settled one, not a frame of a colour fade.
+function settledColor(node) {
+  const before = node.style.transition;
+  node.style.transition = "none";
+  try {
+    return getComputedStyle(node).color;
+  } finally {
+    node.style.transition = before;
+  }
+}
+
+function inboxRoleColors(el) {
+  const group = el.querySelector(".ah-initiative-tab-bar .ah-inbox");
+  const label = document.createElement("span");
+  label.className = "ah-inbox-position";
+  const disabled = document.createElement("button");
+  disabled.disabled = true;
+  group.appendChild(label);
+  el.appendChild(disabled);
+  try {
+    return { label: settledColor(label), disabled: settledColor(disabled) };
+  } finally {
+    label.remove();
+    disabled.remove();
+  }
+}
+
+// Each arrow in the disabled role at full opacity while nothing waits (an
+// empty inbox is the only state the wrapping steps are disabled in), in the
+// label role otherwise; the two roles differ, so the arrows read differently.
+function expectInboxStepInk(el) {
+  const group = el.querySelector(".ah-initiative-tab-bar .ah-inbox");
+  const steps = group.querySelectorAll(".ah-inbox-step");
+  expect(steps.length).toBe(2);
+  const roles = inboxRoleColors(el);
+  expect(roles.disabled).not.toBe(roles.label);
+  const wanted = group.classList.contains("ah-inbox-empty") ? roles.disabled : roles.label;
+  for (const step of steps) {
+    expect(settledColor(step)).toBe(wanted);
+    expect(getComputedStyle(step).opacity).toBe("1");
+  }
+}
+
 // --- Terminal output ------------------------------------------------------
 
 function terminalCheck(assert) {
@@ -111,6 +191,29 @@ export const plays = {
   "agent-harbor-fleet-failed": fleetCheck(async (el) => {
     await waitFor(el, ".ah-fleet-row");
     for (const row of fleetRows(el)) expect(row.classList.contains("ah-fleet-cat-failed")).toBe(true);
+    // One fault is red once: under a red failure line the activity lines are
+    // in the caption role, never the error colour, and none carries the
+    // error class (`agent_harbor_words.activityLineIsError`).
+    const withFailure = [...fleetRows(el)].filter(
+      (r) => !r.classList.contains("ah-fleet-row-selected") && r.querySelector(".ah-fleet-row-failure"));
+    expect(withFailure.length).toBeGreaterThan(0);
+    const red = getComputedStyle(withFailure[0].querySelector(".ah-fleet-row-failure")).color;
+    for (const row of withFailure) {
+      for (const line of row.querySelectorAll(".ah-fleet-activity-line")) {
+        expect(line.classList.contains("ah-fleet-activity-error")).toBe(false);
+        expect(getComputedStyle(line).color).not.toBe(red);
+      }
+    }
+    // The class the view sets on an error-level line of a row WITHOUT a
+    // failure line (no such row is in the story data) does draw it red: the
+    // rule is not overridden by the activity line's own colour rule.
+    const probe = withFailure[0].querySelector(".ah-fleet-activity-line");
+    probe.classList.add("ah-fleet-activity-error");
+    try {
+      expect(getComputedStyle(probe).color).toBe(red);
+    } finally {
+      probe.classList.remove("ah-fleet-activity-error");
+    }
   }),
   "agent-harbor-fleet-selected": fleetCheck(async (el) => {
     await waitFor(el, ".ah-fleet-row-selected");
@@ -127,6 +230,14 @@ export const plays = {
   "agent-harbor-fleet-empty": fleetCheck(async (el) => {
     expect(el.querySelector(".ah-fleet-overlay")?.textContent).toContain("No sessions");
     expect(fleetRows(el).length).toBe(0);
+    // The active filter's 0 keeps the body role on its fill; another
+    // filter's 0 is quieter (the disabled role).
+    const active = el.querySelector(".ah-fleet-filter-active");
+    const activeCount = active.querySelector(".ah-fleet-filter-count");
+    expect(activeCount.textContent).toBe("0");
+    expect(getComputedStyle(activeCount).color).toBe(getComputedStyle(active).color);
+    const idle = el.querySelector(".ah-fleet-filter-empty:not(.ah-fleet-filter-active) .ah-fleet-filter-count");
+    expect(getComputedStyle(idle).color).not.toBe(getComputedStyle(activeCount).color);
   }),
 
   "agent-harbor-fleet-filtered-empty": fleetCheck(async (el) => {
@@ -157,6 +268,7 @@ export const plays = {
     expect(active).toBeTruthy();
     expect(el.querySelector(".ah-tab-strip.overflow-open")).toBeTruthy();
     expect(el.querySelectorAll(".session-tab-overflow-item.active").length).toBe(0);
+    await overflowMenuHangs(el, ".ah-tab-strip:not(.ah-initiative-tab-bar)");
   }),
   "agent-harbor-session-tabs-multi": tabsCheck(async (el) => {
     await waitFor(el, ".ah-tab");
@@ -192,15 +304,7 @@ export const plays = {
     expect(el.querySelector(".ah-tab-retry")).toBeTruthy();
   }),
 
-  "agent-harbor-initiative-tabs": initiativeTabsCheck(async (el) => {
-    await waitFor(el, ".ah-initiative-tab");
-    expect(el.querySelectorAll(".ah-initiative-tab").length).toBeGreaterThan(0);
-    for (const tab of el.querySelectorAll(".ah-initiative-tab")) {
-      expect(tab.querySelector(".ah-tab-progress")?.textContent).toMatch(/^\d+\/\d+$/);
-      expect([...tab.classList].some((c) => c.startsWith("ah-ist-"))).toBe(true);
-    }
-    expect(el.querySelectorAll(".ah-initiative-tab.active").length).toBe(1);
-  }),
+  "agent-harbor-initiative-tabs": initiativeTabsCheck(initiativeTabsDrawn),
   "agent-harbor-initiative-tabs-popup": initiativeTabsCheck(async (el) => {
     await waitFor(el, ".ah-initiative-popup");
     expect(el.querySelector(".ah-initiative-popup .ah-popup-headline")?.textContent).toMatch(/milestone/);
@@ -226,12 +330,32 @@ export const plays = {
     expect(menu.getBoundingClientRect().height).toBeGreaterThan(0);
     expect(getComputedStyle(el.querySelector(".ah-initiative-tab-bar")).overflow).toBe("visible");
   }),
+  // The +N menu hangs from its chip, as the session strip's does.
+  "agent-harbor-initiative-tabs-overflow-menu": initiativeTabsCheck(async (el) => {
+    // The bar's own checks first: this play replaces the bar's for its stories.
+    await initiativeTabsDrawn(el);
+    await overflowMenuHangs(el, ".ah-initiative-tab-bar");
+    // The menu placed is the +N menu, not the sessions-elsewhere one.
+    expect(el.querySelector(".ah-initiative-tab-bar > .ah-overflow-menu")).toBeTruthy();
+  }),
   "agent-harbor-initiative-tabs-inbox": initiativeTabsCheck(async (el) => {
     await waitFor(el, ".ah-inbox");
     // The position is on the bar, or (compact bar) in the Next button's tooltip.
     const steps = el.querySelectorAll(".ah-inbox-step");
     const position = el.querySelector(".ah-inbox-position")?.textContent ?? steps[steps.length - 1]?.getAttribute("title");
     expect(position).toMatch(/of \d+|waiting|empty/);
+    // Something waits here: the arrows are pressable, in the label role.
+    expect(el.querySelector(".ah-inbox").classList.contains("ah-inbox-empty")).toBe(false);
+    expectInboxStepInk(el);
+    // The same arrows with nothing waiting take the disabled role: the
+    // empty inbox's rule is not overridden by the bar's own colour rule.
+    const group = el.querySelector(".ah-inbox");
+    group.classList.add("ah-inbox-empty");
+    try {
+      expectInboxStepInk(el);
+    } finally {
+      group.classList.remove("ah-inbox-empty");
+    }
   }),
   "agent-harbor-initiative-tabs-recordings": initiativeTabsCheck(async (el) => {
     await waitFor(el, ".ah-rec-button");
@@ -250,6 +374,9 @@ export const plays = {
   }),
   "agent-harbor-initiative-tabs-empty": initiativeTabsCheck(async (el) => {
     expect(el.querySelector(".ah-tab-empty")?.textContent).toContain("No initiative");
+    // Nothing waits: the arrows are drawn disabled, not pressable.
+    await waitFor(el, ".ah-inbox.ah-inbox-empty");
+    expectInboxStepInk(el);
   }),
   "agent-harbor-initiative-tabs-loading": initiativeTabsCheck(async (el) => {
     expect(el.querySelector(".ah-tab-loading")?.textContent).toContain("Loading");
@@ -324,6 +451,45 @@ export const plays = {
   "agent-harbor-progress-error": progressCheck(async (el) => {
     expect(el.querySelector(".ah-fleet-error-message")?.textContent).toContain("connection refused");
   }),
+
+  // A playback story (src/frontend/stories/agent_harbor_playback.nim): the
+  // host's playback bar under it, at the first frame, whose controls move
+  // the playback and the story with it. The bar lives on the document's
+  // body (fixed along the canvas's bottom), not inside the story's root.
+  "agent-harbor-playback": async () => {
+    const bar = await waitFor(document, ".ah-playback");
+    // Each button's accessible name is its word, whichever of its word and
+    // its glyph the bar's width shows (`.ah-playback-glyph` under 720px).
+    const buttons = [...bar.querySelectorAll(".ah-playback-button")].map((b) => b.getAttribute("aria-label"));
+    expect(buttons).toEqual(["Play", "Step", "\u25c0 Moment", "Moment \u25b6", "Rewind"]);
+    const shown = [...bar.querySelectorAll(".ah-playback-button")].map((b) =>
+      [...b.children].filter((c) => getComputedStyle(c).display !== "none").map((c) => c.textContent).join(""));
+    expect(shown).toEqual(window.innerWidth < 720
+      ? ["\u25b6", "\u203a", "\u00ab", "\u00bb", "\u21ba"]
+      : ["Play", "Step", "\u25c0 Moment", "Moment \u25b6", "Rewind"]);
+    const moment = () => document.querySelector(".ah-playback .ah-playback-moment")?.textContent;
+    const time = () => document.querySelector(".ah-playback .ah-playback-time")?.textContent;
+    const opened = new URLSearchParams(window.location.search).get("globals") ?? "";
+    if (!opened.includes("moment:")) {
+      expect(moment()).toBe("first frame");
+      expect(time()).toBe("+0:00");
+    }
+    // The next named moment, then back: a seek backwards rebuilds from the
+    // first frame, so the readout returns to where it was. A story opened at
+    // a named moment goes the other way round, back and then forward again:
+    // the scenario's last moment has no next one, and every moment has one
+    // before it (the first frame, before the first). Either way the story is
+    // left where it was opened, which the moment captures rely on.
+    const before = moment();
+    const [away, back] = opened.includes("moment:")
+      ? [".ah-playback-previous", ".ah-playback-next"]
+      : [".ah-playback-next", ".ah-playback-previous"];
+    document.querySelector(away).click();
+    await waitUntil(() => moment() !== before, "the moment " + (opened.includes("moment:") ? "before" : "after") + " " + before);
+    expect(moment()).not.toBe("between moments");
+    document.querySelector(back).click();
+    await waitUntil(() => moment() === before, "the seek back to " + before);
+  },
 
   "terminal-output-populated": terminalCheck((el) => {
     expect(el.querySelector(".isonim-terminal-output")).toBeTruthy();

@@ -1,0 +1,48 @@
+scenario: 1
+name: multi-replay/tabbed-replay-sessions-isolated
+pack: codetracer
+summary: >-
+  Sessions stay isolated and their panes survive switching: after two steps
+  in the recording's session, "+" opens a second session, which is empty;
+  back on the first, the editor is where the steps left it and the Event Log
+  and the Call Trace are loaded; a step there, a switch away and back, and it
+  is still where that step left it.
+
+stage:
+  - use: record-program
+    with: { program: py_console_logs/main.py }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 180s }
+  - wait: { until: call-trace.loaded, timeout: 120s }
+  - wait: { until: event-log.loaded, timeout: 60s }
+  - expect: { at: session-strip, count: 1 }
+  - expect: { at: 'editor[file="main.py"]', assert: "stopped-at(1)" }
+  - click: { at: 'toolbar/toolbar-button[label="next-image"]' }
+    settle: false
+  - wait: { until: { at: 'editor[file="main.py"]', assert: "stopped-at(8)" }, timeout: 60s }
+  - wait: { until: replay-idle, timeout: 60s }
+  - click: { at: 'toolbar/toolbar-button[label="next-image"]' }
+    settle: false
+  - wait: { until: { at: 'editor[file="main.py"]', assert: "stopped-at(10)" }, timeout: 60s }
+  - wait: { until: replay-idle, timeout: 60s }
+  - click: { at: session-strip/session-add }
+  - wait: { until: { at: session-strip, count: 2 }, timeout: 60s }
+  - expect: { at: session-strip, active: "Trace 2" }
+  - expect: { at: 'editor[file="main.py"]', absent: true }
+  - click: { at: 'session-strip/session-tab[title="main.py"]' }
+  - wait: { until: { at: 'editor[file="main.py"]', assert: "stopped-at(10)" }, timeout: 60s }
+  - wait: { until: call-trace.loaded, timeout: 60s }
+  - wait: { until: event-log.loaded, timeout: 60s }
+  - expect: { at: event-log, assert: "has-output(\"stdout\")" }
+  - click: { at: 'toolbar/toolbar-button[label="next-image"]' }
+    settle: false
+  - wait: { until: { at: 'editor[file="main.py"]', assert: "stopped-at(11)" }, timeout: 60s }
+  - wait: { until: replay-idle, timeout: 60s }
+  - click: { at: 'session-strip/session-tab[title="Trace 2"]' }
+  - wait: { until: { at: 'editor[file="main.py"]', absent: true }, timeout: 60s }
+  - click: { at: 'session-strip/session-tab[title="main.py"]' }
+  - wait: { until: { at: 'editor[file="main.py"]', assert: "stopped-at(11)" }, timeout: 60s }
+  - wait: { until: call-trace.loaded, timeout: 60s }
+  - wait: { until: event-log.loaded, timeout: 60s }

@@ -32,9 +32,12 @@ import isonim/core/signals   # `Signal.val`: a pane's held viewport
 
 import ../session_vm
 import ../store/types as store_types
+import ../store/replay_data_store   # `BreakpointSpec`
+import ../sdk/breakpoints            # `requestBreakpoints`
 import ../collab/[codec, reducer, session_core, types as collab_types]
 import ../viewmodels/[
   calltrace_vm,
+  origin_chain_vm,
   debug_controls_vm,
   editor_vm,
   event_log_vm,
@@ -111,7 +114,9 @@ proc applyViewport(session: SessionViewModel; args: JsonNode): bool =
   of "eventLog":
     let vm = session.eventLogVM
     if vm.isNil: return false
-    vm.setViewport(merged(vm.viewport.val))
+    # Merged onto the last report (`shownViewport`), not the debounced
+    # `viewport`: a report pending in the gate is the one held.
+    vm.setViewport(merged(vm.shownViewport.val))
     true
   of "terminalOutput":
     let vm = session.terminalOutputVM
@@ -206,6 +211,7 @@ proc applyAction*(session: SessionViewModel; msg: JsonNode): bool =
                      a.arg("location", store_types.Location()))
     of "jumpToHistoryEntry": v.jumpToHistoryEntry(a.arg("ticks", 0'i64))
     of "loadMore": v.loadMore(a.arg("path", ""))
+    of "continueOriginChain": v.continueOriginChain(a.arg("expression", ""))
     else: return false
 
   of "debugControls":
@@ -240,6 +246,14 @@ proc applyAction*(session: SessionViewModel; msg: JsonNode): bool =
     of "setSelectedKinds": v.setSelectedKinds(a.arg("kinds", newSeq[bool]()))
     of "setFilterInput": v.setFilterInput(a.arg("raw", ""))
     of "dismissToast": v.dismissToast(a.arg("workspaceId", ""))
+    of "jumpToCounterpartOf":
+      let markerId = a.arg("markerId", -1)
+      let eventIndex = a.arg("eventIndex", -1)
+      for row in v.markerRows.val:
+        if row.markerId == markerId and row.eventIndex == eventIndex:
+          v.jumpToCounterpartOf(row)
+          return true
+      return false
     # Kept for mirrors that predate the `viewport` action.
     of "setPageSize":
       v.setViewport(v.viewport.val.withRows(a.arg("size", 0)))
@@ -356,6 +370,48 @@ proc applyAction*(session: SessionViewModel; msg: JsonNode): bool =
     of "setFilterStatus": v.setFilterStatus(a.arg("filter", ""))
     of "setSearchText": v.setSearchText(a.arg("text", ""))
     of "setDetailTab": v.setDetailTab(a.arg("tab", "headers"))
+    else: return false
+
+  of "breakpoints":
+    # A breakpoint change a mirror planned over its rows (`sdk/breakpoints`,
+    # `requestBreakpoints`): the file's whole set, sent from here over this
+    # session's backend, whose rows the engine's answer replaces. A store
+    # action rather than a ViewModel's, because the breakpoints are the
+    # store's (Shared-DOM-Front-Ends D7.4).
+    #
+    # A set that does not decode is refused, not read as "none": an empty
+    # plan deletes every breakpoint of the file.
+    let path = a.arg("path", "")
+    let plan = a{"plan"}
+    if action != "set" or path.len == 0 or session.store.isNil or
+       plan.isNil or plan.kind != JArray:
+      return false
+    var specs: seq[BreakpointSpec] = @[]
+    try:
+      fromJson(specs, plan, DecodeOptions)
+    except CatchableError, AssertionDefect:
+      return false
+    session.store.requestBreakpoints(path, specs)
+
+  of "originChain":
+    # A hop clicked in a mirror's side panel: the chain is the primary's
+    # (the mirror shows the primary's `activeChain`), so the hop is found
+    # there by the step it names, and sought over the primary's connection.
+    let v = session.originChainVM
+    if v.isNil: return false
+    case action
+    of "seekToHop":
+      let chain = v.activeChain.val
+      if chain.isNone: return false
+      let stepId = a.arg("stepId", -1'i64)
+      let rrTicks = a.arg("rrTicks", 0'u64)
+      for hop in chain.get.hops:
+        if hop.stepId == stepId and hop.location.rrTicks == rrTicks:
+          v.onSeekToHop(hop)
+          return true
+      return false
+    of "continueActiveChain":
+      v.continueActiveChain()
     else: return false
 
   of "pointList":

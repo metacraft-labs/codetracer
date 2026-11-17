@@ -1,0 +1,19 @@
+scenario: 1
+name: terminal/scrollbars-thick-setting
+pack: codetracer
+summary: >-
+  `:set scrollbar-thickness thick` draws the editor's scrollbar thumb as the
+  thick `▐` at rest (with the fade off, the bar is always shown).
+stage:
+  - use: record-program
+    with: { program: calc }
+  - use: front-end-options
+    with: { options: { scrollbar-fade: "off" } }
+  - use: open-recording
+    with: { width: 200, height: 50 }
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - expect: { at: 'pane[title="calc/main.py"]', assert: 'lacks-row("▐")' }
+  - type: ":set scrollbar-thickness thick"
+  - key: Enter
+  - wait: { until: { at: 'pane[title="calc/main.py"]', assert: 'has-row("▐")' }, timeout: 10s }

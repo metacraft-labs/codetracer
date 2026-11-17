@@ -88,7 +88,9 @@ suite "GPUI editor gutter tree follows the shared band map":
             inc ownedDiscs
             check disc in discs
             check disc.style("position") == "absolute"
-            check disc.style("left") == (if mark == emTracepoint: "11px" else: "0px")
+            # Centred in the glyph lane, whatever the mark.
+            check disc.style("left") ==
+              $((int(bandWidth) - parseInt(disc.style("width").replace("px", ""))) div 2) & "px"
             let left = parseFloat(disc.style("left").replace("px", ""))
             let width = parseFloat(disc.style("width").replace("px", ""))
             check left >= 0

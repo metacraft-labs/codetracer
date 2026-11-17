@@ -1,0 +1,2211 @@
+# CodeTracer's scenario pack: the backend-neutral part.
+#
+# The page objects a user perceives in CodeTracer — the window, its session
+# tabs, the panes and what is in them — declared once, for every front-end:
+# the desktop (Playwright), the VS Code extension (WebDriverIO, in
+# codetracer-vscode-extension), the terminal (TermAssert) and the GPUI window
+# (GuiAssert). How each front-end shows them is that front-end's binding
+# (`../bindings/`); what a scenario may do to them is DemoVideoScript's format.
+#
+# Property shapes follow the domain models the screen oracle and the desktop's
+# page objects already share (`src/tests/gui/page-objects/layout_models.ts`,
+# `src/tests/visual/screen_oracle/domain_models.nim`): a variable is a name, a
+# type and a value; an event is its console output; a call is its name; an
+# editor knows the line it is stopped on. They are not defined a second time:
+# a binding reads them into these properties.
+#
+# A property a binding cannot read on its front-end is declared unreadable by
+# that binding, so a scenario that needs it is `unsupported` there rather than
+# answered from somewhere else.
+pack: 1
+name: codetracer
+summary: CodeTracer — the time-travelling debugger's windows, panes and controls.
+root: window
+
+roles:
+  window:
+    properties:
+      title: text
+      # `debug` while a recording is replayed, `edit` while files are edited.
+      mode: "enum{debug,edit}"
+      # pw1: every pane tab of the layout, shown or behind another, and the
+      # ones in front of their stack.
+      layout-tabs: lines
+      front-tabs: lines
+      # Every auto-hide strip tab, as `<edge>:<label>`.
+      strip-tabs: lines
+      # pw6: the theme the window is drawn in (`default_dark`, `default_white`, …).
+      theme: text
+      # pw6: how many of Monaco's own editor roots are on the page.
+      monaco-editors: int
+      # The pointer's shape where it rests (Pointer-Affordances.md §4):
+      # default, pointer, text, col-resize, row-resize, grab, grabbing,
+      # not-allowed.
+      pointer: text
+      # pw8: how many diff tabs (`Diff: …`) the layout holds.
+      diff-tabs: int
+    assertions:
+      has-pane(t): "layout-tabs contains t"
+      lacks-pane(t): "not (layout-tabs contains t)"
+      in-front(t): "front-tabs contains t"
+      not-in-front(t): "not (front-tabs contains t)"
+    children:
+      session-strip: optional
+      toolbar: optional
+      editor: many
+      call-trace: optional
+      event-log: optional
+      variables: optional
+      filesystem: optional
+      terminal-output: optional
+      scratchpad: optional
+      breakpoints: optional
+      status-line: optional
+      omnibox: optional
+      context-menu: optional
+      dialog: optional
+      welcome: optional
+      menu-bar: optional
+      pane-tab: many
+      find-field: optional
+      requests: optional
+      origin-chain: optional
+      hover-card: optional
+      # --- pw2 ---
+      vcs: optional
+      diff-view: many
+      # --- terminal ---
+      pane: many
+      popup: many
+      dropdown: many
+      dock-label: many
+      replay-position: optional
+      # pw1
+      strip-tab: many
+      auto-hide-overlay: optional
+      auto-hide-backdrop: optional
+      sidebar: many
+      selection-outline: many
+      docked-panel: many
+      build-panel: optional
+      problems-panel: optional
+      find-in-files: optional
+      agent-activity: optional
+      agent-workspace: optional
+      caption-progress: optional
+      edit-toolbar: optional
+      editor-hover: optional
+      # --- pw4 ---
+      layout: optional
+      tracepoint-editor: many
+      search-box: many
+      shortcuts-dialog: optional
+      low-level-code: optional
+      h-scrubber: many
+      table-pane: many
+      table-tooltip: optional
+      row-detail: optional
+      live-edit-panel: optional
+      # pw8
+      origin-panel: optional
+      splitter: many
+      verification-panel: optional
+      test-results: optional
+      process-tree: optional
+      diff-section: many
+      trace-results: many
+      # pw3
+      key-router: optional
+      video-player: optional
+      pixel-history: optional
+      shader-debug: optional
+      # pw7
+      shell: optional
+      caption-bar: optional
+      value-actions: optional
+      notification-history: optional
+      welcome-view: optional
+      edit-toolbar-strip: optional
+      # --- pw5 deepreview ---
+      review-diff: many
+      expand-menu: optional
+      trace-context: optional
+      review-state: optional
+
+  # The strip of session tabs: one tab per open recording or editing session.
+  session-strip:
+    properties: { count: int, active: text }
+    children: { session-tab: many, session-add: optional }
+    assertions:
+      has-tab(title): "some session-tab: session-tab.title contains title"
+      has-tab-matching(pattern): "some session-tab: session-tab.title matches pattern"
+      active-is(title): "active contains title"
+      at-least(n): "count >= n"
+
+  session-tab:
+    keys: [title]
+    properties: { title: text, active: bool }
+    affordances: [click, context-click]
+    # pw6: `close`: the tab's close button (a strip of two or more tabs).
+    anchors: [close]
+
+  # A pane's tab in the layout (Editor, Call Trace, Event Log, …): what a user
+  # clicks to bring a pane forward.
+  pane-tab:
+    # The terminal and GPUI bindings name a built-in pane's tab by its
+    # canonical pane name ("Call Trace", "Build Output", "Find in Files",
+    # "Problems", "Requests", …: the GPUI window's `gpuiPaneName`), whatever
+    # caption the front-end draws, so one scenario reads on both; a file's
+    # tab by its file label.
+    keys: [label]
+    # pw3: `stack`, the labels of every tab in the same stack.
+    properties: { label: text, active: bool, stack: lines }
+    affordances: [click, context-click, drag-source]
+    # `close`: the tab's close button; `title`: its title (pw3), where a
+    # click on a narrow tab brings it forward rather than pinning it.
+    anchors: [close, title]
+
+  # The transport controls of a replay session (step, continue, reverse, …)
+  # and the edit-mode toolbar.
+  toolbar:
+    children: { toolbar-button: many }
+    assertions:
+      # Exactly one tooltip is on screen, and it is this control's.
+      only-tooltip-of(label): "(some b of toolbar-button: b.label == label and b.tooltip-shown) and (none c of toolbar-button: c.label != label and c.tooltip-shown)"
+      no-tooltip: "none b of toolbar-button: b.tooltip-shown"
+      # No tooltip is left on screen on any control but this one.
+      no-tooltip-but(label): "none b of toolbar-button: b.label != label and b.tooltip-shown"
+
+  toolbar-button:
+    keys: [label]
+    # `tooltip`: the control's tooltip text (`Next (F10)`); `tooltip-chord`:
+    # the chord it names (`F10`), "" when it names none; `tooltip-shown`: the
+    # tooltip is on screen.
+    properties: { label: text, enabled: bool, tooltip: text, tooltip-chord: text, tooltip-shown: bool }
+    affordances: [click]
+
+  # One source editor: a file, shown in its own editor tab.
+  editor:
+    keys: [file]
+    properties:
+      file: text
+      # The editor whose tab is in front.
+      active: bool
+      focused: bool
+      read-only: bool
+      # The line the replay is stopped on (the execution pointer); 0 when the
+      # stop is not in this file.
+      current-line: int
+      # The line the caret is on; 0 when the editor shows no caret.
+      caret-line: int
+      first-visible: int
+      last-visible: int
+      # The text of every line on screen, in order.
+      text: lines
+      # pw6: the shared editor (the sharedEditor setting) draws it, its base
+      # keymap (cua, vim, kakoune, …) and, for a modal one, its mode
+      # (normal, insert).
+      shared: bool
+      keymap: text
+      mode: text
+      # --- pw2 ---
+      # The selected text of each cursor ("" for a bare caret), the first
+      # one's, and how many cursors there are.
+      selections: lines
+      selected-text: text
+      selection-count: int
+      # The code font, as drawn.
+      font-family: text
+      font-size: int
+      # The editor's find widget: shown, its query, its "n of m" count.
+      find-shown: bool
+      find-query: text
+      find-matches: text
+      # pw4: the keyboard focus is in the find widget.
+      find-focused: bool
+      # pw8: every value box drawn beside the code, as `name=value`
+      flow-values: lines
+    # pw8: `panel-button`: the "Run test" control beside a test, named by
+    # its title ("Run test_passes").
+    children: { line: many, flow-value: many, panel-button: many, loop-control: optional, macro-expansion: many }
+    affordances: [click, context-click, wheel, focusable, text-entry]
+    assertions:
+      stopped-at(n): "current-line == n"
+      stopped-within(first, last): "current-line >= first and current-line <= last"
+      caret-at(n): "caret-line == n"
+      shows-line(n): "first-visible <= n and last-visible >= n"
+      shows-text(t): "some line: line.text contains t"
+      # Exactly one of two lines is dimmed as a branch the run did not take.
+      dims-one-of(a, b): "(some x of line: x.number == a and x.dimmed) != (some y of line: y.number == b and y.dimmed)"
+      # --- terminal ---
+      lacks-text(t): "none line: line.text contains t"
+      # pw3: some line on screen carries a branch colour of the flow.
+      has-branch-colours: "some line: line.flow != \"none\""
+    sync:
+      # The editor has a document and has drawn it.
+      loaded: "count(line) > 0"
+
+  # One line of an editor, as it is on screen.
+  line:
+    keys: [number]
+    properties:
+      number: int
+      text: text
+      # The replay is stopped on this line.
+      current: bool
+      # The caret is on this line.
+      caret: bool
+      breakpoint: bool
+      tracepoint: bool
+      # --- pw2 ---
+      # The marks in the line's glyph cell, space-separated, sorted:
+      # `breakpoint`, `breakpoint-disabled`, `breakpoint-tracepoint`, `hint`.
+      glyph: text
+      # The line is dimmed as part of a branch the run did not take.
+      dimmed: bool
+      # The columns (1-based) of the line's inline breakpoints.
+      inline-breakpoints: lines
+      # pw1: a build's diagnostic on this line — the gutter's glyph and the
+      # squiggle under its text.
+      diagnostic: "enum{none,error,warning,info}"
+      squiggle: "enum{none,error,warning,info}"
+      # pw3: the omniscience flow's branch colour on the line (a branch the
+      # run took or did not take), and the names its flow chips draw.
+      flow: "enum{taken,not-taken,none}"
+      flow-names: lines
+    affordances: [click, double-click, context-click]
+    # `gutter`: the breakpoint lane; `text-start` / `text-end`: the first and
+    # last character of the line's text; `column(c)`: the c-th character
+    # (1-based) of the line's text; `glyph`: the glyph cell left of the line
+    # number; `line-number`: the line's number; `caret(c)`: where a press
+    # puts the caret before the c-th character (column c).
+    anchors: [gutter, text-start, text-end, column(c), glyph, line-number, caret(c)]
+
+  # The call trace: the recording's calls, nested.
+  call-trace:
+    properties: { count: int, focused: bool }
+    children: { call: many }
+    affordances: [wheel, focusable]
+    assertions:
+      has-call(name): "some call: call.name == name"
+      has-call-containing(text): "some call: call.name contains text"
+      # pw7: a call of `name` whose arguments, as drawn, contain `args`.
+      has-call-with(name, args): "some call: call.name == name and call.arguments contains args"
+      # A row is marked selected.
+      has-selected-call: "some call: call.selected"
+      # pw1: the current-call mark is on exactly the named call / on no row.
+      marks-only(name): "(some call: call.current and call.name == name) and (every call: not call.current or call.name == name)"
+      marks-none: "none call: call.current"
+    sync:
+      loaded: "count(call) > 0"
+
+  call:
+    # `arguments` tells apart the calls of one function (`square(n=3)` from
+    # `square(n=4)`), as a reader does.
+    keys: [name, arguments]
+    properties:
+      name: text
+      # The call the replay is in.
+      current: bool
+      selected: bool
+      # Its children are shown (the toggle draws the collapse icon).
+      expanded: bool
+      depth: int
+      # The call's arguments as drawn (`a=1, b=2`).
+      arguments: text
+    children: { call-argument: many }
+    affordances: [click, double-click, context-click]
+    # `name`: the call's name, where a click activates it.
+    anchors: [expander, name]
+
+  # pw6: a macro call's expansion, drawn under its line (Toggle Macro
+  # Expansion): the expanded code, row by row.
+  macro-expansion:
+    keys: [line]
+    properties: { line: int, text: lines }
+
+  # pw6: one argument of a call, as the call trace draws it.
+  call-argument:
+    keys: [name]
+    properties: { name: text, value: text }
+    affordances: [click, context-click]
+
+  # The event log: the recording's output and events, in order.
+  event-log:
+    properties:
+      # Rows on screen.
+      count: int
+      # Rows in the log, as its footer reports them.
+      total: int
+      search: text
+      focused: bool
+      # The last row shown, as the footer reports it (`… to <n> of <total>`).
+      last-shown: int
+      # The visible column titles, in order.
+      columns: lines
+      # The column the rows are sorted by, as its header draws it ("tick ▲"),
+      # or "" while the log is in its recorded order.
+      sort: text
+      # pw3: the first row shown, as the footer reports it (`Rows <n> to …`).
+      first-shown: int
+      # The text of every drawn row, in order; how many of them are dimmed
+      # (after the replay's position), and whether the dimmed ones are
+      # exactly the rows after the last undimmed one.
+      rows: lines
+      dimmed: int
+      dimmed-tail: bool
+      # The first and last row (1-based, in the whole log) inside the scroll
+      # body.
+      first-in-view: int
+      last-in-view: int
+    children:
+      event: many
+      event-marker: many
+      columns-button: optional
+      columns-menu: optional
+      # pw8: `text-field[label="Find event"]`, its search field.
+      text-field: optional
+      # pw3: the Filter button, its list, and the scrubber beside the rows.
+      panel-button: many
+      dropdown: many
+      scrubber: optional
+    affordances: [click, wheel, focusable]
+    # pw3: `footer`, the footer's "Rows" label: a press in the pane that is
+    # on no row.
+    anchors: [footer]
+    assertions:
+      has-output(text): "some event: event.text contains text"
+      # No row's output contains `text` (pw8: a native recording's start-up
+      # reads of its libraries are not shown as their bytes).
+      lacks-output(text): "none event: event.text contains text"
+      # pw8: a correlation marker of this boundary, its chip drawn so and its
+      # direction shown.
+      has-marker(boundary, chip): "some event-marker: event-marker.boundary == boundary and event-marker.chip == chip and event-marker.direction"
+      # More rows than the first window shows: paging has something to fetch.
+      pages-remain: "last-shown < total"
+      shows-all: "last-shown == total"
+      # pw3: the footer's first row is the first row inside the scroll body.
+      footer-starts-in-view: "first-shown == first-in-view"
+      # Scrolled to the end: the footer reads "… to <total> of <total>" and
+      # the log's last row is inside the scroll body.
+      at-end: "last-shown == total and last-in-view == total"
+    sync:
+      loaded: "count(event) > 0"
+
+  event:
+    keys: [text]
+    properties:
+      # The event's console output (or its description), as drawn.
+      text: text
+      kind: text
+      # The event the replay is at.
+      current: bool
+      # A row past the replay's position (drawn dimmed).
+      future: bool
+      # pw3: the row the list has selected.
+      selected: bool
+    affordances: [click, double-click, context-click]
+
+  # The state pane: the variables at the replay's position.
+  variables:
+    properties:
+      count: int
+      watch: text
+      focused: bool
+      # pw8: the pane draws a tab strip (it is one list of variables and
+      # watches, with none).
+      tab-strip: bool
+      # pw7: the source line the pane shows above the values (`17 | …`).
+      code-line: text
+    # pw8: `text-field[label="watch"]`, the watch input.
+    children: { variable: many, text-field: optional }
+    affordances: [wheel, focusable]
+    assertions:
+      has-variable(name): "some variable: variable.name == name"
+      value-of(name, value): "some variable: variable.name == name and variable.value contains value"
+      all-have-origin-badges: "count(variable) > 0 and every variable: variable.origin-badge == true"
+    sync:
+      loaded: "count(variable) > 0"
+
+  variable:
+    # pw8: `watch`: a watch's row, told apart from a variable of the same name.
+    keys: [name, watch]
+    properties:
+      name: text
+      type: text
+      value: text
+      expanded: bool
+      # The row offers its value's origin (the badge that opens the chain).
+      origin-badge: bool
+      # pw8: a watch's row, one the recording cannot answer, and the row's
+      # whole text as drawn.
+      watch: bool
+      invalid: bool
+      text: text
+      # pw6: the value history opened under it, one row per value it held
+      # (`<tick> <value>`).
+      history: lines
+    # pw8: the chain the row expands under itself.
+    children: { origin-chain: optional }
+    affordances: [click, double-click, context-click]
+    # `name`: the variable's name; `value`: its value cell; `history`: its
+    # value-history toggle.
+    anchors: [expander, name, value, history]
+
+  # The breakpoints and tracepoints list.
+  breakpoints:
+    # pw6: `locations`: every row's location (`shield.nr:26`), in order.
+    properties: { count: int, locations: lines }
+    children: { point: many }
+
+  point:
+    keys: [location]
+    # `location`: the file's base name and the line (`shield.nr:26`).
+    properties: { location: text, kind: "enum{breakpoint,tracepoint}", enabled: bool }
+    affordances: [click, context-click]
+
+  # The files pane.
+  filesystem:
+    # `loading`: the pane shows its loading state instead of a tree.
+    # pw3: `error`, the name field's refusal ("… already exists"); a Create
+    # or Rename puts a `text-field` (label `name`) in the tree. pw7: `empty`,
+    # the pane shows its "nothing here" overlay instead of a tree.
+    properties: { count: int, focused: bool, loading: bool, error: text, empty: bool }
+    children: { file-node: many, text-field: many }
+    affordances: [wheel, focusable]
+
+  file-node:
+    keys: [name]
+    # `depth`: 0 for the tree's roots, one more per folder it is inside.
+    properties: { name: text, kind: "enum{file,folder}", expanded: bool, selected: bool, depth: int }
+    affordances: [click, double-click, context-click]
+
+  # The program's terminal output.
+  terminal-output:
+    properties: { text: lines, count: int, focused: bool }
+    affordances: [click, wheel, focusable]
+    # `lines-button`: the Lines/Screen toggle's Lines button (a press there
+    # focuses the pane without jumping to an event, as a press on a line does).
+    anchors: [lines-button]
+    assertions:
+      shows(t): "text contains t"
+
+  # The scratchpad: values the user pinned.
+  scratchpad:
+    # `chains`: the origin chains pinned to it.
+    properties: { count: int, chains: int }
+    children: { scratch-entry: many }
+
+  scratch-entry:
+    keys: [expression]
+    properties:
+      expression: text
+      value: text
+      # The value is an evaluation error (drawn as one).
+      error: bool
+      # A pinned `value`, or a pinned origin `chain`.
+      kind: "enum{value,chain}"
+    affordances: [click, context-click]
+
+  # The status line at the bottom of the window.
+  status-line:
+    properties:
+      message: text
+      # Where the replay is, as the status line says it (`file:line`).
+      location: text
+      # The editing keymap's mode indicator, when there is one.
+      mode: text
+      # The build's verdict in the status bar, and the notifications it
+      # shows now.
+      build-status: text
+      notifications: lines
+      # View > Notifications, while open: every notice the bar was given,
+      # newest first, the dismissed ones included.
+      history: lines
+    assertions:
+      says(t): "message contains t"
+      lacks(t): "not (message contains t)"
+      notifies(t): "notifications contains t"
+      # pw7: no notice the status bar shows now says `t`.
+      notifies-nothing-of(t): "not (notifications contains t)"
+      never-notifies(t): "not (notifications contains t)"
+      # No build verdict or progress ("Build succeeded", "Building…").
+      no-build-shown: "not (build-status contains \"Build\")"
+
+  # The command palette / omnibox: a query field and its results.
+  omnibox:
+    properties:
+      query: text
+      focused: bool
+      count: int
+      # pw1: the options' labels, in order.
+      labels: lines
+    children: { option: many }
+    affordances: [click, text-entry, focusable]
+    assertions:
+      offers(kind, text): "some option: option.kind == kind and option.label contains text"
+
+  option:
+    keys: [label]
+    # `kind`: file, command, symbol, … (what choosing it opens or runs).
+    properties: { label: text, detail: text, selected: bool, kind: text }
+    affordances: [click]
+
+  # A context menu, opened by a right press or its key.
+  context-menu:
+    properties: { count: int }
+    children: { menu-item: many }
+    assertions:
+      offers(label): "some menu-item: menu-item.label == label"
+      lacks(label): "none menu-item: menu-item.label == label"
+      # Every disabled row says why (its hint column is not empty).
+      disabled-rows-say-why: "every menu-item: menu-item.enabled or menu-item.hint != \"\""
+      # No row prints an HTML entity instead of the character.
+      no-raw-entities: "none menu-item: menu-item.label matches \"&(lt|gt|amp);\" or menu-item.hint matches \"&(lt|gt|amp);\""
+      # pw6: exactly one row, this one; the keyboard's row is this one / none.
+      offers-only(a): "count == 1 and some menu-item: menu-item.label == a"
+      highlights(label): "some menu-item: menu-item.label == label and menu-item.highlighted"
+      highlights-none: "none menu-item: menu-item.highlighted"
+
+  menu-item:
+    keys: [label]
+    # `hint`: the row's second column — a hint, or why a disabled row is
+    # disabled. pw6: `highlighted`: the keyboard's row.
+    properties: { label: text, enabled: bool, shortcut: text, hint: text, highlighted: bool }
+    affordances: [click]
+
+  # The application menu (the desktop's in-window menu, the terminal's and
+  # the GPUI window's top-bar menus).
+  menu-bar:
+    # `open`: the menu's folders are drawn. A click is the main-menu button.
+    # `menu-item`s: the entries of the open folders.
+    properties: { open: bool }
+    children: { menu: many, menu-item: many }
+    affordances: [click]
+    assertions:
+      offers(label): "some menu-item: menu-item.label == label"
+      lacks(label): "none menu-item: menu-item.label == label"
+      shows-chord(label, chord): "some menu-item: menu-item.label == label and menu-item.shortcut == chord"
+
+  menu:
+    keys: [label]
+    # `mnemonic`: the underlined access key; `highlighted`: the keyboard's
+    # highlight is on it.
+    properties: { label: text, open: bool, mnemonic: text, highlighted: bool }
+    affordances: [click]
+
+  # A dialog or notification asking the user something, or telling them.
+  dialog:
+    keys: [title]
+    properties: { title: text, message: text }
+    children: { dialog-button: many, text-field: many }
+
+  dialog-button:
+    keys: [label]
+    properties: { label: text, enabled: bool }
+    affordances: [click]
+
+  text-field:
+    keys: [label]
+    properties: { label: text, value: text, focused: bool }
+    affordances: [click, text-entry, focusable]
+
+  # The welcome screen a window shows before a recording or project is open.
+  welcome:
+    properties:
+      heading: text
+      # pw8: the parts of the screen that are drawn (`welcome-left-panel`,
+      # `recent-traces`, …)
+      sections: lines
+      # --- terminal --- what the screen says, row by row
+      text: lines
+    children: { welcome-action: many, recent: many }
+    assertions:
+      shows(t): "text contains t"
+
+  welcome-action:
+    keys: [label]
+    properties: { label: text }
+    affordances: [click]
+
+  recent:
+    keys: [name, kind]
+    # `kind`: a recent trace or folder; `detail`: a trace's age (`5 min ago`);
+    # `tooltip-shown`: its tooltip is on screen.
+    properties: { name: text, detail: text, kind: "enum{trace,folder}", tooltip-shown: bool, tooltip: text }
+    affordances: [click, double-click]
+
+
+  # --- pw2 ---
+  # The event log's Columns button and the menu it opens: one option per
+  # column, shown or hidden by its check box, reordered by its handle.
+  columns-button:
+    properties: { label: text, focused: bool }
+    affordances: [click]
+
+  columns-menu:
+    children: { column-option: many }
+    affordances: [click]
+    # pw3: `corner`, the menu's top-right corner: its background, no option.
+    anchors: [corner]
+
+  column-option:
+    keys: [name]
+    # pw3: `outline`, which part of the row shows the key-focus outline: the
+    # whole row, its check box, its drag handle, or none.
+    properties: { name: text, shown: bool, outline: "enum{row,check,handle,none}" }
+    affordances: [click, drag-source, drop-target]
+    anchors: [check, handle]
+
+
+  # The VCS panel as a review shows it: its title (the branch), the changeset
+  # header (`commit`: the abbreviated commit and the file count), its stats
+  # (`+16 -10`), the Unified Diff / Open File toggle, and the changed files.
+  vcs:
+    # pw8: `commits`: the commit history's rows; `no-repo`: it says the
+    # folder is not a repository.
+    # `branch-picker`: the branch picker is drawn; `review-extras`: a
+    # review's trace selector or stats are.
+    properties: { title: text, commit: text, stats: text, count: int, unified-diff: bool, error: text, commits: int,
+                  no-repo: bool, branch-picker: bool, review-extras: bool }
+    children: { changed-file: many, diff-toggle: optional, commit: many }
+
+  # A commit of the history; `toggle` expands it to its files, `header`
+  # opens its whole-commit document.
+  commit:
+    keys: [message]
+    properties: { message: text, expanded: bool }
+    children: { commit-file: many }
+    affordances: [click]
+    anchors: [toggle, header]
+
+  # A file an expanded commit changed; its View Diff button shows on hover.
+  commit-file:
+    keys: [name]
+    properties: { name: text }
+    children: { panel-button: many }
+    affordances: [click]
+
+  changed-file:
+    keys: [name]
+    # `status`: M, A, D…; `status-kind`: modified, added, deleted…;
+    # `stats`: the added/removed line counts; `coverage`: its badge.
+    properties: { name: text, status: text, status-kind: text, stats: text, coverage: text, selected: bool }
+    affordances: [click]
+
+  diff-toggle:
+    properties: { unified: bool }
+    affordances: [click]
+
+  # A unified-diff view a review opened, headed by its file's path.
+  diff-view:
+    keys: [file]
+    # pw8: `hunks`: its `@@` dividers; `added` / `removed`: the lines marked
+    # so; `selected-hunks`: the lines marked selected; `toolbar`: the hunk
+    # toolbar's count ("1 hunk selected"), "" when it is away.
+    # `line-numbers` / `old-line-numbers`: the numbers in the new and the
+    # old revision's gutter; `token-colours`: how many syntax colours the
+    # new revision's lines are drawn in.
+    properties: { file: text, text: lines, hunks: int, added: int, removed: int, selected-hunks: int, toolbar: text,
+                  line-numbers: lines, old-line-numbers: lines, token-colours: int }
+    # The hunk toolbar's buttons: "Copy as patch" (then "Copied!"), "Clear".
+    children: { hunk: many, panel-button: many, expand-boundary: many }
+
+  # A collapsed run of unchanged lines; a click shows more of it.
+  # `direction`: which way it shows more (`above`, `below`); `n`: its place
+  # among the boundaries of that direction.
+  expand-boundary:
+    keys: [direction, n]
+    properties: { n: int, direction: text, hidden: int }
+    affordances: [click]
+
+  # A whole-commit document's section for one file, under its heading
+  # (`link`: the heading's file name, which opens the file); `offset`: how far
+  # below the document's top it starts.
+  diff-section:
+    keys: [path]
+    properties: { path: text, offset: int, editors: int }
+    affordances: [click]
+    anchors: [link]
+
+  hunk:
+    keys: [number]
+    properties: { number: int, text: text }
+    affordances: [click]
+
+  # --- terminal ---
+  # Any pane of the layout, by the label of its tab in front: what it shows,
+  # row by row. The panes no other role reads (Problems, Find in Files,
+  # Build, VCS, Constraints, Requests, …) are read through it.
+  pane:
+    # `title`: the canonical name of its active tab (see `pane-tab`).
+    keys: [title]
+    properties:
+      title: text
+      # Its rows' text, in order, as drawn.
+      text: lines
+      count: int
+      # The labels of the tabs on its strip.
+      tabs: lines
+      # A horizontal scrollbar is drawn across it.
+      hbar: bool
+    children: { row: many }
+    affordances: [click, wheel, context-click, drop-target]
+    # The two ends of its list scrubber's track (a pane whose rows overflow).
+    anchors: [scrubber-start, scrubber-end]
+    assertions:
+      shows(t): "text contains t"
+      has-row(t): "some row: row.text contains t"
+      lacks-row(t): "none row: row.text contains t"
+      rows-match(re): "every row: row.text matches re"
+      has-tab(t): "tabs contains t"
+      lacks-tab(t): "not (tabs contains t)"
+
+  # One row of a pane, by its whole text or by its first column.
+  row:
+    keys: [text, first]
+    properties: { text: text, first: text, selected: bool }
+    children: { cell: many }
+    affordances: [click, double-click, context-click]
+    anchors: [text-start, text-end]
+
+  # One column of a row: a run of text set two or more blanks apart from the
+  # next (a button, a name, a count).
+  cell:
+    keys: [text]
+    properties: { text: text }
+    affordances: [click, double-click, context-click]
+
+  # A box shown over the window that is not a menu: an event's whole content,
+  # a value's history, a detail row, a tooltip.
+  popup:
+    # pw3: a typed value's popup (a flow chip's): the value as expanded, its
+    # type, and the side of the chip it belongs to.
+    properties: { title: text, text: lines, value: text, type: text, anchored: "enum{single,before,after,none}" }
+    affordances: [click]
+    assertions:
+      shows(t): "text contains t"
+
+  # One level of the program menu, open: the first under the menu button,
+  # every entered folder to its right.
+  # pw3: also a pane's dropdown list, by `name` (the event log's Filter).
+  dropdown:
+    keys: [level, name]
+    properties: { level: int, name: text, count: int }
+    children: { dropdown-item: many }
+    assertions:
+      offers(label): "some dropdown-item: dropdown-item.label == label"
+
+  dropdown-item:
+    keys: [label]
+    # pw3: `checked`, a check-box item's state.
+    properties: { label: text, shortcut: text, folder: bool, selected: bool, checked: bool }
+    affordances: [click]
+
+  # A label of the footer's auto-hide panels (Build, Problems, …): a click
+  # docks its pane.
+  dock-label:
+    # `label`: the canonical pane name (see `pane-tab`), not the caption.
+    keys: [label]
+    properties: { label: text }
+    affordances: [click, context-click]
+
+  # Where the replay is in the recording: its tick, of how many.
+  replay-position:
+    properties: { tick: int, total: int, paused: bool }
+    assertions:
+      at-tick(n): "tick == n"
+      past(n): "tick > n"
+      before(n): "tick < n"
+
+  # --- pw1 ---
+  # A tab on an auto-hide strip (the footer's, or a side's): a click docks
+  # its panel open, a rest of the pointer previews it in the overlay.
+  strip-tab:
+    keys: [label]
+    properties: { label: text, edge: "enum{left,right,bottom}", active: bool }
+    affordances: [click, context-click]
+
+  # The slide-in overlay a strip tab's hover opens.
+  auto-hide-overlay:
+    properties: { title: text, edge: "enum{left,right,bottom}" }
+
+  # The backdrop behind the overlay.
+  auto-hide-backdrop:
+    affordances: [click]
+
+  # A side strip's presentation (normal or minimal), its toggle in the
+  # status bar's icon zone, and the minimal sidebar's panel icons.
+  sidebar:
+    keys: [edge]
+    properties:
+      edge: "enum{left,right}"
+      minimal: bool
+      # The toggle's icon: `open` (normal sidebar) or `close` (minimal).
+      toggle: "enum{open,close,none}"
+      zone-visible: bool
+      mode-buttons: int
+    children: { panel-button: many }
+    assertions:
+      # The icon zone holds no buttons at all.
+      no-icons: "count(panel-button) == 0"
+
+  # The selection outline: the line drawn around the panel being worked in
+  # and its strip tab — a docked panel's, the overlay's, or a layout stack's.
+  selection-outline:
+    keys: [kind]
+    properties:
+      kind: "enum{docked,overlay,stack}"
+      # The resolved stroke paint (an `rgb(...)`, never a bare token).
+      stroke: text
+      stroke-width: number
+      solid: bool
+      # It paints above the overlay.
+      above-overlay: bool
+      # The strip tabs the line runs around.
+      encloses: lines
+      measurable: bool
+
+  # The panel docked open at an edge.
+  docked-panel:
+    keys: [edge]
+    properties: { edge: "enum{left,right,bottom}" }
+
+  # A button of a pane's header or body, named by its text or its title.
+  panel-button:
+    keys: [label]
+    properties: { label: text, enabled: bool, active: bool, title: text }
+    affordances: [click]
+
+  # The BUILD pane: its verdict line, its controls and its output.
+  build-panel:
+    properties:
+      verdict: text
+      # "No build has run." is shown.
+      idle: bool
+      count: int
+      text: lines
+      # Where it is shown: docked from its strip tab, in the overlay, or a
+      # tab of the layout.
+      where: "enum{docked,overlay,layout}"
+      state: "enum{none,failed,succeeded,cancelled}"
+      # Lines with a file location (clickable).
+      located: int
+    children: { build-line: many, panel-button: many }
+    affordances: [wheel]
+    assertions:
+      shows(t): "some build-line: build-line.text contains t"
+      lacks(t): "none build-line: build-line.text contains t"
+      # Lines of different streams are drawn in different colours.
+      streams-coloured-apart: "every a of build-line: every b of build-line: a.stream == b.stream or a.colour != b.colour"
+
+  build-line:
+    keys: [text]
+    properties:
+      text: text
+      # `located`: a compiler line with a file location (clickable).
+      stream: "enum{stdout,stderr,located}"
+      severity: "enum{none,error,warning,info}"
+      located: bool
+      italic: bool
+      colour: text
+      # Drawn as styled runs (the escape sequences became styles).
+      styled: bool
+    affordances: [click]
+
+  # The PROBLEMS pane.
+  problems-panel:
+    properties: { count: int, errors: int, warnings: int, empty: bool, groups: int, where: text }
+    children: { problem: many, panel-button: many }
+    assertions:
+      has-problem-at(path, location, severity): "some problem: problem.path contains path and problem.location contains location and problem.severity == severity"
+      # pw6: the highlighted row is exactly the one at this place.
+      highlights-only(path, location): "(some problem: problem.selected and problem.path contains path and problem.location contains location) and (every problem: not problem.selected or problem.location contains location)"
+
+  problem:
+    # pw6: a message two rows share is told apart by where it is;
+    # `selected`: the row the panel highlights.
+    keys: [message, location]
+    properties: { message: text, path: text, location: text, severity: "enum{error,warning,info}", selected: bool }
+    affordances: [click]
+
+  # Find in Files.
+  find-in-files:
+    properties:
+      count: int
+      text: text
+      where: text
+      # pw7: the search the rows answer (the field's text), its options,
+      # the rows as `<folder>/<file>:<line>` in order, each file group as
+      # `<folder>/<file> <n> match(es)`, the matched text each row
+      # highlights, the selected row, and the prompt shown with no rows.
+      query: text
+      match-case: bool
+      regex: bool
+      rows: lines
+      groups: lines
+      highlights: lines
+      selected: text
+      prompt: text
+    children: { fif-match: many, fif-option: many, search-field: optional }
+
+  # The Agent Activity pane.
+  agent-activity:
+    properties:
+      # The pane's whole text, as drawn.
+      text: text
+      # The conversation's text, as drawn.
+      conversation: text
+      # Every message's text, in order.
+      messages: lines
+      # A spinner or "Agent is working" is shown.
+      busy: bool
+      notice: text
+      notices: int
+      # How many of the retired review roll-up's elements are drawn.
+      roll-up: int
+      # The conversation is the pane's first block, and the prompt area
+      # comes after it.
+      conversation-first: bool
+      interaction-after: bool
+      failed-turns: int
+      evidence-cards: int
+      test-runs: int
+      test-rows: int
+    assertions:
+      says(t): "conversation contains t"
+      silent-about(t): "not (conversation contains t)"
+      never-says(t): "not (text contains t)"
+    children:
+      agent-prompt: optional
+      agent-message: many
+      panel-button: many
+      failed-turn: many
+      test-run-card: many
+      evidence-card: many
+      agent-settings: optional
+
+  agent-prompt:
+    properties:
+      value: text
+      height: int
+      lines: int
+      focused: bool
+      # How many text lines the box is tall.
+      visible-lines: int
+    affordances: [click, text-entry, focusable]
+
+  # One message of the conversation, by its place in it (1-based).
+  agent-message:
+    keys: [index]
+    properties: { index: int, text: text }
+
+  # A turn the agent refused: a red X and the agent's own message.
+  failed-turn:
+    properties: { error: text, icon: bool }
+
+  # A `ct test` run's summary card; its header expands it.
+  test-run-card:
+    keys: [title]
+    properties:
+      title: text
+      status: text
+      running: bool
+      expanded: bool
+      # The rows' test names and statuses, in order.
+      rows: lines
+      statuses: lines
+    children: { test-row: many }
+    affordances: [click]
+    anchors: [header]
+
+  test-row:
+    keys: [name]
+    properties:
+      name: text
+      status: text
+      outcome: "enum{passed,failed,errored,running}"
+      # It offers actions (Open recording).
+      has-actions: bool
+      output: text
+      diagnostic: text
+      recording-failed: bool
+      expanded: bool
+      # pw8 (the Test Results pane): the test has a recording; the row is the
+      # selected one; what its ⏵ does (`record-and-open`, `open-existing`)
+      # and says (its title).
+      recorded: bool
+      selected: bool
+      open-mode: text
+      open-title: text
+    children: { panel-button: many }
+    affordances: [click]
+    # `name`: the test's name (pw8: a click there selects the row).
+    anchors: [header, name]
+
+  # An evidence tool call's card, named by its dataset's file name.
+  evidence-card:
+    keys: [dataset]
+    properties:
+      dataset: text
+      path: text
+      kind: text
+      shape: text
+      has-shape: bool
+      command: text
+      note: text
+      output: text
+      has-actions: bool
+      state: "enum{available,unavailable,failed,unreported}"
+    children: { panel-button: many }
+
+  # The Agent Activity settings panel.
+  agent-settings:
+    properties: { scroll-top: int, overflow: int }
+    children: { settings-select: many, settings-section: many, panel-button: many }
+    affordances: [wheel]
+
+  # A settings select, named by the label above it.
+  settings-select:
+    keys: [label]
+    properties: { label: text, value: text, open: bool }
+    children: { settings-option: many }
+    affordances: [click]
+
+  settings-option:
+    keys: [label]
+    properties: { label: text, active: bool }
+    affordances: [click]
+
+  settings-section:
+    keys: [title]
+    properties: { title: text }
+    affordances: [click]
+
+  # The VCS panel of a review: its title, stats and Changed Files.
+  # The editor's hover: the message for what is under the pointer.
+  editor-hover:
+    properties: { text: text }
+
+  # An agent's worktree session: the Agent Workspace panel (which working
+  # copy is shown, the files the agent changed) and its toggle.
+  agent-workspace:
+    properties: { label: text, path: text, files: lines }
+    children: { panel-button: many }
+
+  # The caption bar's progress of an agent's task (`3/5` milestones).
+  caption-progress:
+    properties: { text: text }
+    affordances: [click]
+
+  # The edit-mode toolbar's Build and Run.
+  edit-toolbar:
+    children: { panel-button: many }
+
+  # --- vscode-wdio: the VS Code extension's panels ------------------------
+  # The Request Panel: the HTTP requests a recording served.
+  requests:
+    properties:
+      count: int
+      # Its table's header and body are drawn (the body empty for none).
+      header: bool
+      body: bool
+      list-height: int
+    # pw7 (desktop): the rows by their `#`, and the detail a selected row
+    # opens; `list-height` is the table body's height in pixels.
+    children: { request-row: many, request-detail: optional, resize-handle: optional }
+    affordances: [wheel]
+
+  # The Origin Chain of a value: how it came to be, hop by hop, back to where
+  # it was made (Value-Origin-Tracking), as the State panel shows it.
+  origin-chain:
+    properties:
+      count: int
+      # Where the chain ends (a literal, an input), as drawn.
+      terminator: text
+      # pw8: each hop's text, nearest first (`c = b`).
+      hops: lines
+    children: { origin-hop: many, panel-button: many }
+    assertions:
+      has-hop(classification): "some origin-hop: origin-hop.classification == classification"
+      has-frame-transition: "some origin-hop: origin-hop.frame-transition == true"
+      has-confidence(c): "some origin-hop: origin-hop.confidence == c"
+    sync:
+      loaded: "count(origin-hop) > 0"
+
+  origin-hop:
+    # pw8: `file`: the file the hop happened in (side panel), e.g. `lib.rs`.
+    keys: [number, file]
+    properties:
+      # 1 for the hop nearest the value.
+      number: int
+      text: text
+      # TrivialCopy, Computational, CrossThreadCopy, FrameTransition, …
+      classification: text
+      confidence: number
+      # The source line the hop happened on.
+      line: int
+      # The hop crosses a call boundary.
+      frame-transition: bool
+      # Operand snapshots shown under an expanded Computational hop.
+      operands: int
+      file: text
+      # pw8: the operands are shown, and what they say (`a = 10`).
+      operands-shown: bool
+      operand-values: lines
+      # The hop is flagged low-confidence, and how (`! low confidence`).
+      low-confidence: bool
+      low-confidence-text: text
+      # A cross-process hop's badge (the boundary it crossed).
+      badge: text
+      # The pointer's shape over the hop.
+      pointer: text
+    affordances: [click]
+    # `expander`: the chevron that shows a Computational hop's operands.
+    anchors: [expander]
+
+  # pw8: the Origin Chain side panel: the chain of the query it shows, its
+  # breadcrumbs (one per query, or per recording the chain crossed) and its
+  # footer's buttons.
+  origin-panel:
+    properties:
+      count: int
+      # Each hop's location (`main.py:11`), nearest first.
+      hops: lines
+      terminator: text
+      crumbs: lines
+      focused: bool
+      # "Select a value to see its origin." is shown instead of a chain.
+      empty: bool
+    children: { origin-hop: many, breadcrumb: many, panel-button: many }
+    affordances: [click, focusable]
+    assertions:
+      # Some hop carries this cross-process badge.
+      has-badge(b): "some origin-hop: origin-hop.badge == b"
+      # A hop of this kind, at this confidence, flagged low-confidence.
+      has-low-confidence(kind, c): "some origin-hop: origin-hop.classification == kind and origin-hop.confidence == c and origin-hop.low-confidence and origin-hop.low-confidence-text contains \"low confidence\""
+      # A walked breadcrumb (not a placeholder) whose label contains t.
+      reached(t): "some breadcrumb: breadcrumb.label contains t and not breadcrumb.placeholder"
+    sync:
+      loaded: "count(origin-hop) > 0"
+
+  breadcrumb:
+    keys: [label]
+    # `current`: the query the panel shows; `placeholder`: a recording the
+    # chain reached that owns no hop.
+    properties: { label: text, current: bool, placeholder: bool }
+    affordances: [click]
+
+  # The Verification pane: a run of the project's Verno action and its
+  # findings, by kind. `phase`: idle, running, cancelled, finished; `run`: the
+  # Run control's label ("" when it offers none); `stop`: the Stop control is
+  # shown; `payload`: whether the run's report was found and attached.
+  verification-panel:
+    properties:
+      phase: text
+      outcome: text
+      payload: text
+      status: text
+      command: text
+      run: text
+      stop: bool
+      groups: lines
+      count: int
+    # `panel-button[label="Run"]`, `panel-button[label="Stop"]`.
+    children: { finding: many, panel-button: many }
+
+  finding:
+    keys: [title]
+    properties: { kind: text, title: text, message: text, location: text }
+    affordances: [click, context-click]
+
+  # The processes of a multi-process session, one row per recording; a
+  # click on a row makes that recording the one the panes show.
+  process-tree:
+    properties: { active: text, roles: lines }
+    children: { process: many }
+
+  process:
+    # `name`: the recording's role in the session (`frontend-js`, `backend`).
+    keys: [name]
+    properties: { name: text, title: text, active: bool }
+    affordances: [click]
+
+  # The Test Results pane: its headline ("2 tests, not run yet"), its ▶
+  # (`panel-button[label="Run"]`) and one row per test; each row's ⟳ and ⏵
+  # are `panel-button[label="Refresh"]` and `panel-button[label="Open"]`.
+  # `failure`: why a run faulted; `absence`: why no run can start here.
+  test-results:
+    properties: { headline: text, count: int, failure: text, absence: text }
+    children: { test-row: many, panel-button: many }
+
+  # A tracepoint's results grid under its editor line: `shown` while the grid
+  # is drawn; one `trace-row` per hit (its tick and what the code logged),
+  # and its Run button (`panel-button[label="Run"]`).
+  trace-results:
+    keys: [line]
+    properties: { line: int, shown: bool, count: int }
+    children: { trace-row: many, panel-button: many }
+
+  # `ticks` / `values`: the row's tick cell and its logged value, where a click
+  # jumps the replay to that hit.
+  trace-row:
+    keys: [n]
+    properties: { n: int, ticks: text, values: text }
+    affordances: [click, context-click]
+    anchors: [ticks, values]
+
+  # A divider between panes of the layout; dragged to resize them.
+  # `vertical`: a vertical bar between panes side by side.
+  # `n`: its place among the dividers of that orientation, in document order.
+  splitter:
+    keys: [orientation, n]
+    properties: { orientation: "enum{vertical,horizontal}", n: int }
+    affordances: [click, drag-source]
+
+  # --- pw3 ---
+  # The key router's own trace of the operations it ran (the desktop keeps
+  # it as `__ctKeyTrace`): what a key DID, where the screen shows nothing.
+  key-router:
+    properties:
+      # The operation the router ran for the last key it resolved.
+      last-operation: text
+      # How many operations it has run.
+      operations: int
+    assertions:
+      # The last operation the router ran is not `op`.
+      last-is-not(op): "last-operation != op"
+
+  # A list's scrubber: the bar beside it whose thumb is the window on screen.
+  scrubber:
+    properties:
+      # The first row the window shows (0-based), how many it shows, and the
+      # list's length, as the scrubber knows them.
+      first: int
+      visible-rows: int
+      total: int
+    # The thumb is dragged along the track (a drop on the track's point).
+    affordances: [drag-source, drop-target]
+    # `thumb`: the thumb's centre; `at(p)`: where the thumb's centre is when
+    # the window starts p% of the way down the list.
+    anchors: [thumb, at(p)]
+
+  # A value chip of the omniscience flow (the editor's flow values): a
+  # variable's value on a line, or one side of a before/after (dual) chip. A
+  # locator by `name` alone names the variable's only chip.
+  flow-value:
+    keys: [name, side, line]
+    properties:
+      name: text
+      side: "enum{single,before,after}"
+      line: int
+      value: text
+      # The value was cut short: the chip carries its eye ("view more").
+      cut: bool
+      # It clips a value longer than it with an ellipsis, on one line, and is
+      # capped at `cap` (the width set on it, `30ch`).
+      clipped: bool
+      single-line: bool
+      cap: text
+      # The start of the box, and the chip's eye, are on screen: inside the
+      # editor's code area, not scrolled off it.
+      shown: bool
+      eye-shown: bool
+      # pw6: the loop iteration the value is from (-1 outside a loop).
+      iteration: int
+    affordances: [click, context-click]
+    # `eye`: the chip's "view more" button; `start`: the start of its box.
+    anchors: [eye, start]
+
+  # A loop header's control in the flow: the iteration shown, of how many,
+  # and its slider's width.
+  loop-control:
+    # pw6: `focused`: the keyboard is in its iteration field.
+    properties: { iteration: int, total: int, slider-width: number, focused: bool }
+    affordances: [click, text-entry, focusable]
+    # pw6: `field`: the iteration field ("iteration [N] from M").
+    anchors: [forward, backward, field]
+
+  # The Video Player pane of a visual recording.
+  video-player:
+    properties:
+      # "Frame 2 / 4", "Draw 1 / 3", "1× ▶", "Paused", as the player shows them.
+      frame: text
+      draw: text
+      rate: text
+      # The pixel picker is on.
+      picking: bool
+      error: text
+      # The player is still starting.
+      starting: bool
+      transport-enabled: bool
+      # The scrub bar's last frame.
+      last-frame: int
+      focused: bool
+    children: { toolbar-button: many, frame-image: optional }
+    affordances: [click, focusable, drag-source, drop-target]
+    # `label`: the frame label ("Frame 2 / 4"), where a press focuses the
+    # player without picking a pixel; `scrub-thumb`: the scrub bar's thumb;
+    # `scrub(p)`: the scrub bar, p% along.
+    anchors: [label, scrub-thumb, scrub(p)]
+
+  # The frame the player shows.
+  frame-image:
+    # `quads`: the colour (`#rrggbb`) at the centre of each quadrant of the
+    # drawn image, Q0..Q3 (bottom-left, bottom-right, top-left, top-right);
+    # `width`, `height`: the image's own size.
+    properties: { geid: int, frame: int, quads: lines, width: int, height: int }
+    affordances: [click]
+    # `pixel(x,y)`: where the image's source pixel (x, y) is on screen.
+    anchors: ["pixel(x, y)"]
+
+  # The Pixel History pane: the draw calls that touched the picked pixel.
+  pixel-history:
+    # `draws`: each row's draw call, in order; `last-draw`: the last row's.
+    properties: { count: int, pixel: text, draws: lines, last-draw: text }
+    children: { history-entry: many }
+    affordances: [click]
+    # `last-entry`: the last row.
+    anchors: [last-entry]
+
+  history-entry:
+    keys: [geid]
+    properties: { geid: int, draw: text, result: text, selected: bool, title: text }
+    affordances: [click]
+
+  # The Shader Debug pane: the shader's source, the current step and its
+  # values.
+  shader-debug:
+    properties:
+      source: lines
+      # The text of the source line the current step is on.
+      current: text
+      # "name type value" per row.
+      variables: lines
+      registers: lines
+      step: text
+    children: { panel-button: many }
+
+  # The hover card an editor shows over a symbol, with its command links.
+  hover-card:
+    properties: { text: lines }
+    children: { hover-link: many }
+
+  hover-link:
+    keys: [label]
+    properties: { label: text }
+    affordances: [click]
+
+  # A cross-process boundary in the event log: where a request, a response or
+  # a realm crossing joins this recording to another.
+  event-marker:
+    # A boundary fires more than once in a recording (a call and its
+    # return): its key's value tells the firings apart.
+    keys: [boundary, key-value]
+    properties:
+      boundary: text
+      # The boundary's chip, as drawn (`[account-balance]`).
+      chip: text
+      # The correlation key's value.
+      key-value: text
+      # The row shows the crossing's direction.
+      direction: bool
+    affordances: [click]
+    # pw8: `chip`: the boundary's chip, where a click jumps to the recording
+    # on the other side.
+    anchors: [chip]
+
+  # The in-document find (Ctrl+F), when open: its query and how many matches
+  # it found (`2 of 12`: the current one, of all).
+  find-field:
+    properties: { query: text, count: text }
+
+  # --- pw4 ---
+  # The session strip's "+": a new, empty session.
+  session-add:
+    properties: {}
+    affordances: [click]
+
+  # The pane layout's shape: its stacks and, in order, their tabs.
+  layout:
+    properties: { stacks: int, shape: text }
+
+  # A tracepoint's expression editor, opened on an editor line.
+  tracepoint-editor:
+    keys: [line]
+    properties:
+      line: int
+      text: lines
+      focused: bool
+      # The rows of the expression drawn, and whether the editor's zone holds
+      # them all (it grows and shrinks with the expression).
+      rows: int
+      fits: bool
+      # pw6: "Tracepoint is disabled" is drawn over it.
+      disabled: bool
+      # pw6: drawn by the shared editor (the sharedEditor setting).
+      shared: bool
+    # pw6: `panel-button`s: its menu's entries while open (Disable / Enable).
+    children: { panel-button: many }
+    affordances: [click, text-entry, focusable]
+    # pw5: `run`, the editor's Run button (▷); pw6: `menu`, its ☰ button.
+    anchors: [run, menu]
+
+  # A pane's search box and what it found.
+  search-box:
+    keys: [pane]
+    properties: { pane: text, value: text, focused: bool }
+    children: { search-result: many }
+    affordances: [click, text-entry, focusable]
+
+  search-result:
+    keys: [text]
+    properties: { text: text }
+    affordances: [click]
+
+  # The keyboard shortcuts dialog: the stepping rows and the shortcut
+  # reference (every live row, and what shadows what).
+  shortcuts-dialog:
+    properties: { scope: text }
+    children: { shortcut-row: many, binding-row: many, dialog-button: many }
+
+  shortcut-row:
+    keys: [action]
+    properties: { action: text, chord: text }
+
+  binding-row:
+    keys: [operation, key]
+    properties: { operation: text, key: text, layer: text, shadowed-by: text, text: text }
+
+  # The Low Level Code view: a recording's instructions under their source
+  # lines.
+  low-level-code:
+    # `focused`: the keyboard focus is in its pane (a press on its header
+    # focuses the pane without moving the debugger, as a press on a row would).
+    # `error`: the pane's statement in place of a listing ("compiling …",
+    # "could not compile …"), "" when it shows one.
+    # `pointer`: the offset of the instruction the replay is at;
+    # `pointer-index`: its place in the listing (0 the first instruction, -1
+    # none) — where the program is loaded moves the offsets from one
+    # recording and machine to the next, and leaves the places.
+    properties: { count: int, sync: text, stepping: text, address: text, focused: bool, pointer: text,
+                  pointer-index: int, error: text }
+    children: { instruction: many, source-line: many }
+    affordances: [click, focusable]
+    # `header`: the header's stepping note; `pointer`: the instruction the
+    # replay is at (a press there selects it and moves nothing).
+    anchors: [header, pointer]
+    assertions:
+      pointer-at(offset): "some instruction: instruction.offset == offset and instruction.executing"
+      all-offsets-match(re): "every instruction: instruction.offset matches re"
+      # A generated-source listing's row text is the instruction's `name`.
+      active-row-shows(re): "some instruction: instruction.active and instruction.name matches re"
+      # A row is anchored to the line asked about (marked active).
+      has-active-row: "some instruction: instruction.active"
+      executing-shows(re): "some instruction: instruction.executing and instruction.args matches re"
+
+  instruction:
+    keys: [offset]
+    properties: { offset: text, name: text, args: text, source: text, active: bool, executing: bool, focused: bool }
+    affordances: [click, context-click]
+
+  source-line:
+    keys: [number]
+    properties: { number: int, active: bool }
+
+  # An output pane's horizontal bar, in columns: the line's width, the view's,
+  # the first column shown, and the thumb.
+  h-scrubber:
+    keys: [pane]
+    properties:
+      pane: text
+      content: int
+      viewport: int
+      left: int
+      thumb-px: int
+      track-px: int
+      # The line is wider than the view.
+      overflows: bool
+      # The view shows the line's end.
+      at-end: bool
+      # Where the view's middle is, as a fraction of the line (0.5: the
+      # line's middle), to two places; and the first column shown, in
+      # characters.
+      centre: number
+      left-columns: int
+      # The thumb is viewport/content of the track, 20 px at least.
+      thumb-proportional: bool
+      # The corner: the pane's vertical scrubber stops above the bar, and the
+      # bar stops left of it.
+      clear-of-vertical: bool
+    affordances: [click, drag-source, drop-target]
+    # `track(f)`: the point at fraction f of the track; `thumb`: the thumb's
+    # middle; `start`: the track's first pixel.
+    anchors: [track(f), thumb, start]
+
+  # A table pane (Event Log, Call Trace, Variables): whether its columns fit
+  # or scroll, and its cells.
+  table-pane:
+    keys: [pane]
+    properties:
+      pane: text
+      # `fit` or `scroll`, as the pane decided.
+      fit: text
+      # The body scrolls sideways (overflow-x auto or scroll).
+      sideways: bool
+      # The body is wider than the pane.
+      wider: bool
+      scroll-left: int
+      # The output column's title is over its cells.
+      header-follows: bool
+    children: { table-cell: many, column-header: many }
+    affordances: [click, wheel]
+    assertions:
+      cuts-drawn: "every table-cell: table-cell.cut == table-cell.drawn-cut"
+      has-cut: "some table-cell: table-cell.cut"
+      # Every cell of this column shows some text.
+      column-filled(col): "every table-cell: table-cell.column != col or table-cell.text != \"\""
+      # A cell of this column is cut.
+      column-cut(col): "some table-cell: table-cell.column == col and table-cell.cut"
+      # Every cut cell of this column: its whole text and the text drawn.
+      cut-column-matches(col, whole, drawn): "every table-cell: table-cell.column != col or not table-cell.cut or (table-cell.full matches whole and table-cell.text matches drawn)"
+
+  table-cell:
+    keys: [cell]
+    properties:
+      cell: text
+      column: text
+      # The text drawn and the whole text.
+      text: text
+      full: text
+      # The pane's model cut it; the browser draws it cut.
+      cut: bool
+      drawn-cut: bool
+    affordances: [click, context-click, drop-target]
+    anchors: [ellipsis, text-start]
+
+  column-header:
+    keys: [column]
+    # `cells`: its width in 8-pixel cells, the unit the native front-ends
+    # remember it in. `sorted`: ▲ or ▼ when the rows are sorted by this column
+    # (a press on the header sorts them), else "".
+    properties: { column: text, label: text, cells: int, sorted: text }
+    affordances: [click, drag-source]
+    anchors: [separator]
+
+  # A table cell's tooltip (the whole text of a cut cell the pointer rests
+  # on), its lines as wrapped and the widest of them in characters.
+  table-tooltip:
+    properties: { text: lines, widest: int }
+
+  # A row's detail, opened under it: the row's whole text.
+  row-detail:
+    properties: { text: lines, count: int }
+
+  # The Live Edit (HCR) panel: where a typed edit's answer stays.
+  live-edit-panel:
+    properties: { status: text, detail: text }
+    children: { text-field: optional }
+
+  # --- pw7 -----------------------------------------------------------------
+  # The actions offered beside a value under the pointer (its `+`, which adds
+  # it to the scratchpad).
+  value-actions:
+    children: { panel-button: many }
+
+  # A row of Find in Files, by where it is (`app/main.py:26`).
+  fif-match:
+    keys: [location]
+    properties: { location: text, line: int, highlight: text, selected: bool }
+    affordances: [click, double-click]
+
+  # One of Find in Files' option toggles (`case`, `word`, `regex`).
+  fif-option:
+    keys: [name]
+    properties: { name: text, on: bool }
+    affordances: [click]
+
+  # A pane's own search field: its text, and how much of it is selected.
+  search-field:
+    properties: { value: text, focused: bool, selected-text: text }
+    affordances: [click, text-entry, focusable]
+
+  # A request of the Requests panel, by its `#`.
+  request-row:
+    keys: [id]
+    properties: { id: text, method: text, url: text, status: text, selected: bool }
+    # drop-target: where the list/detail handle is dragged to.
+    affordances: [click, double-click, context-click, drop-target]
+
+  # The detail of the selected request: its tabs and which is in front.
+  request-detail:
+    properties: { active-tab: text, tabs: lines }
+    children: { detail-tab: many }
+    affordances: [click]
+
+  detail-tab:
+    keys: [label]
+    properties: { label: text, active: bool }
+    affordances: [click]
+
+  # The handle between a pane's list and its detail: dragged, it resizes them.
+  resize-handle:
+    affordances: [drag-source]
+
+  # The Shell pane: its state (`running`), its status words and its rows.
+  shell:
+    properties: { state: text, status: text, text: lines, count: int }
+    children: { shell-row: many }
+    affordances: [click, focusable, text-entry]
+    assertions:
+      shows(t): "text contains t"
+      has-mark(m): "some shell-row: shell-row.mark == m"
+
+  # One output line of the shell: its text, its recording mark (`start` on a
+  # recording's first line, `range` on the next, `none`) and the glyph its
+  # gutter draws.
+  shell-row:
+    keys: [text, mark]
+    properties: { text: text, mark: text, gutter: text }
+    affordances: [click]
+    # `gutter`: the row's mark column, where a click opens its recording.
+    anchors: [gutter]
+
+  # The caption bar: the logo (the menu button), the debug controls, the
+  # omnibox and the session tabs, laid out in one row. `seam` is the gap in
+  # pixels between its bottom and the content below it; `buttons`: the debug
+  # controls drawn; `placeholder`: the omnibox's empty text.
+  caption-bar:
+    properties: { seam: int, buttons: int, placeholder: text, opaque: bool, fixed: bool }
+    children: { caption-logo: optional, caption-controls: optional, caption-omnibox: optional,
+                caption-tabs: optional, session-overflow-menu: optional }
+
+  caption-logo:
+    properties: { has-image: bool }
+    affordances: [click]
+
+  caption-controls:
+    properties: { buttons: int }
+
+  caption-omnibox:
+    # `dimmed` / `inert`: drawn faded and ignoring the pointer (while a
+    # welcome screen is up there is no trace for it to act on).
+    properties: { value: text, focused: bool, enabled: bool, dimmed: bool, inert: bool }
+    affordances: [click, text-entry, focusable]
+
+  # The session tabs' area: the overflow chevron and the `+` (new tab).
+  caption-tabs:
+    properties: { shown: int }
+    children: { panel-button: many }
+
+  # A row of a menu the caption bar opens (the session tabs' overflow list).
+  menu-row:
+    keys: [label]
+    properties: { label: text, active: bool, folder: bool }
+    affordances: [click]
+
+  # The session tabs that do not fit, listed by the overflow chevron.
+  session-overflow-menu:
+    properties: { count: int }
+    children: { menu-row: many }
+
+  # The status bar's notification history: every notice it has shown.
+  notification-history:
+    properties: { text: lines, count: int }
+    assertions:
+      never-says(t): "not (text contains t)"
+
+  # The view a welcome tab shows under the caption bar (the welcome screen's
+  # host, as wide as the window).
+  welcome-view:
+    properties: {}
+
+  # The edit-mode commands' toolbar.
+  edit-toolbar-strip:
+    properties: { shown: bool }
+
+  # --- pw5 deepreview ---
+  # A review's diff tab as a reader sees it: the inline diff editor of one
+  # file (the modified side, with the old revision's lines drawn into it),
+  # its decorations, the Omniscience band of values beside it, the boundaries
+  # of the regions it keeps collapsed, and the in-editor controls that choose
+  # which call and which loop pass the values are from.
+  review-diff:
+    keys: [file]
+    properties:
+      file: text
+      # One inline (unified) diff editor, not two panes side by side.
+      inline: bool
+      # The Monaco theme every editor of the tab wears (`vs-dark`, …; the
+      # themes, space-separated, when they differ).
+      theme: text
+      # Distinct syntax-token colours in the shown code, and in the old
+      # revision's deleted lines.
+      token-kinds: int
+      deleted-lines: int
+      deleted-token-kinds: int
+      # Whole-line decorations: added and context lines of the new side,
+      # removed and context lines of the old side, the `@@` dividers of each,
+      # and the gutter marks beside added / removed lines.
+      added: int
+      removed: int
+      context-new: int
+      context-old: int
+      hunk-headers: int
+      hunk-headers-old: int
+      gutter-added: int
+      gutter-removed: int
+      # Word-level marks inside partially changed lines; `narrow-marks`: at
+      # least one mark is narrower than the widest line (a word, not a line).
+      word-inserts: int
+      word-deletes: int
+      narrow-marks: bool
+      # The line numbers on screen, in each revision's gutter.
+      new-lines: lines
+      old-lines: lines
+      # The collapsed regions: how many lines each boundary handle says it
+      # hides, the handles, and the first fold band's text.
+      hidden: lines
+      boundaries: int
+      collapsed: text
+      # The execution overlay: lines drawn as run / not run, the value chips
+      # (`<x> 10 <y> 20 …`, in document order), and how they are drawn.
+      flow-hit-lines: int
+      flow-skip-lines: int
+      values: text
+      value-chips: int
+      value-names: int
+      value-boxes: int
+      value-columns: int
+      omni-names: int
+      omni-values: int
+      # chips drawn inside the code text instead of the band beside it
+      values-in-code: int
+      # the spread (px) of the bands' left edges, and columns drawn past the
+      # pane's right edge
+      band-spread: int
+      values-past-edge: int
+      # every band below a changed line carries that line's diff wash, and no
+      # other band paints a background
+      band-washes: bool
+      # px between the gutter's widest number and the code
+      gutter-gap: int
+      # px between the fold band's left edge and the `@@` divider's, and
+      # whether they are filled with one colour
+      fold-divider-offset: int
+      fold-divider-same-fill: bool
+      # the hunk selection toolbar: its count and its actions
+      hunk-selection: text
+      hunk-actions: lines
+      # the old in-text value rendering (`// x = …`) is not drawn
+      comment-values: int
+    children: { review-boundary: many, hunk-divider: optional, invocation-selector: many, review-loop: many }
+    affordances: [wheel]
+    assertions:
+      shows-new-line(n): "new-lines contains n"
+      lacks-new-line(n): "not (new-lines contains n)"
+      shows-old-line(n): "old-lines contains n"
+      offers-no-action(a): "not (hunk-actions contains a)"
+      values-lack(t): "not (values contains t)"
+
+  # One boundary handle of a collapsed region: `above` reveals the region's
+  # topmost hidden lines, `below` its bottom ones.
+  review-boundary:
+    keys: [direction]
+    properties:
+      direction: text
+      hidden: int
+      # its accessible name, and whether a keyboard reaches it (a button in
+      # the tab order)
+      label: text
+      keyboard: bool
+      # drawn with a fill and a resize pointer
+      painted: bool
+      resize-cursor: bool
+      focused: bool
+    affordances: [click, context-click, drag-source, drop-target, focusable]
+    # `down-3`: three lines below the handle, where a drag that reveals three
+    # lines ends
+    anchors: [down-3]
+
+  # The first `@@` divider of a review's diff tab.
+  hunk-divider:
+    properties: { text: text }
+    affordances: [click]
+
+  # The in-editor control above a function: which recorded call of it the
+  # values show (`main: call 1 / 2`).
+  invocation-selector:
+    keys: [function]
+    properties: { function: text, label: text }
+    children: { step-button: many }
+
+  # The in-editor control above a loop: which pass the values show
+  # (`iteration 1 / 3`), stepped or dragged.
+  review-loop:
+    keys: [function]
+    properties: { function: text, label: text, slider: bool, slider-width: int }
+    children: { step-button: many, loop-slider: optional }
+
+  step-button:
+    keys: [direction]
+    properties: { direction: text, enabled: bool }
+    affordances: [click]
+
+  # The loop control's slider: `grip` is its handle, `end` the far end of
+  # its track.
+  loop-slider:
+    properties: { width: int }
+    affordances: [drag-source, drop-target]
+    anchors: [grip, end]
+
+  # The menu a collapsed region's boundary opens.
+  expand-menu:
+    properties: { direction: text, count: int }
+    children: { expand-option: many }
+
+  expand-option:
+    keys: [label]
+    properties: { label: text, focused: bool }
+    affordances: [click]
+
+  # The review's trace-context selector in the VCS panel header.
+  trace-context:
+    properties: { options: lines, value: text, focused: bool }
+    affordances: [click, focusable]
+
+  # What a review leaves on the whole window: the deleted standalone review
+  # panel's elements and test hooks (none), the full-file editors' diff
+  # overlays (added / modified lines), their execution overlay, the diff tabs
+  # and source editors open, and unsaved edits.
+  review-state:
+    properties:
+      legacy-panel: int
+      legacy-hooks: int
+      diff-added-lines: int
+      diff-modified-lines: int
+      flow-lines: int
+      flow-kinds: lines
+      value-chips: int
+      diff-tabs: int
+      source-editors: int
+      unsaved: int
+      # every notification the window shows now, as one text
+      notices: text
+      # what has the keyboard focus (`tag.class …`)
+      focus: text
+
+# A second client of the application (scenarios with more than one client:
+# DemoVideoScript-pm spec/Proposal-Multiple-Clients.md). `host-page` is one
+# more browser page on the `ct host` the stage started.
+clients:
+  host-page: ~
+  # pw6: the desktop window the application opened last (a pane sent to a
+  # new window, a session tab opened in a new window). The binding's
+  # `openClient` returns once the window shows its session's stop: until
+  # then it is still being sent its session, which on a loaded host outlasts
+  # both the settle wait after the open and a condition's default timeout.
+  app-window: ~
+
+sync:
+  # The implicit condition after every input: the window handled it and the
+  # screen stopped changing.
+  settled: ~
+  # The replay engine has answered everything asked of it and the window shows
+  # where the replay is.
+  replay-idle: ~
+  # --- terminal ---
+  # The front-end has drawn its first frame (a replay or Edit mode).
+  ready: ~
+  # pw1: the Agent Activity pane's agent (the `stub-agent` stand-in) was
+  # asked to open its session.
+  agent-session-open: ~
+
+flows:
+  # --- pw4 ---
+  # One edit typed into the Live Edit panel, answered "applied" with no
+  # restart.
+  live-edit(edit):
+    - click: { at: 'live-edit-panel/text-field[label="edit"]' }
+    - chord: Ctrl+A
+    - type: "${edit}"
+    - key: Enter
+      settle: false
+    - wait: { until: { at: live-edit-panel, status: applied }, timeout: 300s }
+    - expect: { at: live-edit-panel, detail: { contains: "no restart" } }
+  # A forward stepping key and its reverse: one stop on, then back where it
+  # started (a key dispatched twice would not come back).
+  step-and-back(file, forward, reverse, there, back):
+    - chord: "${forward}"
+      settle: false
+    - wait: { until: { at: 'editor[file="${file}"]', assert: "stopped-at(${there})" }, timeout: 60s }
+    - wait: { until: replay-idle, timeout: 60s }
+    - chord: "${reverse}"
+      settle: false
+    - wait: { until: { at: 'editor[file="${file}"]', assert: "stopped-at(${back})" }, timeout: 60s }
+    - wait: { until: replay-idle, timeout: 60s }
+    - expect: { at: 'editor[file="${file}"]', assert: "stopped-at(${back})" }
+
+stages:
+  record-program:
+    summary: >-
+      Record a test program (a path under the repository's test-programs, or
+      a named fixture) once, kept for the lane, and remember it as the
+      recording the next `open-recording` opens. `$project/<file>` records a
+      program `write-project` wrote, into this run only. `lang` is `ct record
+      --lang`, for a target only the user's word identifies (`polkavm`,
+      `solana`; a Solana crate is compiled with `cargo build-sbf` first).
+      `stylus-trace` (a file in the program's folder) is a Stylus
+      transaction's EVM trace: the contract crate is built to WebAssembly and
+      recorded against it (`ct record --stylus-trace`). `nim: stock` records
+      a Nim program with the stock Nim compiler the dev shell pins
+      (GENC_STOCK_NIM, nixpkgs' nim), whose C carries `#line` directives; the
+      stage fails, saying so, without it.
+    params: { program: text, backend: text, lang: text, stylus-trace: text, nim: text }
+  nim-project:
+    summary: >-
+      Write the Nim compile-time tracing project (a macro, a static block, a
+      constant section and a NimScript file) into a fresh folder and record a
+      trace of its static block with the product's own route; that trace is the
+      recording the next `open-recording` opens, with the project folder as
+      its working directory.
+    params: {}
+  open-recording:
+    summary: >-
+      Start the front-end on the recording the stage prepared (or on
+      `recording`, a recording folder), in a window of the given size, with
+      the replay at its entry or at `tick`. `deployment: web` serves it with
+      `ct host` and opens its page in a browser instead (front-ends that
+      have one). `panes` (comma-separated pane roles: call-trace, event-log,
+      variables, scratchpad, requests) are opened with it, for a front-end
+      that opens its panels one by one (VS Code); a front-end whose layout
+      already shows them ignores it.
+    params: { recording: text, tick: int, width: int, height: int, deployment: text, panes: text }
+  open-project:
+    summary: >-
+      Start the front-end in Edit mode on a project folder (a path under
+      test-programs, or `$project` for the stage's own); `from-inside: true`
+      starts it as `ct edit .` from a shell in that folder.
+    params: { folder: text, file: text, width: int, height: int, from-inside: bool }
+  open-review:
+    summary: >-
+      Start the front-end on a DeepReview dataset (`ct review <dataset>`; a
+      path relative to the repository), in the review layout. Without
+      `dataset`, on the one `review-dataset` prepared.
+    params: { dataset: text, width: int, height: int }
+  select-keymap:
+    summary: Choose the base keymap the front-end starts with (cua, emacs, vim, kakoune).
+    params: { preset: text }
+  plant-config:
+    summary: Write a file into the front-end's configuration directory before it starts (keybindings.json, a layout, settings).
+    params: { file: text, content: text }
+  start-from-layout:
+    summary: Start from a saved layout (a file under the pack's fixtures).
+    params: { layout: text }
+  # --- terminal ---
+  write-project:
+    summary: >-
+      Write a project folder from `files` (a relative path to its content; a
+      path ending in `/` is an empty folder). The next `open-project` with
+      `folder: $project` edits it, and the next `open-recording` runs in it.
+    params: { files: record }
+  front-end-options:
+    summary: >-
+      Start the front-end with these command-line options (`name: value` is
+      `--name=value`), on a terminal of type `term` (the terminal flavour's
+      `TERM`), with these environment variables (`$project` in a value is
+      the stage's project folder).
+    params: { options: record, term: text, env: record }
+  delay-stop-drawing:
+    summary: >-
+      Test-only: the front-end holds each move's answer `ms` milliseconds
+      before it draws the stop, showing the move in flight meanwhile — so a
+      sync condition that fires before the stop is shown is caught rather
+      than hidden in one frame. The pack's one stand-in.
+    params: { ms: int }
+  drop-recorded-file:
+    summary: >-
+      Copy the prepared recording into the run's root without its recorded
+      source file `name`, and open that copy: a recording that lacks a file.
+    params: { name: text }
+  fixture-project:
+    summary: >-
+      Write one of the repository's fixture projects into the run's project
+      folder (`c-build`: a C project whose src/main.c fails to build;
+      `noir-build-errors`: a Noir crate with two type errors; `noir-tests`: a
+      Noir crate with a passing and a failing test; `noir-constraints`: a
+      Noir circuit for the Constraints pane; `vcs-repo`: a git repository
+      with a modified, an added and an untracked file; `verno-type-error`,
+      `verno-counterexample`: a Verno package with a recorded verifier run;
+      `verno-run`, `verno-held`, `verno-proved`: the type-error package under
+      its own name, its run replayed to the end, held in flight, or empty and
+      exiting 0).
+      `write-project` may add
+      files to it.
+    params: { name: text }
+  request-session:
+    summary: >-
+      Write the demo request session (a recording whose program served eight
+      HTTP requests) and make it the recording the next `open-recording` opens.
+    params: {}
+  plant-state:
+    summary: >-
+      Write a file into the front-end's state directory before it starts (a
+      saved layout document, the stored keymap preference).
+    params: { file: text, content: text }
+  visual-replay-capable:
+    summary: >-
+      Give the prepared recording (a copy, in the run) the graphics stream of a
+      visual recording, so it opens with the Video Player, Pixel History and
+      Shader Debug panes; the player is the one
+      `CODETRACER_VISUAL_REPLAY_FAKE_PLAYER` (a `front-end-options` env)
+      selects.
+    params: {}
+  visual-recording:
+    summary: >-
+      The visual fixture's GL scene recording (a program that drew frames),
+      as the recording the next `open-recording` opens; it needs the visual
+      replay player.
+    params: {}
+  native-recording:
+    summary: >-
+      Record the native fixture (the C sudoku solver of
+      codetracer-native-test-programs) with rr, as the native suites do, and
+      remember it as the recording the next `open-recording` opens.
+    params: {}
+  # --- pw1 ---
+  stub-agent:
+    summary: >-
+      Put a stand-in for the Agent Activity pane's agent first on the
+      front-end's PATH (`refusing`: refuses the first prompt, answers the
+      next, holds a prompt marked to be held; `replay`: replays a review's
+      session; `live`: the replay agent's live session, which answers a
+      prompt with a streamed review-evidence turn, named to the front-ends
+      that start their agent themselves).
+    params: { agent: text }
+  review-session:
+    summary: >-
+      A review's agent session (the replay agent's: `evidence`, two
+      collections of review evidence, or `test-run`, a `ct test` run of the
+      recorded program), resolved as `ct review` resolves one and handed to
+      the front-end beside its recording; with `live`, the Agent Activity
+      pane's own agent is the replay agent too.
+    params: { run: text, live: bool }
+  review-dataset:
+    summary: >-
+      Write a review dataset (the sample review) into the run's root — plain,
+      or with a session reference the replay agent resolves (`session`,
+      `session-pruned`, `test-run`, `test-run-partial`, `evidence`) — and
+      remember it as the review the next `open-review` opens.
+    params: { variant: text }
+  open-welcome:
+    summary: Start the front-end with nothing open (its welcome screen), in a window of the given size.
+    params: { width: int, height: int }
+  plant-edit-layout:
+    summary: Leave a saved edit-mode layout from a previous session (a review layout fixture by name).
+    params: { fixture: text }
+  project-fixture:
+    summary: >-
+      Write a named project (a C project with build tasks, a Noir crate, a
+      lone file, a folder whose task prints the compilers' diagnostics, …)
+      into the run's root; `open-project` with `folder: $project` opens it.
+    params: { name: text }
+  git-workspace:
+    summary: >-
+      Write a small committed git repository (src/feature.nim and its test)
+      into the run's root; `open-project` with `folder: $project` opens it.
+    params: {}
+  agent-harbor:
+    summary: >-
+      Point the front-end at a real Agent Harbor REST server prepared with the
+      CodeTracer worktree scenario (`AGENT_HARBOR_M7_BASE_URL`, and its
+      optional key, scenario and mock agent); fails, naming it, when none is
+      configured.
+    params: {}
+  read-only-file:
+    summary: >-
+      Make a file of the stage's project folder read-only on disk (after it
+      was recorded): saving it fails, as it does for a file the user may not
+      write.
+    params: { file: text }
+  materialized-recording:
+    summary: >-
+      Produce a recording from this tree with the repository's own recorders
+      (`scripts/materialize-recording.sh <name>`; `cross-process-three-trace`
+      is the account-balance demo: a browser's JavaScript and WebAssembly and
+      a Node server, one session) and remember it as the recording the next
+      `open-recording` opens.
+    params: { name: text }
+  known-recording:
+    summary: >-
+      Import the recording the stage prepared into this run's list of
+      recordings, as an earlier session leaves the recordings a user opened
+      (the welcome screen lists it among the recent traces).
+    params: {}
+  copy-project:
+    summary: >-
+      Copy a project folder (a path under test-programs, or a single file
+      there) into the run's own project folder; `open-project` with `folder:
+      $project` then edits the copy, never the repository's files.
+    params: { folder: text }
+  # --- pw5 ---
+  portable-recording:
+    summary: >-
+      A portable MCR recording made on another platform (`platform`: a folder
+      of codetracer-example-recordings/mcr, e.g. linux-x86_64, macos-arm64),
+      laid out as a recording folder with its source and binaries, as the
+      recording the next `open-recording` opens.
+    params: { platform: text }
+  beam-recording:
+    summary: >-
+      The BEAM recorder's canonical_flow program (`language`: elixir or
+      erlang), recorded with the recorder's own fixture script, as the
+      recording the next `open-recording` opens.
+    params: { language: text }
+  saved-layout:
+    summary: >-
+      Write a saved layout into the front-end's state directory (`file`: the
+      front-end's own layout document, e.g. gpui-layout.json): the shared
+      default with `ops` applied — `dock:<pane>:<edge>`, `activate:<pane>`,
+      `merge:<pane>:<beside>`, comma-separated, panes by their layout names
+      (`eventLog`, `agentActivity`, …) — the arrangement a user left it in.
+    params: { file: text, ops: text }
+  # --- pw4 ---
+  hcr-flame:
+    summary: >-
+      Prepare the hot-code-reload flame demo (codetracer-flame-demo, a
+      patchable Godot engine, its GDExtension and the HCR coordinator driver)
+      and hand the window its CODETRACER_HCR_* settings; `platform` names the
+      platform the arm is for, and an `edit` the Apply Edit command applies.
+      Fails naming the missing prerequisite.
+    params: { platform: text, edit: text, arm: text }
+
+  # --- pw6 ---
+  add-recording:
+    summary: >-
+      Record another program (as `record-program` does) — or take an
+      existing recording (`recording`, a folder or a `.ct` file) — that the
+      front-end lists among its recent traces when it starts, without
+      opening it: what a user who recorded it earlier finds on the welcome
+      screen.
+    params: { program: text, backend: text, recording: text }
+
+# Changes outside the application during a run (an `act:` step).
+actions:
+  write-file:
+    summary: >-
+      Another program (a second editor, a formatter, a `git checkout`) writes a
+      file of the stage's project folder (`file`, relative to it) with
+      `content`; the application is not told.
+    params: { file: text, content: text }
+  make-read-only:
+    summary: >-
+      A file of the stage's project folder (`file`) loses its write permission
+      on disk, as when another user or tool locks it.
+    params: { file: text }
+  run-product:
+    summary: >-
+      The user runs the product again from a shell (`args`, in `cwd`;
+      `$project` is the stage's project folder): a second process, which hands
+      its request to the window that is open and exits.
+    params: { args: lines, cwd: text }

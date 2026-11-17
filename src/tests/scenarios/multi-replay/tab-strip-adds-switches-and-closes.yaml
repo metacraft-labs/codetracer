@@ -1,0 +1,32 @@
+scenario: 1
+name: multi-replay/tab-strip-adds-switches-and-closes
+pack: codetracer
+summary: >-
+  The session strip shows one tab once the recording has loaded; "+" adds a
+  second tab and makes it the active one; clicking a tab makes it active and
+  clicking the other one switches back; the active tab's close button removes
+  it and the remaining tab becomes active.
+
+stage:
+  - use: record-program
+    with: { program: py_console_logs/main.py }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 180s }
+  - wait: { until: { at: 'editor[file="main.py"]', present: true }, timeout: 60s }
+  - expect: { at: session-strip, count: 1 }
+  - click: session-strip/session-add
+  - wait: { until: { at: session-strip, count: 2 }, timeout: 60s }
+  - expect: { at: session-strip, active: "Trace 2" }
+  - click: 'session-strip/session-tab[title="main.py"]'
+  - wait: { until: { at: session-strip, active: "main.py" }, timeout: 30s }
+  - wait: { until: { at: 'editor[file="main.py"]', present: true }, timeout: 60s }
+  - click: 'session-strip/session-tab[title="Trace 2"]'
+  - wait: { until: { at: session-strip, active: "Trace 2" }, timeout: 30s }
+  - expect: { at: 'editor[file="main.py"]', absent: true }
+  - click: { at: 'session-strip/session-tab[title="Trace 2"]', anchor: close }
+  - wait: { until: { at: session-strip, count: 1 }, timeout: 30s }
+  - expect: { at: 'session-strip/session-tab[title="Trace 2"]', absent: true }
+  - wait: { until: { at: session-strip, active: "main.py" }, timeout: 30s }
+  - wait: { until: { at: 'editor[file="main.py"]', present: true }, timeout: 60s }

@@ -1,5 +1,5 @@
 {
-  "D1": "Error: the panel's field has the focus",
+  "D1": "Error: Ctrl+Shift+F reveals the panel",
   "D2": "Error: the field's text is selected",
   "D3": "Error: `:grep` alone opens the field on the selection, selected",
   "D4": "Error: the field holds the editor's selection",

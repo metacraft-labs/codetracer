@@ -1,0 +1,56 @@
+ Sessions  ⚲ ✕
+ SESSIONS  14 sessions · 2 need input · 2 idle · 7 running · 1 queued · 1 failed · 1 ended
+ invented working set: 14 sessions over 4 initiatives
+ ▾ ● Telemetry upload retries                                                                                                                         1/4 1 needs input · 2 running
+ ● Retry telemetry uploads with exponential backoff                                    needs input CodeTracer · Claude 2.1.0 · host-a                                           now
+   assistant: Should a 429 from the collector count against the retry budget, or wait…
+ ● Persist the telemetry queue across restarts                                         running TUI · Claude 2.1.0 · host-e                                                       4m
+   assistant: Writing the queue to telemetry-queue.db before each upload; checking th…
+ ● Cap the telemetry retry budget per hour                                             running CodeTracer · Claude 2.1.0 · host-a                                                5m
+   assistant: Counting retries per rolling hour and dropping past 120; running teleme…
+ ● Add jitter to the telemetry retry delays                                            completed WebUI · Claude 2.1.0 · host-c                                                   1m
+   assistant: Retries spread across the whole window; no 100 ms bucket holds more tha…
+ ▾ ● CI runner migration                                                                                                                    4/10 1 needs input · 1 idle · 1 running
+ ● Cache the dependency graph between CI runs                                          needs input CLI · Opencode 0.6.1 · host-b                                                now
+   assistant: Is a cache miss on every lockfile change acceptable, or should the key…
+ ○ Migrate the CI matrix to the new runners                                            idle CodeTracer · Opencode 0.6.1 · host-d                                                 3m
+   assistant: Every Linux job of the matrix runs on the new runners; the matrix is gr…
+ ● Fix the flaky clock-skew test on the new runners                                    running Telegram · Opencode 0.6.1 · host-f                                                4m
+   assistant: Repeating time::clock_skew 200 times on a new runner to catch the flake.
+ ▾ ● Route cache on the new storage layer                                                                                                         2/6 1 idle · 1 running · 1 failed
+ ○ Migrate cached routes without a cold start                                          idle Telegram · Codex 0.9.4 · host-f                                                      5m
+   assistant: Routes migrate in 50k batches with no cold start; the p99 stays under 8…
+ ● Port the route cache to the new storage layer                                       running CLI · Codex 0.9.4 · host-b                                                        1m
+   assistant: Moving RouteCache::get and ::put onto the storage layer's batch API.
+ ● Benchmark route cache reads on the new layer                                        failed CodeTracer · Codex 0.9.4 · host-d                                                  2m
+   assistant: The read benchmark crashed at 6 M lookups: the bench harness leaks file…
+ ▾ ● Settings redesign                                                                                                                                                3/8 2 running
+ ● Split the settings page into tabs                                                   running WebUI · Grok 1.2.0 · host-c                                                       2m
+   assistant: Splitting SettingsPage into General, Account, Notifications and Advance…
+ ● Add search to the settings page                                                     running TUI · Grok 1.2.0 · host-e                                                         3m
+   assistant: Indexing every setting's label and help text for the settings search fi…
+ ▾   No initiative                                                                                                                                             1 running · 1 queued
+ ● Replace the hand-rolled JSON writer                                                 running CLI · Codex 0.9.4 · host-b                                                        6m
+   assistant: Replacing the hand-rolled JSON writer with the serde serializer.
+ ● Profile the importer on the large fixture                                           queued CodeTracer · Grok 1.2.0 · host-a                                                   6m
+   assistant: Queued; waiting for an agent slot to profile the importer on the large…
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    

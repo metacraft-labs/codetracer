@@ -1,0 +1,27 @@
+# Control digests for run-plat70f-pointer-mutations.py — the
+# subjects AND the suites the arms are graded by (§16c).
+# Refreshed with --record-control-hashes, gated by the
+# needle scan (§39a).
+844bc1c8de4b25f993157089fe104c1c4d62e7c868fc46796ca862b96488c963  src/common/pointer_shape.nim
+e26402fe00220a7a4788bce65ff5d2d86675d98739b8fde0d6e7a9c16738da64  src/frontend/viewmodel/viewmodels/state_pane_keys.nim
+8ccf1af3e2dfbe1c9b9450a7c2efc64432b9dc6be0f477588a792756ce49ed3d  src/frontend/tui/app/theme/pointer_protocol.nim
+4a709e46e1c01539fda428f6784b3535f3a42183eb307651eea4fa86b87714f0  src/frontend/tui/app/theme/capabilities.nim
+a7a3bb422082c3ce0dbfd6321695a4a8876ce902281ec4c17f02c3bc4e1bbeb8  src/frontend/tui/app/runtime.nim
+3f55af556114eafeb1a5f7fc686eea6206650b49f4cebfa331aa5de5f707e2c5  src/frontend/tui/host/terminal_driver.nim
+f76737aff180ffb8ce2023c92a130fc74397ae5e7e14ed1e9c295b95440a4672  src/frontend/tui/host/terminal_probe.nim
+82a88f3f2c8697dc6edab12b1b2be1b458357d4f5be0597552709fceabf7593c  src/frontend/tui/main.nim
+05116914513cefc886b1a5bbfd20d51deee7a14ca7b946b2f8d751f8b8866783  ../nim-termctl/src/nim_termctl/posix_backend.nim
+bd206f82ec3b500e52053e6eeda52e891e83aede0353ce2e485c65e1fcf50d85  src/frontend/gpui/main.nim
+fe5c284894f50c646f4c66a12fceced65f211cf24b9125d72a6183ffb53eb076  src/frontend/gpui/window_pointer.nim
+348d412ad297467f77fdde0607263dc7bd3464de3e457506921a3ae2e52530cb  src/frontend/gpui/window_clicks.nim
+b79e312b4a217396fd5c7344a81dd391c8a96fbc02950e366a0b3d9e4b9c2f7a  src/frontend/ui/pointer_stamp.nim
+86ab2aec710c6203305fc3321959c3d64b2ba9b926b537a8da6cbd984058fa7a  src/frontend/styles/components/button.styl
+afe19051c4d4f5f4622cf774a9c8af2a892c5bfb162561b65a6e7d23fa08ef25  src/frontend/viewmodel/views/isonim_state_view.nim
+3246085ee3e0c0d543085e3627231732bb352593b76d0fa468761e531576b31d  src/frontend/ui/isonim_origin_chain.nim
+5643f4af288ed8fc9f76c0fb60b2a71af66f1dce2dc96235009e4994b42a398b  src/db-backend/src/db.rs
+a8ff4f1d1d4cb210b00f011fc15ee9f130f7e5e63f87ab7e6df014d9b9d20c2b  src/frontend/viewmodel/tests/unit/test_plat70f_pointer_shapes.nim
+d20f3ae7d905ee2dfc2afb1a9270864d260a44ebd713e7c1c8c1967d4db9aa83  src/frontend/tui/tests/real_terminal/test_plat70f_pointer_pty.nim
+fc9ad59f5b25c1d1dc0daa26a90ff560de24e689937953405b6ab3dd491a7b60  src/frontend/tui/tests/real_terminal/test_plat70e_origin_keys_pty.nim
+331c596c81b0a5c214e23df965e7e8aec49131c4960e8d1e80714c7c8128f096  src/frontend/gpui/tests/test_plat70f_gpui_plan.nim
+0f94309a3be11647408d0849086bc710600d60f7b75581502487a2c379008cec  src/tests/gui/tests/value-origin/plat70f-pointer.spec.ts
+4a703c191b436827c7afd1c9d4f763ce06410369047a8edca47a713399d4bf41  src/db-backend/tests/origin_dap_test.rs

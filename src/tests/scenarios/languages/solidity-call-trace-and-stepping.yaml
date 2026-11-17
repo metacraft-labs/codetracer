@@ -1,0 +1,30 @@
+scenario: 1
+name: languages/solidity-call-trace-and-stepping
+pack: codetracer
+summary: >-
+  In the Solidity token recording (`run()`: two mints and a transfer) the
+  call trace lists `_mint` and `_transfer`; from the entry at line 1 Next
+  moves the replay to line 13, and Continue runs on to line 138.
+
+stage:
+  - use: record-program
+    with: { program: solidity_example/SolidityExample.sol }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 240s }
+  - click: 'pane-tab[label="CALLTRACE"]'
+  - wait: { until: { at: call-trace, assert: 'has-call("_mint")' }, timeout: 60s }
+  - expect:
+      at: call-trace
+      assert:
+        - 'has-call("_mint")'
+        - 'has-call("_transfer")'
+  - wait: { until: { at: status-line, location: { matches: "SolidityExample\\.sol:1#" } }, timeout: 60s }
+  - click: 'toolbar/toolbar-button[label="next-image"]'
+    settle: false
+  - wait: { until: { at: status-line, location: { matches: "SolidityExample\\.sol:13#" } }, timeout: 60s }
+  - wait: replay-idle
+  - click: 'toolbar/toolbar-button[label="continue-image"]'
+    settle: false
+  - wait: { until: { at: status-line, location: { matches: "SolidityExample\\.sol:138#" } }, timeout: 60s }

@@ -1,0 +1,30 @@
+scenario: 1
+name: terminal/origin-vim-keys
+pack: codetracer
+summary: >-
+  Under Vim, at tick 118 with `value` selected in the Variables pane, `g o`
+  opens its origin chain under it (a function call at tick 90); Esc closes
+  the chain; `o` walks the replay to the origin's tick, and
+  Shift+O walks back to tick 118.
+stage:
+  - use: record-program
+    with: { program: calc }
+  - use: select-keymap
+    with: { preset: vim }
+  - use: open-recording
+    with: { width: 200, height: 50 }
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - type: ":goto 118"
+  - key: Enter
+  - wait: { until: { at: 'variables/variable[name="value"]', present: true }, timeout: 30s }
+  - expect: { at: replay-position, tick: 118 }
+  - click: { at: 'variables/variable[name="value"]' }
+  # one chord: the keys of a pending prefix arrive together, as typed
+  - chord: g o
+  - wait: { until: { at: 'pane[title="Variables"]', assert: 'has-row("⇠ tick 90  functionCall  value <- e")' }, timeout: 30s }
+  - key: Esc
+  - key: o
+  - wait: { until: { at: replay-position, tick: 90 }, timeout: 30s }
+  - key: O
+  - wait: { until: { at: replay-position, tick: 118 }, timeout: 30s }

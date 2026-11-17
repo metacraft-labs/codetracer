@@ -113,7 +113,6 @@ ns9-row-padding = 0.125rem 0.5rem
   &.disabled
     color: colors-ui-text-primary-disabled
     border-color: colors-ui-border-disabled
-    cursor: default
 
     &:hover
       background-color: colors-ui-surface-primary-default
@@ -176,7 +175,6 @@ ns9-row-padding = 0.125rem 0.5rem
 .test-results-refresh-btn,
 .test-results-open-btn
   padding: 0 0.25rem
-  cursor: pointer
   user-select: none
   border-radius: 0.1875rem
 
@@ -189,7 +187,6 @@ ns9-row-padding = 0.125rem 0.5rem
   // exactly right: same affordance, different explanation.
   &.disabled
     color: colors-ui-text-primary-disabled
-    cursor: default
 
     &:hover
       background-color: transparent
@@ -358,9 +355,6 @@ TEST_MARK_REFRESH = url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000
     background-color: LIST_HOVER_BG
 
 // A row a press takes to its source line (PLAT-62).
-.constraints-row.linked,
-.constraints-opcode.linked
-  cursor: pointer
 
 // The selected row: the cursor a press, the list keys and the row menu share
 // — the Test Results row's selected ground.
@@ -372,6 +366,10 @@ TEST_MARK_REFRESH = url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000
   opacity: 0.6
   font-size: 0.85em
   white-space: nowrap
+
+// An opcode's line ends its row, past the operands.
+.constraints-opcode .constraints-where
+  margin-left: auto
 
 // COUNTS THAT NO LONGER DESCRIBE THE SOURCE ON SCREEN. The rows are dimmed
 // and the headline says `(stale)` beside them — both, not either. Dimming

@@ -134,6 +134,13 @@ func agentHarborSection(): CodeTracerStorySection =
       story("SessionTabsActiveOverflowed", "Session Tabs: Active Tab From The Overflow", "view", "agent-harbor-session-tabs", "single-line-active-late",
             "agent-harbor-session-tabs-active",
             "A late tab active (it takes the last visible place); the overflow menu open"),
+      # The same menu over a panel's ground rather than the window's: a panel
+      # lies under the caption bar, as in the shell, where the menu drops over
+      # whichever panel is below the bar.
+      story("SessionTabsMenuOverPanel", "Session Tabs: Overflow Menu Over A Panel", "view",
+            "agent-harbor-session-tabs", "menu-over-panel",
+            "agent-harbor-session-tabs-active",
+            "The overflow menu opening over the panel under the caption bar"),
       story("SessionTabsMultiLine", "Session Tabs: Several Lines", "view", "agent-harbor-session-tabs", "multi-line",
             "agent-harbor-session-tabs-multi",
             "The working set wrapping onto several lines"),
@@ -188,9 +195,20 @@ func agentHarborSection(): CodeTracerStorySection =
       story("InitiativeTabsPopup", "Initiative Tabs: Progress Popup", "view", "agent-harbor-initiative-tabs", "popup",
             "agent-harbor-initiative-tabs-popup",
             "The first initiative's progress popup, as on hover"),
+      # The same popup over a panel's ground rather than the window's: a
+      # panel lies under the caption bar, as in the shell, where the popup
+      # drops over whichever panel is below the bar.
+      story("InitiativeTabsPopupOverPanel", "Initiative Tabs: Popup Over A Panel", "view",
+            "agent-harbor-initiative-tabs", "popup-over-panel",
+            "agent-harbor-initiative-tabs-popup",
+            "The progress popup opening over the panel under the caption bar"),
       story("InitiativeTabsElsewhere", "Initiative Tabs: Sessions Started Elsewhere", "view", "agent-harbor-initiative-tabs", "elsewhere",
             "agent-harbor-initiative-tabs-elsewhere",
             "The [N agent harbor sessions] menu open"),
+      story("InitiativeTabsElsewhereOverPanel", "Initiative Tabs: Elsewhere Menu Over A Panel", "view",
+            "agent-harbor-initiative-tabs", "elsewhere-over-panel",
+            "agent-harbor-initiative-tabs-elsewhere",
+            "The [N agent harbor sessions] menu opening over the panel under the caption bar"),
       story("InitiativeTabsNext", "Initiative Tabs: Next Session", "view", "agent-harbor-initiative-tabs", "next",
             "agent-harbor-initiative-tabs-inbox",
             "Next taken: the first waiting session in view, its position in the inbox"),
@@ -203,6 +221,17 @@ func agentHarborSection(): CodeTracerStorySection =
       story("InitiativeTabsOverflow", "Initiative Tabs: 40 Sessions Over 5", "view", "agent-harbor-initiative-tabs", "overflow-40",
             "agent-harbor-initiative-tabs",
             "Five invented initiatives and forty sessions"),
+      story("InitiativeTabsOverflowMenuOverPanel", "Initiative Tabs: Overflow Menu Over A Panel", "view",
+            "agent-harbor-initiative-tabs", "overflow-menu-over-panel",
+            "agent-harbor-initiative-tabs-overflow-menu",
+            "Forty invented sessions over five initiatives, the +N menu opening over the panel under the caption bar"),
+      # The menu hangs from its chip; with the chip near the window's left
+      # edge (a narrow bar draws only the short active tab before it), it
+      # shifts right only as far as the window requires.
+      story("InitiativeTabsOverflowMenuNearLeft", "Initiative Tabs: Overflow Menu Near The Left Edge", "view",
+            "agent-harbor-initiative-tabs", "overflow-menu-near-left",
+            "agent-harbor-initiative-tabs-overflow-menu",
+            "Forty invented sessions over five initiatives, the shortest-named one active and the +N menu open"),
       story("InitiativeTabsLongNames", "Initiative Tabs: Long Names", "view", "agent-harbor-initiative-tabs", "long-names",
             "agent-harbor-initiative-tabs",
             "Invented initiatives with very long names"),
@@ -293,6 +322,29 @@ func agentHarborSection(): CodeTracerStorySection =
             "agent-harbor-progress-error",
             "The server could not be reached",
             state = "error"),
+      # Playback stories (`agent_harbor_playback.nim`): each surface over a
+      # synthetic scenario replayed on a clock, which the story host's chrome
+      # plays, pauses, steps and seeks. Each opens at the scenario's first
+      # frame (a host can open it at a named moment instead).
+      story("SessionTabsPlayback", "Session Tabs: Playback", "view",
+            "agent-harbor-session-tabs", "playback-front-ends", "agent-harbor-playback",
+            "Sessions from several front-ends start, ask, are answered, fail and end; a tab appears mid-run"),
+      story("SessionListPlayback", "Session List: Playback", "view",
+            "agent-harbor-session-list", "playback-front-ends", "agent-harbor-playback",
+            "The sidebar's initiatives tree while its sessions move between states"),
+      story("InitiativeTabsPlayback", "Initiative Tabs: Playback", "view",
+            "agent-harbor-initiative-tabs", "playback-initiative-run", "agent-harbor-playback",
+            "An initiative's milestones move and its recordings appear loading, fail and turn ready"),
+      panel("InitiativesPlayback", "Initiatives: Playback", "agent-harbor-initiatives",
+            "playback-front-ends", "agent-harbor-playback",
+            "The running initiative while its sessions and milestones move"),
+      panel("InitiativeProgressPlayback", "Initiative Progress: Playback",
+            "agent-harbor-initiative-progress", "playback-initiative-run",
+            "agent-harbor-playback",
+            "An initiative's milestones over its run: one blocked and resumed, the plan completed"),
+      panel("FleetPlayback", "Fleet: Playback", "agent-harbor-fleet", "playback-front-ends",
+            "agent-harbor-playback",
+            "The fleet list while sessions start, need input, fail, end and are removed"),
     ])
 
 func panelsSection(): CodeTracerStorySection =

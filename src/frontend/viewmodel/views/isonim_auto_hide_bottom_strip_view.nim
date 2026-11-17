@@ -128,6 +128,7 @@ proc renderBottomStripTab[R, N](
     tdiv(ref = tabEl,
          class = cls,
          `data-ct-panel-key` = tab.key,
+         `data-ct-strip-index` = $index,
          role = "button", tabindex = "0",
          onclick = proc() = cb.invokeSelect(index)):
       span(class = AutoHideBottomStripTabLabelClass):
@@ -156,11 +157,6 @@ proc renderBottomStripTab[R, N](
       isonim_dom.addEventListener(isonim_dom.Node(tabEl), cstring"mouseleave",
         proc(ev: isonim_dom.Event) =
           cb.invokeHoverLeave(index))
-      isonim_dom.addEventListener(isonim_dom.Node(tabEl), cstring"contextmenu",
-        proc(ev: isonim_dom.Event) =
-          ev.preventDefault()
-          ev.stopPropagation()
-          cb.invokeContextMenu(index, ev.eventClientX(), ev.eventClientY()))
 
 proc renderAutoHideBottomStripPanel*[R, N](
     r: R;

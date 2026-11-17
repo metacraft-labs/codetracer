@@ -1,0 +1,51 @@
+# The GPUI flavour: the shipped `codetracer-gpui` window on a private X
+# display, read by vision and driven by OS-level input (DemoVideoScript-
+# GuiAssert), with CodeTracer's GuiAssert binding — the screen oracle —
+# linked in process (`dvs-guiassert-codetracer`). Run from the repository
+# root: `ci/test/scenarios.sh lane gpui`.
+lane: 1
+name: gpui
+pack: ../pack/codetracer.pack.yaml
+backend: guiassert
+modes: [fast, realistic]
+retention: { runs: 5, failure-days: 7 }
+# a GPU window drawn by a software renderer takes longer to settle
+settle-timeout: 30000
+applicable:
+  - ../tracing/trace-macro-at-caret.yaml
+  - ../gpui/keys-debug-function-keys.yaml
+  - ../gpui/editor-wheel-scrolls-rows.yaml
+  # --- the GPUI flavour's ports (passed fast and realistic) ---
+  - ../gpui/call-trace-stop-path-parent-component.yaml
+  - ../gpui/call-trace-stop-path-missing-source.yaml
+  - ../gpui/edit-mode-insert-character.yaml
+  - ../gpui/edit-mode-delete-backward.yaml
+  - ../gpui/edit-mode-split-line.yaml
+  - ../gpui/edit-mode-undo.yaml
+  - ../gpui/edit-mode-redo.yaml
+  - ../gpui/edit-mode-delete-selection.yaml
+  - ../gpui/edit-mode-indent-selection.yaml
+  - ../gpui/edit-mode-upper-case-selection.yaml
+  - ../gpui/layout-saved-arrangement-restored.yaml
+  - ../gpui/layout-edit-default.yaml
+  - ../gpui/layout-docked-event-log.yaml
+  - ../gpui/chrome-debug-editor-tab-names-the-file.yaml
+  - ../terminal/panes-call-trace-toggle.yaml
+  - ../gpui/clicks-ctrl-and-middle-click.yaml
+  - ../gpui/editor-scroll-keys.yaml
+  - ../gpui/keys-edit-mode-step-refused.yaml
+  - ../gpui/keys-save-in-replay-refused.yaml
+  - ../gpui/keys-user-rows-later-wins.yaml
+  - ../gpui/keys-user-rows-later-wins-reversed.yaml
+  - ../gpui/keys-letters-step.yaml
+  - ../gpui/editor-horizontal-wheel.yaml
+  - ../gpui/editor-end-shows-line-end.yaml
+  - ../gpui/pointer-shapes.yaml
+  - ../gpui/top-bar-shift-f5-stops.yaml
+  - ../gpui/find-in-files-grep-lists-and-opens.yaml
+  - ../gpui/build-output-failing-gcc-build.yaml
+  - ../gpui/input-routing-user-chords.yaml
+  - ../gpui/fit-event-log-wide-column-scrolls.yaml
+  - ../gpui/multiclick-double-selects-the-word.yaml
+  - ../gpui/tables-cut-cell-detail.yaml
+unsupported: []

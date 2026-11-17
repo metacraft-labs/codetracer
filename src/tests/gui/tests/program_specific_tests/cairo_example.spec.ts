@@ -1,38 +1,17 @@
 /**
- * Playwright UI tests for the Cairo example.
+ * The Cairo example's language detection, checked without launching the
+ * application: the file extension's classification and the recorder probe.
  *
- * These tests verify that the CodeTracer UI renders a Cairo trace
- * correctly, covering:
- *   - Editor pane loading the .cairo source file
- *   - Status bar showing the correct source location after trace load
- *   - Event log populated with at least one event
- *   - Call trace pane showing the Cairo call tree
- *   - Variable state pane available after navigating to a call frame
- *
- * ## Prerequisites
- *
- * Recording a Cairo trace requires the Cairo recorder pipeline:
- *   1. `codetracer-cairo-recorder` binary available via
- *      `CODETRACER_CAIRO_RECORDER_PATH` or on PATH.
- *
- * Because this pipeline is not yet wired into `ct record`, all tests that
- * require a live trace are guarded by `test.skip(!cairoPipelineAvailable, ...)`.
- * They will run automatically once `ct record <path>.cairo` is integrated.
- *
- * The structural tests at the bottom run unconditionally and verify the
- * language-detection logic without launching Electron.
+ * What a user sees of a Cairo recording (its entry, its call trace, its
+ * values, stepping, a column breakpoint) is a scenario now:
+ * src/tests/scenarios/languages/cairo-recording-smoke.yaml and cairo-column-breakpoint.yaml.
  */
 
 import * as childProcess from "node:child_process";
 import * as process from "node:process";
 
-import { test, expect, readyOnEntryTest as readyOnEntry, loadedEventLog } from "../../lib/fixtures";
-import { StatusBar } from "../../page-objects/status_bar";
-import { StatePanel } from "../../page-objects/state";
-import { LayoutPage } from "../../page-objects/layout-page";
-import { retry } from "../../lib/retry-helpers";
+import { test, expect } from "../../lib/fixtures";
 import { resolveRecorderTestProgram, hasToolOnPath } from "../../lib/sibling-test-programs";
-import { defineRecorderColumnBreakpointSuite } from "../../lib/column-aware-helpers";
 
 // ---------------------------------------------------------------------------
 // Tool-availability guards
@@ -56,7 +35,7 @@ function hasCairoRecorder(): boolean {
   }
 }
 
-// Evaluated at collection time so skip decisions are instant.
+// Evaluated at collection time; the structural test below checks the probe does not throw.
 const cairoRecorderAvailable = hasCairoRecorder();
 // Test program lives in the codetracer-cairo-recorder sibling repo.
 const cairoTestProgram = resolveRecorderTestProgram("cairo", "cairo/flow_test.cairo");
@@ -64,181 +43,6 @@ const cairoTestProgram = resolveRecorderTestProgram("cairo", "cairo/flow_test.ca
 // and compiler frontend) in addition to the recorder binary and test program.
 const cairoToolchainAvailable = hasToolOnPath("scarb");
 const cairoPipelineAvailable = cairoRecorderAvailable && cairoTestProgram !== null && cairoToolchainAvailable;
-
-// ---------------------------------------------------------------------------
-// Test suite: basic layout (title, entry status)
-// ---------------------------------------------------------------------------
-
-test.describe("cairo_example — basic layout", () => {
-  test.skip(
-    !cairoPipelineAvailable,
-    "Cairo recorder pipeline not available (need codetracer-cairo-recorder and scarb on PATH)",
-  );
-
-  test.setTimeout(90_000);
-  test.use({ sourcePath: cairoTestProgram ?? "", launchMode: "trace" });
-
-  test("we can access the browser window, not just dev tools", async ({ ctPage }) => {
-    const title = await ctPage.title();
-    expect(title).toContain("CodeTracer");
-    await ctPage.focus("div");
-  });
-
-  test("correct entry status path/line", async ({ ctPage }) => {
-    await readyOnEntry(ctPage);
-
-    const statusBar = new StatusBar(ctPage, ctPage.locator("#status-base"));
-    const location = await statusBar.location();
-    expect(location.path.endsWith("flow_test.cairo")).toBeTruthy();
-    expect(location.line).toBeGreaterThanOrEqual(1);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// Test suite: event log
-// ---------------------------------------------------------------------------
-
-test.describe("cairo_example — event log", () => {
-  test.skip(
-    !cairoPipelineAvailable,
-    "Cairo recorder pipeline not available (need codetracer-cairo-recorder and scarb on PATH)",
-  );
-
-  test.setTimeout(90_000);
-  test.use({ sourcePath: cairoTestProgram ?? "", launchMode: "trace" });
-
-  test("event log has at least one event", async ({ ctPage }) => {
-    await loadedEventLog(ctPage);
-
-    // Read rendered rows from .eventLog-dense-table tbody, not the footer
-    // counter — the footer is in a remount-prone DOM path that the
-    // IsoNim event-log shell clobbers back to "0" (see loadedEventLog
-    // comment in fixtures.ts). M5/noir established this pattern.
-    const denseRows = ctPage.locator(".eventLog-dense-table tbody tr");
-    const count = await denseRows.count();
-    expect(count).toBeGreaterThanOrEqual(1);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// Test suite: state panel
-// ---------------------------------------------------------------------------
-
-test.describe("cairo_example — state panel", () => {
-  test.skip(
-    !cairoPipelineAvailable,
-    "Cairo recorder pipeline not available (need codetracer-cairo-recorder and scarb on PATH)",
-  );
-
-  test.setTimeout(90_000);
-  test.use({ sourcePath: cairoTestProgram ?? "", launchMode: "trace" });
-
-  test("state panel loaded initially", async ({ ctPage }) => {
-    await readyOnEntry(ctPage);
-
-    const statePanel = new StatePanel(ctPage);
-    await expect(statePanel.codeStateLine()).toContainText(" | ");
-  });
-
-  test("state panel shows decoded felt/local variables", async ({ ctPage }) => {
-    await readyOnEntry(ctPage);
-    const statePanel = new StatePanel(ctPage);
-    const values = await statePanel.values();
-    const varNames = Object.keys(values);
-    expect(varNames.length).toBeGreaterThan(0);
-    // Cairo uses felt-based variable names or named locals from Sierra debug info.
-    const hasVariable = varNames.some(
-      (name) => name.length > 0,
-    );
-    expect(hasVariable).toBeTruthy();
-  });
-});
-
-// ---------------------------------------------------------------------------
-// Test suite: call trace pane
-// ---------------------------------------------------------------------------
-
-test.describe("cairo_example — call trace", () => {
-  test.skip(
-    !cairoPipelineAvailable,
-    "Cairo recorder pipeline not available (need codetracer-cairo-recorder and scarb on PATH)",
-  );
-
-  test.setTimeout(90_000);
-  test.use({ sourcePath: cairoTestProgram ?? "", launchMode: "trace" });
-
-  test("call trace shows compute function entry", async ({ ctPage }) => {
-    await readyOnEntry(ctPage);
-    const layout = new LayoutPage(ctPage);
-    const callTraceTabs = await layout.callTraceTabs();
-    expect(callTraceTabs.length).toBeGreaterThan(0);
-    const callTrace = callTraceTabs[0];
-    await callTrace.tabButton().click();
-    await callTrace.waitForReady();
-    const entries = await callTrace.getEntries();
-    expect(entries.length).toBeGreaterThan(0);
-    const firstName = await entries[0].functionName();
-    expect(firstName.length).toBeGreaterThan(0);
-  });
-
-  test("continue", async ({ ctPage }) => {
-    await readyOnEntry(ctPage);
-    const statusBar = new StatusBar(ctPage, ctPage.locator("#status-base"));
-    const initialLocation = await statusBar.location();
-    const layout = new LayoutPage(ctPage);
-    await layout.continueButton().click();
-    await retry(
-      async () => {
-        const status = ctPage.locator("#stable-status");
-        const className = (await status.getAttribute("class")) ?? "";
-        return className.includes("ready-status");
-      },
-      { maxAttempts: 60, delayMs: 500 },
-    );
-    const newLocation = await statusBar.location();
-    expect(newLocation.line).toBeGreaterThanOrEqual(1);
-  });
-
-  test("next", async ({ ctPage }) => {
-    await readyOnEntry(ctPage);
-    const statusBar = new StatusBar(ctPage, ctPage.locator("#status-base"));
-    const initialLocation = await statusBar.location();
-    const layout = new LayoutPage(ctPage);
-    await layout.nextButton().click();
-    await retry(
-      async () => {
-        const status = ctPage.locator("#stable-status");
-        const className = (await status.getAttribute("class")) ?? "";
-        return className.includes("ready-status");
-      },
-      { maxAttempts: 60, delayMs: 500 },
-    );
-    const newLocation = await statusBar.location();
-    expect(newLocation.line).not.toBe(initialLocation.line);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// Test suite: column-aware breakpoints (M1/M6)
-//
-// Cairo's recorder lands `DbStep.line/column` against the .cairo
-// source via Sierra debug-info passes that preserve each `let`
-// binding's column.  `flow_test.cairo` line 4 is
-// `    let sum_val: felt252 = a + b;`; the 4-space indent puts `let`
-// at column 5 — a mid-line column that the M6 Alt+click resolver
-// reliably hits.
-// ---------------------------------------------------------------------------
-
-defineRecorderColumnBreakpointSuite({
-  language: "cairo_example",
-  skipReason:
-    "Cairo recorder pipeline not available (need codetracer-cairo-recorder and scarb on PATH)",
-  pipelineAvailable: cairoPipelineAvailable,
-  sourcePath: cairoTestProgram ?? "",
-  sourceFileName: "flow_test.cairo",
-  targetLine: 4,
-  targetColumn: 5,
-});
 
 // ---------------------------------------------------------------------------
 // Structural tests — run unconditionally, no Electron launch needed

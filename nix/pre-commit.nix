@@ -90,6 +90,19 @@
     # turning the drift check into noise about whitespace. Formatting hooks
     # must not have opinions about a file this repository does not own.
     "^tools/check-test-assertions\\.sh$"
+
+    # THE TUI'S COMMITTED TERMASSERT SNAPSHOTS, where the bytes are a screen.
+    #
+    # `plaintext.txt` is TermAssert's `renderPlain` of a terminal: a blank
+    # row is kept as the row's width in spaces and the file ends without a
+    # newline, and the suites compare the file byte for byte with a fresh
+    # render (`styledSnapshotDiffs`). MEASURED, 2026-11-09, on the 236
+    # snapshots of `test_ctf_p1b_tui_views_cover_web_states`: with the
+    # directory copied aside, `trim-trailing-whitespace` and
+    # `end-of-file-fixer` rewrote ALL 236 `plaintext.txt` files (none of the
+    # `styles.txt`), so every snapshot would have failed on the commit that
+    # adds it. Re-record them with `SNAP_RECORD=1`, never through a hook.
+    "^src/frontend/tui/tests/snapshots/"
   ];
 
   hooks = {

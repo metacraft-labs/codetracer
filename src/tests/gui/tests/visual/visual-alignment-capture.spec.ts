@@ -68,6 +68,7 @@
  * rule.
  */
 
+import { glyphMarksOn, pressGlyph } from "../../lib/glyph-column";
 import * as fs from "fs";
 import * as path from "path";
 
@@ -109,8 +110,7 @@ interface ScenarioOp {
  * 2026-09-21 on the `calc` recording: the first step-in advances `rrTicks`
  * 0 -> 1 and leaves `line` at 1, so "the stopped line changed" is not a
  * postcondition — it is a postcondition that is false for a step that
- * genuinely happened. `real-tab-switching.spec.ts` reads the same field for
- * the same reason, and `stepping-through-views.spec.ts` records the rule:
+ * genuinely happened. `stepping-through-views.spec.ts` records the rule:
  * *"the line may wrap back on loops, but ticks always advance forward"*.
  *
  * `ProgramState` itself, and the entry settle, live in `lib/session-settle.ts`,
@@ -571,22 +571,8 @@ async function drive(
           );
           expect(lines.length, "the editor drew no gutter rows").toBeGreaterThan(0);
           const target = lines[Math.min(op.line ?? 1, lines.length - 1)];
-          const cell = layout.page.locator(
-            `div[id^='editorComponent'] .margin-view-overlays .gutter[data-line='${target}']`,
-          );
-          // `dispatchEvent`, not `click`. Monaco rebuilds the margin overlays
-          // on every render, so an actionability-checked click loses the race:
-          // measured 2026-09-20 — *"element was detached from the DOM,
-          // retrying"*, for the full 30 s budget, on an element the locator had
-          // already resolved. `calltrace_move_sync.spec.ts` dispatches for the
-          // same reason on the same kind of surface.
-          await cell.dispatchEvent("click");
-          await expect(
-            layout.page.locator(
-              `div[id^='editorComponent'] .margin-view-overlays ` +
-                `.gutter[data-line='${target}'] .gutter-breakpoint-enabled`,
-            ),
-          ).toHaveCount(1, { timeout: 15_000 });
+          await pressGlyph(layout.page, target);
+          await expect.poll(() => glyphMarksOn(layout.page, target), { timeout: 15_000 }).toContain("gutter-glyph-breakpoint");
           // **ITS EFFECT IS THE MARK, AND ITS NON-EFFECT IS ALSO ASSERTED.**
           // Setting a breakpoint must not move the program: a gutter click
           // that stepped the debugger would give this scenario a different
@@ -1013,6 +999,39 @@ for (const scenario of definition.scenarios) {
       // removing that from the frame is the repair, not a side effect.
       await waitForEditorFrameSettled(ctPage);
       const answers = await extractLayoutAnswers(ctPage, scenario.id);
+      // NO GRADIENT BACKGROUND UNDER A ROUNDED CORNER. A gradient is drawn by a
+      // dithering shader, and the software rasteriser's dither over a rounded
+      // clip flipped between two states a few seconds apart (one grey level on
+      // the corner pixels), after the settle loop and the tier-1 canary had
+      // already agreed. That was `continued-event-log`'s intermittent drift:
+      // the disabled `#forward-loop` dimmed its glyph with a flat
+      // `linear-gradient`. With the gradient this assertion fails on every run;
+      // with the dimming done by an inset shadow it passes and the canary held
+      // for 30 repeats. Asserting the cause by name keeps a reintroduction
+      // from showing up as an occasional canary failure nobody can read.
+      const roundedGradients = await ctPage.evaluate(() => {
+        const out: string[] = [];
+        for (const el of Array.from(document.querySelectorAll("*"))) {
+          const r = el.getBoundingClientRect();
+          if (r.width < 1 || r.height < 1) continue;
+          const cs = getComputedStyle(el);
+          if (cs.visibility === "hidden" || cs.display === "none") continue;
+          if (!cs.backgroundImage.includes("gradient(")) continue;
+          if (parseFloat(cs.borderTopLeftRadius) > 0 ||
+              parseFloat(cs.borderTopRightRadius) > 0 ||
+              parseFloat(cs.borderBottomLeftRadius) > 0 ||
+              parseFloat(cs.borderBottomRightRadius) > 0) {
+            out.push(`${el.tagName.toLowerCase()}${el.id ? "#" + el.id : ""}.` +
+              String(el.getAttribute("class") || "").split(/\s+/).join("."));
+          }
+        }
+        return out;
+      });
+      expect(
+        roundedGradients,
+        `scenario '${scenario.id}': a gradient background on a rounded element ` +
+          "makes the frame non-deterministic in the software rasteriser",
+      ).toEqual([]);
       // THE STYLE DUMP: the computed style and box of every visible element of
       // the frame the PNG is of, written beside it as
       // `captures/electron/<scenario>.styles.json`. It is the reference the
@@ -1172,3 +1191,196 @@ for (const scenario of definition.scenarios) {
     });
   });
 }
+
+/**
+ * **BOTH POINTS ON ONE LINE: the case no scenario in `scenarios.json` covers.**
+ *
+ * `gutterMarkName` (GPUI) and `layout-answers.ts` (here) are meant to be two
+ * readings of one alphabet. A line carrying an armed breakpoint AND a
+ * tracepoint draws the combined glyph `gutter-glyph-breakpoint-tracepoint`
+ * (Editor-Pane.md MC.5), and this extractor answers it `breakpoint+tracepoint`.
+ * The GPUI producer named no mark for it until 2026-11-09, and nothing noticed
+ * because no scenario puts both points on one line. This case records the
+ * Electron answer for that state, and `test_cross_renderer_visual_alignment.nim`
+ * (`BOTH POINTS ON ONE LINE`) compares the GPUI producer's answer with it.
+ *
+ * It is the `breakpoint-editor` scenario's own definition (the same recording,
+ * viewport and operations, so the two arms aim at the same line) plus one
+ * tracepoint on the line the breakpoint landed on. It is kept out of
+ * `scenarios.json` on purpose: a scenario there is a member of the eight-question
+ * corpus that PLAT-37..42 pin by id and count, and this case asks one question.
+ *
+ * The tracepoint is added through the product's own `toggleTracepoint` (the
+ * entry point the editor's tracepoint command calls), and its EFFECT is the
+ * assertion: the glyph on that line must become the combined class, which
+ * fails by name if the tracepoint never landed.
+ */
+const bothPointsBase = definition.scenarios.find((s) => s.id === "breakpoint-editor");
+if (!bothPointsBase) {
+  throw new Error("scenarios.json no longer holds 'breakpoint-editor', which the both-points case extends");
+}
+test.describe("PLAT-35 capture: an armed breakpoint and a tracepoint on one line", () => {
+  test.use({
+    sourcePath: recordingPath,
+    launchMode: "trace-folder",
+  });
+
+  test("records the gutter-marks answer for the combined mark", async ({
+    ctPage,
+    electronApp,
+  }) => {
+    const opCount = bothPointsBase.operations.reduce(
+      (n: number, op: { times?: number }) => n + (op.times ?? 1),
+      0,
+    );
+    test.setTimeout(300_000 + 30_000 * opCount);
+    const size = definition.viewports[bothPointsBase.viewport];
+    expect(size, `viewport '${bothPointsBase.viewport}' is declared`).toBeTruthy();
+    expect(electronApp, "the both-points case needs the Electron main process").not.toBeNull();
+
+    const layout = new LayoutPage(ctPage);
+    await layout.waitForBaseComponentsLoaded();
+    await layout.waitForStateLoaded();
+    await applyViewport(
+      ctPage,
+      electronApp as import("playwright").ElectronApplication,
+      size,
+    );
+    await waitForEditorRelayout(ctPage);
+
+    // The program is stepped exactly as the 'breakpoint-editor' scenario steps
+    // it; the breakpoint is set below, by the same gutter press, with a retry.
+    // MEASURED: `drive`'s own `setBreakpoint` press left no glyph at all in
+    // about one run in six to twenty-five of this case (the press landed before
+    // the editor had finished laying out), and a missing glyph is an
+    // environment race, not the claim under test. A press is repeated ONLY
+    // after the glyph has been seen absent, so a late glyph is never toggled
+    // off by a second press.
+    const stepOps = bothPointsBase.operations.filter(
+      (o: ScenarioOp) => o.kind !== "setBreakpoint",
+    );
+    const breakpointOp = bothPointsBase.operations.find(
+      (o: ScenarioOp) => o.kind === "setBreakpoint",
+    );
+    expect(breakpointOp, "'breakpoint-editor' declares a setBreakpoint").toBeTruthy();
+    const driven = await drive(layout, stepOps);
+    expect(driven.moves).toBe(
+      stepOps.reduce((n: number, op: ScenarioOp) => n + (op.times ?? 1), 0),
+    );
+    await waitForEditorFrameSettled(ctPage);
+
+    const gutters = ctPage.locator(
+      "div[id^='editorComponent'] .margin-view-overlays .gutter",
+    );
+    const lines: number[] = await gutters.evaluateAll((els) =>
+      els
+        .map((e) => parseInt((e as HTMLElement).dataset.line || "-1", 10))
+        .filter((n) => n > 0)
+        .sort((a, b) => a - b),
+    );
+    expect(lines.length, "the editor drew no gutter rows").toBeGreaterThan(0);
+    // Relative to the first drawn row, as the scenario's `line` is.
+    const target = lines[Math.min(breakpointOp?.line ?? 1, lines.length - 1)];
+    let armed = false;
+    for (let attempt = 0; attempt < 3 && !armed; attempt++) {
+      if ((await glyphMarksOn(ctPage, target)).includes("gutter-glyph-breakpoint")) {
+        armed = true;
+        break;
+      }
+      await pressGlyph(ctPage, target);
+      try {
+        await expect
+          .poll(() => glyphMarksOn(ctPage, target), { timeout: 8_000 })
+          .toContain("gutter-glyph-breakpoint");
+        armed = true;
+      } catch {
+        await waitForEditorFrameSettled(ctPage);
+      }
+    }
+    expect(armed, `no breakpoint glyph on line ${target} after three presses`).toBe(true);
+
+    // The tracepoint, on the same line, through the editor's own entry point.
+    await ctPage.evaluate((line) => {
+      const w = window as unknown as {
+        data?: { services?: { editor?: { active?: string } } };
+        toggleTracepoint?: (path: string, line: number) => void;
+      };
+      const active = w.data?.services?.editor?.active;
+      if (!active || typeof w.toggleTracepoint !== "function") {
+        throw new Error("no active editor, or toggleTracepoint is not exported");
+      }
+      w.toggleTracepoint(active, line);
+    }, target);
+    await expect
+      .poll(() => glyphMarksOn(ctPage, target), { timeout: 15_000 })
+      .toContain("gutter-glyph-breakpoint-tracepoint");
+
+    // Adding a tracepoint re-lays the editor out and can leave the line
+    // outside the rows Monaco has drawn, where the extractor (which reads the
+    // drawn gutter rows, as the GPUI producer reads the drawn row nodes) cannot
+    // see it. MEASURED: with the tracepoint added the first drawn row was line
+    // 27 while the glyph was on 26, in four runs of six, and
+    // `revealLineInCenterIfOutsideViewport` (what `glyphCentre` calls) treats a
+    // line scrolled just out of the drawn rows as in view. So the line is
+    // centred unconditionally.
+    const centreTarget = () => ctPage.evaluate((line) => {
+      const w = window as unknown as {
+        data?: {
+          ui?: { editors?: Record<string, { monacoEditor?: { revealLineInCenter(l: number): void } }> };
+          services?: { editor?: { active?: string } };
+        };
+      };
+      const active = w.data?.services?.editor?.active;
+      const editor = active ? w.data?.ui?.editors?.[active]?.monacoEditor : undefined;
+      if (!editor) throw new Error("no active Monaco editor to centre the line in");
+      editor.revealLineInCenter(line);
+    }, target);
+    await centreTarget();
+    await layout.waitForStateLoaded();
+    await waitForEditorFrameSettled(ctPage);
+    await ctPage.waitForTimeout(1_500);
+
+    const id = "breakpoint-tracepoint-editor";
+    // The tracepoint opens its own component and re-lays the editor out, so
+    // the extractor is polled until it has seen the line again rather than
+    // read once; the state it is waiting for is asserted below, not assumed.
+    await expect
+      .poll(
+        async () => {
+          // MEASURED: the editor scrolls back to the stop line after the
+          // tracepoint lands (top 696, line 26 at 550, in two runs of eight),
+          // so the line is centred again on every poll rather than once.
+          await centreTarget();
+          await ctPage.waitForTimeout(300);
+          const a = await extractLayoutAnswers(ctPage, id);
+          return a.answers.find(
+            (x: { question: string }) => x.question === "gutter-marks-by-line",
+          )?.value;
+        },
+        { timeout: 30_000, message: `glyphs on ${target}: ${(await glyphMarksOn(ctPage, target)).join(",")}; drawn gutters: ${JSON.stringify(await gutters.evaluateAll((els) => els.map((e) => (e as HTMLElement).dataset.line)))}; editor: ${JSON.stringify(await ctPage.evaluate((line) => { const w = window as any; const ed = w.data?.ui?.editors?.[w.data?.services?.editor?.active]?.monacoEditor; return { visible: ed?.getVisibleRanges?.()?.map((r: any) => [r.startLineNumber, r.endLineNumber]), top: ed?.getScrollTop?.(), topForLine: ed?.getTopForLineNumber?.(line), dom: document.querySelectorAll(`[data-line='${line}']`).length }; }, target))}` },
+      )
+      .toContain(`${target}=breakpoint+tracepoint`);
+    const answers = await extractLayoutAnswers(ctPage, id);
+    const gutter = answers.answers.find(
+      (a: { question: string }) => a.question === "gutter-marks-by-line",
+    );
+    // The Electron extractor's own reading of the combined glyph: both names,
+    // in its published order, and the execution pointer first on its own line.
+    expect(gutter?.value, "the combined line answers breakpoint+tracepoint").toContain(
+      `${target}=breakpoint+tracepoint`,
+    );
+    const uiBundle = path.join(
+      process.env.CODETRACER_TEST_PREFIX || path.join(repoRoot, "src", "build-debug"),
+      "ui.js",
+    );
+    const provenance = {
+      capturedAt: new Date().toISOString(),
+      uiBundleBytes: fs.existsSync(uiBundle) ? fs.statSync(uiBundle).size : 0,
+      uiBundleMtime: fs.existsSync(uiBundle) ? fs.statSync(uiBundle).mtime.toISOString() : "",
+    };
+    fs.writeFileSync(
+      path.join(answersDir, `${id}.electron.json`),
+      `${JSON.stringify({ ...answers, provenance }, null, 2)}\n`,
+    );
+  });
+});

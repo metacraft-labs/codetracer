@@ -1,0 +1,71 @@
+scenario: 1
+name: ct-host/duplicated-tab-gets-its-own-session
+pack: codetracer
+summary: >-
+  A tab of a `ct host` page duplicated by the browser starts with a copy of
+  the original tab's session storage, and still gets a session of its own
+  (CLI/ct/host.md, "Clients and Their Sessions"): it opens at the start, not
+  where the original was; each steps without moving the other; and each
+  one's reload resumes its own position.
+
+stage:
+  - use: record-program
+    with: { program: noir_space_ship }
+  - use: open-recording
+    with: { deployment: web }
+
+clients:
+  original: { open: stage }
+
+steps:
+  - beat: the-original-moves-first
+    as: original
+    steps:
+      - wait: { until: call-trace.loaded, timeout: 360s }
+      - wait: { until: { at: 'editor[file="main.nr"]', current-line: 13 }, timeout: 60s }
+      - click: 'toolbar/toolbar-button[label="next-image"]'
+        settle: false
+      - wait: { until: { at: 'editor[file="main.nr"]', current-line: 15 }, timeout: 60s }
+      - wait: { until: replay-idle, timeout: 60s }
+      - click: 'toolbar/toolbar-button[label="next-image"]'
+        settle: false
+      - wait: { until: { at: 'editor[file="main.nr"]', current-line: 17 }, timeout: 60s }
+
+  - duplicate: { client: original, name: copy }
+  - beat: the-copy-has-its-own-replay
+    as: copy
+    steps:
+      - wait: { until: call-trace.loaded, timeout: 360s }
+      - wait: { until: { at: 'editor[file="main.nr"]', current-line: 13 }, timeout: 60s }
+  - expect: { at: 'editor[file="main.nr"]', current-line: 17 }
+    as: original
+
+  - beat: the-copy-steps
+    as: copy
+    steps:
+      - click: 'toolbar/toolbar-button[label="next-image"]'
+        settle: false
+      - wait: { until: { at: 'editor[file="main.nr"]', current-line: 15 }, timeout: 60s }
+  - expect: { at: 'editor[file="main.nr"]', current-line: 17, holds: 2s }
+    as: original
+
+  - beat: the-original-steps
+    as: original
+    steps:
+      - wait: { until: replay-idle, timeout: 60s }
+      - click: 'toolbar/toolbar-button[label="next-image"]'
+        settle: false
+      - wait: { until: { at: 'editor[file="main.nr"]', current-line: { gt: 17 } }, timeout: 60s }
+  - expect: { at: 'editor[file="main.nr"]', current-line: 15, holds: 2s }
+    as: copy
+
+  - reload: copy
+  - wait: { until: call-trace.loaded, timeout: 360s }
+    as: copy
+  - wait: { until: { at: 'editor[file="main.nr"]', current-line: 15 }, timeout: 60s }
+    as: copy
+  - reload: original
+  - wait: { until: call-trace.loaded, timeout: 360s }
+    as: original
+  - wait: { until: { at: 'editor[file="main.nr"]', current-line: { gt: 17 } }, timeout: 60s }
+    as: original

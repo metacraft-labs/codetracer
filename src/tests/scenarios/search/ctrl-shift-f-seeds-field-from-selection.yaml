@@ -1,0 +1,33 @@
+scenario: 1
+name: search/ctrl-shift-f-seeds-field-from-selection
+pack: codetracer
+summary: >-
+  With `scale` selected in the editor (Ctrl+F on it, Enter, Escape),
+  Ctrl+Shift+F focuses Find in Files' own field — not the palette — seeded
+  with `scale` and wholly selected; typing replaces it and Enter lists the
+  lines holding `factor`.
+
+stage:
+  - use: record-program
+    with: { program: multi_root/app/main.py }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - wait: { until: editor.loaded, timeout: 60s }
+  - wait: { until: { at: 'editor[file="main.py"]/line[number="26"]', present: true }, timeout: 30s }
+  - click: { at: 'editor[file="main.py"]/line[number="26"]', anchor: caret(22) }
+  - chord: Ctrl+f
+  - wait: { until: { at: 'editor[file="main.py"]', find-shown: true }, timeout: 20s }
+  - key: Enter
+  - key: Esc
+  - expect: { at: 'editor[file="main.py"]', selected-text: scale }
+  - chord: Ctrl+Shift+f
+  - wait: { until: { at: find-in-files/search-field, focused: true }, timeout: 10s }
+  - expect: { at: find-in-files/search-field, value: scale, selected-text: scale }
+  - expect: { at: omnibox, absent: true }
+  - type: factor
+  - expect: { at: find-in-files/search-field, value: factor }
+  - key: Enter
+  - wait: { until: { at: find-in-files, count: 2 }, timeout: 30s }
+  - expect: { at: find-in-files, rows: ["pkg/extra.py:4", "pkg/extra.py:5"] }

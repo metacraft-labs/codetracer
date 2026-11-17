@@ -60,7 +60,7 @@
 ## script already exports, plus ``CODETRACER_PHP_RECORDER_EXTENSION`` for the
 ## PHP extension, which had no entry at all.
 
-import std/[os]
+import std/[os, strutils]
 import ../../common/[lang, paths, target_assessment]
 
 type
@@ -76,6 +76,11 @@ type
     label*: string      ## what the user should picture — a command or a file
     envVar*: string     ## the environment variable that overrides discovery
     path*: string       ## resolved absolute path, or "" when not found
+    loaded*: bool
+      ## the recorder is a shared object the RUNTIME loads (PHP's
+      ## ``codetracer.so``), not a program `ct` runs: there is no
+      ## ``--version`` to ask it and no PATH it is found on, so a message
+      ## about it offers neither (``staleRecorderMessage``).
 
   RecorderTool* = object
     ## The PURE description of a recorder: everything that can be said about
@@ -91,6 +96,8 @@ type
       ## that is unsupported but DECLARED (a retired backend, a recorder that
       ## does not exist yet) has a non-empty label and an ``installHint``.
     recorderEnvVar*: string
+    recorderLoaded*: bool
+      ## see ``RecorderArtifact.loaded``.
     sibling*: string
       ## the sibling repo that builds the recorder, per
       ## codetracer-specs/Working-with-the-CodeTracer-Repos.md.
@@ -329,6 +336,7 @@ proc instrumentedRuntimeTool(language: SourceLanguage): RecorderTool =
       runtimeLabel: "php", runtimeEnvVar: "CODETRACER_PHP_EXE_PATH",
       recorderLabel: "codetracer.so (the CodeTracer PHP extension)",
       recorderEnvVar: PhpExtensionEnvVar,
+      recorderLoaded: true,
       sibling: "codetracer-php-recorder",
       installHint: @[
         "build it with `cd ../codetracer-php-recorder && just build`;",
@@ -659,6 +667,15 @@ proc serverUnsupportedMessage*(sel: RecorderSelector): seq[string] =
   result.add("help: record the run without --server, or see " &
     "`just demo-request-panel` for the supported flows.")
 
+func recorderArtifact*(tool: RecorderTool, path: string): RecorderArtifact =
+  ## The recorder half of ``tool``, resolved to ``path`` ("" when not
+  ## installed).  The ONE place a table row becomes an artifact, so
+  ## ``recorderRequirements`` and a test that needs the artifact for a path
+  ## of its own build it the same way.
+  RecorderArtifact(kind: raRecorder, label: tool.recorderLabel,
+                   envVar: tool.recorderEnvVar, path: path,
+                   loaded: tool.recorderLoaded)
+
 proc recorderRequirements*(sel: RecorderSelector): seq[RecorderArtifact] =
   ## The same table, resolved against the environment.  A ``path`` of ""
   ## means "not installed", which is what the caller turns into the
@@ -713,9 +730,7 @@ proc recorderRequirements*(sel: RecorderSelector): seq[RecorderArtifact] =
       recorderPath = mcrRecorderExe()
   of raRr, raTtd, raUnknown:
     discard
-  result.add(RecorderArtifact(
-    kind: raRecorder, label: tool.recorderLabel,
-    envVar: tool.recorderEnvVar, path: recorderPath))
+  result.add(recorderArtifact(tool, recorderPath))
 
 proc missingArtifacts*(sel: RecorderSelector): seq[RecorderArtifact] =
   ## The artifacts of ``sel``'s toolchain that are NOT installed.
@@ -772,6 +787,105 @@ proc missingRecorderMessage*(sel: RecorderSelector,
       result.add("help: the `" & tool.sibling & "` repo's dev shell provides " &
         "a working " & name & " toolchain:")
       result.add("help:   direnv exec ../" & tool.sibling & " <command>")
+
+proc readableVersionsText(readable: seq[int]): string =
+  ## "version 7 only" / "versions 5 and 6" / "versions 5, 6 and 7".
+  case readable.len
+  of 0: "no version"
+  of 1: "version " & $readable[0] & " only"
+  else:
+    var listed = ""
+    for i, v in readable:
+      if i > 0:
+        listed.add(if i == readable.high: " and " else: ", ")
+      listed.add($v)
+    "versions " & listed
+
+proc recorderOverrideHint(recorder: RecorderArtifact, which: string): string =
+  ## How to point `ct` at another ``recorder``: its override variable and,
+  ## for a program, ``PATH`` (``which`` says which program: "a current
+  ## `nargo`").  "" when there is neither (a loaded recorder with no
+  ## override).  A loaded recorder's ``label`` is a description
+  ## ("codetracer.so (the CodeTracer PHP extension)"), so the file name
+  ## after ``/path/to/`` is the one `ct` loaded.
+  if recorder.loaded:
+    if recorder.envVar.len == 0:
+      return ""
+    let file =
+      if recorder.path.len > 0: recorder.path.extractFilename
+      else: recorder.label.split(' ')[0]
+    return "set " & recorder.envVar & "=/path/to/" & file
+  let pathHint = "put " & which & " first on PATH"
+  if recorder.envVar.len > 0:
+    "set " & recorder.envVar & "=/path/to/" & recorder.label & ", or " &
+      pathHint
+  else:
+    pathHint
+
+proc staleRecorderMessage*(recorderName: string, recorder: RecorderArtifact,
+                           recorderVersion: string, part: string,
+                           found: int, readable: seq[int],
+                           sibling = "", installHint: seq[string] = @[]):
+    seq[string] =
+  ## The message ``ct record`` prints when the recorder it has JUST run
+  ## exited 0 but wrote a trace format version this ``ct`` refuses
+  ## (``ctfs_sources.TraceFormatVersionRefused``).
+  ##
+  ## ``CLI/ct/record.md`` §"Corner Cases": "Recorder present but wrong
+  ## version.  Report both versions; do not attempt a compatibility shim."
+  ## So it names the recorder by the path that was run, the recorder's own
+  ## ``--version`` (``recorderVersion``, "" when it reported none; never
+  ## asked of a ``loaded`` recorder), the version it wrote and the versions
+  ## this ``ct`` reads.  It does NOT repeat the reader's "Re-record the
+  ## trace": that is the advice for an OLD trace, and this one is seconds
+  ## old -- re-recording runs the same recorder and writes the same version
+  ## again (GitHub #909).
+  ##
+  ## WHICH SIDE IS STALE is decided by comparing the two versions.  A
+  ## version BELOW the newest this ``ct`` reads means the recorder is behind:
+  ## the remedy is a current recorder (its override, ``PATH``, the sibling
+  ## that builds it).  A version ABOVE every version this ``ct`` reads means
+  ## ``ct`` is behind: the remedy is to update ``ct``, and pointing ``ct`` at
+  ## "a current recorder" would replace the one part that is current.
+  ##
+  ## PURE: the caller runs ``--version``; nothing here touches the machine.
+  let exe = if recorder.path.len > 0: recorder.path else: recorder.label
+  let readableText = readableVersionsText(readable)
+  let ctIsBehind = readable.len > 0 and found > max(readable)
+  result.add("error: the " & recorderName & " recorder `" & exe &
+    "` wrote a trace this `ct` cannot read: " & part & " version " &
+    $found & ", and this `ct` reads " & readableText & ".")
+  if recorder.loaded:
+    result.add("error: `" & exe & "` is loaded by the runtime, not run, so " &
+      "`ct` cannot ask it for its own version.")
+  elif recorderVersion.len > 0:
+    result.add("error: `" & exe & " --version` reports: " & recorderVersion)
+  else:
+    result.add("error: `" & exe & " --version` reported no version.")
+  if ctIsBehind:
+    result.add("error: this `ct` is out of date with the recorder, not the " &
+      "trace: the recorder writes " & part & " version " & $found &
+      ", newer than any this `ct` reads.")
+    result.add("help: update ct to a CodeTracer that reads " & part &
+      " version " & $found & ".")
+    let override = recorderOverrideHint(recorder,
+      "a `" & recorder.label & "` that does")
+    if override.len > 0:
+      result.add("help: or record with a " & recorder.label & " that writes " &
+        part & " " & readableText.replace(" only", "") & ": " & override & ".")
+  else:
+    result.add("error: the recorder is out of date with this `ct`, not the " &
+      "trace: recording again with the same recorder writes " & part &
+      " version " & $found & " again.")
+    let override = recorderOverrideHint(recorder,
+      "a current `" & recorder.label & "`")
+    if override.len > 0:
+      result.add("help: point CodeTracer at a current " & recorder.label &
+        ": " & override & ".")
+    if sibling.len > 0:
+      result.add("help: it is built by the `" & sibling & "` repo:")
+      for line in installHint:
+        result.add("help:   " & line)
 
 proc recorderInvocation*(sel: RecorderSelector, program: string,
                          traceFolder: string,

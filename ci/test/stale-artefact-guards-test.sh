@@ -124,7 +124,7 @@ BUILD_SIBLINGS="${SUITE_ROOT}/scripts/build-siblings.sh"
 # Every contract this suite claims to check. A suite that silently runs fewer
 # assertions than it advertises is a suite that stops protecting anything, so
 # the count is asserted at the end and has to be changed deliberately.
-EXPECTED_ASSERTIONS=142
+EXPECTED_ASSERTIONS=170
 
 ASSERTIONS=0
 FAILURES=0
@@ -1576,6 +1576,506 @@ else
 	# shellcheck disable=SC2086
 	bad "no gate, script or justfile recipe spells a bare /tmp/ct-nim-cache any more" \
 		"still hardcoding a host-global root:" ${BARE_ROOTS}
+fi
+
+# AND THE TUP BUILD. `src/Tuprules.tup` gave every Nim binary its nimcache under
+# `/tmp/ct-nim-cache/%B_<kind>`: the binary in the key, not the checkout. Two
+# worktrees running `just build-once` at once wrote one cache, and one failed
+# "final link failed: bad value" linking ct-test (measured 2026-11-14 by
+# concurrent grading agents). The grep above never saw it: it reads ci/test,
+# scripts and the justfile, and the build rules are in src/.
+#
+# The rules now take the root from CT_TUP_NIM_CACHE_ROOT (a Tup `import`),
+# which the entry points compute with `ci/lib/nim-cache-root.sh --tup`. Four
+# contracts: the helper's tup root is per checkout and stays inside the Windows
+# exclusion; every --nimcache in the rules goes through that root; no rule
+# line spells the bare host-global root; and every entry point that runs tup
+# exports it.
+#
+# Source text again, for the same reason as above: the defect is a spelling.
+# Comment lines are dropped first, because the file's own prose names the old
+# path to explain why it is gone.
+TUPRULES="${SUITE_ROOT}/src/Tuprules.tup"
+
+tup_root_for() {
+	# CT_NIM_CACHE_ROOT is set ON PURPOSE: the tup root must ignore it (a
+	# scratch override would leave the Windows exclusion regex and force a
+	# full rebuild), so an ambient one cannot be allowed to answer here.
+	# shellcheck disable=SC2016 # $1 and $2 are the inner shell's parameters
+	CT_NIM_CACHE_ROOT="${TEST_ROOT}/explicit-cache" bash -c \
+		'source "$1"; ct_tup_nim_cache_root "$2"' _ "${NIMCACHE_LIB}" "$1"
+}
+TUP_ROOT_A="$(tup_root_for "${CK_A}")"
+TUP_ROOT_B="$(tup_root_for "${CK_B}")"
+# The rule's Windows exclusion, as the file spells it, applied to a path the
+# compiler would write. Extracted rather than restated so that tightening the
+# regex without moving the root (or the reverse) fails here, not on Windows.
+NIM_IGNORE_RE="$(sed -n 's/^NIM_SIDE_OUTPUTS_IGNORE = //p' "${TUPRULES}")"
+if [[ -n ${TUP_ROOT_A} && ${TUP_ROOT_A} != "${TUP_ROOT_B}" &&
+	${TUP_ROOT_A} == "$(nimcache_for "${CK_A}")" && -n ${NIM_IGNORE_RE} ]] &&
+	printf '%s\n' "${TUP_ROOT_A}/codetracer_codetracer_binary/@mcodetracer.nim.c" |
+	grep -Eq -- "${NIM_IGNORE_RE}"; then
+	ok "the tup nimcache root is per checkout, ignores an override, and stays inside the Windows exclusion"
+else
+	bad "the tup nimcache root is per checkout, ignores an override, and stays inside the Windows exclusion" \
+		"alpha: ${TUP_ROOT_A}" "beta:  ${TUP_ROOT_B}" "lane:  $(nimcache_for "${CK_A}")" \
+		"NIM_SIDE_OUTPUTS_IGNORE: ${NIM_IGNORE_RE:-<not found>}"
+fi
+
+TUP_RULE_LINES="$(grep -v '^[[:space:]]*#' "${TUPRULES}" 2>/dev/null || true)"
+TUP_NIMCACHE_ALL="$(grep -c -- '--nimcache:' <<<"${TUP_RULE_LINES}" || true)"
+# shellcheck disable=SC2016 # the needle is Tup source text, not an expansion
+TUP_NIMCACHE_ROOTED="$(grep -c -- '--nimcache:$(NIM_CACHE_ROOT)/' <<<"${TUP_RULE_LINES}" || true)"
+if [[ ${TUP_NIMCACHE_ALL} -gt 0 && ${TUP_NIMCACHE_ALL} -eq ${TUP_NIMCACHE_ROOTED} ]]; then
+	ok "every --nimcache in src/Tuprules.tup is under the per-checkout NIM_CACHE_ROOT"
+else
+	bad "every --nimcache in src/Tuprules.tup is under the per-checkout NIM_CACHE_ROOT" \
+		"rooted ${TUP_NIMCACHE_ROOTED} of ${TUP_NIMCACHE_ALL}:" \
+		"$( # shellcheck disable=SC2016 # Tup source text, not an expansion
+			grep -n -- '--nimcache:' "${TUPRULES}" | grep -vF -- '--nimcache:$(NIM_CACHE_ROOT)/'
+		)"
+fi
+
+# No rule line spells the root at all any more: it arrives only through the
+# import, and the `tup-from-pwd` fallback is gone (it is checked for by name
+# below).
+TUP_BARE="$(grep -n '/tmp/ct-nim-cache' <<<"${TUP_RULE_LINES}" || true)"
+if [[ -z ${TUP_BARE} ]]; then
+	ok "no src/Tuprules.tup rule spells a bare /tmp/ct-nim-cache any more"
+else
+	bad "no src/Tuprules.tup rule spells a bare /tmp/ct-nim-cache any more" \
+		"still hardcoding a host-global root (line numbers exclude comments):" "${TUP_BARE}"
+fi
+
+# UNSET STOPS THE PARSE. The `tup-from-pwd` fallback could only be reached by
+# a shell with the Cargo values set by hand and not this one, and there it
+# chose a root unlike the scripted one and rebuilt every Nim target. The rules
+# now refuse, like the Cargo import below.
+# shellcheck disable=SC2016 # Tup source text, not expansions
+if grep -qxF 'NIM_CACHE_ROOT = $(CT_TUP_NIM_CACHE_ROOT)' <<<"${TUP_RULE_LINES}" &&
+	grep -qxF 'import CT_TUP_NIM_CACHE_ROOT=' <<<"${TUP_RULE_LINES}" &&
+	grep -q '^error ' <<<"$(grep -A1 -xF 'ifeq ($(CT_TUP_NIM_CACHE_ROOT),)' <<<"${TUP_RULE_LINES}")" &&
+	! grep -qE 'tup-from-pwd|import PWD' <<<"${TUP_RULE_LINES}"; then
+	ok "src/Tuprules.tup takes its Nim cache root only from the environment, and refuses without it"
+else
+	bad "src/Tuprules.tup takes its Nim cache root only from the environment, and refuses without it" "$(grep -n 'NIM_CACHE_ROOT\|PWD' <<<"${TUP_RULE_LINES}" | head -8)"
+fi
+
+# ---------------------------------------------------------------------------
+section "the tup Cargo targets belong to one checkout and one compiler"
+# ---------------------------------------------------------------------------
+#
+# THE CLUSTER. `src/Tuprules.tup` built every crate into a host-global root,
+# `/tmp/codetracer/<crate>_target` (`C:/tmp/...` on Windows). Every measured
+# consequence came from sharing it: E0514 when one checkout's rustc 1.96
+# metadata met another's 1.89; one checkout running ANOTHER checkout's build
+# script, fresh by mtime, so the emulator library was never deployed
+# (2026-11-05); `.cargo-lock` unopenable because another account owned the
+# root (2026-10-27). codetracer-pm
+# issues/2026-10-05-ui-tup-cargo-targets-collide-across-workspaces-and-compilers.md,
+# contract spec/Testing/UI-Cargo-Output-Ownership.md.
+#
+# `ci/lib/tup-cargo-target.sh` is the one cause; the rules import its two
+# values and refuse without them. The contracts below grade the helper on real
+# directories (distinct per checkout, re-entered by the same one, distinct per
+# compiler, and every refusal the spec lists), then the sites.
+#
+# THE COMPILER IS A STUB, and that is the one mock here. The helper reads three
+# things from it: the path it resolves to, `rustc -vV` and `--print sysroot`.
+# A script printing two different release/sysroot texts at two different paths
+# is a genuine pair of distinct identities as far as the helper can tell, which
+# is exactly what is being graded. It is a stub because this suite runs on the
+# lint runner, which has no Rust toolchain; the real-compiler measurement is
+# the concurrent two-worktree `just build-once` recorded with the change.
+CARGO_LIB="${SUITE_ROOT}/ci/lib/tup-cargo-target.sh"
+STUB_RUSTC_DIR="${TEST_ROOT}/stub-rustc"
+mkdir -p "${STUB_RUSTC_DIR}/1.89" "${STUB_RUSTC_DIR}/1.96"
+for rel in 1.89 1.96; do
+	cat >"${STUB_RUSTC_DIR}/${rel}/rustc" <<STUB
+#!/usr/bin/env bash
+case "\$1" in
+-vV) printf 'rustc ${rel}.0 (stub)\nbinary: rustc\nhost: x86_64-unknown-linux-gnu\nrelease: ${rel}.0\n' ;;
+--print) printf '%s\n' "${STUB_RUSTC_DIR}/${rel}/sysroot" ;;
+*) exit 2 ;;
+esac
+STUB
+	chmod +x "${STUB_RUSTC_DIR}/${rel}/rustc"
+done
+CK_CA="${TEST_ROOT}/cargo-checkouts/alpha"
+CK_CB="${TEST_ROOT}/cargo-checkouts/beta"
+mkdir -p "${CK_CA}/src" "${CK_CB}/src"
+
+# `env -u` both values: an ambient one (this suite may run inside a prepared
+# dev shell) would be refused as "supplied by someone else" and turn every
+# contract red for the wrong reason.
+cargo_base_for() { # <checkout> <rustc release>
+	env -u CT_TUP_CARGO_TARGET_BASE -u CT_TUP_CARGO_TARGET_IGNORE \
+		RUSTC="${STUB_RUSTC_DIR}/$2/rustc" bash "${CARGO_LIB}" "$1" 2>&1
+}
+first_line() { printf '%s\n' "$1" | sed -n 1p; }
+
+CB_A="$(cargo_base_for "${CK_CA}" 1.89)"
+CB_B="$(cargo_base_for "${CK_CB}" 1.89)"
+CB_A2="$(cargo_base_for "${CK_CA}" 1.89)"
+CB_A96="$(cargo_base_for "${CK_CA}" 1.96)"
+BASE_A="$(first_line "${CB_A}")"
+if [[ ${BASE_A} == "${CK_CA}"/build/tup-cargo-targets/rustc-1.89.0-* && -d ${BASE_A} &&
+	"$(first_line "${CB_B}")" == "${CK_CB}"/build/tup-cargo-targets/rustc-1.89.0-* &&
+	${CB_A2} == "${CB_A}" ]]; then
+	ok "each checkout gets its own Cargo target base inside it, and re-enters the same one"
+else
+	bad "each checkout gets its own Cargo target base inside it, and re-enters the same one" \
+		"alpha: ${CB_A}" "beta: ${CB_B}" "alpha again: ${CB_A2}"
+fi
+BASE_A96="$(first_line "${CB_A96}")"
+if [[ ${BASE_A96} == "${CK_CA}"/build/tup-cargo-targets/rustc-1.96.0-* &&
+	${BASE_A96} != "${BASE_A}" && -d ${BASE_A96} ]]; then
+	ok "...and another compiler in the same checkout gets a different base (the E0514 case)"
+else
+	bad "...and another compiler in the same checkout gets a different base (the E0514 case)" \
+		"1.89: ${BASE_A}" "1.96: ${CB_A96}"
+fi
+
+# The ignore expression must cover a write into this checkout's base and NOT
+# the same write into another's, or the Windows exclusion would be either
+# broken or a host-wide hole again. `sed` turns the Tupfile spelling `[/\\]`
+# (kept verbatim by tup in a variable, measured) into the ERE `[/\]`.
+IGNORE_A="$(printf '%s\n' "${CB_A}" | sed -n 2p)"
+IGNORE_ERE="^$(printf '%s' "${IGNORE_A}" | sed 's/\[\/\\\\\]/[\/\\]/g')db_backend_target[A-Za-z0-9]*[/\\].*\$"
+if grep -Eq -- "${IGNORE_ERE}" <<<"${BASE_A}/db_backend_target/debug/replay-server" &&
+	grep -Eq -- "${IGNORE_ERE}" <<<"${BASE_A}/db_backend_targetF5RTUl/CACHEDIR.TAG" &&
+	! grep -Eq -- "${IGNORE_ERE}" <<<"$(first_line "${CB_B}")/db_backend_target/debug/replay-server"; then
+	ok "the ignore expression covers this base's target writes and not another checkout's"
+else
+	bad "the ignore expression covers this base's target writes and not another checkout's" \
+		"expression: ${IGNORE_A}" "as ERE: ${IGNORE_ERE}"
+fi
+
+# THE REFUSALS. Each must say no on stderr, print nothing on stdout (so a
+# caller cannot eval half an answer), and exit non-zero.
+cargo_refuses() { # <desc> <fragment> <checkout> [env assignments...]
+	local desc="$1" fragment="$2" checkout="$3" out err status
+	shift 3
+	out="$(env -u CT_TUP_CARGO_TARGET_BASE -u CT_TUP_CARGO_TARGET_IGNORE "$@" \
+		RUSTC="${STUB_RUSTC_DIR}/1.89/rustc" bash "${CARGO_LIB}" "${checkout}" 2>"${TEST_ROOT}/cargo-err")"
+	status=$?
+	err="$(cat "${TEST_ROOT}/cargo-err")"
+	if [[ ${status} -ne 0 && -z ${out} && ${err} == *"${fragment}"* ]]; then
+		ok "${desc}"
+	else
+		bad "${desc}" "status: ${status}" "stdout: ${out}" "stderr: ${err}"
+	fi
+}
+
+cargo_refuses "a base supplied by the environment for another checkout is refused" \
+	"already set to a different base" "${CK_CA}" \
+	CT_TUP_CARGO_TARGET_BASE="$(first_line "${CB_B}")"
+
+printf 'x\n' >"${BASE_A}/stray"
+cargo_refuses "an unknown object in the base is refused" "unexpected entry" "${CK_CA}"
+rm -f "${BASE_A}/stray"
+
+ln -s /tmp "${BASE_A}/db_backend_target"
+cargo_refuses "a target directory that is a link is refused" "not a plain directory" "${CK_CA}"
+rm -f "${BASE_A}/db_backend_target"
+
+cp "${BASE_A}/.ct-tup-cargo-owner" "${TEST_ROOT}/marker-saved"
+sed -i.bak "s|^checkout=.*|checkout=${CK_CB}|" "${BASE_A}/.ct-tup-cargo-owner"
+cargo_refuses "a base whose owner marker names another checkout is refused" \
+	"different checkout or compiler" "${CK_CA}"
+cp "${TEST_ROOT}/marker-saved" "${BASE_A}/.ct-tup-cargo-owner"
+rm -f "${BASE_A}/.ct-tup-cargo-owner.bak"
+
+CK_CL="${TEST_ROOT}/cargo-checkouts/linked"
+mkdir -p "${CK_CL}/src" "${TEST_ROOT}/cargo-elsewhere"
+ln -s "${TEST_ROOT}/cargo-elsewhere" "${CK_CL}/build"
+cargo_refuses "a build directory that is a link out of the checkout is refused" \
+	"is a symbolic link" "${CK_CL}"
+if [[ -z "$(ls -A "${TEST_ROOT}/cargo-elsewhere")" ]]; then
+	ok "...and nothing was created through it"
+else
+	bad "...and nothing was created through it" "$(ls -A "${TEST_ROOT}/cargo-elsewhere")"
+fi
+
+# After every refusal above was undone, the same checkout re-enters cleanly.
+if [[ "$(cargo_base_for "${CK_CA}" 1.89)" == "${CB_A}" ]]; then
+	ok "...and once the foreign objects are gone the same base is re-entered"
+else
+	bad "...and once the foreign objects are gone the same base is re-entered" \
+		"$(cargo_base_for "${CK_CA}" 1.89)"
+fi
+
+# AND THE SITES. Source text, comments dropped, as above.
+TUP_CARGO_BARE="$(grep -nE '[/\]tmp[/\]codetracer|tmp\[/\\\\\]codetracer' <<<"${TUP_RULE_LINES}" || true)"
+# shellcheck disable=SC2016 # Tup source text, not expansions
+if [[ -z ${TUP_CARGO_BARE} ]] &&
+	grep -qxF 'CARGO_TARGET_BASE = $(CT_TUP_CARGO_TARGET_BASE)' <<<"${TUP_RULE_LINES}" &&
+	grep -qxF 'import CT_TUP_CARGO_TARGET_BASE=' <<<"${TUP_RULE_LINES}" &&
+	grep -qxF 'import CT_TUP_CARGO_TARGET_IGNORE=' <<<"${TUP_RULE_LINES}" &&
+	grep -q '^error ' <<<"$(grep -A1 -xF 'ifeq ($(CT_TUP_CARGO_TARGET_BASE),)' <<<"${TUP_RULE_LINES}")" &&
+	grep -q '^error ' <<<"$(grep -A1 -xF 'ifeq ($(CT_TUP_CARGO_TARGET_IGNORE),)' <<<"${TUP_RULE_LINES}")"; then
+	ok "src/Tuprules.tup takes its Cargo target base only from the helper, and refuses without it"
+else
+	bad "src/Tuprules.tup takes its Cargo target base only from the helper, and refuses without it" \
+		"host-global spellings (line numbers exclude comments):" "${TUP_CARGO_BARE:-<none>}" \
+		"$(grep -n 'CARGO_TARGET_BASE\|CT_TUP_CARGO' <<<"${TUP_RULE_LINES}" | head -12)"
+fi
+
+# Every --target-dir under that base, and every Cargo ignore built from the
+# helper's expression: a rule added with its own root would pass the check above.
+TD_ALL="$(grep -o -- '--target-dir [^ ]*' <<<"${TUP_RULE_LINES}" | wc -l)"
+# shellcheck disable=SC2016 # Tup source text
+TD_ROOTED="$(grep -o -- '--target-dir $(CARGO_TARGET_BASE)/[a-z_]*_target' <<<"${TUP_RULE_LINES}" | wc -l)"
+IGN_ALL="$(grep -c '^[A-Z_]*_CARGO_IGNORE_OUTPUTS = ' <<<"${TUP_RULE_LINES}" || true)"
+# shellcheck disable=SC2016 # Tup source text
+IGN_ROOTED="$(grep -c '^[A-Z_]*_CARGO_IGNORE_OUTPUTS = ^($(CT_TUP_CARGO_TARGET_IGNORE)[a-z_]*_target\[A-Za-z0-9\]\*' <<<"${TUP_RULE_LINES}" || true)"
+if [[ ${TD_ALL} -gt 0 && ${TD_ALL} -eq ${TD_ROOTED} && ${IGN_ALL} -gt 0 && ${IGN_ALL} -eq ${IGN_ROOTED} ]]; then
+	ok "every Cargo rule builds under the base and every Cargo ignore is built from the helper's expression"
+else
+	bad "every Cargo rule builds under the base and every Cargo ignore is built from the helper's expression" \
+		"--target-dir: ${TD_ROOTED} of ${TD_ALL} under \$(CARGO_TARGET_BASE)" \
+		"ignores: ${IGN_ROOTED} of ${IGN_ALL} from \$(CT_TUP_CARGO_TARGET_IGNORE)"
+fi
+
+TUP_CARGO_ENTRY_MISSING=""
+for entry in scripts/build-once.sh scripts/build.sh ci/build/dev.sh \
+	nix/shells/ci-base.nix non-nix-build/env.sh \
+	non-nix-build/windows/setup-codetracer-runtime-env.sh; do
+	grep -Eq 'tup-cargo-target\.sh"? (--reap )?--export' "${SUITE_ROOT}/${entry}" 2>/dev/null ||
+		TUP_CARGO_ENTRY_MISSING="${TUP_CARGO_ENTRY_MISSING} ${entry}"
+done
+if [[ -z ${TUP_CARGO_ENTRY_MISSING} ]]; then
+	ok "every tup entry point sets the Cargo target base through tup-cargo-target.sh"
+else
+	# shellcheck disable=SC2086 # one line per file, see BARE_ROOTS above
+	bad "every tup entry point sets the Cargo target base through tup-cargo-target.sh" \
+		"missing in:" ${TUP_CARGO_ENTRY_MISSING}
+fi
+
+# The builds reap; the scripts that only prepare a shell must not, or entering
+# a shell with another compiler would remove a base a running build uses.
+REAP_WRONG=""
+for entry in scripts/build-once.sh scripts/build.sh ci/build/dev.sh build_for_extension.sh; do
+	grep -Eq 'tup-cargo-target\.sh"? --reap' "${SUITE_ROOT}/${entry}" 2>/dev/null ||
+		REAP_WRONG="${REAP_WRONG} ${entry}(does not reap)"
+done
+for entry in nix/shells/ci-base.nix non-nix-build/env.sh \
+	non-nix-build/windows/setup-codetracer-runtime-env.sh; do
+	# Code only: these files explain in comments why they do not pass it.
+	! grep -q -- '--reap' <<<"$(grep -v '^[[:space:]]*#' "${SUITE_ROOT}/${entry}" 2>/dev/null)" ||
+		REAP_WRONG="${REAP_WRONG} ${entry}(reaps)"
+done
+if [[ -z ${REAP_WRONG} ]]; then
+	ok "the build entry points reap old bases, and the shell preparers do not"
+else
+	# shellcheck disable=SC2086 # one line per file
+	bad "the build entry points reap old bases, and the shell preparers do not" ${REAP_WRONG}
+fi
+
+# --export is the ONE setup command, so it must carry the Nim root too, and the
+# same one the lanes' helper computes for this checkout.
+EXPORT_A="$(env -u CT_TUP_CARGO_TARGET_BASE -u CT_TUP_CARGO_TARGET_IGNORE \
+	RUSTC="${STUB_RUSTC_DIR}/1.89/rustc" bash "${CARGO_LIB}" --export "${CK_CA}" 2>&1)"
+NIM_FOR_CA="$(env -u CT_NIM_CACHE_ROOT bash "${NIMCACHE_LIB}" --tup "${CK_CA}")"
+assert_contains "${EXPORT_A}" "export CT_TUP_NIM_CACHE_ROOT='${NIM_FOR_CA}'" \
+	"--export sets the Nim cache root too, the same one ci/lib/nim-cache-root.sh --tup gives"
+
+# THE REAPER. One checkout holding, beside the base about to be selected:
+#   old      this checkout's older-compiler base, with a target in it  -> removed
+#   newer    this checkout's base with a NEWER marker                  -> kept
+#   unmarked a base-named directory with no marker                     -> kept
+#   foreign  a base whose marker names another checkout                -> kept
+#   stray    this checkout's older base holding an object we never put -> kept
+#   linked   a base-named LINK to a directory outside the root         -> kept, target intact
+#   outside  a directory beside the root, not in it                    -> kept
+# Run twice: once WITHOUT --reap (the control: nothing may go), then with it.
+CK_R="${TEST_ROOT}/cargo-checkouts/reap"
+mkdir -p "${CK_R}/src"
+reap_base() { # <rustc release> [--reap]
+	env -u CT_TUP_CARGO_TARGET_BASE -u CT_TUP_CARGO_TARGET_IGNORE \
+		RUSTC="${STUB_RUSTC_DIR}/$1/rustc" bash "${CARGO_LIB}" ${2:+"$2"} "${CK_R}" 2>"${TEST_ROOT}/reap-err" | sed -n 1p
+}
+R_ROOT="${CK_R}/build/tup-cargo-targets"
+R_OLD="$(reap_base 1.89)"
+mkdir -p "${R_OLD}/db_backend_target/debug"
+printf 'artefact\n' >"${R_OLD}/db_backend_target/debug/replay-server"
+mkdir -p "${R_ROOT}/rustc-1.80.0-1" "${R_ROOT}/rustc-1.81.0-2" "${R_ROOT}/rustc-1.82.0-3" \
+	"${R_ROOT}/rustc-1.84.0-5" "${TEST_ROOT}/reap-link-target" "${CK_R}/build/outside"
+printf 'keep\n' >"${TEST_ROOT}/reap-link-target/precious"
+printf 'keep\n' >"${CK_R}/build/outside/precious"
+sed "s|^checkout=.*|checkout=${CK_CB}|" "${R_OLD}/.ct-tup-cargo-owner" >"${R_ROOT}/rustc-1.81.0-2/.ct-tup-cargo-owner"
+cp "${R_OLD}/.ct-tup-cargo-owner" "${R_ROOT}/rustc-1.82.0-3/.ct-tup-cargo-owner"
+printf 'x\n' >"${R_ROOT}/rustc-1.82.0-3/stray"
+cp "${R_OLD}/.ct-tup-cargo-owner" "${R_ROOT}/rustc-1.84.0-5/.ct-tup-cargo-owner"
+ln -s "${TEST_ROOT}/reap-link-target" "${R_ROOT}/rustc-1.83.0-4"
+# Every marker so far is "old"; the newer one is stamped a day ahead after the
+# selected base exists, so `-ot` keeps it.
+touch -t 202001010000 "${R_OLD}/.ct-tup-cargo-owner" "${R_ROOT}"/rustc-1.8[0-2].0-*/.ct-tup-cargo-owner
+reap_snapshot() {
+	local d
+	for d in "${R_ROOT}"/* "${TEST_ROOT}/reap-link-target/precious" "${CK_R}/build/outside/precious"; do
+		[[ -e ${d} || -L ${d} ]] && printf '%s\n' "${d##*/}"
+	done
+}
+R_NEW="$(reap_base 1.96)"
+touch -t "$(date -d '+1 day' +%Y%m%d%H%M 2>/dev/null || date -v+1d +%Y%m%d%H%M)" \
+	"${R_ROOT}/rustc-1.84.0-5/.ct-tup-cargo-owner"
+R_BEFORE="$(reap_snapshot)"
+if [[ -d ${R_OLD}/db_backend_target && -d ${R_NEW} && -z "$(cat "${TEST_ROOT}/reap-err")" ]]; then
+	ok "control: selecting a base without --reap removes nothing"
+else
+	bad "control: selecting a base without --reap removes nothing" "$(cat "${TEST_ROOT}/reap-err")" "${R_BEFORE}"
+fi
+R_SEL="$(reap_base 1.96 --reap)"
+R_AFTER="$(reap_snapshot)"
+R_EXPECT="$(printf '%s\n' "${R_BEFORE}" | grep -vxF "${R_OLD##*/}")"
+if [[ ${R_SEL} == "${R_NEW}" && ! -e ${R_OLD} && ${R_AFTER} == "${R_EXPECT}" &&
+	-f ${TEST_ROOT}/reap-link-target/precious ]]; then
+	ok "--reap removes only this checkout's older, marked, clean base, and keeps the selected one"
+else
+	bad "--reap removes only this checkout's older, marked, clean base, and keeps the selected one" \
+		"selected: ${R_SEL} (expected ${R_NEW})" "before:" "${R_BEFORE}" "after:" "${R_AFTER}" \
+		"stderr: $(cat "${TEST_ROOT}/reap-err")"
+fi
+assert_contains "$(cat "${TEST_ROOT}/reap-err")" "rustc-1.82.0-3: unexpected entry" \
+	"...and says why it left the base holding an object it did not put there"
+
+# THE REPRO SLOT. A constant path the repro graph names, kept bound to the
+# compiler about to run: created with the marker, kept for the same compiler,
+# retired (then reaped, being older) when another compiler takes over, and
+# refused when it is a link or carries another checkout's marker.
+CK_P="${TEST_ROOT}/cargo-checkouts/repro"
+mkdir -p "${CK_P}/src"
+repro_slot() { # <rustc release>
+	env RUSTC="${STUB_RUSTC_DIR}/$1/rustc" bash "${CARGO_LIB}" --repro-slot "${CK_P}" 2>"${TEST_ROOT}/slot-err"
+}
+P_ROOT="${CK_P}/build/repro-cargo-targets"
+P1="$(repro_slot 1.89)"
+mkdir -p "${P_ROOT}/active/db_backend_target"
+P2="$(repro_slot 1.89)"
+P3="$(repro_slot 1.96)"
+if [[ ${P1} == "${P_ROOT}/active" && ${P2} == "${P1}" && ${P3} == "${P1}" &&
+	"$(sed -n 's/^release: //p' "${P_ROOT}/active/.ct-tup-cargo-owner")" == 1.96.0 &&
+	! -e ${P_ROOT}/active/db_backend_target &&
+	"$(find "${P_ROOT}" -mindepth 1 -maxdepth 1 | wc -l)" -eq 1 ]]; then
+	ok "the repro slot keeps one path, re-binds it to a new compiler, and reaps the old compiler's"
+else
+	bad "the repro slot keeps one path, re-binds it to a new compiler, and reaps the old compiler's" \
+		"slots: ${P1} | ${P2} | ${P3}" "$(ls -la "${P_ROOT}" "${P_ROOT}/active")" "$(cat "${TEST_ROOT}/slot-err")"
+fi
+sed -i.bak "s|^checkout=.*|checkout=${CK_CB}|" "${P_ROOT}/active/.ct-tup-cargo-owner"
+rm -f "${P_ROOT}/active/.ct-tup-cargo-owner.bak"
+if ! repro_slot 1.96 >/dev/null && grep -q 'belongs to a different checkout' "${TEST_ROOT}/slot-err" &&
+	[[ -d ${P_ROOT}/active ]]; then
+	ok "a repro slot carrying another checkout's marker is refused, not retired"
+else
+	bad "a repro slot carrying another checkout's marker is refused, not retired" "$(cat "${TEST_ROOT}/slot-err")"
+fi
+
+# AND THE REPRO SITES. The graph names the slot, not a host-global root, and
+# both Cargo actions are ordered after the uncacheable action that binds it.
+REPRO_NIM="${SUITE_ROOT}/repro.nim"
+REPRO_CODE="$(grep -v '^[[:space:]]*#' "${REPRO_NIM}")"
+# The slot action's declaration, held in a variable so each property below is
+# a here-string match rather than a pipe into an early-exiting `grep -q`.
+REPRO_SLOT_ACTION="$(grep -A8 'actionIdValue = "repro-cargo-target-slot"' <<<"${REPRO_CODE}")"
+# shellcheck disable=SC2016 # Nim source text
+if ! grep -qE '"(C:)?/tmp/codetracer"' <<<"${REPRO_CODE}" &&
+	grep -qF 'const ReproCargoSlot = "build/repro-cargo-targets/active"' <<<"${REPRO_CODE}" &&
+	[[ "$(grep -c 'targetDir = ReproCargoSlot & "/' <<<"${REPRO_CODE}")" -eq "$(grep -c 'targetDir = ' <<<"${REPRO_CODE}" | awk '{print $1 - 1}')" ]] &&
+	grep -qF 'targetDir = "build/repro-cargo-targets/probe"' <<<"${REPRO_CODE}" &&
+	[[ "$(grep -c 'after = @\[reproCargoTargetSlot\]' <<<"${REPRO_CODE}")" -eq "$(grep -c 'targetDir = ReproCargoSlot & "/' <<<"${REPRO_CODE}")" ]] &&
+	grep -q 'afterValue = \[reproCargoProbe\]' <<<"${REPRO_SLOT_ACTION}" &&
+	grep -q 'tup-cargo-target.sh --repro-slot --rustc-probe' <<<"${REPRO_SLOT_ACTION}" &&
+	grep -q 'cacheableValue = false' <<<"${REPRO_SLOT_ACTION}"; then
+	ok "repro.nim builds Cargo only into the bound slot, after the uncacheable action that binds it to the probed compiler"
+else
+	bad "repro.nim builds Cargo only into the bound slot, after the uncacheable action that binds it to the probed compiler" \
+		"$(grep -nE 'tmp/codetracer|targetDir = |ReproCargoSlot|reproCargoTargetSlot|cargo.build\(' "${REPRO_NIM}" | head -12)"
+fi
+
+# build_for_extension.sh: the replay backend is built into the compiler-bound
+# base, not the crate's unbound `target/`.
+EXT_SH="${SUITE_ROOT}/build_for_extension.sh"
+EXT_CODE="$(grep -v '^[[:space:]]*#' "${EXT_SH}")"
+# shellcheck disable=SC2016 # shell source text
+if grep -qF 'cargo build --target-dir "${cargo_base}/db_backend_target"' <<<"${EXT_CODE}" &&
+	grep -qF 'cp "${cargo_base}/db_backend_target/debug/replay-server" "$2"' <<<"${EXT_CODE}" &&
+	! grep -q 'src/db-backend/target' <<<"${EXT_CODE}"; then
+	ok "build_for_extension.sh builds the replay backend into the compiler-bound base"
+else
+	bad "build_for_extension.sh builds the replay backend into the compiler-bound base" \
+		"$(grep -n 'cargo\|target' "${EXT_SH}")"
+fi
+
+# THE LINKER RESPONSE FILES. NIM_SIDE_OUTPUTS_IGNORE's second alternative is
+# meant to exclude Nim's `<name>_linkerArgs.txt` side outputs on Windows. It was
+# spelled `_linkerArgs\\.txt`, and tup 0.8 keeps `\\` verbatim inside a
+# variable, so the regex said "a backslash, then any character" and never
+# matched the file (measured with tup 0.8 on a rule that writes one: "was
+# written to, but is not in .tup/db"; with `[.]` it is Updated). The expression
+# is applied here as an ERE to the path such a write has, which treats `\\` and
+# `[/\\]` exactly as tup's regex engine does.
+if grep -Eq -- "${NIM_IGNORE_RE}" <<<"/w/src/build-debug/ct/ct_linkerArgs.txt" &&
+	grep -Eq -- "${NIM_IGNORE_RE}" <<<'C:\w\src\build-debug\ct\ct_linkerArgs.txt' &&
+	! grep -Eq -- "${NIM_IGNORE_RE}" <<<"/w/src/build-debug/ct/ct_linkerArgsXtxt"; then
+	ok "NIM_SIDE_OUTPUTS_IGNORE matches a <name>_linkerArgs.txt side output, and only that name"
+else
+	bad "NIM_SIDE_OUTPUTS_IGNORE matches a <name>_linkerArgs.txt side output, and only that name" \
+		"NIM_SIDE_OUTPUTS_IGNORE: ${NIM_IGNORE_RE:-<not found>}"
+fi
+
+# THE EMULATOR LIBRARY TRAVELS WITH replay-server. A produced binary must
+# carry no load path into a build-scratch root (codetracer-pm issue
+# 2026-10-05, the 2026-10-12 addendum: macOS's /tmp cleanup emptied the Cargo
+# target's `out/` an installed `replay-server` loaded `libmcr_emulator.dylib`
+# from). src/db-backend/build.rs therefore gives every binary of the crate one
+# run-time search path, its own directory, and names the macOS library by
+# `@rpath`; every place that installs `replay-server` installs the library
+# beside it (or, for the AppImage, in the `lib/` its rewritten rpath names).
+# Source text, comments dropped: the defect is the `-rpath,<OUT_DIR>` emit and
+# a copy that forgets the library.
+BUILD_RS_CODE="$(grep -vE '^[[:space:]]*//' "${SUITE_ROOT}/src/db-backend/build.rs")"
+LOADPATH_WRONG=""
+# shellcheck disable=SC2016 # Rust and Tup source text, not expansions
+{
+	grep -qF 'cargo:rustc-link-arg=-Wl,-rpath,{}' <<<"${BUILD_RS_CODE}" &&
+		LOADPATH_WRONG="${LOADPATH_WRONG} build.rs(rpath-into-OUT_DIR)"
+	grep -qF 'cargo:rustc-link-arg=-Wl,-rpath,$ORIGIN' <<<"${BUILD_RS_CODE}" ||
+		LOADPATH_WRONG="${LOADPATH_WRONG} build.rs(no-\$ORIGIN)"
+	grep -qF 'cargo:rustc-link-arg=-Wl,-rpath,@loader_path' <<<"${BUILD_RS_CODE}" ||
+		LOADPATH_WRONG="${LOADPATH_WRONG} build.rs(no-@loader_path)"
+	grep -qF -- '-Wl,-install_name,@rpath/' <<<"${BUILD_RS_CODE}" ||
+		LOADPATH_WRONG="${LOADPATH_WRONG} build.rs(macOS-install-name-not-@rpath)"
+	[[ "$(grep -c 'deploy_shared_beside_binaries(&so_path)' <<<"${BUILD_RS_CODE}")" -ge 1 ]] &&
+		grep -qF 'profile_dir.join("deps")' <<<"$(grep -A12 'fn deploy_shared_beside_binaries' <<<"${BUILD_RS_CODE}")" ||
+		LOADPATH_WRONG="${LOADPATH_WRONG} build.rs(not-deployed-beside-binaries-and-tests)"
+	grep -qF 'cp $(CARGO_TARGET_BASE)/db_backend_target/debug/libmcr_emulator.so %2o' <<<"${TUP_RULE_LINES}" ||
+		LOADPATH_WRONG="${LOADPATH_WRONG} Tuprules(linux)"
+	grep -qF 'cp $(CARGO_TARGET_BASE)/db_backend_target/debug/libmcr_emulator.dylib %2o' <<<"${TUP_RULE_LINES}" ||
+		LOADPATH_WRONG="${LOADPATH_WRONG} Tuprules(macos)"
+	grep -qF '../bin/replay-server$(EXE_SUFFIX) ../bin/libmcr_emulator.dylib' "${SUITE_ROOT}/src/db-backend/Tupfile" ||
+		LOADPATH_WRONG="${LOADPATH_WRONG} db-backend/Tupfile(macos)"
+	grep -qF 'target("replay-server", [replayServer, replayServerEmulator])' <<<"${REPRO_CODE}" ||
+		LOADPATH_WRONG="${LOADPATH_WRONG} repro.nim"
+	grep -qF 'cp "${cargo_base}/db_backend_target/debug/${emulator_library}" "$(dirname "$2")/${emulator_library}"' <<<"${EXT_CODE}" ||
+		LOADPATH_WRONG="${LOADPATH_WRONG} build_for_extension.sh"
+	grep -qF '"${CODETRACER_PREFIX}/lib/libmcr_emulator.so"' "${SUITE_ROOT}/appimage-scripts/build_db_backend.sh" ||
+		LOADPATH_WRONG="${LOADPATH_WRONG} appimage-scripts/build_db_backend.sh"
+	grep -qF '"$DIST_DIR/bin/${emulator_library}"' "${SUITE_ROOT}/non-nix-build/build_db_backend.sh" ||
+		LOADPATH_WRONG="${LOADPATH_WRONG} non-nix-build/build_db_backend.sh"
+	# The dev shell's stdenv self-rpath (`-rpath $out/lib`, $out being
+	# `<checkout>/outputs/out` there) is removed, or every `cargo build` in
+	# the shell gets that second, dead entry.
+	grep -qF "NIX_LDFLAGS=\"''\${NIX_LDFLAGS//-rpath \$out\\/lib/}\"" "${SUITE_ROOT}/nix/shells/ci-base.nix" ||
+		LOADPATH_WRONG="${LOADPATH_WRONG} nix/shells/ci-base.nix(self-rpath)"
+}
+if [[ -z ${LOADPATH_WRONG} ]]; then
+	ok "replay-server loads its emulator library only from beside itself, and every installer puts it there"
+else
+	# shellcheck disable=SC2086 # one item per line
+	bad "replay-server loads its emulator library only from beside itself, and every installer puts it there" \
+		${LOADPATH_WRONG}
 fi
 
 # ---------------------------------------------------------------------------

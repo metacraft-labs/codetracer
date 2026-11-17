@@ -139,6 +139,29 @@ when not defined(ctInExtension):
   var requestFailureNoticesInstalled = false
     ## Whether the one `onCtRequestFailed` observer below is installed.
 
+proc testStopDelayMs(): int =
+  ## TEST-ONLY: how long to hold a replay's `ct/complete-move` before the
+  ## window takes it — `CODETRACER_TEST_DELAY_STOP_MS`, read only in the
+  ## Electron renderer and only when `CODETRACER_IN_UI_TEST` is set, so no
+  ## user's session ever waits on it. The scenario pack sets it (stage
+  ## `delay-stop-drawing`) to widen the window between "the replay answered"
+  ## and "the window shows the stop" from one frame to a measurable one: a
+  ## sync condition that fires early (`replay-idle` before the stop is drawn)
+  ## is then observable. The status stays busy meanwhile, as it is while any
+  ## move is in flight.
+  when defined(ctInExtension) or defined(ctInCentralExtensionContext):
+    0
+  else:
+    var ms = 0
+    {.emit: """
+    if (typeof process !== "undefined" && process.env &&
+        process.env.CODETRACER_IN_UI_TEST) {
+      const n = parseInt(process.env.CODETRACER_TEST_DELAY_STOP_MS || "0", 10);
+      if (n > 0) `ms` = n;
+    }
+    """.}
+    ms
+
 proc setupMiddlewareApis*(dapApi: DapApi, viewsApi: MediatorWithSubscribers) {.exportc.}=
   ## Connect one replay session's DAP API to its views mediator, both ways.
   ## Called once for EVERY tab's session (`ui_js.configureSessionMiddleware`),
@@ -173,6 +196,17 @@ proc setupMiddlewareApis*(dapApi: DapApi, viewsApi: MediatorWithSubscribers) {.e
     if not requestFailureNoticesInstalled:
       requestFailureNoticesInstalled = true
       onCtRequestFailed(proc(outcome: DapRequestOutcome) =
+        # A refused step or continue brings no move, so nothing else ends
+        # the operation the status bar shows ("stable: reverse-next" stayed
+        # up for as long as the window did): the refusal ends it.
+        if isMotionCommand(outcome.command):
+          for session in data.sessions:
+            if not session.isNil and not session.dapApi.isNil and
+               session.dapApi.sessionId == outcome.sessionId:
+              session.status.stableBusy = false
+              if not session.ui.isNil and not session.ui.status.isNil:
+                session.ui.status.state.stableBusy = false
+                session.ui.status.redraw()
         let text = requestFailureText(outcome)
         if text.len == 0:
           return
@@ -222,7 +256,7 @@ proc setupMiddlewareApis*(dapApi: DapApi, viewsApi: MediatorWithSubscribers) {.e
   # in sync with the backend's serde shape.
   dapApi.on(CtUpdatedHttpRequests, proc(kind: CtEventKind, value: JsObject) =
     viewsApi.emit(CtUpdatedHttpRequests, value))
-  dapApi.on(CtCompleteMove, proc(kind: CtEventKind, value: MoveState) =
+  proc applyCompleteMove(value: MoveState) =
     cdebug "[PIPELINE] middleware.CtCompleteMove: received from dapApi, rrTicks=" &
       $value.location.rrTicks &
       ", emitting to viewsApi"
@@ -282,6 +316,13 @@ proc setupMiddlewareApis*(dapApi: DapApi, viewsApi: MediatorWithSubscribers) {.e
       # The same session's run state as its status bar above (`owner`).
       owner.status.stableBusy = false
       owner.status.hasStarted = true
+  dapApi.on(CtCompleteMove, proc(kind: CtEventKind, value: MoveState) =
+    # TEST-ONLY (`testStopDelayMs`): the answer held before it is drawn.
+    let held = testStopDelayMs()
+    if held > 0:
+      discard windowSetTimeout(proc() = applyCompleteMove(value), held)
+    else:
+      applyCompleteMove(value)
   )
 
   dapApi.on(CtLoadedTerminal, proc(kind: CtEventKind, value: seq[ProgramEvent]) = viewsApi.emit(CtLoadedTerminal, value))
@@ -295,7 +336,16 @@ proc setupMiddlewareApis*(dapApi: DapApi, viewsApi: MediatorWithSubscribers) {.e
   # forward them identically.
   wireSessionNotifications(dapApi, viewsApi)
   dapApi.on(CtLoadAsmFunctionResponse, proc(kind: CtEventKind, value: Instructions) = viewsApi.emit(CtLoadAsmFunctionResponse, value.toJs))
-  dapApi.on(CtUpdateExpansionResponse, proc(kind: CtEventKind, value: Location) = viewsApi.emit(CtUpdateExpansionResponse, value))
+  dapApi.on(CtUpdateExpansionResponse, proc(kind: CtEventKind, value: Location) =
+    viewsApi.emit(CtUpdateExpansionResponse, value)
+    when not defined(ctInExtension):
+      # The editor service opens the expansion (S6). It was subscribed on
+      # `data.dapApi` alone (`types.nim`), and a session's answers arrive on
+      # its own `DapApi`, so Toggle Macro Expansion got its expansion back
+      # and nothing opened it.
+      if not data.services.isNil and not data.services.editor.isNil and
+         not data.services.editor.onExpansionResponse.isNil:
+        discard data.services.editor.onExpansionResponse(data.services.editor, value))
 
     #when defined(ctInExtension):
     # TODO: For now not using in the extension
@@ -405,7 +455,9 @@ proc setupMiddlewareApis*(dapApi: DapApi, viewsApi: MediatorWithSubscribers) {.e
       # redundant round-trips and re-renders per replay. The live path got
       # its `isoBatch.batch` wrapper and this one, which is the same event
       # by another door, did not.
-      let cached = lastCompleteMove
+      let cached = MoveState()
+      cached[] = lastCompleteMove[]
+      cached.redelivered = true
       isoBatch.batch proc() =
         viewsApi.emit(CtCompleteMove, cached.toJs)
   )

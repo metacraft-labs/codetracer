@@ -56,10 +56,9 @@
 ## As in `dap_session_routing_test.nim`: the router — `onDapRawMessage`,
 ## `setupProxyForDap`, `handleFrame` / `resolveSessionId`,
 ## `noteReplaySelected` / `noteReplayStopped` (what `index/traces.nim` calls)
-## — and `electron_vars.broadcastToSession` are real. The Backend Manager
-## socket records the frames written to it and hands the test the router's
-## stream handler; each window's `webContents.send` records what the window
-## would be told. Request frames are shaped as `dap.dispatchCtRequest` builds
+## — and `window_routing`'s window and tab tables are real. The Backend
+## Manager socket records the frames written to it and hands the test the
+## router's stream handler; the window's send records what it would be told. Request frames are shaped as `dap.dispatchCtRequest` builds
 ## them.
 ##
 ## Lane: `main-process` (`nim js -d:nodejs -d:ctIndex -d:server`, run under
@@ -69,6 +68,7 @@ import std/[unittest, jsffi, strutils]
 
 import ../index/ipc_subsystems/dap
 import ../index/electron_vars
+import ../index/window_routing
 
 var checks = 0
 var failedChecks = 0
@@ -129,22 +129,16 @@ proc event(replay: int; marker: int): JsObject =
   result["ctReplayId"] = replay
 
 # ---------------------------------------------------------------------------
-# One window per tab, so what each tab is told can be read apart
+# One window with three tabs; what each tab is told is read apart by the tab
+# id it is told under
 # ---------------------------------------------------------------------------
 
 const Tabs = 3
 var received: array[Tabs, seq[(cstring, JsObject)]]
 
-proc windowFor(tab: int): JsObject =
-  let contents = newJsObject()
-  contents["send"] = proc(channel: cstring; payload: JsObject) =
-    received[tab].add((channel, payload))
-  result = newJsObject()
-  result["webContents"] = contents
-
-for tab in 0 ..< Tabs:
-  windowTable[20 + tab] = windowFor(tab)
-  sessionWindows[tab] = @[20 + tab]
+discard registerAppWindow(20, 200, newJsObject(),
+  proc(channel: cstring; payload: JsObject) =
+    received[payload["sessionId"].to(int)].add((channel, payload)))
 
 proc told(tab: int; channel: string): seq[JsObject] =
   for (c, payload) in received[tab]:

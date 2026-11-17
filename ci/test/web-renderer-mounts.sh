@@ -2004,8 +2004,12 @@ vcs = bands.get("vcs")
 # is NOT in this list: its occupants are the current-line arrow (one line at a
 # time) and the run-test control (hover-only), so on an ordinary row it
 # correctly has no box.
-need = ["lineNumber", "vcs", "breakpoint", "tracepoint"]
+need = ["lineNumber", "vcs"]
 missing = [n for n in need if not bands.get(n) or not bands[n]["width"] or not bands[n]["height"]]
+# The glyph column is first, with a width, and left of the numbers.
+glyph = b.get("glyph") or {}
+if not glyph.get("width") or glyph.get("right", 1e9) > (bands.get("lineNumber") or {}).get("left", -1):
+    missing.append("glyph")
 unowned = [n for n in need if bands.get(n) and not bands[n]["ownsHitArea"]]
 print(len(b.get("overlaps") or []))
 print(",".join(missing) or "none")
@@ -2022,7 +2026,7 @@ print((vcs or {}).get("height", 0))
 	r_vcs_height="$(printf '%s\n' "${r_bandstate}" | sed -n 6p)"
 
 	if [ "${r_band_missing}" = "none" ]; then
-		ck ok "arm R: all four of the gutter's reserved concerns have a real box — ${r_bands}"
+		ck ok "arm R: the gutter's reserved concerns have a real box, and the glyph column is first — ${r_bands}"
 	else
 		ck fail "arm R: these gutter bands have no box a pointer can reach: ${r_band_missing} — ${r_bands}"
 	fi

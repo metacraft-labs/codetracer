@@ -113,9 +113,20 @@ require_locked_checkout() {
 		else
 			echo "Ref '$ref' is not known to the existing checkout; fetching it." >&2
 		fi
-		if git -C "$dir" fetch --quiet origin "$ref" 2>/dev/null; then
-			want="$(git -C "$dir" rev-parse --verify --quiet 'FETCH_HEAD^{commit}' 2>/dev/null)" || want=""
-		fi
+		# The checkout's own `origin` first, then the repository's canonical
+		# URL: a persistent runner's leftover checkout can carry an `origin`
+		# this job's credential does not cover (run 43996043232: the fetch
+		# failed and nothing said why). Each failure is shown, not discarded.
+		local url="https://github.com/metacraft-labs/codetracer-native-backend"
+		local src
+		for src in origin "$url"; do
+			if git -C "$dir" fetch --quiet "$src" "$ref"; then
+				want="$(git -C "$dir" rev-parse --verify --quiet 'FETCH_HEAD^{commit}' 2>/dev/null)" || want=""
+				[[ -n $want ]] && break
+			else
+				echo "  (fetching $ref from '$src' failed; origin is '$(git -C "$dir" remote get-url origin 2>/dev/null || echo none)')" >&2
+			fi
+		done
 	fi
 
 	if [[ -z $want ]]; then
@@ -138,6 +149,21 @@ require_locked_checkout() {
 	fi
 
 	echo "Reusing already-provided codetracer-native-backend at $dir (verified at $head)"
+}
+
+# True when this job's git environment already carries a credential for
+# https://github.com/metacraft-labs/ (setup-dev-env exports it as numbered
+# GIT_CONFIG_KEY_n/VALUE_n; the key is matched case-insensitively, as git does).
+job_wide_credential() {
+	local i key
+	for ((i = 0; i < ${GIT_CONFIG_COUNT:-0}; i++)); do
+		key="GIT_CONFIG_KEY_${i}"
+		key="${!key-}"
+		if [[ ${key,,} == "http.https://github.com/metacraft-labs/.extraheader" ]]; then
+			return 0
+		fi
+	done
+	return 1
 }
 
 clone_rr_backend() {
@@ -164,14 +190,21 @@ clone_rr_backend() {
 	# Clean up any previous clone (self-hosted runners reuse workspaces)
 	rm -rf "$CLONE_DIR"
 
-	# Rewrite all GitHub URL styles to authenticated HTTPS.
-	git config --global --replace-all url."https://x-access-token:${GH_TOKEN}@github.com/".insteadOf "git@github.com:" || true
-	git config --global --replace-all url."https://x-access-token:${GH_TOKEN}@github.com/".insteadOf "ssh://git@github.com/" || true
-	git config --global --replace-all url."https://x-access-token:${GH_TOKEN}@github.com/".insteadOf "https://github.com/" || true
+	# One credential per request. When the job already authorises
+	# https://github.com/metacraft-labs/ (setup-dev-env's job-wide
+	# GIT_CONFIG_KEY_n extraHeader), clone over plain HTTPS and let that header
+	# authenticate: embedding a token in the URL as well made GitHub refuse the
+	# clone ("Invalid username or token", CI run 43624654566). Only without a
+	# job-wide credential does the token go into the URLs, as before.
+	local base="https://github.com/"
+	if ! job_wide_credential; then
+		base="https://x-access-token:${GH_TOKEN}@github.com/"
+		git config --global --replace-all url."${base}".insteadOf "git@github.com:" || true
+		git config --global --replace-all url."${base}".insteadOf "ssh://git@github.com/" || true
+		git config --global --replace-all url."${base}".insteadOf "https://github.com/" || true
+	fi
 
-	git clone \
-		"https://x-access-token:${GH_TOKEN}@github.com/metacraft-labs/codetracer-native-backend.git" \
-		"$CLONE_DIR"
+	git clone "${base}metacraft-labs/codetracer-native-backend.git" "$CLONE_DIR"
 
 	(
 		cd "$CLONE_DIR"
@@ -190,8 +223,8 @@ clone_rr_backend() {
 		for url in $(git config --get-regexp '^submodule\..*\.url$' | grep -E 'git@github\.com:|https://github\.com/' | cut -d' ' -f1); do
 			old_url=$(git config --get "$url")
 			new_url=$(echo "$old_url" |
-				sed "s|git@github.com:|https://x-access-token:${GH_TOKEN}@github.com/|" |
-				sed "s|https://github.com/|https://x-access-token:${GH_TOKEN}@github.com/|")
+				sed "s|git@github.com:|${base}|" |
+				sed "s|https://github.com/|${base}|")
 			echo "Rewriting submodule URL: $url"
 			git config "$url" "$new_url"
 		done
@@ -210,8 +243,12 @@ build_rr_support() {
 		--print-build-logs ||
 		{
 			echo "nix build failed, falling back to cargo build via nix develop..." >&2
+			# Through the git CLI: cargo's built-in fetcher reads none of the
+			# job's GIT_CONFIG_* credentials, and lldb-sys is a private git
+			# dependency ("failed to acquire username/password from local
+			# configuration" once the runner's cargo cache lacked its rev).
 			nix develop "${CLONE_DIR}" --command \
-				bash -c "cd '${CLONE_DIR}' && cargo build"
+				bash -c "cd '${CLONE_DIR}' && CARGO_NET_GIT_FETCH_WITH_CLI=true cargo build"
 		}
 
 	# Verify the binary exists

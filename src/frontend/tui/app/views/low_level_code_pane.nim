@@ -100,6 +100,11 @@ type
       ## The display row of the listing's cursor, -1 for none.
     linkedRow*: int
       ## The first display row cross-referenced to the editor's caret, -1.
+    activeRow*: int
+      ## The first display row the position marks (`active`), -1 for none:
+      ## for a generated-code listing, the row its cursor was anchored to
+      ## (`LowLevelCodeVM.showGeneratedListing`) — the row "View Generated C
+      ## Source" brings into view.
     crossRefPath*: string
     crossRefLine*: int
       ## The source line the selected instruction came from, which the

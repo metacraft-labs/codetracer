@@ -1,0 +1,281 @@
+# ct help and the help-delegate commands: 20 argv cases through ct's loader (the parse probe)
+
+### 1: ct-describe-commands bare
+argv: ct "ct-describe-commands"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ct-describe-commands
+  ctDescribeCommandsArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 2: ct-describe-commands a word
+argv: ct "ct-describe-commands" "w"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The subcommand 'ct-describe-commands' does not accept arguments\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 3: ct-describe-commands two words
+argv: ct "ct-describe-commands" "w" "v"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The subcommand 'ct-describe-commands' does not accept arguments\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 4: ct-describe-commands an option
+argv: ct "ct-describe-commands" "--x"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'x'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 5: ct-help bare
+argv: ct "ct-help"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ct-help
+  ctHelpArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 6: ct-help a word
+argv: ct "ct-help" "w"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The subcommand 'ct-help' does not accept arguments\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 7: ct-help two words
+argv: ct "ct-help" "w" "v"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The subcommand 'ct-help' does not accept arguments\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 8: ct-help an option
+argv: ct "ct-help" "--x"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'x'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 9: ct-complete bare
+argv: ct "ct-complete"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ct-complete
+  ctCompleteArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 10: ct-complete a word
+argv: ct "ct-complete" "w"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ct-complete
+  ctCompleteArgs = @["w"]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 11: ct-complete two words
+argv: ct "ct-complete" "w" "v"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ct-complete
+  ctCompleteArgs = @["w", "v"]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 12: ct-complete an option
+argv: ct "ct-complete" "--x"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'x'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 13: ct-completions bare
+argv: ct "ct-completions"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ct-completions
+  ctCompletionsShell = ""
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 14: ct-completions a word
+argv: ct "ct-completions" "w"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ct-completions
+  ctCompletionsShell = "w"
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 15: ct-completions two words
+argv: ct "ct-completions" "w" "v"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The subcommand 'ct-completions' does not accept additional arguments\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 16: ct-completions an option
+argv: ct "ct-completions" "--x"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'x'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 17: help bare
+argv: ct "help"
+env: (none)
+exit: 0
+--- stdout
+<the long help page clispec renders for this request: ct>
+--- stderr
+--- end
+
+### 18: help record
+argv: ct "help" "record"
+env: (none)
+exit: 0
+--- stdout
+<the long help page clispec renders for this request: ct>
+--- stderr
+--- end
+
+### 19: HELP
+argv: ct "HELP"
+env: (none)
+exit: 0
+--- stdout
+<the long help page clispec renders for this request: ct>
+--- stderr
+--- end
+
+### 20: he_lp
+argv: ct "he_lp"
+env: (none)
+exit: 0
+--- stdout
+<the long help page clispec renders for this request: ct>
+--- stderr
+--- end

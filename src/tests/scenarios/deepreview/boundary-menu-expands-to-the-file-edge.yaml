@@ -1,0 +1,28 @@
+scenario: 1
+name: deepreview/boundary-menu-expands-to-the-file-edge
+pack: codetracer
+summary: >-
+  The upper boundary's context menu offers "Expand 10 lines above" and "Expand
+  all 12 lines above"; choosing the second closes the menu and reveals every
+  hidden line, 14 to 25.
+
+stage:
+  - use: open-review
+    with: { dataset: src/tests/gui/tests/deepreview/fixtures/sample-review.json }
+
+steps:
+  - wait: { until: { at: vcs, present: true }, timeout: 120s }
+  - wait: { until: { at: 'review-diff[file="src/main.rs"]', present: true }, timeout: 60s }
+  - wait: { until: settled, timeout: 30s }
+  - wait: { until: { at: 'review-diff[file="src/main.rs"]', boundaries: 2 }, timeout: 30s }
+  - click: { at: 'review-diff[file="src/main.rs"]/review-boundary[direction="above"]', button: right }
+  - wait: { until: { at: expand-menu, present: true }, timeout: 30s }
+  - expect: { at: expand-menu, count: 2, direction: above }
+  - expect: { at: 'expand-menu/expand-option[label="Expand 10 lines above"]', geometry: { above: 'expand-menu/expand-option[label="Expand all 12 lines above"]' } }
+  - click: 'expand-menu/expand-option[label="Expand all 12 lines above"]'
+  - wait: { until: { at: expand-menu, absent: true }, timeout: 30s }
+  - wait: { until: { at: 'review-diff[file="src/main.rs"]', boundaries: 0 }, timeout: 30s }
+  - wheel: { at: 'review-diff[file="src/main.rs"]', direction: down, amount: 20 }
+  - wait: { until: { at: 'review-diff[file="src/main.rs"]', assert: 'shows-new-line("25")' }, timeout: 30s }
+  - wheel: { at: 'review-diff[file="src/main.rs"]', direction: up, amount: 20 }
+  - wait: { until: { at: 'review-diff[file="src/main.rs"]', assert: 'shows-new-line("14")' }, timeout: 30s }

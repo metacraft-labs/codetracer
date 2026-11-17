@@ -263,6 +263,13 @@ type
       ## WITHOUT opening the side panel, which is the context menu's
       ## target (§3.1). Installed by
       ## `origin_chain_bridges.wireOriginChainBridges`.
+    onContinueOriginChainProc*: proc(expression: string)
+      ## Optional bridge for the in-row chain's "Continue tracing" (spec
+      ## §5.3.1): walk the row's cut-off chain further, in place. Installed
+      ## by `origin_chain_bridges.wireOriginChainBridges`.
+    originChainContinuing*: proc(expression: string): bool
+      ## Whether the row's chain is being continued now (reactive), so its
+      ## button says so. Installed with `onContinueOriginChainProc`.
     onWatchesChangedProc*: proc(expressions: seq[string])
       ## Optional bridge invoked whenever the watch list changes, so the
       ## host can re-issue the locals request that carries them.
@@ -683,6 +690,16 @@ proc loadMore*(vm: StateVM; path: string) =
       store.locals.locals.val = locals,
     onError = proc(message: string) =
       done())
+
+proc continueOriginChain*(vm: StateVM; expression: string) =
+  ## "Continue tracing" under the row `expression`'s cut-off chain (spec
+  ## §5.3.1): walk it further, in place. A mirror's (a VS Code panel) is the
+  ## primary's to run, over its connection to the replay.
+  if vm.actionSink.forwards("state", "continueOriginChain",
+      %*{"expression": expression}):
+    return
+  if not vm.onContinueOriginChainProc.isNil:
+    vm.onContinueOriginChainProc(expression)
 
 proc toggleHistory*(vm: StateVM; expression: string) =
   if vm.actionSink.forwards("state", "toggleHistory",

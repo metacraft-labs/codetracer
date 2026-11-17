@@ -1,0 +1,22 @@
+scenario: 1
+name: terminal/panes-call-trace-click-goes-to-the-call
+pack: codetracer
+summary: >-
+  The call trace's rows carry their arguments and returns; a click on a call
+  row moves the replay into that call, and says nothing about the click
+  itself on the status line.
+stage:
+  - use: record-program
+    with: { program: calc }
+  - use: open-recording
+    with: { width: 200, height: 50 }
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - wait: call-trace.loaded
+  - expect: { at: 'call-trace/call[name="main"]', arguments: { contains: "() => @[5, 7, 42" } }
+  - expect: { at: 'call-trace/call[name="<__main__>"]', present: true }
+  - expect: { at: 'call-trace/call[#6]', name: add, arguments: { contains: "(left=2, right=3)" } }
+  - expect: { at: 'editor[file="main.py"]', assert: "stopped-at(1)" }
+  - click: { at: 'call-trace/call[#6]' }
+  - wait: { until: { at: 'editor[file="main.py"]', assert: "stopped-within(29, 31)" }, timeout: 30s }
+  - expect: { at: status-line, assert: 'lacks("calltrace")' }

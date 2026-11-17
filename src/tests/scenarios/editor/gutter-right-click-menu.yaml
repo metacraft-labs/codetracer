@@ -1,0 +1,64 @@
+scenario: 1
+name: editor/gutter-right-click-menu
+pack: codetracer
+summary: >-
+  A press in the glyph cell adds a breakpoint; a right click on its marker
+  disables or re-enables it and opens no menu; the next right click on the
+  line's text offers the matching Enable or Disable entry; a right click on
+  the line's number opens the menu and toggles nothing; and a right click in
+  the empty glyph cell of a line with no breakpoint does nothing.
+
+stage:
+  - use: record-program
+    with: { program: calc }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - wait: { until: call-trace.loaded, timeout: 120s }
+  - wait: { until: { at: 'editor[file="main.py"]/line[number="31"]', text: { contains: "return left + right" } }, timeout: 60s }
+  - expect: { at: 'editor[file="main.py"]/line[number="31"]', glyph: "" }
+
+  # 1. A breakpoint on line 31.
+  - click: { at: 'editor[file="main.py"]/line[number="31"]', anchor: glyph }
+  - wait: { until: { at: 'editor[file="main.py"]/line[number="31"]', glyph: breakpoint }, timeout: 10s }
+
+  # 2. Disabled by the marker's right click, with no menu.
+  - click: { at: 'editor[file="main.py"]/line[number="31"]', anchor: glyph, button: right }
+  - wait: { until: { at: 'editor[file="main.py"]/line[number="31"]', glyph: breakpoint-disabled }, timeout: 10s }
+  - expect: { at: context-menu, absent: true }
+
+  # 3. The first text menu reads the disabled state.
+  - click: { at: 'editor[file="main.py"]/line[number="31"]', anchor: text-start, button: right }
+  - wait: { until: { at: context-menu, present: true }, timeout: 10s }
+  - expect: { at: context-menu, assert: 'offers("Enable breakpoint")' }
+  - expect: { at: context-menu, assert: 'lacks("Disable breakpoint")' }
+  - key: Esc
+  - expect: { at: context-menu, absent: true }
+
+  # 4. Re-enabled by the marker, no menu; the text menu reads the enabled state.
+  - click: { at: 'editor[file="main.py"]/line[number="31"]', anchor: glyph, button: right }
+  - wait: { until: { at: 'editor[file="main.py"]/line[number="31"]', glyph: breakpoint }, timeout: 10s }
+  - expect: { at: context-menu, absent: true }
+  - click: { at: 'editor[file="main.py"]/line[number="31"]', anchor: text-start, button: right }
+  - wait: { until: { at: context-menu, present: true }, timeout: 10s }
+  - expect: { at: context-menu, assert: 'offers("Disable breakpoint")' }
+  - expect: { at: context-menu, assert: 'lacks("Enable breakpoint")' }
+  - key: Esc
+  - expect: { at: context-menu, absent: true }
+
+  # 5. The line number opens the menu, from the current state, and toggles nothing.
+  - click: { at: 'editor[file="main.py"]/line[number="31"]', anchor: line-number, button: right }
+  - wait: { until: { at: context-menu, present: true }, timeout: 10s }
+  - expect: { at: context-menu, assert: 'offers("Disable breakpoint")' }
+  - expect: { at: context-menu, assert: 'lacks("Enable breakpoint")' }
+  - expect: { at: 'editor[file="main.py"]/line[number="31"]', glyph: breakpoint }
+  - key: Esc
+  - expect: { at: context-menu, absent: true }
+
+  # 6. The empty glyph cell of a line with no breakpoint does nothing.
+  - expect: { at: 'editor[file="main.py"]/line[number="36"]', glyph: "" }
+  - click: { at: 'editor[file="main.py"]/line[number="36"]', anchor: glyph, button: right }
+  - expect: { at: context-menu, absent: true }
+  - expect: { at: 'editor[file="main.py"]/line[number="36"]', glyph: { one-of: ["", hint] } }
+  - expect: { at: 'editor[file="main.py"]/line[number="31"]', glyph: breakpoint }

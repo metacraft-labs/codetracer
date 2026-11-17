@@ -1,0 +1,851 @@
+# ct activate: 46 argv cases through ct's loader (the parse probe)
+
+### 1: bare
+argv: ct "activate"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = activate
+  activateToken = none
+  activateBaseUrl = none
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 2: a word
+argv: ct "activate" "w"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The subcommand 'activate' does not accept arguments\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 3: --token <v>
+argv: ct "activate" "--token" "tok"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = activate
+  activateToken = some("tok")
+  activateBaseUrl = none
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 4: --token=<v>
+argv: ct "activate" "--token=tok"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = activate
+  activateToken = some("tok")
+  activateBaseUrl = none
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 5: --token:<v>
+argv: ct "activate" "--token:tok"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = activate
+  activateToken = some("tok")
+  activateBaseUrl = none
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 6: --token tok
+argv: ct "activate" "--token" "tok"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = activate
+  activateToken = some("tok")
+  activateBaseUrl = none
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 7: --token=tok
+argv: ct "activate" "--token=tok"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = activate
+  activateToken = some("tok")
+  activateBaseUrl = none
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 8: --token empty
+argv: ct "activate" "--token" ""
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = activate
+  activateToken = some("")
+  activateBaseUrl = none
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 9: --token= (empty)
+argv: ct "activate" "--token="
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = activate
+  activateToken = some("")
+  activateBaseUrl = none
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 10: --token= <v> (next word)
+argv: ct "activate" "--token=" "tok"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = activate
+  activateToken = some("tok")
+  activateBaseUrl = none
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 11: --token -x (value starts with -)
+argv: ct "activate" "--token" "-x"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = activate
+  activateToken = some("-x")
+  activateBaseUrl = none
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 12: --token --x (value starts with --)
+argv: ct "activate" "--token" "--x"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = activate
+  activateToken = some("--x")
+  activateBaseUrl = none
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 13: --token --new-tab <v> (an option between it and its value)
+argv: ct "activate" "--token" "--new-tab" "tok"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The subcommand 'activate' does not accept arguments\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 14: --token repeated, last wins
+argv: ct "activate" "--token" "tok" "--token" "tok"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = activate
+  activateToken = some("tok")
+  activateBaseUrl = none
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 15: --token missing value (last)
+argv: ct "activate" "--token"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The option '\e[34m--token\e[0m' requires a value\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 16: --TOKEN <v> (style variant)
+argv: ct "activate" "--TOKEN" "tok"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = activate
+  activateToken = some("tok")
+  activateBaseUrl = none
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 17: --t_oken <v> (style variant)
+argv: ct "activate" "--t_oken" "tok"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = activate
+  activateToken = some("tok")
+  activateBaseUrl = none
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 18: --base-url <v>
+argv: ct "activate" "--base-url" "https://b.test"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = activate
+  activateToken = none
+  activateBaseUrl = some("https://b.test")
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 19: --base-url=<v>
+argv: ct "activate" "--base-url=https://b.test"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = activate
+  activateToken = none
+  activateBaseUrl = some("https://b.test")
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 20: --base-url:<v>
+argv: ct "activate" "--base-url:https://b.test"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = activate
+  activateToken = none
+  activateBaseUrl = some("https://b.test")
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 21: --base-url https://b.test
+argv: ct "activate" "--base-url" "https://b.test"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = activate
+  activateToken = none
+  activateBaseUrl = some("https://b.test")
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 22: --base-url=https://b.test
+argv: ct "activate" "--base-url=https://b.test"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = activate
+  activateToken = none
+  activateBaseUrl = some("https://b.test")
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 23: --base-url empty
+argv: ct "activate" "--base-url" ""
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = activate
+  activateToken = none
+  activateBaseUrl = some("")
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 24: --base-url= (empty)
+argv: ct "activate" "--base-url="
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = activate
+  activateToken = none
+  activateBaseUrl = some("")
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 25: --base-url= <v> (next word)
+argv: ct "activate" "--base-url=" "https://b.test"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = activate
+  activateToken = none
+  activateBaseUrl = some("https://b.test")
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 26: --base-url -x (value starts with -)
+argv: ct "activate" "--base-url" "-x"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = activate
+  activateToken = none
+  activateBaseUrl = some("-x")
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 27: --base-url --x (value starts with --)
+argv: ct "activate" "--base-url" "--x"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = activate
+  activateToken = none
+  activateBaseUrl = some("--x")
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 28: --base-url --new-tab <v> (an option between it and its value)
+argv: ct "activate" "--base-url" "--new-tab" "https://b.test"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The subcommand 'activate' does not accept arguments\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 29: --base-url repeated, last wins
+argv: ct "activate" "--base-url" "https://b.test" "--base-url" "https://b.test"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = activate
+  activateToken = none
+  activateBaseUrl = some("https://b.test")
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 30: --base-url missing value (last)
+argv: ct "activate" "--base-url"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The option '\e[34m--base-url\e[0m' requires a value\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 31: --BASE-URL <v> (style variant)
+argv: ct "activate" "--BASE-URL" "https://b.test"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = activate
+  activateToken = none
+  activateBaseUrl = some("https://b.test")
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 32: --b_ase-url <v> (style variant)
+argv: ct "activate" "--b_ase-url" "https://b.test"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = activate
+  activateToken = none
+  activateBaseUrl = some("https://b.test")
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 33: --base_url <v> (style variant)
+argv: ct "activate" "--base_url" "https://b.test"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'base_url'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 34: --baseurl <v> (style variant)
+argv: ct "activate" "--baseurl" "https://b.test"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'baseurl'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 35: env <APP>_TOKEN
+argv: ct "activate"
+env: <APP>_TOKEN="envtok"
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = activate
+  activateToken = some("envtok")
+  activateBaseUrl = none
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 36: unknown long option
+argv: ct "activate" "--bogus"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'bogus'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 37: unknown long option with value
+argv: ct "activate" "--bogus=1"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'bogus'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 38: unknown short option
+argv: ct "activate" "-Z"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'Z'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 39: lone -
+argv: ct "activate" "-"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option ''\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 40: lone -- then a word
+argv: ct "activate" "--" "w"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option ''\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 41: --=v
+argv: ct "activate" "--=v"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option ''\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 42: extra positional
+argv: ct "activate" "extra1" "extra2" "extra3" "extra4" "extra5"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The subcommand 'activate' does not accept arguments\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 43: global --cwd after the command
+argv: ct "activate" "--cwd" "/w"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = some("/w")
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = activate
+  activateToken = none
+  activateBaseUrl = none
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 44: global --new-tab after the command
+argv: ct "activate" "--new-tab"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = true
+  newWindow = false
+  cmd = activate
+  activateToken = none
+  activateBaseUrl = none
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 45: --version after the command
+argv: ct "activate" "--version"
+env: (none)
+exit: 0
+--- stdout
+CodeTracer version: <VERSION>
+\e[0m
+(no newline at end of stdout)
+--- stderr
+--- end
+
+### 46: -h after the command
+argv: ct "activate" "-h"
+env: (none)
+exit: 0
+--- stdout
+<the short help page clispec renders for this request: ct activate>
+--- stderr
+--- end

@@ -1,0 +1,21 @@
+scenario: 1
+name: gpui/editor-caret-brings-rows
+pack: codetracer
+summary: >-
+  A caret moved below the editor's last row brings the rows with it: a click
+  on the last drawn row, then Down, and the rows move one line.
+
+stage:
+  - use: record-program
+    with: { program: calc }
+  - use: open-recording
+    with: { width: 1440, height: 900 }
+
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - wait: { until: { at: 'editor[file="main.py"]', current-line: 1, first-visible: 1 }, timeout: 60s }
+  - click: { at: 'editor[file="main.py"]/line[number="30"]', anchor: text-start }
+  - expect: { at: 'editor[file="main.py"]', assert: "caret-at(30)" }
+  - key: Down
+  - expect: { at: 'editor[file="main.py"]', assert: "caret-at(31)" }
+  - expect: { at: 'editor[file="main.py"]', current-line: 1 }

@@ -1,0 +1,22 @@
+scenario: 1
+name: verification/bare-project-offers-no-run
+pack: codetracer
+summary: >-
+  A Noir crate that declares no Verno action: the Verification pane says
+  "not run" and offers no Run and no Stop.
+
+stage:
+  - use: project-fixture
+    with: { name: noir-build }
+  - use: open-project
+    with: { folder: $project }
+
+steps:
+  - wait: { until: { at: window, mode: edit }, timeout: 120s }
+  - wait: { until: settled, timeout: 30s }
+  - chord: Ctrl+p
+  - type: ":Verification"
+  - wait: { until: { at: omnibox, assert: "offers(command, Verification)" }, timeout: 15s }
+  - key: Enter
+  - wait: { until: { at: verification-panel, present: true }, timeout: 30s }
+  - expect: { at: verification-panel, phase: idle, run: "", stop: false, status: not run }

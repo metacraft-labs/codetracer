@@ -1,0 +1,29 @@
+scenario: 1
+name: tests-pane/context-menu-re-record-opens-a-new-tab
+pack: codetracer
+summary: >-
+  A right click on a test's #[test] line offers "Re-record and replay this
+  test", which records it through the Tests pane and opens the recording in
+  a new session tab.
+
+stage:
+  - use: project-fixture
+    with: { name: noir-suite }
+  - use: open-project
+    with: { folder: $project }
+
+steps:
+  - wait: { until: { at: 'pane-tab[label="TESTS"]', present: true }, timeout: 120s }
+  - wait: { until: settled, timeout: 30s }
+  - click: 'pane-tab[label="TESTS"]'
+  - wait: { until: { at: test-results, count: 2 }, timeout: 120s }
+  - click: 'pane-tab[label="src/main.nr"]'
+  - wait: { until: { at: 'editor[file="main.nr"]', assert: 'shows-text("#[test]")' }, timeout: 60s }
+  - click: { at: 'editor[file="main.nr"]/line[number="5"]', anchor: text-start, button: right }
+  - wait: { until: { at: 'context-menu/menu-item[label="Re-record and replay this test"]', present: true }, timeout: 30s }
+  - click: 'context-menu/menu-item[label="Re-record and replay this test"]'
+    settle: false
+  - wait: { until: { at: session-strip, count: 2 }, timeout: 300s }
+  - wait: { until: replay-idle, timeout: 120s }
+  - click: 'session-strip/session-tab[#1]'
+  - wait: { until: { at: 'test-results/test-row[name="test_passes"]', recorded: true }, timeout: 60s }

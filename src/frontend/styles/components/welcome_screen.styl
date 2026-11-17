@@ -196,8 +196,6 @@ welcome-heading-type()
     align-items: center
     border: 0.0625em solid colors-ui-border-secondary
 
-    &.welcome-screen-loading
-      cursor: wait !important
 
     // One line: the logo, "Welcome to CodeTracer" and the version.  The title
     // and the version share one baseline, 4px above the logo's bottom edge
@@ -314,7 +312,6 @@ welcome-heading-type()
         position: relative
         right: 0
         display: flex
-        cursor: pointer
         justify-content: center
         font-family: "SpaceGrotesk"
 
@@ -337,7 +334,6 @@ welcome-heading-type()
       // pointer without taking the hover away.
       .inactive-start-option
         color: colors-ui-text-primary-disabled !important
-        cursor: not-allowed
 
       .start-option-icon
         width: 6.25em
@@ -456,7 +452,6 @@ welcome-heading-type()
         width: stretch
 
         &:hover
-          cursor: pointer
           background-color: LIST_HOVER_BG
 
           .recent-trace-tooltip
@@ -604,7 +599,6 @@ welcome-heading-type()
         width: stretch
 
         &:hover
-          cursor: pointer
           background-color: LIST_HOVER_BG
 
         .recent-folder-name
@@ -870,7 +864,6 @@ welcome-heading-type()
     width: 1.75em
     background-color: colors-ui-surface-primary-secondary-hover
     border-radius: 0.25em
-    cursor: pointer
   upload
     &:hover
       outline: 0.0625em solid colors-ui-border-secondary
@@ -1025,7 +1018,6 @@ welcome-heading-type()
   width: 1.75em
   background-color: colors-ui-surface-primary-secondary-hover
   border-radius: 0.25em
-  cursor: pointer
   background-image: RECENT_TRANSACTION_ACTION_BUTTON
   background-repeat: no-repeat
   background-position: center

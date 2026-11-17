@@ -1,0 +1,11 @@
+# MUST FAIL the scenario linter: a flow invoked from the steps that the pack
+# does not declare — the only way left to name code from a step.
+scenario: 1
+name: tests/lint-must-fail/stage-in-flow
+pack: codetracer
+summary: An undeclared flow named from the steps.
+stage:
+  - use: nim-project
+  - use: open-recording
+steps:
+  - flow: open-recording

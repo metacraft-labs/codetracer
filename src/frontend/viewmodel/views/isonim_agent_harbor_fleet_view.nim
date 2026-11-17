@@ -34,6 +34,9 @@ when defined(js):
 
 import isonim/core/[signals, computation]
 import isonim/dsl/[ui, components]
+# Its one-line texts (`data-ah-cut`) are cut in code, by the views' one rule
+# for a cut (`ah_cut_text`, CTF-P1c D6).
+import ./ah_cut_text
 
 when defined(js):
   import isonim/web/web_renderer
@@ -109,7 +112,7 @@ proc renderHeader[R](r: R; vm: FleetSnapshotVM;
       tdiv(ref = section, class = "ah-fleet-section-header"):
         span(class = "ah-fleet-title"):
           text "Agent Harbor sessions"
-        span(class = "ah-fleet-source", title = vm.sourceLabel):
+        span(`data-ah-cut` = "line", class = "ah-fleet-source", title = vm.sourceLabel):
           text vm.sourceLabel
       tdiv(ref = filters, class = "ah-fleet-filters")
       # The columns' names, shown only when the rows have columns (a laptop's
@@ -131,7 +134,7 @@ proc renderHeader[R](r: R; vm: FleetSnapshotVM;
     let note = vm.withheldNote
     if note.len > 0:
       let caveat = ui(r):
-        span(class = "ah-fleet-caveat",
+        span(`data-ah-cut` = "line", class = "ah-fleet-caveat",
              title = "Rows are titled by the session's name, branch or workspace, or its id"):
           text note
       r.appendRendered(section, caveat)
@@ -168,10 +171,19 @@ proc renderActivityToggle[R](r: R; vm: FleetSnapshotVM; row: FleetRow): auto =
         proc(ev: isonim_dom.Event) = ev.stopPropagation())
   node
 
+proc renderEmptyCell[R](r: R): auto =
+  ## What an empty column cell shows (`AgentHarborFleetEmptyCellText`).
+  ui(r):
+    span(class = "ah-fleet-col-empty"):
+      text AgentHarborFleetEmptyCellText
+
 proc renderRow[R](r: R; vm: FleetSnapshotVM;
                   callbacks: AgentHarborFleetCallbacks; row: FleetRow): auto =
   let sessionId = row.id
   var activity: typeof(r.createElement("div"))
+  var agentCell, hostCell, initiativeCell, durationCell: typeof(r.createElement("span"))
+  let agentText = if row.agentCount > 1: row.agentLabel & " \xC3\x97" & $row.agentCount
+                  else: row.agentLabel
   let node = ui(r):
     tdiv(role = "button", tabindex = "0", class = rowClass(row),
          title = row.id,
@@ -181,7 +193,7 @@ proc renderRow[R](r: R; vm: FleetSnapshotVM;
       tdiv(class = "ah-fleet-row-main"):
         # The title plainly, whatever named it: the header says once that the
         # server withholds prompts.
-        tdiv(class = "ah-fleet-row-title",
+        tdiv(`data-ah-cut` = "line", class = "ah-fleet-row-title",
              title = (if row.labelTooltip.len > 0: row.title & " (" & row.labelTooltip & ")"
                       else: row.title)):
           text row.title
@@ -193,36 +205,41 @@ proc renderRow[R](r: R; vm: FleetSnapshotVM;
                           "waiting for: " & row.inputSource
                         else: row.statusLabel)):
             text row.statusLabel
-          span(class = "ah-fleet-meta-text ah-fleet-meta-full"):
+          span(`data-ah-cut` = "line", class = "ah-fleet-meta-text ah-fleet-meta-full"):
             text row.metaParts.join(" \xC2\xB7 ")
-          span(class = "ah-fleet-meta-text ah-fleet-meta-short"):
+          span(`data-ah-cut` = "line", class = "ah-fleet-meta-text ah-fleet-meta-short"):
             text row.metaPartsShort.join(" \xC2\xB7 ")
         if row.failureText.len > 0:
-          tdiv(class = "ah-fleet-row-failure", title = row.failureText):
+          tdiv(`data-ah-cut` = "line", class = "ah-fleet-row-failure", title = row.failureText):
             text row.failureText
         tdiv(ref = activity, class = "ah-fleet-row-activity")
       # Columns of their own at a laptop's width (hidden in a narrow panel,
       # where the meta line carries the same facts).
-      span(class = "ah-fleet-col ah-fleet-col-agent", title = row.agentLabel):
-        text (if row.agentCount > 1: row.agentLabel & " \xC3\x97" & $row.agentCount else: row.agentLabel)
-      span(class = "ah-fleet-col ah-fleet-col-host", title = row.host):
+      span(`data-ah-cut` = "line", ref = agentCell, class = "ah-fleet-col ah-fleet-col-agent", title = row.agentLabel):
+        text agentText
+      span(`data-ah-cut` = "line", ref = hostCell, class = "ah-fleet-col ah-fleet-col-host", title = row.host):
         text row.host
-      span(class = "ah-fleet-col ah-fleet-col-initiative", title = row.initiative):
+      span(`data-ah-cut` = "line", ref = initiativeCell, class = "ah-fleet-col ah-fleet-col-initiative",
+           title = row.initiative):
         text row.initiative
-      span(class = "ah-fleet-col ah-fleet-col-duration"):
+      span(`data-ah-cut` = "line", ref = durationCell, class = "ah-fleet-col ah-fleet-col-duration"):
         text row.durationLabel
       span(class = "ah-fleet-row-age"):
         text row.ageLabel
+  # A column with nothing to say shows the shared placeholder.
+  for (cell, value) in [(agentCell, agentText), (hostCell, row.host),
+                        (initiativeCell, row.initiative), (durationCell, row.durationLabel)]:
+    if value.len == 0: r.appendRendered(cell, renderEmptyCell(r))
   let shown = if row.expanded: row.activity.len else: min(1, row.activity.len)
   let allLines = row.activity.join("\n")
   for i in 0 ..< shown:
     let line = row.activity[i]
-    let level = if i < row.activityLevels.len: row.activityLevels[i] else: ""
     var lineHost: typeof(r.createElement("div"))
     let lineNode = ui(r):
       tdiv(ref = lineHost, class = "ah-fleet-activity-row"):
-        tdiv(class = "ah-fleet-activity-line" &
-                     (if level == "error": " ah-fleet-activity-error" else: ""),
+        # Red only where the row has no failure line (`activityLineIsError`).
+        tdiv(`data-ah-cut` = "line", class = "ah-fleet-activity-line" &
+                     (if activityLineIsError(row, i): " ah-fleet-activity-error" else: ""),
              title = allLines):
           text line
     # The unfold control rides on the first line, so a folded row stays one

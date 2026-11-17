@@ -262,9 +262,11 @@ ARMS = [
         "  TermCell(ch: 0, attr: s.table.idOf(TermAttrs(fg: s.pen.fg, bg: s.pen.bg)))\n",
         "  TermCell(ch: 0, attr: s.table.idOf(TermAttrs()))\n",
         U_ERASE, "an erased cell drops the pen's colours"),
+    # M8 RE-AIMED 2026-11-09: `348342aaa` keeps the scrolled-off line first
+    # (`keepScrolledOff`), so the scroll is the next line; same defect.
     Arm("M8", MODEL,
-        "  if s.row == s.bottom:\n    s.scrollUp(s.top, s.bottom, 1)\n",
-        "  if s.row == s.bottom:\n    s.scrollUp(0, s.bottom, 1)\n",
+        "    s.keepScrolledOff(1)\n    s.scrollUp(s.top, s.bottom, 1)\n",
+        "    s.keepScrolledOff(1)\n    s.scrollUp(0, s.bottom, 1)\n",
         U_REGION, "a line feed at the region's bottom scrolls the rows above it"),
     Arm("M9", MODEL,
         "      s.eraseRect(0, 0, s.rows - 1, s.cols)\n      s.sawClear = true\n",
@@ -316,9 +318,11 @@ ARMS = [
         "  if offered: tvScreen else: tvLines\n",
         "  tvLines\n",
         N_OPENS, "a full-screen program opens on its lines"),
+    # V4 RE-AIMED 2026-11-09: `e91f95ce8` names the key by `fieldKeyOf`
+    # (`fkRight`) instead of the DOM key string; same defect.
     Arm("V4", DVIEW,
-        "  of \"ArrowRight\":\n    discard vm.stepWrite(1)\n",
-        "  of \"ArrowRight\":\n    discard vm.stepWrite(0)\n",
+        "  of fkRight:\n    discard vm.stepWrite(1)\n",
+        "  of fkRight:\n    discard vm.stepWrite(0)\n",
         N_ARROW, "ArrowRight steps nowhere"),
     Arm("V5", TVM,
         "  var ev = vm.eventOf(eventIndex)\n",
@@ -417,9 +421,12 @@ ARMS = [
         "  scrubberModel(vm.lineCount, vm.visibleTop(st, rows), rows,\n",
         "  scrubberModel(min(rows, vm.lineCount), vm.visibleTop(st, rows), rows,\n",
         G_SCRUB, "GPUI's scrubber spans the rows drawn"),
+    # G4 RE-AIMED 2026-11-13: `106bc7e3e0` sends the press through the pointer
+    # keymap (`pressElement`), whose operation jumps to the write it carries;
+    # same defect.
     Arm("G4", GMAIN,
-        "  of ghWrite:\n    return terminalJump(r, hit.write)\n",
-        "  of ghWrite:\n    return terminalJump(r, hit.write + 1)\n",
+        "    return pressElement(r, paneTerminalOutput, ekRow, \"\",\n                        ContextTarget(pane: paneTerminalOutput,\n                                      index: int64(hit.write)))\n",
+        "    return pressElement(r, paneTerminalOutput, ekRow, \"\",\n                        ContextTarget(pane: paneTerminalOutput,\n                                      index: int64(hit.write + 1)))\n",
         G_CLICK, "a GPUI press lands on the next write"),
     Arm("G5", GMAIN,
         "  of ghViewLines, ghViewScreen:\n    vm.setView(if hit.kind == ghViewLines: tvLines else: tvScreen)\n",

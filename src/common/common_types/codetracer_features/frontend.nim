@@ -353,7 +353,33 @@ type
     # destination — the project's program recorded and opened. Appended at
     # the end, for the reason every note above gives.
     aRunProgram,                  # palette: Project: Run
-    aRunProgramInCurrentTab       # palette: Project: Run in Current Tab
+    aRunProgramInCurrentTab,      # palette: Project: Run in Current Tab
+    aInlineBreakpoint,            # Shift+F9: a column breakpoint at the caret
+    # View › Constraints: how a desktop user opens the pane where the layout
+    # does not place it (Debug mode). Appended, for the same reason.
+    aConstraints,                 # menu: View › Constraints
+    # Nim's compile-time tracing at the editor's caret (`nim_tracing_vm`),
+    # beside `aTraceMacroAtCursor` / `aTraceStaticBlockAtCursor`: the
+    # constant's and the evaluation's. Appended, for the same reason.
+    aTraceConstantAtCursor,       # palette: Nim: Trace Constant at Cursor
+    aTraceEval,                   # palette: Nim: Trace NimScript Evaluation
+    # The developer setting `sharedEditor` (`common/config.nim`), switched in
+    # a running window: the source editors re-mount with the other editor.
+    # Appended, for the same reason.
+    aToggleSharedEditor,          # palette: Developer: Toggle Shared Editor
+    # The base keymap of this window (Base-Keymaps-And-Layer-Stack.md §3: one
+    # base, CUA by default), the terminal's `:keymap <name>`. Offered while
+    # the shared editor is on, whose modal state the core keeps. Appended,
+    # for the same reason.
+    aKeymapCua,                   # palette: Keymap: CUA
+    aKeymapEmacs,                 # palette: Keymap: Emacs
+    aKeymapVim,                   # palette: Keymap: Vim
+    aKeymapKakoune,               # palette: Keymap: Kakoune
+    # The formatted view of a minified source (Column-Aware-Navigation M3:
+    # the GUI sends `ct/set-active-source-view` on a view toggle): steps
+    # then move by the formatted source's lines and the editor follows it.
+    # Appended, for the same reason.
+    aToggleFormattedSourceView    # palette: View: Toggle Formatted Source View
 
   InputShortcutMap* = TableLike[langstring, langstring]
 

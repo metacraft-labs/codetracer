@@ -82,6 +82,9 @@ type
     emBreakpoint          ## stops here
     emBreakpointDisabled  ## present, not armed
     emTracepoint          ## records without stopping
+    emBreakpointTracepoint
+      ## An armed line breakpoint and a tracepoint on one line. The glyph column
+      ## is one lane, so they share one mark (Editor-Pane.md MC.5).
 
   EditorPointKind* = enum
     ## What a declared point IS, before a line decides how to show it.
@@ -179,6 +182,8 @@ type
     ## **One row of a source editor, on any medium.**
     line*: int
       ## 1-based.
+    hinted*: bool
+      ## The pointer is over this line's empty glyph cell (gesture 7a).
     text*: string
       ## The source text, or "" when `held` is false.
     held*: bool
@@ -384,18 +389,22 @@ func markFor*(points: openArray[EditorPoint]; path: string;
   result = emNone
   var sawTracepoint = false
   var sawDisabled = false
+  var sawArmed = false
   for p in points:
     if p.path != path or p.line != line or line <= 0:
       continue
     case p.kind
     of epkBreakpoint:
       if p.enabled:
-        return emBreakpoint
-      sawDisabled = true
+        sawArmed = true
+      else:
+        sawDisabled = true
     of epkTracepoint:
       sawTracepoint = true
   result =
-    if sawTracepoint: emTracepoint
+    if sawArmed and sawTracepoint: emBreakpointTracepoint
+    elif sawArmed: emBreakpoint
+    elif sawTracepoint: emTracepoint
     elif sawDisabled: emBreakpointDisabled
     else: emNone
 

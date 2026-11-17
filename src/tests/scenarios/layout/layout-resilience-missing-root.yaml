@@ -1,0 +1,22 @@
+scenario: 1
+name: layout/layout-resilience-missing-root
+pack: codetracer
+summary: >-
+  A saved Edit-mode layout with no root does not stop the window: it comes up with a usable layout.
+
+stage:
+  - use: plant-config
+    with:
+      file: default_edit_layout.json
+      content: |
+        { "settings": { "constrainDragToContainer": true }, "dimensions": { "borderWidth": 2 },
+          "notRoot": { "type": "row", "content": [] } }
+  - use: open-project
+    with: { folder: test-programs }
+
+steps:
+  - wait: { until: { at: layout, present: true }, timeout: 120s }
+  - wait: { until: settled, timeout: 60s }
+  - expect: { at: layout, stacks: { gt: 0 } }
+  - expect: { at: 'pane-tab[label="FILES"]', present: true }
+

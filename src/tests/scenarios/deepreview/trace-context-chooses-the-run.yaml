@@ -1,0 +1,23 @@
+scenario: 1
+name: deepreview/trace-context-chooses-the-run
+pack: codetracer
+summary: >-
+  The VCS panel's header carries the review's trace-context selector, which
+  offers the runs the dataset was collected from ("latest passing run",
+  "previous run"); choosing the second with the keyboard keeps it chosen.
+
+stage:
+  - use: open-review
+    with: { dataset: src/tests/gui/tests/deepreview/fixtures/sample-review.json }
+
+steps:
+  - wait: { until: { at: vcs, present: true }, timeout: 120s }
+  - wait: { until: { at: 'review-diff[file="src/main.rs"]', present: true }, timeout: 60s }
+  - wait: { until: settled, timeout: 30s }
+  - expect: { at: trace-context, geometry: { visible: true, inside: vcs } }
+  - expect: { at: trace-context, options: { subsequence: ["latest passing run", "previous run"] } }
+  - expect: { at: trace-context, value: { contains: "latest passing run" } }
+  - click: trace-context
+  - key: Down
+  - key: Enter
+  - wait: { until: { at: trace-context, value: { contains: "previous run" } }, timeout: 30s }

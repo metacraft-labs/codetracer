@@ -129,8 +129,8 @@ const
     ## counted sweep rather than four loose `contains` calls so a partially
     ## painted screen cannot satisfy "at least one".
 
-  MeasurementDate = "2026-10-24"
-  MeasuredBinaryBytes = 22_026_040
+  MeasurementDate = "2026-11-09"
+  MeasuredBinaryBytes = 24_428_208
     ## `build/bin/codetracer-tui` as `just build-tui` produces it — `--mm:orc
     ## -d:release`, NOT stripped, ten tree-sitter grammars statically archived
     ## in, the runtime dynamic. `wc -c` on a Linux x86-64 host on
@@ -296,7 +296,19 @@ const
     ## `tui_session`. No data table is linked in. The ceiling keeps 8.02% over
     ## the anchor.
 
-  BinaryCeilingBytes = 23_792_600
+  BinaryCeilingBytes = 26_387_350
+    ## 2026-11-09: re-anchored from 22_026_040 / 23_792_600 to 24_428_208 /
+    ## 26_387_350 (+2_402_168 bytes, +10.9%). The band had been tripped by the
+    ## growth of the panes and features that landed from 2026-10-27 to
+    ## 2026-11-08 (among them Visual Replay on the terminal, `919620c00`, the
+    ## pointer protocol, `d8e437ee5`, and the editor's multi-click and
+    ## breakpoint column, `ffec0f79a`), none of which re-anchored it. The
+    ## growth is NOT attributed per module: no `nm -S` breakdown was taken, so
+    ## the commits named are the large landings in the window, not a
+    ## measurement of their cost. Measured as `just build-tui` produced it on
+    ## `agents` at `2b5efd05f` (the issue that filed this saw 24_427_608 at
+    ## `bf3ef9226`). No data table is known to be linked in.
+    ##
     ## MeasuredBinaryBytes + 8.02%. Wide enough that ordinary work — a pane, a
     ## formatter, a grammar's parser table growing — does not redden the lane on
     ## the day it lands, narrow enough that a link-line accident (a second

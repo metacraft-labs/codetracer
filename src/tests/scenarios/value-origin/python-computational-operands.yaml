@@ -1,0 +1,38 @@
+scenario: 1
+name: value-origin/python-computational-operands
+pack: codetracer
+summary: >-
+  At `print(result)` in the Python computational fixture, `result`'s chain is
+  one hop, `result = a + b`, ending at `a + b`; in the side panel the hop's
+  operand snapshots open to show a = 10 and b = 32.
+
+stage:
+  - use: record-program
+    with: { program: src/db-backend/tests/fixtures/origin/python/computational_origin/main.py }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - click: 'toolbar/toolbar-button[label="run-to-entry-image"]'
+    settle: false
+  - wait: { until: replay-idle, timeout: 60s }
+  - wait: { until: { at: 'editor[file="main.py"]', current-line: { gt: 0 } }, timeout: 60s }
+  - click: { at: 'editor[file="main.py"]/line[number="10"]', anchor: glyph }
+  - click: 'toolbar/toolbar-button[label="continue-image"]'
+    settle: false
+  - wait: { until: { at: 'editor[file="main.py"]', current-line: 10 }, timeout: 60s }
+  - wait: { until: { at: variables, assert: 'value-of("result", "42")' }, timeout: 60s }
+
+  - click: { at: 'variables/variable[name="result"]', anchor: name, button: right }
+  - wait: { until: { at: context-menu, assert: 'offers("Show value origin")' }, timeout: 15s }
+  - click: 'context-menu/menu-item[label="Show value origin"]'
+  - wait: { until: { at: 'variables/variable[name="result"]/origin-chain', hops: [result = a + b] }, timeout: 30s }
+  - expect: { at: 'variables/variable[name="result"]/origin-chain', terminator: a + b }
+  - wheel: { at: variables, direction: down, amount: 10 }
+  - wait: { until: { at: 'variables/variable[name="result"]/origin-chain/panel-button[label="Show in side panel"]', geometry: { visible: true } }, timeout: 15s }
+  - click: 'variables/variable[name="result"]/origin-chain/panel-button[label="Show in side panel"]'
+  - wait: { until: { at: origin-panel, count: 1 }, timeout: 30s }
+  - expect: { at: 'origin-panel/origin-hop[number="1"]', classification: Computational, operands: 2 }
+  - click: { at: 'origin-panel/origin-hop[number="1"]', anchor: expander }
+  - wait: { until: { at: 'origin-panel/origin-hop[number="1"]', operands-shown: true }, timeout: 15s }
+  - expect: { at: 'origin-panel/origin-hop[number="1"]', operand-values: { unordered: [a = 10, b = 32] } }

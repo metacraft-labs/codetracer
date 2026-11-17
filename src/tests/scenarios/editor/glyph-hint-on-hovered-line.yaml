@@ -1,0 +1,21 @@
+scenario: 1
+name: editor/glyph-hint-on-hovered-line
+pack: codetracer
+summary: >-
+  Hovering the glyph cell of an unmarked line shows the breakpoint hint on
+  that line only, and it goes when the pointer moves onto the text.
+
+stage:
+  - use: record-program
+    with: { program: src/db-backend/tests/fixtures/origin/python/simple_trivial_chain/main.py }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - wait: { until: { at: 'editor[file="main.py"]/line[number="8"]', text: "def main() -> None:" }, timeout: 60s }
+  - expect: { at: 'editor[file="main.py"]', read-only: true }
+  - hover: { at: 'editor[file="main.py"]/line[number="8"]', anchor: glyph, for: 300ms }
+  - expect: { at: 'editor[file="main.py"]/line[number="8"]', glyph: hint }
+  - expect: { at: 'editor[file="main.py"]/line[number="9"]', glyph: "" }
+  - move: { at: 'editor[file="main.py"]/line[number="8"]', anchor: column(3) }
+  - expect: { at: 'editor[file="main.py"]/line[number="8"]', glyph: "" }

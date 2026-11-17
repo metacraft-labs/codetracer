@@ -164,7 +164,16 @@ proc runReplay(stall: bool): RunResult =
   ## The two arms differ in EXACTLY ONE THING — whether the harness pauses
   ## between reads — so anything that differs in the result is downstream of
   ## the link's speed and of nothing else.
-  var sess = tuiSession(@["--replay-keys=" & journalPath, tracePath],
+  # `--scrollbar-fade=off`: the scrollbar thumb fades on the child's WALL
+  # clock (`scrollbar_interaction.stepFade`), so the colour of a thumb cell in
+  # the final frame depends on how long ago the last key woke it — and the
+  # slow arm, which takes longer, snapshots a different moment of the
+  # animation than the fast one (row 2 col 96 differed two runs in three).
+  # That is a time-driven style, not part of the state this suite compares,
+  # so it is held at its settled level in BOTH arms, as the other pty suites
+  # do (`test_plat51_pty`, `test_plat70b_tables_pty`).
+  var sess = tuiSession(@["--scrollbar-fade=off",
+                          "--replay-keys=" & journalPath, tracePath],
                         cols = Cols, rows = Rows)
   let started = getMonoTime()
   var bursts = 0

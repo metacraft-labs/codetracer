@@ -73,25 +73,9 @@ type
       ## counterexample for the code on screen and one for the code that was
       ## there last week.
 
-const
-  TasksJsonNames* = [".vscode/tasks.json", "tasks.json"]
-  PackageJsonName* = "package.json"
-
-const PayloadDirectoryNames* = ["target"]
-  ## Where a verifier is expected to have left its structured report, relative
-  ## to the project root.
-  ##
-  ## A **convention**, and that is the point rather than a shortcut.
-  ## Noir-Studio.md §9.3 has CodeTracer surface the actions a project declares
-  ## and "invent no manifest of our own", so we launch the project's own
-  ## `tasks.json` command verbatim — we cannot append `--report-json <path>` to
-  ## it and we cannot ask the project to add one. The producer writes the file
-  ## where the consumer will look, or there is no payload and VN-M3's text tier
-  ## stands, which is a supported outcome rather than a failure.
-  ##
-  ## A list rather than a single name because a second producer will want its
-  ## own build directory, and a list of *stated* places is honest where a
-  ## search of the tree would not be.
+# `TasksJsonNames` / `PackageJsonName` (`project_actions`) and
+# `PayloadDirectoryNames` (`verification_payload`) are pure, so the desktop's
+# host (`ui/verification`) reads the same places.
 
 # ---------------------------------------------------------------------------
 # Reading what the project declared
@@ -164,22 +148,10 @@ proc readPayload*(action: ProjectAction; projectRoot: string): string =
   readIfPresent(payloadPath(action, projectRoot))
 
 proc launchSpec*(action: ProjectAction; projectRoot: string): CommandSpec =
-  ## The argv this action becomes.
-  ##
-  ## A `tasks.json` task is a program plus arguments and is launched directly —
-  ## no shell, so no quoting hazard. A `package.json` script is a shell string
-  ## by definition (`verno fv && echo ok` is a legal one), so it goes to
-  ## `/bin/sh -c` verbatim rather than being split on whitespace into a command
-  ## the project did not write.
-  let cwd = workingDirectory(action, projectRoot)
-  case action.source
-  of pasTasksJson:
-    commandSpec(argv = @[action.command] & action.args, cwd = cwd)
-  of pasPackageJson:
-    when defined(windows):
-      commandSpec(argv = @["cmd", "/C", action.command], cwd = cwd)
-    else:
-      commandSpec(argv = @["/bin/sh", "-c", action.command], cwd = cwd)
+  ## The argv this action becomes (`project_actions.launchArgv`, which the
+  ## desktop's runner launches too), in its working directory.
+  commandSpec(argv = launchArgv(action, windows = defined(windows)),
+              cwd = workingDirectory(action, projectRoot))
 
 proc startAction*(vm: VerificationVM; action: ProjectAction;
                   projectRoot: string; timeoutMs = -1): ProjectActionRun =

@@ -1,30 +1,37 @@
 #!/usr/bin/env bash
 # =============================================================================
-# Print, comma-separated, the members of codetracer's develop set that are
-# BUILD INPUTS: the sibling repos the build compiles from source.
+# Print, comma-separated, the members of codetracer's develop set that
+# `.github/actions/provision-repro-lock-siblings` clones: every sibling repo the
+# lock pins that is also a solved package.
 #
 #   usage: ci/repro-lock-build-input-siblings.sh [path/to/repro.lock]
 #
-# `repro.lock` answers two questions for the `codetracer` node:
+# `repro.lock` answers two questions:
 #
-#   * `depends` -- the develop set: every sibling repo this commit is built
-#     AND tested against, each pinned by a `deps` entry. It includes the
-#     recorders, the native backend and the trace-format crates the test
-#     lanes provision through `clone-siblings`, some of which are private.
-#   * `packages` -- the solved build graph: what `repro.nim` `uses`. A sibling
-#     repo appears here when the build consumes it from source (`isonim`,
-#     `nim-acp`, ... -- the libraries `config.nims` puts on the Nim path).
+#   * `deps` -- the develop set: every sibling repo this commit is built AND
+#     tested against, each pinned by its own entry. Since reprobuild 5a1326957
+#     the lock records a GRAPH: the `codetracer` entry's `depends` lists only
+#     its DIRECT dependencies (what `repro.nim` `uses:`), and the entries
+#     below it hold the whole transitive set its recipes derive. So the develop
+#     set is every `deps` entry other than codetracer's own, not the root's
+#     `depends` field.
+#   * `packages` -- the solved build graph. Every sibling a `uses:` entry names
+#     is solved as a package (a sibling that builds nothing carries a minimal
+#     `repro.nim` so it can be named), whether the build compiles it or only a
+#     test lane reads it.
 #
-# The members of the first set that are also in the second are the siblings
-# a Nim build needs checked out next to codetracer, and that is what
-# `.github/actions/provision-repro-lock-siblings` clones. Deriving the list
-# here keeps the lock the only source of the answer: declaring a new from-
-# source dependency in `repro.nim` and relocking adds it, with no list to
-# edit. `ci/test/sibling-provisioning-test.sh` pins the current output so a
-# change to it is a visible decision.
+# The lock therefore no longer separates Nim build inputs from test-lane
+# siblings, and the owner's decision (2026-11-16) is to provision the whole
+# declared set: every develop-set member that is a solved package. The one
+# member that is not -- `reprobuild-packages`, reached through a source
+# `import` in `repro.nim` rather than a `uses:` -- is the package catalog,
+# which the jobs pin and fetch on their own. Deriving the list here keeps the
+# lock the only source of the answer: declaring a dependency in `repro.nim`
+# and relocking adds it, with no list to edit. Several members are private,
+# so the action clones with the job's minted token.
 #
 # Exits non-zero, printing nothing on stdout, when the lock cannot be read or
-# yields no build-input sibling at all: provisioning nothing is never right.
+# yields no sibling at all: provisioning nothing is never right.
 #
 # BASH BUILTINS ONLY. `.github/actions/provision-repro-lock-siblings` runs this
 # in a raw `shell: bash` step, BEFORE `nix develop`, and a nix-darwin runner's
@@ -58,23 +65,26 @@ fi
 
 lock_text="$(<"$lock")"
 
-# The `codetracer` node of `deps`: `self = "true"` in a v3 lock, `path = "."`
-# in a v2 one. `[^}]*` keeps the match inside that one inline table, and the
-# leftmost match is the node itself -- the same entry the grep|head pipeline
-# this replaces selected.
-codetracer_node='name = "codetracer", (self = "true"|path = "\.")[^}]*depends = "([^"]*)"'
-if [[ $lock_text =~ $codetracer_node ]]; then
-	depends="${BASH_REMATCH[2]}"
-else
-	depends=""
-fi
-if [ -z "$depends" ]; then
+# Every `deps` entry other than codetracer's own, in lock order. An entry
+# opens `{ name = "<n>", ` followed by `self = "true", ` (codetracer, v3),
+# `path = "<p>", ` (v2) or directly by `coord_kind`. `[[ =~ ]]` has no global
+# match, so the text is consumed one entry at a time.
+deps_entry='\{ name = "([^"]+)", (self = "true", |path = "([^"]*)", )?coord_kind = '
+members=()
+rest="$lock_text"
+while [[ $rest =~ $deps_entry ]]; do
+	name="${BASH_REMATCH[1]}"
+	if [ "${BASH_REMATCH[2]}" != 'self = "true", ' ] && [ "${BASH_REMATCH[3]}" != "." ]; then
+		members+=("$name")
+	fi
+	rest="${rest#*"${BASH_REMATCH[0]}"}"
+done
+if [ "${#members[@]}" -eq 0 ]; then
 	echo "repro-lock-build-input-siblings: $lock declares no develop set for codetracer" >&2
 	exit 1
 fi
 
 selected=()
-IFS=',' read -r -a members <<<"$depends"
 for member in "${members[@]}"; do
 	# A solved package entry: `{ name = "<m>", version = "...", source = "<m>", ...`
 	# The quoted parts of the pattern match literally, so a `.` in a member
@@ -85,7 +95,7 @@ for member in "${members[@]}"; do
 done
 
 if [ "${#selected[@]}" -eq 0 ]; then
-	echo "repro-lock-build-input-siblings: none of $lock's develop set ($depends) is a build input" >&2
+	echo "repro-lock-build-input-siblings: none of $lock's develop set (${members[*]}) is a solved package" >&2
 	exit 1
 fi
 

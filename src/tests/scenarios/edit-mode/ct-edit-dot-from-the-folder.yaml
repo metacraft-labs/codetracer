@@ -1,0 +1,20 @@
+scenario: 1
+name: edit-mode/ct-edit-dot-from-the-folder
+pack: codetracer
+summary: >-
+  `ct edit .` from a shell inside a git repository opens it in Edit mode with
+  its Files pane (README.md, src) and its VCS pane (the history) filled.
+
+stage:
+  - use: project-fixture
+    with: { name: git-lazy-tree }
+  - use: open-project
+    with: { folder: $project, from-inside: true }
+
+steps:
+  - wait: { until: { at: 'filesystem/file-node[name="README.md"]', present: true }, timeout: 120s }
+  - wait: { until: settled, timeout: 30s }
+  - expect: { at: window, mode: edit }
+  - expect: { at: 'filesystem/file-node[name="src"]', present: true }
+  - click: 'pane-tab[label="VCS"]'
+  - wait: { until: { at: vcs, commits: { gt: 0 } }, timeout: 30s }

@@ -1,0 +1,164 @@
+# ct get-default-org: 13 argv cases through ct's loader (the parse probe)
+
+### 1: no arguments
+argv: ct "get-default-org"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = get-default-org
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 2: one argument too many
+argv: ct "get-default-org" "surplus"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The subcommand 'get-default-org' does not accept arguments\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 3: unknown long option
+argv: ct "get-default-org" "--bogus"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'bogus'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 4: unknown long option with value
+argv: ct "get-default-org" "--bogus=1"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'bogus'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 5: unknown short option
+argv: ct "get-default-org" "-Z"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'Z'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 6: lone -
+argv: ct "get-default-org" "-"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option ''\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 7: lone -- then a word
+argv: ct "get-default-org" "--" "w"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option ''\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 8: --=v
+argv: ct "get-default-org" "--=v"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option ''\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 9: extra positional
+argv: ct "get-default-org" "extra1" "extra2" "extra3" "extra4" "extra5"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The subcommand 'get-default-org' does not accept arguments\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 10: global --cwd after the command
+argv: ct "get-default-org" "--cwd" "/w"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = some("/w")
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = get-default-org
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 11: global --new-tab after the command
+argv: ct "get-default-org" "--new-tab"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = true
+  newWindow = false
+  cmd = get-default-org
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 12: --version after the command
+argv: ct "get-default-org" "--version"
+env: (none)
+exit: 0
+--- stdout
+CodeTracer version: <VERSION>
+\e[0m
+(no newline at end of stdout)
+--- stderr
+--- end
+
+### 13: -h after the command
+argv: ct "get-default-org" "-h"
+env: (none)
+exit: 0
+--- stdout
+<the short help page clispec renders for this request: ct get-default-org>
+--- stderr
+--- end

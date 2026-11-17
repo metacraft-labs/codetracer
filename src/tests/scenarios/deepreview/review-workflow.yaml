@@ -1,0 +1,41 @@
+scenario: 1
+name: deepreview/review-workflow
+pack: codetracer
+summary: >-
+  A reviewer's pass through a review, end to end: the title and the three
+  files with their statuses (M, A, D, main.rs selected); utils.rs opens as a
+  diff of 8 added lines in one hunk, main.rs as 8 added and 3 removed in one
+  hunk; pressing a boundary reveals hidden context; the trace context is
+  switched to the previous run; and the Agent Activity panel shows no roll-up.
+
+stage:
+  - use: open-review
+    with: { dataset: src/tests/gui/tests/deepreview/fixtures/sample-review.json }
+
+steps:
+  - wait: { until: { at: vcs, present: true }, timeout: 120s }
+  - wait: { until: { at: 'review-diff[file="src/main.rs"]', present: true }, timeout: 60s }
+  - wait: { until: settled, timeout: 30s }
+  - expect: { at: vcs, title: { contains: "DeepReview: parser cleanup" }, count: 3 }
+  - expect: { at: 'vcs/changed-file[name="main.rs"]', status: M, selected: true }
+  - expect: { at: 'vcs/changed-file[name="utils.rs"]', status: A }
+  - expect: { at: 'vcs/changed-file[name="config.rs"]', status: D }
+  - click: 'vcs/changed-file[name="utils.rs"]'
+  - wait: { until: { at: 'review-diff[file="src/utils.rs"]', added: 8 }, timeout: 30s }
+  - expect: { at: 'vcs/changed-file[name="utils.rs"]', selected: true }
+  - expect: { at: 'vcs/changed-file[name="main.rs"]', selected: false }
+  - expect: { at: vcs, unified-diff: true }
+  - expect: { at: 'review-diff[file="src/utils.rs"]', removed: 0, hunk-headers: 1 }
+  - click: 'vcs/changed-file[name="main.rs"]'
+  - wait: { until: { at: 'review-diff[file="src/main.rs"]', added: 8 }, timeout: 30s }
+  - expect: { at: 'review-diff[file="src/main.rs"]', removed: 3, hunk-headers: 1 }
+  - wait: { until: { at: 'review-diff[file="src/main.rs"]', boundaries: 2 }, timeout: 30s }
+  - click: 'review-diff[file="src/main.rs"]/review-boundary[direction="above"]'
+  - wait: { until: { at: 'review-diff[file="src/main.rs"]/review-boundary[direction="above"]', hidden: { lt: 12 } }, timeout: 30s }
+  - expect: { at: 'review-diff[file="src/main.rs"]', context-new: { gt: 0 } }
+  - expect: { at: trace-context, options: { subsequence: ["latest passing run", "previous run"] } }
+  - click: trace-context
+  - key: Down
+  - key: Enter
+  - wait: { until: { at: trace-context, value: { contains: "previous run" } }, timeout: 30s }
+  - expect: { at: agent-activity, geometry: { visible: true }, roll-up: 0 }

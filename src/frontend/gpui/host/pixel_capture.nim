@@ -271,4 +271,15 @@ proc writeCapture*(imagePath: string; c: PixelCapture;
   let failed = png.writePng(imagePath, c.width, c.height, c.rgba)
   if failed.len > 0:
     return failed
+  # PLAT-59: the raw RGBA beside the PNG on request
+  # (`CODETRACER_GPUI_PIXELS_RAW=1`), for a reader with no PNG decoder — a
+  # suite comparing the window's pixels with a frame's.
+  if getEnv("CODETRACER_GPUI_PIXELS_RAW") == "1":
+    try:
+      var bytes = newString(c.rgba.len)
+      if bytes.len > 0:
+        copyMem(addr bytes[0], unsafeAddr c.rgba[0], bytes.len)
+      writeFile(imagePath & ".rgba", bytes)
+    except CatchableError as e:
+      return "could not write " & imagePath & ".rgba: " & e.msg.splitLines()[0]
   ""

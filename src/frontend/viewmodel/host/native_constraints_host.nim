@@ -113,8 +113,11 @@ proc settle(h: NativeConstraintsHost; root: string; run: NargoInfoRun) =
   let answer = constraintsAnswer(root, hasMarker, run)
   h.measuredRoot = root
   if answer.hasReport:
-    h.vm.setSources(noirSourcesUnder(root))
-    h.vm.setReport(answer.report)
+    let sources = noirSourcesUnder(root)
+    h.vm.setSources(sources)
+    # The compiled program `nargo` just left says where each opcode came from.
+    h.vm.setReport(placeOpcodes(answer.report,
+      readQuietly(artefactPathUnder(root, answer.report.package)), sources))
   else:
     h.vm.setSources(@[])
     h.vm.setAbsence(answer.absence)

@@ -488,7 +488,16 @@ suite "ct review — the retired spellings, through the shipped binary":
     let run = runCt(@["--help"])
     checkpoint(run.output)
     check not run.output.contains("--deepreview")
-    check run.output.contains("ct review")
+    # The help lists `review` among the commands.  Since CS-M10 the help
+    # screen is clispec's (a `Commands:` table, one row per command, the
+    # name first) rather than confutils' (`ct review` headings), so either
+    # form is accepted.
+    var listsReview = run.output.contains("ct review")
+    for line in run.output.splitLines:
+      let words = line.strip.splitWhitespace
+      if words.len > 0 and words[0].strip(chars = {','}) == "review":
+        listsReview = true
+    check listsReview
 
   test "review_export_points_at_collect":
     let run = runCt(@["review", "export", "/tmp/out"])

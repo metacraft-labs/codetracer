@@ -406,12 +406,24 @@ proc paneViewModel*(slot: HeadlessSessionSlot; kind: PaneKind): ViewModel =
     # docks. Its ViewModel is the desktop's (a build's diagnostics); the
     # replay session owns none, so nil, for the reason above.
     nil
+  of paneVideoPlayer:
+    # PLAT-59. The frame with its transport and scrubbers: the session's
+    # Visual Replay panes (nil for a recording that carries no graphics).
+    if s.visualReplay.isNil: nil else: ViewModel(s.visualReplay.player)
+  of panePixelHistory:
+    if s.visualReplay.isNil: nil else: ViewModel(s.visualReplay.history)
+  of paneShaderDebug:
+    if s.visualReplay.isNil: nil else: ViewModel(s.visualReplay.shader)
   of paneLowLevelCode:
     # PLAT-60. The function the debugger is in, as instructions under the
     # source lines they came from: the session's own `LowLevelCodeVM`, the
     # one the desktop's Low Level Code view draws (loaded per stop by the
     # session's stop loader while a front-end shows it).
     ViewModel(s.lowLevelCodeVM)
+  of paneMacroExpansion:
+    # Editor-Hosted-Front-Ends §E15. The session's open macro expansions, the
+    # debugger's row in them.
+    ViewModel(s.macroExpansionVM)
   of paneVerification:
     # PLAT-63. A Verno run of the window's project: the WINDOW's
     # `VerificationVM` (the desktop keeps one per window too,

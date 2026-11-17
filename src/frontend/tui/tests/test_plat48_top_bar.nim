@@ -31,6 +31,11 @@
 ## disabled one gives, the welcome tab and form a choice opens, the buffer a
 ## choice makes active — is the runtime's and the shared models' own; the
 ## host performing the intent end to end is `real_terminal/test_plat51b_pty`.
+##
+## Where `calc` cannot be produced (no `ct`, no Python recorder, a cold
+## fixture cache), every case that needs it is the counted
+## `MISSING-PREREQ SKIP:` line `just test-tui` documents — see
+## `requireCalcRecorded` — and the engine-free cases still run and count.
 
 import std/[base64, os, osproc, posix, strutils, tables, unicode, unittest]
 
@@ -69,6 +74,43 @@ var countedAssertions = 0
 template ck(condition: untyped) =
   inc countedAssertions
   check condition
+
+# ---------------------------------------------------------------------------
+# The real `calc` recording, and what its absence is reported as
+# ---------------------------------------------------------------------------
+
+let calcFixture = resolveFixture("calc")
+  ## Resolved once, for every case below that opens a real session (the M74
+  ## File menu and the M76 Debug menu, Stop and top-bar Stop cases).
+
+const SessionCases = 12
+  ## The cases that open `calcFixture`, each starting `requireCalcRecorded()`.
+const SessionCaseAssertions = 171
+  ## How many of `ExpectedAssertions` those cases make when `calc` resolves:
+  ## 515 less the 344 the engine-free cases make. Measured 2026-11-09 with no
+  ## `ct` (356 counted, 12 of them the skip lines' own assertions).
+
+var skippedSessionCases = 0
+
+template requireCalcRecorded() =
+  ## The first statement of every case over the real `calc` recording.
+  ##
+  ## An absent prerequisite — no `ct`, no Python recorder, nothing cached —
+  ## is the counted `MISSING-PREREQ SKIP:` line `just test-tui` documents,
+  ## reported as `test_fixture_corpus.nim` reports it, and never a failure:
+  ## it says what to install, not that the menu is broken. The skip still
+  ## asserts that the line carries the prefix and names the fixture, and the
+  ## count guard at the end of the file checks that every session case
+  ## skipped together. A prerequisite that IS present and misbehaves does
+  ## not land here: a recording that fails raises out of `resolveFixture`,
+  ## and a session that misbehaves fails the case's own assertions.
+  if calcFixture.outcome == foMissingPrereq:
+    inc skippedSessionCases
+    let message = missingPrereqMessage(calcFixture.spec, calcFixture.detail)
+    echo "  ", message
+    ck message.startsWith(MissingPrereqSkipPrefix) and "calc" in message
+    skip()
+    return
 
 const
   F12 = "\x1b[24~"
@@ -601,8 +643,6 @@ suite "M74 (#841): the File menu follows what the terminal can do":
     discard rt.handleToken(Esc, 0)
     discard rt.handleToken(Esc, 0)
 
-  let calc = resolveFixture("calc")
-
   proc open(path: string): (TuiRuntime, TuiSession) =
     let rt = newRuntime(200, 50)
     let s = openTuiSession(path, viewportHeight = 42)
@@ -612,8 +652,8 @@ suite "M74 (#841): the File menu follows what the terminal can do":
     (rt, s)
 
   test "the trace and tab items are enabled where a host performs them; New Trace Tab adds a welcome tab":
-    require calc.outcome == foRecorded
-    let (rt, s) = open(calc.tracePath)
+    requireCalcRecorded()
+    let (rt, s) = open(calcFixture.tracePath)
     defer: s.close()
     # No host to open a recording with: the four trace and tab items are
     # disabled, and choosing one SAYS why (EMT-D14) rather than nothing.
@@ -647,8 +687,8 @@ suite "M74 (#841): the File menu follows what the terminal can do":
     ck asked.len == 0
 
   test "Open Trace…, Open Trace in New Tab… and Record New Trace… reach the welcome flow":
-    require calc.outcome == foRecorded
-    let (rt, s) = open(calc.tracePath)
+    requireCalcRecorded()
+    let (rt, s) = open(calcFixture.tracePath)
     defer: s.close()
     var asked: seq[NativeWelcomeIntent] = @[]
     rt.app.welcomeHost = proc(tab: int; intent: NativeWelcomeIntent): string =
@@ -663,11 +703,11 @@ suite "M74 (#841): the File menu follows what the terminal can do":
     # The form is the real one: the recording typed and Enter reach the host
     # as the intent to open it.
     if not w.isNil:
-      for ch in calc.tracePath:
+      for ch in calcFixture.tracePath:
         discard rt.handleToken($ch, 0)
       discard rt.handleToken(Enter, 0)
     ck asked.len == 1 and asked[0].kind == niOpenTrace and
-       asked[0].path == calc.tracePath
+       asked[0].path == calcFixture.tracePath
     # With a welcome tab shown, Open Trace… opens the form IN that tab (it
     # becomes the session it starts, rule 3); Open Trace in New Tab… does not.
     discard rt.chooseFileItem("Open Trace...")
@@ -697,8 +737,8 @@ suite "M74 (#841): the File menu follows what the terminal can do":
     ck asked.len == 1
 
   test "the file items act on the edit session's buffers, and say why when they cannot":
-    require calc.outcome == foRecorded
-    let (rt, s) = open(calc.tracePath)
+    requireCalcRecorded()
+    let (rt, s) = open(calcFixture.tracePath)
     defer: s.close()
     # A real project on disk, read through the host's own reader
     # (`edit_host`), as `main.nim` wires it.
@@ -785,8 +825,6 @@ suite "M74 (#841): the File menu follows what the terminal can do":
 # table, not off a flag. The real `calc` recording and a real
 # `replay-server`; the tokens go through `handleToken` and `applyOutcome`,
 # the shipped loop's two halves. Nothing is mocked.
-
-let calcFixture = resolveFixture("calc")
 
 const
   ShiftF5 = "\x1b[15;2~"
@@ -890,7 +928,7 @@ proc processAlive(pid: int): bool =
 suite "M76 (#843): the Debug menu's breakpoint items, over a real session":
 
   test "Delete All Breakpoints is enabled, and removes every breakpoint the user set":
-    require calcFixture.outcome == foRecorded
+    requireCalcRecorded()
     let (rt, s) = openCalc()
     defer: s.close()
     let path = s.session.getCurrentFile()
@@ -909,7 +947,7 @@ suite "M76 (#843): the Debug menu's breakpoint items, over a real session":
     ck rt.app.points == pointListPaneModelFor(s.points)
 
   test "Delete / Enable / Disable Breakpoint act on the caret's line; the All items on every one":
-    require calcFixture.outcome == foRecorded
+    requireCalcRecorded()
     let (rt, s) = openCalc()
     defer: s.close()
     let path = s.session.getCurrentFile()
@@ -939,7 +977,7 @@ suite "M76 (#843): the Debug menu's breakpoint items, over a real session":
 suite "M76 (#843): the Debug menu's tracepoint items, over a real session":
 
   test "Add opens the tracepoint editor at the caret; enable, disable, run all and delete act on the rows":
-    require calcFixture.outcome == foRecorded
+    requireCalcRecorded()
     let (rt, s) = openCalc()
     defer: s.close()
     let path = s.session.getCurrentFile()
@@ -1003,7 +1041,7 @@ suite "M76 (#843): the Debug menu's tracepoint items, over a real session":
 suite "M76 (#843): Stop ends the debugging session":
 
   test "the menu's Stop is enabled; after it the tab is in Edit mode and its replay-server is gone":
-    require calcFixture.outcome == foRecorded
+    requireCalcRecorded()
     let (rt, s) = openCalc()
     defer: s.close()
     let pid = int(s.session.backend.process.processID)
@@ -1034,7 +1072,7 @@ suite "M76 (#843): Stop ends the debugging session":
     # `main.nim`'s `recordingOpener` for a stopped tab: a session opened as
     # every session is, the runtime pointed at it, Debug mode. Written with
     # the fix — before it there was no Stop to come back from.
-    require calcFixture.outcome == foRecorded
+    requireCalcRecorded()
     let (rt, s) = openCalc()
     defer: s.close()
     let first = s.session.replayPid()
@@ -1067,7 +1105,7 @@ suite "M76 (#843): Stop ends the debugging session":
     # Trace…) starts its session in that tab — `main.nim`'s `recordingOpener`
     # replaces the stopped slot only for the welcome tab `stoppedTabWelcome`
     # names. A request for a new tab gets one, and the stopped tab stays.
-    require calcFixture.outcome == foRecorded
+    requireCalcRecorded()
     let (rt, s) = openCalc()
     defer: s.close()
     rt.app.welcomeHost = proc(tab: int; intent: NativeWelcomeIntent): string =
@@ -1094,7 +1132,7 @@ suite "M76 (#843): Stop ends the debugging session":
     ck rt.app.shell.tabsOf().len == 1     # the stopped tab is still there
 
   test "Shift+F5 (CUA's debugger.stop) reaches the same Stop":
-    require calcFixture.outcome == foRecorded
+    requireCalcRecorded()
     let (rt, s) = openCalc()
     defer: s.close()
     rt.selectBase(bkCua, ksFlag)
@@ -1169,7 +1207,7 @@ suite "M76 (#843): the top bar's Stop control":
     ck col >= 0 and rt.roleAt(col) == srChromeMuted
 
   test "a click on Stop ends the session as the menu does; afterwards it is disabled and inert":
-    require calcFixture.outcome == foRecorded
+    requireCalcRecorded()
     let (rt, s) = openCalc()
     defer: s.close()
     rt.selectBase(bkCua, ksFlag)
@@ -1205,7 +1243,7 @@ suite "M76 (#843): the top bar's Stop control":
     # chord and a menu item take": on the native front ends its `stop` must
     # not be the nil entry `defaultDebugCommands` leaves (`native_host`
     # installs it), so a caller that reaches it ends the engine.
-    require calcFixture.outcome == foRecorded
+    requireCalcRecorded()
     let (rt, s) = openCalc()
     defer: s.close()
     let pid = s.session.replayPid()
@@ -1225,4 +1263,14 @@ suite "M76 (#843): the top bar's Stop control":
 suite "PLAT-48 top bar: assertion count":
   test "every assertion ran":
     echo "CHECKS: " & $countedAssertions
-    check countedAssertions == ExpectedAssertions
+    # `calc` is one resolution, so its session cases run together or skip
+    # together; a count between the two is a case that neither ran nor
+    # reported its skip. Skipped, each made its one skip-line assertion in
+    # place of its own.
+    checkpoint("session cases skipped: " & $skippedSessionCases)
+    check skippedSessionCases in [0, SessionCases]
+    if skippedSessionCases == 0:
+      check countedAssertions == ExpectedAssertions
+    else:
+      check countedAssertions ==
+        ExpectedAssertions - SessionCaseAssertions + SessionCases

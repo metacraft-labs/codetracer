@@ -248,7 +248,7 @@ const
     ## `recordArgs` and `runArgs` are `restOfArgs`, so everything after the
     ## first positional is the program's. `codetracer.nim` makes the same
     ## distinction one level up for POSIX `--`, and for the same reason — see
-    ## its `RecordChildProgramPlaceholder` note, which records what happened
+    ## its note on the `ct record ... --` split, which records what happened
     ## when `ct record php -S localhost:8000` had its `-S` read as ct's.
     ##
     ## So for every other command the scan stops at the first positional after

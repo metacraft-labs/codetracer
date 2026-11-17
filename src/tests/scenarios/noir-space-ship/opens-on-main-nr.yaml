@@ -1,0 +1,18 @@
+scenario: 1
+name: noir-space-ship/opens-on-main-nr
+pack: codetracer
+summary: >-
+  The space-ship recording opens with main.nr in an editor, stopped at its
+  entry, and its call trace loaded.
+
+stage:
+  - use: record-program
+    with: { program: noir_space_ship }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 180s }
+  - wait: { until: { at: 'editor[file="main.nr"]', present: true }, timeout: 60s }
+  - wait: { until: editor.loaded, timeout: 60s }
+  - expect: { at: 'editor[file="main.nr"]', assert: "shows-text(iterate_asteroids)" }
+  - expect: { at: status-line, location: { contains: "main.nr" } }

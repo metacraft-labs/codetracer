@@ -239,6 +239,11 @@ export HERE=$(dirname "$(readlink -f "${0}")")
 export CODETRACER_PREFIX=$HERE
 export PATH="${HERE}/bin:${PATH}"
 
+# Nim tracing: the bundled language server and trace-enabled nimsuggest
+# (appimage-scripts/bundle_nim_tracing.sh). A value the user set wins.
+export CODETRACER_NIM_LS_COMMAND="${CODETRACER_NIM_LS_COMMAND:-${HERE}/bin/nimlangserver}"
+export CODETRACER_NIMSUGGEST="${CODETRACER_NIMSUGGEST:-${HERE}/nim/libexec/nimsuggest}"
+
 exec ${HERE}/bin/ct "$@"
 EOF
 
@@ -375,6 +380,14 @@ if [ ! -e "${APP_DIR}/lib/libgcc_s.so.1" ]; then
 		cp -L "${libgcc_src}" "${APP_DIR}/lib/"
 	fi
 fi
+
+# Nim tracing: the language server and the trace-enabled nimsuggest, each with
+# its library closure and its own loader wrapper. After glibc is bundled (it
+# reuses that loader) and before the closure pass below, which then also sees
+# the libraries this adds.
+NIM_FORK=$(nix build --no-link --print-out-paths "${ROOT_PATH}#packages.${CURRENT_NIX_SYSTEM}.nim-fork")
+NIMLANGSERVER=$(nix build --no-link --print-out-paths "${ROOT_PATH}#packages.${CURRENT_NIX_SYSTEM}.nimlangserver")
+bash "${ROOT_PATH}"/appimage-scripts/bundle_nim_tracing.sh "${APP_DIR}" "${NIM_FORK}" "${NIMLANGSERVER}"
 
 ls -al "${APP_DIR}"/lib
 

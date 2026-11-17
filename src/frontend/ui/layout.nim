@@ -26,9 +26,9 @@ import
 # window to send a pane to.
 #
 # So this import is conditional rather than the module being ported, which is
-# what its guard asks for. `registerPanelAttachHandler` is the only symbol
-# `layout.nim` uses from it (one call site, guarded to match), so the web build
-# simply never installs a handler for an event no web build can raise.
+# what its guard asks for. Every use of it here is guarded to match, so the
+# web build simply never installs a handler for an event no web build can
+# raise.
 when not defined(ctWeb):
   import panel_transfer
 
@@ -36,6 +36,7 @@ import kdom except Location
 # The panel host (Shared-DOM-Front-Ends D4): the factory below mounts the
 # converted panes into the container it creates, and disposes them with it.
 import ./panel_host
+import ../viewmodel/input/dom_pointer
 from ./session_viewmodels import tabScopedKey
 from ./pane_host_lookup import findPaneHost
 from isonim/web/dom_api import nil
@@ -161,14 +162,20 @@ type
 # ---------------------------------------------------------------------------
 
 proc addPanelTransferContextMenu(tab: GoldenTab, contentItem: GoldenContentItem) =
-  ## Attach a right-click context menu to a GL tab element that offers
-  ## pin (left/bottom/right), close, and maximise actions.
+  ## Attach a right-click context menu to a GL tab element: pin
+  ## (left/bottom/right), close and maximise, and on the desktop the
+  ## Multi-Window-Tab-Management.md §"Panel Transfer" entries — "Send to:
+  ## <window>" for each other window of this session, and "Send to New
+  ## Window" (`panel_transfer.buildSendToWindowMenuItems`). `f214d703bc9`
+  ## replaced the transfer menu with the pin menu and left the transfer
+  ## entries without a caller; they are offered again beside the pin ones.
   let tabElement = tab.element
   if tabElement.isNil or tabElement.isUndefined:
     return
 
-  tabElement.addEventListener(cstring"contextmenu", proc(event: JsObject) =
-    event.preventDefault()
+  # A right press on the tab is the pointer row `context-menu.open`, which
+  # opens the menu the tab carries (`dom_pointer.setPressMenu`).
+  setPressMenu(cast[JsObject](tabElement), proc(event: JsObject): bool =
     let x = event.clientX.to(int)
     let y = event.clientY.to(int)
     let capturedItem = contentItem
@@ -176,7 +183,7 @@ proc addPanelTransferContextMenu(tab: GoldenTab, contentItem: GoldenContentItem)
     let maxLabel =
       if cast[bool](stack.isMaximised): cstring"Minimise container"
       else: cstring"Maximise container"
-    showContextMenu(@[
+    var items = @[
       ContextMenuItem(name: cstring"Pin to Left", hint: cstring"",
         handler: proc(ev: kdom.Event) =
           pinPanel(data.ui.layout, capturedItem, AutoHideEdge.Left)),
@@ -194,7 +201,25 @@ proc addPanelTransferContextMenu(tab: GoldenTab, contentItem: GoldenContentItem)
           let s = cast[js](capturedItem.parent)
           if cast[bool](s.isMaximised): s.minimise()
           else: s.maximise())
-    ], x, y))
+    ]
+    when not defined(ctWeb):
+      # The transfer entries follow the pin ones, for the pane's tab — the
+      # tab on screen — and its replay. The other windows are the ones the
+      # main process last reported (it says when one opens, closes or is
+      # retitled: `panel_transfer.registerWindowListHandler`), so the menu
+      # opens at once; it asks again too, for a list a missed message left
+      # stale. "Send to New Window" needs no list.
+      let session = data.activeSession
+      let tabId = if session.isNil: 0 else: int(session.id)
+      let replayId = if session.isNil: -1 else: session.replayId
+      showContextMenu(items & buildSendToWindowMenuItems(capturedItem,
+          tabId, replayId, knownOtherWindows), x, y)
+      proc refreshWindows() {.async.} =
+        knownOtherWindows = await requestWindowList()
+      discard refreshWindows()
+    else:
+      showContextMenu(items, x, y)
+    true)
 
 let commonContextMenuOptions: seq[ContextMenuOption] = @[
   ContextMenuOption(
@@ -327,7 +352,7 @@ proc setupDropdownDismissListeners() =
         }
       }
 
-      document.addEventListener('mousedown', function (ev) {
+      document.addEventListener('mousedown', function (ev) {  // ir1-gate: outside press
         var target = ev.target;
         if (!target || !target.closest) { return; }
         closeOpenMenus(function (container) {
@@ -1127,7 +1152,7 @@ proc setupClickToFocusListeners() =
       }
     }
 
-    document.addEventListener('mousedown', function (ev) {
+    document.addEventListener('mousedown', function (ev) {  // ir1-gate: focus (the docked panel's focus mark)
       var target = ev.target;
       if (!target || !target.closest) return;
 
@@ -2405,7 +2430,7 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
 
       let tabEl = cast[Element](tab.element)
       if not tabEl.isNil:
-        tabEl.addEventListener(cstring"mousedown", proc(ev: Event) =
+        tabEl.addEventListener(cstring"mousedown", proc(ev: Event) =  # ir1-gate: gesture (the tab drag)
           activeDraggedItem = genericContentItem
         )
 
@@ -2430,7 +2455,11 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
   # Desktop only: a web build has no second window to receive a pane FROM, so
   # there is no event to handle. See this file's `panel_transfer` import.
   when not defined(ctWeb):
-    registerPanelAttachHandler(layout)
+    registerPanelAttachHandler(layout, proc(sessionId: int): bool =
+      for session in data.sessions:
+        if not session.isNil and int(session.id) == sessionId:
+          return true
+      false)
 
   # Auto-hide panes: initialise state and set up the edge strip renderer
   # and overlay event handlers.

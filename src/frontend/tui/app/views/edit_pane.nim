@@ -112,6 +112,10 @@ type
       ## 0-based grapheme-cluster column of the caret within its line.
     selectionActive*: bool
     selected*: seq[tuple[line, fromColumn, toColumn: int]]
+    hintLine*: int
+      ## The line whose empty glyph cell the pointer is over (gesture 7a).
+    extraCarets*: seq[tuple[line, column: int]]
+      ## The other cursors, 1-based display columns (Alt+click, MC.4).
       ## PLAT-70 Part C: the selection's cells (`editing_core.selectionCells`),
       ## drawn on the selection ground as the Debug-mode source pane draws
       ## them — a find match is selected, and must be seen to be.
@@ -241,6 +245,17 @@ proc markFor*(model: EditPaneModel; line: int): GutterMark =
     if line2 == line:
       result = mark
 
+type
+  EditPaneHit* = object
+    ## What a press on the Edit pane is on (`sourceClickTargetAt`'s twin).
+    line*: int
+    gutterCell*: int
+      ## -1 off the gutter.
+    gutterWidth*: int
+    column*: int
+      ## 1-based view column of the text, 0 on the gutter.
+    pixelColumn*: float
+
 proc paneGutterWidth*(model: EditPaneModel): int =
   gutterWidth(gutterNumberWidth(max(1, model.lineCount)))
 
@@ -368,6 +383,30 @@ proc editBarOf*(model: EditPaneModel; area: CellArea):
    row: area.row + area.height - 1, left: area.col + gw, cols: codeW,
    view: view)
 
+proc editPaneHitAt*(model: EditPaneModel; area: CellArea; row, col: int): EditPaneHit =
+  ## A press at `(row, col)` on the pane `paintEditPane` paints into `area`, read
+  ## back by the same arithmetic. Line 0 for the title row, the horizontal bar,
+  ## or below the file.
+  result = EditPaneHit(gutterCell: -1)
+  if area.width <= 0 or area.height <= 1 or row <= area.row or
+     row >= area.row + area.height or col < area.col or
+     col >= area.col + area.width:
+    return
+  let bar = model.editBarOf(area)
+  if bar.shown and row == bar.row:
+    return
+  let line = model.viewportTop + (row - area.row - 1)
+  if line < 1 or line > model.lineCount:
+    return
+  let gw = paneGutterWidth(model)
+  result.line = line
+  result.gutterWidth = gw
+  result.pixelColumn = float(area.col + gw - bar.view.leftCol)
+  if col < area.col + gw:
+    result.gutterCell = col - area.col
+  else:
+    result.column = col - area.col - gw + 1 + bar.view.leftCol
+
 proc paintEditPane*(g: var StyledGrid; area: CellArea; model: EditPaneModel;
                     cache: HighlighterCache = nil): EditPaneScreen =
   ## Paint the pane into `area` of `g`, and report what it painted.
@@ -445,6 +484,7 @@ proc paintEditPane*(g: var StyledGrid; area: CellArea; model: EditPaneModel;
     var spec = initGutterLineSpec(
       line = line, numberWidth = numberWidth, mark = markFor(model, line),
       isExecutionLine = false, numberStyle = EditLineNumberStyle)
+    spec.hinted = line == model.hintLine
     # THE EXECUTION POINTER IS NOT DRAWN, and the flags above are how: both
     # cursors are false on every line, so `gutterRow` emits `NoPointerGlyph`
     # and the three cells stay reserved. §3: "the gutter reused from Debug mode

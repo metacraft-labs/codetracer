@@ -1,0 +1,34 @@
+scenario: 1
+name: noir-space-ship/step-controls-recover-from-reverse
+pack: codetracer
+summary: >-
+  In shield.nr, Reverse Continue runs back to the recording's start and
+  Continue then runs forward again to its end: the controls answer after a
+  reverse run.
+
+stage:
+  - use: record-program
+    with: { program: noir_space_ship }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 180s }
+  - click: 'pane-tab[label="CALLTRACE"]'
+  - wait: { until: call-trace.loaded, timeout: 60s }
+  - wait: { until: { at: 'call-trace/call[name="iterate_asteroids"]', present: true }, timeout: 60s }
+  - click: { at: 'call-trace/call[name="iterate_asteroids"]', anchor: name }
+    settle: false
+  - wait: { until: { at: status-line, location: { contains: "shield.nr" } }, timeout: 60s }
+  - wait: { until: replay-idle, timeout: 60s }
+  - click: 'toolbar/toolbar-button[label="reverse-continue-image"]'
+    settle: false
+  - wait: { until: { at: status-line, location: { contains: "main.nr" } }, timeout: 60s }
+  - wait: { until: replay-idle, timeout: 60s }
+  - click: 'toolbar/toolbar-button[label="continue-image"]'
+    settle: false
+  - wait: { until: replay-idle, timeout: 60s }
+  - wait: { until: { at: 'toolbar/toolbar-button[label="next-image"]', enabled: true }, timeout: 60s }
+  - click: 'toolbar/toolbar-button[label="reverse-next-image"]'
+    settle: false
+  - wait: { until: replay-idle, timeout: 60s }
+  - wait: { until: { at: 'toolbar/toolbar-button[label="continue-image"]', enabled: true }, timeout: 60s }

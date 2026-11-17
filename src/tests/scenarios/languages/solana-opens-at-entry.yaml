@@ -1,0 +1,39 @@
+scenario: 1
+name: languages/solana-opens-at-entry
+pack: codetracer
+summary: >-
+  A Solana recording opens, and activating `process_instruction` in its
+  call trace shows solana_flow_test.rs: the status line names the file, the
+  state pane shows the line it stopped on, and the event log has the
+  program's events.
+
+stage:
+  - use: record-program
+    with: { program: solana_example, lang: solana }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 240s }
+  - expect: { at: window, title: { contains: CodeTracer } }
+  # The recording starts in the SBF entrypoint the `entrypoint!` macro
+  # generates, drawn from solana-program-entrypoint's own src/lib.rs (a file
+  # the editor opens, not a path it cannot find); the call trace leads from
+  # it to the program's own code.
+  - wait: { until: { at: 'editor[file="lib.rs"]', active: true }, timeout: 60s }
+  - wait: { until: { at: status-line, location: { contains: "solana-program-entrypoint" } }, timeout: 60s }
+  - click: 'pane-tab[label="CALLTRACE"]'
+  - wait: { until: call-trace.loaded, timeout: 120s }
+  # The call trace opens deep inside the entrypoint's account
+  # deserialisation; process_instruction is reached through its search.
+  - click: { at: 'search-box[pane="call-trace"]' }
+  - type: process_instruction
+  - key: Enter
+  - wait: { until: { at: 'search-box[pane="call-trace"]/search-result[#1]', present: true }, timeout: 60s }
+  - click: 'search-box[pane="call-trace"]/search-result[#1]'
+    settle: false
+  - wait: replay-idle
+  - wait: { until: { at: 'editor[file="solana_flow_test.rs"]', active: true }, timeout: 60s }
+  - wait: { until: { at: status-line, location: { contains: "solana_flow_test.rs:" } }, timeout: 60s }
+  - wait: { until: { at: variables, code-line: { contains: " | " } }, timeout: 60s }
+  - click: 'pane-tab[label="EVENT LOG"]'
+  - wait: { until: event-log.loaded, timeout: 60s }

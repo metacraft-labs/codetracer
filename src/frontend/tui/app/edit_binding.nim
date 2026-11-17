@@ -551,6 +551,31 @@ proc togglePointAt*(s: EditSession; path: string; line: int;
   s.points.add SourcePoint(path: path, line: line, kind: kind, enabled: true)
   true
 
+proc setPointEnabled*(s: EditSession; path: string; line: int; enabled: bool): bool =
+  ## Gesture 8 in Edit mode: the line breakpoint on `path:line` armed or
+  ## disarmed; false when the line has none.
+  if s.isNil:
+    return false
+  for p in s.points.mitems:
+    if p.path == path and p.line == line and p.kind == sptBreakpoint:
+      p.enabled = enabled
+      return true
+
+proc toggleInlinePointAt*(s: EditSession; path: string; line, column: int): bool =
+  ## `toggle-inline-breakpoint` in Edit mode, where no engine answers yet. The
+  ## next session sends the point with its column.
+  if s.isNil or path.len == 0 or line <= 0 or column < 2:
+    return false
+  for i, p in s.points:
+    if p.path == path and p.line == line and p.kind == sptBreakpoint:
+      s.points.delete(i)
+      if p.column == column:
+        return false
+      break
+  s.points.add SourcePoint(path: path, line: line, column: column,
+                           kind: sptBreakpoint, enabled: true)
+  true
+
 proc activeBuffer*(s: EditSession): EditBuffer =
   if s.isNil or s.active < 0 or s.active >= s.buffers.len: nil
   else: s.buffers[s.active]

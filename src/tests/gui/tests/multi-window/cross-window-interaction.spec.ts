@@ -29,12 +29,13 @@ import {
 import { _electron } from "playwright";
 
 import { retry } from "../../lib/retry-helpers";
-// Side-effect import: lib/fixtures.ts performs language-recorder
+// Imported for the readiness selector and for a side effect:
+// lib/fixtures.ts performs language-recorder
 // discovery at module load (Python interpreter / recorder, Ruby, etc.)
 // and records the results on process.env.  This spec defines its own
 // `test` fixture and `recordTestProgram`, so without importing fixtures
 // that discovery never runs and `ct record` cannot find the recorders.
-import "../../lib/fixtures";
+import { READY_ON_ENTRY_SELECTOR } from "../../lib/fixtures";
 
 // ---------------------------------------------------------------------------
 // Path constants (duplicated from fixtures.ts -- these are not exported)
@@ -333,9 +334,13 @@ const { expect } = base;
 // ---------------------------------------------------------------------------
 
 async function waitForTraceLoaded(page: Page): Promise<void> {
-  // Wait for the trace-loaded indicator (location path becomes visible).
+  // Wait for the trace-loaded indicator: the editor's execution line, the
+  // signal `readyOnEntryTest` uses (the status bar's location path is hidden
+  // by design).
   await page
-    .locator(".location-path")
+    .locator(READY_ON_ENTRY_SELECTOR)
+    .filter({ visible: true })
+    .first()
     .waitFor({ state: "visible", timeout: 30_000 })
     .catch(() => {
       // Fallback: wait for any content to appear.
@@ -954,11 +959,14 @@ test.describe("Cross-window interaction", () => {
       return;
     }
 
+    // The reply lists the OTHER open windows (the asking one is never a
+    // target for its own panes): with one window open, none.
     expect(Array.isArray(result.windows)).toBe(true);
-    expect(result.windows.length).toBeGreaterThanOrEqual(1);
+    expect(result.windows.length).toBe(0);
     for (const entry of result.windows) {
       expect(entry).toHaveProperty("id");
       expect(typeof entry.id).toBe("number");
+      expect(Array.isArray(entry.replayIds)).toBe(true);
     }
   });
 

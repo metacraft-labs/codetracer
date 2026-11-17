@@ -1,0 +1,22 @@
+scenario: 1
+name: agent-activity-deepreview/pane-mounts-in-review
+pack: codetracer
+summary: >-
+  In a dataset review (`ct review <PATH>`), bringing the AGENT ACTIVITY tab
+  forward shows the mounted pane and its prompt box, not an empty
+  container.
+
+stage:
+  - use: review-dataset
+    with: { variant: plain }
+  - use: stub-agent
+    with: { agent: refusing }
+  - use: open-review
+
+steps:
+  # The layout carries the tab (the half that held while the pane was
+  # missing), checked first to keep the two failures apart.
+  - wait: { until: { at: 'pane-tab[label="AGENT ACTIVITY"]', present: true }, timeout: 60s }
+  - click: { at: 'pane-tab[label="AGENT ACTIVITY"]' }
+  - wait: { until: { at: agent-activity, present: true }, timeout: 30s }
+  - wait: { until: { at: agent-activity/agent-prompt, present: true }, timeout: 30s }

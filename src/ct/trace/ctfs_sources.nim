@@ -57,6 +57,24 @@ const
     ## non-zero reserved byte, is refused by name (§1c).
 
 type
+  TraceFormatVersionRefused* = object of ValueError
+    ## A trace refused for its format VERSION alone: the CTFS container
+    ## version byte (``openCtfs``) or the ``meta.dat`` schema version
+    ## (``parseCtfsMetaDat``).  ``msg`` is the reader's own text, which names
+    ## the version and tells the user to re-record -- the right advice for an
+    ## old trace.  The fields exist for the one caller that knows better:
+    ## ``ct record`` imports a container its recorder wrote seconds ago, so
+    ## there the stale party is the recorder, and re-recording with it writes
+    ## the same version again (GitHub #909; ``CLI/ct/record.md`` §"Corner
+    ## Cases", "Recorder present but wrong version").  It is a ``ValueError``
+    ## so every existing ``except ValueError`` still catches it.
+    part*: string
+      ## what carries the refused version: "CTFS container" or "meta.dat".
+    found*: int
+      ## the version the trace carries.
+    readable*: seq[int]
+      ## the versions this reader reads, lowest first.
+
   CtfsMetaDat* = object
     ## Subset of the ``meta.dat`` payload that the Nim importer
     ## consumes.  Mirrors the fields used to populate the trace index.
@@ -130,10 +148,14 @@ proc openCtfs(path: string): CtfsReader =
   # ``parseCtfsMetaDat`` gates on, and the two move independently.
   let version = result.data[5].ord
   if version != SupportedCtfsVersion and version != CtfsVersionV6:
-    raise newException(ValueError,
+    let refusal = newException(TraceFormatVersionRefused,
       "CTFS container version " & $version & " is not readable: this " &
       "reader reads versions " & $SupportedCtfsVersion & " and " &
       $CtfsVersionV6 & ". Re-record the trace")
+    refusal.part = "CTFS container"
+    refusal.found = version
+    refusal.readable = @[SupportedCtfsVersion, CtfsVersionV6]
+    raise refusal
   result.blockSize = readU32Le(result.data, 8)
   if result.blockSize notin [uint32 1024, 2048, 4096]:
     raise newException(ValueError, "invalid CTFS block size")
@@ -360,25 +382,44 @@ proc extractFilemapSources(reader: CtfsReader, outputFolder: string): seq[string
   if filemap.len < 8 or filemap[0 ..< 4] != "FMAP":
     raise newException(ValueError, "invalid CTFS filemap")
 
+  # Two layouts (codetracer-native-recorder `ct_recorder/filemap.nim`, the
+  # writer): version 1 carries an ELF build id per entry; version 2, what
+  # the recorder writes, carries the file's identity instead -- a 16-byte
+  # content hash and a u64 size -- and, when flags bit 2 is set, a
+  # (st_dev, st_ino, st_mtime_ns) tuple after the path. The source bytes are
+  # read from the member either way; the identity fields are skipped.
+  const StatTupleFlag = 0x04
   let version = readU16Le(filemap, 4)
-  if version == 0 or version > 1:
-    raise newException(ValueError, "unsupported CTFS filemap version")
+  if version == 0 or version > 2:
+    raise newException(ValueError, "unsupported CTFS filemap version " & $version)
   let entryCount = int(readU16Le(filemap, 6))
   var offset = 8
 
   for _ in 0 ..< entryCount:
+    if offset + 10 > filemap.len:
+      raise newException(ValueError, "truncated CTFS filemap entry")
     let ctfsName = base40Decode(readU64Le(filemap, offset))
     offset += 8
-    if offset + 3 > filemap.len:
-      raise newException(ValueError, "truncated CTFS filemap entry")
     let entryType = filemap[offset].ord
     offset += 1
-    offset += 1 # flags
-    let buildIdLength = filemap[offset].ord
-    offset += 1 + buildIdLength
-    if offset > filemap.len:
-      raise newException(ValueError, "truncated CTFS filemap build id")
+    let flags = filemap[offset].ord
+    offset += 1
+    if version == 1:
+      if offset + 1 > filemap.len:
+        raise newException(ValueError, "truncated CTFS filemap entry")
+      let buildIdLength = filemap[offset].ord
+      offset += 1 + buildIdLength
+      if offset > filemap.len:
+        raise newException(ValueError, "truncated CTFS filemap build id")
+    else:
+      offset += 16 + 8 # content_hash, file_size
+      if offset > filemap.len:
+        raise newException(ValueError, "truncated CTFS filemap identity")
     let realPath = readVarString(filemap, offset)
+    if version >= 2 and (flags and StatTupleFlag) != 0:
+      offset += 3 * 8 # st_dev, st_ino, st_mtime_ns
+      if offset > filemap.len:
+        raise newException(ValueError, "truncated CTFS filemap stat tuple")
 
     if entryType == 1:
       offset += 8
@@ -629,10 +670,14 @@ proc parseCtfsMetaDat(data: string): CtfsMetaDat =
         "reads one line high"
       else:
         ""
-    raise newException(ValueError,
+    let refusal = newException(TraceFormatVersionRefused,
       "meta.dat: version " & $version & " is not readable: this reader " &
       "reads version " & $SupportedMetaDatVersion & " only" & detail &
       ". Re-record the trace")
+    refusal.part = "meta.dat"
+    refusal.found = int(version)
+    refusal.readable = @[int(SupportedMetaDatVersion)]
+    raise refusal
   if data.len < 12:
     raise newException(ValueError,
       "meta.dat: a version " & $SupportedMetaDatVersion & " header is 12 " &

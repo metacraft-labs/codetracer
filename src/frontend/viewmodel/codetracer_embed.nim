@@ -131,6 +131,12 @@ export dap_commands
 # ---------------------------------------------------------------------------
 # ReplayDataStore and the trace data models (§3.1, rows 1 and 8)
 # ---------------------------------------------------------------------------
+import input/editor_pointer
+export editor_pointer
+
+import viewmodels/editor_gutter_lanes
+export editor_gutter_lanes
+
 import store/types
 export types
 
@@ -370,6 +376,20 @@ export frame_viewer_vm
 import viewmodels/pixel_history_vm
 export pixel_history_vm
 
+# PLAT-59: the Visual Replay panes as one model — the transport and its two
+# scrubbers (`video_player_vm`), the shader debugger, and the four joined over
+# one player (`visual_replay_panes_vm`) — which the terminal's and GPUI's
+# Video Player, Pixel History and Shader Debug panes draw. Like the three
+# above, they import only `std/*`, `isonim/*` and `store/replay_data_store`.
+import viewmodels/video_player_vm
+export video_player_vm
+
+import viewmodels/shader_debug_vm
+export shader_debug_vm
+
+import viewmodels/visual_replay_panes_vm
+export visual_replay_panes_vm
+
 # ---------------------------------------------------------------------------
 # Source access (CTUI-4)
 #
@@ -512,7 +532,9 @@ import keymap/keymap_router
 import keymap/keymap_importers
 import keymap/client_actions
 import keymap/navigation_keymap
-export keymap_router, keymap_importers, client_actions, navigation_keymap
+import input/operation_table
+export keymap_router, keymap_importers, client_actions, navigation_keymap,
+  operation_table
 
 # PLAT-8's I/O primitives are DELIBERATELY NOT HERE, and the reason is the
 # whole of §8's argument.
@@ -567,6 +589,14 @@ export native_welcome, layout_settings
 # no I/O, no process — the agent connection is the native host's.
 import viewmodels/agent_activity_feed
 export agent_activity_feed
+
+# Nim's compile-time tracing from the editor: the offer at the caret, the
+# request each route sends, its progress and failure, and where the
+# recording opens — the shared half of every front-end's four
+# `editor.trace-*` operations (the native process half is
+# `host/native_nim_tracer`, outside the facade with the other hosts).
+import viewmodels/nim_tracing_vm
+export nim_tracing_vm
 
 const
   CodeTracerEmbedFacadeModule* = "codetracer_embed"

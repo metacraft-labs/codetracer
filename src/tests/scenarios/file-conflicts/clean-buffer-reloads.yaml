@@ -1,0 +1,18 @@
+scenario: 1
+name: file-conflicts/clean-buffer-reloads
+pack: codetracer
+summary: >-
+  Editing a project, an open file with no unsaved edits reloads when another
+  program rewrites it on disk.
+
+stage:
+  - use: write-project
+    with: { files: { main.py: "print(\"initial\")\n" } }
+  - use: open-project
+    with: { folder: $project, file: main.py }
+
+steps:
+  - wait: { until: { at: 'editor[file="main.py"]', assert: 'shows-text("initial")' }, timeout: 120s }
+  - wait: { until: settled, timeout: 30s }
+  - act: { use: write-file, with: { file: main.py, content: "print(\"external clean reload\")\n" } }
+  - wait: { until: { at: 'editor[file="main.py"]', assert: 'shows-text("external clean reload")' }, timeout: 30s }

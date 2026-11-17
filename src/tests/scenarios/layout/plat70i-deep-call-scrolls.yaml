@@ -1,0 +1,20 @@
+scenario: 1
+name: layout/plat70i-deep-call-scrolls
+pack: codetracer
+summary: >-
+  A call nested 40 deep: once the wheel brings the deep calls on screen, the
+  Call Trace's list scrolls sideways instead of cutting them.
+
+stage:
+  - use: record-program
+    with: { program: deep_calls/main.py }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 180s }
+  - wait: { until: call-trace.loaded, timeout: 120s }
+  - wheel: { at: call-trace, direction: down, amount: 10 }
+  - wheel: { at: call-trace, direction: down, amount: 10 }
+  - wheel: { at: call-trace, direction: down, amount: 10 }
+  - wait: { until: { at: 'table-pane[pane="call-trace"]', fit: scroll }, timeout: 30s }
+  - expect: { at: 'table-pane[pane="call-trace"]', sideways: true, wider: true }

@@ -33,6 +33,12 @@ type
     ekGutter = "gutter"
     ekMenu = "menu"
     ekOverlay = "overlay"
+    ekToggle = "toggle"
+      ## A row's expander: what a press on it means is not the row's.
+    ekHeader = "header"
+      ## A table's column header.
+    ekValue = "value"
+      ## A value shown inline, in the editor or a row.
 
   ScopeElement* = object
     kind*: ElementKind
@@ -75,7 +81,8 @@ const
                 "flow", "search", "pointList", "scratchpad", "shell",
                 "fileTree", "buildOutput", "vcs", "agentActivity",
                 "terminalOutput", "testResults", "constraints", "problems",
-                "requests", "lowLevelCode", "verification"]
+                "requests", "lowLevelCode", "verification", "videoPlayer",
+                "pixelHistory", "shaderDebug"]
     ## `headless_app/layout_model.PaneKind`'s names, in its order — the
     ## values `paneKind` holds and a `when` may compare against. Spelled
     ## here so this package stays free of the layout model's imports;
@@ -85,7 +92,8 @@ const
   ListPaneKinds = ["calltrace", "state", "eventLog", "search", "pointList",
                     "fileTree", "buildOutput", "problems", "testResults",
                     "requests", "agentActivity", "vcs", "constraints",
-                    "lowLevelCode", "verification"]
+                    "lowLevelCode", "verification", "pixelHistory",
+                    "shaderDebug"]
     ## The list-like panes (CUA-Keymap.md §3.6): a focused one is
     ## `listFocus` and takes the shared `list` table.
 
@@ -107,6 +115,28 @@ const
     ## — its `ElementKind` and identity (§5.2) — so each front-end's producer
     ## reads the scope path off its OWN focus chain: the terminal's
     ## `isonim-tui` nodes, GPUI's elements and the desktop's DOM.
+  TopBarScope* = "topBar"
+    ## The scope a press on the native top bar and its session-tab strip is
+    ## routed in (`paneKind == topBar` to a pointer row's `when`): the bar is
+    ## no pane, but its elements are pressed like a pane's.
+  BreakpointConditionScope* = "breakpointCondition"
+    ## The scope a press on the desktop's "Edit breakpoint condition"
+    ## dialog is routed in (`ui/breakpoint_condition_dialog`): no pane, but
+    ## its OK and Cancel are buttons carrying their operations.
+  StoryPlaybackScope* = "storyPlayback"
+    ## The scope a press on a story host's playback chrome is routed in (the
+    ## bar under an Agent Harbor playback story, `stories/agent_harbor_playback`):
+    ## no pane, but its controls are buttons carrying their operations.
+  SessionActivityScope* = "sessionActivity"
+    ## The scope the session activity timeline's keys and presses are routed
+    ## in (the cardless timeline of one Agent Harbor session,
+    ## `agent_harbor_activity_words`). It is a prototype drawn in story hosts,
+    ## framed as the Agent Activity panel, and no pane of the layout: the
+    ## production `agentActivity` pane keeps its own keys until the timeline
+    ## replaces its rendering.
+  NonPaneScopes* = [TopBarScope, BreakpointConditionScope, StoryPlaybackScope,
+                    SessionActivityScope]
+    ## The scopes a press names in `paneKind` that are not panes.
 
 func element*(kind: ElementKind; id: string; paneKind = ""): ScopeElement =
   ScopeElement(kind: kind, id: id, paneKind: paneKind)
@@ -264,7 +294,8 @@ func tablesOf*(e: ScopeElement): seq[string] =
   of ekPane:
     if isListPane(e.paneKind): @[PaneTablePrefix & e.paneKind, ListTable]
     else: @[PaneTablePrefix & e.paneKind]
-  of ekTab, ekRow, ekButton, ekGutter, ekMenu, ekOverlay: @[]
+  of ekTab, ekRow, ekButton, ekGutter, ekMenu, ekOverlay, ekToggle, ekHeader,
+     ekValue: @[]
 
 func `$`*(e: ScopeElement): string =
   if e.kind == ekPane: "pane:" & e.paneKind

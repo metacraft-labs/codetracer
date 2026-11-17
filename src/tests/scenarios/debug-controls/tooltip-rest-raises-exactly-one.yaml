@@ -1,0 +1,70 @@
+scenario: 1
+name: debug-controls/tooltip-rest-raises-exactly-one
+pack: codetracer
+summary: >-
+  A pointer resting on a toolbar control raises that control's tooltip and no
+  other one — for every one of the thirteen controls, the two disabled history
+  controls included. The first rest is also the proof that a hover lands where
+  it is aimed.
+
+stage:
+  - use: record-program
+    with: { program: py_console_logs/main.py }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - wait: { until: { at: 'toolbar/toolbar-button[label="next-image"]', present: true }, timeout: 60s }
+  - wait: { until: editor.loaded, timeout: 60s }
+  - move: { at: 'editor[file="main.py"]/line[number="1"]', anchor: text-start }
+  - wait: { until: { at: toolbar, assert: no-tooltip }, timeout: 30s }
+  - hover: { at: 'toolbar/toolbar-button[label="history-back-image"]', for: 900ms }
+  - wait: { until: { at: toolbar, assert: "only-tooltip-of(history-back-image)" }, timeout: 30s }
+  - move: { at: 'editor[file="main.py"]/line[number="1"]', anchor: text-start }
+  - wait: { until: { at: toolbar, assert: no-tooltip }, timeout: 30s }
+  - hover: { at: 'toolbar/toolbar-button[label="history-forward-image"]', for: 900ms }
+  - wait: { until: { at: toolbar, assert: "only-tooltip-of(history-forward-image)" }, timeout: 30s }
+  - move: { at: 'editor[file="main.py"]/line[number="1"]', anchor: text-start }
+  - wait: { until: { at: toolbar, assert: no-tooltip }, timeout: 30s }
+  - hover: { at: 'toolbar/toolbar-button[label="reverse-next-image"]', for: 900ms }
+  - wait: { until: { at: toolbar, assert: "only-tooltip-of(reverse-next-image)" }, timeout: 30s }
+  - move: { at: 'editor[file="main.py"]/line[number="1"]', anchor: text-start }
+  - wait: { until: { at: toolbar, assert: no-tooltip }, timeout: 30s }
+  - hover: { at: 'toolbar/toolbar-button[label="next-image"]', for: 900ms }
+  - wait: { until: { at: toolbar, assert: "only-tooltip-of(next-image)" }, timeout: 30s }
+  - move: { at: 'editor[file="main.py"]/line[number="1"]', anchor: text-start }
+  - wait: { until: { at: toolbar, assert: no-tooltip }, timeout: 30s }
+  - hover: { at: 'toolbar/toolbar-button[label="reverse-step-in-image"]', for: 900ms }
+  - wait: { until: { at: toolbar, assert: "only-tooltip-of(reverse-step-in-image)" }, timeout: 30s }
+  - move: { at: 'editor[file="main.py"]/line[number="1"]', anchor: text-start }
+  - wait: { until: { at: toolbar, assert: no-tooltip }, timeout: 30s }
+  - hover: { at: 'toolbar/toolbar-button[label="step-in-image"]', for: 900ms }
+  - wait: { until: { at: toolbar, assert: "only-tooltip-of(step-in-image)" }, timeout: 30s }
+  - move: { at: 'editor[file="main.py"]/line[number="1"]', anchor: text-start }
+  - wait: { until: { at: toolbar, assert: no-tooltip }, timeout: 30s }
+  - hover: { at: 'toolbar/toolbar-button[label="reverse-step-out-image"]', for: 900ms }
+  - wait: { until: { at: toolbar, assert: "only-tooltip-of(reverse-step-out-image)" }, timeout: 30s }
+  - move: { at: 'editor[file="main.py"]/line[number="1"]', anchor: text-start }
+  - wait: { until: { at: toolbar, assert: no-tooltip }, timeout: 30s }
+  - hover: { at: 'toolbar/toolbar-button[label="step-out-image"]', for: 900ms }
+  - wait: { until: { at: toolbar, assert: "only-tooltip-of(step-out-image)" }, timeout: 30s }
+  - move: { at: 'editor[file="main.py"]/line[number="1"]', anchor: text-start }
+  - wait: { until: { at: toolbar, assert: no-tooltip }, timeout: 30s }
+  - hover: { at: 'toolbar/toolbar-button[label="reverse-continue-image"]', for: 900ms }
+  - wait: { until: { at: toolbar, assert: "only-tooltip-of(reverse-continue-image)" }, timeout: 30s }
+  - move: { at: 'editor[file="main.py"]/line[number="1"]', anchor: text-start }
+  - wait: { until: { at: toolbar, assert: no-tooltip }, timeout: 30s }
+  - hover: { at: 'toolbar/toolbar-button[label="continue-image"]', for: 900ms }
+  - wait: { until: { at: toolbar, assert: "only-tooltip-of(continue-image)" }, timeout: 30s }
+  - move: { at: 'editor[file="main.py"]/line[number="1"]', anchor: text-start }
+  - wait: { until: { at: toolbar, assert: no-tooltip }, timeout: 30s }
+  - hover: { at: 'toolbar/toolbar-button[label="run-to-entry-image"]', for: 900ms }
+  - wait: { until: { at: toolbar, assert: "only-tooltip-of(run-to-entry-image)" }, timeout: 30s }
+  - move: { at: 'editor[file="main.py"]/line[number="1"]', anchor: text-start }
+  - wait: { until: { at: toolbar, assert: no-tooltip }, timeout: 30s }
+  - hover: { at: 'toolbar/toolbar-button[label="reset-operation-image"]', for: 900ms }
+  - wait: { until: { at: toolbar, assert: "only-tooltip-of(reset-operation-image)" }, timeout: 30s }
+  - move: { at: 'editor[file="main.py"]/line[number="1"]', anchor: text-start }
+  - wait: { until: { at: toolbar, assert: no-tooltip }, timeout: 30s }
+  - hover: { at: 'toolbar/toolbar-button[label="run-tests-image"]', for: 900ms }
+  - wait: { until: { at: toolbar, assert: "only-tooltip-of(run-tests-image)" }, timeout: 30s }

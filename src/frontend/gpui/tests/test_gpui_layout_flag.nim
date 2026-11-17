@@ -1,3 +1,8 @@
+## Ported in part to the scenario
+## src/tests/scenarios/gpui/layout-docked-event-log.yaml (a saved layout
+## docking the Event Log at the bottom); kept for the `--layout=` refusal
+## of an unreadable docked entry, a command-line check no scenario ports.
+##
 ## test_gpui_layout_flag.nim — **a saved layout with a DOCKED pane opens
 ## through the shipped binary's `--layout=`.**
 ##

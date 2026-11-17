@@ -551,6 +551,16 @@ when not defined(ctInExtension):
     ## change is the pre-M49 behaviour arriving late rather than a new
     ## failure mode.
 
+  proc isMotionCommand*(command: cstring): bool =
+    ## A request that moves the replay (a step, a continue, either way). The
+    ## status bar shows it as the running operation until the move arrives
+    ## (`CtCompleteMove`); a refused one brings no move, so its refusal is
+    ## what ends it.
+    command in [cstring"next", cstring"stepIn", cstring"stepOut",
+                cstring"continue", cstring"stepBack", cstring"reverseContinue",
+                cstring"ct/reverseStepIn", cstring"ct/reverseStepOut",
+                cstring"ct/step"]
+
   proc requestFailureText*(outcome: DapRequestOutcome): cstring =
     ## The sentence a user reads when a request they triggered did not
     ## succeed — or "" when it did, which is what keeps this from firing on
@@ -914,6 +924,12 @@ proc deliverDapResponse*(fanOut: DapApi; responseDap: DapApi; raw: JsObject) =
   let command = raw["command"].to(cstring)
   var body = raw["body"]
   var requestId = cstring""
+  when not defined(ctInExtension):
+    if jsHasOwn(raw, cstring"success") and not raw["success"].to(bool):
+      # A refusal reaches its subscribers as an answer with nothing in it;
+      # the reason is only in the frame, so the log is where it can be read.
+      console.warn(cstring"dap: request refused: ", command, cstring" ",
+                   raw["message"])
   when not defined(ctInExtension):
     if isTrackedCommand(command) and jsHasOwn(raw, cstring"request_seq"):
       # A frame with no body (a bare refusal) still answers its request, and

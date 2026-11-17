@@ -1,0 +1,32 @@
+scenario: 1
+name: verification/held-run-is-live-and-stops
+pack: codetracer
+summary: >-
+  A run still in flight is live — the Stop control, a clock that moves, the
+  verifier's last line and its command — and Stop cancels it with no outcome:
+  nothing proved or disproved, no findings, Run offered again.
+
+stage:
+  - use: fixture-project
+    with: { name: verno-held }
+  - use: open-project
+    with: { folder: $project }
+
+steps:
+  - wait: { until: { at: window, mode: edit }, timeout: 120s }
+  - wait: { until: settled, timeout: 30s }
+  - chord: Ctrl+p
+  - type: ":Verification"
+  - wait: { until: { at: omnibox, assert: "offers(command, Verification)" }, timeout: 15s }
+  - key: Enter
+  - wait: { until: { at: verification-panel, present: true }, timeout: 30s }
+  - click: 'verification-panel/panel-button[label="Run"]'
+    settle: false
+  - wait: { until: { at: verification-panel, phase: running }, timeout: 30s }
+  - wait: { until: { at: verification-panel, status: { matches: "^Verifying with Verno — [1-9][0-9]*s" } }, timeout: 30s }
+  - wait: { until: { at: verification-panel, status: { matches: '^Verifying with Verno — \S+ — \S' } }, timeout: 15s }
+  - expect: { at: verification-panel, stop: true, run: "", command: verno --program-dir . formal-verify -- --rlimit 60 }
+  - click: 'verification-panel/panel-button[label="Stop"]'
+    settle: false
+  - wait: { until: { at: verification-panel, phase: cancelled }, timeout: 30s }
+  - expect: { at: verification-panel, status: { matches: "^Cancelled after .* — nothing was proved or disproved$" }, count: 0, run: Verify with Verno }

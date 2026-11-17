@@ -1,0 +1,18 @@
+scenario: 1
+name: terminal/panes-tab-click-says-nothing
+pack: codetracer
+summary: >-
+  A click on a pane's tab brings the pane forward and writes no layout command
+  to the status line.
+stage:
+  - use: record-program
+    with: { program: calc }
+  - use: open-recording
+    with: { width: 200, height: 50 }
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - expect: { at: 'pane-tab[label="Scratchpad"]', active: false }
+  - click: { at: 'pane-tab[label="Scratchpad"]' }
+  - wait: { until: { at: 'pane-tab[label="Scratchpad"]', active: true }, timeout: 10s }
+  - expect: { at: status-line, assert: 'lacks("activateTab")' }
+  - expect: { at: status-line, assert: 'lacks("applied")' }

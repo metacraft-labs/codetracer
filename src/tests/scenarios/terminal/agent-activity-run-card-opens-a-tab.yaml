@@ -1,0 +1,36 @@
+scenario: 1
+name: terminal/agent-activity-run-card-opens-a-tab
+pack: codetracer
+summary: >-
+  A review's `ct test` run card, opened, offers [Open in new tab]: its
+  recording opens in a second session tab and the status line says so. In
+  that tab a prompt to the live agent (`/ai collect the review`) is answered
+  over ACP: the agent's rows arrive, the tab shows ✓ when the turn is over,
+  and the prompt's control is [Send] again.
+stage:
+  - use: record-program
+    with: { program: calc }
+  - use: review-session
+    with: { run: test-run, live: true }
+  - use: open-recording
+    with: { width: 200, height: 50 }
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - click: { at: 'pane-tab[label="Agent Activity"]' }
+  - wait: { until: { at: 'pane[title="Agent Activity"]', assert: 'has-row("▌ ▸")' }, timeout: 60s }
+  - click: { at: 'pane[title="Agent Activity"]/row[first="▌ ▸ ct-mcr record --source tests/calc.c"]', anchor: text-start }
+  - wait: { until: { at: 'pane[title="Agent Activity"]', assert: 'has-row("[Open in new tab]")' }, timeout: 30s }
+  - click: { at: 'pane[title="Agent Activity"]/row[text="[Open in new tab]"]', anchor: text-start }
+    settle: false
+  - wait: { until: { at: session-strip, count: 2 }, timeout: 120s }
+  - wait: { until: { at: status-line, assert: 'says("in a new session tab")' }, timeout: 30s }
+  - click: { at: 'pane-tab[label="Agent Activity"]' }
+  - wait: { until: { at: 'pane[title="Agent Activity"]', assert: 'has-row("Start an agent task")' }, timeout: 60s }
+  - chord: Ctrl+P
+  - type: "/ai collect the review"
+  - key: Enter
+    settle: false
+  - wait: { until: { at: 'pane[title="Agent Activity"]', assert: 'has-row("Collected review evidence")' }, timeout: 60s }
+  - wait: { until: { at: 'pane[title="Agent Activity"]', assert: 'has-row("[Send]")' }, timeout: 60s }
+  - expect: { at: session-strip, assert: 'has-tab-matching("✓")' }
+  - expect: { at: 'pane[title="Agent Activity"]', assert: 'lacks-row("[Stop]")' }

@@ -1,0 +1,20 @@
+scenario: 1
+name: keymaps/plat68b-alt-e-focuses-event-log
+pack: codetracer
+summary: >-
+  Alt+E with the caret in the editor focuses the Event Log (it does not toggle macro expansion there).
+
+stage:
+  - use: record-program
+    with: { program: calc }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 180s }
+  - wait: { until: call-trace.loaded, timeout: 120s }
+  - expect: { at: 'editor[file="main.py"]', assert: "stopped-at(1)" }
+  - click: { at: 'editor[file="main.py"]/line[number="1"]', anchor: text-start }
+  - expect: { at: 'editor[file="main.py"]', focused: true }
+  - chord: Alt+E
+  - expect: { at: event-log, focused: true }
+  - expect: { at: 'editor[file="main.py"]', focused: false }

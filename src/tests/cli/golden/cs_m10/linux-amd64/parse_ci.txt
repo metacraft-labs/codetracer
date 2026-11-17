@@ -1,0 +1,9263 @@
+# ct ci: 393 argv cases through ct's loader (the parse probe)
+
+### 1: bare
+argv: ct "ci"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = noCommand
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 2: --token <v>
+argv: ct "ci" "--token" "tok"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = some("tok")
+  ciBaseUrl = none
+  ciCommand = noCommand
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 3: --token=<v>
+argv: ct "ci" "--token=tok"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = some("tok")
+  ciBaseUrl = none
+  ciCommand = noCommand
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 4: --token:<v>
+argv: ct "ci" "--token:tok"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = some("tok")
+  ciBaseUrl = none
+  ciCommand = noCommand
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 5: --token tok
+argv: ct "ci" "--token" "tok"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = some("tok")
+  ciBaseUrl = none
+  ciCommand = noCommand
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 6: --token=tok
+argv: ct "ci" "--token=tok"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = some("tok")
+  ciBaseUrl = none
+  ciCommand = noCommand
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 7: --token empty
+argv: ct "ci" "--token" ""
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = some("")
+  ciBaseUrl = none
+  ciCommand = noCommand
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 8: --token= (empty)
+argv: ct "ci" "--token="
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = some("")
+  ciBaseUrl = none
+  ciCommand = noCommand
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 9: --token= <v> (next word)
+argv: ct "ci" "--token=" "tok"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = some("tok")
+  ciBaseUrl = none
+  ciCommand = noCommand
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 10: --token -x (value starts with -)
+argv: ct "ci" "--token" "-x"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = some("-x")
+  ciBaseUrl = none
+  ciCommand = noCommand
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 11: --token --x (value starts with --)
+argv: ct "ci" "--token" "--x"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = some("--x")
+  ciBaseUrl = none
+  ciCommand = noCommand
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 12: --token --new-tab <v> (an option between it and its value)
+argv: ct "ci" "--token" "--new-tab" "tok"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The subcommand 'ci' does not accept arguments\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 13: --token repeated, last wins
+argv: ct "ci" "--token" "tok" "--token" "tok"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = some("tok")
+  ciBaseUrl = none
+  ciCommand = noCommand
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 14: --token missing value (last)
+argv: ct "ci" "--token"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The option '\e[34m--token\e[0m' requires a value\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 15: --TOKEN <v> (style variant)
+argv: ct "ci" "--TOKEN" "tok"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = some("tok")
+  ciBaseUrl = none
+  ciCommand = noCommand
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 16: --t_oken <v> (style variant)
+argv: ct "ci" "--t_oken" "tok"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = some("tok")
+  ciBaseUrl = none
+  ciCommand = noCommand
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 17: --base-url <v>
+argv: ct "ci" "--base-url" "https://b.test"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = some("https://b.test")
+  ciCommand = noCommand
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 18: --base-url=<v>
+argv: ct "ci" "--base-url=https://b.test"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = some("https://b.test")
+  ciCommand = noCommand
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 19: --base-url:<v>
+argv: ct "ci" "--base-url:https://b.test"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = some("https://b.test")
+  ciCommand = noCommand
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 20: --base-url https://b.test
+argv: ct "ci" "--base-url" "https://b.test"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = some("https://b.test")
+  ciCommand = noCommand
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 21: --base-url=https://b.test
+argv: ct "ci" "--base-url=https://b.test"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = some("https://b.test")
+  ciCommand = noCommand
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 22: --base-url empty
+argv: ct "ci" "--base-url" ""
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = some("")
+  ciCommand = noCommand
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 23: --base-url= (empty)
+argv: ct "ci" "--base-url="
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = some("")
+  ciCommand = noCommand
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 24: --base-url= <v> (next word)
+argv: ct "ci" "--base-url=" "https://b.test"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = some("https://b.test")
+  ciCommand = noCommand
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 25: --base-url -x (value starts with -)
+argv: ct "ci" "--base-url" "-x"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = some("-x")
+  ciCommand = noCommand
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 26: --base-url --x (value starts with --)
+argv: ct "ci" "--base-url" "--x"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = some("--x")
+  ciCommand = noCommand
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 27: --base-url --new-tab <v> (an option between it and its value)
+argv: ct "ci" "--base-url" "--new-tab" "https://b.test"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The subcommand 'ci' does not accept arguments\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 28: --base-url repeated, last wins
+argv: ct "ci" "--base-url" "https://b.test" "--base-url" "https://b.test"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = some("https://b.test")
+  ciCommand = noCommand
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 29: --base-url missing value (last)
+argv: ct "ci" "--base-url"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The option '\e[34m--base-url\e[0m' requires a value\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 30: --BASE-URL <v> (style variant)
+argv: ct "ci" "--BASE-URL" "https://b.test"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = some("https://b.test")
+  ciCommand = noCommand
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 31: --b_ase-url <v> (style variant)
+argv: ct "ci" "--b_ase-url" "https://b.test"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = some("https://b.test")
+  ciCommand = noCommand
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 32: --base_url <v> (style variant)
+argv: ct "ci" "--base_url" "https://b.test"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'base_url'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 33: --baseurl <v> (style variant)
+argv: ct "ci" "--baseurl" "https://b.test"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'baseurl'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 34: --token after the subcommand
+argv: ct "ci" "status" "--token" "t"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = some("t")
+  ciBaseUrl = none
+  ciCommand = status
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 35: subcommand status
+argv: ct "ci" "status"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = status
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 36: subcommand cancel
+argv: ct "ci" "cancel"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = cancel
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 37: subcommand Status
+argv: ct "ci" "Status"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = status
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 38: subcommand STATUS
+argv: ct "ci" "STATUS"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = status
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 39: subcommand bogus
+argv: ct "ci" "bogus"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The subcommand 'ci' does not accept arguments\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 40: subcommand noCommand
+argv: ct "ci" "noCommand"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = noCommand
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 41: help word
+argv: ct "ci" "help"
+env: (none)
+exit: 0
+--- stdout
+<the long help page clispec renders for this request: ct ci>
+--- stderr
+--- end
+
+### 42: status help word
+argv: ct "ci" "status" "help"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The subcommand 'status' does not accept arguments\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 43: status extra
+argv: ct "ci" "status" "extra"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The subcommand 'status' does not accept arguments\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 44: start bare
+argv: ct "ci" "start"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = start
+  ciStartRepo = none
+  ciStartCommit = none
+  ciStartBranch = none
+  ciStartBaseCommit = none
+  ciStartLabel = none
+  ciStartMonitorProcesses = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 45: --repo <v>
+argv: ct "ci" "start" "--repo" "https://g.test/r"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = start
+  ciStartRepo = some("https://g.test/r")
+  ciStartCommit = none
+  ciStartBranch = none
+  ciStartBaseCommit = none
+  ciStartLabel = none
+  ciStartMonitorProcesses = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 46: --repo=<v>
+argv: ct "ci" "start" "--repo=https://g.test/r"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = start
+  ciStartRepo = some("https://g.test/r")
+  ciStartCommit = none
+  ciStartBranch = none
+  ciStartBaseCommit = none
+  ciStartLabel = none
+  ciStartMonitorProcesses = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 47: --repo:<v>
+argv: ct "ci" "start" "--repo:https://g.test/r"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = start
+  ciStartRepo = some("https://g.test/r")
+  ciStartCommit = none
+  ciStartBranch = none
+  ciStartBaseCommit = none
+  ciStartLabel = none
+  ciStartMonitorProcesses = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 48: --repo https://g.test/r
+argv: ct "ci" "start" "--repo" "https://g.test/r"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = start
+  ciStartRepo = some("https://g.test/r")
+  ciStartCommit = none
+  ciStartBranch = none
+  ciStartBaseCommit = none
+  ciStartLabel = none
+  ciStartMonitorProcesses = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 49: --repo=https://g.test/r
+argv: ct "ci" "start" "--repo=https://g.test/r"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = start
+  ciStartRepo = some("https://g.test/r")
+  ciStartCommit = none
+  ciStartBranch = none
+  ciStartBaseCommit = none
+  ciStartLabel = none
+  ciStartMonitorProcesses = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 50: --repo empty
+argv: ct "ci" "start" "--repo" ""
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = start
+  ciStartRepo = some("")
+  ciStartCommit = none
+  ciStartBranch = none
+  ciStartBaseCommit = none
+  ciStartLabel = none
+  ciStartMonitorProcesses = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 51: --repo= (empty)
+argv: ct "ci" "start" "--repo="
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = start
+  ciStartRepo = some("")
+  ciStartCommit = none
+  ciStartBranch = none
+  ciStartBaseCommit = none
+  ciStartLabel = none
+  ciStartMonitorProcesses = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 52: --repo= <v> (next word)
+argv: ct "ci" "start" "--repo=" "https://g.test/r"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = start
+  ciStartRepo = some("https://g.test/r")
+  ciStartCommit = none
+  ciStartBranch = none
+  ciStartBaseCommit = none
+  ciStartLabel = none
+  ciStartMonitorProcesses = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 53: --repo -x (value starts with -)
+argv: ct "ci" "start" "--repo" "-x"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = start
+  ciStartRepo = some("-x")
+  ciStartCommit = none
+  ciStartBranch = none
+  ciStartBaseCommit = none
+  ciStartLabel = none
+  ciStartMonitorProcesses = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 54: --repo --x (value starts with --)
+argv: ct "ci" "start" "--repo" "--x"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = start
+  ciStartRepo = some("--x")
+  ciStartCommit = none
+  ciStartBranch = none
+  ciStartBaseCommit = none
+  ciStartLabel = none
+  ciStartMonitorProcesses = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 55: --repo --new-tab <v> (an option between it and its value)
+argv: ct "ci" "start" "--repo" "--new-tab" "https://g.test/r"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The subcommand 'start' does not accept arguments\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 56: --repo repeated, last wins
+argv: ct "ci" "start" "--repo" "https://g.test/r" "--repo" "https://g.test/r"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = start
+  ciStartRepo = some("https://g.test/r")
+  ciStartCommit = none
+  ciStartBranch = none
+  ciStartBaseCommit = none
+  ciStartLabel = none
+  ciStartMonitorProcesses = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 57: --repo missing value (last)
+argv: ct "ci" "start" "--repo"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The option '\e[34m--repo\e[0m' requires a value\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 58: --REPO <v> (style variant)
+argv: ct "ci" "start" "--REPO" "https://g.test/r"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = start
+  ciStartRepo = some("https://g.test/r")
+  ciStartCommit = none
+  ciStartBranch = none
+  ciStartBaseCommit = none
+  ciStartLabel = none
+  ciStartMonitorProcesses = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 59: --r_epo <v> (style variant)
+argv: ct "ci" "start" "--r_epo" "https://g.test/r"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = start
+  ciStartRepo = some("https://g.test/r")
+  ciStartCommit = none
+  ciStartBranch = none
+  ciStartBaseCommit = none
+  ciStartLabel = none
+  ciStartMonitorProcesses = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 60: --commit <v>
+argv: ct "ci" "start" "--commit" "abc123"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = start
+  ciStartRepo = none
+  ciStartCommit = some("abc123")
+  ciStartBranch = none
+  ciStartBaseCommit = none
+  ciStartLabel = none
+  ciStartMonitorProcesses = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 61: --commit=<v>
+argv: ct "ci" "start" "--commit=abc123"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = start
+  ciStartRepo = none
+  ciStartCommit = some("abc123")
+  ciStartBranch = none
+  ciStartBaseCommit = none
+  ciStartLabel = none
+  ciStartMonitorProcesses = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 62: --commit:<v>
+argv: ct "ci" "start" "--commit:abc123"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = start
+  ciStartRepo = none
+  ciStartCommit = some("abc123")
+  ciStartBranch = none
+  ciStartBaseCommit = none
+  ciStartLabel = none
+  ciStartMonitorProcesses = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 63: --commit abc123
+argv: ct "ci" "start" "--commit" "abc123"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = start
+  ciStartRepo = none
+  ciStartCommit = some("abc123")
+  ciStartBranch = none
+  ciStartBaseCommit = none
+  ciStartLabel = none
+  ciStartMonitorProcesses = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 64: --commit=abc123
+argv: ct "ci" "start" "--commit=abc123"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = start
+  ciStartRepo = none
+  ciStartCommit = some("abc123")
+  ciStartBranch = none
+  ciStartBaseCommit = none
+  ciStartLabel = none
+  ciStartMonitorProcesses = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 65: --commit empty
+argv: ct "ci" "start" "--commit" ""
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = start
+  ciStartRepo = none
+  ciStartCommit = some("")
+  ciStartBranch = none
+  ciStartBaseCommit = none
+  ciStartLabel = none
+  ciStartMonitorProcesses = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 66: --commit= (empty)
+argv: ct "ci" "start" "--commit="
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = start
+  ciStartRepo = none
+  ciStartCommit = some("")
+  ciStartBranch = none
+  ciStartBaseCommit = none
+  ciStartLabel = none
+  ciStartMonitorProcesses = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 67: --commit= <v> (next word)
+argv: ct "ci" "start" "--commit=" "abc123"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = start
+  ciStartRepo = none
+  ciStartCommit = some("abc123")
+  ciStartBranch = none
+  ciStartBaseCommit = none
+  ciStartLabel = none
+  ciStartMonitorProcesses = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 68: --commit -x (value starts with -)
+argv: ct "ci" "start" "--commit" "-x"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = start
+  ciStartRepo = none
+  ciStartCommit = some("-x")
+  ciStartBranch = none
+  ciStartBaseCommit = none
+  ciStartLabel = none
+  ciStartMonitorProcesses = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 69: --commit --x (value starts with --)
+argv: ct "ci" "start" "--commit" "--x"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = start
+  ciStartRepo = none
+  ciStartCommit = some("--x")
+  ciStartBranch = none
+  ciStartBaseCommit = none
+  ciStartLabel = none
+  ciStartMonitorProcesses = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 70: --commit --new-tab <v> (an option between it and its value)
+argv: ct "ci" "start" "--commit" "--new-tab" "abc123"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The subcommand 'start' does not accept arguments\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 71: --commit repeated, last wins
+argv: ct "ci" "start" "--commit" "abc123" "--commit" "abc123"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = start
+  ciStartRepo = none
+  ciStartCommit = some("abc123")
+  ciStartBranch = none
+  ciStartBaseCommit = none
+  ciStartLabel = none
+  ciStartMonitorProcesses = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 72: --commit missing value (last)
+argv: ct "ci" "start" "--commit"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The option '\e[34m--commit\e[0m' requires a value\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 73: --COMMIT <v> (style variant)
+argv: ct "ci" "start" "--COMMIT" "abc123"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = start
+  ciStartRepo = none
+  ciStartCommit = some("abc123")
+  ciStartBranch = none
+  ciStartBaseCommit = none
+  ciStartLabel = none
+  ciStartMonitorProcesses = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 74: --c_ommit <v> (style variant)
+argv: ct "ci" "start" "--c_ommit" "abc123"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = start
+  ciStartRepo = none
+  ciStartCommit = some("abc123")
+  ciStartBranch = none
+  ciStartBaseCommit = none
+  ciStartLabel = none
+  ciStartMonitorProcesses = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 75: --branch <v>
+argv: ct "ci" "start" "--branch" "main"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = start
+  ciStartRepo = none
+  ciStartCommit = none
+  ciStartBranch = some("main")
+  ciStartBaseCommit = none
+  ciStartLabel = none
+  ciStartMonitorProcesses = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 76: --branch=<v>
+argv: ct "ci" "start" "--branch=main"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = start
+  ciStartRepo = none
+  ciStartCommit = none
+  ciStartBranch = some("main")
+  ciStartBaseCommit = none
+  ciStartLabel = none
+  ciStartMonitorProcesses = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 77: --branch:<v>
+argv: ct "ci" "start" "--branch:main"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = start
+  ciStartRepo = none
+  ciStartCommit = none
+  ciStartBranch = some("main")
+  ciStartBaseCommit = none
+  ciStartLabel = none
+  ciStartMonitorProcesses = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 78: --branch main
+argv: ct "ci" "start" "--branch" "main"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = start
+  ciStartRepo = none
+  ciStartCommit = none
+  ciStartBranch = some("main")
+  ciStartBaseCommit = none
+  ciStartLabel = none
+  ciStartMonitorProcesses = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 79: --branch=main
+argv: ct "ci" "start" "--branch=main"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = start
+  ciStartRepo = none
+  ciStartCommit = none
+  ciStartBranch = some("main")
+  ciStartBaseCommit = none
+  ciStartLabel = none
+  ciStartMonitorProcesses = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 80: --branch empty
+argv: ct "ci" "start" "--branch" ""
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = start
+  ciStartRepo = none
+  ciStartCommit = none
+  ciStartBranch = some("")
+  ciStartBaseCommit = none
+  ciStartLabel = none
+  ciStartMonitorProcesses = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 81: --branch= (empty)
+argv: ct "ci" "start" "--branch="
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = start
+  ciStartRepo = none
+  ciStartCommit = none
+  ciStartBranch = some("")
+  ciStartBaseCommit = none
+  ciStartLabel = none
+  ciStartMonitorProcesses = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 82: --branch= <v> (next word)
+argv: ct "ci" "start" "--branch=" "main"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = start
+  ciStartRepo = none
+  ciStartCommit = none
+  ciStartBranch = some("main")
+  ciStartBaseCommit = none
+  ciStartLabel = none
+  ciStartMonitorProcesses = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 83: --branch -x (value starts with -)
+argv: ct "ci" "start" "--branch" "-x"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = start
+  ciStartRepo = none
+  ciStartCommit = none
+  ciStartBranch = some("-x")
+  ciStartBaseCommit = none
+  ciStartLabel = none
+  ciStartMonitorProcesses = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 84: --branch --x (value starts with --)
+argv: ct "ci" "start" "--branch" "--x"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = start
+  ciStartRepo = none
+  ciStartCommit = none
+  ciStartBranch = some("--x")
+  ciStartBaseCommit = none
+  ciStartLabel = none
+  ciStartMonitorProcesses = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 85: --branch --new-tab <v> (an option between it and its value)
+argv: ct "ci" "start" "--branch" "--new-tab" "main"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The subcommand 'start' does not accept arguments\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 86: --branch repeated, last wins
+argv: ct "ci" "start" "--branch" "main" "--branch" "main"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = start
+  ciStartRepo = none
+  ciStartCommit = none
+  ciStartBranch = some("main")
+  ciStartBaseCommit = none
+  ciStartLabel = none
+  ciStartMonitorProcesses = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 87: --branch missing value (last)
+argv: ct "ci" "start" "--branch"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The option '\e[34m--branch\e[0m' requires a value\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 88: --BRANCH <v> (style variant)
+argv: ct "ci" "start" "--BRANCH" "main"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = start
+  ciStartRepo = none
+  ciStartCommit = none
+  ciStartBranch = some("main")
+  ciStartBaseCommit = none
+  ciStartLabel = none
+  ciStartMonitorProcesses = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 89: --b_ranch <v> (style variant)
+argv: ct "ci" "start" "--b_ranch" "main"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = start
+  ciStartRepo = none
+  ciStartCommit = none
+  ciStartBranch = some("main")
+  ciStartBaseCommit = none
+  ciStartLabel = none
+  ciStartMonitorProcesses = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 90: --base-commit <v>
+argv: ct "ci" "start" "--base-commit" "def456"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = start
+  ciStartRepo = none
+  ciStartCommit = none
+  ciStartBranch = none
+  ciStartBaseCommit = some("def456")
+  ciStartLabel = none
+  ciStartMonitorProcesses = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 91: --base-commit=<v>
+argv: ct "ci" "start" "--base-commit=def456"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = start
+  ciStartRepo = none
+  ciStartCommit = none
+  ciStartBranch = none
+  ciStartBaseCommit = some("def456")
+  ciStartLabel = none
+  ciStartMonitorProcesses = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 92: --base-commit:<v>
+argv: ct "ci" "start" "--base-commit:def456"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = start
+  ciStartRepo = none
+  ciStartCommit = none
+  ciStartBranch = none
+  ciStartBaseCommit = some("def456")
+  ciStartLabel = none
+  ciStartMonitorProcesses = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 93: --base-commit def456
+argv: ct "ci" "start" "--base-commit" "def456"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = start
+  ciStartRepo = none
+  ciStartCommit = none
+  ciStartBranch = none
+  ciStartBaseCommit = some("def456")
+  ciStartLabel = none
+  ciStartMonitorProcesses = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 94: --base-commit=def456
+argv: ct "ci" "start" "--base-commit=def456"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = start
+  ciStartRepo = none
+  ciStartCommit = none
+  ciStartBranch = none
+  ciStartBaseCommit = some("def456")
+  ciStartLabel = none
+  ciStartMonitorProcesses = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 95: --base-commit empty
+argv: ct "ci" "start" "--base-commit" ""
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = start
+  ciStartRepo = none
+  ciStartCommit = none
+  ciStartBranch = none
+  ciStartBaseCommit = some("")
+  ciStartLabel = none
+  ciStartMonitorProcesses = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 96: --base-commit= (empty)
+argv: ct "ci" "start" "--base-commit="
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = start
+  ciStartRepo = none
+  ciStartCommit = none
+  ciStartBranch = none
+  ciStartBaseCommit = some("")
+  ciStartLabel = none
+  ciStartMonitorProcesses = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 97: --base-commit= <v> (next word)
+argv: ct "ci" "start" "--base-commit=" "def456"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = start
+  ciStartRepo = none
+  ciStartCommit = none
+  ciStartBranch = none
+  ciStartBaseCommit = some("def456")
+  ciStartLabel = none
+  ciStartMonitorProcesses = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 98: --base-commit -x (value starts with -)
+argv: ct "ci" "start" "--base-commit" "-x"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = start
+  ciStartRepo = none
+  ciStartCommit = none
+  ciStartBranch = none
+  ciStartBaseCommit = some("-x")
+  ciStartLabel = none
+  ciStartMonitorProcesses = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 99: --base-commit --x (value starts with --)
+argv: ct "ci" "start" "--base-commit" "--x"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = start
+  ciStartRepo = none
+  ciStartCommit = none
+  ciStartBranch = none
+  ciStartBaseCommit = some("--x")
+  ciStartLabel = none
+  ciStartMonitorProcesses = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 100: --base-commit --new-tab <v> (an option between it and its value)
+argv: ct "ci" "start" "--base-commit" "--new-tab" "def456"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The subcommand 'start' does not accept arguments\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 101: --base-commit repeated, last wins
+argv: ct "ci" "start" "--base-commit" "def456" "--base-commit" "def456"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = start
+  ciStartRepo = none
+  ciStartCommit = none
+  ciStartBranch = none
+  ciStartBaseCommit = some("def456")
+  ciStartLabel = none
+  ciStartMonitorProcesses = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 102: --base-commit missing value (last)
+argv: ct "ci" "start" "--base-commit"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The option '\e[34m--base-commit\e[0m' requires a value\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 103: --BASE-COMMIT <v> (style variant)
+argv: ct "ci" "start" "--BASE-COMMIT" "def456"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = start
+  ciStartRepo = none
+  ciStartCommit = none
+  ciStartBranch = none
+  ciStartBaseCommit = some("def456")
+  ciStartLabel = none
+  ciStartMonitorProcesses = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 104: --b_ase-commit <v> (style variant)
+argv: ct "ci" "start" "--b_ase-commit" "def456"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = start
+  ciStartRepo = none
+  ciStartCommit = none
+  ciStartBranch = none
+  ciStartBaseCommit = some("def456")
+  ciStartLabel = none
+  ciStartMonitorProcesses = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 105: --base_commit <v> (style variant)
+argv: ct "ci" "start" "--base_commit" "def456"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'base_commit'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 106: --basecommit <v> (style variant)
+argv: ct "ci" "start" "--basecommit" "def456"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'basecommit'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 107: --label <v>
+argv: ct "ci" "start" "--label" "nightly"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = start
+  ciStartRepo = none
+  ciStartCommit = none
+  ciStartBranch = none
+  ciStartBaseCommit = none
+  ciStartLabel = some("nightly")
+  ciStartMonitorProcesses = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 108: --label=<v>
+argv: ct "ci" "start" "--label=nightly"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = start
+  ciStartRepo = none
+  ciStartCommit = none
+  ciStartBranch = none
+  ciStartBaseCommit = none
+  ciStartLabel = some("nightly")
+  ciStartMonitorProcesses = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 109: --label:<v>
+argv: ct "ci" "start" "--label:nightly"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = start
+  ciStartRepo = none
+  ciStartCommit = none
+  ciStartBranch = none
+  ciStartBaseCommit = none
+  ciStartLabel = some("nightly")
+  ciStartMonitorProcesses = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 110: --label nightly
+argv: ct "ci" "start" "--label" "nightly"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = start
+  ciStartRepo = none
+  ciStartCommit = none
+  ciStartBranch = none
+  ciStartBaseCommit = none
+  ciStartLabel = some("nightly")
+  ciStartMonitorProcesses = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 111: --label=nightly
+argv: ct "ci" "start" "--label=nightly"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = start
+  ciStartRepo = none
+  ciStartCommit = none
+  ciStartBranch = none
+  ciStartBaseCommit = none
+  ciStartLabel = some("nightly")
+  ciStartMonitorProcesses = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 112: --label empty
+argv: ct "ci" "start" "--label" ""
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = start
+  ciStartRepo = none
+  ciStartCommit = none
+  ciStartBranch = none
+  ciStartBaseCommit = none
+  ciStartLabel = some("")
+  ciStartMonitorProcesses = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 113: --label= (empty)
+argv: ct "ci" "start" "--label="
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = start
+  ciStartRepo = none
+  ciStartCommit = none
+  ciStartBranch = none
+  ciStartBaseCommit = none
+  ciStartLabel = some("")
+  ciStartMonitorProcesses = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 114: --label= <v> (next word)
+argv: ct "ci" "start" "--label=" "nightly"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = start
+  ciStartRepo = none
+  ciStartCommit = none
+  ciStartBranch = none
+  ciStartBaseCommit = none
+  ciStartLabel = some("nightly")
+  ciStartMonitorProcesses = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 115: --label -x (value starts with -)
+argv: ct "ci" "start" "--label" "-x"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = start
+  ciStartRepo = none
+  ciStartCommit = none
+  ciStartBranch = none
+  ciStartBaseCommit = none
+  ciStartLabel = some("-x")
+  ciStartMonitorProcesses = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 116: --label --x (value starts with --)
+argv: ct "ci" "start" "--label" "--x"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = start
+  ciStartRepo = none
+  ciStartCommit = none
+  ciStartBranch = none
+  ciStartBaseCommit = none
+  ciStartLabel = some("--x")
+  ciStartMonitorProcesses = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 117: --label --new-tab <v> (an option between it and its value)
+argv: ct "ci" "start" "--label" "--new-tab" "nightly"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The subcommand 'start' does not accept arguments\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 118: --label repeated, last wins
+argv: ct "ci" "start" "--label" "nightly" "--label" "nightly"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = start
+  ciStartRepo = none
+  ciStartCommit = none
+  ciStartBranch = none
+  ciStartBaseCommit = none
+  ciStartLabel = some("nightly")
+  ciStartMonitorProcesses = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 119: --label missing value (last)
+argv: ct "ci" "start" "--label"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The option '\e[34m--label\e[0m' requires a value\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 120: --LABEL <v> (style variant)
+argv: ct "ci" "start" "--LABEL" "nightly"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = start
+  ciStartRepo = none
+  ciStartCommit = none
+  ciStartBranch = none
+  ciStartBaseCommit = none
+  ciStartLabel = some("nightly")
+  ciStartMonitorProcesses = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 121: --l_abel <v> (style variant)
+argv: ct "ci" "start" "--l_abel" "nightly"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = start
+  ciStartRepo = none
+  ciStartCommit = none
+  ciStartBranch = none
+  ciStartBaseCommit = none
+  ciStartLabel = some("nightly")
+  ciStartMonitorProcesses = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 122: --monitor-processes
+argv: ct "ci" "start" "--monitor-processes"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = start
+  ciStartRepo = none
+  ciStartCommit = none
+  ciStartBranch = none
+  ciStartBaseCommit = none
+  ciStartLabel = none
+  ciStartMonitorProcesses = true
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 123: --monitor-processes=true
+argv: ct "ci" "start" "--monitor-processes=true"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = start
+  ciStartRepo = none
+  ciStartCommit = none
+  ciStartBranch = none
+  ciStartBaseCommit = none
+  ciStartLabel = none
+  ciStartMonitorProcesses = true
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 124: --monitor-processes=false
+argv: ct "ci" "start" "--monitor-processes=false"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = start
+  ciStartRepo = none
+  ciStartCommit = none
+  ciStartBranch = none
+  ciStartBaseCommit = none
+  ciStartLabel = none
+  ciStartMonitorProcesses = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 125: --monitor-processes=on
+argv: ct "ci" "start" "--monitor-processes=on"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = start
+  ciStartRepo = none
+  ciStartCommit = none
+  ciStartBranch = none
+  ciStartBaseCommit = none
+  ciStartLabel = none
+  ciStartMonitorProcesses = true
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 126: --monitor-processes=off
+argv: ct "ci" "start" "--monitor-processes=off"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = start
+  ciStartRepo = none
+  ciStartCommit = none
+  ciStartBranch = none
+  ciStartBaseCommit = none
+  ciStartLabel = none
+  ciStartMonitorProcesses = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 127: --monitor-processes=yes
+argv: ct "ci" "start" "--monitor-processes=yes"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = start
+  ciStartRepo = none
+  ciStartCommit = none
+  ciStartBranch = none
+  ciStartBaseCommit = none
+  ciStartLabel = none
+  ciStartMonitorProcesses = true
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 128: --monitor-processes=no
+argv: ct "ci" "start" "--monitor-processes=no"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = start
+  ciStartRepo = none
+  ciStartCommit = none
+  ciStartBranch = none
+  ciStartBaseCommit = none
+  ciStartLabel = none
+  ciStartMonitorProcesses = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 129: --monitor-processes=1
+argv: ct "ci" "start" "--monitor-processes=1"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = start
+  ciStartRepo = none
+  ciStartCommit = none
+  ciStartBranch = none
+  ciStartBaseCommit = none
+  ciStartLabel = none
+  ciStartMonitorProcesses = true
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 130: --monitor-processes=0
+argv: ct "ci" "start" "--monitor-processes=0"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = start
+  ciStartRepo = none
+  ciStartCommit = none
+  ciStartBranch = none
+  ciStartBaseCommit = none
+  ciStartLabel = none
+  ciStartMonitorProcesses = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 131: --monitor-processes=maybe
+argv: ct "ci" "start" "--monitor-processes=maybe"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Error while processing the \e[34mmonitor-processes=maybe\e[0m parameter: 'maybe' is not a valid boolean value. Supported values are on/off, yes/no, true/false or 1/0\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 132: --monitor-processes=
+argv: ct "ci" "start" "--monitor-processes="
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = start
+  ciStartRepo = none
+  ciStartCommit = none
+  ciStartBranch = none
+  ciStartBaseCommit = none
+  ciStartLabel = none
+  ciStartMonitorProcesses = true
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 133: --monitor-processes:false
+argv: ct "ci" "start" "--monitor-processes:false"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = start
+  ciStartRepo = none
+  ciStartCommit = none
+  ciStartBranch = none
+  ciStartBaseCommit = none
+  ciStartLabel = none
+  ciStartMonitorProcesses = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 134: --monitor-processes false (next word)
+argv: ct "ci" "start" "--monitor-processes" "false"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The subcommand 'start' does not accept arguments\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 135: --monitor-processes twice
+argv: ct "ci" "start" "--monitor-processes" "--monitor-processes"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = start
+  ciStartRepo = none
+  ciStartCommit = none
+  ciStartBranch = none
+  ciStartBaseCommit = none
+  ciStartLabel = none
+  ciStartMonitorProcesses = true
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 136: --no-monitor-processes
+argv: ct "ci" "start" "--no-monitor-processes"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'no-monitor-processes'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 137: --MONITOR-PROCESSES (style variant)
+argv: ct "ci" "start" "--MONITOR-PROCESSES"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = start
+  ciStartRepo = none
+  ciStartCommit = none
+  ciStartBranch = none
+  ciStartBaseCommit = none
+  ciStartLabel = none
+  ciStartMonitorProcesses = true
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 138: --m_onitor-processes (style variant)
+argv: ct "ci" "start" "--m_onitor-processes"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = start
+  ciStartRepo = none
+  ciStartCommit = none
+  ciStartBranch = none
+  ciStartBaseCommit = none
+  ciStartLabel = none
+  ciStartMonitorProcesses = true
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 139: --monitor_processes (style variant)
+argv: ct "ci" "start" "--monitor_processes"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'monitor_processes'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 140: --monitorprocesses (style variant)
+argv: ct "ci" "start" "--monitorprocesses"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'monitorprocesses'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 141: unknown long option
+argv: ct "ci" "start" "--bogus"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'bogus'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 142: unknown long option with value
+argv: ct "ci" "start" "--bogus=1"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'bogus'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 143: unknown short option
+argv: ct "ci" "start" "-Z"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'Z'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 144: lone -
+argv: ct "ci" "start" "-"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option ''\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 145: lone -- then a word
+argv: ct "ci" "start" "--" "w"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option ''\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 146: --=v
+argv: ct "ci" "start" "--=v"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option ''\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 147: extra positional
+argv: ct "ci" "start" "extra1" "extra2" "extra3" "extra4" "extra5"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The subcommand 'start' does not accept arguments\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 148: global --cwd after the command
+argv: ct "ci" "start" "--cwd" "/w"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = some("/w")
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = start
+  ciStartRepo = none
+  ciStartCommit = none
+  ciStartBranch = none
+  ciStartBaseCommit = none
+  ciStartLabel = none
+  ciStartMonitorProcesses = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 149: global --new-tab after the command
+argv: ct "ci" "start" "--new-tab"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = true
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = start
+  ciStartRepo = none
+  ciStartCommit = none
+  ciStartBranch = none
+  ciStartBaseCommit = none
+  ciStartLabel = none
+  ciStartMonitorProcesses = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 150: --version after the command
+argv: ct "ci" "start" "--version"
+env: (none)
+exit: 0
+--- stdout
+CodeTracer version: <VERSION>
+\e[0m
+(no newline at end of stdout)
+--- stderr
+--- end
+
+### 151: -h after the command
+argv: ct "ci" "start" "-h"
+env: (none)
+exit: 0
+--- stdout
+<the short help page clispec renders for this request: ct ci start>
+--- stderr
+--- end
+
+### 152: run bare
+argv: ct "ci" "run"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The required option 'ciRunProgram' was not specified\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 153: --repo <v>
+argv: ct "ci" "run" "--repo" "https://g.test/r" "cmd"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = run
+  ciRunRepo = some("https://g.test/r")
+  ciRunCommit = none
+  ciRunBranch = none
+  ciRunBaseCommit = none
+  ciRunLabel = none
+  ciRunMonitorProcesses = false
+  ciRunRecord = false
+  ciRunProgram = "cmd"
+  ciRunArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 154: --repo=<v>
+argv: ct "ci" "run" "--repo=https://g.test/r" "cmd"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = run
+  ciRunRepo = some("https://g.test/r")
+  ciRunCommit = none
+  ciRunBranch = none
+  ciRunBaseCommit = none
+  ciRunLabel = none
+  ciRunMonitorProcesses = false
+  ciRunRecord = false
+  ciRunProgram = "cmd"
+  ciRunArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 155: --repo:<v>
+argv: ct "ci" "run" "--repo:https://g.test/r" "cmd"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = run
+  ciRunRepo = some("https://g.test/r")
+  ciRunCommit = none
+  ciRunBranch = none
+  ciRunBaseCommit = none
+  ciRunLabel = none
+  ciRunMonitorProcesses = false
+  ciRunRecord = false
+  ciRunProgram = "cmd"
+  ciRunArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 156: --repo https://g.test/r
+argv: ct "ci" "run" "--repo" "https://g.test/r" "cmd"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = run
+  ciRunRepo = some("https://g.test/r")
+  ciRunCommit = none
+  ciRunBranch = none
+  ciRunBaseCommit = none
+  ciRunLabel = none
+  ciRunMonitorProcesses = false
+  ciRunRecord = false
+  ciRunProgram = "cmd"
+  ciRunArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 157: --repo=https://g.test/r
+argv: ct "ci" "run" "--repo=https://g.test/r" "cmd"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = run
+  ciRunRepo = some("https://g.test/r")
+  ciRunCommit = none
+  ciRunBranch = none
+  ciRunBaseCommit = none
+  ciRunLabel = none
+  ciRunMonitorProcesses = false
+  ciRunRecord = false
+  ciRunProgram = "cmd"
+  ciRunArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 158: --repo empty
+argv: ct "ci" "run" "--repo" "" "cmd"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = run
+  ciRunRepo = some("")
+  ciRunCommit = none
+  ciRunBranch = none
+  ciRunBaseCommit = none
+  ciRunLabel = none
+  ciRunMonitorProcesses = false
+  ciRunRecord = false
+  ciRunProgram = "cmd"
+  ciRunArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 159: --repo= (empty)
+argv: ct "ci" "run" "--repo=" "cmd"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The required option 'ciRunProgram' was not specified\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 160: --repo= <v> (next word)
+argv: ct "ci" "run" "--repo=" "https://g.test/r" "cmd"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = run
+  ciRunRepo = some("https://g.test/r")
+  ciRunCommit = none
+  ciRunBranch = none
+  ciRunBaseCommit = none
+  ciRunLabel = none
+  ciRunMonitorProcesses = false
+  ciRunRecord = false
+  ciRunProgram = "cmd"
+  ciRunArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 161: --repo -x (value starts with -)
+argv: ct "ci" "run" "--repo" "-x" "cmd"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = run
+  ciRunRepo = some("-x")
+  ciRunCommit = none
+  ciRunBranch = none
+  ciRunBaseCommit = none
+  ciRunLabel = none
+  ciRunMonitorProcesses = false
+  ciRunRecord = false
+  ciRunProgram = "cmd"
+  ciRunArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 162: --repo --x (value starts with --)
+argv: ct "ci" "run" "--repo" "--x" "cmd"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = run
+  ciRunRepo = some("--x")
+  ciRunCommit = none
+  ciRunBranch = none
+  ciRunBaseCommit = none
+  ciRunLabel = none
+  ciRunMonitorProcesses = false
+  ciRunRecord = false
+  ciRunProgram = "cmd"
+  ciRunArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 163: --repo --new-tab <v> (an option between it and its value)
+argv: ct "ci" "run" "--repo" "--new-tab" "https://g.test/r" "cmd"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = run
+  ciRunRepo = some("--new-tab")
+  ciRunCommit = none
+  ciRunBranch = none
+  ciRunBaseCommit = none
+  ciRunLabel = none
+  ciRunMonitorProcesses = false
+  ciRunRecord = false
+  ciRunProgram = "https://g.test/r"
+  ciRunArgs = @["cmd"]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 164: --repo repeated, last wins
+argv: ct "ci" "run" "--repo" "https://g.test/r" "--repo" "https://g.test/r" "cmd"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = run
+  ciRunRepo = some("https://g.test/r")
+  ciRunCommit = none
+  ciRunBranch = none
+  ciRunBaseCommit = none
+  ciRunLabel = none
+  ciRunMonitorProcesses = false
+  ciRunRecord = false
+  ciRunProgram = "cmd"
+  ciRunArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 165: --repo missing value (last)
+argv: ct "ci" "run" "cmd" "--repo"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The option '\e[34m--repo\e[0m' requires a value\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 166: --repo missing value (before the rest)
+argv: ct "ci" "run" "--repo" "cmd"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The required option 'ciRunProgram' was not specified\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 167: --REPO <v> (style variant)
+argv: ct "ci" "run" "--REPO" "https://g.test/r" "cmd"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = run
+  ciRunRepo = some("https://g.test/r")
+  ciRunCommit = none
+  ciRunBranch = none
+  ciRunBaseCommit = none
+  ciRunLabel = none
+  ciRunMonitorProcesses = false
+  ciRunRecord = false
+  ciRunProgram = "cmd"
+  ciRunArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 168: --r_epo <v> (style variant)
+argv: ct "ci" "run" "--r_epo" "https://g.test/r" "cmd"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = run
+  ciRunRepo = some("https://g.test/r")
+  ciRunCommit = none
+  ciRunBranch = none
+  ciRunBaseCommit = none
+  ciRunLabel = none
+  ciRunMonitorProcesses = false
+  ciRunRecord = false
+  ciRunProgram = "cmd"
+  ciRunArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 169: --commit <v>
+argv: ct "ci" "run" "--commit" "abc123" "cmd"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = run
+  ciRunRepo = none
+  ciRunCommit = some("abc123")
+  ciRunBranch = none
+  ciRunBaseCommit = none
+  ciRunLabel = none
+  ciRunMonitorProcesses = false
+  ciRunRecord = false
+  ciRunProgram = "cmd"
+  ciRunArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 170: --commit=<v>
+argv: ct "ci" "run" "--commit=abc123" "cmd"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = run
+  ciRunRepo = none
+  ciRunCommit = some("abc123")
+  ciRunBranch = none
+  ciRunBaseCommit = none
+  ciRunLabel = none
+  ciRunMonitorProcesses = false
+  ciRunRecord = false
+  ciRunProgram = "cmd"
+  ciRunArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 171: --commit:<v>
+argv: ct "ci" "run" "--commit:abc123" "cmd"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = run
+  ciRunRepo = none
+  ciRunCommit = some("abc123")
+  ciRunBranch = none
+  ciRunBaseCommit = none
+  ciRunLabel = none
+  ciRunMonitorProcesses = false
+  ciRunRecord = false
+  ciRunProgram = "cmd"
+  ciRunArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 172: --commit abc123
+argv: ct "ci" "run" "--commit" "abc123" "cmd"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = run
+  ciRunRepo = none
+  ciRunCommit = some("abc123")
+  ciRunBranch = none
+  ciRunBaseCommit = none
+  ciRunLabel = none
+  ciRunMonitorProcesses = false
+  ciRunRecord = false
+  ciRunProgram = "cmd"
+  ciRunArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 173: --commit=abc123
+argv: ct "ci" "run" "--commit=abc123" "cmd"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = run
+  ciRunRepo = none
+  ciRunCommit = some("abc123")
+  ciRunBranch = none
+  ciRunBaseCommit = none
+  ciRunLabel = none
+  ciRunMonitorProcesses = false
+  ciRunRecord = false
+  ciRunProgram = "cmd"
+  ciRunArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 174: --commit empty
+argv: ct "ci" "run" "--commit" "" "cmd"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = run
+  ciRunRepo = none
+  ciRunCommit = some("")
+  ciRunBranch = none
+  ciRunBaseCommit = none
+  ciRunLabel = none
+  ciRunMonitorProcesses = false
+  ciRunRecord = false
+  ciRunProgram = "cmd"
+  ciRunArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 175: --commit= (empty)
+argv: ct "ci" "run" "--commit=" "cmd"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The required option 'ciRunProgram' was not specified\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 176: --commit= <v> (next word)
+argv: ct "ci" "run" "--commit=" "abc123" "cmd"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = run
+  ciRunRepo = none
+  ciRunCommit = some("abc123")
+  ciRunBranch = none
+  ciRunBaseCommit = none
+  ciRunLabel = none
+  ciRunMonitorProcesses = false
+  ciRunRecord = false
+  ciRunProgram = "cmd"
+  ciRunArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 177: --commit -x (value starts with -)
+argv: ct "ci" "run" "--commit" "-x" "cmd"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = run
+  ciRunRepo = none
+  ciRunCommit = some("-x")
+  ciRunBranch = none
+  ciRunBaseCommit = none
+  ciRunLabel = none
+  ciRunMonitorProcesses = false
+  ciRunRecord = false
+  ciRunProgram = "cmd"
+  ciRunArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 178: --commit --x (value starts with --)
+argv: ct "ci" "run" "--commit" "--x" "cmd"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = run
+  ciRunRepo = none
+  ciRunCommit = some("--x")
+  ciRunBranch = none
+  ciRunBaseCommit = none
+  ciRunLabel = none
+  ciRunMonitorProcesses = false
+  ciRunRecord = false
+  ciRunProgram = "cmd"
+  ciRunArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 179: --commit --new-tab <v> (an option between it and its value)
+argv: ct "ci" "run" "--commit" "--new-tab" "abc123" "cmd"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = run
+  ciRunRepo = none
+  ciRunCommit = some("--new-tab")
+  ciRunBranch = none
+  ciRunBaseCommit = none
+  ciRunLabel = none
+  ciRunMonitorProcesses = false
+  ciRunRecord = false
+  ciRunProgram = "abc123"
+  ciRunArgs = @["cmd"]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 180: --commit repeated, last wins
+argv: ct "ci" "run" "--commit" "abc123" "--commit" "abc123" "cmd"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = run
+  ciRunRepo = none
+  ciRunCommit = some("abc123")
+  ciRunBranch = none
+  ciRunBaseCommit = none
+  ciRunLabel = none
+  ciRunMonitorProcesses = false
+  ciRunRecord = false
+  ciRunProgram = "cmd"
+  ciRunArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 181: --commit missing value (last)
+argv: ct "ci" "run" "cmd" "--commit"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The option '\e[34m--commit\e[0m' requires a value\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 182: --commit missing value (before the rest)
+argv: ct "ci" "run" "--commit" "cmd"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The required option 'ciRunProgram' was not specified\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 183: --COMMIT <v> (style variant)
+argv: ct "ci" "run" "--COMMIT" "abc123" "cmd"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = run
+  ciRunRepo = none
+  ciRunCommit = some("abc123")
+  ciRunBranch = none
+  ciRunBaseCommit = none
+  ciRunLabel = none
+  ciRunMonitorProcesses = false
+  ciRunRecord = false
+  ciRunProgram = "cmd"
+  ciRunArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 184: --c_ommit <v> (style variant)
+argv: ct "ci" "run" "--c_ommit" "abc123" "cmd"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = run
+  ciRunRepo = none
+  ciRunCommit = some("abc123")
+  ciRunBranch = none
+  ciRunBaseCommit = none
+  ciRunLabel = none
+  ciRunMonitorProcesses = false
+  ciRunRecord = false
+  ciRunProgram = "cmd"
+  ciRunArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 185: --branch <v>
+argv: ct "ci" "run" "--branch" "main" "cmd"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = run
+  ciRunRepo = none
+  ciRunCommit = none
+  ciRunBranch = some("main")
+  ciRunBaseCommit = none
+  ciRunLabel = none
+  ciRunMonitorProcesses = false
+  ciRunRecord = false
+  ciRunProgram = "cmd"
+  ciRunArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 186: --branch=<v>
+argv: ct "ci" "run" "--branch=main" "cmd"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = run
+  ciRunRepo = none
+  ciRunCommit = none
+  ciRunBranch = some("main")
+  ciRunBaseCommit = none
+  ciRunLabel = none
+  ciRunMonitorProcesses = false
+  ciRunRecord = false
+  ciRunProgram = "cmd"
+  ciRunArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 187: --branch:<v>
+argv: ct "ci" "run" "--branch:main" "cmd"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = run
+  ciRunRepo = none
+  ciRunCommit = none
+  ciRunBranch = some("main")
+  ciRunBaseCommit = none
+  ciRunLabel = none
+  ciRunMonitorProcesses = false
+  ciRunRecord = false
+  ciRunProgram = "cmd"
+  ciRunArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 188: --branch main
+argv: ct "ci" "run" "--branch" "main" "cmd"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = run
+  ciRunRepo = none
+  ciRunCommit = none
+  ciRunBranch = some("main")
+  ciRunBaseCommit = none
+  ciRunLabel = none
+  ciRunMonitorProcesses = false
+  ciRunRecord = false
+  ciRunProgram = "cmd"
+  ciRunArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 189: --branch=main
+argv: ct "ci" "run" "--branch=main" "cmd"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = run
+  ciRunRepo = none
+  ciRunCommit = none
+  ciRunBranch = some("main")
+  ciRunBaseCommit = none
+  ciRunLabel = none
+  ciRunMonitorProcesses = false
+  ciRunRecord = false
+  ciRunProgram = "cmd"
+  ciRunArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 190: --branch empty
+argv: ct "ci" "run" "--branch" "" "cmd"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = run
+  ciRunRepo = none
+  ciRunCommit = none
+  ciRunBranch = some("")
+  ciRunBaseCommit = none
+  ciRunLabel = none
+  ciRunMonitorProcesses = false
+  ciRunRecord = false
+  ciRunProgram = "cmd"
+  ciRunArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 191: --branch= (empty)
+argv: ct "ci" "run" "--branch=" "cmd"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The required option 'ciRunProgram' was not specified\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 192: --branch= <v> (next word)
+argv: ct "ci" "run" "--branch=" "main" "cmd"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = run
+  ciRunRepo = none
+  ciRunCommit = none
+  ciRunBranch = some("main")
+  ciRunBaseCommit = none
+  ciRunLabel = none
+  ciRunMonitorProcesses = false
+  ciRunRecord = false
+  ciRunProgram = "cmd"
+  ciRunArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 193: --branch -x (value starts with -)
+argv: ct "ci" "run" "--branch" "-x" "cmd"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = run
+  ciRunRepo = none
+  ciRunCommit = none
+  ciRunBranch = some("-x")
+  ciRunBaseCommit = none
+  ciRunLabel = none
+  ciRunMonitorProcesses = false
+  ciRunRecord = false
+  ciRunProgram = "cmd"
+  ciRunArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 194: --branch --x (value starts with --)
+argv: ct "ci" "run" "--branch" "--x" "cmd"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = run
+  ciRunRepo = none
+  ciRunCommit = none
+  ciRunBranch = some("--x")
+  ciRunBaseCommit = none
+  ciRunLabel = none
+  ciRunMonitorProcesses = false
+  ciRunRecord = false
+  ciRunProgram = "cmd"
+  ciRunArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 195: --branch --new-tab <v> (an option between it and its value)
+argv: ct "ci" "run" "--branch" "--new-tab" "main" "cmd"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = run
+  ciRunRepo = none
+  ciRunCommit = none
+  ciRunBranch = some("--new-tab")
+  ciRunBaseCommit = none
+  ciRunLabel = none
+  ciRunMonitorProcesses = false
+  ciRunRecord = false
+  ciRunProgram = "main"
+  ciRunArgs = @["cmd"]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 196: --branch repeated, last wins
+argv: ct "ci" "run" "--branch" "main" "--branch" "main" "cmd"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = run
+  ciRunRepo = none
+  ciRunCommit = none
+  ciRunBranch = some("main")
+  ciRunBaseCommit = none
+  ciRunLabel = none
+  ciRunMonitorProcesses = false
+  ciRunRecord = false
+  ciRunProgram = "cmd"
+  ciRunArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 197: --branch missing value (last)
+argv: ct "ci" "run" "cmd" "--branch"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The option '\e[34m--branch\e[0m' requires a value\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 198: --branch missing value (before the rest)
+argv: ct "ci" "run" "--branch" "cmd"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The required option 'ciRunProgram' was not specified\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 199: --BRANCH <v> (style variant)
+argv: ct "ci" "run" "--BRANCH" "main" "cmd"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = run
+  ciRunRepo = none
+  ciRunCommit = none
+  ciRunBranch = some("main")
+  ciRunBaseCommit = none
+  ciRunLabel = none
+  ciRunMonitorProcesses = false
+  ciRunRecord = false
+  ciRunProgram = "cmd"
+  ciRunArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 200: --b_ranch <v> (style variant)
+argv: ct "ci" "run" "--b_ranch" "main" "cmd"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = run
+  ciRunRepo = none
+  ciRunCommit = none
+  ciRunBranch = some("main")
+  ciRunBaseCommit = none
+  ciRunLabel = none
+  ciRunMonitorProcesses = false
+  ciRunRecord = false
+  ciRunProgram = "cmd"
+  ciRunArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 201: --base-commit <v>
+argv: ct "ci" "run" "--base-commit" "def456" "cmd"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = run
+  ciRunRepo = none
+  ciRunCommit = none
+  ciRunBranch = none
+  ciRunBaseCommit = some("def456")
+  ciRunLabel = none
+  ciRunMonitorProcesses = false
+  ciRunRecord = false
+  ciRunProgram = "cmd"
+  ciRunArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 202: --base-commit=<v>
+argv: ct "ci" "run" "--base-commit=def456" "cmd"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = run
+  ciRunRepo = none
+  ciRunCommit = none
+  ciRunBranch = none
+  ciRunBaseCommit = some("def456")
+  ciRunLabel = none
+  ciRunMonitorProcesses = false
+  ciRunRecord = false
+  ciRunProgram = "cmd"
+  ciRunArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 203: --base-commit:<v>
+argv: ct "ci" "run" "--base-commit:def456" "cmd"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = run
+  ciRunRepo = none
+  ciRunCommit = none
+  ciRunBranch = none
+  ciRunBaseCommit = some("def456")
+  ciRunLabel = none
+  ciRunMonitorProcesses = false
+  ciRunRecord = false
+  ciRunProgram = "cmd"
+  ciRunArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 204: --base-commit def456
+argv: ct "ci" "run" "--base-commit" "def456" "cmd"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = run
+  ciRunRepo = none
+  ciRunCommit = none
+  ciRunBranch = none
+  ciRunBaseCommit = some("def456")
+  ciRunLabel = none
+  ciRunMonitorProcesses = false
+  ciRunRecord = false
+  ciRunProgram = "cmd"
+  ciRunArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 205: --base-commit=def456
+argv: ct "ci" "run" "--base-commit=def456" "cmd"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = run
+  ciRunRepo = none
+  ciRunCommit = none
+  ciRunBranch = none
+  ciRunBaseCommit = some("def456")
+  ciRunLabel = none
+  ciRunMonitorProcesses = false
+  ciRunRecord = false
+  ciRunProgram = "cmd"
+  ciRunArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 206: --base-commit empty
+argv: ct "ci" "run" "--base-commit" "" "cmd"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = run
+  ciRunRepo = none
+  ciRunCommit = none
+  ciRunBranch = none
+  ciRunBaseCommit = some("")
+  ciRunLabel = none
+  ciRunMonitorProcesses = false
+  ciRunRecord = false
+  ciRunProgram = "cmd"
+  ciRunArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 207: --base-commit= (empty)
+argv: ct "ci" "run" "--base-commit=" "cmd"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The required option 'ciRunProgram' was not specified\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 208: --base-commit= <v> (next word)
+argv: ct "ci" "run" "--base-commit=" "def456" "cmd"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = run
+  ciRunRepo = none
+  ciRunCommit = none
+  ciRunBranch = none
+  ciRunBaseCommit = some("def456")
+  ciRunLabel = none
+  ciRunMonitorProcesses = false
+  ciRunRecord = false
+  ciRunProgram = "cmd"
+  ciRunArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 209: --base-commit -x (value starts with -)
+argv: ct "ci" "run" "--base-commit" "-x" "cmd"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = run
+  ciRunRepo = none
+  ciRunCommit = none
+  ciRunBranch = none
+  ciRunBaseCommit = some("-x")
+  ciRunLabel = none
+  ciRunMonitorProcesses = false
+  ciRunRecord = false
+  ciRunProgram = "cmd"
+  ciRunArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 210: --base-commit --x (value starts with --)
+argv: ct "ci" "run" "--base-commit" "--x" "cmd"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = run
+  ciRunRepo = none
+  ciRunCommit = none
+  ciRunBranch = none
+  ciRunBaseCommit = some("--x")
+  ciRunLabel = none
+  ciRunMonitorProcesses = false
+  ciRunRecord = false
+  ciRunProgram = "cmd"
+  ciRunArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 211: --base-commit --new-tab <v> (an option between it and its value)
+argv: ct "ci" "run" "--base-commit" "--new-tab" "def456" "cmd"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = run
+  ciRunRepo = none
+  ciRunCommit = none
+  ciRunBranch = none
+  ciRunBaseCommit = some("--new-tab")
+  ciRunLabel = none
+  ciRunMonitorProcesses = false
+  ciRunRecord = false
+  ciRunProgram = "def456"
+  ciRunArgs = @["cmd"]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 212: --base-commit repeated, last wins
+argv: ct "ci" "run" "--base-commit" "def456" "--base-commit" "def456" "cmd"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = run
+  ciRunRepo = none
+  ciRunCommit = none
+  ciRunBranch = none
+  ciRunBaseCommit = some("def456")
+  ciRunLabel = none
+  ciRunMonitorProcesses = false
+  ciRunRecord = false
+  ciRunProgram = "cmd"
+  ciRunArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 213: --base-commit missing value (last)
+argv: ct "ci" "run" "cmd" "--base-commit"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The option '\e[34m--base-commit\e[0m' requires a value\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 214: --base-commit missing value (before the rest)
+argv: ct "ci" "run" "--base-commit" "cmd"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The required option 'ciRunProgram' was not specified\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 215: --BASE-COMMIT <v> (style variant)
+argv: ct "ci" "run" "--BASE-COMMIT" "def456" "cmd"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = run
+  ciRunRepo = none
+  ciRunCommit = none
+  ciRunBranch = none
+  ciRunBaseCommit = some("def456")
+  ciRunLabel = none
+  ciRunMonitorProcesses = false
+  ciRunRecord = false
+  ciRunProgram = "cmd"
+  ciRunArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 216: --b_ase-commit <v> (style variant)
+argv: ct "ci" "run" "--b_ase-commit" "def456" "cmd"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = run
+  ciRunRepo = none
+  ciRunCommit = none
+  ciRunBranch = none
+  ciRunBaseCommit = some("def456")
+  ciRunLabel = none
+  ciRunMonitorProcesses = false
+  ciRunRecord = false
+  ciRunProgram = "cmd"
+  ciRunArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 217: --base_commit <v> (style variant)
+argv: ct "ci" "run" "--base_commit" "def456" "cmd"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'base_commit'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 218: --basecommit <v> (style variant)
+argv: ct "ci" "run" "--basecommit" "def456" "cmd"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'basecommit'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 219: --label <v>
+argv: ct "ci" "run" "--label" "nightly" "cmd"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = run
+  ciRunRepo = none
+  ciRunCommit = none
+  ciRunBranch = none
+  ciRunBaseCommit = none
+  ciRunLabel = some("nightly")
+  ciRunMonitorProcesses = false
+  ciRunRecord = false
+  ciRunProgram = "cmd"
+  ciRunArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 220: --label=<v>
+argv: ct "ci" "run" "--label=nightly" "cmd"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = run
+  ciRunRepo = none
+  ciRunCommit = none
+  ciRunBranch = none
+  ciRunBaseCommit = none
+  ciRunLabel = some("nightly")
+  ciRunMonitorProcesses = false
+  ciRunRecord = false
+  ciRunProgram = "cmd"
+  ciRunArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 221: --label:<v>
+argv: ct "ci" "run" "--label:nightly" "cmd"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = run
+  ciRunRepo = none
+  ciRunCommit = none
+  ciRunBranch = none
+  ciRunBaseCommit = none
+  ciRunLabel = some("nightly")
+  ciRunMonitorProcesses = false
+  ciRunRecord = false
+  ciRunProgram = "cmd"
+  ciRunArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 222: --label nightly
+argv: ct "ci" "run" "--label" "nightly" "cmd"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = run
+  ciRunRepo = none
+  ciRunCommit = none
+  ciRunBranch = none
+  ciRunBaseCommit = none
+  ciRunLabel = some("nightly")
+  ciRunMonitorProcesses = false
+  ciRunRecord = false
+  ciRunProgram = "cmd"
+  ciRunArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 223: --label=nightly
+argv: ct "ci" "run" "--label=nightly" "cmd"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = run
+  ciRunRepo = none
+  ciRunCommit = none
+  ciRunBranch = none
+  ciRunBaseCommit = none
+  ciRunLabel = some("nightly")
+  ciRunMonitorProcesses = false
+  ciRunRecord = false
+  ciRunProgram = "cmd"
+  ciRunArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 224: --label empty
+argv: ct "ci" "run" "--label" "" "cmd"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = run
+  ciRunRepo = none
+  ciRunCommit = none
+  ciRunBranch = none
+  ciRunBaseCommit = none
+  ciRunLabel = some("")
+  ciRunMonitorProcesses = false
+  ciRunRecord = false
+  ciRunProgram = "cmd"
+  ciRunArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 225: --label= (empty)
+argv: ct "ci" "run" "--label=" "cmd"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The required option 'ciRunProgram' was not specified\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 226: --label= <v> (next word)
+argv: ct "ci" "run" "--label=" "nightly" "cmd"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = run
+  ciRunRepo = none
+  ciRunCommit = none
+  ciRunBranch = none
+  ciRunBaseCommit = none
+  ciRunLabel = some("nightly")
+  ciRunMonitorProcesses = false
+  ciRunRecord = false
+  ciRunProgram = "cmd"
+  ciRunArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 227: --label -x (value starts with -)
+argv: ct "ci" "run" "--label" "-x" "cmd"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = run
+  ciRunRepo = none
+  ciRunCommit = none
+  ciRunBranch = none
+  ciRunBaseCommit = none
+  ciRunLabel = some("-x")
+  ciRunMonitorProcesses = false
+  ciRunRecord = false
+  ciRunProgram = "cmd"
+  ciRunArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 228: --label --x (value starts with --)
+argv: ct "ci" "run" "--label" "--x" "cmd"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = run
+  ciRunRepo = none
+  ciRunCommit = none
+  ciRunBranch = none
+  ciRunBaseCommit = none
+  ciRunLabel = some("--x")
+  ciRunMonitorProcesses = false
+  ciRunRecord = false
+  ciRunProgram = "cmd"
+  ciRunArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 229: --label --new-tab <v> (an option between it and its value)
+argv: ct "ci" "run" "--label" "--new-tab" "nightly" "cmd"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = run
+  ciRunRepo = none
+  ciRunCommit = none
+  ciRunBranch = none
+  ciRunBaseCommit = none
+  ciRunLabel = some("--new-tab")
+  ciRunMonitorProcesses = false
+  ciRunRecord = false
+  ciRunProgram = "nightly"
+  ciRunArgs = @["cmd"]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 230: --label repeated, last wins
+argv: ct "ci" "run" "--label" "nightly" "--label" "nightly" "cmd"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = run
+  ciRunRepo = none
+  ciRunCommit = none
+  ciRunBranch = none
+  ciRunBaseCommit = none
+  ciRunLabel = some("nightly")
+  ciRunMonitorProcesses = false
+  ciRunRecord = false
+  ciRunProgram = "cmd"
+  ciRunArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 231: --label missing value (last)
+argv: ct "ci" "run" "cmd" "--label"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The option '\e[34m--label\e[0m' requires a value\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 232: --label missing value (before the rest)
+argv: ct "ci" "run" "--label" "cmd"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The required option 'ciRunProgram' was not specified\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 233: --LABEL <v> (style variant)
+argv: ct "ci" "run" "--LABEL" "nightly" "cmd"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = run
+  ciRunRepo = none
+  ciRunCommit = none
+  ciRunBranch = none
+  ciRunBaseCommit = none
+  ciRunLabel = some("nightly")
+  ciRunMonitorProcesses = false
+  ciRunRecord = false
+  ciRunProgram = "cmd"
+  ciRunArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 234: --l_abel <v> (style variant)
+argv: ct "ci" "run" "--l_abel" "nightly" "cmd"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = run
+  ciRunRepo = none
+  ciRunCommit = none
+  ciRunBranch = none
+  ciRunBaseCommit = none
+  ciRunLabel = some("nightly")
+  ciRunMonitorProcesses = false
+  ciRunRecord = false
+  ciRunProgram = "cmd"
+  ciRunArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 235: --monitor-processes
+argv: ct "ci" "run" "--monitor-processes" "cmd"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = run
+  ciRunRepo = none
+  ciRunCommit = none
+  ciRunBranch = none
+  ciRunBaseCommit = none
+  ciRunLabel = none
+  ciRunMonitorProcesses = true
+  ciRunRecord = false
+  ciRunProgram = "cmd"
+  ciRunArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 236: --monitor-processes=true
+argv: ct "ci" "run" "--monitor-processes=true" "cmd"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = run
+  ciRunRepo = none
+  ciRunCommit = none
+  ciRunBranch = none
+  ciRunBaseCommit = none
+  ciRunLabel = none
+  ciRunMonitorProcesses = true
+  ciRunRecord = false
+  ciRunProgram = "cmd"
+  ciRunArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 237: --monitor-processes=false
+argv: ct "ci" "run" "--monitor-processes=false" "cmd"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = run
+  ciRunRepo = none
+  ciRunCommit = none
+  ciRunBranch = none
+  ciRunBaseCommit = none
+  ciRunLabel = none
+  ciRunMonitorProcesses = false
+  ciRunRecord = false
+  ciRunProgram = "cmd"
+  ciRunArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 238: --monitor-processes=on
+argv: ct "ci" "run" "--monitor-processes=on" "cmd"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = run
+  ciRunRepo = none
+  ciRunCommit = none
+  ciRunBranch = none
+  ciRunBaseCommit = none
+  ciRunLabel = none
+  ciRunMonitorProcesses = true
+  ciRunRecord = false
+  ciRunProgram = "cmd"
+  ciRunArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 239: --monitor-processes=off
+argv: ct "ci" "run" "--monitor-processes=off" "cmd"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = run
+  ciRunRepo = none
+  ciRunCommit = none
+  ciRunBranch = none
+  ciRunBaseCommit = none
+  ciRunLabel = none
+  ciRunMonitorProcesses = false
+  ciRunRecord = false
+  ciRunProgram = "cmd"
+  ciRunArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 240: --monitor-processes=yes
+argv: ct "ci" "run" "--monitor-processes=yes" "cmd"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = run
+  ciRunRepo = none
+  ciRunCommit = none
+  ciRunBranch = none
+  ciRunBaseCommit = none
+  ciRunLabel = none
+  ciRunMonitorProcesses = true
+  ciRunRecord = false
+  ciRunProgram = "cmd"
+  ciRunArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 241: --monitor-processes=no
+argv: ct "ci" "run" "--monitor-processes=no" "cmd"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = run
+  ciRunRepo = none
+  ciRunCommit = none
+  ciRunBranch = none
+  ciRunBaseCommit = none
+  ciRunLabel = none
+  ciRunMonitorProcesses = false
+  ciRunRecord = false
+  ciRunProgram = "cmd"
+  ciRunArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 242: --monitor-processes=1
+argv: ct "ci" "run" "--monitor-processes=1" "cmd"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = run
+  ciRunRepo = none
+  ciRunCommit = none
+  ciRunBranch = none
+  ciRunBaseCommit = none
+  ciRunLabel = none
+  ciRunMonitorProcesses = true
+  ciRunRecord = false
+  ciRunProgram = "cmd"
+  ciRunArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 243: --monitor-processes=0
+argv: ct "ci" "run" "--monitor-processes=0" "cmd"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = run
+  ciRunRepo = none
+  ciRunCommit = none
+  ciRunBranch = none
+  ciRunBaseCommit = none
+  ciRunLabel = none
+  ciRunMonitorProcesses = false
+  ciRunRecord = false
+  ciRunProgram = "cmd"
+  ciRunArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 244: --monitor-processes=maybe
+argv: ct "ci" "run" "--monitor-processes=maybe" "cmd"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Error while processing the \e[34mmonitor-processes=maybe\e[0m parameter: 'maybe' is not a valid boolean value. Supported values are on/off, yes/no, true/false or 1/0\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 245: --monitor-processes=
+argv: ct "ci" "run" "--monitor-processes=" "cmd"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Error while processing the \e[34mmonitor-processes=cmd\e[0m parameter: 'cmd' is not a valid boolean value. Supported values are on/off, yes/no, true/false or 1/0\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 246: --monitor-processes:false
+argv: ct "ci" "run" "--monitor-processes:false" "cmd"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = run
+  ciRunRepo = none
+  ciRunCommit = none
+  ciRunBranch = none
+  ciRunBaseCommit = none
+  ciRunLabel = none
+  ciRunMonitorProcesses = false
+  ciRunRecord = false
+  ciRunProgram = "cmd"
+  ciRunArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 247: --monitor-processes false (next word)
+argv: ct "ci" "run" "--monitor-processes" "false" "cmd"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = run
+  ciRunRepo = none
+  ciRunCommit = none
+  ciRunBranch = none
+  ciRunBaseCommit = none
+  ciRunLabel = none
+  ciRunMonitorProcesses = true
+  ciRunRecord = false
+  ciRunProgram = "false"
+  ciRunArgs = @["cmd"]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 248: --monitor-processes twice
+argv: ct "ci" "run" "--monitor-processes" "--monitor-processes" "cmd"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = run
+  ciRunRepo = none
+  ciRunCommit = none
+  ciRunBranch = none
+  ciRunBaseCommit = none
+  ciRunLabel = none
+  ciRunMonitorProcesses = true
+  ciRunRecord = false
+  ciRunProgram = "cmd"
+  ciRunArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 249: --no-monitor-processes
+argv: ct "ci" "run" "--no-monitor-processes" "cmd"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'no-monitor-processes'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 250: --MONITOR-PROCESSES (style variant)
+argv: ct "ci" "run" "--MONITOR-PROCESSES" "cmd"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = run
+  ciRunRepo = none
+  ciRunCommit = none
+  ciRunBranch = none
+  ciRunBaseCommit = none
+  ciRunLabel = none
+  ciRunMonitorProcesses = true
+  ciRunRecord = false
+  ciRunProgram = "cmd"
+  ciRunArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 251: --m_onitor-processes (style variant)
+argv: ct "ci" "run" "--m_onitor-processes" "cmd"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = run
+  ciRunRepo = none
+  ciRunCommit = none
+  ciRunBranch = none
+  ciRunBaseCommit = none
+  ciRunLabel = none
+  ciRunMonitorProcesses = true
+  ciRunRecord = false
+  ciRunProgram = "cmd"
+  ciRunArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 252: --monitor_processes (style variant)
+argv: ct "ci" "run" "--monitor_processes" "cmd"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'monitor_processes'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 253: --monitorprocesses (style variant)
+argv: ct "ci" "run" "--monitorprocesses" "cmd"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'monitorprocesses'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 254: unknown long option
+argv: ct "ci" "run" "--bogus" "cmd"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'bogus'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 255: unknown long option with value
+argv: ct "ci" "run" "--bogus=1" "cmd"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'bogus'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 256: unknown short option
+argv: ct "ci" "run" "-Z" "cmd"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'Z'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 257: lone -
+argv: ct "ci" "run" "-" "cmd"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option ''\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 258: lone -- then a word
+argv: ct "ci" "run" "--" "w" "cmd"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option ''\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 259: --=v
+argv: ct "ci" "run" "--=v" "cmd"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option ''\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 260: extra positional
+argv: ct "ci" "run" "cmd" "extra1" "extra2" "extra3" "extra4" "extra5"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = run
+  ciRunRepo = none
+  ciRunCommit = none
+  ciRunBranch = none
+  ciRunBaseCommit = none
+  ciRunLabel = none
+  ciRunMonitorProcesses = false
+  ciRunRecord = false
+  ciRunProgram = "cmd"
+  ciRunArgs = @["extra1", "extra2", "extra3", "extra4", "extra5"]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 261: global --cwd after the command
+argv: ct "ci" "run" "--cwd" "/w" "cmd"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = some("/w")
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = run
+  ciRunRepo = none
+  ciRunCommit = none
+  ciRunBranch = none
+  ciRunBaseCommit = none
+  ciRunLabel = none
+  ciRunMonitorProcesses = false
+  ciRunRecord = false
+  ciRunProgram = "cmd"
+  ciRunArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 262: global --new-tab after the command
+argv: ct "ci" "run" "--new-tab" "cmd"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = true
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = run
+  ciRunRepo = none
+  ciRunCommit = none
+  ciRunBranch = none
+  ciRunBaseCommit = none
+  ciRunLabel = none
+  ciRunMonitorProcesses = false
+  ciRunRecord = false
+  ciRunProgram = "cmd"
+  ciRunArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 263: --version after the command
+argv: ct "ci" "run" "--version" "cmd"
+env: (none)
+exit: 0
+--- stdout
+CodeTracer version: <VERSION>
+\e[0m
+(no newline at end of stdout)
+--- stderr
+--- end
+
+### 264: -h after the command
+argv: ct "ci" "run" "-h" "cmd"
+env: (none)
+exit: 0
+--- stdout
+<the short help page clispec renders for this request: ct ci run>
+--- stderr
+--- end
+
+### 265: run cmd args
+argv: ct "ci" "run" "cmd" "a" "b"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = run
+  ciRunRepo = none
+  ciRunCommit = none
+  ciRunBranch = none
+  ciRunBaseCommit = none
+  ciRunLabel = none
+  ciRunMonitorProcesses = false
+  ciRunRecord = false
+  ciRunProgram = "cmd"
+  ciRunArgs = @["a", "b"]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 266: --record
+argv: ct "ci" "run" "--record" "cmd"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = run
+  ciRunRepo = none
+  ciRunCommit = none
+  ciRunBranch = none
+  ciRunBaseCommit = none
+  ciRunLabel = none
+  ciRunMonitorProcesses = false
+  ciRunRecord = true
+  ciRunProgram = "cmd"
+  ciRunArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 267: --record=true
+argv: ct "ci" "run" "--record=true" "cmd"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = run
+  ciRunRepo = none
+  ciRunCommit = none
+  ciRunBranch = none
+  ciRunBaseCommit = none
+  ciRunLabel = none
+  ciRunMonitorProcesses = false
+  ciRunRecord = true
+  ciRunProgram = "cmd"
+  ciRunArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 268: --record=false
+argv: ct "ci" "run" "--record=false" "cmd"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = run
+  ciRunRepo = none
+  ciRunCommit = none
+  ciRunBranch = none
+  ciRunBaseCommit = none
+  ciRunLabel = none
+  ciRunMonitorProcesses = false
+  ciRunRecord = false
+  ciRunProgram = "cmd"
+  ciRunArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 269: --record=on
+argv: ct "ci" "run" "--record=on" "cmd"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = run
+  ciRunRepo = none
+  ciRunCommit = none
+  ciRunBranch = none
+  ciRunBaseCommit = none
+  ciRunLabel = none
+  ciRunMonitorProcesses = false
+  ciRunRecord = true
+  ciRunProgram = "cmd"
+  ciRunArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 270: --record=off
+argv: ct "ci" "run" "--record=off" "cmd"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = run
+  ciRunRepo = none
+  ciRunCommit = none
+  ciRunBranch = none
+  ciRunBaseCommit = none
+  ciRunLabel = none
+  ciRunMonitorProcesses = false
+  ciRunRecord = false
+  ciRunProgram = "cmd"
+  ciRunArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 271: --record=yes
+argv: ct "ci" "run" "--record=yes" "cmd"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = run
+  ciRunRepo = none
+  ciRunCommit = none
+  ciRunBranch = none
+  ciRunBaseCommit = none
+  ciRunLabel = none
+  ciRunMonitorProcesses = false
+  ciRunRecord = true
+  ciRunProgram = "cmd"
+  ciRunArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 272: --record=no
+argv: ct "ci" "run" "--record=no" "cmd"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = run
+  ciRunRepo = none
+  ciRunCommit = none
+  ciRunBranch = none
+  ciRunBaseCommit = none
+  ciRunLabel = none
+  ciRunMonitorProcesses = false
+  ciRunRecord = false
+  ciRunProgram = "cmd"
+  ciRunArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 273: --record=1
+argv: ct "ci" "run" "--record=1" "cmd"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = run
+  ciRunRepo = none
+  ciRunCommit = none
+  ciRunBranch = none
+  ciRunBaseCommit = none
+  ciRunLabel = none
+  ciRunMonitorProcesses = false
+  ciRunRecord = true
+  ciRunProgram = "cmd"
+  ciRunArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 274: --record=0
+argv: ct "ci" "run" "--record=0" "cmd"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = run
+  ciRunRepo = none
+  ciRunCommit = none
+  ciRunBranch = none
+  ciRunBaseCommit = none
+  ciRunLabel = none
+  ciRunMonitorProcesses = false
+  ciRunRecord = false
+  ciRunProgram = "cmd"
+  ciRunArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 275: --record=maybe
+argv: ct "ci" "run" "--record=maybe" "cmd"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Error while processing the \e[34mrecord=maybe\e[0m parameter: 'maybe' is not a valid boolean value. Supported values are on/off, yes/no, true/false or 1/0\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 276: --record=
+argv: ct "ci" "run" "--record=" "cmd"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Error while processing the \e[34mrecord=cmd\e[0m parameter: 'cmd' is not a valid boolean value. Supported values are on/off, yes/no, true/false or 1/0\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 277: --record:false
+argv: ct "ci" "run" "--record:false" "cmd"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = run
+  ciRunRepo = none
+  ciRunCommit = none
+  ciRunBranch = none
+  ciRunBaseCommit = none
+  ciRunLabel = none
+  ciRunMonitorProcesses = false
+  ciRunRecord = false
+  ciRunProgram = "cmd"
+  ciRunArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 278: --record false (next word)
+argv: ct "ci" "run" "--record" "false" "cmd"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = run
+  ciRunRepo = none
+  ciRunCommit = none
+  ciRunBranch = none
+  ciRunBaseCommit = none
+  ciRunLabel = none
+  ciRunMonitorProcesses = false
+  ciRunRecord = true
+  ciRunProgram = "false"
+  ciRunArgs = @["cmd"]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 279: --record twice
+argv: ct "ci" "run" "--record" "--record" "cmd"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = run
+  ciRunRepo = none
+  ciRunCommit = none
+  ciRunBranch = none
+  ciRunBaseCommit = none
+  ciRunLabel = none
+  ciRunMonitorProcesses = false
+  ciRunRecord = true
+  ciRunProgram = "cmd"
+  ciRunArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 280: --no-record
+argv: ct "ci" "run" "--no-record" "cmd"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'no-record'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 281: --RECORD (style variant)
+argv: ct "ci" "run" "--RECORD" "cmd"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = run
+  ciRunRepo = none
+  ciRunCommit = none
+  ciRunBranch = none
+  ciRunBaseCommit = none
+  ciRunLabel = none
+  ciRunMonitorProcesses = false
+  ciRunRecord = true
+  ciRunProgram = "cmd"
+  ciRunArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 282: --r_ecord (style variant)
+argv: ct "ci" "run" "--r_ecord" "cmd"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = run
+  ciRunRepo = none
+  ciRunCommit = none
+  ciRunBranch = none
+  ciRunBaseCommit = none
+  ciRunLabel = none
+  ciRunMonitorProcesses = false
+  ciRunRecord = true
+  ciRunProgram = "cmd"
+  ciRunArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 283: attach no id
+argv: ct "ci" "attach"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The required option 'ciAttachRunId' was not specified\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 284: attach id
+argv: ct "ci" "attach" "r1"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = attach
+  ciAttachRunId = "r1"
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 285: attach two ids
+argv: ct "ci" "attach" "r1" "r2"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The subcommand 'attach' does not accept additional arguments\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 286: unknown long option
+argv: ct "ci" "attach" "--bogus" "r1"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'bogus'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 287: unknown long option with value
+argv: ct "ci" "attach" "--bogus=1" "r1"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'bogus'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 288: unknown short option
+argv: ct "ci" "attach" "-Z" "r1"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'Z'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 289: lone -
+argv: ct "ci" "attach" "-" "r1"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option ''\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 290: lone -- then a word
+argv: ct "ci" "attach" "--" "w" "r1"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option ''\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 291: --=v
+argv: ct "ci" "attach" "--=v" "r1"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option ''\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 292: extra positional
+argv: ct "ci" "attach" "r1" "extra1" "extra2" "extra3" "extra4" "extra5"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The subcommand 'attach' does not accept additional arguments\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 293: global --cwd after the command
+argv: ct "ci" "attach" "--cwd" "/w" "r1"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = some("/w")
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = attach
+  ciAttachRunId = "r1"
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 294: global --new-tab after the command
+argv: ct "ci" "attach" "--new-tab" "r1"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = true
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = attach
+  ciAttachRunId = "r1"
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 295: --version after the command
+argv: ct "ci" "attach" "--version" "r1"
+env: (none)
+exit: 0
+--- stdout
+CodeTracer version: <VERSION>
+\e[0m
+(no newline at end of stdout)
+--- stderr
+--- end
+
+### 296: -h after the command
+argv: ct "ci" "attach" "-h" "r1"
+env: (none)
+exit: 0
+--- stdout
+<the short help page clispec renders for this request: ct ci attach>
+--- stderr
+--- end
+
+### 297: exec bare
+argv: ct "ci" "exec"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The required option 'ciExecProgram' was not specified\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 298: exec cmd
+argv: ct "ci" "exec" "cmd"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = exec
+  ciExecMonitorProcesses = false
+  ciExecRecord = false
+  ciExecProgram = "cmd"
+  ciExecArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 299: exec cmd args
+argv: ct "ci" "exec" "cmd" "a" "b"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = exec
+  ciExecMonitorProcesses = false
+  ciExecRecord = false
+  ciExecProgram = "cmd"
+  ciExecArgs = @["a", "b"]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 300: exec cmd args that look like options
+argv: ct "ci" "exec" "cmd" "-x" "--y"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'x'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 301: --monitor-processes
+argv: ct "ci" "exec" "--monitor-processes" "cmd"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = exec
+  ciExecMonitorProcesses = true
+  ciExecRecord = false
+  ciExecProgram = "cmd"
+  ciExecArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 302: --monitor-processes=true
+argv: ct "ci" "exec" "--monitor-processes=true" "cmd"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = exec
+  ciExecMonitorProcesses = true
+  ciExecRecord = false
+  ciExecProgram = "cmd"
+  ciExecArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 303: --monitor-processes=false
+argv: ct "ci" "exec" "--monitor-processes=false" "cmd"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = exec
+  ciExecMonitorProcesses = false
+  ciExecRecord = false
+  ciExecProgram = "cmd"
+  ciExecArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 304: --monitor-processes=on
+argv: ct "ci" "exec" "--monitor-processes=on" "cmd"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = exec
+  ciExecMonitorProcesses = true
+  ciExecRecord = false
+  ciExecProgram = "cmd"
+  ciExecArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 305: --monitor-processes=off
+argv: ct "ci" "exec" "--monitor-processes=off" "cmd"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = exec
+  ciExecMonitorProcesses = false
+  ciExecRecord = false
+  ciExecProgram = "cmd"
+  ciExecArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 306: --monitor-processes=yes
+argv: ct "ci" "exec" "--monitor-processes=yes" "cmd"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = exec
+  ciExecMonitorProcesses = true
+  ciExecRecord = false
+  ciExecProgram = "cmd"
+  ciExecArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 307: --monitor-processes=no
+argv: ct "ci" "exec" "--monitor-processes=no" "cmd"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = exec
+  ciExecMonitorProcesses = false
+  ciExecRecord = false
+  ciExecProgram = "cmd"
+  ciExecArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 308: --monitor-processes=1
+argv: ct "ci" "exec" "--monitor-processes=1" "cmd"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = exec
+  ciExecMonitorProcesses = true
+  ciExecRecord = false
+  ciExecProgram = "cmd"
+  ciExecArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 309: --monitor-processes=0
+argv: ct "ci" "exec" "--monitor-processes=0" "cmd"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = exec
+  ciExecMonitorProcesses = false
+  ciExecRecord = false
+  ciExecProgram = "cmd"
+  ciExecArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 310: --monitor-processes=maybe
+argv: ct "ci" "exec" "--monitor-processes=maybe" "cmd"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Error while processing the \e[34mmonitor-processes=maybe\e[0m parameter: 'maybe' is not a valid boolean value. Supported values are on/off, yes/no, true/false or 1/0\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 311: --monitor-processes=
+argv: ct "ci" "exec" "--monitor-processes=" "cmd"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Error while processing the \e[34mmonitor-processes=cmd\e[0m parameter: 'cmd' is not a valid boolean value. Supported values are on/off, yes/no, true/false or 1/0\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 312: --monitor-processes:false
+argv: ct "ci" "exec" "--monitor-processes:false" "cmd"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = exec
+  ciExecMonitorProcesses = false
+  ciExecRecord = false
+  ciExecProgram = "cmd"
+  ciExecArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 313: --monitor-processes false (next word)
+argv: ct "ci" "exec" "--monitor-processes" "false" "cmd"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = exec
+  ciExecMonitorProcesses = true
+  ciExecRecord = false
+  ciExecProgram = "false"
+  ciExecArgs = @["cmd"]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 314: --monitor-processes twice
+argv: ct "ci" "exec" "--monitor-processes" "--monitor-processes" "cmd"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = exec
+  ciExecMonitorProcesses = true
+  ciExecRecord = false
+  ciExecProgram = "cmd"
+  ciExecArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 315: --no-monitor-processes
+argv: ct "ci" "exec" "--no-monitor-processes" "cmd"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'no-monitor-processes'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 316: --MONITOR-PROCESSES (style variant)
+argv: ct "ci" "exec" "--MONITOR-PROCESSES" "cmd"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = exec
+  ciExecMonitorProcesses = true
+  ciExecRecord = false
+  ciExecProgram = "cmd"
+  ciExecArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 317: --m_onitor-processes (style variant)
+argv: ct "ci" "exec" "--m_onitor-processes" "cmd"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = exec
+  ciExecMonitorProcesses = true
+  ciExecRecord = false
+  ciExecProgram = "cmd"
+  ciExecArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 318: --monitor_processes (style variant)
+argv: ct "ci" "exec" "--monitor_processes" "cmd"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'monitor_processes'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 319: --monitorprocesses (style variant)
+argv: ct "ci" "exec" "--monitorprocesses" "cmd"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'monitorprocesses'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 320: --record
+argv: ct "ci" "exec" "--record" "cmd"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = exec
+  ciExecMonitorProcesses = false
+  ciExecRecord = true
+  ciExecProgram = "cmd"
+  ciExecArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 321: --record=true
+argv: ct "ci" "exec" "--record=true" "cmd"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = exec
+  ciExecMonitorProcesses = false
+  ciExecRecord = true
+  ciExecProgram = "cmd"
+  ciExecArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 322: --record=false
+argv: ct "ci" "exec" "--record=false" "cmd"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = exec
+  ciExecMonitorProcesses = false
+  ciExecRecord = false
+  ciExecProgram = "cmd"
+  ciExecArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 323: --record=on
+argv: ct "ci" "exec" "--record=on" "cmd"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = exec
+  ciExecMonitorProcesses = false
+  ciExecRecord = true
+  ciExecProgram = "cmd"
+  ciExecArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 324: --record=off
+argv: ct "ci" "exec" "--record=off" "cmd"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = exec
+  ciExecMonitorProcesses = false
+  ciExecRecord = false
+  ciExecProgram = "cmd"
+  ciExecArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 325: --record=yes
+argv: ct "ci" "exec" "--record=yes" "cmd"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = exec
+  ciExecMonitorProcesses = false
+  ciExecRecord = true
+  ciExecProgram = "cmd"
+  ciExecArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 326: --record=no
+argv: ct "ci" "exec" "--record=no" "cmd"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = exec
+  ciExecMonitorProcesses = false
+  ciExecRecord = false
+  ciExecProgram = "cmd"
+  ciExecArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 327: --record=1
+argv: ct "ci" "exec" "--record=1" "cmd"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = exec
+  ciExecMonitorProcesses = false
+  ciExecRecord = true
+  ciExecProgram = "cmd"
+  ciExecArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 328: --record=0
+argv: ct "ci" "exec" "--record=0" "cmd"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = exec
+  ciExecMonitorProcesses = false
+  ciExecRecord = false
+  ciExecProgram = "cmd"
+  ciExecArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 329: --record=maybe
+argv: ct "ci" "exec" "--record=maybe" "cmd"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Error while processing the \e[34mrecord=maybe\e[0m parameter: 'maybe' is not a valid boolean value. Supported values are on/off, yes/no, true/false or 1/0\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 330: --record=
+argv: ct "ci" "exec" "--record=" "cmd"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Error while processing the \e[34mrecord=cmd\e[0m parameter: 'cmd' is not a valid boolean value. Supported values are on/off, yes/no, true/false or 1/0\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 331: --record:false
+argv: ct "ci" "exec" "--record:false" "cmd"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = exec
+  ciExecMonitorProcesses = false
+  ciExecRecord = false
+  ciExecProgram = "cmd"
+  ciExecArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 332: --record false (next word)
+argv: ct "ci" "exec" "--record" "false" "cmd"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = exec
+  ciExecMonitorProcesses = false
+  ciExecRecord = true
+  ciExecProgram = "false"
+  ciExecArgs = @["cmd"]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 333: --record twice
+argv: ct "ci" "exec" "--record" "--record" "cmd"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = exec
+  ciExecMonitorProcesses = false
+  ciExecRecord = true
+  ciExecProgram = "cmd"
+  ciExecArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 334: --no-record
+argv: ct "ci" "exec" "--no-record" "cmd"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'no-record'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 335: --RECORD (style variant)
+argv: ct "ci" "exec" "--RECORD" "cmd"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = exec
+  ciExecMonitorProcesses = false
+  ciExecRecord = true
+  ciExecProgram = "cmd"
+  ciExecArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 336: --r_ecord (style variant)
+argv: ct "ci" "exec" "--r_ecord" "cmd"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = exec
+  ciExecMonitorProcesses = false
+  ciExecRecord = true
+  ciExecProgram = "cmd"
+  ciExecArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 337: unknown long option
+argv: ct "ci" "exec" "--bogus" "cmd"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'bogus'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 338: unknown long option with value
+argv: ct "ci" "exec" "--bogus=1" "cmd"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'bogus'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 339: unknown short option
+argv: ct "ci" "exec" "-Z" "cmd"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'Z'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 340: lone -
+argv: ct "ci" "exec" "-" "cmd"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option ''\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 341: lone -- then a word
+argv: ct "ci" "exec" "--" "w" "cmd"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option ''\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 342: --=v
+argv: ct "ci" "exec" "--=v" "cmd"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option ''\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 343: extra positional
+argv: ct "ci" "exec" "cmd" "extra1" "extra2" "extra3" "extra4" "extra5"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = exec
+  ciExecMonitorProcesses = false
+  ciExecRecord = false
+  ciExecProgram = "cmd"
+  ciExecArgs = @["extra1", "extra2", "extra3", "extra4", "extra5"]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 344: global --cwd after the command
+argv: ct "ci" "exec" "--cwd" "/w" "cmd"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = some("/w")
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = exec
+  ciExecMonitorProcesses = false
+  ciExecRecord = false
+  ciExecProgram = "cmd"
+  ciExecArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 345: global --new-tab after the command
+argv: ct "ci" "exec" "--new-tab" "cmd"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = true
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = exec
+  ciExecMonitorProcesses = false
+  ciExecRecord = false
+  ciExecProgram = "cmd"
+  ciExecArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 346: --version after the command
+argv: ct "ci" "exec" "--version" "cmd"
+env: (none)
+exit: 0
+--- stdout
+CodeTracer version: <VERSION>
+\e[0m
+(no newline at end of stdout)
+--- stderr
+--- end
+
+### 347: -h after the command
+argv: ct "ci" "exec" "-h" "cmd"
+env: (none)
+exit: 0
+--- stdout
+<the short help page clispec renders for this request: ct ci exec>
+--- stderr
+--- end
+
+### 348: finish bare
+argv: ct "ci" "finish"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = finish
+  ciFinishStatus = none
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 349: --status <v>
+argv: ct "ci" "finish" "--status" "passed"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = finish
+  ciFinishStatus = some("passed")
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 350: --status=<v>
+argv: ct "ci" "finish" "--status=passed"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = finish
+  ciFinishStatus = some("passed")
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 351: --status:<v>
+argv: ct "ci" "finish" "--status:passed"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = finish
+  ciFinishStatus = some("passed")
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 352: --status passed
+argv: ct "ci" "finish" "--status" "passed"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = finish
+  ciFinishStatus = some("passed")
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 353: --status=passed
+argv: ct "ci" "finish" "--status=passed"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = finish
+  ciFinishStatus = some("passed")
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 354: --status failed
+argv: ct "ci" "finish" "--status" "failed"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = finish
+  ciFinishStatus = some("failed")
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 355: --status=failed
+argv: ct "ci" "finish" "--status=failed"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = finish
+  ciFinishStatus = some("failed")
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 356: --status empty
+argv: ct "ci" "finish" "--status" ""
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = finish
+  ciFinishStatus = some("")
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 357: --status= (empty)
+argv: ct "ci" "finish" "--status="
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = finish
+  ciFinishStatus = some("")
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 358: --status= <v> (next word)
+argv: ct "ci" "finish" "--status=" "passed"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = finish
+  ciFinishStatus = some("passed")
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 359: --status -x (value starts with -)
+argv: ct "ci" "finish" "--status" "-x"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = finish
+  ciFinishStatus = some("-x")
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 360: --status --x (value starts with --)
+argv: ct "ci" "finish" "--status" "--x"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = finish
+  ciFinishStatus = some("--x")
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 361: --status --new-tab <v> (an option between it and its value)
+argv: ct "ci" "finish" "--status" "--new-tab" "passed"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The subcommand 'finish' does not accept arguments\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 362: --status repeated, last wins
+argv: ct "ci" "finish" "--status" "passed" "--status" "failed"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = finish
+  ciFinishStatus = some("failed")
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 363: --status missing value (last)
+argv: ct "ci" "finish" "--status"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The option '\e[34m--status\e[0m' requires a value\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 364: --STATUS <v> (style variant)
+argv: ct "ci" "finish" "--STATUS" "passed"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = finish
+  ciFinishStatus = some("passed")
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 365: --s_tatus <v> (style variant)
+argv: ct "ci" "finish" "--s_tatus" "passed"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = finish
+  ciFinishStatus = some("passed")
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 366: unknown long option
+argv: ct "ci" "finish" "--bogus"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'bogus'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 367: unknown long option with value
+argv: ct "ci" "finish" "--bogus=1"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'bogus'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 368: unknown short option
+argv: ct "ci" "finish" "-Z"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'Z'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 369: lone -
+argv: ct "ci" "finish" "-"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option ''\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 370: lone -- then a word
+argv: ct "ci" "finish" "--" "w"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option ''\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 371: --=v
+argv: ct "ci" "finish" "--=v"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option ''\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 372: extra positional
+argv: ct "ci" "finish" "extra1" "extra2" "extra3" "extra4" "extra5"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The subcommand 'finish' does not accept arguments\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 373: global --cwd after the command
+argv: ct "ci" "finish" "--cwd" "/w"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = some("/w")
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = finish
+  ciFinishStatus = none
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 374: global --new-tab after the command
+argv: ct "ci" "finish" "--new-tab"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = true
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = finish
+  ciFinishStatus = none
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 375: --version after the command
+argv: ct "ci" "finish" "--version"
+env: (none)
+exit: 0
+--- stdout
+CodeTracer version: <VERSION>
+\e[0m
+(no newline at end of stdout)
+--- stderr
+--- end
+
+### 376: -h after the command
+argv: ct "ci" "finish" "-h"
+env: (none)
+exit: 0
+--- stdout
+<the short help page clispec renders for this request: ct ci finish>
+--- stderr
+--- end
+
+### 377: log no message
+argv: ct "ci" "log"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The required option 'ciLogMessage' was not specified\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 378: log message
+argv: ct "ci" "log" "hello"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = log
+  ciLogMessage = "hello"
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 379: log two words
+argv: ct "ci" "log" "a" "b"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The subcommand 'log' does not accept additional arguments\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 380: env <APP>_CICOMMAND=status
+argv: ct "ci"
+env: <APP>_CICOMMAND="status"
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = noCommand
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 381: env <APP>_LABEL
+argv: ct "ci" "start"
+env: <APP>_LABEL="envlabel"
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = start
+  ciStartRepo = none
+  ciStartCommit = none
+  ciStartBranch = none
+  ciStartBaseCommit = none
+  ciStartLabel = some("envlabel")
+  ciStartMonitorProcesses = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 382: env CODETRACER_TOKEN (read later, not by the loader)
+argv: ct "ci" "status"
+env: CODETRACER_TOKEN="t"
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = status
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 383: unknown long option
+argv: ct "ci" "--bogus"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'bogus'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 384: unknown long option with value
+argv: ct "ci" "--bogus=1"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'bogus'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 385: unknown short option
+argv: ct "ci" "-Z"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'Z'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 386: lone -
+argv: ct "ci" "-"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option ''\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 387: lone -- then a word
+argv: ct "ci" "--" "w"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option ''\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 388: --=v
+argv: ct "ci" "--=v"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option ''\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 389: extra positional
+argv: ct "ci" "extra1" "extra2" "extra3" "extra4" "extra5"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The subcommand 'ci' does not accept arguments\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 390: global --cwd after the command
+argv: ct "ci" "--cwd" "/w"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = some("/w")
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = noCommand
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 391: global --new-tab after the command
+argv: ct "ci" "--new-tab"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = true
+  newWindow = false
+  cmd = ci
+  ciToken = none
+  ciBaseUrl = none
+  ciCommand = noCommand
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 392: --version after the command
+argv: ct "ci" "--version"
+env: (none)
+exit: 0
+--- stdout
+CodeTracer version: <VERSION>
+\e[0m
+(no newline at end of stdout)
+--- stderr
+--- end
+
+### 393: -h after the command
+argv: ct "ci" "-h"
+env: (none)
+exit: 0
+--- stdout
+<the short help page clispec renders for this request: ct ci>
+--- stderr
+--- end

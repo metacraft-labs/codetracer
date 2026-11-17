@@ -15,7 +15,14 @@
 ##     one creates the empty file on disk, lists it and opens it; Rename
 ##     renames the file on disk; Delete asks first — Escape keeps the file,
 ##     Enter moves it into the trash (a directory of this suite's, through
-##     `XDG_DATA_HOME`); Enter on a row opens it in the editor.
+##     `XDG_DATA_HOME`); Enter on a row opens it in the editor;
+##   * M102 (codetracer#877): opening a file from Files SHOWS it
+##     (Filesystem-Pane.md § "Opening a file": *"its tab is the one on
+##     screen"*). With the editor's tab Closed from its tab menu, a press on a
+##     row and the menu's Edit each put the editor back in the arrangement,
+##     focused, painting the file; with the editor behind another tab of its
+##     stack, Enter on a row brings its tab to the front. (The replay arm,
+##     which the host's session opens, is in `test_recording_file_tree.nim`.)
 ##
 ## No mocks. The product's runtime and its own host wiring for the disk
 ## (`native_file_tree.wireNativeFileOperations`, the closure `main.nim`
@@ -26,21 +33,24 @@
 ## `app/tests/` because it links the disk half, which a declared SDK consumer
 ## may not import. Every claim about a file is read back from the disk.
 
-import std/[algorithm, os, strutils, tempfiles, unittest]
+import std/[algorithm, options, os, strutils, tempfiles, unicode, unittest]
 
 import codetracer_embed
 import headless_app/file_tree_menu
+import headless_app/layout_model
 import host/native_file_tree
 
 import ../app/edit_binding
 import ../app/runtime
+import ../app/layout/binding
+import ../app/layout/cells
 import ../app/theme/capabilities
 import ../app/views/file_tree
 import ../app/views/shell
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count.
-const ExpectedAssertions = 78
+const ExpectedAssertions = 106
 
 var countedAssertions = 0
 
@@ -122,6 +132,62 @@ proc typeText(rt: TuiRuntime; text: string) =
 proc clearPrompt(rt: TuiRuntime) =
   while rt.prompt.buffer.len > 0:
     discard rt.handleToken("\x7f", 0)
+
+proc regionOf(rt: TuiRuntime; pane: PaneKind): (bool, PaneRegion) =
+  ## The projected region `pane` is drawn in — present only when the
+  ## arrangement places it AND its tab is the active one of its stack.
+  for r in rt.layoutGeometry().projection.regions:
+    if r.pane == pane and not r.area.isEmptyArea:
+      return (true, r)
+  (false, PaneRegion())
+
+proc closeTab(rt: TuiRuntime; pane: PaneKind) =
+  ## The tab menu's Close on `pane`'s tab, as a user chooses it: a
+  ## right-click on the tab (`headless_app/pane_clicks.tabContextMenu`),
+  ## Down to Close, Enter.
+  let (shown, region) = rt.regionOf(pane)
+  require shown
+  let label = if region.tabs.len > 0 and region.activeTab >= 0:
+                region.tabs[region.activeTab]
+              else: terminalPaneName(pane)
+  let line = rt.shellScreenOf().rows[region.area.row].toRunes
+  let want = label.toRunes
+  var col = -1
+  for c in region.area.col .. line.len - want.len:
+    if line[c ..< c + want.len] == want:
+      col = c
+      break
+  if col < 0:
+    # Edit mode's editor is a bare pane whose strip names its buffers, not
+    # the pane: the strip is its one-tab header (`tabStripOf`), and a
+    # right-click anywhere on it is a right-click on the pane's tab.
+    col = region.area.col
+  discard rt.handleToken(sgr(2, region.area.row, col + 1, true), 0)
+  discard rt.handleToken(sgr(2, region.area.row, col + 1, false), 0)
+  require rt.app.contextMenu.open
+  let at = rt.app.contextMenu.menu.labels.find("Close")
+  require at >= 0
+  while rt.app.contextMenu.selected < at:
+    discard rt.handleToken("\x1b[B", 0)
+  discard rt.handleToken("\r", 0)
+
+proc editorPaints(rt: TuiRuntime; text: string): bool =
+  ## Whether the editor's region, on the frame, shows `text`.
+  let (shown, region) = rt.regionOf(paneEditor)
+  if not shown:
+    return false
+  let rows = rt.shellScreenOf().rows
+  for r in region.area.row ..< region.area.row + region.area.height:
+    let line = rows[r].toRunes
+    let last = min(line.len, region.area.col + region.area.width)
+    if region.area.col < last and
+       ($line[region.area.col ..< last]).contains(text):
+      return true
+  false
+
+proc focusedOn(rt: TuiRuntime; pane: PaneKind): bool =
+  let (had, focused) = rt.focus.focusedPane()
+  had and focused == pane
 
 suite "K19 in the terminal: a replay's tree":
 
@@ -248,6 +314,13 @@ suite "K19 in the terminal: Edit mode acts on the disk":
   test "Delete asks first: Escape keeps the file, Enter moves it to the trash":
     let root = project()
     let data = createTempDir("ct-files-menu-tui-data-", "")
+    # ct-home-sweep: not codetracer state. XDG_DATA_HOME is redirected only to
+    # aim the freedesktop.org trash (`$XDG_DATA_HOME/Trash`, which
+    # `native_file_tree.homeTrashDir` resolves) at this suite's directory, in
+    # this process. The trash is the desktop's, shared with every file
+    # manager, and CODETRACER_HOME does not move it by design; CodeTracer's own
+    # state is already in the scratch CODETRACER_HOME every test program gets
+    # (test_support/state_isolation.nim).
     let saved = getEnv("XDG_DATA_HOME")
     putEnv("XDG_DATA_HOME", data)
     let rt = editRuntime(root)
@@ -287,6 +360,9 @@ suite "K19 in the terminal: Edit mode acts on the disk":
     discard rt.runNamedOperation("list.activate", "", 0)
     ck rt.app.editSession.activeBuffer().path == "src/main.py"
     ck rt.app.fileTree.openPath == "src/main.py"
+    # M102: the opened file's editor took the focus; back to Files.
+    ck rt.focusedOn(paneEditor)
+    ck rt.focusHostedPane(paneFileTree)
     discard rt.runNamedOperation("list.focus-first", "", 0)
     discard rt.runNamedOperation("context-menu.open", "", 0)
     discard rt.runNamedOperation("context-menu.focus-last", "", 0)
@@ -294,6 +370,68 @@ suite "K19 in the terminal: Edit mode acts on the disk":
       "Edit"
     discard rt.runNamedOperation("context-menu.accept", "", 0)
     ck rt.app.editSession.activeBuffer().path == "a.txt"
+    removeDir(root)
+
+suite "M102 (#877): a file opened from Files is shown in the editor":
+
+  test "the editor's tab Closed: a press on a row brings it back":
+    let root = project()
+    let rt = editRuntime(root)
+    ck rt.regionOf(paneEditor)[0]
+    rt.closeTab(paneEditor)
+    ck not rt.app.layoutBinding.layout.tree.contains(paneEditor)
+    ck not rt.regionOf(paneEditor)[0]
+    # A press on `src/main.py`'s row.
+    let (r, c) = rt.filesRowOf("src/main.py")
+    ck r > 0
+    discard rt.handleToken(sgr(0, r, c + 1, true), 0)
+    discard rt.handleToken(sgr(0, r, c + 1, false), 0)
+    ck rt.app.editSession.activeBuffer().path == "src/main.py"
+    ck rt.app.layoutBinding.layout.tree.contains(paneEditor)
+    ck rt.editorPaints("print(1)")
+    ck rt.focusedOn(paneEditor)
+    ck rt.statusRow.contains("editing src/main.py")
+    removeDir(root)
+
+  test "the editor's tab Closed: the Files menu's Edit brings it back":
+    let root = project()
+    let rt = editRuntime(root)
+    rt.closeTab(paneEditor)
+    ck not rt.app.layoutBinding.layout.tree.contains(paneEditor)
+    ck rt.focusHostedPane(paneFileTree)
+    discard rt.runNamedOperation("list.focus-last", "", 0)
+    discard rt.runNamedOperation("context-menu.open", "", 0)
+    discard rt.runNamedOperation("context-menu.focus-last", "", 0)
+    ck rt.app.contextMenu.menu.entries[rt.app.contextMenu.selected].label ==
+      "Edit"
+    discard rt.runNamedOperation("context-menu.accept", "", 0)
+    ck rt.app.editSession.activeBuffer().path == "src/main.py"
+    ck rt.app.layoutBinding.layout.tree.contains(paneEditor)
+    ck rt.editorPaints("print(1)")
+    ck rt.focusedOn(paneEditor)
+    removeDir(root)
+
+  test "the editor behind another tab of its stack: Enter brings it forward":
+    let root = project()
+    let rt = editRuntime(root)
+    let b = rt.app.layoutBinding
+    # VCS moved into the editor's region as a tab of its stack, in front of
+    # it (a tab dropped onto a pane's strip).
+    ck b.dispatch(cmdMergeIntoStack(paneVcs, beside = paneEditor)).status ==
+      lasApplied
+    discard rt.focusHostedPane(paneFileTree)
+    ck b.layout.tree.contains(paneEditor)
+    ck not rt.regionOf(paneEditor)[0]
+    ck rt.regionOf(paneVcs)[0]
+    discard rt.runNamedOperation("list.focus-last", "", 0)
+    discard rt.runNamedOperation("list.activate", "", 0)
+    ck rt.app.editSession.activeBuffer().path == "src/main.py"
+    ck rt.regionOf(paneEditor)[0]
+    ck rt.editorPaints("print(1)")
+    ck rt.focusedOn(paneEditor)
+    # The tab beside it is still placed, only behind.
+    ck b.layout.tree.contains(paneVcs)
+    ck not rt.regionOf(paneVcs)[0]
     removeDir(root)
 
 suite "K19 in the terminal: assertion count":

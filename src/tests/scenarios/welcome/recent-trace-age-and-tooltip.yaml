@@ -1,0 +1,21 @@
+scenario: 1
+name: welcome/recent-trace-age-and-tooltip
+pack: codetracer
+summary: >-
+  A recording an earlier session opened is listed under Recent traces with
+  how long ago it was made; its tooltip is hidden until the pointer rests on
+  the entry, and then shows.
+
+stage:
+  - use: record-program
+    with: { program: py_console_logs/main.py }
+  - use: known-recording
+  - use: open-welcome
+
+steps:
+  - wait: { until: { at: welcome, present: true }, timeout: 60s }
+  - wait: { until: settled, timeout: 30s }
+  - wait: { until: { at: 'welcome/recent[kind="trace"]', present: true }, timeout: 30s }
+  - expect: { at: 'welcome/recent[kind="trace"]', detail: { matches: "ago|now|sec|min" }, tooltip-shown: false }
+  - hover: { at: 'welcome/recent[kind="trace"]', for: 700ms }
+  - wait: { until: { at: 'welcome/recent[kind="trace"]', tooltip-shown: true }, timeout: 10s }

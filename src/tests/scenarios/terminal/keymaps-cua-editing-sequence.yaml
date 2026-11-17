@@ -1,0 +1,30 @@
+scenario: 1
+name: terminal/keymaps-cua-editing-sequence
+pack: codetracer
+summary: >-
+  Under CUA in Edit mode: typing at the start, Shift+Right ×3 selecting
+  `alp`, Ctrl+C, End, Ctrl+V pasting it, Ctrl+Z undoing the paste and Ctrl+Y
+  redoing it gives `xyalphaalp`; Ctrl+S writes the file.
+stage:
+  - use: write-project
+    with: { files: { doc.txt: "alpha\n    beta\ngamma\n" } }
+  - use: open-project
+    with: { folder: $project, file: doc.txt, width: 160, height: 40 }
+steps:
+  - wait: { until: ready, timeout: 60s }
+  - wait: { until: { at: 'editor[file="doc.txt"]', assert: 'shows-text("alpha")' }, timeout: 20s }
+  - type: "xy"
+  - chord: Shift+Right
+  - chord: Shift+Right
+  - chord: Shift+Right
+  - chord: Ctrl+C
+  - key: End
+  - chord: Ctrl+V
+  - wait: { until: { at: 'editor[file="doc.txt"]/line[number="1"]', text: "xyalphaalp" }, timeout: 10s }
+  - chord: Ctrl+Z
+  - wait: { until: { at: 'editor[file="doc.txt"]/line[number="1"]', text: "xyalpha" }, timeout: 10s }
+  - chord: Ctrl+Y
+  - wait: { until: { at: 'editor[file="doc.txt"]/line[number="1"]', text: "xyalphaalp" }, timeout: 10s }
+  - expect: { at: 'editor[file="doc.txt"]/line[number="2"]', text: "    beta" }
+  - chord: Ctrl+S
+  - wait: { until: { at: status-line, assert: 'says("wrote doc.txt")' }, timeout: 10s }

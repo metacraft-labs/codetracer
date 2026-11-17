@@ -1,0 +1,23 @@
+scenario: 1
+name: noir-space-ship/call-argument-to-scratchpad
+pack: codetracer
+summary: >-
+  A call-trace argument's "Add value to scratchpad" adds it to the
+  scratchpad with the value the call received.
+
+stage:
+  - use: record-program
+    with: { program: noir_space_ship }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 180s }
+  - click: 'pane-tab[label="CALLTRACE"]'
+  - wait: { until: call-trace.loaded, timeout: 60s }
+  - wait: { until: { at: 'call-trace/call[name="main"]/call-argument[name="initial_shield"]', present: true }, timeout: 60s }
+  - click: { at: 'call-trace/call[name="main"]/call-argument[name="initial_shield"]', button: right }
+  - wait: { until: { at: 'context-menu/menu-item[label="Add value to scratchpad"]', present: true }, timeout: 30s }
+  - click: 'context-menu/menu-item[label="Add value to scratchpad"]'
+  - click: 'pane-tab[label="SCRATCHPAD"]'
+  - wait: { until: { at: 'scratchpad/scratch-entry[expression="initial_shield"]', present: true }, timeout: 30s }
+  - expect: { at: 'scratchpad/scratch-entry[expression="initial_shield"]', value: { matches: "[0-9]" } }

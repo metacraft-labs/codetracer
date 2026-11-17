@@ -1,0 +1,3596 @@
+# ct replay: 146 argv cases through ct's loader (the parse probe)
+
+### 1: bare
+argv: ct "replay"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = replay
+  replayRecordingId = none
+  replayTraceFolder = none
+  lastTraceMatchingPattern = none
+  replayInteractive = none
+  replayThreadSyncOrder = none
+  replayOsSimulation = none
+  replayFollowRequestSpans = none
+VALIDATED replayInteractive = true
+--- stderr
+--- end
+
+### 2: pattern
+argv: ct "replay" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = replay
+  replayRecordingId = none
+  replayTraceFolder = none
+  lastTraceMatchingPattern = some("prog")
+  replayInteractive = none
+  replayThreadSyncOrder = none
+  replayOsSimulation = none
+  replayFollowRequestSpans = none
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 3: two patterns
+argv: ct "replay" "a" "b"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The subcommand 'replay' does not accept additional arguments\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 4: --id <v>
+argv: ct "replay" "--id" "0190d7a0"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = replay
+  replayRecordingId = some("0190d7a0")
+  replayTraceFolder = none
+  lastTraceMatchingPattern = none
+  replayInteractive = none
+  replayThreadSyncOrder = none
+  replayOsSimulation = none
+  replayFollowRequestSpans = none
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 5: --id=<v>
+argv: ct "replay" "--id=0190d7a0"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = replay
+  replayRecordingId = some("0190d7a0")
+  replayTraceFolder = none
+  lastTraceMatchingPattern = none
+  replayInteractive = none
+  replayThreadSyncOrder = none
+  replayOsSimulation = none
+  replayFollowRequestSpans = none
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 6: --id:<v>
+argv: ct "replay" "--id:0190d7a0"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = replay
+  replayRecordingId = some("0190d7a0")
+  replayTraceFolder = none
+  lastTraceMatchingPattern = none
+  replayInteractive = none
+  replayThreadSyncOrder = none
+  replayOsSimulation = none
+  replayFollowRequestSpans = none
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 7: --id 0190d7a0
+argv: ct "replay" "--id" "0190d7a0"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = replay
+  replayRecordingId = some("0190d7a0")
+  replayTraceFolder = none
+  lastTraceMatchingPattern = none
+  replayInteractive = none
+  replayThreadSyncOrder = none
+  replayOsSimulation = none
+  replayFollowRequestSpans = none
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 8: --id=0190d7a0
+argv: ct "replay" "--id=0190d7a0"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = replay
+  replayRecordingId = some("0190d7a0")
+  replayTraceFolder = none
+  lastTraceMatchingPattern = none
+  replayInteractive = none
+  replayThreadSyncOrder = none
+  replayOsSimulation = none
+  replayFollowRequestSpans = none
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 9: --id 0190d7a0-1234-7abc-8def-0123456789ab
+argv: ct "replay" "--id" "0190d7a0-1234-7abc-8def-0123456789ab"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = replay
+  replayRecordingId = some("0190d7a0-1234-7abc-8def-0123456789ab")
+  replayTraceFolder = none
+  lastTraceMatchingPattern = none
+  replayInteractive = none
+  replayThreadSyncOrder = none
+  replayOsSimulation = none
+  replayFollowRequestSpans = none
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 10: --id=0190d7a0-1234-7abc-8def-0123456789ab
+argv: ct "replay" "--id=0190d7a0-1234-7abc-8def-0123456789ab"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = replay
+  replayRecordingId = some("0190d7a0-1234-7abc-8def-0123456789ab")
+  replayTraceFolder = none
+  lastTraceMatchingPattern = none
+  replayInteractive = none
+  replayThreadSyncOrder = none
+  replayOsSimulation = none
+  replayFollowRequestSpans = none
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 11: --id empty
+argv: ct "replay" "--id" ""
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = replay
+  replayRecordingId = some("")
+  replayTraceFolder = none
+  lastTraceMatchingPattern = none
+  replayInteractive = none
+  replayThreadSyncOrder = none
+  replayOsSimulation = none
+  replayFollowRequestSpans = none
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 12: --id= (empty)
+argv: ct "replay" "--id="
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = replay
+  replayRecordingId = some("")
+  replayTraceFolder = none
+  lastTraceMatchingPattern = none
+  replayInteractive = none
+  replayThreadSyncOrder = none
+  replayOsSimulation = none
+  replayFollowRequestSpans = none
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 13: --id= <v> (next word)
+argv: ct "replay" "--id=" "0190d7a0"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = replay
+  replayRecordingId = some("0190d7a0")
+  replayTraceFolder = none
+  lastTraceMatchingPattern = none
+  replayInteractive = none
+  replayThreadSyncOrder = none
+  replayOsSimulation = none
+  replayFollowRequestSpans = none
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 14: --id -x (value starts with -)
+argv: ct "replay" "--id" "-x"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = replay
+  replayRecordingId = some("-x")
+  replayTraceFolder = none
+  lastTraceMatchingPattern = none
+  replayInteractive = none
+  replayThreadSyncOrder = none
+  replayOsSimulation = none
+  replayFollowRequestSpans = none
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 15: --id --x (value starts with --)
+argv: ct "replay" "--id" "--x"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = replay
+  replayRecordingId = some("--x")
+  replayTraceFolder = none
+  lastTraceMatchingPattern = none
+  replayInteractive = none
+  replayThreadSyncOrder = none
+  replayOsSimulation = none
+  replayFollowRequestSpans = none
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 16: --id --new-tab <v> (an option between it and its value)
+argv: ct "replay" "--id" "--new-tab" "0190d7a0"
+env: (none)
+exit: 1
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = replay
+  replayRecordingId = some("--new-tab")
+  replayTraceFolder = none
+  lastTraceMatchingPattern = some("0190d7a0")
+  replayInteractive = none
+  replayThreadSyncOrder = none
+  replayOsSimulation = none
+  replayFollowRequestSpans = none
+configuration error: expected no more than one arg to command to be passed
+Try `ct --help` for more information
+--- stderr
+--- end
+
+### 17: --id repeated, last wins
+argv: ct "replay" "--id" "0190d7a0" "--id" "0190d7a0-1234-7abc-8def-0123456789ab"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = replay
+  replayRecordingId = some("0190d7a0-1234-7abc-8def-0123456789ab")
+  replayTraceFolder = none
+  lastTraceMatchingPattern = none
+  replayInteractive = none
+  replayThreadSyncOrder = none
+  replayOsSimulation = none
+  replayFollowRequestSpans = none
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 18: --id missing value (last)
+argv: ct "replay" "--id"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The option '\e[34m--id\e[0m' requires a value\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 19: --ID <v> (style variant)
+argv: ct "replay" "--ID" "0190d7a0"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = replay
+  replayRecordingId = some("0190d7a0")
+  replayTraceFolder = none
+  lastTraceMatchingPattern = none
+  replayInteractive = none
+  replayThreadSyncOrder = none
+  replayOsSimulation = none
+  replayFollowRequestSpans = none
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 20: --i_d <v> (style variant)
+argv: ct "replay" "--i_d" "0190d7a0"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = replay
+  replayRecordingId = some("0190d7a0")
+  replayTraceFolder = none
+  lastTraceMatchingPattern = none
+  replayInteractive = none
+  replayThreadSyncOrder = none
+  replayOsSimulation = none
+  replayFollowRequestSpans = none
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 21: --trace-folder <v>
+argv: ct "replay" "--trace-folder" "/tr"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = replay
+  replayRecordingId = none
+  replayTraceFolder = some("/tr")
+  lastTraceMatchingPattern = none
+  replayInteractive = none
+  replayThreadSyncOrder = none
+  replayOsSimulation = none
+  replayFollowRequestSpans = none
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 22: --trace-folder=<v>
+argv: ct "replay" "--trace-folder=/tr"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = replay
+  replayRecordingId = none
+  replayTraceFolder = some("/tr")
+  lastTraceMatchingPattern = none
+  replayInteractive = none
+  replayThreadSyncOrder = none
+  replayOsSimulation = none
+  replayFollowRequestSpans = none
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 23: --trace-folder:<v>
+argv: ct "replay" "--trace-folder:/tr"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = replay
+  replayRecordingId = none
+  replayTraceFolder = some("/tr")
+  lastTraceMatchingPattern = none
+  replayInteractive = none
+  replayThreadSyncOrder = none
+  replayOsSimulation = none
+  replayFollowRequestSpans = none
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 24: -t <v>
+argv: ct "replay" "-t" "/tr"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = replay
+  replayRecordingId = none
+  replayTraceFolder = some("/tr")
+  lastTraceMatchingPattern = none
+  replayInteractive = none
+  replayThreadSyncOrder = none
+  replayOsSimulation = none
+  replayFollowRequestSpans = none
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 25: -t=<v>
+argv: ct "replay" "-t=/tr"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = replay
+  replayRecordingId = none
+  replayTraceFolder = some("/tr")
+  lastTraceMatchingPattern = none
+  replayInteractive = none
+  replayThreadSyncOrder = none
+  replayOsSimulation = none
+  replayFollowRequestSpans = none
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 26: -t:<v>
+argv: ct "replay" "-t:/tr"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = replay
+  replayRecordingId = none
+  replayTraceFolder = some("/tr")
+  lastTraceMatchingPattern = none
+  replayInteractive = none
+  replayThreadSyncOrder = none
+  replayOsSimulation = none
+  replayFollowRequestSpans = none
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 27: -t<v> (attached)
+argv: ct "replay" "-t/tr"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = replay
+  replayRecordingId = none
+  replayTraceFolder = some("/tr")
+  lastTraceMatchingPattern = none
+  replayInteractive = none
+  replayThreadSyncOrder = none
+  replayOsSimulation = none
+  replayFollowRequestSpans = none
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 28: -T <v> (other case)
+argv: ct "replay" "-T" "/tr"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'T'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 29: --t <v> (the letter as a long option)
+argv: ct "replay" "--t" "/tr"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = replay
+  replayRecordingId = none
+  replayTraceFolder = some("/tr")
+  lastTraceMatchingPattern = none
+  replayInteractive = none
+  replayThreadSyncOrder = none
+  replayOsSimulation = none
+  replayFollowRequestSpans = none
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 30: --trace-folder /tr
+argv: ct "replay" "--trace-folder" "/tr"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = replay
+  replayRecordingId = none
+  replayTraceFolder = some("/tr")
+  lastTraceMatchingPattern = none
+  replayInteractive = none
+  replayThreadSyncOrder = none
+  replayOsSimulation = none
+  replayFollowRequestSpans = none
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 31: --trace-folder=/tr
+argv: ct "replay" "--trace-folder=/tr"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = replay
+  replayRecordingId = none
+  replayTraceFolder = some("/tr")
+  lastTraceMatchingPattern = none
+  replayInteractive = none
+  replayThreadSyncOrder = none
+  replayOsSimulation = none
+  replayFollowRequestSpans = none
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 32: --trace-folder rel
+argv: ct "replay" "--trace-folder" "rel"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = replay
+  replayRecordingId = none
+  replayTraceFolder = some("rel")
+  lastTraceMatchingPattern = none
+  replayInteractive = none
+  replayThreadSyncOrder = none
+  replayOsSimulation = none
+  replayFollowRequestSpans = none
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 33: --trace-folder=rel
+argv: ct "replay" "--trace-folder=rel"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = replay
+  replayRecordingId = none
+  replayTraceFolder = some("rel")
+  lastTraceMatchingPattern = none
+  replayInteractive = none
+  replayThreadSyncOrder = none
+  replayOsSimulation = none
+  replayFollowRequestSpans = none
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 34: --trace-folder empty
+argv: ct "replay" "--trace-folder" ""
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = replay
+  replayRecordingId = none
+  replayTraceFolder = some("")
+  lastTraceMatchingPattern = none
+  replayInteractive = none
+  replayThreadSyncOrder = none
+  replayOsSimulation = none
+  replayFollowRequestSpans = none
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 35: --trace-folder= (empty)
+argv: ct "replay" "--trace-folder="
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = replay
+  replayRecordingId = none
+  replayTraceFolder = some("")
+  lastTraceMatchingPattern = none
+  replayInteractive = none
+  replayThreadSyncOrder = none
+  replayOsSimulation = none
+  replayFollowRequestSpans = none
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 36: --trace-folder= <v> (next word)
+argv: ct "replay" "--trace-folder=" "/tr"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = replay
+  replayRecordingId = none
+  replayTraceFolder = some("/tr")
+  lastTraceMatchingPattern = none
+  replayInteractive = none
+  replayThreadSyncOrder = none
+  replayOsSimulation = none
+  replayFollowRequestSpans = none
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 37: --trace-folder -x (value starts with -)
+argv: ct "replay" "--trace-folder" "-x"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = replay
+  replayRecordingId = none
+  replayTraceFolder = some("-x")
+  lastTraceMatchingPattern = none
+  replayInteractive = none
+  replayThreadSyncOrder = none
+  replayOsSimulation = none
+  replayFollowRequestSpans = none
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 38: --trace-folder --x (value starts with --)
+argv: ct "replay" "--trace-folder" "--x"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = replay
+  replayRecordingId = none
+  replayTraceFolder = some("--x")
+  lastTraceMatchingPattern = none
+  replayInteractive = none
+  replayThreadSyncOrder = none
+  replayOsSimulation = none
+  replayFollowRequestSpans = none
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 39: --trace-folder --new-tab <v> (an option between it and its value)
+argv: ct "replay" "--trace-folder" "--new-tab" "/tr"
+env: (none)
+exit: 1
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = replay
+  replayRecordingId = none
+  replayTraceFolder = some("--new-tab")
+  lastTraceMatchingPattern = some("/tr")
+  replayInteractive = none
+  replayThreadSyncOrder = none
+  replayOsSimulation = none
+  replayFollowRequestSpans = none
+configuration error: expected no more than one arg to command to be passed
+Try `ct --help` for more information
+--- stderr
+--- end
+
+### 40: --trace-folder repeated, last wins
+argv: ct "replay" "--trace-folder" "/tr" "--trace-folder" "rel"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = replay
+  replayRecordingId = none
+  replayTraceFolder = some("rel")
+  lastTraceMatchingPattern = none
+  replayInteractive = none
+  replayThreadSyncOrder = none
+  replayOsSimulation = none
+  replayFollowRequestSpans = none
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 41: --trace-folder missing value (last)
+argv: ct "replay" "--trace-folder"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The option '\e[34m--trace-folder\e[0m' requires a value\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 42: --TRACE-FOLDER <v> (style variant)
+argv: ct "replay" "--TRACE-FOLDER" "/tr"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = replay
+  replayRecordingId = none
+  replayTraceFolder = some("/tr")
+  lastTraceMatchingPattern = none
+  replayInteractive = none
+  replayThreadSyncOrder = none
+  replayOsSimulation = none
+  replayFollowRequestSpans = none
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 43: --t_race-folder <v> (style variant)
+argv: ct "replay" "--t_race-folder" "/tr"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = replay
+  replayRecordingId = none
+  replayTraceFolder = some("/tr")
+  lastTraceMatchingPattern = none
+  replayInteractive = none
+  replayThreadSyncOrder = none
+  replayOsSimulation = none
+  replayFollowRequestSpans = none
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 44: --trace_folder <v> (style variant)
+argv: ct "replay" "--trace_folder" "/tr"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'trace_folder'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 45: --tracefolder <v> (style variant)
+argv: ct "replay" "--tracefolder" "/tr"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'tracefolder'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 46: --interactive (last)
+argv: ct "replay" "--interactive"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = replay
+  replayRecordingId = none
+  replayTraceFolder = none
+  lastTraceMatchingPattern = none
+  replayInteractive = some(true)
+  replayThreadSyncOrder = none
+  replayOsSimulation = none
+  replayFollowRequestSpans = none
+VALIDATED replayInteractive = true
+--- stderr
+--- end
+
+### 47: --interactive true
+argv: ct "replay" "--interactive" "true"
+env: (none)
+exit: 1
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = replay
+  replayRecordingId = none
+  replayTraceFolder = none
+  lastTraceMatchingPattern = some("true")
+  replayInteractive = some(true)
+  replayThreadSyncOrder = none
+  replayOsSimulation = none
+  replayFollowRequestSpans = none
+configuration error: expected no more than one arg to command to be passed
+Try `ct --help` for more information
+--- stderr
+--- end
+
+### 48: --interactive=false
+argv: ct "replay" "--interactive=false"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = replay
+  replayRecordingId = none
+  replayTraceFolder = none
+  lastTraceMatchingPattern = none
+  replayInteractive = some(false)
+  replayThreadSyncOrder = none
+  replayOsSimulation = none
+  replayFollowRequestSpans = none
+VALIDATED replayInteractive = true
+--- stderr
+--- end
+
+### 49: -i (last)
+argv: ct "replay" "-i"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = replay
+  replayRecordingId = none
+  replayTraceFolder = none
+  lastTraceMatchingPattern = none
+  replayInteractive = some(true)
+  replayThreadSyncOrder = none
+  replayOsSimulation = none
+  replayFollowRequestSpans = none
+VALIDATED replayInteractive = true
+--- stderr
+--- end
+
+### 50: -i true
+argv: ct "replay" "-i" "true"
+env: (none)
+exit: 1
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = replay
+  replayRecordingId = none
+  replayTraceFolder = none
+  lastTraceMatchingPattern = some("true")
+  replayInteractive = some(true)
+  replayThreadSyncOrder = none
+  replayOsSimulation = none
+  replayFollowRequestSpans = none
+configuration error: expected no more than one arg to command to be passed
+Try `ct --help` for more information
+--- stderr
+--- end
+
+### 51: -i=false
+argv: ct "replay" "-i=false"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = replay
+  replayRecordingId = none
+  replayTraceFolder = none
+  lastTraceMatchingPattern = none
+  replayInteractive = some(false)
+  replayThreadSyncOrder = none
+  replayOsSimulation = none
+  replayFollowRequestSpans = none
+VALIDATED replayInteractive = true
+--- stderr
+--- end
+
+### 52: --interactive=true
+argv: ct "replay" "--interactive=true"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = replay
+  replayRecordingId = none
+  replayTraceFolder = none
+  lastTraceMatchingPattern = none
+  replayInteractive = some(true)
+  replayThreadSyncOrder = none
+  replayOsSimulation = none
+  replayFollowRequestSpans = none
+VALIDATED replayInteractive = true
+--- stderr
+--- end
+
+### 53: --interactive=false
+argv: ct "replay" "--interactive=false"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = replay
+  replayRecordingId = none
+  replayTraceFolder = none
+  lastTraceMatchingPattern = none
+  replayInteractive = some(false)
+  replayThreadSyncOrder = none
+  replayOsSimulation = none
+  replayFollowRequestSpans = none
+VALIDATED replayInteractive = true
+--- stderr
+--- end
+
+### 54: --interactive=on
+argv: ct "replay" "--interactive=on"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = replay
+  replayRecordingId = none
+  replayTraceFolder = none
+  lastTraceMatchingPattern = none
+  replayInteractive = some(true)
+  replayThreadSyncOrder = none
+  replayOsSimulation = none
+  replayFollowRequestSpans = none
+VALIDATED replayInteractive = true
+--- stderr
+--- end
+
+### 55: --interactive=maybe
+argv: ct "replay" "--interactive=maybe"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Error while processing the \e[34minteractive=maybe\e[0m parameter: 'maybe' is not a valid boolean value. Supported values are on/off, yes/no, true/false or 1/0\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 56: --interactive=
+argv: ct "replay" "--interactive="
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = replay
+  replayRecordingId = none
+  replayTraceFolder = none
+  lastTraceMatchingPattern = none
+  replayInteractive = some(true)
+  replayThreadSyncOrder = none
+  replayOsSimulation = none
+  replayFollowRequestSpans = none
+VALIDATED replayInteractive = true
+--- stderr
+--- end
+
+### 57: --interactive <pattern> (next word)
+argv: ct "replay" "--interactive" "prog"
+env: (none)
+exit: 1
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = replay
+  replayRecordingId = none
+  replayTraceFolder = none
+  lastTraceMatchingPattern = some("prog")
+  replayInteractive = some(true)
+  replayThreadSyncOrder = none
+  replayOsSimulation = none
+  replayFollowRequestSpans = none
+configuration error: expected no more than one arg to command to be passed
+Try `ct --help` for more information
+--- stderr
+--- end
+
+### 58: --interactive --cwd=x (next word an option)
+argv: ct "replay" "--interactive" "--cwd=x"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = some("x")
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = replay
+  replayRecordingId = none
+  replayTraceFolder = none
+  lastTraceMatchingPattern = none
+  replayInteractive = some(true)
+  replayThreadSyncOrder = none
+  replayOsSimulation = none
+  replayFollowRequestSpans = none
+VALIDATED replayInteractive = true
+--- stderr
+--- end
+
+### 59: --no-interactive
+argv: ct "replay" "--no-interactive"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'no-interactive'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 60: --id and a pattern
+argv: ct "replay" "--id" "x" "prog"
+env: (none)
+exit: 1
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = replay
+  replayRecordingId = some("x")
+  replayTraceFolder = none
+  lastTraceMatchingPattern = some("prog")
+  replayInteractive = none
+  replayThreadSyncOrder = none
+  replayOsSimulation = none
+  replayFollowRequestSpans = none
+configuration error: expected no more than one arg to command to be passed
+Try `ct --help` for more information
+--- stderr
+--- end
+
+### 61: --id and -t
+argv: ct "replay" "--id" "x" "-t" "/tr"
+env: (none)
+exit: 1
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = replay
+  replayRecordingId = some("x")
+  replayTraceFolder = some("/tr")
+  lastTraceMatchingPattern = none
+  replayInteractive = none
+  replayThreadSyncOrder = none
+  replayOsSimulation = none
+  replayFollowRequestSpans = none
+configuration error: expected no more than one arg to command to be passed
+Try `ct --help` for more information
+--- stderr
+--- end
+
+### 62: -t and -i
+argv: ct "replay" "-t" "/tr" "-i" "true"
+env: (none)
+exit: 1
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = replay
+  replayRecordingId = none
+  replayTraceFolder = some("/tr")
+  lastTraceMatchingPattern = some("true")
+  replayInteractive = some(true)
+  replayThreadSyncOrder = none
+  replayOsSimulation = none
+  replayFollowRequestSpans = none
+configuration error: expected no more than one arg to command to be passed
+Try `ct --help` for more information
+--- stderr
+--- end
+
+### 63: pattern and -i false
+argv: ct "replay" "prog" "-i" "false"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The subcommand 'replay' does not accept additional arguments\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 64: -i false alone
+argv: ct "replay" "-i" "false"
+env: (none)
+exit: 1
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = replay
+  replayRecordingId = none
+  replayTraceFolder = none
+  lastTraceMatchingPattern = some("false")
+  replayInteractive = some(true)
+  replayThreadSyncOrder = none
+  replayOsSimulation = none
+  replayFollowRequestSpans = none
+configuration error: expected no more than one arg to command to be passed
+Try `ct --help` for more information
+--- stderr
+--- end
+
+### 65: -i true alone
+argv: ct "replay" "-i" "true"
+env: (none)
+exit: 1
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = replay
+  replayRecordingId = none
+  replayTraceFolder = none
+  lastTraceMatchingPattern = some("true")
+  replayInteractive = some(true)
+  replayThreadSyncOrder = none
+  replayOsSimulation = none
+  replayFollowRequestSpans = none
+configuration error: expected no more than one arg to command to be passed
+Try `ct --help` for more information
+--- stderr
+--- end
+
+### 66: -ti (cluster)
+argv: ct "replay" "-ti" "x"
+env: (none)
+exit: 1
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = replay
+  replayRecordingId = none
+  replayTraceFolder = some("i")
+  lastTraceMatchingPattern = some("x")
+  replayInteractive = none
+  replayThreadSyncOrder = none
+  replayOsSimulation = none
+  replayFollowRequestSpans = none
+configuration error: expected no more than one arg to command to be passed
+Try `ct --help` for more information
+--- stderr
+--- end
+
+### 67: env <APP>_ID
+argv: ct "replay"
+env: <APP>_ID="0190d7a0"
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = replay
+  replayRecordingId = some("0190d7a0")
+  replayTraceFolder = none
+  lastTraceMatchingPattern = none
+  replayInteractive = none
+  replayThreadSyncOrder = none
+  replayOsSimulation = none
+  replayFollowRequestSpans = none
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 68: env <APP>_INTERACTIVE=false
+argv: ct "replay"
+env: <APP>_INTERACTIVE="false"
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = replay
+  replayRecordingId = none
+  replayTraceFolder = none
+  lastTraceMatchingPattern = none
+  replayInteractive = some(false)
+  replayThreadSyncOrder = none
+  replayOsSimulation = none
+  replayFollowRequestSpans = none
+VALIDATED replayInteractive = true
+--- stderr
+--- end
+
+### 69: env <APP>_INTERACTIVE=maybe
+argv: ct "replay"
+env: <APP>_INTERACTIVE="maybe"
+exit: 1
+--- stdout
+--- stderr
+Error while processing the \e[34minteractive=maybe\e[0m parameter: 'maybe' is not a valid boolean value. Supported values are on/off, yes/no, true/false or 1/0\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 70: --thread-sync-order <v>
+argv: ct "replay" "--thread-sync-order" "total"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = replay
+  replayRecordingId = none
+  replayTraceFolder = none
+  lastTraceMatchingPattern = none
+  replayInteractive = none
+  replayThreadSyncOrder = some("total")
+  replayOsSimulation = none
+  replayFollowRequestSpans = none
+VALIDATED replayInteractive = true
+--- stderr
+--- end
+
+### 71: --thread-sync-order=<v>
+argv: ct "replay" "--thread-sync-order=total"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = replay
+  replayRecordingId = none
+  replayTraceFolder = none
+  lastTraceMatchingPattern = none
+  replayInteractive = none
+  replayThreadSyncOrder = some("total")
+  replayOsSimulation = none
+  replayFollowRequestSpans = none
+VALIDATED replayInteractive = true
+--- stderr
+--- end
+
+### 72: --thread-sync-order:<v>
+argv: ct "replay" "--thread-sync-order:total"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = replay
+  replayRecordingId = none
+  replayTraceFolder = none
+  lastTraceMatchingPattern = none
+  replayInteractive = none
+  replayThreadSyncOrder = some("total")
+  replayOsSimulation = none
+  replayFollowRequestSpans = none
+VALIDATED replayInteractive = true
+--- stderr
+--- end
+
+### 73: --thread-sync-order total
+argv: ct "replay" "--thread-sync-order" "total"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = replay
+  replayRecordingId = none
+  replayTraceFolder = none
+  lastTraceMatchingPattern = none
+  replayInteractive = none
+  replayThreadSyncOrder = some("total")
+  replayOsSimulation = none
+  replayFollowRequestSpans = none
+VALIDATED replayInteractive = true
+--- stderr
+--- end
+
+### 74: --thread-sync-order=total
+argv: ct "replay" "--thread-sync-order=total"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = replay
+  replayRecordingId = none
+  replayTraceFolder = none
+  lastTraceMatchingPattern = none
+  replayInteractive = none
+  replayThreadSyncOrder = some("total")
+  replayOsSimulation = none
+  replayFollowRequestSpans = none
+VALIDATED replayInteractive = true
+--- stderr
+--- end
+
+### 75: --thread-sync-order per-object
+argv: ct "replay" "--thread-sync-order" "per-object"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = replay
+  replayRecordingId = none
+  replayTraceFolder = none
+  lastTraceMatchingPattern = none
+  replayInteractive = none
+  replayThreadSyncOrder = some("per-object")
+  replayOsSimulation = none
+  replayFollowRequestSpans = none
+VALIDATED replayInteractive = true
+--- stderr
+--- end
+
+### 76: --thread-sync-order=per-object
+argv: ct "replay" "--thread-sync-order=per-object"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = replay
+  replayRecordingId = none
+  replayTraceFolder = none
+  lastTraceMatchingPattern = none
+  replayInteractive = none
+  replayThreadSyncOrder = some("per-object")
+  replayOsSimulation = none
+  replayFollowRequestSpans = none
+VALIDATED replayInteractive = true
+--- stderr
+--- end
+
+### 77: --thread-sync-order bad bogus
+argv: ct "replay" "--thread-sync-order" "bogus"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = replay
+  replayRecordingId = none
+  replayTraceFolder = none
+  lastTraceMatchingPattern = none
+  replayInteractive = none
+  replayThreadSyncOrder = some("bogus")
+  replayOsSimulation = none
+  replayFollowRequestSpans = none
+VALIDATED replayInteractive = true
+--- stderr
+--- end
+
+### 78: --thread-sync-order=bad bogus
+argv: ct "replay" "--thread-sync-order=bogus"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = replay
+  replayRecordingId = none
+  replayTraceFolder = none
+  lastTraceMatchingPattern = none
+  replayInteractive = none
+  replayThreadSyncOrder = some("bogus")
+  replayOsSimulation = none
+  replayFollowRequestSpans = none
+VALIDATED replayInteractive = true
+--- stderr
+--- end
+
+### 79: --thread-sync-order empty
+argv: ct "replay" "--thread-sync-order" ""
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = replay
+  replayRecordingId = none
+  replayTraceFolder = none
+  lastTraceMatchingPattern = none
+  replayInteractive = none
+  replayThreadSyncOrder = some("")
+  replayOsSimulation = none
+  replayFollowRequestSpans = none
+VALIDATED replayInteractive = true
+--- stderr
+--- end
+
+### 80: --thread-sync-order= (empty)
+argv: ct "replay" "--thread-sync-order="
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = replay
+  replayRecordingId = none
+  replayTraceFolder = none
+  lastTraceMatchingPattern = none
+  replayInteractive = none
+  replayThreadSyncOrder = some("")
+  replayOsSimulation = none
+  replayFollowRequestSpans = none
+VALIDATED replayInteractive = true
+--- stderr
+--- end
+
+### 81: --thread-sync-order= <v> (next word)
+argv: ct "replay" "--thread-sync-order=" "total"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = replay
+  replayRecordingId = none
+  replayTraceFolder = none
+  lastTraceMatchingPattern = none
+  replayInteractive = none
+  replayThreadSyncOrder = some("total")
+  replayOsSimulation = none
+  replayFollowRequestSpans = none
+VALIDATED replayInteractive = true
+--- stderr
+--- end
+
+### 82: --thread-sync-order -x (value starts with -)
+argv: ct "replay" "--thread-sync-order" "-x"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = replay
+  replayRecordingId = none
+  replayTraceFolder = none
+  lastTraceMatchingPattern = none
+  replayInteractive = none
+  replayThreadSyncOrder = some("-x")
+  replayOsSimulation = none
+  replayFollowRequestSpans = none
+VALIDATED replayInteractive = true
+--- stderr
+--- end
+
+### 83: --thread-sync-order --x (value starts with --)
+argv: ct "replay" "--thread-sync-order" "--x"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = replay
+  replayRecordingId = none
+  replayTraceFolder = none
+  lastTraceMatchingPattern = none
+  replayInteractive = none
+  replayThreadSyncOrder = some("--x")
+  replayOsSimulation = none
+  replayFollowRequestSpans = none
+VALIDATED replayInteractive = true
+--- stderr
+--- end
+
+### 84: --thread-sync-order --new-tab <v> (an option between it and its value)
+argv: ct "replay" "--thread-sync-order" "--new-tab" "total"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = replay
+  replayRecordingId = none
+  replayTraceFolder = none
+  lastTraceMatchingPattern = some("total")
+  replayInteractive = none
+  replayThreadSyncOrder = some("--new-tab")
+  replayOsSimulation = none
+  replayFollowRequestSpans = none
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 85: --thread-sync-order repeated, last wins
+argv: ct "replay" "--thread-sync-order" "total" "--thread-sync-order" "per-object"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = replay
+  replayRecordingId = none
+  replayTraceFolder = none
+  lastTraceMatchingPattern = none
+  replayInteractive = none
+  replayThreadSyncOrder = some("per-object")
+  replayOsSimulation = none
+  replayFollowRequestSpans = none
+VALIDATED replayInteractive = true
+--- stderr
+--- end
+
+### 86: --thread-sync-order missing value (last)
+argv: ct "replay" "--thread-sync-order"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The option '\e[34m--thread-sync-order\e[0m' requires a value\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 87: --THREAD-SYNC-ORDER <v> (style variant)
+argv: ct "replay" "--THREAD-SYNC-ORDER" "total"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = replay
+  replayRecordingId = none
+  replayTraceFolder = none
+  lastTraceMatchingPattern = none
+  replayInteractive = none
+  replayThreadSyncOrder = some("total")
+  replayOsSimulation = none
+  replayFollowRequestSpans = none
+VALIDATED replayInteractive = true
+--- stderr
+--- end
+
+### 88: --t_hread-sync-order <v> (style variant)
+argv: ct "replay" "--t_hread-sync-order" "total"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = replay
+  replayRecordingId = none
+  replayTraceFolder = none
+  lastTraceMatchingPattern = none
+  replayInteractive = none
+  replayThreadSyncOrder = some("total")
+  replayOsSimulation = none
+  replayFollowRequestSpans = none
+VALIDATED replayInteractive = true
+--- stderr
+--- end
+
+### 89: --thread_sync_order <v> (style variant)
+argv: ct "replay" "--thread_sync_order" "total"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'thread_sync_order'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 90: --threadsyncorder <v> (style variant)
+argv: ct "replay" "--threadsyncorder" "total"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'threadsyncorder'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 91: --os-simulation <v>
+argv: ct "replay" "--os-simulation" "weak-userspace"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = replay
+  replayRecordingId = none
+  replayTraceFolder = none
+  lastTraceMatchingPattern = none
+  replayInteractive = none
+  replayThreadSyncOrder = none
+  replayOsSimulation = some("weak-userspace")
+  replayFollowRequestSpans = none
+VALIDATED replayInteractive = true
+--- stderr
+--- end
+
+### 92: --os-simulation=<v>
+argv: ct "replay" "--os-simulation=weak-userspace"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = replay
+  replayRecordingId = none
+  replayTraceFolder = none
+  lastTraceMatchingPattern = none
+  replayInteractive = none
+  replayThreadSyncOrder = none
+  replayOsSimulation = some("weak-userspace")
+  replayFollowRequestSpans = none
+VALIDATED replayInteractive = true
+--- stderr
+--- end
+
+### 93: --os-simulation:<v>
+argv: ct "replay" "--os-simulation:weak-userspace"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = replay
+  replayRecordingId = none
+  replayTraceFolder = none
+  lastTraceMatchingPattern = none
+  replayInteractive = none
+  replayThreadSyncOrder = none
+  replayOsSimulation = some("weak-userspace")
+  replayFollowRequestSpans = none
+VALIDATED replayInteractive = true
+--- stderr
+--- end
+
+### 94: --os-simulation weak-userspace
+argv: ct "replay" "--os-simulation" "weak-userspace"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = replay
+  replayRecordingId = none
+  replayTraceFolder = none
+  lastTraceMatchingPattern = none
+  replayInteractive = none
+  replayThreadSyncOrder = none
+  replayOsSimulation = some("weak-userspace")
+  replayFollowRequestSpans = none
+VALIDATED replayInteractive = true
+--- stderr
+--- end
+
+### 95: --os-simulation=weak-userspace
+argv: ct "replay" "--os-simulation=weak-userspace"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = replay
+  replayRecordingId = none
+  replayTraceFolder = none
+  lastTraceMatchingPattern = none
+  replayInteractive = none
+  replayThreadSyncOrder = none
+  replayOsSimulation = some("weak-userspace")
+  replayFollowRequestSpans = none
+VALIDATED replayInteractive = true
+--- stderr
+--- end
+
+### 96: --os-simulation strong-kernel
+argv: ct "replay" "--os-simulation" "strong-kernel"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = replay
+  replayRecordingId = none
+  replayTraceFolder = none
+  lastTraceMatchingPattern = none
+  replayInteractive = none
+  replayThreadSyncOrder = none
+  replayOsSimulation = some("strong-kernel")
+  replayFollowRequestSpans = none
+VALIDATED replayInteractive = true
+--- stderr
+--- end
+
+### 97: --os-simulation=strong-kernel
+argv: ct "replay" "--os-simulation=strong-kernel"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = replay
+  replayRecordingId = none
+  replayTraceFolder = none
+  lastTraceMatchingPattern = none
+  replayInteractive = none
+  replayThreadSyncOrder = none
+  replayOsSimulation = some("strong-kernel")
+  replayFollowRequestSpans = none
+VALIDATED replayInteractive = true
+--- stderr
+--- end
+
+### 98: --os-simulation bad bogus
+argv: ct "replay" "--os-simulation" "bogus"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = replay
+  replayRecordingId = none
+  replayTraceFolder = none
+  lastTraceMatchingPattern = none
+  replayInteractive = none
+  replayThreadSyncOrder = none
+  replayOsSimulation = some("bogus")
+  replayFollowRequestSpans = none
+VALIDATED replayInteractive = true
+--- stderr
+--- end
+
+### 99: --os-simulation=bad bogus
+argv: ct "replay" "--os-simulation=bogus"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = replay
+  replayRecordingId = none
+  replayTraceFolder = none
+  lastTraceMatchingPattern = none
+  replayInteractive = none
+  replayThreadSyncOrder = none
+  replayOsSimulation = some("bogus")
+  replayFollowRequestSpans = none
+VALIDATED replayInteractive = true
+--- stderr
+--- end
+
+### 100: --os-simulation empty
+argv: ct "replay" "--os-simulation" ""
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = replay
+  replayRecordingId = none
+  replayTraceFolder = none
+  lastTraceMatchingPattern = none
+  replayInteractive = none
+  replayThreadSyncOrder = none
+  replayOsSimulation = some("")
+  replayFollowRequestSpans = none
+VALIDATED replayInteractive = true
+--- stderr
+--- end
+
+### 101: --os-simulation= (empty)
+argv: ct "replay" "--os-simulation="
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = replay
+  replayRecordingId = none
+  replayTraceFolder = none
+  lastTraceMatchingPattern = none
+  replayInteractive = none
+  replayThreadSyncOrder = none
+  replayOsSimulation = some("")
+  replayFollowRequestSpans = none
+VALIDATED replayInteractive = true
+--- stderr
+--- end
+
+### 102: --os-simulation= <v> (next word)
+argv: ct "replay" "--os-simulation=" "weak-userspace"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = replay
+  replayRecordingId = none
+  replayTraceFolder = none
+  lastTraceMatchingPattern = none
+  replayInteractive = none
+  replayThreadSyncOrder = none
+  replayOsSimulation = some("weak-userspace")
+  replayFollowRequestSpans = none
+VALIDATED replayInteractive = true
+--- stderr
+--- end
+
+### 103: --os-simulation -x (value starts with -)
+argv: ct "replay" "--os-simulation" "-x"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = replay
+  replayRecordingId = none
+  replayTraceFolder = none
+  lastTraceMatchingPattern = none
+  replayInteractive = none
+  replayThreadSyncOrder = none
+  replayOsSimulation = some("-x")
+  replayFollowRequestSpans = none
+VALIDATED replayInteractive = true
+--- stderr
+--- end
+
+### 104: --os-simulation --x (value starts with --)
+argv: ct "replay" "--os-simulation" "--x"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = replay
+  replayRecordingId = none
+  replayTraceFolder = none
+  lastTraceMatchingPattern = none
+  replayInteractive = none
+  replayThreadSyncOrder = none
+  replayOsSimulation = some("--x")
+  replayFollowRequestSpans = none
+VALIDATED replayInteractive = true
+--- stderr
+--- end
+
+### 105: --os-simulation --new-tab <v> (an option between it and its value)
+argv: ct "replay" "--os-simulation" "--new-tab" "weak-userspace"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = replay
+  replayRecordingId = none
+  replayTraceFolder = none
+  lastTraceMatchingPattern = some("weak-userspace")
+  replayInteractive = none
+  replayThreadSyncOrder = none
+  replayOsSimulation = some("--new-tab")
+  replayFollowRequestSpans = none
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 106: --os-simulation repeated, last wins
+argv: ct "replay" "--os-simulation" "weak-userspace" "--os-simulation" "strong-kernel"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = replay
+  replayRecordingId = none
+  replayTraceFolder = none
+  lastTraceMatchingPattern = none
+  replayInteractive = none
+  replayThreadSyncOrder = none
+  replayOsSimulation = some("strong-kernel")
+  replayFollowRequestSpans = none
+VALIDATED replayInteractive = true
+--- stderr
+--- end
+
+### 107: --os-simulation missing value (last)
+argv: ct "replay" "--os-simulation"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The option '\e[34m--os-simulation\e[0m' requires a value\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 108: --OS-SIMULATION <v> (style variant)
+argv: ct "replay" "--OS-SIMULATION" "weak-userspace"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = replay
+  replayRecordingId = none
+  replayTraceFolder = none
+  lastTraceMatchingPattern = none
+  replayInteractive = none
+  replayThreadSyncOrder = none
+  replayOsSimulation = some("weak-userspace")
+  replayFollowRequestSpans = none
+VALIDATED replayInteractive = true
+--- stderr
+--- end
+
+### 109: --o_s-simulation <v> (style variant)
+argv: ct "replay" "--o_s-simulation" "weak-userspace"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = replay
+  replayRecordingId = none
+  replayTraceFolder = none
+  lastTraceMatchingPattern = none
+  replayInteractive = none
+  replayThreadSyncOrder = none
+  replayOsSimulation = some("weak-userspace")
+  replayFollowRequestSpans = none
+VALIDATED replayInteractive = true
+--- stderr
+--- end
+
+### 110: --os_simulation <v> (style variant)
+argv: ct "replay" "--os_simulation" "weak-userspace"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'os_simulation'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 111: --ossimulation <v> (style variant)
+argv: ct "replay" "--ossimulation" "weak-userspace"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'ossimulation'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 112: --follow-request-spans <v>
+argv: ct "replay" "--follow-request-spans" "1"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = replay
+  replayRecordingId = none
+  replayTraceFolder = none
+  lastTraceMatchingPattern = none
+  replayInteractive = none
+  replayThreadSyncOrder = none
+  replayOsSimulation = none
+  replayFollowRequestSpans = some("1")
+VALIDATED replayInteractive = true
+--- stderr
+--- end
+
+### 113: --follow-request-spans=<v>
+argv: ct "replay" "--follow-request-spans=1"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = replay
+  replayRecordingId = none
+  replayTraceFolder = none
+  lastTraceMatchingPattern = none
+  replayInteractive = none
+  replayThreadSyncOrder = none
+  replayOsSimulation = none
+  replayFollowRequestSpans = some("1")
+VALIDATED replayInteractive = true
+--- stderr
+--- end
+
+### 114: --follow-request-spans:<v>
+argv: ct "replay" "--follow-request-spans:1"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = replay
+  replayRecordingId = none
+  replayTraceFolder = none
+  lastTraceMatchingPattern = none
+  replayInteractive = none
+  replayThreadSyncOrder = none
+  replayOsSimulation = none
+  replayFollowRequestSpans = some("1")
+VALIDATED replayInteractive = true
+--- stderr
+--- end
+
+### 115: --follow-request-spans 1
+argv: ct "replay" "--follow-request-spans" "1"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = replay
+  replayRecordingId = none
+  replayTraceFolder = none
+  lastTraceMatchingPattern = none
+  replayInteractive = none
+  replayThreadSyncOrder = none
+  replayOsSimulation = none
+  replayFollowRequestSpans = some("1")
+VALIDATED replayInteractive = true
+--- stderr
+--- end
+
+### 116: --follow-request-spans=1
+argv: ct "replay" "--follow-request-spans=1"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = replay
+  replayRecordingId = none
+  replayTraceFolder = none
+  lastTraceMatchingPattern = none
+  replayInteractive = none
+  replayThreadSyncOrder = none
+  replayOsSimulation = none
+  replayFollowRequestSpans = some("1")
+VALIDATED replayInteractive = true
+--- stderr
+--- end
+
+### 117: --follow-request-spans 0
+argv: ct "replay" "--follow-request-spans" "0"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = replay
+  replayRecordingId = none
+  replayTraceFolder = none
+  lastTraceMatchingPattern = none
+  replayInteractive = none
+  replayThreadSyncOrder = none
+  replayOsSimulation = none
+  replayFollowRequestSpans = some("0")
+VALIDATED replayInteractive = true
+--- stderr
+--- end
+
+### 118: --follow-request-spans=0
+argv: ct "replay" "--follow-request-spans=0"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = replay
+  replayRecordingId = none
+  replayTraceFolder = none
+  lastTraceMatchingPattern = none
+  replayInteractive = none
+  replayThreadSyncOrder = none
+  replayOsSimulation = none
+  replayFollowRequestSpans = some("0")
+VALIDATED replayInteractive = true
+--- stderr
+--- end
+
+### 119: --follow-request-spans bad yes
+argv: ct "replay" "--follow-request-spans" "yes"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = replay
+  replayRecordingId = none
+  replayTraceFolder = none
+  lastTraceMatchingPattern = none
+  replayInteractive = none
+  replayThreadSyncOrder = none
+  replayOsSimulation = none
+  replayFollowRequestSpans = some("yes")
+VALIDATED replayInteractive = true
+--- stderr
+--- end
+
+### 120: --follow-request-spans=bad yes
+argv: ct "replay" "--follow-request-spans=yes"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = replay
+  replayRecordingId = none
+  replayTraceFolder = none
+  lastTraceMatchingPattern = none
+  replayInteractive = none
+  replayThreadSyncOrder = none
+  replayOsSimulation = none
+  replayFollowRequestSpans = some("yes")
+VALIDATED replayInteractive = true
+--- stderr
+--- end
+
+### 121: --follow-request-spans empty
+argv: ct "replay" "--follow-request-spans" ""
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = replay
+  replayRecordingId = none
+  replayTraceFolder = none
+  lastTraceMatchingPattern = none
+  replayInteractive = none
+  replayThreadSyncOrder = none
+  replayOsSimulation = none
+  replayFollowRequestSpans = some("")
+VALIDATED replayInteractive = true
+--- stderr
+--- end
+
+### 122: --follow-request-spans= (empty)
+argv: ct "replay" "--follow-request-spans="
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = replay
+  replayRecordingId = none
+  replayTraceFolder = none
+  lastTraceMatchingPattern = none
+  replayInteractive = none
+  replayThreadSyncOrder = none
+  replayOsSimulation = none
+  replayFollowRequestSpans = some("")
+VALIDATED replayInteractive = true
+--- stderr
+--- end
+
+### 123: --follow-request-spans= <v> (next word)
+argv: ct "replay" "--follow-request-spans=" "1"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = replay
+  replayRecordingId = none
+  replayTraceFolder = none
+  lastTraceMatchingPattern = none
+  replayInteractive = none
+  replayThreadSyncOrder = none
+  replayOsSimulation = none
+  replayFollowRequestSpans = some("1")
+VALIDATED replayInteractive = true
+--- stderr
+--- end
+
+### 124: --follow-request-spans -x (value starts with -)
+argv: ct "replay" "--follow-request-spans" "-x"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = replay
+  replayRecordingId = none
+  replayTraceFolder = none
+  lastTraceMatchingPattern = none
+  replayInteractive = none
+  replayThreadSyncOrder = none
+  replayOsSimulation = none
+  replayFollowRequestSpans = some("-x")
+VALIDATED replayInteractive = true
+--- stderr
+--- end
+
+### 125: --follow-request-spans --x (value starts with --)
+argv: ct "replay" "--follow-request-spans" "--x"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = replay
+  replayRecordingId = none
+  replayTraceFolder = none
+  lastTraceMatchingPattern = none
+  replayInteractive = none
+  replayThreadSyncOrder = none
+  replayOsSimulation = none
+  replayFollowRequestSpans = some("--x")
+VALIDATED replayInteractive = true
+--- stderr
+--- end
+
+### 126: --follow-request-spans --new-tab <v> (an option between it and its value)
+argv: ct "replay" "--follow-request-spans" "--new-tab" "1"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = replay
+  replayRecordingId = none
+  replayTraceFolder = none
+  lastTraceMatchingPattern = some("1")
+  replayInteractive = none
+  replayThreadSyncOrder = none
+  replayOsSimulation = none
+  replayFollowRequestSpans = some("--new-tab")
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 127: --follow-request-spans repeated, last wins
+argv: ct "replay" "--follow-request-spans" "1" "--follow-request-spans" "0"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = replay
+  replayRecordingId = none
+  replayTraceFolder = none
+  lastTraceMatchingPattern = none
+  replayInteractive = none
+  replayThreadSyncOrder = none
+  replayOsSimulation = none
+  replayFollowRequestSpans = some("0")
+VALIDATED replayInteractive = true
+--- stderr
+--- end
+
+### 128: --follow-request-spans missing value (last)
+argv: ct "replay" "--follow-request-spans"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The option '\e[34m--follow-request-spans\e[0m' requires a value\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 129: --FOLLOW-REQUEST-SPANS <v> (style variant)
+argv: ct "replay" "--FOLLOW-REQUEST-SPANS" "1"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = replay
+  replayRecordingId = none
+  replayTraceFolder = none
+  lastTraceMatchingPattern = none
+  replayInteractive = none
+  replayThreadSyncOrder = none
+  replayOsSimulation = none
+  replayFollowRequestSpans = some("1")
+VALIDATED replayInteractive = true
+--- stderr
+--- end
+
+### 130: --f_ollow-request-spans <v> (style variant)
+argv: ct "replay" "--f_ollow-request-spans" "1"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = replay
+  replayRecordingId = none
+  replayTraceFolder = none
+  lastTraceMatchingPattern = none
+  replayInteractive = none
+  replayThreadSyncOrder = none
+  replayOsSimulation = none
+  replayFollowRequestSpans = some("1")
+VALIDATED replayInteractive = true
+--- stderr
+--- end
+
+### 131: --follow_request_spans <v> (style variant)
+argv: ct "replay" "--follow_request_spans" "1"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'follow_request_spans'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 132: --followrequestspans <v> (style variant)
+argv: ct "replay" "--followrequestspans" "1"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'followrequestspans'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 133: env <APP>_OS_SIMULATION
+argv: ct "replay"
+env: <APP>_OS_SIMULATION="strong-kernel"
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = replay
+  replayRecordingId = none
+  replayTraceFolder = none
+  lastTraceMatchingPattern = none
+  replayInteractive = none
+  replayThreadSyncOrder = none
+  replayOsSimulation = some("strong-kernel")
+  replayFollowRequestSpans = none
+VALIDATED replayInteractive = true
+--- stderr
+--- end
+
+### 134: env CT_OS_SIMULATION (read later, not by the loader)
+argv: ct "replay"
+env: CT_OS_SIMULATION="strong-kernel"
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = replay
+  replayRecordingId = none
+  replayTraceFolder = none
+  lastTraceMatchingPattern = none
+  replayInteractive = none
+  replayThreadSyncOrder = none
+  replayOsSimulation = none
+  replayFollowRequestSpans = none
+VALIDATED replayInteractive = true
+--- stderr
+--- end
+
+### 135: every replay option
+argv: ct "replay" "-t" "/tr" "--thread-sync-order" "total" "--os-simulation=weak-userspace" "--follow-request-spans" "1" "--new-window"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = true
+  cmd = replay
+  replayRecordingId = none
+  replayTraceFolder = some("/tr")
+  lastTraceMatchingPattern = none
+  replayInteractive = none
+  replayThreadSyncOrder = some("total")
+  replayOsSimulation = some("weak-userspace")
+  replayFollowRequestSpans = some("1")
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 136: unknown long option
+argv: ct "replay" "--bogus"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'bogus'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 137: unknown long option with value
+argv: ct "replay" "--bogus=1"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'bogus'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 138: unknown short option
+argv: ct "replay" "-Z"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'Z'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 139: lone -
+argv: ct "replay" "-"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option ''\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 140: lone -- then a word
+argv: ct "replay" "--" "w"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option ''\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 141: --=v
+argv: ct "replay" "--=v"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option ''\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 142: extra positional
+argv: ct "replay" "extra1" "extra2" "extra3" "extra4" "extra5"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The subcommand 'replay' does not accept additional arguments\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 143: global --cwd after the command
+argv: ct "replay" "--cwd" "/w"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = some("/w")
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = replay
+  replayRecordingId = none
+  replayTraceFolder = none
+  lastTraceMatchingPattern = none
+  replayInteractive = none
+  replayThreadSyncOrder = none
+  replayOsSimulation = none
+  replayFollowRequestSpans = none
+VALIDATED replayInteractive = true
+--- stderr
+--- end
+
+### 144: global --new-tab after the command
+argv: ct "replay" "--new-tab"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = true
+  newWindow = false
+  cmd = replay
+  replayRecordingId = none
+  replayTraceFolder = none
+  lastTraceMatchingPattern = none
+  replayInteractive = none
+  replayThreadSyncOrder = none
+  replayOsSimulation = none
+  replayFollowRequestSpans = none
+VALIDATED replayInteractive = true
+--- stderr
+--- end
+
+### 145: --version after the command
+argv: ct "replay" "--version"
+env: (none)
+exit: 0
+--- stdout
+CodeTracer version: <VERSION>
+\e[0m
+(no newline at end of stdout)
+--- stderr
+--- end
+
+### 146: -h after the command
+argv: ct "replay" "-h"
+env: (none)
+exit: 0
+--- stdout
+<the short help page clispec renders for this request: ct replay>
+--- stderr
+--- end

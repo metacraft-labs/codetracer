@@ -62,10 +62,14 @@ import
   ../types,
   ../lib/[ jslib, logging ],
   ./auto_hide_panel_config
+from std/options import isSome, get
+import ../viewmodel/input/dom_pointer
+from ../headless_app/desktop_panes import paneOfContent
 # Node type comes from kdom; do not import dom.Node which conflicts.
 
 when defined(js):
   import isonim/web/web_renderer
+  import ../viewmodel/views/dismissals
   from isonim/web/dom_api import nil
   from std/strutils import nil
   from ../viewmodel/views/isonim_auto_hide_bottom_strip_view import
@@ -495,6 +499,42 @@ proc pinPanel*(
   deferredUpdateGLSize()
   dispatchLayoutUpdated()
 
+proc labelsOf(container: dom_api.Element): seq[JsObject] {.importjs:
+  "Array.from(#.querySelectorAll('[data-ct-strip-index]'))".}
+
+proc setStripMenu(container: dom_api.Element;
+                  menu: proc(index: int; x: int; y: int)) =
+  ## What a right press on each of a strip's labels opens (its callbacks'
+  ## `onContextMenu`, built with the strip's panels): the strip's views draw
+  ## the labels and their `data-ct-strip-index` and open no menu themselves;
+  ## the right press is the pointer row `context-menu.open`, which opens the
+  ## menu each label carries (`dom_pointer.setPressMenu`).
+  if menu.isNil:
+    return
+  let labels = labelsOf(container)
+  for i in 0 ..< labels.len:
+    # By index, not `for label in`: the loop's `lent` element cannot be
+    # captured by `closureScope` under the test lanes' memory model.
+    let label = labels[i]
+    closureScope:
+      let index = intAttributeOf(label, "data-ct-strip-index")
+      setPressMenu(label, proc(event: JsObject): bool =
+        menu(index, event.clientX.to(int), event.clientY.to(int))
+        true)
+
+proc markAutoHidePaneScope(host: Element; content: int) =
+  ## A pane shown from the auto-hide state names its kind for the DOM pointer
+  ## listener (`viewmodel/input/dom_pointer`, `data-ct-pane`), as a
+  ## GoldenLayout pane's host does through its scope attributes
+  ## (`layout.markPaneScope`): without it a press on the pane's rows has no
+  ## pane to resolve against. (It is not a key scope: the panes shown here
+  ## keep their keys as they were.)
+  if host.isNil or not host.getAttribute(cstring"data-ct-pane").isNil:
+    return
+  let pane = paneOfContent(content)
+  if pane.isSome:
+    host.setAttribute(cstring"data-ct-pane", cstring($pane.get))
+
 proc addStandaloneAutoHidePanel*(
   title: cstring,
   content: Content,
@@ -537,6 +577,7 @@ proc addStandaloneAutoHidePanel*(
   ## Registering a second entry instead would leave the restored one shadowing
   ## it in `findPanelByContent`; dropping the restored one would put the pane
   ## back at `edge`, which is #807.
+  markAutoHidePaneScope(liveElement, ord(content))
   if autoHideState.isNil:
     initAutoHideState()
 
@@ -827,6 +868,11 @@ proc instantiatePanelElement*(panel: AutoHidePanel): bool =
   let label = configComponentLabel(panel.config)
   panel.liveElement = jsCreatePanelHost(label)
   panel.containerElement = panel.liveElement
+  let state = panel.config[cstring"componentState"]
+  if not state.isNil and not state.isUndefined:
+    let content = state[cstring"content"]
+    if not content.isNil and not content.isUndefined:
+      markAutoHidePaneScope(panel.liveElement, content.to(int))
   panel.instantiatedFromConfig = true
   cdebug fmt"auto_hide: rebuilt host for restored panel '{panel.title}' ({label})"
   true
@@ -1084,7 +1130,7 @@ proc setupDockedResizeHandles*() =
     let container = document.getElementById(containerId)
     if handle.isNil or container.isNil:
       return
-    handle.addEventListener(cstring"mousedown", proc(ev: Event) =
+    handle.addEventListener(cstring"mousedown", proc(ev: Event) =  # ir1-gate: gesture (the docked panel's resize drag)
       let mouseEv = cast[JsObject](ev)
       dockedResizing = true
       dockedResizeIsLeft = isLeft
@@ -1131,7 +1177,7 @@ proc setupDockedResizeHandles*() =
   let bottomHandle = document.getElementById(cstring"auto-hide-docked-bottom-resize")
   let bottomContainer = document.getElementById(cstring"auto-hide-docked-bottom")
   if not bottomHandle.isNil and not bottomContainer.isNil:
-    bottomHandle.addEventListener(cstring"mousedown", proc(ev: Event) =
+    bottomHandle.addEventListener(cstring"mousedown", proc(ev: Event) =  # ir1-gate: gesture (the bottom panel's resize drag)
       let mouseEv = cast[JsObject](ev)
       dockedBottomResizing = true
       dockedBottomResizeStartY = mouseEv.clientY.to(int)
@@ -1182,7 +1228,7 @@ proc setupOverlayResizeHandle*() =
   let handle = document.getElementById(cstring"auto-hide-overlay-resize")
   if handle.isNil:
     return
-  handle.addEventListener(cstring"mousedown", proc(ev: Event) =
+  handle.addEventListener(cstring"mousedown", proc(ev: Event) =  # ir1-gate: gesture (the resize drag)
     let mouseEv = cast[JsObject](ev)
     let overlayEl = document.getElementById(cstring"auto-hide-overlay")
     if overlayEl.isNil:
@@ -1330,15 +1376,42 @@ const OVERLAY_SLIDE_OUT_MS = 100
 ## Pending end-of-slide cleanup for a closing overlay; -1 when none.
 var overlayCloseTimerId = -1
 
+var pendingOverlayTeardown: proc() = nil
+  ## The teardown of the hide whose slide-out is under way, until it has run
+  ## or a reopen has cancelled it (`cancelOverlayClose`).
+
+proc finishPendingOverlayClose() =
+  ## Complete a hide whose slide-out is still under way, now.
+  if overlayCloseTimerId != -1:
+    windowClearTimeout(overlayCloseTimerId)
+    overlayCloseTimerId = -1
+  let teardown = pendingOverlayTeardown
+  pendingOverlayTeardown = nil
+  if not teardown.isNil:
+    teardown()
+
 proc cancelOverlayClose() =
   ## A panel is opening while the previous one is still sliding out: drop the
   ## pending cleanup (the opening panel owns the overlay now) and the slide-out.
+  pendingOverlayTeardown = nil
   if overlayCloseTimerId != -1:
     windowClearTimeout(overlayCloseTimerId)
     overlayCloseTimerId = -1
   let overlayEl = document.getElementById(cstring"auto-hide-overlay")
   if not overlayEl.isNil:
     overlayEl.classList.remove(cstring"closing")
+
+proc onSlideOutEnd(el: kdom.Element; done: proc()) {.importjs: """
+  (function (el, done) {
+    function onEnd(ev) {
+      if (!String(ev.animationName || '').endsWith('-out')) return;
+      el.removeEventListener('animationend', onEnd);
+      done();
+    }
+    el.addEventListener('animationend', onEnd);
+  })(#, #)""".}
+  ## `done` when `el`'s slide-out animation (`ct-overlay-slide-*-out`,
+  ## auto_hide.styl) ends.
 
 proc hideOverlay*(slideOut = true) =
   ## Hide the currently visible auto-hide overlay.
@@ -1357,6 +1430,12 @@ proc hideOverlay*(slideOut = true) =
   if autoHideState.isNil:
     return
 
+  # A previous hide still sliding out is completed first: its teardown puts
+  # its revealed strip back and detaches its content, which a second hide
+  # would otherwise never do (it used to clear the first one's timer and lose
+  # its teardown).
+  finishPendingOverlayClose()
+
   cancelHoverPreview()
   autoHideState.pinnedOpen = false
 
@@ -1370,8 +1449,16 @@ proc hideOverlay*(slideOut = true) =
 
   let overlayEl = document.getElementById(cstring"auto-hide-overlay")
 
+  var tornDown = false
   proc teardown() =
-    overlayCloseTimerId = -1
+    if tornDown:
+      return
+    tornDown = true
+    if pendingOverlayTeardown == teardown:
+      pendingOverlayTeardown = nil
+    if overlayCloseTimerId != -1:
+      windowClearTimeout(overlayCloseTimerId)
+      overlayCloseTimerId = -1
     # Re-opened while sliding out: the overlay belongs to the new panel now,
     # and `doShowOverlayImpl` has already detached this one if it had to.
     if autoHideState.overlayVisible:
@@ -1403,14 +1490,25 @@ proc hideOverlay*(slideOut = true) =
       overlayEl.classList.remove(cstring"auto-hide-overlay-bottom")
       overlayEl.classList.remove(cstring"collapsed-overlay")
 
-  if overlayCloseTimerId != -1:
-    windowClearTimeout(overlayCloseTimerId)
-    overlayCloseTimerId = -1
   if slideOut and not overlayEl.isNil and overlayEl.classList.contains(cstring"visible"):
     overlayEl.classList.add(cstring"closing")
     if revealedEdge != Bottom:
       revealClosing[revealedEdge] = true
+    # The hide completes when the slide-out animation ends (`animationend`),
+    # with the timer as the fallback for a slide that does not run (reduced
+    # motion). A timer alone left the overlay half-way off screen whenever
+    # the renderer's timers were held back longer than the slide: Escape on a
+    # minimal sidebar's overlay then failed to close it within 15 s in 3 of 6
+    # realistic scenario runs (codetracer-pm 21830530), the teardown measured
+    # 12 s after Escape in a passing one.
+    pendingOverlayTeardown = teardown
     overlayCloseTimerId = windowSetTimeout(teardown, OVERLAY_SLIDE_OUT_MS)
+    # Only while this hide is still the pending one: a reopen cancels it
+    # (`cancelOverlayClose`), and its listener must not tear down the panel
+    # that reopened when a later slide-out ends.
+    onSlideOutEnd(overlayEl, proc() =
+      if pendingOverlayTeardown == teardown:
+        finishPendingOverlayClose())
   else:
     teardown()
 
@@ -1914,6 +2012,7 @@ when defined(js):
     renderAutoHideSideStripInto(
       r, container, records, model.collapsed, callbacks,
       revealed = isEdgeRevealed(edge), revealClosing = isEdgeRevealClosing(edge))
+    setStripMenu(container, callbacks.onContextMenu)
     if footprint(dom_api.getAttribute(container, cstring"class")) != before:
       deferredUpdateGLSize()
 else:
@@ -2011,6 +2110,7 @@ when defined(js):
           ], x, y))
     let r = WebRenderer()
     renderAutoHideBottomStripInto(r, container, records, callbacks)
+    setStripMenu(container, callbacks.onContextMenu)
 else:
   proc requestAutoHideBottomStripRender*(containerId: cstring) =
     discard
@@ -2082,11 +2182,11 @@ when defined(js):
       (function(e) { const t = e && e.target;
         return !!(t && t.closest &&
           t.closest('.auto-hide-tablist-menu, .auto-hide-tablist-button')); })(#)""".}
-    proc isEscape(ev: kdom.Event): bool {.importjs: "(#.key === 'Escape')".}
-    kdom.document.addEventListener(cstring"mousedown", proc(ev: kdom.Event) =
+    kdom.document.addEventListener(cstring"mousedown", proc(ev: kdom.Event) =  # ir1-gate: outside press (closes the tab lists)
       if not inTabList(ev): closeTabLists(), true)
-    kdom.document.addEventListener(cstring"keydown", proc(ev: kdom.Event) =
-      if isEscape(ev): closeTabLists())
+    registerDismissal(proc(): bool =
+      closeTabLists()
+      false)
 
   proc requestCollapsedIconZoneRender*(containerId: cstring, edge: AutoHideEdge = Left) =
     ## Refresh the collapsed status-bar icon zone through IsoNim direct DOM.
@@ -2357,6 +2457,11 @@ proc restoreAutoHideState*(saved: JsObject) =
 # Keyboard / backdrop dismissal
 # ---------------------------------------------------------------------------
 
+proc pointerRestsOnStripTab(): bool {.importjs:
+  "(document.querySelector('.auto-hide-strip-tab:hover, .collapsed-strip-line:hover') !== null)".}
+  ## Whether the pointer is on a strip tab or a collapsed strip line now — the
+  ## elements whose `mouseenter` opens a hover preview.
+
 proc setupOverlayDismissal*() =
   ## Set up global event handlers for dismissing the auto-hide overlay:
   ## - Escape key
@@ -2366,11 +2471,23 @@ proc setupOverlayDismissal*() =
   ## Call once after DOM is ready.
 
   # Escape key handler.
-  document.addEventListener(cstring"keydown", proc(ev: Event) =
-    let keyEv = cast[JsObject](ev)
-    if keyEv.key.to(cstring) == cstring"Escape":
-      if not autoHideState.isNil and autoHideState.overlayVisible:
-        hideOverlay())
+  #
+  # Escape dismisses the overlay wherever the pointer is (Auto-Hide-Panes.md
+  # §3.3), and that includes the strip tab whose hover opened it. Closing the
+  # overlay re-renders the strip, so the tab under a resting pointer is a NEW
+  # element, and Chromium answers the next layout with `mouseenter` on it —
+  # which started a fresh hover preview, and the overlay was back 300 ms
+  # later. So when the pointer rests on a tab (or a collapsed line), hovering
+  # it opens nothing again until the pointer has left it, as after a docked
+  # panel is closed from its tab.
+  registerDismissal(proc(): bool =
+    if not autoHideState.isNil and autoHideState.overlayVisible:
+      if pointerRestsOnStripTab():
+        suppressHoverAfterClose = true
+        suppressLineHoverUntilLeave = true
+      hideOverlay()
+      return true
+    false)
 
   # Backdrop click handler.
   let backdrop = document.getElementById(cstring"auto-hide-backdrop")

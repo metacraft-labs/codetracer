@@ -767,6 +767,31 @@ if [ -z "${CT_EMULATOR_EXTRA_NIM_PATHS:-}" ] && [ -d "$PWD/libs/nim-stew/stew" ]
 	export CODETRACER_TRACE_FORMAT_NIM_EXTRA_PATHS="${CODETRACER_TRACE_FORMAT_NIM_EXTRA_PATHS:-$ct_nim_paths_lib}"
 fi
 
+# The tup rules' roots, all three from one command (ci/lib/tup-cargo-target.sh
+# --export), and src/Tuprules.tup refuses to parse without any of them:
+#
+#   * the Cargo target base: this checkout's, keyed on the compiler, created
+#     or reopened only after the helper has checked that it is
+#     (codetracer-pm spec/Testing/UI-Cargo-Output-Ownership.md). A value
+#     already in the environment is passed to the helper, which refuses one
+#     that names another checkout or compiler, so a stale shell stops here
+#     instead of building into someone else's target;
+#   * the Nim cache root, `<checkout basename>-<cksum of its path>`,
+#     so two worktrees running `just build-once` at once no longer compile
+#     into one cache (measured 2026-11-14: "final link failed: bad value"
+#     linking ct-test). Printed fresh, so an inherited one is replaced.
+#
+# `--reap` because this is a build: it removes this checkout's older-compiler
+# bases (see the helper's REAPING section). A stripped-down fixture tree
+# without the helper leaves the variables unset, and its stub tup never parses.
+if [ -f "$CT_ROOT/ci/lib/tup-cargo-target.sh" ]; then
+	if ! ct_tup_cargo_env="$("${BASH:-bash}" "$CT_ROOT/ci/lib/tup-cargo-target.sh" --reap --export "$CT_ROOT")"; then
+		echo "build-once: no Cargo target base this checkout owns (see above); not building." >&2
+		exit 1
+	fi
+	eval "$ct_tup_cargo_env"
+fi
+
 # tup's dependency tracking is a FUSE mount, and libfuse can only obtain
 # /dev/fuse through a setuid helper at a path compiled into the binary. When
 # that helper is missing, tup reports a mount timeout three layers away from

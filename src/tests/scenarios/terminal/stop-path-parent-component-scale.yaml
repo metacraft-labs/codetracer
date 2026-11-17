@@ -1,0 +1,20 @@
+scenario: 1
+name: terminal/stop-path-parent-component-scale
+pack: codetracer
+summary: >-
+  A stop in a file reached through a `..` path (multi_root's app/../shared):
+  clicking `scale` in the call trace shows extra.py's source, without a "No
+  verified source" banner, and the status line names the file.
+stage:
+  - use: record-program
+    with: { program: multi_root/app/main.py }
+  - use: open-recording
+    with: { width: 200, height: 50 }
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - wait: call-trace.loaded
+  - click: { at: 'call-trace/call[name="scale"]' }
+  - wait: { until: { at: 'editor[file="extra.py"]', assert: 'shows-text("result = value * factor")' }, timeout: 30s }
+  - expect: { at: 'editor[file="helpers.py"]', absent: true }
+  - expect: { at: 'editor[file="extra.py"]', assert: 'lacks-text("No verified source")' }
+  - expect: { at: status-line, message: { contains: "extra.py" } }

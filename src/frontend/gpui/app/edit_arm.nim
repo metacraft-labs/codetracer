@@ -47,6 +47,9 @@ type
     path*: string
       ## The open file, relative to `root`.
     doc*: EditingDocument
+    points*: seq[EditorPoint]
+      ## The breakpoints set in this window, which has no engine: they belong to
+      ## the project (Editor-Pane.md MC.5, both zones work in Edit mode).
     loadedText*: string
       ## The bytes last read from or written to disk; the buffer is dirty when
       ## it differs.
@@ -131,6 +134,22 @@ proc applyGpuiKey*(arm: GpuiEditArm; key: string; modifiers: openArray[string];
     return GpuiKeyResult(name: "", outcome: eoIgnored)
   arm.applyCanonicalKey(name, nowMs)
 
+proc togglePoint*(arm: GpuiEditArm; line: int) =
+  ## The glyph column's press in Edit mode.
+  for i, p in arm.points:
+    if p.line == line and p.kind == epkBreakpoint:
+      arm.points.delete(i)
+      return
+  arm.points.add EditorPoint(path: arm.doc.path, line: line, kind: epkBreakpoint,
+                             enabled: true)
+
+proc setPointEnabled*(arm: GpuiEditArm; line: int) =
+  ## The glyph column's right press in Edit mode: enable / disable; nothing on a
+  ## line with no breakpoint.
+  for p in arm.points.mitems:
+    if p.line == line and p.kind == epkBreakpoint:
+      p.enabled = not p.enabled
+
 proc surfaceOf*(arm: GpuiEditArm; viewportHeight: int): EditorSurface =
   ## The editor surface for the CURRENT document — writable, so no read-only
   ## notice — with the caret shown, scrolled to keep it visible. `status`,
@@ -141,7 +160,7 @@ proc surfaceOf*(arm: GpuiEditArm; viewportHeight: int): EditorSurface =
   result = editorSurfaceForDocument(
     d = arm.doc, medium = GpuiMedium, mutableHere = true,
     viewportTop = arm.viewportTop, viewportHeight = viewportHeight,
-    showCaret = true)
+    points = arm.points, showCaret = true)
   if arm.status.len > 0 and result.notice.len == 0:
     result.notice = arm.status
   # PLAT-70 Part C (Find-And-Incremental-Search.md §4.3): after Vim's `*` /
@@ -149,6 +168,7 @@ proc surfaceOf*(arm: GpuiEditArm; viewportHeight: int): EditorSurface =
   # matches stay highlighted while the caret is on one — the closed
   # session's highlights, from the shared session.
   result.selection = arm.doc.selectionCells
+  result.extraCarets = arm.doc.secondaryCarets
   var closed: FindVM
   for m in closed.marksInWindow(arm.doc, arm.viewportTop, viewportHeight):
     result.findMarks.add (m.line, m.fromColumn, m.toColumn, m.current)

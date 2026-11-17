@@ -21,14 +21,23 @@
  *     #status #status-base > *:not(#auto-hide-bottom-strip)
  *       display: none !important
  *
- * made the footer tabs-only.  It removed the only display of the current
- * debug location (`.location-path` — nothing else in the frontend renders
- * `StatusBaseModel.locationText`), its copy affordance
- * (`#copy-path-image`), the language/encoding readout (`#file-info-status`),
- * and — because the `!important` outranked `.collapsed-icon-zone.has-icons`
- * — §10.3's icon zone, which could then never appear at all.  Every Electron
- * spec starts with `readyOnEntryTest`, which waits for `.location-path` to be
+ * made the footer tabs-only.  It removed the location readout
+ * (`.location-path`), its copy affordance (`#copy-path-image`), the
+ * language/encoding readout (`#file-info-status`), and — because the
+ * `!important` outranked `.collapsed-icon-zone.has-icons` — §10.3's icon
+ * zone, which could then never appear at all.  Every Electron spec started
+ * with `readyOnEntryTest`, which then waited for `.location-path` to be
  * visible, so the whole suite went red on a footer nobody was looking at.
+ *
+ * THE LOCATION READOUT IS NOW HIDDEN ON PURPOSE.  The status-bar design hides
+ * `.location-path` and `#copy-path-image` (`status_bar.styl`, "HIDDEN FOR
+ * NOW"; `docs/UI-Design-Decisions.md` D-05, 2026-10-15), and on 2026-11-11 the
+ * decision was to keep them hidden: §3.1 records it.  So this spec no longer
+ * requires them, and the current location is checked where the user now
+ * reads it, on the editor's execution line.  `readyOnEntryTest` waits for
+ * that line too, which means a footer regression no longer turns the whole
+ * suite red: this spec and `footer-visibility-css-guard.spec.ts` are the only
+ * things that notice one.  The third test below pins that independence.
  *
  * A third attempt reached the same footer without going red at all.
  * `00fd68b7f "fix: status bar styling"` wrote `position: absolute; left:
@@ -48,12 +57,18 @@ import * as os from "node:os";
 import * as path from "node:path";
 import * as childProcess from "node:child_process";
 
-import { test, expect, readyOnEntryTest } from "../../lib/fixtures";
+import {
+  test,
+  expect,
+  readyOnEntryTest,
+  READY_ON_ENTRY_SELECTOR,
+} from "../../lib/fixtures";
 import {
   BOTTOM_STRIP_IN_FOOTER_SELECTOR,
   RETIRED_BOTTOM_TABS_SELECTOR,
   bottomStripTabs,
 } from "../../page-objects/auto-hide-strip";
+import { parseStatusLocation } from "../../page-objects/status_bar";
 import {
   CAUGHT_HIDE_SPELLINGS,
   TABS_ONLY_RULE_CSS,
@@ -131,25 +146,51 @@ const fixture = prepareFixture();
 test.use({ sourcePath: fixture.traceDir, launchMode: "trace-folder" });
 
 test.describe("status bar footer contract (Auto-Hide-Panes §3.1 / §10.3)", () => {
-  test("footer_hosts_tab_strip_and_keeps_location_language_and_icon_zone", async ({
+  test("footer_hosts_tab_strip_and_keeps_language_certificate_and_icon_zone", async ({
     ctPage,
   }) => {
     test.setTimeout(180_000);
     await readyOnEntryTest(ctPage);
 
-    // -- §3.1: all three regions of the footer are live ------------------
-    const locationPath = ctPage.locator("#status-base .location-path");
-    await expect(locationPath).toBeVisible();
-    // `path:line#ticks`, filled from `data.services.debugger.location`.
-    await expect(locationPath).toHaveText(/program\.js:\d+#\d+$/);
-    await expect(ctPage.locator("#status-base #copy-path-image")).toBeVisible();
+    // -- The current location, where the design now shows it --------------
+    // The execution-line arrow is on a line of `program.js`, in a visible
+    // editor.  `readyOnEntryTest` waited for a visible arrow; this pins
+    // that it is the recorded program's, not some other editor's.
+    // Monaco's `data-uri` is an `inmemory://model/N` id, not the file, so the
+    // file is taken from the location the status bar still renders (hidden):
+    // the arrow must be on the line of that location, in `program.js`.
+    const arrowLine = await ctPage
+      .locator(READY_ON_ENTRY_SELECTOR)
+      .filter({ visible: true })
+      .first()
+      .getAttribute("data-line");
+    const reported = parseStatusLocation(
+      (await ctPage.locator("#status-base .location-path").textContent()) ?? "",
+    );
+    expect(reported, "the status bar holds the entry location").not.toBeNull();
+    expect(reported!.path).toMatch(/program\.js$/);
+    expect(arrowLine, "the arrow is on the reported entry line").toBe(
+      String(reported!.line),
+    );
+
+    // -- §3.1: the bar's own readouts are live ---------------------------
     await expect(ctPage.locator("#status-base #file-info-status")).toBeVisible();
     await expect(
       ctPage.locator("#status-base #file-info-status .file-info-status-language"),
     ).not.toBeEmpty();
+    // The right-hand group's readout while the path is hidden by design.
+    // It appears once the certificate indicator has read the tree, which
+    // need not have happened by the time the entry location arrives.
     await expect(
-      ctPage.locator("#status-base #file-info-status #stable-status"),
-    ).toContainText("stable:");
+      ctPage.locator("#status-base .status-right .test-certificate-status"),
+    ).toBeVisible();
+    // `#stable-status` is rendered only while the replay is busy (since
+    // 74caaa788b), so an idle bar may not have it; when it is there it says
+    // what it is.
+    const stable = ctPage.locator("#status-base #file-info-status #stable-status");
+    if ((await stable.count()) > 0) {
+      await expect(stable).toContainText("stable:");
+    }
 
     // The bottom tab strip shares the bar and carries the standalone panes
     // `layout.nim` registers at boot (see `DEFAULT_BOTTOM_TAB_TITLES` in
@@ -222,96 +263,201 @@ test.describe("status bar footer contract (Auto-Hide-Panes §3.1 / §10.3)", () 
     await ctPage.setViewportSize({ width: WINDOW_MIN_WIDTH, height: 700 });
 
     // The three regions must not overflow the narrowest permitted window.
-    // They currently need ~1035px of the 1050px minimum, so this also guards
-    // the thin margin: adding another always-present readout or bottom tab
-    // pushes the location path off-screen.  Polled rather than asserted once
-    // so the flex row has time to settle after the resize; the value polled
-    // is the overflow itself, so a real overflow reports how much.
+    // They needed ~1035px of the 1050px minimum while the location path was
+    // shown, so this also guards the margin: adding another always-present
+    // readout or bottom tab pushes the last readout off-screen.  Polled
+    // rather than asserted once so the flex row has time to settle after the
+    // resize; the value polled is the overflow itself, so a real overflow
+    // reports how much, and the message lists the offending elements.
+    //
+    // WHAT COUNTS AS OVERFLOW: content the user can see that ends past the
+    // bar's right edge.  Not `scrollWidth`, which also counts transparent
+    // boxes.  Measured at this width (2026-11-11): the "Path copied to
+    // clipboard" tooltip of the copy button, `#location-status
+    // .custom-tooltip`, is laid out at `opacity: 0` and ends 159px past the
+    // edge.  It belongs to the copy button the design hides (D-05), so it can
+    // never be shown, and `scrollWidth` would fail this test on it.
+    const overflow = async () =>
+      ctPage.evaluate(() => {
+        const base = document.querySelector("#status-base") as HTMLElement | null;
+        if (!base) {
+          return {
+            overflow: Number.MAX_SAFE_INTEGER,
+            scrollOverflow: Number.MAX_SAFE_INTEGER,
+            pastRightEdge: [] as string[],
+          };
+        }
+        const right = base.getBoundingClientRect().left + base.clientWidth;
+        const seen = (node: Element): boolean => {
+          for (
+            let el: Element | null = node;
+            el !== null && el !== base.parentElement;
+            el = el.parentElement
+          ) {
+            const style = getComputedStyle(el);
+            if (
+              style.visibility !== "visible" ||
+              Number.parseFloat(style.opacity) === 0
+            ) {
+              return false;
+            }
+          }
+          const r = node.getBoundingClientRect();
+          return r.width > 0 && r.height > 0;
+        };
+        const describe = (node: Element) => {
+          const r = node.getBoundingClientRect();
+          const id = node.id ? `#${node.id}` : "";
+          const cls = node.classList.length
+            ? `.${Array.from(node.classList).join(".")}`
+            : "";
+          return (
+            `${node.tagName.toLowerCase()}${id}${cls} x=${Math.round(r.x)} ` +
+            `w=${Math.round(r.width)} visible=${seen(node)}`
+          );
+        };
+        const past = Array.from(base.querySelectorAll("*")).filter(
+          (node) => node.getBoundingClientRect().right > right + 1,
+        );
+        const visibleRights = past
+          .filter(seen)
+          .map((node) => node.getBoundingClientRect().right - right);
+        return {
+          overflow: Math.round(Math.max(0, ...visibleRights)),
+          scrollOverflow: base.scrollWidth - base.clientWidth,
+          pastRightEdge: past.map(describe),
+        };
+      });
+    let measured = await overflow();
     await expect
       .poll(
-        async () =>
-          ctPage.evaluate(() => {
-            const base = document.querySelector(
-              "#status-base",
-            ) as HTMLElement | null;
-            if (!base) return Number.MAX_SAFE_INTEGER;
-            return base.scrollWidth - base.clientWidth;
-          }),
+        async () => {
+          measured = await overflow();
+          return measured.overflow;
+        },
         { timeout: 10_000, intervals: [250, 500, 1000] },
       )
-      .toBeLessThanOrEqual(0);
+      .toBeLessThanOrEqual(0)
+      .catch((failure: Error) => {
+        throw new Error(
+          `${failure.message}\nelements past the bar's right edge at ` +
+            `${WINDOW_MIN_WIDTH}px (scrollWidth overflow ` +
+            `${measured.scrollOverflow}): ` +
+            JSON.stringify(measured.pastRightEdge, null, 1),
+        );
+      });
 
-    await expect(ctPage.locator("#status-base .location-path")).toBeVisible();
+    // The control for that narrower measure: a visible readout made wide
+    // enough to spill must still count, or the measure above ignores too much.
+    await ctPage.evaluate(() => {
+      const spill = document.createElement("span");
+      spill.id = "footer-overflow-control";
+      spill.className = "status-inline";
+      spill.textContent = "x".repeat(400);
+      document.querySelector("#status-base .status-right")?.appendChild(spill);
+    });
+    await expect
+      .poll(async () => (await overflow()).overflow, { timeout: 5_000 })
+      .toBeGreaterThan(0);
+    await ctPage.evaluate(() =>
+      document.getElementById("footer-overflow-control")?.remove(),
+    );
+
+    // The bar's last readout, now the test certificate (the location path is
+    // hidden by design), must end inside the bar and stay on one row.
+    const lastReadout = ctPage.locator(
+      "#status-base .status-right .test-certificate-status",
+    );
+    await expect(lastReadout).toBeVisible();
     const squeezed = await ctPage.evaluate(() => {
       const base = document.querySelector("#status-base") as HTMLElement;
-      const path = document.querySelector("#status-base .location-path");
-      if (!path) return null;
-      const r = path.getBoundingClientRect();
+      const readout = document.querySelector(
+        "#status-base .status-right .test-certificate-status",
+      );
+      if (!readout) return null;
+      const r = readout.getBoundingClientRect();
       return { barWidth: base.clientWidth, right: r.right, height: r.height };
     });
-    expect(squeezed, "location-path must have a box").not.toBeNull();
+    expect(squeezed, "the certificate readout must have a box").not.toBeNull();
     // `+ 1` absorbs sub-pixel rounding between the viewport size Playwright
     // sets and the width the fixed-position bar reports.
     expect(squeezed!.right).toBeLessThanOrEqual(squeezed!.barWidth + 1);
     // The bar is 2em tall and `overflow: visible`, so a readout that wraps
-    // does not clip — it spills over the content above.  `.location-path` is
-    // `nowrap` + `text-overflow: ellipsis` precisely so a long path shortens
-    // instead of growing the row.
+    // does not clip — it spills over the content above.
     expect(squeezed!.height).toBeLessThanOrEqual(32);
   });
 
-  test("reintroducing_the_tabs_only_rule_breaks_entry_readiness", async ({
+  test("entry_readiness_reads_the_editor_not_the_footer", async ({
     ctPage,
   }) => {
     test.setTimeout(180_000);
-    // Negative control. `readyOnEntryTest` is deliberately a *visibility*
-    // wait: `.location-path` is attached with the right `title` long before
-    // it has a box, so an attachment wait would report readiness for a footer
-    // that never renders. Prove the wait still fails loudly if the blanket
-    // hide comes back, so a repeat regression cannot pass unnoticed.
+    // Readiness used to be read from the footer, which is how two footer
+    // regressions surfaced as suite-wide timeouts.  It is now read from the
+    // editor's execution line.  Pin both halves of that in the real app:
     //
-    // What this control does NOT establish, and must not be read as
-    // establishing: that `readyOnEntryTest` covers the footer. It covers this
-    // ONE spelling. `00fd68b7f`'s off-screen rule left `.location-path` with a
-    // box and Playwright called it visible, enabled and stable; the readiness
-    // wait passed and the footer was gone. The general case is the
-    // `CAUGHT_HIDE_SPELLINGS` control below, which asserts through
-    // `footerVisibilityFailures` for exactly that reason.
+    //   1. The tabs-only rule that shipped twice takes the footer's readouts
+    //      away (the footer predicate says so), and readiness still passes,
+    //      because nothing about the session's entry location changed.  A
+    //      footer regression must therefore be caught by THIS file and the
+    //      CSS guard, not by the rest of the suite.
+    //   2. Hiding the editor makes readiness fail, and say why: the
+    //      execution line is drawn but has no box.  That is the visibility
+    //      half of the wait, watched failing on the live renderer rather than
+    //      only on the synthetic page of `ready-on-entry-contract.spec.ts`.
     await readyOnEntryTest(ctPage);
 
-    await ctPage.addStyleTag({ content: TABS_ONLY_RULE });
-
-    await expect(ctPage.locator("#status-base .location-path")).toBeHidden();
+    const tabsOnly = await ctPage.addStyleTag({ content: TABS_ONLY_RULE });
     await expect(ctPage.locator("#status-base #file-info-status")).toBeHidden();
     await expect(
       ctPage.locator("#status-base #auto-hide-bottom-strip"),
     ).toBeVisible();
+    expect(
+      footerVisibilityFailures(await probeFooterRegions(ctPage)),
+      "the tabs-only rule must still fail the footer contract",
+    ).not.toEqual([]);
+    await readyOnEntryTest(ctPage);
+    await tabsOnly.evaluate((el) => (el as Element).remove());
 
-    // ... and the readiness wait itself rejects rather than silently passing.
-    await expect(readyOnEntryTest(ctPage)).rejects.toThrow(/Timeout|timeout/);
+    await ctPage.addStyleTag({
+      content: ".monaco-editor { display: none !important; }",
+    });
+    let refusal = "";
+    try {
+      await readyOnEntryTest(ctPage);
+    } catch (failure) {
+      refusal = (failure as Error).message;
+    }
+    expect(refusal, "a hidden editor must not count as ready").toMatch(
+      /Timeout \d+ms exceeded/,
+    );
+    expect(refusal).toContain("IS drawn but has no box");
+    expect(refusal).toContain("monaco-editor");
   });
 
   test("every_spelling_of_the_blanket_hide_is_caught_in_the_running_app", async ({
     ctPage,
   }) => {
     test.setTimeout(180_000);
-    // The second negative control, and the one that generalises.  The test
-    // above pins the historical rule and the suite-wide symptom it produced;
-    // this one applies every entry of `CAUGHT_HIDE_SPELLINGS` — eight of
-    // which have never been written in this repo — and requires the shared
-    // visibility check to reject each of them in the real renderer.
+    // The negative control that generalises.  It applies every entry of
+    // `CAUGHT_HIDE_SPELLINGS` — eight of which have never been written in
+    // this repo — and requires the shared visibility check to reject each of
+    // them in the real renderer.
     //
-    // Note what the two controls measure differently.  `readyOnEntryTest`
-    // rejects on `display`/`visibility` hides because Playwright's
-    // visibility predicate is box-and-`visibility`; an `opacity: 0` footer
-    // would sail past it while being just as invisible to the user, and an
-    // OFF-SCREEN footer sails past it too — Playwright reports a
-    // `.location-path` at x = -9999 as "visible, enabled and stable", which
-    // is how `00fd68b7f` shipped for two weeks.  Those two gaps are why
-    // `footerVisibilityFailures` folds in effective opacity AND placement,
-    // and why this control asserts through it rather than through the
-    // readiness wait.
+    // It asserts through `footerVisibilityFailures` rather than through a
+    // Playwright visibility wait, because that predicate is
+    // box-and-`visibility` only: an `opacity: 0` footer would sail past it
+    // while being just as invisible to the user, and an OFF-SCREEN footer
+    // sails past it too — Playwright reported a `.location-path` at
+    // x = -9999 as "visible, enabled and stable", which is how `00fd68b7f`
+    // shipped for two weeks.  Those two gaps are why the predicate folds in
+    // effective opacity AND placement.
     await readyOnEntryTest(ctPage);
+    // The certificate readout is a guarded region and arrives once the
+    // indicator has read the tree; wait for it so the loop below measures
+    // the injected rules and not the launch.
+    await expect(
+      ctPage.locator("#status-base .status-right .test-certificate-status"),
+    ).toBeVisible();
 
     const survived: string[] = [];
     for (const spelling of CAUGHT_HIDE_SPELLINGS) {

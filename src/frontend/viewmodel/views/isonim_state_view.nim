@@ -41,6 +41,7 @@ when defined(js):
 
 import ../viewmodels/state_vm
 import ../viewmodels/origin_chain_types
+import ../viewmodels/state_pane_keys
 import ../views/state_view
 when defined(js):
   import std/jsffi
@@ -314,6 +315,13 @@ template onToggleOriginBadge*(vm: StateVM; item: proc(): VariableViewState; evTy
   ## For placeholder summaries the click goes to ``onShowOriginProc``
   ## instead, which resolves the placeholder (spec §3.2.3).
   ##
+  ## A row with NO summary is fetched like a loaded one. A backend that
+  ## sends no `originSummary` with its locals (the native ones) draws no
+  ## badge, but the row menu's "Show value origin" and `Ctrl+Shift+O` still
+  ## come here, and "loading it when needed" (§3.1) is the whole of what
+  ## they can do there: requiring a summary left such a row expanded to
+  ## nothing, with no request sent.
+  ##
   ## Both bridges are installed by
   ## ``origin_chain_bridges.wireOriginChainBridges`` once the
   ## ``OriginChainVM`` is available — without them the click just
@@ -334,7 +342,7 @@ template onToggleOriginBadge*(vm: StateVM; item: proc(): VariableViewState; evTy
       if not vm.onShowOriginProc.isNil and not vm.store.isNil:
         let loc = vm.store.debugger.val.location
         vm.onShowOriginProc(row.name, loc)
-    elif summary.isSome and vm.isOriginExpanded(id) and
+    elif vm.isOriginExpanded(id) and
         not vm.onLoadOriginChainProc.isNil and not vm.store.isNil and
         (vm.originChainLookup.isNil or vm.originChainLookup(row.name).isNone):
       let loc = vm.store.debugger.val.location
@@ -411,7 +419,7 @@ proc buildVariableRowContextMenu*(vm: StateVM;
       if summary.isSome and summary.get.isPlaceholder:
         if not stateVM.onShowOriginProc.isNil and not stateVM.store.isNil:
           stateVM.onShowOriginProc(name, loc)
-      elif summary.isSome and stateVM.isOriginExpanded(id) and
+      elif stateVM.isOriginExpanded(id) and
           not stateVM.onLoadOriginChainProc.isNil and not stateVM.store.isNil and
           (stateVM.originChainLookup.isNil or
            stateVM.originChainLookup(name).isNone):
@@ -436,23 +444,24 @@ proc buildVariableRowContextMenu*(vm: StateVM;
         action: switchProcessAction(stateVM, switchTo),
       )
 
-proc onShowVariableRowContextMenu*(vm: StateVM;
-                                   item: proc(): VariableViewState):
-    proc() =
-  ## Renderer-agnostic ``contextmenu`` handler used by the Mock-side row.
-  ##
-  ## Builds the menu via ``buildVariableRowContextMenu`` and publishes it
-  ## through ``StateVM.lastContextMenu`` so headless tests can inspect
-  ## the entries and invoke the action.  The Web-side wiring lives in
-  ## ``wireRowContextMenu`` (JS-only) which additionally forwards the
-  ## menu into ``showContextMenu`` and handles ``preventDefault`` on the
-  ## browser event.
-  let getRow = item
-  let stateVM = vm
-  result = proc() =
-    let row = getRow()
-    let menu = buildVariableRowContextMenu(stateVM, row)
-    stateVM.lastContextMenu.val = menu
+proc variableRowOf*(vm: StateVM; path: string): VariableViewState =
+  ## The shown row whose variable is at `path` (the row a press names by its
+  ## `data-variable-path`); a row with an empty path when none is shown.
+  for row in getStateViewState(vm).variables:
+    if row.path == path:
+      return row
+
+proc openVariableRowMenu*(vm: StateVM; path: string): seq[OriginContextMenuEntry] =
+  ## The row's right-click menu (`buildVariableRowContextMenu`), published
+  ## through ``StateVM.lastContextMenu`` so headless tests can inspect the
+  ## entries and invoke the action. A right press on the row is the pointer
+  ## row `context-menu.open`; a DOM front-end performs it with
+  ## `variableRowMenuItems` (`input/dom_pane_presses`).
+  let row = vm.variableRowOf(path)
+  if row.path.len == 0:
+    return
+  result = buildVariableRowContextMenu(vm, row)
+  vm.lastContextMenu.val = result
 
 when defined(js):
   # JS bindings used by the row context-menu wiring.  ``preventDefault``
@@ -486,38 +495,13 @@ when defined(js):
           act(),
     )
 
-  proc wireRowContextMenu*(vm: StateVM;
-                           row: isonim_dom.Element;
-                           item: proc(): VariableViewState) =
-    ## Wire the JS-side ``contextmenu`` event on a single State-Pane
-    ## row (M4 deliverable §3.1).  Mirrors the legacy
-    ## ``ValueComponent`` shape in ``ui/value.nim:1131``:
-    ##
-    ##   1. ``preventDefault()`` cancels the browser's native menu.
-    ##   2. The renderer-agnostic ``buildVariableRowContextMenu`` is
-    ##      reused so the menu items (labels + actions) match the
-    ##      Mock-side handler in lock-step.
-    ##   3. Each entry is adapted to the legacy ``ContextMenuItem``
-    ##      shape and forwarded to ``showContextMenu`` — the same
-    ##      primitive ``ValueComponent.renderValueRowDom`` uses for the
-    ##      value-hover row's right-click menu.
-    let stateVM = vm
-    let getRow = item
-    isonim_dom.addEventListener(isonim_dom.Node(row), cstring"contextmenu",
-      proc(ev: isonim_dom.Event) =
-        ev.rcPreventDefault()
-        ev.rcStopPropagation()
-        let row = getRow()
-        let menu = buildVariableRowContextMenu(stateVM, row)
-        # Publish through the renderer-agnostic signal too so any
-        # observer (test hooks, future telemetry) sees the same menu
-        # the user will interact with.
-        stateVM.lastContextMenu.val = menu
-        var legacy: seq[ContextMenuItem] = @[]
-        for entry in menu:
-          legacy.add(toLegacyContextMenuItem(entry))
-        if legacy.len > 0:
-          showContextMenu(legacy, ev.eventClientX(), ev.eventClientY()))
+  proc variableRowMenuItems*(vm: StateVM; path: string): seq[ContextMenuItem] =
+    ## The row's menu as the shared right-click menu's items: the
+    ## renderer-agnostic `openVariableRowMenu`, each entry adapted to the
+    ## legacy ``ContextMenuItem`` shape that ``showContextMenu`` draws — the
+    ## same primitive ``ui/value.nim`` uses on the value-hover row.
+    for entry in openVariableRowMenu(vm, path):
+      result.add(toLegacyContextMenuItem(entry))
 
 # ---------------------------------------------------------------------------
 # In-row expanded-chain helpers (spec §3.2.1 collapsed → expanded).
@@ -534,6 +518,33 @@ proc chainForRow(vm: StateVM; item: VariableViewState): Option[OriginChain] =
   if vm.originChainLookup.isNil:
     return none(OriginChain)
   vm.originChainLookup(item.name)
+
+proc showInSidePanelDisplay(vm: StateVM; item: VariableViewState): string =
+  if chainForRow(vm, item).isSome: "inline-block" else: "none"
+
+proc onShowInSidePanel(vm: StateVM; item: proc(): VariableViewState): proc() =
+  ## The expanded chain's "Show in side panel" (§3.2.2): the side panel's
+  ## query for the row's variable at the current stop, through the same
+  ## bridge the command palette and `origin(expr)` watches use
+  ## (`origin_chain_bridges`: `OriginChainVM.onShowOrigin` opens the panel,
+  ## pushes the breadcrumb and asks for the chain). Reads `item()` when
+  ## clicked, so a reused row opens the variable it shows.
+  result = proc() =
+    let row = item()
+    if not vm.onShowOriginProc.isNil and not vm.store.isNil:
+      vm.onShowOriginProc(row.name, vm.store.debugger.val.location)
+
+proc continueChainDisplay(vm: StateVM; item: VariableViewState): string =
+  ## "Continue tracing" shows under a chain the engine cut off with a point
+  ## to go on from (spec §5.3.1).
+  let chain = chainForRow(vm, item)
+  if chain.isSome and chain.get.canContinue: "inline-block" else: "none"
+
+proc continueChainText(vm: StateVM; item: VariableViewState): string =
+  if not vm.originChainContinuing.isNil and vm.originChainContinuing(item.name):
+    "Continuing…"
+  else:
+    "Continue tracing"
 
 proc hopLineText(hop: OriginHop): string =
   ## Single-line preview the in-row block emits per hop — matches the
@@ -610,14 +621,10 @@ proc onLoadMore(vm: StateVM; item: proc(): VariableViewState): proc() =
   ## Reads `item()` when clicked, so a reused row loads the variable it shows.
   result = proc() = vm.loadMore(item().path)
 
-proc onToggleExpand(vm: StateVM; item: proc(): VariableViewState): proc() =
-  ## The expand-button only reacts when the variable has children.
-  ## Reading `item()` inside the closure ensures the toggle targets the
-  ## current variable at this row's position, even after `indexEach`
-  ## reuses the row for a different item.
-  result = proc() =
-    let v = item()
-    if v.hasChildren: vm.toggleExpand(v.path)
+# A compound value's expander is an element the pointer rows name
+# (`pointer_rows`: Click on a Variables row toggles it); the front-end's
+# procedure performs it — on a DOM front-end `input/pane_presses`', on the expander's
+# `data-variable-path`.
 
 # ---------------------------------------------------------------------------
 # Reactive sub-lists of a variable row (origin chain, value history)
@@ -649,10 +656,21 @@ proc onToggleExpand(vm: StateVM; item: proc(): VariableViewState): proc() =
 # on the State panel means every debugger step — destroying focus and
 # expansion state. Position-keyed reuse is what this panel wants.
 
-proc renderOriginChainLine[R, N](r: R; line: proc(): OriginChainLineView): N =
-  ## One line of the in-row origin chain (hop or terminator).
+proc renderOriginChainLine[R, N](r: R; line: proc(): OriginChainLineView;
+                                 item: proc(): VariableViewState; vm: StateVM;
+                                 index: int): N =
+  ## One line of the in-row origin chain (hop or terminator). A hop is a
+  ## navigation row: a click does what `Enter` on it does in the native panes
+  ## (`state_pane_keys.stateRowClick`).
+  let seek = proc() =
+    let chain = chainForRow(vm, item())
+    if chain.isNone:
+      return
+    let effect = stateRowClick(chain.get.chainKeyRows, StateCursor(hop: index))
+    if effect.kind == skeSeek:
+      vm.jumpToHistoryEntry(int64(effect.tick))
   ui(r):
-    tdiv(class = chainLineClass(line)):
+    tdiv(class = chainLineClass(line), onclick = seek):
       span(class = chainLineIconClass(line)):
         discard
       span(class = chainLineTextClass(line)):
@@ -684,7 +702,7 @@ proc renderOriginChainLines[R, N](r: R; container: N;
   indexEach[OriginChainLineView, R, N](r, container,
     proc(): seq[OriginChainLineView] = originChainLines(vm, item()),
     proc(line: proc(): OriginChainLineView, index: int): N =
-      renderOriginChainLine[R, N](r, line))
+      renderOriginChainLine[R, N](r, line, item, vm, index))
 
 proc renderHistoryRows[R, N](r: R; container: N;
                              item: proc(): VariableViewState; vm: StateVM) =
@@ -729,8 +747,11 @@ proc renderVariableRow*[R, N](r: R; vm: StateVM;
   ##             span.ct-origin-badge-icon
   ##             span.ct-origin-badge-text
   ##       div.ct-origin-inline-chain[display: block when expanded]  ← sibling of atom/compound-parent
-  ##         div.ct-origin-inline-chain-hop (one per hop) — text "lhs = rhs"
-  ##         div.ct-origin-inline-chain-terminator
+  ##         div.ct-origin-inline-chain-lines
+  ##           div.ct-origin-inline-chain-hop (one per hop) — text "lhs = rhs"
+  ##           div.ct-origin-inline-chain-terminator
+  ##         button.ct-origin-show-in-side-panel[display: once the chain is held]
+  ##         button.ct-origin-continue-chain[display: while the chain can be continued]
   ##       div.ct-history-inline-container[display: block when expanded]  ← sibling of atom/compound-parent
   ##         div.ct-history-inline-row (one per history entry)
   ##           div.history-location : "{rrTicks}"
@@ -749,14 +770,12 @@ proc renderVariableRow*[R, N](r: R; vm: StateVM;
   mixin BadgeEvent
   var chainContainer, historyContainer: N
   var expandSlot, nameTypeSlot, valueTypeSlot: N
-  let onToggle = onToggleExpand(vm, item)
   let onBadgeClick = onToggleOriginBadge(vm, item, BadgeEvent(r))
-  let onRowContextMenu = onShowVariableRowContextMenu(vm, item)
   let row = ui(r):
     tdiv(class = rowClass(item),
          `data-variable-name` = item().name,
-         padding_left = rowPaddingLeft(item, 16),
-         oncontextmenu = onRowContextMenu):
+         `data-variable-path` = item().path,
+         padding_left = rowPaddingLeft(item, 16)):
       tdiv(class = atomOrCompoundClass(item)):
         tdiv(class = "value-name-container"):
           # Slots for the parts a row shows only sometimes: `show` below puts
@@ -824,9 +843,27 @@ proc renderVariableRow*[R, N](r: R; vm: StateVM;
       # layout out of line, matching the history container placement.
       # Populated after the ui() block via renderOriginChainLines (indexEach).
       tdiv(class = "ct-origin-inline-chain ct-mt-2",
-           display = (if rowExpanded(vm, item()): "block" else: "none"),
-           ref = chainContainer):
-        discard
+           display = (if rowExpanded(vm, item()): "block" else: "none")):
+        tdiv(class = "ct-origin-inline-chain-lines", ref = chainContainer):
+          discard
+        # Spec §3.2.2: "A 'Show in side panel' affordance at the bottom of
+        # the expanded chain opens the same chain in the dedicated side
+        # panel" — the side panel's one door from the State pane since the
+        # row menu's "Show value origin" expands in place (§3.1). Shown
+        # once the row has a chain to show.
+        button(class = "ct-origin-show-in-side-panel ct-button-text-xs-tertiary",
+               display = showInSidePanelDisplay(vm, item()),
+               onclick = onShowInSidePanel(vm, item)):
+          text "Show in side panel"
+        # "Continue tracing" — a chain cut off by the engine's limits goes
+        # on from where it stopped (§5.3.1); the new hops join the block.
+        # The press is routed (Input-Routing §5.1): the button carries its
+        # operation, performed on the row its `data-variable-name` names
+        # (`pane_presses.pressState`).
+        button(class = "ct-origin-continue-chain ct-button-text-xs-tertiary",
+               display = continueChainDisplay(vm, item()),
+               `data-ct-operation` = "variables.continue-origin-chain"):
+          text continueChainText(vm, item())
       # History container is a sibling of atomOrCompoundClass — placed
       # outside it so that expanding history does not push the name/value
       # layout out of line. Populated after the ui() block via
@@ -846,7 +883,7 @@ proc renderVariableRow*[R, N](r: R; vm: StateVM;
              `aria-expanded` = (if item().isExpanded: "true" else: "false"),
              `aria-label` = "Show or hide the value's parts",
              title = "Show or hide the value's parts",
-             onclick = onToggle):
+             `data-variable-path` = item().path):
           tdiv(class = caretClass(item)):
             discard)
   show(r, nameTypeSlot,
@@ -875,11 +912,6 @@ proc renderVariableRow*[R, N](r: R; vm: StateVM;
         if h.len > 0 and
            not isonim_dom.isNodeNil(isonim_dom.Node(historyContainer)):
           scrollNodeToBottom(historyContainer))
-      # Wire the right-click context menu on the row's outer element so
-      # the spec §3.1 entry-point "right-click → Show value origin"
-      # surfaces through ``showContextMenu`` — the same primitive
-      # ``ui/value.nim`` uses on the value-hover row.
-      wireRowContextMenu(vm, row, item)
   row
 
 # ---------------------------------------------------------------------------

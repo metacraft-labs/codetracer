@@ -102,7 +102,7 @@ for f in "$native_lock" "$canonical_lock"; do
 	fi
 done
 
-drift="$(comm -3 \
+drift="$(LC_ALL=C comm -3 \
 	<(lock_deps "$canonical_lock") \
 	<(lock_deps "$native_lock") |
 	awk -v left="$(basename "$canonical_lock")" \

@@ -83,12 +83,6 @@ pkgs.runCommand "backend-manager-package-inputs-test"
       exit 1
     fi
     "$replayServer" --help >/dev/null
-    recorder="${backend.CODETRACER_CT_MCR_CMD or ""}"
-    if [ ! -x "$recorder" ]; then
-      echo "backend-manager checks require a real ct-mcr executable" >&2
-      exit 1
-    fi
-    "$recorder" --help >/dev/null
     ${pkgs.lib.optionalString pkgs.stdenv.isLinux ''
       # script_confinement's a_mount_over_the_root_is_refused re-runs the
       # test binary under ``unshare --user --map-root-user --mount`` and

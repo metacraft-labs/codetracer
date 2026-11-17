@@ -68,9 +68,11 @@ import ./views/agent_activity_pane
 import ./views/problems_pane
 import ./views/requests_pane
 import ./views/low_level_code_pane
+import ./views/macro_expansion_pane   # Editor-Hosted-Front-Ends §E15
 import ./views/verification_pane   # PLAT-63
 import ./views/constraints_pane
 import ./views/shell_session_pane   # PLAT-61
+import ./views/visual_replay_panes
 import ./views/point_list
 
 export headless_app
@@ -179,6 +181,11 @@ type
       ## `follow`) and the screen scrubber's preview are the pane's own.
     terminalDrag*: TerminalDragKind
       ## PLAT-52: a press held on one of the pane's scrubbers.
+    editorPointer*: EditorPointerState
+      ## The editor's click count and the gesture a held press is making
+      ## (Editor-Pane.md MC.1, MC.4).
+    wordSeparators*: string
+      ## `word-separators`, handed to each document a press lands on.
     textDrag*: bool
       ## PLAT-68: a left press on the editor's text is held — the pointer's
       ## motion extends the selection from where it was pressed.
@@ -306,6 +313,16 @@ type
       ## `AgentActivityVM` through the shared feed; its `scroll` is the
       ## pane's own reading position.
     lowLevel*: LowLevelPaneModel
+    macroExpansion*: MacroExpansionPaneModel
+      ## Editor-Hosted-Front-Ends §E15. THE MACRO EXPANSION pane's model, as a
+      ## value, filled by the host (`tui_session.refreshMacroExpansion`) from
+      ## the session's `MacroExpansionVM`; its `scrollTop` is the pane's own.
+    pixelHistory*: PixelHistoryPaneModel
+    shaderDebug*: ShaderDebugPaneModel
+      ## PLAT-59: the Pixel History and Shader Debug panes, as values
+      ## (`frame_viewer_binding.pixelHistoryPaneModelFor` /
+      ## `shaderDebugPaneModelFor`). Unloaded until a session whose recording
+      ## carries graphics fills them; the Video Player is `frameViewer`.
       ## PLAT-60. THE LOW LEVEL CODE pane's model, as a value, filled by the
       ## host (`host/tui_session.lowLevelModelOf`) from the session's
       ## `LowLevelCodeVM`; its `scrollTop` is the pane's own reading position.
@@ -368,6 +385,12 @@ type
     traceName*: string
     tick*: int
     totalTicks*: int
+    replayStatus*: ExecutionStatus
+      ## The top bar's status badge: `esPaused` at a stop, and what the
+      ## replay is doing (`esStepping`, `esReversing`, `esSeeking`) while a
+      ## move the user asked for is in flight — the frame `main.nim` paints
+      ## between sending the move and drawing its stop, so the screen never
+      ## says PAUSED over a stop the replay has already left.
     menu*: MenuVM
       ## PLAT-48. The program menu — the shared tree, the shared state.
     omnibar*: OmnibarVM
@@ -400,7 +423,19 @@ type
       ## PLAT-57: the HOST's Find in Files toggle, by its operation
       ## (`search.toggle-case` / `-whole-word` / `-regex`): flipped, and a
       ## search that ran run again. The words the status line shows.
+    visualAct*: proc(act: VisualAct): VisualActResult {.closure.}
+      ## PLAT-59: the Visual Replay panes' acts (`VisualAct`), done by the
+      ## host over the session's `VisualReplayPanesVM`
+      ## (`tui_session.visualAct`), which refreshes the three panes. nil when
+      ## the session has no graphics.
     lowLevelAct*: proc(act: LowLevelAct): LowLevelActResult {.closure.}
+    toggleMacroExpansion*: proc(path: string; line: int):
+        tuple[ok, opened: bool; detail: string] {.closure.}
+      ## Editor-Hosted-Front-Ends §E15: Toggle Macro Expansion on the call at
+      ## `path:line`, done by the host through the session's
+      ## `MacroExpansionVM` (`tui_session.toggleMacroExpansion`), the pane's
+      ## model refreshed. `opened`: an expansion is open afterwards, so the
+      ## pane is to be shown. Nil when no replay session owns the window.
       ## PLAT-60: the HOST's answer to an act on the Low Level Code pane — a
       ## press, a menu built or chosen, a key, the sync toggle, a step —
       ## done through the session's `LowLevelCodeVM`, the pane's model
@@ -654,7 +689,7 @@ proc shellModel*(app: TuiApp; width, height: int): ShellModel =
   let selected = selectProfile(width, height)
   var header = initHeaderModel(
     traceName = (if app.traceName.len > 0: app.traceName else: "-"),
-    tick = app.tick, totalTicks = app.totalTicks)
+    status = app.replayStatus, tick = app.tick, totalTicks = app.totalTicks)
   let active = app.shell.activeSlot()
   if not active.isNil:
     header.traceName = (if active.title.len > 0: active.title else: $active.id)
@@ -783,9 +818,12 @@ proc shellModel*(app: TuiApp; width, height: int): ShellModel =
     problems: app.problems,
     requests: app.requests,
     lowLevel: app.lowLevel,
+    macroExpansion: app.macroExpansion,
     verification: app.verification,
     constraints: app.constraints,
     shellPane: app.shellPane,
+    pixelHistory: app.pixelHistory,
+    shaderDebug: app.shaderDebug,
     build: build,
     product: app.modes.product,
     edit: app.editPaneModel())

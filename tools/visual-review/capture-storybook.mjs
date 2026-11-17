@@ -12,7 +12,7 @@ import { requireFreshStorybookStatic } from "./storybook-freshness.mjs";
 // render check's own definition (`just storybook-check-render`), not a
 // second one. A capture is taken only after that readiness and only of a
 // story its judge passes; a story it fails is REFUSED, its image not written.
-import { JUDGE_RULES, loadStoryDeclarations, renderAndJudge } from "../../storybook/scripts/story-render-judge.mjs";
+import { JUDGE_RULES, loadStoryDeclarations, renderAndJudge, storyUrl } from "../../storybook/scripts/story-render-judge.mjs";
 import { readVerdicts, writeVerdicts } from "./capture-verdicts.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -78,6 +78,7 @@ const agentHarborViews = {
   "agent-harbor-fleet-empty": "codetracer-agent-harbor--fleet-empty",
   "agent-harbor-fleet-expanded": "codetracer-agent-harbor--fleet-expanded",
   "agent-harbor-fleet-filtered-empty": "codetracer-agent-harbor--fleet-filtered-empty",
+  "agent-harbor-fleet-playback": "codetracer-agent-harbor--fleet-playback",
   "agent-harbor-ref-agent-activity": "codetracer-panels--agent-activity",
   "agent-harbor-ref-test-results": "codetracer-panels--test-results",
   "agent-harbor-ref-vcs": "codetracer-panels--vcs",
@@ -93,11 +94,15 @@ const kebab = (name) => name.replace(/([a-z0-9])([A-Z])/g, "$1-$2").toLowerCase(
 const sessionTabsExports = [
   "InitiativeTabs",
   "InitiativeTabsPopup",
+  "InitiativeTabsPopupOverPanel",
   "InitiativeTabsElsewhere",
+  "InitiativeTabsElsewhereOverPanel",
   "InitiativeTabsNext",
   "InitiativeTabsAutoSwitch",
   "InitiativeTabsRecordingsMany",
   "InitiativeTabsOverflow",
+  "InitiativeTabsOverflowMenuOverPanel",
+  "InitiativeTabsOverflowMenuNearLeft",
   "InitiativeTabsLongNames",
   "InitiativeTabsRealPlans",
   "InitiativeTabsEmpty",
@@ -106,6 +111,7 @@ const sessionTabsExports = [
   "SessionListSidebarTreeFolded",
   "SessionTabsSingleLine",
   "SessionTabsActiveOverflowed",
+  "SessionTabsMenuOverPanel",
   "SessionTabsMultiLine",
   "SessionTabsSingleLineOverflow",
   "SessionTabsMultiLineOverflow",
@@ -141,6 +147,12 @@ const sessionTabsExports = [
   "InitiativeProgressUnknown",
   "InitiativeProgressLoading",
   "InitiativeProgressError",
+  // The playback stories, each captured at its first frame.
+  "SessionTabsPlayback",
+  "SessionListPlayback",
+  "InitiativeTabsPlayback",
+  "InitiativesPlayback",
+  "InitiativeProgressPlayback",
 ];
 for (const name of sessionTabsExports) {
   agentHarborViews[`agent-harbor-${kebab(name)}`] = `codetracer-agent-harbor--${kebab(name)}`;
@@ -173,6 +185,8 @@ const viewFamilies = {
   "agent-harbor": Object.keys(agentHarborViews),
   "agent-harbor-fleet": Object.keys(agentHarborViews).filter((v) => v.startsWith("agent-harbor-fleet-")),
   "agent-harbor-ref": Object.keys(agentHarborViews).filter((v) => v.startsWith("agent-harbor-ref-")),
+  // The playback stories (`--moments` captures them at their named moments).
+  "agent-harbor-playback": Object.keys(agentHarborViews).filter((v) => v.endsWith("-playback")),
   "agent-harbor-session-tabs": sessionTabsExports.map((name) => `agent-harbor-${kebab(name)}`),
   "agent-harbor-layouts": agentHarborLayoutViews,
 };
@@ -358,6 +372,30 @@ async function main() {
     if (!themes.includes(theme)) throw new Error(`Unknown theme "${theme}" (known: ${themes.join(", ")})`);
   }
   const noBuild = hasArg("--no-build");
+  // `--font-render-hinting <none|slight|medium|full>`: Chromium's own switch
+  // for how the text rasteriser hints glyphs on Linux. Unset, the browser's
+  // default applies (headless Chromium on Linux hints fully, which rounds
+  // the advances of small text -- 11 to 13px -- to whole, often wider,
+  // pixels); `none` sets text at the face's own advances, as a browser on
+  // macOS does and as GPUI's text system does.
+  const fontRenderHinting = argValue("--font-render-hinting");
+  if (fontRenderHinting && !["none", "slight", "medium", "full"].includes(fontRenderHinting)) {
+    throw new Error(`--font-render-hinting: unknown value "${fontRenderHinting}"`);
+  }
+  const regionsArg = argValue("--regions");
+  const regionsDeclaration = regionsArg ? JSON.parse(readFileSync(resolve(regionsArg), "utf8")) : null;
+  if (regionsDeclaration && !Array.isArray(regionsDeclaration.regions)) {
+    throw new Error(`${regionsArg}: no "regions" array`);
+  }
+  // `--moments`: each selected PLAYBACK story at each of its named moments
+  // (the `moments` its declaration lists: those of its scenario whose event
+  // its view shows, tools/stories/emit_storybook_stories.nim), opened by the
+  // StoryBook global `moment`, instead of at its first frame; a selected
+  // story that is not a playback story is skipped. The capture id names the
+  // moment: `<view>-at-<moment>-<size>-<theme>`, which the GPUI story
+  // capture (`ci/test/ctf_p1b_gpui_story_capture.nim` with
+  // `CTF_P1B_MOMENTS=1`) uses for the same story at the same moment.
+  const atMoments = hasArg("--moments");
   const listViews = hasArg("--list-views");
   const port = Number(argValue("--port") ?? "6106");
 
@@ -426,7 +464,7 @@ async function main() {
     const browser = await chromium.launch({
       executablePath: chromiumExecutable(),
       headless: true,
-      args: ["--no-sandbox"],
+      args: ["--no-sandbox", ...(fontRenderHinting ? [`--font-render-hinting=${fontRenderHinting}`] : [])],
     });
 
     const reports = [];
@@ -440,25 +478,34 @@ async function main() {
       const viewThemes = selectedThemes.length > 0
         ? selectedThemes
         : view.themes ?? ["dark"];
+      // "" is the first frame; with `--moments`, a playback story's named
+      // moments instead (and nothing for any other story).
+      const declared = declarations.get(view.storyId);
+      const viewMoments = atMoments ? (declared?.moments ?? []) : [""];
+      if (atMoments && declared && viewMoments.length === 0) {
+        console.error(`skipped ${viewName}: not a playback story, so it has no named moments`);
+      }
+      for (const moment of viewMoments)
       for (const [sizeName, viewport] of viewSizes)
       for (const theme of viewThemes) {
+        const viewAt = moment ? `${viewName}-at-${moment}` : viewName;
         const captureId = view.themes || theme !== "dark"
-          ? `${viewName}-${sizeName}-${theme}`
-          : `${viewName}-${sizeName}`;
+          ? `${viewAt}-${sizeName}-${theme}`
+          : `${viewAt}-${sizeName}`;
         const screenshotPath = join(outDir, `${captureId}.png`);
-        const story = declarations.get(view.storyId);
+        const story = declared;
         if (!story) {
           throw new Error(`${captureId}: story ${view.storyId} is not declared in storybook/stories/generated/stories.json (run just storybook-stories)`);
         }
         const page = await browser.newPage({ viewport });
-        const url = `http://127.0.0.1:${port}/iframe.html?id=${view.storyId}&viewMode=story&globals=theme:${theme}`;
+        const url = storyUrl(`http://127.0.0.1:${port}`, view.storyId, theme, moment);
         // The render check's readiness (StoryBook's render event after the
         // play check, no pending mount, network and DOM quiet twice) and its
         // verdict. Until 2026-11-06 this waited only for some visible text
         // and 750 ms, and shot panels whose data had not arrived: empty
         // panels and windows that the render check, waiting for the story,
         // passed.
-        const { observed, failures } = await renderAndJudge(page, `http://127.0.0.1:${port}`, story, theme);
+        const { observed, failures } = await renderAndJudge(page, `http://127.0.0.1:${port}`, story, theme, { moment });
         if (failures.length > 0) {
           await page.close();
           // No image of a story the judge fails, and none left behind from an
@@ -466,7 +513,7 @@ async function main() {
           // the capture is missing, and the PNG check fails on it.
           rmSync(screenshotPath, { force: true });
           verdicts[basename(screenshotPath)] = {
-            storyId: view.storyId, size: sizeName, theme, viewport, verdict: "refused",
+            storyId: view.storyId, size: sizeName, theme, viewport, ...(moment ? { moment } : {}), verdict: "refused",
             failures, judgedAt: new Date().toISOString(),
           };
           refused.push({ captureId, failures });
@@ -541,13 +588,90 @@ async function main() {
         // (tools/visual-review/check-storybook-captures.mjs): it must be these bytes,
         // and it must show something inside each content box.
         verdicts[basename(screenshotPath)] = {
-          storyId: view.storyId, size: sizeName, theme, viewport, verdict: "pass",
+          storyId: view.storyId, size: sizeName, theme, viewport, ...(moment ? { moment } : {}), verdict: "pass",
           kind: observed.page.kind, state: story.state ?? "data",
           rules: JUDGE_RULES,
           contentBoxes: observed.page.contentBoxes,
           sha256: createHash("sha256").update(readFileSync(screenshotPath)).digest("hex"),
           judgedAt: new Date().toISOString(),
         };
+        // `--regions <declaration>`: where the browser laid out each declared
+        // region of the story (src/tests/visual/agent-harbor-regions.json),
+        // written beside the image as `<capture id>.regions.json`. The GPUI
+        // story window writes the same file from GPUI's own layout, and the
+        // CTF-P1b layout test compares the two. A region is the first VISIBLE
+        // match of its selector (an element with no area, or hidden, is left
+        // out, as the GPUI side leaves out an element laid out with none), or,
+        // for `"pick": "last-whole"`, the last visible match drawn whole --
+        // its bottom edge inside the viewport (the last row of a list the
+        // window shows entirely; a row cut by the window's edge can show
+        // nothing but its background). A picked region also records its `index` among the
+        // visible matches, so the layout test can tell that both sides picked
+        // the same row and not two different rows that happen to sit near the
+        // bottom of their windows.
+        if (regionsDeclaration) {
+          const regions = await page.evaluate((declared) => {
+            const out = {};
+            for (const region of declared) {
+              const visible = [];
+              for (const element of document.querySelectorAll(region.web)) {
+                const rect = element.getBoundingClientRect();
+                const style = getComputedStyle(element);
+                if (rect.width <= 0 || rect.height <= 0 || style.visibility === "hidden" || style.display === "none") continue;
+                visible.push({ element, rect });
+              }
+              let chosen = visible.length > 0 ? 0 : -1;
+              if (region.pick === "last-whole") {
+                chosen = -1;
+                visible.forEach(({ rect }, i) => {
+                  if (rect.y + rect.height <= window.innerHeight) chosen = i;
+                });
+              }
+              if (chosen >= 0) {
+                const { element, rect } = visible[chosen];
+                out[region.name] = { x: rect.x, y: rect.y, w: rect.width, h: rect.height };
+                if (region.pick) out[region.name].index = chosen;
+                // An `elision` region also records whether its line of text is
+                // cut: wider than the element's content box. The text's own
+                // width comes from a Range over it, which measures the laid
+                // out glyphs, overflow included
+                // (https://drafts.csswg.org/cssom-view/#dom-range-getboundingclientrect);
+                // `text-overflow: ellipsis` only paints the cut.
+                if (region.elision) {
+                  const style = getComputedStyle(element);
+                  const content = rect.width -
+                    ["paddingLeft", "paddingRight", "borderLeftWidth", "borderRightWidth"]
+                      .reduce((sum, k) => sum + (parseFloat(style[k]) || 0), 0);
+                  const range = document.createRange();
+                  range.selectNodeContents(element);
+                  out[region.name].cut = range.getBoundingClientRect().width > content + 0.01;
+                }
+                // A `fill` region also records the colour the browser
+                // composites behind the element: its own background over
+                // its ancestors', each `rgba()` blended over the one below
+                // (https://www.w3.org/TR/compositing-1/#simplealphacompositing),
+                // down to the page's opaque white.
+                if (region.fill) {
+                  const layers = [];
+                  for (let e = element; e; e = e.parentElement) layers.push(getComputedStyle(e).backgroundColor);
+                  let rgb = [255, 255, 255];
+                  for (const layer of layers.reverse()) {
+                    const m = layer.match(/rgba?\(([^)]+)\)/);
+                    if (!m) continue;
+                    const [r, g, b, a = 1] = m[1].split(",").map((v) => Number(v.trim()));
+                    rgb = [r, g, b].map((c, i) => Math.round(c * a + rgb[i] * (1 - a)));
+                  }
+                  out[region.name].fill = `#${rgb.map((c) => c.toString(16).padStart(2, "0")).join("")}`;
+                }
+              }
+            }
+            return out;
+          }, regionsDeclaration.regions.map(({ name, web, fill, pick, elision }) => ({ name, web, fill: Boolean(fill), pick, elision })));
+          writeFileSync(
+            join(outDir, `${captureId}.regions.json`),
+            `${JSON.stringify({ renderer: "web", story: view.storyId, ...(moment ? { moment } : {}), theme, viewport, regions }, null, 2)}\n`,
+          );
+        }
         const htmlPath = join(dumpDir, `${captureId}.html`);
         writeFileSync(htmlPath, await page.content());
 
@@ -870,6 +994,7 @@ async function main() {
           size: sizeName,
           theme,
           storyId: view.storyId,
+          ...(moment ? { moment } : {}),
           brief: view.brief,
           screenshotPath,
           htmlPath,

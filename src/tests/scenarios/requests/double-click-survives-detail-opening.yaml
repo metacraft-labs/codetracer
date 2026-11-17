@@ -1,0 +1,25 @@
+scenario: 1
+name: requests/double-click-survives-detail-opening
+pack: codetracer
+summary: >-
+  In a tall window, a real double click on a lower request row survives the
+  detail opening under it: the replay moves to the handler (line 13, step
+  20), the list shrinks above the detail, and the selected row is still on
+  screen in the list.
+
+stage:
+  - use: request-session
+  - use: open-recording
+    with: { width: 1900, height: 1400 }
+
+steps:
+  - wait: { until: { at: requests, present: true }, timeout: 120s }
+  - wait: settled
+  - wait: { until: { at: requests, count: 8 }, timeout: 120s }
+  - expect: { at: requests/request-detail, absent: true }
+  - expect: { at: status-line, location: { matches: ":13#6$" } }
+  - click: { at: 'requests/request-row[id="04"]', count: 2 }
+    settle: false
+  - wait: { until: { at: status-line, location: { matches: ":13#20$" } }, timeout: 60s }
+  - wait: { until: { at: requests/request-detail, present: true }, timeout: 10s }
+  - expect: { at: 'requests/request-row[id="04"]', selected: true, geometry: { visible: true, above: requests/request-detail } }

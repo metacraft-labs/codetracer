@@ -1,0 +1,16 @@
+{
+  "C1": "Unhandled exception: never showed 'Trace Constant Initializer'",
+  "G1": "trace.count(\"\u2014 opened in a new session tab\") == 1",
+  "G2": "\"Trace Constant Initializer\" in labels",
+  "H1": "Unhandled exception: never showed 'tracing-static-block'",
+  "H2": "Unhandled exception: never showed 'var total = 0'",
+  "K1": "res.kind == erOperation and res.operation == op",
+  "P1": "listed == 4",
+  "T1": "Unhandled exception: never showed 'is neither'",
+  "T2": "Unhandled exception: never showed 'opened in a new session tab'",
+  "V1": "ntaStaticBlock notin offer(\"proc ctOnly(): int {.compileTime.} =\")",
+  "V2": "at.line == lineOf(\"static:\") - 1",
+  "V3": "nimTracePlacement() == topNewTab",
+  "V4": "requested(ntaStaticBlock, \"acc += i\") == first",
+  "V5": "nimsuggestCommandOf(r) == \"tracestatic \" & Path & \":11:6\""
+}

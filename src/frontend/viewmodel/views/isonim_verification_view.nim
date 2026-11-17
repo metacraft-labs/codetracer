@@ -72,13 +72,9 @@ proc openHandler(handlers: VerificationPanelHandlers;
     if not f.isNil:
       f(id)
 
-proc activateHandler(handlers: VerificationPanelHandlers;
-                     key: string): proc() =
-  let f = handlers.onActivate
-  let k = key
-  result = proc() =
-    if not f.isNil:
-      f(k)
+# A finding's press is the pointer row `verification.go-to-source`, performed
+# by the front-end on the row's `data-ct-verification-key` (on the desktop
+# `ui/verification.nim`'s procedure, by `VerificationPanelHandlers.onActivate`).
 
 proc plainHandler(f: proc()): proc() =
   result = proc() =
@@ -90,6 +86,14 @@ var verificationSourceOpener*: proc(activation: VerificationActivation;
   ## PLAT-63: how the HOST goes to a finding's source (the desktop's
   ## `ui/verification.nim` installs `openLocation`). Nil in a headless render,
   ## where a press still selects and opens counterexamples.
+
+var verificationRunRequest*: proc()
+  ## How the HOST runs the project's declared Verno action when the pane's
+  ## Run is pressed (the desktop's `ui/verification.nim` installs it; the
+  ## native front-ends draw their own pane and call their host directly).
+  ## Nil in a headless render, where Run does nothing.
+var verificationStopRequest*: proc()
+  ## How the HOST stops the run in flight (Stop). Nil in a headless render.
 
 proc verificationHandlersFor*(vm: VerificationVM;
                               session: CounterexampleSessionVM):
@@ -103,7 +107,13 @@ proc verificationHandlersFor*(vm: VerificationVM;
     onActivate: proc(key: string) =
       let done = vm.activateLine(session, key)
       if done.kind == vakSource and not verificationSourceOpener.isNil:
-        verificationSourceOpener(done, vm.sourceCandidates(done.file)))
+        verificationSourceOpener(done, vm.sourceCandidates(done.file)),
+    onRun: proc() =
+      if not verificationRunRequest.isNil:
+        verificationRunRequest(),
+    onStop: proc() =
+      if not verificationStopRequest.isNil:
+        verificationStopRequest())
 
 when defined(js):
   import isonim/web/dom_api as isonim_dom
@@ -137,23 +147,20 @@ when defined(js):
         verificationSourceOpener(outcome.activation,
           vm.sourceCandidates(outcome.activation.file))
 
-  proc wireRowMenu(row: isonim_dom.Element; key: string) =
-    ## A right press selects the line and opens its menu: the ViewModel's
-    ## entries (`VerificationVM.rowMenu`), the terminal's and GPUI's too.
-    isonim_dom.addEventListener(isonim_dom.Node(row), cstring"contextmenu",
-      proc(ev: isonim_dom.Event) =
-        ev.preventMenuDefault()
-        ev.stopMenuPropagation()
-        let vm = liveVerificationVM
-        if vm.isNil:
-          return
-        vm.selectLine(key)
-        var items: seq[ContextMenuItem] = @[]
-        for e in vm.rowMenu(liveCounterexampleVM, key):
-          items.add ContextMenuItem(name: cstring(e.label), hint: cstring"",
-            disabled: not e.enabled, disabledReason: cstring(e.reason),
-            handler: rowMenuHandler(key, e.action))
-        showContextMenu(items, ev.eventClientX(), ev.eventClientY()))
+  proc verificationRowMenuItems*(key: string): seq[ContextMenuItem] =
+    ## A line's menu: the ViewModel's entries (`VerificationVM.rowMenu`), the
+    ## terminal's and GPUI's too, with the line selected. A right press is
+    ## the pointer row `context-menu.open`, performed by the front-end
+    ## (`ui/verification`).
+    let vm = liveVerificationVM
+    if vm.isNil:
+      return
+    vm.selectLine(key)
+    for e in vm.rowMenu(liveCounterexampleVM, key):
+      result.add ContextMenuItem(name: cstring(e.label), hint: cstring"",
+        disabled: not e.enabled, disabledReason: cstring(e.reason),
+        handler: rowMenuHandler(key, e.action))
+
 
 proc noModelNote(model: VerificationPanelModel): string =
   ## The sentence shown when a payload arrived, was believed, and carries no
@@ -186,6 +193,7 @@ proc renderVerificationPanelTree[R, N](r: R; mdl: VerificationPanelModel;
          `data-ct-verification-running` = $mdl.running,
          `data-ct-verification-outcome` = mdl.outcomeText,
          `data-ct-verification-tier` = "text-fallback",
+         `data-ct-verification-payload` = $mdl.payloadStatus,
          `data-ct-verification-answers-correctness` = $mdl.answersCorrectness):
       tdiv(class = "ct-verification-status",
            `data-ct-verification-status` = "true",
@@ -196,7 +204,7 @@ proc renderVerificationPanelTree[R, N](r: R; mdl: VerificationPanelModel;
            title = mdl.commandLine):
         text mdl.commandLine
       # PLAT-63: a host that runs the project's verifier offers it here; one
-      # that runs nothing (the desktop today) draws no control at all.
+      # that runs nothing (a browser tab, a headless render) draws none.
       if mdl.canRun:
         button(class = "ct-verification-run",
                `data-ct-verification-action` = "run",
@@ -263,7 +271,7 @@ proc renderVerificationPanelTree[R, N](r: R; mdl: VerificationPanelModel;
                    `data-ct-verification-kind` = $row.kind,
                    `data-ct-verification-is-failure` = $row.isFailure,
                    `data-ct-verification-location` = row.location,
-                   onclick = activateHandler(hnd, key)):
+                   `data-ct-verification-target` = "finding"):
                 span(class = "ct-verification-row-kind"):
                   text row.kindLabel
                 span(class = "ct-verification-row-title"):
@@ -277,18 +285,8 @@ proc renderVerificationPanelTree[R, N](r: R; mdl: VerificationPanelModel;
                   pre(class = "ct-verification-row-excerpt",
                       `data-ct-verification-excerpt` = "true"):
                     text row.excerpt
-  when defined(js):
-    when N is isonim_dom.Element:
-      # The rows' right press: the shared menu, wired on the DOM rows (the
-      # headless tree has no events to wire).
-      if not findings.isNil:
-        for g in 0 ..< findings.childNodes.len:
-          let group = findings.childNodes[g]
-          for i in 1 ..< group.childNodes.len:
-            let row = isonim_dom.Element(group.childNodes[i])
-            let key = $row.getAttribute(cstring"data-ct-verification-key")
-            if key.len > 0:
-              wireRowMenu(row, key)
+  # A line's right press is the pointer row `context-menu.open`, performed by
+  # the front-end with `verificationRowMenuItems` (`ui/verification`).
 
 proc renderVerificationPanel*[R, N](r: R; model: VerificationPanelModel): N =
   ## The pure render, from a plain record, with inert controls.

@@ -34,7 +34,7 @@ import ../app/tests/navigation_table
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count, and inside a `const` block the
 # declaration is invisible to it.
-const ExpectedAssertions = 3
+const ExpectedAssertions = 4
 
 var countedAssertions = 0
 
@@ -68,20 +68,46 @@ suite "CTUI-9: key-to-command dispatch stays under its 2 ms gate":
     var slowest = ""
     # A representative token per canonical key name, so the measurement
     # includes `keyName`'s decoding — which is the expensive half.
+    const Tokens = [".", "n", "\x1b[21~", "\x1b[21;2~", "\x17", "\x1b[Z",
+                    "\x1b[B", "\x7f", "\x1b", "\r", "g", "r", "\x1b[15;3~"]
+    var coldWorstNs = 0'i64
     for mode in ModalMode:
       var state = initModalState(mode)
+      # TWO GATES, ONE BUDGET. A router builds each layer's resolution trie on
+      # the first key of a scope and keeps it (`editing_keymap.trieFor`'s
+      # cache, one per router). So a fresh router's first key is that
+      # construction plus a dispatch, paid once per scope per session, and
+      # every later key is a dispatch alone. Until 2026-11-07 this loop timed
+      # only fresh routers, so every reading was the first; now each is
+      # measured and each must fit the 2 ms. On the CPU clock, fresh routers
+      # only: 239 us mean, 425 us worst. This loop, 2026-11-04 and -05 at load
+      # 66-98: warm 34-38 us mean, 86-100 us worst; first key 306-342 us.
+      for token in Tokens:
+        var first = int64.high
+        for rep in 0 ..< DispatchReps:
+          var fresh = newNavResolver()
+          let started = threadCpuNs()
+          discard fresh.resolve(state, token, 0)
+          first = min(first, threadCpuNs() - started)
+        coldWorstNs = max(coldWorstNs, first)
+      # ONE WARM RESOLVER PER MODE, as the shipped window has one router for
+      # its session; priming it is what makes the readings below dispatches.
+      var km = newNavResolver()
+      for token in Tokens:
+        km.router.cancelPending()
+        discard km.resolve(state, token, 0)
       for bnd in table.bindingsFor(mode):
-        for token in [".", "n", "\x1b[21~", "\x1b[21;2~", "\x17", "\x1b[Z",
-                      "\x1b[B", "\x7f", "\x1b", "\r", "g", "r", "\x1b[15;3~"]:
+        for token in Tokens:
           # THE DISPATCH'S COST, NOT THE SCHEDULER'S: the fastest of
-          # `DispatchReps` identical dispatches, each from a fresh resolver.
+          # `DispatchReps` identical dispatches, each from no pending prefix
+          # (`cancelPending`, the state a fresh resolver starts in).
           # A dispatch that is slow is slow every time; one the kernel
           # descheduled is slow once. Measured 2026-10-30 on `agents` at load
           # 150: a single wall-clock reading put the worst at 10.3 ms (RED) on
           # a table whose every dispatch costs microseconds alone.
           var elapsed = int64.high
           for rep in 0 ..< DispatchReps:
-            var km = newNavResolver()
+            km.router.cancelPending()
             let started = threadCpuNs()
             discard km.resolve(state, token, 0)
             elapsed = min(elapsed, threadCpuNs() - started)
@@ -93,10 +119,16 @@ suite "CTUI-9: key-to-command dispatch stays under its 2 ms gate":
     let worstUs = float(worstNs) / 1000.0
     echo "DISPATCH: worst " & $worstUs & " us over " & $dispatches &
       " dispatches (mean " & $(float(totalNs) / float(dispatches) / 1000.0) &
-      " us); slowest " & slowest
+      " us); slowest " & slowest & "; a fresh router's first key " &
+      $(float(coldWorstNs) / 1000.0) & " us at worst"
     checkpoint("worst dispatch " & $worstUs & " us over " & $dispatches &
                " dispatches; slowest " & slowest)
     # 2 ms, spelled in nanoseconds so the comparison is integer.
+    #
+    # ## REPAIRED A THIRD TIME 2026-11-07: the warm dispatch and a fresh router's
+    # ## first key are measured apart (see the loop above) and both gated. No
+    # ## CPU-clock reading is on record over 2 ms; the reds recorded here were
+    # ## wall-clock readings.
     #
     # ## REPAIRED AGAIN 2026-11-03: the clock is the thread's CPU time
     # ## (`threadCpuNs`), not the wall. At load 55 the minimum of five
@@ -144,7 +176,8 @@ suite "CTUI-9: key-to-command dispatch stays under its 2 ms gate":
     # PRE-EXISTING: this gate is CTUI-9's and predates PLAT-12, which touched
     # neither this file nor `resolve`.
     ck worstNs < 2_000_000
-    # THE NON-VACUITY FLOOR: 106 bindings x 13 tokens = 1378. A sweep that
+    ck coldWorstNs < 2_000_000
+    # THE NON-VACUITY FLOOR: 107 bindings x 13 tokens = 1391. A sweep that
     # measured nothing would satisfy the gate above trivially.
     #
     # 1105 UNTIL PLAT-16 ADDED ONE BINDING (`Ctrl+F5`, the product-mode
@@ -155,14 +188,15 @@ suite "CTUI-9: key-to-command dispatch stays under its 2 ms gate":
     # PLAT-70 added FIVE (the output panes' `z h`, `z l`, `z H`, `z L`, `0`),
     # 1300 until the table panes' Show Detail added TWO (`Shift+K` under the
     # Vim and Kakoune modes, Horizontal-Overflow.md §5.3), 1326 until PLAT-70
-    # Part E added FOUR (`g o` and `Menu` in NORMAL and INSPECT).
+    # Part E added FOUR (`g o` and `Menu` in NORMAL and INSPECT), 1378 until
+    # the editor's breakpoint column added ONE (`Shift+F9`, `ffec0f79af3`).
     # The literal
     # moves with `ExpectedBindingCount` in `test_keymap_no_conflicts.nim`,
     # and it is still written as a literal BESIDE the computed form rather
     # than replacing it: the line above is satisfied by any binding count,
     # and this one is what notices that the count changed.
     ck dispatches == table.bindings.len * 13
-    ck dispatches == 1378
+    ck dispatches == 1391
 
   test "assertion count":
     echo "CHECKS: " & $countedAssertions

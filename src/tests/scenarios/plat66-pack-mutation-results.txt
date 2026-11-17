@@ -1,0 +1,23 @@
+# plat66 pack mutation results — 2026-11-17 04:13:46 +0200
+# measured against 23084ab21a6 with this commit's terminal binding and ci/test/scenarios.sh (the subjects at the control digests)
+
+T1   KILLED                         the terminal binding misreads the line the replay is stopped on
+       | step 1.4: 'editor[file="tracing.nim"]' does not satisfy stopped-within(18, 21)
+T2   KILLED                         the terminal binding never sees the read-only editor's caret
+       | step 2.2: backend
+T3   KILLED                         the terminal binding reads every property off the first screen it saw
+       | step 2.2: backend
+T4   KILLED                         the terminal's replay-idle fires before the window shows the stop
+       | step 5: 'editor[file="main.py"]' does not satisfy stopped-at(2)
+P1   KILLED                         the desktop binding never reads the line the replay is stopped on
+       | step 1.4: 'editor[file="tracing.nim"]' does not satisfy stopped-within(18, 21)
+P2   KILLED                         the desktop's replay-idle fires before the window shows the stop
+       | step 5: 'editor[file="main.py"]' does not satisfy stopped-at(2)
+G1   KILLED                         the GPUI binding never sees the execution pointer
+       | step 1.4: 'editor[file="tracing.nim"]' does not satisfy stopped-within(18, 21)
+R1   KILLED                         the binding resolver ignores the user's keybindings.json
+       | step 6: waited 180000 ms
+R2   KILLED                         the binding resolver sends the display form's capital (Shift+t)
+       | step 3.2: waited 180000 ms
+S1   KILLED                         a stage call smuggled into the user's example's steps
+       | lint L1

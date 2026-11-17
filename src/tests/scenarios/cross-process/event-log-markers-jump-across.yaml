@@ -1,0 +1,32 @@
+scenario: 1
+name: cross-process/event-log-markers-jump-across
+pack: codetracer
+summary: >-
+  The frontend recording's event log shows both correlation markers — the
+  account-balance request (key req-0001) and the js-wasm-realm crossing —
+  with their chips and direction icons; on the backend it shows its one
+  account-balance marker, and a click on that chip makes frontend-js the
+  active recording and opens app.js.
+
+stage:
+  - use: materialized-recording
+    with: { name: cross-process-three-trace }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 180s }
+  - wait: { until: { at: process-tree, active: frontend-js }, timeout: 60s }
+  - click: 'pane-tab[label="EVENT LOG"]'
+  - wait: { until: { at: 'event-log/event-marker[boundary="account-balance"]', present: true }, timeout: 60s }
+  - expect: { at: 'event-log/event-marker[boundary="account-balance"]', chip: "[account-balance]", key-value: req-0001, direction: true }
+  - expect: { at: event-log, assert: 'has-marker("js-wasm-realm", "[js-wasm-realm]")' }
+
+  - click: 'process-tree/process[name="backend"]'
+    settle: false
+  - wait: { until: { at: process-tree, active: backend }, timeout: 30s }
+  - wait: { until: { at: 'event-log/event-marker[boundary="js-wasm-realm"]', present: false }, timeout: 60s }
+  - wait: { until: { at: 'event-log/event-marker[boundary="account-balance"]', key-value: req-0001 }, timeout: 60s }
+  - click: { at: 'event-log/event-marker[boundary="account-balance"]', anchor: chip }
+    settle: false
+  - wait: { until: { at: process-tree, active: frontend-js }, timeout: 60s }
+  - wait: { until: { at: 'editor[file="app.js"]', present: true }, timeout: 60s }

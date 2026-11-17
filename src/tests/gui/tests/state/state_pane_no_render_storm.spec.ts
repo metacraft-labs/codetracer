@@ -59,6 +59,18 @@ test.use({ sourcePath: "py_sudoku_solver/main.py", launchMode: "trace" });
  * retry loop, whose floor was ~143. If a future change needs more than thirty,
  * the honest response is to find out which signal is being sent twice, not to
  * raise this number.
+ *
+ * (The constant has since become 400; the note above is its history.)
+ *
+ * RE-MEASURED 2026-11-12: 498, over the bound, with replays still 6 — no
+ * storm, but most of the mutations changed nothing. Counted with
+ * `attributeOldValue`, ~340 of them wrote an attribute or a text its own
+ * value: the pointer stamp re-writing `data-pointer` after every `class`
+ * write, the table fit pass re-writing `data-ct-cut` / `data-ct-fit`, and
+ * IsoNim's attribute and text effects re-writing a reused row's unchanged
+ * values. The first two now write only a changed value (`ui/pointer_stamp`,
+ * `views/table_overflow_dom`, `views/table_fit_dom`), which gives 373. The
+ * IsoNim share (~260) is IsoNim's to remove. The bound was not raised.
  */
 const MAX_STATE_PANE_MUTATIONS = 400;
 

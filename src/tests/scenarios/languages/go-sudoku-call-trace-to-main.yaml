@@ -1,0 +1,21 @@
+scenario: 1
+name: languages/go-sudoku-call-trace-to-main
+pack: codetracer
+summary: >-
+  In a Go Sudoku solver recording, activating `main.main` in the call trace shows
+  sudoku.go in the editor, with the `testBoards` value drawn beside its line.
+
+stage:
+  - use: record-program
+    with: { program: go_sudoku_solver/sudoku.go, backend: rr }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 240s }
+  - click: 'pane-tab[label="CALLTRACE"]'
+  - wait: { until: { at: 'call-trace/call[name="main.main"]', present: true }, timeout: 120s }
+  - click: { at: 'call-trace/call[name="main.main"]', anchor: name }
+    settle: false
+  - wait: { until: { at: 'editor[file="sudoku.go"]', active: true }, timeout: 60s }
+  - wait: replay-idle
+  - wait: { until: { at: 'editor[file="sudoku.go"]/flow-value[name="testBoards"]', present: true }, timeout: 60s }

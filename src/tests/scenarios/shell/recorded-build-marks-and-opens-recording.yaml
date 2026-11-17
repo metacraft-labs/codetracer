@@ -1,0 +1,58 @@
+scenario: 1
+name: shell/recorded-build-marks-and-opens-recording
+pack: codetracer
+summary: >-
+  View › Shell opens a running shell whose line-editing keys (Ctrl+B,
+  Ctrl+E) belong to the pane while it has the focus; a build typed there
+  records a program with `ct record`, its output lines carry the recording's
+  gutter marks (● on the first, │ on the next) and the pane counts one
+  recording; a click on ● opens the recording in a new session tab.
+
+stage:
+  - use: write-project
+    with:
+      files:
+        session.py: "x = 41\nprint(x + 1)\n"
+        shellrc: "PS1='$ '\n"
+        build.sh: |
+          cd "$(dirname "$0")"
+          echo "building prog.py"
+          printf 'def add(a, b):\n    return a + b\nprint("sum", add(2, 3))\nprint("done")\n' > prog.py
+          rm -rf rec-build
+          ct record -o rec-build prog.py
+  - use: record-program
+    with: { program: $project/session.py }
+  - use: front-end-options
+    with:
+      env: { CODETRACER_SHELL_COMMAND: "bash --noprofile --rcfile $project/shellrc -i" }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - click: menu-bar
+  - wait: { until: { at: 'menu-bar/menu[label="View"]', present: true }, timeout: 10s }
+  - hover: { at: 'menu-bar/menu[label="View"]', for: 300ms }
+  - wait: { until: { at: 'menu-bar/menu-item[label="Shell"]', present: true }, timeout: 10s }
+  # Across into View's entries along its own row first, as a user does: a
+  # diagonal path over Build and Reset would open their folders instead.
+  - hover: { at: 'menu-bar/menu-item[label="Filesystem"]', for: 200ms }
+  - wait: settled
+  - click: 'menu-bar/menu-item[label="Shell"]'
+  - wait: { until: { at: shell, state: running }, timeout: 60s }
+  - wait: { until: { at: shell, assert: 'shows("$")' }, timeout: 60s }
+  - click: shell
+  # `b` typed last, after moving back over `uild.sh` with the shell's own
+  # Ctrl+B: were the window to take Ctrl+B, the line would end `uild.shb`.
+  - type: "sh ./uild.sh"
+  - chord: Ctrl+b Ctrl+b Ctrl+b Ctrl+b Ctrl+b Ctrl+b Ctrl+b
+  - type: b
+  - chord: Ctrl+e
+  - key: Enter
+    settle: false
+  - wait: { until: { at: shell, status: { contains: "1 recording" } }, timeout: 180s }
+  - wait: { until: { at: shell, assert: 'shows("recordingId:")' }, timeout: 60s }
+  - expect: { at: 'shell/shell-row[mark="start"]', text: { contains: "sum 5" }, gutter: "●" }
+  - expect: { at: 'shell/shell-row[mark="range"]', text: { contains: done }, gutter: "│" }
+  - click: { at: 'shell/shell-row[mark="start"]', anchor: gutter }
+    settle: false
+  - wait: { until: { at: session-strip, count: 2 }, timeout: 120s }

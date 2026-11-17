@@ -8,6 +8,14 @@
 ## loop tests), and what each gesture reports — the jump, the scratchpad, the
 ## context menu, the loop control's back / forward / typed iteration.
 ##
+## A PRESS on a chip is routed (Input-Routing-And-Keymaps.md §5.1): the chips
+## hold no press handler; each element carries its operation, bound to the
+## procedure that performs it there (`input/element_operations`). `press`
+## below presses as the page's one pointer listener does — the shipped router
+## over the shipped base keymap resolves the gesture in the editor pane, and
+## the operation it resolves to is performed on the element. A fired
+## `mousedown` reaches nothing (the controls in each case).
+##
 ## No mock beyond `MockRenderer` and the `MockEvent`s it dispatches: the views
 ## take plain values and report gestures through handlers this suite records.
 
@@ -16,6 +24,11 @@ import std/[strutils, tables, unittest]
 import isonim/testing/mock_dom
 
 import views/isonim_flow_inline_view
+import input/element_operations
+import keymap/[base_keymaps, context_keys, editing_keymap, keymap_router,
+               scope_path]
+import viewmodels/product_mode
+import ../../../../common/key_names
 
 proc classes(node: MockNode): seq[string] =
   node.attributes.getOrDefault("class", "").splitWhitespace()
@@ -51,6 +64,23 @@ proc fire(node: MockNode; event: string; ctrl = false; shift = false;
   fireEventWith(node, event, result)
 
 let r = MockRenderer()
+
+let router = initKeymapRouter(bkCua, KeyDelivery(frontEnd: feDesktop,
+  platform: pkLinux, keyProtocol: kpNative))
+
+proc press(node: MockNode; ctrl = false; pane = "editor"): string =
+  ## A primary press on `node`, routed as the page's pointer listener routes
+  ## it; answers the operation it ran ("" for none).
+  let kind = if node.attr(ElementKindAttribute).len > 0: node.attr(ElementKindAttribute)
+             else: ButtonElementKind
+  let outcome = resolveElementPress(
+    routerResolver(router, SessionFacts(product: pmDebug, replayLoaded: true)),
+    @[element(ekWindow, "window"), pane(pane)], kind,
+    node.attr(OperationAttribute), (if ctrl: {kmodCtrl} else: {}), "Click")
+  if outcome.operation.len > 0 and
+     runBoundOperation(node, outcome.operation, PressInfo(ctrl: ctrl)):
+    outcome.operation
+  else: ""
 
 suite "a variable's chip":
 
@@ -102,9 +132,12 @@ suite "a variable's chip":
     let button = chip.byClass("flow-view-more-button")
     check "flow-hide-content" in button.classes
     check button.styles["fontSize"] == "13px"
-    let ev = button.fire("mousedown")
+    discard button.fire("mousedown")
+    check opened == 0             # CONTROL: no handler of its own
+    check button.press() == FlowViewFullValue
     check opened == 1
-    check ev.propagationStopped   # the press must not reach Monaco
+    # Pressed on the press, which goes no further: it must not reach Monaco.
+    check button.attr("data-ct-press") == "down"
     check chip.byClass("flow-parallel-value-box").styles["maxWidth"] == "120px"
     check chip.allByClass("ct-omni-name").len == 0
 
@@ -120,11 +153,18 @@ suite "a variable's chip":
       FlowChipHandlers(onBoxPress: onPress))
     let shown = chip.allByClass("flow-parallel-value-box")
     discard shown[0].fire("mousedown")
-    let ev = shown[1].fire("mousedown", ctrl = true)
+    check pressed.len == 0        # CONTROL: no handler of its own
+    check shown[0].attr(ElementKindAttribute) == "value"
+    check shown[0].press() == FlowJumpToStep
+    # Ctrl+Click on a value is the pointer keymap's (K36), in the editor and
+    # in the Flow pane.
+    check shown[1].press(ctrl = true) == ScratchpadAddValue
+    check shown[1].press(ctrl = true, pane = "flow") == ScratchpadAddValue
     # Each box reports ITSELF: a dual chip's before box is not its after box.
     check pressed == @[(fvsBefore, boxes[0].id, false),
+                       (fvsAfter, boxes[1].id, true),
                        (fvsAfter, boxes[1].id, true)]
-    check ev.propagationStopped
+    check shown[1].attr("data-ct-press") == "down"
 
   test "each box of a dual chip hovers its own value":
     let boxes = planFlowValueChip("parallel", fvmBeforeAndAfter, 0, 5, "v",
@@ -168,6 +208,8 @@ suite "a variable's chip":
     let name = chip.byClass("ct-omni-name")
     check name.textOf == "i"
     discard name.fire("mousedown")
+    check jumps == 0              # CONTROL: no handler of its own
+    check name.press() == FlowJumpToStep
     discard name.fire("contextmenu")
     check jumps == 1
     check menus == 1
@@ -192,7 +234,9 @@ suite "an event's chip":
     check box.attr("iteration") == "2"
     check "maxWidth" notin box.styles
     discard box.fire("mousedown")
-    discard chip.children[0].fire("mousedown")
+    check jumps == 0              # CONTROL: no handler of its own
+    check box.press() == FlowJumpToStep
+    check chip.children[0].press() == FlowJumpToStep
     check jumps == 2
 
   test "a long event is capped and opens its popup":
@@ -205,7 +249,8 @@ suite "an event's chip":
       onJump = nil, onViewMore = (proc(input: FlowInput) = inc opened))
     let button = chip.byClass("flow-view-more-button")
     check "ct-omni-name-error" in button.classes
-    check button.fire("mousedown").propagationStopped
+    check button.press() == FlowViewFullValue
+    check button.attr("data-ct-press") == "down"
     check opened == 1
     check chip.byClass("flow-error-box").styles["maxWidth"] == "120px"
     let popup = renderFlowEventPopup[MockRenderer, MockNode](r, "full text")

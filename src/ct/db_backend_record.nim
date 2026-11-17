@@ -6,10 +6,47 @@ import std/[ options, os, osproc, strutils, strformat, sequtils, json ],
   cli/[ logging, help ],
   globals,
   trace/storage_and_import,
+  trace/ctfs_sources,
   trace/recorder_dispatch,
+  trace/recorder_version_probe,
   trace/record_assessment,
   trace/shell
 
+
+template importRecorderOutput(recorderName: string, recorder: RecorderArtifact,
+                              sibling: string, installHint: seq[string],
+                              importCall: untyped): untyped =
+  ## ``importCall`` imports what the recorder ``recorder`` has just written.  ## A refusal on the trace's format VERSION is not the trace's fault but a
+  ## mismatch between that recorder and this `ct` (GitHub #909): report it
+  ## as such, with both versions and the side that is behind, and exit 1
+  ## before anything is registered -- the refusal is raised by
+  ## ``readCtfsMetaDat`` / ``openCtfs`` before ``importTrace`` copies or
+  ## records anything.
+  ##
+  ## Each argument is evaluated once, and only on the refusal path:
+  ## ``recorder`` may be a call (``recorderArtifactOf``, which resolves the
+  ## toolchain).  A ``loaded`` recorder (PHP's ``codetracer.so``) is never
+  ## run: it is not a program.  The ``--version`` probe is bounded
+  ## (``recorder_version_probe``), so it cannot hold the refusal up.
+  try:
+    importCall
+  except TraceFormatVersionRefused as refusal:
+    let artifact = recorder
+    let reported =
+      if artifact.loaded: "" else: recorderVersionLine(artifact.path)
+    for line in staleRecorderMessage(recorderName, artifact, reported,
+                                     refusal.part, refusal.found,
+                                     refusal.readable, sibling, installHint):
+      errorMessage line
+    quit(1)
+
+proc recorderArtifactOf(sel: RecorderSelector, exe: string): RecorderArtifact =
+  ## The recorder half of ``sel``'s toolchain (label, override, resolved
+  ## path), or -- for a selector the table has none for -- ``exe`` itself.
+  for artifact in recorderRequirements(sel):
+    if artifact.kind == raRecorder and artifact.path.len > 0:
+      return artifact
+  RecorderArtifact(kind: raRecorder, label: exe.extractFilename, path: exe)
 
 proc recordSymbols(sourceDir: string, outputFolder: string, lang: Lang) =
   var ctagsArgs = @[
@@ -84,7 +121,11 @@ proc recordWithCtRrSupport(
     quit(code)
 
   # import replay trace metadata written by ct-native-replay.
-  result = importTrace(traceFolder, recordingId, NO_PID, LangUnknown, DB_SELF_CONTAINED_DEFAULT, traceKind=traceKind)
+  result = importRecorderOutput("native",
+      RecorderArtifact(kind: raRecorder, label: "ct-native-replay",
+                       path: ctRRSupportExe),
+      "", @[]):
+    importTrace(traceFolder, recordingId, NO_PID, LangUnknown, DB_SELF_CONTAINED_DEFAULT, traceKind=traceKind)
 
 
 proc copyMacroSourcemaps(nimcacheDir, traceFolder: string) =
@@ -176,8 +217,13 @@ proc recordNim(
     if exitCode != 0:
       echo fmt"error: nim e tracer exited with {exitCode} for {program}"
       quit(1)
-    return importTrace(traceFolder, recordingId, recordPid, LangNim,
-        DB_SELF_CONTAINED_DEFAULT, traceKind="db")
+    return importRecorderOutput("Nim",
+        RecorderArtifact(kind: raRecorder, label: "nim",
+                         envVar: "CODETRACER_NIM_EXE_PATH",
+                         path: nimCompilerExe()),
+        "", @[]):
+      importTrace(traceFolder, recordingId, recordPid, LangNim,
+          DB_SELF_CONTAINED_DEFAULT, traceKind="db")
 
   # Default (``.nim`` and any other Nim-recognised extension we may add
   # later): compile to a native binary then hand off to MCR.
@@ -219,8 +265,14 @@ proc recordNim(
   if exitCode != 0:
     echo fmt"error: ct-mcr record exited with {exitCode} for {binaryPath}"
     quit(1)
-  result = importTrace(traceFolder, recordingId, recordPid, LangNim,
-      DB_SELF_CONTAINED_DEFAULT, traceKind="db")
+  result = importRecorderOutput("Nim",
+      RecorderArtifact(kind: raRecorder, label: "ct-mcr",
+                       envVar: "CODETRACER_CT_MCR_CMD",
+                       path: mcrRecorderExe()),
+      "codetracer-native-recorder",
+      @["build it with `cd ../codetracer-native-recorder && just build-ct-mcr`"]):
+    importTrace(traceFolder, recordingId, recordPid, LangNim,
+        DB_SELF_CONTAINED_DEFAULT, traceKind="db")
 
 
 # rr patches for ruby/other vm-s: not supported now, instead
@@ -267,8 +319,14 @@ proc recordNativeServer(
     echo fmt"error: the native server recorder exited with {exitCode}"
     quit(1)
 
-  importTrace(traceFolder, recordingId, recordPid, LangUnknown,
-              DB_SELF_CONTAINED_DEFAULT, traceKind = "rr")
+  importRecorderOutput("native server",
+      RecorderArtifact(kind: raRecorder, label: "codetracer-native-recorder",
+                       envVar: "CODETRACER_NATIVE_SERVER_RECORDER_PATH",
+                       path: nativeServerRecorderExe()),
+      "codetracer-native-recorder",
+      @["build it with `cd ../codetracer-native-recorder && just build`"]):
+    importTrace(traceFolder, recordingId, recordPid, LangUnknown,
+                DB_SELF_CONTAINED_DEFAULT, traceKind = "rr")
 
 proc requireRecorder(sel: RecorderSelector) =
   ## Fail with a precise, actionable message when a target's recording
@@ -377,11 +435,15 @@ proc recordDb(
       echo fmt"error: recorder exited with {exitCode} for {lang}"
       quit(1)
 
-  result = importTrace(
-    traceFolder, recordingId, recordPid, lang, DB_SELF_CONTAINED_DEFAULT,
-    traceKind = "db",
-    axesArg = some(TargetAxes(language: sel.language, targetIsa: sel.targetIsa,
-                              toolchain: tcUnknown, approach: sel.approach)))
+  let tool = recorderToolFor(sel)
+  result = importRecorderOutput(displayName(sel),
+                                recorderArtifactOf(sel, invocation.exe),
+                                tool.sibling, tool.installHint):
+    importTrace(
+      traceFolder, recordingId, recordPid, lang, DB_SELF_CONTAINED_DEFAULT,
+      traceKind = "db",
+      axesArg = some(TargetAxes(language: sel.language, targetIsa: sel.targetIsa,
+                                toolchain: tcUnknown, approach: sel.approach)))
 
 
 # record a program run
@@ -669,6 +731,10 @@ proc main*(): Trace =
   var noirTestName = ""
     ## `--noir-test-name <name>`: trace that Noir test function instead of
     ## `main` (`ct record-test` on a `.nr` file; see `recordTest`).
+  var recordingIdFile = ""
+    ## Internal `--recording-id-file <path>`: `ct record` on a terminal gives
+    ## the recorded program its own streams and reads the id from this file
+    ## (`trace/recorder_spawn.nim`).
 
   # for i, arg in args:
   var i = 0
@@ -728,6 +794,12 @@ proc main*(): Trace =
       else:
         stderr.writeLine("db-backend-record: --recognized-lang names no language: " & args[i + 1])
         quit(1)
+      i += 2
+    elif arg == "--recording-id-file":
+      if args.len() < i + 2:
+        displayHelp()
+        return
+      recordingIdFile = args[i + 1]
       i += 2
     elif arg == "--backend":
       if args.len() < i + 2:
@@ -941,6 +1013,14 @@ proc main*(): Trace =
     # Marker for caller — M-REC-6 renamed the prefix from ``traceId:`` to
     # ``recordingId:`` to remove the "trace_id" overload across our
     # subprocess plumbing.  The payload is still a UUIDv7 string.
+    if recordingIdFile.len > 0:
+      # Before the marker, so the two never disagree; a failure here must not
+      # fail a recording that is already made and indexed.
+      try:
+        writeFile(recordingIdFile, traceId & "\n")
+      except IOError, OSError:
+        stderr.writeLine("warning: could not write the recording id to " &
+          recordingIdFile & ": " & getCurrentExceptionMsg())
     echo fmt"recordingId:{traceId}"
     # The recorder runs the traced program as a child with
     # ``poParentStreams``, so the child writes directly to our inherited

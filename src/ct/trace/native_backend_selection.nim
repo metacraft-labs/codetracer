@@ -42,6 +42,7 @@
 
 import std/[strutils]
 import ../../common/target_axes
+import ../../common/lang
 
 const
   BackendMcr* = token(raMcr)   ## "mcr"
@@ -155,6 +156,44 @@ proc defaultNativeRecordingBackend*(): string =
   ## `defaultNativeRecordingApproach`, spelled for the command line.
   token(defaultNativeRecordingApproach())
 
+const McrUnsuitableLangs* = {LangLean}
+  ## Languages whose programs MCR does not record in a usable time
+  ## (`codetracer-specs/Recording-Backends/Multi-Core-Recorder/
+  ## Multi-Core-Recorder.md` §1, "Programs MCR is not for"; see
+  ## `mcrUnsuitableLines`). For them rr is the default where the host has it.
+
+proc defaultNativeRecordingApproachFor*(lang: Lang; host: string): RecordingApproach =
+  ## The default when `--backend` is not given, for a program in `lang` on
+  ## `host`: rr for a language MCR is not for, where the host has rr; the
+  ## general default (`defaultNativeRecordingApproach`) otherwise.
+  if lang in McrUnsuitableLangs and raRr in approachesValidOn(host): raRr
+  else: defaultNativeRecordingApproach()
+
+proc mcrUnsuitableLines(lang: Lang; chosen: RecordingApproach; host: string;
+                        requested: bool): seq[string] =
+  ## Why `lang` is not recorded with MCR, as the note (rr was chosen for it)
+  ## or the warning (MCR was asked for, or is all the host has) `ct record`
+  ## prints. Empty for every other language.
+  if lang notin McrUnsuitableLangs:
+    return @[]
+  let name = toName(lang)
+  let why = "MCR records every reference-count access the " & name &
+    " runtime makes (versioned reads); a " & name &
+    " program that runs for more than a fraction of a second records for a" &
+    " very long time and leaves a very large trace."
+  if chosen == raRr:
+    @["note: recording this " & name & " program with rr.",
+      "      " & why,
+      "      pass --backend mcr to record it with MCR anyway."]
+  elif requested:
+    @["warning: --backend mcr for a " & name & " program.",
+      "         " & why,
+      "         --backend rr records it in about the program's own run time."]
+  else:
+    @["warning: recording this " & name & " program with MCR, the only native recorder on " & host & ".",
+      "         " & why,
+      "         rr records it in about the program's own run time; rr is available on " & HostLinux & "."]
+
 proc availableElsewhere(host: string): string =
   ## "rr is available on linux; ttd is available on windows" — every backend
   ## this host cannot honour, and where it can be.
@@ -168,31 +207,37 @@ proc availableElsewhere(host: string): string =
       parts.add(token(approach) & " is available on " & provider)
   parts.join("; ")
 
-proc resolveNativeRecordingBackend*(requested: string, host: string):
+proc resolveNativeRecordingBackend*(requested: string, host: string;
+                                    lang: Lang = LangUnknown):
     NativeBackendSelection =
-  ## Q6, implemented.  An empty `requested` takes the default; a value the host
-  ## can honour is used as given — including `mcr`, which is therefore a **pin**
-  ## rather than a coincidence of the default; anything else is refused.
+  ## Q6, implemented.  An empty `requested` takes the default for `lang` on
+  ## `host` (`defaultNativeRecordingApproachFor`); a value the host can honour
+  ## is used as given — including `mcr`, which is therefore a **pin** rather
+  ## than a coincidence of the default; anything else is refused. A language
+  ## MCR is not for (`McrUnsuitableLangs`) gets a note or a warning saying why.
   let normalized = requested.strip.toLowerAscii
   if normalized.len == 0:
+    let approach = defaultNativeRecordingApproachFor(lang, host)
     return NativeBackendSelection(
-      ok: true, backend: defaultNativeRecordingBackend(),
-      approach: defaultNativeRecordingApproach())
+      ok: true, backend: token(approach), approach: approach,
+      noteLines: mcrUnsuitableLines(lang, approach, host, requested = false))
 
   if normalized in MaterializedBackendNames:
     # See `MaterializedBackendNames`.  This arm exists because the product
     # itself puts this value on the command line, so refusing it would fail a
     # recording the user never passed a flag for.  It is a note rather than
     # silence: Q6's rule is that a value is never *silently* not honoured.
+    let approach = defaultNativeRecordingApproachFor(lang, host)
     return NativeBackendSelection(
       ok: true,
-      backend: defaultNativeRecordingBackend(),
-      approach: defaultNativeRecordingApproach(),
+      backend: token(approach),
+      approach: approach,
       noteLines: @[
         "note: --backend " & normalized &
           " names the materialized-trace recorder, and this target is native.",
-        "      recording with " & defaultNativeRecordingBackend() &
-          " instead; pass --lang to record it as a materialized-trace language."])
+        "      recording with " & token(approach) &
+          " instead; pass --lang to record it as a materialized-trace language."] &
+        mcrUnsuitableLines(lang, approach, host, requested = false))
 
   # Parsed onto the axis, then checked against the host's row.  A value that
   # parses as an approach but is not a NATIVE REPLAY one (`instrumented`,
@@ -203,7 +248,8 @@ proc resolveNativeRecordingBackend*(requested: string, host: string):
                  approach in NativeReplayApproaches
   let valid = backendsValidOn(host)
   if isNative and normalized in valid:
-    return NativeBackendSelection(ok: true, backend: normalized, approach: approach)
+    return NativeBackendSelection(ok: true, backend: normalized, approach: approach,
+      noteLines: mcrUnsuitableLines(lang, approach, host, requested = true))
 
   let known = isNative
   var lines: seq[string] = @[]

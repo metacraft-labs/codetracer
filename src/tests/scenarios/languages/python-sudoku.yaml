@@ -1,0 +1,40 @@
+scenario: 1
+name: languages/python-sudoku
+pack: codetracer
+summary: >-
+  The Python sudoku solver's recording opens main.py in the editor and fills
+  the event log; the call trace's solve_sudoku call carries its board
+  argument, and a click on it moves the replay into main.py; the terminal
+  output shows the printed boards.
+
+stage:
+  - use: record-program
+    with: { program: py_sudoku_solver/main.py }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - wait: { until: { at: 'editor[file="main.py"]', present: true }, timeout: 60s }
+
+  - beat: event-log
+    steps:
+      - click: 'pane-tab[label="EVENT LOG"]'
+      - wait: { until: event-log.loaded, timeout: 60s }
+      - expect: { at: event-log, count: { gt: 0 } }
+
+  - beat: call-trace
+    steps:
+      - click: 'pane-tab[label="CALLTRACE"]'
+      - wait: { until: call-trace.loaded, timeout: 60s }
+      - wait: { until: { at: 'call-trace/call[name="solve_sudoku"]', present: true }, timeout: 60s }
+      - expect: { at: 'call-trace/call[name="solve_sudoku"]', arguments: { contains: board } }
+      - click: { at: 'call-trace/call[name="solve_sudoku"]', anchor: name }
+      - wait: { until: { at: 'call-trace/call[name="solve_sudoku"]', current: true }, timeout: 30s }
+      - wait: { until: replay-idle, timeout: 60s }
+      - expect: { at: 'editor[file="main.py"]', active: true }
+
+  - beat: terminal-output
+    steps:
+      - click: 'pane-tab[label="TERMINAL OUTPUT"]'
+      - wait: { until: { at: terminal-output, count: { gt: 0 } }, timeout: 60s }
+      - expect: { at: terminal-output, assert: 'shows("1")' }

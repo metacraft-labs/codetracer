@@ -1,0 +1,14 @@
+scenario: 1
+name: terminal/vcs-pane-in-edit-mode
+pack: codetracer
+summary: In Edit mode, as in a replay, a click on the VCS tab shows the repository's pane.
+stage:
+  - use: fixture-project
+    with: { name: vcs-repo }
+  - use: open-project
+    with: { folder: $project, width: 200, height: 50 }
+steps:
+  - wait: { until: ready, timeout: 60s }
+  - click: { at: 'pane-tab[label="VCS"]' }
+  - wait: { until: { at: 'pane[title="VCS"]', assert: 'has-row("WORKING TREE (3)")' }, timeout: 30s }
+  - expect: { at: 'pane[title="VCS"]', assert: 'has-row("M notes.txt")' }

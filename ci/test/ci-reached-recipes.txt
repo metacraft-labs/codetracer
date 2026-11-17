@@ -30,3 +30,8 @@ test-tui # TUI Tier-1 suites (codetracer-pm issues/2026-11-01-no-ci-lane-calls-t
 # The only route to the `tui-real-terminal` Nim lane: CodeTracer-TUI.md §7.1.6,
 # Tier 2, the terminal-peer check. Run by the `tui-tests` job.
 test-tui-real-terminal # TUI Tier-2 suites (same issue)
+
+# The only route to the `tui-native` Nim lane: the Tier-1 suites over an rr
+# recording of a native program, split out of `tui` because they need rr and
+# ct-native-replay. Run by the `test-ui-tests-rr` job.
+test-tui-native # TUI Tier-1 rr-recording suites (codetracer-pm issues/2026-11-09-tui-job-runs-plat60-and-plat65-without-their-prerequisites.md)

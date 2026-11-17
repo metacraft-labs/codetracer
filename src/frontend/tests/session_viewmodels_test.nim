@@ -122,7 +122,7 @@ proc panelMountSession(m: PanelMount): SessionViewModel =
   privateAccess(PanelMount)
   if m.isNil: nil else: m.session
 
-const ExpectedChecks = 62
+const ExpectedChecks = 67
 proc jsHasOwnProperty(o: JsObject; key: cstring): bool {.importjs:
   "Object.prototype.hasOwnProperty.call(#, #)".}
 
@@ -271,6 +271,45 @@ scenario "each tab's pane renders its own tab's session, whichever tab is shown"
   let vm2 = buildSessionVMs(tab2)
   refreshPanelSessions()
   ck panelMountSession(m2) == vm2
+
+scenario "the caption bar's command prompt stays drawn over a tab with no session":
+  # The prompt's host is the caption bar's, outside every tab. A "+" tab
+  # shows a welcome screen and has no ViewModels; switching to it rebuilds
+  # the caption's chrome, and the prompt mounted into the new host waited
+  # for a session that tab never gets, leaving an empty gap in the caption
+  # (`welcome_screen.styl` keeps the prompt drawn, faded and inert, there).
+  proc chromeHost(): isonim_dom.Element =
+    let h = document.createElement("div")
+    h.id = "commandPaletteComponent-0"
+    document.body.appendChild(h)
+    cast[isonim_dom.Element](h)
+  data.activeSessionIndex = 0
+  setPanelSession(vm0)
+  let shown = mountPanel(chromeHost(), Content.CommandPalette)
+  ck panelMountSession(shown) == vm0
+  let welcomeTab = addTab()
+  ck sessionVMOf(welcomeTab).isNil
+  data.activeSessionIndex = data.sessions.len - 1
+  setPanelSession(nil)
+  let rebuilt = mountPanel(chromeHost(), Content.CommandPalette)
+  ck panelMountSession(rebuilt) == vm0
+  # ... and drawn: the new host holds the prompt.
+  privateAccess(PanelMount)
+  ck not isonim_dom.isNodeNil(isonim_dom.Node(rebuilt.host).firstChild)
+  # A tab's own pane outside every tab still waits: only the chrome keeps
+  # the session it showed.
+  let overlay = block:
+    let h = document.createElement("div")
+    document.body.appendChild(h)
+    cast[isonim_dom.Element](h)
+  let waitingPane = mountPanel(overlay, Content.Calltrace)
+  ck panelMountSession(waitingPane).isNil
+  dispose(shown)
+  dispose(rebuilt)
+  dispose(waitingPane)
+  data.sessions.delete(data.sessions.len - 1)
+  data.activeSessionIndex = 0
+  setPanelSession(vm0)
 
 scenario "a move of the hidden tab updates the hidden tab's store only":
   data.activeSessionIndex = 0

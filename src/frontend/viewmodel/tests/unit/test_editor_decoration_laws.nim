@@ -85,7 +85,7 @@ template counted(condition: untyped) =
   inc countedAssertions
   check condition
 
-const ExpectedAssertions = 1280
+const ExpectedAssertions = 1282
   ## +2 on 2026-10-24: PLAT-70 Part C's `find_match.nim` joined the editor
   ## directory, so the §35 scan covers one more module.
   ## **AND AGAIN ON 2026-09-20: PLAT-33 ADDED `collab_text.nim`, THE SEVENTH
@@ -1068,7 +1068,7 @@ const
   WrapSource = staticRead("../../editor/wrap.nim")
   GeneratorSource = staticRead("../generators/decoration_generator.nim")
 
-const ScannedModules = ["anchor.nim", "change_set.nim", "collab_text.nim",
+const ScannedModules = ["word_classifier.nim", "anchor.nim", "change_set.nim", "collab_text.nim",
                     "decoration.nim",
                         "document_version.nim", "editor_state.nim",
                         "find_match.nim", "history.nim",
@@ -1224,7 +1224,7 @@ suite "PLAT-28 — the suite's own non-vacuity":
     # the two-sided comparison above: without it, a directory walk that matched
     # nothing and a list that had been emptied would agree with each other
     # perfectly (§4). Forcing this edit is the whole job it does.
-    counted ScannedModules.len == 20
+    counted ScannedModules.len == 21
     counted NewModules.len == 5
 
   test "NO CLAMP REPAIRS AN ANCHOR — every unreachable path RAISES":

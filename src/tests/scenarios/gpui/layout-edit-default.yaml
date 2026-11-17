@@ -1,0 +1,21 @@
+scenario: 1
+name: gpui/layout-edit-default
+pack: codetracer
+summary: >-
+  An Edit window opens the shared Edit default: the debug arrangement without
+  the replay's panes — Files and the editor are there, the Call Trace, the
+  Variables and the Event Log are not.
+
+stage:
+  - use: write-project
+    with: { files: { main.py: "print(1)\n" } }
+  - use: open-project
+    with: { folder: $project, file: main.py }
+
+steps:
+  - wait: { until: ready, timeout: 60s }
+  - wait: { until: editor.loaded, timeout: 60s }
+  - expect: { at: 'pane-tab[label="Files"]', present: true }
+  - expect: { at: 'pane-tab[label="Call Trace"]', absent: true }
+  - expect: { at: 'pane-tab[label="Variables"]', absent: true }
+  - expect: { at: 'pane-tab[label="Event Log"]', absent: true }

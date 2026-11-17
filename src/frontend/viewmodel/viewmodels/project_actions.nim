@@ -103,6 +103,12 @@ type
     problems*: seq[string]
       ## One line per declaration that could not be read. See rule 2 above.
 
+const
+  TasksJsonNames* = [".vscode/tasks.json", "tasks.json"]
+    ## §9.3's task files, relative to the project root, in order of
+    ## preference: a host reads the first that exists.
+  PackageJsonName* = "package.json"
+
 proc `==`*(a, b: ProjectAction): bool {.noSideEffect.} =
   a.id == b.id and a.label == b.label and a.detail == b.detail and
     a.command == b.command and a.args == b.args and a.cwd == b.cwd and
@@ -120,6 +126,22 @@ proc commandLine*(action: ProjectAction): string {.noSideEffect.} =
       result.add '"' & arg & '"'
     else:
       result.add arg
+
+proc launchArgv*(action: ProjectAction; windows: bool): seq[string]
+    {.noSideEffect.} =
+  ## The argv this action becomes, on every host that launches one.
+  ##
+  ## A `tasks.json` task is a program plus arguments and is launched directly —
+  ## no shell, so no quoting hazard. A `package.json` script is a shell string
+  ## by definition (`verno fv && echo ok` is a legal one), so it goes to the
+  ## platform's shell verbatim rather than being split on whitespace into a
+  ## command the project did not write.
+  case action.source
+  of pasTasksJson:
+    @[action.command] & action.args
+  of pasPackageJson:
+    if windows: @["cmd", "/C", action.command]
+    else: @["/bin/sh", "-c", action.command]
 
 proc readJson(text, what: string; doc: var JsonNode): string =
   ## Parse, or say why not. Returns "" on success and a problem line

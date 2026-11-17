@@ -327,3 +327,20 @@ suite "a refused ct/ request reaches the user as readable text":
     let painted = notificationText(paintStatusBar())
     check painted.contains("ct/run-tracepoints")
     check painted.contains($BackendSentence)
+
+  test "a refused motion request is one the status bar must stop showing":
+    # A refused step or continue brings no move (`CtCompleteMove`), and the
+    # status bar showed its operation until a move came: "stable: reverse-next"
+    # stayed up after the replay refused reverse execution (codetracer-pm
+    # issue 2026-11-15 "Reverse Next never completes on an rr recording of a
+    # Nim program"). `middleware`'s refusal observer ends the operation for
+    # exactly the commands `isMotionCommand` names.
+    for command in ["next", "stepIn", "stepOut", "continue", "stepBack",
+                    "reverseContinue", "ct/reverseStepIn", "ct/reverseStepOut",
+                    "ct/step"]:
+      checkpoint(command)
+      check isMotionCommand(cstring(command))
+    for command in ["ct/run-tracepoints", "ct/load-locals", "ct/update-expansion",
+                    "setBreakpoints", ""]:
+      checkpoint(command)
+      check not isMotionCommand(cstring(command))

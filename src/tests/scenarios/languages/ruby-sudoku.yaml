@@ -1,0 +1,41 @@
+scenario: 1
+name: languages/ruby-sudoku
+pack: codetracer
+summary: >-
+  The Ruby sudoku solver's recording opens sudoku_solver.rb and fills the
+  event log; the call trace's SudokuSolver#initialize call carries its board
+  argument and a click on it moves the replay into sudoku_solver.rb, the
+  call trace lists SudokuSolver#solve, and the terminal output shows the printed board.
+
+stage:
+  - use: record-program
+    with: { program: rb_sudoku_solver/sudoku_solver.rb }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - wait: { until: { at: 'editor[file="sudoku_solver.rb"]', present: true }, timeout: 60s }
+
+  - beat: event-log
+    steps:
+      - click: 'pane-tab[label="EVENT LOG"]'
+      - wait: { until: event-log.loaded, timeout: 60s }
+      - expect: { at: event-log, count: { gt: 0 } }
+
+  - beat: call-trace
+    steps:
+      - click: 'pane-tab[label="CALLTRACE"]'
+      - wait: { until: call-trace.loaded, timeout: 60s }
+      - wait: { until: { at: 'call-trace/call[name="SudokuSolver#initialize"]', present: true }, timeout: 60s }
+      - expect: { at: 'call-trace/call[name="SudokuSolver#initialize"]', arguments: { contains: board } }
+      - wait: { until: { at: call-trace, assert: 'has-call("SudokuSolver#solve")' }, timeout: 60s }
+      - click: { at: 'call-trace/call[name="SudokuSolver#initialize"]', anchor: name }
+      - wait: { until: { at: 'call-trace/call[name="SudokuSolver#initialize"]', current: true }, timeout: 30s }
+      - wait: { until: replay-idle, timeout: 60s }
+      - expect: { at: 'editor[file="sudoku_solver.rb"]', active: true }
+
+  - beat: terminal-output
+    steps:
+      - click: 'pane-tab[label="TERMINAL OUTPUT"]'
+      - wait: { until: { at: terminal-output, count: { gt: 0 } }, timeout: 60s }
+      - expect: { at: terminal-output, assert: 'shows("1")' }

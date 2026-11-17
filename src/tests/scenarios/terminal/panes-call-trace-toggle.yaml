@@ -1,0 +1,22 @@
+scenario: 1
+name: terminal/panes-call-trace-toggle
+pack: codetracer
+summary: >-
+  A call's toggle collapses its children out of the call trace and a second
+  press expands them back, under the same row.
+stage:
+  - use: record-program
+    with: { program: calc }
+  - use: open-recording
+    with: { width: 200, height: 50 }
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - wait: call-trace.loaded
+  - expect: { at: 'call-trace/call[#5]', name: apply_op }
+  - expect: { at: 'call-trace/call[#6]', name: add }
+  - click: { at: 'call-trace/call[#5]', anchor: expander }
+  - wait: { until: { at: 'call-trace/call[#6]', name: evaluate }, timeout: 10s }
+  - expect: { at: 'pane[title="Call Trace"]', assert: 'lacks-row("add #5(left=2, right=3)")' }
+  - click: { at: 'call-trace/call[#5]', anchor: expander }
+  - wait: { until: { at: 'call-trace/call[#6]', name: add }, timeout: 10s }
+  - expect: { at: 'call-trace/call[#6]', arguments: { contains: "(left=2, right=3)" } }

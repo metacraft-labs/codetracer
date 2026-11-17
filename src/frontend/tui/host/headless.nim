@@ -56,11 +56,14 @@ import ../app/cli
 import ../app/runtime
 import ../app/theme/capabilities as app_capabilities
 import ../app/tui_app
+import ../app/theme/image_capability
 import ./capabilities
+import ./image_probe
 import ./native_host
 import ./resize
 import ./terminal_driver
 import ./tui_session
+import ../../viewmodel/host/native_visual_replay_host   # PLAT-59
 
 proc headlessGeometry*(): TerminalSize =
   ## The screen `--headless` renders onto.
@@ -168,6 +171,17 @@ proc runHeadless*(traceFolder: string; flags: app_capabilities.CapabilityFlags;
   # the status row, so a clamped seek says so on the frame a CI job reads.
   if gotoTick != NoGotoTick:
     app.notification = session.seekToStartupTick(rt, gotoTick)
+
+  # PLAT-59: THE RECORDING'S GRAPHICS, as the tty path shows them — the
+  # Visual Replay panes added and their first frame waited for (nobody
+  # watches this mode, so the frame drawn is the one the player answered).
+  rt.imageCapability = resolveImageCapability(readTerminalEnv(STDOUT_FILENO),
+    readImageEnv(), caps, flags)
+  session.attachVisualReplay(rt, folder)
+  session.syncVisualLayout(rt)
+  if not session.visual.isNil:
+    discard session.visual.settleAll()
+    session.refreshVisual(rt)
 
   # THE SAME COMPOSITE THE TTY PATH DRAWS, read as text instead of as bytes.
   # `plainFrame` is `terminal_driver`'s and shares `degradeRows` + `composite`

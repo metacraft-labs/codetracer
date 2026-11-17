@@ -1,0 +1,31 @@
+scenario: 1
+name: keymaps/plat68b-f10-steps-once
+pack: codetracer
+summary: >-
+  F10 in the editor steps over once: back at the entry, the toolbar's Step Over reaches the same stop, not one further.
+
+stage:
+  - use: record-program
+    with: { program: calc }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 180s }
+  - wait: { until: call-trace.loaded, timeout: 120s }
+  - expect: { at: 'editor[file="main.py"]', assert: "stopped-at(1)" }
+  - click: { at: 'editor[file="main.py"]/line[number="1"]', anchor: text-start }
+  - expect: { at: 'editor[file="main.py"]', focused: true }
+  - key: F10
+    settle: false
+  - wait: { until: { at: 'editor[file="main.py"]', assert: "stopped-at(2)" }, timeout: 60s }
+  - wait: { until: replay-idle, timeout: 60s }
+  - expect: { at: 'editor[file="main.py"]', assert: "stopped-at(2)" }
+  - click: { at: 'toolbar/toolbar-button[label="run-to-entry-image"]' }
+    settle: false
+  - wait: { until: { at: 'editor[file="main.py"]', assert: "stopped-at(1)" }, timeout: 60s }
+  - wait: { until: replay-idle, timeout: 60s }
+  - click: { at: 'toolbar/toolbar-button[label="next-image"]' }
+    settle: false
+  - wait: { until: { at: 'editor[file="main.py"]', assert: "stopped-at(2)" }, timeout: 60s }
+  - wait: { until: replay-idle, timeout: 60s }
+  - expect: { at: 'editor[file="main.py"]', assert: "stopped-at(2)" }

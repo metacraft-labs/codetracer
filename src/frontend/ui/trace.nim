@@ -12,13 +12,17 @@ import
 # ---------------------------------------------------------------------------
 import std/json
 from ../viewmodel/backend/backend_service import BackendService, BackendFuture
-from ./editor_points import gutterMarkFor, EditorMark, emNone, emBreakpoint,
+from ./editor_points import gutterMarkFor, breakpointsInFile, EditorMark, emNone, emBreakpoint,
+  emBreakpointTracepoint,
   emBreakpointDisabled, emTracepoint
 import ./presented_value
-from ../lib/monaco_appearance import editorGutterLineHtml, GutterTraceMark,
-  GutterBreakpointMark, gtmNone, gtmEnabled, gtmDisabled, gbmNone, gbmEnabled,
-  gbmDisabled
+import ./editor_surface
+import ../viewmodel/input/element_operations
+from ../lib/monaco_appearance import editorGutterLineHtml
 import ../viewmodel/store/replay_data_store
+from ../viewmodel/store/types as store_types import TracepointSweepSpec,
+  TracepointSweepHit
+import ../viewmodel/sdk/tracepoints
 from ../viewmodel/viewmodels/timeline_vm import
   TimelineVM, createTimelineVM
 from isonim/web/dom_api import nil
@@ -97,6 +101,89 @@ proc ownPaneStore(self: TraceComponent): ReplayDataStore =
   let vm = ownPaneVM(self, timelineVMInstance, timelineVM)
   if vm.isNil: nil else: vm.store
 
+# ---------------------------------------------------------------------------
+# The tracepoint's row of the Breakpoints & Tracepoints pane (codetracer#886)
+#
+# The pane draws its tab's `store.pointList.rows` (`PointListVM.points`). A
+# tracepoint this editor holds is one of those rows from the moment its editor
+# opens under a line, run or not (`sdk/tracepoints.declareTracepoint`). A run's
+# answer annotates the rows (`applyTracepointResults`), disabling flips the
+# row's enabled flag, and closing removes it. The store is the tab's own
+# (`ownPaneStore`), the one its point-list pane and its debugger service's
+# breakpoints share (`ui_js.configureSessionMiddleware`).
+# ---------------------------------------------------------------------------
+
+proc sweptHits(stops: seq[Stop]): seq[TracepointSweepHit] =
+  ## A `ct/tracepoint-results` answer's stops, as the store holds a sweep's
+  ## hits. The locals are not carried: the results grid reads them from the
+  ## legacy session, and the point list needs only where and how often.
+  for stop in stops:
+    if stop.isNil:
+      continue
+    result.add TracepointSweepHit(
+      tracepointId: stop.tracepointId,
+      rrTicks: uint64(max(0, stop.rrTicks)),
+      path: $stop.path,
+      line: stop.line,
+      errorMessage: $stop.errorMessage)
+
+proc sweepSpecs(tracepoints: seq[Tracepoint]): seq[TracepointSweepSpec] =
+  ## The tracepoints a run sent (`TraceSession.tracepoints`), as the store
+  ## matches an answer's hits back to them: by the id the engine echoes.
+  for tp in tracepoints:
+    if tp.isNil:
+      continue
+    result.add TracepointSweepSpec(tracepointId: tp.tracepointId,
+                                   path: $tp.name, line: tp.line,
+                                   expression: $tp.expression)
+
+proc declarePointRow(self: TraceComponent; expression: cstring) =
+  ## Hold this tracepoint as a row of its tab's point list, with `expression`
+  ## and its enabled state. The hits its last run reported let the store find
+  ## a row that run moved (`sdk/tracepoints.heldTracepointLocation`).
+  let store = self.ownPaneStore()
+  if store.isNil or self.tracepoint.isNil:
+    return
+  store.declareTracepoint($self.name, self.line, $expression,
+                          enabled = not self.isDisabled,
+                          swept = sweptHits(self.tracepoint.results))
+
+var lastPointListAnswer: TracepointResultsAggregate
+  ## The last `ct/tracepoint-results` answer written into a point list. Every
+  ## TraceComponent subscribes to the answer and receives the SAME object, but
+  ## the answer is the whole sweep's: it is written once, with every
+  ## tracepoint the run sent. A second write of it would not be a no-op when
+  ## the sweep moved a row (the second pass would find no row at the line it
+  ## sent and add one).
+
+proc ownTraceSession(self: TraceComponent; sessionId: int): TraceSession =
+  ## The run `sessionId` of the tab that holds `self`, or nil. A run is kept
+  ## in the trace service of the tab it was started in (`runTracepoints`), and
+  ## an answer can arrive after another tab was brought to the front, so the
+  ## shown tab's `data.services` may hold a different run under the same id.
+  let owner = data.sessionOfComponent(self)
+  let services =
+    if owner.isNil or owner.services.isNil: data.services else: owner.services
+  if services.isNil or services.trace.isNil or sessionId < 0 or
+     sessionId >= services.trace.traceSessions.len:
+    return nil
+  services.trace.traceSessions[sessionId]
+
+proc applySweepToPointList(self: TraceComponent;
+                           response: TracepointResultsAggregate) =
+  ## Write one sweep's answer into the tab's point list, once per answer.
+  ## The specs are the run's own: the tracepoints of the tab whose store is
+  ## written, never another tab's.
+  if response == lastPointListAnswer:
+    return
+  lastPointListAnswer = response
+  let store = self.ownPaneStore()
+  let session = self.ownTraceSession(response.sessionId)
+  if store.isNil or session.isNil:
+    return
+  store.applyTracepointResults(sweepSpecs(session.tracepoints),
+                               sweptHits(response.results))
+
 proc syncTimelineDebuggerPosition(store: ReplayDataStore;
                                   rrTicks: int, path: cstring, line: int;
                                   sourceGeneration: int = 0;
@@ -134,7 +221,10 @@ const
   TRACE_FOOTER_MIN_HEIGHT_PX = 18
   TRACE_RESULTS_VISIBLE_ROWS = 10
 
-proc getCurrentMonacoTheme(editor: MonacoEditor): cstring {.importjs:"#._themeService._theme.themeName".}
+proc getCurrentMonacoTheme(editor: MonacoEditor): cstring {.importjs:
+  "((e) => (e && e._themeService && e._themeService._theme && e._themeService._theme.themeName) || '')(#)".}
+  ## The theme a Monaco editor wears; "" for the shared editor, which has no
+  ## theme service (the page's configured theme is used then).
 proc toggleTrace*(editorUI: EditorViewComponent, name: cstring, line: int)
 proc closeTrace*(self: TraceComponent)
 proc resizeTraceHandler*(self: TraceComponent)
@@ -521,6 +611,7 @@ proc runTracepoints*(data: Data) {.exportc.} =
       trace.indexInSession = i
 
       trace.tracepoint.expression = code
+      trace.declarePointRow(code)
       trace.tracepoint.lastRender = 0
       trace.tracepoint.isChanged = trace.isChanged
       trace.tracepoint.results = @[]
@@ -619,6 +710,7 @@ method onTracepointResultsAggregate*(
 
   let session = data.services.trace.traceSessions[response.sessionId]
   session.results[response.sessionId] = response.results
+  traceComponent.applySweepToPointList(response)
   traceResultsChanged()
 
   if traceComponent.tracepoint.isNil:
@@ -727,9 +819,15 @@ proc registerTraceTableEvents(self: TraceComponent) {.importjs: """
       }
     });
 
-    table.off("contextmenu", "tr");
-    table.on("contextmenu", "tr", function(event) {
-      handleTraceTableContextMenu(self, event);
+    // A row's right press is the pointer row `context-menu.open`, which opens
+    // the menu the table carries (`dom_pointer.setPressMenu`'s convention):
+    // the row is the press's target.
+    table.each(function() {
+      this.__ctPressMenu = function(event) {
+        handleTraceTableContextMenu(self, event);
+        return true;
+      };
+      this.setAttribute("data-ct-press-menu", "");
     });
   })(#);
 """.}
@@ -1065,57 +1163,85 @@ proc gutterTestLinesFor*(path: cstring): seq[int] =
 proc gutterHasTest(path: cstring; line: int): bool =
   line in gutterTestLinesFor(path)
 
+proc updateGlyphMarks*(self: EditorViewComponent) =
+  ## The glyph column (Editor-Pane.md MC.5): each line's mark, one per line, as
+  ## Monaco glyph-margin decorations, from the session store (`gutterMarkFor`,
+  ## the one the terminal and GPUI draw), and the hover hint on an unmarked
+  ## line. Tracepoints come from the editor's own traces, which the store's
+  ## rows do not hold until a sweep.
+  let editorInstance = self.monacoEditor
+  if editorInstance.isNil or editorInstance.getModel().isNil:
+    return
+  let firstLine = if self.isExpansion: self.tabInfo.location.expansionFirstLine else: 1
+  var decorations: seq[DeltaDecoration] = @[]
+  var seen: seq[int] = @[]
+  let held = breakpointsInFile($self.path)
+  proc mark(realLine: int) =
+    if realLine in seen:
+      return
+    seen.add realLine
+    let line = realLine - firstLine + 1
+    let traced = self.traces.hasKey(realLine)
+    let class: cstring =
+      case gutterMarkFor($self.path, realLine)
+      of emBreakpoint:
+        if traced: cstring"gutter-glyph-breakpoint-tracepoint"
+        else: cstring"gutter-glyph-breakpoint"
+      of emBreakpointTracepoint: cstring"gutter-glyph-breakpoint-tracepoint"
+      of emBreakpointDisabled: cstring"gutter-glyph-breakpoint-disabled"
+      of emTracepoint: cstring"gutter-glyph-tracepoint"
+      of emNone:
+        if traced: cstring"gutter-glyph-tracepoint" else: cstring""
+    if class.len > 0:
+      # A breakpoint with a condition says so, in the mark and on hover
+      # (Breakpoints-And-Tracepoints.md § Conditional breakpoints).
+      var condition = ""
+      for sp in held:
+        if sp.line == realLine and sp.condition.len > 0:
+          condition = sp.condition
+      if condition.len > 0 and class != cstring"gutter-glyph-tracepoint":
+        decorations.add(DeltaDecoration(
+          `range`: newMonacoRange(line, 1, line, 1),
+          options: js{
+            glyphMarginClassName: class & cstring" gutter-glyph-conditional",
+            glyphMarginHoverMessage: js{value: cstring("Breakpoint condition: " & condition)},
+            stickiness: 1}))
+      else:
+        decorations.add(DeltaDecoration(
+          `range`: newMonacoRange(line, 1, line, 1),
+          options: js{glyphMarginClassName: class, stickiness: 1}))
+  for sp in held:
+    mark(sp.line)
+  # A `JsAssoc[int, _]`'s keys come back as JavaScript strings.
+  for key, _ in self.traces:
+    mark(parseJSInt(cast[cstring](key)))
+  # The hover hint, only where the line has no mark.
+  if self.glyphHintLine > 0 and self.glyphHintLine + firstLine - 1 notin seen:
+    decorations.add(DeltaDecoration(
+      `range`: newMonacoRange(self.glyphHintLine, 1, self.glyphHintLine, 1),
+      options: js{glyphMarginClassName: cstring"gutter-glyph-hint", stickiness: 1}))
+  self.glyphDecorations = editorInstance.deltaDecorations(self.glyphDecorations,
+                                                          decorations)
+
 proc editorLineNumber*(self: EditorViewComponent, path: cstring, line: int, isDeleteChunk: bool = false, lineNumber: int = NO_LINE): cstring =
   ## The custom gutter, as HTML handed to Monaco's `lineNumbers` callback.
   ##
-  ## TWO THINGS ABOUT THIS MARKUP THAT WERE ASKED ABOUT AND ARE NOW MEASURED,
-  ## because both look like defects and only one is.
+  ## THE BREAKPOINT AND TRACEPOINT MARKS ARE NOT HERE. They are Monaco's glyph
+  ## margin, left of this band (`ui/editor.updateGlyphMarks`, Editor-Pane.md MC.5).
   ##
-  ## 1. `onmousedown='event.stopPropagation()'` ON EVERY NODE IS LOAD-BEARING.
-  ##    It reads like a guard on the wrong event — the breakpoint handler is a
-  ##    `click` listener (`ui/editor.nim`), so a guard on `mousedown` cannot
-  ##    stop anything that acts on `click` or `mouseup`, which is how Monaco's
-  ##    folding works.  Measured in a real tab by stripping all 132 of them from
-  ##    a live page and repeating the same click:
-  ##
-  ##        with the guards     breakpoint toggled, no selection, no fold
-  ##        without them        Monaco SELECTS THE LINE, and the breakpoint is
-  ##                            not toggled at all
-  ##
-  ##    So they stop Monaco's line-selection on press, which is their job, and
-  ##    they are also what keeps the click path working.
-  ##
-  ##    AND THEY DO STOP THE FOLD.  The paragraph that used to end this item
-  ##    said they did not, and that "nothing needs to, because `.gutter`
-  ##    subtracts `--ct-gutter-folding-lane` and the chevron is never underneath
-  ##    us".  The second half is true and the first is false, and the whole of
-  ##    the reported defect (c) — "clicking in the gutter to place a breakpoint
-  ##    also triggers the folding collapse" — lives in the difference.
-  ##
-  ##    Measured by stripping the guards from THIS PROC, rebuilding, and
-  ##    repeating the same click at the same coordinates
-  ##    (`ci/test/menu-and-context-menu-in-browser.sh`, which now records
-  ##    Monaco's own `MouseTargetType` for the press):
-  ##
-  ##        with the guards     0 Monaco mouse targets; breakpoint toggled,
-  ##                            22 rendered lines before and after
-  ##        without them        1 target, GUTTER_LINE_DECORATIONS; breakpoint
-  ##                            toggled AND the function folded
-  ##
-  ##    `GUTTER_LINE_DECORATIONS` is the band Monaco's own folding contribution
-  ##    owns, and Monaco resolves a press on OUR markup into it — the chevron's
-  ##    box being elsewhere does not enter into it, because the classification
-  ##    is by band and not by which element was hit.  So the guards are the only
-  ##    thing standing between this gutter and the reported symptom, and they
-  ##    are now asserted by name rather than reasoned about.
+  ## 1. A PRESS ON THE NUMBER AND THE POINTER LANE REACHES MONACO, which selects
+  ##    the line (`startedOnLineNumbers`, gestures 9 - 12). The run-test control
+  ##    and the VCS lane keep `onmousedown='event.stopPropagation()'`: the control
+  ##    has its own click, and the VCS lane lies where Monaco resolves an unguarded
+  ##    press to `GUTTER_LINE_DECORATIONS`, which folds the function (measured,
+  ##    `ci/test/menu-and-context-menu-in-browser.sh`).
   ##
   ## 2. `diffHtml` IS THE VCS BAND, and it was a dead slot until it was given
   ##    one.  Measured on `cloud` 402c1d35: `.diff-line` rendered at 73x0 px —
   ##    a box spanning the whole gutter, lying across the line number by 29px,
   ##    the breakpoint by 9px and the tracepoint by 10px at once, with no
   ##    height, no hit area and nothing drawn.  It now has a reserved band of
-  ##    its own between the line number and the markers, with clearance from
-  ##    both; `viewmodel/viewmodels/editor_gutter_lanes.nim` declares the order
+  ##    its own between the line number and the folding lane; `viewmodel/viewmodels/editor_gutter_lanes.nim` declares the order
   ##    and `ci/test/web-renderer-mounts.sh` asserts the painted boxes.
   let realLine =
     if isDeleteChunk:
@@ -1126,22 +1252,11 @@ proc editorLineNumber*(self: EditorViewComponent, path: cstring, line: int, isDe
       line + self.tabInfo.location.expansionFirstLine - 1
 
   # The slots' markup is `lib/monaco_appearance.editorGutterLineHtml`'s,
-  # which the StoryBook editor builds its gutter with too; what is decided
-  # here is which mark each slot shows.
-  var trace = gtmNone
-  if self.traces.hasKey(realLine):
-    trace = if self.traces[realLine].isDisabled: gtmDisabled else: gtmEnabled
-
+  # which the StoryBook editor builds its gutter with too. The marks are the
+  # glyph margin's (`updateGlyphMarks`).
   let executionLine = line == self.location.line and
     path == self.location.path and
     not isDeleteChunk
-
-  # The line's mark is the session store's (`editor_points.gutterMarkFor`),
-  # the same `EditorMark` the terminal and GPUI draw for this line.
-  let breakpoint = case gutterMarkFor($path, realLine)
-    of emBreakpoint: gbmEnabled
-    of emBreakpointDisabled: gbmDisabled
-    of emNone, emTracepoint: gbmNone
 
   var runTestHtml = cstring""
   if not isDeleteChunk and gutterHasTest(path, realLine):
@@ -1154,13 +1269,13 @@ proc editorLineNumber*(self: EditorViewComponent, path: cstring, line: int, isDe
     runTestHtml =
       cstring"<div class='" & runClass & cstring"' data-runtest-line='" &
       toCString(realLine) & cstring"' title='" & runTitle &
-      cstring"' onmousedown='event.stopPropagation()'></div>"
+      cstring"' onmousedown='event.stopPropagation()'></div>"  # ir1-gate: propagation
 
   let trueLineNumber = if not isDeleteChunk: toCString(realLine) else: toCString(line + lineNumber - 1)
   let klass = if isDeleteChunk: cstring"diff-deleted-gutter" elif line in self.diffAddedLines: cstring"diff-added-gutter" else: cstring""
 
   result = editorGutterLineHtml(trueLineNumber, klass, runTestHtml,
-                                executionLine, trace, breakpoint)
+                                executionLine)
 
 proc updateLineNumbersOnly*(self: EditorViewComponent) =
   let editorInstance = self.monacoEditor
@@ -1169,6 +1284,7 @@ proc updateLineNumbersOnly*(self: EditorViewComponent) =
 
     currentOptions["lineNumbers"] = proc(line: int): cstring = self.editorLineNumber(self.path, line)
     editorInstance.updateOptions(cast[MonacoEditorOptions](currentOptions))
+    self.updateGlyphMarks()
 
 proc toggleTraceState*(self: TraceComponent) =
   self.api.emit(CtTracepointToggle, TracepointId(id: self.id))
@@ -1177,6 +1293,13 @@ proc toggleTraceState*(self: TraceComponent) =
   self.forceReload = true
   self.tracepoint.isDisabled = not self.tracepoint.isDisabled
   self.error = nil
+
+  # The point list's row follows: a disabled tracepoint stays a row, dimmed.
+  let store = self.ownPaneStore()
+  if not store.isNil and not store.setDeclaredTracepointEnabled(
+      $self.name, self.line, not self.isDisabled,
+      sweptHits(self.tracepoint.results)):
+    self.declarePointRow(self.tracepoint.expression)
 
   self.refreshLine()
   self.refreshTrace()
@@ -1335,10 +1458,15 @@ proc traceChartKindSwitchDom(self: TraceComponent): Node =
 
   result = traceDiv(cstring"select-view-kind")
   result.setAttribute(cstring"tabindex", cstring"0")
-  result.addEventListener(cstring"mousedown", proc(ev: Event) =
-    chart.kindSelectorIsClicked = not chart.kindSelectorIsClicked
-    self.refreshTraceChartKindSwitch()
-  )
+  # A press on the selector or on one of its kinds is routed
+  # (Input-Routing-And-Keymaps.md §5.1): each carries its operation and the
+  # procedure that performs it there (`bindElementOperation`). A press on a
+  # kind is the kind's, not also the selector's, so choosing one closes the
+  # list itself.
+  bindPressOperation(result.toJs, "trace-chart.toggle-kinds",
+    proc(p: PressInfo) =
+      chart.kindSelectorIsClicked = not chart.kindSelectorIsClicked
+      self.refreshTraceChartKindSwitch())
   result.addEventListener(cstring"blur", proc(ev: Event) =
     chart.kindSelectorIsClicked = false
     self.refreshTraceChartKindSwitch()
@@ -1351,42 +1479,49 @@ proc traceChartKindSwitchDom(self: TraceComponent): Node =
   result.appendChild(button)
 
   let dropdown = traceDiv(dropdownClass)
-  dropdown.addEventListener(cstring"mousedown", proc(ev: Event) =
+  dropdown.addEventListener(cstring"mousedown", proc(ev: Event) =  # ir1-gate: propagation
     ev.preventDefault()
   )
   result.appendChild(dropdown)
 
+  proc chosen() =
+    chart.kindSelectorIsClicked = false
+    self.refreshTraceChartKindSwitch()
+
   let tableItem = traceDiv(cstring"dropdown-item")
-  tableItem.addEventListener(cstring"mousedown", proc(ev: Event) =
-    if chart.viewKind != ViewTable:
-      chart.changed = true
-      chart.viewKind = ViewTable
-      chart.line = nil
-      chart.pie = nil
-    chart.redraw()
-  )
+  bindPressOperation(tableItem.toJs, "trace-chart.show-table",
+    proc(p: PressInfo) =
+      if chart.viewKind != ViewTable:
+        chart.changed = true
+        chart.viewKind = ViewTable
+        chart.line = nil
+        chart.pie = nil
+      chosen()
+      chart.redraw())
   tableItem.appendTraceText(cstring"table")
   dropdown.appendChild(tableItem)
 
   let lineItem = traceDiv(cstring"dropdown-item")
-  lineItem.addEventListener(cstring"mousedown", proc(ev: Event) =
-    if chart.viewKind != ViewLine:
-      chart.viewKind = ViewLine
-      chart.pie = nil
-      chart.changed = true
-    chart.redraw()
-  )
+  bindPressOperation(lineItem.toJs, "trace-chart.show-line",
+    proc(p: PressInfo) =
+      if chart.viewKind != ViewLine:
+        chart.viewKind = ViewLine
+        chart.pie = nil
+        chart.changed = true
+      chosen()
+      chart.redraw())
   lineItem.appendTraceText(cstring"line")
   dropdown.appendChild(lineItem)
 
   let pieItem = traceDiv(cstring"dropdown-item")
-  pieItem.addEventListener(cstring"mousedown", proc(ev: Event) =
-    if chart.viewKind != ViewPie:
-      chart.viewKind = ViewPie
-      chart.line = nil
-      chart.changed = true
-    chart.redraw()
-  )
+  bindPressOperation(pieItem.toJs, "trace-chart.show-pie",
+    proc(p: PressInfo) =
+      if chart.viewKind != ViewPie:
+        chart.viewKind = ViewPie
+        chart.line = nil
+        chart.changed = true
+      chosen()
+      chart.redraw())
   pieItem.appendTraceText(cstring"pie")
   dropdown.appendChild(pieItem)
 
@@ -1452,7 +1587,7 @@ proc traceMenuDom(self: TraceComponent): Node =
     else:
       cstring"dropdown-list hidden"
   let dropdown = traceDiv(dropdownClass)
-  dropdown.addEventListener(cstring"mousedown", proc(ev: Event) =
+  dropdown.addEventListener(cstring"mousedown", proc(ev: Event) =  # ir1-gate: propagation
     ev.preventDefault()
   )
   hamburgerContainer.appendChild(dropdown)
@@ -1519,13 +1654,17 @@ proc traceSourceValue(self: TraceComponent): cstring =
 proc traceEditorTheme(self: TraceComponent): cstring =
 
   if not self.editorUI.isNil and not self.editorUI.monacoEditor.isNil:
-    return self.editorUI.monacoEditor.getCurrentMonacoTheme()
+    result = self.editorUI.monacoEditor.getCurrentMonacoTheme()
+    if result.len > 0: return
+    return monacoThemeName(self.data.config.theme)
 
   let active = self.data.services.editor.active
   if not active.isNil and active.len > 0 and self.data.ui.editors.hasKey(active):
     let activeEditor = self.data.ui.editors[active]
     if not activeEditor.isNil and not activeEditor.monacoEditor.isNil:
-      return activeEditor.monacoEditor.getCurrentMonacoTheme()
+      result = activeEditor.monacoEditor.getCurrentMonacoTheme()
+      if result.len > 0: return
+      return monacoThemeName(self.data.config.theme)
 
   cstring""
 
@@ -1576,9 +1715,11 @@ proc mountMonacoEditor(self: TraceComponent): bool =
     documentTmp.body.appendChild(overflowHost)
 
     editorHost.innerHTML = cstring""
-    let editor = monaco.editor.create(
-      editorHost,
-      MonacoEditorOptions(
+    # Monaco, or the shared editor under the developer setting
+    # `sharedEditor` (`editor_surface`).
+    let editor = cast[MonacoEditor](createEditorSurface(
+      cast[JsObject](editorHost),
+      cast[JsObject](MonacoEditorOptions(
         value: self.traceSourceValue(),
         # language: toJsLang(self.editorUI.lang),
         theme: theme,
@@ -1599,8 +1740,9 @@ proc mountMonacoEditor(self: TraceComponent): bool =
         # },
         overflowWidgetsDomNode: overflowHost,
         fixedOverflowWidgets: true
-      )
-    )
+      )),
+      data.config, "", data.ui.fontSize, $codeFontFamily(data.ui),
+      darkTheme = $theme != "codetracerWhite", embeddedField = true))
     self.monacoEditor = editor
   except:
     cerror "trace: create monaco editor: " & getCurrentExceptionMsg()
@@ -1931,9 +2073,6 @@ proc togglePoint*(trace: TraceComponent) =
     # tabInfo.monacoEditor.changeViewZones do (view: js):
     #   trace.zoneId = cast[int](view.addZone(trace.viewZone))
 
-    # # add tracepoint to points register
-    # data.pointList.tracepoints[trace.tracepoint.tracepointId] = trace.tracepoint
-
     trace.finishTraceDomMount()
 
 proc toggleTrace*(editorUI: EditorViewComponent, name: cstring, line: int) =
@@ -1989,8 +2128,9 @@ proc toggleTrace*(editorUI: EditorViewComponent, name: cstring, line: int) =
 
     trace.zoneId = addMonacoViewZone(tabInfo.monacoEditor, trace.viewZone)
 
-    # add tracepoint to points register
-    data.pointList.tracepoints[trace.tracepoint.tracepointId] = trace.tracepoint
+    # The tracepoint is held from here on, so it is a row of the
+    # Breakpoints & Tracepoints pane before anything is run (codetracer#886).
+    trace.declarePointRow(trace.tracepoint.expression)
 
     # render current trace component
     trace.appendTraceViewZoneDomContent()
@@ -2073,10 +2213,11 @@ proc closeTrace*(self: TraceComponent) =
   # remove editor view zone
   removeMonacoViewZone(self.editorUI.tabInfo.monacoEditor, self.zoneId)
 
-  # remove tracepoint from pointList
-  if self.data.pointList.tracepoints.hasKey(self.tracepoint.tracepointId):
-    discard jsdelete(self.data.pointList.tracepoints[self.tracepoint.tracepointId])
-    self.data.pointList.redrawTracepoints = true
+  # remove its row from the point list, wherever its last run located it
+  let store = self.ownPaneStore()
+  if not store.isNil:
+    discard store.removeDeclaredTracepoint($self.name, self.line,
+                                           sweptHits(self.tracepoint.results))
 
   # remove trace component from the editor register
   discard jsDelete(self.editorUI.traces[self.line])

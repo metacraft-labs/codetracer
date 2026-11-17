@@ -1,0 +1,24 @@
+scenario: 1
+name: terminal/parity-alt-t-tracepoint-at-the-caret
+pack: codetracer
+summary: >-
+  A click places the caret (not the replay); Down moves it to the next line;
+  Alt+T opens the tracepoint editor there, and the tracepoint's results name
+  that line.
+stage:
+  - use: record-program
+    with: { program: calc }
+  - use: open-recording
+    with: { width: 200, height: 50 }
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - wait: { until: { at: 'editor[file="main.py"]', assert: "shows-line(30)" }, timeout: 30s }
+  - click: { at: 'editor[file="main.py"]/line[number="29"]', anchor: text-start }
+  - key: Down
+  - expect: { at: 'editor[file="main.py"]', assert: "stopped-at(1)" }
+  - chord: Alt+t
+  - wait: { until: { at: status-line, assert: 'says(":tracepoint")' }, timeout: 10s }
+  - type: "log(left)"
+  - key: Enter
+  - wait: { until: { at: status-line, assert: 'says("tracepoint `log(left)` at ")' }, timeout: 60s }
+  - expect: { at: status-line, assert: 'says("main.py:30 — ")' }

@@ -1,0 +1,34 @@
+scenario: 1
+name: agent-activity/prompt-box-resizes
+pack: codetracer
+summary: >-
+  The Agent Activity prompt box grows with the lines typed into it and
+  shrinks back to one line when Enter sends and clears it.
+
+stage:
+  - use: record-program
+    with: { program: py_console_logs/main.py }
+  - use: stub-agent
+    with: { agent: refusing }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - click: { at: 'pane-tab[label="AGENT ACTIVITY"]' }
+  - wait: { until: { at: agent-activity/agent-prompt, present: true }, timeout: 30s }
+  - wait: { until: agent-session-open, timeout: 60s }
+  - click: { at: agent-activity/agent-prompt }
+  - type: "first line"
+  - expect: { at: agent-activity/agent-prompt, visible-lines: 1 }
+  - chord: Shift+Enter
+  - type: "second line"
+  - chord: Shift+Enter
+  - type: "third line"
+  - chord: Shift+Enter
+  - type: "fourth line"
+  - expect: { at: agent-activity/agent-prompt, value: "first line\nsecond line\nthird line\nfourth line" }
+  - wait: { until: { at: agent-activity/agent-prompt, visible-lines: { gt: 1 } }, timeout: 5s }
+  - key: Enter
+  - wait: { until: { at: agent-activity, failed-turns: 1 }, timeout: 30s }
+  - expect: { at: agent-activity/agent-prompt, value: "" }
+  - wait: { until: { at: agent-activity/agent-prompt, visible-lines: 1 }, timeout: 5s }

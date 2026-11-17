@@ -1,0 +1,25 @@
+scenario: 1
+name: launch-config/menu-lists-launch-configurations
+pack: codetracer
+summary: >-
+  Editing the examples folder, a click on the logo opens the program menu;
+  its Debug folder holds Launch Configurations, which lists the folder's
+  "Python: Fibonacci" and "Ruby: Fibonacci", enabled.
+
+stage:
+  - use: copy-project
+    with: { folder: examples }
+  - use: open-project
+    with: { folder: $project }
+
+steps:
+  - wait: { until: { at: menu-bar, present: true }, timeout: 120s }
+  - wait: { until: settled, timeout: 30s }
+  - click: menu-bar
+  - wait: { until: { at: 'menu-bar/menu[label="Debug"]', present: true }, timeout: 15s }
+  - hover: { at: 'menu-bar/menu[label="Debug"]', for: 500ms }
+  - wait: { until: { at: 'menu-bar/menu[label="Launch Configurations"]', present: true }, timeout: 15s }
+  - hover: { at: 'menu-bar/menu[label="Launch Configurations"]', for: 500ms }
+  - wait: { until: { at: 'menu-bar/menu-item[label="Python: Fibonacci"]', present: true }, timeout: 15s }
+  - expect: { at: 'menu-bar/menu-item[label="Ruby: Fibonacci"]', present: true }
+  - expect: { at: 'menu-bar/menu-item[label="Ruby: Fibonacci"]', enabled: true }

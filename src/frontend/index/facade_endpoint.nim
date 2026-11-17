@@ -44,34 +44,50 @@
 ## The two failures are independent, and only the first is closed here. The
 ## second is step 4 of WD1b's sequence and is deliberately not in this file.
 ##
-## ## Why the dispatcher is SYNCHRONOUS, and why that is a boundary rather than
-## ## a shortcut
+## ## Which verbs answer LATER, and why the line is drawn there
 ##
-## `dispatch` is a function from a `call` frame to a `reply` frame. It performs
-## node's *synchronous* filesystem calls and `child_process.spawnSync`, and
-## every verb it serves is bounded by construction.
+## `dispatch` returns a FUTURE of a `reply` frame. A verb that runs a child
+## process — `process.run` and every `vcs.*` verb, all of which are `git` —
+## launches it through `child_process.spawn` and settles the future when the
+## child closes; the index's event loop runs on meanwhile. Every other verb
+## (the filesystem, `process.which`, settings) is answered INLINE, through
+## node's synchronous calls, and its future is already settled when `dispatch`
+## returns.
 ##
-## The verbs that are NOT bounded are exactly the verbs it refuses.
-## `fs.watch`, `process.start` and everything reachable only from a started
-## child (`signal`, `writeStdin`, `closeStdin`, `isRunning`) deliver their
-## real content through §6.2 `event` frames, and **the client has no registry
-## for those yet** — `container_platform.nim`'s header says so in as many
-## words: "Wiring that registry is the duplex channel's job, not this
-## module's". Serving them here would mint a handle the client could never
-## receive an event against, which is the "advertised and silently dropped"
-## failure this milestone exists to remove, arriving from the other side.
+## The line is the child process, because that is where the time goes. The
+## page's VCS pane refreshes `vcs.status` every 5 s and its certificate
+## indicator computes `vcs.contentId` every 15 s; under `ct host` the index
+## served both through `spawnSync`, on the one event loop that also carries
+## the page's IPC (`tab-load`, DAP traffic) and every other client's. On a
+## loaded host a `git status` took 2.4-3.0 s and a content-id cycle 3.5 s, the
+## loop was blocked 4-13 s at a time, and a 3 KB `tab-load` answer arrived
+## 4-27 s late (codetracer-pm issue
+## `2026-11-11-ct-host-runs-the-pages-periodic-git-reads-synchronously-on-the-server-event-loop`;
+## `CLI/ct/host.md`, "A facade verb never holds the server's event loop").
+## A filesystem verb is one bounded system call on a path the caller named;
+## it is not what held the loop, and keeping it inline keeps its error mapping
+## exactly where §6.4 put it.
 ##
-## So the synchronous boundary and the capability boundary are the same line
-## drawn twice, and that is why a synchronous dispatcher is honest rather than
-## expedient.
+## WHAT THE CLIENT SEES does not change. §6.2 correlates a reply with its call
+## by `(session, id)` and by nothing else, so replies that now arrive in a
+## different order from their calls are claimed by the right caller
+## (`host/container_boot.nim` keeps a table of pending ids). A failure is
+## still a value: no future this module returns is ever rejected, and a
+## handler that misbehaves after its child has closed is answered `pkFailed`
+## rather than leaving its caller waiting.
 ##
-## **The cost, stated rather than hidden:** `process.run` of an unbounded
-## command blocks the index process's event loop, and §6.1 puts the existing
-## index IPC surface on the same connection. `ProcessSpec.timeoutMs` is
-## threaded into `spawnSync`'s `timeout`, so a caller that bounds its command
-## is bounded; a caller that does not, is not. Making this asynchronous means
-## giving `dispatch` a future-returning signature and is a real change to make
-## when a caller needs it — not a defect being papered over here.
+## STILL BOUNDED. `ProcessSpec.timeoutMs` kills a child that outlives it
+## (`SIGTERM`, the `spawnSync` default, reported as `ETIMEDOUT` → `pkTimeout`),
+## and output past `MaxChildOutput` kills the child and reports `ENOBUFS`. The
+## verbs that are NOT bounded are still the verbs it refuses: `fs.watch`,
+## `process.start` and everything reachable only from a started child
+## (`signal`, `writeStdin`, `closeStdin`, `isRunning`) deliver their real
+## content through §6.2 `event` frames, and **the client has no registry for
+## those yet** — `container_platform.nim`'s header says so in as many words:
+## "Wiring that registry is the duplex channel's job, not this module's".
+## Serving them here would mint a handle the client could never receive an
+## event against, which is the "advertised and silently dropped" failure this
+## milestone exists to remove, arriving from the other side.
 ##
 ## ## Errors are mapped ONCE, at the boundary — §6.4
 ##
@@ -106,9 +122,10 @@ export endpoint_codec
 # Node, bound directly.
 #
 # NOT through `lib/electron_lib.nim`, and the reason is specific rather than
-# stylistic: what this module needs is node's SYNCHRONOUS fs, `spawnSync`, and
-# — above all — the `code` property of the error a failed call throws, because
-# that string is the entire basis of §6.4's mapping. `electron_lib`'s
+# stylistic: what this module needs is node's SYNCHRONOUS fs, a
+# `child_process.spawn` whose outcome reads like `spawnSync`'s, and — above
+# all — the `code` property of the error a failed call throws, because that
+# string is the entire basis of §6.4's mapping. `electron_lib`'s
 # `NodeFilesystem` is the promise-shaped subset the product's async IPC needs
 # and carries none of the three. It also reaches for `electron`, which this
 # module must not, since it has to load in `ct host` and in a suite with no
@@ -134,6 +151,102 @@ function ctFacadeAttempt(thunk) {
 """.}
 
 proc ctFacadeAttempt(thunk: proc(): JsObject): JsObject {.importjs: "ctFacadeAttempt(#)".}
+
+{.emit: """
+// One child process, run WITHOUT blocking the event loop, and `done` called
+// exactly once with a record of the SAME shape `child_process.spawnSync`
+// returns — `{error, status, signal, stdout, stderr}` — so the one mapping in
+// `runOutcomeOf` reads it, and every verb that runs a child keeps the error
+// kinds it had when it ran through `spawnSync`. What `spawnSync` did for free
+// and has to be reproduced here, and how:
+//
+//  * a failed launch (ENOENT for a missing program or a missing working
+//    directory) arrives as an `error` event, and node may still emit `close`
+//    after it — hence the once-guard;
+//  * `timeout` is a timer that kills the child with SIGTERM (`spawnSync`'s
+//    default `killSignal`) and reports `ETIMEDOUT`, as `spawnSync` does;
+//  * `maxBuffer` is counted as output arrives; past it the child is killed and
+//    the record carries `ENOBUFS`, `spawnSync`'s report of the same condition;
+//  * `input` is written to the child's stdin and stdin is closed, so a child
+//    given no input reads EOF at once, as it does from `spawnSync`'s empty
+//    pipe. A child that exits without reading it makes the write fail with
+//    EPIPE; that is the child's business, not a failure of the run;
+//  * stdout and stderr are decoded as UTF-8 once, at the end, so a multi-byte
+//    character split across two chunks is not mangled.
+//
+// https://nodejs.org/api/child_process.html#child_processspawncommand-args-options
+// https://nodejs.org/api/child_process.html#event-close
+// https://nodejs.org/api/child_process.html#child_processspawnsynccommand-args-options
+function ctFacadeSpawn(command, args, options, input, timeoutMs, maxBuffer, done) {
+  var finished = false;
+  var timer = null;
+  function finish(record) {
+    if (finished) { return; }
+    finished = true;
+    if (timer !== null) { clearTimeout(timer); }
+    done(record);
+  }
+  function failed(code, message) {
+    var e = new Error(message);
+    e.code = code;
+    return e;
+  }
+  var child;
+  try {
+    var spawnOptions = Object.assign({}, options,
+                                     {stdio: ['pipe', 'pipe', 'pipe']});
+    child = require('child_process').spawn(command, args, spawnOptions);
+  } catch (e) {
+    // An invalid argument throws synchronously; answer it as a value, inline.
+    finish({error: e, status: null, signal: null, stdout: "", stderr: ""});
+    return;
+  }
+  var chunks = {stdout: [], stderr: []};
+  var total = 0;
+  var pendingError = null;
+  function collect(stream) {
+    return function (chunk) {
+      if (finished || pendingError !== null) { return; }
+      total += chunk.length;
+      if (total > maxBuffer) {
+        pendingError = failed('ENOBUFS', 'spawn ' + command + ' ENOBUFS');
+        try { child.kill('SIGTERM'); } catch (e) {}
+        return;
+      }
+      chunks[stream].push(chunk);
+    };
+  }
+  function text(stream) {
+    return Buffer.concat(chunks[stream]).toString('utf8');
+  }
+  child.stdout.on('data', collect('stdout'));
+  child.stderr.on('data', collect('stderr'));
+  child.on('error', function (e) {
+    // A launch failure: there is no exit status, and `close` may not follow.
+    finish({error: e, status: null, signal: null,
+            stdout: text('stdout'), stderr: text('stderr')});
+  });
+  child.on('close', function (status, signal) {
+    finish({error: pendingError, status: status, signal: signal,
+            stdout: text('stdout'), stderr: text('stderr')});
+  });
+  if (timeoutMs > 0) {
+    timer = setTimeout(function () {
+      if (pendingError === null) {
+        pendingError = failed('ETIMEDOUT', 'spawn ' + command + ' ETIMEDOUT');
+      }
+      try { child.kill('SIGTERM'); } catch (e) {}
+    }, timeoutMs);
+  }
+  child.stdin.on('error', function () {});
+  if (input) { child.stdin.end(input); } else { child.stdin.end(); }
+}
+""".}
+
+proc ctFacadeSpawn(command: cstring; args: seq[cstring]; options: JsObject;
+                   input: cstring; timeoutMs: int; maxBuffer: int;
+                   done: proc(raw: JsObject))
+  {.importjs: "ctFacadeSpawn(#, #, #, #, #, #, #)".}
 
 proc require(module: cstring): JsObject {.importjs: "require(#)".}
 proc jsFloor(value: JsObject): JsObject {.importjs: "Math.floor(#)".}
@@ -271,6 +384,87 @@ proc replyFromNode(action, subject: string; a: NodeAttempt): VerbReply =
   if a.code.len > 0:
     detail = if detail.len > 0: a.code & ": " & detail else: a.code
   replyErr(kind, action & " failed for " & subject, detail)
+
+# ---------------------------------------------------------------------------
+# Answering later.
+#
+# A handler that runs a child process returns a future that settles when the
+# child has closed; one that does not, returns a future already settled. Both
+# are built here, once, so that "settled inline" and "settled later" mean the
+# same thing at every verb — and so that no future this module returns is
+# ever REJECTED: a failure is a `VerbReply`, as it was when every verb
+# answered synchronously.
+# ---------------------------------------------------------------------------
+
+proc reasonText(reason: JsObject): cstring
+  {.importjs: "(function (r) { return String((r && r.message) || r); })(#)".}
+
+proc promiseThen[T](future: PlatformFuture[T]; onValue: proc(value: T);
+                    onFailure: proc(reason: JsObject))
+  {.importjs: "#.then(#, #)".}
+
+proc replyLater(start: proc(settle: proc(reply: VerbReply))):
+    PlatformFuture[VerbReply] =
+  ## A reply for work that answers through a callback: `start` is called at
+  ## once and calls `settle` exactly once — later (a child process closing),
+  ## or before it returns. A second `settle` is ignored.
+  ##
+  ## `outcome.settledLater`'s shape, for a `VerbReply` rather than a
+  ## `PlatformOutcome`: an answer given before `start` returns comes back as
+  ## an already-settled future (`newCompletedFuture`), so a caller that reads
+  ## settled futures synchronously still sees it, and only an answer that
+  ## genuinely arrives later makes a pending one. An exception raised by
+  ## `start` propagates to the caller — `dispatch`, which answers it.
+  var delivered = false
+  var settledInline = false
+  var inlineValue: VerbReply
+  var deliver: proc(reply: VerbReply) = nil
+  start(proc(reply: VerbReply) =
+    if delivered:
+      return
+    delivered = true
+    if deliver.isNil:
+      settledInline = true
+      inlineValue = reply
+    else:
+      deliver(reply))
+  if settledInline:
+    return newCompletedFuture(inlineValue)
+  # The executor runs synchronously, so `deliver` is in place before any
+  # child can close.
+  newPromise(proc(resolve: proc(value: VerbReply)) =
+    deliver = resolve)
+
+proc mapLater[A, B](future: PlatformFuture[A]; map: proc(value: A): B;
+                    otherwise: proc(message: string): B): PlatformFuture[B] =
+  ## `future`'s value through `map`, as a future that never rejects: a
+  ## rejection, or a `map` that raises, is answered by `otherwise`. A future
+  ## that is already settled gives one that is already settled.
+  ##
+  ## The bare `except:` arms are deliberate: on the JS backend a throw from V8
+  ## or a node binding is not a Nim exception type, and a typed arm would let
+  ## it escape a promise callback, where nothing would ever answer the call.
+  proc apply(value: A): B =
+    try:
+      map(value)
+    except:
+      otherwise(getCurrentExceptionMsg())
+  if isSyncResolved(future):
+    return newCompletedFuture(apply(getSyncValue[A](future)))
+  newPromise(proc(resolve: proc(value: B)) =
+    promiseThen(future,
+      proc(value: A) = resolve(apply(value)),
+      proc(reason: JsObject) = resolve(otherwise($reasonText(reason)))))
+
+proc whenAnswered*(answer: PlatformFuture[string];
+                   deliver: proc(text: string)) =
+  ## Hand `handleFrame`'s answer to `deliver` once it is ready, on a later turn
+  ## of the event loop. The socket's one way to wait for it without a
+  ## `drainPlatformCallbacks` nobody in the server runs: `deliver` is reached
+  ## through the promise, for a settled answer as for a pending one.
+  promiseThen(answer,
+    proc(text: string) = deliver(text),
+    proc(reason: JsObject) = discard)
 
 # ---------------------------------------------------------------------------
 # Arguments. A missing or wrongly-typed field RAISES, and `dispatch` turns the
@@ -534,25 +728,50 @@ type
     message: string
     result: ProcessRunResult
 
-proc runSpec(spec: ProcessSpec): RunOutcome =
+const MaxChildOutput = 64 * 1024 * 1024
+  ## 64 MiB of stdout and stderr together. `spawnSync`'s default was 1 MiB,
+  ## and `git log` over a real repository passes it, at which point node
+  ## reports ENOBUFS and truncates — a failure that looks like a git failure
+  ## and is not.
+
+proc runOutcomeOf(command: string; raw: JsObject): RunOutcome =
+  ## A `ctFacadeSpawn` record, read: the ONE place a child's ending becomes a
+  ## `RunOutcome`.
+  if not isNullish(raw["error"]):
+    # A failed spawn, a timeout and an over-long output arrive as a value
+    # rather than as a throw: ENOENT for a command that is not there,
+    # ETIMEDOUT when `timeoutMs` bit, ENOBUFS past `MaxChildOutput`.
+    let code = if isNullish(raw["error"]["code"]): ""
+               else: $(raw["error"]["code"].to(cstring))
+    let text = if isNullish(raw["error"]["message"]): ""
+               else: $(raw["error"]["message"].to(cstring))
+    return RunOutcome(ran: false, kind: errorKindForNodeCode(code),
+                      message: "cannot run " & command & ": " & text)
+
+  let signalled = not isNullish(raw["signal"])
+  result.ran = true
+  result.result = ProcessRunResult(
+    exit: ProcessExit(
+      exitCode: if isNullish(raw["status"]): -1 else: raw["status"].to(int),
+      signalled: signalled,
+      signalName: if signalled: $(raw["signal"].to(cstring)) else: ""),
+    stdout: if isNullish(raw["stdout"]): "" else: $(raw["stdout"].to(cstring)),
+    stderr: if isNullish(raw["stderr"]): "" else: $(raw["stderr"].to(cstring)))
+
+proc runSpecLater(spec: ProcessSpec; done: proc(outcome: RunOutcome)) =
   ## The one spawn in this module. `process.run` is a thin wrapper over it and
   ## so is every `vcs.*` verb — the milestone's note, made structural: there is
   ## no VCS message in the index IPC surface because product VCS is `git` run
   ## as a process, so `vcs.*` is served by running `git`, the same way
   ## `process.run` is, through the same code and the same error mapping.
+  ##
+  ## It returns at once; `done` is called exactly once, when the child has
+  ## closed (or failed to start), on a later turn of the event loop — or
+  ## inline, only when node throws inside `spawn` itself.
   let options = newJsObject()
-  options["encoding"] = cstring"utf8"
-  # 64 MiB. `spawnSync`'s default is 1 MiB and `git log` over a real repository
-  # passes it, at which point node reports ENOBUFS and truncates — a failure
-  # that looks like a git failure and is not.
-  options["maxBuffer"] = 64 * 1024 * 1024
   options["windowsHide"] = true
   if spec.workingDir.len > 0:
     options["cwd"] = cstring spec.workingDir
-  if spec.timeoutMs > 0:
-    options["timeout"] = spec.timeoutMs
-  if spec.stdinText.len > 0:
-    options["input"] = cstring spec.stdinText
   if spec.clearEnv or spec.env.len > 0:
     let env = newJsObject()
     if not spec.clearEnv:
@@ -565,44 +784,42 @@ proc runSpec(spec: ProcessSpec): RunOutcome =
   for a in spec.args:
     argv.add cstring(a)
 
-  let attempted = attempt(proc(): JsObject =
-    nchild.spawnSync(cstring spec.command, argv, options))
-  if not attempted.ok:
-    return RunOutcome(ran: false, kind: errorKindForNodeCode(attempted.code),
-                      message: "cannot run " & spec.command & ": " &
-                               attempted.message)
+  let command = spec.command
+  var answered = false
+  proc answer(outcome: RunOutcome) =
+    if answered: return
+    answered = true
+    done(outcome)
+  try:
+    ctFacadeSpawn(cstring command, argv, options, cstring spec.stdinText,
+                  spec.timeoutMs, MaxChildOutput,
+                  proc(raw: JsObject) =
+                    var outcome: RunOutcome
+                    try:
+                      outcome = runOutcomeOf(command, raw)
+                    except:
+                      outcome = RunOutcome(ran: false, kind: pkFailed,
+                        message: "cannot run " & command & ": " &
+                                 getCurrentExceptionMsg())
+                    answer(outcome))
+  except:
+    # The emitted function catches what node throws; this arm is for a lapse
+    # in it, so that "failures are values" holds regardless.
+    answer(RunOutcome(ran: false, kind: pkFailed,
+                      message: "cannot run " & command & ": " &
+                               getCurrentExceptionMsg()))
 
-  let raw = attempted.value
-  if not isNullish(raw["error"]):
-    # `spawnSync` reports a failed spawn and a timeout as a value rather than
-    # as a throw, so this arm is not a duplicate of the one above: ENOENT for a
-    # command that is not there, and ETIMEDOUT when `timeoutMs` bit, both land
-    # here.
-    let code = if isNullish(raw["error"]["code"]): ""
-               else: $(raw["error"]["code"].to(cstring))
-    let text = if isNullish(raw["error"]["message"]): ""
-               else: $(raw["error"]["message"].to(cstring))
-    return RunOutcome(ran: false, kind: errorKindForNodeCode(code),
-                      message: "cannot run " & spec.command & ": " & text)
-
-  let signalled = not isNullish(raw["signal"])
-  result.ran = true
-  result.result = ProcessRunResult(
-    exit: ProcessExit(
-      exitCode: if isNullish(raw["status"]): -1 else: raw["status"].to(int),
-      signalled: signalled,
-      signalName: if signalled: $(raw["signal"].to(cstring)) else: ""),
-    stdout: if isNullish(raw["stdout"]): "" else: $(raw["stdout"].to(cstring)),
-    stderr: if isNullish(raw["stderr"]): "" else: $(raw["stderr"].to(cstring)))
-
-proc hProcessRun(ep: FacadeEndpoint; args: JsonNode): VerbReply =
+proc hProcessRun(ep: FacadeEndpoint; args: JsonNode): PlatformFuture[VerbReply] =
   let spec = decodeProcessSpec(jrequire(args, "spec"))
   if spec.command.len == 0:
-    return replyErr(pkInvalidArgument, "process.run was given no command")
-  let outcome = runSpec(spec)
-  if not outcome.ran:
-    return replyErr(outcome.kind, outcome.message)
-  replyOk(encodeProcessRunResult(outcome.result))
+    return newCompletedFuture(
+      replyErr(pkInvalidArgument, "process.run was given no command"))
+  replyLater(proc(settle: proc(reply: VerbReply)) =
+    runSpecLater(spec, proc(outcome: RunOutcome) =
+      if not outcome.ran:
+        settle(replyErr(outcome.kind, outcome.message))
+      else:
+        settle(replyOk(encodeProcessRunResult(outcome.result)))))
 
 proc isExecutableFile(path: string): bool =
   let executable = attempt(proc(): JsObject =
@@ -653,58 +870,78 @@ type
     kind: PlatformErrorKind
     message: string
 
-proc git(repository: string; args: seq[string]; stdinText = ""): GitOutcome =
+proc gitLater(repository: string; args: seq[string]; stdinText: string;
+              done: proc(outcome: GitOutcome)) =
   ## `args` run by the container's git, with the shared
   ## `NoIndexLockGitOptions` prefix (`platform/vcs`): the client's pane
   ## refreshes through these verbs every few seconds, and a refresh must never
-  ## write the user's index nor take its lock.
+  ## write the user's index nor take its lock. `done` is called once, when git
+  ## has exited, through `runSpecLater`: nothing waits for it.
   var spec = processSpec("git", noIndexLockGitArgs(args),
                          workingDir = repository)
   spec.stdinText = stdinText
-  let outcome = runSpec(spec)
-  if not outcome.ran:
-    return GitOutcome(ok: false, kind: pkNotFound, message: outcome.message)
-  if outcome.result.exit.exitCode != 0:
-    return GitOutcome(
-      ok: false, kind: pkFailed,
-      message: "git " & args.join(" ") & " failed: " &
-        outcome.result.stderr.strip())
-  GitOutcome(ok: true, output: outcome.result.stdout)
+  runSpecLater(spec, proc(outcome: RunOutcome) =
+    if not outcome.ran:
+      done(GitOutcome(ok: false, kind: pkNotFound, message: outcome.message))
+    elif outcome.result.exit.exitCode != 0:
+      done(GitOutcome(
+        ok: false, kind: pkFailed,
+        message: "git " & args.join(" ") & " failed: " &
+          outcome.result.stderr.strip()))
+    else:
+      done(GitOutcome(ok: true, output: outcome.result.stdout)))
 
-template gitText(body: untyped): untyped =
-  let outcome = body
-  if not outcome.ok: return replyErr(outcome.kind, outcome.message)
-  outcome.output
+proc settleGuarded(settle: proc(reply: VerbReply);
+                   answer: proc(): VerbReply) =
+  ## `settle(answer())`, with a raise in `answer` — a payload that will not
+  ## encode, a parse that trips — answered `pkFailed` instead of escaping a
+  ## child-process callback, where nothing would ever answer the call. The
+  ## bare `except:` is `mapLater`'s, for its reason.
+  var reply: VerbReply
+  try:
+    reply = answer()
+  except:
+    reply = replyErr(pkFailed, getCurrentExceptionMsg())
+  settle(reply)
 
-proc hVcsIsRepository(ep: FacadeEndpoint; args: JsonNode): VerbReply =
+proc gitReply(repository: string; args: seq[string];
+              answer: proc(output: string): VerbReply;
+              stdinText = ""): PlatformFuture[VerbReply] =
+  ## The verb that is ONE git run: git's failure is the reply as it stands,
+  ## and its stdout on success goes through `answer`.
+  replyLater(proc(settle: proc(reply: VerbReply)) =
+    gitLater(repository, args, stdinText, proc(outcome: GitOutcome) =
+      if not outcome.ok:
+        settle(replyErr(outcome.kind, outcome.message))
+      else:
+        settleGuarded(settle, proc(): VerbReply = answer(outcome.output))))
+
+proc answersNothing(output: string): VerbReply = replyNothing()
+proc answersText(output: string): VerbReply = replyOk(encodeText(output))
+
+proc hVcsIsRepository(ep: FacadeEndpoint; args: JsonNode): PlatformFuture[VerbReply] =
   let path = argText(args, "path")
-  let outcome = git(path, @["rev-parse", "--is-inside-work-tree"])
-  # A non-repository is a `false`, not a failure — `native_vcs` answers the
-  # same way, and a caller asking "is this a repository" has already accounted
-  # for "no".
-  replyOk(encodeFlag(outcome.ok and outcome.output.strip() == "true"))
+  replyLater(proc(settle: proc(reply: VerbReply)) =
+    gitLater(path, @["rev-parse", "--is-inside-work-tree"], "",
+      proc(outcome: GitOutcome) =
+        # A non-repository is a `false`, not a failure — `native_vcs` answers
+        # the same way, and a caller asking "is this a repository" has
+        # already accounted for "no".
+        settle(replyOk(encodeFlag(outcome.ok and
+                                  outcome.output.strip() == "true")))))
 
-proc hVcsRepositoryRoot(ep: FacadeEndpoint; args: JsonNode): VerbReply =
+proc hVcsRepositoryRoot(ep: FacadeEndpoint; args: JsonNode): PlatformFuture[VerbReply] =
   let path = argText(args, "path")
-  let output = gitText git(path, @["rev-parse", "--show-toplevel"])
-  replyOk(encodeText(output.strip()))
+  gitReply(path, @["rev-parse", "--show-toplevel"],
+    proc(output: string): VerbReply = replyOk(encodeText(output.strip())))
 
-proc hVcsStatus(ep: FacadeEndpoint; args: JsonNode): VerbReply =
+proc hVcsStatus(ep: FacadeEndpoint; args: JsonNode): PlatformFuture[VerbReply] =
   let repository = argText(args, "repository")
-  let output = gitText git(repository, @["status", "--porcelain=v2", "--branch"])
-  replyOk(encodeVcsStatus(parsePorcelainV2(output)))
+  gitReply(repository, @["status", "--porcelain=v2", "--branch"],
+    proc(output: string): VerbReply =
+      replyOk(encodeVcsStatus(parsePorcelainV2(output))))
 
-proc hVcsLog(ep: FacadeEndpoint; args: JsonNode): VerbReply =
-  let repository = argText(args, "repository")
-  let maxCount = argCount(args, "maxCount")
-  let path = argText(args, "path")
-  var arguments = @["log", "--max-count=" & $maxCount,
-    "--pretty=format:%H%x1f%h%x1f%P%x1f%an%x1f%ae%x1f%at%x1f%s%x1f%b%x1e"]
-  if path.len > 0:
-    arguments.add "--"
-    arguments.add path
-  let output = gitText git(repository, arguments)
-  var commits: seq[VcsCommit] = @[]
+proc parseLog(output: string): seq[VcsCommit] =
   for record in output.split('\x1e'):
     let trimmed = record.strip()
     if trimmed.len == 0: continue
@@ -713,34 +950,48 @@ proc hVcsLog(ep: FacadeEndpoint; args: JsonNode): VerbReply =
     var authoredAt: int64 = 0
     try: authoredAt = parseBiggestInt(fields[5]) * 1000
     except ValueError: discard
-    commits.add VcsCommit(
+    result.add VcsCommit(
       id: fields[0], shortId: fields[1],
       parents: if fields[2].len > 0: fields[2].split(' ') else: @[],
       authorName: fields[3], authorEmail: fields[4],
       authoredAtMs: authoredAt, subject: fields[6], body: fields[7])
-  replyOk(encodeVcsCommits(commits))
 
-proc hVcsReadBlob(ep: FacadeEndpoint; args: JsonNode): VerbReply =
+proc hVcsLog(ep: FacadeEndpoint; args: JsonNode): PlatformFuture[VerbReply] =
+  let repository = argText(args, "repository")
+  let maxCount = argCount(args, "maxCount")
+  let path = argText(args, "path")
+  var arguments = @["log", "--max-count=" & $maxCount,
+    "--pretty=format:%H%x1f%h%x1f%P%x1f%an%x1f%ae%x1f%at%x1f%s%x1f%b%x1e"]
+  if path.len > 0:
+    arguments.add "--"
+    arguments.add path
+  gitReply(repository, arguments,
+    proc(output: string): VerbReply = replyOk(encodeVcsCommits(parseLog(output))))
+
+proc hVcsReadBlob(ep: FacadeEndpoint; args: JsonNode): PlatformFuture[VerbReply] =
   let repository = argText(args, "repository")
   let path = argText(args, "path")
   case decodeVcsBlobSource(jrequire(args, "source"))
   of vbsWorkingTree:
+    # A file read, not a child process: answered inline, as `fs.readText` is.
     let full = joinPath(repository, path)
     let a = attempt(proc(): JsObject = nfs.readFileSync(cstring full, cstring"utf8"))
-    if not a.ok: return replyFromNode("read the working-tree copy of", path, a)
-    replyOk(encodeText($(a.value.to(cstring))))
+    if not a.ok:
+      return newCompletedFuture(
+        replyFromNode("read the working-tree copy of", path, a))
+    newCompletedFuture(replyOk(encodeText($(a.value.to(cstring)))))
   of vbsIndex:
-    replyOk(encodeText(gitText git(repository, @["show", ":" & path])))
+    gitReply(repository, @["show", ":" & path], answersText)
   of vbsHead:
-    replyOk(encodeText(gitText git(repository, @["show", "HEAD:" & path])))
+    gitReply(repository, @["show", "HEAD:" & path], answersText)
 
-proc hVcsReadBlobAt(ep: FacadeEndpoint; args: JsonNode): VerbReply =
+proc hVcsReadBlobAt(ep: FacadeEndpoint; args: JsonNode): PlatformFuture[VerbReply] =
   let repository = argText(args, "repository")
   let path = argText(args, "path")
   let revision = argText(args, "revision")
-  replyOk(encodeText(gitText git(repository, @["show", revision & ":" & path])))
+  gitReply(repository, @["show", revision & ":" & path], answersText)
 
-proc hVcsDiff(ep: FacadeEndpoint; args: JsonNode): VerbReply =
+proc hVcsDiff(ep: FacadeEndpoint; args: JsonNode): PlatformFuture[VerbReply] =
   let repository = argText(args, "repository")
   let paths = decodeTextSeq(jrequire(args, "paths"))
   let staged = argFlag(args, "staged")
@@ -750,13 +1001,22 @@ proc hVcsDiff(ep: FacadeEndpoint; args: JsonNode): VerbReply =
   if paths.len > 0:
     arguments.add "--"
     for p in paths: arguments.add p
-  replyOk(encodeText(gitText git(repository, arguments)))
+  gitReply(repository, arguments, answersText)
 
-proc hVcsContentId(ep: FacadeEndpoint; args: JsonNode): VerbReply =
+proc replyOfOutcome[T](outcome: PlatformOutcome[T];
+                       encode: proc(value: T): JsonNode): VerbReply =
+  if not outcome.ok:
+    return replyErr(outcome.error.kind, outcome.error.message,
+                    outcome.error.detail)
+  replyOk(encode(outcome.value))
+
+proc hVcsContentId(ep: FacadeEndpoint; args: JsonNode): PlatformFuture[VerbReply] =
   ## `vcs.contentId` — the content id of W, H or S (Status-Bar.md), by the ONE
-  ## recipe (`ct_test/certificate_content_id`, through `vcs.contentIdOver`)
-  ## with node's `spawnSync` as its git and the endpoint's temp root for its
-  ## temporary index.
+  ## recipe (`ct_test/certificate_content_id`, through `vcs.contentIdOverAsync`,
+  ## which re-runs `vcs.contentIdOver` under `runResumable`) with node's
+  ## `child_process.spawn` as its git and the endpoint's temp root for its
+  ## temporary index. The certificate indicator asks for it every 15 s; each
+  ## computation is several git runs, and none of them holds the event loop.
   ##
   ## REQUIRES `capVcsRead` (`vcs.ContentIdRequires`). WHAT IT WRITES: loose,
   ## content-addressed blob and tree objects into the repository's
@@ -769,61 +1029,62 @@ proc hVcsContentId(ep: FacadeEndpoint; args: JsonNode): VerbReply =
   if scopeField.kind != JArray:
     raise newException(ProtocolError, "'scope' must be a list of paths")
   let scope = decodeTextSeq(scopeField)
-  let outcome = contentIdOver(nodeContentIdHost(ep.tempRoot), ep.grantedProfile(),
-                              repository, state, algorithm, scope)
-  if not outcome.ok:
-    return replyErr(outcome.error.kind, outcome.error.message,
-                    outcome.error.detail)
-  replyOk(encodeVcsContentId(outcome.value))
+  mapLater(
+    contentIdOverAsync(nodeAsyncContentIdHost(ep.tempRoot), ep.grantedProfile(),
+                       repository, state, algorithm, scope),
+    proc(outcome: PlatformOutcome[VcsContentId]): VerbReply =
+      replyOfOutcome(outcome, encodeVcsContentId),
+    proc(message: string): VerbReply =
+      replyErr(pkFailed, "vcs.contentId failed: " & message))
 
-proc hVcsDeclaredScopes(ep: FacadeEndpoint; args: JsonNode): VerbReply =
+proc hVcsDeclaredScopes(ep: FacadeEndpoint; args: JsonNode): PlatformFuture[VerbReply] =
   ## `vcs.declaredScopes` — the certificate scopes the repository declares
   ## (test-certificates-spec Tooling §3.1), by the ONE reader
-  ## (`vcs.declaredScopesOver`) with node's `spawnSync` as its git. REQUIRES
-  ## `capVcsRead` (`vcs.DeclaredScopesRequires`); writes nothing.
+  ## (`vcs.declaredScopesOverAsync`) with node's `child_process.spawn` as its
+  ## git. REQUIRES `capVcsRead` (`vcs.DeclaredScopesRequires`); writes nothing.
   let repository = argText(args, "repository")
-  let outcome = declaredScopesOver(nodeContentIdHost(ep.tempRoot),
-                                   ep.grantedProfile(), repository)
-  if not outcome.ok:
-    return replyErr(outcome.error.kind, outcome.error.message,
-                    outcome.error.detail)
-  replyOk(encodeVcsDeclaredScopes(outcome.value))
+  mapLater(
+    declaredScopesOverAsync(nodeAsyncContentIdHost(ep.tempRoot),
+                            ep.grantedProfile(), repository),
+    proc(outcome: PlatformOutcome[VcsDeclaredScopes]): VerbReply =
+      replyOfOutcome(outcome, encodeVcsDeclaredScopes),
+    proc(message: string): VerbReply =
+      replyErr(pkFailed, "vcs.declaredScopes failed: " & message))
 
-proc hVcsStage(ep: FacadeEndpoint; args: JsonNode): VerbReply =
-  let repository = argText(args, "repository")
-  let paths = decodeTextSeq(jrequire(args, "paths"))
-  discard gitText git(repository, @["add", "--"] & paths)
-  replyNothing()
-
-proc hVcsUnstage(ep: FacadeEndpoint; args: JsonNode): VerbReply =
+proc hVcsStage(ep: FacadeEndpoint; args: JsonNode): PlatformFuture[VerbReply] =
   let repository = argText(args, "repository")
   let paths = decodeTextSeq(jrequire(args, "paths"))
-  discard gitText git(repository, @["restore", "--staged", "--"] & paths)
-  replyNothing()
+  gitReply(repository, @["add", "--"] & paths, answersNothing)
 
-proc hVcsDiscardChanges(ep: FacadeEndpoint; args: JsonNode): VerbReply =
+proc hVcsUnstage(ep: FacadeEndpoint; args: JsonNode): PlatformFuture[VerbReply] =
   let repository = argText(args, "repository")
   let paths = decodeTextSeq(jrequire(args, "paths"))
-  discard gitText git(repository, @["restore", "--"] & paths)
-  replyNothing()
+  gitReply(repository, @["restore", "--staged", "--"] & paths, answersNothing)
 
-proc hVcsApplyPatch(ep: FacadeEndpoint; args: JsonNode): VerbReply =
+proc hVcsDiscardChanges(ep: FacadeEndpoint; args: JsonNode): PlatformFuture[VerbReply] =
+  let repository = argText(args, "repository")
+  let paths = decodeTextSeq(jrequire(args, "paths"))
+  gitReply(repository, @["restore", "--"] & paths, answersNothing)
+
+proc hVcsApplyPatch(ep: FacadeEndpoint; args: JsonNode): PlatformFuture[VerbReply] =
   let repository = argText(args, "repository")
   let patch = argText(args, "patch")
   let reverse = argFlag(args, "reverse")
   var arguments = @["apply"]
   if reverse: arguments.add "--reverse"
   arguments.add "-"
-  let outcome = git(repository, arguments, stdinText = patch)
-  if not outcome.ok:
-    # `pkConflict` rather than `pkFailed`, as `native_vcs` has it: a patch that
-    # does not apply is a state disagreement the caller can act on, and it is
-    # the one git failure here that is routinely not a bug.
-    let kind = if outcome.kind == pkFailed: pkConflict else: outcome.kind
-    return replyErr(kind, outcome.message)
-  replyNothing()
+  replyLater(proc(settle: proc(reply: VerbReply)) =
+    gitLater(repository, arguments, patch, proc(outcome: GitOutcome) =
+      if not outcome.ok:
+        # `pkConflict` rather than `pkFailed`, as `native_vcs` has it: a patch
+        # that does not apply is a state disagreement the caller can act on,
+        # and it is the one git failure here that is routinely not a bug.
+        let kind = if outcome.kind == pkFailed: pkConflict else: outcome.kind
+        settle(replyErr(kind, outcome.message))
+      else:
+        settle(replyNothing())))
 
-proc hVcsCommit(ep: FacadeEndpoint; args: JsonNode): VerbReply =
+proc hVcsCommit(ep: FacadeEndpoint; args: JsonNode): PlatformFuture[VerbReply] =
   let repository = argText(args, "repository")
   let message = argText(args, "message")
   let authorName = argText(args, "authorName")
@@ -831,27 +1092,35 @@ proc hVcsCommit(ep: FacadeEndpoint; args: JsonNode): VerbReply =
   var arguments = @["commit", "-m", message]
   if authorName.len > 0 and authorEmail.len > 0:
     arguments.add "--author=" & authorName & " <" & authorEmail & ">"
-  discard gitText git(repository, arguments)
-  let head = gitText git(repository, @["rev-parse", "HEAD"])
-  replyOk(encodeVcsCommit(VcsCommit(id: head.strip(), subject: message)))
+  # Two runs, the second only once the first has exited 0: the id is read
+  # back from the repository rather than parsed out of `commit`'s chatter.
+  replyLater(proc(settle: proc(reply: VerbReply)) =
+    gitLater(repository, arguments, "", proc(committed: GitOutcome) =
+      if not committed.ok:
+        settle(replyErr(committed.kind, committed.message))
+        return
+      gitLater(repository, @["rev-parse", "HEAD"], "", proc(head: GitOutcome) =
+        if not head.ok:
+          settle(replyErr(head.kind, head.message))
+        else:
+          settleGuarded(settle, proc(): VerbReply =
+            replyOk(encodeVcsCommit(VcsCommit(id: head.output.strip(),
+                                              subject: message)))))))
 
-proc hVcsInitRepository(ep: FacadeEndpoint; args: JsonNode): VerbReply =
+proc hVcsInitRepository(ep: FacadeEndpoint; args: JsonNode): PlatformFuture[VerbReply] =
   let path = argText(args, "path")
-  discard gitText git(path, @["init", "-q"])
-  replyNothing()
+  gitReply(path, @["init", "-q"], answersNothing)
 
-proc hVcsFetch(ep: FacadeEndpoint; args: JsonNode): VerbReply =
+proc hVcsFetch(ep: FacadeEndpoint; args: JsonNode): PlatformFuture[VerbReply] =
   let repository = argText(args, "repository")
   let remote = argText(args, "remote")
-  discard gitText git(repository, @["fetch", remote])
-  replyNothing()
+  gitReply(repository, @["fetch", remote], answersNothing)
 
-proc hVcsPush(ep: FacadeEndpoint; args: JsonNode): VerbReply =
+proc hVcsPush(ep: FacadeEndpoint; args: JsonNode): PlatformFuture[VerbReply] =
   let repository = argText(args, "repository")
   let remote = argText(args, "remote")
   let refspec = argText(args, "refspec")
-  discard gitText git(repository, @["push", remote, refspec])
-  replyNothing()
+  gitReply(repository, @["push", remote, refspec], answersNothing)
 
 # ---------------------------------------------------------------------------
 # Settings.
@@ -940,7 +1209,16 @@ proc hSettingsEnvironment(ep: FacadeEndpoint; args: JsonNode): VerbReply =
 # ---------------------------------------------------------------------------
 
 type
-  VerbHandler* = proc(ep: FacadeEndpoint; args: JsonNode): VerbReply {.closure.}
+  VerbHandler* = proc(ep: FacadeEndpoint; args: JsonNode):
+                   PlatformFuture[VerbReply] {.closure.}
+    ## Every handler answers with a future (see "Which verbs answer LATER" in
+    ## this module's header). A raise before it returns — a missing or
+    ## mistyped argument — is answered by `dispatch`; the future itself never
+    ## rejects.
+
+  InlineVerbHandler = proc(ep: FacadeEndpoint; args: JsonNode): VerbReply
+                        {.nimcall.}
+    ## A verb that runs no child process, answered before it returns.
 
   FacadeVerb* = object
     verb*: string
@@ -966,7 +1244,16 @@ type
       ## says which thing is missing does not.
 
 proc served(verb: string; serves: CapabilitySet;
-            handler: VerbHandler): FacadeVerb =
+            handler: InlineVerbHandler): FacadeVerb =
+  ## A verb answered inline: its future is settled when `dispatch` returns.
+  FacadeVerb(verb: verb, serves: serves,
+             handler: proc(ep: FacadeEndpoint; args: JsonNode):
+                          PlatformFuture[VerbReply] =
+               newCompletedFuture(handler(ep, args)))
+
+proc servedLater(verb: string; serves: CapabilitySet;
+                 handler: VerbHandler): FacadeVerb =
+  ## A verb that runs a child process and answers when it has closed.
   FacadeVerb(verb: verb, serves: serves, handler: handler)
 
 proc refused(verb: string; serves: CapabilitySet;
@@ -1013,7 +1300,7 @@ let facadeVerbs*: seq[FacadeVerb] = @[
   # (capabilities.nim). The four verbs reachable only from a STARTED child are
   # refused together with `start` itself, because a handle nobody can receive
   # events against is worse than a refusal.
-  served("process.run", {capProcessSpawn, capProcessArbitraryPrograms}, hProcessRun),
+  servedLater("process.run", {capProcessSpawn, capProcessArbitraryPrograms}, hProcessRun),
   served("process.which", {capProcessArbitraryPrograms}, hProcessWhich),
   refused("process.start", {}, NoClientEventRegistry),
   refused("process.signal", {capProcessSignal, capProcessGracefulSignal},
@@ -1023,28 +1310,28 @@ let facadeVerbs*: seq[FacadeVerb] = @[
   refused("process.isRunning", {}, NoClientEventRegistry),
 
   # -- version control ----------------------------------------------------
-  served("vcs.isRepository", {capVcsRead}, hVcsIsRepository),
-  served("vcs.repositoryRoot", {capVcsRead}, hVcsRepositoryRoot),
-  served("vcs.status", {capVcsRead}, hVcsStatus),
-  served("vcs.log", {capVcsRead}, hVcsLog),
-  served("vcs.readBlob", {capVcsRead}, hVcsReadBlob),
-  served("vcs.readBlobAt", {capVcsRead}, hVcsReadBlobAt),
-  served("vcs.diff", {capVcsRead}, hVcsDiff),
+  servedLater("vcs.isRepository", {capVcsRead}, hVcsIsRepository),
+  servedLater("vcs.repositoryRoot", {capVcsRead}, hVcsRepositoryRoot),
+  servedLater("vcs.status", {capVcsRead}, hVcsStatus),
+  servedLater("vcs.log", {capVcsRead}, hVcsLog),
+  servedLater("vcs.readBlob", {capVcsRead}, hVcsReadBlob),
+  servedLater("vcs.readBlobAt", {capVcsRead}, hVcsReadBlobAt),
+  servedLater("vcs.diff", {capVcsRead}, hVcsDiff),
   # REQUIRES capVcsRead, and WRITES: computing a content id stores loose,
   # content-addressed blob and tree objects in the repository's `.git/objects`
   # (that is how git computes a tree id), and nothing else — no ref, no index,
   # no working-tree file. A read in the facade's sense; see `vcs.contentId`.
-  served("vcs.contentId", ContentIdRequires, hVcsContentId),
+  servedLater("vcs.contentId", ContentIdRequires, hVcsContentId),
   # REQUIRES capVcsRead; reads the repository's configuration, writes nothing.
-  served("vcs.declaredScopes", DeclaredScopesRequires, hVcsDeclaredScopes),
-  served("vcs.stage", {capVcsWrite}, hVcsStage),
-  served("vcs.unstage", {capVcsWrite}, hVcsUnstage),
-  served("vcs.discardChanges", {capVcsWrite}, hVcsDiscardChanges),
-  served("vcs.applyPatch", {capVcsWrite}, hVcsApplyPatch),
-  served("vcs.commit", {capVcsWrite}, hVcsCommit),
-  served("vcs.initRepository", {capVcsWrite}, hVcsInitRepository),
-  served("vcs.fetch", {capVcsRemote}, hVcsFetch),
-  served("vcs.push", {capVcsRemote}, hVcsPush),
+  servedLater("vcs.declaredScopes", DeclaredScopesRequires, hVcsDeclaredScopes),
+  servedLater("vcs.stage", {capVcsWrite}, hVcsStage),
+  servedLater("vcs.unstage", {capVcsWrite}, hVcsUnstage),
+  servedLater("vcs.discardChanges", {capVcsWrite}, hVcsDiscardChanges),
+  servedLater("vcs.applyPatch", {capVcsWrite}, hVcsApplyPatch),
+  servedLater("vcs.commit", {capVcsWrite}, hVcsCommit),
+  servedLater("vcs.initRepository", {capVcsWrite}, hVcsInitRepository),
+  servedLater("vcs.fetch", {capVcsRemote}, hVcsFetch),
+  servedLater("vcs.push", {capVcsRemote}, hVcsPush),
 
   # -- settings -----------------------------------------------------------
   served("settings.get", {capSettingsRead}, hSettingsGet),
@@ -1213,9 +1500,13 @@ proc welcomeFrame*(ep: FacadeEndpoint; session = ""): WelcomeFrame =
 # Dispatch.
 # ---------------------------------------------------------------------------
 
-proc dispatch*(ep: FacadeEndpoint; call: CallFrame): ReplyFrame =
-  ## One `call` frame in, one `reply` frame out. The `(session, id)` PAIR is
-  ## copied back and nothing else correlates them.
+proc dispatch*(ep: FacadeEndpoint; call: CallFrame): PlatformFuture[ReplyFrame] =
+  ## One `call` frame in, one `reply` frame out — as a future, which is
+  ## already settled for every refusal and every verb answered inline, and
+  ## settles when the child has closed for a verb that runs one. It never
+  ## rejects. The `(session, id)` PAIR is copied back and nothing else
+  ## correlates them; with several calls in flight that is what lets replies
+  ## arrive in a different order from their calls.
   ##
   ## §6.2 says `id`, and that was complete while a connection carried one
   ## conversation. It does not survive several: ids are allocated per client
@@ -1225,8 +1516,8 @@ proc dispatch*(ep: FacadeEndpoint; call: CallFrame): ReplyFrame =
   ## side's whole part in preventing that, and it is unconditional: an empty
   ## session echoes as empty, which is the single-session wire unchanged.
   # NO `result.id = ...` / `result.session = ...` HERE. Every path below either
-  # `return`s a fresh `ReplyFrame` or falls into the final `if`, which builds
-  # one -- so an assignment to `result` at the top is dead on all of them. It
+  # `return`s a fresh `ReplyFrame` or falls into the final `mapLater`, which
+  # builds one -- so an assignment to `result` at the top is dead on all of them. It
   # was dead for `id` before the session was added, and reading as though it
   # set a default is exactly how a path that forgot to copy the pair would look
   # correct. Each literal carries both, and the suite checks them on the
@@ -1239,16 +1530,16 @@ proc dispatch*(ep: FacadeEndpoint; call: CallFrame): ReplyFrame =
     # does not have, the other is this build choosing not to serve a verb it
     # knows about — and a suite that cannot tell them apart cannot notice a
     # verb missing from the table.
-    return ReplyFrame(
+    return newCompletedFuture(ReplyFrame(
       session: call.session, id: call.id, ok: false, errorKind: pkNotSupported,
-      errorMessage: "this endpoint declares no verb named '" & call.verb & "'")
+      errorMessage: "this endpoint declares no verb named '" & call.verb & "'"))
 
   let entry = facadeVerbs[index]
   if entry.handler.isNil:
-    return ReplyFrame(
+    return newCompletedFuture(ReplyFrame(
       session: call.session, id: call.id, ok: false, errorKind: pkNotSupported,
       errorMessage: entry.verb & " is declared by the contract and not " &
-        "served here: " & entry.unservedBecause)
+        "served here: " & entry.unservedBecause))
 
   let ungranted = entry.serves - ep.granted
   if ungranted.len > 0:
@@ -1257,45 +1548,57 @@ proc dispatch*(ep: FacadeEndpoint; call: CallFrame): ReplyFrame =
     # capVcsRead" from "this build does not have the verb".
     var names: seq[string] = @[]
     for capability in ungranted: names.add $capability
-    return ReplyFrame(
+    return newCompletedFuture(ReplyFrame(
       session: call.session, id: call.id, ok: false, errorKind: pkNotSupported,
       errorMessage: entry.verb & " requires " & names.join(", ") &
-        ", which this endpoint was not granted")
+        ", which this endpoint was not granted"))
 
-  var reply: VerbReply
+  var pending: PlatformFuture[VerbReply]
   try:
-    reply = entry.handler(ep, if call.args.isNil: newJObject() else: call.args)
+    pending = entry.handler(ep, if call.args.isNil: newJObject() else: call.args)
   except ProtocolError as err:
     # The client sent a field this build cannot read — a missing name, a
     # string where a number belongs, an enum value from another version.
-    return ReplyFrame(
+    return newCompletedFuture(ReplyFrame(
       session: call.session, id: call.id, ok: false, errorKind: pkInvalidArgument,
-      errorMessage: entry.verb & ": " & err.msg)
+      errorMessage: entry.verb & ": " & err.msg))
   except CatchableError as err:
-    return ReplyFrame(
+    return newCompletedFuture(ReplyFrame(
       session: call.session, id: call.id, ok: false, errorKind: pkFailed,
-      errorMessage: entry.verb & " failed: " & err.msg)
+      errorMessage: entry.verb & " failed: " & err.msg))
   except:
     # THE BARE `except:` IS DELIBERATE, for `endpoint_protocol`'s measured
     # reason: on the JS backend a throw from V8 or from a node binding is not
     # a Nim exception type, so `except CatchableError` catches nothing and the
     # exception escapes — here, out of a socket handler, taking the connection
     # with it. A dispatcher must answer even when a handler misbehaves.
-    return ReplyFrame(
+    return newCompletedFuture(ReplyFrame(
       session: call.session, id: call.id, ok: false, errorKind: pkFailed,
-      errorMessage: entry.verb & " failed: " & getCurrentExceptionMsg())
+      errorMessage: entry.verb & " failed: " & getCurrentExceptionMsg()))
 
-  if reply.ok:
-    ReplyFrame(session: call.session, id: call.id, ok: true,
-               payload: if reply.payload.isNil: newJNull() else: reply.payload)
-  else:
-    ReplyFrame(session: call.session, id: call.id, ok: false,
-               errorKind: reply.errorKind,
-               errorMessage: reply.errorMessage, detail: reply.detail)
+  let session = call.session
+  let id = call.id
+  let verb = entry.verb
+  mapLater(pending,
+    proc(reply: VerbReply): ReplyFrame =
+      if reply.ok:
+        ReplyFrame(session: session, id: id, ok: true,
+                   payload: if reply.payload.isNil: newJNull() else: reply.payload)
+      else:
+        ReplyFrame(session: session, id: id, ok: false,
+                   errorKind: reply.errorKind,
+                   errorMessage: reply.errorMessage, detail: reply.detail),
+    proc(message: string): ReplyFrame =
+      # The handler's future rejected, which none built here does; answered
+      # rather than dropped, for the reason the bare `except:` above gives.
+      ReplyFrame(session: session, id: id, ok: false, errorKind: pkFailed,
+                 errorMessage: verb & " failed: " & message))
 
-proc handleFrame*(ep: FacadeEndpoint; text: string): string =
-  ## Frame text in, frame text out; "" when the text is not a frame this
-  ## endpoint owns.
+proc handleFrame*(ep: FacadeEndpoint; text: string): PlatformFuture[string] =
+  ## Frame text in, frame text out — as a future, settled at once for a
+  ## `hello`, a refusal and an inline verb, and when the child closes for a
+  ## verb that runs one (`dispatch`); "" when the text is not a frame this
+  ## endpoint owns. The socket hands the answer on with `whenAnswered`.
   ##
   ## §6.1 puts the facade and the existing index IPC surface on ONE connection,
   ## distinguished by frame kind rather than by port. So a message that is not
@@ -1312,8 +1615,8 @@ proc handleFrame*(ep: FacadeEndpoint; text: string): string =
     try:
       hello = decodeHello(text)
     except ProtocolError:
-      return ""
-    encodeWelcome(ep.welcomeFrame(hello.session))
+      return newCompletedFuture("")
+    newCompletedFuture(encodeWelcome(ep.welcomeFrame(hello.session)))
   of FrameCall:
     var call: CallFrame
     try:
@@ -1322,7 +1625,9 @@ proc handleFrame*(ep: FacadeEndpoint; text: string): string =
       # There is no `id` to answer under, so there is no reply to send. A
       # `reply` with a made-up id would be answered by whichever call happened
       # to own that number.
-      return ""
-    encodeReply(ep.dispatch(call))
+      return newCompletedFuture("")
+    mapLater(ep.dispatch(call),
+      proc(reply: ReplyFrame): string = encodeReply(reply),
+      proc(message: string): string = "")
   else:
-    ""
+    newCompletedFuture("")

@@ -75,7 +75,8 @@ permissions:
 # `dmg-lib-check`, `test-non-gui` (both legs), `test-ui-tests` (both legs),
 # `ct-test-providers`, `push-to-attic`, `create-release`, `ci-verdict`. Of
 # these, `push-to-attic` and `create-release` have no sample of ANY kind -- only
-# zero-length cancellations, meaning they never started. Their bounds are
+# zero-length cancellations, meaning they never started. (`push-to-attic` has
+# since moved to its own workflow, cache-push.yml, 2026-11-16.) Their bounds are
 # structural, not measured, and say so. Nine of the twelve ALREADY-bounded jobs
 # have no green sample either; the whole Windows family is red.
 #
@@ -104,7 +105,9 @@ permissions:
 # group", and they answer it WITHOUT a watchdog. With every job bounded and
 # `ci/verdict/job-timeouts.py` keeping them bounded, the worst case is the
 # longest path through `needs:`, computable from this file alone. For a push
-# that is test-ui-tests (150) -> push-to-attic (60) = 210 minutes. A watchdog
+# that is test-ui-tests (150) -> push-to-attic (60) = 210 minutes. (Since
+# 2026-11-16 the cache push is cache-push.yml, outside this graph, so the
+# longest path is now test-ui-tests alone.) A watchdog
 # would report the same fact later, and only after a runner had already been
 # stranded for the afternoon.
 jobs:
@@ -1333,15 +1336,15 @@ jobs:
           gh-token: ${{ steps.ci_token.outputs.token }}
           env-ps1-path: ./env.ps1
           siblings: |
-            codetracer-native-recorder=e57bbd7cc6450cf3ded247c6e9bed72a9d53d9cf
+            codetracer-native-recorder=8a79c040e7ac06a1a49af21d88eee50134d824a2
             # codetracer-trace-format{,-nim} BY COMMIT, not `=dev`: the two halves of
             # the FFI pair are `/agents` inputs in flake.nix, and trace-format's `dev`
             # tip (051a298, 2026-09-30) predates the FileTable / PathTableKind API that
             # src/db-backend's ctfs_trace_reader has called since 2026-10-03, so a
             # sibling cloned at `dev` fails to compile. Full account and the refresh
             # rule: .github/actions/setup-db-backend-siblings/action.yml.
-            codetracer-trace-format=dc4991ad078599fc6187bdf466b10d4da5b43f27
-            codetracer-trace-format-nim=4c74973690e13eddb886f3376827e0934b8a4deb
+            codetracer-trace-format=2f01e602e70f69a04675293f3fa0d5bad9f196a1
+            codetracer-trace-format-nim=8eef47d71a2431311a4b9d6b6cf38a2acb37a33f
 
       - name: Install Nim dependencies
         shell: bash
@@ -1542,6 +1545,18 @@ jobs:
         with:
           app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
           private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+          root-default-shell: "false"  # lint-nim enters only the lint shell
+
+      - name: Mint a token for the clone below
+        # An installation token lives an hour, and the clone below comes after
+        # 'Provision dependency siblings from repro.lock', which can take most of
+        # one on a cold runner: hand it a token minted here, not the job's first
+        # (ci/test/late-clone-token-test.py).
+        id: late_token
+        uses: ./.github/actions/refresh-github-token
+        with:
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
 
       - name: Clone codetracer-pm sibling
         # `ci/test/cua-keymap-extractor.sh` (PLAT-68's CUA keymap step in
@@ -1559,7 +1574,7 @@ jobs:
           repo: metacraft-labs/codetracer-pm
           ref: latest
           path: ${{ github.workspace }}/../codetracer-pm
-          gh-token: ${{ steps.ci_token.outputs.token }}
+          gh-token: ${{ steps.late_token.outputs.token }}
           submodules: 'false'
 
       # MEASURE THE FETCH ENVIRONMENT BEFORE NIX TOUCHES THE NETWORK, and
@@ -1642,13 +1657,13 @@ jobs:
       # Each producer owns its compiler and trace-writer dependencies.
       - name: Build the wazero replayer
         working-directory: ../codetracer-wasm-recorder
-        run: nix develop . --command just build
+        run: nix develop . --profile "${CT_GCROOT_DIR:-$RUNNER_TEMP}/codetracer-wasm-recorder-shell" --command just build
       - name: Build the WebAssembly instrumenter
         working-directory: ../codetracer-wasm-instrumenter
-        run: nix develop . --command just build
+        run: nix develop . --profile "${CT_GCROOT_DIR:-$RUNNER_TEMP}/codetracer-wasm-instrumenter-shell" --command just build
       - name: Build the canonical recording decoder
         working-directory: ../codetracer-trace-format-nim
-        run: nix develop . --command just build
+        run: nix develop . --profile "${CT_GCROOT_DIR:-$RUNNER_TEMP}/codetracer-trace-format-nim-shell" --command just build
       - name: Build the browser recording daemon
         run: nix develop .#ci --command cargo build --locked --manifest-path src/backend-manager/Cargo.toml
       - name: Re-record and verify the boundary fixtures
@@ -1743,6 +1758,9 @@ jobs:
     # (2026-10-25/26) that step took 26-35m and the flake check 10-18m, and on
     # #882 every attempt on a cold garm slot was cancelled at 25m inside the
     # build. 90m is ~2x the slowest local measurement of the two steps together.
+    # The ct-mcr test recorder and the license check left those inputs when
+    # backend-manager's check phase stopped running the CPUID-faulting
+    # recording test; the limit is kept until the lane is measured again.
     timeout-minutes: 90
     steps:
       - name: Mint installation token for cross-repo sibling access
@@ -1853,9 +1871,9 @@ jobs:
             # src/db-backend's ctfs_trace_reader has called since 2026-10-03, so a
             # sibling cloned at `dev` fails to compile. Full account and the refresh
             # rule: .github/actions/setup-db-backend-siblings/action.yml.
-            codetracer-trace-format=dc4991ad078599fc6187bdf466b10d4da5b43f27
-            codetracer-trace-format-nim=4c74973690e13eddb886f3376827e0934b8a4deb
-            codetracer-native-recorder=e57bbd7cc6450cf3ded247c6e9bed72a9d53d9cf
+            codetracer-trace-format=2f01e602e70f69a04675293f3fa0d5bad9f196a1
+            codetracer-trace-format-nim=8eef47d71a2431311a4b9d6b6cf38a2acb37a33f
+            codetracer-native-recorder=8a79c040e7ac06a1a49af21d88eee50134d824a2
 
       # MEASURE THE FETCH ENVIRONMENT BEFORE NIX TOUCHES THE NETWORK, and
       # before the FIRST `nix develop` in this job rather than before the
@@ -2100,6 +2118,12 @@ jobs:
             echo "Output did not report expected unsupported diagnostic naming macOS arm64 on aarch64-darwin" >&2
             exit 1
           fi
+
+      # The reprobuild dev env must name the active build dir and must not
+      # export CODETRACER_PREFIX. It activates the real dev env through
+      # `repro exec`, so it runs where Nix and `repro` are present.
+      - name: Check the reprobuild dev env exports CODETRACER_BUILD_DIR, not CODETRACER_PREFIX
+        run: nix develop . --command just test-repro-dev-env
 
   # M12: macOS verification pass for Value Origin Tracking.
   # The per-PR gate runs the seven materialized Python origin-DAP scenarios.
@@ -2386,6 +2410,17 @@ jobs:
           app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
           private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
 
+      - name: Mint a token for the clones below
+        # An installation token lives an hour, and the clones below come after
+        # 'Provision dependency siblings from repro.lock', which can take most of
+        # one on a cold runner: hand them a token minted here, not the job's first
+        # (ci/test/late-clone-token-test.py).
+        id: late_token
+        uses: ./.github/actions/refresh-github-token
+        with:
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+
       # The envelope records the three-tier demo from this tree, and
       # scripts/materialize-recording.sh refuses without `ct-instrument` and a
       # built codetracer-js-recorder. `just test-cross-process` builds both
@@ -2401,7 +2436,7 @@ jobs:
           ref: dev
           path: ${{ github.workspace }}/../codetracer-wasm-instrumenter
           submodules: "false"
-          gh-token: ${{ steps.ci_token.outputs.token }}
+          gh-token: ${{ steps.late_token.outputs.token }}
 
       - name: Clone codetracer-js-recorder sibling
         uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
@@ -2410,7 +2445,7 @@ jobs:
           ref: dev
           path: ${{ github.workspace }}/../codetracer-js-recorder
           submodules: "false"
-          gh-token: ${{ steps.ci_token.outputs.token }}
+          gh-token: ${{ steps.late_token.outputs.token }}
 
       - name: Clone runquota sibling
         # `just build-once` below compiles `ct`, and src/ct/codetracer.nim ->
@@ -2426,7 +2461,7 @@ jobs:
           repo: metacraft-labs/runquota
           ref: dev
           path: ${{ github.workspace }}/../runquota
-          gh-token: ${{ steps.ci_token.outputs.token }}
+          gh-token: ${{ steps.late_token.outputs.token }}
           submodules: 'false'
 
       - name: Build frontend (needed by gated Playwright stage)
@@ -3529,6 +3564,7 @@ jobs:
         run: nix develop .#devShells.x86_64-linux.default --command just test-vm-recorder-gated
 
       - name: Build ct (needed by the CLI dispatch tests)
+        id: ct
         # record_missing_recorder_test.nim and record_dispatch_e2e_test.nim
         # drive the SHIPPED `ct` binary rather than importing its modules, so
         # the lane needs a build.  The pure dispatch table test does not, but
@@ -3544,7 +3580,7 @@ jobs:
         run: nix develop .#devShells.x86_64-linux.default --command just test-cli-record
 
       - name: The desktop opens the one shared default arrangement, and follows it
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.ct.outcome == 'success' }}
         # The desktop's first-run default is GENERATED from the arrangement the
         # terminal and the GPUI window also open with, and `ci/lint/nim.sh`
         # already fails when the committed file is stale. This is the half a
@@ -3565,7 +3601,7 @@ jobs:
         run: nix develop .#devShells.x86_64-linux.default --command just plat45-capture-electron
 
       - name: The desktop shows what the terminal and GPUI front-ends must equal
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.ct.outcome == 'success' }}
         # The desktop column of the terminal's and GPUI's desktop-parity
         # suites: the first-run arrangement, the editor's colours as the eye
         # sees them, the focused panel's outline, the Files pane's entries and
@@ -3576,7 +3612,7 @@ jobs:
         run: nix develop .#devShells.x86_64-linux.default --command just plat47-capture-electron
 
       - name: The desktop's menu is drawn from the shared Menu ViewModel
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.ct.outcome == 'success' }}
         # The desktop column of the one menu drawn three ways: a highlight
         # given to the Menu ViewModel ALONE must move the desktop's DOM
         # highlight (a renderer keeping its own copy fails here), the Debug
@@ -3588,7 +3624,7 @@ jobs:
         run: nix develop .#devShells.x86_64-linux.default --command just plat48-capture-electron
 
       - name: The desktop's chrome is the reference for the other front-ends
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.ct.outcome == 'success' }}
         # The desktop column of the chrome the terminal and GPUI front-ends
         # draw: one root menu button whose first level drops below it and
         # whose submenus open to its right, each transport control's tooltip
@@ -3599,7 +3635,7 @@ jobs:
         run: nix develop .#devShells.x86_64-linux.default --command just plat49-capture-electron
 
       - name: The desktop's click behaviours and chrome are the reference
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.ct.outcome == 'success' }}
         # The desktop column of the click sweep and the chrome colours: its
         # caption bar (the omnibox centred, the buttons on the bar's ground),
         # its strip and splitters, its menu surface, its right-click menus and
@@ -3610,7 +3646,7 @@ jobs:
         run: nix develop .#devShells.x86_64-linux.default --command just plat50-capture-electron
 
       - name: The desktop's Terminal Output pane is the reference
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.ct.outcome == 'success' }}
         # The desktop column of the Terminal Output pane: the lines of a
         # program writing coloured output with each fragment's computed
         # style, where a click on a fragment moves the debugger, and the
@@ -3621,7 +3657,7 @@ jobs:
         run: nix develop .#devShells.x86_64-linux.default --command just plat52-capture-electron
 
       - name: The desktop's Test Results pane is the reference
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.ct.outcome == 'success' }}
         # The desktop column of the Test Results pane: its rows before and
         # after a real `ct test run` over a Noir crate with a passing and a
         # failing test, the controls' titles and modes, the marks' colours,
@@ -3631,7 +3667,7 @@ jobs:
         run: nix develop .#devShells.x86_64-linux.default --command just plat53-capture-electron
 
       - name: The desktop's Constraints pane is the reference
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.ct.outcome == 'success' }}
         # The desktop column of the Constraints pane: the rows of a Noir
         # crate measured by a real `nargo info --json`, where each function is
         # declared, what a right-click on a row opens and where a press goes —
@@ -3640,7 +3676,7 @@ jobs:
         run: nix develop .#devShells.x86_64-linux.default --command just plat62-capture-electron
 
       - name: The desktop's Agent Activity pane is the reference
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.ct.outcome == 'success' }}
         # The desktop column of the Agent Activity pane: a review's agent
         # session replayed through `ct review` — every evidence card in its
         # state with its shape, dataset, command and note, the `ct test` run
@@ -3650,7 +3686,7 @@ jobs:
         run: nix develop .#devShells.x86_64-linux.default --command just plat54-capture-electron
 
       - name: The desktop's Problems panel is the reference
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.ct.outcome == 'success' }}
         # The desktop column of the Problems pane: its rows after a real
         # `nargo compile` of a crate with one warning and two errors in two
         # files, the icons' colours, the Errors filter and Group by File, and
@@ -3660,7 +3696,7 @@ jobs:
         run: nix develop .#devShells.x86_64-linux.default --command just plat55-capture-electron
 
       - name: The desktop's Build Output is the reference
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.ct.outcome == 'success' }}
         # The desktop column of the Build Output pane: each line's class, text
         # and colours after a real coloured `gcc` build that fails and one
         # that passes, the verdict, the status bar's build indicator, a press
@@ -3670,7 +3706,7 @@ jobs:
         run: nix develop .#devShells.x86_64-linux.default --command just plat56-capture-electron
 
       - name: The desktop's Requests pane is the reference
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.ct.outcome == 'success' }}
         # The desktop column of the Requests pane: the rows of a recording
         # carrying request spans, the Method and Status filters and the URL
         # search, a double-click going to a request's handler, and the
@@ -3680,7 +3716,7 @@ jobs:
         run: nix develop .#devShells.x86_64-linux.default --command just plat58-capture-electron
 
       - name: The desktop's Low Level Code view is the reference
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.ct.outcome == 'success' }}
         # The desktop column of the Low Level Code pane: the listing of a Noir
         # recording opened with Alt+1, its execution pointer, its header, an
         # instruction's right-click menu and a click going to its source line —
@@ -3690,7 +3726,7 @@ jobs:
         run: nix develop .#devShells.x86_64-linux.default --command just plat60-capture-electron
 
       - name: The desktop's Shell pane is the reference
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.ct.outcome == 'success' }}
         # The desktop column of the Shell pane: a recorded build run in the
         # pane's shell, its output and the recording's marked lines, and a
         # click opening the recording in a new tab — read from the REAL
@@ -3699,7 +3735,7 @@ jobs:
         run: nix develop .#devShells.x86_64-linux.default --command just plat61-capture-electron
 
       - name: The desktop's Timeline removal, list scrubbers and changed values are the reference
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.ct.outcome == 'success' }}
         # The desktop column of the 2026-10-05 decisions: no Timeline (and a
         # saved layout that held one opens without it), the Event Log's, the
         # Call Trace's and the Terminal Output's scrollbars as scrubbers over
@@ -3710,7 +3746,7 @@ jobs:
         run: nix develop .#devShells.x86_64-linux.default --command just plat51-capture-electron
 
       - name: The desktop's keys go through the shared keymap router
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.ct.outcome == 'success' }}
         # The desktop column of the one keymap every front-end resolves:
         # each F-key runs its operation once, a letter steps and Enter opens
         # the tracepoint editor in the read-only editor, Alt+E focuses the
@@ -3723,7 +3759,7 @@ jobs:
         run: nix develop .#devShells.x86_64-linux.default --command just plat68-desktop-keys
 
       - name: The desktop answers every key as the shared rule does (DIFF-13)
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.ct.outcome == 'success' }}
         # The cross-front-end differential's desktop column: every key of the
         # four base keymaps in six situations, built as a real KeyboardEvent
         # and named by the desktop's own decoder, resolved for the scope path
@@ -3735,13 +3771,33 @@ jobs:
         run: nix develop .#devShells.x86_64-linux.default --command just plat68-desktop-keys
 
       - name: One keybindings.json, three front-ends, one behaviour
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.ct.outcome == 'success' }}
         # The same user file read by the terminal (a real pty), the GPUI
         # window and the Electron app in one run: a rebound call-trace
         # operation and a removed base row give the same execution lines on
         # all three. Needs the terminal and GPUI binaries beside the desktop
         # build; the recipe's desktop half starts its own Xvfb.
         run: nix develop .#devShells.x86_64-linux.default --command bash -c 'just build-tui && just build-gpui && just plat68-one-keymap'
+
+      - name: One input routing, three front-ends (keys and presses)
+        if: ${{ !cancelled() && steps.ct.outcome == 'success' }}
+        # Input-Routing-And-Keymaps.md IR-3, IR-5 and §5.1: one user file
+        # binds a chord to Step Over and Ctrl+click on a call-trace row to
+        # Continue; the terminal (a real pty), the GPUI window and the
+        # Electron app each step on the chord, continue on the rebound press,
+        # go to the call on the plain press, and show the new chord. The
+        # recipe's desktop half starts its own Xvfb.
+        run: nix develop .#devShells.x86_64-linux.default --command bash -c 'just build-tui && just build-gpui && just plat64-input-routing'
+
+      - name: The desktop's presses are the pointer keymap's rows
+        if: ${{ !cancelled() && steps.ct.outcome == 'success' }}
+        # A press on a call, its toggle and an Event Log column header runs
+        # each element's pointer row through the desktop's one pointer
+        # listener; a user's row removing the base's leaves the press with
+        # nothing to run — in the REAL Electron app on `calc`.
+        env:
+          PLAT68_SPEC: tests/keymaps/plat64-desktop-pointer-rows.spec.ts
+        run: nix develop .#devShells.x86_64-linux.default --command just plat68-desktop-keys
 
       - name: Upload test logs
         if: always()
@@ -3751,157 +3807,17 @@ jobs:
           path: test-logs/
           retention-days: 30
 
+  ct-build:
+    # The job is in ct-build.yml: build-once and the windowed shim, once per
+    # run, for the TUI and GPUI shards.
+    uses: ./.github/workflows/ct-build.yml
+    secrets: inherit
+
   tui-tests:
-    runs-on: [self-hosted, linux, x64]  # CIP-5 nix job; same label as `viewmodel-tests` and `gpui-window-captures`
-    # NEW, NO SAMPLE YET, and no local timing either: the host this job was
-    # written on could not materialise the dev shell within its free disk.
-    # So this bound is structural. The body is Nix and sibling provisioning,
-    # `just build-once` (a job whose work is mostly that, `cross-process-
-    # linux`, is bounded at 45m), isonim-gpui's shim and `build-gpui` (one
-    # cargo build and one front-end compile), `build-tui`, and then ~197 Nim programs
-    # compiled and run ONE AT A TIME -- at an ASSUMED 20-30s per
-    # compile-and-run of a program importing isonim-tui (an estimate, not a
-    # measurement), 65-100m on its own. 180m clears the sum of those upper ends by about a third and stays
-    # half of GitHub's 360m default. Tighten it from the first green runs.
-    #
-    # MEASURED since, on cold GARM runners (PR #903): provisioning, which first
-    # realises the dev shell, took 77 to 104 minutes, and `just build-once`
-    # ran 85 minutes in one run and to completion in 218 in another (job
-    # 127706075383, on a host at load ~100). That is most of the old 180m
-    # before a single TUI test. Setup plus the estimate above comes to about
-    # 430m on such a host, more than ci/verdict/job-timeouts.py allows (a
-    # bound must be tighter than GitHub's 360m default), so this is that
-    # ceiling: 355m. It fits a host at ordinary load; tighten it once the job
-    # has run on a warm cache.
-    timeout-minutes: 355
-    name: TUI tests (Tier 1 + Tier 2)
-    # WHY THIS JOB EXISTS. `just test-tui` and `just test-tui-real-terminal` are
-    # the only routes to the `tui` and `tui-real-terminal` lanes of
-    # `ci/lib/run-nim-test-lane.sh` -- 133 and 64 files -- and until this job no
-    # workflow called either (codetracer-pm issues/2026-11-01-no-ci-lane-calls-
-    # the-test-tui-recipes.md). CodeTracer-TUI.md §7.1.6 asserts the TUI's
-    # Tier-1 content "fast, per-PR" and makes Tier 2 the terminal-peer check, so
-    # both run here, on every push and pull request this workflow runs on.
-    # `ci/test/ci-reached-recipes-test.sh` fails if either recipe stops being
-    # reached by a workflow lane.
-    #
-    # WHY ITS OWN JOB AND NOT TWO STEPS OF `viewmodel-tests`. That job is
-    # already at its 75-minute bound with no green sample, and these lanes
-    # compile ~197 Nim programs serially. Added there, they would either push
-    # it past its bound or be cut off by it, and its token (one mint per job,
-    # 60-minute life) could not cover a longer job's clones anyway -- here every
-    # authenticated clone happens in the first steps.
-    steps:
-      - name: Generate CI token
-        id: ci_token
-        uses: actions/create-github-app-token@v2
-        with:
-          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
-          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
-          owner: metacraft-labs
-
-      - name: Checkout
-        # Recursive: `tui-prereqs` builds the grammar archive the TUI links from
-        # the `libs/tree-sitter-*` submodules.
-        uses: actions/checkout@v5
-        with:
-          submodules: recursive
-          token: ${{ steps.ci_token.outputs.token }}
-
-      # EVERY AUTHENTICATED CLONE IS IN THIS BLOCK, at the top of the job: the
-      # installation token minted above expires an hour after it is minted (see
-      # `viewmodel-tests`), and this job's bound is longer than that.
-      - name: Setup db-backend siblings and the terminal-test siblings
-        # The db-backend siblings are what `just build-once` needs to build
-        # `replay-server` (see `gpui-window-captures`). The three extra ones are
-        # the Tier-2 lane's: `ci/lib/test-lane-files.sh` compiles every
-        # `tui-real-terminal` file with `--path:../TermAssert/src`,
-        # `../TermAssertClient/src` and `../nim-libvterm/src`. All three are in
-        # this repo's committed `repro.lock`, so they are named BARE and clone
-        # at the revision that lock pins -- not at a branch tip.
-        uses: ./.github/actions/setup-db-backend-siblings
-        with:
-          env-flavor: nix
-          gh-token: ${{ steps.ci_token.outputs.token }}
-          extra-siblings: |
-            TermAssert
-            TermAssertClient
-            nim-libvterm
-
-      - name: Clone runquota sibling
-        # `just build-once` compiles `ct`, which imports `runquota_process`
-        # (see `cross-process-linux`).
-        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
-        with:
-          repo: metacraft-labs/runquota
-          ref: dev
-          path: ${{ github.workspace }}/../runquota
-          gh-token: ${{ steps.ci_token.outputs.token }}
-          submodules: 'false'
-
-      - name: Provision dependency siblings from repro.lock
-        # isonim, isonim-tui, nim-pty, nim-termctl et al., which every TUI suite
-        # compiles against through codetracer's top-level `config.nims`. After
-        # the step above, which installed Nix: this action reaches `repro`
-        # through the dev shell. The token is required: one build input,
-        # codetracer-image-diff, is private.
-        uses: ./.github/actions/provision-repro-lock-siblings
-        with:
-          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
-          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
-
-      - name: Build ct and replay-server
-        # `test_fixture_corpus.nim` (Tier 1) opens real recorded traces through
-        # a real `replay-server`, and on a cold `test-logs/tui-fixtures/` cache
-        # records them with `ct`. A missing `replay-server` fails that file by
-        # design and an all-skipped corpus fails it too (see the comment above
-        # `test-tui` in the justfile), so both are built first.
-        #
-        # The trace writer's Nim archive needs the same paths. build-once.sh
-        # derives CODETRACER_TRACE_FORMAT_NIM_EXTRA_PATHS only when
-        # CT_EMULATOR_EXTRA_NIM_PATHS is unset, and it turns off the writer's
-        # `nimble install`, so with only the emulator's variable given here the
-        # writer's `nim c` got no path to `results`. On a persistent runner a
-        # leftover nimble store hid that; on a fresh one the build failed with
-        # "cannot open file: results" (TUI job 127420337626). `libs/nim-result`
-        # stays last, as build-once.sh explains.
-        env:
-          CODETRACER_DB_BACKEND_SKIP_DIRENV: "1"
-          CT_EMULATOR_EXTRA_NIM_PATHS: ${{ github.workspace }}/libs/nim-stew/stew:${{ github.workspace }}/libs/nim-stew:${{ github.workspace }}/libs/nim-result
-          CODETRACER_TRACE_FORMAT_NIM_EXTRA_PATHS: ${{ github.workspace }}/libs/nim-stew/stew:${{ github.workspace }}/libs/nim-stew:${{ github.workspace }}/libs/nim-result
-        run: nix develop .#devShells.x86_64-linux.default --command just build-once
-
-      - name: Build the GPUI front-end the cross-front-end suites drive
-        # Four files in these lanes hold the terminal to the same answers as
-        # the GPUI front-end and run the SHIPPED `build/bin/codetracer-gpui`
-        # over the same recording (`test_plat68_diff13.nim`,
-        # `test_plat45_three_media.nim`, `test_plat41_parity.nim`,
-        # `real_terminal/test_plat42_diff11.nim`); a missing binary is a
-        # failure naming `just build-gpui`, not a skip. The binary dlopens
-        # isonim-gpui's featureless shim from `../isonim-gpui/rust/target/debug`,
-        # which is built in isonim-gpui's OWN dev shell, as
-        # `ci/test/gpui-window-captures.sh` builds it. `../isonim-gpui` is the
-        # checkout `provision-repro-lock-siblings` made, at the lock's revision.
-        run: |
-          (cd ../isonim-gpui && nix develop --command bash -c 'cd rust && cargo build')
-          nix develop .#devShells.x86_64-linux.default --command just build-gpui
-
-      - name: TUI Tier 1 — the suites that need no terminal
-        run: nix develop .#devShells.x86_64-linux.default --command just test-tui
-
-      - name: TUI Tier 2 — the real binary in a real pty
-        # `!cancelled()`, so a Tier-1 failure does not hide whether Tier 2 holds.
-        # The recipe builds `build/bin/codetracer-tui` itself (`build-tui`).
-        if: ${{ !cancelled() }}
-        run: nix develop .#devShells.x86_64-linux.default --command just test-tui-real-terminal
-
-      - name: Upload test logs
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: tui-test-logs
-          path: test-logs/
-          retention-days: 30
+    # The job is in tui-tests.yml; it takes ct from ct-build.
+    needs: ct-build
+    uses: ./.github/workflows/tui-tests.yml
+    secrets: inherit
 
   isonim-editor-smoke:
     runs-on: [self-hosted, linux, x64]  # CIP-5 nix job; same label as `viewmodel-tests` and `tui-tests`
@@ -4008,149 +3924,10 @@ jobs:
           if-no-files-found: ignore
 
   gpui-window-captures:
-    runs-on: [self-hosted, linux, x64]  # the label isonim-gpui's "GUI tests (headless sway)" job runs green on
-    # NEW, NO SAMPLE YET. The work is two cargo builds of isonim-gpui's shim
-    # (windowed and featureless; incremental on a runner that kept its work
-    # tree), `just build-once`, three windowed front-end builds' worth of Nim,
-    # and three captures of 2-5 minutes each on this host class. 90m is a
-    # generous first bound, to be tightened from the first green runs.
-    timeout-minutes: 90
-    name: GPUI window captures (headless sway)
-    # WHY THIS JOB EXISTS. The GPUI window suites assert records measured off
-    # a real window (`src/tests/visual/plat4{5,7,8}-…json`); until this job
-    # nothing re-took them, so a record stopped describing the window the
-    # first time the window changed (PLAT-45's and PLAT-47's predated the
-    # top bar). Here each capture runs on a headless sway, its frames are
-    # measured into the record, and the suite asserts THAT — this commit's
-    # window, not the file last committed. The two capabilities the
-    # known-dark list recorded as missing — a windowed shim and a
-    # compositor — are isonim-gpui's own CI job's, on this runner label
-    # (codetracer-specs issues/2026-09-26-window-capture-gates-recorded-
-    # blocked-although-ci-can-run-them.md).
-    steps:
-      - name: Generate CI token
-        id: ci_token
-        uses: actions/create-github-app-token@v2
-        with:
-          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
-          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
-          owner: metacraft-labs
-
-      - name: Checkout
-        uses: actions/checkout@v5
-        with:
-          submodules: recursive
-          token: ${{ steps.ci_token.outputs.token }}
-
-      - name: Read the isonim-gpui pin
-        # The ONE pin this repo keeps for isonim-gpui is flake.lock's; the
-        # clone below takes it from there rather than from a second copy of
-        # the SHA in this file.
-        #
-        # jq, not python3: this step runs before any Nix provisioning, on the
-        # runner's own PATH, and the persistent NixOS runners have no python3
-        # there -- the step died with `python3: command not found` on every run
-        # since the job was added, so nothing after it had ever run in CI. jq
-        # is declared on every self-hosted runner. `-e` makes a missing node
-        # or a null rev an error rather than the string "null" handed to the
-        # clone below. ci/test/sibling-provisioning-test.sh section 5 fails a
-        # pre-dev-shell step that reaches for a tool its runner lacks.
-        id: gpui_pin
-        run: |
-          set -euo pipefail
-          rev="$(jq -er '.nodes["isonim-gpui"].locked.rev' flake.lock)"
-          echo "rev=${rev}" >> "${GITHUB_OUTPUT}"
-
-      # Every authenticated clone near the top: the installation token expires
-      # an hour after it is minted (see `viewmodel-tests`).
-      - name: Clone isonim-gpui sibling
-        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
-        with:
-          repo: metacraft-labs/isonim-gpui
-          ref: ${{ steps.gpui_pin.outputs.rev }}
-          path: ${{ github.workspace }}/../isonim-gpui
-          gh-token: ${{ steps.ci_token.outputs.token }}
-          submodules: 'false'
-
-      - name: Clone GuiAssert sibling
-        # PLAT-45's window record reads the frames through GuiAssert's pixel
-        # readers (`--path:../GuiAssert/src`), the declared cross-repo edge
-        # the `gpui-shell` and `screen-oracle` lanes carry. PLAT-69's
-        # scenarios drive the window on GuiAssert's desktop-environment
-        # targets (`gui_assert/desktop_env`), which are on its `agents`
-        # branch until they reach `dev`.
-        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
-        with:
-          repo: metacraft-labs/GuiAssert
-          ref: agents
-          path: ${{ github.workspace }}/../GuiAssert
-          gh-token: ${{ steps.ci_token.outputs.token }}
-          submodules: 'false'
-
-      - name: Clone runquota sibling
-        # `just build-once` compiles `ct`, which imports `runquota_process`
-        # (see `cross-process-linux`).
-        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
-        with:
-          repo: metacraft-labs/runquota
-          ref: dev
-          path: ${{ github.workspace }}/../runquota
-          gh-token: ${{ steps.ci_token.outputs.token }}
-          submodules: 'false'
-
-      - name: Setup db-backend siblings
-        uses: ./.github/actions/setup-db-backend-siblings
-        with:
-          env-flavor: nix
-          gh-token: ${{ steps.ci_token.outputs.token }}
-
-      - name: Provision dependency siblings from repro.lock
-        uses: ./.github/actions/provision-repro-lock-siblings
-        with:
-          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
-          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
-
-      - name: Build ct and replay-server
-        # `ct record` records the `calc` and `call_pages` fixtures the
-        # captures open; `replay-server` replays them.
-        env:
-          CODETRACER_DB_BACKEND_SKIP_DIRENV: "1"
-          CT_EMULATOR_EXTRA_NIM_PATHS: ${{ github.workspace }}/libs/nim-stew/stew:${{ github.workspace }}/libs/nim-stew:${{ github.workspace }}/libs/nim-result
-        run: nix develop .#devShells.x86_64-linux.default --command just build-once
-
-      - name: Re-take and assert the GPUI window captures
-        # isonim-gpui's windowed shim and virtual pointer are built in ITS
-        # dev shell (the one that declares the X/Wayland libraries and the
-        # compositor tools); the recipe enters it itself.
-        run: nix develop .#devShells.x86_64-linux.default --command just gpui-window-captures
-
-      - name: PLAT-35's GPUI arm as a real window, one per parity scenario
-        # Linux has no headless GPUI renderer, so PLAT-35's GPUI frames on
-        # Linux are a real window on GuiAssert's headless sway -- this job's
-        # compositor, windowed shim and GuiAssert checkout. One window per
-        # scenario in `src/tests/visual/scenarios.json`; a scenario with no
-        # settled frame at its declared size fails by name. Runs after the
-        # step above, which builds the same windowed shim and records the
-        # `calc` trace it opens; `!cancelled()` so a red capture above does
-        # not hide whether this one works.
-        if: ${{ !cancelled() }}
-        run: nix develop .#devShells.x86_64-linux.default --command just plat35-capture-gpui-window
-
-      - name: Upload the frames
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: gpui-window-captures
-          path: |
-            build/plat45/
-            build/plat47-gpui/
-            build/plat48-gpui/
-            build/plat69/
-            build/plat35/gpui-window/
-            src/tests/visual/plat45-gpui-arrangement.json
-            src/tests/visual/plat47-gpui-window.json
-            src/tests/visual/plat48-gpui-window.json
-          retention-days: 7
+    # The job is in gpui-window-captures.yml; it takes ct from ct-build.
+    needs: ct-build
+    uses: ./.github/workflows/gpui-window-captures.yml
+    secrets: inherit
 
   push-gpg-public-key:
     runs-on: [self-hosted, linux, x64]  # CIP-5 nix job; H4: routed to GPU host gpu-server-002
@@ -4834,9 +4611,9 @@ jobs:
             # src/db-backend's ctfs_trace_reader has called since 2026-10-03, so a
             # sibling cloned at `dev` fails to compile. Full account and the refresh
             # rule: .github/actions/setup-db-backend-siblings/action.yml.
-            codetracer-trace-format=dc4991ad078599fc6187bdf466b10d4da5b43f27
-            codetracer-trace-format-nim=4c74973690e13eddb886f3376827e0934b8a4deb
-            codetracer-native-recorder=e57bbd7cc6450cf3ded247c6e9bed72a9d53d9cf
+            codetracer-trace-format=2f01e602e70f69a04675293f3fa0d5bad9f196a1
+            codetracer-trace-format-nim=8eef47d71a2431311a4b9d6b6cf38a2acb37a33f
+            codetracer-native-recorder=8a79c040e7ac06a1a49af21d88eee50134d824a2
             # Required by scripts/require-siblings.sh, which build-once.sh runs first.
             # BARE: this job only runs on codetracer, so clone-siblings resolves
             # them from this commit's own committed repro.lock, which pins all of them.
@@ -4846,6 +4623,8 @@ jobs:
             test-certificates-tools
             nim-shm-queue
             nim-shm-gset
+            # `ct shell-session` imports nim_pty (src/common/shell_session.nim).
+            nim-pty
 
       - name: Build CodeTracer-Setup.exe
         shell: bash
@@ -5605,6 +5384,17 @@ jobs:
       # "Provision dependency siblings from repro.lock" step above clones
       # them, on both legs, at the revisions repro.lock pins.
 
+      - name: Mint a token for the clones below
+        # An installation token lives an hour, and the clones below come after
+        # 'Provision dependency siblings from repro.lock', which can take most of
+        # one on a cold runner: hand them a token minted here, not the job's first
+        # (ci/test/late-clone-token-test.py).
+        id: late_token
+        uses: ./.github/actions/refresh-github-token
+        with:
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+
       - name: Clone python-recorder (macOS)
         if: matrix.platform == 'macos'
         uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
@@ -5634,7 +5424,7 @@ jobs:
           # change this line back.
           ref: dev
           path: ${{ github.workspace }}/../codetracer-python-recorder
-          gh-token: ${{ steps.ci_token.outputs.token }}
+          gh-token: ${{ steps.late_token.outputs.token }}
 
       # The Ruby recorder, on BOTH legs. It used to be cloned and built on macOS
       # only, on the reading that the nixos leg got it from "Provision
@@ -5658,7 +5448,7 @@ jobs:
           repo: metacraft-labs/codetracer-ruby-recorder
           ref: dev
           path: ${{ github.workspace }}/../codetracer-ruby-recorder
-          gh-token: ${{ steps.ci_token.outputs.token }}
+          gh-token: ${{ steps.late_token.outputs.token }}
 
       - name: Build ruby-recorder native extension
         # Both legs (see the clone step above for why the nixos leg needs it
@@ -5697,7 +5487,7 @@ jobs:
           # so a build that followed the runner's variable would land where neither
           # looks and fail the assertion below.
           CARGO_TARGET_DIR="$PWD/gems/codetracer-ruby-recorder/ext/native_tracer/target" \
-            nix develop --no-write-lock-file --command just build-extension
+            nix develop --profile "${CT_GCROOT_DIR:-$RUNNER_TEMP}/codetracer-ruby-recorder-shell" --no-write-lock-file --command just build-extension
 
           # Assert the artefact, do not assume the exit code. `just
           # build-extension` succeeding is not the same claim as "the file the
@@ -5729,6 +5519,17 @@ jobs:
             exit 1
           fi
           echo "ruby recorder native extension: $found"
+
+      - name: Mint a token for the clone below
+        # An installation token lives an hour, and the clone below comes after
+        # 'Build ruby-recorder native extension', which can take most of
+        # one on a cold runner: hand it a token minted here, not the job's first
+        # (ci/test/late-clone-token-test.py).
+        id: late_token_2
+        uses: ./.github/actions/refresh-github-token
+        with:
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
 
       # ---------------------------------------------------------------------
       # codetracer-js-recorder. This lane runs `./ci/test/non-gui.sh` ->
@@ -5781,7 +5582,7 @@ jobs:
           ref: dev
           path: ${{ github.workspace }}/../codetracer-js-recorder
           submodules: "false"
-          gh-token: ${{ steps.ci_token.outputs.token }}
+          gh-token: ${{ steps.late_token_2.outputs.token }}
 
       - name: Build codetracer-js-recorder sibling
         # The clone lands unbuilt and `packages/cli/dist/` is PRODUCED, never
@@ -5798,7 +5599,7 @@ jobs:
         run: |
           set -euo pipefail
           cd "${{ github.workspace }}/../codetracer-js-recorder"
-          nix develop --no-write-lock-file --command just build
+          nix develop --profile "${CT_GCROOT_DIR:-$RUNNER_TEMP}/codetracer-js-recorder-shell" --no-write-lock-file --command just build
 
           # Assert the artefact `find_js_recorder()` actually opens, by the
           # same name it uses. A built-looking tree with no dist/index.js
@@ -5809,6 +5610,17 @@ jobs:
             exit 1
           fi
           echo "js recorder CLI: $(pwd)/packages/cli/dist/index.js"
+
+      - name: Mint a token for the clone below
+        # An installation token lives an hour, and the clone below comes after
+        # 'Build codetracer-js-recorder sibling', which can take most of
+        # one on a cold runner: hand it a token minted here, not the job's first
+        # (ci/test/late-clone-token-test.py).
+        id: late_token_3
+        uses: ./.github/actions/refresh-github-token
+        with:
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
 
       # ---------------------------------------------------------------------
       # codetracer-wasm-instrumenter. Seven db-backend integration tests in
@@ -5831,7 +5643,7 @@ jobs:
           ref: dev
           path: ${{ github.workspace }}/../codetracer-wasm-instrumenter
           submodules: "false"
-          gh-token: ${{ steps.ci_token.outputs.token }}
+          gh-token: ${{ steps.late_token_3.outputs.token }}
 
       - name: Build ct-instrument (codetracer-wasm-instrumenter sibling)
         shell: bash
@@ -5846,7 +5658,7 @@ jobs:
           # also honours a CARGO_TARGET_DIR it is given, for builds outside
           # this step. Asserted by ci/test/ct-instrument-target-dir-test.sh.
           CARGO_TARGET_DIR="$PWD/target" \
-            nix develop --no-write-lock-file --command cargo build --release -p ct-instrument-cli
+            nix develop --profile "${CT_GCROOT_DIR:-$RUNNER_TEMP}/codetracer-wasm-instrumenter-shell" --no-write-lock-file --command cargo build --release -p ct-instrument-cli
           if [ ! -x target/release/ct-instrument ]; then
             echo "::error::cargo build reported success but target/release/ct-instrument is missing; scripts/materialize-recording.sh cannot produce the cross-process recording."
             exit 1
@@ -6001,6 +5813,11 @@ jobs:
     # macOS tests are new and may have pre-existing failures; don't block PRs
     continue-on-error: ${{ matrix.platform == 'macos' }}
     steps:
+      - name: Record when the job started
+        # For the cache push, whose budget is capped at what the job's time
+        # limit leaves.
+        run: echo "CT_JOB_STARTED_AT=$(date +%s)" >>"$GITHUB_ENV"
+
       - name: Mint installation token for cross-repo sibling access
         # GitHub free plan restricts org-level secrets with visibility
         # ALL from being readable inside private repos, so we mint
@@ -6111,15 +5928,31 @@ jobs:
             # src/db-backend's ctfs_trace_reader has called since 2026-10-03, so a
             # sibling cloned at `dev` fails to compile. Full account and the refresh
             # rule: .github/actions/setup-db-backend-siblings/action.yml.
-            codetracer-trace-format=dc4991ad078599fc6187bdf466b10d4da5b43f27
-            codetracer-trace-format-nim=4c74973690e13eddb886f3376827e0934b8a4deb
-            codetracer-native-recorder=e57bbd7cc6450cf3ded247c6e9bed72a9d53d9cf
+            codetracer-trace-format=2f01e602e70f69a04675293f3fa0d5bad9f196a1
+            codetracer-trace-format-nim=8eef47d71a2431311a4b9d6b6cf38a2acb37a33f
+            codetracer-native-recorder=8a79c040e7ac06a1a49af21d88eee50134d824a2
             # codetracer-native-backend and codetracer-visual-replay BY COMMIT as well: both are
             # `/agents` inputs in flake.nix (7ab073a22), so `=dev` cloned a different tree than the
             # Nix lane builds. These are the revs flake.lock and repro.lock lock; refresh them with
             # the lock, as for the trace-format pair above.
-            codetracer-visual-replay=d1a374379039d0214ef6a896380abe5cc2650c3b
-            codetracer-native-backend=c1a0eb91ab307fae913c28f3e7bffdb6f0411d35
+            codetracer-visual-replay=92d39d8d249356bd05d8fca5db4d526e1ac4505a
+            codetracer-native-backend=3715b91249518a27975ea18dda49910a475a6323
+            # The desktop scenario lane's recorders and recordings: the BEAM
+            # recorder at repro.lock's pin, and the example recordings at the
+            # pin of the test lock (ci/test/siblings/repro.lock), the commit their
+            # scenarios were measured against.
+            codetracer-beam-recorder=e8ba8f7b77ac609faca152b7139b19ed4db7cffb
+            codetracer-example-recordings=f2a1d4a80d9685fcf92e94cc7e2cf576dfb1b2e4
+            # The HCR flame scenarios' demo, and reprobuild (repro.lock's pin) for the
+            # HCR coordinator driver, the patchable-profile emitter and the in-target
+            # agent the patchable Godot links.
+            codetracer-flame-demo=220d7abd236c610b69f2d3900a0c0d2eae884416
+            # codetracer-visual-replay's config.nims puts both on its --path
+            # (ct_gfx_player's build); snapshot-codecs at visual-replay's
+            # repro.lock pin, image-diff at codetracer's.
+            codetracer-snapshot-codecs=3e503da83b73e805f30096d4baa45c18d138f6d3
+            codetracer-image-diff=d04b56d822c7d4335fbc40f0a1aad387a1b838b5
+            reprobuild=e2fe4eb9f5b94abe382f10d39be0957e90a344a9
             runquota=dev
 
       - name: Stage codetracer-trace-format into libs/
@@ -6168,8 +6001,45 @@ jobs:
           cp -a "$SRC" "$DEST"
 
       - name: Build CodeTracer (nix)
+        id: ct
         if: matrix.platform == 'nixos'
-        run: nix build --print-build-logs '.?submodules=1#codetracer' --override-input codetracer-trace-format path:./libs/codetracer-trace-format --override-input codetracer-trace-format-nim path:./libs/codetracer-trace-format-nim
+        # No --override-input: the staged libs/ copies are the revisions flake.lock
+        # pins (sibling-provisioning-test holds the spellings to it), and
+        # overriding them changed Noir's derivation, which then built from
+        # source for 1h36m on a cold runner (run 43935388749, cancelled).
+        run: nix build --print-build-logs '.?submodules=1#codetracer'
+
+      - name: Push the build to the cache
+        # #codetracer and the realised paths it was built from, so the next run
+        # substitutes them: run 44048043714's nixos leg built Noir, db-backend,
+        # backend-manager and codetracer from source here (122 minutes) because
+        # no cache push had finished on the moved lock. Best effort: a budget
+        # (CT_CACHE_PUSH_BUDGET, 15 minutes), exit 0 on any failure, and only
+        # dev and agents write the shared cache
+        # (ci/test/push-built-closure-test.sh).
+        # Right after the build, so a job that then runs out of time has
+        # still pushed; a warm cache leaves little to upload. The budget is
+        # capped at what the job's 150 minutes leave (CT_JOB_TIMEOUT_MINUTES,
+        # held equal to timeout-minutes by push-built-closure-test.sh).
+        if: ${{ !cancelled() && matrix.platform == 'nixos' && steps.ct.conclusion == 'success' && (github.ref_name == 'dev' || github.ref_name == 'agents') }}
+        continue-on-error: true
+        timeout-minutes: 20
+        env:
+          ATTIC_ENDPOINT: ${{ vars.ATTIC_ENDPOINT }}
+          ATTIC_CACHE: ${{ vars.ATTIC_CACHE }}
+          ATTIC_TOKEN: ${{ secrets.ATTIC_TOKEN }}
+          CT_JOB_TIMEOUT_MINUTES: 150
+        run: bash ci/deploy/push-built-closure.sh --codetracer --flake-inputs
+
+      # The build above can outlast the job's first token on a cold runner.
+      - name: Refresh the GitHub token
+        id: fresh_token
+        if: matrix.platform == 'nixos'
+        uses: ./.github/actions/refresh-github-token
+        with:
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+          keep-refreshing: "true"
 
       # --- macOS setup ---
       # The macOS leg now builds the ct binary with codetracer's reprobuild
@@ -6207,6 +6077,9 @@ jobs:
         with:
           app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
           private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+          # From the test lock, ci/test/siblings/repro.lock: the scenario lane builds
+          # its runner and backend from these (ci/test/scenarios.sh).
+          test-siblings: DemoVideoScript,DemoVideoScript-Playwright
 
       # NOTE: codetracer-trace-format, codetracer-trace-format-nim,
       # codetracer-native-recorder, codetracer-visual-replay and
@@ -6219,41 +6092,9 @@ jobs:
       # resolve against those clones, so the former per-sibling resolve/clone
       # steps (and the trace-format symlink) are no longer needed.
 
-      - name: Clone codetracer-snapshot-codecs sibling (macOS)
-        if: matrix.platform == 'macos'
-        # codetracer-visual-replay's config.nims threads
-        # ``--path:../codetracer-snapshot-codecs/src`` into the Nim
-        # compile.  The build aborts with ``cannot open file:
-        # snapshot_codecs`` without this checkout.
-        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
-        with:
-          repo: metacraft-labs/codetracer-snapshot-codecs
-          ref: dev
-          path: ${{ github.workspace }}/../codetracer-snapshot-codecs
-          gh-token: ${{ steps.ci_token.outputs.token }}
-          submodules: 'false'
-
-      - name: Clone codetracer-image-diff sibling (macOS)
-        if: matrix.platform == 'macos'
-        # Companion sibling to codetracer-snapshot-codecs threaded via
-        # the same ``config.nims`` --path; without it ST-M3 test
-        # imports break the visual-replay build.
-        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
-        with:
-          repo: metacraft-labs/codetracer-image-diff
-          ref: dev
-          path: ${{ github.workspace }}/../codetracer-image-diff
-          gh-token: ${{ steps.ci_token.outputs.token }}
-          submodules: 'false'
-
-      # NOTE: Nix is installed by the ``Setup dev env`` step above (a fast
-      # no-op on the self-hosted aarch64-darwin runner, where nix is already
-      # on PATH). The former bespoke ``Install Nix (macOS, for ct_cli build)``
-      # step is therefore no longer needed; the visual-replay sibling builds
-      # below still drive each sibling's own ``nix develop`` flake.
-
-      - name: Build ct-mcr via codetracer-native-recorder nix develop (macOS)
-        if: matrix.platform == 'macos'
+      - name: Build ct-mcr via codetracer-native-recorder nix develop
+        # Both legs: the macOS Playwright suite needs it, and so does the
+        # desktop scenario lane on nixos (MCR and visual-replay scenarios).
         # The macOS Playwright suite needs ct_cli/ct_cli built from
         # the codetracer-native-recorder sibling.  Use the recorder's
         # own ``nix develop`` shell + its ``just build-ct-mcr`` target
@@ -6274,30 +6115,19 @@ jobs:
           # Cargo's default libgit2 transport does not read gitconfig, so the
           # git CLI has to be forced for the private ``lldb-sys.rs``
           # dependency. The CREDENTIAL it then uses is already installed
-          # job-wide by ``Setup dev env`` above, so nothing is configured here.
-          #
-          # That step runs the shared ``setup-nix``, which exports
-          #
-          #   GIT_CONFIG_KEY_0=http.https://github.com/metacraft-labs/.extraHeader
-          #
-          # through $GITHUB_ENV. Four things make it sufficient here, and each
-          # was checked rather than assumed:
-          #
-          #   * ``Setup dev env`` is unconditional on this job -- it is not
-          #     gated on ``matrix.platform`` -- so the macOS leg gets it too.
-          #   * ``lldb-sys.rs`` lives at github.com/metacraft-labs/lldb-sys.rs,
-          #     and git matches ``http.<url>.*`` by scheme + host + port +
-          #     slash-delimited path prefix, so the metacraft-labs scope covers
-          #     it (and nothing outside the org).
-          #   * GIT_CONFIG_COUNT/KEY_n/VALUE_n are ordinary environment
-          #     variables, so they survive ``nix develop --command`` into
-          #     cargo's child git processes. Verified directly: inside a
-          #     ``nix develop`` shell, ``git config --get-all`` resolves the
-          #     header from the environment alone.
-          #   * The same scoped-header + git-CLI combination already fetches
-          #     this exact dependency in ``visual-replay-regression-gate``,
-          #     which builds its own per-repo header and neutralises
-          #     ~/.gitconfig entirely.
+          # job-wide, so nothing is configured here: "Provision dependency
+          # siblings from repro.lock" registers ci/git-credential-job-netrc.sh
+          # as the github.com credential helper through GIT_CONFIG_KEY_n /
+          # GIT_CONFIG_VALUE_n in $GITHUB_ENV, and blanks the metacraft-labs
+          # extraHeader setup-nix exported, which would otherwise go stale an
+          # hour after its token was minted (codetracer-pm issues/2026-11-17-a-
+          # ci-step-longer-than-an-hour-sends-metacraft-labs-git-requests-a-
+          # stale-token.md). lldb-sys.rs is private, so the git CLI cargo
+          # runs gets a 401 and asks the helper, which hands out the job's
+          # current token. GIT_CONFIG_* are ordinary environment variables and
+          # survive ``nix develop --command`` into cargo's child git
+          # processes (verified: inside a ``nix develop`` shell,
+          # ``git config --get-all`` resolves them from the environment alone).
           #
           # What used to be here was a GLOBAL catch-all rewriting every
           # github.com URL to carry the token as userinfo. Unlike a
@@ -6333,10 +6163,11 @@ jobs:
           # for git/python/clang etc.  This only has to make reachable the one
           # command that exists nowhere else.
           PATH="$PATH:/usr/bin" \
-            nix develop --no-write-lock-file --command just build-ct-mcr
+            nix develop --profile "${CT_GCROOT_DIR:-$RUNNER_TEMP}/codetracer-native-recorder-shell" --no-write-lock-file --command just build-ct-mcr
 
-      - name: Build ct_gfx_player via codetracer-visual-replay nix develop (macOS)
-        if: matrix.platform == 'macos'
+      - name: Build ct_gfx_player via codetracer-visual-replay nix develop
+        # Both legs: the macOS Playwright suite needs it, and so does the
+        # desktop scenario lane on nixos (MCR and visual-replay scenarios).
         # The Playwright suite's visual-replay specs
         # ``requireExecutable(ct_gfx_player)`` at module-load time.
         # ``codetracer-visual-replay``'s ``just build`` target wraps
@@ -6347,9 +6178,10 @@ jobs:
         run: |
           set -euo pipefail
           cd "${{ github.workspace }}/../codetracer-visual-replay"
-          nix develop --no-write-lock-file --command just build
+          nix develop --profile "${CT_GCROOT_DIR:-$RUNNER_TEMP}/codetracer-visual-replay-shell" --no-write-lock-file --command just build
 
       - name: Build CodeTracer (nix dev shell)
+        id: ct-darwin
         if: matrix.platform == 'macos'
         # Toolchain-free reprobuild build inside codetracer's nix dev shell,
         # the same path ``dmg-build`` uses on this runner. On Darwin
@@ -6410,6 +6242,18 @@ jobs:
           nix develop . --command repro daemon stop >/dev/null 2>&1 || true
           nix develop . --command just build-once
 
+      - name: Mint a token for the clones below
+        # An installation token lives an hour, and the clones below come after
+        # 'Build CodeTracer (nix dev shell)', which can take most of
+        # one on a cold runner: hand them a token minted here, not the job's first
+        # (ci/test/late-clone-token-test.py).
+        if: matrix.platform == 'macos'
+        id: late_token
+        uses: ./.github/actions/refresh-github-token
+        with:
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+
       - name: Clone python-recorder (macOS)
         if: matrix.platform == 'macos'
         uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
@@ -6439,7 +6283,7 @@ jobs:
           # change this line back.
           ref: dev
           path: ${{ github.workspace }}/../codetracer-python-recorder
-          gh-token: ${{ steps.ci_token.outputs.token }}
+          gh-token: ${{ steps.late_token.outputs.token }}
 
       - name: Clone ruby-recorder (macOS)
         if: matrix.platform == 'macos'
@@ -6448,7 +6292,7 @@ jobs:
           repo: metacraft-labs/codetracer-ruby-recorder
           ref: dev
           path: ${{ github.workspace }}/../codetracer-ruby-recorder
-          gh-token: ${{ steps.ci_token.outputs.token }}
+          gh-token: ${{ steps.late_token.outputs.token }}
 
       - name: Build ruby-recorder native extension (macOS)
         if: matrix.platform == 'macos'
@@ -6478,7 +6322,7 @@ jobs:
         run: |
           set -euo pipefail
           cd "${{ github.workspace }}/../codetracer-ruby-recorder"
-          nix develop --no-write-lock-file --command just build-extension
+          nix develop --profile "${CT_GCROOT_DIR:-$RUNNER_TEMP}/codetracer-ruby-recorder-shell" --no-write-lock-file --command just build-extension
 
           # Assert the artefact, do not assume the exit code. `just
           # build-extension` succeeding is not the same claim as "the file the
@@ -6508,6 +6352,17 @@ jobs:
             exit 1
           fi
           echo "ruby recorder native extension: $found"
+
+      - name: Mint a token for the clone below
+        # The clone runs after the nix build, provisioning and ct-mcr, over an
+        # hour into the job on a cold runner: the token minted after the build
+        # (fresh_token) had expired by then (run 43996043232: "Invalid username
+        # or token").
+        id: clone_token
+        uses: ./.github/actions/refresh-github-token
+        with:
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
 
       - name: Clone codetracer-js-recorder sibling
         # NOT gated to macOS, unlike the two clones above, and not for symmetry
@@ -6542,7 +6397,7 @@ jobs:
           repo: metacraft-labs/codetracer-js-recorder
           ref: dev
           path: ${{ github.workspace }}/../codetracer-js-recorder
-          gh-token: ${{ steps.ci_token.outputs.token }}
+          gh-token: ${{ steps.clone_token.outputs.token }}
           submodules: 'false'
 
       - name: Build codetracer-js-recorder sibling
@@ -6564,7 +6419,7 @@ jobs:
         run: |
           set -euo pipefail
           cd "${{ github.workspace }}/../codetracer-js-recorder"
-          nix develop --no-write-lock-file --command just build
+          nix develop --profile "${CT_GCROOT_DIR:-$RUNNER_TEMP}/codetracer-js-recorder-shell" --no-write-lock-file --command just build
 
           # The artefact materialize-recording.sh actually opens, asserted by
           # the same name it uses. A built-looking tree with no dist/index.js
@@ -6605,8 +6460,60 @@ jobs:
       # failure it guards against, the pane emptying after a jump, is one a
       # reader hits immediately, so it should be reported even when an earlier
       # spec in the suite has already gone red.
+      - name: Native replay, the BEAM recorder and the GL recording for the desktop scenario lane
+        # What each piece is and where it lands: ci/test/scenario-lane-provision.sh.
+        if: ${{ !cancelled() && steps.ct.outcome == 'success' && matrix.platform == 'nixos' }}
+        run: bash ci/test/scenario-lane-provision.sh native
+
+      - name: Restore the patchable Godot engine for the HCR flame scenarios
+        # Byte-identical when rebuilt from the same tree (its build script), so
+        # its revision, reprobuild's and the flags are the whole key. Restore and
+        # save are separate: actions/cache saves only when the whole job passes.
+        id: hcr-godot
+        if: ${{ !cancelled() && steps.ct.outcome == 'success' && matrix.platform == 'nixos' }}
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ github.workspace }}/../codetracer-engine-godot/bin/godot.linuxbsd.template_debug.x86_64.hcrgpu
+          key: hcr-godot-c2b72fd205bcb509cca8513a2627ae18d9809562-reprobuild-e2fe4eb9f5b94abe382f10d39be0957e90a344a9-vulkan-hcrgpu
+
+      - name: The HCR flame demo for the desktop scenario lane
+        id: hcr-flame
+        if: ${{ !cancelled() && steps.ct.outcome == 'success' && matrix.platform == 'nixos' }}
+        env:
+          HCR_ENGINE_REV: c2b72fd205bcb509cca8513a2627ae18d9809562
+        run: bash ci/test/scenario-lane-provision.sh hcr
+
+      - name: Save the patchable Godot engine
+        if: ${{ !cancelled() && matrix.platform == 'nixos' && steps.hcr-flame.outcome == 'success' && steps.hcr-godot.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ github.workspace }}/../codetracer-engine-godot/bin/godot.linuxbsd.template_debug.x86_64.hcrgpu
+          key: ${{ steps.hcr-godot.outputs.cache-primary-key }}
+
+      - name: Scenarios — the desktop lane
+        # The real `ct` → Electron through DemoVideoScript-Playwright's arm
+        # with CodeTracer's Playwright binding, under Xvfb at 2560x1440, 96 dpi.
+        if: ${{ !cancelled() && steps.ct.outcome == 'success' && matrix.platform == 'nixos' }}
+        run: |
+          nix develop .#devShells.x86_64-linux.default --command bash -c '
+            set -e
+            just scenario-build dvs stage playwright
+            just scenario-lane-xvfb electron
+            . scripts/lib/own-xvfb.sh
+            trap own_xvfb_stop EXIT
+            own_xvfb_start -screen 0 2560x1440x24 -dpi 96 -nolisten tcp
+            bash ci/test/scenario-broken-run.sh electron'
+
+      - name: Upload the failed scenario runs (desktop)
+        if: ${{ failure() && matrix.platform == 'nixos' }}
+        uses: metacraft-labs/DemoVideoScript/.github/actions/upload-failed-runs@028ea4f6704fc5377e2c6b7021a9e048c15c9f92
+        with:
+          build-dir: build
+          name: scenario-runs-electron
+
       - name: Event Log stays static across a jump
-        if: always()
+        # Only with a ct, or an earlier failure resurfaces as `ct ENOENT`.
+        if: ${{ !cancelled() && (steps.ct.outcome == 'success' || steps.ct-darwin.outcome == 'success') }}
         run: ./ci/test/ui-tests-db.sh tests/event-log/event_log_is_static_across_jumps.spec.ts
         env:
           CODETRACER_CI_PLATFORM: ${{ matrix.platform }}
@@ -6649,6 +6556,11 @@ jobs:
     runs-on: [self-hosted, linux, x64]  # CIP-5 nix job; H4: routed to GPU host gpu-server-002
     timeout-minutes: 120
     steps:
+      - name: Record when the job started
+        # For the cache push, whose budget is capped at what the job's time
+        # limit leaves.
+        run: echo "CT_JOB_STARTED_AT=$(date +%s)" >>"$GITHUB_ENV"
+
       - name: Mint installation token for cross-repo sibling access
         # GitHub free plan restricts org-level secrets with visibility
         # ALL from being readable inside private repos, so we mint
@@ -6668,15 +6580,22 @@ jobs:
           submodules: recursive
           token: ${{ steps.ci_token.outputs.token }}
 
-      - name: Setup dev env
-        # setup-dev-env installs Nix (with the Attic substituter/keys) and
-        # clones codetracer-trace-format adjacent to this checkout at the
-        # pinned `dev` ref, replacing the former
-        # Checkout-manifests / Resolve-lock / clone-repo / Install Nix steps.
-        # The flake build below reads the in-repo path
-        # libs/codetracer-trace-format, so the sibling clone is mirrored
-        # there by the next step.
-        uses: metacraft-labs/metacraft-github-actions/setup-dev-env@dev
+      - name: Setup dev env and the db-backend siblings
+        # Installs Nix (with the Attic substituter/keys) and clones the
+        # db-backend siblings -- codetracer-trace-format{,-nim} and
+        # codetracer-native-recorder -- adjacent to this checkout, at the
+        # revisions the shared action pins (its comments give the refresh
+        # rule), so this job carries no copy of those pins. The flake build
+        # below reads the in-repo paths libs/codetracer-trace-format{,-nim},
+        # so the clones are mirrored there by the staging steps.
+        #
+        # `just test-gui` depends on `build-once`, whose preflight
+        # (scripts/require-siblings.sh) refuses a workspace missing any
+        # REQUIRED sibling. This job used to clone only trace-format,
+        # trace-format-nim and the fixture below, so it could never get past
+        # that preflight; the rest come from this action and the two steps
+        # after it.
+        uses: ./.github/actions/setup-db-backend-siblings
         with:
           env-flavor: nix
           gh-token: ${{ steps.ci_token.outputs.token }}
@@ -6684,18 +6603,33 @@ jobs:
           trusted-public-keys: ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
           attic-token: ${{ secrets.ATTIC_TOKEN }}
           attic-cache: ${{ vars.ATTIC_CACHE }}
-          siblings: |
-            # codetracer-trace-format{,-nim} BY COMMIT, not `=dev`: the two halves of
-            # the FFI pair are `/agents` inputs in flake.nix, and trace-format's `dev`
-            # tip (051a298, 2026-09-30) predates the FileTable / PathTableKind API that
-            # src/db-backend's ctfs_trace_reader has called since 2026-10-03, so a
-            # sibling cloned at `dev` fails to compile. Full account and the refresh
-            # rule: .github/actions/setup-db-backend-siblings/action.yml.
-            codetracer-trace-format=dc4991ad078599fc6187bdf466b10d4da5b43f27
-            codetracer-trace-format-nim=4c74973690e13eddb886f3376827e0934b8a4deb
+          extra-siblings: |
             # The native fixture the desktop's native Low Level Code capture
             # records (`c/sudoku_solver`), at the revision repro.lock pins.
-            codetracer-native-test-programs=af5a77b20f5a4ae09c202902b3ee01e9edf5473f
+            codetracer-native-test-programs=0d0d64e2ebe2cb261284778fa7959bb7cf761604
+
+      - name: Clone runquota sibling
+        # `just test-gui` -> `build-once` compiles `ct`, which imports
+        # `runquota_process`. Not a repro.lock build input; cloned the way
+        # `tui-tests` and `cross-process-linux` clone it.
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
+        with:
+          repo: metacraft-labs/runquota
+          ref: dev
+          path: ${{ github.workspace }}/../runquota
+          gh-token: ${{ steps.ci_token.outputs.token }}
+          submodules: 'false'
+
+      - name: Provision dependency siblings from repro.lock
+        # isonim, isonim-tui, nim-agents, nim-agent-harbor, nim-acp,
+        # nim-everywhere, test-certificates-tools, io-mon, nim-stackable-hooks
+        # and nim-pty: the rest of build-once's required siblings. After
+        # `Setup dev env`, which installed Nix: this action reaches `repro`
+        # through the dev shell.
+        uses: ./.github/actions/provision-repro-lock-siblings
+        with:
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
 
       - name: Stage codetracer-trace-format into libs/
         # The flake override below points at ./libs/codetracer-trace-format;
@@ -6740,7 +6674,43 @@ jobs:
           cp -a "$SRC" "$DEST"
 
       - name: Build CodeTracer
-        run: nix build --print-build-logs '.?submodules=1#codetracer' --override-input codetracer-trace-format path:./libs/codetracer-trace-format --override-input codetracer-trace-format-nim path:./libs/codetracer-trace-format-nim
+        id: ct_build
+        # No --override-input: the staged libs/ copies are the revisions flake.lock
+        # pins (sibling-provisioning-test holds the spellings to it), and
+        # overriding them changed Noir's derivation, which then built from
+        # source for 1h36m on a cold runner (run 43935388749, cancelled).
+        run: nix build --print-build-logs '.?submodules=1#codetracer'
+
+      - name: Push the build to the cache
+        # #codetracer and the realised paths it was built from, so the next run
+        # substitutes them: run 44048043714's nixos leg built Noir, db-backend,
+        # backend-manager and codetracer from source here (122 minutes) because
+        # no cache push had finished on the moved lock. Best effort: a budget
+        # (CT_CACHE_PUSH_BUDGET, 15 minutes), exit 0 on any failure, and only
+        # dev and agents write the shared cache
+        # (ci/test/push-built-closure-test.sh).
+        # Right after the build, so a job that then runs out of time has
+        # still pushed; a warm cache leaves little to upload. The budget is
+        # capped at what the job's 120 minutes leave (CT_JOB_TIMEOUT_MINUTES,
+        # held equal to timeout-minutes by push-built-closure-test.sh).
+        if: ${{ !cancelled() && steps.ct_build.outcome == 'success' && (github.ref_name == 'dev' || github.ref_name == 'agents') }}
+        continue-on-error: true
+        timeout-minutes: 20
+        env:
+          ATTIC_ENDPOINT: ${{ vars.ATTIC_ENDPOINT }}
+          ATTIC_CACHE: ${{ vars.ATTIC_CACHE }}
+          ATTIC_TOKEN: ${{ secrets.ATTIC_TOKEN }}
+          CT_JOB_TIMEOUT_MINUTES: 120
+        run: bash ci/deploy/push-built-closure.sh --codetracer --flake-inputs
+
+      # The build above can outlast the job's first token on a cold runner.
+      - name: Refresh the GitHub token
+        id: fresh_token
+        uses: ./.github/actions/refresh-github-token
+        with:
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+          keep-refreshing: "true"
 
       - name: Setup rr-backend
         # `ci/setup-rr-backend.sh` resolves codetracer-native-backend's revision
@@ -6757,8 +6727,8 @@ jobs:
         # native-backend is an `/agents` input in flake.nix, and a commit is
         # what the script's stale-checkout check can hold a checkout to.
         env:
-          GH_TOKEN: ${{ steps.ci_token.outputs.token }}
-          RR_BACKEND_REF: c1a0eb91ab307fae913c28f3e7bffdb6f0411d35
+          GH_TOKEN: ${{ steps.fresh_token.outputs.token }}
+          RR_BACKEND_REF: 3715b91249518a27975ea18dda49910a475a6323
         run: ./ci/setup-rr-backend.sh
 
       - name: Assert the ct-native-replay build-siblings builds can start
@@ -6776,6 +6746,26 @@ jobs:
         # depends on it.
         run: "nix develop .#devShells.x86_64-linux.default --command just test-build-siblings-native-backend"
 
+      - name: Assert build-siblings bounds and names a stalled toolchain lookup
+        # `scripts/build-siblings.sh` resolves its toolchain through
+        # `repro exec`, and that call once stalled with nothing printed until
+        # the job's own limit cancelled it two hours later. The suite runs the
+        # real script with a `repro` that never returns and requires it to
+        # announce the stage and give up after its bound. It needs the
+        # `../codetracer-trace-format-nim` sibling this job already checks out;
+        # about ten seconds, no network.
+        run: "nix develop .#devShells.x86_64-linux.default --command just test-build-siblings-toolchain-stage"
+
+      - name: Assert build-siblings names a failed sibling, and fails only when asked to
+        # `just test-gui` below fails when any sibling fails to build, which is
+        # what the whole suite needs; callers that run one spec through
+        # `test-gui` set BUILD_SIBLINGS_KEEP_GOING=1 so that a recorder their
+        # spec never uses cannot fail them (a flow-recorder lock drift once
+        # failed every codetracer-observability-e2e recipe this way). The suite
+        # holds both behaviours with two scratch siblings and a pass-through
+        # `repro`; a few seconds, no network.
+        run: "nix develop .#devShells.x86_64-linux.default --command just test-build-siblings-keep-going"
+
       - name: Run TypeScript Playwright UI tests (RR-based only)
         env:
           CODETRACER_E2E_CT_PATH: ${{ github.workspace }}/result/bin/ct
@@ -6785,8 +6775,16 @@ jobs:
           PLAYWRIGHT_GLOBAL_TIMEOUT: "10800000"
         run: "nix develop .#devShells.x86_64-linux.default --command just test-gui"
 
-      - name: The desktop's Low Level Code view on a native recording is the reference
+      # `just test-gui` builds the dev ct these three read (src/build-debug), but
+      # when an earlier step fails it is skipped and they still run; then they
+      # failed with "no built ct at src/build-debug/bin/ct". A no-op after it.
+      - name: Build ct for the native capture and lanes
+        id: ct
         if: ${{ !cancelled() }}
+        run: nix develop .#devShells.x86_64-linux.default --command just build-once
+
+      - name: The desktop's Low Level Code view on a native recording is the reference
+        if: ${{ !cancelled() && steps.ct.outcome == 'success' }}
         # The desktop column of the Low Level Code pane on an rr recording of
         # `codetracer-native-test-programs/c/sudoku_solver`: the machine-code
         # listing, the execution pointer, the header, and a step by
@@ -6798,6 +6796,65 @@ jobs:
         # borrows from. The recipe starts its own Xvfb.
         run: nix develop .#devShells.x86_64-linux.default --command just plat60-native-capture-electron
 
+      - name: The desktop's generated C and disassembly of a Nim recording
+        if: ${{ !cancelled() && steps.ct.outcome == 'success' }}
+        # View > View Generated C Source and View Disassembly in the REAL
+        # Electron app (`low-level-code/generated-c-source.spec.ts`): on a
+        # `ct record` recording of a Nim program, whose C and source maps the
+        # recording keeps, and in Edit mode on a small Nim project. It runs
+        # here for the same reason as the step above: `ct-native-replay`, rr
+        # and the `build-once` tree come from `just test-gui`, and the GUI
+        # fixture builds ct-mcr from the codetracer-native-recorder sibling
+        # this job clones. The dev shell's `nim` is CodeTracer's own compiler,
+        # which the `ct record` and Edit-mode cases need; the stock-compiler
+        # case records with nixpkgs' Nim, which the shell exports as
+        # GENC_STOCK_NIM (nix/shells/ci-base.nix).
+        run: nix develop .#devShells.x86_64-linux.default --command just generated-c-desktop
+
+      - name: TUI Tier 1 over a native rr recording (the `tui-native` lane)
+        if: ${{ !cancelled() && steps.ct.outcome == 'success' }}
+        # The terminal's suites that open an rr recording of a native program
+        # -- every Tier-1 suite importing `fixtures/native_recording`, PLAT-60's
+        # Low Level Code suite among them -- over the same
+        # `codetracer-native-test-programs/c/sudoku_solver` fixture the step
+        # above records. They were in the `tui` lane, which `tui-tests` runs on
+        # the generic Linux hosts, where rr does not work and nothing builds
+        # `ct-native-replay`, so they skipped every case and failed that lane
+        # (codetracer-pm issues/2026-11-09-tui-job-runs-plat60-and-plat65-
+        # without-their-prerequisites.md). Here they get what they need, all
+        # from earlier steps: rr from `Setup rr-backend`, `ct-native-replay` at
+        # `../codetracer-native-backend/target/debug/` and `replay-server` from
+        # `just test-gui` (`build-siblings` and `build-once`), the fixture from
+        # `extra-siblings`, and isonim-tui et al. from the lock-provisioned
+        # siblings. The recipe builds the grammar archive the TUI links
+        # (`tui-prereqs`) from the recursive checkout's `libs/tree-sitter-*`.
+        # COST, against this job's 120m bound: one suite today, so the grammar
+        # archive, one Nim compile and one rr recording. Measured 2026-11-09 on
+        # nixos-ci-bare-002 at codetracer a17bbdf7a plus this change, with the
+        # archive already built and no recording (rr unusable there): 69 s. The
+        # cold archive and the recording come on top; the bound is left as it
+        # is until a run of this job says otherwise.
+        # `ci/test/native-recording-suites-run-where-rr-is-test.py` fails when a
+        # job runs such a suite without rr set up and `ct-native-replay` built
+        # in an earlier step.
+        run: nix develop .#devShells.x86_64-linux.default --command just test-tui-native
+
+      - name: The GPUI window over a native rr recording (the `gpui-native` lane)
+        if: ${{ !cancelled() && steps.ct.outcome == 'success' }}
+        # The GPUI suites that open an rr recording of a native program --
+        # PLAT-60's Low Level Code pane in the GPUI window -- over the same
+        # sudoku fixture as the step above. In the `gpui-shell` lane they
+        # skipped every case: nothing there builds `ct-native-replay` or
+        # provides rr. rr, `replay-server`, `ct-native-replay` and the fixture
+        # come from the earlier steps, as for `tui-native`. isonim-gpui is the
+        # lock-provisioned sibling; its featureless shim is built in its own
+        # dev shell, as `tui-tests` builds it, and `just test-gpui-native`
+        # builds `codetracer-gpui` over it (and re-checks `ct-native-replay`,
+        # which `test-gui` already built).
+        run: |
+          (cd ../isonim-gpui && nix develop --profile "${CT_GCROOT_DIR:-$RUNNER_TEMP}/isonim-gpui-shell" --command bash -c 'cd rust && cargo build')
+          nix develop .#devShells.x86_64-linux.default --command just test-gpui-native
+
       - name: Upload test artifacts
         if: failure()
         uses: actions/upload-artifact@v5
@@ -6806,6 +6863,7 @@ jobs:
           path: |
             src/tests/gui/test-results/
             src/tests/gui/playwright-report/
+            test-logs/test-tui-native.log
           retention-days: 14
           if-no-files-found: ignore
 
@@ -7000,7 +7058,9 @@ jobs:
       - name: Setup dev env
         # setup-dev-env installs Nix (with the Attic substituter/keys) and
         # clones every source dependency used by the visual gate adjacent to
-        # this checkout at their pinned `dev` refs. That includes the
+        # this checkout at their pinned refs -- `agents` for isonim, nim-acp
+        # and nim-agents, whose flake.nix inputs follow that branch
+        # (ci/test/sibling-input-branch-test.sh). That includes the
         # frontend's IsoNim/agent libraries, the incremental runner's trace and
         # I/O libraries, and visual replay's own native siblings. A missing
         # lock entry fails loudly before the build starts.
@@ -7023,33 +7083,41 @@ jobs:
           attic-token: ${{ secrets.ATTIC_TOKEN }}
           attic-cache: ${{ vars.ATTIC_CACHE }}
           siblings: |
-            isonim=dev
+            isonim=agents
             nim-everywhere=dev
-            nim-acp=dev
+            nim-acp=agents
             nim-agent-harbor=dev
-            nim-agents=dev
+            nim-agents=agents
             # codetracer-trace-format{,-nim} BY COMMIT, not `=dev`: the two halves of
             # the FFI pair are `/agents` inputs in flake.nix, and trace-format's `dev`
             # tip (051a298, 2026-09-30) predates the FileTable / PathTableKind API that
             # src/db-backend's ctfs_trace_reader has called since 2026-10-03, so a
             # sibling cloned at `dev` fails to compile. Full account and the refresh
             # rule: .github/actions/setup-db-backend-siblings/action.yml.
-            codetracer-trace-format=dc4991ad078599fc6187bdf466b10d4da5b43f27
-            codetracer-trace-format-nim=4c74973690e13eddb886f3376827e0934b8a4deb
-            io-mon=e66e05c9471ce184e9a3b0d793b2db62ca5557b9
-            nim-shm-queue=84fd76b174d4868e703ba3d599668ee340e0b6ea
-            nim-shm-gset=953bd231a022243fcee96092234d7cf80f7042b0
-            nim-stackable-hooks=dev
+            codetracer-trace-format=2f01e602e70f69a04675293f3fa0d5bad9f196a1
+            codetracer-trace-format-nim=8eef47d71a2431311a4b9d6b6cf38a2acb37a33f
+            io-mon=735726963f48d91031463cbd9d1e9cf8f444f5ee
+            nim-shm-queue=0d6049997d77421b6e4748f819657cf6042e9508
+            nim-shm-gset=0b2896adc65d0d62c0ee84af1356c909da2975d0
+            nim-stackable-hooks=07319306758cf608e664fe9e64ab7e0bed5ca186
             # codetracer-native-backend and codetracer-visual-replay BY COMMIT as well: both are
             # `/agents` inputs in flake.nix (7ab073a22), so `=dev` cloned a different tree than the
             # Nix lane builds. These are the revs flake.lock and repro.lock lock; refresh them with
             # the lock, as for the trace-format pair above.
-            codetracer-visual-replay=d1a374379039d0214ef6a896380abe5cc2650c3b
-            codetracer-native-backend=c1a0eb91ab307fae913c28f3e7bffdb6f0411d35
-            codetracer-native-recorder=e57bbd7cc6450cf3ded247c6e9bed72a9d53d9cf
+            codetracer-visual-replay=92d39d8d249356bd05d8fca5db4d526e1ac4505a
+            codetracer-native-backend=3715b91249518a27975ea18dda49910a475a6323
+            codetracer-native-recorder=8a79c040e7ac06a1a49af21d88eee50134d824a2
             codetracer-native-test-programs=dev
             codetracer-visual-replay-fixtures=dev
             runquota=dev
+            isonim-tui
+            test-certificates-tools
+            nim-pty
+
+      - name: Build ct for the gate and the Visual Replay capture
+        # Its own step, so the capture below can wait on it (the gate rebuilds).
+        id: ct
+        run: nix develop .#devShells.x86_64-linux.default --command just build-once
 
       - name: Run visual replay regression gate
         env:
@@ -7127,6 +7195,17 @@ jobs:
           trap cleanup_private_cargo_auth EXIT
 
           nix develop .#devShells.x86_64-linux.default --command just test-visual-replay-gate
+
+      - name: The desktop's Visual Replay panes are the reference
+        if: ${{ !cancelled() && steps.ct.outcome == 'success' }}
+        # The desktop column of the Visual Replay panes: the Video Player's
+        # frame at three positions on a real `gl_scene` recording, a draw
+        # call, a picked pixel's history, the Shader Debug pane and a history
+        # row's click — read from the REAL Electron app with this checkout's
+        # desktop JavaScript. Here, after the gate, because the gate builds
+        # the recorder and the player the recording and the desktop need; the
+        # recipe records the recording and starts its own Xvfb.
+        run: nix develop .#devShells.x86_64-linux.default --command just plat59-capture-electron
 
       - name: Stage sibling artifacts into workspace
         # actions/upload-artifact@v5 forbids paths containing ``..``
@@ -7351,21 +7430,21 @@ jobs:
             # src/db-backend's ctfs_trace_reader has called since 2026-10-03, so a
             # sibling cloned at `dev` fails to compile. Full account and the refresh
             # rule: .github/actions/setup-db-backend-siblings/action.yml.
-            codetracer-trace-format=dc4991ad078599fc6187bdf466b10d4da5b43f27
-            codetracer-trace-format-nim=4c74973690e13eddb886f3376827e0934b8a4deb
-            io-mon=e66e05c9471ce184e9a3b0d793b2db62ca5557b9
-            nim-shm-queue=84fd76b174d4868e703ba3d599668ee340e0b6ea
-            nim-shm-gset=953bd231a022243fcee96092234d7cf80f7042b0
-            nim-stackable-hooks=dev
-            codetracer-native-recorder=e57bbd7cc6450cf3ded247c6e9bed72a9d53d9cf
-            codetracer-js-recorder=dev
+            codetracer-trace-format=2f01e602e70f69a04675293f3fa0d5bad9f196a1
+            codetracer-trace-format-nim=8eef47d71a2431311a4b9d6b6cf38a2acb37a33f
+            io-mon=735726963f48d91031463cbd9d1e9cf8f444f5ee
+            nim-shm-queue=0d6049997d77421b6e4748f819657cf6042e9508
+            nim-shm-gset=0b2896adc65d0d62c0ee84af1356c909da2975d0
+            nim-stackable-hooks=07319306758cf608e664fe9e64ab7e0bed5ca186
+            codetracer-native-recorder=8a79c040e7ac06a1a49af21d88eee50134d824a2
+            codetracer-js-recorder=1df4100fb244bb334dbf9f0a691d11846c2ac39f
             codetracer-ruby-recorder=dev
             # codetracer-native-backend and codetracer-visual-replay BY COMMIT as well: both are
             # `/agents` inputs in flake.nix (7ab073a22), so `=dev` cloned a different tree than the
             # Nix lane builds. These are the revs flake.lock and repro.lock lock; refresh them with
             # the lock, as for the trace-format pair above.
-            codetracer-native-backend=c1a0eb91ab307fae913c28f3e7bffdb6f0411d35
-            codetracer-visual-replay=d1a374379039d0214ef6a896380abe5cc2650c3b
+            codetracer-native-backend=3715b91249518a27975ea18dda49910a475a6323
+            codetracer-visual-replay=92d39d8d249356bd05d8fca5db4d526e1ac4505a
 
       - name: Allow direnv in the cloned recorder siblings
         # scripts/build-siblings.sh runs every sibling build as
@@ -7530,6 +7609,16 @@ jobs:
         if: ${{ !cancelled() }}
         run: nix develop .#devShells.x86_64-linux.default --command just test-nix-package-ct-test-run
 
+      - name: Nim tracing from the Nix package and the AppImage layout
+        # The desktop's Nim tracing needs a Nim language server and a
+        # trace-enabled nimsuggest; the dev shell supplies both, an install
+        # must ship them. `ci/test/packaged-nim-tracing.sh` takes the
+        # environment the Nix package's `ct` wrapper and the AppImage's AppRun
+        # give the desktop, and traces a Nim static block through the language
+        # server they name, with no Nim tool on PATH.
+        if: ${{ !cancelled() }}
+        run: nix develop .#devShells.x86_64-linux.default --command just test-packaged-nim-tracing
+
       - name: Show the pinned conformance walk
         # The lane prints one headline per suite; this re-runs the walker the
         # lane already built, so the log names the pin it walked and its case
@@ -7554,54 +7643,6 @@ jobs:
         # `just test-certificate-vectors-wrong-pin <walker>`.
         if: ${{ !cancelled() }}
         run: nix develop .#devShells.x86_64-linux.default --command just test-certificate-vectors-wrong-pin
-
-  push-to-attic:
-    runs-on: [self-hosted, linux, x64]  # CIP-5 nix job; H4: routed to GPU host gpu-server-001
-    # NO SAMPLE OF ANY KIND: 0 success, 0 failure, and 7 cancellations of zero
-    # length -- this job is `refs/heads/main`-only and never started in the
-    # window. There is nothing to measure. 60m is chosen structurally: the job
-    # pushes a Nix closure to a binary cache, so it is bounded by upload of the
-    # artefacts its `needs:` already built. Revisit once it has run green once.
-    timeout-minutes: 60
-    needs:
-      - test-non-gui
-      - test-ui-tests
-      - appimage-lib-check
-      - dmg-lib-check
-    if: "github.ref == 'refs/heads/main' && ${{ !github.event.codetracer-ci }}"
-    steps:
-      - name: Mint installation token for cross-repo sibling access
-        # GitHub free plan restricts org-level secrets with visibility
-        # ALL from being readable inside private repos, so we mint
-        # per-run installation tokens from the repo-local
-        # CI_TOKEN_PROVIDER_APP_ID + CI_TOKEN_PROVIDER_PRIVATE_KEY
-        # secrets via the CI Token Provider GitHub App.
-        id: ci_token
-        uses: actions/create-github-app-token@v2
-        with:
-          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
-          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
-          owner: metacraft-labs
-
-      - name: Checkout
-        uses: actions/checkout@v5
-        with:
-          submodules: recursive
-          token: ${{ steps.ci_token.outputs.token }}
-
-      - name: Install Nix
-        uses: ./.github/actions/setup-nix
-        with:
-          trusted-public-keys: ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
-          attic-token: ${{ secrets.ATTIC_TOKEN }}
-          substituters: ${{ vars.ATTIC_SUBSTITUTER }}
-          gh-token: ${{ steps.ci_token.outputs.token }}
-
-      - run: "nix develop .#devShells.x86_64-linux.default --command ./ci/deploy/build-nix-and-push-to-attic.sh"
-        env:
-          ATTIC_ENDPOINT: ${{ vars.ATTIC_ENDPOINT }}
-          ATTIC_CACHE: ${{ vars.ATTIC_CACHE }}
-          ATTIC_TOKEN: ${{ secrets.ATTIC_TOKEN }}
 
   docs-scope:
     # Does this run have any documentation to publish?
@@ -7679,12 +7720,12 @@ jobs:
     # The docs site is INDEPENDENT content: it is built by its own isonim-docs
     # SSG consumer (docs/book-isonim via ci/deploy/docs.sh) and consumes NO
     # artifact from the app build or the attic-cache push. It must therefore not
-    # be chained behind push-to-attic (which needs the full build/test matrix:
-    # test-non-gui, test-ui-tests, appimage/dmg-lib-check) — otherwise any
+    # be chained behind the cache push (which, as push-to-attic, needed the
+    # full build/test matrix; it is cache-push.yml now) — otherwise any
     # unrelated app-CI failure silently blocks the docs deploy. Decoupled so the
     # docs publish on every push to a documentation branch regardless of
     # build/test status. The attic substituter set up in "Install Nix" is a
-    # read-through cache that works whether or not this run's push-to-attic
+    # read-through cache that works whether or not cache-push.yml has
     # populated it.
     #
     # THREE PUBLISH CHANNELS, one job, chosen by the event and the branch
@@ -8407,6 +8448,49 @@ jobs:
       - name: Self-test the job-timeout contract
         if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
         run: bash ci/test/job-timeouts-test.sh
+
+      - name: Jobs that run a launcher suite build the launcher first
+        # `tui-tests` ran two suites that execute `../codetracer-launcher/out/
+        # launcher` and neither cloned nor built it, so they judged whatever an
+        # earlier job left on a persistent runner and failed on an ephemeral one
+        # (codetracer-pm issues/2026-11-09-tui-job-runs-launcher-suites-without-
+        # building-the-launcher.md). This suite reads every job's lanes from the
+        # justfile and `ci/lib/test-lane-files.sh` and fails a job that runs a
+        # launcher suite without a lock-pinned clone and a build before it.
+        # python3, PyYAML and bash, like `job-timeouts.py` above.
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
+        run: python3 ci/test/launcher-suites-build-launcher-test.py
+
+      - name: A long build's dev shell is GC-rooted for the job
+        # `nix develop --command` roots nothing while the command runs; a host
+        # collecting below min-free deleted Nim's lib/ under a build (macOS
+        # m3-mcl-001, run 43935388749). python3 and PyYAML, as above.
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
+        run: python3 ci/test/dev-shell-gcroot-test.py
+
+      - name: Late git fetches use a token minted late
+        # An installation token lives an hour; clones that followed sibling
+        # provisioning or a nix build with the job's first token failed with
+        # "Invalid username or token" (run 43996043232). Also: no job that
+        # registers the credential helper sets an extraHeader after it.
+        # python3 and PyYAML.
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
+        run: python3 ci/test/late-clone-token-test.py
+
+      - name: Jobs that run a native rr-recording suite set rr up and build ct-native-replay first
+        # `tui-tests` ran PLAT-60's terminal Low Level Code suite, which records
+        # a native program under rr and replays it through `ct-native-replay`,
+        # on hosts where rr does not work and with nothing building that binary,
+        # so it skipped every case and failed its lane (codetracer-pm
+        # issues/2026-11-09-tui-job-runs-plat60-and-plat65-without-their-
+        # prerequisites.md). Such suites are now the `tui-native` lane, run by
+        # `test-ui-tests-rr`. This suite reads every job's lanes from the
+        # justfile and `ci/lib/test-lane-files.sh` and fails a job that runs a
+        # suite importing `fixtures/native_recording` without
+        # `ci/setup-rr-backend.sh` and a `ct-native-replay` build before it.
+        # python3, PyYAML and bash, like the launcher suite above.
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
+        run: python3 ci/test/native-recording-suites-run-where-rr-is-test.py
 
       - name: Check every build-once job provisions the workspace the build needs
         if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}

@@ -75,7 +75,22 @@ when defined(js):
       if (!ctx) {
         throw new Error("visual replay frame conversion could not create a 2d context");
       }
-      ctx.putImageData(new ImageData(raw.slice(0, width * height * 4), width, height), 0, 0);
+      // A GL player sends the framebuffer's rows bottom-up, as
+      // `glReadPixels` returns them (`X-Row-Order: bottom-up`): the image
+      // is drawn top row first, so they are flipped — and a picked pixel's
+      // `y` then counts from the top, as `/pixel-history` takes it.
+      let pixels = raw.slice(0, width * height * 4);
+      if ((response.headers.get("x-row-order") || "") === "bottom-up") {
+        const rowBytes = width * 4;
+        const flipped = new Uint8ClampedArray(pixels.length);
+        for (let row = 0; row < height; row++) {
+          flipped.set(pixels.subarray((height - 1 - row) * rowBytes,
+                                      (height - row) * rowBytes),
+                      row * rowBytes);
+        }
+        pixels = flipped;
+      }
+      ctx.putImageData(new ImageData(pixels, width, height), 0, 0);
 
       const parsedUrl = new URL(url, window.location.href);
       const frame = {
@@ -91,6 +106,17 @@ when defined(js):
       if (parsedUrl.searchParams.has("frame")) {
         frame.frame = Number(parsedUrl.searchParams.get("frame") || 0);
       }
+      // THE DRAW CALL SHOWN AND ITS FRAME'S RANGE (`X-Draw`,
+      // `X-Frame-Draw-Start` / `X-Frame-Draw-Count`): what the draw-call
+      // stepping counts within. Absent headers leave them unknown.
+      const drawHeader = response.headers.get("x-draw");
+      if (drawHeader !== null) frame.drawIndex = Number(drawHeader);
+      const xFrame = response.headers.get("x-frame");
+      if (xFrame !== null) frame.frame = Number(xFrame);
+      const drawStart = response.headers.get("x-frame-draw-start");
+      if (drawStart !== null) frame.frameDrawStart = Number(drawStart);
+      const drawCount = response.headers.get("x-frame-draw-count");
+      if (drawCount !== null) frame.frameDrawCount = Number(drawCount);
       return JSON.stringify(frame);
     })(#, #, #))
   """.}
@@ -207,6 +233,9 @@ proc createHttpVisualReplayClient*(playerUrl: string): VisualReplayClient =
         getFrame(client.sizedFrameUrl(frameByFrameUrl(baseUrl, frame))),
       getFrameByDrawProc: proc(draw: int): VisualReplayFuture[VisualReplayFrame] =
         getFrame(client.sizedFrameUrl(frameByDrawUrl(baseUrl, draw))),
+      getFrameByFrameDrawProc: proc(frame, draw: int):
+          VisualReplayFuture[VisualReplayFrame] =
+        getFrame(client.sizedFrameUrl(frameByFrameDrawUrl(baseUrl, frame, draw))),
       getDrawCallsProc: proc(frame: int): VisualReplayFuture[seq[VisualReplayDrawCall]] =
         let fut = getJson(drawCallsUrl(baseUrl, frame))
         result = newPromise proc(resolve: proc(value: seq[VisualReplayDrawCall])) =

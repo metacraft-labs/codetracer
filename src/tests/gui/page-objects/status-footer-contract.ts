@@ -12,6 +12,16 @@
  * `tools/screen-briefs.md` (Screen 1) states the same expectation for the
  * visual audit.
  *
+ * ONE READOUT IS HIDDEN ON PURPOSE, and is not in this contract.  The status
+ * bar's location path (`.location-path`) and its copy button are hidden by a
+ * design decision (`status_bar.styl`, "HIDDEN FOR NOW";
+ * `docs/UI-Design-Decisions.md` D-05, 2026-10-15).  On 2026-11-11 it was
+ * decided to keep them hidden: §3.1 now says so, the editor's
+ * execution-line marker is where the user reads the current location, and
+ * `readyOnEntryTest` waits for that marker instead.  Everything else the bar
+ * shows is still guarded here, and the right-hand group is guarded through
+ * the readout it still shows, the test certificate.
+ *
  * WHY THIS FILE IS SHAPED THE WAY IT IS.  The same regression has been
  * written three times.  `b27da3947 "feat: Redesign of the status bar"` added
  *
@@ -23,7 +33,10 @@
  * `51a3e820e "fix: UI regressions"` wrote the identical rule back into
  * `status_bar.styl`.  Both times the visible symptom was not a footer
  * complaint but a suite-wide timeout: every Electron spec opens with
- * `readyOnEntryTest`, which waits for `.location-path` to be **visible**.
+ * `readyOnEntryTest`, which then waited for `.location-path` to be
+ * **visible**.  It now waits for the editor's execution line, so a footer
+ * regression no longer shows up as a suite-wide timeout — this file and its
+ * two consumers are the only things that catch it.
  *
  * The lesson of that repeat is that a guard must not recognise a *spelling*.
  * There are unboundedly many ways to make an element invisible —
@@ -76,6 +89,14 @@ export interface FooterRegion {
    * a locator that matches nothing (milestone M47).
    */
   readonly renderedAs: readonly string[];
+  /**
+   * Set when the app renders this region only in some states, saying which.
+   * A probe that does not find such a region in the running app is not a
+   * failure: the app has simply not rendered it.  When it IS rendered it must
+   * be visible like any other region, and the stylesheet guard always lays
+   * it out, so a rule that hides it is still caught.
+   */
+  readonly renderedOnlyWhile?: string;
 }
 
 /**
@@ -90,7 +111,7 @@ export interface FooterRegion {
 export const FOOTER_REQUIRED_REGIONS: readonly FooterRegion[] = [
   {
     selector: "#status-base #file-info-status",
-    why: "language / encoding / `stable: ready` readout — Auto-Hide-Panes §3.1",
+    why: "language / encoding readout — Auto-Hide-Panes §3.1",
     renderedAs: ["file-info-status"],
   },
   {
@@ -100,8 +121,12 @@ export const FOOTER_REQUIRED_REGIONS: readonly FooterRegion[] = [
   },
   {
     selector: "#status-base #file-info-status #stable-status",
-    why: "the `stable: ready` process state the screen brief requires",
+    why: "the replay's `stable:` process state, shown while the replay is busy",
     renderedAs: ["stable-status"],
+    renderedOnlyWhile:
+      "the replay is busy: `isonim_status_view.nim` renders it under " +
+      "`if model.base.stableBusy:` since 74caaa788b (\"Remove stable: ready " +
+      "from status bar when idle\"), so an idle bar has no such node",
   },
   {
     selector: "#status-base #auto-hide-bottom-strip",
@@ -109,19 +134,12 @@ export const FOOTER_REQUIRED_REGIONS: readonly FooterRegion[] = [
     renderedAs: ["auto-hide-bottom-strip"],
   },
   {
-    selector: "#status-base .status-right .location-path",
+    selector: "#status-base .status-right .test-certificate-status",
     why:
-      "the ONLY display of the current debug location anywhere in the UI — " +
-      "nothing else renders `StatusBaseModel.locationText` — and the element " +
-      "`readyOnEntryTest` waits for, so hiding it fails every Electron spec",
-    renderedAs: ["location-path", "location-status", "status-right"],
-  },
-  {
-    selector: "#status-base #copy-path-image",
-    why:
-      "the only copy affordance for that location (the editor tab's " +
-      "'Copy full path' copies the tab label, not the debug location)",
-    renderedAs: ["copy-path-image"],
+      "the right-hand group's readout: the test certificate (Status-Bar.md " +
+      "SB-1), the bar's last readout while the location path is hidden by " +
+      "design (D-05)",
+    renderedAs: ["test-certificate-status", "status-right"],
   },
 ] as const;
 
@@ -507,8 +525,8 @@ export async function probeFooterRegions(
  * halves, because three regressions have now shown that answering only the
  * first half is answering the wrong question:
  *
- *   1. IS THERE A BOX.  The same property `readyOnEntryTest` waits for (a
- *      real box, not merely an attached node), widened to also reject
+ *   1. IS THERE A BOX.  The property `readyOnEntryTest` waits for on its own
+ *      signal (a real box, not merely an attached node), widened to also reject
  *      `visibility` and `opacity` tricks that leave a box behind.
  *   2. IS THE BOX WHERE THE USER IS LOOKING.  Added after `00fd68b7f`, which
  *      kept every box at full size and put it at x = -9999.  A region whose
@@ -569,13 +587,13 @@ export async function probeFooterRegions(
  *
  * The misses share one shape: the geometry is intact and correctly placed,
  * and only the *painting* is wrong, which `getBoundingClientRect` plus the
- * computed-style chain cannot see.  `readyOnEntryTest` misses all of them and
- * misses the off-screen family too — Playwright's visibility predicate
- * reports an off-screen `.location-path` as "visible, enabled and stable" —
- * so this predicate is now strictly stronger than the readiness wait in both
- * halves.  Closing what remains needs a different instrument (a screenshot of
- * the footer strip, or an `elementsFromPoint` hit test), not another rule
- * here.
+ * computed-style chain cannot see.  Playwright's visibility predicate, which
+ * `readyOnEntryTest` uses, misses all of them and misses the off-screen
+ * family too — it reports an off-screen element as "visible, enabled and
+ * stable" — so this predicate is strictly stronger than a Playwright
+ * visibility wait in both halves.  Closing what remains needs a different
+ * instrument (a screenshot of the footer strip, or an `elementsFromPoint` hit
+ * test), not another rule here.
  */
 export function footerVisibilityFailures(
   probes: readonly RegionProbe[],
@@ -588,7 +606,12 @@ export function footerVisibilityFailures(
   for (const probe of probes) {
     const suffix = ` — ${reasonFor(probe.selector)}`;
     if (!probe.found) {
-      failures.push(`${probe.selector}: not present in the page${suffix}`);
+      const conditional = FOOTER_REQUIRED_REGIONS.find(
+        (r) => r.selector === probe.selector,
+      )?.renderedOnlyWhile;
+      if (conditional === undefined) {
+        failures.push(`${probe.selector}: not present in the page${suffix}`);
+      }
       continue;
     }
     const hidden =

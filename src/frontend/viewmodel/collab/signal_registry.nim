@@ -1110,6 +1110,10 @@ proc collabSignalRegistry*(): seq[SignalRegistryEntry] =
              "StepListVM", "TraceLogVM", "RequestPanelVM"]:
     entries.addEntry(vm, "viewport", vscRendererLocal,
       "The size and scroll position of this viewer's pane.")
+  # The Event Log's undebounced copy, which its footer reads (pxor #904):
+  # the same viewer's position, a report sooner.
+  entries.addEntry("EventLogVM", "shownViewport", vscRendererLocal,
+    "The size and scroll position this viewer's pane shows now, before the request's debounce.")
   entries.addEntry("VCSVM", "historyViewport", vscRendererLocal,
     "The size and scroll position of this viewer's commit list.")
   entries.addDerived("EventLogVM", ["visibleRows"])

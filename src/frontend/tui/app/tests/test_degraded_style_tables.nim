@@ -65,7 +65,10 @@ import ../views/styled_row
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count, and inside a `const` block the
 # declaration is invisible to it.
-const ExpectedAssertions = 3735
+const ExpectedAssertions = 3761
+  ## +26 on 2026-11-09, measured: `ffec0f79a` added the role
+  ## `srGutterBreakpointHint` (swept per tier and per palette) and the
+  ## tracepoint glyph `◉` (`grBreakpointTracepoint`, new to the ASCII table).
   ## +2 on 2026-10-29 (PLAT-61): the Shell pane's four gutter roles, of which
   ## one glyph (`◌`) is new to the ASCII table, swept per tier.
   ## +32 on 2026-10-25 (PLAT-70 Part C): two more roles, swept per tier.
@@ -86,7 +89,9 @@ const
   AllModes = [dmDark, dmLight]
   AllPalettes = [pkDesign, pkTerminal]
 
-  ExpectedRoleCount = 138
+  ExpectedRoleCount = 139
+    ## 2026-11-09: +1, the editor's inline breakpoint hint
+    ## (`srGutterBreakpointHint`, group `dgGutter`, `ffec0f79a`).
     ## PLAT-70 Part C: +2, the find highlights (`srSurfaceFindMatch`,
     ## `srSurfaceFindMatchCurrent`, group `dgSurface`).
     ## PLAT-70 Part H: +6, a scrollbar's parts (`srScrollbarTrack`,
@@ -582,8 +587,9 @@ suite "CTUI-11 Tier 1: degraded style tables":
       if tee notin expected: expected.add tee
     checkpoint("chrome glyphs from the role table: " & $expected.len)
     ck expected.len <= mapped
-    # PLAT-61: the Shell pane's working mark `◌` (`~`) (83).
-    ck mapped == 83
+    # PLAT-61: the Shell pane's working mark `◌` (`~`) (83); 2026-11-09: the
+    # tracepoint glyph `◉` (`@`) `ffec0f79a` added (84).
+    ck mapped == 84
     # A rune that is NOT chrome passes through unchanged, in both modes — the
     # rule that keeps a Python identifier or a recorded path out of the
     # substitution table.

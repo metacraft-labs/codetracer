@@ -222,6 +222,20 @@ ct_start_watcher() {
 if [ -z "$CT_BUILD_HOST" ]; then
 	# Legacy tup host. `tup monitor -a` daemonises; start it before the
 	# writers below so it does not miss their first events.
+	#
+	# The monitor's autoupdates parse the Tupfiles with THIS environment, so
+	# it needs the roots build-once.sh exported to its own tup runs: the Cargo
+	# target base and the Nim cache root, from the one helper (see
+	# build-once.sh), which refuses a Cargo value here that is not this
+	# checkout's and compiler's. Without them every autoupdate would stop at
+	# the parse. (The contract tests' fixture trees have no helper.)
+	if [ -f "$REPO_ROOT/ci/lib/tup-cargo-target.sh" ]; then
+		if ! ct_tup_cargo_env="$(bash "$REPO_ROOT/ci/lib/tup-cargo-target.sh" --reap --export "$REPO_ROOT")"; then
+			echo "build: no Cargo target base this checkout owns (see above); not starting tup monitor." >&2
+			exit 1
+		fi
+		eval "$ct_tup_cargo_env"
+	fi
 	cd src
 	"${TUP:-tup}" monitor -a
 	cd ..

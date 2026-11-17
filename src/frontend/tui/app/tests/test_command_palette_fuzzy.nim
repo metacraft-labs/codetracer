@@ -53,6 +53,24 @@
 ## both build a fresh `(query, candidate)` cache — so the minimum is the
 ## cleanest slot the scheduler gave, not the cheapest query.
 ##
+## ## AND IT COUNTS INSTRUCTIONS, NOT MILLISECONDS (2026-11-05)
+##
+## CTUI-10 states the gate as "< 8 ms". On a host shared with CI runners no
+## clock measures only the search: wall time moved with the scheduler (fixed
+## 2026-10-04 by reading CPU time), and CPU time still moved 1.6x between load
+## 27 and load 99 with the matcher unchanged, because an SMT sibling and the
+## shared caches slow the same instructions down (codetracer-pm issue
+## 2026-10-31-palette-fuzzy-gate-cpu-time-still-moves-with-host-contention).
+## So where the kernel lets a process count its own retired instructions
+## (the instrument below, Linux), the gate is on the
+## instructions one keystroke's search retires, against `GateBudgetInstructions`: the 8 ms
+## converted at the rate this search retires instructions on the reference
+## host when it is quiet. The count does not move with load, and a search that
+## does twice the work retires twice the instructions, so the gate still fails
+## a real slowdown. The CPU and wall figures are printed beside it. Where no
+## counter can be opened (macOS, a kernel that refuses, a VM without a PMU) the
+## gate is the 8 ms on best-of-nine CPU time, as before.
+##
 ## ## Templates, not procs, for anything that calls `check`
 
 import std/[algorithm, monotimes, os, strutils, times, unittest]
@@ -62,12 +80,133 @@ import isonim_tui
 import ../commands/interpreter
 import ../views/command_palette
 
+# ---------------------------------------------------------------------------
+# The instrument: this thread's retired user-space instructions
+# ---------------------------------------------------------------------------
+#
+# Linux only, through `perf_event_open(2)` (`PERF_COUNT_HW_INSTRUCTIONS`, user
+# space only, this thread). On a hybrid CPU the kernel publishes one PMU per
+# core type (`/sys/bus/event_source/devices/cpu_core` and `cpu_atom`), and a
+# generic hardware event counts on one of them only, so one event is opened
+# per core type and the counts are added: a thread the scheduler moves between
+# the two is counted on both. A counter that is not `available` (the kernel
+# refused, `perf_event_paranoid` 3, no PMU in a VM, not Linux) sends the gate
+# to its CPU-time fallback. Kept in this file rather than a module of its own:
+# `app/` counts its modules (`test_gdb_command_surface`) and the facade walk
+# follows imports out of it (`test_tui_facade_boundary`).
+
+type
+  InstructionCounter = object
+    fds: seq[cint]
+
+when defined(linux):
+  {.emit: """/*INCLUDESECTION*/
+#include <linux/perf_event.h>
+#include <sys/ioctl.h>
+#include <sys/syscall.h>
+#include <string.h>
+#include <unistd.h>
+""".}
+  {.emit: """
+static int ct_open_instruction_counter(unsigned long long pmuType) {
+  struct perf_event_attr attr;
+  memset(&attr, 0, sizeof attr);
+  attr.size = sizeof attr;
+  attr.type = PERF_TYPE_HARDWARE;
+  attr.config = (pmuType << 32) | PERF_COUNT_HW_INSTRUCTIONS;
+  attr.disabled = 1;
+  attr.exclude_kernel = 1;
+  attr.exclude_hv = 1;
+  return (int)syscall(__NR_perf_event_open, &attr, 0, -1, -1, 0);
+}
+static int ct_counter_reset_enable(int fd) {
+  if (ioctl(fd, PERF_EVENT_IOC_RESET, 0) != 0) return -1;
+  return ioctl(fd, PERF_EVENT_IOC_ENABLE, 0);
+}
+static int ct_counter_disable(int fd) {
+  return ioctl(fd, PERF_EVENT_IOC_DISABLE, 0);
+}
+static long long ct_counter_read(int fd) {
+  long long value = 0;
+  if (read(fd, &value, sizeof value) != (ssize_t)sizeof value) return -1;
+  return value;
+}
+static void ct_counter_close(int fd) { close(fd); }
+""".}
+  proc ctOpenInstructionCounter(pmuType: culonglong): cint
+    {.importc: "ct_open_instruction_counter", nodecl.}
+  proc ctCounterResetEnable(fd: cint): cint
+    {.importc: "ct_counter_reset_enable", nodecl.}
+  proc ctCounterDisable(fd: cint): cint
+    {.importc: "ct_counter_disable", nodecl.}
+  proc ctCounterRead(fd: cint): clonglong
+    {.importc: "ct_counter_read", nodecl.}
+  proc ctCounterClose(fd: cint)
+    {.importc: "ct_counter_close", nodecl.}
+
+  proc hybridPmuTypes(): seq[culonglong] =
+    ## The PMU type of each core type on a hybrid CPU; empty on any other.
+    for name in ["cpu_core", "cpu_atom"]:
+      let path = "/sys/bus/event_source/devices" / name / "type"
+      if fileExists(path):
+        try: result.add culonglong(parseInt(readFile(path).strip()))
+        except ValueError: discard
+
+proc available(c: InstructionCounter): bool = c.fds.len > 0
+
+proc close(c: var InstructionCounter) =
+  when defined(linux):
+    for fd in c.fds: ctCounterClose(fd)
+  c.fds = @[]
+
+proc openInstructionCounter(): InstructionCounter =
+  ## A counter for this thread, or one that is not `available` (see the module
+  ## comment). On a hybrid CPU, one event per core type or none at all: a count
+  ## from one core type alone would be short whenever the thread ran on the
+  ## other.
+  when defined(linux):
+    let types = hybridPmuTypes()
+    if types.len == 0:
+      let fd = ctOpenInstructionCounter(0)
+      if fd >= 0: result.fds.add fd
+    else:
+      for t in types:
+        let fd = ctOpenInstructionCounter(t)
+        if fd < 0:
+          result.close()
+          return
+        result.fds.add fd
+
+proc start(c: InstructionCounter): bool =
+  ## Zero and start every event; false when one refused.
+  when defined(linux):
+    for fd in c.fds:
+      if ctCounterResetEnable(fd) != 0: return false
+    c.fds.len > 0
+  else:
+    false
+
+proc stop(c: InstructionCounter): int64 =
+  ## Stop the events and return the instructions they counted since `start`,
+  ## or -1 when one could not be read.
+  when defined(linux):
+    for fd in c.fds:
+      if ctCounterDisable(fd) != 0: return -1
+    for fd in c.fds:
+      let value = ctCounterRead(fd)
+      if value < 0: return -1
+      result += int64(value)
+  else:
+    -1
+
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count, and inside a `const` block the
 # declaration is invisible to it.
 # 90 -> 93 (2026-10-04): the gate reads CPU time, and asserts its instrument
 # (a CPU sample per run, a non-zero best, no run's CPU over its wall time).
-const ExpectedAssertions = 93
+# 93 -> 94 (2026-11-05): the gate counts instructions where it can, and asserts
+# that instrument too (every run counted, and the same work counted alike).
+const ExpectedAssertions = 94
 
 var countedAssertions = 0
 
@@ -82,6 +221,19 @@ const
   GateSymbols = 2000
     ## CTUI-10's verification gate: "Fuzzy search over 2,000 symbols < 8 ms."
   GateBudgetMs = 8
+  GateBudgetInstructions = 85_000_000
+    ## CTUI-10's 8 ms, in instructions. Measured 2026-11-08 at codetracer
+    ## `agents` `bebcf6a9545` on the 24-core i9-12900K this gate has always
+    ## been read on: three runs of this suite at load 28-32 retired
+    ## 63,792,444-63,792,489 instructions in the best run while the best CPU
+    ## time moved from 5,971 to 7,056 us. At the quickest of those, 5,971 us,
+    ## the search retires 10.68 M instructions per ms, so 8 ms is 85 M. The
+    ## search sits at 75% of it; a change that makes it a third more work
+    ## fails the gate on any host load, where the millisecond gate went red
+    ## at load 28 with nothing changed.
+  CountsAgreePercent = 2
+    ## Nine runs of the same cold search retire the same instructions to
+    ## within this: more spread says the counter, not the search, moved.
   GateRuns = 9
     ## NINE, not five, and the reason is a measurement rather than a
     ## preference. On this 24-core host the same query measures 4.1 ms best-of-
@@ -473,7 +625,15 @@ suite "CTUI-10: the palette ranks isonim-tui's way over real symbols":
     discard model.open()
     var elapsed: seq[int64] = @[]
     var cpu: seq[int64] = @[]
+    var instructions: seq[int64] = @[]
     var hitCounts: seq[int] = @[]
+    var counter = openInstructionCounter()
+    # ONE RUN FIRST, NOT MEASURED. The first search of a fresh model grows
+    # the allocator's pools, and on 2026-11-08 it retired 66.5 M instructions
+    # where every later run retired 63.8 M (to within 0.01%). That is set-up,
+    # not the search; the nine measured runs follow it.
+    discard model.setQuery(IntendedQuery)
+    model.query = ""
     for _ in 0 ..< GateRuns:
       # THE SAME QUERY EVERY RUN, and every run is COLD: `rankWith` calls
       # `newMatcher(query)` and `searchProvider` calls it again, and
@@ -483,19 +643,27 @@ suite "CTUI-10: the palette ranks isonim-tui's way over real symbols":
       # `isonim-tui/src/isonim_tui/command/fuzzy.nim`'s `newMatcher`, not
       # assumed. Varying the query instead would compare five different amounts
       # of work and make "the best of five" mean the cheapest query.
+      let counting = counter.available and counter.start()
       let started = getMonoTime()
       let cpuStarted = cpuTime()
       let n = model.setQuery(IntendedQuery)
       cpu.add int64((cpuTime() - cpuStarted) * 1_000_000.0)
       elapsed.add (getMonoTime() - started).inMicroseconds
+      if counting: instructions.add counter.stop()
       hitCounts.add n
       model.query = ""
+    let counted = counter.available and instructions.len == GateRuns and
+                  min(instructions) > 0
+    counter.close()
     let best = min(cpu)
     echo "CTUI-10 PALETTE GATE: ", GateSymbols, " symbols, query `",
          IntendedQuery, "` -> ", hitCounts[0], " hit(s); CPU ", cpu,
          " us, wall ", elapsed, " us over ", GateRuns, " run(s); best CPU ",
-         best, " us (best wall ", min(elapsed), " us) against ",
-         GateBudgetMs * 1000, " us"
+         best, " us (best wall ", min(elapsed), " us); instructions ",
+         (if counted: $instructions else: "not counted on this host"),
+         "; gate: ", (if counted: "best " & $min(instructions) & " < " &
+           $GateBudgetInstructions & " instructions"
+         else: "best CPU < " & $(GateBudgetMs * 1000) & " us")
     ck elapsed.len == GateRuns
     ck cpu.len == GateRuns
     # The instrument reads: some CPU was spent, and no run spent more CPU
@@ -506,7 +674,14 @@ suite "CTUI-10: the palette ranks isonim-tui's way over real symbols":
     for i in 0 ..< GateRuns:
       if cpu[i] > elapsed[i] + 1000: inc cpuOverWall
     ck cpuOverWall == 0
-    ck best < GateBudgetMs * 1000
+    # The counter's own check: the same work, counted alike in every run.
+    ck (not counted) or
+       (max(instructions) - min(instructions)) * 100 <=
+         min(instructions) * CountsAgreePercent
+    if counted:
+      ck min(instructions) < GateBudgetInstructions
+    else:
+      ck best < GateBudgetMs * 1000
     # THE SWEEP REALLY SWEPT: the first run's hit count is not zero — a matcher
     # that returned nothing would be very fast — and it is what the ORACLE says
     # over the same 2,000 candidates.

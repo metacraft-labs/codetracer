@@ -5,8 +5,9 @@
 ## writes `src/tests/visual/plat42-window.json`, which the portable suite
 ## `src/frontend/gpui/tests/test_plat42_window.nim` asserts over. Per frame:
 ##
-##   * the EXECUTION LINE: the one line row whose execution-mark lane (left
-##     of the number field) holds ink. PLAT-39's own reading (`readFrame` →
+##   * the EXECUTION LINE: the one line row whose execution-mark lane (the
+##     gutter's pointer band, `plat42_code_column.pointerLane`) holds ink.
+##     PLAT-39's own reading (`readFrame` →
 ##     `EditorModel.higlitedLineNumber`, the band located by row medians) is
 ##     kept beside it as `plat39ExecutionLine` and asserted by nothing: since
 ##     the 2026-10-17 redesign the band is on the code column only, behind the
@@ -22,8 +23,8 @@
 ##
 ##   * `breakpoint-editor` vs `stepped-editor` — the same stop, with and
 ##     without a breakpoint: the MARGIN of each line (number, mark lanes,
-##     chevron — the breakpoint lane is right of the number since the
-##     redesign), compared;
+##     chevron — the breakpoint is in the glyph lane, leftmost, since the
+##     2026-10-28 gutter rewrite), compared;
 ##   * `noir-flow` vs `noir-flow-off` — the same stop, the flow overlay shown
 ##     and hidden: the CODE column of each line, compared. Lines are matched
 ##     by number, not by height: the overlay's loop control takes a row.
@@ -88,25 +89,10 @@ const
   MinChipPx = 12
     ## Narrower spans are a pane border or an indent guide, not a box.
   NumberFieldPx = 38
-    ## Independent reading window measured from the historical captures.
-    ## Left of this number field is the execution pointer's ink. This is a
-    ## pixel-reader calibration, not a renderer layout constant.
-
-proc inkCount(img: GrayImage; x0, x1, y0, y1: int): int =
-  ## Pixels more than 40 grey levels from the region's own most common level.
-  var hist: array[256, int]
-  let (ya, yb) = (max(0, y0), min(img.height, y1))
-  let (xa, xb) = (max(0, x0), min(img.width, x1))
-  if xb <= xa or yb <= ya: return 0
-  for y in ya ..< yb:
-    for x in xa ..< xb:
-      inc hist[int(img.pixels[y * img.width + x])]
-  var bg = 0
-  for v in 1 .. 255:
-    if hist[v] > hist[bg]: bg = v
-  for y in ya ..< yb:
-    for x in xa ..< xb:
-      if abs(int(img.pixels[y * img.width + x]) - bg) > 40: inc result
+    ## Independent reading window measured from the historical captures: a
+    ## row is a LINE row when this much of the gutter, ending at the number's
+    ## right edge, holds ink. A pixel-reader calibration, not a renderer
+    ## layout constant.
 
 proc chipsOf(img: GrayImage; pane: Rect; codeX, y0, y1: int;
              scratch: string): seq[Chip] =
@@ -293,8 +279,7 @@ proc rowBands(img: GrayImage; pane: Rect; scratch: string): seq[RowBand] =
   for s in slots:
     if s.isLine:
       columnRows.add CodeColumnRow(y0: s.y0, y1: s.y1,
-        pointer: inkCount(img, pane.x, gutterRight - NumberFieldPx,
-                          s.y0 + 1, s.y1 - 1) > 0)
+        pointer: pointerInked(img, pane, s.y0, s.y1))
   let codeX = codeColumnLeft(img, pane, gutterRight, columnRows)
   if codeX < 0:
     raise newException(IOError,
@@ -309,9 +294,8 @@ proc rowBands(img: GrayImage; pane: Rect; scratch: string): seq[RowBand] =
     let words = ocrRegion(img, rowRect, scratch, psm = 7, upscale = 2.0)
     var parts: seq[string] = @[]
     for w in words: parts.add w.text
-    # THE POINTER is the execution mark in its own lane, left of the number
-    # field (read independently from the image). PLAT-39's reader looks for the
-    # execution band instead — a row whose MEDIAN grey differs — and since
+    # THE POINTER is the execution mark in its own lane (`pointerLane`).
+    # PLAT-39's reader looks for the execution band instead — a row whose MEDIAN grey differs — and since
     # the redesign that band is drawn only on the code column, behind the
     # code and the chips: measured, it is a minority of the row whenever the
     # row carries a long chip, and the reader then reports no execution line
@@ -441,8 +425,18 @@ proc twin(withPath, withoutPath: string; region: string;
       let (x0, x1) =
         if region == "gutter": (pane.x, band.codeX - 1)
         else: (band.codeX, pane.x + pane.w - 2)
+      # THE SAME SCANLINES unless the line really moved. Each frame's grid is
+      # fitted to its own gutter readings, and two fits of one geometry
+      # differ by a pixel forty rows down (`noir-flow` put line 43 at y=994,
+      # `noir-flow-off` at 993, over pixel-identical rows): a one-pixel crop
+      # shift moves 73% of a row's ink. A line that moved, moved by a row
+      # (the overlay's loop control), so less than a quarter pitch apart is
+      # one place.
+      let ay0 =
+        if abs(other.y0 - band.y0) * 4 < band.y1 - band.y0: band.y0
+        else: other.y0
       result.add %*{"line": band.line,
-                    "changed": changedFraction(a, b, x0, x1, other.y0, band.y0,
+                    "changed": changedFraction(a, b, x0, x1, ay0, band.y0,
                                                band.y1 - band.y0)}
 
 proc main() =

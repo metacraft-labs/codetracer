@@ -12,12 +12,21 @@ import isonim/core/signals
 import isonim/web/dom_api as dom_api
 import isonim/web/web_renderer
 import ./panel_host
+import ../viewmodel/input/[dom_pointer, dom_pane_presses, pane_presses]
 from ../viewmodel/session_vm import SessionViewModel
 
 var pixelHistoryVMInstance: PixelHistoryVM
+var pixelHistoryVMProvider*: proc(): PixelHistoryVM
+  ## The Visual Replay panes' model's Pixel History (`ui/video_player`): a
+  ## row's click there shows the draw call in the Video Player and loads its
+  ## shader (`VisualReplayPanesVM`).
 
 proc initPixelHistoryVM(store: ReplayDataStore = nil) =
   if not pixelHistoryVMInstance.isNil:
+    pixelHistoryVMInstance.bindReplayStore(store)
+    return
+  if not pixelHistoryVMProvider.isNil:
+    pixelHistoryVMInstance = pixelHistoryVMProvider()
     pixelHistoryVMInstance.bindReplayStore(store)
     return
   pixelHistoryVMInstance = createPixelHistoryVM(
@@ -57,3 +66,10 @@ setPanelRenderer(Content.PixelHistory,
 method register*(self: PixelHistoryComponent, api: MediatorWithSubscribers) =
   self.api = api
   initPixelHistoryVM()
+
+# A press on an entry goes to the draw call's source (K73): the pointer row
+# `pixel-history.activate`, performed on the entry the key router's hit test
+# found (`input/dom_pointer`).
+registerElementOperation("pixel-history.activate", proc(p: ElementPress): bool =
+  pressPixelHistory(pixelHistoryVMInstance, "pixel-history.activate",
+                    readerOf(p.element)))

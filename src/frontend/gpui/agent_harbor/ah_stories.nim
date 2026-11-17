@@ -23,8 +23,14 @@ import ./ah_session_views
 import ./ah_initiative_tab_bar
 import ./ah_initiative_panels
 import ./ah_fleet_panel
+import ./ah_playback_bar
+import ../../viewmodel/input/element_press
+import ../../viewmodel/keymap/[base_keymaps, context_keys, editing_keymap,
+                               keymap_router,
+                               scope_path, user_keymap]
+import ../../../common/key_names
 
-export agent_harbor_stories, ah_theme
+export agent_harbor_stories, ah_theme, ah_playback_bar, user_keymap
 
 const
   GpuiAgentHarborSurfaces* = [
@@ -36,7 +42,8 @@ const
     "agent-harbor-initiative-progress",
   ]
     ## Every surface of the Agent Harbor section this module draws.
-  FrameTitlePx = 28
+  FrameTitlePx = 32          ## `.lm_header`
+  FrameInsetPx = 4           ## the golden-layout root's side inset
 
 type
   AhStoryMount* = object
@@ -52,82 +59,192 @@ type
     initiativeTabs*: InitiativeTabStripVM
     initiatives*: InitiativesVM
     progress*: InitiativeProgressVM
+    playback*: AhPlayback
+      ## A playback story's playback (nil for any other story): its source
+      ## feeds the viewmodel, and the bar under the story controls it.
+    bar*: GpuiElement
+      ## The playback bar's host (nil for any other story).
     dispose*: proc()
 
 proc hasGpuiRendering*(surface: string): bool =
   surface in GpuiAgentHarborSurfaces
 
+proc playbackPresses*(keymap: UserKeymap; pb: AhPlayback): PlaybackPress =
+  ## **THE STORY HOST'S ROUTE FOR A PRESS ON ITS PLAYBACK BAR**
+  ## (Input-Routing-And-Keymaps.md §5.1): the press is resolved in the
+  ## `storyPlayback` scope by the window's router — the base keymap with
+  ## `keymap` (a user's `keybindings.json` rows) laid over it — and a
+  ## user's row for the press takes it; a primary press with no row runs
+  ## the operation the button carries (`element_press`). The story host
+  ## performs only the playback's own operations (`performPlaybackOperation`):
+  ## a press resolved to any other is inert.
+  # GPUI's three keys (`edit_arm.GpuiDelivery`): it receives keys, not bytes.
+  let router = initKeymapRouter(bkCua, KeyDelivery(frontEnd: feGpui,
+                                                   platform: hostPlatform(),
+                                                   keyProtocol: kpNative),
+                                user = keymap)
+  let resolve = routerResolver(router, SessionFacts())
+  result = proc(operation: string; mods: KeyModifiers) =
+    let outcome = resolveElementPress(resolve,
+                                      @[element(ekWindow, "window"),
+                                        pane(StoryPlaybackScope)],
+                                      ButtonElementKind, operation, mods, "Click")
+    discard pb.performPlaybackOperation(outcome.operation)
+
 proc drawFrame(r: GpuiRenderer; p: AhPalette; title: string;
                widthPx, heightPx: int): tuple[frame, body: GpuiElement] =
-  ## A panel's frame as the window draws one: its title tab on the strip,
-  ## the panel under it (the web story's golden-layout tab).
+  ## A panel's frame as the web story frames one (a golden-layout stack):
+  ## 4px in from the window's sides, a 32px header holding the panel's tab
+  ## (4px down, 24px high, rounded on top, on the panel's surface, its title
+  ## at 14px in the label role, then its pin and close icons at its end,
+  ## 4.8px apart), then the panel body on the same surface, 8px below the
+  ## tab and rounded at the bottom.
   let frame = r.box(column = true, pairs = [("width", $widthPx & "px"),
                                             ("height", $heightPx & "px"),
+                                            ("padding-left", $FrameInsetPx & "px"),
+                                            ("padding-right", $FrameInsetPx & "px"),
                                             ("background", p.ground)])
-  let strip = r.box(pairs = [("height", $FrameTitlePx & "px"), ("items", "center"),
-                             ("padding-left", "8px"), ("flex-shrink", "0")])
-  let t = r.text(title, CaptionPx + 1, p.textBody, shrink = false)
+  let strip = r.box(pairs = [("height", $FrameTitlePx & "px"), ("flex-shrink", "0"),
+                             ("items", "end")])
+  r.tag(strip, "frame-header", title)
+  # `.lm_tab`: 24px, 4px down in the 32px header (4 + 24 + 4); the active
+  # tab's fill runs on down into its panel (its `box-shadow` bridge), so the
+  # box reaches the header's foot and its contents keep to the top 24px.
+  let tab = r.box(pairs = [("height", "28px"), ("flex-grow", "1"), ("items", "center"),
+                           ("padding-bottom", "4px"),
+                           ("padding-left", "8px"), ("padding-right", "8px"),
+                           ("background", p.panel),
+                           ("border-top-left-radius", $ControlRadiusPx & "px"),
+                           ("border-top-right-radius", $ControlRadiusPx & "px")])
+  # `.lm_title`: 14px on the face's normal line (18px), centred in the tab.
+  let t = r.text(title, BodyPx, p.textLabel, pairs = [("flex-grow", "1"), ("line-height", "18px")])
   r.tag(t, "frame-title", title)
-  r.appendChild(strip, t)
+  r.appendChild(tab, t)
+  # `.lm_pin_tab` (0.85em, 0.3em before the close) and `.lm_close_tab`
+  # (0.6em): the active tab's icons, at full strength.
+  let pin = r.framePinIcon(p)
+  r.setStyle(pin, "margin-right", "4.8px")
+  r.tag(pin, "frame-pin", "")
+  r.appendChild(tab, pin)
+  let close = r.frameCloseIcon(p)
+  r.tag(close, "frame-close", "")
+  r.appendChild(tab, close)
+  r.appendChild(strip, tab)
   r.appendChild(frame, strip)
-  let body = r.box(column = true, pairs = [("flex-grow", "1"), ("overflow", "hidden")])
+  let body = r.box(column = true, pairs = [("flex-grow", "1"), ("min-height", "0px"),
+                                           ("overflow", "hidden"), ("padding-top", "8px"),
+                                           ("background", p.panel),
+                                           ("border-bottom-left-radius", $ControlRadiusPx & "px"),
+                                           ("border-bottom-right-radius", $ControlRadiusPx & "px")])
   r.appendChild(frame, body)
   (frame, body)
 
 proc mountAgentHarborStoryGpui*(r: GpuiRenderer; surface, fixture: string;
                                 widthPx, heightPx: int; mode = dmDark;
-                                frameTitle = ""): AhStoryMount =
+                                frameTitle = ""; clock: ClockBase = nil;
+                                moment = "";
+                                keymap = UserKeymap()): AhStoryMount =
   ## Builds the story's viewmodel and mounts its GPUI view, `widthPx` ×
   ## `heightPx`. A `frameTitle` frames it as a panel. Raises `ValueError` for
   ## a surface with no GPUI rendering, and (from the story constructors) for
   ## a fixture the surface does not name.
+  ##
+  ## A playback story plays on `clock` (a `RealClock` when nil; a test or a
+  ## capture passes a `TestClock`), opens at `moment` (its first frame when
+  ## ""), and has the host's playback bar under it: the story is drawn
+  ## `PlaybackBarPx` shorter, the bar along the bottom. A press on the bar
+  ## is routed under `keymap`'s rows over the base's (`playbackPresses`).
   if not hasGpuiRendering(surface):
     raise newException(ValueError, "no GPUI rendering for the Agent Harbor surface " &
                        surface & " (story fixture " & fixture & ")")
   let p = ahPalette(mode)
   var m = AhStoryMount(surface: surface, fixture: fixture)
+  var outer: GpuiElement
+  var heightPx = heightPx
+  if isPlaybackStory(surface, fixture):
+    m.playback = newAhPlayback(surface, fixture,
+                               if clock.isNil: ClockBase(newRealClock()) else: clock)
+    # The window: the story above, the bar below.
+    outer = r.box(column = true, pairs = [("width", $widthPx & "px"),
+                                          ("height", $heightPx & "px"),
+                                          ("background", p.ground)])
+    heightPx = heightPx - PlaybackBarPx
   var host: GpuiElement
   if frameTitle.len > 0:
     let (frame, body) = r.drawFrame(p, frameTitle, widthPx, heightPx)
     m.root = frame
     host = r.createElement("div")
+    # The panel takes the body's height (a percentage of a flex item's
+    # height does not resolve in GPUI's layout; growing does).
+    r.setStyle(host, "flex-grow", "1")
+    r.setStyle(host, "min-height", "0px")
     r.appendChild(body, host)
+  elif hasPanelUnderCaption(surface, fixture):
+    # The caption bar over a panel, as in the shell: the window below the
+    # bar on the panel's ground, where the bar's popup drops (the web story
+    # fills the window behind its fixed caption with `.ah-story-panel-under`).
+    m.root = r.box(column = true, pairs = [("width", $widthPx & "px"),
+                                           ("height", $heightPx & "px"),
+                                           ("background", p.panel)])
+    host = r.createElement("div")
+    r.appendChild(m.root, host)
   else:
     host = r.createElement("div")
     m.root = host
+    if not outer.isNil:
+      # The story's own area, above the bar: a column as tall as the window
+      # less the bar, holding the story as the window's root holds any other
+      # story, so a caption-bar story keeps its own height instead of
+      # stretching to the area's.
+      m.root = r.box(column = true, pairs = [("width", $widthPx & "px"),
+                                             ("height", $heightPx & "px"),
+                                             ("flex-shrink", "0"),
+                                             ("overflow", "hidden")])
+      r.appendChild(m.root, host)
   m.view = host
-  let bodyW = widthPx
+  let bodyW = if frameTitle.len > 0: widthPx - 2 * FrameInsetPx else: widthPx
   var rootDisposer: proc()
   createRoot proc(dispose: proc()) =
     rootDisposer = dispose
+    let pb = m.playback
     case surface
     of "agent-harbor-fleet":
-      m.fleet = createFleetStoryVM(fixture)
+      m.fleet = createFleetStoryVM(fixture, pb)
       r.mountFleetPanel(host, m.fleet, p, bodyW)
     of "agent-harbor-session-tabs":
-      m.sessions = createSessionTabsStoryVM(fixture)
+      m.sessions = createSessionTabsStoryVM(fixture, pb)
       r.mountSessionTabStrip(host, m.sessions, p, bodyW)
     of "agent-harbor-session-list":
-      m.sessions = createSessionListStoryVM(fixture)
+      m.sessions = createSessionListStoryVM(fixture, pb)
       r.mountSessionList(host, m.sessions, p, bodyW)
     of "agent-harbor-initiative-tabs":
-      m.initiativeTabs = createInitiativeTabsStoryVM(fixture)
+      m.initiativeTabs = createInitiativeTabsStoryVM(fixture, pb)
       r.mountInitiativeTabBar(host, m.initiativeTabs, p, bodyW)
     of "agent-harbor-initiatives":
-      m.initiatives = createInitiativesStoryVM(fixture)
+      m.initiatives = createInitiativesStoryVM(fixture, pb)
       r.mountInitiativesPanel(host, m.initiatives, p, bodyW)
     of "agent-harbor-initiative-progress":
-      m.progress = createProgressStoryVM(fixture)
+      m.progress = createProgressStoryVM(fixture, pb)
       r.mountProgressPanel(host, m.progress, p, bodyW)
     else:
       raise newException(ValueError, "no GPUI rendering for the Agent Harbor surface " &
                          surface)
+    if not pb.isNil:
+      m.bar = r.createElement("div")
+      r.mountPlaybackBar(m.bar, pb, p, widthPx, playbackPresses(keymap, pb))
+  if not outer.isNil:
+    r.appendChild(outer, m.root)
+    r.appendChild(outer, m.bar)
+    m.root = outer
+    m.playback.openAtMoment(moment)
   let fleet = m.fleet
   let sessions = m.sessions
   let initiativeTabs = m.initiativeTabs
   let initiatives = m.initiatives
   let progress = m.progress
+  let playback = m.playback
   m.dispose = proc() =
+    if playback != nil: playback.dispose()
     if fleet != nil: fleet.dispose()
     if sessions != nil: sessions.dispose()
     if initiativeTabs != nil: initiativeTabs.dispose()

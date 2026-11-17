@@ -15,7 +15,6 @@
   border-radius: 0.375rem
   color: colors-ui-text-primary-body
   white-space: nowrap
-  cursor: pointer
   height: 1.75rem
   // margin-bottom: 10px
   margin-left: 0.625rem
@@ -68,7 +67,6 @@
 .hamburger-dropdown
   border-radius: 0.375rem
   color: colors-ui-text-primary-body
-  cursor: pointer
   height: 1.5rem
   background-color: colors-ui-surface-primary-tertiary
   right: 0
@@ -89,11 +87,9 @@
   &:focus:not(:focus-visible)
     outline: none !important
     box-shadow: none !important
-    cursor: pointer
     background-color: colors-ui-surface-base-panel
 
   &:focus-visible
-    cursor: pointer
     background-color: colors-ui-surface-base-panel
 
   &:hover
@@ -384,7 +380,6 @@ table.dataTable tbody tr:not(.active):hover
     width: 1.125em
     // height: 13px
     position: relative
-    cursor: pointer
     min-width: 2.3ch !important
     max-width: 2.3ch !important
     height: 1.5em
@@ -440,7 +435,6 @@ table.dataTable tbody tr:not(.active):hover
     text-align: center
     border-radius: 0.625rem
     border: 0
-    cursor: pointer
     background-color: EVENT_LOG_BUTTON_BACKGROUND_COLOR
     color: EVENT_LOG_BUTTON_UNSELECTED_COLOR
 
@@ -564,7 +558,6 @@ label
   .paging-page
     background-color: blue
     color: white
-    cursor: pointer
     margin-left: 0.125rem
     margin-right: 0.125rem
 
@@ -600,7 +593,6 @@ label
         color: colors-ui-text-primary-label
         overflow: hidden
         // PLAT-50: a header click orders the log by the column.
-        cursor: pointer
         // Every label on one centre line: the body's `.eventLog-text` rules
         // (its 1.1em line box and 0.1em padding) lifted OUTPUT above TICK and #.
         display: flex
@@ -687,7 +679,6 @@ label
     border-collapse: collapse
 
   .eventLog-row
-    cursor: pointer
 
     &.event-selected, &.selected
       background-color: colors-ui-surface-primary-secondary-hover
@@ -731,7 +722,6 @@ label
   white-space: nowrap
   font-size: 0.75em
   padding: 0.125em 0.5em
-  cursor: pointer
 
 // The menu is every other dropdown (Nikolay, 2026-10-20): the shared surface
 // (`dropdown-surface()`, shared_widgets.styl — the Requests pickers' menu), its
@@ -755,9 +745,6 @@ label
     // The title takes the room; the drag handle sits at the row's end.
     .eventLog-column-title
       flex: 1
-    .eventLog-column-check,
-    .eventLog-column-title
-      cursor: pointer
     // The icon slot is 1em of the 12px menu; the checkbox is 16px.  Let the
     // slot fit it.
     .eventLog-column-check
@@ -773,7 +760,6 @@ label
       width: 1rem
       height: 1rem
       border-radius: 0.125rem
-      cursor: grab
       // The icon is drawn on a child box: a mask on the handle itself would
       // also cut away its keyboard focus ring.
       &::before

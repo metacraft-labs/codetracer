@@ -2194,17 +2194,67 @@ impl MaterializedReplaySession {
     /// is the same, keeps two independent cases right.  Two column-aware
     /// breakpoints on one line are two stops, and a conditional breakpoint
     /// whose condition turns true part way through a statement fires there.
+    ///
+    /// A step that executes its position again starts a visit of its own
+    /// (`step_repeats_position`): that is how a loop whose iterations never
+    /// leave the line shows in the recording.
     fn breakpoint_slot_fires_at(&self, column: Option<i64>, step: &DbStep) -> bool {
         if !self.breakpoint_slot_live_at(column, step) {
             return false;
         }
         match self.step_continued_by(step) {
             Some(previous) if previous.path_id == step.path_id && previous.line == step.line => {
-                // A column slot spans only the steps at its own column.
-                (column.is_some() && previous.column != step.column) || !self.breakpoint_slot_live_at(column, previous)
+                self.step_repeats_position(previous, step)
+                    // A column slot spans only the steps at its own column.
+                    || (column.is_some() && previous.column != step.column)
+                    || !self.breakpoint_slot_live_at(column, previous)
             }
             _ => true,
         }
+    }
+
+    /// Does `step` execute the position of `previous`, the step it continues,
+    /// a second time?
+    ///
+    /// The recording carries no loop iterations, so this is read from the
+    /// steps.  A recorder writes a step when execution reaches a new position:
+    /// the JavaScript recorder one per statement it runs, the EVM and Noir
+    /// recorders one per change of source position.  Two steps in a row at the
+    /// same line and column, with the frame's recorded values changed between
+    /// them, are therefore the same statement run twice: that is what a loop
+    /// body looks like when the recorder writes no step for the loop's header
+    /// between iterations.  Several steps of ONE run of a statement sit at
+    /// different columns, or carry no column at all, and stay one visit.
+    ///
+    /// The values are part of the test because a recorder also writes the
+    /// same position twice when nothing ran in between: the JavaScript
+    /// recorder writes the program's first position again once the main
+    /// thread has started, and the reader gives the thread-start slot that
+    /// position too.  Nothing changed there, and it is one visit.  The cost is
+    /// a loop whose iteration changes none of the values recorded at the step,
+    /// which stays one visit.
+    ///
+    /// Only directly consecutive steps count.  Coming back from a call made
+    /// at a position resumes it (`step_continued_by`), so a step after a call
+    /// that lands on the caller's position again is the same visit.
+    fn step_repeats_position(&self, previous: &DbStep, step: &DbStep) -> bool {
+        step.column.is_some()
+            && step.column == previous.column
+            && self
+                .step_before(step.step_id)
+                .is_some_and(|before| before.step_id == previous.step_id)
+            && self.recorded_values_differ(previous.step_id, step.step_id)
+    }
+
+    /// Do the values recorded at `a` and at `b` differ?
+    fn recorded_values_differ(&self, a: StepId, b: StepId) -> bool {
+        let before = self.reader.variables_at(a).unwrap_or(&[]);
+        let after = self.reader.variables_at(b).unwrap_or(&[]);
+        before.len() != after.len()
+            || before
+                .iter()
+                .zip(after)
+                .any(|(x, y)| x.variable_id != y.variable_id || x.value != y.value)
     }
 
     /// Is the breakpoint in the `(step.line, column)` slot enabled, not
@@ -2729,6 +2779,10 @@ impl MaterializedReplaySession {
 }
 
 impl ReplaySession for MaterializedReplaySession {
+    fn breakpoints_stop_once_per_visit(&self) -> bool {
+        true
+    }
+
     fn load_location(&mut self, expr_loader: &mut ExprLoader) -> Result<Location, Box<dyn Error>> {
         info!("load_location: db replay");
         // Event-only traces (e.g. Stylus) have no steps — return a default location
@@ -3453,7 +3507,13 @@ impl MaterializedOriginChainContext<'_> {
 enum BackwardScanOutcome {
     /// Found a step inside `current_frame` where `current_var` changed.
     /// `step_id` is the step at which the new value first appeared.
-    FoundInFrame { step_id: StepId, steps_scanned: u64 },
+    /// `first_sighting`: nothing earlier disagrees with this value; the variable
+    /// simply is not recorded before this step, so the step need not be a write.
+    FoundInFrame {
+        step_id: StepId,
+        steps_scanned: u64,
+        first_sighting: bool,
+    },
     /// Reached the entry of the current frame — the chain may cross into
     /// the caller via the matching `Call` event.
     FrameEntryReached { call_step: StepId, steps_scanned: u64 },
@@ -3568,48 +3628,13 @@ impl MaterializedReplaySession {
         let (mut current_var_name, mut current_step, mut current_frame, hops_already_emitted, source_digests_in_token) =
             if let Some(token_raw) = &args.continuation_token {
                 let token = OriginContinuationToken::decode(token_raw)?;
-                // Spec §5.3.1 step 2: verify pattern fingerprint.
-                if token.patterns_fingerprint != patterns.fingerprint().hex {
-                    return Err(OriginError::new(
-                        OriginErrorCode::ContinuationTokenInvalid,
-                        format!(
-                            "pattern fingerprint changed since token was issued: {} -> {}",
-                            token.patterns_fingerprint,
-                            patterns.fingerprint().hex
-                        ),
-                    )
-                    .with_detail(serde_json::json!({
-                        "kind": "patterns_fingerprint_mismatch",
-                        "issuedFingerprint": token.patterns_fingerprint,
-                        "currentFingerprint": patterns.fingerprint().hex,
-                    })));
-                }
-                // Spec §5.3.1 step 3: verify per-path source digest. We
-                // only check digests for paths whose origin was the
-                // filesystem (bundled paths are immune per spec). The
-                // token is client data, so its paths are read under the
-                // session's source rule: with host reads off, only the
-                // recording's own copy, never the named host file.
-                for digest in &token.source_digests {
-                    if digest.origin == SourceOriginKind::Filesystem {
-                        let current = match expr_loader.token_digest_bytes(Path::new(&digest.path)) {
-                            Some(bytes) => sha256_hex(&bytes),
-                            None => continue,
-                        };
-                        if current != digest.sha256_hex {
-                            return Err(OriginError::new(
-                                OriginErrorCode::ContinuationTokenInvalid,
-                                format!("source file `{}` digest changed since token was issued", digest.path),
-                            )
-                            .with_detail(serde_json::json!({
-                                "kind": "source_digest_mismatch",
-                                "path": digest.path,
-                                "issuedDigest": digest.sha256_hex,
-                                "currentDigest": current,
-                            })));
-                        }
-                    }
-                }
+                // Spec §5.3.1 steps 2 and 3. The token is client data, so
+                // its paths are read under the session's source rule: with
+                // host reads off, only the recording's own copy, never the
+                // named host file.
+                crate::origin_query::check_continuation_token_integrity(&token, &patterns.fingerprint().hex, |path| {
+                    expr_loader.token_digest_bytes(path)
+                })?;
                 (
                     token.current_var_name,
                     StepId(token.current_step),
@@ -3694,6 +3719,9 @@ impl MaterializedReplaySession {
                 break;
             }
 
+            // Set by the `FoundInFrame` arm below; every other arm leaves the
+            // loop (`continue` or `break`) before the read after the match.
+            let first_sighting;
             // (1) Find the most recent step ≤ current_step inside
             //     current_frame where current_var's value changed.
             let scan_outcome = self.scan_backward_for_value_change(
@@ -3705,8 +3733,13 @@ impl MaterializedReplaySession {
                 &deadline,
             );
             let last_change_step = match scan_outcome {
-                BackwardScanOutcome::FoundInFrame { step_id, steps_scanned } => {
+                BackwardScanOutcome::FoundInFrame {
+                    step_id,
+                    steps_scanned,
+                    first_sighting: first,
+                } => {
                     metrics.steps_scanned += steps_scanned;
+                    first_sighting = first;
                     step_id
                 }
                 BackwardScanOutcome::FrameEntryReached {
@@ -3912,6 +3945,17 @@ impl MaterializedReplaySession {
                 // pre-reload step reads pre-reload text.
                 self.reader.path_version_ordinal(step_record.path_id),
             );
+            if source_origin != SourceOrigin::Unavailable {
+                line_text = complete_statement(line_text, |next| {
+                    let (text, from) = expr_loader.get_source_line_v2(
+                        &probe_path,
+                        row + next,
+                        meta_dat_sources_root,
+                        self.reader.path_version_ordinal(step_record.path_id),
+                    );
+                    (from != SourceOrigin::Unavailable).then_some(text)
+                });
+            }
             // Pre-execution snapshot fallback: when the line at
             // `last_change_step` does not parse as an assignment that
             // names `current_var_name`, walk to the immediately
@@ -3955,6 +3999,7 @@ impl MaterializedReplaySession {
                 .unwrap_or(false);
             let mut origin_step = last_change_step;
             if !line_matches_target
+                && !line_mutates_variable(&line_text, &current_var_name)
                 && let Some((prev_step, prev_line_text, prev_origin)) = self.resolve_previous_frame_source_line(
                     last_change_step,
                     current_frame,
@@ -3962,10 +4007,11 @@ impl MaterializedReplaySession {
                     meta_dat_sources_root,
                     expr_loader,
                 )
-                && classifier_lang
-                    .and_then(|lang| parse_assignment(&prev_line_text, lang))
-                    .map(|ast| ast.targets_variable(&current_var_name))
-                    .unwrap_or(false)
+                && (line_mutates_variable(&prev_line_text, &current_var_name)
+                    || classifier_lang
+                        .and_then(|lang| parse_assignment(&prev_line_text, lang))
+                        .map(|ast| ast.targets_variable(&current_var_name))
+                        .unwrap_or(false))
             {
                 line_text = prev_line_text;
                 source_origin = prev_origin;
@@ -4110,6 +4156,61 @@ impl MaterializedReplaySession {
                 break;
             }
 
+            // An assignment to something else says nothing about this variable: a
+            // hop built from it would show another variable's write as this
+            // one's origin. Where the variable was merely first seen here (a
+            // module's `__doc__`, which the program never assigns) there is no
+            // recorded write at all; where its value really changed, the change
+            // has an unknown source. So does a value a recorder captured where
+            // it crossed a module boundary (`is_boundary_binding_name`): no line
+            // assigns it, yet it was written, outside the source.
+            if classifier_lang
+                .and_then(|lang| parse_assignment(&line_text, lang))
+                .is_some_and(|ast| !ast.targets_variable(&current_var_name))
+                && !line_mutates_variable(&line_text, &current_var_name)
+            {
+                if first_sighting && !is_boundary_binding_name(&current_var_name) {
+                    // Seen first at this frame's start, under a name the frame never
+                    // assigns: a global, written by an enclosing frame. Its origin is
+                    // there.
+                    if let Some((outer_frame, outer_step)) =
+                        self.enclosing_frame_holding(&current_var_name, current_frame)
+                    {
+                        current_frame = outer_frame;
+                        current_step = outer_step;
+                        continue;
+                    }
+                    terminator = Terminator::new(TerminatorKind::RecordingStart);
+                    terminator.expression = current_var_name.clone();
+                    break;
+                }
+                hops.push(OriginHop {
+                    kind: WireOriginKind::Unknown,
+                    target_expr: current_var_name.clone(),
+                    source_expr: line_text.trim().to_string(),
+                    source_variable: None,
+                    location: self.reader.load_location(origin_step, current_frame, expr_loader),
+                    source_text: line_text.clone(),
+                    step_id: last_change_step.0,
+                    frame_transition: None,
+                    operand_snapshots: Vec::new(),
+                    truncated_operands: false,
+                    confidence: 0.0,
+                    classification_provenance: Some(
+                        if is_boundary_binding_name(&current_var_name) {
+                            "built-in: a value recorded where it crossed a module boundary"
+                        } else {
+                            "built-in: the line assigns another variable"
+                        }
+                        .to_string(),
+                    ),
+                    correlation_transition: None,
+                });
+                terminator = Terminator::new(TerminatorKind::UnknownSource);
+                terminator.source_line = Some(line_text);
+                break;
+            }
+
             // (3) Parse with the classifier.
             // `classify` runs against the *full source line* but stores
             // byte offsets into that line, so the `slice` calls below
@@ -4134,6 +4235,28 @@ impl MaterializedReplaySession {
             let (classification, ast_source) = match classification {
                 Some(pair) => pair,
                 None => {
+                    // `results.append(value)`: the variable changed through a method
+                    // of its own. That is a write; its earlier ones are the rest of
+                    // the chain.
+                    if line_mutates_variable(&line_text, &current_var_name) {
+                        hops.push(OriginHop {
+                            kind: WireOriginKind::Computational,
+                            target_expr: current_var_name.clone(),
+                            source_expr: line_text.trim().to_string(),
+                            source_variable: None,
+                            location: location.clone(),
+                            source_text: line_text.clone(),
+                            step_id: last_change_step.0,
+                            frame_transition: None,
+                            operand_snapshots: Vec::new(),
+                            truncated_operands: false,
+                            confidence: 0.5,
+                            classification_provenance: Some("built-in: in-place mutation".to_string()),
+                            correlation_transition: None,
+                        });
+                        current_step = StepId(last_change_step.0 - 1);
+                        continue;
+                    }
                     if last_change_step.0 > 0
                         && let Some(lang) = classifier_lang
                         && parse_call_arguments(&line_text, lang)
@@ -4292,6 +4415,7 @@ impl MaterializedReplaySession {
                 patterns_fingerprint: patterns.fingerprint().hex.clone(),
                 source_digests: source_digests.clone(),
                 issued_at: crate::wall_clock::unix_seconds(),
+                replay_resume: None,
             };
             token.encode().ok()
         } else {
@@ -4419,6 +4543,7 @@ impl MaterializedReplaySession {
                                 return BackwardScanOutcome::FoundInFrame {
                                     step_id: prev_step,
                                     steps_scanned,
+                                    first_sighting: false,
                                 };
                             }
                         }
@@ -4433,6 +4558,7 @@ impl MaterializedReplaySession {
                             return BackwardScanOutcome::FoundInFrame {
                                 step_id: prev_step,
                                 steps_scanned,
+                                first_sighting: true,
                             };
                         }
                     }
@@ -4482,6 +4608,7 @@ impl MaterializedReplaySession {
                         return BackwardScanOutcome::FoundInFrame {
                             step_id: prev_step,
                             steps_scanned,
+                            first_sighting: true,
                         };
                     }
                     return BackwardScanOutcome::FrameEntryReached {
@@ -4503,6 +4630,7 @@ impl MaterializedReplaySession {
             return BackwardScanOutcome::FoundInFrame {
                 step_id: prev_step,
                 steps_scanned,
+                first_sighting: true,
             };
         }
         BackwardScanOutcome::RecordingStart { steps_scanned }
@@ -4581,6 +4709,22 @@ impl MaterializedReplaySession {
             caller_frame,
             caller_step,
         ))
+    }
+
+    /// The frame that called `frame`, and its last step before the call, when
+    /// `var_name` is recorded there too: where a global seen first at
+    /// `frame`'s start was written.
+    fn enclosing_frame_holding(&self, var_name: &str, frame: CallKey) -> Option<(CallKey, StepId)> {
+        let call = self.reader.call(frame)?;
+        let outer = call.parent_key;
+        if outer.0 < 0 || outer == frame {
+            return None;
+        }
+        let step = self.nearest_prior_step_in_frame(call.step_id, outer)?;
+        let vars = self.reader.variables_at(step).unwrap_or(&[]);
+        vars.iter()
+            .any(|v| self.var_name_matches(v.variable_id, var_name))
+            .then_some((outer, step))
     }
 
     fn nearest_prior_step_in_frame(&self, from_step: StepId, frame: CallKey) -> Option<StepId> {
@@ -4779,6 +4923,17 @@ impl MaterializedReplaySession {
                     self.reader.path_version_ordinal(step.path_id),
                 );
                 if origin != SourceOrigin::Unavailable && !line_text.trim().is_empty() {
+                    // A statement written over several lines (`X = [`, its items, `]`)
+                    // is read whole, so the classifier sees the assignment.
+                    let line_text = complete_statement(line_text, |next| {
+                        let (text, from) = expr_loader.get_source_line_v2(
+                            &probe_path.to_path_buf(),
+                            row + next,
+                            meta_dat_sources_root,
+                            self.reader.path_version_ordinal(step.path_id),
+                        );
+                        (from != SourceOrigin::Unavailable).then_some(text)
+                    });
                     return Some((sid, line_text, origin));
                 }
             } else if step.call_key.0 < frame.0 {
@@ -5141,27 +5296,80 @@ fn ruby_block_argument_source(line_text: &str, param_name: &str) -> Option<Strin
 }
 
 fn value_records_equal(a: &ValueRecord, b: &ValueRecord) -> bool {
-    // Equality at the wire level is value-by-value. We compare the
-    // serialised debug representation because ValueRecord does not
-    // implement PartialEq (compound types contain HashMaps etc.).
-    // The debug format is stable for primitives (int/float/string/bool)
-    // which is the only case where same-value chains arise in practice;
-    // for compound values we fall back to "not equal" which means the
-    // backward scan terminates one hop earlier — a conservative choice
-    // that never returns a wrong answer.
-    matches!(
-        (a, b),
-        (ValueRecord::Int { i: ai, .. }, ValueRecord::Int { i: bi, .. }) if ai == bi
-    ) || matches!(
-        (a, b),
-        (ValueRecord::Float { f: af, .. }, ValueRecord::Float { f: bf, .. }) if af == bf
-    ) || matches!(
-        (a, b),
-        (ValueRecord::String { text: at, .. }, ValueRecord::String { text: bt, .. }) if at == bt
-    ) || matches!(
-        (a, b),
-        (ValueRecord::Bool { b: ab, .. }, ValueRecord::Bool { b: bb, .. }) if ab == bb
-    )
+    // Value by value, compound values element by element: a list that kept its
+    // contents did not change, and a backward scan that believed it had would
+    // name the query's own line as the write. A `Cell` names a place, not a
+    // value, so it counts as changed: the scan stops one hop early,
+    // which never reports a wrong write further back.
+    fn all_equal(a: &[ValueRecord], b: &[ValueRecord]) -> bool {
+        a.len() == b.len() && a.iter().zip(b).all(|(x, y)| value_records_equal(x, y))
+    }
+    match (a, b) {
+        (ValueRecord::Int { i: x, .. }, ValueRecord::Int { i: y, .. }) => x == y,
+        (ValueRecord::Float { f: x, .. }, ValueRecord::Float { f: y, .. }) => x == y,
+        (ValueRecord::Bool { b: x, .. }, ValueRecord::Bool { b: y, .. }) => x == y,
+        (ValueRecord::String { text: x, .. }, ValueRecord::String { text: y, .. }) => x == y,
+        (ValueRecord::None { .. }, ValueRecord::None { .. }) => true,
+        (ValueRecord::Sequence { elements: x, .. }, ValueRecord::Sequence { elements: y, .. }) => all_equal(x, y),
+        (ValueRecord::Tuple { elements: x, .. }, ValueRecord::Tuple { elements: y, .. }) => all_equal(x, y),
+        (ValueRecord::Struct { field_values: x, .. }, ValueRecord::Struct { field_values: y, .. }) => all_equal(x, y),
+        (ValueRecord::Raw { r: x, .. }, ValueRecord::Raw { r: y, .. }) => x == y,
+        _ => false,
+    }
+}
+
+/// `first`, and the lines after it while its brackets are still open: one
+/// statement, joined. `more(k)` reads the line `k` after the first, `None`
+/// past the end. Strings are skipped so a bracket inside one does not count;
+/// a statement still open after 64 lines is returned as its first line.
+fn complete_statement(first: String, mut more: impl FnMut(usize) -> Option<String>) -> String {
+    fn depth_after(text: &str, mut depth: i64) -> i64 {
+        let mut quote: Option<char> = None;
+        let mut escaped = false;
+        for c in text.chars() {
+            if let Some(q) = quote {
+                if escaped {
+                    escaped = false;
+                } else if c == '\\' {
+                    escaped = true;
+                } else if c == q {
+                    quote = None;
+                }
+                continue;
+            }
+            match c {
+                '"' | '\'' => quote = Some(c),
+                '#' => break,
+                '(' | '[' | '{' => depth += 1,
+                ')' | ']' | '}' => depth -= 1,
+                _ => {}
+            }
+        }
+        depth
+    }
+    let mut depth = depth_after(&first, 0);
+    if depth <= 0 {
+        return first;
+    }
+    let mut joined = first.trim_end().to_string();
+    for k in 1..=64 {
+        let Some(next) = more(k) else { break };
+        depth = depth_after(&next, depth);
+        joined.push(' ');
+        joined.push_str(next.trim());
+        if depth <= 0 {
+            return joined;
+        }
+    }
+    first
+}
+
+/// Whether `line` changes `name` through its own members: `name.append(v)`,
+/// `name[0] = v`. A word boundary is the character right after the name.
+fn line_mutates_variable(line: &str, name: &str) -> bool {
+    line.trim_start()
+        .strip_prefix(name)
+        .is_some_and(|rest| rest.starts_with('.') || rest.starts_with('['))
 }
 
 // ---------------------------------------------------------------------------
@@ -5861,24 +6069,143 @@ mod breakpoint_condition_tests {
         assert_eq!(continue_walk(&mut session, &[false]), vec![1]);
     }
 
-    /// A column-aware breakpoint spans only its own column, so two of them on
-    /// one line are two stops, and each is one stop however many steps its
-    /// column recorded.  A line-only breakpoint spans the line, columns and all.
-    #[test]
-    fn continue_coalesces_a_column_breakpoint_within_its_own_column_only() {
-        let at = |line, column| Visit {
+    /// A step at `line` and `column` in the outermost frame.
+    fn at(line: i64, column: i64) -> Visit {
+        Visit {
             column: Some(column),
             ..on_line(line)
+        }
+    }
+
+    /// A column-aware breakpoint spans only its own column, so two of them on
+    /// one line are two stops, and each is one stop however many steps its
+    /// column recorded: here column 14 makes a call and is resumed after it.
+    /// A line-only breakpoint spans the line, columns and all.
+    #[test]
+    fn continue_coalesces_a_column_breakpoint_within_its_own_column_only() {
+        let callee = Visit {
+            frame: 1,
+            ..on_line(10)
         };
-        let visits = [at(1, 1), at(1, 14), at(1, 14), at(1, 28), at(2, 1), at(2, 9), at(3, 1)];
+        let visits = [
+            at(1, 1),
+            at(1, 14),
+            callee,
+            at(1, 14),
+            at(1, 28),
+            at(2, 1),
+            at(2, 9),
+            at(3, 1),
+        ];
 
         let mut session = session_with_visits(&visits);
         for column in [14, 28] {
             session.add_breakpoint("synthetic.src", 1, Some(column), None).unwrap();
         }
         session.add_breakpoint("synthetic.src", 2, None, None).unwrap();
-        assert_eq!(continue_walk(&mut session, &[true, true, true]), vec![1, 3, 4]);
-        assert_eq!(continue_walk(&mut session, &[false, false]), vec![3, 1]);
+        assert_eq!(continue_walk(&mut session, &[true, true, true]), vec![1, 4, 5]);
+        assert_eq!(continue_walk(&mut session, &[false, false]), vec![4, 1]);
+    }
+
+    /// The `n`th iteration of a loop body at `line`, `column`: the loop's
+    /// variable `x` holds `n` there.
+    fn iteration(line: i64, column: i64, n: i64) -> Visit {
+        Visit {
+            x: Some(n),
+            ..at(line, column)
+        }
+    }
+
+    /// A loop body the recorder writes as one step per iteration, with no step
+    /// for the loop's header in between (the JavaScript recorder's
+    /// `for (…) {\n  var a = i;\n}`): each iteration is a visit, because each
+    /// runs the statement at line 2, column 3 again, and `x` changed.  The
+    /// reverse walk retraces the iterations.
+    #[test]
+    fn continue_stops_once_per_iteration_of_a_body_line_with_no_header_step() {
+        let body = |n| iteration(2, 3, n);
+        let visits = [at(1, 1), body(0), body(1), body(2), body(3), body(4), at(4, 1)];
+        let mut session = session_with_visits(&visits);
+        session.add_breakpoint("synthetic.src", 2, None, None).unwrap();
+
+        assert_eq!(
+            continue_walk(&mut session, &[true, true, true, true, true]),
+            vec![1, 2, 3, 4, 5],
+            "forward Continue must stop on every iteration"
+        );
+        assert_eq!(
+            continue_walk(&mut session, &[false, false, false, false]),
+            vec![4, 3, 2, 1]
+        );
+    }
+
+    /// A loop that never leaves its line (`for (…) { var a = i; }`): the first
+    /// iteration continues the visit the `for` statement began at step 0, and
+    /// every iteration after it runs column 31 again and is a visit of its own.
+    /// A column breakpoint on the body stops on each iteration, the first too.
+    #[test]
+    fn continue_stops_once_per_iteration_of_a_one_line_loop() {
+        let body = |n| iteration(1, 31, n);
+        let visits = [at(1, 1), body(0), body(1), body(2), at(2, 1)];
+
+        // The session starts on step 0, the `for` statement's own visit.
+        let mut session = session_with_visits(&visits);
+        session.add_breakpoint("synthetic.src", 1, None, None).unwrap();
+        assert_eq!(continue_walk(&mut session, &[true, true]), vec![2, 3]);
+        assert_eq!(continue_walk(&mut session, &[false, false]), vec![2, 0]);
+
+        let mut session = session_with_visits(&visits);
+        session.add_breakpoint("synthetic.src", 1, Some(31), None).unwrap();
+        assert_eq!(continue_walk(&mut session, &[true, true, true]), vec![1, 2, 3]);
+    }
+
+    /// The steps of ONE run of a statement are one visit wherever their
+    /// columns go, backwards included (an EVM statement's opcodes map to
+    /// `b`, then `a`, then the whole `x = a + b`), and so is the run of a
+    /// position that made a call and is resumed after it.  Only the same
+    /// position twice in a row, with a value changed, is a second run.
+    #[test]
+    fn continue_keeps_one_run_of_a_statement_one_visit() {
+        let callee = Visit {
+            frame: 1,
+            ..on_line(10)
+        };
+        let visits = [
+            at(1, 1),
+            at(2, 9),
+            at(2, 5),
+            at(2, 1),
+            at(3, 5),
+            callee,
+            at(3, 5),
+            at(4, 1),
+        ];
+        let mut session = session_with_visits(&visits);
+        for line in [2, 3, 4] {
+            session.add_breakpoint("synthetic.src", line, None, None).unwrap();
+        }
+        assert_eq!(continue_walk(&mut session, &[true, true, true]), vec![1, 4, 7]);
+        assert_eq!(continue_walk(&mut session, &[false, false]), vec![4, 1]);
+    }
+
+    /// The same position written again with nothing changed is not a second
+    /// run: the JavaScript recorder writes the program's first position again
+    /// once its main thread has started.  A breakpoint there stops once.
+    #[test]
+    fn continue_keeps_a_position_written_twice_with_no_change_one_visit() {
+        let visits = [
+            at(9, 1),
+            at(1, 1),
+            at(1, 1),
+            at(1, 1),
+            iteration(1, 31, 0),
+            iteration(1, 31, 1),
+            at(2, 1),
+        ];
+        let mut session = session_with_visits(&visits);
+        session.add_breakpoint("synthetic.src", 1, None, None).unwrap();
+        assert_eq!(continue_walk(&mut session, &[true, true]), vec![1, 5]);
+        assert_eq!(continue_walk(&mut session, &[false]), vec![1]);
     }
 
     /// A condition that turns true part way through a statement fires where
@@ -6293,6 +6620,53 @@ mod event_stdout_tests {
             EventLogKind::Open,
         ] {
             assert!(!stdout_of(kind), "{kind:?} is not standard output");
+        }
+    }
+}
+
+/// Whether `name` is the binding a recorder gave a value it captured where
+/// the value crossed a module boundary, rather than a name in the program.
+///
+/// The WebAssembly recorders name the values crossing an export or import
+/// `<label>:arg<n>` and `<label>:ret<n>` (`boundaryBindingName` in the
+/// instrumenter's `recorder-runtime/browser_session.js`): the boundary is
+/// positional, so the position is all a recording can say. No source line
+/// assigns such a name, and the step the recorder put it on is the
+/// boundary itself. So the rule that a variable first seen on another
+/// variable's line has no recorded write (a module's `__doc__`) does not
+/// apply: the value has an origin the source does not show, and the chain
+/// names that hop with an unknown source rather than claiming the
+/// recording's start.
+pub(crate) fn is_boundary_binding_name(name: &str) -> bool {
+    let Some((label, slot)) = name.rsplit_once(':') else {
+        return false;
+    };
+    let digits = slot.strip_prefix("arg").or_else(|| slot.strip_prefix("ret"));
+    !label.is_empty() && digits.is_some_and(|d| !d.is_empty() && d.bytes().all(|b| b.is_ascii_digit()))
+}
+
+#[cfg(test)]
+mod boundary_binding_name_tests {
+    use super::is_boundary_binding_name;
+
+    #[test]
+    fn the_webassembly_recorders_boundary_names_are_recognised() {
+        for name in [
+            "compute_balance:ret0",
+            "compute_balance:arg1",
+            "import #4:arg0",
+            "f:ret12",
+        ] {
+            assert!(is_boundary_binding_name(name), "{name}");
+        }
+    }
+
+    #[test]
+    fn program_names_are_not_boundary_names() {
+        for name in [
+            "__doc__", "balance", "Foo::BAR", "x:y", ":ret0", "f:ret", "f:retx", "f:arg-1", "a.b",
+        ] {
+            assert!(!is_boundary_binding_name(name), "{name}");
         }
     }
 }

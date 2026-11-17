@@ -58,8 +58,8 @@ use serde_json::Value as JsonValue;
 use crate::expr_loader::ExprLoader;
 use crate::expr_loader::SourceOrigin;
 use crate::origin_query::{
-    OriginContinuationToken, OriginError, OriginErrorCode, SourceDigest, SourceOriginKind, WallClockDeadline,
-    sha256_hex,
+    OriginContinuationToken, OriginError, OriginErrorCode, ReplayResume, SourceDigest, SourceOriginKind,
+    WallClockDeadline, sha256_hex,
 };
 use crate::query::ReplayQuery;
 use crate::recreator_session::RecreatorReplaySession;
@@ -71,10 +71,55 @@ use origin_classifier::{Classification, Lang as ClassifierLang, PatternSet, pars
 
 /// Default per-hop wall-clock cap for the RR origin loop (spec §6.3 —
 /// lower than the M2 materialized default because each hop costs a
-/// reverse-continue). The dispatcher applies this on top of the
-/// per-request budget.
+/// reverse-continue). It bounds how long one hop keeps re-issuing reverse
+/// continues past stops that are not a usable write; a write is taken
+/// however long the reverse continue that found it ran. The per-request
+/// budget bounds the whole walk.
 pub const RR_PER_HOP_WALL_CLOCK_MS: u32 = 1_500;
 const RR_UI_TEST_PER_HOP_ENV: &str = "CT_RR_ORIGIN_PER_HOP_WALL_CLOCK_MS";
+
+/// How many reverse continues one hop may always re-issue, however slowly
+/// the replay answers them (spec §6.3, "Per-hop cap").
+pub const RR_PER_HOP_MIN_REISSUES: u64 = 8;
+
+/// The per-hop cap, measured against how fast THIS replay answers. A fixed
+/// wall-clock cap made the chain's length depend on the host's load: where a
+/// reverse continue took a second, the cap allowed one re-issue and a
+/// three-hop chain ended at its first hop. The cap is therefore the larger of
+/// its wall-clock value and [`RR_PER_HOP_MIN_REISSUES`] times the slowest
+/// reverse continue the hop has issued, so a slow host spends more time on a
+/// hop instead of giving up on it. The request's wall-clock budget still
+/// bounds the whole walk.
+#[derive(Debug, Clone, Copy)]
+pub struct HopReissueCap {
+    cap_ms: u64,
+    slowest_reverse_continue_ms: u64,
+}
+
+impl HopReissueCap {
+    pub fn new(cap_ms: u32) -> Self {
+        HopReissueCap {
+            cap_ms: u64::from(cap_ms),
+            slowest_reverse_continue_ms: 0,
+        }
+    }
+
+    /// Note how long one reverse continue took.
+    pub fn record_reverse_continue(&mut self, elapsed_ms: u64) {
+        self.slowest_reverse_continue_ms = self.slowest_reverse_continue_ms.max(elapsed_ms);
+    }
+
+    /// The cap in effect: the wall-clock value, or more on a slow replay.
+    pub fn effective_cap_ms(&self) -> u64 {
+        self.cap_ms
+            .max(self.slowest_reverse_continue_ms.saturating_mul(RR_PER_HOP_MIN_REISSUES))
+    }
+
+    /// May the hop, `elapsed_ms` into it, re-issue another reverse continue?
+    pub fn allows_reissue(&self, elapsed_ms: u64) -> bool {
+        elapsed_ms < self.effective_cap_ms()
+    }
+}
 const RR_UI_TEST_PER_HOP_MAX_MS: u32 = 10_000;
 
 /// Default `max_hops` for the RR backend (spec §6.3 — half of M2's 16).
@@ -221,7 +266,51 @@ pub fn classifier_lang_for_path(path: &str) -> Option<ClassifierLang> {
 ///
 /// Returns an [`OriginChain`] on success or an [`OriginError`] carrying
 /// one of the spec §5.3 codes 6101–6106.
+///
+/// The walk runs the replay back to each write, and onto the writing thread
+/// when a write came from another one. Afterwards the replay is returned to
+/// the point it was asked at (spec §6.3, "The replay after a walk"), so that
+/// the next query there — the side panel asking for the chain the row just
+/// showed, or a step — starts where the user stands and not at the last
+/// write. The point is remembered as an rr checkpoint
+/// ([`ReplayQuery::SaveReplayPosition`]); a seek back to the starting tick
+/// count is not enough, because rr counts ticks per thread and seeks them on
+/// the thread it last stopped in.
 pub fn run_rr_origin_chain(
+    session: &mut RecreatorReplaySession,
+    args: &CtOriginChainArguments,
+    budget: &OriginBudget,
+    expr_loader: &mut ExprLoader,
+    patterns: &PatternSet,
+    meta_dat_sources_root: Option<&std::path::Path>,
+) -> RrOriginResult {
+    let mark = match session.stable.dispatch_replay_query(ReplayQuery::SaveReplayPosition) {
+        Ok(raw) => match serde_json::from_str::<JsonValue>(&raw) {
+            Ok(mark) => Some(mark),
+            Err(e) => {
+                warn!("origin_chain: the worker's position mark is not JSON ({e}): `{raw}`");
+                None
+            }
+        },
+        Err(e) => {
+            warn!("origin_chain: the worker cannot remember its position, so the walk will leave it moved: {e}");
+            None
+        }
+    };
+    let result = walk_rr_origin_chain(session, args, budget, expr_loader, patterns, meta_dat_sources_root);
+    if let Some(mark) = mark
+        && let Err(e) = session
+            .stable
+            .dispatch_replay_query(ReplayQuery::RestoreReplayPosition { mark })
+    {
+        log::error!(
+            "origin_chain: returning the replay to the queried point failed; it stays where the walk left it: {e}"
+        );
+    }
+    result
+}
+
+fn walk_rr_origin_chain(
     session: &mut RecreatorReplaySession,
     args: &CtOriginChainArguments,
     budget: &OriginBudget,
@@ -235,9 +324,39 @@ pub fn run_rr_origin_chain(
     // browser build, so measure elapsed time from the deadline rather
     // than opening a second, trapping clock.
     let deadline = WallClockDeadline::new(budget.wall_clock_ms);
-    let mut metrics = OriginMetrics::default();
-    let mut hops: Vec<OriginHop> = Vec::new();
-    let mut source_digests: Vec<SourceDigest> = Vec::new();
+    let metrics = OriginMetrics::default();
+    let hops: Vec<OriginHop> = Vec::new();
+
+    // A continuation (spec §5.3.1, "A replay walk's continuation") puts the
+    // replay back where the cut-off walk stopped and goes on from there.
+    if let Some(raw) = &args.continuation_token {
+        let (resumed, resume) = resume_from_token(session, raw, patterns, expr_loader)?;
+        return walk_from(
+            session,
+            args,
+            budget,
+            expr_loader,
+            patterns,
+            meta_dat_sources_root,
+            WalkStart {
+                deadline,
+                metrics,
+                hops,
+                source_digests: resumed.source_digests,
+                query_variable: resumed.query_variable,
+                query_step: resumed.query_step_id,
+                current_var_name: resumed.current_var_name,
+                watch: EvaluateAddressResponse {
+                    address: resume.address,
+                    size: resume.size,
+                },
+                querying_thread: resume.querying_thread,
+                hops_before: resumed.hops_emitted,
+            },
+        );
+    }
+
+    let source_digests: Vec<SourceDigest> = Vec::new();
     let current_worker_step = load_current_location(session, expr_loader)
         .map(|loc| loc.rr_ticks.0)
         .ok();
@@ -246,7 +365,7 @@ pub fn run_rr_origin_chain(
     } else {
         args.step_id
     };
-    let mut current_var_name = args.variable_name.clone();
+    let current_var_name = args.variable_name.clone();
     let query_variable = args.variable_name.clone();
 
     // Defensive bail-out: empty variable name = 6101 (spec §5.3).
@@ -272,7 +391,7 @@ pub fn run_rr_origin_chain(
     // Locals can lose addressable DWARF storage as soon as we move to the next
     // RR tick, so capture the real stack slot before positioning the worker for
     // reverse-watchpoint execution.
-    let mut watch = evaluate_with_address(session, &current_var_name)?;
+    let watch = evaluate_with_address(session, &current_var_name)?;
 
     // Step 2: position the replay worker for reverse-watchpoint execution.
     //
@@ -305,6 +424,112 @@ pub fn run_rr_origin_chain(
         }
     }
 
+    let querying_thread = current_thread(session).unwrap_or(0);
+    walk_from(
+        session,
+        args,
+        budget,
+        expr_loader,
+        patterns,
+        meta_dat_sources_root,
+        WalkStart {
+            deadline,
+            metrics,
+            hops,
+            source_digests,
+            query_variable,
+            query_step: initial_query_step,
+            current_var_name,
+            watch,
+            querying_thread,
+            hops_before: 0,
+        },
+    )
+}
+
+/// Where [`walk_from`] starts: a fresh query's first variable at the queried
+/// point, or a continuation's next variable at the point the cut-off walk
+/// stopped at (the replay already stands there).
+struct WalkStart {
+    deadline: WallClockDeadline,
+    metrics: OriginMetrics,
+    hops: Vec<OriginHop>,
+    source_digests: Vec<SourceDigest>,
+    query_variable: String,
+    query_step: i64,
+    current_var_name: String,
+    watch: EvaluateAddressResponse,
+    querying_thread: u32,
+    /// Hops the chain's earlier requests returned (0 for a fresh query).
+    hops_before: u32,
+}
+
+/// Decode a continuation token for a replay walk, check it still applies, and
+/// put the replay back at the point it continues from (spec §5.3.1, "A
+/// replay walk's continuation"). Every refusal is DAP 6106: the chain cannot
+/// be continued, and the user traces the value again.
+fn resume_from_token(
+    session: &mut RecreatorReplaySession,
+    raw: &str,
+    patterns: &PatternSet,
+    expr_loader: &mut ExprLoader,
+) -> Result<(OriginContinuationToken, ReplayResume), OriginError> {
+    let mut token = OriginContinuationToken::decode(raw)?;
+    crate::origin_query::check_continuation_token_integrity(&token, &patterns.fingerprint().hex, |path| {
+        expr_loader.token_digest_bytes(path)
+    })?;
+    let Some(resume) = token.replay_resume.take() else {
+        return Err(OriginError::new(
+            OriginErrorCode::ContinuationTokenInvalid,
+            "this continuation was not issued by a replay walk, so it names no replay point to continue from",
+        ));
+    };
+    if !session.take_origin_continuation(&resume.mark) {
+        return Err(OriginError::new(
+            OriginErrorCode::ContinuationTokenInvalid,
+            "the replay no longer holds the point this chain continues from (it was continued already, \
+             a newer cut-off chain took its place, or the replay restarted); trace the value again",
+        ));
+    }
+    session
+        .stable
+        .dispatch_replay_query(ReplayQuery::RestoreReplayPosition {
+            mark: resume.mark.clone(),
+        })
+        .map_err(|e| {
+            OriginError::new(
+                OriginErrorCode::ContinuationTokenInvalid,
+                format!("the replay could not return to the point this chain continues from: {e}"),
+            )
+        })?;
+    Ok((token, resume))
+}
+
+/// The hop loop of the replay walk (spec §6.3), from `start`.
+fn walk_from(
+    session: &mut RecreatorReplaySession,
+    args: &CtOriginChainArguments,
+    budget: &OriginBudget,
+    expr_loader: &mut ExprLoader,
+    patterns: &PatternSet,
+    meta_dat_sources_root: Option<&std::path::Path>,
+    start: WalkStart,
+) -> RrOriginResult {
+    let WalkStart {
+        deadline,
+        mut metrics,
+        mut hops,
+        mut source_digests,
+        query_variable,
+        query_step: initial_query_step,
+        mut current_var_name,
+        mut watch,
+        querying_thread,
+        hops_before,
+    } = start;
+
+    // `max_hops` bounds one request (spec §5.3.1, "A replay walk's
+    // continuation"): a continuation walks up to as many hops again.
     let mut effective_max_hops = budget.max_hops.max(1);
     if args.max_hops > 0 {
         effective_max_hops = effective_max_hops.min(args.max_hops);
@@ -316,12 +541,15 @@ pub fn run_rr_origin_chain(
 
     let mut terminator = Terminator::new(TerminatorKind::UnknownSource);
     let mut truncated = false;
-    let querying_thread = current_thread(session).unwrap_or(0);
 
     while hops.len() < effective_max_hops as usize {
-        if deadline.exceeded() {
+        // The request's time limit is checked between hops, never before
+        // the first: every request, a continuation included, walks at least
+        // one hop, so continuing a chain always gets further.
+        if !hops.is_empty() && deadline.exceeded() {
             terminator = Terminator::new(TerminatorKind::OutOfBudget);
             terminator.expression = format!("wall-clock budget exhausted ({} ms)", budget.wall_clock_ms);
+            truncated = true;
             break;
         }
 
@@ -346,12 +574,28 @@ pub fn run_rr_origin_chain(
         // instruction's source line does not target `current_var_name`
         // (spec §6.3 "stack-slot reuse / aliasing guard").
         let hop_started = WallClockDeadline::new(per_hop_cap_ms);
+        let mut hop_cap = HopReissueCap::new(per_hop_cap_ms);
+        // The cap bounds the RE-ISSUES (spec §6.3, "Per-hop cap"): a stop
+        // that is not a usable write is re-issued only while the hop is
+        // within its cap. A write found by a reverse continue that itself
+        // took longer than the cap is still taken — the time is spent
+        // already, and throwing the write away only made the chain's length
+        // depend on the host's load (a loaded host ended the first hop of a
+        // cross-thread chain at the cap). The request's wall-clock budget
+        // still bounds the query between hops.
+        let mut reissue = false;
         let validated = loop {
-            let raw = match wp_guard
+            if reissue && !hop_cap.allows_reissue(hop_started.elapsed_ms()) {
+                break ValidatedHop::OutOfBudget;
+            }
+            reissue = true;
+            let issued_at_ms = hop_started.elapsed_ms();
+            let answer = wp_guard
                 .session
                 .stable
-                .dispatch_replay_query(ReplayQuery::ReverseContinue)
-            {
+                .dispatch_replay_query(ReplayQuery::ReverseContinue);
+            hop_cap.record_reverse_continue(hop_started.elapsed_ms().saturating_sub(issued_at_ms));
+            let raw = match answer {
                 Ok(r) => r,
                 Err(e) => {
                     drop(wp_guard); // defensive watchpoint cleanup on error.
@@ -370,14 +614,7 @@ pub fn run_rr_origin_chain(
                     "origin_chain: reverse-continue stopped for non-watchpoint reason `{}`; re-issuing until watchpoint, recording start, or cap",
                     rc.reason
                 );
-                if hop_started.exceeded() {
-                    break ValidatedHop::OutOfBudget;
-                }
                 continue;
-            }
-            // Per-hop wall-clock cap.
-            if hop_started.exceeded() {
-                break ValidatedHop::OutOfBudget;
             }
 
             // 3. Inspect the writing PC and decode (path, line).
@@ -526,7 +763,7 @@ pub fn run_rr_origin_chain(
                 terminator = Terminator::new(TerminatorKind::OutOfBudget);
                 terminator.expression = format!(
                     "rr per-hop wall-clock cap ({} ms) tripped; documentation: spec §6.3",
-                    per_hop_cap_ms
+                    hop_cap.effective_cap_ms()
                 );
                 terminator.source_line = Some(format!(
                     "elided assignment for `{}` — see {}",
@@ -660,16 +897,25 @@ pub fn run_rr_origin_chain(
     metrics.steps_scanned = hops.len() as u64;
 
     let confidence: f32 = hops.iter().map(|h| h.confidence).fold(1.0_f32, f32::min);
+    // A cut-off chain continues from where the replay stands now: at the last
+    // hop's write, with `watch` resolved for the variable to follow next.
     let continuation_token = if truncated {
-        Some(build_continuation_token(
-            &query_variable,
-            initial_query_step,
-            &current_var_name,
-            hops.len() as u32,
-            effective_max_hops,
-            patterns,
-            source_digests.clone(),
-        )?)
+        match remember_continuation_point(session, &watch, querying_thread) {
+            Some(replay_resume) => Some(build_continuation_token(
+                &query_variable,
+                initial_query_step,
+                hops.last()
+                    .map(|hop| hop.location.rr_ticks.0)
+                    .unwrap_or(initial_query_step),
+                &current_var_name,
+                hops_before + hops.len() as u32,
+                effective_max_hops,
+                patterns,
+                source_digests.clone(),
+                replay_resume,
+            )?),
+            None => None,
+        }
     } else {
         None
     };
@@ -694,7 +940,9 @@ fn rr_per_hop_wall_clock_ms() -> u32 {
     std::env::var(RR_UI_TEST_PER_HOP_ENV)
         .ok()
         .and_then(|raw| raw.parse::<u32>().ok())
-        .map(|ms| ms.clamp(RR_PER_HOP_WALL_CLOCK_MS, RR_UI_TEST_PER_HOP_MAX_MS))
+        // Below the default too: a test sets 1 ms to make every hop "slow"
+        // and check that a found write is still taken (spec §6.3 "Per-hop cap").
+        .map(|ms| ms.clamp(1, RR_UI_TEST_PER_HOP_MAX_MS))
         .unwrap_or(RR_PER_HOP_WALL_CLOCK_MS)
 }
 
@@ -924,22 +1172,59 @@ fn track_source_digest(
     });
 }
 
+/// Remember the point the replay stands at as the one a cut-off chain
+/// continues from, and hold it in the session (which lets go of the oldest
+/// held point beyond `MAX_ORIGIN_CONTINUATIONS`). `None` when the worker
+/// cannot remember its position: the chain is then cut off with nothing to
+/// continue from.
+fn remember_continuation_point(
+    session: &mut RecreatorReplaySession,
+    watch: &EvaluateAddressResponse,
+    querying_thread: u32,
+) -> Option<ReplayResume> {
+    let raw = match session.stable.dispatch_replay_query(ReplayQuery::SaveReplayPosition) {
+        Ok(raw) => raw,
+        Err(e) => {
+            warn!(
+                "origin_chain: the worker cannot remember where the cut-off walk stopped, so it cannot be continued: {e}"
+            );
+            return None;
+        }
+    };
+    let mark = match serde_json::from_str::<JsonValue>(&raw) {
+        Ok(mark) => mark,
+        Err(e) => {
+            warn!("origin_chain: the worker's position mark is not JSON ({e}): `{raw}`");
+            return None;
+        }
+    };
+    session.hold_origin_continuation(mark.clone());
+    Some(ReplayResume {
+        mark,
+        address: watch.address,
+        size: watch.size,
+        querying_thread,
+    })
+}
+
 /// Build an opaque continuation token for the chain (spec §5.3.1).
 #[allow(clippy::too_many_arguments)]
 fn build_continuation_token(
     query_variable: &str,
     query_step_id: i64,
+    current_step: i64,
     current_var_name: &str,
     hops_emitted: u32,
     max_hops: u32,
     patterns: &PatternSet,
     source_digests: Vec<SourceDigest>,
+    replay_resume: ReplayResume,
 ) -> Result<String, OriginError> {
     let token = OriginContinuationToken {
         v: OriginContinuationToken::CURRENT_VERSION,
         query_variable: query_variable.to_string(),
         query_step_id,
-        current_step: query_step_id,
+        current_step,
         current_frame: -1,
         current_var_name: current_var_name.to_string(),
         hops_emitted,
@@ -947,6 +1232,7 @@ fn build_continuation_token(
         patterns_fingerprint: patterns.fingerprint().hex.clone(),
         source_digests,
         issued_at: crate::wall_clock::unix_seconds(),
+        replay_resume: Some(replay_resume),
     };
     token.encode()
 }
@@ -972,6 +1258,47 @@ mod tests {
         // pushes the RR default up to 16 trips this test).
         const _ASSERT_DEFAULTS_DIFFER: () = assert!(RR_DEFAULT_MAX_HOPS < crate::task::DEFAULT_ORIGIN_MAX_HOPS);
         assert!(RR_DEFAULT_MAX_HOPS < crate::task::DEFAULT_ORIGIN_MAX_HOPS);
+    }
+
+    #[test]
+    fn the_per_hop_cap_scales_with_how_fast_the_replay_answers() {
+        // A fast replay (reverse continues of 100 ms): the wall-clock cap
+        // decides, as before — 14 re-issues fit, the 15th does not.
+        let mut fast = HopReissueCap::new(RR_PER_HOP_WALL_CLOCK_MS);
+        let mut elapsed = 0;
+        let mut issued = 0;
+        while fast.allows_reissue(elapsed) {
+            fast.record_reverse_continue(100);
+            elapsed += 100;
+            issued += 1;
+        }
+        assert_eq!(fast.effective_cap_ms(), u64::from(RR_PER_HOP_WALL_CLOCK_MS));
+        assert_eq!(issued, 15);
+
+        // A loaded host (reverse continues of 1,200 ms): the fixed cap
+        // allowed ONE re-issue, and a three-hop chain ended at its first
+        // hop. The cap now follows the replay's speed, so the hop still
+        // gets its minimum number of re-issues.
+        let mut slow = HopReissueCap::new(RR_PER_HOP_WALL_CLOCK_MS);
+        let mut elapsed = 0;
+        let mut issued = 0;
+        while slow.allows_reissue(elapsed) {
+            slow.record_reverse_continue(1_200);
+            elapsed += 1_200;
+            issued += 1;
+        }
+        assert_eq!(issued, RR_PER_HOP_MIN_REISSUES);
+        assert!(slow.effective_cap_ms() > u64::from(RR_PER_HOP_WALL_CLOCK_MS));
+
+        // CONTROL: the fixed wall-clock cap this replaces, under the same
+        // load, lets the hop issue only two reverse continues.
+        let mut elapsed = 0;
+        let mut issued = 0;
+        while elapsed < u64::from(RR_PER_HOP_WALL_CLOCK_MS) {
+            elapsed += 1_200;
+            issued += 1;
+        }
+        assert_eq!(issued, 2);
     }
 
     #[test]

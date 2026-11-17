@@ -1,0 +1,15 @@
+# Control digests for run-plat65-nim-tracing-mutations.py —
+# the subjects AND the suites the arms are graded by (§16c).
+# Refreshed with --record-control-hashes, gated by the
+# needle scan (§39a).
+22a797571a1b43a6b1786d977391abde738216a1e73018e499685805cec72ac6  src/frontend/viewmodel/viewmodels/nim_tracing_vm.nim
+308ff686a913389b1041cf893d2737c23489f5f0bd36a9f69b7fb81f065ae020  src/frontend/viewmodel/host/native_nim_tracer.nim
+5714112e36bc517ef919a226c1b6ad8ae588015cfef1fafa37ebc72ae1cf32e9  src/frontend/headless_app/pane_clicks.nim
+a7a3bb422082c3ce0dbfd6321695a4a8876ce902281ec4c17f02c3bc4e1bbeb8  src/frontend/tui/app/runtime.nim
+82a88f3f2c8697dc6edab12b1b2be1b458357d4f5be0597552709fceabf7593c  src/frontend/tui/main.nim
+bd206f82ec3b500e52053e6eeda52e891e83aede0353ce2e485c65e1fcf50d85  src/frontend/gpui/main.nim
+643fb879cc5dbd70044dc62566bed49974e2ffd5103497069e607fa4cab2451d  src/frontend/viewmodel/keymap/cua_keymap.nim
+6459644f00fe59f0d69f5c8c58216a226dcbbd7a9af4133e0bd0e2d123c793d9  src/frontend/viewmodel/viewmodels/omnibar_sources.nim
+b7b5e9774a7582155484b9a5facd62f4eed9501e7dbf0f708c586de7170bb6ba  src/frontend/viewmodel/tests/unit/test_plat65_nim_tracing_vm.nim
+c7c0c9a3ee813d2058350a2db5d16f3296381f43cd848986606d9f1b23fde7ba  src/frontend/tui/tests/real_terminal/test_plat65_nim_tracing_pty.nim
+18ac7ea57dca2c4e4eb7da4c84b17f493ff3f3eaf1cef4b1728205e704fd3d7c  src/frontend/gpui/tests/test_plat65_gpui_nim_tracing.nim

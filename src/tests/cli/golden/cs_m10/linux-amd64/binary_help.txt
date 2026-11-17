@@ -1,0 +1,1272 @@
+# help screens, the version and the help-delegate commands, through ct: 105 cases
+
+### 1: top: --help
+argv: ct "--help"
+env: (none)
+exit: 0
+--- stdout
+<the long help page clispec renders for this request: ct>
+--- stderr
+--- end
+
+### 2: top: -h
+argv: ct "-h"
+env: (none)
+exit: 0
+--- stdout
+<the short help page clispec renders for this request: ct>
+--- stderr
+--- end
+
+### 3: top: help (a word)
+argv: ct "help"
+env: (none)
+exit: 0
+--- stdout
+<the long help page clispec renders for this request: ct>
+--- stderr
+--- end
+
+### 4: top: help record
+argv: ct "help" "record"
+env: (none)
+exit: 0
+--- stdout
+<the long help page clispec renders for this request: ct>
+--- stderr
+--- end
+
+### 5: top: --HELP
+argv: ct "--HELP"
+env: (none)
+exit: 0
+--- stdout
+<the long help page clispec renders for this request: ct>
+--- stderr
+--- end
+
+### 6: top: --he_lp
+argv: ct "--he_lp"
+env: (none)
+exit: 0
+--- stdout
+<the long help page clispec renders for this request: ct>
+--- stderr
+--- end
+
+### 7: top: --help=1
+argv: ct "--help=1"
+env: (none)
+exit: 0
+--- stdout
+<the long help page clispec renders for this request: ct>
+--- stderr
+--- end
+
+### 8: top: --help record
+argv: ct "--help" "record"
+env: (none)
+exit: 0
+--- stdout
+<the long help page clispec renders for this request: ct>
+--- stderr
+--- end
+
+### 9: top: -help (a cluster)
+argv: ct "-help"
+env: (none)
+exit: 0
+--- stdout
+<the short help page clispec renders for this request: ct>
+--- stderr
+--- end
+
+### 10: top: --version
+argv: ct "--version"
+env: (none)
+exit: 0
+--- stdout
+CodeTracer version: <VERSION>
+\e[0m
+(no newline at end of stdout)
+--- stderr
+--- end
+
+### 11: top: version (a word)
+argv: ct "version"
+env: (none)
+exit: 0
+--- stdout
+CodeTracer version: <VERSION>
+\e[0m
+(no newline at end of stdout)
+--- stderr
+--- end
+
+### 12: top: --help, COLUMNS=40
+argv: ct "--help"
+env: COLUMNS="40"
+exit: 0
+--- stdout
+<the long help page clispec renders for this request: ct>
+--- stderr
+--- end
+
+### 13: top: --help, COLUMNS=120
+argv: ct "--help"
+env: COLUMNS="120"
+exit: 0
+--- stdout
+<the long help page clispec renders for this request: ct>
+--- stderr
+--- end
+
+### 14: top: --help, COLUMNS=250
+argv: ct "--help"
+env: COLUMNS="250"
+exit: 0
+--- stdout
+<the long help page clispec renders for this request: ct>
+--- stderr
+--- end
+
+### 15: top: --help, COLUMNS=x
+argv: ct "--help"
+env: COLUMNS="x"
+exit: 0
+--- stdout
+<the long help page clispec renders for this request: ct>
+--- stderr
+--- end
+
+### 16: install --help
+argv: ct "install" "--help"
+env: (none)
+exit: 0
+--- stdout
+<the long help page clispec renders for this request: ct install>
+--- stderr
+--- end
+
+### 17: list --help
+argv: ct "list" "--help"
+env: (none)
+exit: 0
+--- stdout
+<the long help page clispec renders for this request: ct list>
+--- stderr
+--- end
+
+### 18: print --help
+argv: ct "print" "--help"
+env: (none)
+exit: 0
+--- stdout
+<the long help page clispec renders for this request: ct print>
+--- stderr
+--- end
+
+### 19: replay --help
+argv: ct "replay" "--help"
+env: (none)
+exit: 0
+--- stdout
+<the long help page clispec renders for this request: ct replay>
+--- stderr
+--- end
+
+### 20: console --help
+argv: ct "console" "--help"
+env: (none)
+exit: 0
+--- stdout
+<the long help page clispec renders for this request: ct console>
+--- stderr
+--- end
+
+### 21: upload --help
+argv: ct "upload" "--help"
+env: (none)
+exit: 0
+--- stdout
+<the long help page clispec renders for this request: ct upload>
+--- stderr
+--- end
+
+### 22: host --help
+argv: ct "host" "--help"
+env: (none)
+exit: 0
+--- stdout
+<the long help page clispec renders for this request: ct host>
+--- stderr
+--- end
+
+### 23: import --help
+argv: ct "import" "--help"
+env: (none)
+exit: 0
+--- stdout
+<the long help page clispec renders for this request: ct import>
+--- stderr
+--- end
+
+### 24: build --help
+argv: ct "build" "--help"
+env: (none)
+exit: 0
+--- stdout
+<the long help page clispec renders for this request: ct build>
+--- stderr
+--- end
+
+### 25: record --help
+argv: ct "record" "--help"
+env: (none)
+exit: 0
+--- stdout
+<the long help page clispec renders for this request: ct record>
+--- stderr
+--- end
+
+### 26: record-test --help
+argv: ct "record-test" "--help"
+env: (none)
+exit: 0
+--- stdout
+<the long help page clispec renders for this request: ct record-test>
+--- stderr
+--- end
+
+### 27: run --help
+argv: ct "run" "--help"
+env: (none)
+exit: 0
+--- stdout
+<the long help page clispec renders for this request: ct run>
+--- stderr
+--- end
+
+### 28: remote --help
+argv: ct "remote" "--help"
+env: (none)
+NOT RUN: the parse succeeds, so ct would go on to run it
+
+### 29: electron --help
+argv: ct "electron" "--help"
+env: (none)
+NOT RUN: the parse succeeds, so ct would go on to run it
+
+### 30: download --help
+argv: ct "download" "--help"
+env: (none)
+exit: 0
+--- stdout
+<the long help page clispec renders for this request: ct download>
+--- stderr
+--- end
+
+### 31: login --help
+argv: ct "login" "--help"
+env: (none)
+exit: 0
+--- stdout
+<the long help page clispec renders for this request: ct login>
+--- stderr
+--- end
+
+### 32: set-default-org --help
+argv: ct "set-default-org" "--help"
+env: (none)
+exit: 0
+--- stdout
+<the long help page clispec renders for this request: ct set-default-org>
+--- stderr
+--- end
+
+### 33: get-default-org --help
+argv: ct "get-default-org" "--help"
+env: (none)
+exit: 0
+--- stdout
+<the long help page clispec renders for this request: ct get-default-org>
+--- stderr
+--- end
+
+### 34: activate --help
+argv: ct "activate" "--help"
+env: (none)
+exit: 0
+--- stdout
+<the long help page clispec renders for this request: ct activate>
+--- stderr
+--- end
+
+### 35: check-license --help
+argv: ct "check-license" "--help"
+env: (none)
+exit: 0
+--- stdout
+<the long help page clispec renders for this request: ct check-license>
+--- stderr
+--- end
+
+### 36: arb --help
+argv: ct "arb" "--help"
+env: (none)
+exit: 0
+--- stdout
+<the long help page clispec renders for this request: ct arb>
+--- stderr
+--- end
+
+### 37: ci --help
+argv: ct "ci" "--help"
+env: (none)
+exit: 0
+--- stdout
+<the long help page clispec renders for this request: ct ci>
+--- stderr
+--- end
+
+### 38: index-diff --help
+argv: ct "index-diff" "--help"
+env: (none)
+exit: 0
+--- stdout
+<the long help page clispec renders for this request: ct index-diff>
+--- stderr
+--- end
+
+### 39: edit --help
+argv: ct "edit" "--help"
+env: (none)
+exit: 0
+--- stdout
+<the long help page clispec renders for this request: ct edit>
+--- stderr
+--- end
+
+### 40: trace-metadata --help
+argv: ct "trace-metadata" "--help"
+env: (none)
+exit: 0
+--- stdout
+<the long help page clispec renders for this request: ct trace-metadata>
+--- stderr
+--- end
+
+### 41: start_backend --help
+argv: ct "start_backend" "--help"
+env: (none)
+exit: 0
+--- stdout
+<the long help page clispec renders for this request: ct start_backend>
+--- stderr
+--- end
+
+### 42: trace --help
+argv: ct "trace" "--help"
+env: (none)
+exit: 0
+--- stdout
+<the long help page clispec renders for this request: ct trace>
+--- stderr
+--- end
+
+### 43: gfx-replay --help
+argv: ct "gfx-replay" "--help"
+env: (none)
+exit: 0
+--- stdout
+<the long help page clispec renders for this request: ct gfx-replay>
+--- stderr
+--- end
+
+### 44: doctor --help
+argv: ct "doctor" "--help"
+env: (none)
+exit: 0
+--- stdout
+<the long help page clispec renders for this request: ct doctor>
+--- stderr
+--- end
+
+### 45: ct-describe-commands --help
+argv: ct "ct-describe-commands" "--help"
+env: (none)
+exit: 0
+--- stdout
+<the long help page clispec renders for this request: ct ct-describe-commands>
+--- stderr
+--- end
+
+### 46: ct-help --help
+argv: ct "ct-help" "--help"
+env: (none)
+exit: 0
+--- stdout
+<the long help page clispec renders for this request: ct ct-help>
+--- stderr
+--- end
+
+### 47: review --help (intercepted)
+argv: ct "review" "--help"
+env: (none)
+exit: 0
+--- stdout
+`ct review` — review a diff with its recorded executions (DeepReview).
+
+Usage:
+  ct review <PATH>                    open a review over an exported dataset
+                                      (a review.json file, or a directory
+                                      produced by `ct review collect`)
+  ct review collect [OPTIONS]         produce a review dataset
+  ct review inspect <PATH> [--format text|json]
+                                      summarise a dataset without a GUI
+
+`ct review collect` options:
+  --repo <DIR>          git repository the diff is read from
+  --diff <BASE..HEAD>   diff specification, e.g. main..HEAD
+  --diff-file <PATH>    a unified diff file instead of --repo/--diff
+  --recordings <DIR>    directory of recordings to collect from
+  --output, -o <DIR>    output directory for the dataset (required)
+  --preset <NAME>       default | minimal | comprehensive
+  --progress            emit JSON Lines progress events on stderr
+
+`collect` writes the dataset chunks and a `review.json` beside them, so
+`ct review <the same DIR>` opens what it just produced.
+
+--- stderr
+--- end
+
+### 48: review -h (intercepted)
+argv: ct "review" "-h"
+env: (none)
+exit: 0
+--- stdout
+`ct review` — review a diff with its recorded executions (DeepReview).
+
+Usage:
+  ct review <PATH>                    open a review over an exported dataset
+                                      (a review.json file, or a directory
+                                      produced by `ct review collect`)
+  ct review collect [OPTIONS]         produce a review dataset
+  ct review inspect <PATH> [--format text|json]
+                                      summarise a dataset without a GUI
+
+`ct review collect` options:
+  --repo <DIR>          git repository the diff is read from
+  --diff <BASE..HEAD>   diff specification, e.g. main..HEAD
+  --diff-file <PATH>    a unified diff file instead of --repo/--diff
+  --recordings <DIR>    directory of recordings to collect from
+  --output, -o <DIR>    output directory for the dataset (required)
+  --preset <NAME>       default | minimal | comprehensive
+  --progress            emit JSON Lines progress events on stderr
+
+`collect` writes the dataset chunks and a `review.json` beside them, so
+`ct review <the same DIR>` opens what it just produced.
+
+--- stderr
+--- end
+
+### 49: review help (intercepted)
+argv: ct "review" "help"
+env: (none)
+exit: 0
+--- stdout
+`ct review` — review a diff with its recorded executions (DeepReview).
+
+Usage:
+  ct review <PATH>                    open a review over an exported dataset
+                                      (a review.json file, or a directory
+                                      produced by `ct review collect`)
+  ct review collect [OPTIONS]         produce a review dataset
+  ct review inspect <PATH> [--format text|json]
+                                      summarise a dataset without a GUI
+
+`ct review collect` options:
+  --repo <DIR>          git repository the diff is read from
+  --diff <BASE..HEAD>   diff specification, e.g. main..HEAD
+  --diff-file <PATH>    a unified diff file instead of --repo/--diff
+  --recordings <DIR>    directory of recordings to collect from
+  --output, -o <DIR>    output directory for the dataset (required)
+  --preset <NAME>       default | minimal | comprehensive
+  --progress            emit JSON Lines progress events on stderr
+
+`collect` writes the dataset chunks and a `review.json` beside them, so
+`ct review <the same DIR>` opens what it just produced.
+
+--- stderr
+--- end
+
+### 50: review x --help
+argv: ct "review" "x" "--help"
+env: (none)
+exit: 0
+--- stdout
+<the long help page clispec renders for this request: ct review>
+--- stderr
+--- end
+
+### 51: arb explorer --help
+argv: ct "arb" "explorer" "--help"
+env: (none)
+exit: 0
+--- stdout
+<the long help page clispec renders for this request: ct arb explorer>
+--- stderr
+--- end
+
+### 52: arb record --help
+argv: ct "arb" "record" "--help"
+env: (none)
+exit: 0
+--- stdout
+<the long help page clispec renders for this request: ct arb record>
+--- stderr
+--- end
+
+### 53: arb replay --help
+argv: ct "arb" "replay" "--help"
+env: (none)
+exit: 0
+--- stdout
+<the long help page clispec renders for this request: ct arb replay>
+--- stderr
+--- end
+
+### 54: arb deploy --help
+argv: ct "arb" "deploy" "--help"
+env: (none)
+exit: 0
+--- stdout
+<the long help page clispec renders for this request: ct arb deploy>
+--- stderr
+--- end
+
+### 55: arb listRecentTx --help
+argv: ct "arb" "listRecentTx" "--help"
+env: (none)
+exit: 0
+--- stdout
+<the long help page clispec renders for this request: ct arb listRecentTx>
+--- stderr
+--- end
+
+### 56: ci start --help
+argv: ct "ci" "start" "--help"
+env: (none)
+exit: 0
+--- stdout
+<the long help page clispec renders for this request: ct ci start>
+--- stderr
+--- end
+
+### 57: ci attach --help
+argv: ct "ci" "attach" "--help"
+env: (none)
+exit: 0
+--- stdout
+<the long help page clispec renders for this request: ct ci attach>
+--- stderr
+--- end
+
+### 58: ci exec --help
+argv: ct "ci" "exec" "--help"
+env: (none)
+exit: 0
+--- stdout
+<the long help page clispec renders for this request: ct ci exec>
+--- stderr
+--- end
+
+### 59: ci finish --help
+argv: ct "ci" "finish" "--help"
+env: (none)
+exit: 0
+--- stdout
+<the long help page clispec renders for this request: ct ci finish>
+--- stderr
+--- end
+
+### 60: ci run --help
+argv: ct "ci" "run" "--help"
+env: (none)
+exit: 0
+--- stdout
+<the long help page clispec renders for this request: ct ci run>
+--- stderr
+--- end
+
+### 61: ci log --help
+argv: ct "ci" "log" "--help"
+env: (none)
+exit: 0
+--- stdout
+<the long help page clispec renders for this request: ct ci log>
+--- stderr
+--- end
+
+### 62: ci status --help
+argv: ct "ci" "status" "--help"
+env: (none)
+exit: 0
+--- stdout
+<the long help page clispec renders for this request: ct ci status>
+--- stderr
+--- end
+
+### 63: ci cancel --help
+argv: ct "ci" "cancel" "--help"
+env: (none)
+exit: 0
+--- stdout
+<the long help page clispec renders for this request: ct ci cancel>
+--- stderr
+--- end
+
+### 64: trace extract-gfx --help
+argv: ct "trace" "extract-gfx" "--help"
+env: (none)
+exit: 0
+--- stdout
+<the long help page clispec renders for this request: ct trace extract-gfx>
+--- stderr
+--- end
+
+### 65: trace export --help
+argv: ct "trace" "export" "--help"
+env: (none)
+exit: 0
+--- stdout
+<the long help page clispec renders for this request: ct trace export>
+--- stderr
+--- end
+
+### 66: trace omniscient-prep --help
+argv: ct "trace" "omniscient-prep" "--help"
+env: (none)
+exit: 0
+--- stdout
+<the long help page clispec renders for this request: ct trace omniscient-prep>
+--- stderr
+--- end
+
+### 67: ci help (a word)
+argv: ct "ci" "help"
+env: (none)
+exit: 0
+--- stdout
+<the long help page clispec renders for this request: ct ci>
+--- stderr
+--- end
+
+### 68: trace help (a word)
+argv: ct "trace" "help"
+env: (none)
+exit: 0
+--- stdout
+<the long help page clispec renders for this request: ct trace>
+--- stderr
+--- end
+
+### 69: arb version (a word)
+argv: ct "arb" "version"
+env: (none)
+exit: 0
+--- stdout
+CodeTracer version: <VERSION>
+\e[0m
+(no newline at end of stdout)
+--- stderr
+--- end
+
+### 70: record --help, COLUMNS=60
+argv: ct "record" "--help"
+env: COLUMNS="60"
+exit: 0
+--- stdout
+<the long help page clispec renders for this request: ct record>
+--- stderr
+--- end
+
+### 71: record --help, COLUMNS=200
+argv: ct "record" "--help"
+env: COLUMNS="200"
+exit: 0
+--- stdout
+<the long help page clispec renders for this request: ct record>
+--- stderr
+--- end
+
+### 72: record: options then --help
+argv: ct "record" "-o" "/o" "--lang=python" "--help"
+env: (none)
+exit: 0
+--- stdout
+<the long help page clispec renders for this request: ct record>
+--- stderr
+--- end
+
+### 73: record: --help after a bad option
+argv: ct "record" "--bogus" "--help"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'bogus'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 74: record: --help after a bad value
+argv: ct "record" "--store-trace-folder-for-pid=x" "--help"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Error while processing the \e[34mstore-trace-folder-for-pid=x\e[0m parameter: invalid integer: x\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 75: print -h
+argv: ct "print" "-h"
+env: (none)
+exit: 0
+--- stdout
+<the short help page clispec renders for this request: ct print>
+--- stderr
+--- end
+
+### 76: upload --version
+argv: ct "upload" "--version"
+env: (none)
+exit: 0
+--- stdout
+CodeTracer version: <VERSION>
+\e[0m
+(no newline at end of stdout)
+--- stderr
+--- end
+
+### 77: ct-describe-commands
+argv: ct "ct-describe-commands"
+env: (none)
+exit: 0
+--- stdout
+command replay
+description Replay a recorded trace
+
+command run
+description Record and immediately replay
+file-types .py .rb .js .mjs .ts .php .ex .exs .erl .hrl .sh .bash .zsh .nim .nims .nr .wasm .sol .masm .sw .move .cairo .circom .leo .tolk .ak .cdc
+
+command remote
+description Manage remote trace sharing
+
+command install
+description Install CodeTracer integration into the host environment
+
+command upload
+description Upload a recorded trace
+
+command download
+description Download a shared trace
+
+command login
+description Sign in to CodeTracer cloud
+
+command set-default-org
+
+command get-default-org
+
+command activate
+description Activate a CodeTracer license
+
+command check-license
+description Check the current license status
+
+command build
+
+command record
+description Record a program execution
+file-types .py .rb .js .mjs .ts .php .ex .exs .erl .hrl .sh .bash .zsh .nim .nims .nr .wasm .sol .masm .sw .move .cairo .circom .leo .tolk .ak .cdc
+
+command record-test
+description Record a test execution
+file-types .py
+
+command console
+
+command host
+description Host a trace for remote replay
+
+command import
+description Import a previously exported trace archive
+
+command arb
+
+command ci
+description Manage CodeTracer CI runs
+
+command index-diff
+
+command edit
+description Open a file or folder in CodeTracer
+
+command review
+description Review a diff with its recorded executions (collect, inspect, open)
+file-types .json
+
+command list
+description List recorded traces
+
+command print
+description Print trace events in human-readable format
+
+command help
+description Show help
+
+command trace
+description Post-process a recorded trace (extract-gfx, export)
+
+command gfx-replay
+description Replay an extracted graphics stream
+
+command doctor
+description Check recorder readiness (per-language probes)
+
+--- stderr
+--- end
+
+### 78: ct-help
+argv: ct "ct-help"
+env: (none)
+exit: 0
+--- stdout
+CodeTracer - the user-friendly time-travelling debugger
+
+Usage: ct <command> [options] [args]
+
+Commands:
+  replay                Replay a recorded trace
+  run                   Record and immediately replay
+  remote                Manage remote trace sharing
+  install               Install CodeTracer integration into the host environment
+  upload                Upload a recorded trace
+  download              Download a shared trace
+  login                 Sign in to CodeTracer cloud
+  set-default-org      \x20
+  get-default-org      \x20
+  activate              Activate a CodeTracer license
+  check-license         Check the current license status
+  build                \x20
+  record                Record a program execution
+  record-test           Record a test execution
+  console              \x20
+  host                  Host a trace for remote replay
+  import                Import a previously exported trace archive
+  arb                  \x20
+  ci                    Manage CodeTracer CI runs
+  index-diff           \x20
+  edit                  Open a file or folder in CodeTracer
+  review                Review a diff with its recorded executions (collect, inspect, open)
+  list                  List recorded traces
+  print                 Print trace events in human-readable format
+  help                  Show help
+  trace                 Post-process a recorded trace (extract-gfx, export)
+  gfx-replay            Replay an extracted graphics stream
+  doctor                Check recorder readiness (per-language probes)
+
+Installed:
+  codetracer-desktop    <VERSION>   (self)
+
+Run 'ct <command> --help' for details on a specific command.
+--- stderr
+--- end
+
+### 79: ct-completions "bash"
+argv: ct "ct-completions" "bash"
+env: (none)
+exit: 0
+--- stdout
+# bash completion script for the ct launcher
+# Generated by `codetracer ct-completions bash`.
+# Source this file (e.g. add to /etc/bash_completion.d/ct) or
+# evaluate inline: `eval "$(codetracer ct-completions bash)"`.
+#
+# At runtime, _ct_completions calls `codetracer ct-complete ...`
+# directly -- bypassing the `ct` launcher exec hop (spec §2.7).
+_ct_completions() {
+  local IFS=$'\n'
+  local cur_words=("${COMP_WORDS[@]:1}")
+  COMPREPLY=($(codetracer ct-complete "${cur_words[@]}"))
+}
+complete -F _ct_completions ct
+--- stderr
+--- end
+
+### 80: ct-completions "zsh"
+argv: ct "ct-completions" "zsh"
+env: (none)
+exit: 0
+--- stdout
+#compdef ct
+# zsh completion script for the ct launcher
+# Generated by `codetracer ct-completions zsh`.
+# Save under a directory in $fpath (e.g. /usr/share/zsh/site-functions/_ct)
+# or source inline: `source <(codetracer ct-completions zsh)`.
+#
+# At runtime, _ct calls `codetracer ct-complete ...` directly --
+# bypassing the `ct` launcher exec hop (spec §2.7).
+_ct() {
+  local -a candidates
+  local cur_word="${words[CURRENT]}"
+  local -a partial
+  partial=("${(@)words[2,CURRENT]}")
+  candidates=("${(@f)$(codetracer ct-complete "${partial[@]}")}")
+  compadd -a candidates
+}
+compdef _ct ct
+--- stderr
+--- end
+
+### 81: ct-completions "fish"
+argv: ct "ct-completions" "fish"
+env: (none)
+exit: 0
+--- stdout
+# fish completion script for the ct launcher
+# Generated by `codetracer ct-completions fish`.
+# Save under ~/.config/fish/completions/ct.fish or source it.
+#
+# At runtime, the completion calls `codetracer ct-complete ...`
+# directly -- bypassing the `ct` launcher exec hop (spec §2.7).
+function __ct_complete
+  set -l tokens (commandline -opc)
+  set -l current (commandline -ct)
+  set -l partial $tokens[2..-1] $current
+  codetracer ct-complete $partial
+end
+complete -c ct -f -a '(__ct_complete)'
+--- stderr
+--- end
+
+### 82: ct-completions "powershell"
+argv: ct "ct-completions" "powershell"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+ct-completions: unsupported shell 'powershell' (supported: bash, zsh, fish)
+--- end
+
+### 83: ct-completions ""
+argv: ct "ct-completions" ""
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+ct-completions: missing shell argument (expected bash, zsh, or fish)
+--- end
+
+### 84: ct-completions "bogus"
+argv: ct "ct-completions" "bogus"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+ct-completions: unsupported shell 'bogus' (supported: bash, zsh, fish)
+--- end
+
+### 85: ct-completions (no shell)
+argv: ct "ct-completions"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+ct-completions: missing shell argument (expected bash, zsh, or fish)
+--- end
+
+### 86: ct-complete ""
+argv: ct "ct-complete" ""
+env: (none)
+exit: 0
+--- stdout
+activate
+arb
+build
+check-license
+ci
+console
+doctor
+download
+edit
+get-default-org
+gfx-replay
+help
+host
+import
+index-diff
+install
+list
+login
+print
+record
+record-test
+remote
+replay
+review
+run
+set-default-org
+trace
+upload
+--- stderr
+--- end
+
+### 87: ct-complete "rec"
+argv: ct "ct-complete" "rec"
+env: (none)
+exit: 0
+--- stdout
+record
+record-test
+--- stderr
+--- end
+
+### 88: ct-complete "record" ""
+argv: ct "ct-complete" "record" ""
+env: (none)
+exit: 0
+--- stdout
+home/
+tmp/
+cthome/
+--- stderr
+--- end
+
+### 89: ct-complete "record" "--"
+argv: ct "ct-complete" "record" "--"
+env: (none)
+exit: 0
+--- stdout
+--lang
+--output-folder
+--backend
+--export
+--stylus-trace
+--address
+--socket
+--with-diff
+--store-trace-folder-for-pid
+--upload
+--use-interpose
+--server
+--portable
+--- stderr
+--- end
+
+### 90: ct-complete "record" "-"
+argv: ct "ct-complete" "record" "-"
+env: (none)
+exit: 0
+--- stdout
+--lang
+--output-folder
+-o
+--backend
+--export
+-e
+--stylus-trace
+-t
+--address
+-a
+--socket
+--with-diff
+--store-trace-folder-for-pid
+--upload
+--use-interpose
+--server
+--portable
+--- stderr
+--- end
+
+### 91: ct-complete "record" "--l"
+argv: ct "ct-complete" "record" "--l"
+env: (none)
+exit: 0
+--- stdout
+--lang
+--- stderr
+--- end
+
+### 92: ct-complete "upload" "--omniscient-db" ""
+argv: ct "ct-complete" "upload" "--omniscient-db" ""
+env: (none)
+exit: 0
+--- stdout
+home/
+tmp/
+cthome/
+--- stderr
+--- end
+
+### 93: ct-complete "upload" "--omniscient-db="
+argv: ct "ct-complete" "upload" "--omniscient-db="
+env: (none)
+exit: 0
+--- stdout
+--- stderr
+--- end
+
+### 94: ct-complete "trace" ""
+argv: ct "ct-complete" "trace" ""
+env: (none)
+exit: 0
+--- stdout
+home/
+tmp/
+cthome/
+--- stderr
+--- end
+
+### 95: ct-complete "ci" ""
+argv: ct "ct-complete" "ci" ""
+env: (none)
+exit: 0
+--- stdout
+home/
+tmp/
+cthome/
+--- stderr
+--- end
+
+### 96: ct-complete "ci" "exec" "--"
+argv: ct "ct-complete" "ci" "exec" "--"
+env: (none)
+exit: 0
+--- stdout
+--token
+--base-url
+--- stderr
+--- end
+
+### 97: ct-complete "arb" ""
+argv: ct "ct-complete" "arb" ""
+env: (none)
+exit: 0
+--- stdout
+home/
+tmp/
+cthome/
+--- stderr
+--- end
+
+### 98: ct-complete "print" "-"
+argv: ct "ct-complete" "print" "-"
+env: (none)
+exit: 0
+--- stdout
+--filter
+-f
+--function
+--limit
+-n
+--format
+--verify
+--follow
+-F
+--- stderr
+--- end
+
+### 99: ct-complete "--"
+argv: ct "ct-complete" "--"
+env: (none)
+exit: 0
+--- stdout
+--- stderr
+--- end
+
+### 100: ct-complete "--c"
+argv: ct "ct-complete" "--c"
+env: (none)
+exit: 0
+--- stdout
+--- stderr
+--- end
+
+### 101: ct-complete "install" "--"
+argv: ct "ct-complete" "install" "--"
+env: (none)
+exit: 0
+--- stdout
+--path
+--desktop
+--bpf
+--agent-harbor
+--json
+--- stderr
+--- end
+
+### 102: ct-complete "review" ""
+argv: ct "ct-complete" "review" ""
+env: (none)
+exit: 0
+--- stdout
+home/
+tmp/
+cthome/
+--- stderr
+--- end
+
+### 103: ct-complete "agent" ""
+argv: ct "ct-complete" "agent" ""
+env: (none)
+exit: 0
+--- stdout
+--- stderr
+--- end
+
+### 104: ct-complete "test" ""
+argv: ct "ct-complete" "test" ""
+env: (none)
+exit: 0
+--- stdout
+--- stderr
+--- end
+
+### 105: ct-complete (no words)
+argv: ct "ct-complete"
+env: (none)
+exit: 0
+--- stdout
+activate
+arb
+build
+check-license
+ci
+console
+doctor
+download
+edit
+get-default-org
+gfx-replay
+help
+host
+import
+index-diff
+install
+list
+login
+print
+record
+record-test
+remote
+replay
+review
+run
+set-default-org
+trace
+upload
+--- stderr
+--- end

@@ -362,6 +362,25 @@ suite "CODETRACER_HOME — the sweeps":
           "against the developer's real CodeTracer state.")
       check present
 
+  test "B3: the GUI fixtures give the agent a launch starts a scratch CODEX_HOME":
+    ## Not CodeTracer state, but a launch's: the Agent Activity pane starts
+    ## `codex-acp`, whose login and session rollouts live in `CODEX_HOME`
+    ## (default `~/.codex`). codetracer-pm issue 2026-11-12: the GUI tests
+    ## left it inherited, and the agents they started wrote 31 sessions into
+    ## a developer's `~/.codex`. The behaviour is pinned by
+    ## `src/tests/gui/tests/harness/codex-home-isolation.spec.ts`; this keeps
+    ## the statements in place on hosts that never run the GUI suite.
+    const fixtures = "src/tests/gui/lib/fixtures.ts"
+    let lines = codeLines(readFile(repoRoot / fixtures), repoRoot / fixtures)
+    for needle in ["process.env.CODEX_HOME = guiTestCodexHome;",
+                   "env.CODEX_HOME = guiTestCodexHome;"]:
+      let present = lines.anyIt(needle in it)
+      if not present:
+        checkpoint(fixtures & " no longer contains `" & needle & "`: every " &
+          "GUI launch would start codex-acp against the developer's real " &
+          "Codex login and session list.")
+      check present
+
   test "B2: every config.nims under src/ keeps its tree isolated":
     ## Nim evaluates config files root-first, and only the LAST one may add the
     ## force-import (src/frontend/test_support/force_import_isolation.nims).
@@ -400,7 +419,14 @@ suite "CODETRACER_HOME — the sweeps":
       ("src/ct_test/certificate_store_roots.nim",
        "the cross-tool test-certificates store (test-certificates-spec " &
        "Transport.md §2.1); its override is TEST_CERTIFICATES_DIR, and " &
-       "CODETRACER_HOME deliberately does not move a store other producers share")]
+       "CODETRACER_HOME deliberately does not move a store other producers share"),
+      ("src/frontend/viewmodel/host/native_file_tree.nim",
+       "the Files pane's Delete moves an entry into the desktop's trash, which " &
+       "the freedesktop.org Trash specification places at $XDG_DATA_HOME/Trash " &
+       "(~/.local/share/Trash; ~/.Trash on macOS): the user's own trash, " &
+       "shared with every file manager, not CodeTracer state, so " &
+       "CODETRACER_HOME deliberately does not move it " &
+       "(https://specifications.freedesktop.org/trash-spec/latest/)")]
     var scanned, resolving = 0
     for path in walkDirRec(repoRoot / "src"):
       let rel = path.relativePath(repoRoot).replace('\\', '/')

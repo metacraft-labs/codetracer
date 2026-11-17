@@ -174,6 +174,7 @@ type
     # ---- dgGutter: §3.3.2's marks -----------------------------------------
     srGutterNoMark = "gutter-no-mark"
     srGutterBreakpoint = "gutter-breakpoint"
+    srGutterBreakpointHint = "gutter-breakpoint-hint"
     srGutterBreakpointDisabled = "gutter-breakpoint-disabled"
     srGutterTracepoint = "gutter-tracepoint"
     srGutterExecutionPointer = "gutter-execution-pointer"
@@ -585,6 +586,8 @@ const
     srGutterNoMark: bare(dgGutter),
     srGutterBreakpoint: fgOnly(dgGutter, dtColorsEditorSyntaxError,
                                attrs = {raBold}, mono = {raBold}),
+    srGutterBreakpointHint: fgOnly(dgGutter, dtColorsUiSurfaceAlertError,
+                                   mono = {raItalic}),
     srGutterBreakpointDisabled: fgOnly(dgGutter, dtColorsUiTextPrimaryDisabled,
                                        mono = {raItalic}),
     srGutterTracepoint: fgOnly(dgGutter, dtColorsEditorSyntaxType,

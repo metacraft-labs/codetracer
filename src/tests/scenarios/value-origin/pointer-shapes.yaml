@@ -1,0 +1,27 @@
+scenario: 1
+name: value-origin/pointer-shapes
+pack: codetracer
+summary: >-
+  The pointer takes each element kind's shape: a resize arrow over a divider
+  between panes side by side, an up-down arrow over one between stacked
+  panes, a hand over a tab's close button; and while a divider is held the
+  resize arrow stays wherever the pointer goes.
+
+stage:
+  - use: record-program
+    with: { program: src/db-backend/tests/fixtures/origin/python/simple_trivial_chain/main.py }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - hover: { at: 'splitter[orientation="vertical", n="1"]', for: 300ms }
+  - expect: { at: window, pointer: col-resize }
+  - hover: { at: 'splitter[orientation="horizontal", n="1"]', for: 300ms }
+  - expect: { at: window, pointer: row-resize }
+  - hover: { at: 'pane-tab[label="EVENT LOG"]', anchor: close, for: 300ms }
+  - expect: { at: window, pointer: pointer }
+
+  - press: { at: 'splitter[orientation="vertical", n="1"]', button: left }
+  - move: 'pane-tab[label="EVENT LOG"]'
+  - expect: { at: window, pointer: col-resize }
+  - release: { at: 'pane-tab[label="EVENT LOG"]', button: left }

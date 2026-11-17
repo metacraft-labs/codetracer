@@ -1,0 +1,18 @@
+scenario: 1
+name: files/ruby-replay-lists-its-sources
+pack: codetracer
+summary: >-
+  The Files panel of a Ruby replay shows the program's source tree,
+  sudoku_solver.rb among it, and no "nothing here" overlay.
+
+stage:
+  - use: record-program
+    with: { program: rb_sudoku_solver/sudoku_solver.rb }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 180s }
+  - wait: { until: { at: 'pane-tab[label="FILES"]', present: true }, timeout: 60s }
+  - click: 'pane-tab[label="FILES"]'
+  - wait: { until: { at: 'filesystem/file-node[name="sudoku_solver.rb"]', present: true }, timeout: 60s }
+  - expect: { at: filesystem, empty: false, loading: false, count: { gt: 0 } }

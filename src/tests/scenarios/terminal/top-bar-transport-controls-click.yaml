@@ -1,0 +1,26 @@
+scenario: 1
+name: terminal/top-bar-transport-controls-click
+pack: codetracer
+summary: >-
+  A click on each transport control performs it on the recording: Next and
+  Step in move forward, Reverse next and Reverse step in move back, Run to
+  entry returns to the start, Continue runs to the end and Reverse continue
+  back to the start.
+stage:
+  - use: record-program
+    with: { program: calc }
+  - use: open-recording
+    with: { width: 200, height: 50 }
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - expect: { at: replay-position, tick: 1 }
+  - click: { at: 'toolbar/toolbar-button[label="Next"]' }
+  - wait: { until: { at: replay-position, assert: "past(1)" }, timeout: 30s }
+  - click: { at: 'toolbar/toolbar-button[label="Step in"]' }
+  - wait: { until: { at: replay-position, assert: "past(2)" }, timeout: 30s }
+  - click: { at: 'toolbar/toolbar-button[label="Run to entry"]' }
+  - wait: { until: { at: replay-position, assert: "before(2)" }, timeout: 30s }
+  - click: { at: 'toolbar/toolbar-button[label="Continue"]' }
+  - wait: { until: { at: replay-position, assert: "past(100)" }, timeout: 30s }
+  - click: { at: 'toolbar/toolbar-button[label="Reverse continue"]' }
+  - wait: { until: { at: replay-position, assert: "before(100)" }, timeout: 30s }

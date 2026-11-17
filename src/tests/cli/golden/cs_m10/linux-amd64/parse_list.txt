@@ -1,0 +1,1074 @@
+# ct list: 54 argv cases through ct's loader (the parse probe)
+
+### 1: bare
+argv: ct "list"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = list
+  listFormat = "text"
+  listTarget = "local"
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 2: target remote
+argv: ct "list" "remote"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = list
+  listFormat = "text"
+  listTarget = "remote"
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 3: target local
+argv: ct "list" "local"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = list
+  listFormat = "text"
+  listTarget = "local"
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 4: target other
+argv: ct "list" "other"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = list
+  listFormat = "text"
+  listTarget = "other"
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 5: two targets
+argv: ct "list" "local" "remote"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The subcommand 'list' does not accept additional arguments\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 6: --format <v>
+argv: ct "list" "--format" "json"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = list
+  listFormat = "json"
+  listTarget = "local"
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 7: --format=<v>
+argv: ct "list" "--format=json"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = list
+  listFormat = "json"
+  listTarget = "local"
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 8: --format:<v>
+argv: ct "list" "--format:json"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = list
+  listFormat = "json"
+  listTarget = "local"
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 9: --format json
+argv: ct "list" "--format" "json"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = list
+  listFormat = "json"
+  listTarget = "local"
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 10: --format=json
+argv: ct "list" "--format=json"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = list
+  listFormat = "json"
+  listTarget = "local"
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 11: --format text
+argv: ct "list" "--format" "text"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = list
+  listFormat = "text"
+  listTarget = "local"
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 12: --format=text
+argv: ct "list" "--format=text"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = list
+  listFormat = "text"
+  listTarget = "local"
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 13: --format bad xml
+argv: ct "list" "--format" "xml"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = list
+  listFormat = "xml"
+  listTarget = "local"
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 14: --format=bad xml
+argv: ct "list" "--format=xml"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = list
+  listFormat = "xml"
+  listTarget = "local"
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 15: --format empty
+argv: ct "list" "--format" ""
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = list
+  listFormat = ""
+  listTarget = "local"
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 16: --format= (empty)
+argv: ct "list" "--format="
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = list
+  listFormat = ""
+  listTarget = "local"
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 17: --format= <v> (next word)
+argv: ct "list" "--format=" "json"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = list
+  listFormat = "json"
+  listTarget = "local"
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 18: --format -x (value starts with -)
+argv: ct "list" "--format" "-x"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = list
+  listFormat = "-x"
+  listTarget = "local"
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 19: --format --x (value starts with --)
+argv: ct "list" "--format" "--x"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = list
+  listFormat = "--x"
+  listTarget = "local"
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 20: --format --new-tab <v> (an option between it and its value)
+argv: ct "list" "--format" "--new-tab" "json"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = list
+  listFormat = "--new-tab"
+  listTarget = "json"
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 21: --format repeated, last wins
+argv: ct "list" "--format" "json" "--format" "text"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = list
+  listFormat = "text"
+  listTarget = "local"
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 22: --format missing value (last)
+argv: ct "list" "--format"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The option '\e[34m--format\e[0m' requires a value\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 23: --FORMAT <v> (style variant)
+argv: ct "list" "--FORMAT" "json"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = list
+  listFormat = "json"
+  listTarget = "local"
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 24: --f_ormat <v> (style variant)
+argv: ct "list" "--f_ormat" "json"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = list
+  listFormat = "json"
+  listTarget = "local"
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 25: --format <v>
+argv: ct "list" "--format" "json" "remote"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = list
+  listFormat = "json"
+  listTarget = "remote"
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 26: --format=<v>
+argv: ct "list" "--format=json" "remote"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = list
+  listFormat = "json"
+  listTarget = "remote"
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 27: --format:<v>
+argv: ct "list" "--format:json" "remote"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = list
+  listFormat = "json"
+  listTarget = "remote"
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 28: --format json
+argv: ct "list" "--format" "json" "remote"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = list
+  listFormat = "json"
+  listTarget = "remote"
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 29: --format=json
+argv: ct "list" "--format=json" "remote"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = list
+  listFormat = "json"
+  listTarget = "remote"
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 30: --format empty
+argv: ct "list" "--format" "" "remote"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = list
+  listFormat = ""
+  listTarget = "remote"
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 31: --format= (empty)
+argv: ct "list" "--format=" "remote"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = list
+  listFormat = "remote"
+  listTarget = "local"
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 32: --format= <v> (next word)
+argv: ct "list" "--format=" "json" "remote"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = list
+  listFormat = "json"
+  listTarget = "remote"
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 33: --format -x (value starts with -)
+argv: ct "list" "--format" "-x" "remote"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = list
+  listFormat = "-x"
+  listTarget = "remote"
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 34: --format --x (value starts with --)
+argv: ct "list" "--format" "--x" "remote"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = list
+  listFormat = "--x"
+  listTarget = "remote"
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 35: --format --new-tab <v> (an option between it and its value)
+argv: ct "list" "--format" "--new-tab" "json" "remote"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The subcommand 'list' does not accept additional arguments\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 36: --format repeated, last wins
+argv: ct "list" "--format" "json" "--format" "json" "remote"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = list
+  listFormat = "json"
+  listTarget = "remote"
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 37: --format missing value (last)
+argv: ct "list" "remote" "--format"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The option '\e[34m--format\e[0m' requires a value\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 38: --format missing value (before the rest)
+argv: ct "list" "--format" "remote"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = list
+  listFormat = "remote"
+  listTarget = "local"
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 39: --FORMAT <v> (style variant)
+argv: ct "list" "--FORMAT" "json" "remote"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = list
+  listFormat = "json"
+  listTarget = "remote"
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 40: --f_ormat <v> (style variant)
+argv: ct "list" "--f_ormat" "json" "remote"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = list
+  listFormat = "json"
+  listTarget = "remote"
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 41: env <APP>_FORMAT=json
+argv: ct "list"
+env: <APP>_FORMAT="json"
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = list
+  listFormat = "json"
+  listTarget = "local"
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 42: env <APP>_LISTTARGET=remote (a positional)
+argv: ct "list"
+env: <APP>_LISTTARGET="remote"
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = list
+  listFormat = "text"
+  listTarget = "local"
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 43: env <APP>_TARGET=remote (the argument's name)
+argv: ct "list"
+env: <APP>_TARGET="remote"
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = list
+  listFormat = "text"
+  listTarget = "remote"
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 44: unknown long option
+argv: ct "list" "--bogus"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'bogus'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 45: unknown long option with value
+argv: ct "list" "--bogus=1"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'bogus'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 46: unknown short option
+argv: ct "list" "-Z"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'Z'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 47: lone -
+argv: ct "list" "-"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option ''\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 48: lone -- then a word
+argv: ct "list" "--" "w"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option ''\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 49: --=v
+argv: ct "list" "--=v"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option ''\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 50: extra positional
+argv: ct "list" "extra1" "extra2" "extra3" "extra4" "extra5"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The subcommand 'list' does not accept additional arguments\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 51: global --cwd after the command
+argv: ct "list" "--cwd" "/w"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = some("/w")
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = list
+  listFormat = "text"
+  listTarget = "local"
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 52: global --new-tab after the command
+argv: ct "list" "--new-tab"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = true
+  newWindow = false
+  cmd = list
+  listFormat = "text"
+  listTarget = "local"
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 53: --version after the command
+argv: ct "list" "--version"
+env: (none)
+exit: 0
+--- stdout
+CodeTracer version: <VERSION>
+\e[0m
+(no newline at end of stdout)
+--- stderr
+--- end
+
+### 54: -h after the command
+argv: ct "list" "-h"
+env: (none)
+exit: 0
+--- stdout
+<the short help page clispec renders for this request: ct list>
+--- stderr
+--- end

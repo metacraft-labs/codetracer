@@ -1,0 +1,22 @@
+scenario: 1
+name: debug-controls/noir-next-and-f10-step
+pack: codetracer
+summary: >-
+  On a Noir recording at its entry (main.nr line 17), the toolbar's Next
+  moves the replay to line 18, and F10 to line 19.
+
+stage:
+  - use: record-program
+    with: { program: noir_example }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 180s }
+  - wait: { until: { at: status-line, location: { matches: "main\\.nr:17#" } }, timeout: 60s }
+  - click: 'toolbar/toolbar-button[label="next-image"]'
+    settle: false
+  - wait: { until: { at: status-line, location: { matches: "main\\.nr:18#" } }, timeout: 60s }
+  - wait: replay-idle
+  - key: F10
+    settle: false
+  - wait: { until: { at: status-line, location: { matches: "main\\.nr:19#" } }, timeout: 60s }

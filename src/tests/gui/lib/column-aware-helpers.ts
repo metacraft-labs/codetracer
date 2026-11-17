@@ -24,6 +24,7 @@
  * regression is easy to attribute.
  */
 
+import { placeCaret } from "./glyph-column";
 import type { Page } from "@playwright/test";
 
 import { test, expect, readyOnEntryTest as readyOnEntry } from "./fixtures";
@@ -241,17 +242,16 @@ export async function altMouseDownAt(page: Page, x: number, y: number): Promise<
 }
 
 /**
- * Convenience: Alt+click the Monaco rendering of `(line, column)`
- * inside the given editor pane.  Mirrors what an end-user does in
- * the M6 affordance.
+ * A column breakpoint the way a user sets one (Editor-Pane.md § Inline
+ * breakpoints): the caret at the column, then `Shift+F9`.
  */
-export async function altClickAtColumn(
+export async function inlineBreakpointAtColumn(
   editor: EditorPane,
   line: number,
   column: number,
 ): Promise<void> {
-  const target = await resolveColumnClickTarget(editor, line, column);
-  await altMouseDownAt(editor.page, target.x, target.y);
+  await placeCaret(editor.page, line, column);
+  await editor.page.keyboard.press("Shift+F9");
 }
 
 /**
@@ -379,7 +379,7 @@ export function defineRecorderColumnBreakpointSuite(
 
       // Drive the M6 Alt+click affordance.  Monaco's pixel→column
       // resolver maps the click to `targetColumn`.
-      await altClickAtColumn(editor, cfg.targetLine, cfg.targetColumn);
+      await inlineBreakpointAtColumn(editor, cfg.targetLine, cfg.targetColumn);
 
       // The frontend MUST register a column-aware breakpoint with
       // `bp.column == cfg.targetColumn` — the M1 wire-contract each

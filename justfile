@@ -236,6 +236,17 @@ test-python-version-alignment:
 test-sibling-backend-path:
   bash ci/test/sibling-backend-path-test.sh
 
+# Assert that a sandboxed entry point (ci/lib/codetracer-home.sh, the
+# user-state sandbox) reaches the host's RunQuota endpoint the way it does
+# unsandboxed: `repro exec` and a lease succeed inside, through a private relay
+# RunQuota verified outside, and an endpoint RunQuota refuses keeps its
+# refusal. Runs a real runquotad, runquota and repro, so it needs this dev
+# shell rather than the lint shell ci/test/lane-user-state-guard-test.sh runs
+# in. Linux only (the sandbox is); about a minute, most of it the fixture
+# project's first `repro exec`.
+test-user-state-sandbox-runquota:
+  bash ci/test/user-state-sandbox-runquota-test.sh
+
 # Assert that the ct-native-replay `build-siblings` reports as built actually
 # starts (`--help` with an empty environment). It once linked the machine's
 # unpinned registry LLDB against codetracer's pinned glibc, reported PASS, and
@@ -264,6 +275,15 @@ test-build-siblings-noir:
 test-build-siblings-toolchain-stage:
   bash ci/test/build-siblings-toolchain-stage-bounded-test.sh
 
+# Assert that one sibling that fails to build fails `build-siblings` by
+# default, and under `--keep-going` / BUILD_SIBLINGS_KEEP_GOING=1 is named
+# (summary row, log tail, closing line) without failing the run, its earlier
+# artifact removed. Callers that run part of `test-gui` rely on the second
+# form; the whole suite relies on the first. Two scratch siblings with real
+# justfiles, `repro` replaced by a pass-through; a few seconds, no network.
+test-build-siblings-keep-going:
+  bash ci/test/build-siblings-keep-going-test.sh
+
 # Assert that the built output tree carries the assets `ct` reads on startup
 # (`<prefix>/config/default_config.yaml` and `default_layout.json`). A tup
 # build exits 0 when a runtime asset is simply never published -- there is no
@@ -284,6 +304,11 @@ test-runtime-assets-guard:
 # Idempotent — already-built artefacts short-circuit, so this is cheap on
 # warm checkouts.  Pass `--force` to rebuild everything; `--check` to just
 # report status without building.  See scripts/build-siblings.sh.
+# Any sibling that fails to build fails this recipe, and with it `test-gui`.
+# A caller running only some specs, whose specs fail by name on an absent
+# sibling, sets BUILD_SIBLINGS_KEEP_GOING=1 (or passes `--keep-going`): the
+# failures are still named, but a recorder those specs never use cannot fail
+# them.
 build-siblings *args:
   bash scripts/build-siblings.sh {{args}}
 
@@ -1096,7 +1121,7 @@ test-rust:
   # only its own writes can fail it (ci/lib/codetracer-home.sh).
   ct_user_state_stage_sandbox rust-tests bash "$0" || :
   ct_export_scratch_codetracer_home rust-tests
-  trap '_ct_rc=$?; report_skips; rm -rf ${ct_scratch_home_created:+"$ct_scratch_home_created"}; ct_user_state_guard_exit rust-tests "$_ct_rc"' EXIT
+  trap '_ct_rc=$?; report_skips; ct_remove_scratch_codetracer_home rust-tests; ct_user_state_guard_exit rust-tests "$_ct_rc"' EXIT
   # The resolver itself (both sides of the CODETRACER_HOME contract).
   ( cd libs/ct-home && cargo test )
   # `libs/ct-dap-client` is a plain path dev-dependency of src/db-backend, so
@@ -1265,7 +1290,7 @@ test-python-api:
   # only its own writes can fail it (ci/lib/codetracer-home.sh).
   ct_user_state_stage_sandbox python-api bash "$0" || :
   ct_export_scratch_codetracer_home python-api
-  trap '_ct_rc=$?; rm -rf ${ct_scratch_home_created:+"$ct_scratch_home_created"}; ct_user_state_guard_exit python-api "$_ct_rc"' EXIT
+  trap '_ct_rc=$?; ct_remove_scratch_codetracer_home python-api; ct_user_state_guard_exit python-api "$_ct_rc"' EXIT
   cd python-api
   python3 -m pytest -q tests
 
@@ -1337,6 +1362,7 @@ test:
     test-python-api-gate \
     test-python-api \
     test-sibling-backend-path \
+    test-user-state-sandbox-runquota \
     test-agent-api-contract \
     test-rust \
     test-sibling-cargo-locks \
@@ -2004,7 +2030,7 @@ test-acp-notifications:
   notification_test="$(mktemp "${TMPDIR:-/tmp}/codetracer-acp-notifications.XXXXXX.js")"
   sessions_test="$(mktemp "${TMPDIR:-/tmp}/codetracer-acp-sessions.XXXXXX.js")"
   git_changes_test="$(mktemp "${TMPDIR:-/tmp}/codetracer-acp-git-changes.XXXXXX.js")"
-  trap '_ct_rc=$?; rm -f "$notification_test" "$sessions_test" "$git_changes_test"; rm -rf ${ct_scratch_home_created:+"$ct_scratch_home_created"}; ct_user_state_guard_exit acp-notifications "$_ct_rc"' EXIT
+  trap '_ct_rc=$?; rm -f "$notification_test" "$sessions_test" "$git_changes_test"; ct_remove_scratch_codetracer_home acp-notifications; ct_user_state_guard_exit acp-notifications "$_ct_rc"' EXIT
   nim js -d:nodejs -d:server -d:chronicles_enabled=off \
     --out:"$notification_test" src/frontend/tests/acp_notification_test.nim
   node "$notification_test"
@@ -2032,12 +2058,14 @@ test-frontend-js:
   ct_user_state_stage_sandbox frontend-js bash "$0" || :
   ct_export_scratch_codetracer_home frontend-js
   nim_sourcemap_test="$(mktemp "${TMPDIR:-/tmp}/codetracer-nim-sourcemap-test.XXXXXX.js")"
+  nim_c_listing_test="$(mktemp "${TMPDIR:-/tmp}/codetracer-nim-c-listing-test.XXXXXX.js")"
   frontend_lang_test="$(mktemp "${TMPDIR:-/tmp}/codetracer-frontend-lang-test.XXXXXX.js")"
   scratchpad_dispatch_test="$(mktemp "${TMPDIR:-/tmp}/codetracer-scratchpad-add-dispatch-test.XXXXXX.js")"
   target_axes_js_test="$(mktemp "${TMPDIR:-/tmp}/codetracer-target-axes-js-test.XXXXXX.js")"
   ipc_registry_test="$(mktemp "${TMPDIR:-/tmp}/codetracer-ipc-registry-test.XXXXXX.js")"
   monaco_operations_test="$(mktemp "${TMPDIR:-/tmp}/codetracer-monaco-operations-test.XXXXXX.js")"
   desktop_list_operations_test="$(mktemp "${TMPDIR:-/tmp}/codetracer-desktop-list-operations-test.XXXXXX.js")"
+  formatted_source_view_test="$(mktemp "${TMPDIR:-/tmp}/codetracer-formatted-source-view-test.XXXXXX.js")"
   shortcut_presets_test="$(mktemp "${TMPDIR:-/tmp}/codetracer-shortcut-presets-test.XXXXXX.js")"
   shortcut_dialog_test="$(mktemp "${TMPDIR:-/tmp}/codetracer-shortcut-dialog-test.XXXXXX.js")"
   debug_toolbar_tooltips_test="$(mktemp "${TMPDIR:-/tmp}/codetracer-debug-toolbar-tooltips-test.XXXXXX.js")"
@@ -2047,11 +2075,17 @@ test-frontend-js:
   run_to_cursor_test="$(mktemp "${TMPDIR:-/tmp}/codetracer-run-to-cursor-test.XXXXXX.js")"
   html_sinks_probe="$(mktemp "${TMPDIR:-/tmp}/codetracer-html-sinks-probe.XXXXXX.js")"
   dap_refusal_test="$(mktemp "${TMPDIR:-/tmp}/codetracer-dap-refusal-test.XXXXXX.js")"
-  trap '_ct_rc=$?; rm -f "$nim_sourcemap_test" "$frontend_lang_test" "$scratchpad_dispatch_test" "$target_axes_js_test" "$ipc_registry_test" "$monaco_operations_test" "$desktop_list_operations_test" "$shortcut_presets_test" "$shortcut_dialog_test" "$debug_toolbar_tooltips_test" "$component_registry_binding_test" "$component_ids_across_sessions_test" "$stop_command_test" "$run_to_cursor_test" "$html_sinks_probe" "$dap_refusal_test"; rm -rf ${ct_scratch_home_created:+"$ct_scratch_home_created"}; ct_user_state_guard_exit frontend-js "$_ct_rc"' EXIT
+  trap '_ct_rc=$?; rm -f "$nim_sourcemap_test" "$nim_c_listing_test" "$frontend_lang_test" "$scratchpad_dispatch_test" "$target_axes_js_test" "$ipc_registry_test" "$monaco_operations_test" "$desktop_list_operations_test" "$formatted_source_view_test" "$shortcut_presets_test" "$shortcut_dialog_test" "$debug_toolbar_tooltips_test" "$component_registry_binding_test" "$component_ids_across_sessions_test" "$stop_command_test" "$run_to_cursor_test" "$html_sinks_probe" "$dap_refusal_test"; ct_remove_scratch_codetracer_home frontend-js; ct_user_state_guard_exit frontend-js "$_ct_rc"' EXIT
   echo "Running Nim Source Map V3 frontend tests..."
   nim -d:nodejs -d:chronicles_enabled=off -d:ctIndex -d:server \
     --out:"$nim_sourcemap_test" js src/frontend/tests/nim_sourcemap_test.nim
   node "$nim_sourcemap_test"
+  # Edit mode's View Generated C Source: the main process compiles a Nim file
+  # to C with the `nim` on PATH (Generated-Code-Listing.md §13.4).
+  echo "Running the desktop's Nim-to-C listing compile tests..."
+  nim -d:nodejs -d:chronicles_enabled=off -d:ctIndex -d:server \
+    --out:"$nim_c_listing_test" js src/frontend/tests/nim_c_listing_test.nim
+  node "$nim_c_listing_test"
   echo "Running frontend language mapping tests..."
   nim -d:nodejs -d:chronicles_enabled=off -d:ctRenderer -d:ctInExtension \
     --out:"$frontend_lang_test" js src/frontend/tests/frontend_lang_test.nim
@@ -2099,6 +2133,13 @@ test-frontend-js:
     --path:src/frontend/viewmodel \
     --out:"$desktop_list_operations_test" js src/frontend/tests/desktop_list_operations_test.nim
   node -e 'globalThis.window = globalThis; require(process.argv[1])' "$desktop_list_operations_test"
+
+  # The palette's toggle into a minified source's formatted view.
+  echo "Running the formatted source view's toggle tests..."
+  nim -d:nodejs -d:chronicles_enabled=off -d:ctRenderer -d:ctInExtension \
+    --path:src/frontend/viewmodel \
+    --out:"$formatted_source_view_test" js src/frontend/tests/formatted_source_view_test.nim
+  node -e 'globalThis.window = globalThis; require(process.argv[1])' "$formatted_source_view_test"
 
   # The preset tables, and the dialog that lists what they resolved to. Same
   # lane and same invocation as the suite above: all three read the SHIPPED
@@ -4173,6 +4214,14 @@ test-ct-test-certificates:
 test-nix-package-ct-test-run:
   bash ci/test/nix-package-ct-test-run.sh
 
+# Nim tracing from a packaged CodeTracer: the Nix package's `ct` wrapper and the
+# AppImage's AppRun each name the trace-enabled nimsuggest and the Nim language
+# server they ship, and that server traces a static block with nothing else on
+# PATH. Needs nix, patchelf, lddtree and python3 (all in the default dev shell).
+test-packaged-nim-tracing:
+  bash ci/test/packaged-nim-tracing.sh --nix
+  bash ci/test/packaged-nim-tracing.sh --appimage
+
 # CTC-3a's negative control: the conformance-vector walker the
 # `ct-test-certificates` lane built (or `walker`) passes at the committed pin
 # and fails at an earlier revision of the standard and at one the sibling
@@ -5421,12 +5470,43 @@ build-tui: tui-prereqs
 # are reported as counted `MISSING-PREREQ SKIP:` lines and an all-skipped run
 # FAILS — see that file's header. The first run on a workspace therefore costs
 # a few recordings; every run after it hits the content-addressed cache.
+#
+# The Tier-1 suites that open an rr recording of a native program (every one
+# importing `fixtures/native_recording`, PLAT-60's Low Level Code suite among
+# them) are NOT here: they are the `tui-native` lane, `test-tui-native` below,
+# because they need rr and `ct-native-replay`, which the hosts this lane runs
+# on cannot provide.
 test-tui: tui-prereqs
   #!/usr/bin/env bash
   set -euo pipefail
   mkdir -p test-logs
   exec > >(tee test-logs/test-tui.log) 2>&1
   bash ci/lib/run-nim-test-lane.sh tui
+
+# Tier 1, the rr half: the TUI suites that open an rr recording of a native
+# program (`ci/lib/test-lane-files.sh`'s `tui-native` lane — every Tier-1 suite
+# importing `fixtures/native_recording`).
+#
+# PREREQUISITES, none of which this recipe builds: a built `replay-server`
+# (`just build-once`), a working `rr` on the PATH, `ct-native-replay` at
+# `../codetracer-native-backend/target/debug/` or `$CT_NATIVE_REPLAY_PATH`
+# (`just ensure-ct-native-replay`, or `just test-gui`, which builds it through
+# `scripts/build-siblings.sh`), and the `../codetracer-native-test-programs`
+# sibling whose `c/sudoku_solver` the fixture records. A missing one is a
+# counted `MISSING-PREREQ SKIP:`, and an all-skipped file fails the lane.
+#
+# rr works only on some hosts, so CI runs this in `test-ui-tests-rr` — the job
+# the workflow routes rr work to — after its `ci/setup-rr-backend.sh` and
+# `just test-gui` steps, and not in `tui-tests`, where these suites skipped
+# every case (codetracer-pm
+# `issues/2026-11-09-tui-job-runs-plat60-and-plat65-without-their-prerequisites.md`).
+# `ci/test/native-recording-suites-run-where-rr-is-test.py` holds that order.
+test-tui-native: tui-prereqs
+  #!/usr/bin/env bash
+  set -euo pipefail
+  mkdir -p test-logs
+  exec > >(tee test-logs/test-tui-native.log) 2>&1
+  bash ci/lib/run-nim-test-lane.sh tui-native
 
 # Tier 2: the TUI suites that spawn the real binary in a real pty.
 #
@@ -5440,6 +5520,75 @@ test-tui-real-terminal: build-tui
   mkdir -p test-logs
   exec > >(tee test-logs/test-tui-real-terminal.log) 2>&1
   bash ci/lib/run-nim-test-lane.sh tui-real-terminal
+
+# ─── Scenarios: CodeTracer's DemoVideoScript pack ────────────────────────────
+#
+# The user-level tests as scenarios (src/tests/scenarios/README.md): one
+# scenario file runs on the desktop (Playwright), the terminal (TermAssert)
+# and the GPUI window (GuiAssert). The runner and the backends are siblings
+# at repro.lock's pins (ci/test/scenarios.sh names them). A failed run's
+# recording is under build/scenario-runs/; `.agents/codebase-insights.txt`,
+# "Scenario run recordings", says how to read one.
+
+# The runner, the stage tool and the three flavours' programs.
+scenario-build *parts:
+  bash ci/test/scenarios.sh build {{parts}}
+
+# The scenario linter over every scenario: no step may reach application code.
+scenario-lint:
+  bash ci/test/scenarios.sh lint
+
+# One flavour's lane: `terminal`, `gpui` or `electron` (the last two need a
+# display: run them under Xvfb, as `scenario-lane-xvfb` does).
+scenario-lane flavour: build-tui
+  bash ci/test/scenarios.sh lane {{flavour}}
+
+# A lane on a private Xvfb at 2560x1440, 96 dpi (the desktop's and GPUI's).
+scenario-lane-xvfb flavour:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  . "{{justfile_directory()}}/scripts/lib/own-xvfb.sh"
+  trap "own_xvfb_stop" EXIT
+  own_xvfb_start -screen 0 2560x1440x24 -dpi 96 -nolisten tcp || exit 1
+  bash ci/test/scenarios.sh lane {{flavour}}
+
+# The inventory of the UI tests and their port, checked against the tree.
+scenario-inventory:
+  python3 ci/test/scenario-inventory.py
+
+# The documentation's captures, made deterministically by the scenarios the
+# pages cite (`<!-- capture scenario=… capture=… -->`); `--check` fails when a
+# page's capture is not what its scenario produces now.
+docs-captures *args: build-tui
+  bash ci/test/docs-captures.sh {{args}}
+
+# The persona capture tool (CodeTracer-TUI-Terminal-Adaptation.md §13.1): run
+# the binary's start-up round in the terminal it runs in and save the answers
+# as a persona fixture. Linked like `build-tui`, since it writes the round
+# with the same `host/terminal_probe.queriesFor`.
+build-capture-terminal-persona: tui-prereqs
+  #!/usr/bin/env bash
+  set -euo pipefail
+  read -r -a ts_flags < <(sed 's/^/--passL:/; s/ / --passL:/g' \
+    build/grammars/tui-link-flags.txt)
+  nim c --hints:off --mm:orc -d:release \
+    --path:src/frontend/viewmodel \
+    "-d:isonimTuiGrammarArchive=${PWD}/build/grammars/libcodetracer_tui_grammars.a" \
+    "${ts_flags[@]}" \
+    --nimcache:build/nimcache/capture-terminal-persona \
+    -o:build/bin/capture-terminal-persona \
+    tools/capture-terminal-persona/capture_terminal_persona.nim
+
+# Tier 3 (§13.4): the shipped binary in REAL terminal emulators — kitty,
+# xterm, Ghostty and Alacritty on a private Xvfb, foot on GuiAssert's headless
+# sway, tmux inside kitty — each from this checkout's pinned nixpkgs. Per
+# terminal: the persona captured and compared with the committed one, the
+# profile (`--capabilities=json`), the glyph test card screenshotted and read
+# by OCR and pixel checks, OSC 52 accepted or refused against the profile's
+# clipboard axis. An emulator this host cannot run is a counted
+# `MISSING-PREREQ SKIP:`. Needs ../GuiAssert (its dev shell runs the suite).
+test-tui-real-emulators: build-tui build-capture-terminal-persona
+  bash ci/test/tui-real-emulators.sh
 
 # PLAT-1: `--ui` front-end selection, end to end
 # (codetracer-specs/CLI/ct/ui-selection.md).
@@ -5522,6 +5671,26 @@ test-gpui-shell:
   mkdir -p test-logs
   exec > >(tee test-logs/test-gpui-shell.log) 2>&1
   bash ci/lib/run-nim-test-lane.sh gpui-shell
+
+# The GPUI suites that open an rr recording of a native program
+# (`ci/lib/test-lane-files.sh`'s `gpui-native` lane — every suite under
+# `src/frontend/gpui/tests/` importing `fixtures/native_recording`, PLAT-60's
+# Low Level Code pane over a C program among them). In `gpui-shell` they
+# skipped every case: nothing there provides `ct-native-replay`.
+#
+# Builds what the lane runs: `build/bin/codetracer-gpui` (`build-gpui`, which
+# needs isonim-gpui's shim built in that sibling's own shell) and
+# `ct-native-replay` (`ensure-ct-native-replay`, from
+# `../codetracer-native-backend`). Also needs a built `replay-server`, a
+# working `rr` and the `../codetracer-native-test-programs` sibling; a missing
+# one is a counted `MISSING-PREREQ SKIP:`, and an all-skipped file fails the
+# lane. CI runs this in `test-ui-tests-rr` beside `test-tui-native`.
+test-gpui-native: build-gpui ensure-ct-native-replay
+  #!/usr/bin/env bash
+  set -euo pipefail
+  mkdir -p test-logs
+  exec > >(tee test-logs/test-gpui-native.log) 2>&1
+  bash ci/lib/run-nim-test-lane.sh gpui-native
 
 # ─── PLAT-35: cross-renderer visual alignment ───────────────────────────────
 #
@@ -5721,6 +5890,98 @@ gpui-window-captures *which:
 plat35-capture-gpui-window *view: tui-prereqs
   bash ci/test/plat35-gpui-window-capture.sh {{view}}
 
+# CTF-P1b: every Agent Harbor story as a REAL GPUI window — the story host
+# `codetracer-gpui-story` on GuiAssert's headless sway, both themes, laptop and
+# sidebar sizes, frames and laid-out regions in `build/ctf-p1b/gpui/` — then
+# the `agent-harbor-gpui-captures` lane, whose
+# `test_ctf_p1b_gpui_capture_matches_web_layout` compares each capture's
+# regions with the committed web record (PLAT-35's pane-rectangle tolerance)
+# and fails on a missing or blank capture. Needs no recording. The report is
+# `build/ctf-p1b/parity/report.md`; `tools/visual-review/parity-pairs.sh
+# --agent-harbor` adds the side-by-side images. The lane also holds CTF-P1c's
+# layout test at the playback stories' named moments, so the moment captures
+# (`build/ctf-p1c/gpui/`, `CTF_P1B_MOMENTS=1`) are taken here too: a lane run
+# over a stale or missing half would fail or pass on captures this run did
+# not take.
+ctf-p1b-gpui-captures:
+  bash ci/test/ctf-p1b-gpui-story-capture.sh
+  CTF_P1B_MOMENTS=1 bash ci/test/ctf-p1b-gpui-story-capture.sh
+  bash ci/lib/run-nim-test-lane.sh agent-harbor-gpui-captures
+
+# CTF-P1b: every Agent Harbor story on a REAL TERMINAL — the terminal story
+# host (`src/frontend/tui/agent_harbor/ah_tui_story_host.nim`) in a pty per
+# story, theme and size (laptop 180x56 and sidebar 45x56 cells: 1440x900 and
+# 360x900 at 8x16 px a cell), read back through TermAssert by the
+# `tui-real-terminal` suite `test_ctf_p1b_tui_views_cover_web_states.nim`
+# (viewmodel, cell styles and committed snapshots), each screen written as an
+# SVG in its colours and rasterised to `build/ctf-p1b/tui/<id>.png`, then
+# paired with the web capture of the same story in `build/ctf-p1b/parity-tui/`
+# when `just ctf-p1b-web-captures` has taken it. Over the synthetic set.
+ctf-p1b-tui-captures: tui-prereqs
+  bash ci/test/ctf-p1b-tui-capture.sh
+
+# CTF-P1b: one Agent Harbor story in this terminal, by its StoryBook id
+# (`--list` among the ids lists them): clicks fold, filter and switch, the
+# pointer opens the initiative popup; `q` ends it (it ends by itself after
+# 30 s, as every snapshot app does). Needs a truecolor terminal.
+ctf-p1b-tui-story story="--list" theme="dark": tui-prereqs
+  #!/usr/bin/env bash
+  set -euo pipefail
+  flags=()
+  for f in $(cat build/grammars/tui-link-flags.txt 2>/dev/null); do flags+=("--passL:${f}"); done
+  AGENT_HARBOR_FIXTURES=synthetic nim c --hints:off --warnings:off --mm:orc -d:release \
+    --path:src/frontend/viewmodel \
+    "-d:isonimTuiGrammarArchive=${PWD}/build/grammars/libcodetracer_tui_grammars.a" \
+    "${flags[@]}" --path:../TermAssertClient/src \
+    --nimcache:build/nimcache/codetracer-tui-story -o:build/bin/codetracer-tui-story \
+    src/frontend/tui/agent_harbor/ah_tui_story_host.nim
+  if [ "{{story}}" = "--list" ]; then exec build/bin/codetracer-tui-story --list; fi
+  exec build/bin/codetracer-tui-story "--story={{story}}" "--theme={{theme}}" \
+    "--cols=$(tput cols)" "--rows=$(tput lines)"
+
+# CTF-P1b's web arm: the same stories in StoryBook (`capture-storybook.mjs
+# --regions`) into `build/ctf-p1b/web/`, and the browser's regions into the
+# committed `src/tests/visual/agent-harbor-web-regions.json`. Re-take and
+# commit it after changing a web view, a story or the region declaration.
+# `--no-build` reuses a fresh StoryBook.
+ctf-p1b-web-captures *args:
+  bash ci/test/ctf-p1b-web-capture.sh {{args}}
+
+# CTF-P1c: the web arm at the playback stories' named moments — each playback
+# story of the Agent Harbor section in StoryBook, opened at each named moment
+# of its scenario (the `moment` global), both themes, laptop and sidebar, into
+# `build/ctf-p1c/web/`, and the browser's regions into the committed
+# `src/tests/visual/agent-harbor-web-regions-at-moments.json`. Re-take and
+# commit it after changing a web view, a playback story, a scenario or the
+# region declaration. `--no-build` reuses a fresh StoryBook.
+ctf-p1c-web-captures *args:
+  bash ci/test/ctf-p1b-web-capture.sh --moments {{args}}
+
+# CTF-P1c: the GPUI arm at the same moments — each playback story as a REAL
+# GPUI window opened at each named moment (`codetracer-gpui-story --moment`),
+# both themes, laptop and sidebar, into `build/ctf-p1c/gpui/` — then the
+# `agent-harbor-gpui-captures` lane, whose
+# `test_ctf_p1c_gpui_capture_matches_web_layout_at_moments` runs CTF-P1b's
+# layout check over each moment's capture against that moment's web record.
+# The lane holds CTF-P1b's test too, so this is `ctf-p1b-gpui-captures`,
+# which takes both halves. The report is `build/ctf-p1c/parity/report.md`;
+# `tools/visual-review/parity-pairs.sh --agent-harbor-moments` adds the
+# side-by-side images.
+ctf-p1c-gpui-captures: ctf-p1b-gpui-captures
+
+# CTF-P1c: the terminal arm at the same moments — each playback story in the
+# terminal story host opened at each named moment (`--moment`), both themes,
+# laptop and sidebar, read back in a pty by `tui-real-terminal`'s
+# `test_ctf_p1c_playback_stories_agree_at_each_moment.nim` (each screen held
+# to the in-process drawing at that moment), written as an SVG in its colours
+# and rasterised to `build/ctf-p1c/tui/<id>.png`, then paired with the web
+# capture of the same story and moment in `build/ctf-p1c/parity-tui/`. Needs
+# `just ctf-p1c-web-captures`; fails when a capture the story host lists
+# (`--captures --moments`) was not written or has no web partner. Over the
+# synthetic set.
+ctf-p1c-tui-captures: tui-prereqs
+  bash ci/test/ctf-p1b-tui-capture.sh --moments
+
 # PLAT-69: the GPUI window as a normal desktop window — its top bar is the
 # title bar — as GuiAssert scenarios on a headless sway (`PLAT69_TARGET=gnome`
 # for GuiAssert's headless GNOME): the window moved, resized, maximized and
@@ -5863,6 +6124,20 @@ plat56-capture-electron *args:
 build-tasks-electron *args:
   bash scripts/build-tasks-electron.sh "$@"
 
+# PLAT-59: the desktop's Visual Replay panes on the `gl_scene` visual
+# recording — the reference the terminal's and GPUI's Video Player, Pixel
+# History and Shader Debug panes are measured against
+# (`src/tests/visual/answers/plat59-visual-replay.electron.json`).
+plat59-capture-electron *args:
+  bash scripts/plat59-capture-electron.sh "$@"
+
+# PLAT-59: re-record the `gl_scene` visual recording the Visual Replay suites
+# open. They open the one committed in the `examples/recordings` submodule
+# (`mcr/linux-x86_64/visual-gl-scene`); this writes a new one there, to
+# commit in codetracer-example-recordings.
+record-visual-replay-fixture *args:
+  bash scripts/record-visual-replay-fixture.sh "$@"
+
 # PLAT-60: the desktop's Low Level Code view on the `noir_space_ship`
 # recording — the reference the terminal's and GPUI's panes are measured
 # against (`src/tests/visual/answers/plat60-low-level-code.electron.json`).
@@ -5873,6 +6148,12 @@ plat60-capture-electron *args:
 # (`src/tests/visual/answers/plat60-native-low-level-code.electron.json`).
 plat60-native-capture-electron *args:
   bash scripts/plat60-native-capture-electron.sh "$@"
+
+# View > View Generated C Source and View Disassembly in the real desktop app
+# (Generated-Code-Listing.md §13.4): a stock-Nim recording (GENC_STOCK_NIM),
+# a `ct record` recording and Edit mode.
+generated-c-desktop *args:
+  bash scripts/generated-c-desktop.sh "$@"
 
 # The §30a arm: the two answer producers are independent readers.
 plat35-answer-independence:
@@ -7026,8 +7307,18 @@ ensure-ct-native-replay:
         if ! ( cd "$sibling" && nix develop "$backend_flake_ref" --command true >/dev/null 2>&1 ); then
             backend_flake_ref='.'
         fi
-        ( cd "$sibling" && nix develop "$backend_flake_ref" --command bash -lc \
-            "unset CXXFLAGS CC CXX; just $backend_target" )
+        # ``bash -c``, not ``bash -lc``: a login shell rebuilds PATH from the
+        # login profile and drops the dev shell's entries, so on a CI runner
+        # neither ``just`` nor the shell's ``cargo`` was found ("command not
+        # found", exit 127). The ``just`` running this recipe is passed by
+        # absolute path, since the backend's shell ships none of its own.
+        just_bin="$(command -v just)"
+        # A GC root for the backend's shell while it builds (CI sets
+        # CT_GCROOT_DIR; see provision-repro-lock-siblings).
+        gcroot=()
+        [ -n "${CT_GCROOT_DIR:-}" ] && gcroot=(--profile "${CT_GCROOT_DIR}/codetracer-native-backend-shell")
+        ( cd "$sibling" && nix develop "$backend_flake_ref" ${gcroot[@]+"${gcroot[@]}"} --command bash -c \
+            "unset CXXFLAGS CC CXX; '$just_bin' $backend_target" )
     elif command -v just >/dev/null 2>&1; then
         # Fallback: the sibling dev shell could not be evaluated, but we are
         # already inside the codetracer Nix dev shell which provides cargo +
@@ -7186,6 +7477,10 @@ test-own-xvfb:
 # operation and a `-command` removal behave identically on all three.
 plat68-one-keymap:
   bash ci/test/plat68-one-keymap-three-front-ends.sh
+
+# Input-Routing-And-Keymaps.md IR-3, IR-5 and §5.1 on all three front-ends.
+plat64-input-routing:
+  bash ci/test/plat64-input-routing-three-front-ends.sh
 
 # Published parity figures require two independent captures of each renderer.
 # Raw capture recipes above produce diagnostics, not stable parity scalars.

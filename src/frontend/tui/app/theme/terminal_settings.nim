@@ -15,6 +15,8 @@
 ## setting except `modern-unicode`, where `auto` is a value of its own
 ## (§6.7) and `off` is the default.
 
+import std/strutils
+
 import codetracer_embed
 
 import ./terminal_profile
@@ -53,6 +55,17 @@ proc choicesOf*(which: LayoutSetting; word: string;
       var v: bool
       if not parseOnOffWord(word, v): return false
       into.reduceMotion = some(v)
+  of lsPointerShapes:
+    var v: PointerShapesChoice
+    if not parseChoice(word, v): return false
+    into.pointerShapes = (if v == pscAuto: none(PointerShapesChoice) else: some(v))
+  of lsScreenReader:
+    if word.strip.toLowerAscii == "auto":
+      into.screenReader = none(bool)
+    else:
+      var v: bool
+      if not parseOnOffWord(word, v): return false
+      into.screenReader = some(v)
   else:
     return false
   true
@@ -69,6 +82,8 @@ proc choicesOf*(words: TerminalSettingWords): TerminalChoices =
   if words.terminalProbe == "off":
     discard choicesOf(lsTerminalProbe, words.terminalProbe, result)
   discard choicesOf(lsReduceMotion, words.reduceMotion, result)
+  discard choicesOf(lsPointerShapes, words.pointerShapes, result)
+  discard choicesOf(lsScreenReader, words.screenReader, result)
 
 proc prefsOf*(s: LayoutSettings): TerminalPrefs =
   ## Ranks 4 and 5: the `[terminal "<glob>"]` sections and the global

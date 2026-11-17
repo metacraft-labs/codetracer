@@ -1,0 +1,24 @@
+scenario: 1
+name: streaming/streamed-recording-call-trace-lists-every-burst
+pack: codetracer
+summary: >-
+  A program that alternates sleeps with bursts of work is recorded whole:
+  the call trace lists its three `burst_activity` calls (phase1, phase2,
+  phase3) and the `compute_fibonacci` calls inside them.
+
+stage:
+  - use: record-program
+    with: { program: py_streaming_test/main.py }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 180s }
+  - click: 'pane-tab[label="CALLTRACE"]'
+  - wait: { until: { at: call-trace, assert: 'has-call-with(burst_activity, phase1)' }, timeout: 60s }
+  - expect:
+      at: call-trace
+      assert:
+        - 'has-call-with(burst_activity, phase2)'
+        - 'has-call-with(burst_activity, phase3)'
+        - 'has-call-with(compute_fibonacci, "n=10")'
+        - 'has-call-with(compute_fibonacci, "n=12")'

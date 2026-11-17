@@ -1,0 +1,24 @@
+scenario: 1
+name: requests/press-on-opened-detail-is-not-activation
+pack: codetracer
+summary: >-
+  A click on a request opens its detail; a press on that detail after the
+  double-click interval has passed is a press on the detail, not a second
+  click on the row: the replay does not move.
+
+stage:
+  - use: request-session
+  - use: open-recording
+    with: { width: 1900, height: 1400 }
+
+steps:
+  - wait: { until: { at: requests, present: true }, timeout: 120s }
+  - wait: settled
+  - wait: { until: { at: requests, count: 8 }, timeout: 120s }
+  - wait: replay-idle
+  - expect: { at: status-line, location: { matches: ":13#6$" } }
+  - click: 'requests/request-row[id="04"]'
+  - wait: { until: { at: requests/request-detail, present: true }, timeout: 10s }
+  - hover: { at: requests/request-detail, for: 700ms }
+  - click: requests/request-detail
+  - expect: { at: status-line, location: { matches: ":13#6$" } }

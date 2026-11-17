@@ -177,6 +177,7 @@ proc roleGlyph*(role: SemanticRole; p: GlyphProfile): string =
     if s == RvSpace: " " else: s
   case role
   of srGutterBreakpoint: g(grBreakpoint)
+  of srGutterBreakpointHint: g(grBreakpoint)
   of srGutterBreakpointDisabled: g(grBreakpointDisabled)
   of srGutterTracepoint: g(grTracepoint)
   of srGutterExecutionPointer: p.pointerField(grExecPointer)
@@ -295,16 +296,21 @@ proc projectStyle*(style: CellStyle; depth: ColorDepth): CellStyle =
       result.fg = nearestAnsiName(result.fg)
     if isRgbSpelling(result.bg):
       result.bg = nearestAnsiName(result.bg)
+    if isRgbSpelling(result.underlineColor):
+      result.underlineColor = nearestAnsiName(result.underlineColor)
   of cdAnsi16:
     result = style
     result.fg = nearestAnsiName(result.fg)
     result.bg = nearestAnsiName(result.bg)
+    result.underlineColor = nearestAnsiName(result.underlineColor)
   of cdMonochrome:
+    # The underline stays; its colour, like every colour, goes.
     result = mergeAttrs(style, monoEmphasisFor(style.fg))
     if style.bg.len > 0:
       result.reverse = true
     result.fg = ""
     result.bg = ""
+    result.underlineColor = ""
 
 proc degradeStyle*(style: CellStyle; caps: TerminalCapabilities): CellStyle =
   ## One painted style at the resolved tier: the ROLES first

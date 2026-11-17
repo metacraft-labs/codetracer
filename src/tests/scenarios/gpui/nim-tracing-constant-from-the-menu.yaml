@@ -1,0 +1,19 @@
+scenario: 1
+name: gpui/nim-tracing-constant-from-the-menu
+pack: codetracer
+summary: >-
+  On a Nim project, the editor's menu on a constant's line offers Trace Constant Initializer, which opens a second session tab stopped inside the constant's initializer.
+
+stage:
+  - use: nim-project
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 180s }
+  - wait: { until: editor.loaded, timeout: 60s }
+  - expect: { at: session-strip, count: 1 }
+  - click: { at: 'editor[file="tracing.nim"]/line[number="15"]', anchor: text-start, button: right }
+  - wait: { until: { at: 'context-menu/menu-item[label="Trace Constant Initializer"]', present: true }, timeout: 20s }
+  - click: { at: 'context-menu/menu-item[label="Trace Constant Initializer"]' }
+    settle: false
+  - wait: { until: { at: session-strip, count: 2 }, timeout: 240s }

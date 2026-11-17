@@ -60,7 +60,6 @@
     border-top: 0.0625rem solid colors-ui-border-secondary
     color: colors-ui-text-primary-body
     padding: 0 0.5rem
-    cursor: pointer
 
     &:hover,
     &.selected
@@ -104,7 +103,6 @@
 
   .trace-values
     width: 45%
-    cursor: pointer
     text-overflow: ellipsis
     overflow: visible
     white-space: nowrap
@@ -134,11 +132,9 @@
   .view-overlays.focused
     z-index: TRACE_LOG_EDITOR_Z_INDEX + 3
     opacity: 0.4
-    cursor: text
 
   .view-overlays
     z-index: 5
-    cursor: text
 
   .view-lines
     z-index: TRACE_LOG_EDITOR_Z_INDEX + 1
@@ -209,7 +205,6 @@
       min-width: max-content
       flex: 0 0 auto
       color: colors-ui-text-primary-body
-      cursor: pointer
       overflow: visible
       white-space: nowrap
       display: block
@@ -270,7 +265,6 @@
 
     .trace-chevron-arrow
       color: colors-ui-text-primary-label
-      cursor: pointer
       position: absolute
       left: 50%
       z-index: 4
@@ -375,7 +369,6 @@
     // surface, 2.2:1 in the light theme, which takes the icon token
     // (`by-mode`, defaults.styl).
     color: by-mode(BORDER_COLOR, colors-ui-icon-primary-default);
-    cursor: pointer;
     height: 1.5rem;
     background: colors-ui-surface-primary-tertiary;
     width: 1.5rem;
@@ -464,7 +457,6 @@
     .dropdown
       border-radius: 0.9375rem
       color:#434f6a
-      cursor: pointer
       height: 1.875rem
       margin-top: 0.625rem
       background-color: colors-ui-surface-input-default
@@ -509,7 +501,6 @@
 
 .trace-simple
   color: TRACE_SIMPLE_COLOR
-  cursor: pointer
   padding-top: 0.3125rem
 
 .trace-sequence
@@ -560,7 +551,6 @@
 
 .trace-expand
   color: TRACE_EXPAND_COLOR
-  cursor: pointer
   text-align: right
 
 
@@ -568,13 +558,9 @@ RESIZING_BORDER_SIZE = 0.25rem
 
 .width-border
   height RESIZING_BORDER_SIZE
-  &:hover
-    cursor: row-resize
 
 .height-border
   width RESIZING_BORDER_SIZE
-  &:hover
-    cursor: col-resize
 
 .width-border, .height-border
   background-color COLOR_PANEL_BORDER
@@ -609,7 +595,6 @@ RESIZING_BORDER_SIZE = 0.25rem
   color: colors-ui-text-primary-body
   font-size: 0.9375rem
   border-radius: 0.9375rem
-  cursor: pointer
   display: none
   position: absolute
   // right: 75px
@@ -627,7 +612,6 @@ RESIZING_BORDER_SIZE = 0.25rem
     // 1.2:1, so there body text (`by-mode`, defaults.styl).
     color: by-mode(colors-ui-surface-primary-tertiary, colors-ui-text-primary-body)
     font-size: 0.9375rem
-    cursor: pointer
     position: absolute
     // right: 75px
     left: 0
@@ -643,14 +627,11 @@ RESIZING_BORDER_SIZE = 0.25rem
 .expanded-compound-select-view-kind
   margin-left: 32%
 
-.editor-trace
-  cursor: pointer
 
 //.active-trace
 //  background-color: #00f
 
 #save-trace
-  cursor: pointer
   font-size: 1.5rem
 
 .trace
@@ -691,7 +672,6 @@ RESIZING_BORDER_SIZE = 0.25rem
   // top: calc(50% - 0.5ex)
   font-size: 0.875rem
   text-align: center
-  cursor: text
   user-select: text
 
 .graph
@@ -700,7 +680,6 @@ RESIZING_BORDER_SIZE = 0.25rem
   visibility: hidden
 
 .expand-trace
-  cursor: pointer
   opacity: 0
 
 .trace

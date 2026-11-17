@@ -1,0 +1,32 @@
+scenario: 1
+name: terminal/panes-event-log-columns
+pack: codetracer
+summary: >-
+  The event log's header is tick, #, kind, output, with no location column
+  until `:column-show location` adds it (each row then names main.py:111);
+  `:column-left output` moves a column and says so; an unknown column is
+  refused by name.
+stage:
+  - use: record-program
+    with: { program: calc }
+  - use: open-recording
+    with: { width: 200, height: 50 }
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - wait: event-log.loaded
+  - expect: { at: 'pane[title="Event Log"]', assert: 'has-row("tick    # kind output")' }
+  - expect: { at: 'pane[title="Event Log"]', assert: 'lacks-row("location")' }
+  - expect: { at: 'pane[title="Event Log"]', assert: 'lacks-row("main.py:111")' }
+  - chord: Ctrl+P
+  - type: ":column-show location"
+  - key: Enter
+  - wait: { until: { at: 'pane[title="Event Log"]', assert: 'has-row("main.py:111")' }, timeout: 20s }
+  - expect: { at: 'pane[title="Event Log"]', assert: 'has-row("location")' }
+  - chord: Ctrl+P
+  - type: ":column-left output"
+  - key: Enter
+  - wait: { until: { at: status-line, assert: 'says("event log columns: tick # location output kind")' }, timeout: 20s }
+  - chord: Ctrl+P
+  - type: ":column-hide nope"
+  - key: Enter
+  - wait: { until: { at: status-line, assert: "says(\"no event log column 'nope'\")" }, timeout: 20s }

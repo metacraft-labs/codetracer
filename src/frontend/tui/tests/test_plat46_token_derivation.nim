@@ -74,7 +74,7 @@ const
     ## unchanged: each moved rung must still be the nearest entry to THAT hex.
   ThemeModules = ["roles.nim", "cell_style.nim", "colour_math.nim",
                   "palette.nim", "capabilities.nim", "editor_theme.nim",
-                  "terminal_profile.nim"]
+                  "terminal_profile.nim", "pointer_protocol.nim"]
     ## (PLAT-71: `capabilities.nim` imports `terminal_profile.nim`.)
   ProbeSource = """
 import ./palette
@@ -147,6 +147,8 @@ proc buildProbe(scratchTree, tokensNim, root: string): string =
              scratchTree / "src" / "common" / "terminal_graphics" / m)
   # `capabilities.nim` names the negotiated key protocol (PLAT-68), whose
   # type lives in the one key-name module.
+  copyFile(root / "src" / "common" / "pointer_shape.nim",
+           scratchTree / "src" / "common" / "pointer_shape.nim")
   copyFile(root / "src" / "common" / "key_names.nim",
            scratchTree / "src" / "common" / "key_names.nim")
   # `roles.nim` reads the focused strip's contrast floor (PLAT-68), a

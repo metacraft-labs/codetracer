@@ -66,21 +66,12 @@ proc bufferingDisplay(vm: VideoPlayerVM): string =
   displayIf(vm.bufferingDegraded.val and vm.playState.val == Playing)
 
 proc currentFrameLabel(vm: VideoPlayerVM): string =
-  let total = vm.frameVm.frameCount.val
-  if total > 0:
-    "Frame " & $vm.frameVm.currentFrame.val & " / " & $(total - 1)
-  else:
-    "Frame " & $vm.frameVm.currentFrame.val
+  ## The shared words (`video_player_vm.frameLabel`), which the terminal's
+  ## and GPUI's Video Player print too.
+  vm.frameLabel()
 
 proc currentDrawLabel(vm: VideoPlayerVM): string =
-  let calls = vm.frameVm.drawCalls.val
-  if vm.frameVm.selectedDrawCall.val.isSome:
-    "Draw " & $vm.frameVm.selectedDrawCall.val.get & " / " &
-      (if calls.len > 0: $(calls.len - 1) else: "?")
-  elif calls.len > 0:
-    "Draw 0 / " & $(calls.len - 1)
-  else:
-    ""
+  vm.drawLabel()
 
 proc frameImageDisplay(vm: VideoPlayerVM): string =
   displayIf(vm.frameVm.frameImageSrc.val.len > 0 and not vm.frameVm.loading.val)
@@ -133,9 +124,9 @@ proc transportDisabledClass(vm: VideoPlayerVM): string =
   else:
     "video-player-transport"
 
-proc scrubDisabledAttr(vm: VideoPlayerVM): string =
-  ## Disable the scrub slider when the player has errored.
-  if vm.frameVm.error.val.len > 0: "disabled" else: ""
+proc scrubDisabled(vm: VideoPlayerVM): bool =
+  ## The scrub slider is disabled while the player has errored.
+  vm.frameVm.error.val.len > 0
 
 proc magnifierClass(vm: VideoPlayerVM): string =
   result = "video-player-loupe"
@@ -241,7 +232,7 @@ proc renderVideoPlayerPanelBody[R, N](r: R; vm: VideoPlayerVM): N =
   ## The panel's markup, for every renderer. The clear-frame ticks follow
   ## ``FrameViewerVM.clearFrames`` reactively (``layoutScrubTicks`` maps
   ## them to 0..100 % positions; legacy traces have none).
-  var ticks: N
+  var ticks, scrub: N
   let panel = ui(r):
     tdiv(class = rootClassFor(vm, "video-player-component isonim-video-player")):
       ## --- Canvas area -----------------------------------------------------
@@ -377,7 +368,7 @@ proc renderVideoPlayerPanelBody[R, N](r: R; vm: VideoPlayerVM): N =
               min = "0",
               max = maxFrameValue(vm),
               value = currentFrameValue(vm),
-              disabled = scrubDisabledAttr(vm))
+              ref = scrub)
         tdiv(class = "video-player-scrub-labels"):
           tdiv(class = "video-player-frame-label"):
             text currentFrameLabel(vm)
@@ -386,6 +377,15 @@ proc renderVideoPlayerPanelBody[R, N](r: R; vm: VideoPlayerVM): N =
           tdiv(class = "video-player-selected-pixel"):
             text selectedPixelText(vm)
 
+  # `disabled` is a boolean attribute: present at all, even empty, it
+  # disables the slider, so it is set while the player has errored and
+  # removed otherwise (an empty value left every scrub disabled once a
+  # recording's player had started).
+  createEffect proc() =
+    if scrubDisabled(vm):
+      r.setAttribute(scrub, "disabled", "disabled")
+    else:
+      r.removeAttribute(scrub, "disabled")
   indexEach[ScrubTick, R, N](r, ticks,
     proc(): seq[ScrubTick] =
       layoutScrubTicks(vm.frameVm.clearFrames.val, vm.frameVm.frameCount.val),
@@ -405,11 +405,9 @@ when defined(js):
   proc setCanvasMouseHandlers(
       panel: isonim_dom.Element;
       onMouseMove: proc(renderedX, renderedY, renderedWidth,
-                        renderedHeight: float) {.closure.};
-      onClick: proc(renderedX, renderedY, renderedWidth,
-                    renderedHeight: float) {.closure.})
+                        renderedHeight: float) {.closure.})
       {.importjs: """
-        (function(panel, onMouseMove, onClick) {
+        (function(panel, onMouseMove) {
           function imageForEvent(event) {
             return event.target && event.target.closest
               ? event.target.closest(".video-player-stage")?.querySelector(".video-player-image")
@@ -427,18 +425,7 @@ when defined(js):
           panel.addEventListener("mouseleave", function() {
             onMouseMove(-1, -1, 0, 0);
           });
-          panel.addEventListener("click", function(event) {
-            const image = imageForEvent(event);
-            if (!image) return;
-            const rect = image.getBoundingClientRect();
-            onClick(
-              event.clientX - rect.left,
-              event.clientY - rect.top,
-              rect.width,
-              rect.height
-            );
-          });
-        })(#, #, #);
+        })(#, #);
       """.}
 
   # Listen for both "input" (live drag) and "change" (final value) so the
@@ -448,14 +435,27 @@ when defined(js):
   # otherwise dead-code-strips ``scrubTo`` because the raw JS body is
   # opaque to the compiler, leaving ``vm.scrubTo is not a function`` at
   # runtime.
+  ## THE SLIDER'S DRAG, IN THREE PHASES (Visual-Replay.md § Scrub Slider):
+  ## a press (0) begins it, each "input" (1) moves it, the "change" (2) a
+  ## release fires settles it — the shared gesture
+  ## (`VideoPlayerVM.beginScrub` / `dragScrub` / `releaseScrub`), so the
+  ## desktop's slider coalesces its requests and resumes playback as the
+  ## terminal's and GPUI's scrubbers do.
   proc setScrubRangeHandler(input: isonim_dom.Element;
-                            onSeek: proc(frame: int)) {.importjs: """
-    (function(el, onSeek) {
-      const handler = function(event) {
-        onSeek(Number((event.target && event.target.value) || 0));
+                            onScrub: proc(frame, phase: int)) {.importjs: """
+    (function(el, onScrub) {
+      const valueOf = function(event) {
+        return Number((event.target && event.target.value) || 0);
       };
-      el.addEventListener("input", handler);
-      el.addEventListener("change", handler);
+      el.addEventListener("pointerdown", function(event) {  // ir1-gate: gesture (the scrub)
+        onScrub(valueOf(event), 0);
+      });
+      el.addEventListener("input", function(event) {
+        onScrub(valueOf(event), 1);
+      });
+      el.addEventListener("change", function(event) {
+        onScrub(valueOf(event), 2);
+      });
     })(#, #);
   """.}
 
@@ -675,8 +675,8 @@ when defined(js):
   ## M2 historical note: a raw window-level Escape keydown handler used to
   ## live here (``installEscapeHandler``).  M4 retired it in favour of the
   ## standard ClientAction pipeline — ``ClientAction.videoPlayerCancelPicker``
-  ## is one of the pane's own keys (``videoPlayerKey``) in
-  ## ``ui/key_router.nim`` and routed onto ``VideoPlayerVM.cancelPicker`` via
+  ## is the picker layer's `Escape` (``keymap/overlay_rows``), routed by
+  ## ``ui/key_router.nim`` onto ``VideoPlayerVM.cancelPicker`` via
   ## ``dispatchVideoPlayerAction``.  The new wiring respects focus scoping
   ## (only fires when the Video Player is focused or hovered) and falls
   ## through to ``aEscape`` when picker mode is inactive, so it can coexist
@@ -709,19 +709,10 @@ when defined(js):
           vm.magnifier.val = none(MagnifierPosition)
           vm.magnifierCenterColor.val = none(VisualReplayPixelColor)
           return
-        vm.updateMagnifier(renderedX, renderedY, renderedWidth, renderedHeight),
-      proc(renderedX, renderedY, renderedWidth, renderedHeight: float) =
-        if vm.pickerState.val == PickerActive:
-          ## Make sure the magnifier reflects the click position before
-          ## commit (covers the "click without prior mousemove" path).
-          vm.updateMagnifier(renderedX, renderedY,
-                             renderedWidth, renderedHeight)
-          vm.commitPickedPixel()
-        else:
-          ## Fallback: clicks outside picker mode still update the pixel
-          ## selection — useful for the existing pixel-history workflow.
-          vm.frameVm.selectPixelFromRenderedPoint(
-            renderedX, renderedY, renderedWidth, renderedHeight))
+        vm.updateMagnifier(renderedX, renderedY, renderedWidth, renderedHeight))
+    # A press on the frame is the pointer row `video-player.select-pixel`,
+    # performed by the front-end (on the desktop `ui/video_player.nim`'s
+    # procedure, at the press's position over `.video-player-image`).
 
     # FRAMES SIZED (Viewport-Driven-Loading, Decided Q5): the stage the
     # image is shown in, which the VM turns into the frame size it asks for.
@@ -733,8 +724,22 @@ when defined(js):
     let scrub = querySelector(panel, cstring".video-player-scrub-range")
     if not isNilElement(scrub):
       let capturedVm = vm
-      setScrubRangeHandler(scrub, proc(frame: int) =
-        capturedVm.scrubTo(frame))
+      setScrubRangeHandler(scrub, proc(frame, phase: int) =
+        let now = nowMs()
+        case phase
+        of 0:
+          capturedVm.beginScrub(scrubFrame, frame, now)
+        of 1:
+          if not capturedVm.frameScrub.held:
+            capturedVm.beginScrub(scrubFrame, frame, now)
+          else:
+            discard capturedVm.dragScrub(scrubFrame, frame, now)
+        else:
+          # A keyboard change (or a programmatic one) arrives with no press:
+          # it is a whole drag of its own.
+          if not capturedVm.frameScrub.held:
+            capturedVm.beginScrub(scrubFrame, frame, now)
+          capturedVm.releaseScrub(scrubFrame, frame, now))
 
     ## Loupe pixel-grid rendering. The JS side owns the mirror canvas and
     ## the per-frame blit; the Nim side drives it from a reactive effect
@@ -785,13 +790,15 @@ when defined(js):
     ## then miss them.
     installPlaybackTickLoop(panel,
       proc(nowMs: float) =
+        # A held drag's coalesced frame, once its window passed.
+        discard vm.pumpScrub(nowMs)
         if not isInTest():
           vm.tickPlayback(nowMs))
 
     ## Escape → cancelPicker flows through the standard ClientAction
-    ## pipeline (M4).  No raw keydown listener is installed here — the
-    ## pane's own keys in ``ui/key_router.nim`` (``videoPlayerKey``) query
-    ## ``videoPlayerHasFocus()`` and ``vm.pickerState`` before delegating.
+    ## pipeline (M4).  No raw keydown listener is installed here — it is a
+    ## row of the picker's layer (``keymap/overlay_rows``), which
+    ## ``ui/key_router.nim`` pushes while ``vm.pickerState`` is active.
 
 proc renderVideoPlayerPanel*[R, N](r: R; vm: VideoPlayerVM): N =
   ## The Video Player panel, under any renderer (Shared-DOM-Front-Ends D3);

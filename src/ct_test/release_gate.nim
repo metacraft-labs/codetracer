@@ -1057,6 +1057,30 @@ const
     "src/tests/cli/replay_backend_env_e2e_test.nim",
   ]
 
+  CliSurfaceGateTests* = [
+    # `ct`'s whole command line, pinned before CS-M10 (Clispec Library
+    # campaign) moved it from confutils' type-based loader to a clispec
+    # description.  Same contract and the same runner as the arrays above --
+    # `just test-cli-record` globs the whole of `src/tests/cli` -- kept in its
+    # own array because its subject is every command, not one of them.
+    #
+    # The move is required to leave every flag, environment variable, default,
+    # error text and exit code unchanged (help screens are clispec's default
+    # rendering, compared in-process), and this golden capture is the only
+    # evidence that it did.  A move that also deleted or skip-disabled the test
+    # would look exactly like a move that changed nothing, which is why it is
+    # registered rather than reachable by the glob alone.
+    "src/tests/cli/cs_m10_cli_surface_unchanged_test.nim",
+    # ... and that nothing of confutils' type-based command line is left:
+    # no enum subcommands (`{.command.}`), no confutils field pragmas, no
+    # import of the module whose `load` reads them.
+    "src/tests/cli/cs_m10_no_enum_subcommands_left_test.nim",
+    # ... and that its help is coloured only where clispec's printer would
+    # colour it (on a terminal, without `NO_COLOR`, `TERM` not `dumb`) and
+    # as wide as the terminal or `COLUMNS`, on the real binary.
+    "src/tests/cli/cs_m10_help_colour_test.nim",
+  ]
+
   GuiActionGateEntries*: array[5, GuiActionGateEntry] = [
     GuiActionGateEntry(
       action: "ct.test.run",

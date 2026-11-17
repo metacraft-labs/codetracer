@@ -1,0 +1,20 @@
+scenario: 1
+name: terminal/nim-tracing-without-nimsuggest
+pack: codetracer
+summary: >-
+  With no nimsuggest available, the static-block action starts nothing and
+  says why, naming CODETRACER_NIMSUGGEST; no new tab opens.
+stage:
+  - use: nim-project
+  - use: front-end-options
+    with:
+      env: { CODETRACER_NIMSUGGEST: "$project/no-nimsuggest" }
+  - use: open-recording
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - wait: { until: editor.loaded, timeout: 60s }
+  - click: { at: 'editor[file="tracing.nim"]/line[number="18"]', anchor: text-start }
+  - chord: { bound: editor.trace-static-block-at-cursor }
+  - wait: { until: { at: status-line, assert: 'says("nimsuggest is not available")' }, timeout: 30s }
+  - expect: { at: status-line, assert: 'says("CODETRACER_NIMSUGGEST")' }
+  - expect: { at: session-strip, count: 1 }

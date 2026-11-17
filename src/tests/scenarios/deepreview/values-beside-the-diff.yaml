@@ -1,0 +1,33 @@
+scenario: 1
+name: deepreview/values-beside-the-diff
+pack: codetracer
+summary: >-
+  A diff tab draws the recorded execution the way the debugger does: the
+  four lines the first call of main ran are marked run and none skipped; the
+  values the dataset recorded (`<x>` 10, `<y>` 20, `<result>` 55) stand in
+  the debugger's band of value columns beside the code — never inside the
+  code text, never as `// x = …` comments, every band at one left offset and
+  no column past the pane's edge, a band below a changed line carrying its
+  diff colour; and utils.rs shows its own values (`<trimmed>` "hello world").
+
+stage:
+  - use: open-review
+    with: { dataset: src/tests/gui/tests/deepreview/fixtures/sample-review.json }
+
+steps:
+  - wait: { until: { at: vcs, present: true }, timeout: 120s }
+  - wait: { until: { at: 'review-diff[file="src/main.rs"]', present: true }, timeout: 60s }
+  - wait: { until: settled, timeout: 30s }
+  - wait: { until: { at: 'review-diff[file="src/main.rs"]', flow-hit-lines: 4 }, timeout: 30s }
+  - wait: { until: { at: 'review-diff[file="src/main.rs"]', value-chips: { gt: 1 } }, timeout: 30s }
+  - expect: { at: 'review-diff[file="src/main.rs"]', flow-skip-lines: 0, values-in-code: 0, comment-values: 0 }
+  - expect: { at: 'review-diff[file="src/main.rs"]', values: { matches: "<x>.*10" } }
+  - expect: { at: 'review-diff[file="src/main.rs"]', values: { matches: "<y>.*20" } }
+  - expect: { at: 'review-diff[file="src/main.rs"]', values: { matches: "<result>.*55" } }
+  - expect: { at: 'review-diff[file="src/main.rs"]', value-names: { gt: 0 }, value-boxes: { gt: 0 }, value-columns: { gt: 0 } }
+  - expect: { at: 'review-diff[file="src/main.rs"]', omni-names: { gt: 0 }, omni-values: { gt: 0 } }
+  - expect: { at: 'review-diff[file="src/main.rs"]', band-spread: { le: 1 }, values-past-edge: 0, band-washes: true }
+  - click: 'vcs/changed-file[name="utils.rs"]'
+  - wait: { until: { at: 'review-diff[file="src/utils.rs"]', value-chips: { gt: 0 } }, timeout: 30s }
+  - expect: { at: 'review-diff[file="src/utils.rs"]', values: { matches: "<trimmed>.*hello world" } }
+  - expect: { at: 'review-diff[file="src/utils.rs"]', values: { matches: "<input>.*\\.\\.\\." } }

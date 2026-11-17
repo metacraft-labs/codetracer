@@ -1,0 +1,22 @@
+scenario: 1
+name: macro-expansion/language-dynamic-menu-nim
+pack: codetracer
+summary: >-
+  A Nim recording's View menu offers the Nim views and tracing commands:
+  View Generated C Source, View Disassembly, Trace Macro at Cursor and Trace
+  Static Block at Cursor.
+
+stage:
+  - use: nim-project
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - wait: { until: editor.loaded, timeout: 60s }
+  - click: { at: menu-bar }
+  - hover: { at: 'menu-bar/menu[label="View"]', for: 500ms }
+  - wait: { until: { at: 'menu-bar/menu-item[label="Trace Macro at Cursor"]', present: true }, timeout: 10s }
+  - expect: { at: menu-bar, assert: "offers(\"View Generated C Source\")" }
+  - expect: { at: menu-bar, assert: "offers(\"View Disassembly\")" }
+  - expect: { at: menu-bar, assert: "offers(\"Trace Macro at Cursor\")" }
+  - expect: { at: menu-bar, assert: "offers(\"Trace Static Block at Cursor\")" }

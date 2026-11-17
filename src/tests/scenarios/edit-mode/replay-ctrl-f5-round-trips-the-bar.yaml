@@ -1,0 +1,26 @@
+scenario: 1
+name: edit-mode/replay-ctrl-f5-round-trips-the-bar
+pack: codetracer
+summary: >-
+  A replay starts in Debug mode with the stepping controls; Ctrl+F5 takes it
+  to Edit mode, where they are gone, and back, twice, with the right bar
+  each time.
+
+stage:
+  - use: record-program
+    with: { program: py_console_logs/main.py }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - wait: { until: { at: 'toolbar/toolbar-button[label="next-image"]', present: true }, timeout: 60s }
+  - expect: { at: window, mode: debug }
+  - chord: Ctrl+F5
+  - wait: { until: { at: window, mode: edit }, timeout: 30s }
+  - wait: { until: { at: 'toolbar/toolbar-button[label="next-image"]', present: false }, timeout: 30s }
+  - chord: Ctrl+F5
+  - wait: { until: { at: 'toolbar/toolbar-button[label="next-image"]', present: true }, timeout: 30s }
+  - expect: { at: window, mode: debug }
+  - chord: Ctrl+F5
+  - wait: { until: { at: window, mode: edit }, timeout: 30s }
+  - wait: { until: { at: 'toolbar/toolbar-button[label="next-image"]', present: false }, timeout: 30s }

@@ -2,8 +2,15 @@
 # gpui-window-captures.sh — RE-TAKE the GPUI window's measurements on a real
 # compositor and assert them, end to end, from nothing but a checkout.
 #
-#   bash ci/test/gpui-window-captures.sh [plat45] [plat47] [plat48] [plat68] [plat69] [plat70a] [plat70b] [m71]
-#   just gpui-window-captures                 # all eight
+#   bash ci/test/gpui-window-captures.sh [plat45] [plat47] [plat48] [plat68] [plat69] [plat59] [plat70a] [plat70b] [m71]
+#   just gpui-window-captures                 # all nine
+#   bash ci/test/gpui-window-captures.sh --shim-only    # step 1 only: the
+#                                             # windowed shim and the virtual
+#                                             # pointer (CI's ct-build job)
+#   bash ci/test/gpui-window-captures.sh --build-only   # steps 1-2 only: the
+#                                             # windowed shim and front-end the
+#                                             # GPUI scenario lane opens (the CI
+#                                             # shards that take no captures)
 #
 # The GPUI window suites (`test_plat45_three_media.nim`,
 # `test_plat47_gpui_window.nim`, `test_plat48_gpui_window.nim`,
@@ -17,7 +24,7 @@
 # run the committed record is REPLACED by a fresh measurement of this commit's
 # window and the suite asserts that, not the file a person last committed.
 #
-# For each capture named (default: all three):
+# For each capture named (default: all of them):
 #   1. isonim-gpui's WINDOWED shim (`--features gpui-backend`) and its
 #      `build/virtual-pointer`, built in isonim-gpui's own dev shell — the
 #      shell that declares the X/Wayland link libraries and the compositor
@@ -61,12 +68,27 @@ fail() {
 	exit 1
 }
 
+# CT_GPUI_SHIM_PREBUILT=1: the windowed shim and the virtual pointer are
+# already in place (CI's shards restore them from the ct-build job), so step 1
+# is skipped and only checked.
+build_only=0
+shim_only=0
+case "${1:-}" in
+--build-only)
+	build_only=1
+	shift
+	;;
+--shim-only)
+	shim_only=1
+	shift
+	;;
+esac
 which=("$@")
-[ "${#which[@]}" -gt 0 ] || which=(plat45 plat47 plat48 plat68 plat69 plat70a plat70b m71)
+[ "${#which[@]}" -gt 0 ] || which=(plat45 plat47 plat48 plat59 plat68 plat69 plat70a plat70b m71)
 for w in "${which[@]}"; do
 	case "${w}" in
-	plat45 | plat47 | plat48 | plat68 | plat69 | plat70a | plat70b | m71) ;;
-	*) fail "unknown capture '${w}' (plat45, plat47, plat48, plat68, plat69, plat70a, plat70b, m71)" ;;
+	plat45 | plat47 | plat48 | plat59 | plat68 | plat69 | plat70a | plat70b | m71) ;;
+	*) fail "unknown capture '${w}' (plat45, plat47, plat48, plat59, plat68, plat69, plat70a, plat70b, m71)" ;;
 	esac
 done
 
@@ -87,13 +109,25 @@ export REPLAY_SERVER_BIN="${REPLAY_SERVER_BIN:-${_ct_replay_default}}"
 
 # ---- 1. the windowed shim and the virtual pointer, in isonim-gpui's shell ---
 target="${GPUI_WINDOWED_TARGET_DIR:-${ISONIM_GPUI}/rust/target/windowed}"
-echo "=== isonim-gpui: the windowed shim (${target}) and build/virtual-pointer"
-(cd "${ISONIM_GPUI}" && nix develop --command bash -c \
-	"cd rust && CARGO_TARGET_DIR='${target}' cargo build --features gpui-backend &&
-	 cd .. && bash scripts/build-virtual-pointer.sh") ||
-	fail "could not build isonim-gpui's windowed shim or its virtual pointer"
 shim="${target}/debug/libgpui_nim_shim.so"
+if [ "${CT_GPUI_SHIM_PREBUILT:-0}" = 1 ]; then
+	echo "=== isonim-gpui: the windowed shim and build/virtual-pointer are prebuilt (CT_GPUI_SHIM_PREBUILT=1)"
+	[ -x "${ISONIM_GPUI}/build/virtual-pointer" ] ||
+		fail "CT_GPUI_SHIM_PREBUILT=1, but there is no ${ISONIM_GPUI}/build/virtual-pointer"
+else
+	echo "=== isonim-gpui: the windowed shim (${target}) and build/virtual-pointer"
+	gcroot=()
+	[ -n "${CT_GCROOT_DIR:-}" ] && gcroot=(--profile "${CT_GCROOT_DIR}/isonim-gpui-shell")
+	(cd "${ISONIM_GPUI}" && nix develop ${gcroot[@]+"${gcroot[@]}"} --command bash -c \
+		"cd rust && CARGO_TARGET_DIR='${target}' cargo build --features gpui-backend &&
+		 cd .. && bash scripts/build-virtual-pointer.sh") ||
+		fail "could not build isonim-gpui's windowed shim or its virtual pointer"
+fi
 [ -f "${shim}" ] || fail "the windowed shim is not at ${shim}"
+if [ "${shim_only}" = 1 ]; then
+	echo "gpui-window-captures: built ${shim} and build/virtual-pointer (--shim-only)"
+	exit 0
+fi
 
 # ---- 2. this checkout's GPUI front-end, pinned to that shim -----------------
 echo "=== build/bin/codetracer-gpui-window against ${shim}"
@@ -104,6 +138,10 @@ nim c --hints:off --warnings:off --mm:orc -d:release \
 	"-d:gpuiShimPath=${shim}" \
 	-o:build/bin/codetracer-gpui-window src/frontend/gpui/main.nim ||
 	fail "could not build the windowed codetracer-gpui"
+if [ "${build_only}" = 1 ]; then
+	echo "gpui-window-captures: built build/bin/codetracer-gpui-window (--build-only)"
+	exit 0
+fi
 
 # ---- 3. the recordings -------------------------------------------------------
 #
@@ -112,12 +150,23 @@ nim c --hints:off --warnings:off --mm:orc -d:release \
 # corpus, so a name alone cannot be resolved (`test_window_capture_fixtures.nim`
 # asserts every capture's recordings resolve). The provider reuses a recording
 # whose program is unchanged, so this is cheap when they already exist.
-echo "=== recording the fixtures ${which[*]} open"
-nim c -r --hints:off --warnings:off --path:src/frontend/tui/tests \
-	--nimcache:build/nimcache/window-capture-fixtures \
-	-o:build/window-capture-fixtures \
-	src/frontend/tui/tests/fixtures/window_capture_fixtures.nim "${which[@]}" ||
-	fail "could not record the fixtures ${which[*]} open"
+#
+# plat59 is not one of them: it opens the committed gl_scene recording
+# (visual_fixture.nim), which nothing here records, and the recorder's
+# `WindowCaptures` does not list it. Passing it failed the whole step with
+# "unknown capture 'plat59'" whenever the default list ran.
+recorded=()
+for w in "${which[@]}"; do
+	[ "$w" = plat59 ] || recorded+=("$w")
+done
+if [ "${#recorded[@]}" -gt 0 ]; then
+	echo "=== recording the fixtures ${recorded[*]} open"
+	nim c -r --hints:off --warnings:off --path:src/frontend/tui/tests \
+		--nimcache:build/nimcache/window-capture-fixtures \
+		-o:build/window-capture-fixtures \
+		src/frontend/tui/tests/fixtures/window_capture_fixtures.nim "${recorded[@]}" ||
+		fail "could not record the fixtures ${recorded[*]} open"
+fi
 
 # ---- 3b. the no-display refusal, with the binary that CAN open a window -----
 #
@@ -208,6 +257,29 @@ for w in "${which[@]}"; do
 		in_compositor_shell "CODETRACER_PLAT68_ISONIM_GPUI='${ISONIM_GPUI}' bash ci/test/plat68-cua-window.sh" &&
 			bash ci/test/plat68-cua-window.sh --record &&
 			suite gpui-shell src/frontend/gpui/tests/test_plat68_cua_window.nim ||
+			failed+=("${w}")
+		;;
+	plat59)
+		# The Video Player's frames on the `gl_scene` visual recording: its
+		# tab pressed by the virtual pointer, frame 30 and the last frame by
+		# real keys. Linux has no off-screen GPUI renderer, so these are the
+		# window's pixels. Needs what the desktop's Visual Replay needs: ct-mcr
+		# and ct_gfx_player.
+		# shellcheck disable=SC1090,SC1091 # written by the script just run
+		if ! bash ci/test/visual-replay-tools.sh build/plat59-tools.env ||
+			! . build/plat59-tools.env; then
+			failed+=("${w}")
+			continue
+		fi
+		# The committed gl_scene recording (the examples/recordings submodule).
+		[ -f examples/recordings/mcr/linux-x86_64/visual-gl-scene/gfx_stream/gfx_frames.idx ] || {
+			echo "gpui-window-captures: the gl_scene recording is not checked out (git submodule update --init examples/recordings)" >&2
+			failed+=("${w}")
+			continue
+		}
+		in_compositor_shell "bash ci/test/plat59-gpui-window.sh" &&
+			python3 ci/test/plat59_gpui_window.py record &&
+			suite gpui-shell src/frontend/gpui/tests/test_plat59_gpui_window.nim ||
 			failed+=("${w}")
 		;;
 	plat70a)

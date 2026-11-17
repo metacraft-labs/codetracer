@@ -58,10 +58,15 @@ suite "the Menu ViewModel":
     ck vm.enterFolder()
     ck vm.path == @[3]
     ck vm.highlightedItem().label == "Filesystem"
+    # Theme's index is read from View's own definition, not written here:
+    # View gains and loses panes (Timeline went with PLAT-51, Constraints
+    # came with the Constraints pane's parity work), and the walk is about
+    # where the keyboard lands, not about how many panes precede Theme.
+    let themeAt = vm.root.children[3].visibleChildren()[^1]
     vm.moveHighlight(-1)           # wraps to the last visible item
     ck vm.highlightedItem().label == "Theme"
     ck vm.enterFolder()            # the nested Theme folder
-    ck vm.path == @[3, 13]          # PLAT-51: View lost its Timeline entry
+    ck vm.path == @[3, themeAt]
     ck vm.leaveFolder()
     ck vm.highlightedItem().label == "Theme"
     vm.escape()                    # leaves View

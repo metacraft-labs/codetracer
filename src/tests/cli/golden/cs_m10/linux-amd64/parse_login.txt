@@ -1,0 +1,838 @@
+# ct login: 46 argv cases through ct's loader (the parse probe)
+
+### 1: bare
+argv: ct "login"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = login
+  loginDefaultOrg = none
+  loginBaseUrl = none
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 2: --default-org <v>
+argv: ct "login" "--default-org" "acme"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = login
+  loginDefaultOrg = some("acme")
+  loginBaseUrl = none
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 3: --default-org=<v>
+argv: ct "login" "--default-org=acme"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = login
+  loginDefaultOrg = some("acme")
+  loginBaseUrl = none
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 4: --default-org:<v>
+argv: ct "login" "--default-org:acme"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = login
+  loginDefaultOrg = some("acme")
+  loginBaseUrl = none
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 5: --default-org acme
+argv: ct "login" "--default-org" "acme"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = login
+  loginDefaultOrg = some("acme")
+  loginBaseUrl = none
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 6: --default-org=acme
+argv: ct "login" "--default-org=acme"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = login
+  loginDefaultOrg = some("acme")
+  loginBaseUrl = none
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 7: --default-org empty
+argv: ct "login" "--default-org" ""
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = login
+  loginDefaultOrg = some("")
+  loginBaseUrl = none
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 8: --default-org= (empty)
+argv: ct "login" "--default-org="
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = login
+  loginDefaultOrg = some("")
+  loginBaseUrl = none
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 9: --default-org= <v> (next word)
+argv: ct "login" "--default-org=" "acme"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = login
+  loginDefaultOrg = some("acme")
+  loginBaseUrl = none
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 10: --default-org -x (value starts with -)
+argv: ct "login" "--default-org" "-x"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = login
+  loginDefaultOrg = some("-x")
+  loginBaseUrl = none
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 11: --default-org --x (value starts with --)
+argv: ct "login" "--default-org" "--x"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = login
+  loginDefaultOrg = some("--x")
+  loginBaseUrl = none
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 12: --default-org --new-tab <v> (an option between it and its value)
+argv: ct "login" "--default-org" "--new-tab" "acme"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The subcommand 'login' does not accept arguments\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 13: --default-org repeated, last wins
+argv: ct "login" "--default-org" "acme" "--default-org" "acme"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = login
+  loginDefaultOrg = some("acme")
+  loginBaseUrl = none
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 14: --default-org missing value (last)
+argv: ct "login" "--default-org"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The option '\e[34m--default-org\e[0m' requires a value\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 15: --DEFAULT-ORG <v> (style variant)
+argv: ct "login" "--DEFAULT-ORG" "acme"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = login
+  loginDefaultOrg = some("acme")
+  loginBaseUrl = none
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 16: --d_efault-org <v> (style variant)
+argv: ct "login" "--d_efault-org" "acme"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = login
+  loginDefaultOrg = some("acme")
+  loginBaseUrl = none
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 17: --default_org <v> (style variant)
+argv: ct "login" "--default_org" "acme"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'default_org'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 18: --defaultorg <v> (style variant)
+argv: ct "login" "--defaultorg" "acme"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'defaultorg'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 19: --base-url <v>
+argv: ct "login" "--base-url" "https://b.test"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = login
+  loginDefaultOrg = none
+  loginBaseUrl = some("https://b.test")
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 20: --base-url=<v>
+argv: ct "login" "--base-url=https://b.test"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = login
+  loginDefaultOrg = none
+  loginBaseUrl = some("https://b.test")
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 21: --base-url:<v>
+argv: ct "login" "--base-url:https://b.test"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = login
+  loginDefaultOrg = none
+  loginBaseUrl = some("https://b.test")
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 22: --base-url https://b.test
+argv: ct "login" "--base-url" "https://b.test"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = login
+  loginDefaultOrg = none
+  loginBaseUrl = some("https://b.test")
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 23: --base-url=https://b.test
+argv: ct "login" "--base-url=https://b.test"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = login
+  loginDefaultOrg = none
+  loginBaseUrl = some("https://b.test")
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 24: --base-url empty
+argv: ct "login" "--base-url" ""
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = login
+  loginDefaultOrg = none
+  loginBaseUrl = some("")
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 25: --base-url= (empty)
+argv: ct "login" "--base-url="
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = login
+  loginDefaultOrg = none
+  loginBaseUrl = some("")
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 26: --base-url= <v> (next word)
+argv: ct "login" "--base-url=" "https://b.test"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = login
+  loginDefaultOrg = none
+  loginBaseUrl = some("https://b.test")
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 27: --base-url -x (value starts with -)
+argv: ct "login" "--base-url" "-x"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = login
+  loginDefaultOrg = none
+  loginBaseUrl = some("-x")
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 28: --base-url --x (value starts with --)
+argv: ct "login" "--base-url" "--x"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = login
+  loginDefaultOrg = none
+  loginBaseUrl = some("--x")
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 29: --base-url --new-tab <v> (an option between it and its value)
+argv: ct "login" "--base-url" "--new-tab" "https://b.test"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The subcommand 'login' does not accept arguments\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 30: --base-url repeated, last wins
+argv: ct "login" "--base-url" "https://b.test" "--base-url" "https://b.test"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = login
+  loginDefaultOrg = none
+  loginBaseUrl = some("https://b.test")
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 31: --base-url missing value (last)
+argv: ct "login" "--base-url"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The option '\e[34m--base-url\e[0m' requires a value\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 32: --BASE-URL <v> (style variant)
+argv: ct "login" "--BASE-URL" "https://b.test"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = login
+  loginDefaultOrg = none
+  loginBaseUrl = some("https://b.test")
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 33: --b_ase-url <v> (style variant)
+argv: ct "login" "--b_ase-url" "https://b.test"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = login
+  loginDefaultOrg = none
+  loginBaseUrl = some("https://b.test")
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 34: --base_url <v> (style variant)
+argv: ct "login" "--base_url" "https://b.test"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'base_url'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 35: --baseurl <v> (style variant)
+argv: ct "login" "--baseurl" "https://b.test"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'baseurl'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 36: unknown long option
+argv: ct "login" "--bogus"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'bogus'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 37: unknown long option with value
+argv: ct "login" "--bogus=1"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'bogus'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 38: unknown short option
+argv: ct "login" "-Z"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'Z'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 39: lone -
+argv: ct "login" "-"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option ''\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 40: lone -- then a word
+argv: ct "login" "--" "w"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option ''\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 41: --=v
+argv: ct "login" "--=v"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option ''\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 42: extra positional
+argv: ct "login" "extra1" "extra2" "extra3" "extra4" "extra5"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The subcommand 'login' does not accept arguments\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 43: global --cwd after the command
+argv: ct "login" "--cwd" "/w"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = some("/w")
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = login
+  loginDefaultOrg = none
+  loginBaseUrl = none
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 44: global --new-tab after the command
+argv: ct "login" "--new-tab"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = true
+  newWindow = false
+  cmd = login
+  loginDefaultOrg = none
+  loginBaseUrl = none
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 45: --version after the command
+argv: ct "login" "--version"
+env: (none)
+exit: 0
+--- stdout
+CodeTracer version: <VERSION>
+\e[0m
+(no newline at end of stdout)
+--- stderr
+--- end
+
+### 46: -h after the command
+argv: ct "login" "-h"
+env: (none)
+exit: 0
+--- stdout
+<the short help page clispec renders for this request: ct login>
+--- stderr
+--- end

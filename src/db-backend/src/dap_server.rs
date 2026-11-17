@@ -902,6 +902,13 @@ fn setup_session(
             )
             .into()
         })?;
+        let mut handler = handler;
+        // Its stops name the thread `threads` lists it under, so a client
+        // (VS Code's call stack and editor) follows a stop into this
+        // recording rather than showing the first recording's.
+        if let Some(composed) = compose_thread_id(idx as TraceSlot, crate::dap_handler::REPLAYED_THREAD_ID) {
+            handler.dap_client.stopped_thread_id = composed;
+        }
         handlers.push(handler);
     }
     let session = SessionHandler::new(manifest, handlers)
@@ -1102,6 +1109,27 @@ fn extract_thread_id_from_request(req: &dap::Request) -> Option<i64> {
     None
 }
 
+/// A `ct/` request with the session's routing `threadId` taken out of its
+/// arguments.
+///
+/// After the user switches the recording a multi-process session shows, the
+/// renderer names that recording on every request by stamping its composed
+/// thread id (`dap.nim` `dispatchCtRequest`). The router reads it to choose
+/// the trace; the trace's handler does not take it. Most `ct/` argument types
+/// refuse unknown fields, so `ct/load-locals`, `ct/load-flow` and
+/// `ct/load-calltrace-section` were refused ("unknown field `threadId`") and
+/// the switched-to recording showed no variables and kept the previous call
+/// trace. The standard DAP requests keep it: their arguments carry a thread
+/// by definition, and `stackTrace` reads its inner part.
+fn without_routing_thread_id(mut req: dap::Request) -> dap::Request {
+    if req.command.starts_with("ct/")
+        && let Some(arguments) = req.arguments.as_object_mut()
+    {
+        arguments.remove("threadId");
+    }
+    req
+}
+
 /// Route a single DAP request through the SessionHandler. The
 /// composed thread id selects the trace; requests without a thread id
 /// default to slot 0 (the primary trace). The existing
@@ -1195,6 +1223,7 @@ fn handle_request_via_session(
         )
         .into());
     }
+    let req = without_routing_thread_id(req);
     // M29 §14.3 — `ct/originChain` is the one *per-trace* request the
     // session layer must post-process: after the owning trace's
     // single-trace walk finishes, the chain may end on a receive marker

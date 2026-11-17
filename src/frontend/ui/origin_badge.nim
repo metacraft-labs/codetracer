@@ -98,7 +98,7 @@ when defined(js):
           else: ""
         onClick(tok)
       button.addEventListener(cstring"click", handler)
-    button.addEventListener(cstring"mousedown", proc(ev: Event) =
+    button.addEventListener(cstring"mousedown", proc(ev: Event) =  # ir1-gate: propagation
       ev.stopPropagation()
     )
     parent.appendChild(button)

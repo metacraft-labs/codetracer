@@ -24,7 +24,8 @@ import std/strutils
 
 import isonim/core/signals
 import nim_agents_isonim_viewmodels/agent_harbor/[session_tabs_vm, initiative_progress_vm,
-                                                   fleet_vm, recording_switcher]
+                                                   fleet_vm, recording_switcher,
+                                                   initiative_tabs_vm]
 
 const
   AgentHarborTabsLoadingText* = "Loading sessions\xE2\x80\xA6"
@@ -33,6 +34,11 @@ const
   AgentHarborFleetLoadingText* = "Loading sessions\xE2\x80\xA6"
   AgentHarborFleetEmptyText* = "No sessions on this server yet."
   AgentHarborFleetFilteredEmptyText* = "No session in this category."
+  AgentHarborFleetEmptyCellText* = "\xE2\x80\x94"
+    ## A fleet column with nothing to say -- a session of no initiative, an
+    ## agent or host the server did not name: an em dash, set in the disabled
+    ## text role, so the cell reads as empty rather than as a gap in the
+    ## grid. The web and GPUI fleet views both draw it from here.
   InitiativesLoadingText* = "Loading initiatives\xE2\x80\xA6"
   InitiativesEmptyText* = "No initiative is running on this server."
   ProgressEmptyText* = "Select an initiative to see its progress."
@@ -102,6 +108,28 @@ proc filterLabel*(filter: FleetFilter): string =
   of ffFailed: "Failed"
   of ffEnded: "Ended"
 
+proc activityLineIsError*(row: FleetRow; line: int): bool =
+  ## Whether a fleet row's activity line `line` is drawn in the error
+  ## colour: it is one the viewmodel marks error-level, AND the row has no
+  ## failure line. A failure line already says the fault in red; the
+  ## activity under it stays in the caption role, so one fault is not shown
+  ## twice in red: a failed row shows a red failure line, or else an
+  ## error-coloured activity line. One rule for the three front-ends: the
+  ## web sets `ah-fleet-activity-error` from it, GPUI and the terminal pick
+  ## the ink from it. A selected row draws every line in the selection's
+  ## text colour, whatever this says.
+  line >= 0 and line < row.activityLevels.len and row.activityLevels[line] == "error" and
+    row.failureText.len == 0
+
+proc filterCountInk*(count: int; active: bool): tuple[disabled, body: bool] =
+  ## Which role a fleet filter's count takes: the active filter's count is
+  ## in the body role even at 0 (on the active fill the disabled role falls
+  ## to about 2.2:1); another filter's 0 is in the disabled role, quieter
+  ## than a count; any other count in the caption role (neither flag set).
+  if active: (false, true)
+  elif count == 0: (true, false)
+  else: (false, false)
+
 proc filterCount*(counts: FleetCounts; filter: FleetFilter): int =
   case filter
   of ffAll: counts.listed
@@ -168,3 +196,200 @@ proc stateSuffix*(state: RecordingState): string =
   of rsLoading: " \xE2\x80\xA6"
   of rsFailed: " \xE2\x9C\x95"
   of rsMissing: " ?"
+
+# ---------------------------------------------------------------------------
+# The `+N` chips: what they hide
+# ---------------------------------------------------------------------------
+
+type
+  HiddenSeverity* = enum
+    ## The most severe status among the items a `+N` chip hides, which the
+    ## chip takes: its colour and mark, and its accessible name.
+    hsNone = "none"            ## nothing that asks for the reader
+    hsNeedsInput = "needs-input" ## a hidden item waits (the warning mark)
+    hsFailed = "failed"        ## a hidden item failed (the error colour and mark)
+
+  HiddenSummary* = object
+    ## What a `+N` chip hides: how many items, how many of them wait for
+    ## the reader and how many failed, and the most severe of these.
+    hidden*, waiting*, failed*: int
+    severity*: HiddenSeverity
+
+proc hiddenSummary*(waiting, failed, hidden: int): HiddenSummary =
+  ## A chip hiding `hidden` items, `waiting` of them waiting and `failed`
+  ## of them failed; a failure is more severe than a wait.
+  result = HiddenSummary(hidden: hidden, waiting: waiting, failed: failed)
+  result.severity = if failed > 0: hsFailed elif waiting > 0: hsNeedsInput else: hsNone
+
+proc hiddenSessions*(attentions: openArray[SessionAttention]): HiddenSummary =
+  ## The session tabs a chip hides, by their attention.
+  var waiting, failed = 0
+  for a in attentions:
+    if a == saNeedsInput: inc waiting
+    elif a == saFailed: inc failed
+  hiddenSummary(waiting, failed, attentions.len)
+
+proc hiddenRecordings*(states: openArray[RecordingState]): HiddenSummary =
+  ## The recordings a recording switcher's chip hides: a recording that
+  ## failed to load is a failure; one no longer on the server (missing,
+  ## drawn in the warning colour) is a warning.
+  var waiting, failed = 0
+  for s in states:
+    if s == rsFailed: inc failed
+    elif s == rsMissing: inc waiting
+  hiddenSummary(waiting, failed, states.len)
+
+proc chipTitle*(h: HiddenSummary; noun, nouns: string): string =
+  ## The chip's accessible name and tooltip: `3 more tabs, 1 failed, 1
+  ## needing input`, so what the chip's colour says is also said in words.
+  result = $h.hidden & " more " & (if h.hidden == 1: noun else: nouns)
+  if h.failed > 0:
+    result.add ", " & $h.failed & (if noun == "recording": " failed to load" else: " failed")
+  if h.waiting > 0:
+    result.add ", " & $h.waiting & (if noun == "recording": " missing" else: " needing input")
+
+proc hiddenBarTabs*(tabs: openArray[StripTab]; hidden: openArray[int]): HiddenSummary =
+  ## The initiative bar's tabs a chip hides (indexes into `tabs`): an
+  ## initiative that needs input, or a session that does, waits; an
+  ## initiative whose milestone is blocked with nothing working (its red
+  ## mark), or a session that failed, is a failure.
+  var waiting, failed = 0
+  for i in hidden:
+    let t = tabs[i]
+    case t.kind
+    of stkInitiative:
+      if t.state == isNeedsInput: inc waiting
+      elif t.state == isBlocked: inc failed
+    of stkSession:
+      if t.session.attention == saNeedsInput: inc waiting
+      elif t.session.attention == saFailed: inc failed
+  hiddenSummary(waiting, failed, hidden.len)
+
+# ---------------------------------------------------------------------------
+# Cut text
+# ---------------------------------------------------------------------------
+
+const
+  CutEllipsis* = "\xE2\x80\xA6"
+    ## What ends a cut text.
+  CutSeparators* = ["\xC2\xB7", "\xE2\x80\x94"]
+    ## The separators a cut drops when they end what it keeps: `·`, and the
+    ## `—` of ` — `. Spaces are always dropped too. The GPUI views hand this
+    ## set to isonim-gpui's text element (`ah_theme.text`), so the native
+    ## cut follows the same rule.
+
+proc trimBeforeEllipsis*(kept: string): string =
+  ## The kept start of a cut text, without what would dangle before its
+  ## "…": trailing spaces, and a separator (`CutSeparators`: `·`, or
+  ## ` — `) the cut left last, so `5ca1ab1e · ` reads `5ca1ab1e…` and
+  ## `Telemetry upload ` reads `Telemetry upload…`. Every host's cut text
+  ## goes through this rule: the terminal's `ah_tui_canvas.elide`, the web's
+  ## `ah_cut_text` and, through `CutSeparators`, the GPUI text element.
+  result = kept.strip(leading = false)
+  var trimmed = true
+  while trimmed:
+    trimmed = false
+    for sep in CutSeparators:
+      if result.endsWith(sep):
+        result = result[0 ..< result.len - sep.len].strip(leading = false)
+        trimmed = true
+
+proc danglesBeforeEllipsis*(shown: string): bool =
+  ## Whether a drawn text breaks the rule above: it ends in "…" and what it
+  ## keeps before the "…" ends in a space or a separator. A bare "…"
+  ## keeps nothing and does not dangle. The hosts' tests read their drawn
+  ## cut texts through this; it reads the text itself rather than asking
+  ## `trimBeforeEllipsis`, so a broken trim cannot also blind the check.
+  if not shown.endsWith(CutEllipsis): return false
+  let kept = shown[0 ..< shown.len - CutEllipsis.len]
+  if kept.len == 0: return false
+  if kept[^1] in Whitespace: return true
+  for sep in CutSeparators:
+    if kept.endsWith(sep): return true
+  false
+
+proc trimAfterEllipsis*(kept: string): string =
+  ## The kept end of a text cut in its middle, without what would dangle
+  ## after its "…": leading spaces, and a separator (`CutSeparators`) the
+  ## cut left first. The mirror of `trimBeforeEllipsis`.
+  result = kept.strip(trailing = false)
+  var trimmed = true
+  while trimmed:
+    trimmed = false
+    for sep in CutSeparators:
+      if result.startsWith(sep):
+        result = result[sep.len .. ^1].strip(trailing = false)
+        trimmed = true
+
+const PathSeparator* = '/'
+  ## Where a path's segments meet; a path is cut only between them.
+
+proc joinPathCut(head, tail: string): string =
+  ## `head…tail`, each side trimmed by the one rule.
+  trimBeforeEllipsis(head) & CutEllipsis & trimAfterEllipsis(tail)
+
+proc pathCutCandidates*(path: string): seq[string] =
+  ## The middle cuts of a file path, longest first (CTF-P1c D6, amended for
+  ## paths): the path keeps its first segment and its file name, and the
+  ## segments between give way one at a time from the second
+  ## (`src/upload/retry/client.py`: `src/…/retry/client.py`, then
+  ## `src/…/client.py`); then only the file name is kept (`…/client.py`).
+  ## A host draws the first candidate that fits, and when none does, cuts
+  ## the whole path at its end like any other text. A path with no segment
+  ## between its first and its file name has only the last candidate, and a
+  ## path of one segment has none. A leading `/` belongs to the first
+  ## segment. Each side of the "…" is trimmed by the one rule
+  ## (`trimBeforeEllipsis`, `trimAfterEllipsis`).
+  let start = if path.len > 0 and path[0] == PathSeparator: 1 else: 0
+  let firstSep = path.find(PathSeparator, start)
+  let lastSep = path.rfind(PathSeparator)
+  if firstSep < 0 or lastSep <= start - 1 or lastSep == path.high: return
+  # The separators between the first segment and the file name: each one
+  # starts a segment that may give way.
+  var seps: seq[int]
+  var i = firstSep
+  while i >= 0 and i <= lastSep:
+    seps.add i
+    i = path.find(PathSeparator, i + 1)
+  let head = path[0 .. firstSep]
+  # Keep the segments after seps[k] (k = 1 .. high): drop the ones before.
+  for k in 1 .. seps.high:
+    result.add joinPathCut(head, path[seps[k] .. ^1])
+  result.add joinPathCut("", path[lastSep .. ^1])
+
+proc cutPath*(path: string; fits: proc(text: string): bool;
+              endCut: proc(): string): string =
+  ## A file path as a host draws it in the room it has: whole when it fits,
+  ## else the first of `pathCutCandidates` that fits, else `endCut()` (the
+  ## host's end cut of the whole path). `fits` measures in the host's unit.
+  if fits(path): return path
+  for candidate in pathCutCandidates(path):
+    if fits(candidate): return candidate
+  endCut()
+
+proc danglesAroundEllipsis*(shown: string): bool =
+  ## Whether a drawn cut breaks the trim rule: an end cut (it ends in "…")
+  ## by `danglesBeforeEllipsis`; a middle cut on either side of its last
+  ## "…" -- what it keeps before ends in a space or a separator, or what it
+  ## keeps after starts with one. Reads the text itself, as
+  ## `danglesBeforeEllipsis` does.
+  if shown.endsWith(CutEllipsis): return danglesBeforeEllipsis(shown)
+  let at = shown.rfind(CutEllipsis)
+  if at < 0: return false
+  if danglesBeforeEllipsis(shown[0 ..< at + CutEllipsis.len]): return true
+  let after = shown[at + CutEllipsis.len .. ^1]
+  if after.len == 0: return false
+  if after[0] in Whitespace: return true
+  for sep in CutSeparators:
+    if after.startsWith(sep): return true
+  false
+
+proc countsFloor*(counts: string): string =
+  ## The least a tree node's counts are cut to (CTF-P1c D7): the first
+  ## count's number and the ellipsis, `1…` for `1 needs input · 2 running`.
+  ## The counts never shrink below it; the title gives way first. Counts
+  ## that are a number alone, or do not open with one, are their own floor.
+  var digits = 0
+  while digits < counts.len and counts[digits] in Digits: inc digits
+  if digits == 0 or digits == counts.len: counts
+  else: counts[0 ..< digits] & CutEllipsis

@@ -1,3 +1,9 @@
+## Ported to the scenarios src/tests/scenarios/gpui/edit-mode-*.yaml (the
+## operation sequences typed as OS keys into the shipped Edit window and
+## saved: insert, delete backward, split, undo, redo, delete / indent /
+## upper-case a selection); kept for the corpus-wide sequence check against
+## the in-process core, which no scenario ports.
+##
 ## PLAT-44 — PLAT-34's thirty pinned operation sequences, driven through the
 ## SHIPPED GPUI binary as WRITES, from keys.
 ##

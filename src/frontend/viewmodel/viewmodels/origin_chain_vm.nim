@@ -24,6 +24,12 @@
 ## - §5.3 DAP request         — issued via `BackendService.send("ct/originChain", …)`.
 ## - §5.3.2 lazy fill         — issued via `BackendService.send("ct/originSummary", …)`.
 ##
+## The requests go over the store's `directBackend`: this ViewModel's state
+## is the host's own and is not mirrored, so on a `ct host` page, whose store
+## is a mirror's over an inert backend, they take the page's connection to
+## the replay (`ReplayDataStore.navigationBackend`); elsewhere that is the
+## store's `backend`.
+##
 ## Headless test posture (per the milestones-file Introduction): tests
 ## drive the real backend whenever possible. Pure VM-state tests run
 ## against the existing `MockBackendService` which records every command;
@@ -39,6 +45,7 @@ import ../backend/backend_service
 import ../store/[replay_data_store, types]
 from ../store/stop_timeline import stopIdentityOf
 import origin_chain_types
+import ./action_sink
 
 type
   RowChain* = object
@@ -83,6 +90,12 @@ type
       ## Per-session navigation history. Each `onShowOrigin` push adds
       ## an entry; the side-panel renders them as clickable
       ## breadcrumbs (spec §3.3).
+    breadcrumbChains: seq[Option[OriginChain]]
+      ## The chain each breadcrumb's query was answered with, by position in
+      ## `breadcrumbStack`, so going back to a breadcrumb shows what the user
+      ## saw there (`onSelectBreadcrumb`). An entry is `none` until its answer
+      ## arrives; a stack set from elsewhere (a collab mirror) has no chains,
+      ## and its breadcrumbs are asked again instead.
     preferences*: Signal[OriginPreferences]
       ## User-mutable badge / chain preferences (spec §3.7).
     placeholderFillQueue*: Signal[seq[string]]
@@ -119,6 +132,10 @@ type
       ## Token → resolved-summary cache populated by responses to
       ## `ct/originSummary`. The State Pane subscribes and replaces
       ## `[?]` pills with the filled badge once the entry appears.
+    continuing*: Signal[HashSet[string]]
+      ## The chains being continued now (spec §5.3.1, "continue tracing"),
+      ## by `continuationKey`: a row's variable name, or the side panel's.
+      ## A chain is continued once at a time; its button says so meanwhile.
     sidePanelOpen*: Signal[bool]
       ## Whether the dedicated Origin Chain side panel (spec §3.2.2
       ## "Show in side panel" + §8.1) is currently visible. The host
@@ -127,6 +144,10 @@ type
       ## populated; Esc / "close" affordances clear it.
 
     # -- Wiring --
+    actionSink*: ActionSink
+      ## A MIRROR's sink (`sync/mirror_session`): a hop clicked in a mirrored
+      ## side panel is sought by the primary, whose connection to the replay
+      ## the mirror does not have (a VS Code panel's webview).
     onSeekProc*: proc(stepId: int64; location: Location)
       ## Optional bridge installed by the host so `onSeekToHop` can
       ## reuse the existing `ct/history-jump` / `ct/goto-ticks` wiring.
@@ -181,6 +202,7 @@ proc recordRowChain(vm: OriginChainVM; expression, stop: string;
                     chain: OriginChain)
 proc forgetRowRequest(vm: OriginChainVM; expression, stop: string)
 proc onCancelLoad*(vm: OriginChainVM)
+proc rememberBreadcrumbChain(vm: OriginChainVM; chain: OriginChain)
 
 proc sendChainQuery(vm: OriginChainVM; expression: string; stepId: int64;
                     forSidePanel: bool) =
@@ -218,7 +240,7 @@ proc sendChainQuery(vm: OriginChainVM; expression: string; stepId: int64;
   # which never passes through here, counted as the side panel's.
   vm.sendingRowChainRequest = not forSidePanel
   try:
-    async_compat.onComplete(vm.store.backend.send("ct/originChain", args),
+    async_compat.onComplete(vm.store.directBackend.send("ct/originChain", args),
       onSuccess = proc(response: JsonNode) =
         let body = responseBody(response)
         if responseSucceeded(response) and body.hasKey("hops"):
@@ -250,7 +272,7 @@ proc onShowOrigin*(vm: OriginChainVM; expression: string; location: Location;
   ##
   ## The origin badge's in-place fetch is `loadRowChain`, which touches
   ## neither the side panel nor its breadcrumb trail.
-  if vm.store.isNil or vm.store.backend.isNil:
+  if vm.store.isNil or vm.store.directBackend.isNil:
     return
   vm.sidePanelOpen.val = true
   var stack = vm.breadcrumbStack.val
@@ -286,7 +308,7 @@ proc loadRowChain*(vm: OriginChainVM; expression: string; location: Location) =
   ## pending request and its breadcrumb trail are left alone. Asked at most
   ## once per row per stop, so the expand click and the re-ask after a move
   ## cannot duplicate it.
-  if vm.store.isNil or vm.store.backend.isNil:
+  if vm.store.isNil or vm.store.directBackend.isNil:
     return
   let stop = stopIdentityOf(vm.store.debugger.val)
   if vm.rowChainAt(expression, stop).isSome:
@@ -298,6 +320,132 @@ proc loadRowChain*(vm: OriginChainVM; expression: string; location: Location) =
     return
   vm.rowChainsAsked.incl(expression)
   vm.sendChainQuery(expression, stepId = -1, forSidePanel = false)
+
+# ---------------------------------------------------------------------------
+# Continuing a cut-off chain (spec §5.3.1, "continue tracing")
+# ---------------------------------------------------------------------------
+
+const SidePanelContinuation* = "<side panel>"
+  ## `continuationKey` of the side panel's chain (a key no variable name is).
+
+proc continuationKey*(expression: string): string =
+  ## `continuing`'s key for the State-pane row `expression`'s chain.
+  expression
+
+proc isContinuing*(vm: OriginChainVM; key: string): bool =
+  ## Reactive: reads `continuing`.
+  key in vm.continuing.val
+
+proc appendChainPage*(shown, page: OriginChain): OriginChain =
+  ## The chain the user sees after a continuation: `shown`'s hops, then the
+  ## hops `page` (the continuation's answer) walked, ending where `page`
+  ## ends — at the origin, or cut off again with `page`'s continuation.
+  result = shown
+  result.hops = shown.hops & page.hops
+  result.terminator = page.terminator
+  result.truncated = page.truncated
+  result.continuationToken = page.continuationToken
+  result.metrics = page.metrics
+  result.crossProcessSpans = shown.crossProcessSpans & page.crossProcessSpans
+  result.confidence = min(shown.confidence, page.confidence)
+
+proc cannotContinue(shown: OriginChain; reason: string): OriginChain =
+  ## `shown`, told that it cannot be continued and why: the engine refused
+  ## its continuation (the replay no longer holds the point, the sources
+  ## changed). The chain stays as walked; tracing the value again starts it
+  ## over.
+  result = shown
+  result.continuationToken = none(string)
+  result.terminator.expression =
+    if reason.len > 0: "cannot continue: " & reason
+    else: "cannot continue; trace the value again"
+
+proc responseMessage(response: JsonNode): string =
+  ## The DAP error message of a failed response; "" when it has none.
+  if not response.isNil and response.kind == JObject and
+      response.hasKey("message") and response["message"].kind == JString:
+    response["message"].getStr
+  else:
+    ""
+
+proc sendContinuation(vm: OriginChainVM; key: string; shown: OriginChain;
+                      apply: proc(chain: OriginChain)) =
+  ## Ask the engine to go on with `shown` from its continuation token and
+  ## hand `apply` the chain with the new hops appended. The request is
+  ## never the side panel's "latest request" (`noteChainRequestSent`): its
+  ## answer is a page of a chain, which `applyChainAnswer` must not take for
+  ## a whole one.
+  if vm.store.isNil or vm.store.directBackend.isNil or not shown.canContinue:
+    return
+  if vm.isContinuing(key):
+    return
+  var keys = vm.continuing.val
+  keys.incl(key)
+  vm.continuing.val = keys
+  let args = originChainArgs(
+    expression = shown.queryVariable,
+    stepId = shown.queryStepId,
+    maxHops = vm.preferences.val.defaultMaxHops,
+    continuationToken = shown.continuationToken,
+  )
+  let vmRef = vm
+  let done = proc() =
+    var keys = vmRef.continuing.val
+    keys.excl(key)
+    vmRef.continuing.val = keys
+  vm.sendingRowChainRequest = true
+  try:
+    async_compat.onComplete(vm.store.directBackend.send("ct/originChain", args),
+      onSuccess = proc(response: JsonNode) =
+        let body = responseBody(response)
+        if responseSucceeded(response) and body.hasKey("hops"):
+          apply(appendChainPage(shown, parseOriginChain(body)))
+        else:
+          apply(cannotContinue(shown, responseMessage(response)))
+        done(),
+      onError = proc(message: string) =
+        apply(cannotContinue(shown, message))
+        done())
+  finally:
+    vm.sendingRowChainRequest = false
+
+proc continueRowChain*(vm: OriginChainVM; expression: string) =
+  ## "Continue tracing" under the State-pane row `expression`: walk the
+  ## row's cut-off chain further and show it longer in place. The chain is
+  ## the one asked at the current stop; a row whose chain is another stop's
+  ## has nothing to continue.
+  if vm.store.isNil:
+    return
+  let stop = stopIdentityOf(vm.store.debugger.val)
+  let shown = vm.rowChainAt(expression, stop)
+  if shown.isNone:
+    return
+  let vmRef = vm
+  vm.sendContinuation(continuationKey(expression), shown.get,
+    proc(chain: OriginChain) =
+      # Only while the row still shows the chain at that stop: after a move
+      # the row asks afresh, and a late page must not land on it.
+      if vmRef.rowChainAt(expression, stop).isSome:
+        vmRef.recordRowChain(expression, stop, chain))
+
+proc continueActiveChain*(vm: OriginChainVM) =
+  ## "Continue tracing" in the side panel: walk its cut-off chain further.
+  ## A mirror's (a VS Code panel) is the primary's to run.
+  if vm.actionSink.forwards("originChain", "continueActiveChain", newJObject()):
+    return
+  let shown = vm.activeChain.val
+  if shown.isNone:
+    return
+  let vmRef = vm
+  let asked = shown.get
+  vm.sendContinuation(SidePanelContinuation, asked,
+    proc(chain: OriginChain) =
+      # Only while the panel still shows the chain that was continued: a
+      # chain asked for since replaced it.
+      let now = vmRef.activeChain.val
+      if now.isSome and now.get == asked:
+        vmRef.activeChain.val = some(chain)
+        vmRef.rememberBreadcrumbChain(chain))
 
 proc openSidePanel*(vm: OriginChainVM) =
   ## Force-open the side panel (used by the command palette / keyboard
@@ -337,6 +485,14 @@ proc rejectChainAnswer*(vm: OriginChainVM; transportId: string): bool =
   vm.onCancelLoad()
   true
 
+proc rememberBreadcrumbChain(vm: OriginChainVM; chain: OriginChain) =
+  ## The side panel's chain just arrived: it answers the latest breadcrumb.
+  let depth = vm.breadcrumbStack.val.len
+  if depth == 0:
+    return
+  vm.breadcrumbChains.setLen(depth)
+  vm.breadcrumbChains[depth - 1] = some(chain)
+
 proc applyChainAnswer*(vm: OriginChainVM; chain: OriginChain;
                        transportId: string): bool =
   ## Apply a chain that arrived on the transport, named by the request it
@@ -352,6 +508,7 @@ proc applyChainAnswer*(vm: OriginChainVM; chain: OriginChain;
   vm.activeChain.val = some(chain)
   vm.loading.val = false
   vm.latestTransportRequest = ""
+  vm.rememberBreadcrumbChain(chain)
   true
 
 proc applyChainResponse*(vm: OriginChainVM; chain: OriginChain;
@@ -364,6 +521,7 @@ proc applyChainResponse*(vm: OriginChainVM; chain: OriginChain;
     return
   vm.activeChain.val = some(chain)
   vm.loading.val = false
+  vm.rememberBreadcrumbChain(chain)
 
 proc onCancelLoad*(vm: OriginChainVM) =
   ## Drop the spinner flag and bump the request counter so any future
@@ -377,11 +535,14 @@ proc onSeekToHop*(vm: OriginChainVM; hop: OriginHop) =
   ## Invoke the host-provided seek bridge (spec §3.3 "Click a hop").
   ## Falls back to a `ct/history-jump` payload via the backend
   ## directly when no host bridge is installed (e.g. in unit tests).
+  if vm.actionSink.forwards("originChain", "seekToHop",
+      %*{"stepId": hop.stepId, "rrTicks": hop.location.rrTicks}):
+    return
   if not vm.onSeekProc.isNil:
     let loc = Location(file: hop.location.path, line: hop.location.line)
     vm.onSeekProc(hop.stepId, loc)
     return
-  if vm.store.isNil or vm.store.backend.isNil:
+  if vm.store.isNil or vm.store.directBackend.isNil:
     return
   # Fallback: forward the seek as a history-jump request so the
   # existing backend dispatcher (`ct/history-jump`) handles it.
@@ -455,11 +616,40 @@ proc onPopBreadcrumb*(vm: OriginChainVM): Option[BreadcrumbEntry] =
   let last = stack[^1]
   stack.setLen(stack.len - 1)
   vm.breadcrumbStack.val = stack
+  if vm.breadcrumbChains.len > stack.len:
+    vm.breadcrumbChains.setLen(stack.len)
   some(last)
 
 proc onClearBreadcrumbs*(vm: OriginChainVM) =
   ## Clear the entire breadcrumb stack (called on session switch).
   vm.breadcrumbStack.val = @[]
+  vm.breadcrumbChains.setLen(0)
+
+proc onSelectBreadcrumb*(vm: OriginChainVM; index: int) =
+  ## A press on the breadcrumb at `index` (spec §3.3: the breadcrumbs list
+  ## the queries "the user navigated through, allowing easy back-up"): the
+  ## queries after it are popped, and the side panel shows its chain again.
+  ##
+  ## The chain shown is the one that breadcrumb was answered with, not a new
+  ## query: a breadcrumb asked at the current stop (`stepId` -1) asked again
+  ## after a move would answer about a different moment. A breadcrumb whose
+  ## answer never arrived is asked again. Any request still in flight is
+  ## cancelled, so its late answer cannot replace the chain gone back to.
+  let stack = vm.breadcrumbStack.val
+  if index < 0 or index >= stack.len:
+    return
+  var kept = stack
+  kept.setLen(index + 1)
+  vm.breadcrumbStack.val = kept
+  if vm.breadcrumbChains.len > index + 1:
+    vm.breadcrumbChains.setLen(index + 1)
+  vm.onCancelLoad()
+  vm.sidePanelOpen.val = true
+  if index < vm.breadcrumbChains.len and vm.breadcrumbChains[index].isSome:
+    vm.activeChain.val = vm.breadcrumbChains[index]
+  else:
+    vm.sendChainQuery(stack[index].variableName, stack[index].stepId,
+                      forSidePanel = true)
 
 proc toggleExpanded*(vm: OriginChainVM; row: VariableId) =
   ## Toggle the inline expansion state for `row`. The State Pane
@@ -498,7 +688,7 @@ proc flushPlaceholderFill*(vm: OriginChainVM) =
   let queue = vm.placeholderFillQueue.val
   if queue.len == 0:
     return
-  if vm.store.isNil or vm.store.backend.isNil:
+  if vm.store.isNil or vm.store.directBackend.isNil:
     return
   vm.inFlightSummary.val = true
   let args = originSummaryArgs(queue)
@@ -507,7 +697,7 @@ proc flushPlaceholderFill*(vm: OriginChainVM) =
   # that no host had, so it stopped after the first batch.
   let vmRef = vm
   let sent = queue
-  async_compat.onComplete(vm.store.backend.send("ct/originSummary", args),
+  async_compat.onComplete(vm.store.directBackend.send("ct/originSummary", args),
     onSuccess = proc(response: JsonNode) =
       if responseSucceeded(response):
         vmRef.applySummaryResponse(sent,
@@ -629,6 +819,7 @@ proc createOriginChainVM*(store: ReplayDataStore): OriginChainVM =
       lastResolvedSummaries: createSignal(
         initTable[string, OriginSummary]()),
       sidePanelOpen: createSignal(false),
+      continuing: createSignal(initHashSet[string]()),
       rowChains: createSignal(initTable[string, RowChain]()),
       sendingRowChainRequest: false,
       disposeProc: dispose,

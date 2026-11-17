@@ -157,3 +157,47 @@ suite "after a jump the call trace shows the current call":
     vm.setViewport(Viewport(rows: 10, firstRow: 0))
     store.calltrace.currentLineIndex.val = 250   # the same stop answering again
     check vm.viewport.val.firstRow == 0
+
+suite "a row selected for a move keeps its mark when the move lands":
+  # Click-Navigation.md §2.1-§2.3: the clicked row is the one marked. A row
+  # click selects its call and jumps to it, and when the call shares its
+  # first step with calls it makes, the engine reports the INNERMOST of them
+  # as current. Line 5 stands for the clicked call and line 8 for that deeper
+  # frame, both open at the step the jump lands on.
+
+  test "the clicked call stays marked at the stop the jump lands on":
+    let (store, vm) = setup(follow = true)
+    store.stopAt(20, 1)
+    vm.selectCallForMove("k5")
+    check vm.selectedEntry.val == some(5'i64)
+    store.stopAt(6, 8)                    # the jump; the engine says line 8
+    check vm.selectedEntry.val == some(5'i64)
+    check vm.selectedCallKey.val == "k5"
+
+  test "and the next move is followed again":
+    let (store, vm) = setup(follow = true)
+    store.stopAt(20, 1)
+    vm.selectCallForMove("k5")
+    store.stopAt(6, 8)
+    store.stopAt(30, 12)                  # a step: the mark follows it
+    check vm.selectedEntry.val == some(12'i64)
+
+  test "an answer for the stop the selection was made at is not the move's":
+    # The section can answer again at the old stop before the jump lands;
+    # that answer must neither be followed nor use the selection up.
+    let (store, vm) = setup(follow = true)
+    store.stopAt(20, 1)
+    vm.selectCallForMove("k5")
+    store.answer(1)                       # the same stop answering again
+    check vm.selectedEntry.val == some(5'i64)
+    store.stopAt(6, 8)
+    check vm.selectedEntry.val == some(5'i64)
+
+  test "control: a plain selectCall before the move is replaced by the follow":
+    # The defect this suite pins: a selection made with `selectCall` alone
+    # loses its mark to the engine's innermost frame.
+    let (store, vm) = setup(follow = true)
+    store.stopAt(20, 1)
+    vm.selectCall("k5")
+    store.stopAt(6, 8)
+    check vm.selectedEntry.val == some(8'i64)

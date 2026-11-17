@@ -212,6 +212,24 @@ pub enum ReplayQuery {
         tick_lo: u64,
         tick_hi: u64,
     },
+    /// Remember the exact point the replay stands at. The rr worker answers
+    /// with a mark (an rr checkpoint one instruction before the point, and the
+    /// selected thread, frame and registers), which this side does not read:
+    /// it hands it back in [`ReplayQuery::RestoreReplayPosition`]. A tick
+    /// count cannot name the point: rr seeks a tick count on the thread its
+    /// replay last stopped in, which after a cross-thread walk is another.
+    SaveReplayPosition,
+    /// Return the replay to the point a [`ReplayQuery::SaveReplayPosition`]
+    /// mark names, and forget the mark. The reply is a JSON `true`.
+    RestoreReplayPosition {
+        mark: serde_json::Value,
+    },
+    /// Let go of a [`ReplayQuery::SaveReplayPosition`] mark without returning
+    /// to it: an rr mark holds a checkpoint (a forked copy of the replayed
+    /// process) until it is restored or let go. The reply is a JSON `true`.
+    ForgetReplayPosition {
+        mark: serde_json::Value,
+    },
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]

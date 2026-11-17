@@ -1,0 +1,28 @@
+scenario: 1
+name: languages/wasm-opens-at-entry-and-steps
+pack: codetracer
+summary: >-
+  A Rust program compiled to WebAssembly opens at its entry, main.rs line
+  11 (`let x = 3;`), which the state pane shows; two Next steps reach
+  line 13 with `x` = 3 and `y` = 4, both i32.
+
+stage:
+  - use: record-program
+    with: { program: wasm_example }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 180s }
+  - expect: { at: window, title: { contains: CodeTracer } }
+  - wait: { until: { at: status-line, location: { matches: "main\\.rs:11#" } }, timeout: 60s }
+  - wait: { until: { at: variables, code-line: { contains: "11 | " } }, timeout: 60s }
+  - click: 'toolbar/toolbar-button[label="next-image"]'
+    settle: false
+  - wait: { until: { at: status-line, location: { matches: "main\\.rs:12#" } }, timeout: 60s }
+  - wait: replay-idle
+  - click: 'toolbar/toolbar-button[label="next-image"]'
+    settle: false
+  - wait: { until: { at: status-line, location: { matches: "main\\.rs:13#" } }, timeout: 60s }
+  - wait: { until: { at: 'variables/variable[name="y"]', value: { contains: "4" } }, timeout: 60s }
+  - expect: { at: 'variables/variable[name="x"]', value: { contains: "3" }, type: { contains: i32 } }
+  - expect: { at: 'variables/variable[name="y"]', type: { contains: i32 } }

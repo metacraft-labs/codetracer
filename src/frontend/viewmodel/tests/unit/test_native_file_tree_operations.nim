@@ -166,6 +166,13 @@ suite "native Files operations: through the shared Files model":
 
   test "the menu's Create, Rename and Delete change the disk, once each":
     let p = project()
+    # ct-home-sweep: not codetracer state. XDG_DATA_HOME is redirected only to
+    # aim the freedesktop.org trash (`$XDG_DATA_HOME/Trash`, which
+    # `homeTrashDir` resolves) at this suite's directory, in this process.
+    # The trash is the desktop's, shared with every file manager, and
+    # CODETRACER_HOME does not move it by design; CodeTracer's own state is
+    # already in the scratch CODETRACER_HOME every test program gets
+    # (test_support/state_isolation.nim).
     let saved = getEnv("XDG_DATA_HOME")
     putEnv("XDG_DATA_HOME", p / ".xdg-data")
     createRoot proc(dispose: proc()) =

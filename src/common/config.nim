@@ -122,6 +122,15 @@ type
     ## publishes must not be able to delete the file it is written in.
     ui* {.defaultVal: "".}:                               string
 
+    ## The desktop's editor pane draws the shared editing core (the editor the
+    ## terminal and the GPUI window use) instead of Monaco. A DEVELOPER
+    ## setting, off by default; `CODETRACER_SHARED_EDITOR=1` / `=0` overrides
+    ## it for one launch, and the command palette's "Developer: Toggle Shared
+    ## Editor" switches an open window without a restart
+    ## (codetracer-pm Editor-ViewModel.md §3.2a; the parity table is
+    ## docs/shared-editor-parity.md).
+    sharedEditor* {.defaultVal: false.}:                  bool
+
   Config* = ref ConfigObject
 
   FlowUI* = enum FlowParallel, FlowInline, FlowMultiline

@@ -559,13 +559,21 @@ suite "CTUI-11 Tier 2: what the terminal was actually told":
     # MEASURED TO FRAME 0. `main.nim` negotiates, claims the tty and paints
     # before it spawns `replay-server`; the engine handshake is CTUI-14's number
     # and is reported below rather than gated here.
+    #
+    # THE TERMINAL ANSWERS THE START-UP ROUND, as every terminal the gate is
+    # about does (`answerQueries`: libvterm's replies, the DA1 fence among
+    # them). A terminal that answers nothing makes the probe wait its whole
+    # bound before frame 0 (`DefaultStartupProbeMs`, traced at 9-10 ms, every
+    # time); with the fence answered that wait ends on the reply. The bound is
+    # what a terminal that never answers costs; it is not the cold start this
+    # gate publishes.
     var samples: seq[int64] = @[]
     var openingFrames = 0
     var started = getMonoTime()
     var sess: TuiTestSession
     for i in 0 ..< ColdStarts:
       started = getMonoTime()
-      sess = baseSession(@[tracePath]).spawn()
+      sess = baseSession(@[tracePath]).answerQueries().spawn()
       samples.add (sess.frameCompletedAt(20000) - started).inMilliseconds
       let firstRow = strutils.strip(sess.regionText(Rows - 1, 0, Cols, 1),
                                     leading = false)

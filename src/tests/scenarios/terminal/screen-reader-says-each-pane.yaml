@@ -1,0 +1,34 @@
+scenario: 1
+name: terminal/screen-reader-says-each-pane
+pack: codetracer
+summary: >-
+  In the screen-reader mode one pane fills the body at a time and the status
+  line says where focus is: the editor's first line on opening, then each
+  pane by name with its row as F6 moves to it (Variables, Call Trace, Event
+  Log, Files), the screen following; a click on a Files row says the row
+  alone, the pane having been named on entry.
+stage:
+  - use: record-program
+    with: { program: calc }
+  - use: front-end-options
+    with: { options: { screen-reader: "on" } }
+  - use: open-recording
+    with: { width: 200, height: 50 }
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - wait: { until: { at: status-line, assert: 'says("Source: 1 > #!/usr/bin/env python3")' }, timeout: 30s }
+  - expect: { at: 'pane[title="calc/main.py"]', present: true }
+  - expect: { at: 'pane[title="Variables"]', absent: true }
+  - key: F6
+  - wait: { until: { at: status-line, assert: 'says("Variables: ")' }, timeout: 10s }
+  - expect: { at: 'pane[title="Variables"]', present: true }
+  - expect: { at: 'pane[title="calc/main.py"]', absent: true }
+  - key: F6
+  - wait: { until: { at: status-line, assert: 'says("Call Trace: ")' }, timeout: 10s }
+  - key: F6
+  - wait: { until: { at: status-line, assert: 'says("Event Log: ")' }, timeout: 10s }
+  - key: F6
+  - wait: { until: { at: status-line, assert: 'says("Files: ")' }, timeout: 10s }
+  - expect: { at: 'pane[title="Files"]', present: true }
+  - click: { at: 'pane[title="Files"]/row[first="main.py"]', anchor: text-start }
+  - wait: { until: { at: status-line, assert: ['says("main.py")', 'lacks("Files: ")'] }, timeout: 10s }

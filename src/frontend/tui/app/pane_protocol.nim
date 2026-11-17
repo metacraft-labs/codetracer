@@ -94,11 +94,20 @@ proc argsJson(a: PaneOpArgs; operation: string): JsonNode =
     result["text"] = %a.text
   of "variables.toggle-expand", "variables.value-history",
      "variables.value-origin", "variables.load-more",
-     "file-tree.open", "file-tree.toggle-folder":
+     "file-tree.open", "file-tree.toggle-folder",
+     "tests.refresh-test":
     result["path"] = %a.path
+  of "editor.toggle-macro-expansion":
+    # §E15: a Macro Expansion heading names the call it closes.
+    result["path"] = %a.path
+    result["line"] = %a.line
+  of "tests.open-test":
+    result["path"] = %a.path
+    if a.text.len > 0:
+      result["text"] = %a.text
   of "history.seek-to-tick":
     result["tick"] = %a.tick
-  of "frame-viewer.go-to-frame":
+  of "frame-viewer.go-to-frame", "low-level.go-to-source-line":
     result["index"] = %a.index
   else: discard
 
@@ -169,11 +178,19 @@ proc keymapJson*(entries: seq[ReferenceEntry];
       b["shadowedBy"] = %e.shadowedBy
     result.add b
 
+func isHostedPaneOperation(name: string): bool =
+  ## Listed below, with the protocol's `pane` flag.
+  for (op, _) in PaneOperations:
+    if op == name: return true
+  for (op, _) in FrameViewerOperations:
+    if op == name: return true
+
 proc operationsJson*(): JsonNode =
   ## The operation catalogue (§E6: the plugins generate their commands from
   ## it): every catalogued operation, then the panes' own.
   result = newJArray()
   for o in Catalogue:
+    if o.arg == oaTarget and o.name.isHostedPaneOperation: continue
     result.add %*{"name": o.name, "label": o.label, "argument": $o.arg}
   for (name, label) in PaneOperations:
     result.add %*{"name": name, "label": label, "argument": "pane-target",

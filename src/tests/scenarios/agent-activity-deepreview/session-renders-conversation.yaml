@@ -1,0 +1,25 @@
+scenario: 1
+name: agent-activity-deepreview/session-renders-conversation
+pack: codetracer
+summary: >-
+  A review whose dataset references the agent session that produced it
+  shows that session's messages in order, with no notice, as the whole of
+  the pane's body: the conversation first, the prompt area after it, no
+  roll-up.
+
+stage:
+  - use: review-dataset
+    with: { variant: session }
+  - use: open-review
+
+steps:
+  - wait: { until: { at: vcs, present: true }, timeout: 60s }
+  # the window has finished loading the review
+  - wait: { until: settled, timeout: 30s }
+  - wait: { until: { at: agent-activity, messages: { count: 5 } }, timeout: 30s }
+  - expect: { at: 'agent-activity/agent-message[index="1"]', text: { contains: "Reading the failing parser test" } }
+  - expect: { at: 'agent-activity/agent-message[index="2"]', text: { contains: "Run the parser tests" } }
+  - expect: { at: 'agent-activity/agent-message[index="4"]', text: { contains: "off-by-one was in the hunk parser" } }
+  - expect: { at: agent-activity, notices: 0 }
+  - expect: { at: agent-activity, conversation-first: true, interaction-after: true, roll-up: 0 }
+  - expect: { at: vcs, stats: { contains: "3 files" } }

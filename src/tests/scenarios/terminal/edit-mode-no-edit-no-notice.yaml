@@ -1,0 +1,23 @@
+scenario: 1
+name: terminal/edit-mode-no-edit-no-notice
+pack: codetracer
+summary: >-
+  With no edit, the same route says nothing about the recording being older:
+  Ctrl+F5 to Edit mode and back reports the switch and no stale-trace notice.
+stage:
+  - use: record-program
+    with: { program: calc }
+  - use: write-project
+    with:
+      files:
+        alpha.nim: "proc alpha() =\n  echo 1\n"
+  - use: open-recording
+    with: { width: 170, height: 40 }
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - chord: Ctrl+F5
+  - wait: { until: { at: status-line, message: { contains: "CUA [EDIT]" } }, timeout: 20s }
+  - chord: Ctrl+F5
+  - wait: { until: { at: status-line, message: { contains: "CUA [DEBUG]" } }, timeout: 20s }
+  - expect: { at: status-line, message: { contains: "switched to DEBUG mode" } }
+  - expect: { at: status-line, assert: 'lacks("predates")' }

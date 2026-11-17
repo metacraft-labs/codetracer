@@ -1,0 +1,25 @@
+scenario: 1
+name: command-palette/find-symbol-opens-definition
+pack: codetracer
+summary: >-
+  A symbol search in the command palette (`:sym iterate_asteroids`) lists the
+  function, and choosing it opens shield.nr with the caret on its definition,
+  line 1.
+
+stage:
+  - use: record-program
+    with: { program: noir_space_ship }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 180s }
+  - wait: { until: editor.loaded, timeout: 60s }
+  - chord: Ctrl+p
+  - wait: { until: { at: omnibox, focused: true }, timeout: 10s }
+  - type: ":sym iterate_asteroids"
+  - wait: { until: { at: omnibox, assert: "offers(symbol, iterate_asteroids)" }, timeout: 30s }
+  - click: { at: 'omnibox/option[label="iterate_asteroids"]' }
+    settle: false
+  - wait: { until: { at: 'editor[file="shield.nr"]', active: true }, timeout: 30s }
+  - wait: { until: { at: 'editor[file="shield.nr"]', caret-line: 1 }, timeout: 30s }
+  - expect: { at: omnibox, absent: true }

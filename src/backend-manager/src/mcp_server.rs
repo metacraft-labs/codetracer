@@ -1668,7 +1668,7 @@ fn handle_resources_read<'a>(
                 "ct/open-trace",
                 1,
                 config.trace_request(json!({"tracePath": trace_path})),
-                30,
+                crate::dap_init::open_trace_deadline_secs_from_env(30),
             )
             .await
             {
@@ -2063,7 +2063,7 @@ async fn fetch_trace_metadata(
         "ct/open-trace",
         1,
         config.trace_request(json!({"tracePath": trace_path})),
-        30,
+        crate::dap_init::open_trace_deadline_secs_from_env(30),
     )
     .await?;
 
@@ -2434,7 +2434,7 @@ async fn handle_trace_info(
         "ct/open-trace",
         1,
         config.trace_request(json!({"tracePath": trace_path})),
-        30,
+        crate::dap_init::open_trace_deadline_secs_from_env(30),
     )
     .await
     {
@@ -2617,7 +2617,7 @@ async fn handle_list_source_files(
         "ct/open-trace",
         1,
         config.trace_request(json!({"tracePath": trace_path})),
-        30,
+        crate::dap_init::open_trace_deadline_secs_from_env(30),
     )
     .await
     {
@@ -2767,7 +2767,7 @@ async fn handle_read_source_file(
         "ct/open-trace",
         1,
         config.trace_request(json!({"tracePath": trace_path})),
-        30,
+        crate::dap_init::open_trace_deadline_secs_from_env(30),
     )
     .await
     {
@@ -3080,7 +3080,7 @@ async fn run_origin_query(
         "ct/open-trace",
         1,
         config.trace_request(json!({ "tracePath": trace_path })),
-        180,
+        crate::dap_init::open_trace_deadline_secs_from_env(180),
     )
     .await
     .map_err(|e| format!("Failed to open trace: {e}"))?;

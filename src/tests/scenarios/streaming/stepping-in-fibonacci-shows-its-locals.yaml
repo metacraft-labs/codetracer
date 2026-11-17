@@ -1,0 +1,30 @@
+scenario: 1
+name: streaming/stepping-in-fibonacci-shows-its-locals
+pack: codetracer
+summary: >-
+  After activating a `compute_fibonacci` call of a streamed recording and
+  stepping twice with Next (past `a, b = 0, 1`), the state pane shows its locals `n`, `a` and `b`.
+
+stage:
+  - use: record-program
+    with: { program: py_streaming_test/main.py }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 180s }
+  - click: 'pane-tab[label="CALLTRACE"]'
+  - wait: { until: { at: call-trace, assert: 'has-call-with(burst_activity, phase1)' }, timeout: 60s }
+  # The first `compute_fibonacci(n=10)` (the row after phase1's burst).
+  - click: { at: 'call-trace/call[#4]', anchor: name }
+    settle: false
+  - wait: { until: { at: 'editor[file="main.py"]', assert: 'stopped-within(11, 16)' }, timeout: 60s }
+  - wait: replay-idle
+  - click: 'toolbar/toolbar-button[label="next-image"]'
+    settle: false
+  - wait: replay-idle
+  - click: 'toolbar/toolbar-button[label="next-image"]'
+    settle: false
+  - wait: replay-idle
+  - click: 'pane-tab[label="VARIABLES"]'
+  - wait: { until: { at: variables, assert: 'has-variable("n")' }, timeout: 60s }
+  - expect: { at: variables, assert: ['has-variable("a")', 'has-variable("b")'] }

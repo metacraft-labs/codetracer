@@ -408,10 +408,10 @@ ARMS = [
     ),
     Arm(
         "M12", PROJECTION,
-        "  elif cls == MarkClassTracepoint: emTracepoint\n"
+        "  elif cls == MarkClassBreakpointTracepoint: emBreakpointTracepoint\n"
         "  else:\n"
         "    raise newException(RowProjectionError,\n",
-        "  elif cls == MarkClassTracepoint: emTracepoint\n"
+        "  elif cls == MarkClassBreakpointTracepoint: emBreakpointTracepoint\n"
         "  elif true: emNone\n"
         "  else:\n"
         "    raise newException(RowProjectionError,\n",

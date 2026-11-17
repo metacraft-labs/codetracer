@@ -1,0 +1,23 @@
+scenario: 1
+name: gpui/keys-letters-step
+pack: codetracer
+summary: >-
+  Under CUA, a letter steps while a read-only view has the focus: `n` steps
+  over and `p` steps back in the read-only editor, and `n` steps from the call
+  trace once a press on its tab has given it the focus.
+
+stage:
+  - use: record-program
+    with: { program: calc }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - wait: { until: { at: 'editor[file="main.py"]', current-line: 1 }, timeout: 60s }
+  - key: n
+  - wait: { until: { at: 'editor[file="main.py"]', current-line: 2 }, timeout: 60s }
+  - key: p
+  - wait: { until: { at: 'editor[file="main.py"]', current-line: 1 }, timeout: 60s }
+  - click: { at: 'pane-tab[label="Call Trace"]' }
+  - key: n
+  - wait: { until: { at: 'editor[file="main.py"]', current-line: 2 }, timeout: 60s }

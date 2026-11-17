@@ -71,9 +71,11 @@ import ./agent_activity_pane
 import ./problems_pane
 import ./requests_pane
 import ./low_level_code_pane
+import ./macro_expansion_pane   # Editor-Hosted-Front-Ends §E15
 import ./verification_pane   # PLAT-63
 import ./constraints_pane
 import ./shell_session_pane   # PLAT-61
+import ./visual_replay_panes
 import ./frame_overlay
 import ./variables
 import ./context_menu
@@ -214,6 +216,9 @@ type
     lowLevel*: LowLevelPaneModel
       ## PLAT-60. LOW LEVEL CODE, as a value: the session's `LowLevelCodeVM`
       ## the desktop's view draws too, read by `tui_session.lowLevelModelOf`.
+    macroExpansion*: MacroExpansionPaneModel
+      ## Editor-Hosted-Front-Ends §E15. The open macro expansions, as a value
+      ## (`tui_session.refreshMacroExpansion`).
       ## Not loaded by default.
     verification*: VerificationPaneModel
       ## PLAT-63. VERIFICATION, as a value: the window's `VerificationVM`,
@@ -222,6 +227,11 @@ type
       ## PLAT-62. CONSTRAINTS, as a value: the window's `ConstraintsVM` the
       ## desktop's panel draws too, read by `constraints_source.paneModelOf`.
       ## Not loaded by default.
+    pixelHistory*: PixelHistoryPaneModel
+    shaderDebug*: ShaderDebugPaneModel
+      ## PLAT-59. PIXEL HISTORY and SHADER DEBUG, as values: the session's
+      ## `VisualReplayPanesVM` the desktop's panes draw too. Not loaded by
+      ## default. The Video Player pane is `frameViewer` with `pane` set.
     vcs*: VcsPaneModel
       ## PLAT-47 deliverable 4. The VCS pane, as a value: the shared `VCSVM`
       ## the desktop's VCS panel draws, read by `host/vcs_source.nim`. Not
@@ -641,6 +651,10 @@ proc activeLayout*(reg: ModeRegister): LayoutNode =
 # with it.) This module re-exports it (see the `export` above), so `paintPane`'s
 # three call sites below are the same call they were.
 
+const
+  NoGraphicsText* = "this recording carries no graphics"
+    ## PLAT-59: a Visual Replay pane in a layout whose recording drew nothing.
+
 proc frameViewerOverlayArea*(body: CellArea): CellArea =
   ## The rectangle PLAT-15's frame viewer occupies: centred in the body, at
   ## most `FrameViewerOverlayWidth` x `FrameViewerOverlayHeight`, never larger
@@ -945,6 +959,10 @@ proc paintPane(g: var StyledGrid; region: PaneRegion; model: ShellModel;
   elif region.pane == paneLowLevelCode and model.lowLevel.loaded:
     belowStrip:
       discard paintLowLevelCode(g, content, model.lowLevel)
+  # Editor-Hosted-Front-Ends §E15. MACRO EXPANSION — below the strip.
+  elif region.pane == paneMacroExpansion and model.macroExpansion.loaded:
+    belowStrip:
+      discard paintMacroExpansion(g, content, model.macroExpansion)
   # PLAT-63. VERIFICATION — its status and controls are content, so below
   # the strip.
   elif region.pane == paneVerification and model.verification.loaded:
@@ -954,6 +972,24 @@ proc paintPane(g: var StyledGrid; region: PaneRegion; model: ShellModel;
   elif region.pane == paneConstraints and model.constraints.loaded:
     belowStrip:
       discard paintConstraints(g, content, model.constraints)
+  # PLAT-59. THE VISUAL REPLAY PANES — the frame with its transport and its
+  # two scrubbers, the pixel history, the shader debugger; below the strip.
+  elif region.pane == paneVideoPlayer and model.frameViewer.pane:
+    belowStrip:
+      discard paintFrameViewer(g, content, model.frameViewer)
+  elif region.pane == panePixelHistory and model.pixelHistory.loaded:
+    belowStrip:
+      discard paintPixelHistory(g, content, model.pixelHistory)
+  elif region.pane == paneShaderDebug and model.shaderDebug.loaded:
+    belowStrip:
+      discard paintShaderDebug(g, content, model.shaderDebug)
+  elif region.pane in {paneVideoPlayer, panePixelHistory, paneShaderDebug}:
+    # A remembered layout can hold them for a recording that draws nothing:
+    # the slot says so (PLAT-41's data-or-report rule).
+    belowStrip:
+      g.paint(content.row, content.col,
+              fitCells(NoGraphicsText, content.width),
+              CellStyle(role: srChromeMuted))
   elif region.pane == paneBuildOutput:
     # NO EMPTINESS GUARD: an idle BUILD pane is a statement — `[idle] build:
     # not started` — and a user who has just pressed `:build` needs to see the
@@ -1374,6 +1410,18 @@ proc shellScreen*(model: ShellModel; width, height: int;
                                           revealPane: geometry.revealPane,
                                           openDock: geometry.openDock,
                                           openDockPane: geometry.openDockPane))
+    # The screen-reader mode (Terminal-Adaptation §9.4 SR-D7): THE MESSAGE
+    # LEADS THE ROW. A screen reader reads the line from its start, and a
+    # focus announcement right-aligned behind the file info and the bottom
+    # labels was cut, or read last. The labels keep their cells for the
+    # pointer (the strips are hit-tested from the geometry, not the text).
+    if g.glyphs.quiet and status.notification.len > 0:
+      let said = asciiProse(status.notification)
+      g.fillSurface(height - 1, 0, width, 1, srSurfaceStatusLine)
+      g.paint(height - 1, 0, repeat(' ', width))
+      g.paint(height - 1, 1, fitCells(said & "   " & status.modeText & " " &
+                                      productIndicator(status.product),
+                                      max(0, width - 1)))
 
   for row in 0 ..< height:
     result.rows.add g.rowText(row)

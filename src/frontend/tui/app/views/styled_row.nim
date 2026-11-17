@@ -341,6 +341,8 @@ proc styledRowNode*(r: TerminalRenderer; row: StyledRow): TerminalNode =
       r.setStyle(node, "color", style.fg)
     if style.bg.len > 0:
       r.setStyle(node, "background-color", style.bg)
+    if style.underlineColor.len > 0:
+      r.setStyle(node, "underline-color", style.underlineColor)
     for a in style.attrNames():
       r.setStyle(node, a, "true")
     r.appendChild(result, node)

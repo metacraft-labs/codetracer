@@ -1,0 +1,3375 @@
+# ct print: 152 argv cases through ct's loader (the parse probe)
+
+### 1: no path
+argv: ct "print"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The required option 'printPath' was not specified\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 2: path
+argv: ct "print" "t.jsonl"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = print
+  printPath = "t.jsonl"
+  printFilter = none
+  printFunction = none
+  printLimit = none
+  printFormat = none
+  printVerify = false
+  printFollow = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 3: two paths
+argv: ct "print" "a" "b"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The subcommand 'print' does not accept additional arguments\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 4: path starting with -
+argv: ct "print" "-t.jsonl"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 't'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 5: --filter <v>
+argv: ct "print" "--filter" "calls" "t.jsonl"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = print
+  printPath = "t.jsonl"
+  printFilter = some("calls")
+  printFunction = none
+  printLimit = none
+  printFormat = none
+  printVerify = false
+  printFollow = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 6: --filter=<v>
+argv: ct "print" "--filter=calls" "t.jsonl"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = print
+  printPath = "t.jsonl"
+  printFilter = some("calls")
+  printFunction = none
+  printLimit = none
+  printFormat = none
+  printVerify = false
+  printFollow = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 7: --filter:<v>
+argv: ct "print" "--filter:calls" "t.jsonl"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = print
+  printPath = "t.jsonl"
+  printFilter = some("calls")
+  printFunction = none
+  printLimit = none
+  printFormat = none
+  printVerify = false
+  printFollow = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 8: -f <v>
+argv: ct "print" "-f" "calls" "t.jsonl"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = print
+  printPath = "t.jsonl"
+  printFilter = some("calls")
+  printFunction = none
+  printLimit = none
+  printFormat = none
+  printVerify = false
+  printFollow = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 9: -f=<v>
+argv: ct "print" "-f=calls" "t.jsonl"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = print
+  printPath = "t.jsonl"
+  printFilter = some("calls")
+  printFunction = none
+  printLimit = none
+  printFormat = none
+  printVerify = false
+  printFollow = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 10: -f:<v>
+argv: ct "print" "-f:calls" "t.jsonl"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = print
+  printPath = "t.jsonl"
+  printFilter = some("calls")
+  printFunction = none
+  printLimit = none
+  printFormat = none
+  printVerify = false
+  printFollow = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 11: -f<v> (attached)
+argv: ct "print" "-fcalls" "t.jsonl"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = print
+  printPath = "t.jsonl"
+  printFilter = some("calls")
+  printFunction = none
+  printLimit = none
+  printFormat = none
+  printVerify = false
+  printFollow = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 12: -F <v> (other case)
+argv: ct "print" "-F" "calls" "t.jsonl"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The subcommand 'print' does not accept additional arguments\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 13: --f <v> (the letter as a long option)
+argv: ct "print" "--f" "calls" "t.jsonl"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = print
+  printPath = "t.jsonl"
+  printFilter = some("calls")
+  printFunction = none
+  printLimit = none
+  printFormat = none
+  printVerify = false
+  printFollow = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 14: --filter calls
+argv: ct "print" "--filter" "calls" "t.jsonl"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = print
+  printPath = "t.jsonl"
+  printFilter = some("calls")
+  printFunction = none
+  printLimit = none
+  printFormat = none
+  printVerify = false
+  printFollow = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 15: --filter=calls
+argv: ct "print" "--filter=calls" "t.jsonl"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = print
+  printPath = "t.jsonl"
+  printFilter = some("calls")
+  printFunction = none
+  printLimit = none
+  printFormat = none
+  printVerify = false
+  printFollow = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 16: --filter errors
+argv: ct "print" "--filter" "errors" "t.jsonl"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = print
+  printPath = "t.jsonl"
+  printFilter = some("errors")
+  printFunction = none
+  printLimit = none
+  printFormat = none
+  printVerify = false
+  printFollow = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 17: --filter=errors
+argv: ct "print" "--filter=errors" "t.jsonl"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = print
+  printPath = "t.jsonl"
+  printFilter = some("errors")
+  printFunction = none
+  printLimit = none
+  printFormat = none
+  printVerify = false
+  printFollow = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 18: --filter empty
+argv: ct "print" "--filter" "" "t.jsonl"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = print
+  printPath = "t.jsonl"
+  printFilter = some("")
+  printFunction = none
+  printLimit = none
+  printFormat = none
+  printVerify = false
+  printFollow = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 19: --filter= (empty)
+argv: ct "print" "--filter=" "t.jsonl"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The required option 'printPath' was not specified\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 20: --filter= <v> (next word)
+argv: ct "print" "--filter=" "calls" "t.jsonl"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = print
+  printPath = "t.jsonl"
+  printFilter = some("calls")
+  printFunction = none
+  printLimit = none
+  printFormat = none
+  printVerify = false
+  printFollow = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 21: --filter -x (value starts with -)
+argv: ct "print" "--filter" "-x" "t.jsonl"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = print
+  printPath = "t.jsonl"
+  printFilter = some("-x")
+  printFunction = none
+  printLimit = none
+  printFormat = none
+  printVerify = false
+  printFollow = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 22: --filter --x (value starts with --)
+argv: ct "print" "--filter" "--x" "t.jsonl"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = print
+  printPath = "t.jsonl"
+  printFilter = some("--x")
+  printFunction = none
+  printLimit = none
+  printFormat = none
+  printVerify = false
+  printFollow = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 23: --filter --new-tab <v> (an option between it and its value)
+argv: ct "print" "--filter" "--new-tab" "calls" "t.jsonl"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The subcommand 'print' does not accept additional arguments\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 24: --filter repeated, last wins
+argv: ct "print" "--filter" "calls" "--filter" "errors" "t.jsonl"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = print
+  printPath = "t.jsonl"
+  printFilter = some("errors")
+  printFunction = none
+  printLimit = none
+  printFormat = none
+  printVerify = false
+  printFollow = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 25: --filter missing value (last)
+argv: ct "print" "t.jsonl" "--filter"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The option '\e[34m--filter\e[0m' requires a value\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 26: --filter missing value (before the rest)
+argv: ct "print" "--filter" "t.jsonl"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The required option 'printPath' was not specified\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 27: --FILTER <v> (style variant)
+argv: ct "print" "--FILTER" "calls" "t.jsonl"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = print
+  printPath = "t.jsonl"
+  printFilter = some("calls")
+  printFunction = none
+  printLimit = none
+  printFormat = none
+  printVerify = false
+  printFollow = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 28: --f_ilter <v> (style variant)
+argv: ct "print" "--f_ilter" "calls" "t.jsonl"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = print
+  printPath = "t.jsonl"
+  printFilter = some("calls")
+  printFunction = none
+  printLimit = none
+  printFormat = none
+  printVerify = false
+  printFollow = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 29: --function <v>
+argv: ct "print" "--function" "main" "t.jsonl"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = print
+  printPath = "t.jsonl"
+  printFilter = none
+  printFunction = some("main")
+  printLimit = none
+  printFormat = none
+  printVerify = false
+  printFollow = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 30: --function=<v>
+argv: ct "print" "--function=main" "t.jsonl"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = print
+  printPath = "t.jsonl"
+  printFilter = none
+  printFunction = some("main")
+  printLimit = none
+  printFormat = none
+  printVerify = false
+  printFollow = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 31: --function:<v>
+argv: ct "print" "--function:main" "t.jsonl"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = print
+  printPath = "t.jsonl"
+  printFilter = none
+  printFunction = some("main")
+  printLimit = none
+  printFormat = none
+  printVerify = false
+  printFollow = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 32: --function main
+argv: ct "print" "--function" "main" "t.jsonl"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = print
+  printPath = "t.jsonl"
+  printFilter = none
+  printFunction = some("main")
+  printLimit = none
+  printFormat = none
+  printVerify = false
+  printFollow = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 33: --function=main
+argv: ct "print" "--function=main" "t.jsonl"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = print
+  printPath = "t.jsonl"
+  printFilter = none
+  printFunction = some("main")
+  printLimit = none
+  printFormat = none
+  printVerify = false
+  printFollow = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 34: --function empty
+argv: ct "print" "--function" "" "t.jsonl"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = print
+  printPath = "t.jsonl"
+  printFilter = none
+  printFunction = some("")
+  printLimit = none
+  printFormat = none
+  printVerify = false
+  printFollow = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 35: --function= (empty)
+argv: ct "print" "--function=" "t.jsonl"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The required option 'printPath' was not specified\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 36: --function= <v> (next word)
+argv: ct "print" "--function=" "main" "t.jsonl"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = print
+  printPath = "t.jsonl"
+  printFilter = none
+  printFunction = some("main")
+  printLimit = none
+  printFormat = none
+  printVerify = false
+  printFollow = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 37: --function -x (value starts with -)
+argv: ct "print" "--function" "-x" "t.jsonl"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = print
+  printPath = "t.jsonl"
+  printFilter = none
+  printFunction = some("-x")
+  printLimit = none
+  printFormat = none
+  printVerify = false
+  printFollow = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 38: --function --x (value starts with --)
+argv: ct "print" "--function" "--x" "t.jsonl"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = print
+  printPath = "t.jsonl"
+  printFilter = none
+  printFunction = some("--x")
+  printLimit = none
+  printFormat = none
+  printVerify = false
+  printFollow = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 39: --function --new-tab <v> (an option between it and its value)
+argv: ct "print" "--function" "--new-tab" "main" "t.jsonl"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The subcommand 'print' does not accept additional arguments\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 40: --function repeated, last wins
+argv: ct "print" "--function" "main" "--function" "main" "t.jsonl"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = print
+  printPath = "t.jsonl"
+  printFilter = none
+  printFunction = some("main")
+  printLimit = none
+  printFormat = none
+  printVerify = false
+  printFollow = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 41: --function missing value (last)
+argv: ct "print" "t.jsonl" "--function"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The option '\e[34m--function\e[0m' requires a value\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 42: --function missing value (before the rest)
+argv: ct "print" "--function" "t.jsonl"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The required option 'printPath' was not specified\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 43: --FUNCTION <v> (style variant)
+argv: ct "print" "--FUNCTION" "main" "t.jsonl"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = print
+  printPath = "t.jsonl"
+  printFilter = none
+  printFunction = some("main")
+  printLimit = none
+  printFormat = none
+  printVerify = false
+  printFollow = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 44: --f_unction <v> (style variant)
+argv: ct "print" "--f_unction" "main" "t.jsonl"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = print
+  printPath = "t.jsonl"
+  printFilter = none
+  printFunction = some("main")
+  printLimit = none
+  printFormat = none
+  printVerify = false
+  printFollow = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 45: --limit <v>
+argv: ct "print" "--limit" "5" "t.jsonl"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = print
+  printPath = "t.jsonl"
+  printFilter = none
+  printFunction = none
+  printLimit = some(5)
+  printFormat = none
+  printVerify = false
+  printFollow = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 46: --limit=<v>
+argv: ct "print" "--limit=5" "t.jsonl"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = print
+  printPath = "t.jsonl"
+  printFilter = none
+  printFunction = none
+  printLimit = some(5)
+  printFormat = none
+  printVerify = false
+  printFollow = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 47: --limit:<v>
+argv: ct "print" "--limit:5" "t.jsonl"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = print
+  printPath = "t.jsonl"
+  printFilter = none
+  printFunction = none
+  printLimit = some(5)
+  printFormat = none
+  printVerify = false
+  printFollow = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 48: -n <v>
+argv: ct "print" "-n" "5" "t.jsonl"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = print
+  printPath = "t.jsonl"
+  printFilter = none
+  printFunction = none
+  printLimit = some(5)
+  printFormat = none
+  printVerify = false
+  printFollow = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 49: -n=<v>
+argv: ct "print" "-n=5" "t.jsonl"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = print
+  printPath = "t.jsonl"
+  printFilter = none
+  printFunction = none
+  printLimit = some(5)
+  printFormat = none
+  printVerify = false
+  printFollow = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 50: -n:<v>
+argv: ct "print" "-n:5" "t.jsonl"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = print
+  printPath = "t.jsonl"
+  printFilter = none
+  printFunction = none
+  printLimit = some(5)
+  printFormat = none
+  printVerify = false
+  printFollow = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 51: -n<v> (attached)
+argv: ct "print" "-n5" "t.jsonl"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = print
+  printPath = "t.jsonl"
+  printFilter = none
+  printFunction = none
+  printLimit = some(5)
+  printFormat = none
+  printVerify = false
+  printFollow = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 52: -N <v> (other case)
+argv: ct "print" "-N" "5" "t.jsonl"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'N'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 53: --n <v> (the letter as a long option)
+argv: ct "print" "--n" "5" "t.jsonl"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = print
+  printPath = "t.jsonl"
+  printFilter = none
+  printFunction = none
+  printLimit = some(5)
+  printFormat = none
+  printVerify = false
+  printFollow = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 54: --limit 5
+argv: ct "print" "--limit" "5" "t.jsonl"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = print
+  printPath = "t.jsonl"
+  printFilter = none
+  printFunction = none
+  printLimit = some(5)
+  printFormat = none
+  printVerify = false
+  printFollow = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 55: --limit=5
+argv: ct "print" "--limit=5" "t.jsonl"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = print
+  printPath = "t.jsonl"
+  printFilter = none
+  printFunction = none
+  printLimit = some(5)
+  printFormat = none
+  printVerify = false
+  printFollow = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 56: --limit -1
+argv: ct "print" "--limit" "-1" "t.jsonl"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = print
+  printPath = "t.jsonl"
+  printFilter = none
+  printFunction = none
+  printLimit = some(-1)
+  printFormat = none
+  printVerify = false
+  printFollow = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 57: --limit=-1
+argv: ct "print" "--limit=-1" "t.jsonl"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = print
+  printPath = "t.jsonl"
+  printFilter = none
+  printFunction = none
+  printLimit = some(-1)
+  printFormat = none
+  printVerify = false
+  printFollow = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 58: --limit 0
+argv: ct "print" "--limit" "0" "t.jsonl"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = print
+  printPath = "t.jsonl"
+  printFilter = none
+  printFunction = none
+  printLimit = some(0)
+  printFormat = none
+  printVerify = false
+  printFollow = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 59: --limit=0
+argv: ct "print" "--limit=0" "t.jsonl"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = print
+  printPath = "t.jsonl"
+  printFilter = none
+  printFunction = none
+  printLimit = some(0)
+  printFormat = none
+  printVerify = false
+  printFollow = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 60: --limit bad ten
+argv: ct "print" "--limit" "ten" "t.jsonl"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Error while processing the \e[34mlimit=ten\e[0m parameter: invalid integer: ten\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 61: --limit=bad ten
+argv: ct "print" "--limit=ten" "t.jsonl"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Error while processing the \e[34mlimit=ten\e[0m parameter: invalid integer: ten\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 62: --limit bad 1.5
+argv: ct "print" "--limit" "1.5" "t.jsonl"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Error while processing the \e[34mlimit=1.5\e[0m parameter: invalid integer: 1.5\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 63: --limit=bad 1.5
+argv: ct "print" "--limit=1.5" "t.jsonl"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Error while processing the \e[34mlimit=1.5\e[0m parameter: invalid integer: 1.5\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 64: --limit bad 0x10
+argv: ct "print" "--limit" "0x10" "t.jsonl"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Error while processing the \e[34mlimit=0x10\e[0m parameter: invalid integer: 0x10\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 65: --limit=bad 0x10
+argv: ct "print" "--limit=0x10" "t.jsonl"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Error while processing the \e[34mlimit=0x10\e[0m parameter: invalid integer: 0x10\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 66: --limit empty
+argv: ct "print" "--limit" "" "t.jsonl"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Error while processing the \e[34mlimit=\e[0m parameter: invalid integer: \e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 67: --limit= (empty)
+argv: ct "print" "--limit=" "t.jsonl"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Error while processing the \e[34mlimit=t.jsonl\e[0m parameter: invalid integer: t.jsonl\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 68: --limit= <v> (next word)
+argv: ct "print" "--limit=" "5" "t.jsonl"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = print
+  printPath = "t.jsonl"
+  printFilter = none
+  printFunction = none
+  printLimit = some(5)
+  printFormat = none
+  printVerify = false
+  printFollow = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 69: --limit -x (value starts with -)
+argv: ct "print" "--limit" "-x" "t.jsonl"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Error while processing the \e[34mlimit=-x\e[0m parameter: invalid integer: -x\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 70: --limit --x (value starts with --)
+argv: ct "print" "--limit" "--x" "t.jsonl"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Error while processing the \e[34mlimit=--x\e[0m parameter: invalid integer: --x\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 71: --limit --new-tab <v> (an option between it and its value)
+argv: ct "print" "--limit" "--new-tab" "5" "t.jsonl"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Error while processing the \e[34mlimit=--new-tab\e[0m parameter: invalid integer: --new-tab\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 72: --limit repeated, last wins
+argv: ct "print" "--limit" "5" "--limit" "0" "t.jsonl"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = print
+  printPath = "t.jsonl"
+  printFilter = none
+  printFunction = none
+  printLimit = some(0)
+  printFormat = none
+  printVerify = false
+  printFollow = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 73: --limit missing value (last)
+argv: ct "print" "t.jsonl" "--limit"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The option '\e[34m--limit\e[0m' requires a value\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 74: --limit missing value (before the rest)
+argv: ct "print" "--limit" "t.jsonl"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Error while processing the \e[34mlimit=t.jsonl\e[0m parameter: invalid integer: t.jsonl\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 75: --LIMIT <v> (style variant)
+argv: ct "print" "--LIMIT" "5" "t.jsonl"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = print
+  printPath = "t.jsonl"
+  printFilter = none
+  printFunction = none
+  printLimit = some(5)
+  printFormat = none
+  printVerify = false
+  printFollow = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 76: --l_imit <v> (style variant)
+argv: ct "print" "--l_imit" "5" "t.jsonl"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = print
+  printPath = "t.jsonl"
+  printFilter = none
+  printFunction = none
+  printLimit = some(5)
+  printFormat = none
+  printVerify = false
+  printFollow = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 77: --format <v>
+argv: ct "print" "--format" "json" "t.jsonl"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = print
+  printPath = "t.jsonl"
+  printFilter = none
+  printFunction = none
+  printLimit = none
+  printFormat = some("json")
+  printVerify = false
+  printFollow = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 78: --format=<v>
+argv: ct "print" "--format=json" "t.jsonl"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = print
+  printPath = "t.jsonl"
+  printFilter = none
+  printFunction = none
+  printLimit = none
+  printFormat = some("json")
+  printVerify = false
+  printFollow = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 79: --format:<v>
+argv: ct "print" "--format:json" "t.jsonl"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = print
+  printPath = "t.jsonl"
+  printFilter = none
+  printFunction = none
+  printLimit = none
+  printFormat = some("json")
+  printVerify = false
+  printFollow = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 80: --format json
+argv: ct "print" "--format" "json" "t.jsonl"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = print
+  printPath = "t.jsonl"
+  printFilter = none
+  printFunction = none
+  printLimit = none
+  printFormat = some("json")
+  printVerify = false
+  printFollow = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 81: --format=json
+argv: ct "print" "--format=json" "t.jsonl"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = print
+  printPath = "t.jsonl"
+  printFilter = none
+  printFunction = none
+  printLimit = none
+  printFormat = some("json")
+  printVerify = false
+  printFollow = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 82: --format csv
+argv: ct "print" "--format" "csv" "t.jsonl"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = print
+  printPath = "t.jsonl"
+  printFilter = none
+  printFunction = none
+  printLimit = none
+  printFormat = some("csv")
+  printVerify = false
+  printFollow = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 83: --format=csv
+argv: ct "print" "--format=csv" "t.jsonl"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = print
+  printPath = "t.jsonl"
+  printFilter = none
+  printFunction = none
+  printLimit = none
+  printFormat = some("csv")
+  printVerify = false
+  printFollow = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 84: --format empty
+argv: ct "print" "--format" "" "t.jsonl"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = print
+  printPath = "t.jsonl"
+  printFilter = none
+  printFunction = none
+  printLimit = none
+  printFormat = some("")
+  printVerify = false
+  printFollow = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 85: --format= (empty)
+argv: ct "print" "--format=" "t.jsonl"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The required option 'printPath' was not specified\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 86: --format= <v> (next word)
+argv: ct "print" "--format=" "json" "t.jsonl"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = print
+  printPath = "t.jsonl"
+  printFilter = none
+  printFunction = none
+  printLimit = none
+  printFormat = some("json")
+  printVerify = false
+  printFollow = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 87: --format -x (value starts with -)
+argv: ct "print" "--format" "-x" "t.jsonl"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = print
+  printPath = "t.jsonl"
+  printFilter = none
+  printFunction = none
+  printLimit = none
+  printFormat = some("-x")
+  printVerify = false
+  printFollow = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 88: --format --x (value starts with --)
+argv: ct "print" "--format" "--x" "t.jsonl"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = print
+  printPath = "t.jsonl"
+  printFilter = none
+  printFunction = none
+  printLimit = none
+  printFormat = some("--x")
+  printVerify = false
+  printFollow = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 89: --format --new-tab <v> (an option between it and its value)
+argv: ct "print" "--format" "--new-tab" "json" "t.jsonl"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The subcommand 'print' does not accept additional arguments\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 90: --format repeated, last wins
+argv: ct "print" "--format" "json" "--format" "csv" "t.jsonl"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = print
+  printPath = "t.jsonl"
+  printFilter = none
+  printFunction = none
+  printLimit = none
+  printFormat = some("csv")
+  printVerify = false
+  printFollow = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 91: --format missing value (last)
+argv: ct "print" "t.jsonl" "--format"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The option '\e[34m--format\e[0m' requires a value\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 92: --format missing value (before the rest)
+argv: ct "print" "--format" "t.jsonl"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The required option 'printPath' was not specified\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 93: --FORMAT <v> (style variant)
+argv: ct "print" "--FORMAT" "json" "t.jsonl"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = print
+  printPath = "t.jsonl"
+  printFilter = none
+  printFunction = none
+  printLimit = none
+  printFormat = some("json")
+  printVerify = false
+  printFollow = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 94: --f_ormat <v> (style variant)
+argv: ct "print" "--f_ormat" "json" "t.jsonl"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = print
+  printPath = "t.jsonl"
+  printFilter = none
+  printFunction = none
+  printLimit = none
+  printFormat = some("json")
+  printVerify = false
+  printFollow = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 95: --verify
+argv: ct "print" "--verify" "t.jsonl"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = print
+  printPath = "t.jsonl"
+  printFilter = none
+  printFunction = none
+  printLimit = none
+  printFormat = none
+  printVerify = true
+  printFollow = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 96: --verify=true
+argv: ct "print" "--verify=true" "t.jsonl"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = print
+  printPath = "t.jsonl"
+  printFilter = none
+  printFunction = none
+  printLimit = none
+  printFormat = none
+  printVerify = true
+  printFollow = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 97: --verify=false
+argv: ct "print" "--verify=false" "t.jsonl"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = print
+  printPath = "t.jsonl"
+  printFilter = none
+  printFunction = none
+  printLimit = none
+  printFormat = none
+  printVerify = false
+  printFollow = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 98: --verify=on
+argv: ct "print" "--verify=on" "t.jsonl"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = print
+  printPath = "t.jsonl"
+  printFilter = none
+  printFunction = none
+  printLimit = none
+  printFormat = none
+  printVerify = true
+  printFollow = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 99: --verify=off
+argv: ct "print" "--verify=off" "t.jsonl"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = print
+  printPath = "t.jsonl"
+  printFilter = none
+  printFunction = none
+  printLimit = none
+  printFormat = none
+  printVerify = false
+  printFollow = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 100: --verify=yes
+argv: ct "print" "--verify=yes" "t.jsonl"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = print
+  printPath = "t.jsonl"
+  printFilter = none
+  printFunction = none
+  printLimit = none
+  printFormat = none
+  printVerify = true
+  printFollow = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 101: --verify=no
+argv: ct "print" "--verify=no" "t.jsonl"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = print
+  printPath = "t.jsonl"
+  printFilter = none
+  printFunction = none
+  printLimit = none
+  printFormat = none
+  printVerify = false
+  printFollow = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 102: --verify=1
+argv: ct "print" "--verify=1" "t.jsonl"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = print
+  printPath = "t.jsonl"
+  printFilter = none
+  printFunction = none
+  printLimit = none
+  printFormat = none
+  printVerify = true
+  printFollow = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 103: --verify=0
+argv: ct "print" "--verify=0" "t.jsonl"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = print
+  printPath = "t.jsonl"
+  printFilter = none
+  printFunction = none
+  printLimit = none
+  printFormat = none
+  printVerify = false
+  printFollow = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 104: --verify=maybe
+argv: ct "print" "--verify=maybe" "t.jsonl"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Error while processing the \e[34mverify=maybe\e[0m parameter: 'maybe' is not a valid boolean value. Supported values are on/off, yes/no, true/false or 1/0\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 105: --verify=
+argv: ct "print" "--verify=" "t.jsonl"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Error while processing the \e[34mverify=t.jsonl\e[0m parameter: 't.jsonl' is not a valid boolean value. Supported values are on/off, yes/no, true/false or 1/0\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 106: --verify:false
+argv: ct "print" "--verify:false" "t.jsonl"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = print
+  printPath = "t.jsonl"
+  printFilter = none
+  printFunction = none
+  printLimit = none
+  printFormat = none
+  printVerify = false
+  printFollow = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 107: --verify false (next word)
+argv: ct "print" "--verify" "false" "t.jsonl"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The subcommand 'print' does not accept additional arguments\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 108: --verify twice
+argv: ct "print" "--verify" "--verify" "t.jsonl"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = print
+  printPath = "t.jsonl"
+  printFilter = none
+  printFunction = none
+  printLimit = none
+  printFormat = none
+  printVerify = true
+  printFollow = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 109: --no-verify
+argv: ct "print" "--no-verify" "t.jsonl"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'no-verify'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 110: --VERIFY (style variant)
+argv: ct "print" "--VERIFY" "t.jsonl"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = print
+  printPath = "t.jsonl"
+  printFilter = none
+  printFunction = none
+  printLimit = none
+  printFormat = none
+  printVerify = true
+  printFollow = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 111: --v_erify (style variant)
+argv: ct "print" "--v_erify" "t.jsonl"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = print
+  printPath = "t.jsonl"
+  printFilter = none
+  printFunction = none
+  printLimit = none
+  printFormat = none
+  printVerify = true
+  printFollow = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 112: --follow
+argv: ct "print" "--follow" "t.jsonl"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = print
+  printPath = "t.jsonl"
+  printFilter = none
+  printFunction = none
+  printLimit = none
+  printFormat = none
+  printVerify = false
+  printFollow = true
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 113: -F
+argv: ct "print" "-F" "t.jsonl"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = print
+  printPath = "t.jsonl"
+  printFilter = none
+  printFunction = none
+  printLimit = none
+  printFormat = none
+  printVerify = false
+  printFollow = true
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 114: -F (other case)
+argv: ct "print" "-F" "t.jsonl"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = print
+  printPath = "t.jsonl"
+  printFilter = none
+  printFunction = none
+  printLimit = none
+  printFormat = none
+  printVerify = false
+  printFollow = true
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 115: --F (the letter as a long option)
+argv: ct "print" "--F" "t.jsonl"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = print
+  printPath = "t.jsonl"
+  printFilter = none
+  printFunction = none
+  printLimit = none
+  printFormat = none
+  printVerify = false
+  printFollow = true
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 116: --follow=true
+argv: ct "print" "--follow=true" "t.jsonl"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = print
+  printPath = "t.jsonl"
+  printFilter = none
+  printFunction = none
+  printLimit = none
+  printFormat = none
+  printVerify = false
+  printFollow = true
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 117: --follow=false
+argv: ct "print" "--follow=false" "t.jsonl"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = print
+  printPath = "t.jsonl"
+  printFilter = none
+  printFunction = none
+  printLimit = none
+  printFormat = none
+  printVerify = false
+  printFollow = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 118: --follow=on
+argv: ct "print" "--follow=on" "t.jsonl"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = print
+  printPath = "t.jsonl"
+  printFilter = none
+  printFunction = none
+  printLimit = none
+  printFormat = none
+  printVerify = false
+  printFollow = true
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 119: --follow=off
+argv: ct "print" "--follow=off" "t.jsonl"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = print
+  printPath = "t.jsonl"
+  printFilter = none
+  printFunction = none
+  printLimit = none
+  printFormat = none
+  printVerify = false
+  printFollow = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 120: --follow=yes
+argv: ct "print" "--follow=yes" "t.jsonl"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = print
+  printPath = "t.jsonl"
+  printFilter = none
+  printFunction = none
+  printLimit = none
+  printFormat = none
+  printVerify = false
+  printFollow = true
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 121: --follow=no
+argv: ct "print" "--follow=no" "t.jsonl"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = print
+  printPath = "t.jsonl"
+  printFilter = none
+  printFunction = none
+  printLimit = none
+  printFormat = none
+  printVerify = false
+  printFollow = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 122: --follow=1
+argv: ct "print" "--follow=1" "t.jsonl"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = print
+  printPath = "t.jsonl"
+  printFilter = none
+  printFunction = none
+  printLimit = none
+  printFormat = none
+  printVerify = false
+  printFollow = true
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 123: --follow=0
+argv: ct "print" "--follow=0" "t.jsonl"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = print
+  printPath = "t.jsonl"
+  printFilter = none
+  printFunction = none
+  printLimit = none
+  printFormat = none
+  printVerify = false
+  printFollow = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 124: --follow=maybe
+argv: ct "print" "--follow=maybe" "t.jsonl"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Error while processing the \e[34mfollow=maybe\e[0m parameter: 'maybe' is not a valid boolean value. Supported values are on/off, yes/no, true/false or 1/0\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 125: --follow=
+argv: ct "print" "--follow=" "t.jsonl"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Error while processing the \e[34mfollow=t.jsonl\e[0m parameter: 't.jsonl' is not a valid boolean value. Supported values are on/off, yes/no, true/false or 1/0\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 126: --follow:false
+argv: ct "print" "--follow:false" "t.jsonl"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = print
+  printPath = "t.jsonl"
+  printFilter = none
+  printFunction = none
+  printLimit = none
+  printFormat = none
+  printVerify = false
+  printFollow = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 127: --follow false (next word)
+argv: ct "print" "--follow" "false" "t.jsonl"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The subcommand 'print' does not accept additional arguments\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 128: --follow twice
+argv: ct "print" "--follow" "--follow" "t.jsonl"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = print
+  printPath = "t.jsonl"
+  printFilter = none
+  printFunction = none
+  printLimit = none
+  printFormat = none
+  printVerify = false
+  printFollow = true
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 129: --no-follow
+argv: ct "print" "--no-follow" "t.jsonl"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'no-follow'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 130: --FOLLOW (style variant)
+argv: ct "print" "--FOLLOW" "t.jsonl"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = print
+  printPath = "t.jsonl"
+  printFilter = none
+  printFunction = none
+  printLimit = none
+  printFormat = none
+  printVerify = false
+  printFollow = true
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 131: --f_ollow (style variant)
+argv: ct "print" "--f_ollow" "t.jsonl"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = print
+  printPath = "t.jsonl"
+  printFilter = none
+  printFunction = none
+  printLimit = none
+  printFormat = none
+  printVerify = false
+  printFollow = true
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 132: --verify before the path
+argv: ct "print" "--verify" "t.jsonl"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = print
+  printPath = "t.jsonl"
+  printFilter = none
+  printFunction = none
+  printLimit = none
+  printFormat = none
+  printVerify = true
+  printFollow = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 133: --verify after the path
+argv: ct "print" "t.jsonl" "--verify"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = print
+  printPath = "t.jsonl"
+  printFilter = none
+  printFunction = none
+  printLimit = none
+  printFormat = none
+  printVerify = true
+  printFollow = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 134: --follow before the path
+argv: ct "print" "--follow" "t.jsonl"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = print
+  printPath = "t.jsonl"
+  printFilter = none
+  printFunction = none
+  printLimit = none
+  printFormat = none
+  printVerify = false
+  printFollow = true
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 135: -F x (filter or follow?)
+argv: ct "print" "-F" "x" "t.jsonl"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The subcommand 'print' does not accept additional arguments\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 136: -f x -F
+argv: ct "print" "-f" "x" "-F" "t.jsonl"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = print
+  printPath = "t.jsonl"
+  printFilter = some("x")
+  printFunction = none
+  printLimit = none
+  printFormat = none
+  printVerify = false
+  printFollow = true
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 137: -n5 (attached)
+argv: ct "print" "-n5" "t.jsonl"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = print
+  printPath = "t.jsonl"
+  printFilter = none
+  printFunction = none
+  printLimit = some(5)
+  printFormat = none
+  printVerify = false
+  printFollow = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 138: -fn (cluster)
+argv: ct "print" "-fn" "t.jsonl"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = print
+  printPath = "t.jsonl"
+  printFilter = some("n")
+  printFunction = none
+  printLimit = none
+  printFormat = none
+  printVerify = false
+  printFollow = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 139: env <APP>_PRINTPATH (the positional)
+argv: ct "print"
+env: <APP>_PRINTPATH="e.jsonl"
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = print
+  printPath = "e.jsonl"
+  printFilter = none
+  printFunction = none
+  printLimit = none
+  printFormat = none
+  printVerify = false
+  printFollow = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 140: env <APP>_LIMIT=ten
+argv: ct "print" "t.jsonl"
+env: <APP>_LIMIT="ten"
+exit: 1
+--- stdout
+--- stderr
+Error while processing the \e[34mlimit=ten\e[0m parameter: invalid integer: ten\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 141: env <APP>_VERIFY=yes
+argv: ct "print" "t.jsonl"
+env: <APP>_VERIFY="yes"
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = print
+  printPath = "t.jsonl"
+  printFilter = none
+  printFunction = none
+  printLimit = none
+  printFormat = none
+  printVerify = true
+  printFollow = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 142: unknown long option
+argv: ct "print" "--bogus" "t.jsonl"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'bogus'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 143: unknown long option with value
+argv: ct "print" "--bogus=1" "t.jsonl"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'bogus'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 144: unknown short option
+argv: ct "print" "-Z" "t.jsonl"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'Z'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 145: lone -
+argv: ct "print" "-" "t.jsonl"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option ''\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 146: lone -- then a word
+argv: ct "print" "--" "w" "t.jsonl"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option ''\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 147: --=v
+argv: ct "print" "--=v" "t.jsonl"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option ''\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 148: extra positional
+argv: ct "print" "t.jsonl" "extra1" "extra2" "extra3" "extra4" "extra5"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The subcommand 'print' does not accept additional arguments\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 149: global --cwd after the command
+argv: ct "print" "--cwd" "/w" "t.jsonl"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = some("/w")
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = print
+  printPath = "t.jsonl"
+  printFilter = none
+  printFunction = none
+  printLimit = none
+  printFormat = none
+  printVerify = false
+  printFollow = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 150: global --new-tab after the command
+argv: ct "print" "--new-tab" "t.jsonl"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = true
+  newWindow = false
+  cmd = print
+  printPath = "t.jsonl"
+  printFilter = none
+  printFunction = none
+  printLimit = none
+  printFormat = none
+  printVerify = false
+  printFollow = false
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 151: --version after the command
+argv: ct "print" "--version" "t.jsonl"
+env: (none)
+exit: 0
+--- stdout
+CodeTracer version: <VERSION>
+\e[0m
+(no newline at end of stdout)
+--- stderr
+--- end
+
+### 152: -h after the command
+argv: ct "print" "-h" "t.jsonl"
+env: (none)
+exit: 0
+--- stdout
+<the short help page clispec renders for this request: ct print>
+--- stderr
+--- end

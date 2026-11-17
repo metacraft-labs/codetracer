@@ -58,6 +58,7 @@ from viewmodels/omnibar_vm import OmnibarEntry, OmnibarMode   # `recordingsBesid
 import ../../../common/trace_source_paths   # the shared source-folder rule
 import ../../../common/replay_server_path   # the one replay-server search order
 import ../../viewmodel/host/find_in_files   # PLAT-57: the one search runner
+from ../../viewmodel/host/native_visual_replay_host import recordingHasGraphics
 from viewmodels/search_results_vm import SearchResultsVM, acceptBatch
 import ../../../ct/trace/trace_kind   # the shared test-oracle refusal
 import ../../../ct/trace/recorder_output   # `ct record-test`'s recording id
@@ -233,25 +234,42 @@ proc recordingFolderOf*(recordingId: string): string =
   except CatchableError:
     result = ""
 
+proc readableNow(fd: FileHandle): bool =
+  ## Whether `fd` has bytes (or its end) to read NOW. Not `osproc.hasData`:
+  ## on POSIX that is a `select` with no timeout, which BLOCKS until the
+  ## child writes, so a poll of a quiet `ct record` froze the window for as
+  ## long as the recorded program said nothing.
+  var p = TPollfd(fd: cint(fd), events: POLLIN)
+  posix.poll(addr p, 1, 0) == 1 and (p.revents and (POLLIN or POLLHUP)) != 0
+
+proc drainRecordOutput(job: NativeRecordJob): string =
+  ## What the child has written so far, WITHOUT BLOCKING: the fd is asked with
+  ## a zero timeout and read as raw bytes, because a `readLine` would wait for
+  ## the end of a line the child may not finish for a while.
+  var buf: array[4096, char]
+  let fd = job.process.outputHandle
+  while readableNow(fd):
+    let n = posix.read(fd, addr buf[0], buf.len)
+    if n <= 0:
+      break
+    for i in 0 ..< n:
+      result.add buf[i]
+
 proc pollRecordJob*(job: NativeRecordJob): bool =
   ## Whether the job FINISHED on this poll (once): `ok` and `message` say
-  ## how. The recorder's output is drained so a chatty program cannot fill
-  ## the pipe and stall it.
+  ## how. It returns at once, quiet child or not. The recorder's output is
+  ## drained so a chatty program cannot fill the pipe and stall it.
   if job.isNil or job.done:
     return false
   if job.process.isNil:
     job.done = true
     return true
-  var chunk = ""
-  try:
-    let outp = job.process.outputStream
-    while job.process.hasData:
-      var line = ""
-      if not outp.readLine(line):
-        break
-      chunk.add line & "\n"
-  except CatchableError:
-    discard
+  var chunk = job.drainRecordOutput()
+  let code = job.process.peekExitCode()
+  if code != -1:
+    # The child is gone, so all it ever wrote is in the pipe; the log must
+    # hold the tail (`record-test`'s recording id is read from it).
+    chunk.add job.drainRecordOutput()
   if chunk.len > 0:
     try:
       let f = open(job.logPath, fmAppend)
@@ -259,7 +277,6 @@ proc pollRecordJob*(job: NativeRecordJob): bool =
       f.close()
     except CatchableError:
       discard
-  let code = job.process.peekExitCode()
   if code == -1:
     return false
   job.done = true
@@ -568,7 +585,18 @@ proc openLocalTrace*(traceFolder: string;
   let bin = findReplayServer()
   if bin.len == 0:
     raiseHost(replayServerRemedy())
-  result = newHeadlessDebugSession(resolved, bin, handshake = bound)
+  try:
+    result = newHeadlessDebugSession(resolved, bin, handshake = bound)
+  except DapLaunchRefusedError as e:
+    # A RECORDING THAT CARRIES GRAPHICS STILL OPENS. The graphics do not need
+    # this engine, and the desktop shows the Visual Replay panes of a recording
+    # whose debugging session is refused (a Linux `--attach=premain` recording:
+    # the debug server has no stage0 boundary to replay from, and it is the only
+    # attach that captures GL). Without graphics there is nothing to show and
+    # the refusal stays what ends the open.
+    if not recordingHasGraphics(resolved):
+      raise
+    result = newRefusedDebugSession(resolved, bin, e.msg)
   result.installNativeStop()
 
 # ---------------------------------------------------------------------------

@@ -146,7 +146,8 @@ ARMS = [
      [(VMU, None), (TBL, TBL_PICKER)],
      "§3.11: `:build: ` is not the task picker"),
     # ---- the terminal --------------------------------------------------------
-    ("T1", [(RUNTIME, '  of "build.run":', '  of "build.run-disabled":')],
+    ("T1", [(RUNTIME, '  session.bindOp("build.run", act(rt.note(rt.openBuildTaskPicker())))',
+             '  session.bindOp("build.run", ask(false))')],
      [(TBL, TBL_PICKER), (PTY, None)],
      "§3.11: Ctrl+Shift+B opens nothing"),
     ("T2", [(RUNTIME, "  if mode == omBuildTask:", "  if false:")],
@@ -184,7 +185,8 @@ ARMS = [
      [(TBL, TBL_REVEAL)],
      "§3.8: a failed build does not reveal Problems where Build Output is docked"),
     # ---- the GPUI window -----------------------------------------------------
-    ("G1", [(GPUI_MAIN, '  of "build.run":', '  of "build.run-disabled":')],
+    ("G1", [(GPUI_MAIN, '  window.bindOp("build.run", act(traceGesture(openGpuiBuildTaskPicker(r))))',
+             '  window.bindOp("build.run", ask(false))')],
      [(PLAN, None)],
      "§3.11: GPUI's Ctrl+Shift+B opens nothing"),
     ("G2", [(GPUI_MAIN, "  if res.kind == erOperation and res.operation in EditWindowRoutedOperations:",

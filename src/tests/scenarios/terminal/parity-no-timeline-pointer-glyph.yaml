@@ -1,0 +1,18 @@
+scenario: 1
+name: terminal/parity-no-timeline-pointer-glyph
+pack: codetracer
+summary: >-
+  The terminal shows no Timeline pane, and the replay's position in the
+  editor is the ▸ pointer on line 1 (never an `-->` arrow).
+stage:
+  - use: record-program
+    with: { program: calc }
+  - use: open-recording
+    with: { width: 200, height: 50 }
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - expect: { at: 'pane-tab[label="Timeline"]', absent: true }
+  - expect: { at: 'pane[title="Timeline"]', absent: true }
+  - expect: { at: 'editor[file="main.py"]/line[number="1"]', current: true }
+  - expect: { at: 'pane[title="calc/main.py"]', assert: 'has-row("1  ▸  #!/usr/bin/env python3")' }
+  - expect: { at: 'pane[title="calc/main.py"]', assert: 'lacks-row("-->")' }

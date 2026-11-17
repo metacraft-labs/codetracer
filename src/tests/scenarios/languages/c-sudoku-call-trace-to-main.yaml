@@ -1,0 +1,21 @@
+scenario: 1
+name: languages/c-sudoku-call-trace-to-main
+pack: codetracer
+summary: >-
+  In a C Sudoku solver recording, activating `main` in the call trace shows
+  main.c in the editor, with the `test_boards` value drawn beside its line.
+
+stage:
+  - use: record-program
+    with: { program: c_sudoku_solver/main.c }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 240s }
+  - click: 'pane-tab[label="CALLTRACE"]'
+  - wait: { until: { at: 'call-trace/call[name="main"]', present: true }, timeout: 120s }
+  - click: { at: 'call-trace/call[name="main"]', anchor: name }
+    settle: false
+  - wait: { until: { at: 'editor[file="main.c"]', active: true }, timeout: 60s }
+  - wait: replay-idle
+  - wait: { until: { at: 'editor[file="main.c"]/flow-value[name="test_boards"]', present: true }, timeout: 60s }

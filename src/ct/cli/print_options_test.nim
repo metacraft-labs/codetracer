@@ -28,13 +28,14 @@
 ## with the same `load` call `ct` makes, so it fails whenever the declaration
 ## or the parser does.
 ##
-## No mocks: the argument vectors go through the real confutils parser.
+## No mocks: the argument vectors go through ct's real parser (its clispec
+## description, since CS-M10).
 ##
 ## Lane: `ct-cli-units` (discovered by `src/ct/**/*_test.nim`).
 
 import
   std/[options, unittest],
-  confutils,
+  confutils/defs,
   ../codetracerconf
 
 proc parseCt(args: openArray[string]): CodetracerConf =

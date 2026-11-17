@@ -1,0 +1,52 @@
+scenario: 1
+name: visual-replay/keymap-rows
+pack: codetracer
+summary: >-
+  With the Video Player focused, its keys are keymap rows the key router
+  runs: l fast-forwards (1×, then 2×), Space pauses, Home jumps to frame 0,
+  Right steps to frame 1. Escape is not the player's while the picker is off;
+  p turns the picker on, and then Escape (the picker layer's) turns it off.
+
+stage:
+  - use: record-program
+    with: { program: py_console_logs/main.py }
+  - use: visual-replay-capable
+  - use: front-end-options
+    with: { env: { CODETRACER_VISUAL_REPLAY_FAKE_PLAYER: ready } }
+  - use: open-recording
+    with: { deployment: web }
+
+steps:
+  - wait: { until: replay-idle, timeout: 360s }
+  - wait: { until: editor.loaded, timeout: 300s }
+  - wait: { until: call-trace.loaded, timeout: 120s }
+  - wait: { until: { at: 'pane-tab[label="VIDEO PLAYER"]', present: true }, timeout: 60s }
+  - click: { at: 'pane-tab[label="VIDEO PLAYER"]', anchor: title }
+  - wait: { until: { at: video-player/frame-image, present: true }, timeout: 60s }
+  - click: { at: video-player, anchor: label }
+  - wait: { until: { at: video-player, focused: true }, timeout: 10s }
+  - key: l
+    settle: false
+  - wait: { until: { at: video-player, rate: { contains: "1×" } }, timeout: 10s }
+  - expect: { at: key-router, last-operation: video-player.fast-forward }
+  - key: l
+    settle: false
+  - wait: { until: { at: video-player, rate: { contains: "2×" } }, timeout: 10s }
+  - key: Space
+  - wait: { until: { at: video-player, rate: { contains: "Paused" } }, timeout: 10s }
+  - expect: { at: key-router, last-operation: video-player.toggle-play }
+  - key: Home
+  - wait: { until: { at: video-player, frame: { matches: "^Frame 0 /" } }, timeout: 10s }
+  - expect: { at: key-router, last-operation: video-player.jump-start }
+  - key: Right
+  - wait: { until: { at: video-player, frame: { matches: "^Frame 1 /" } }, timeout: 10s }
+  - expect: { at: key-router, last-operation: video-player.step-frame-forward }
+  # Escape with the picker off is not the player's.
+  - key: Esc
+  - expect: { at: key-router, assert: 'last-is-not("video-player.cancel-picker")' }
+  - click: { at: video-player, anchor: label }
+  - key: p
+  - wait: { until: { at: video-player, picking: true }, timeout: 10s }
+  - key: Esc
+  - wait: { until: { at: video-player, picking: false }, timeout: 10s }
+  - expect: { at: key-router, last-operation: video-player.cancel-picker }

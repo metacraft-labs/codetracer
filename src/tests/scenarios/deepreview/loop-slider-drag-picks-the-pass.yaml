@@ -1,0 +1,25 @@
+scenario: 1
+name: deepreview/loop-slider-drag-picks-the-pass
+pack: codetracer
+summary: >-
+  Dragging the loop control's slider to the end of its track shows the last
+  pass through compute's loop: the control says `iteration 3 / 3` and the
+  values are that pass's (`<acc> 3`).
+
+stage:
+  - use: open-review
+    with: { dataset: src/tests/gui/tests/deepreview/fixtures/sample-review.json }
+
+steps:
+  - wait: { until: { at: vcs, present: true }, timeout: 120s }
+  - wait: { until: { at: 'review-diff[file="src/main.rs"]', present: true }, timeout: 60s }
+  - wait: { until: settled, timeout: 30s }
+  - wait: { until: { at: 'review-diff[file="src/main.rs"]', boundaries: { gt: 0 } }, timeout: 30s }
+  - click: 'review-diff[file="src/main.rs"]/review-boundary[direction="below"]'
+  - wait: { until: { at: 'review-diff[file="src/main.rs"]/review-loop[function="compute"]', slider: true }, timeout: 30s }
+  - expect: { at: 'review-diff[file="src/main.rs"]/review-loop[function="compute"]', label: "iteration 1 / 3", slider-width: { gt: 20 } }
+  - drag:
+      from: { at: 'review-diff[file="src/main.rs"]/review-loop[function="compute"]/loop-slider', anchor: grip }
+      to: { at: 'review-diff[file="src/main.rs"]/review-loop[function="compute"]/loop-slider', anchor: end }
+  - wait: { until: { at: 'review-diff[file="src/main.rs"]/review-loop[function="compute"]', label: "iteration 3 / 3" }, timeout: 30s }
+  - wait: { until: { at: 'review-diff[file="src/main.rs"]', values: { contains: "<acc> 3" } }, timeout: 30s }

@@ -15,6 +15,7 @@
 ## ---------------------------------------------------------------------------
 
 import ui_imports, auto_hide, ../[types, communication]
+import ../viewmodel/views/field_keys
 
 import std/json
 from ../viewmodel/store/types as vmtypes import SearchResultLine
@@ -113,9 +114,9 @@ when defined(js):
       cstring"fixed-search-query",
       className = cstring"mousetrap")
     queryInput.setAttribute(cstring"name", cstring"search-query")
-    queryInput.addEventListener(cstring"keydown", proc(ev: Event) =
+    queryInput.addEventListener(cstring KeyDownEvent, proc(ev: Event) =
       let event = cast[KeyboardEvent](ev)
-      if event.keyCode == ENTER_KEY_CODE and event.isTrusted:
+      if fieldKeyOfCode(event.keyCode) == fkCommit and event.isTrusted:
         let value = inputValue(cstring"fixed-search-query")
         let includeValue = inputValue(cstring"fixed-search-include")
         let excludeValue = inputValue(cstring"fixed-search-exclude")

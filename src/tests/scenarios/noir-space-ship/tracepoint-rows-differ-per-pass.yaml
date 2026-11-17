@@ -1,0 +1,31 @@
+scenario: 1
+name: noir-space-ship/tracepoint-rows-differ-per-pass
+pack: codetracer
+summary: >-
+  A tracepoint logging damage and remaining_shield on shield.nr line 14
+  shows each pass's own values: the first pass's damage (0x…64) and the
+  second's (0x…7d0) are different rows.
+
+stage:
+  - use: record-program
+    with: { program: noir_space_ship }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 180s }
+  - click: 'pane-tab[label="CALLTRACE"]'
+  - wait: { until: call-trace.loaded, timeout: 60s }
+  - wait: { until: { at: 'call-trace/call[name="iterate_asteroids"]', present: true }, timeout: 60s }
+  - click: { at: 'call-trace/call[name="iterate_asteroids"]', anchor: name }
+    settle: false
+  - wait: { until: { at: 'editor[file="shield.nr"]', active: true }, timeout: 60s }
+  - wait: { until: replay-idle, timeout: 60s }
+  - click: { at: 'editor[file="shield.nr"]/line[number="14"]', anchor: text-start }
+  - key: Enter
+  - wait: { until: { at: 'tracepoint-editor[line="14"]', focused: true }, timeout: 20s }
+  - type: "log(damage, remaining_shield)"
+  - chord: Ctrl+Enter
+    settle: false
+  - wait: { until: { at: 'trace-results[line="14"]', count: { ge: 2 } }, timeout: 120s }
+  - expect: { at: 'trace-results[line="14"]/trace-row[n="1"]', values: { matches: "damage=\"0x0*64\"" } }
+  - expect: { at: 'trace-results[line="14"]/trace-row[n="2"]', values: { matches: "damage=\"0x0*7d0\"" } }

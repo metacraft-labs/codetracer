@@ -190,6 +190,34 @@ pub struct OriginContinuationToken {
     pub source_digests: Vec<SourceDigest>,
     /// Issue time (UNIX seconds) — purely informational.
     pub issued_at: u64,
+    /// Where a replay walk (rr or MCR, spec §6.3) continues: the point the
+    /// replay stood at when the walk was cut off, and the storage of
+    /// `current_var_name` there. Absent from the tokens the materialized
+    /// tiers issue, which resume from `current_step` alone.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub replay_resume: Option<ReplayResume>,
+}
+
+/// The replay half of a continuation token a replay walk issues (spec §5.3.1,
+/// "A replay walk's continuation").
+///
+/// The point is the worker's own position mark
+/// (`ReplayQuery::SaveReplayPosition`), opaque here. A tick count cannot
+/// stand in for it: rr counts ticks per thread, and the write a hop found
+/// shares its tick count with the instructions around it, so a walk resumed
+/// from the count could find a write that came after the hop.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ReplayResume {
+    /// The worker's mark of the point the walk stopped at.
+    pub mark: serde_json::Value,
+    /// Address and size of the variable the walk was about to follow, as
+    /// resolved at that point (a local's storage cannot be resolved again
+    /// from another point).
+    pub address: u64,
+    pub size: usize,
+    /// The thread the chain was asked about, which decides whether a later
+    /// write is a cross-thread copy.
+    pub querying_thread: u32,
 }
 
 impl OriginContinuationToken {
@@ -230,6 +258,54 @@ impl OriginContinuationToken {
         }
         Ok(token)
     }
+}
+
+/// Spec §5.3.1 steps 2 and 3: a continuation token resumes only while the
+/// classifier patterns and the sources its chain visited are the ones it was
+/// issued against. `current_bytes` reads a visited path the way the session
+/// reads sources (`None` when it cannot, which skips that path); only paths
+/// read from the filesystem are checked, a bundled copy cannot change.
+pub fn check_continuation_token_integrity(
+    token: &OriginContinuationToken,
+    patterns_fingerprint: &str,
+    mut current_bytes: impl FnMut(&std::path::Path) -> Option<Vec<u8>>,
+) -> Result<(), OriginError> {
+    if token.patterns_fingerprint != patterns_fingerprint {
+        return Err(OriginError::new(
+            OriginErrorCode::ContinuationTokenInvalid,
+            format!(
+                "pattern fingerprint changed since token was issued: {} -> {}",
+                token.patterns_fingerprint, patterns_fingerprint
+            ),
+        )
+        .with_detail(serde_json::json!({
+            "kind": "patterns_fingerprint_mismatch",
+            "issuedFingerprint": token.patterns_fingerprint,
+            "currentFingerprint": patterns_fingerprint,
+        })));
+    }
+    for digest in &token.source_digests {
+        if digest.origin != SourceOriginKind::Filesystem {
+            continue;
+        }
+        let Some(bytes) = current_bytes(std::path::Path::new(&digest.path)) else {
+            continue;
+        };
+        let current = sha256_hex(&bytes);
+        if current != digest.sha256_hex {
+            return Err(OriginError::new(
+                OriginErrorCode::ContinuationTokenInvalid,
+                format!("source file `{}` digest changed since token was issued", digest.path),
+            )
+            .with_detail(serde_json::json!({
+                "kind": "source_digest_mismatch",
+                "path": digest.path,
+                "issuedDigest": digest.sha256_hex,
+                "currentDigest": current,
+            })));
+        }
+    }
+    Ok(())
 }
 
 /// Compute SHA-256 over the bytes of a single source-file, returning the
@@ -319,6 +395,7 @@ mod tests {
                 sha256_hex: "cafebabe".to_string(),
             }],
             issued_at: 0,
+            replay_resume: None,
         };
         let encoded = token.encode().unwrap();
         let decoded = OriginContinuationToken::decode(&encoded).unwrap();
@@ -341,6 +418,7 @@ mod tests {
             patterns_fingerprint: String::new(),
             source_digests: Vec::new(),
             issued_at: 0,
+            replay_resume: None,
         };
         let encoded = token.encode().unwrap();
         let err = OriginContinuationToken::decode(&encoded).unwrap_err();

@@ -1,0 +1,24 @@
+scenario: 1
+name: vcs/view-mode-toggle-keeps-the-history
+pack: codetracer
+summary: >-
+  The VCS pane's Unified Diff switch starts on; switching it off changes
+  what a file click opens, and the commit history stays; a plain git
+  session shows the branch picker and none of a review's extras.
+
+stage:
+  - use: project-fixture
+    with: { name: vcs-two-hunks }
+  - use: open-project
+    with: { folder: $project }
+
+steps:
+  - wait: { until: { at: 'pane-tab[label="VCS"]', present: true }, timeout: 120s }
+  - wait: { until: settled, timeout: 30s }
+  - click: 'pane-tab[label="VCS"]'
+  - wait: { until: { at: 'vcs/commit[message="change the greeting"]', present: true }, timeout: 60s }
+  - expect: { at: vcs, unified-diff: true, branch-picker: true, review-extras: false }
+  - click: vcs/diff-toggle
+  - wait: { until: { at: vcs, unified-diff: false }, timeout: 15s }
+  - expect: { at: 'vcs/commit[message="change the greeting"]', present: true }
+  - expect: { at: 'vcs/commit[message="initial"]', present: true }

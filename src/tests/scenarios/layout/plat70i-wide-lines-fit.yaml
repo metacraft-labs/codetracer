@@ -1,0 +1,23 @@
+scenario: 1
+name: layout/plat70i-wide-lines-fit
+pack: codetracer
+summary: >-
+  On a recording whose output line, call argument and variable are far wider
+  than any pane, the Event Log's and the Call Trace's columns fit: neither
+  scrolls sideways, and the wide call is cut, its cut drawn exactly where the
+  pane says it cut.
+
+stage:
+  - use: record-program
+    with: { program: wide_lines/main.py }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 180s }
+  - wait: { until: call-trace.loaded, timeout: 120s }
+  - wait: { until: { at: 'table-pane[pane="event-log"]', present: true }, timeout: 120s }
+  - wait: { until: settled, timeout: 60s }
+  - expect: { at: 'table-pane[pane="event-log"]', fit: { one-of: [fit, shrink] }, sideways: false }
+  - wait: { until: { at: 'table-pane[pane="call-trace"]', assert: has-cut }, timeout: 30s }
+  - expect: { at: 'table-pane[pane="call-trace"]', fit: { one-of: [fit, shrink] }, sideways: false, wider: false }
+  - expect: { at: 'table-pane[pane="call-trace"]', assert: cuts-drawn }

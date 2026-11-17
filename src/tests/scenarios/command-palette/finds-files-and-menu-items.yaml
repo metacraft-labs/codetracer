@@ -1,0 +1,26 @@
+scenario: 1
+name: command-palette/finds-files-and-menu-items
+pack: codetracer
+summary: >-
+  Ctrl+P opens the palette; typing a file name offers that file, and choosing
+  it shows it in an editor; typing `:open` offers the menu's Open commands.
+
+stage:
+  - use: record-program
+    with: { program: noir_example }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - wait: { until: editor.loaded, timeout: 60s }
+  - chord: Ctrl+p
+  - expect: { at: omnibox, focused: true }
+  - type: main.nr
+  - wait: { until: { at: 'omnibox/option[label="src/main.nr"]', kind: file }, timeout: 10s }
+  - click: 'omnibox/option[label="src/main.nr"]'
+  - expect: { at: omnibox, absent: true }
+  - expect: { at: 'editor[file="main.nr"]', active: true }
+  - chord: Ctrl+p
+  - type: ":open"
+  - wait: { until: { at: omnibox, assert: "offers(command, Open)" }, timeout: 10s }
+  - expect: { at: 'omnibox/option[label="Open Trace..."]', kind: command }

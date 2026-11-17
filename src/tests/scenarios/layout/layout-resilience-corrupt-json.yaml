@@ -1,0 +1,18 @@
+scenario: 1
+name: layout/layout-resilience-corrupt-json
+pack: codetracer
+summary: >-
+  A saved Edit-mode layout that is not JSON does not stop the window: it comes up with a usable layout, its stacks and tabs.
+
+stage:
+  - use: plant-config
+    with: { file: default_edit_layout.json, content: "{ invalid json content without closing brace" }
+  - use: open-project
+    with: { folder: test-programs }
+
+steps:
+  - wait: { until: { at: layout, present: true }, timeout: 120s }
+  - wait: { until: settled, timeout: 60s }
+  - expect: { at: layout, stacks: { gt: 0 } }
+  - expect: { at: 'pane-tab[label="FILES"]', present: true }
+

@@ -116,7 +116,10 @@
 ##   * a `directive_*` function is one the compiler generated, and no source
 ##     in the project declares it;
 ##   * a listing's `func N` numbers a circuit and does not name a function,
-##     and an opcode row carries no source position: neither is placed.
+##     so it is not placed;
+##   * an opcode is placed where the compile's debug symbols say it came from,
+##     the innermost frame in the project's own sources
+##     (`constraints_listing.placeOpcodes`), or says why it is not.
 ##
 ## A row's activation (a press, Enter, the menu's Go to Source) goes through
 ## `activateRow`, which calls the host's `onOpenSource` with the
@@ -131,9 +134,11 @@ import isonim/viewmodel
 import ../../../common/noir_constraints
 from ../../../ct_test/frameworks/noir_test_syntax import NoirSourceFile,
   NoirFnDecl, noirFunctionDeclarations
+from ./constraints_listing import OpcodeHasNoSourceReason
 
 export noir_constraints
 export NoirSourceFile, NoirFnDecl
+export OpcodeHasNoSourceReason
 
 type
   ConstraintSourceLink* = object
@@ -235,8 +240,6 @@ const
   NumberedCircuitReason* =
     "the listing numbers this circuit; it does not name the source " &
     "function it was compiled from"
-  OpcodeHasNoSourceReason* =
-    "the listing carries no source position for an opcode"
   DirectiveReason* =
     "the compiler generated this function (a directive); no source in the " &
     "project declares it"
@@ -434,6 +437,15 @@ proc linksFor*(report: ConstraintReport;
   for fn in report.functions:
     result.add linkFunction(fn, decls)
 
+proc linkOpcode*(place: ConstraintOpcodePlace): ConstraintSourceLink =
+  ## Where a printed opcode came from, or why it is placed nowhere: a report no
+  ## artefact was read for has said nothing about its opcodes yet.
+  if place.placed:
+    return ConstraintSourceLink(linked: true, path: place.path,
+                                line: place.line, column: place.column)
+  unlinked(if place.reason.len > 0: place.reason
+           else: OpcodeHasNoSourceReason)
+
 proc whereText*(link: ConstraintSourceLink): string =
   ## `src/main.nr:3`, or "" for a row placed nowhere.
   if link.linked: link.path & ":" & $link.line else: ""
@@ -457,7 +469,7 @@ proc rowsFor*(report: ConstraintReport;
     for o, op in fn.rows:
       result.add ConstraintRow(kind: crkOpcode, function: f, opcode: o,
                                name: op.name, count: $op.index, args: op.args,
-                               source: unlinked(OpcodeHasNoSourceReason))
+                               source: linkOpcode(op.place))
 
 proc rowTitle*(row: ConstraintRow): string =
   ## The row's tooltip: where a press goes, or why it goes nowhere.

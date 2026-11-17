@@ -24,11 +24,11 @@
 ## effect, and the Embed SDK's facade, which reaches some of those views, must
 ## not reach a rendering module through it (CodeTracer-Embed-SDK.md §3.2).
 
-when defined(js):
-  proc isActivationKey*(key: string): bool =
-    ## Enter and Space ("Spacebar" is the name older engines report).
-    key == "Enter" or key == " " or key == "Spacebar"
+import ./field_keys
 
+export field_keys.isActivationKey
+
+when defined(js):
   proc installDocumentActivation(isKey: proc(key: cstring): bool) {.importjs: """
     (function (isKey) {
       if (typeof document === 'undefined' || globalThis.__ctRoleButtonKeys) return;

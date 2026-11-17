@@ -974,3 +974,82 @@ suite "the .nim compile step builds a replayable program":
     for arg in args:
       if arg.startsWith("--nimcache"): inc nimcacheFlags
     check nimcacheFlags == 1
+
+suite "the refused-version message names the stale party (#909)":
+  # `staleRecorderMessage` is what `ct record` prints when the recorder it
+  # has just run exited 0 but wrote a trace format version this `ct`
+  # refuses.  Both versions are reported either way (`CLI/ct/record.md`
+  # §"Corner Cases", "Recorder present but wrong version"); what the
+  # comparison decides is WHICH side is out of date, and so which one the
+  # user has to change.  Asserted on the pure builder, with the table's own
+  # artifacts (`recorderArtifact`), so the label and override are the ones
+  # production prints.
+  let noirSel = selector(slNoir, tiAcir, raVmEmulation)
+  let noirTool = recorderToolFor(noirSel)
+  let nargo = recorderArtifact(noirTool, "/opt/old/bin/nargo")
+
+  test "a version below what ct reads: the recorder is out of date":
+    let lines = staleRecorderMessage("Noir", nargo, "nargo version = 0.36.0",
+                                     "CTFS container", 4, @[5, 6],
+                                     noirTool.sibling, noirTool.installHint)
+    let text = lines.join("\n")
+    checkpoint(text)
+    check "CTFS container version 4" in text
+    check "versions 5 and 6" in text
+    check "/opt/old/bin/nargo --version` reports: nargo version = 0.36.0" in text
+    check "the recorder is out of date" in text
+    check "update ct" notin text
+    check "CODETRACER_NOIR_EXE_PATH" in text
+    check "Re-record" notin text
+
+  test "a version above what ct reads: ct is out of date, and the advice is to update ct (#909 review)":
+    # The recorder is NEWER than this `ct`.  Telling the user the recorder
+    # is out of date and to point at "a current" one sends them to replace
+    # the one part that is current.
+    let lines = staleRecorderMessage("Noir", nargo, "nargo version = 9.0.0",
+                                     "CTFS container", 7, @[5, 6],
+                                     noirTool.sibling, noirTool.installHint)
+    let text = lines.join("\n")
+    checkpoint(text)
+    # Both versions are still reported.
+    check "CTFS container version 7" in text
+    check "versions 5 and 6" in text
+    check "nargo version = 9.0.0" in text
+    check "/opt/old/bin/nargo" in text
+    # The stale party is `ct`.
+    check "update ct" in text
+    check "the recorder is out of date" notin text
+    check "point CodeTracer at a current" notin text
+    check "Re-record" notin text
+
+  test "a meta.dat version above the one ct reads is also ct's to update (#909 review)":
+    let lines = staleRecorderMessage("Noir", nargo, "", "meta.dat", 8, @[7],
+                                     noirTool.sibling, noirTool.installHint)
+    let text = lines.join("\n")
+    checkpoint(text)
+    check "meta.dat version 8" in text
+    check "version 7 only" in text
+    check "update ct" in text
+    check "the recorder is out of date" notin text
+
+  test "the PHP extension is loaded, not run: no --version, no PATH, the override only (#909 review)":
+    # The PHP recorder is the Zend extension `codetracer.so`, which `ct`
+    # hands to `php -d extension=<so>`.  It is not a program: there is no
+    # `codetracer.so --version` to quote, and no PATH it is found on.
+    let phpSel = selector(slPhp, tiInterpreted, raInstrumentedRuntime)
+    let phpTool = recorderToolFor(phpSel)
+    let so = recorderArtifact(phpTool, "/build/php/ext/modules/codetracer.so")
+    let lines = staleRecorderMessage("PHP", so, "", "CTFS container", 4,
+                                     @[5, 6], phpTool.sibling,
+                                     phpTool.installHint)
+    let text = lines.join("\n")
+    checkpoint(text)
+    check "/build/php/ext/modules/codetracer.so" in text
+    check "CTFS container version 4" in text
+    check "versions 5 and 6" in text
+    check "--version" notin text
+    check "PATH" notin text
+    check (PhpExtensionEnvVar & "=/path/to/codetracer.so") in text
+    # The label is a description, not a file name to put after /path/to/.
+    check "/path/to/codetracer.so (" notin text
+    check "codetracer-php-recorder" in text

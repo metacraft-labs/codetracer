@@ -360,7 +360,7 @@ proc readLocations(node: JsonNode; into: var Table[int, seq[NoirSpan]]) =
     # `mfUnmapped` there by the same path as a resolvable-but-unresolved span.
     into[opcode] = spans
 
-proc readCallStackTree(node: JsonNode): seq[LocationNode] =
+proc readCallStackTree*(node: JsonNode): seq[LocationNode] =
   ## `location_tree.locations` — a flat array in which each entry names its
   ## parent by index. Index 0 is the root sentinel.
   result = @[]
@@ -389,7 +389,7 @@ proc readCallStackTree(node: JsonNode): seq[LocationNode] =
           n.span.endByte = span["end"].getInt
     result.add n
 
-proc callStackSpans(tree: seq[LocationNode]; startId: int): seq[NoirSpan] =
+proc callStackSpans*(tree: seq[LocationNode]; startId: int): seq[NoirSpan] =
   ## Walk `startId`'s parent chain to the root and return the frames
   ## OUTERMOST FIRST — `Generated-Code-Listing.md` GCL-D1, which makes the last
   ## element the innermost frame and lets the editor highlight where the code

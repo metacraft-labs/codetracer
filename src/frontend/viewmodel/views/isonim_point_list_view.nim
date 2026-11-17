@@ -70,9 +70,9 @@ proc pointLocationText(point: PointListEntry): string =
   else:
     point.path
 
-proc onPointClick(vm: PointListVM; index: int): proc() =
-  let captured = index
-  result = proc() = vm.selectPoint(some(captured))
+# A point's press is the pointer row `point-list.select`, performed by the
+# front-end on the row's `data-point-index` (on a DOM front-end
+# `input/pane_presses`).
 
 # ---------------------------------------------------------------------------
 # The panel
@@ -87,7 +87,7 @@ proc renderPointRow[R, N](r: R; vm: PointListVM; point: proc(): PointListEntry;
   ## `index`, so every attribute and text reads `point()`.
   ui(r):
     tdiv(role = "button", tabindex = "0", class = pointRowClass(vm, index, point().enabled),
-         onclick = onPointClick(vm, index)):
+         `data-point-index` = $index):
       span(class = "point-list-kind"):
         text point().kind
       span(class = "point-list-label"):

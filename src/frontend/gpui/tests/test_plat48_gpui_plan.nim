@@ -35,6 +35,7 @@ import codetracer_embed
 import headless_app/layout_model
 import gpui/chrome
 import gpui/window_geometry
+import gpui/design_font_metrics
 import gpui/window_top_bar
 import gpui/app/dock_projection
 import views/debug_control_marks
@@ -46,7 +47,12 @@ template ck(cond: untyped) =
   check(cond)
 
 const
-  ExpectedAssertions = 243
+  ExpectedAssertions = 248
+    ## 247 -> 248: the top strip's label too. Measured.
+    ## 243 -> 247 (2026-11-10, issue gpui-shell-measures-panel-tab-labels-with-
+    ## letter-spacing-but-draws-them-without): each of the footer strip's four
+    ## labels is asserted to be drawn with the spacing it is measured with.
+    ## Measured.
     ## 222 -> 243 (M76, codetracer#843): the Debug menu's Stop and point
     ## items drawn enabled (+15), and Shift+F5 ending the session (+6).
     ## Measured.
@@ -98,8 +104,9 @@ let calc = requireFixture(fixtureSpec("calc"))
 
 var drawnFiles: Table[string, string]
   ## Every file a reported plan's `img src` names, read as soon as the plan
-  ## is: `--report-window-plan` leaves the marks' SVG files for its reader,
-  ## and this reader removes them.
+  ## is: the marks' SVG files are in the spawned binary's per-user content
+  ## cache (`CODETRACER_HOME`, under the case's directory), which goes with
+  ## the case, so they are read before it is removed.
 
 var lastPlanTrace = ""
   ## M76: the gesture trace (`CODETRACER_GPUI_GESTURE_TRACE=1`) of the last
@@ -137,23 +144,19 @@ proc windowPlan(ops: string; pre: seq[string] = @[]; trace = false): JsonNode =
   let err = if fileExists(errFile): readFile(errFile) else: ""
   lastPlanTrace = err
   removeFile(errFile)
-  removeDir(state)
   if rc != 0:
+    removeDir(state)
     checkpoint("codetracer-gpui exited " & $rc & ": " & err)
     raise newException(IOError, "the window plan run failed (" & ops & ")")
   result = parseJson(output)
-  var dirs: seq[string] = @[]
   proc keep(n: JsonNode) =
     if n{"tag"}.getStr == "img":
       let src = n{"attributes"}{"src"}.getStr
       if src.len > 0 and fileExists(src):
         drawnFiles[src] = readFile(src)
-        if src.parentDir notin dirs: dirs.add src.parentDir
     for c in n{"children"}.getElems: keep(c)
   keep(result)
-  for d in dirs:
-    try: removeDir(d)
-    except OSError: discard
+  removeDir(state)
 
 proc attr(n: JsonNode; name: string): string =
   if n{"attributes"}.kind == JObject: n["attributes"]{name}.getStr else: ""
@@ -172,6 +175,16 @@ proc nodesWith(plan: JsonNode; attribute: string): seq[JsonNode] =
 proc textOf(n: JsonNode): string =
   if n{"kind"}.getStr == "TextNode": return n{"text"}.getStr
   for c in n{"children"}.getElems: result.add textOf(c)
+
+proc textHolder(n: JsonNode): JsonNode =
+  ## The element that DIRECTLY holds the first text node under `n`: the one
+  ## whose `letter-spacing` the shim draws the glyphs with (it is not
+  ## inherited by an element child).
+  for c in n{"children"}.getElems:
+    if c{"kind"}.getStr == "TextNode": return n
+  for c in n{"children"}.getElems:
+    let h = textHolder(c)
+    if not h.isNil: return h
 
 proc px(n: JsonNode; style: string): int =
   let v = n{"styles"}{style}.getStr
@@ -302,6 +315,11 @@ suite "PLAT-48: the GPUI window's top bar and auto-hide panels, as drawn":
     for s in strips[0].nodesWith("data-ct-dock-slot"):
       labels.add s.textOf
       ck s.attr("data-ct-tab-active") == "false"
+      # A label is drawn with the spacing its box is measured with
+      # (`slotExtentPx` uses `LabelLetterSpacing`): the issue 2026-11-10-gpui-
+      # shell-measures-panel-tab-labels-with-letter-spacing-but-draws-them-
+      # without.
+      ck s.textHolder{"styles"}{"letter_spacing"}.getStr == LabelLetterSpacingCss
     var want: seq[string] = @[]
     for d in sharedDefaultDocked(): want.add d.title
     ck labels == want
@@ -468,6 +486,8 @@ suite "PLAT-48: the GPUI window's top bar and auto-hide panels, as drawn":
     if not top.isNil:
       for s in top.nodesWith("data-ct-dock-slot"):
         slots.add s.attr("data-ct-dock-slot")
+        # The top strip's label is measured with `LabelLetterSpacing` too.
+        ck s.textHolder{"styles"}{"letter_spacing"}.getStr == LabelLetterSpacingCss
     ck slots == @[$paneState]
     # No pane box holds State any more: no tab of the tree is State's.
     ck plan.tabPanes().len > 0

@@ -62,3 +62,17 @@ suite "PLAT-42 code-column pixel reader":
     rows[0].pointer = true
     rows[1].pointer = true
     check codeColumnLeft(frame(110, 100), Pane, 49, rows) == -1
+
+  test "an indent guide crossing the band does not move the boundary":
+    # Measured on `returned-calltrace` at b7e12b7450b: the execution row is
+    # indented, and its 1 px guides (grey 79) cross the #404040 band 3 px and
+    # 42 px into the code — the first segment, 38 px, is under the minimum.
+    var img = frame(157, 147)
+    img.rect(160, 161, 24, 48, 79)
+    img.rect(199, 200, 24, 48, 79)
+    check codeColumnLeft(img, Pane, 49, Rows) == 157
+
+  test "planted: a crossing wider than a guide or the caret ends the band":
+    var img = frame(157, 147)
+    img.rect(160, 163, 24, 48, 40)
+    check codeColumnLeft(img, Pane, 49, Rows) == 163

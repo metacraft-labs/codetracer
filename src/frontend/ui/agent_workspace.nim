@@ -30,6 +30,7 @@ import ../viewmodel/store/replay_data_store
 from ../viewmodel/store/types as vmtypes import
   AgentWorkspaceFileEntry, AgentWorkspaceSummary, AgentWorkspaceViewKind,
   awvkAgentWorkspace, awvkUserWorkspace
+import ./editor_surface
 from ../viewmodel/viewmodels/agent_workspace_vm import
   AgentWorkspaceVM, createAgentWorkspaceVM, setViewKind,
   setWorkspaceMetadata, setSummary, setFiles, setSelectedFileIndex,
@@ -46,8 +47,6 @@ when defined(js):
 # symbol clashes when both modules are compiled together)
 # ---------------------------------------------------------------------------
 
-proc awCreateMonacoEditor(divId: cstring, options: JsObject): MonacoEditor
-  {.importjs: "monaco.editor.create(document.getElementById(#), #)".}
 
 proc awDeltaDecorations(editor: MonacoEditor, oldDecorations: js, newDecorations: js): js
   {.importjs: "#.deltaDecorations(#, #)".}
@@ -367,7 +366,9 @@ proc initEditor(self: AgentWorkspaceComponent) =
   let theme = monacoThemeName(self.data.config.theme)
   let placeholder = cstring"// Select a file to view agent workspace content"
 
-  self.editor = awCreateMonacoEditor(divId, js{
+  # Monaco, or the shared editor under the developer setting `sharedEditor`
+  # (`editor_surface`).
+  self.editor = cast[MonacoEditor](createEditorSurface(cast[JsObject](el), js{
     value: placeholder,
     language: lang,
     readOnly: true,
@@ -385,7 +386,8 @@ proc initEditor(self: AgentWorkspaceComponent) =
     scrollBeyondLastLine: false,
     contextmenu: false,
     glyphMargin: true
-  })
+  }, self.data.config, "", self.data.ui.fontSize, $codeFontFamily(self.data.ui),
+    darkTheme = $theme != "codetracerWhite"))
   self.editorInitialized = true
   self.currentDecorationIds = newJsObject()
   self.updateDecorations()

@@ -255,11 +255,21 @@ func gutterMarkName*(mark, pointer, provenance: string): string =
   var parts: seq[string] = @[]
   if pointer == "eptExecution": parts.add "execution"
   elif pointer == "eptInspection": parts.add "inspection"
-  case mark
-  of "emBreakpoint": parts.add "breakpoint"
-  of "emBreakpointDisabled": parts.add "breakpoint-disabled"
-  of "emTracepoint": parts.add "tracepoint"
-  else: discard
+  # The attribute is `$EditorMark` (leaves.nim); an absent attribute is no
+  # mark. The match is over the ENUM and has no `else`, so a mark kind added
+  # later does not compile until it is named here, and a name outside the
+  # alphabet raises rather than degrading into "no mark on this line".
+  let kind = if mark.len == 0: emNone else: parseEnum[EditorMark](mark)
+  case kind
+  of emNone: discard
+  of emBreakpoint: parts.add "breakpoint"
+  of emBreakpointDisabled: parts.add "breakpoint-disabled"
+  of emTracepoint: parts.add "tracepoint"
+  of emBreakpointTracepoint:
+    # The one lane's combined mark (Editor-Pane.md MC.5); the Electron
+    # extractor answers it with both names, in this order.
+    parts.add "breakpoint"
+    parts.add "tracepoint"
   if provenance == "epUnverified": parts.add "unverified"
   elif provenance == "epAbsent": parts.add "absent"
   parts.join("+")

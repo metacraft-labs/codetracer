@@ -32,7 +32,7 @@ import ../session_vm
 import ../viewmodels/[debug_controls_vm, action_sink, calltrace_vm, state_vm,
                       event_log_vm, terminal_output_vm, scratchpad_vm,
                       trace_log_vm, flow_vm, point_list_vm,
-                      filesystem_vm]
+                      filesystem_vm, origin_chain_vm]
 import action_relay, sync_subscriber, transport
 
 when defined(js):
@@ -60,6 +60,13 @@ type
       ## answering that subscription replaces this mirror's document, and these
       ## are what the session's next batch brings back (codetracer-pm
       ## issues/2026-10-22-a-watch-typed-in-the-browser-never-produces-a-row.md).
+    unsentBreakpoints: JsonNode
+      ## The breakpoint sets changed on this mirror before it followed any
+      ## session, by file (the `args` of a `breakpoints` / `set` action, the
+      ## latest per file): a `ct host` page shows the trace, and accepts a
+      ## gutter click, before the replay's first stop creates the server's
+      ## session. Sent to the first session it follows (`switchTo`), after its
+      ## subscription, whose snapshot would otherwise replace them.
     disposeRoot: proc()
 
 proc inertBackend*(): BackendService =
@@ -99,6 +106,10 @@ proc switchTo*(m: MirrorSession; sessionId: string) =
   for op in m.unsentViewOps:
     m.channel.send(serializeAction("collab", "viewop", op.toJson, sessionId))
   m.unsentViewOps = @[]
+  if not m.unsentBreakpoints.isNil:
+    for _, args in m.unsentBreakpoints.pairs:
+      m.channel.send(serializeAction("breakpoints", "set", args, sessionId))
+    m.unsentBreakpoints = nil
 
 proc onHostMessage(m: MirrorSession; msg: JsonNode) =
   if msg.isNil or msg.kind != JObject:
@@ -149,15 +160,25 @@ proc relayActions(m: MirrorSession; relays: RelayFilter) =
   if not s.pointListVM.isNil: s.pointListVM.actionSink = sink
   if not s.fileTreeVM.isNil: s.fileTreeVM.actionSink = sink
   if not s.requestPanelVM.isNil: s.requestPanelVM.actionSink = sink
+  if not s.originChainVM.isNil: s.originChainVM.actionSink = sink
+  # The breakpoints are the store's, not a panel's (`sdk/breakpoints`).
+  if not s.store.isNil: s.store.actionSink = sink
 
 proc createMirrorSession*(
     channel: SyncChannel;
     debugCommandsFor: proc(session: SessionViewModel): DebugCommands = nil;
     relayActions = false;
-    relays: RelayFilter = nil
+    relays: RelayFilter = nil;
+    localOwners: openArray[string] = [];
+    originChain = false
 ): MirrorSession =
   ## A mirror over `channel`. It follows the session the host activates, or
   ## the one `switchTo` names.
+  ##
+  ## `originChain`: the mirror shows the primary's Origin Chain (its side
+  ## panel, the chain asked for last) — a VS Code State panel, whose host
+  ## asks for the chain (`vscode_host.showValueOrigin`). Off for a mirror
+  ## whose own page builds and asks for its chain (`ct host`).
   ##
   ## `debugCommandsFor` gives the toolbar the host's own commands, for a host
   ## that drives the replay itself while another process owns the session
@@ -171,6 +192,10 @@ proc createMirrorSession*(
   ## (Shared-DOM-Front-Ends D6) — a VS Code webview, and a `ct host` page
   ## (`createHostedPageMirror`). Off for a mirror that only shows a session.
   ## `relays` narrows them to the actions it accepts; nil relays every one.
+  ##
+  ## `localOwners`: the ViewModels, by key prefix, whose state this side
+  ## produces and the primary's snapshots and batches must not replace
+  ## (`sync_subscriber.ownedLocally`; `HostedPageOwnedSignals`).
   let m = MirrorSession(channel: channel, viewports: newJObject())
   createRoot proc(dispose: proc()) =
     m.disposeRoot = dispose
@@ -178,9 +203,11 @@ proc createMirrorSession*(
     if not debugCommandsFor.isNil:
       m.session.debugCommands = debugCommandsFor(m.session)
     m.session.initializePanelViewModels()
+    if originChain:
+      m.session.attachOriginChainVM(createOriginChainVM(m.session.store))
     if relayActions:
       m.relayActions(relays)
-  m.subscriber = createSyncSubscriber(m.session)
+  m.subscriber = createSyncSubscriber(m.session, localOwners)
   channel.setHandler(proc(msg: JsonNode) = m.onHostMessage(msg))
   # THE VIEW STATE IS THE PRIMARY'S. A tab chosen, a row expanded or a watch
   # added in a mirror's pane goes through the session's collaboration core
@@ -207,16 +234,64 @@ proc createMirrorSession*(
 proc hostedPageRelays*(vm, action: string): bool =
   ## The actions a `ct host` page relays to the server's session
   ## (`createHostedPageMirror`): the panes' viewports, the call trace's
-  ## actions, and the request panel's selection, filters and detail tab. The
-  ## call trace's ViewModel takes no callback from the page, so all its
+  ## actions, the state pane's value-history toggle and "load more", the
+  ## breakpoints, and the request panel's selection, filters and detail tab.
+  ## The call trace's ViewModel takes no callback from the page, so all its
   ## actions run the same on either side. The request panel's window is
   ## loaded by the server's session, from the viewport the page relays, so
   ## its filters and selection must be the server's too: a filter set on the
   ## page alone would filter rows the page does not load. Its row activation
   ## (`jumpToHandler`) stays on the page, which installs the hook that opens
   ## a request recorded in another container (`openExternalTrace`).
-  vm == "viewport" or vm == "calltrace" or
+  ##
+  ## THE VALUE HISTORY IS LOADED BY THE SERVER'S SESSION. A row's history is
+  ## the answer to `ct/load-history`, which the page's ViewModel would send
+  ## through this mirror's inert backend, where it waits forever; and the
+  ## history is the server's (`StateVM.valueHistory` is backend-authoritative),
+  ## so a history the page loaded itself would be replaced by the server's on
+  ## its next batch. Relayed, the toggle opens the row on the server's
+  ## session, whose loader (`debugger_session.markReady`) asks its replay,
+  ## and the open row and its history come back in the next batch. A history
+  ## row's jump (`jumpToHistoryEntry`) stays on the page, which navigates
+  ## over its own connection (`ReplayDataStore.navigationBackend`).
+  ##
+  ## A COLLECTION'S "LOAD MORE" IS THE SERVER'S for the same reason: the
+  ## locals are the server's session's (the page's own decoders stand down,
+  ## `claimLocalsLoading`), so the next elements (`ct/load-value-elements`)
+  ## are asked and appended there, and reach the page with the locals.
+  ##
+  ## THE BREAKPOINTS ARE THE SERVER'S. A change planned on the page (the
+  ## editor's gutter and menus, `sdk/breakpoints`) is the store's
+  ## `breakpoints` / `set`: the server's session sends the file's set over
+  ## its connection to the replay — the replay the page's Continue runs —
+  ## and holds the rows the engine verified, which reach the page with its
+  ## batches and outlive a reload of the page, as the replay's breakpoints
+  ## do. Sent through the mirror's inert backend, the request never left
+  ## the page and Continue ran past the breakpoint the gutter showed.
+  vm == "viewport" or vm == "calltrace" or vm == "breakpoints" or
+    (vm == "state" and action in ["toggleHistory", "loadMore"]) or
     (vm == "requestPanel" and action != "jumpToHandler")
+
+const HostedPageOwnedSignals = ["fileTree."]
+  ## The ViewModels whose state a `ct host` page produces itself, and which
+  ## the server's session therefore must not overwrite in the page's mirror.
+  ##
+  ## THE FILE TREE IS THE PAGE'S. The server's session never loads one: the
+  ## page asks the index for the trace's source folders and their lazily
+  ## loaded sub-folders over its own IPC (`CODETRACER::filesystem-loaded`,
+  ## `load-path-content`) and writes the answers into this mirror's
+  ## `FilesystemVM` (`ui/filesystem.syncLegacyFilesystemIntoVM`), and every
+  ## file-tree action runs on the page (`hostedPageRelays`). The server's
+  ## `FilesystemVM` stays at its initial "Loading..." state, so applying it
+  ## replaced the tree the page had loaded with "Loading..." on the first
+  ## snapshot, for good. The VS Code host is the other way round — its
+  ## extension host loads the tree into the primary
+  ## (`vscode_host.setSourceFiles`) and its webviews take it from there —
+  ## which is why the exception is this page's, not the subscriber's.
+  ##
+  ## A ViewModel joins this list when the page produces its state and the
+  ## server's session does not, and leaves it when the server's session is
+  ## given an equivalent (Shared-DOM-Front-Ends, "Server-managed sessions").
 
 proc createHostedPageMirror*(
     channel: SyncChannel;
@@ -234,6 +309,11 @@ proc createHostedPageMirror*(
   ##   connection to the replay, not the mirror's inert backend.
   ## * the request panel's filters, selection and detail tab: its window is
   ##   loaded on the server's session, so they must be that session's.
+  ## * the state pane's value-history toggle and a collection's "load more":
+  ##   the history and the locals are loaded by the server's session, over
+  ##   its connection to the replay.
+  ## * the breakpoints (the store's `breakpoints` / `set`): the server's
+  ##   session sends them to the replay and holds the rows it verified.
   ##
   ## The other panels' actions stay on the page, as before: several reach
   ## callbacks only the page installs — the file tree opens a file in the
@@ -243,8 +323,12 @@ proc createHostedPageMirror*(
   ## stays the page's too, through `debugCommandsFor`: the page drives the
   ## replay it launched, and the server's session follows the moves it makes
   ## (`hosted_primary`).
+  ##
+  ## The file tree's STATE is the page's too, not only its actions: the page
+  ## loads it (`HostedPageOwnedSignals`).
   createMirrorSession(channel, debugCommandsFor, relayActions = true,
-                      relays = hostedPageRelays)
+                      relays = hostedPageRelays,
+                      localOwners = HostedPageOwnedSignals)
 
 proc rememberViewport(m: MirrorSession; args: JsonNode) =
   ## Keep `args` as the pane's last report, for the next primary `switchTo`
@@ -259,6 +343,13 @@ proc relay*(m: MirrorSession; vm, action: string;
   ## by `action_relay` on the primary, enums by name.
   if vm == "viewport" and action == "set" and not args.isNil:
     m.rememberViewport(args)
+  if vm == "breakpoints" and m.following.len == 0 and not args.isNil:
+    # Held for the first session followed (`unsentBreakpoints`): no session
+    # would run it now.
+    if m.unsentBreakpoints.isNil:
+      m.unsentBreakpoints = newJObject()
+    m.unsentBreakpoints[args{"path"}.getStr("")] = args.copy
+    return
   m.channel.send(serializeAction(vm, action, args, m.following))
 
 proc setViewport*(m: MirrorSession; pane: string; rows: int; depth = 0;

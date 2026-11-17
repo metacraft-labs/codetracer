@@ -17,8 +17,15 @@
 ## `ct record` left it, with a `paths.json` sidecar beside it (the imported
 ## shape), and through a real session (a real `replay-server`): the frame the
 ## terminal paints and the view GPUI's FILES leaf draws. No mocks.
+##
+## M102 (codetracer#877), the replay arm: with the editor's tab Closed from
+## its tab menu, a press on a FILES row of the same real session puts the
+## editor back in the arrangement, focused, painting the clicked file
+## (Filesystem-Pane.md § "Opening a file": *"its tab is the one on screen"*).
+## The press goes through the product's runtime and the outcome through the
+## host's own `applyOutcome`, the path `main.nim` drives.
 
-import std/[algorithm, json, os, strutils, unittest]
+import std/[algorithm, json, os, strutils, unicode, unittest]
 
 import store/types as store_types
 import ../../view_vocabulary/pane_views
@@ -29,6 +36,8 @@ import ../app/runtime
 import ../app/tui_app
 import ../app/theme/capabilities
 import ../app/views/shell
+import ../app/layout/binding
+import ../app/layout/cells
 import ../host/native_host
 import ../host/tui_session
 import ./fixtures/fixture_provider
@@ -36,7 +45,7 @@ import isonim/viewmodel as isonim_viewmodel   # `ViewModel`, the view's input
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads this spelling
 # as the suite's RUNTIME assertion count.
-const ExpectedAssertions = 25
+const ExpectedAssertions = 34
 
 var countedAssertions = 0
 
@@ -167,6 +176,108 @@ suite "the replay FILES pane lists every source folder of a recording":
     for name in ["app", "main.py", "shared", "helpers.py", "pkg",
                  "__init__.py", "extra.py"]:
       ck name in labels
+
+proc sgr(button, row, col: int; pressed: bool): string =
+  ## SGR 1006, one-based, as a terminal writes it.
+  "\x1b[<" & $button & ";" & $(col + 1) & ";" & $(row + 1) &
+    (if pressed: "M" else: "m")
+
+proc regionOf(rt: TuiRuntime; pane: PaneKind): (bool, PaneRegion) =
+  ## The projected region `pane` is drawn in: the arrangement places it and
+  ## its tab is the active one of its stack.
+  for r in rt.layoutGeometry().projection.regions:
+    if r.pane == pane and not r.area.isEmptyArea:
+      return (true, r)
+  (false, PaneRegion())
+
+proc labelCol(rt: TuiRuntime; row, fromCol: int; label: string;
+              toCol = high(int)): int =
+  ## The cell `label` starts at on `row`, at or right of `fromCol` and
+  ## starting left of `toCol`; -1 when it is not drawn there.
+  let line = rt.shellScreenOf().rows[row].toRunes
+  let want = label.toRunes
+  for c in fromCol .. line.len - want.len:
+    if c >= toCol:
+      break
+    if line[c ..< c + want.len] == want:
+      return c
+  -1
+
+proc pressAndApply(rt: TuiRuntime; session: TuiSession;
+                   button, row, col: int) =
+  ## A press and its release through the runtime, each outcome applied by
+  ## the host, as the event loop does.
+  for pressed in [true, false]:
+    let outcome = rt.handleToken(sgr(button, row, col, pressed), 0)
+    session.applyOutcome(rt, outcome)
+
+suite "M102 (#877): a FILES press on a recording shows the file":
+
+  test "the editor's tab Closed: a press on a row brings it back, painting the file":
+    require resolved.outcome == foRecorded
+    let trace = copyTrace(resolved.tracePath, "reveal")
+    defer: removeDir(trace)
+    let rt = newTuiRuntime(newTuiApp(), resolveCapabilities(
+      initTerminalEnv(term = "xterm-256color", colorterm = "truecolor",
+                      lang = "en_US.UTF-8"), initCapabilityFlags()), 200, 60)
+    discard rt.enableLayoutBinding()
+    let session = openTuiSession(trace, viewportHeight = 54)
+    defer: session.close()
+    session.header(rt)
+    session.learnExtent()
+    session.refresh(rt)
+    # The tab menu's Close on the editor's tab.
+    let (shown, editor) = rt.regionOf(paneEditor)
+    require shown
+    let label = if editor.tabs.len > 0 and editor.activeTab >= 0:
+                  editor.tabs[editor.activeTab]
+                else: terminalPaneName(paneEditor)
+    var tabCol = rt.labelCol(editor.area.row, editor.area.col, label)
+    if tabCol < 0:
+      # A bare pane's strip names what it shows, not the pane: the strip is
+      # its one-tab header (`tabStripOf`), and a right-click anywhere on it
+      # is a right-click on the pane's tab.
+      tabCol = editor.area.col
+    rt.pressAndApply(session, 2, editor.area.row, tabCol + 1)
+    require rt.app.contextMenu.open
+    let close = rt.app.contextMenu.menu.labels.find("Close")
+    require close >= 0
+    while rt.app.contextMenu.selected < close:
+      session.applyOutcome(rt, rt.handleToken("\x1b[B", 0))
+    session.applyOutcome(rt, rt.handleToken("\r", 0))
+    ck not rt.app.layoutBinding.layout.tree.contains(paneEditor)
+    ck not rt.regionOf(paneEditor)[0]
+    # A press on `helpers.py`'s row in FILES.
+    let (hasFiles, files) = rt.regionOf(paneFileTree)
+    require hasFiles
+    var row = -1
+    var col = -1
+    for r in files.area.row + 1 ..< files.area.row + files.area.height:
+      let c = rt.labelCol(r, files.area.col, "helpers.py",
+                          files.area.col + files.area.width)
+      if c >= 0:
+        row = r
+        col = c
+        break
+    ck row > 0
+    rt.pressAndApply(session, 0, row, col + 1)
+    ck rt.app.viewedFile.endsWith("helpers.py")
+    ck rt.app.layoutBinding.layout.tree.contains(paneEditor)
+    let (back, region) = rt.regionOf(paneEditor)
+    ck back
+    var painted = false
+    let rows = rt.shellScreenOf().rows
+    for r in region.area.row ..< region.area.row + region.area.height:
+      let line = rows[r].toRunes
+      let last = min(line.len, region.area.col + region.area.width)
+      if region.area.col < last and
+         ($line[region.area.col ..< last]).contains("def add(left, right):"):
+        painted = true
+    checkpoint(rows.join("\n"))
+    ck painted
+    let (had, focused) = rt.focus.focusedPane()
+    ck had and focused == paneEditor
+    ck rt.app.notification.contains("opened ")
 
 suite "the replay FILES pane: assertion count":
   test "every assertion ran":

@@ -15,6 +15,10 @@ type
     timeoutId*: int
     hasTimeout*: bool
     isOperationStatus*: bool
+    # Kept on screen until the user dismisses it, rather than for the
+    # toast's few seconds: the reason a replay could not start, which is all
+    # its tab will ever show (`Multi-Window-Tab-Management.md` item 7).
+    persistent*: bool
     # Defines side-effect-ful "actions" that will be performed when the
     # notification is sent
     actions*: seq[NotificationAction]

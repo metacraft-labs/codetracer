@@ -7083,6 +7083,25 @@ impl BackendManager {
         };
         let backend_args = [subcommand];
 
+        // The DAP init sequence's per-step bound (`dap_init::DAP_INIT_TIMEOUT_ENV`,
+        // default 120 s), checked before anything is spawned.
+        let dap_timeout = match dap_init::dap_init_timeout_from(
+            std::env::var(dap_init::DAP_INIT_TIMEOUT_ENV).ok().as_deref(),
+        ) {
+            Ok(timeout) => timeout,
+            Err(message) => {
+                let response = json!({
+                    "type": "response",
+                    "request_seq": seq,
+                    "success": false,
+                    "command": "ct/open-trace",
+                    "message": message
+                });
+                self.send_response_for_seq(seq, response);
+                return Ok(());
+            }
+        };
+
         // Spawn the backend process (raw, without installing channels).
         let (backend_id, sender, mut receiver) =
             match self.start_replay_raw(&backend_cmd, &backend_args).await {
@@ -7185,11 +7204,7 @@ impl BackendManager {
             opts
         };
 
-        // Run DAP init sequence.
-        // Large DB traces (e.g. 96 MB Python traces) can take significant
-        // time to parse and post-process.  Use a generous per-step timeout
-        // so that `setup()` in replay-server has time to complete.
-        let dap_timeout = Duration::from_secs(120);
+
         match dap_init::run_dap_init(
             &sender,
             &mut receiver,

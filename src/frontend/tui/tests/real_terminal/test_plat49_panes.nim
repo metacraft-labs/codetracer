@@ -70,6 +70,18 @@ type Snapshot = seq[seq[Cell]]
 
 var spawned = 0
 
+proc pythonSpec(name: string): FixtureSpec =
+  ## A program of `test-programs/` recorded with the Python recorder, as
+  ## `test_plat51_pty.nim` declares it.
+  FixtureSpec(
+    name: name, program: "test-programs/" & name & "/main.py",
+    recorder: "codetracer-python-recorder",
+    probe: FixtureProbe(kind: pkPythonRecorder),
+    buildHint: "Install codetracer_python_recorder into the interpreter " &
+               "`ct` will use (the repo's .python-recorder-venv, or " &
+               "$CODETRACER_PYTHON_INTERPRETER).",
+    blockedOn: "")
+
 proc open(args: seq[string] = @[]): TuiTestSession =
   let resolved = resolveFixture("calc")
   doAssert resolved.outcome == foRecorded
@@ -145,8 +157,16 @@ proc findCall(s: Snapshot; head, args: string; below = Rows):
       at = line.find(head, at + 1)
   (-1, -1, -1)
 
+const StateCeilingMs = 60000
+  ## How long a wait for a STATE may take before the case fails. Every wait
+  ## below is for what the screen shows, never for a span of time, so the
+  ## ceiling costs nothing when the state comes at once; it is generous
+  ## because this lane runs on loaded hosts. A short per-call ceiling (3 s or
+  ## 5 s) made the docking, preview and drop-zone cases fail whenever the host
+  ## was busy, with the binary doing exactly what they asserted, only later.
+
 proc waitFor(sess: var TuiTestSession; needle: string; present = true;
-             timeoutMs = 20000; below = Rows): (int, int) =
+             timeoutMs = StateCeilingMs; below = Rows): (int, int) =
   let deadline = getMonoTime() + initDuration(milliseconds = timeoutMs)
   while getMonoTime() < deadline:
     let at = sess.snap().findRow(needle, below)
@@ -157,7 +177,7 @@ proc waitFor(sess: var TuiTestSession; needle: string; present = true;
     (if present: "never showed '" else: "kept showing '") & needle & "'")
 
 proc waitForCall(sess: var TuiTestSession; head, args: string; present = true;
-                 timeoutMs = 20000): tuple[row, col, index: int] =
+                 timeoutMs = StateCeilingMs): tuple[row, col, index: int] =
   ## `findCall`, waited for (or, with `present = false`, waited away).
   let deadline = getMonoTime() + initDuration(milliseconds = timeoutMs)
   while getMonoTime() < deadline:
@@ -339,7 +359,7 @@ suite "PLAT-49 part B on a real terminal: the footer's auto-hide panels":
     ck earlyAt >= HoverPreviewDelayMs or
        early.findRow(" BUILD ", below = StatusRow)[0] < 0
     # …the overlay after the preview delay: the build pane, over the body.
-    let (br, bc) = sess.waitFor(" BUILD ", timeoutMs = 3000, below = StatusRow)
+    let (br, bc) = sess.waitFor(" BUILD ", below = StatusRow)
     let waited = (getMonoTime() - t0).inMilliseconds
     checkpoint("preview after " & $waited & " ms")
     ck waited >= 250
@@ -354,7 +374,7 @@ suite "PLAT-49 part B on a real terminal: the footer's auto-hide panels":
     checkpoint("grace screen read by " & $graceAt & " ms")
     ck graceAt >= LeaveDismissDelayMs or
        graceScreen.findRow(" BUILD ", below = StatusRow)[0] == br
-    discard sess.waitFor(" BUILD ", present = false, timeoutMs = 3000,
+    discard sess.waitFor(" BUILD ", present = false,
                          below = StatusRow)
     sess.quit()
 
@@ -370,7 +390,7 @@ suite "PLAT-49 part B on a real terminal: the footer's auto-hide panels":
     # the row above it.
     ck s0.text(StatusRow - 2).contains(DividerGlyph & "  46 ")
     sess.click(StatusRow, buildCol + 1)
-    let (br, bc) = sess.waitFor(" BUILD ", timeoutMs = 5000, below = StatusRow)
+    let (br, bc) = sess.waitFor(" BUILD ", below = StatusRow)
     ck br > StatusRow div 2 and bc == 0
     let s1 = sess.snap()
     # DOCKED, NOT OVER THE ARRANGEMENT: the band runs to the status line, and
@@ -390,7 +410,7 @@ suite "PLAT-49 part B on a real terminal: the footer's auto-hide panels":
     sleep(900)
     ck sess.snap().findRow(" BUILD ", below = StatusRow)[0] == br
     sess.click(StatusRow, buildCol + 1)
-    discard sess.waitFor(" BUILD ", present = false, timeoutMs = 5000,
+    discard sess.waitFor(" BUILD ", present = false,
                          below = StatusRow)
     ck sess.snap().text(StatusRow - 2).contains(DividerGlyph & "  46 ")
     sess.quit()
@@ -415,13 +435,13 @@ suite "PLAT-49 part B on a real terminal: GoldenLayout's drop zones":
     let midRow = (bodyTop + bodyBottom) div 2
     let midCol = (bodyLeft + bodyRight) div 2
     sess.mouse(32, midRow, midCol)
-    discard sess.waitFor("would intoStack(state", timeoutMs = 5000)
+    discard sess.waitFor("would intoStack(state")
     sess.mouse(32, midRow, bodyLeft + 1)
-    discard sess.waitFor("would splitBefore(state", timeoutMs = 5000)
+    discard sess.waitFor("would splitBefore(state")
     sess.mouse(32, midRow, midCol)
-    discard sess.waitFor("would intoStack(state", timeoutMs = 5000)
+    discard sess.waitFor("would intoStack(state")
     sess.mouse(0, midRow, midCol, release = true)
-    discard sess.waitFor("applied", timeoutMs = 5000)
+    discard sess.waitFor("applied")
     ck sess.rowText(StatusRow).contains("moveTab(calltrace")
     sess.quit()
 
@@ -441,15 +461,15 @@ suite "PLAT-49 part B review on a real terminal: the layout's own edge":
     sess.mouse(32, er - 1, ec + 8)
     let row = tr + 6
     sess.mouse(32, row, Cols - 3)
-    discard sess.waitFor("would splitRoot(right)", timeoutMs = 5000)
+    discard sess.waitFor("would splitRoot(right)")
     # The band is five cells deep: eight in from the edge is the stack's own
     # right quarter again.
     sess.mouse(32, row, Cols - 8)
-    discard sess.waitFor("would splitAfter(calltrace", timeoutMs = 5000)
+    discard sess.waitFor("would splitAfter(calltrace")
     sess.mouse(32, row, Cols - 3)
-    discard sess.waitFor("would splitRoot(right)", timeoutMs = 5000)
+    discard sess.waitFor("would splitRoot(right)")
     sess.mouse(0, row, Cols - 3, release = true)
-    discard sess.waitFor("applied", timeoutMs = 5000)
+    discard sess.waitFor("applied")
     ck sess.rowText(StatusRow).contains("splitRoot(eventLog, row, after)")
     # The event log is the layout's right side now: its tab on the top
     # strip row, at the right, the full height below it.
@@ -462,6 +482,11 @@ suite "PLAT-49 part B review on a real terminal: the layout's own edge":
 suite "PLAT-49 part B review on a real terminal: the strip's +":
 
   test "a recording opened in a new tab, switched to and back, closed":
+    # The second recording is this case's own prerequisite, recorded here when
+    # the cache lacks it: the welcome screen lists only the recordings that
+    # sit beside calc, so a case that counted on another suite to have
+    # recorded it failed whenever that suite had not run first.
+    let pages = extractFilename(requireFixture(pythonSpec("call_pages")))
     var sess = open()
     let row0 = sess.rowText(0)
     let plus = row0.cellFind(" + ")
@@ -477,15 +502,15 @@ suite "PLAT-49 part B review on a real terminal: the strip's +":
     # showing the WELCOME SCREEN; the recordings beside calc are its recent
     # traces, and a click on one opens it in that tab.
     sess.click(0, plus + 1)
-    discard sess.waitFor("Welcome to CodeTracer", timeoutMs = 5000)
-    discard sess.waitFor("Recent traces", timeoutMs = 5000)
-    let (pr, pc) = sess.snap().findRow("call_pages-d6745afd1e2e")
+    discard sess.waitFor("Welcome to CodeTracer")
+    discard sess.waitFor("Recent traces")
+    let (pr, pc) = sess.snap().findRow(pages)
     ck pr > 1 and pc >= 0
     sess.click(pr, pc + 2)
     # Its own tab, its own engine, its own panes.
-    discard sess.waitFor("call_pages-d6745afd1e2e ×", timeoutMs = 30000,
+    discard sess.waitFor(pages & " ×",
                          below = 1)
-    discard sess.waitForCall("step #", "(i=0)", timeoutMs = 30000)
+    discard sess.waitForCall("step #", "(i=0)")
     ck sess.rowText(0).contains("calc-")
     ck sess.rowText(0).contains("trace: call_pages")
     ck markedReplayServerPids().len == before + 1
@@ -493,16 +518,16 @@ suite "PLAT-49 part B review on a real terminal: the strip's +":
     let (_, c0) = sess.snap().findRow("calc-2f0")
     ck c0 > 0
     sess.click(0, c0 + 2)
-    discard sess.waitForCall("evaluate #", "(expression=", timeoutMs = 20000)
+    discard sess.waitForCall("evaluate #", "(expression=")
     ck sess.rowText(0).contains("trace: calc-")
     ck sess.snap().findCall("step #", "(i=0)").row < 0
     # Close the second: its engine stops; one session, the "+" alone.
     let line = sess.rowText(0)
-    let at = line.cellFind("call_pages-d6745afd1e2e ×")
+    let at = line.cellFind(pages & " ×")
     ck at > 0
-    sess.click(0, at + "call_pages-d6745afd1e2e ".len)
-    discard sess.waitFor(" × ", present = false, timeoutMs = 10000, below = 1)
-    let deadline = getMonoTime() + initDuration(seconds = 10)
+    sess.click(0, at + (pages & " ").len)
+    discard sess.waitFor(" × ", present = false, below = 1)
+    let deadline = getMonoTime() + initDuration(milliseconds = StateCeilingMs)
     while getMonoTime() < deadline and markedReplayServerPids().len > before:
       sleep(100)
     ck markedReplayServerPids().len == before

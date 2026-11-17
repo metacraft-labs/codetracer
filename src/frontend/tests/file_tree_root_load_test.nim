@@ -92,6 +92,9 @@ proc writeTree(root: cstring; relPath: cstring) {.importjs: """(function (root, 
   fs.writeFileSync(full, 'x');
 })(#, #)""".}
 
+proc writeText(path: cstring; text: cstring) {.importjs:
+  "require('fs').writeFileSync(#, #)".}
+
 proc makeDir(root: cstring; relPath: cstring) {.importjs:
   "require('fs').mkdirSync(require('path').join(#, #), {recursive: true})".}
 
@@ -175,7 +178,7 @@ proc countNodes(node: CodetracerFile; stubs: var int): int =
   for child in node.children:
     result += countNodes(child, stubs)
 
-const ExpectedChecks = 31
+const ExpectedChecks = 35
 
 proc runCases(dir: cstring) {.async.} =
   # The recording host's repository, which the payload does not mirror.
@@ -331,6 +334,52 @@ proc runCases(dir: cstring) {.async.} =
   ck okSent[cstring"length"].to(int) == 1 and
       not okSent[0][cstring"payload"][cstring"folders"].isUndefined,
     "a successful load answers with its tree"
+
+  # 8. A recording whose sources reach outside its workdir (`multi_root`: a
+  #    runner in `app/` importing `app/../shared/helpers.py` and
+  #    `app/../shared/pkg/extra.py`) is rooted at its sources' outermost
+  #    folders, `app` and `shared`, as the terminal roots it. It used to be
+  #    rooted at the workdir alone, so the Files pane listed only `main.py`.
+  #    The layout is `ct record`'s: the payload mirrors the recording host's
+  #    absolute paths, root stripped, and `paths.json` keeps the `..`.
+  let mrTrace = joinPath(dir, cstring"multi_root_trace")
+  let mrHost = "/home/dev/repo/test-programs/multi_root"
+  let mrFiles = joinPath(mrTrace, cstring"files")
+  let mrStore = stripTraceSourceRoot(mrHost)
+  writeTree(mrFiles, cstring(mrStore & "/app/main.py"))
+  writeTree(mrFiles, cstring(mrStore & "/shared/helpers.py"))
+  writeTree(mrFiles, cstring(mrStore & "/shared/pkg/__init__.py"))
+  writeTree(mrFiles, cstring(mrStore & "/shared/pkg/extra.py"))
+  writeText(joinPath(mrTrace, cstring"paths.json"), cstring("[" &
+    "\"" & mrStore & "/app/main.py\"," &
+    "\"" & mrStore & "/app/../shared/helpers.py\"," &
+    "\"" & mrStore & "/app/../shared/pkg/__init__.py\"," &
+    "\"" & mrStore & "/app/../shared/pkg/extra.py\"]"))
+  let mr = Trace(imported: true, program: cstring(mrHost & "/app/main.py"),
+                 workdir: cstring(mrHost & "/app"),
+                 sourceFolders: @[cstring"/home/dev/repo"],
+                 outputFolder: mrTrace)
+  let mrRoots = await sourceFoldersFromTracePaths(mr)
+  var mrRootNames: seq[string] = @[]
+  for r in mrRoots: mrRootNames.add $r
+  ck mrRootNames == @[mrStore & "/app", mrStore & "/shared"],
+    "a recording whose sources leave its workdir is rooted at app and shared " &
+      "(got " & $mrRootNames & ")"
+  let mrGroup = await loadFilesystem(mrRoots, mrFiles, selfContained = true)
+  let shared = mrGroup.childNamed("shared")
+  ck not shared.isNil and "helpers.py" in shared.childNames(),
+    "the shared root lists helpers.py (got " &
+      (if shared.isNil: "no shared root" else: shared.describe()) & ")"
+  ck not shared.isNil and shared.childNamed("pkg").isCollapsedStub(),
+    "shared/pkg is a folder of the shared root, not a root of its own"
+  let mrInside = Trace(imported: true, program: cstring(mrHost & "/app/main.py"),
+                       workdir: cstring(mrHost),
+                       sourceFolders: @[cstring"/home/dev/repo"],
+                       outputFolder: mrTrace)
+  let insideRoots = await sourceFoldersFromTracePaths(mrInside)
+  ck insideRoots.len == 1 and $insideRoots[0] == mrHost,
+    "with every source inside the workdir, the workdir is still the root " &
+      "(got " & $insideRoots & ")"
 
 proc main() {.async.} =
   let dir = makeTempDir()

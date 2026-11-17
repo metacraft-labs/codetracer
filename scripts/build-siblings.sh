@@ -14,8 +14,12 @@
 #   bash scripts/build-siblings.sh --only ruby    # build only matching siblings
 #   bash scripts/build-siblings.sh --skip noir    # skip matching siblings
 #   bash scripts/build-siblings.sh --check        # report what's missing, build nothing
+#   bash scripts/build-siblings.sh --keep-going   # name failed siblings, exit 0
 #
 # Environment:
+#   BUILD_SIBLINGS_KEEP_GOING=1 — same as --keep-going. This is how a caller of
+#                               `just test-gui`, which runs this script with no
+#                               arguments, opts in (see "Failures" below).
 #   BUILD_SIBLINGS_VERBOSE=1  — stream child build output to stderr instead of
 #                               capturing it into a per-repo log file.
 #   BUILD_SIBLINGS_FAIL_TAIL_LINES=N — how many trailing lines of each FAILED
@@ -42,6 +46,22 @@
 #     an artifact that turns out to be current is cheap.
 #   - Failures in one repo do NOT abort the rest — the script reports a
 #     per-repo PASS/SKIP/FAIL summary and exits non-zero only if any FAILs.
+#
+# Failures:
+#   By default any FAIL makes the exit status 1, so `just test-gui` — the
+#   whole suite, as CI runs it — fails when any sibling it reaches for did not
+#   build. A caller that runs only part of the suite, and whose specs fail BY
+#   NAME when a sibling they need is absent, passes --keep-going (or sets
+#   BUILD_SIBLINGS_KEEP_GOING=1): each FAIL is still listed in the summary with
+#   its log tail and named on a closing line, but the exit status is 0, so a
+#   recorder that spec never touches cannot fail it. Under --keep-going a failed
+#   entry's artifact is also REMOVED: a build that failed did not produce the
+#   file at that path, and leaving an earlier build's binary there would let a
+#   spec that needs the sibling pass against sources nobody built. A failed
+#   toolchain lookup still exits 1 either way: no sibling can be built without
+#   it. Contract: ci/test/build-siblings-keep-going-test.sh; policy:
+#   codetracer-pm spec/Working-with-the-CodeTracer-Repos.md, "Building the
+#   sibling recorders".
 # =============================================================================
 
 set -uo pipefail
@@ -53,6 +73,11 @@ WS_ROOT="$(cd "$CT_ROOT/.." && pwd)"
 # Parse arguments.
 FORCE=0
 CHECK_ONLY=0
+KEEP_GOING=0
+case "${BUILD_SIBLINGS_KEEP_GOING:-0}" in
+'' | 0) ;;
+*) KEEP_GOING=1 ;;
+esac
 ONLY_PATTERN=""
 SKIP_PATTERN=""
 while [ $# -gt 0 ]; do
@@ -63,6 +88,10 @@ while [ $# -gt 0 ]; do
 		;;
 	--check)
 		CHECK_ONLY=1
+		shift
+		;;
+	--keep-going)
+		KEEP_GOING=1
 		shift
 		;;
 	--only)
@@ -510,6 +539,23 @@ write_stamp() {
 	return 1
 }
 
+# record_failure <key> <detail> <artifact path>: marks <key> FAIL. Under
+# --keep-going it also removes the artifact (see "Failures" in the header): the
+# run is about to exit 0, and a binary left over from an earlier build must not
+# stand in for the one this build failed to produce.
+record_failure() {
+	local key="$1" detail="$2" artifact_path="$3"
+	RESULT_STATE[$key]="FAIL"
+	if [ "$KEEP_GOING" -eq 1 ] && [ -e "$artifact_path" ]; then
+		if rm -f -- "$artifact_path"; then
+			detail="$detail; removed the earlier artifact"
+		else
+			detail="$detail; could NOT remove the earlier artifact $artifact_path"
+		fi
+	fi
+	RESULT_DETAIL[$key]="$detail"
+}
+
 # ---------------------------------------------------------------------------
 # Helper: run a build step for one repo.
 #   $1 — repo directory name (under WS_ROOT)
@@ -685,14 +731,12 @@ build_sibling() {
 	fi
 
 	if [ "$rc" -ne 0 ]; then
-		RESULT_STATE[$key]="FAIL"
-		RESULT_DETAIL[$key]="build exited $rc — $see"
+		record_failure "$key" "build exited $rc — $see" "$artifact_path"
 		return 0
 	fi
 
 	if [ ! -e "$artifact_path" ]; then
-		RESULT_STATE[$key]="FAIL"
-		RESULT_DETAIL[$key]="build succeeded but $artifact still missing — $see"
+		record_failure "$key" "build succeeded but $artifact still missing — $see" "$artifact_path"
 		return 0
 	fi
 
@@ -704,8 +748,7 @@ build_sibling() {
 	if [ -n "$smoke_arg" ]; then
 		local smoke_out
 		if ! smoke_out="$(env -i PATH=/usr/bin:/bin "$artifact_path" "$smoke_arg" 2>&1)"; then
-			RESULT_STATE[$key]="FAIL"
-			RESULT_DETAIL[$key]="built $artifact, but \`$artifact $smoke_arg\` does not run: $(printf '%s' "$smoke_out" | head -1)"
+			record_failure "$key" "built $artifact, but \`$artifact $smoke_arg\` does not run: $(printf '%s' "$smoke_out" | head -1)" "$artifact_path"
 			return 0
 		fi
 	fi
@@ -1105,6 +1148,16 @@ if [ "$fail_count" -gt 0 ] && [ "$fail_tail_lines" -gt 0 ]; then
 fi
 
 if [ "$fail_count" -gt 0 ]; then
+	failed_keys=""
+	for repo in $(printf '%s\n' "${!RESULT_STATE[@]}" | sort); do
+		[ "${RESULT_STATE[$repo]}" = "FAIL" ] && failed_keys="${failed_keys:+$failed_keys, }$repo"
+	done
+	echo "" >&2
+	if [ "$KEEP_GOING" -eq 1 ]; then
+		echo "build-siblings.sh: $fail_count sibling(s) failed to build: $failed_keys; continuing because of --keep-going / BUILD_SIBLINGS_KEEP_GOING (a spec that needs one of them finds it absent)" >&2
+		exit 0
+	fi
+	echo "build-siblings.sh: $fail_count sibling(s) failed to build: $failed_keys" >&2
 	exit 1
 fi
 exit 0

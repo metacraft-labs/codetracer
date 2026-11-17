@@ -642,6 +642,8 @@ proc runInitial*(conf: CodetracerConf; uiSelection: string = "") =
         conf.traceMetadataRecentFolders,
         conf.traceMetadataAddRecentFolder,
         conf.traceMetadataRecentLimit,
+        conf.traceMetadataImportCt,
+        conf.traceMetadataImportSource,
         conf.traceMetadataTest)
     of StartupCommand.start_backend:
       startBackend(conf.backendKind, conf.isStdio, conf.socketPath)

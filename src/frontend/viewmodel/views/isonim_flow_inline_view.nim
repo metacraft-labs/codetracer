@@ -24,7 +24,9 @@
 ## and ids (`FlowValue`, `OmniscientLoopControls`, the noir-space-ship loop
 ## tests). Each proc says which of its names are load-bearing.
 
+import ../input/press_menu
 import std/strutils
+import ./field_keys
 
 import isonim/testing/mock_dom
 when defined(js):
@@ -35,6 +37,7 @@ when defined(js):
 
 import ../viewmodels/flow_layout
 import isonim_flow_value_view
+import ../input/element_operations
 
 export isonim_flow_value_view, FlowValueMode
 
@@ -68,6 +71,15 @@ when defined(js):
     {.importjs: "((e) => (e.target && e.target.value != null) ? String(e.target.value) : '')(#)".}
   proc evPreventDefault(ev: isonim_dom.Event) {.importjs: "#.preventDefault()".}
   proc evStopPropagation(ev: isonim_dom.Event) {.importjs: "#.stopPropagation()".}
+
+proc menuOf(handler: FlowInputHandler): ElementMenu =
+  ## A chip's right press, as the menu it carries (`input/press_menu`): the
+  ## host's handler, told the press as a `FlowInput`; it opened a menu when it
+  ## asked to keep the browser's (`prevent`).
+  result = proc(x, y: int; ctrl, shift: bool): bool =
+    let input = FlowInput(button: 2, ctrl: ctrl, shift: shift, x: x, y: y)
+    handler(input)
+    input.prevent
 
 proc listen*[R, N](r: R; node: N; event: string; handler: FlowInputHandler;
                    stop = false) =
@@ -104,6 +116,33 @@ proc listen*[R, N](r: R; node: N; event: string; handler: FlowInputHandler;
         {.error: "listen: no event binding for this renderer".}
     else:
       {.error: "listen: no event binding for this renderer".}
+
+const
+  FlowJumpToStep* = "flow.jump-to-step"
+    ## What a press on a chip's value, its name or an event chip does: go to
+    ## the step it was recorded at.
+  FlowViewFullValue* = "flow.view-full-value"
+    ## What a press on a cut-short value's "view more" button does.
+  ScratchpadAddValue* = "scratchpad.add-value"
+    ## The pointer row `Ctrl+Click` on an inline value (K36) runs on a
+    ## chip's value box.
+
+proc inputOf(press: PressInfo; ctrl: bool): FlowInput =
+  FlowInput(button: press.button, ctrl: ctrl, shift: press.shift,
+            x: press.x, y: press.y, stop: true)
+
+proc bindPress[R, N](r: R; node: N; operation: string;
+                     handler: FlowInputHandler) =
+  ## A chip element's press, ROUTED (Input-Routing-And-Keymaps.md §5.1): the
+  ## element carries `operation`, and `handler` is the procedure that performs
+  ## it there (`element_operations`). The window's one pointer listener runs
+  ## it when a press resolves to it — on the press itself, as the chips sit in
+  ## Monaco, which swallows their clicks and must not take their presses.
+  if handler.isNil:
+    return
+  bindOperation[R, N](r, node, operation,
+    proc(press: PressInfo) = handler(inputOf(press, press.ctrl)),
+    onDown = true)
 
 # ---------------------------------------------------------------------------
 # Building blocks
@@ -201,6 +240,10 @@ type
     onNamePress*, onNameContext*: FlowInputHandler
     onBoxPress*, onBoxContext*, onBoxHover*:
       proc(side: FlowValueSide; boxId: string; input: FlowInput) {.closure.}
+      ## `onBoxPress` is the box's press: `flow.jump-to-step` (its own) and
+      ## `scratchpad.add-value` (the pointer row `Ctrl+Click` on a value),
+      ## told apart by `input.ctrl`, which says which of the two the router
+      ## resolved the press to.
 
 proc bindFlowChipBox[R, N](r: R; node: N; box: FlowChipBox;
                            handlers: FlowChipHandlers) =
@@ -210,12 +253,19 @@ proc bindFlowChipBox[R, N](r: R; node: N; box: FlowChipBox;
   ## box of a dual chip as its last ("after") box.
   if not handlers.onBoxPress.isNil:
     let act = handlers.onBoxPress
-    listen(r, node, "mousedown", proc(input: FlowInput) =
-      act(box.side, box.id, input))
+    # An inline value (`elementKind == value`): its press goes to the step,
+    # and `Ctrl+Click` is the pointer keymap's `scratchpad.add-value`.
+    bindElementKind[R, N](r, node, "value")
+    bindOperation[R, N](r, node, FlowJumpToStep,
+      proc(press: PressInfo) = act(box.side, box.id, inputOf(press, false)),
+      onDown = true)
+    bindOperation[R, N](r, node, ScratchpadAddValue,
+      proc(press: PressInfo) = act(box.side, box.id, inputOf(press, true)),
+      carried = false)
   if not handlers.onBoxContext.isNil:
     let act = handlers.onBoxContext
-    listen(r, node, "contextmenu", proc(input: FlowInput) =
-      act(box.side, box.id, input))
+    bindPressMenu(r, node, menuOf(proc(input: FlowInput) =
+      act(box.side, box.id, input)))
   if not handlers.onBoxHover.isNil:
     let act = handlers.onBoxHover
     listen(r, node, "mouseover", proc(input: FlowInput) =
@@ -236,12 +286,13 @@ proc renderFlowVariableChip*[R, N](r: R; flowMode, name: string;
       "flow-" & flowMode & "-value-name flow-view-more-button flow-hide-content")
     applyStyle[R, N](r, button, style)
     r.setAttribute(button, "title", "Show the full value")
-    listen(r, button, "mousedown", handlers.onViewMore, stop = true)
+    bindPress[R, N](r, button, FlowViewFullValue, handlers.onViewMore)
     r.appendChild(result, button)
   if showName:
     let nameNode = renderFlowValueName[R, N](r, name)
-    listen(r, nameNode, "mousedown", handlers.onNamePress)
-    listen(r, nameNode, "contextmenu", handlers.onNameContext)
+    bindPress[R, N](r, nameNode, FlowJumpToStep, handlers.onNamePress)
+    if not handlers.onNameContext.isNil:
+      bindPressMenu(r, nameNode, menuOf(handlers.onNameContext))
     r.appendChild(result, nameNode)
   for i, box in boxes:
     if i > 0:
@@ -285,10 +336,10 @@ proc renderFlowEventChip*[R, N](r: R; flowMode: string; event: FlowEventChip;
       event.nameClassSuffix & " flow-view-more-button flow-hide-content")
     applyStyle[R, N](r, button, style)
     r.setAttribute(button, "title", "Show the full value")
-    listen(r, button, "mousedown", onViewMore, stop = true)
+    bindPress[R, N](r, button, FlowViewFullValue, onViewMore)
     r.appendChild(result, button)
   let nameNode = element[R, N](r, "span", "ct-omni-name" & event.nameClassSuffix)
-  listen(r, nameNode, "mousedown", onJump)
+  bindPress[R, N](r, nameNode, FlowJumpToStep, onJump)
   addText[R, N](r, nameNode, "<" & event.name & ">")
   r.appendChild(result, nameNode)
   let box = renderFlowValueBox[R, N](r,
@@ -297,7 +348,7 @@ proc renderFlowEventChip*[R, N](r: R; flowMode: string; event: FlowEventChip;
       flowMode & "-value-before-only",
     event.text, iteration, style,
     if event.truncated: maxWidth else: "")
-  listen(r, box, "mousedown", onJump)
+  bindPress[R, N](r, box, FlowJumpToStep, onJump)
   r.appendChild(result, box)
 
 proc renderFlowEventPopup*[R, N](r: R; text: string): N =
@@ -501,8 +552,8 @@ proc renderFlowLoopIteration*[R, N](r: R; control: FlowLoopControl;
       entered = clampedIterationEntry(input.value, allIterations, entered))
     listen(r, field, "blur", proc(input: FlowInput) =
       onCommit(entered, true))
-    listen(r, field, "keydown", proc(input: FlowInput) =
-      if input.key == "Enter" or input.keyCode == 13:
+    listen(r, field, KeyDownEvent, proc(input: FlowInput) =
+      if fieldKeyOf(input.key) == fkCommit or fieldKeyOfCode(input.keyCode) == fkCommit:
         input.prevent = true
         onCommit(entered, false))
   r.appendChild(loopSpan, field)

@@ -130,9 +130,9 @@ func domainOf*(k: ContextKey): seq[string] =
   ## against it at load, and `when_expr.canBothHold` enumerates it.
   case k
   of ckProductMode: @["debug", "edit"]
-  of ckPaneKind: @["none"] & @PaneKinds
+  of ckPaneKind: @["none"] & @PaneKinds & @NonPaneScopes
   of ckElementKind: @["none", "editor", "row", "tab", "input", "button",
-                      "gutter", "menu", "overlay"]
+                      "gutter", "menu", "overlay", "toggle", "header", "value"]
   of ckEditorMode: @["normal", "insert", "visual", "visual-line",
                      "visual-block", "operator-pending", "replace"]
   of ckFrontEnd: @["terminal", "gpui", "desktop", "web"]
@@ -206,7 +206,7 @@ func contextKeysOf*(facts: SessionFacts; path: ScopePath;
   result.values[ckReplayLoaded] = b(facts.replayLoaded)
   if paneKind.len > 0: result.values[ckPaneKind] = paneKind
   if f.kind in {ekEditor, ekRow, ekTab, ekInput, ekButton, ekGutter, ekMenu,
-                ekOverlay}:
+                ekOverlay, ekToggle, ekHeader, ekValue}:
     result.values[ckElementKind] = $f.kind
   result.values[ckEditorFocus] = b(onEditor)
   result.values[ckEditorTextFocus] = b(editorText)

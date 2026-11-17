@@ -1,0 +1,1006 @@
+# ct record-test: 58 argv cases through ct's loader (the parse probe)
+
+### 1: no arguments
+argv: ct "record-test"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The required option 'recordTestTestName' was not specified\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 2: name
+argv: ct "record-test" "name"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The required option 'recordTestPath' was not specified\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 3: name path
+argv: ct "record-test" "name" "path"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The required option 'recordTestLine' was not specified\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 4: name path line
+argv: ct "record-test" "name" "path" "10"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The required option 'recordTestColumn' was not specified\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 5: all four
+argv: ct "record-test" "name" "path" "10" "1"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record-test
+  recordTestTestName = "name"
+  recordTestPath = "path"
+  recordTestLine = 10
+  recordTestColumn = 1
+  recordTestWithDiff = ""
+  recordTestStoreTraceFolderForPid = 0
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 6: bad line
+argv: ct "record-test" "name" "path" "ten" "1"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Error while processing the \e[34mrecordTestLine=ten\e[0m parameter: invalid integer: ten\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 7: bad column
+argv: ct "record-test" "name" "path" "10" "x"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Error while processing the \e[34mrecordTestColumn=x\e[0m parameter: invalid integer: x\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 8: negative line
+argv: ct "record-test" "name" "path" "-3" "1"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option '3'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 9: --with-diff <v>
+argv: ct "record-test" "--with-diff" "last-commit" "name" "path" "10" "1"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record-test
+  recordTestTestName = "name"
+  recordTestPath = "path"
+  recordTestLine = 10
+  recordTestColumn = 1
+  recordTestWithDiff = "last-commit"
+  recordTestStoreTraceFolderForPid = 0
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 10: --with-diff=<v>
+argv: ct "record-test" "--with-diff=last-commit" "name" "path" "10" "1"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record-test
+  recordTestTestName = "name"
+  recordTestPath = "path"
+  recordTestLine = 10
+  recordTestColumn = 1
+  recordTestWithDiff = "last-commit"
+  recordTestStoreTraceFolderForPid = 0
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 11: --with-diff:<v>
+argv: ct "record-test" "--with-diff:last-commit" "name" "path" "10" "1"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record-test
+  recordTestTestName = "name"
+  recordTestPath = "path"
+  recordTestLine = 10
+  recordTestColumn = 1
+  recordTestWithDiff = "last-commit"
+  recordTestStoreTraceFolderForPid = 0
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 12: --with-diff last-commit
+argv: ct "record-test" "--with-diff" "last-commit" "name" "path" "10" "1"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record-test
+  recordTestTestName = "name"
+  recordTestPath = "path"
+  recordTestLine = 10
+  recordTestColumn = 1
+  recordTestWithDiff = "last-commit"
+  recordTestStoreTraceFolderForPid = 0
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 13: --with-diff=last-commit
+argv: ct "record-test" "--with-diff=last-commit" "name" "path" "10" "1"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record-test
+  recordTestTestName = "name"
+  recordTestPath = "path"
+  recordTestLine = 10
+  recordTestColumn = 1
+  recordTestWithDiff = "last-commit"
+  recordTestStoreTraceFolderForPid = 0
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 14: --with-diff empty
+argv: ct "record-test" "--with-diff" "" "name" "path" "10" "1"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record-test
+  recordTestTestName = "name"
+  recordTestPath = "path"
+  recordTestLine = 10
+  recordTestColumn = 1
+  recordTestWithDiff = ""
+  recordTestStoreTraceFolderForPid = 0
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 15: --with-diff= (empty)
+argv: ct "record-test" "--with-diff=" "name" "path" "10" "1"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The required option 'recordTestColumn' was not specified\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 16: --with-diff= <v> (next word)
+argv: ct "record-test" "--with-diff=" "last-commit" "name" "path" "10" "1"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record-test
+  recordTestTestName = "name"
+  recordTestPath = "path"
+  recordTestLine = 10
+  recordTestColumn = 1
+  recordTestWithDiff = "last-commit"
+  recordTestStoreTraceFolderForPid = 0
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 17: --with-diff -x (value starts with -)
+argv: ct "record-test" "--with-diff" "-x" "name" "path" "10" "1"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record-test
+  recordTestTestName = "name"
+  recordTestPath = "path"
+  recordTestLine = 10
+  recordTestColumn = 1
+  recordTestWithDiff = "-x"
+  recordTestStoreTraceFolderForPid = 0
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 18: --with-diff --x (value starts with --)
+argv: ct "record-test" "--with-diff" "--x" "name" "path" "10" "1"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record-test
+  recordTestTestName = "name"
+  recordTestPath = "path"
+  recordTestLine = 10
+  recordTestColumn = 1
+  recordTestWithDiff = "--x"
+  recordTestStoreTraceFolderForPid = 0
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 19: --with-diff --new-tab <v> (an option between it and its value)
+argv: ct "record-test" "--with-diff" "--new-tab" "last-commit" "name" "path" "10" "1"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Error while processing the \e[34mrecordTestLine=path\e[0m parameter: invalid integer: path\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 20: --with-diff repeated, last wins
+argv: ct "record-test" "--with-diff" "last-commit" "--with-diff" "last-commit" "name" "path" "10" "1"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record-test
+  recordTestTestName = "name"
+  recordTestPath = "path"
+  recordTestLine = 10
+  recordTestColumn = 1
+  recordTestWithDiff = "last-commit"
+  recordTestStoreTraceFolderForPid = 0
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 21: --with-diff missing value (last)
+argv: ct "record-test" "name" "path" "10" "1" "--with-diff"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The option '\e[34m--with-diff\e[0m' requires a value\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 22: --with-diff missing value (before the rest)
+argv: ct "record-test" "--with-diff" "name" "path" "10" "1"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The required option 'recordTestColumn' was not specified\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 23: --WITH-DIFF <v> (style variant)
+argv: ct "record-test" "--WITH-DIFF" "last-commit" "name" "path" "10" "1"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record-test
+  recordTestTestName = "name"
+  recordTestPath = "path"
+  recordTestLine = 10
+  recordTestColumn = 1
+  recordTestWithDiff = "last-commit"
+  recordTestStoreTraceFolderForPid = 0
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 24: --w_ith-diff <v> (style variant)
+argv: ct "record-test" "--w_ith-diff" "last-commit" "name" "path" "10" "1"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record-test
+  recordTestTestName = "name"
+  recordTestPath = "path"
+  recordTestLine = 10
+  recordTestColumn = 1
+  recordTestWithDiff = "last-commit"
+  recordTestStoreTraceFolderForPid = 0
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 25: --with_diff <v> (style variant)
+argv: ct "record-test" "--with_diff" "last-commit" "name" "path" "10" "1"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'with_diff'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 26: --withdiff <v> (style variant)
+argv: ct "record-test" "--withdiff" "last-commit" "name" "path" "10" "1"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'withdiff'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 27: --store-trace-folder-for-pid <v>
+argv: ct "record-test" "--store-trace-folder-for-pid" "7" "name" "path" "10" "1"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record-test
+  recordTestTestName = "name"
+  recordTestPath = "path"
+  recordTestLine = 10
+  recordTestColumn = 1
+  recordTestWithDiff = ""
+  recordTestStoreTraceFolderForPid = 7
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 28: --store-trace-folder-for-pid=<v>
+argv: ct "record-test" "--store-trace-folder-for-pid=7" "name" "path" "10" "1"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record-test
+  recordTestTestName = "name"
+  recordTestPath = "path"
+  recordTestLine = 10
+  recordTestColumn = 1
+  recordTestWithDiff = ""
+  recordTestStoreTraceFolderForPid = 7
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 29: --store-trace-folder-for-pid:<v>
+argv: ct "record-test" "--store-trace-folder-for-pid:7" "name" "path" "10" "1"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record-test
+  recordTestTestName = "name"
+  recordTestPath = "path"
+  recordTestLine = 10
+  recordTestColumn = 1
+  recordTestWithDiff = ""
+  recordTestStoreTraceFolderForPid = 7
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 30: --store-trace-folder-for-pid 7
+argv: ct "record-test" "--store-trace-folder-for-pid" "7" "name" "path" "10" "1"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record-test
+  recordTestTestName = "name"
+  recordTestPath = "path"
+  recordTestLine = 10
+  recordTestColumn = 1
+  recordTestWithDiff = ""
+  recordTestStoreTraceFolderForPid = 7
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 31: --store-trace-folder-for-pid=7
+argv: ct "record-test" "--store-trace-folder-for-pid=7" "name" "path" "10" "1"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record-test
+  recordTestTestName = "name"
+  recordTestPath = "path"
+  recordTestLine = 10
+  recordTestColumn = 1
+  recordTestWithDiff = ""
+  recordTestStoreTraceFolderForPid = 7
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 32: --store-trace-folder-for-pid bad x
+argv: ct "record-test" "--store-trace-folder-for-pid" "x" "name" "path" "10" "1"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Error while processing the \e[34mstore-trace-folder-for-pid=x\e[0m parameter: invalid integer: x\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 33: --store-trace-folder-for-pid=bad x
+argv: ct "record-test" "--store-trace-folder-for-pid=x" "name" "path" "10" "1"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Error while processing the \e[34mstore-trace-folder-for-pid=x\e[0m parameter: invalid integer: x\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 34: --store-trace-folder-for-pid empty
+argv: ct "record-test" "--store-trace-folder-for-pid" "" "name" "path" "10" "1"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Error while processing the \e[34mstore-trace-folder-for-pid=\e[0m parameter: invalid integer: \e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 35: --store-trace-folder-for-pid= (empty)
+argv: ct "record-test" "--store-trace-folder-for-pid=" "name" "path" "10" "1"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Error while processing the \e[34mstore-trace-folder-for-pid=name\e[0m parameter: invalid integer: name\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 36: --store-trace-folder-for-pid= <v> (next word)
+argv: ct "record-test" "--store-trace-folder-for-pid=" "7" "name" "path" "10" "1"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record-test
+  recordTestTestName = "name"
+  recordTestPath = "path"
+  recordTestLine = 10
+  recordTestColumn = 1
+  recordTestWithDiff = ""
+  recordTestStoreTraceFolderForPid = 7
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 37: --store-trace-folder-for-pid -x (value starts with -)
+argv: ct "record-test" "--store-trace-folder-for-pid" "-x" "name" "path" "10" "1"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Error while processing the \e[34mstore-trace-folder-for-pid=-x\e[0m parameter: invalid integer: -x\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 38: --store-trace-folder-for-pid --x (value starts with --)
+argv: ct "record-test" "--store-trace-folder-for-pid" "--x" "name" "path" "10" "1"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Error while processing the \e[34mstore-trace-folder-for-pid=--x\e[0m parameter: invalid integer: --x\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 39: --store-trace-folder-for-pid --new-tab <v> (an option between it and its value)
+argv: ct "record-test" "--store-trace-folder-for-pid" "--new-tab" "7" "name" "path" "10" "1"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Error while processing the \e[34mstore-trace-folder-for-pid=--new-tab\e[0m parameter: invalid integer: --new-tab\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 40: --store-trace-folder-for-pid repeated, last wins
+argv: ct "record-test" "--store-trace-folder-for-pid" "7" "--store-trace-folder-for-pid" "7" "name" "path" "10" "1"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record-test
+  recordTestTestName = "name"
+  recordTestPath = "path"
+  recordTestLine = 10
+  recordTestColumn = 1
+  recordTestWithDiff = ""
+  recordTestStoreTraceFolderForPid = 7
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 41: --store-trace-folder-for-pid missing value (last)
+argv: ct "record-test" "name" "path" "10" "1" "--store-trace-folder-for-pid"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The option '\e[34m--store-trace-folder-for-pid\e[0m' requires a value\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 42: --store-trace-folder-for-pid missing value (before the rest)
+argv: ct "record-test" "--store-trace-folder-for-pid" "name" "path" "10" "1"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Error while processing the \e[34mstore-trace-folder-for-pid=name\e[0m parameter: invalid integer: name\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 43: --STORE-TRACE-FOLDER-FOR-PID <v> (style variant)
+argv: ct "record-test" "--STORE-TRACE-FOLDER-FOR-PID" "7" "name" "path" "10" "1"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record-test
+  recordTestTestName = "name"
+  recordTestPath = "path"
+  recordTestLine = 10
+  recordTestColumn = 1
+  recordTestWithDiff = ""
+  recordTestStoreTraceFolderForPid = 7
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 44: --s_tore-trace-folder-for-pid <v> (style variant)
+argv: ct "record-test" "--s_tore-trace-folder-for-pid" "7" "name" "path" "10" "1"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record-test
+  recordTestTestName = "name"
+  recordTestPath = "path"
+  recordTestLine = 10
+  recordTestColumn = 1
+  recordTestWithDiff = ""
+  recordTestStoreTraceFolderForPid = 7
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 45: --store_trace_folder_for_pid <v> (style variant)
+argv: ct "record-test" "--store_trace_folder_for_pid" "7" "name" "path" "10" "1"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'store_trace_folder_for_pid'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 46: --storetracefolderforpid <v> (style variant)
+argv: ct "record-test" "--storetracefolderforpid" "7" "name" "path" "10" "1"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'storetracefolderforpid'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 47: env <APP>_RECORDTESTLINE=5
+argv: ct "record-test" "name" "path"
+env: <APP>_RECORDTESTLINE="5" <APP>_RECORDTESTCOLUMN="2"
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record-test
+  recordTestTestName = "name"
+  recordTestPath = "path"
+  recordTestLine = 5
+  recordTestColumn = 2
+  recordTestWithDiff = ""
+  recordTestStoreTraceFolderForPid = 0
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 48: unknown long option
+argv: ct "record-test" "--bogus" "name" "path" "10" "1"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'bogus'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 49: unknown long option with value
+argv: ct "record-test" "--bogus=1" "name" "path" "10" "1"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'bogus'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 50: unknown short option
+argv: ct "record-test" "-Z" "name" "path" "10" "1"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'Z'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 51: lone -
+argv: ct "record-test" "-" "name" "path" "10" "1"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option ''\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 52: lone -- then a word
+argv: ct "record-test" "--" "w" "name" "path" "10" "1"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option ''\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 53: --=v
+argv: ct "record-test" "--=v" "name" "path" "10" "1"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option ''\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 54: extra positional
+argv: ct "record-test" "name" "path" "10" "1" "extra1" "extra2" "extra3" "extra4" "extra5"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The subcommand 'record-test' does not accept additional arguments\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 55: global --cwd after the command
+argv: ct "record-test" "--cwd" "/w" "name" "path" "10" "1"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = some("/w")
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = record-test
+  recordTestTestName = "name"
+  recordTestPath = "path"
+  recordTestLine = 10
+  recordTestColumn = 1
+  recordTestWithDiff = ""
+  recordTestStoreTraceFolderForPid = 0
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 56: global --new-tab after the command
+argv: ct "record-test" "--new-tab" "name" "path" "10" "1"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = true
+  newWindow = false
+  cmd = record-test
+  recordTestTestName = "name"
+  recordTestPath = "path"
+  recordTestLine = 10
+  recordTestColumn = 1
+  recordTestWithDiff = ""
+  recordTestStoreTraceFolderForPid = 0
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 57: --version after the command
+argv: ct "record-test" "--version" "name" "path" "10" "1"
+env: (none)
+exit: 0
+--- stdout
+CodeTracer version: <VERSION>
+\e[0m
+(no newline at end of stdout)
+--- stderr
+--- end
+
+### 58: -h after the command
+argv: ct "record-test" "-h" "name" "path" "10" "1"
+env: (none)
+exit: 0
+--- stdout
+<the short help page clispec renders for this request: ct record-test>
+--- stderr
+--- end

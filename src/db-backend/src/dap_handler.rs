@@ -1003,6 +1003,7 @@ impl Handler {
         // self.db.load_location(self.step_id, call_key, &mut self.expr_loader),
         let mut location = self.replay.load_location(&mut self.expr_loader)?;
         self.step_id = self.replay.current_step_id();
+        self.apply_macro_expansion_level(&mut location);
         // M3 — when the user has toggled into a formatted srcview, the
         // GUI cursor must follow the formatted coordinates the runner
         // is stepping through.  Project the recorded
@@ -1022,6 +1023,14 @@ impl Handler {
             let recorded_column = location.column.unwrap_or(1);
             let (translated_path, translated_line, translated_col) =
                 self.apply_sourcemap_translation(&location.path, location.line, recorded_column);
+            // The stop's source is the formatted view's, at its line: the GUI
+            // opens a stop's editor by its high-level path, so that path
+            // moves with it (left as the recorded path, the editor showed the
+            // minified text under the formatted file's name).
+            if location.high_level_path.is_empty() || location.high_level_path == location.path {
+                location.high_level_path = translated_path.clone();
+                location.high_level_line = translated_line;
+            }
             location.path = translated_path;
             location.line = translated_line;
             // Surface the translated column on the existing slot so the
@@ -3825,7 +3834,7 @@ impl Handler {
         // because each RR hop costs a reverse-continue.
         let mut budget = task::OriginBudget {
             max_hops: args.max_hops,
-            wall_clock_ms: task::DEFAULT_ORIGIN_WALL_CLOCK_MS,
+            wall_clock_ms: task::origin_wall_clock_ms(),
             max_steps_scanned: task::DEFAULT_ORIGIN_MAX_STEPS_SCANNED,
         };
         if self.trace_kind == TraceKind::Recreator && budget.max_hops > crate::recreator_origin::RR_DEFAULT_MAX_HOPS {
@@ -4903,6 +4912,7 @@ impl Handler {
             patterns_fingerprint: patterns_fingerprint.to_string(),
             source_digests: Vec::new(),
             issued_at: 0,
+            replay_resume: None,
         };
         crate::origin_query::placeholder_summary(token)
     }
@@ -5855,16 +5865,14 @@ impl Handler {
                     return Ok(());
                 }
 
-                // Go to the start BEFORE the tracepoint breakpoints exist.  On
-                // a recreator replay the start is the entry, reached with
-                // `run_to_entry`, which clears the breakpoints it used to get
-                // there with `DeleteBreakpoints`, and that query removes every
-                // breakpoint of the session.  Added first, the tracepoint
-                // breakpoints were removed with them and the Continue below
-                // ran to the end: measured on an MCR recording served by
-                // `ct-mcr debugserver` (zero tracepoint results, the
-                // run-to-entry's `DeleteBreakpoints` sending `z0` for each
-                // tracepoint site).
+                // Go to the start BEFORE the tracepoint breakpoints exist, so
+                // the run to the start cannot stop at one of them.  (On a
+                // recreator replay the run to entry used to end with a
+                // `DeleteBreakpoints` that removed every breakpoint of the
+                // session; tracepoint breakpoints added first were removed
+                // with them and the Continue below ran to the end, measured on
+                // an MCR recording. The worker now removes only the
+                // breakpoints its run to entry set for itself.)
                 self.go_to_tracepoint_run_start()?;
 
                 for (path, line_map) in tracepoint_locations.iter() {
@@ -5955,6 +5963,14 @@ impl Handler {
                         }
 
                         *visit_entry = visit_index;
+
+                        // An engine whose breakpoints already stop once per
+                        // visit is Continued from the hit: the next stop is
+                        // the next visit, a loop's next iteration on this
+                        // same line included.
+                        if self.replay.breakpoints_stop_once_per_visit() {
+                            continue;
+                        }
 
                         // Step past the current source line to skip any
                         // remaining sub-breakpoint addresses. GDB/LLDB can
@@ -7173,6 +7189,45 @@ impl Handler {
         }
     }
 
+    /// Show a move's stop at the macro expansion level the user chose for its
+    /// call (`MacroSourceMapCollection::stop_location`,
+    /// Editor-Hosted-Front-Ends §E15). A stop in `expanded.nim` whose call is
+    /// collapsed becomes the call site; one whose call is expanded keeps its
+    /// expanded line and gains the expansion's fields — the parent call site
+    /// and the range — which `ct/complete-move` carries to every front-end.
+    /// Until 2026-11-17 such a stop arrived as a bare `expanded.nim:3` with
+    /// `isExpanded` false, and every surface showed the whole generated file,
+    /// or nothing.
+    fn apply_macro_expansion_level(&self, location: &mut Location) {
+        if self.macro_sourcemaps.is_empty() {
+            return;
+        }
+        let Some(resolved) = self.macro_sourcemaps.stop_location(&location.path, location.line) else {
+            return;
+        };
+        if resolved.is_expanded {
+            location.expansion_parents = resolved.expansion_parents;
+            location.expansion_depth = resolved.expansion_depth;
+            location.expansion_id = resolved.expansion_id;
+            location.expansion_first_line = resolved.expansion_first_line;
+            location.expansion_last_line = resolved.expansion_last_line;
+            location.is_expanded = true;
+            // The expanded file is the stop's high-level source, as in the
+            // `ct/update-expansion` answer: the desktop loads an expansion's
+            // text from it (`config.open`).
+            location.high_level_path.clone_from(&location.path);
+            location.high_level_line = location.line;
+        } else {
+            // The column was the expanded line's; the call site has its own,
+            // which this answer does not carry, so none is claimed.
+            location.path.clone_from(&resolved.high_level_path);
+            location.line = resolved.high_level_line;
+            location.high_level_path = resolved.high_level_path;
+            location.high_level_line = resolved.high_level_line;
+            location.column = None;
+        }
+    }
+
     /// Handle the `ct/update-expansion` custom DAP request.
     ///
     /// When the user presses ALT+E on a macro call in the editor, the frontend
@@ -8061,6 +8116,7 @@ pub(crate) fn build_flow_eager_or_placeholder(
         patterns_fingerprint: patterns_fingerprint.to_string(),
         source_digests: Vec::new(),
         issued_at: 0,
+        replay_resume: None,
     };
     crate::origin_query::placeholder_summary(token)
 }
@@ -8398,8 +8454,8 @@ mod tests {
     // use event_db::{IndexInSingleTable, SingleTableId};
     // use futures::stream::Iter;
     use codetracer_trace_types::{
-        CallRecord, FieldTypeRecord, FunctionId, FunctionRecord, NONE_VALUE, StepId, StepRecord, TraceLowLevelEvent,
-        TraceMetadata, TypeId, TypeKind, TypeRecord, TypeSpecificInfo, ValueRecord,
+        CallRecord, FieldTypeRecord, FullValueRecord, FunctionId, FunctionRecord, NONE_VALUE, StepId, StepRecord,
+        TraceLowLevelEvent, TraceMetadata, TypeId, TypeKind, TypeRecord, TypeSpecificInfo, ValueRecord, VariableId,
     };
     use codetracer_trace_writer::non_streaming_trace_writer::NonStreamingTraceWriter;
     use codetracer_trace_writer::trace_writer::TraceWriter;
@@ -9095,6 +9151,7 @@ mod tests {
                     sha256_hex: "0".repeat(64),
                 }],
                 issued_at: 0,
+                replay_resume: None,
             }
             .encode()?)
         };
@@ -9355,6 +9412,147 @@ mod tests {
         handler.event_load(dap::Request::default(), sender.clone())?;
         handler.run_tracepoints(dap::Request::default(), make_tracepoints_args(1, 0), sender)?;
         assert_eq!(handler.event_db.single_tables.len(), 2);
+        Ok(())
+    }
+
+    /// One recorded step of [`setup_db_at_positions`]: its line and column,
+    /// and the value of the local `x` recorded there, if any.
+    type Position = (i64, i64, Option<i64>);
+
+    /// A materialized trace whose steps sit at `positions`, all in the one
+    /// frame, as a column-aware recorder writes them.
+    fn setup_db_at_positions(positions: &[Position]) -> Db {
+        let none_type = TypeRecord {
+            kind: TypeKind::None,
+            lang_type: "None".to_string(),
+            specific_info: TypeSpecificInfo::None,
+        };
+        let int_type = TypeRecord {
+            kind: TypeKind::Int,
+            lang_type: "int".to_string(),
+            specific_info: TypeSpecificInfo::None,
+        };
+        let mut trace: Vec<TraceLowLevelEvent> = vec![
+            TraceLowLevelEvent::Path(PathBuf::from("/test/workdir")),
+            TraceLowLevelEvent::Function(FunctionRecord {
+                path_id: PathId(0),
+                line: Line(1),
+                name: "<top-level>".to_string(),
+            }),
+            TraceLowLevelEvent::Call(CallRecord {
+                function_id: FunctionId(0),
+                args: vec![],
+            }),
+            TraceLowLevelEvent::Type(none_type),
+            TraceLowLevelEvent::Type(int_type),
+            TraceLowLevelEvent::VariableName("x".to_string()),
+        ];
+        for (line, _, x) in positions {
+            trace.push(TraceLowLevelEvent::Step(StepRecord {
+                path_id: PathId(0),
+                line: Line(*line),
+            }));
+            if let Some(x) = x {
+                trace.push(TraceLowLevelEvent::Value(FullValueRecord {
+                    variable_id: VariableId(0),
+                    value: ValueRecord::Int {
+                        i: *x,
+                        type_id: TypeId(1),
+                    },
+                }));
+            }
+        }
+        let mut db = Db::new(&PathBuf::from("/test/workdir"));
+        let mut trace_processor = TraceProcessor::new(&mut db);
+        trace_processor.postprocess(&trace).unwrap();
+        // `StepRecord` carries no column; give each step the one the
+        // column-aware reader would have decoded.
+        for (index, (_, column, _)) in positions.iter().enumerate() {
+            db.steps[StepId(index as i64)].column = Some(Line(*column));
+        }
+        for per_path in db.step_map.iter_mut() {
+            for steps in per_path.values_mut() {
+                for step in steps.iter_mut() {
+                    step.column = Some(Line(positions[step.step_id.0 as usize].1));
+                }
+            }
+        }
+        db
+    }
+
+    /// The step ids a tracepoint on `line` logs over `positions`.
+    fn tracepoint_hits(positions: &[Position], line: usize) -> Result<Vec<usize>, Box<dyn Error>> {
+        let (sender, _r) = mpsc::channel();
+        let mut handler = Handler::new(
+            TraceKind::Materialized,
+            RecreatorArgs::default(),
+            Box::new(setup_db_at_positions(positions)),
+        );
+        handler.event_load(dap::Request::default(), sender)?;
+        let stops = handler.handle_trace_steps(&make_tracepoints_args(line, 0))?;
+        Ok(stops.iter().map(|stop| stop.rr_ticks).collect())
+    }
+
+    /// A tracepoint logs once per iteration of a loop whose iterations never
+    /// leave its line.  The JavaScript recorder writes no step for the loop's
+    /// header between iterations, so `for (…) { var a = i; }` is the `for`
+    /// statement's step and then one step per run of `var a = i` at column 31,
+    /// each with the loop's variable changed, and the body of a loop written
+    /// over three lines is one step per run at line 2, column 3.  The program
+    /// opens on its first position written twice, as that recorder writes it.
+    /// Before, the sweep stepped past the whole line after its first hit and
+    /// logged one row.
+    #[test]
+    fn tracepoint_logs_every_iteration_of_a_loop_that_stays_on_its_line() -> Result<(), Box<dyn Error>> {
+        // The sweep starts on step 0 and Continues from it, so each fixture
+        // opens on a line no tracepoint is on (line 9, the program's entry).
+        let one_line = [
+            (9, 1, None),
+            (9, 1, None),
+            (1, 1, None),
+            (1, 31, Some(0)),
+            (1, 31, Some(1)),
+            (1, 31, Some(2)),
+            (1, 31, Some(3)),
+            (1, 31, Some(4)),
+            (2, 1, Some(4)),
+        ];
+        // Step 3, the first iteration, continues the `for` statement's visit.
+        assert_eq!(tracepoint_hits(&one_line, 1)?, vec![2, 4, 5, 6, 7]);
+
+        let body_line = [
+            (9, 1, None),
+            (1, 1, None),
+            (2, 3, Some(0)),
+            (2, 3, Some(1)),
+            (2, 3, Some(2)),
+            (2, 3, Some(3)),
+            (2, 3, Some(4)),
+            (4, 1, Some(4)),
+        ];
+        assert_eq!(tracepoint_hits(&body_line, 2)?, vec![2, 3, 4, 5, 6]);
+        Ok(())
+    }
+
+    /// The steps of one run of a statement are still one hit: a statement
+    /// whose steps move between columns (an EVM statement's opcodes) logs once
+    /// per run, a loop that comes back to the line logs each time, and the
+    /// same position written twice with nothing changed is one run.
+    #[test]
+    fn tracepoint_logs_one_row_per_run_of_a_statement() -> Result<(), Box<dyn Error>> {
+        let positions = [
+            (1, 1, None),
+            (2, 9, None),
+            (2, 5, None),
+            (2, 1, None),
+            (3, 1, None),
+            (2, 9, None),
+            (2, 9, None),
+            (2, 5, None),
+            (2, 1, None),
+            (4, 1, None),
+        ];
+        assert_eq!(tracepoint_hits(&positions, 2)?, vec![1, 5]);
         Ok(())
     }
 

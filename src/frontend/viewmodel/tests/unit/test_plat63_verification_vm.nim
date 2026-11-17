@@ -52,7 +52,7 @@ import ../../../../common/types
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads this spelling
 # as the suite's RUNTIME assertion count.
-const ExpectedAssertions = 96
+const ExpectedAssertions = 95
 
 var countedAssertions = 0
 
@@ -351,15 +351,14 @@ suite "PLAT-63: the desktop's view draws the same lines":
 
 suite "PLAT-63: the pane in the persisted vocabulary":
 
-  test "PaneKind.verification, schema 8, the desktop's row":
+  test "PaneKind.verification, in the current schema, the desktop's row":
     ck $paneVerification == "verification"
-    ck paneVerification == high(PaneKind)
-    ck LayoutSchemaVersion == 8
+    ck LayoutSchemaVersion >= 8
     # A layout naming the pane round-trips.
     let tree = row([pane(paneEditor, weight = 60.0),
                     pane(paneVerification, weight = 40.0)])
     let doc = saveLayout(initLayout(tree))
-    ck doc["version"].getInt == 8
+    ck doc["version"].getInt == LayoutSchemaVersion
     ck restoreLayoutDocument(doc).tree.contains(paneVerification)
     # A version-7 document (no pane of its can be `verification`) reads
     # unchanged, re-stamped.

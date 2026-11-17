@@ -64,7 +64,15 @@ except ImportError:  # pragma: no cover
     print("job-timeouts: PyYAML is required", file=sys.stderr)
     sys.exit(2)
 
-DEFAULT_WORKFLOWS = [".github/workflows/codetracer.yml"]
+# The two reusable workflows hold jobs codetracer.yml calls (it had reached
+# GitHub's file-size limit); their stubs are `uses:` jobs, skipped here, so the
+# bound is checked where the job is.
+DEFAULT_WORKFLOWS = [
+    ".github/workflows/codetracer.yml",
+    ".github/workflows/tui-tests.yml",
+    ".github/workflows/gpui-window-captures.yml",
+    ".github/workflows/ct-build.yml",
+]
 
 # GitHub's own default. A declared bound must be strictly tighter than this,
 # or it is not a bound.

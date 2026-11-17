@@ -1,0 +1,43 @@
+scenario: 1
+name: re-record/ctrl-r-burst-starts-one-recorder
+pack: codetracer
+summary: >-
+  Three Ctrl+R presses in a row after an edit start one recorder: the
+  presses refused say a recording is already under way, and the one
+  recording still completes with the edited program's output.
+
+stage:
+  - use: write-project
+    with: { files: { main.py: "print(\"initial\")\n" } }
+  - use: record-program
+    with: { program: $project/main.py }
+
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - wait: { until: { at: 'editor[file="main.py"]', assert: 'shows-text("initial")' }, timeout: 60s }
+  - chord: Ctrl+E
+  - wait: { until: { at: 'editor[file="main.py"]', read-only: false }, timeout: 30s }
+  - click: { at: 'editor[file="main.py"]/line[number="1"]', anchor: text-start }
+  - chord: Ctrl+A
+  - type: "print(\"burst marker\")"
+  - wait: { until: { at: 'editor[file="main.py"]', assert: 'shows-text("burst marker")' }, timeout: 15s }
+  # Three presses, no wait between them: key auto-repeat, or an impatient
+  # user.
+  - chord: Ctrl+R Ctrl+R Ctrl+R
+    settle: false
+  # The window shows the Edit-mode layout until the new recording opens.
+  - wait: { until: { at: 'pane-tab[label="EVENT LOG"]', present: true }, timeout: 180s }
+  - click: 'pane-tab[label="EVENT LOG"]'
+    settle: false
+  - wait: { until: { at: event-log, assert: 'has-output("burst marker")' }, timeout: 180s }
+  - wait: { until: replay-idle, timeout: 60s }
+  - expect: { at: 'editor[file="main.py"]', assert: 'shows-text("burst marker")' }
+  # The refusal is a toast that leaves after a few seconds; the Notifications
+  # list keeps it.
+  - chord: Ctrl+p
+  - type: ":Notifications"
+  - wait: { until: { at: omnibox, assert: "offers(command, Notifications)" }, timeout: 15s }
+  - key: Enter
+  - wait: { until: { at: status-line, history: { contains: already } }, timeout: 15s }

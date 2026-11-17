@@ -1,0 +1,39 @@
+scenario: 1
+name: languages/circom-recording-smoke
+pack: codetracer
+summary: >-
+  A Circom recording opens at its entry in flow_test.circom, with its signals in the state pane and the FlowTest call in the call trace;
+  Continue and Next move the replay.
+
+stage:
+  - use: record-program
+    with: { program: ../codetracer-circom-recorder/test-programs/circom/flow_test.circom }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 180s }
+  - expect: { at: window, title: { contains: CodeTracer } }
+  - wait: { until: { at: status-line, location: { matches: "flow_test.circom:[0-9]+#" } }, timeout: 60s }
+  - wait: { until: { at: 'editor[file="flow_test.circom"]', present: true }, timeout: 60s }
+  - click: 'pane-tab[label="CALLTRACE"]'
+  - wait: { until: call-trace.loaded, timeout: 60s }
+  - wait: { until: { at: 'call-trace/call[name="FlowTest"]', present: true }, timeout: 60s }
+  - click: { at: 'call-trace/call[name="FlowTest"]', anchor: name }
+    settle: false
+  - wait: { until: replay-idle, timeout: 60s }
+  # the signals are assigned from line 11: a breakpoint on 13 stops after a and b
+  - click: { at: 'editor[file="flow_test.circom"]/line[number="13"]', anchor: glyph }
+  - expect: { at: 'editor[file="flow_test.circom"]/line[number="13"]', glyph: breakpoint }
+  - click: 'toolbar/toolbar-button[label="continue-image"]'
+    settle: false
+  - wait: { until: { at: 'editor[file="flow_test.circom"]', current-line: 13 }, timeout: 60s }
+  - wait: { until: replay-idle, timeout: 60s }
+  - wait: { until: variables.loaded, timeout: 60s }
+  - click: 'toolbar/toolbar-button[label="next-image"]'
+    settle: false
+  - wait: { until: replay-idle, timeout: 60s }
+  - expect: { at: status-line, location: { matches: "flow_test.circom:[0-9]+#" } }
+  - click: 'toolbar/toolbar-button[label="continue-image"]'
+    settle: false
+  - wait: { until: replay-idle, timeout: 60s }
+  - expect: { at: status-line, location: { matches: "flow_test.circom:[0-9]+#" } }

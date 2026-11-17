@@ -573,6 +573,19 @@ proc lineOfOffset(doc: string; offset: int): int =
     if doc[i] == '\n': inc n
   n
 
+
+when defined(js):
+  proc shared[T](x: T): T {.importjs: "#".}
+    ## `x` itself. On the JS backend binding a seq or an object holding seqs
+    ## copies it deeply, and a splice that carries a line's metrics over
+    ## "byte for byte" did exactly that for every line of the document on
+    ## every keystroke (`nimCopy`, 70% of a key's time on a 1,000-line file,
+    ## measured 2026-11-12 in node with `--cpu-prof`). The carried values are
+    ## never written after the cache that holds them is built, so sharing
+    ## them is the value semantics the copy was paying for.
+else:
+  template shared[T](x: T): T = x
+
 proc updateWrapCache*(c: WrapCache; oldDoc: string; cs: ChangeSet;
                       newDoc: string): WrapCache =
   ## The cache, moved onto `newDoc`, recomputing **only the logical lines the
@@ -639,8 +652,8 @@ proc updateWrapCache*(c: WrapCache; oldDoc: string; cs: ChangeSet;
   result.rows = @[]
   # Above the edit: carried over byte for byte.
   for i in 0 ..< firstLine:
-    result.metrics.add c.metrics[i]
-    result.rows.add c.rows[i]
+    result.metrics.add shared(c.metrics[i])
+    result.rows.add shared(c.rows[i])
   # The touched span: recomputed.
   for i in firstLine .. lastNewLine:
     let m = lineMetrics(newLines[i], c.settings.policy)
@@ -649,10 +662,14 @@ proc updateWrapCache*(c: WrapCache; oldDoc: string; cs: ChangeSet;
   # Below the edit: carried over, with only the line index re-stamped.
   for i in (lastOldLine + 1) ..< c.metrics.len:
     let target = i + (lastNewLine - lastOldLine)
-    result.metrics.add c.metrics[i]
-    var rs = c.rows[i]
-    for k in 0 ..< rs.len: rs[k].line = target
-    result.rows.add rs
+    result.metrics.add shared(c.metrics[i])
+    if target == i:
+      # The edit kept the line count: the rows are this line's, unchanged.
+      result.rows.add shared(c.rows[i])
+    else:
+      var rs = c.rows[i]
+      for k in 0 ..< rs.len: rs[k].line = target
+      result.rows.add rs
   result.lineCount = result.metrics.len
   if result.lineCount != newLines.len:
     # Unreachable by construction, and it RAISES rather than truncating: a

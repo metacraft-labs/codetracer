@@ -1,0 +1,30 @@
+scenario: 1
+name: ct-host/files-pane-survives-session-sync
+pack: codetracer
+summary: >-
+  On a `ct host` page the Files pane keeps the tree the page loaded once the
+  server's session reaches the page (its call trace is shown): the recording's
+  `src` folder with shield.nr, not "Loading..."; it keeps it after a Next
+  publishes the session again; and a file in it opens in an editor.
+
+stage:
+  - use: record-program
+    with: { program: noir_space_ship }
+  - use: open-recording
+    with: { deployment: web }
+
+steps:
+  - wait: { until: call-trace.loaded, timeout: 360s }
+  - wait: { until: { at: 'filesystem/file-node[name="shield.nr"]', present: true }, timeout: 30s }
+  - expect: { at: filesystem, loading: false }
+  - expect: { at: 'filesystem/file-node[name="src"]', present: true }
+  - wait: { until: { at: status-line, location: { contains: "main.nr" } }, timeout: 60s }
+  - click: 'toolbar/toolbar-button[label="next-image"]'
+    settle: false
+  - wait: { until: { at: status-line, location: { matches: "#[2-9]|#[1-9][0-9]" } }, timeout: 60s }
+  - wait: { until: replay-idle, timeout: 60s }
+  - expect: { at: filesystem, loading: false }
+  - expect: { at: 'filesystem/file-node[name="shield.nr"]', present: true }
+  - click: 'pane-tab[label="FILES"]'
+  - click: 'filesystem/file-node[name="shield.nr"]'
+  - wait: { until: { at: 'pane-tab[label="src/shield.nr"]', present: true }, timeout: 30s }

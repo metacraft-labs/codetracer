@@ -1,0 +1,33 @@
+scenario: 1
+name: deepreview/full-file-carries-the-review
+pack: codetracer
+summary: >-
+  With the toggle on the file itself, the review still shows on the file:
+  main.rs's changed lines are marked modified, and its execution overlay and
+  value chips are drawn on it; utils.rs (an added file) marks its lines added
+  and none modified; config.rs (deleted, nothing to open) opens its diff tab
+  instead and leaves the files' marks as they were.
+
+stage:
+  - use: open-review
+    with: { dataset: src/tests/gui/tests/deepreview/fixtures/sample-review.json }
+
+steps:
+  - wait: { until: { at: vcs, present: true }, timeout: 120s }
+  - wait: { until: settled, timeout: 30s }
+  - expect: { at: review-state, flow-lines: 0, value-chips: 0, source-editors: 0 }
+  - click: vcs/diff-toggle
+  - wait: { until: { at: vcs, unified-diff: false }, timeout: 30s }
+  - click: 'vcs/changed-file[name="main.rs"]'
+  - wait: { until: { at: 'editor[file="main.rs"]', present: true }, timeout: 30s }
+  - wait: { until: { at: review-state, diff-modified-lines: { gt: 0 } }, timeout: 30s }
+  - wait: { until: { at: review-state, flow-lines: { gt: 0 } }, timeout: 30s }
+  - wait: { until: { at: review-state, value-chips: { gt: 0 } }, timeout: 30s }
+  - expect: { at: review-state, source-editors: 1, flow-kinds: { subsequence: ["line-flow-hit"] } }
+  - click: 'vcs/changed-file[name="utils.rs"]'
+  - wait: { until: { at: 'editor[file="utils.rs"]', present: true }, timeout: 30s }
+  - wait: { until: { at: review-state, diff-added-lines: { gt: 0 } }, timeout: 30s }
+  - expect: { at: review-state, diff-modified-lines: 0 }
+  - click: 'vcs/changed-file[name="config.rs"]'
+  - wait: { until: { at: 'review-diff[file="src/config.rs"]', present: true }, timeout: 30s }
+  - expect: { at: review-state, diff-modified-lines: 0, diff-added-lines: { gt: 0 } }

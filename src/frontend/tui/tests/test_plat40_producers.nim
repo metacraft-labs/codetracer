@@ -416,6 +416,11 @@ suite "PLAT-40 3 — the producer partition":
        "setTracepointsEnabled"),
       ("src/frontend/viewmodel/store/replay_data_store.nim",
        "deleteTracepoint"),
+      # codetracer#886: the desktop's tracepoint editor holds a tracepoint as
+      # a row from the moment it opens, before any sweep has answered for it
+      # (`ui/trace` -> `sdk/tracepoints.declareTracepoint`). A sweep then
+      # annotates that row through `applyTracepointResults` above.
+      ("src/frontend/viewmodel/sdk/tracepoints.nim", "declareTracepoint"),
       ("src/frontend/viewmodel/viewmodels/point_list_vm.nim", "setPoints")]}.toTable
   const Sinks = {
     "calltrace": ("updateCalltraceSection", @["updateCalltraceSection(",

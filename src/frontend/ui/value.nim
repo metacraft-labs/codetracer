@@ -6,6 +6,12 @@ import
   origin_chain_runtime
 
 import ./presented_value
+# A press on a value's controls is routed (Input-Routing-And-Keymaps.md §5.1):
+# each control carries its operation and the procedure that performs it on
+# that control; the window's pointer listener runs it when a press resolves to
+# it (`bindElementOperation`).
+import ../viewmodel/input/element_operations
+import ../viewmodel/input/dom_pointer
 
 let ATOM_KINDS = {
   Int, Float, String, CString, Char, Bool, Enum, Enum16, Enum32,
@@ -486,22 +492,20 @@ proc renderHistoryTableDom*(self: ValueComponent, expression: cstring, chart: Ch
       closureScope: # Each history row owns its listeners and origin-badge callbacks.
         let historyEvent = self.state.valueHistory[key].results[eventIndex]
         let locationNode = newElement(cstring"div", cstring"history-location")
-        locationNode.addEventListener(cstring"contextmenu", proc(ev: Event) =
-          ev.preventDefault()
-          self.historyContextAction(historyEvent, ev)
-        )
+        # A right press is the pointer row `context-menu.open`, which opens
+        # the menu the entry carries (`dom_pointer.setPressMenu`).
+        setPressMenu(cast[JsObject](locationNode), proc(ev: JsObject): bool =
+          self.historyContextAction(historyEvent, cast[Event](ev))
+          true)
         locationNode.appendText(cstring($historyEvent.location.rrTicks))
         locationElement.appendChild(locationNode)
 
         let valueNode = newElement(cstring"div", cstring"history-value")
-        valueNode.addEventListener(cstring"mousedown", proc(ev: Event) =
-          if cast[MouseEvent](ev).button == 0:
-            self.historyClick(historyEvent.location)
-        )
-        valueNode.addEventListener(cstring"contextmenu", proc(ev: Event) =
-          ev.preventDefault()
-          self.historyContextAction(historyEvent, ev)
-        )
+        bindPressOperation(valueNode.toJs, "history.seek-to-tick",
+          proc(p: PressInfo) = self.historyClick(historyEvent.location))
+        setPressMenu(cast[JsObject](valueNode), proc(ev: JsObject): bool =
+          self.historyContextAction(historyEvent, cast[Event](ev))
+          true)
         valueNode.appendText(statePanelValue(historyEvent.value).root.text)
 
         # Value Origin Tracking (M4 deliverable §3.2.3 + Gap 1) —
@@ -760,10 +764,8 @@ proc valueLanguage(self: ValueComponent): Lang =
 proc renderValueHistoryButtonDom(self: ValueComponent, expression: cstring, active: string): Node =
   result = newElement(cstring"button")
   result.setAttribute(cstring"class", cstring(&"value-history-button {active} ct-button-image-xs-secondary ct-ml-2"))
-  result.addEventListener(cstring"mousedown", proc(ev: Event) =
-    if cast[MouseEvent](ev).button == 0:
-      discard self.showHistory(expression)
-  )
+  bindPressOperation(result.toJs, "variables.value-history",
+    proc(p: PressInfo) = discard self.showHistory(expression))
 
   let tooltip = newElement(cstring"div", cstring"custom-tooltip")
   tooltip.appendText(cstring"Toggle history value")
@@ -823,13 +825,16 @@ proc renderExpandButtonDom(
 ): Node =
   result = newElement(cstring"span", cstring("value-expand-button " & fresh))
   result.setAttribute(cstring"title", cstring"Show or hide the value's parts")
-  result.addEventListener(cstring"mousedown", proc(ev: Event) =
-    self.data.focusComponent(self)
-    ev.stopPropagation()
-    capture expression, value, path:
-      discard self.expandNewValues(value, path)
-      discard self.toggleExpanded(value, expression)
-  )
+  # The press must not reach what is under the value (a row's own press).
+  result.addEventListener(cstring"mousedown", proc(ev: Event) =  # ir1-gate: propagation
+    ev.stopPropagation())
+  let expandEl = result.toJs
+  capture expression, value, path:
+    bindPressOperation(expandEl, "variables.toggle-expand",
+      proc(p: PressInfo) =
+        self.data.focusComponent(self)
+        discard self.expandNewValues(value, path)
+        discard self.toggleExpanded(value, expression))
 
   let caretClass =
     if self.uiExpanded(value, expression):
@@ -856,12 +861,13 @@ proc renderLoadMoreButtonDom(self: ValueComponent, value: Value, path: seq[SubPa
   let cPath = path
 
   result = newElement(cstring"button", cstring"value-load-more-button")
-  result.addEventListener(cstring"mousedown", proc(ev: Event) =
-    capture value, cPath:
-      if not self.isOperationRunning:
-        self.isOperationRunning = true
-        discard self.loadMoreValues(value, cPath)
-  )
+  let loadMoreEl = result.toJs
+  capture value, cPath:
+    bindPressOperation(loadMoreEl, "variables.load-more",
+      proc(p: PressInfo) =
+        if not self.isOperationRunning:
+          self.isOperationRunning = true
+          discard self.loadMoreValues(value, cPath))
   result.appendText(cstring"Load More")
 
 proc childPathForExpandedValue(parent: Value, childName: cstring, element: Value, path: seq[SubPath]): seq[SubPath] =
@@ -1071,28 +1077,31 @@ proc renderValueRowDom(
   )
 
   let atomParent = newElement(cstring"div", atomClass)
-  atomParent.addEventListener(cstring"contextmenu", proc(ev: Event) =
+  # A right press is the pointer row `context-menu.open`, which opens the
+  # menu the value carries (`dom_pointer.setPressMenu`).
+  setPressMenu(cast[JsObject](atomParent), proc(jev: JsObject): bool =
+    let ev = cast[Event](jev)
     # `preventDefault` used to be conditional on the extension, so everywhere
     # else — the State pane, the value tooltips drawn over the editor — the
     # browser menu opened on top of ours.  The third sibling of the leak fixed
     # in `ui/editor.nim`; see the comment there, including why Shift stands
     # down rather than being suppressed.
     if cast[bool](ev.toJs.shiftKey):
-      return
-    ev.preventDefault()
+      return false
     let contextMenu = self.createContextMenuItems(value, ev)
     let e = ev.toJs
     if contextMenu != []:
       showContextMenu(contextMenu, cast[int](e.x), cast[int](e.y))
+    true
   )
 
   let nameContainer = newElement(cstring"div", cstring"value-name-container")
   if self.isTooltipValue and expression == self.baseExpression:
     let scratchpadButton = newElement(cstring"div", cstring"add-to-scratchpad-button")
-    scratchpadButton.addEventListener(cstring"mousedown", proc(ev: Event) =
-      self.api.openValueInScratchpad(ValueWithExpression(expression: expression, value: value))
-      self.redraw()
-    )
+    bindPressOperation(scratchpadButton.toJs, "scratchpad.add-value",
+      proc(p: PressInfo) =
+        self.api.openValueInScratchpad(ValueWithExpression(expression: expression, value: value))
+        self.redraw())
     # A plain `title`, not a `.custom-tooltip` child. This button only exists
     # inside the Flow value popup, whose content box scrolls, so a styled
     # tooltip positioned outside it is cropped (see the note on

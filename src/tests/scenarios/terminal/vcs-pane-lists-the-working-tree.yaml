@@ -1,0 +1,20 @@
+scenario: 1
+name: terminal/vcs-pane-lists-the-working-tree
+pack: codetracer
+summary: >-
+  Replaying from inside a git repository, a click on the VCS tab shows the
+  pane: the branch, the WORKING TREE (3) caption and the desktop's rows — A
+  added.txt, M notes.txt, ? scratch.txt — and not the unchanged file.
+stage:
+  - use: record-program
+    with: { program: calc }
+  - use: fixture-project
+    with: { name: vcs-repo }
+  - use: open-recording
+    with: { width: 200, height: 50 }
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - click: { at: 'pane-tab[label="VCS"]' }
+  - wait: { until: { at: 'pane[title="VCS"]', assert: 'has-row("WORKING TREE (3)")' }, timeout: 30s }
+  - expect: { at: 'pane[title="VCS"]', assert: ['has-row("on plat47-vcs")', 'lacks-row("unchanged.txt")'] }
+  - expect: { at: 'pane[title="VCS"]', text: { subsequence: ["WORKING TREE (3)", "A added.txt", "M notes.txt", "? scratch.txt"] } }

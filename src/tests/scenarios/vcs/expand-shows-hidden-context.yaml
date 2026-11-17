@@ -1,0 +1,34 @@
+scenario: 1
+name: vcs/expand-shows-hidden-context
+pack: codetracer
+summary: >-
+  The diff of "edit the middle" shows the changed line 20 and hides the
+  lines around it behind two boundaries; a click on the first shows ten more
+  lines (alpha 7 appears, numbered in both gutters), and a second click the
+  rest, leaving one boundary.
+
+stage:
+  - use: project-fixture
+    with: { name: vcs-history }
+  - use: open-project
+    with: { folder: $project }
+
+steps:
+  - wait: { until: { at: 'pane-tab[label="VCS"]', present: true }, timeout: 120s }
+  - wait: { until: settled, timeout: 30s }
+  - click: 'pane-tab[label="VCS"]'
+  - wait: { until: { at: 'vcs/commit[message="edit the middle"]', present: true }, timeout: 60s }
+  - click: { at: 'vcs/commit[message="edit the middle"]', anchor: toggle }
+  - wait: { until: { at: 'vcs/commit[message="edit the middle"]/commit-file[name="app.nim"]', present: true }, timeout: 30s }
+  - hover: { at: 'vcs/commit[message="edit the middle"]/commit-file[name="app.nim"]', for: 300ms }
+  - wait: { until: { at: 'vcs/commit[message="edit the middle"]/commit-file[name="app.nim"]/panel-button[label="View Diff"]', present: true }, timeout: 15s }
+  - click: 'vcs/commit[message="edit the middle"]/commit-file[name="app.nim"]/panel-button[label="View Diff"]'
+  - wait: { until: { at: 'diff-view[file="src/app.nim"]', text: { contains: 'echo "beta 20"' } }, timeout: 30s }
+  - expect: { at: 'diff-view[file="src/app.nim"]/expand-boundary[direction="below", n="1"]', hidden: { gt: 10 } }
+  - click: 'diff-view[file="src/app.nim"]/expand-boundary[direction="below", n="1"]'
+  - wait: { until: { at: 'diff-view[file="src/app.nim"]', text: { matches: 'alpha 7"$' } }, timeout: 15s }
+  - expect: { at: 'diff-view[file="src/app.nim"]', line-numbers: { contains: "8" } }
+  - expect: { at: 'diff-view[file="src/app.nim"]', line-numbers: { contains: "17" }, old-line-numbers: { contains: "8" } }
+  - click: 'diff-view[file="src/app.nim"]/expand-boundary[direction="below", n="1"]'
+  - wait: { until: { at: 'diff-view[file="src/app.nim"]', text: { matches: 'alpha 1"$' } }, timeout: 15s }
+  - expect: { at: 'diff-view[file="src/app.nim"]', line-numbers: { contains: "2" } }

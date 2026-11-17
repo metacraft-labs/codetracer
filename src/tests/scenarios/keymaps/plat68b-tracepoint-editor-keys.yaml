@@ -1,0 +1,30 @@
+scenario: 1
+name: keymaps/plat68b-tracepoint-editor-keys
+pack: codetracer
+summary: >-
+  Enter in the read-only editor opens a tracepoint editor with the caret in
+  it; it takes its letters and its Enter, keeps the focus, and grows by a row
+  with the new line and shrinks back when it is removed.
+
+stage:
+  - use: record-program
+    with: { program: py_calltrace_collapse/main.py }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 180s }
+  - wait: { until: call-trace.loaded, timeout: 120s }
+  - click: { at: 'editor[file="main.py"]/line[number="1"]', anchor: text-start }
+  - key: Enter
+  - wait: { until: { at: 'tracepoint-editor[line="1"]', focused: true }, timeout: 20s }
+  - type: fn
+  - expect: { at: 'tracepoint-editor[line="1"]', text: [fn], rows: 1, fits: true, focused: true }
+  - expect: { at: 'editor[file="main.py"]', assert: "stopped-at(1)" }
+  - key: Enter
+  - expect: { at: 'tracepoint-editor[line="1"]', text: [fn, ""], rows: 2, fits: true, focused: true }
+  - type: x
+  - expect: { at: 'tracepoint-editor[line="1"]', text: [fn, x], rows: 2, fits: true, focused: true }
+  - key: Backspace
+  - key: Backspace
+  - type: y
+  - expect: { at: 'tracepoint-editor[line="1"]', text: [fny], rows: 1, fits: true, focused: true }

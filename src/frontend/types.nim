@@ -133,6 +133,11 @@ type
     stopSignal*: RRGDBStopSignal
     frameInfo*: FrameInfo
     eventLogIndex*: int
+    redelivered*: bool
+      ## The last move handed again to a pane built after it
+      ## (`InternalLastCompleteMove`), not a new one. It brings that pane up
+      ## to the stop; it does not take the active editor back to the stop's
+      ## file from one the user opened since. Never set by the backend.
 
   RunTestOptions* = ref object
     testName*: cstring
@@ -224,6 +229,10 @@ type
 
   DebuggerService* = ref object of Service
     location*: Location
+    formattedSourceView*: bool
+      ## The replay steps by a minified source's formatted view (its source
+      ## map's lines) and the editor follows it
+      ## (`ui/formatted_source_view`).
     locals*:  seq[Variable] # the locals while stepping
     registerState*: JsAssoc[cstring, cstring]
     watchExpressions*:    seq[cstring]
@@ -1232,6 +1241,10 @@ type
     ## ``MonacoEditor.deltaDecorations``; passing them back lets
     ## Monaco diff the column-marker layer cleanly on each refresh.
     columnBreakpointDecorations*: seq[cstring]
+    glyphDecorations*: seq[cstring]
+      ## The glyph column's marks and hover hint (`trace.updateGlyphMarks`).
+    glyphHintLine*: int
+      ## The line the pointer is over in the glyph column, 0 for none.
     whitespace*:     Whitespace
     encoding*:       cstring
     # monacoJsonSchemes*: JsAssoc[cstring, js]
@@ -1567,7 +1580,11 @@ type
     modalValueComponent*: JsAssoc[cstring, ValueComponent]
     tippyElement*: JsObject
     leftPos*: cstring
-    lastScrollFireTime*: int64
+    lastScrollFireTime*: float
+      ## When the last value jump was asked for, in milliseconds since the
+      ## epoch (`jslib.dateNowMs`, a JS Number). Not an `int64`: that is a
+      ## BigInt on the JS backend, and adding the JS Number a clock returns to
+      ## one throws (`flow.afterJump`).
     position*: int
     # codeID*: int64
 
@@ -2079,6 +2096,11 @@ type
     savedLayoutConfig*: GoldenLayoutResolvedConfig
     # Nim-to-C sourcemap for ViewTargetSource (S3).
     sourcemap*: FrontendSourcemap
+    # The generated C of a `ct record` Nim recording and its Source Map v3
+    # files, on disk in `<trace>/nimcache/` (`index/nim_sourcemap_paths`):
+    # where View Generated C Source reads what the replay does not serve
+    # (`ui/generated_code`, Generated-Code-Listing §13.4).
+    nimcacheFiles*: seq[cstring]
     # S6: Whether a macro sourcemap was found for this trace.
     # The actual macro expansion resolution happens in the backend;
     # this flag lets the frontend know that ALT+E expansion is available.
@@ -2189,7 +2211,9 @@ type
     init*: bool
     tracepointTable*: js
     lastTracepoint*: int
-    tracepoints*: JsAssoc[int, Tracepoint]
+    # The desktop's tracepoints are rows of the tab's store
+    # (`store.pointList.rows`, written by `ui/trace` through
+    # `sdk/tracepoints`); this record keeps no copy of them (codetracer#886).
     redrawTracepoints*: bool
 
   ProblemSeverity* = enum
@@ -2302,6 +2326,11 @@ type
     vcs*:                     VcsConfig
       ## The `vcs:` entry, or nil in a config file written before it existed.
       ## Read through `vcsFileClickOpensFullFile`.
+    sharedEditor*:            bool
+      ## `sharedEditor:` (see `common/config.nim`): the editor pane draws the
+      ## shared editing core instead of Monaco. js-yaml leaves it undefined
+      ## (falsy) in a config written before it existed; `index/config`
+      ## applies `CODETRACER_SHARED_EDITOR` over it.
     window*:                  WindowConfig
       ## PLAT-69: the `window:` entry, as js-yaml read it. nil (undefined)
       ## in a config file written before the entry existed; its fields are
@@ -2613,8 +2642,7 @@ when defined(ctRenderer):
     )
     session.network = Network(
       futures: JsAssoc[cstring, JsAssoc[cstring, JsObject]]{})
-    session.pointList = PointListData(
-      tracepoints: JsAssoc[int, Tracepoint]{})
+    session.pointList = PointListData()
     session.status = StatusState(
       lastDirection: DebForward,
       currentOperation: cstring"",
@@ -2649,13 +2677,9 @@ when defined(ctRenderer):
 
   wireSessionServiceMoves(data, data.sessions[0])
 
-  data.dapApi.on(CtUpdateExpansionResponse, proc(kind: CtEventKind, value: Location) =
-    ## Handle the macro expansion response from the backend (S6).
-    ## Delegates to the editor service callback which handles both the
-    ## expanded case (open inline) and the non-expanded case (navigate to
-    ## the resolved high-level location).
-    if data.activeSessionIndex >= 0:
-      discard data.services.editor.onExpansionResponse(data.services.editor, value))
+  # The macro expansion response (S6) is handed to the editor service by each
+  # session's middleware (`middleware.setupMiddlewareApis`), on the `DapApi`
+  # the answer arrives on.
 
   # Expose the global `data` object on `window` as a debugging aid in the
   # renderer / webview.  The VS Code central extension context

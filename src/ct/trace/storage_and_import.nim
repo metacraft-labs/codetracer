@@ -164,11 +164,24 @@ proc detectTraceAxes*(program: string, paths: seq[string],
   ##   `LangC` / `LangCpp` decomposed to before.
   var detectedLang = detectLangFromPath(program)
   if detectedLang == LangUnknown:
+    # A recorded binary names no language, so the captured sources decide. A
+    # Nim program reaches the binary through C: its capture holds C files
+    # (libc headers first, usually) and the nimcache's generated C — named
+    # `@m<module>.nim.c` — and, when the recorder captured them, the `.nim`
+    # sources. "The first recognised path" therefore made every rr recording
+    # of a Nim binary a C one, and its View menu lost the Nim views. A `.nim`
+    # source or a Nim-generated `.nim.c` anywhere in the capture makes it a
+    # Nim recording.
     for path in paths:
-      let p = detectLangFromPath(path)
-      if p != LangUnknown:
-        detectedLang = p
+      if path.endsWith(".nim.c") or detectLangFromPath(path) == LangNim:
+        detectedLang = LangNim
         break
+    if detectedLang == LangUnknown:
+      for path in paths:
+        let p = detectLangFromPath(path)
+        if p != LangUnknown:
+          detectedLang = p
+          break
 
   let artefactIsa = targetIsaForArtefactPath(program)
   if detectedLang == LangUnknown and artefactIsa == tiUnknown:
@@ -290,6 +303,9 @@ proc readTraceFolderMeta*(folder: string): CtfsMetaDat =
     readMaterializedTraceMeta(folder)
   else:
     raise newException(IOError, describeMissingTraceContainer(folder))
+
+const RECORDING_SYMBOLS_FILE* = "symbols.json"
+  ## The recording's symbol index (`db_backend_record.recordSymbols`).
 
 proc copyMaterializedTracePayload(sourceFolder, outputFolder: string) =
   ## Copy a materialized `runtime_tracing` recording (event stream +
@@ -466,6 +482,37 @@ proc importTrace*(
     # when the source files are still available and unchanged
     if paths.len > 0:
       storeTraceFiles(paths, outputFolder, workdir, axes)
+
+  # The symbol index `ct record` writes beside a recording (`symbols.json`:
+  # ctags over its sources, what the command palette's `:sym` searches) is
+  # part of the recording. A copy without it left `:sym` with nothing to
+  # find in every imported recording, which is every recording the desktop
+  # opens through `ct host --trace-path`.
+  if outputFolder != recordingSourceFolder:
+    for folder in [recordingSourceFolder, traceFolder]:
+      let source = folder / RECORDING_SYMBOLS_FILE
+      if fileExists(source):
+        if not fileExists(outputFolder / RECORDING_SYMBOLS_FILE):
+          copyFile(source, outputFolder / RECORDING_SYMBOLS_FILE)
+        break
+
+  # The Nim compiler's macro source maps (`macro_sourcemap_*.json`, which
+  # `db_backend_record.copyMacroSourcemaps` puts at the recording's root) are
+  # part of the recording too: the replay loads them from the trace folder it
+  # is given (`macro_sourcemap.rs::load_macro_sourcemaps`), and an imported
+  # copy without them answered every Toggle Macro Expansion with nothing.
+  if outputFolder != recordingSourceFolder:
+    for folder in [recordingSourceFolder, traceFolder]:
+      var copied = false
+      for (kind, source) in walkDir(folder):
+        let name = source.extractFilename
+        if kind == pcFile and name.startsWith("macro_sourcemap") and
+            name.endsWith(".json"):
+          if not fileExists(outputFolder / name):
+            copyFile(source, outputFolder / name)
+          copied = true
+      if copied:
+        break
 
   var sourceFoldersInitialSet = initHashSet[string]()
   for path in paths:

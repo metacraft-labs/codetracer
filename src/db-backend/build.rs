@@ -625,18 +625,32 @@ fn build_native(private_build: &PrivateEmulatorBuild, target_arch: &str) {
     let parent = so_path.parent().expect("so has parent");
     println!("cargo:rustc-link-search=native={}", parent.display());
     println!("cargo:rustc-link-lib=dylib={}", private_build.link_name);
-    if cfg!(target_os = "linux") {
-        // The binary's own directory first, then the build's. A binary that
-        // finds the library only through OUT_DIR depends on a directory other
-        // checkouts' builds rewrite: the default cargo target is machine-wide,
-        // and on 2026-11-05 a running test's `replay-server` failed to start
-        // with "libmcr_emulator.so: file too short" while another checkout
-        // relinked it. Worse, a completed rewrite would have been loaded
-        // silently, as that checkout's emulator under this checkout's server.
+    // THE BINARY FINDS THE LIBRARY BESIDE ITSELF, AND NOWHERE ELSE. Its only
+    // run-time search path is its own directory (`$ORIGIN` on Linux,
+    // `@loader_path` on macOS), and the library is deployed there: into the
+    // profile directory, where `replay-server` is linked, and into `deps/`,
+    // where cargo links the test binaries. Whoever installs `replay-server`
+    // elsewhere copies the library with it (src/Tuprules.tup, repro.nim,
+    // build_for_extension.sh).
+    //
+    // There used to be a second entry, `-rpath <OUT_DIR>`, and that is the
+    // defect this replaces: a produced binary carried a load path into a
+    // build-scratch directory. Measured consequences (codetracer-pm
+    // issues/2026-10-05-ui-tup-cargo-targets-collide-across-workspaces-and-compilers.md):
+    // macOS's /tmp cleanup emptied that `out/` and an installed
+    // `replay-server` stopped loading (2026-10-12); on 2026-11-05 a running
+    // test's `replay-server` failed with "libmcr_emulator.so: file too short"
+    // while another checkout relinked the library in a shared target, and a
+    // completed rewrite would have been loaded silently, as that checkout's
+    // emulator under this checkout's server. On macOS the library's own
+    // install name was the absolute OUT_DIR path, so the load command itself
+    // pointed into scratch; it is `@rpath/<name>` now (link_shared).
+    if cfg!(target_os = "macos") {
+        println!("cargo:rustc-link-arg=-Wl,-rpath,@loader_path");
+    } else {
         println!("cargo:rustc-link-arg=-Wl,-rpath,$ORIGIN");
-        deploy_shared_to_profile_dir(&so_path);
     }
-    println!("cargo:rustc-link-arg=-Wl,-rpath,{}", parent.display());
+    deploy_shared_beside_binaries(&so_path);
 
     println!(
         "cargo:warning=db-backend: linked Nim MCR emulator ({} TUs) from {} as {}",
@@ -691,7 +705,12 @@ fn compile_c_to_obj_native(
 /// can copy the library with it. By rename, so that a reader sees the old file
 /// or the new one and never a partial one. OUT_DIR is laid out as
 /// `<target>/<profile>/build/<pkg>-<hash>/out`.
-fn deploy_shared_to_profile_dir(so_path: &Path) {
+/// Copy the emulator library into every directory cargo links a binary that
+/// loads it: the profile directory (`replay-server`, `virtualization-layers`,
+/// ...) and `deps/` (test and bench binaries). Each copy is written beside the
+/// build script's output and renamed into place, so a binary starting while
+/// another build deploys never maps half a library.
+fn deploy_shared_beside_binaries(so_path: &Path) {
     let out = PathBuf::from(env::var("OUT_DIR").expect("OUT_DIR"));
     let profile_dir = out
         .parent()
@@ -699,10 +718,13 @@ fn deploy_shared_to_profile_dir(so_path: &Path) {
         .and_then(|p| p.parent())
         .expect("OUT_DIR has at least three parents (.../target/<profile>/build/<pkg>/out)");
     let file_name = so_path.file_name().expect("library has a file name");
-    let dest = profile_dir.join(file_name);
-    let partial = out.join(format!("{}.deploy", file_name.to_string_lossy()));
-    std::fs::copy(so_path, &partial).expect("copy emulator library to profile dir");
-    std::fs::rename(&partial, &dest).expect("move emulator library into profile dir");
+    for dir in [profile_dir.to_path_buf(), profile_dir.join("deps")] {
+        std::fs::create_dir_all(&dir).expect("create the directory the library is deployed to");
+        let dest = dir.join(file_name);
+        let partial = out.join(format!("{}.deploy", file_name.to_string_lossy()));
+        std::fs::copy(so_path, &partial).expect("copy emulator library beside the binaries");
+        std::fs::rename(&partial, &dest).expect("move emulator library beside the binaries");
+    }
 }
 
 fn link_shared(
@@ -726,7 +748,14 @@ fn link_shared(
     let cc = env::var("CC").unwrap_or_else(|_| "cc".to_string());
     let mut cmd = Command::new(cc);
     if cfg!(target_os = "macos") {
-        cmd.arg("-dynamiclib").arg("-o").arg(&so_path);
+        // `@rpath/<name>`, not the default (the absolute output path in
+        // OUT_DIR, which every binary would then record as its load command).
+        // The binary's rpath is `@loader_path` (build_native).
+        let file_name = so_path.file_name().expect("library has a file name");
+        cmd.arg("-dynamiclib")
+            .arg(format!("-Wl,-install_name,@rpath/{}", file_name.to_string_lossy()))
+            .arg("-o")
+            .arg(&so_path);
     } else {
         cmd.arg("-shared").arg("-fPIC").arg("-o").arg(&so_path);
     }

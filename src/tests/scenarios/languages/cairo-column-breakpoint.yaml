@@ -1,0 +1,24 @@
+scenario: 1
+name: languages/cairo-column-breakpoint
+pack: codetracer
+summary: >-
+  In a Cairo recording, a click at line 4, column 5 then Shift+F9 sets a
+  column breakpoint there (its marker drawn at that column), and Continue from the
+  entry stops on line 4.
+
+stage:
+  - use: record-program
+    with: { program: ../codetracer-cairo-recorder/test-programs/cairo/flow_test.cairo }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 180s }
+  - wait: { until: { at: 'editor[file="flow_test.cairo"]/line[number="4"]', present: true }, timeout: 60s }
+  - click: { at: 'editor[file="flow_test.cairo"]/line[number="4"]', anchor: caret(5) }
+  - chord: Shift+F9
+  - wait: { until: { at: 'editor[file="flow_test.cairo"]/line[number="4"]', inline-breakpoints: ["5"] }, timeout: 30s }
+  - click: 'toolbar/toolbar-button[label="continue-image"]'
+    settle: false
+  - wait: { until: { at: 'editor[file="flow_test.cairo"]', current-line: 4 }, timeout: 60s }
+  - wait: { until: replay-idle, timeout: 60s }
+  - expect: { at: status-line, location: { matches: "flow_test.cairo:4#" } }

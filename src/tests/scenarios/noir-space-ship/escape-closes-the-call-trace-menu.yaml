@@ -1,0 +1,22 @@
+scenario: 1
+name: noir-space-ship/escape-closes-the-call-trace-menu
+pack: codetracer
+summary: >-
+  With a call's context menu open, Escape closes the menu (and only the
+  menu: the call trace keeps its selection).
+
+stage:
+  - use: record-program
+    with: { program: noir_space_ship }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 180s }
+  - click: 'pane-tab[label="CALLTRACE"]'
+  - wait: { until: call-trace.loaded, timeout: 60s }
+  - wait: { until: { at: 'call-trace/call[name="main"]', present: true }, timeout: 60s }
+  - click: { at: 'call-trace/call[name="main"]', anchor: name, button: right }
+  - wait: { until: { at: context-menu, present: true }, timeout: 30s }
+  - key: Esc
+  - wait: { until: { at: context-menu, absent: true }, timeout: 10s }
+  - expect: { at: 'call-trace/call[name="main"]', present: true }

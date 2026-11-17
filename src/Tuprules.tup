@@ -66,6 +66,7 @@ NIM_REPO_PATH_FLAGS=\
 --path:$(ROOT)/libs/parsetoml/src\
 --path:$(ROOT)/libs/nim-result\
 --path:$(ROOT)/libs/nim-confutils\
+--path:$(ROOT)/libs/nim-cli-spec/src\
 --path:$(ROOT)/libs/nimcrypto\
 --path:$(ROOT)/libs/zip\
 --path:$(ROOT)/libs/jsony/src\
@@ -207,7 +208,60 @@ NIM_FFI_CACHE_IGNORE = (([A-Za-z]:)?[/\\].*[/\\]ctnw[/\\].*|([A-Za-z]:)?[/\\].*[
 # `D:/metacraft-dev-deps/cargo`).
 WINDOWS_CARGO_HOME_IGNORE = (([A-Za-z]:)?[/\\][Uu]sers[/\\][^/\\]+[/\\]\.cargo[/\\].*|.+[/\\]\.?cargo[/\\](registry|git|\.crates.*|\.package-cache.*|\.global-cache.*|bin|env)([/\\].*)?|.+[/\\]\.?cargo[/\\]\.[^/\\]+)
 
-NIM_SIDE_OUTPUTS_IGNORE = ^(([A-Za-z]:)?[/\\]tmp[/\\]ct-nim-cache[/\\].*|([A-Za-z]:)?[/\\].*_linkerArgs\\.txt)$
+# THE NIM CACHE ROOT IS PER CHECKOUT. Every Nim rule below writes its nimcache
+# under $(NIM_CACHE_ROOT)/%B_<kind>. The `%B_<kind>` part (2026-02-10) keeps the
+# targets of ONE checkout apart; it names the binary, not the tree, so while
+# the root was the host-global `/tmp/ct-nim-cache` two worktrees building `ct`
+# at the same moment wrote one cache, and one of them failed with "final link
+# failed: bad value" linking objects the other had half-written (measured
+# 2026-11-14 by concurrent `just build-once` runs in sibling worktrees).
+#
+# The root is `ci/lib/nim-cache-root.sh`'s `ct_tup_nim_cache_root`:
+# `/tmp/ct-nim-cache/<checkout basename>-<cksum of its absolute path>`, the
+# scheme the test lanes already use. It reaches this file as the environment
+# variable CT_TUP_NIM_CACHE_ROOT, through `import` rather than `export`:
+#
+#   * `import` substitutes the value into the command string at PARSE time, so
+#     the rule needs no shell expansion. Windows tup does not run rules through
+#     a POSIX shell, and `tup generate` (ci/build/dev.sh) bakes the commands
+#     into a script that would otherwise depend on the variable again at run
+#     time.
+#   * tup records the import as a dependency of every Tupfile that includes
+#     this one, so a changed root reparses them and re-runs exactly the
+#     commands whose string changed. An `export` would also re-run every
+#     command, but with commands whose text does not say where they write.
+#   * tup has no absolute "this checkout" variable of its own ($(TUP_CWD) is
+#     relative), and the tracked variant configs (build-*/tup.config) cannot
+#     carry a per-checkout value. The cksum needs a shell, so the entry points
+#     compute it, through the same command that sets the Cargo values below:
+#     `ci/lib/tup-cargo-target.sh --export` (scripts/build-once.sh,
+#     scripts/build.sh for `tup monitor`, ci/build/dev.sh for `tup generate`,
+#     the dev shells in nix/shells/ci-base.nix, and the non-Nix environments
+#     non-nix-build/env.sh and, through
+#     non-nix-build/windows/setup-codetracer-runtime-env.sh, env.sh).
+#
+# UNSET STOPS THE PARSE, with the remedy. There used to be a fallback, a root
+# derived from the directory tup was started in. It was per checkout, but once
+# the Cargo values below became mandatory it could only be reached by someone
+# who had set those by hand and not this one, and there it picked a root that
+# differed from the scripted one and rebuilt every Nim target. One rule for
+# both: the entry points set the tup roots, or tup stops and says how.
+#
+# The root must stay under `/tmp/ct-nim-cache/`: that is what
+# NIM_SIDE_OUTPUTS_IGNORE excludes on Windows, which is why the helper does not
+# honour a CT_NIM_CACHE_ROOT override. ci/test/stale-artefact-guards-test.sh
+# fails if a rule spells the bare root again, or if this refusal goes.
+import CT_TUP_NIM_CACHE_ROOT=
+ifeq ($(CT_TUP_NIM_CACHE_ROOT),)
+error CT_TUP_NIM_CACHE_ROOT is unset, so tup cannot place the Nim cache for this checkout. Run just build-once, or in the checkout: eval "`bash ci/lib/tup-cargo-target.sh --export .`"
+endif
+NIM_CACHE_ROOT = $(CT_TUP_NIM_CACHE_ROOT)
+
+# `[.]`, not `\\.`, for the literal dot: tup 0.8 keeps `\\` verbatim inside a
+# variable, so `\\.` was "a backslash, then any character" and this alternative
+# never matched `<name>_linkerArgs.txt` (measured on tup 0.8 against a rule that
+# writes one; ci/test/stale-artefact-guards-test.sh holds the spelling).
+NIM_SIDE_OUTPUTS_IGNORE = ^(([A-Za-z]:)?[/\\]tmp[/\\]ct-nim-cache[/\\].*|([A-Za-z]:)?[/\\].*_linkerArgs[.]txt)$
 
 # The CodeTracer Nim fork's C backend writes a MACRO SOURCEMAP for every
 # binary it links, `macro_sourcemap_<out name>.json`, where <out name> is the
@@ -217,7 +271,7 @@ NIM_SIDE_OUTPUTS_IGNORE = ^(([A-Za-z]:)?[/\\]tmp[/\\]ct-nim-cache[/\\].*|([A-Za-
 # 0b5b5ec5 (the one reprobuild's `nim-fork` package builds) put it beside the
 # binary (`bin/macro_sourcemap_ct.json`); later revisions put it in the
 # nimcache, beside the per-module `.c.map` source maps, which every rule here
-# points at /tmp/ct-nim-cache (already excluded by NIM_SIDE_OUTPUTS_IGNORE).
+# points under $(NIM_CACHE_ROOT) (already excluded by NIM_SIDE_OUTPUTS_IGNORE).
 #
 # That is a side output tup was never told about, and since the `ci` / default
 # dev shells switched `nim` to the fork (ccbb85a0a, landed on dev 2026-09-20)
@@ -254,6 +308,36 @@ NIM_SIDE_OUTPUTS_IGNORE = ^(([A-Za-z]:)?[/\\]tmp[/\\]ct-nim-cache[/\\].*|([A-Za-
 # For the same reason no rule declares the file, whichever directory the
 # compiler in the shell writes it to.
 NIM_MACRO_SOURCEMAP_IGNORE = ^.*[/\\]macro_sourcemap_[^/\\]*\.json$
+# THE CARGO TARGETS ARE THIS CHECKOUT'S AND THIS COMPILER'S. The rules used to
+# build into host-global roots (`<tmp>/codetracer/<crate>_target`), and every
+# measured consequence came from sharing them: E0514 when another checkout's
+# rustc 1.96 metadata met this checkout's 1.89; one checkout running another
+# checkout's build script and missing the emulator library it should have
+# deployed; `.cargo-lock` unopenable because another account owned the root;
+# macOS /tmp cleanup emptying an `out/` a produced binary loaded from.
+# (codetracer-pm issues/2026-10-05-ui-tup-cargo-targets-collide-across-
+# workspaces-and-compilers.md; the contract is spec/Testing/
+# UI-Cargo-Output-Ownership.md.)
+#
+# `ci/lib/tup-cargo-target.sh` selects, creates or reopens the base
+# `<checkout>/build/tup-cargo-targets/rustc-<release>-<digest of the resolved
+# rustc>/` and refuses anything it cannot prove is that checkout's and that
+# compiler's. It yields two values, imported here:
+#
+#   CT_TUP_CARGO_TARGET_BASE    the absolute base, native spelling;
+#   CT_TUP_CARGO_TARGET_IGNORE  the same base as a Tup ignore-regex prefix
+#                               (separator-agnostic, bracket-escaped,
+#                               ending in a separator).
+#
+# `import`, like the Nim cache root above, so the commands carry the value as
+# text (Windows, `tup generate`) and a change reparses. There is NO default:
+# a missing value stops the parse. A fallback would have to be a root that
+# nobody proved is this checkout's, which is the defect. The entry points
+# (scripts/build-once.sh, scripts/build.sh, ci/build/dev.sh, the dev shell,
+# non-nix-build/env.sh, and env.sh through
+# non-nix-build/windows/setup-codetracer-runtime-env.sh) set both; a plain
+# `tup` elsewhere gets them from the remedy in the error below.
+#
 # Cargo writes CACHEDIR.TAG (and other metadata) into a temp directory whose
 # name is `<target_dir><RANDOM>` (e.g. `db_backend_targetF5RTUl/`) while
 # preparing the target dir, then atomically renames it to `<target_dir>`.
@@ -261,15 +345,18 @@ NIM_MACRO_SOURCEMAP_IGNORE = ^.*[/\\]macro_sourcemap_[^/\\]*\.json$
 # or tup reports the transient writes as undeclared outputs. The patterns
 # below intentionally allow either `target/...` (final layout) or
 # `target<6-char-suffix>/...` (cargo's atomic-prep layout).
-BACKEND_MANAGER_CARGO_IGNORE_OUTPUTS = ^(([A-Za-z]:)?[/\\]tmp[/\\]codetracer[/\\]backend_manager_target[A-Za-z0-9]*[/\\].*|$(WINDOWS_RUSTC_TMP_IGNORE)|$(WINDOWS_CARGO_HOME_IGNORE))$
-DB_BACKEND_CARGO_IGNORE_OUTPUTS = ^(([A-Za-z]:)?[/\\]tmp[/\\]codetracer[/\\]db_backend_target[A-Za-z0-9]*[/\\].*|$(WINDOWS_RUSTC_TMP_IGNORE)|$(WINDOWS_RUSTC_PIPE_IGNORE)|$(WINDOWS_CARGO_HOME_IGNORE)|$(NIM_FFI_CACHE_IGNORE))$
-VIRTUALIZATION_LAYERS_CARGO_IGNORE_OUTPUTS = ^(([A-Za-z]:)?[/\\]tmp[/\\]codetracer[/\\]virtualization_layers_target[A-Za-z0-9]*[/\\].*|$(WINDOWS_RUSTC_TMP_IGNORE)|$(WINDOWS_CARGO_HOME_IGNORE))$
-
-ifeq (@(TUP_PLATFORM),win32)
-CARGO_TARGET_BASE = C:/tmp/codetracer
-else
-CARGO_TARGET_BASE = /tmp/codetracer
+import CT_TUP_CARGO_TARGET_BASE=
+import CT_TUP_CARGO_TARGET_IGNORE=
+ifeq ($(CT_TUP_CARGO_TARGET_BASE),)
+error CT_TUP_CARGO_TARGET_BASE is unset, so the Cargo rules have no target directory this checkout owns. Run just build-once, or in the checkout: eval "`bash ci/lib/tup-cargo-target.sh --export .`"
 endif
+ifeq ($(CT_TUP_CARGO_TARGET_IGNORE),)
+error CT_TUP_CARGO_TARGET_IGNORE is unset, so tup cannot exclude the Cargo target writes. In the checkout: eval "`bash ci/lib/tup-cargo-target.sh --export .`"
+endif
+CARGO_TARGET_BASE = $(CT_TUP_CARGO_TARGET_BASE)
+BACKEND_MANAGER_CARGO_IGNORE_OUTPUTS = ^($(CT_TUP_CARGO_TARGET_IGNORE)backend_manager_target[A-Za-z0-9]*[/\\].*|$(WINDOWS_RUSTC_TMP_IGNORE)|$(WINDOWS_CARGO_HOME_IGNORE))$
+DB_BACKEND_CARGO_IGNORE_OUTPUTS = ^($(CT_TUP_CARGO_TARGET_IGNORE)db_backend_target[A-Za-z0-9]*[/\\].*|$(WINDOWS_RUSTC_TMP_IGNORE)|$(WINDOWS_RUSTC_PIPE_IGNORE)|$(WINDOWS_CARGO_HOME_IGNORE)|$(NIM_FFI_CACHE_IGNORE))$
+VIRTUALIZATION_LAYERS_CARGO_IGNORE_OUTPUTS = ^($(CT_TUP_CARGO_TARGET_IGNORE)virtualization_layers_target[A-Za-z0-9]*[/\\].*|$(WINDOWS_RUSTC_TMP_IGNORE)|$(WINDOWS_CARGO_HOME_IGNORE))$
 
 ifeq (@(TUP_PLATFORM),win32)
 TSC = tsc.cmd
@@ -343,7 +430,7 @@ endif
 --lineDir:on\
 --hints:off \
 --warnings:off \
---nimcache:/tmp/ct-nim-cache/%B_nim_js\
+--nimcache:$(NIM_CACHE_ROOT)/%B_nim_js\
 --out:%o\
 js %f |> %B.js | $(NIM_SIDE_OUTPUTS_IGNORE)
 
@@ -356,7 +443,7 @@ js %f |> %B.js
 -d:ctIndex\
 -d:nodejs\
 --sourcemap:on\
---nimcache:/tmp/ct-nim-cache/%B_nim_node_index\
+--nimcache:$(NIM_CACHE_ROOT)/%B_nim_node_index\
 --out:%o\
 js %f |> %B.js %B.js.map | $(NIM_SIDE_OUTPUTS_IGNORE)
 
@@ -366,7 +453,7 @@ js %f |> %B.js %B.js.map | $(NIM_SIDE_OUTPUTS_IGNORE)
 --debugInfo:on\
 --lineDir:on\
 --sourcemap:on\
---nimcache:/tmp/ct-nim-cache/%B_nim_node_subwindow\
+--nimcache:$(NIM_CACHE_ROOT)/%B_nim_node_subwindow\
 --out:%o\
 js %f |> %B.js %B.js.map | $(NIM_SIDE_OUTPUTS_IGNORE)
 
@@ -375,7 +462,7 @@ js %f |> %B.js %B.js.map | $(NIM_SIDE_OUTPUTS_IGNORE)
 -d:server\
 -d:nodejs\
 --sourcemap:on\
---nimcache:/tmp/ct-nim-cache/%B_nim_node_index_server\
+--nimcache:$(NIM_CACHE_ROOT)/%B_nim_node_index_server\
 --out:%o \
 js %f |> %B.js %B.js.map | $(NIM_SIDE_OUTPUTS_IGNORE)
 
@@ -393,7 +480,7 @@ js %f |> %o
 --linetrace:on \
 --lineDir:on\
 --debugInfo\
---nimcache:/tmp/ct-nim-cache/%B_test_nimcache2\
+--nimcache:$(NIM_CACHE_ROOT)/%B_test_nimcache2\
 --out:%o\
 js %f |> %B.js | $(NIM_SIDE_OUTPUTS_IGNORE)
 
@@ -437,7 +524,7 @@ endif
 -d:ssl \
 -d:useOpenssl3 \
 $(DYNLIB_OVERRIDE_FLAGS) \
---nimcache:/tmp/ct-nim-cache/%B_c\
+--nimcache:$(NIM_CACHE_ROOT)/%B_c\
 --out:%o\
 c %f |> %o | $(NIM_SIDE_OUTPUTS_IGNORE) $(NIM_MACRO_SOURCEMAP_IGNORE)
 
@@ -458,7 +545,7 @@ $(DYNLIB_OVERRIDE_FLAGS)
 # Standard CodeTracer binary build (e.g. db-backend-record).
 !codetracer = |> $(NIM_SELECTED)\
 $(CODETRACER_FLAGS) \
---nimcache:/tmp/ct-nim-cache/%B_codetracer_binary\
+--nimcache:$(NIM_CACHE_ROOT)/%B_codetracer_binary\
 --out:%o\
 c %f |> %o | $(NIM_SIDE_OUTPUTS_IGNORE) $(NIM_MACRO_SOURCEMAP_IGNORE)
 
@@ -472,7 +559,7 @@ c %f |> %o | $(NIM_SIDE_OUTPUTS_IGNORE) $(NIM_MACRO_SOURCEMAP_IGNORE)
 # only run outside the build sandbox, as a post-materialization step.
 !codetracer_bpf = |> $(NIM_SELECTED)\
 $(CODETRACER_FLAGS) \
---nimcache:/tmp/ct-nim-cache/%B_codetracer_binary\
+--nimcache:$(NIM_CACHE_ROOT)/%B_codetracer_binary\
 --out:%o\
 c %f\
 |> %o | $(NIM_SIDE_OUTPUTS_IGNORE) $(NIM_MACRO_SOURCEMAP_IGNORE)
@@ -498,12 +585,12 @@ c %f\
 --boundChecks:on \
 --stacktrace:on \
 --linetrace:on \
---nimcache:/tmp/ct-nim-cache/%B_ct_test_orc_binary\
+--nimcache:$(NIM_CACHE_ROOT)/%B_ct_test_orc_binary\
 --out:%o\
 c %f |> %o | $(NIM_SIDE_OUTPUTS_IGNORE) $(NIM_MACRO_SOURCEMAP_IGNORE)
 
 !nim_tester = |> ^ %f^ $(NIM_SELECTED) \
---nimcache:/tmp/ct-nim-cache/tester \
+--nimcache:$(NIM_CACHE_ROOT)/tester \
 --warnings:on \
 --hints:on \
 --out:%o\
@@ -599,18 +686,22 @@ ifeq (@(TUP_PLATFORM),win32)
     cp $(CARGO_TARGET_BASE)/db_backend_target/debug/mcr_emulator.dll %2o |> %o | $(DB_BACKEND_CARGO_IGNORE_OUTPUTS)
 endif
 ifeq (@(TUP_PLATFORM),linux)
-# The emulator library travels with the binary, which searches its own directory
-# first (src/db-backend/build.rs): the target directory is machine-wide, and
-# another checkout's build rewrites the copy in it.
+# The emulator library travels with the binary, whose ONLY run-time search path
+# is its own directory (`$ORIGIN`, src/db-backend/build.rs): a produced binary
+# carries no load path into the Cargo target, so it keeps working when that
+# directory is moved, rebuilt by another compiler or cleaned.
 !debug_rust_cargo_db_backend = |> \
     cargo build --locked $(RUST_WINDOWS_LINKER_CONFIG) $(DB_BACKEND_CARGO_FEATURES) --target-dir $(CARGO_TARGET_BASE)/db_backend_target && \
     cp $(CARGO_TARGET_BASE)/db_backend_target/debug/replay-server$(EXE_SUFFIX) %1o && \
     cp $(CARGO_TARGET_BASE)/db_backend_target/debug/libmcr_emulator.so %2o |> %o | $(DB_BACKEND_CARGO_IGNORE_OUTPUTS)
 endif
 ifeq (@(TUP_PLATFORM),macosx)
+# The same on macOS: the binary's only rpath is `@loader_path`, and the library's
+# install name is `@rpath/libmcr_emulator.dylib` (src/db-backend/build.rs).
 !debug_rust_cargo_db_backend = |> \
     cargo build --locked $(RUST_WINDOWS_LINKER_CONFIG) $(DB_BACKEND_CARGO_FEATURES) --target-dir $(CARGO_TARGET_BASE)/db_backend_target && \
-    cp $(CARGO_TARGET_BASE)/db_backend_target/debug/replay-server$(EXE_SUFFIX) %o |> %o | $(DB_BACKEND_CARGO_IGNORE_OUTPUTS)
+    cp $(CARGO_TARGET_BASE)/db_backend_target/debug/replay-server$(EXE_SUFFIX) %1o && \
+    cp $(CARGO_TARGET_BASE)/db_backend_target/debug/libmcr_emulator.dylib %2o |> %o | $(DB_BACKEND_CARGO_IGNORE_OUTPUTS)
 endif
 !rust_cargo_db_backend = |> \
     cargo build --locked $(RUST_WINDOWS_LINKER_CONFIG) $(DB_BACKEND_CARGO_FEATURES) --release --target-dir $(CARGO_TARGET_BASE)/db_backend_target && \

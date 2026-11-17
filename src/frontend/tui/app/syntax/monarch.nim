@@ -137,6 +137,18 @@ proc definitions(): JsonNode =
     parsedDefinitions = parseJson(MonarchJson)
   parsedDefinitions
 
+proc addMonarchDefinitions*(text: string) =
+  ## More exported definitions beside Monaco's (`scripts/monarch-languages.mjs`
+  ## with a second output): the desktop's own languages, which its shared
+  ## editor adds; the terminal links none.
+  let extra = parseJson(text){"languages"}
+  if extra.isNil:
+    return
+  let langs = definitions(){"languages"}
+  for id, d in extra.pairs:
+    langs[id] = d
+    languageCache.del(id)
+
 proc monacoVersion*(): string =
   ## The `monaco-editor` version the definitions were exported from.
   definitions(){"monacoVersion"}.getStr("")

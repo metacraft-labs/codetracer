@@ -1,0 +1,20 @@
+scenario: 1
+name: keymaps/plat68c-ctrl-k-prefix-waits
+pack: codetracer
+summary: >-
+  Under CUA a Ctrl+K prefix waits: Ctrl+K, the pointer resting for a second
+  and a half, then Ctrl+S still opens the keyboard shortcuts dialog.
+
+stage:
+  - use: record-program
+    with: { program: calc }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 180s }
+  - wait: { until: call-trace.loaded, timeout: 120s }
+  - click: { at: 'editor[file="main.py"]/line[number="1"]', anchor: text-start }
+  - chord: Ctrl+K
+  - hover: { at: 'editor[file="main.py"]/line[number="1"]', anchor: text-end, for: 1500ms }
+  - chord: Ctrl+S
+  - wait: { until: { at: shortcuts-dialog, present: true }, timeout: 20s }

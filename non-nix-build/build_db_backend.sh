@@ -23,6 +23,14 @@ cargo build --release --features io-transport
 # under the new name -- same fix appimage-scripts/build_db_backend.sh
 # already shipped in commit 510673a5.
 cp "$ROOT_DIR/src/db-backend/target/release/replay-server" "$DIST_DIR/bin/replay-server"
+# And the emulator library beside it: the binary's only run-time search path is
+# its own directory ($ORIGIN / @loader_path, src/db-backend/build.rs), which
+# deploys the library into target/release/.
+case "$(uname -s)" in
+Darwin) emulator_library="libmcr_emulator.dylib" ;;
+*) emulator_library="libmcr_emulator.so" ;;
+esac
+cp "$ROOT_DIR/src/db-backend/target/release/${emulator_library}" "$DIST_DIR/bin/${emulator_library}"
 popd
 
 echo "==========="

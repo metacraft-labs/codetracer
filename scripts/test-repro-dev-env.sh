@@ -8,7 +8,7 @@
 # Host integration test, Linux only: it activates the real reprobuild dev env
 # through `repro exec`, which evaluates the Nix flake, so it needs repro and nix.
 # The expected build dir is the Linux tup default, src/build-debug.
-# NOT-A-CI-GATE; run it with `just test-repro-dev-env`.
+# CI runs it in the reprobuild-linux-smoke lane; locally: `just test-repro-dev-env`.
 # Usage: bash scripts/test-repro-dev-env.sh
 set -euo pipefail
 repo=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)

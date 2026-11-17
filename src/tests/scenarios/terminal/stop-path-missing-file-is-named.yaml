@@ -1,0 +1,22 @@
+scenario: 1
+name: terminal/stop-path-missing-file-is-named
+pack: codetracer
+summary: >-
+  A stop in a file the recording lacks says so, naming its `..` path, instead
+  of a "No verified source" banner or another file's text.
+stage:
+  - use: record-program
+    with: { program: multi_root/app/main.py }
+  - use: drop-recorded-file
+    with: { name: helpers.py }
+  - use: open-recording
+    with: { width: 200, height: 50 }
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - wait: call-trace.loaded
+  - click: { at: 'call-trace/call[name="add"]' }
+  - wait: { until: { at: 'pane-tab[label="shared/helpers.py"]', present: true }, timeout: 30s }
+  - wait: { until: { at: 'pane[title="shared/helpers.py"]', assert: 'has-row("No source for ")' }, timeout: 30s }
+  # the message names the `..` path, wrapped at the pane's edge
+  - expect: { at: 'pane[title="shared/helpers.py"]', assert: ['has-row("multi_root/app/../shared/")', 'has-row("in this recording.")'] }
+  - expect: { at: 'pane[title="shared/helpers.py"]', assert: ['lacks-row("No verified source")', 'lacks-row("def scale(value, factor):")', 'lacks-row("return left + right")'] }

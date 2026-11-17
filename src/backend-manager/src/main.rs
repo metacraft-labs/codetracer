@@ -2877,15 +2877,15 @@ async fn run_trace_info(
     let trace_path_str = resolve_cli_trace_path(trace_path).await?;
 
     // First, open the trace so that trace-info has session data to return.
-    // Large traces (e.g. 96 MB Python traces) may take a while to load,
-    // so we use a generous timeout.  The daemon's internal DAP init can
-    // take up to 4 * 30 s = 120 s, and trace processing adds more time.
+    // Large traces (e.g. 96 MB Python traces) may take a while to load:
+    // 180 s, or with CODETRACER_DAP_INIT_TIMEOUT_SECS set, the daemon's own
+    // bound on its DAP init (`dap_init::open_trace_deadline_secs`).
     let open_resp = cli_dap_request(
         &mut stream,
         "ct/open-trace",
         1,
         cli_trace_request(json!({"tracePath": trace_path_str})),
-        180,
+        crate::dap_init::open_trace_deadline_secs_from_env(180),
     )
     .await?;
 
@@ -2984,7 +2984,7 @@ async fn run_trace_origin(
         "ct/open-trace",
         1,
         cli_trace_request(json!({"tracePath": trace_path_str})),
-        180,
+        crate::dap_init::open_trace_deadline_secs_from_env(180),
     )
     .await?;
     if open_resp.get("success").and_then(Value::as_bool) != Some(true) {
@@ -3070,7 +3070,7 @@ async fn run_trace_origin(
         "ct/open-trace",
         1,
         cli_trace_request(json!({"tracePath": trace_path_str})),
-        180,
+        crate::dap_init::open_trace_deadline_secs_from_env(180),
     )
     .await?;
     if open_resp.get("success").and_then(Value::as_bool) != Some(true) {
@@ -3270,7 +3270,7 @@ async fn run_trace_info(
         "ct/open-trace",
         1,
         cli_trace_request(json!({"tracePath": trace_path_str})),
-        180,
+        crate::dap_init::open_trace_deadline_secs_from_env(180),
     )
     .await?;
 

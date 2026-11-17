@@ -1,0 +1,37 @@
+scenario: 1
+name: auto-hide/focus-border-bottom-edge
+pack: codetracer
+summary: >-
+  The status bar's panel (BUILD) is outlined the same way in auto-hide and
+  docked: a resolved, solid line of the same colour and width that runs
+  around the panel and its strip tab — and in auto-hide it paints above the
+  overlay.
+
+stage:
+  - use: record-program
+    with: { program: py_console_logs/main.py }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - wait: { until: { at: window, strip-tabs: { count: 4 } }, timeout: 30s }
+
+  - beat: auto-hide
+    steps:
+      - hover: { at: 'strip-tab[label="BUILD"]', for: 500ms }
+      - wait: { until: { at: 'selection-outline[kind="overlay"]', present: true }, timeout: 15s }
+      - expect: { at: 'selection-outline[kind="overlay"]', solid: true, measurable: true, above-overlay: true }
+      - expect: { at: 'selection-outline[kind="overlay"]', stroke: { matches: "^rgba?\\(" }, stroke-width: { gt: 0 } }
+      - expect: { at: 'selection-outline[kind="overlay"]', encloses: { contains: "BUILD" } }
+      - expect: { at: 'selection-outline[kind="overlay"]', stroke: "rgb(86, 86, 86)", stroke-width: 1 }
+      - capture: { name: bottom-auto-hide }
+
+  - beat: docked
+    steps:
+      - click: { at: 'strip-tab[label="BUILD"]' }
+      - wait: { until: { at: 'selection-outline[kind="docked"]', present: true }, timeout: 15s }
+      - expect: { at: 'selection-outline[kind="docked"]', solid: true, measurable: true }
+      - expect: { at: 'selection-outline[kind="docked"]', encloses: { contains: "BUILD" } }
+      # the same line as in auto-hide
+      - expect: { at: 'selection-outline[kind="docked"]', stroke: "rgb(86, 86, 86)", stroke-width: 1 }
+      - capture: { name: bottom-docked }

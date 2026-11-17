@@ -1,0 +1,1727 @@
+# ct console: 80 argv cases through ct's loader (the parse probe)
+
+### 1: bare
+argv: ct "console"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = console
+  consoleRecordingId = none
+  consoleTraceFolder = none
+  consoleLastTraceMatchingPattern = none
+  consoleInteractive = none
+VALIDATED replayInteractive = true
+--- stderr
+--- end
+
+### 2: pattern
+argv: ct "console" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = console
+  consoleRecordingId = none
+  consoleTraceFolder = none
+  consoleLastTraceMatchingPattern = some("prog")
+  consoleInteractive = none
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 3: two patterns
+argv: ct "console" "a" "b"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The subcommand 'console' does not accept additional arguments\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 4: --id <v>
+argv: ct "console" "--id" "0190d7a0"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = console
+  consoleRecordingId = some("0190d7a0")
+  consoleTraceFolder = none
+  consoleLastTraceMatchingPattern = none
+  consoleInteractive = none
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 5: --id=<v>
+argv: ct "console" "--id=0190d7a0"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = console
+  consoleRecordingId = some("0190d7a0")
+  consoleTraceFolder = none
+  consoleLastTraceMatchingPattern = none
+  consoleInteractive = none
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 6: --id:<v>
+argv: ct "console" "--id:0190d7a0"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = console
+  consoleRecordingId = some("0190d7a0")
+  consoleTraceFolder = none
+  consoleLastTraceMatchingPattern = none
+  consoleInteractive = none
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 7: --id 0190d7a0
+argv: ct "console" "--id" "0190d7a0"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = console
+  consoleRecordingId = some("0190d7a0")
+  consoleTraceFolder = none
+  consoleLastTraceMatchingPattern = none
+  consoleInteractive = none
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 8: --id=0190d7a0
+argv: ct "console" "--id=0190d7a0"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = console
+  consoleRecordingId = some("0190d7a0")
+  consoleTraceFolder = none
+  consoleLastTraceMatchingPattern = none
+  consoleInteractive = none
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 9: --id 0190d7a0-1234-7abc-8def-0123456789ab
+argv: ct "console" "--id" "0190d7a0-1234-7abc-8def-0123456789ab"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = console
+  consoleRecordingId = some("0190d7a0-1234-7abc-8def-0123456789ab")
+  consoleTraceFolder = none
+  consoleLastTraceMatchingPattern = none
+  consoleInteractive = none
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 10: --id=0190d7a0-1234-7abc-8def-0123456789ab
+argv: ct "console" "--id=0190d7a0-1234-7abc-8def-0123456789ab"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = console
+  consoleRecordingId = some("0190d7a0-1234-7abc-8def-0123456789ab")
+  consoleTraceFolder = none
+  consoleLastTraceMatchingPattern = none
+  consoleInteractive = none
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 11: --id empty
+argv: ct "console" "--id" ""
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = console
+  consoleRecordingId = some("")
+  consoleTraceFolder = none
+  consoleLastTraceMatchingPattern = none
+  consoleInteractive = none
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 12: --id= (empty)
+argv: ct "console" "--id="
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = console
+  consoleRecordingId = some("")
+  consoleTraceFolder = none
+  consoleLastTraceMatchingPattern = none
+  consoleInteractive = none
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 13: --id= <v> (next word)
+argv: ct "console" "--id=" "0190d7a0"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = console
+  consoleRecordingId = some("0190d7a0")
+  consoleTraceFolder = none
+  consoleLastTraceMatchingPattern = none
+  consoleInteractive = none
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 14: --id -x (value starts with -)
+argv: ct "console" "--id" "-x"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = console
+  consoleRecordingId = some("-x")
+  consoleTraceFolder = none
+  consoleLastTraceMatchingPattern = none
+  consoleInteractive = none
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 15: --id --x (value starts with --)
+argv: ct "console" "--id" "--x"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = console
+  consoleRecordingId = some("--x")
+  consoleTraceFolder = none
+  consoleLastTraceMatchingPattern = none
+  consoleInteractive = none
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 16: --id --new-tab <v> (an option between it and its value)
+argv: ct "console" "--id" "--new-tab" "0190d7a0"
+env: (none)
+exit: 1
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = console
+  consoleRecordingId = some("--new-tab")
+  consoleTraceFolder = none
+  consoleLastTraceMatchingPattern = some("0190d7a0")
+  consoleInteractive = none
+configuration error: expected no more than one arg to command to be passed
+Try `ct --help` for more information
+--- stderr
+--- end
+
+### 17: --id repeated, last wins
+argv: ct "console" "--id" "0190d7a0" "--id" "0190d7a0-1234-7abc-8def-0123456789ab"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = console
+  consoleRecordingId = some("0190d7a0-1234-7abc-8def-0123456789ab")
+  consoleTraceFolder = none
+  consoleLastTraceMatchingPattern = none
+  consoleInteractive = none
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 18: --id missing value (last)
+argv: ct "console" "--id"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The option '\e[34m--id\e[0m' requires a value\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 19: --ID <v> (style variant)
+argv: ct "console" "--ID" "0190d7a0"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = console
+  consoleRecordingId = some("0190d7a0")
+  consoleTraceFolder = none
+  consoleLastTraceMatchingPattern = none
+  consoleInteractive = none
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 20: --i_d <v> (style variant)
+argv: ct "console" "--i_d" "0190d7a0"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = console
+  consoleRecordingId = some("0190d7a0")
+  consoleTraceFolder = none
+  consoleLastTraceMatchingPattern = none
+  consoleInteractive = none
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 21: --trace-folder <v>
+argv: ct "console" "--trace-folder" "/tr"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = console
+  consoleRecordingId = none
+  consoleTraceFolder = some("/tr")
+  consoleLastTraceMatchingPattern = none
+  consoleInteractive = none
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 22: --trace-folder=<v>
+argv: ct "console" "--trace-folder=/tr"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = console
+  consoleRecordingId = none
+  consoleTraceFolder = some("/tr")
+  consoleLastTraceMatchingPattern = none
+  consoleInteractive = none
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 23: --trace-folder:<v>
+argv: ct "console" "--trace-folder:/tr"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = console
+  consoleRecordingId = none
+  consoleTraceFolder = some("/tr")
+  consoleLastTraceMatchingPattern = none
+  consoleInteractive = none
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 24: -t <v>
+argv: ct "console" "-t" "/tr"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = console
+  consoleRecordingId = none
+  consoleTraceFolder = some("/tr")
+  consoleLastTraceMatchingPattern = none
+  consoleInteractive = none
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 25: -t=<v>
+argv: ct "console" "-t=/tr"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = console
+  consoleRecordingId = none
+  consoleTraceFolder = some("/tr")
+  consoleLastTraceMatchingPattern = none
+  consoleInteractive = none
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 26: -t:<v>
+argv: ct "console" "-t:/tr"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = console
+  consoleRecordingId = none
+  consoleTraceFolder = some("/tr")
+  consoleLastTraceMatchingPattern = none
+  consoleInteractive = none
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 27: -t<v> (attached)
+argv: ct "console" "-t/tr"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = console
+  consoleRecordingId = none
+  consoleTraceFolder = some("/tr")
+  consoleLastTraceMatchingPattern = none
+  consoleInteractive = none
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 28: -T <v> (other case)
+argv: ct "console" "-T" "/tr"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'T'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 29: --t <v> (the letter as a long option)
+argv: ct "console" "--t" "/tr"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = console
+  consoleRecordingId = none
+  consoleTraceFolder = some("/tr")
+  consoleLastTraceMatchingPattern = none
+  consoleInteractive = none
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 30: --trace-folder /tr
+argv: ct "console" "--trace-folder" "/tr"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = console
+  consoleRecordingId = none
+  consoleTraceFolder = some("/tr")
+  consoleLastTraceMatchingPattern = none
+  consoleInteractive = none
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 31: --trace-folder=/tr
+argv: ct "console" "--trace-folder=/tr"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = console
+  consoleRecordingId = none
+  consoleTraceFolder = some("/tr")
+  consoleLastTraceMatchingPattern = none
+  consoleInteractive = none
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 32: --trace-folder rel
+argv: ct "console" "--trace-folder" "rel"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = console
+  consoleRecordingId = none
+  consoleTraceFolder = some("rel")
+  consoleLastTraceMatchingPattern = none
+  consoleInteractive = none
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 33: --trace-folder=rel
+argv: ct "console" "--trace-folder=rel"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = console
+  consoleRecordingId = none
+  consoleTraceFolder = some("rel")
+  consoleLastTraceMatchingPattern = none
+  consoleInteractive = none
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 34: --trace-folder empty
+argv: ct "console" "--trace-folder" ""
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = console
+  consoleRecordingId = none
+  consoleTraceFolder = some("")
+  consoleLastTraceMatchingPattern = none
+  consoleInteractive = none
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 35: --trace-folder= (empty)
+argv: ct "console" "--trace-folder="
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = console
+  consoleRecordingId = none
+  consoleTraceFolder = some("")
+  consoleLastTraceMatchingPattern = none
+  consoleInteractive = none
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 36: --trace-folder= <v> (next word)
+argv: ct "console" "--trace-folder=" "/tr"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = console
+  consoleRecordingId = none
+  consoleTraceFolder = some("/tr")
+  consoleLastTraceMatchingPattern = none
+  consoleInteractive = none
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 37: --trace-folder -x (value starts with -)
+argv: ct "console" "--trace-folder" "-x"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = console
+  consoleRecordingId = none
+  consoleTraceFolder = some("-x")
+  consoleLastTraceMatchingPattern = none
+  consoleInteractive = none
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 38: --trace-folder --x (value starts with --)
+argv: ct "console" "--trace-folder" "--x"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = console
+  consoleRecordingId = none
+  consoleTraceFolder = some("--x")
+  consoleLastTraceMatchingPattern = none
+  consoleInteractive = none
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 39: --trace-folder --new-tab <v> (an option between it and its value)
+argv: ct "console" "--trace-folder" "--new-tab" "/tr"
+env: (none)
+exit: 1
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = console
+  consoleRecordingId = none
+  consoleTraceFolder = some("--new-tab")
+  consoleLastTraceMatchingPattern = some("/tr")
+  consoleInteractive = none
+configuration error: expected no more than one arg to command to be passed
+Try `ct --help` for more information
+--- stderr
+--- end
+
+### 40: --trace-folder repeated, last wins
+argv: ct "console" "--trace-folder" "/tr" "--trace-folder" "rel"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = console
+  consoleRecordingId = none
+  consoleTraceFolder = some("rel")
+  consoleLastTraceMatchingPattern = none
+  consoleInteractive = none
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 41: --trace-folder missing value (last)
+argv: ct "console" "--trace-folder"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The option '\e[34m--trace-folder\e[0m' requires a value\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 42: --TRACE-FOLDER <v> (style variant)
+argv: ct "console" "--TRACE-FOLDER" "/tr"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = console
+  consoleRecordingId = none
+  consoleTraceFolder = some("/tr")
+  consoleLastTraceMatchingPattern = none
+  consoleInteractive = none
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 43: --t_race-folder <v> (style variant)
+argv: ct "console" "--t_race-folder" "/tr"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = console
+  consoleRecordingId = none
+  consoleTraceFolder = some("/tr")
+  consoleLastTraceMatchingPattern = none
+  consoleInteractive = none
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 44: --trace_folder <v> (style variant)
+argv: ct "console" "--trace_folder" "/tr"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'trace_folder'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 45: --tracefolder <v> (style variant)
+argv: ct "console" "--tracefolder" "/tr"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'tracefolder'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 46: --interactive (last)
+argv: ct "console" "--interactive"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = console
+  consoleRecordingId = none
+  consoleTraceFolder = none
+  consoleLastTraceMatchingPattern = none
+  consoleInteractive = some(true)
+VALIDATED replayInteractive = true
+--- stderr
+--- end
+
+### 47: --interactive true
+argv: ct "console" "--interactive" "true"
+env: (none)
+exit: 1
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = console
+  consoleRecordingId = none
+  consoleTraceFolder = none
+  consoleLastTraceMatchingPattern = some("true")
+  consoleInteractive = some(true)
+configuration error: expected no more than one arg to command to be passed
+Try `ct --help` for more information
+--- stderr
+--- end
+
+### 48: --interactive=false
+argv: ct "console" "--interactive=false"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = console
+  consoleRecordingId = none
+  consoleTraceFolder = none
+  consoleLastTraceMatchingPattern = none
+  consoleInteractive = some(false)
+VALIDATED replayInteractive = true
+--- stderr
+--- end
+
+### 49: -i (last)
+argv: ct "console" "-i"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = console
+  consoleRecordingId = none
+  consoleTraceFolder = none
+  consoleLastTraceMatchingPattern = none
+  consoleInteractive = some(true)
+VALIDATED replayInteractive = true
+--- stderr
+--- end
+
+### 50: -i true
+argv: ct "console" "-i" "true"
+env: (none)
+exit: 1
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = console
+  consoleRecordingId = none
+  consoleTraceFolder = none
+  consoleLastTraceMatchingPattern = some("true")
+  consoleInteractive = some(true)
+configuration error: expected no more than one arg to command to be passed
+Try `ct --help` for more information
+--- stderr
+--- end
+
+### 51: -i=false
+argv: ct "console" "-i=false"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = console
+  consoleRecordingId = none
+  consoleTraceFolder = none
+  consoleLastTraceMatchingPattern = none
+  consoleInteractive = some(false)
+VALIDATED replayInteractive = true
+--- stderr
+--- end
+
+### 52: --interactive=true
+argv: ct "console" "--interactive=true"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = console
+  consoleRecordingId = none
+  consoleTraceFolder = none
+  consoleLastTraceMatchingPattern = none
+  consoleInteractive = some(true)
+VALIDATED replayInteractive = true
+--- stderr
+--- end
+
+### 53: --interactive=false
+argv: ct "console" "--interactive=false"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = console
+  consoleRecordingId = none
+  consoleTraceFolder = none
+  consoleLastTraceMatchingPattern = none
+  consoleInteractive = some(false)
+VALIDATED replayInteractive = true
+--- stderr
+--- end
+
+### 54: --interactive=on
+argv: ct "console" "--interactive=on"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = console
+  consoleRecordingId = none
+  consoleTraceFolder = none
+  consoleLastTraceMatchingPattern = none
+  consoleInteractive = some(true)
+VALIDATED replayInteractive = true
+--- stderr
+--- end
+
+### 55: --interactive=maybe
+argv: ct "console" "--interactive=maybe"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Error while processing the \e[34minteractive=maybe\e[0m parameter: 'maybe' is not a valid boolean value. Supported values are on/off, yes/no, true/false or 1/0\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 56: --interactive=
+argv: ct "console" "--interactive="
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = console
+  consoleRecordingId = none
+  consoleTraceFolder = none
+  consoleLastTraceMatchingPattern = none
+  consoleInteractive = some(true)
+VALIDATED replayInteractive = true
+--- stderr
+--- end
+
+### 57: --interactive <pattern> (next word)
+argv: ct "console" "--interactive" "prog"
+env: (none)
+exit: 1
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = console
+  consoleRecordingId = none
+  consoleTraceFolder = none
+  consoleLastTraceMatchingPattern = some("prog")
+  consoleInteractive = some(true)
+configuration error: expected no more than one arg to command to be passed
+Try `ct --help` for more information
+--- stderr
+--- end
+
+### 58: --interactive --cwd=x (next word an option)
+argv: ct "console" "--interactive" "--cwd=x"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = some("x")
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = console
+  consoleRecordingId = none
+  consoleTraceFolder = none
+  consoleLastTraceMatchingPattern = none
+  consoleInteractive = some(true)
+VALIDATED replayInteractive = true
+--- stderr
+--- end
+
+### 59: --no-interactive
+argv: ct "console" "--no-interactive"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'no-interactive'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 60: --id and a pattern
+argv: ct "console" "--id" "x" "prog"
+env: (none)
+exit: 1
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = console
+  consoleRecordingId = some("x")
+  consoleTraceFolder = none
+  consoleLastTraceMatchingPattern = some("prog")
+  consoleInteractive = none
+configuration error: expected no more than one arg to command to be passed
+Try `ct --help` for more information
+--- stderr
+--- end
+
+### 61: --id and -t
+argv: ct "console" "--id" "x" "-t" "/tr"
+env: (none)
+exit: 1
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = console
+  consoleRecordingId = some("x")
+  consoleTraceFolder = some("/tr")
+  consoleLastTraceMatchingPattern = none
+  consoleInteractive = none
+configuration error: expected no more than one arg to command to be passed
+Try `ct --help` for more information
+--- stderr
+--- end
+
+### 62: -t and -i
+argv: ct "console" "-t" "/tr" "-i" "true"
+env: (none)
+exit: 1
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = console
+  consoleRecordingId = none
+  consoleTraceFolder = some("/tr")
+  consoleLastTraceMatchingPattern = some("true")
+  consoleInteractive = some(true)
+configuration error: expected no more than one arg to command to be passed
+Try `ct --help` for more information
+--- stderr
+--- end
+
+### 63: pattern and -i false
+argv: ct "console" "prog" "-i" "false"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The subcommand 'console' does not accept additional arguments\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 64: -i false alone
+argv: ct "console" "-i" "false"
+env: (none)
+exit: 1
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = console
+  consoleRecordingId = none
+  consoleTraceFolder = none
+  consoleLastTraceMatchingPattern = some("false")
+  consoleInteractive = some(true)
+configuration error: expected no more than one arg to command to be passed
+Try `ct --help` for more information
+--- stderr
+--- end
+
+### 65: -i true alone
+argv: ct "console" "-i" "true"
+env: (none)
+exit: 1
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = console
+  consoleRecordingId = none
+  consoleTraceFolder = none
+  consoleLastTraceMatchingPattern = some("true")
+  consoleInteractive = some(true)
+configuration error: expected no more than one arg to command to be passed
+Try `ct --help` for more information
+--- stderr
+--- end
+
+### 66: -ti (cluster)
+argv: ct "console" "-ti" "x"
+env: (none)
+exit: 1
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = console
+  consoleRecordingId = none
+  consoleTraceFolder = some("i")
+  consoleLastTraceMatchingPattern = some("x")
+  consoleInteractive = none
+configuration error: expected no more than one arg to command to be passed
+Try `ct --help` for more information
+--- stderr
+--- end
+
+### 67: env <APP>_ID
+argv: ct "console"
+env: <APP>_ID="0190d7a0"
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = console
+  consoleRecordingId = some("0190d7a0")
+  consoleTraceFolder = none
+  consoleLastTraceMatchingPattern = none
+  consoleInteractive = none
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 68: env <APP>_INTERACTIVE=false
+argv: ct "console"
+env: <APP>_INTERACTIVE="false"
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = console
+  consoleRecordingId = none
+  consoleTraceFolder = none
+  consoleLastTraceMatchingPattern = none
+  consoleInteractive = some(false)
+VALIDATED replayInteractive = true
+--- stderr
+--- end
+
+### 69: env <APP>_INTERACTIVE=maybe
+argv: ct "console"
+env: <APP>_INTERACTIVE="maybe"
+exit: 1
+--- stdout
+--- stderr
+Error while processing the \e[34minteractive=maybe\e[0m parameter: 'maybe' is not a valid boolean value. Supported values are on/off, yes/no, true/false or 1/0\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 70: unknown long option
+argv: ct "console" "--bogus"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'bogus'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 71: unknown long option with value
+argv: ct "console" "--bogus=1"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'bogus'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 72: unknown short option
+argv: ct "console" "-Z"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'Z'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 73: lone -
+argv: ct "console" "-"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option ''\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 74: lone -- then a word
+argv: ct "console" "--" "w"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option ''\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 75: --=v
+argv: ct "console" "--=v"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option ''\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 76: extra positional
+argv: ct "console" "extra1" "extra2" "extra3" "extra4" "extra5"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The subcommand 'console' does not accept additional arguments\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 77: global --cwd after the command
+argv: ct "console" "--cwd" "/w"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = some("/w")
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = console
+  consoleRecordingId = none
+  consoleTraceFolder = none
+  consoleLastTraceMatchingPattern = none
+  consoleInteractive = none
+VALIDATED replayInteractive = true
+--- stderr
+--- end
+
+### 78: global --new-tab after the command
+argv: ct "console" "--new-tab"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = true
+  newWindow = false
+  cmd = console
+  consoleRecordingId = none
+  consoleTraceFolder = none
+  consoleLastTraceMatchingPattern = none
+  consoleInteractive = none
+VALIDATED replayInteractive = true
+--- stderr
+--- end
+
+### 79: --version after the command
+argv: ct "console" "--version"
+env: (none)
+exit: 0
+--- stdout
+CodeTracer version: <VERSION>
+\e[0m
+(no newline at end of stdout)
+--- stderr
+--- end
+
+### 80: -h after the command
+argv: ct "console" "-h"
+env: (none)
+exit: 0
+--- stdout
+<the short help page clispec renders for this request: ct console>
+--- stderr
+--- end

@@ -1,0 +1,25 @@
+scenario: 1
+name: vcs/diff-tab-colours-the-whole-file
+pack: codetracer
+summary: >-
+  The diff tab of the two-hunk commit is drawn in more than one syntax
+  colour: the whole file tokenizes.
+
+stage:
+  - use: project-fixture
+    with: { name: vcs-two-hunks }
+  - use: open-project
+    with: { folder: $project }
+
+steps:
+  - wait: { until: { at: 'pane-tab[label="VCS"]', present: true }, timeout: 120s }
+  - wait: { until: settled, timeout: 30s }
+  - click: 'pane-tab[label="VCS"]'
+  - wait: { until: { at: 'vcs/commit[message="change the greeting"]', present: true }, timeout: 60s }
+  - click: { at: 'vcs/commit[message="change the greeting"]', anchor: toggle }
+  - wait: { until: { at: 'vcs/commit[message="change the greeting"]/commit-file[name="main.nim"]', present: true }, timeout: 30s }
+  - hover: { at: 'vcs/commit[message="change the greeting"]/commit-file[name="main.nim"]', for: 300ms }
+  - wait: { until: { at: 'vcs/commit[message="change the greeting"]/commit-file[name="main.nim"]/panel-button[label="View Diff"]', present: true }, timeout: 15s }
+  - click: 'vcs/commit[message="change the greeting"]/commit-file[name="main.nim"]/panel-button[label="View Diff"]'
+  - wait: { until: { at: 'diff-view[file="src/main.nim"]', hunks: 2 }, timeout: 30s }
+  - wait: { until: { at: 'diff-view[file="src/main.nim"]', token-colours: { gt: 1 } }, timeout: 15s }

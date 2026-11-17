@@ -33,6 +33,10 @@ when defined(js):
 
 import ../store/types
 import ../viewmodels/shell_vm
+import ./field_keys
+import ./shell_keys
+
+export shell_keys
 import ../viewmodels/terminal_output_model
 
 func markName*(m: ShellRowMark): string =
@@ -47,31 +51,6 @@ proc gutterText*(vm: ShellVM; row: ShellRow): string =
   of srmNone: " "
   of srmStart: vm.actions[row.action].actionGlyph
   of srmRange: actionBar()
-
-func domKeyName(key: string): string =
-  case key
-  of "ArrowUp": "Up"
-  of "ArrowDown": "Down"
-  of "ArrowLeft": "Left"
-  of "ArrowRight": "Right"
-  of " ": "Space"
-  else: key
-
-proc shellKeyOfDom*(key: string; ctrl, alt, shift: bool): ShellKey =
-  ## A browser `KeyboardEvent` as the model's key: a named key by its name,
-  ## a character by itself (`text`).
-  let name = domKeyName(key)
-  var text = ""
-  var n = 0
-  for _ in key.runes:
-    inc n
-  if n == 1 and name != "Space":
-    text = key
-  ShellKey(key: name, text: text, ctrl: ctrl, alt: alt, shift: shift)
-
-proc isModifierOnly(key: string): bool =
-  key in ["Shift", "Control", "Alt", "Meta", "CapsLock", "AltGraph", "Dead",
-          "Unidentified", ""]
 
 when defined(js):
   proc evKey(ev: isonim_dom.Event): cstring {.importjs: "(#.key || '')".}
@@ -98,7 +77,7 @@ proc wireInput[R, N](r: R; panel: N; vm: ShellVM) =
   ## Keys, paste and the wheel on the pane.
   when defined(js):
     when N is isonim_dom.Element:
-      r.addEventListener(panel, "keydown", proc(ev: isonim_dom.Event) =
+      r.addEventListener(panel, KeyDownEvent, proc(ev: isonim_dom.Event) =
         let key = $evKey(ev)
         if isModifierOnly(key) or evMeta(ev) or evForApp(ev): return
         if handleKey(vm, shellKeyOfDom(key, evCtrl(ev), evAlt(ev), evShift(ev))):
@@ -112,12 +91,12 @@ proc wireInput[R, N](r: R; panel: N; vm: ShellVM) =
           vm.scrollShell((if d > 0: 3 else: -3), vm.screen.rows)
           stopEvent(ev))
     else:
-      r.addEventListener(panel, "keydown", proc(ev: MockEvent) =
+      r.addEventListener(panel, KeyDownEvent, proc(ev: MockEvent) =
         if not isModifierOnly(ev.key) and
            handleKey(vm, shellKeyOfDom(ev.key, false, false, false)):
           ev.preventDefault())
   else:
-    r.addEventListener(panel, "keydown", proc(ev: MockEvent) =
+    r.addEventListener(panel, KeyDownEvent, proc(ev: MockEvent) =
       if not isModifierOnly(ev.key) and
          handleKey(vm, shellKeyOfDom(ev.key, false, false, false)):
         ev.preventDefault())

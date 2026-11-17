@@ -39,7 +39,7 @@ import ../../app/theme/roles
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads this spelling
 # as the suite's RUNTIME assertion count.
-const ExpectedAssertions = 16
+const ExpectedAssertions = 19
 
 var countedAssertions = 0
 
@@ -213,24 +213,51 @@ proc focusVariables(sess: var TuiTestSession; next = F6) =
   raise newException(AssertionFailedError,
                      "F6 never focused the Variables pane:\n" & sess.snap().dump)
 
+proc selectedVarsRow(s: Snapshot): int =
+  ## The screen row the Variables pane draws on the selection ground, -1
+  ## when none is.
+  let (tr, left) = s.findRow(" Variables ")
+  if tr < 0: return -1
+  let (_, right0) = s.findRow(" Call Trace ")
+  let right = if right0 > left: right0 else: Cols
+  for r in tr + 1 ..< Rows - 1:
+    for c in left ..< right:
+      if s.selected(r, c): return r
+  -1
+
 proc selectVariable(sess: var TuiTestSession; name: string; down = Down;
                     first = Home): (int, int) =
   ## `Home` (the first row), then `Down` until `name`'s row is the selected
   ## one; its (row, column).
-  if first.len > 0: sess.key(first)
-  for i in 0 ..< 40:
-    # A loaded host paints the moved cursor late: give each key up to a
-    # second to show before reading where the cursor is.
-    let deadline = getMonoTime() + initDuration(milliseconds = 1000)
-    var s = sess.snap()
-    while true:
-      let (r, c) = s.varsFind(name & " ")
-      if r >= 0 and s.selected(r, c):
-        return (r, c)
-      if getMonoTime() >= deadline: break
+  ##
+  ## ONE KEY PER MOVE THE SCREEN SHOWS. A loaded host paints a moved cursor
+  ## late; reading the cursor a fixed time after a key and pressing `Down`
+  ## again when it had not moved yet sent two keys for one row, and at a load
+  ## average near 90 on 24 cores that stepped past `name` and never came back
+  ## (measured 2026-11-14: "never selected value" in one baseline run in
+  ## three). Each key now waits for the selected row to change — or `name`
+  ## to be the selected one — before the next is sent.
+  proc settle(sess: var TuiTestSession; before: int): Snapshot =
+    let deadline = getMonoTime() + initDuration(milliseconds = 5000)
+    result = sess.snap()
+    while getMonoTime() < deadline:
+      let (r, c) = result.varsFind(name & " ")
+      if (r >= 0 and result.selected(r, c)) or
+         result.selectedVarsRow() != before:
+        return
       sleep(50)
-      s = sess.snap()
+      result = sess.snap()
+  if first.len > 0:
+    let before = sess.snap().selectedVarsRow()
+    sess.key(first)
+    discard sess.settle(before)
+  for i in 0 ..< 40:
+    let s = sess.snap()
+    let (r, c) = s.varsFind(name & " ")
+    if r >= 0 and s.selected(r, c):
+      return (r, c)
     sess.key(down)
+    discard sess.settle(s.selectedVarsRow())
   raise newException(AssertionFailedError,
                      "never selected " & name & ":\n" & sess.snap().dump)
 
@@ -240,6 +267,25 @@ proc atResults(sess: var TuiTestSession) =
     proc(s: Snapshot): bool = s.varsFind("value ")[0] >= 0)
 
 suite "PLAT-70 Part E on a real terminal: value origin from the keyboard":
+
+  test "a press on a hop seeks to its tick, with the cursor on it":
+    var (sess, state) = open()
+    defer: sess.quit(state)
+    sess.atResults()
+    sess.focusVariables()
+    let (rx, _) = sess.selectVariable("value")
+    ck rx > 0
+    sess.key(CtrlShiftO)
+    var s = sess.waitUntil("the chain under value",
+      proc(s: Snapshot): bool = s.findRow("⇠ tick ", rx + 1)[0] > rx)
+    let (h0, hc) = s.findRow("⇠ tick ", rx + 1)
+    let wanted = hopTick(s.text(h0))
+    ck wanted > 0
+    sess.sendMouseClick(h0, hc + 4)
+    s = sess.waitUntil("the recording at the hop's tick",
+      proc(s: Snapshot): bool = s.tick == wanted)
+    let (h1, hc1) = s.findRow("⇠ tick ", 1)
+    ck h1 > 0 and s.selected(h1, hc1)
 
   test "CUA: Ctrl+Shift+O, Down onto a hop, Escape, Enter seeks, Menu":
     var (sess, state) = open()

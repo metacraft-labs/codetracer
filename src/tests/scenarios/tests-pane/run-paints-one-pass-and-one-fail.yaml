@@ -1,0 +1,29 @@
+scenario: 1
+name: tests-pane/run-paints-one-pass-and-one-fail
+pack: codetracer
+summary: >-
+  Editing a Noir crate with a passing and a failing test, the Tests pane
+  lists both, not run yet; its ▶ runs the suite through `ct test run` and
+  paints test_passes passed and test_fails failed ("1 passed, 1 failed"),
+  and settles with the ▶ live again.
+
+stage:
+  - use: project-fixture
+    with: { name: noir-suite }
+  - use: open-project
+    with: { folder: $project }
+
+steps:
+  - wait: { until: { at: 'pane-tab[label="TESTS"]', present: true }, timeout: 120s }
+  - wait: { until: settled, timeout: 30s }
+  - click: 'pane-tab[label="TESTS"]'
+  - wait: { until: { at: test-results, count: 2 }, timeout: 120s }
+  - expect: { at: test-results, headline: "2 tests, not run yet" }
+  - wait: { until: { at: 'test-results/panel-button[label="Run"]', enabled: true }, timeout: 60s }
+  - click: 'test-results/panel-button[label="Run"]'
+    settle: false
+  - wait: { until: { at: 'test-results/test-row[name="test_passes"]', outcome: passed }, timeout: 300s }
+  - expect: { at: 'test-results/test-row[name="test_fails"]', outcome: failed }
+  - wait: { until: { at: test-results, headline: { matches: "^1 passed, 1 failed" } }, timeout: 60s }
+  - expect: { at: test-results, count: 2 }
+  - expect: { at: 'test-results/panel-button[label="Run"]', enabled: true }

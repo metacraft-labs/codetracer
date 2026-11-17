@@ -1,0 +1,69 @@
+scenario: 1
+name: visual-replay/keyboard-shortcuts
+pack: codetracer
+summary: >-
+  The Video Player's keys drive it: Space and k toggle play and pause; l
+  fast-forwards through 1×, 2×, 4×, 8× and wraps to 1×; j rewinds (◀); Home
+  jumps to frame 0, Right and Left step a frame; Shift+Right and Shift+Left
+  step a draw call; End jumps to the last frame; p turns the picker on and
+  Escape turns it off, after which Escape is no longer the picker's.
+
+stage:
+  - use: record-program
+    with: { program: py_console_logs/main.py }
+  - use: visual-replay-capable
+  - use: front-end-options
+    with: { env: { CODETRACER_VISUAL_REPLAY_FAKE_PLAYER: ready } }
+  - use: open-recording
+    with: { deployment: web }
+
+steps:
+  - wait: { until: replay-idle, timeout: 360s }
+  - wait: { until: editor.loaded, timeout: 300s }
+  - wait: { until: call-trace.loaded, timeout: 120s }
+  - wait: { until: { at: 'pane-tab[label="VIDEO PLAYER"]', present: true }, timeout: 60s }
+  - click: { at: 'pane-tab[label="VIDEO PLAYER"]', anchor: title }
+  - wait: { until: { at: video-player/frame-image, present: true }, timeout: 60s }
+  - click: { at: video-player, anchor: label }
+  - wait: { until: { at: video-player, focused: true }, timeout: 10s }
+  - key: Space
+  - wait: { until: { at: video-player, rate: { matches: "[▶◀]" } }, timeout: 10s }
+  - key: k
+  - wait: { until: { at: video-player, rate: { contains: "Paused" } }, timeout: 10s }
+  - key: l
+  - wait: { until: { at: video-player, rate: { contains: "1×" } }, timeout: 10s }
+  - key: l
+  - wait: { until: { at: video-player, rate: { contains: "2×" } }, timeout: 10s }
+  - key: l
+  - wait: { until: { at: video-player, rate: { contains: "4×" } }, timeout: 10s }
+  - key: l
+  - wait: { until: { at: video-player, rate: { contains: "8×" } }, timeout: 10s }
+  - key: l
+  - wait: { until: { at: video-player, rate: { contains: "1×" } }, timeout: 10s }
+  - key: j
+  - wait: { until: { at: video-player, rate: { contains: "◀" } }, timeout: 10s }
+  - key: Space
+  - wait: { until: { at: video-player, rate: { contains: "Paused" } }, timeout: 10s }
+  - key: Home
+  - wait: { until: { at: video-player, frame: { matches: "^Frame 0 /" } }, timeout: 10s }
+  - key: Right
+  - wait: { until: { at: video-player, frame: { matches: "^Frame 1 /" } }, timeout: 10s }
+  - key: Left
+  - wait: { until: { at: video-player, frame: { matches: "^Frame 0 /" } }, timeout: 10s }
+  - chord: Shift+Right
+  - expect: { at: key-router, last-operation: video-player.step-draw-forward }
+  - chord: Shift+Left
+  - expect: { at: key-router, last-operation: video-player.step-draw-back }
+  - key: End
+  - wait: { until: { at: video-player, frame: { matches: "^Frame 3 /" } }, timeout: 10s }
+  - key: p
+  - wait: { until: { at: video-player, picking: true }, timeout: 10s }
+  - key: Esc
+  - wait: { until: { at: video-player, picking: false }, timeout: 10s }
+  - expect: { at: key-router, last-operation: video-player.cancel-picker }
+  # With the picker off, Escape is no longer the picker's.
+  - key: Left
+  - wait: { until: { at: video-player, frame: { matches: "^Frame 2 /" } }, timeout: 10s }
+  - key: Esc
+  - expect: { at: key-router, last-operation: video-player.step-frame-back }
+  - expect: { at: video-player, picking: false }

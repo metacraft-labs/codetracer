@@ -204,10 +204,18 @@ type
     sshConnection*, sshTty*: string
       ## A remote session (§3.4). Marks remote, not slow.
     ctGlyphs*, ctModernUnicode*, ctAmbiguousWidth*, ctColors*,
-      ctProbe*: string
+      ctProbe*, ctScreenReader*: string
       ## The CodeTracer environment overrides (§5.2 rank 3):
       ## `CODETRACER_TUI_GLYPHS`, `…_MODERN_UNICODE`, `…_AMBIGUOUS_WIDTH`,
-      ## `…_COLORS`, `…_PROBE`.
+      ## `…_COLORS`, `…_PROBE`, `…_SCREEN_READER`.
+    accessible*: string
+      ## `$ACCESSIBLE` (§9.4 SR-D2): the convention of Charm's `huh` forms
+      ## and the GitHub CLI for "a screen reader is listening". Anything but
+      ## empty, `0`, `false`, `no` or `off` is a yes.
+    speakupSynth*: string
+      ## `/sys/accessibility/speakup/synth` on the Linux console (SR-D2):
+      ## the synthesizer Speakup drives, `none` when it drives none, "" when
+      ## Speakup is not loaded. Read by the host, local only.
 
   CapabilityFlags* = object
     ## §6.2's four capability flags, as a value. Parsed by `app/cli.nim`, which
@@ -332,6 +340,17 @@ type
       ## state, hover repaints are coalesced.
     reduceMotion*: bool
     reduceMotionFrom*: CapabilitySource
+    screenReader*: bool
+      ## §9.4: the screen-reader mode — the ASCII tier with the decorative
+      ## glyphs as spaces (SR-D3), motion and hover off (SR-D4), the cursor
+      ## on the focused element (SR-D5), one pane at a time (SR-D6), focus
+      ## changes announced (SR-D7).
+    screenReaderFrom*: CapabilitySource
+    screenReaderNote*: string
+      ## Which rank or which hint decided (`ACCESSIBLE=1`, `:set`).
+    pointer*: PointerCaps
+      ## Pointer-Affordances §5.2: the OSC 22 dialect, or off.
+    pointerFrom*: CapabilitySource
     probeOff*: bool
       ## The start-up round was turned off (§4.8 rule 4).
     probeFrom*: CapabilitySource
@@ -613,6 +632,17 @@ type
       ## the DA1 fence — it implements the Kitty keyboard protocol.
     tmuxExtendedKeys*: string
       ## tmux's `extended-keys` option (`on`, `off`, `always`); "" unknown.
+    pointerAnswered*: bool
+      ## The terminal answered Pointer-Affordances §5.2's OSC 22 query.
+    pointerReply*: PointerReply
+      ## Which shapes that answer said it has.
+    pointerWrappedAsked*: bool
+      ## The query went through tmux's passthrough: its answer comes from the
+      ## outer terminal, after tmux's own answer to the fence.
+    pointerWrappedDue*: bool
+      ## The wrapped query is still to be written: inside tmux it goes AFTER
+      ## the fence (`terminal_probe.pointerQueryAfterFence`), never in the
+      ## round's own write.
     # --- Terminal-Adaptation §4.2's additions to the round -----------------
     xtversion*: string
       ## XTVERSION's text (`kitty(0.36.4)`, `tmux 3.4`); "" unanswered.
@@ -622,9 +652,19 @@ type
     sync2026*, grapheme2027*: int
       ## DECRQM's `Ps` for each mode (meaningful when answered).
     cprExpected*: int
-      ## How many cursor reports the width probe asked for. A `CSI r ; c R`
-      ## is taken as a REPLY only while fewer than this have arrived (§4.3's
-      ## F3 rule); after that it is Ctrl+F3 again.
+      ## How many cursor reports the width probe asked for. A report is
+      ## taken as a REPLY only while fewer than this have arrived (§4.3's
+      ## F3 rule).
+    cprMarked*: bool
+      ## The round asked DECXCPR (`CSI ? 6 n`), whose answer `CSI ? r ; c R`
+      ## no key shares. An unmarked `CSI r ; c R` is then a KEY (legacy
+      ## xterm's Ctrl+F3 is `CSI 1 ; 5 R`) unless the plain-CPR fallback
+      ## round below is outstanding.
+    cprFallbackAsked*: bool
+      ## The fence came back with no marked report, so the width probe was
+      ## asked again with plain CPR, fenced by a second DA1 (§4.3).
+    cprFallbackFenced*: bool
+      ## The fallback round's own DA1 has arrived.
     replyWindowClosed*: bool
       ## The reply window passed without the fence (`ReplyWindowMs`). No
       ## owed cursor report is waited for after it, nor after the fence: a
@@ -727,7 +767,26 @@ proc envChoices*(env: TerminalEnv): (TerminalChoices, seq[string]) =
     var v: bool
     if parseOnOffWord(env.ctProbe, v): c.probe = some(v)
     else: bad.add "CODETRACER_TUI_PROBE=" & env.ctProbe & " is not on or off"
+  if env.ctScreenReader.len > 0:
+    var v: bool
+    if env.ctScreenReader.strip.toLowerAscii == "auto": discard
+    elif parseOnOffWord(env.ctScreenReader, v): c.screenReader = some(v)
+    else: bad.add "CODETRACER_TUI_SCREEN_READER=" & env.ctScreenReader &
+                  " is not auto, on or off"
   (c, bad)
+
+proc screenReaderHint*(env: TerminalEnv): (bool, string) =
+  ## §9.4 SR-D2: whether the environment says a screen reader is listening,
+  ## and which hint said so. `ACCESSIBLE` anywhere; Speakup only on the
+  ## Linux console, where it reads the screen.
+  let a = env.accessible.strip
+  if a.len > 0 and a.toLowerAscii notin ["0", "false", "no", "off"]:
+    return (true, "ACCESSIBLE=" & a)
+  if env.term == "linux":
+    let s = env.speakupSynth.strip
+    if s.len > 0 and s.toLowerAscii != "none":
+      return (true, "Speakup (" & s & ")")
+  (false, "")
 
 proc flagChoices(flags: CapabilityFlags): TerminalChoices =
   ## Rank 2, with the older flags folded in: `--ascii-borders` is
@@ -1135,10 +1194,25 @@ proc resolveCapabilities*(env: TerminalEnv; flags: CapabilityFlags;
     elif not probe.answered and cache.isSome and cache.get.truecolor:
       (colors, colorsFrom) = (cdTrueColor, csCache)
 
-  # Glyphs.
+  # The screen-reader mode (§9.4): a choice at any rank, else the hints.
+  let readerChoice = firstExplicit(ranks, screenReader, bool, false)
+  var (screenReader, screenReaderFrom, screenReaderNote) =
+    (false, csDefault, "")
+  if readerChoice.found:
+    (screenReader, screenReaderFrom, screenReaderNote) =
+      (readerChoice.value, readerChoice.source, readerChoice.note)
+  else:
+    let (hinted, why) = screenReaderHint(env)
+    if hinted:
+      (screenReader, screenReaderFrom, screenReaderNote) =
+        (true, csEnvironment, why)
+
+  # Glyphs. The screen-reader mode forces the ASCII tier (SR-D3).
   let glyphChoice = firstExplicit(ranks, glyphs, GlyphsChoice, true)
-  let (tier, tierFrom, tierNote) =
+  var (tier, tierFrom, tierNote) =
     resolveTier(env, glyphChoice, widths, widthsFrom, identity, probe)
+  if screenReader:
+    (tier, tierFrom, tierNote) = (tierAscii, screenReaderFrom, "screen-reader")
   let ambiguousChoice = firstExplicit(ranks, ambiguousWidth, AmbiguousChoice,
                                       true)
   let (ambiguousWide, ambiguousFrom, ambiguousNote) =
@@ -1160,12 +1234,26 @@ proc resolveCapabilities*(env: TerminalEnv; flags: CapabilityFlags;
   elif cache.isSome and cache.get.rttMs >= 0:
     (rtt, rttFrom) = (cache.get.rttMs, csCache)
   let conservative = rtt > LinkConservativeMs
+  let pointerChoice = firstExplicit(ranks, pointerShapes, PointerShapesChoice,
+                                    false)
+  let pointerCaps =
+    if mouse:
+      resolvePointerCaps(
+        (if pointerChoice.found: pointerChoice.value else: pscAuto),
+        probe.pointerAnswered, probe.pointerReply, env.tmux.len > 0,
+        env.term.toLowerAscii.startsWith("screen"), identity.name,
+        probe.tmuxPassthrough)
+    else:
+      PointerCaps(dialect: pdOff, source: "no mouse")
   let motionChoice = firstExplicit(ranks, reduceMotion, bool, false)
   var (reduceMotion, reduceMotionFrom) = (false, csDefault)
   if motionChoice.found:
     (reduceMotion, reduceMotionFrom) = (motionChoice.value, motionChoice.source)
   elif conservative:
     (reduceMotion, reduceMotionFrom) = (true, rttFrom)
+  if screenReader:
+    # SR-D4: motion off whatever `reduce-motion` says.
+    (reduceMotion, reduceMotionFrom) = (true, screenReaderFrom)
   let probeChoice = firstExplicit(ranks, probe, bool, false)
 
   # Grapheme clustering (DEC 2027): set it when recognised and off.
@@ -1209,6 +1297,12 @@ proc resolveCapabilities*(env: TerminalEnv; flags: CapabilityFlags;
     syncNote: syncNote,
     rttMs: rtt, rttFrom: rttFrom, linkConservative: conservative,
     reduceMotion: reduceMotion, reduceMotionFrom: reduceMotionFrom,
+    screenReader: screenReader, screenReaderFrom: screenReaderFrom,
+    screenReaderNote: screenReaderNote,
+    pointer: pointerCaps,
+    pointerFrom: (if pointerChoice.found: pointerChoice.source
+                  elif probe.pointerAnswered: csProbe
+                  else: csDefault),
     probeOff: probeChoice.found and not probeChoice.value,
     probeFrom: (if probeChoice.found: probeChoice.source else: csDefault),
     clipboard: clipboard, clipboardFrom: clipboardFrom)
@@ -1222,6 +1316,8 @@ proc resolveCapabilities*(env: TerminalEnv; flags: CapabilityFlags;
   if result.tmuxExtendedKeysOff:
     result.remedies.add "tmux withholds extended keys (Ctrl+Shift+…): " &
       "set -s extended-keys on"
+  if pointerCaps.remedy.len > 0:
+    result.remedies.add pointerCaps.remedy
   if env.tmux.len > 0 and probe.tmuxMouse in ["off", "0"] and mouse:
     result.remedies.add "tmux withholds the mouse: set -g mouse on"
   if tier != tierAscii and not isUtf8Locale(effectiveLocale(env)) and
@@ -1231,6 +1327,13 @@ proc resolveCapabilities*(env: TerminalEnv; flags: CapabilityFlags;
       " but the terminal decodes UTF-8: set LANG=C.UTF-8"
   for bad in envChoices(env)[1]:
     result.remedies.add bad
+
+proc pointerQueryWanted*(flags: CapabilityFlags): bool =
+  ## Whether the round asks about pointer shapes (Pointer-Affordances §5.2):
+  ## not when they are off, and not with no mouse to move.
+  not flags.noMouse and
+    (flags.choices.pointerShapes.isNone or
+     flags.choices.pointerShapes.get != pscOff)
 
 proc probeWanted*(env: TerminalEnv; flags: CapabilityFlags;
                   prefs = TerminalPrefs();

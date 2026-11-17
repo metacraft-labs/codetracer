@@ -289,7 +289,7 @@ when defined(js):
       s.dragging = false
       unlistenDoc("mousemove", onMove)
       unlistenDoc("mouseup", onUp)
-    s.track.listen("mousedown", proc(ev: JsObject) =
+    s.track.listen("mousedown", proc(ev: JsObject) =  # ir1-gate: gesture (the scrub)
       if ev.buttonOf() != 0:
         return
       ev.stopEv()
@@ -481,7 +481,7 @@ when defined(js):
       s.dragging = false
       unlistenDoc("mousemove", onMove)
       unlistenDoc("mouseup", onUp)
-    s.track.listen("mousedown", proc(ev: JsObject) =
+    s.track.listen("mousedown", proc(ev: JsObject) =  # ir1-gate: gesture (the scrub)
       if ev.buttonOf() != 0:
         return
       ev.stopEv()

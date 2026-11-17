@@ -23,6 +23,13 @@ when defined(js):
   import isonim/web/web_renderer
   import isonim/web/dom_api as isonim_dom
   from ../lib/jslib import windowSetTimeout
+  import std/[jsffi, jsconsole]
+  import kdom except Location
+  import ../context_menu_item
+  from ../viewmodel/views/context_menu_bridge import showContextMenu
+  when not defined(ctWeb):
+    import ../viewmodel/input/dom_pointer
+    from ../viewmodel/keymap/scope_path import TopBarScope
 
   proc requestSessionTabsRender*(data: Data)
 
@@ -138,6 +145,55 @@ when defined(js):
         requestSessionTabsRender(data),
         50))
 
+  when not defined(ctWeb):
+    proc sessionTabIndexOf(el: JsObject): int {.importjs:
+      "((e) => { const t = (e && e.closest) ? e.closest('.session-tab') : null; " &
+      "const m = (t && t.id) ? /^session-tab-(\\d+)$$/.exec(t.id) : null; " &
+      "return m ? parseInt(m[1], 10) : -1; })(#)".}
+    proc closestSessionTab(el: JsObject): JsObject {.importjs:
+      "((e) => (e && e.closest) ? e.closest('.session-tab') : null)(#)".}
+
+    var openInNewWindowInstalled = false
+
+    proc installOpenInNewWindowMenu(data: Data) =
+      ## Multi-Window-Tab-Management.md §"Multi-Window Behavior" (3): a
+      ## right-click on a session tab offers "Open in New Window", which asks
+      ## the main process for a secondary window on that session
+      ## (`CODETRACER::open-new-window`, `index/window.onOpenNewWindow`).
+      ##
+      ## The press is the pointer keymap's (Input-Routing §5.1): the strip is
+      ## the `topBar` scope (`data-ct-pane`), a session tab its `tab` element
+      ## (this hit test), and a right click on it resolves to
+      ## `context-menu.open`, which the desktop's fallback hands to the menu
+      ## registered for the scope here. No listener on the tab itself.
+      ## Desktop only: the web build has no second window (`capMultiWindow`).
+      if openInNewWindowInstalled:
+        return
+      openInNewWindowInstalled = true
+      registerHitTest(TopBarScope, proc(target, event: JsObject): ElementHit =
+        let tab = closestSessionTab(target)
+        if tab.isNil or tab.isUndefined: ElementHit()
+        else: ElementHit(element: tab, kind: "tab"))
+      registerPaneMenu(TopBarScope, proc(press: ElementPress): bool =
+        let index = sessionTabIndexOf(press.element)
+        if index < 0:
+          return false
+        let x = press.event.clientX.to(int)
+        let y = press.event.clientY.to(int)
+        # The tab is named by its id, not its place in the strip: the main
+        # process knows a tab of this window by the id its messages carry.
+        let session = if index < data.sessions.len: data.sessions[index] else: nil
+        if session.isNil:
+          return false
+        let tabId = int(session.id)
+        showContextMenu(@[ContextMenuItem(
+          name: cstring"Open in New Window", hint: cstring"",
+          handler: proc(e: kdom.Event) =
+            console.log cstring"session_tabs: open tab in a new window: ", tabId
+            data.ipc.send(cstring"CODETRACER::open-new-window",
+                          js{sessionId: tabId}))], x, y)
+        true)
+
   proc renderIsoNimSessionTabs*(data: Data) =
     ## Build the session tab bar DOM using IsoNim WebRenderer and
     ## render directly into `#session-tab-bar`.
@@ -164,6 +220,10 @@ when defined(js):
       sessionTabCallbacks(data))
     if overflowWasOpen:
       container.addClass(cstring"overflow-open")
+    when not defined(ctWeb):
+      # The strip is the `topBar` press scope (scope_path.TopBarScope).
+      isonim_dom.setAttribute(container, cstring"data-ct-pane", cstring TopBarScope)
+      installOpenInNewWindowMenu(data)
 
   proc requestSessionTabsRender*(data: Data) =
     ## Refresh the direct IsoNim tab-bar mount after explicit session state

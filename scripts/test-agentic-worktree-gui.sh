@@ -56,14 +56,27 @@ just build-once
 : >"$stdout_log"
 : >"$stderr_log"
 
+# The server runs every session through `ah` (`branch create`, `agent record`),
+# and a system `ah` from another release makes each command exit -1 with no
+# output. Build the checkout's own `ah` beside the mock agent and hand it to the
+# server through AH_BIN and PATH; an AH_BIN the caller set is kept. It also
+# gets its own AH_HOME: that `ah` opens $AH_HOME's database, and the user's
+# default one may be migrated past it by a newer `ah` ("migration ... was
+# previously applied but is missing in the resolved migrations").
+# shellcheck disable=SC2016
+build_and_serve='set -e
+cargo build -p mock-agent
+cargo build -p ah-cli --bin ah
+t="${CARGO_TARGET_DIR:-$PWD/target}/debug"
+export AH_BIN="${AH_BIN:-$t/ah}" PATH="$t:$PATH" AH_HOME="${AH_HOME:-$(mktemp -d)}"
+exec cargo run -p acp-client-runs-scenario --bin codetracer_m7_rest_server -- "$1" "$2"'
+
 (
 	cd "$ah_root"
 	if [ "${AGENT_HARBOR_M7_SKIP_NIX:-}" != "1" ] && command -v nix >/dev/null 2>&1 && [ -f flake.nix ]; then
-		# shellcheck disable=SC2016
-		nix develop --command bash -lc 'cargo build -p mock-agent && cargo run -p acp-client-runs-scenario --bin codetracer_m7_rest_server -- "$1" "$2"' bash "$scenario" "$log_dir"
+		nix develop --command bash -lc "$build_and_serve" bash "$scenario" "$log_dir"
 	else
-		cargo build -p mock-agent
-		cargo run -p acp-client-runs-scenario --bin codetracer_m7_rest_server -- "$scenario" "$log_dir"
+		bash -c "$build_and_serve" bash "$scenario" "$log_dir"
 	fi
 ) >"$stdout_log" 2>"$stderr_log" &
 server_pid=$!

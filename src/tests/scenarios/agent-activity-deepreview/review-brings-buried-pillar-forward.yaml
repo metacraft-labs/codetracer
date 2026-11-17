@@ -1,0 +1,26 @@
+scenario: 1
+name: agent-activity-deepreview/review-brings-buried-pillar-forward
+pack: codetracer
+summary: >-
+  A saved layout that puts AGENT ACTIVITY behind FILES in one stack: the
+  review brings AGENT ACTIVITY to the front of that stack (FILES goes
+  behind), the VCS panel stays in front of its own, and nothing moves or
+  is duplicated.
+
+stage:
+  - use: review-dataset
+    with: { variant: plain }
+  - use: plant-edit-layout
+    with: { fixture: edit-layout-agent-activity-buried }
+  - use: open-review
+
+steps:
+  - wait: { until: { at: vcs, present: true }, timeout: 60s }
+  # the window has finished loading the review
+  - wait: { until: settled, timeout: 30s }
+  - wait: { until: { at: window, assert: 'in-front("AGENT ACTIVITY")' }, timeout: 30s }
+  - expect: { at: window, assert: 'not-in-front("FILES")' }
+  - expect: { at: window, assert: 'in-front("VCS")' }
+  - expect: { at: window, assert: 'has-pane("FILES")' }
+  - expect: { at: 'pane-tab[label="AGENT ACTIVITY"]', active: true }
+  - expect: { at: agent-activity, roll-up: 0 }

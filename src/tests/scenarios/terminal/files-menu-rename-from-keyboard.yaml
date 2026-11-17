@@ -1,0 +1,43 @@
+scenario: 1
+name: terminal/files-menu-rename-from-keyboard
+pack: codetracer
+summary: >-
+  From the keyboard: a press on a Files row opens the file, and the opened
+  file's editor takes the focus; a press on the Files tab gives it back to
+  the pane, Down selects the next row, Shift+F10 opens its menu, and Rename,
+  edited on the command line, renames the file — the pane lists it under its
+  new name.
+stage:
+  - use: write-project
+    with:
+      files:
+        notes.txt: "notes\n"
+        src/main.py: "print(1)\n"
+  - use: open-project
+    with: { folder: $project, width: 140, height: 40 }
+steps:
+  - wait: { until: ready, timeout: 60s }
+  - wait: { until: { at: 'filesystem/file-node[name="notes.txt"]', present: true }, timeout: 30s }
+  - click: { at: 'filesystem/file-node[name="notes.txt"]' }
+  - wait: { until: { at: status-line, message: { contains: "editing notes.txt" } }, timeout: 20s }
+  - click: { at: 'pane-tab[label="Files"]' }
+  - key: Down
+  - chord: Shift+F10
+  - expect: { at: context-menu, assert: 'offers("Rename")' }
+  - key: Down
+  - key: Enter
+  - wait: { until: { at: status-line, message: { contains: ":rename main.py" } }, timeout: 20s }
+  - expect: { at: status-line, message: { contains: "Rename main.py" } }
+  - key: Backspace
+  - key: Backspace
+  - key: Backspace
+  - key: Backspace
+  - key: Backspace
+  - key: Backspace
+  - key: Backspace
+  - type: "app.py"
+  - wait: { until: { at: status-line, message: { contains: ":rename app.py" } }, timeout: 20s }
+  - key: Enter
+  - wait: { until: { at: status-line, message: { contains: "renamed src/main.py to app.py" } }, timeout: 20s }
+  - expect: { at: 'filesystem/file-node[name="src/app.py"]', present: true }
+  - expect: { at: 'filesystem/file-node[name="src/main.py"]', absent: true }

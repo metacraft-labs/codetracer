@@ -35,7 +35,9 @@
 ##   * TA-12 — the per-terminal cache gives a silent session the last
 ##     answers, and a live answer replaces them;
 ##   * TA-14 — with a REAL tmux behind `TMUX`, the facts come from one
-##     `tmux display -p` and no passthrough (`DCS tmux;`) is ever written;
+##     `tmux display -p`, and the only query ever written through tmux's
+##     passthrough (`DCS tmux;`) is Pointer-Affordances §5.2's OSC 22 one,
+##     whose reply tmux returns to the pane (§5.5);
 ##   * a slow link (answers 300 ms late) is measured and makes the session
 ##     link-conservative (§4.6);
 ##   * §4.3's F3 rule on the real framer: after the round a `CSI 1 ; 5 R` is
@@ -46,10 +48,13 @@
 ## The persona peer types the TERMINAL'S half of the start-up round. The
 ## subject — the binary, its round, its framer, its resolver, its repaint,
 ## its restore — is real and untouched; the peer stands in for the terminal
-## emulator because fifteen emulators cannot run in CI. Its answers are
-## WRITTEN FROM each terminal's documentation (§3.2), not yet captured from
-## the real emulators (PLAT-71 Part E, owed); each persona says so. The tmux
-## case needs no stand-in for tmux: a real tmux server answers `display -p`.
+## emulator because fifteen emulators cannot run in CI. kitty's, foot's and
+## xterm's answers are the bytes those terminals wrote back to this round,
+## CAPTURED inside the real emulators (`app/tests/personas/`, by the
+## `tui-real-emulators` lane, which re-checks them on every run), replayed
+## verbatim; the VTE set to ambiguous WIDE and the Linux console are written
+## from their documentation (§3.2); each persona says which. The tmux case
+## needs no stand-in for tmux: a real tmux server answers `display -p`.
 ##
 ## ## No skips
 ##
@@ -69,7 +74,17 @@ import ./persona_peer
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count.
-const ExpectedAssertions = 120
+const ExpectedAssertions = 231
+  ## 227 -> 231, measured: the personas re-captured with the DECXCPR round
+  ## — kitty and xterm answer it (6 marked reports each, as before), and
+  ## the four that do not answer the plain-CPR fallback round (one check
+  ## that the round was answered, +4, and its 6 reports, as before).
+  ## 223 -> 227: §4.3 DECXCPR — Ctrl+F3 on a terminal that never answers
+  ## (+3), and the marked query never left on the screen (+1).
+  ## 120 -> 223, measured: the peer answers each of the six captured
+  ## personas' questions with its terminal's bytes (17 checks each, +102),
+  ## and foot answering DEC 2027 recognised-and-off beside foot as captured
+  ## (+1).
 
 var countedAssertions = 0
 
@@ -84,7 +99,32 @@ const
     ## What the width probe prints and this front-end never draws itself:
     ## none may survive on the screen (TA-3). (`⏮`, the fourth probe, is
     ## also the `unicode` icons' jump-to-start control, so it is not proof.)
-  QueryTexts = ["[>q", "[>c", "2026$p", "2027$p", "[6n"]
+  QueryTexts = ["[>q", "[>c", "2026$p", "2027$p", "[6n", "[?6n"]
+  PointerQuery = "\x1b]22;?default,pointer,text,col-resize,row-resize,grab," &
+                 "grabbing,not-allowed,ew-resize,ns-resize\x1b\\"
+    ## Pointer-Affordances §5.2's question, spelled as the spec spells it.
+
+proc passthroughPayloads(bytes: string): seq[string] =
+  ## Every sequence written inside tmux's passthrough
+  ## (`ESC P tmux ; <payload, each ESC doubled> ESC \`), un-doubled. A
+  ## payload the bytes cut off is returned as far as it got.
+  const Open = "\x1bPtmux;"
+  var at = bytes.find(Open)
+  while at >= 0:
+    var i = at + Open.len
+    var payload = ""
+    while i < bytes.len:
+      if bytes[i] == '\x1b' and i + 1 < bytes.len and bytes[i + 1] == '\x1b':
+        payload.add '\x1b'
+        i += 2
+      elif bytes[i] == '\x1b' and i + 1 < bytes.len and bytes[i + 1] == '\\':
+        i += 2
+        break
+      else:
+        payload.add bytes[i]
+        inc i
+    result.add payload
+    at = bytes.find(Open, i)
 
 var stateRoot = getTempDir() / ("plat71-state-" & $getCurrentProcessId())
 
@@ -171,13 +211,42 @@ suite "PLAT-71 Tier 2: the binary adapts to the terminal it runs in":
   test "the binary exists":
     ck fileExists(tuiBinary())
 
+  test "the peer answers each question with the bytes its terminal sent":
+    for c in capturedPersonas():
+      checkpoint(c.provenance)
+      let p = fromCapture(c)
+      ck p.answerFor("\x1b[>q", 0) == c.answerFor("xtversion")
+      ck p.answerFor("\x1b[>c", 0) == c.answerFor("da2")
+      ck p.answerFor("\x1b[c", 0) == c.answerFor("da1")
+      ck p.answerFor("\x1b]11;?\x1b\\", 0) == c.answerFor("osc11")
+      ck p.answerFor("\x1bP+q524742;5463\x1b\\", 0) == c.answerFor("xtgettcap")
+      ck p.answerFor("\x1bP$qm\x1b\\", 0) == c.answerFor("decrqss")
+      ck p.answerFor("\x1b[16t", 0) == c.answerFor("cellSize")
+      ck p.answerFor("\x1b[?u", 0) == c.answerFor("kittyKeyboard")
+      for mode in [1016, 2026, 2027]:
+        ck p.answerFor("\x1b[?" & $mode & "$p", 0) == c.answerFor("decrqm." & $mode)
+      # The width probe's cursor reports, for the question the capture's
+      # round asked: DECXCPR (`CSI ? 6 n`) in a round captured since §4.3
+      # moved to it, plain CPR in one captured before.
+      let cprQuery = if c.roundMarked: MarkedCprQuery else: CprQuery
+      for i in 0 ..< c.cprCount:
+        ck p.answerFor(cprQuery, i) == c.answerFor("cpr", i)
+      # A terminal that answered the fence but not DECXCPR was asked again
+      # with plain CPR (the fallback round): the peer answers that question
+      # with the fallback round's reports.
+      if c.decxcpr == dxNo:
+        let fallback = c.widthReplies
+        ck fallback.len > 0
+        for i in 0 ..< fallback.len:
+          ck p.answerFor(CprQuery, i) == fallback[i]
+
   test "the profile per persona, every axis with its source":
     block kittyCase:
       let (j, log, _) = reportFor(kitty())
       checkpoint(kitty().provenance)
       ck log.cursorReports == 6
       ck j["identity"]["value"]["name"].getStr == "kitty"
-      ck j["identity"]["value"]["version"].getStr == "0.36.4"
+      ck j["identity"]["value"]["version"].getStr == "0.44.0"
       ck j.source("identity") == "probe"
       ck j.axis("tier").getStr == "extended"
       ck j.axis("syncOutput").getBool and j.source("syncOutput") == "probe"
@@ -193,6 +262,9 @@ suite "PLAT-71 Tier 2: the binary adapts to the terminal it runs in":
     block footCase:
       let (j, _, _) = reportFor(foot(), term = "foot")
       ck j["identity"]["value"]["name"].getStr == "foot"
+      ck j.axis("graphemeMode").getBool           # recognised and already set
+    block footOffCase:
+      let (j, _, _) = reportFor(footGraphemeOff(), term = "foot")
       ck j.axis("graphemeMode").getBool           # recognised, off: set
     block wideCase:
       let (j, _, _) = reportFor(vteWide())
@@ -263,9 +335,9 @@ suite "PLAT-71 Tier 2: the binary adapts to the terminal it runs in":
       checkpoint(calc.detail)
     ck calc.outcome == foRecorded
     if calc.outcome == foRecorded:
-      # foot: 2027 recognised and off, so the binary sets it.
+      # foot answering 2027 recognised and off, so the binary sets it.
       var sess = builder(@[calc.tracePath], term = "foot").spawn()
-      discard sess.serve(foot())
+      discard sess.serve(footGraphemeOff())
       settleOnDebugger(sess, Cols, Rows)
       let screen = sess.screenText()
       for g in ProbeGlyphs:
@@ -282,7 +354,7 @@ suite "PLAT-71 Tier 2: the binary adapts to the terminal it runs in":
       sess.close()
       # SIGTERM: the same bytes, from the signal handler.
       var term = builder(@[calc.tracePath], term = "foot").spawn()
-      discard term.serve(foot())
+      discard term.serve(footGraphemeOff())
       settleOnDebugger(term, Cols, Rows)
       let mark = term.transcriptBytes().len
       term.sendSignal(SIGTERM)
@@ -313,7 +385,7 @@ suite "PLAT-71 Tier 2: the binary adapts to the terminal it runs in":
     if calc.outcome == foRecorded:
       for sig in [SIGHUP, SIGSEGV]:
         var s = builder(@[calc.tracePath], term = "foot").spawn()
-        discard s.serve(foot())
+        discard s.serve(footGraphemeOff())
         settleOnDebugger(s, Cols, Rows)
         ck s.transcriptBytes().contains("\x1b[?2027h")
         let mark = s.transcriptBytes().len
@@ -330,7 +402,7 @@ suite "PLAT-71 Tier 2: the binary adapts to the terminal it runs in":
       # SIGTSTP: the restore before the stop, the claim after it, and a
       # whole frame — the screen the user returns to is the session's.
       var t = builder(@[calc.tracePath], term = "foot").spawn()
-      discard t.serve(foot())
+      discard t.serve(footGraphemeOff())
       settleOnDebugger(t, Cols, Rows)
       let before = t.screenText()
       let mark = t.transcriptBytes().len
@@ -445,7 +517,7 @@ suite "PLAT-71 Tier 2: the binary adapts to the terminal it runs in":
         discard sess.drainOutput(50)
       var screen = sess.screenText()
       ck screen.contains("TERMINAL CAPABILITIES")
-      ck screen.contains("kitty 0.36.4")
+      ck screen.contains("kitty 0.44.0")
       ck screen.contains("modern-unicode off")
       ck screen.contains("Glyph test card")
       # A key is shown decoded.
@@ -516,7 +588,7 @@ suite "PLAT-71 Tier 2: the binary adapts to the terminal it runs in":
         discard sess.drainOutput(50)
       let screen = sess.screenText()
       checkpoint(screen)
-      ck screen.contains("kitty 0.36.4")       # the late identity, applied
+      ck screen.contains("kitty 0.44.0")       # the late identity, applied
       ck screen.contains("slow link")
       ck screen.contains("Motion       reduced")
       sess.send("\x1b")
@@ -580,7 +652,32 @@ suite "PLAT-71 Tier 2: the binary adapts to the terminal it runs in":
       ck j >= 0 and k > j
       ck tokens.contains("[1;5R")
 
-  test "TA-14: under a real tmux, one display spawn and no passthrough":
+  test "§4.3 DECXCPR: a terminal that never answers cannot swallow Ctrl+F3":
+    # The round asks DECXCPR, so no unmarked `CSI … R` is owed: Ctrl+F3 typed
+    # while the round waits for a terminal that answers nothing is a key, not
+    # a cursor report taken for the reply window's three seconds.
+    let calc = resolveFixture(pythonSpec("calc"))
+    ck calc.outcome == foRecorded
+    if calc.outcome == foRecorded:
+      let journal = freshState("journal-silent") / "keys.txt"
+      var sess = builder(@["--record-keys=" & journal, calc.tracePath],
+                         probeMs = 3000).spawn()
+      let deadline = getMonoTime() + initDuration(seconds = 20)
+      while not sess.transcriptBytes().contains("\x1b[c") and
+            getMonoTime() < deadline:
+        discard sess.drainOutput(20)
+      sess.send("\x1b[1;5R")
+      discard sess.serve(silent())
+      settleOnDebugger(sess, Cols, Rows)
+      discard sess.drainOutput(300)
+      finishSession(sess)
+      sess.close()
+      ck fileExists(journal)
+      let tokens = readFile(journal)
+      checkpoint("journal: " & tokens.escape)
+      ck tokens.contains("[1;5R")
+
+  test "TA-14: under a real tmux, one display spawn and no passthrough query but OSC 22's":
     let tmux = findExe("tmux")
     if tmux.len == 0:
       checkpoint("tmux is not on PATH: the lane's environment provides it")
@@ -616,7 +713,19 @@ suite "PLAT-71 Tier 2: the binary adapts to the terminal it runs in":
       client.close()
       checkpoint("pane bytes: " & $bytes.len)
       ck bytes.contains("\x1b[c")                # the round reached tmux
-      ck not bytes.contains("\x1bPtmux;")         # and nothing passed through
+      # Every `DCS tmux;` payload is an OSC 22 or OSC 52 sequence, and the one
+      # QUERY among them is Pointer-Affordances §5.2's own: tmux returns the
+      # outer terminal's OSC 22 reply to the pane (§5.5), and answers every
+      # other query itself, so any other passthrough query is TA-14's defect.
+      let passed = passthroughPayloads(bytes)
+      checkpoint("passthrough payloads: " & $passed)
+      var foreign: seq[string] = @[]
+      for payload in passed:
+        let isSet = (payload.startsWith("\x1b]22;") or
+                     payload.startsWith("\x1b]52;")) and "?" notin payload
+        if not isSet and payload != PointerQuery:
+          foreign.add payload
+      ck foreign.len == 0
       let leave = bytes.rfind("\x1b[?1049l")
       let start = bytes.find('{', max(0, leave))
       let stop = bytes.rfind('}')

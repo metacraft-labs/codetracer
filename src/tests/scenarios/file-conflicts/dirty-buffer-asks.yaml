@@ -1,0 +1,26 @@
+scenario: 1
+name: file-conflicts/dirty-buffer-asks
+pack: codetracer
+summary: >-
+  When another program rewrites a file whose buffer has unsaved edits, the
+  editor asks — "File changed on disk", with Discard and reload, Save in-memory
+  version, Open three-way merge and Keep editing — and the edits stay.
+
+stage:
+  - use: write-project
+    with: { files: { main.py: "print(\"initial\")\n" } }
+  - use: open-project
+    with: { folder: $project, file: main.py }
+
+steps:
+  - wait: { until: { at: 'editor[file="main.py"]', assert: 'shows-text("initial")' }, timeout: 120s }
+  - wait: { until: settled, timeout: 30s }
+  - click: { at: 'editor[file="main.py"]/line[number="1"]', anchor: text-start }
+  - chord: Ctrl+A
+  - type: "print(\"ours in memory\")"
+  - wait: { until: { at: 'editor[file="main.py"]', assert: 'shows-text("ours in memory")' }, timeout: 15s }
+  - act: { use: write-file, with: { file: main.py, content: "print(\"theirs on disk\")\n" } }
+  - wait: { until: { at: 'dialog[title="File changed on disk"]', present: true }, timeout: 30s }
+  - expect: { at: 'dialog[title="File changed on disk"]/dialog-button[label="Keep editing"]', present: true }
+  - expect: { at: 'dialog[title="File changed on disk"]/dialog-button[label="Discard and reload"]', present: true }
+  - expect: { at: 'editor[file="main.py"]', assert: 'shows-text("ours in memory")' }

@@ -1,0 +1,35 @@
+scenario: 1
+name: agent-activity-deepreview/evidence-open-review
+pack: codetracer
+summary: >-
+  An evidence card's Open review enters a review over that dataset — the
+  VCS panel's title and files change and its first diff tab opens — and
+  each card can be chosen on its own, back and forth.
+
+stage:
+  - use: review-dataset
+    with: { variant: evidence }
+  - use: open-review
+
+steps:
+  - wait: { until: { at: vcs, present: true }, timeout: 60s }
+  - wait: { until: settled, timeout: 30s }
+  - wait: { until: { at: vcs, count: 3 }, timeout: 30s }
+  - expect: { at: vcs, title: "DeepReview: parser cleanup" }
+  - wait: { until: { at: 'agent-activity/evidence-card[dataset="iteration-2.json"]/panel-button[label="Open review"]', present: true }, timeout: 30s }
+  - expect: { at: 'agent-activity/evidence-card[dataset="iteration-1.json"]/panel-button[label="Open review"]', present: true }
+
+  - beat: second
+    steps:
+      - click: { at: 'agent-activity/evidence-card[dataset="iteration-2.json"]/panel-button[label="Open review"]' }
+      - wait: { until: { at: vcs, title: "DeepReview: iteration two" }, timeout: 15s }
+      - expect: { at: vcs, count: 1 }
+      - expect: { at: 'vcs/changed-file[name="config.rs"]', present: true }
+      - wait: { until: { at: window, assert: 'has-pane("Diff: config.rs")' }, timeout: 15s }
+
+  - beat: first
+    steps:
+      - click: { at: 'agent-activity/evidence-card[dataset="iteration-1.json"]/panel-button[label="Open review"]' }
+      - wait: { until: { at: vcs, title: "DeepReview: iteration one" }, timeout: 15s }
+      - expect: { at: vcs, count: 2 }
+      - expect: { at: agent-activity, evidence-cards: 5 }

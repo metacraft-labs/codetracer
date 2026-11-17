@@ -1,0 +1,51 @@
+scenario: 1
+name: multi-replay/tab-switch-restores-the-first-session
+pack: codetracer
+summary: >-
+  After two steps, a new tab ("+") and a click back on the first tab, the
+  first session is as it was left: main.py in the editor, its event log and
+  call trace, the status line on the stepped line; and both the toolbar's
+  Next and F10 still step it.
+
+stage:
+  - use: record-program
+    with: { program: py_console_logs/main.py }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - wait: { until: { at: 'toolbar/toolbar-button[label="next-image"]', present: true }, timeout: 60s }
+  - wait: { until: editor.loaded, timeout: 60s }
+  - click: 'pane-tab[label="EVENT LOG"]'
+  - wait: { until: event-log.loaded, timeout: 60s }
+  - click: 'pane-tab[label="CALLTRACE"]'
+  - wait: { until: call-trace.loaded, timeout: 60s }
+  - click: 'toolbar/toolbar-button[label="next-image"]'
+    settle: false
+  - wait: { until: { at: status-line, location: { matches: "main.py:8#" } }, timeout: 60s }
+  - wait: { until: replay-idle, timeout: 60s }
+  - click: 'toolbar/toolbar-button[label="next-image"]'
+    settle: false
+  - wait: { until: { at: status-line, location: { matches: "main.py:10#" } }, timeout: 60s }
+  - wait: { until: replay-idle, timeout: 60s }
+  - click: session-strip/session-add
+  - wait: { until: { at: session-strip, count: 2 }, timeout: 30s }
+  - wait: { until: { at: welcome, present: true }, timeout: 30s }
+  - expect: { at: 'editor[file="main.py"]', absent: true }
+  - click: 'session-strip/session-tab[title="main.py"]'
+  - wait: { until: { at: 'session-strip/session-tab[title="main.py"]', active: true }, timeout: 30s }
+  - wait: { until: { at: 'editor[file="main.py"]', present: true }, timeout: 60s }
+  - wait: { until: { at: status-line, location: { matches: "main.py:10#" } }, timeout: 60s }
+  - expect: { at: 'editor[file="main.py"]', current-line: 10 }
+  - click: 'pane-tab[label="EVENT LOG"]'
+  - wait: { until: event-log.loaded, timeout: 60s }
+  - click: 'pane-tab[label="CALLTRACE"]'
+  - wait: { until: call-trace.loaded, timeout: 60s }
+  - wait: { until: replay-idle, timeout: 60s }
+  - click: 'toolbar/toolbar-button[label="next-image"]'
+    settle: false
+  - wait: { until: { at: status-line, location: { matches: "main.py:11#" } }, timeout: 60s }
+  - wait: { until: replay-idle, timeout: 60s }
+  - chord: F10
+    settle: false
+  - wait: { until: { at: status-line, location: { matches: "main.py:12#" } }, timeout: 60s }

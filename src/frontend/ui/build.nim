@@ -306,8 +306,8 @@ proc autoDismissBuildPanel*() =
       buildOverlayInteracted = true
       cancelBuildAutoDismiss()
     # Attach listeners that fire once and then remove themselves.
-    overlayEl.addEventListener(cstring"pointerdown", handler)
-    overlayEl.addEventListener(cstring"keydown", handler)
+    overlayEl.addEventListener(cstring"pointerdown", handler)  # ir1-gate: activity (cancels the auto-dismiss)
+    overlayEl.addEventListener(cstring"keydown", handler)  # ir1-gate: not a key: any activity
 
   buildAutoDismissTimer = windowSetTimeout(proc() =
     buildAutoDismissTimer = 0

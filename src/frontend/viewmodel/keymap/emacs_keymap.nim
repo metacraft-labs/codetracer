@@ -182,6 +182,10 @@ const
             table: G),
     BaseRow(chords: "Ctrl+X Ctrl+A Ctrl+B", operation: "editor.toggle-breakpoint",
             whenText: "editorFocus", table: G),
+    # Editor-Pane.md § Inline breakpoints: GUD names no column breakpoint, so
+    # the desktop's F-key (§3.8's rule).
+    BaseRow(chords: "Shift+F9", operation: "editor.toggle-inline-breakpoint",
+            whenText: "editorFocus", table: G),
     BaseRow(chords: "Enter", operation: "editor.toggle-tracepoint",
             whenText: "editorTextFocus && editorReadOnly && " & Debug),
     BaseRow(chords: "F8", operation: "debugger.continue", whenText: Debug, table: G),

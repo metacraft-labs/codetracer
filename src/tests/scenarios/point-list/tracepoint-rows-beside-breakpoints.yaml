@@ -1,0 +1,59 @@
+scenario: 1
+name: point-list/tracepoint-rows-beside-breakpoints
+pack: codetracer
+summary: >-
+  codetracer#886. A tracepoint added from the editor's context menu is a
+  tracepoint row of the Breakpoints & Tracepoints pane, beside the row of a
+  breakpoint set in the gutter: before it is run, still after Run, and gone
+  once the tracepoint is deleted from its line's context menu, which leaves
+  the breakpoint's row in place.
+
+stage:
+  - use: write-project
+    with: { files: { program.js: "var total = 0;\nfor (let i = 0; i < 3; i++) {\n  var a = i;\n  total += a;\n}\nvar d = total;\n" } }
+  - use: record-program
+    with: { program: $project/program.js }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - wait: { until: { at: 'editor[file="program.js"]', present: true }, timeout: 60s }
+  # a breakpoint on line 6, in the gutter
+  - click: { at: 'editor[file="program.js"]/line[number="6"]', anchor: glyph }
+  - wait: { until: { at: 'editor[file="program.js"]/line[number="6"]', glyph: breakpoint }, timeout: 30s }
+  # a tracepoint on line 3, from the editor's context menu
+  - click: { at: 'editor[file="program.js"]/line[number="3"]', anchor: text-end, button: right }
+  - wait: { until: { at: context-menu, present: true }, timeout: 10s }
+  - click: 'context-menu/menu-item[label="Add tracepoint"]'
+  - wait: { until: { at: 'tracepoint-editor[line="3"]', focused: true }, timeout: 20s }
+  - type: "log(a)"
+  # leave the tracepoint editor for the main editor, so the palette's chord
+  # reaches the window rather than the tracepoint's expression
+  - click: { at: 'editor[file="program.js"]/line[number="1"]', anchor: text-start }
+  # View › Breakpoints & Tracepoints, found in the command palette
+  - chord: Ctrl+p
+  - wait: { until: { at: omnibox, focused: true }, timeout: 10s }
+  - type: ":Breakpoints"
+  - wait: { until: { at: 'omnibox/option[label="Breakpoints & Tracepoints"]', kind: command }, timeout: 10s }
+  - click: 'omnibox/option[label="Breakpoints & Tracepoints"]'
+  - wait: { until: { at: breakpoints, present: true }, timeout: 60s }
+  # before any run: both points are rows, each of its own kind
+  - wait: { until: { at: breakpoints, locations: { unordered: [ "program.js:6", "program.js:3" ] } }, timeout: 60s }
+  - expect: { at: 'breakpoints/point[location="program.js:6"]', kind: breakpoint }
+  - expect: { at: 'breakpoints/point[location="program.js:3"]', kind: tracepoint }
+  # Run: the tracepoint logs its value, and its row stays
+  - click: { at: 'tracepoint-editor[line="3"]', anchor: run }
+    settle: false
+  - wait: { until: event-log.loaded, timeout: 60s }
+  - wait: { until: { at: event-log, assert: 'has-output("a=2")' }, timeout: 60s }
+  - wait: { until: { at: breakpoints, locations: { unordered: [ "program.js:6", "program.js:3" ] } }, timeout: 60s }
+  - expect: { at: 'breakpoints/point[location="program.js:3"]', kind: tracepoint }
+  - expect: { at: 'breakpoints/point[location="program.js:6"]', kind: breakpoint }
+  # Delete, from the line's context menu: its row goes, the breakpoint's stays
+  - click: { at: 'editor[file="program.js"]/line[number="3"]', anchor: text-end, button: right }
+  - wait: { until: { at: 'context-menu/menu-item[label="Delete tracepoint"]', present: true }, timeout: 10s }
+  - click: 'context-menu/menu-item[label="Delete tracepoint"]'
+  - wait: { until: { at: 'tracepoint-editor[line="3"]', absent: true }, timeout: 20s }
+  - wait: { until: { at: breakpoints, locations: [ "program.js:6" ] }, timeout: 60s }
+  - expect: { at: 'breakpoints/point[location="program.js:3"]', absent: true }
+  - expect: { at: 'breakpoints/point[location="program.js:6"]', kind: breakpoint }

@@ -1,0 +1,51 @@
+scenario: 1
+name: problems/failed-build-rows-filters-and-press
+pack: codetracer
+summary: >-
+  A failed nargo build lists its warning and two errors in PROBLEMS and
+  highlights the first error, even when another tab is shown as it
+  finishes; the Errors filter leaves the two errors, Group by File groups
+  the rows under their two files, and a press on util.nr's error opens
+  src/util.nr at line 3.
+
+stage:
+  - use: project-fixture
+    with: { name: noir-build }
+  - use: open-project
+    with: { folder: $project }
+
+steps:
+  - wait: { until: { at: 'strip-tab[label="BUILD"]', present: true }, timeout: 60s }
+  - wait: { until: settled, timeout: 30s }
+  - click: session-strip/session-add
+  - wait: { until: { at: 'welcome/welcome-action[label="New file"]', present: true }, timeout: 30s }
+  - click: 'welcome/welcome-action[label="New file"]'
+  - wait: { until: { at: welcome, absent: true }, timeout: 30s }
+  - click: 'session-strip/session-tab[title="project-noir-build"]'
+  - wait: { until: { at: 'session-strip/session-tab[title="project-noir-build"]', active: true }, timeout: 30s }
+  - wait: { until: { at: 'edit-toolbar/panel-button[label="Build"]', enabled: true }, timeout: 60s }
+  - click: { at: 'edit-toolbar/panel-button[label="Build"]' }
+    settle: false
+  # the other tab is shown while the build finishes
+  - click: 'session-strip/session-tab[title="Trace 2"]'
+    settle: false
+  - wait: { until: { at: 'session-strip/session-tab[title="Trace 2"]', active: true }, timeout: 30s }
+  - wait: { until: settled, timeout: 60s }
+  - click: 'session-strip/session-tab[title="project-noir-build"]'
+  - wait: { until: { at: status-line, build-status: { matches: "^Build failed" } }, timeout: 120s }
+  - click: 'strip-tab[label="PROBLEMS"]'
+  - wait: { until: { at: problems-panel, count: 3 }, timeout: 60s }
+  - expect: { at: problems-panel, errors: 2, warnings: 1 }
+  - expect: { at: problems-panel, assert: 'highlights-only("src/util.nr", "3:22")' }
+  - click: 'problems-panel/panel-button[label="Errors"]'
+  - wait: { until: { at: problems-panel, count: 2 }, timeout: 10s }
+  - expect: { at: problems-panel, warnings: 0 }
+  - click: 'problems-panel/panel-button[label="All"]'
+  - wait: { until: { at: problems-panel, count: 3 }, timeout: 10s }
+  - click: 'problems-panel/panel-button[label="Group by File"]'
+  - wait: { until: { at: problems-panel, groups: 2 }, timeout: 10s }
+  - click: 'problems-panel/panel-button[label="Group by File"]'
+  - wait: { until: { at: problems-panel, groups: 0 }, timeout: 10s }
+  - click: 'problems-panel/problem[message="Expected type bool, found type Field", location="3:22"]'
+  - wait: { until: { at: 'editor[file="util.nr"]', active: true }, timeout: 30s }
+  - wait: { until: { at: 'editor[file="util.nr"]', caret-line: 3 }, timeout: 30s }

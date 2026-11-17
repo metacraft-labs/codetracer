@@ -187,7 +187,7 @@ const CROSS_PLATFORM_ENTRY_BREAKPOINT_REFUSAL =
  * worth waiting for.
  */
 const LAUNCH_FAILURE_NOTIFICATION =
-  /^(launch error: |failed to initialize replay-worker transport|replay worker for pid \d+ refused to start|Free tier: |.*: this recording cannot be opened by this build)/;
+  /^(launch error: |The replay could not start: |failed to initialize replay-worker transport|replay worker for pid \d+ refused to start|Free tier: |.*: this recording cannot be opened by this build)/;
 
 /** The main binaries `ct-mcr debugserver` reported extracting, as the worker logged them. */
 function reportedMainBinaries(workerLog: string): Set<string> {

@@ -1,0 +1,18 @@
+scenario: 1
+name: languages/wasm-continue-runs-to-the-end
+pack: codetracer
+summary: >-
+  From the entry of a WebAssembly recording (main.rs line 11), Continue runs
+  on to the end of `main` (line 15, its closing brace).
+
+stage:
+  - use: record-program
+    with: { program: wasm_example }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 180s }
+  - wait: { until: { at: status-line, location: { matches: "main\\.rs:11#" } }, timeout: 60s }
+  - click: 'toolbar/toolbar-button[label="continue-image"]'
+    settle: false
+  - wait: { until: { at: status-line, location: { matches: "main\\.rs:15#" } }, timeout: 60s }

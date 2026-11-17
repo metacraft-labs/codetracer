@@ -172,8 +172,9 @@ sibling_remote_org="${CODETRACER_SIBLING_REMOTE_ORG:-https://github.com/metacraf
 # them as packages, so `ci/repro-lock-build-input-siblings.sh` lists them and
 # the action clones them -- and src/ imports all three (see their rows). Being
 # lock-declared does not make a sibling required: this tier is what a
-# `build-once` build cannot compile without, and theirs are other targets'
-# needs (the advisory paragraph below).
+# `build-once` build cannot compile without. For isonim-gpui and nim-termctl
+# that is other targets' needs (the advisory paragraph below); nim-pty became
+# required on 2026-11-08 (its paragraph below).
 #
 # `runquota` was added to that tier after issue #641. `src/ct/codetracer.nim`
 # imports `../ct_test/ct_test`, which reaches `src/ct_test/process_exec.nim` ->
@@ -229,15 +230,30 @@ sibling_remote_org="${CODETRACER_SIBLING_REMOTE_ORG:-https://github.com/metacraf
 # sibling checkouts. Honouring the variables here is exactly how the issue's
 # failing tree got its green preflight.
 #
+# `nim-pty` joined that tier on 2026-11-08 (codetracer-pm issue
+# 2026-11-08-ct-core-imports-nim-pty-which-the-sibling-check-calls-optional).
+# It used to be advisory, as a TUI-only dependency, and stopped being one with
+# 4e856d570 ("a shell session any front-end can drive"):
+# `src/common/shell_session.nim` imports `nim_pty`, and the desktop runs that
+# session behind its main process as `ct shell-session`
+# (src/ct/codetracer.nim -> shell_session_command -> ../common/shell_session,
+# CodeTracer-Shell.md §7.2). So every `ct` build compiles it, on every
+# platform: the import sits under `when not defined(js)` only, and nim-pty
+# carries a Windows backend. A tree without nim-pty passed this preflight as
+# advisory and then died in `Build the codetracer-desktop core` on
+# `shell_session.nim(40, 8) Error: cannot open file: nim_pty`. Its override
+# column is empty because no override exists: `config.nims` and
+# `src/Tuprules.tup` reach it only as `../nim-pty/src`.
+#
 # Everything else the source references across a relative path goes in the
 # advisory tier: a warning naming the module that will fail to resolve, and a
-# zero exit. `isonim-gpui` / `nim-termctl` / `nim-pty` are on
+# zero exit. `isonim-gpui` / `nim-termctl` are on
 # `src/Tuprules.tup`'s `--path` list and are imported, but only by the GPUI and
 # TUI frontends and their tests (`just build-gpui`, `just build-tui`,
 # `just test-tui`), which `build-once` does not compile: no file in the import
 # closure of its targets (src/ct/{codetracer,db_backend_record}.nim,
 # src/ct_test/ct_test.nim, the src/frontend/{index,subwindow,ui_js}.nim JS
-# bundles and the two src/frontend/tests JS tests) reaches any of them.
+# bundles and the two src/frontend/tests JS tests) reaches either of them.
 # Note isonim-tui's umbrella imports nim_termctl, but `build-once` reaches
 # only `isonim_tui/text/width`, which does not. `just test`'s plat37 shim gate
 # (`ci/test/plat37-shim-gate-test.sh`) reads `${ISONIM_GPUI:-../isonim-gpui}/tools`
@@ -296,6 +312,9 @@ required_siblings=(
 	'io-mon|src/io_mon/depfile.nim||`import io_mon/depfile` in src/ct_test/incremental/io_mon_capture.nim:83, reached from EVERY `ct` build via src/ct/codetracer.nim -> ../ct_test/incremental_cli -> incremental/io_mon_capture; config.nims puts ../io-mon/src on the Nim search path'
 	# Probe the module imported, for the same reason as io-mon's row.
 	'nim-stackable-hooks|src/stackable_hooks/propagation.nim||`import stackable_hooks/propagation` in src/ct_test/incremental/io_mon_capture.nim:91, reached from EVERY `ct` build by the same chain as io-mon; config.nims puts ../nim-stackable-hooks/src on the Nim search path'
+	# Override column empty because none exists -- see the nim-pty paragraph in
+	# the tier notes above.
+	'nim-pty|src/nim_pty.nim||`import nim_pty` in src/common/shell_session.nim, reached from EVERY `ct` build via src/ct/codetracer.nim -> shell_session_command (`ct shell-session`); the TUI tests (test_terminal_driver_start.nim, test_focus_reporting.nim) and src/frontend/tui/benchmarks/tui_benchmarks.nim import it too. src/Tuprules.tup and config.nims put ../nim-pty/src on the Nim search path'
 )
 
 advisory_siblings=(
@@ -309,7 +328,6 @@ advisory_siblings=(
 	# file, so a checkout that is only an empty `src` is not a pass.
 	'isonim-gpui|src/isonim_gpui/renderer.nim||`import isonim_gpui/...` in src/frontend/gpui/main.nim and the rest of src/frontend/gpui/, and in src/frontend/view_vocabulary/gpui_binding.nim, so `just build-gpui` needs it; `just test-plat37-shim-gate` reads its tools/ and refuses without it'
 	"nim-termctl|src/nim_termctl.nim||\`import nim_termctl\` in src/frontend/tui/host/terminal_driver.nim and resize.nim (and isonim-tui's \`isonim_tui\` umbrella), so \`just build-tui\` needs it"
-	'nim-pty|src/nim_pty.nim||`import nim_pty` in src/frontend/tui/tests/test_terminal_driver_start.nim, test_focus_reporting.nim and src/frontend/tui/benchmarks/tui_benchmarks.nim, so `just test-tui` and `just build-tui-benchmarks` need it'
 	# Not in `build-once`'s import closure: only StoryBook's component bundle
 	# imports it. It is not declared in repro.nim yet, so the lock-provisioned
 	# CI checkouts do not carry it.

@@ -1,0 +1,20 @@
+scenario: 1
+name: terminal/terminal-output-click-goes-to-the-line
+pack: codetracer
+summary: >-
+  The Terminal Output pane shows what the recorded program wrote; a click on
+  a line moves the replay to the tick that wrote it (row 2, the desktop's
+  line 10), past the start.
+stage:
+  - use: record-program
+    with: { program: terminal_colours/main.py }
+  - use: open-recording
+    with: { width: 200, height: 50 }
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - click: { at: 'pane-tab[label="Terminal Output"]' }
+  - wait: { until: { at: terminal-output, assert: 'shows("red plain bold green")' }, timeout: 20s }
+  - expect: { at: replay-position, tick: 1 }
+  - click: { at: 'pane[title="Terminal Output"]/row[text="row   2 ###"]', anchor: text-start }
+  - wait: { until: { at: replay-position, assert: "past(1)" }, timeout: 30s }
+  - expect: { at: terminal-output, assert: 'shows("red plain bold green")' }

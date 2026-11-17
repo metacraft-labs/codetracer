@@ -1,0 +1,38 @@
+scenario: 1
+name: gpui/call-trace-current-frame
+pack: codetracer
+summary: >-
+  Exactly one call-trace row is marked as the call the replay is in, it is
+  the frame holding the execution line, and the mark moves with the stop: a
+  press on `add` marks `add` (and the editor stops in its body), a press on
+  `evaluate` marks `evaluate`; a call trace hidden behind another tab and
+  brought back shows the mark where it was.
+
+stage:
+  - use: record-program
+    with: { program: calc }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - wait: { until: call-trace.loaded, timeout: 60s }
+
+  - beat: into-add
+    steps:
+      - click: { at: 'call-trace/call[#6]' }
+      - wait: { until: { at: call-trace, assert: "marks-only(add)" }, timeout: 60s }
+      - expect: { at: 'editor[file="main.py"]', assert: "stopped-within(29, 31)" }
+
+  - beat: into-evaluate
+    steps:
+      - click: { at: 'call-trace/call[#4]' }
+      - wait: { until: { at: call-trace, assert: "marks-only(evaluate)" }, timeout: 60s }
+      - expect: { at: 'editor[file="main.py"]', assert: "stopped-within(72, 87)" }
+
+  - beat: hidden-and-back
+    steps:
+      - click: { at: 'pane-tab[label="Agent Activity"]' }
+      - expect: { at: call-trace, absent: true }
+      - click: { at: 'pane-tab[label="Call Trace"]' }
+      - wait: { until: call-trace.loaded, timeout: 30s }
+      - expect: { at: call-trace, assert: "marks-only(evaluate)" }

@@ -1,0 +1,27 @@
+scenario: 1
+name: visual-replay/video-player-in-production-layout
+pack: codetracer
+summary: >-
+  A visual-capable recording opens the Video Player in the production layout:
+  brought forward, it shows a frame (no startup or error notice), its scrub
+  bar runs to frame 3, and the editor, VARIABLES, CALLTRACE, EVENT LOG and
+  TERMINAL OUTPUT panes stay.
+
+stage:
+  - use: record-program
+    with: { program: py_console_logs/main.py }
+  - use: visual-replay-capable
+  - use: front-end-options
+    with: { env: { CODETRACER_VISUAL_REPLAY_FAKE_PLAYER: ready } }
+  - use: open-recording
+    with: { deployment: web }
+
+steps:
+  - wait: { until: replay-idle, timeout: 360s }
+  - wait: { until: editor.loaded, timeout: 300s }
+  - wait: { until: call-trace.loaded, timeout: 120s }
+  - wait: { until: { at: 'pane-tab[label="VIDEO PLAYER"]', present: true }, timeout: 60s }
+  - click: { at: 'pane-tab[label="VIDEO PLAYER"]', anchor: title }
+  - wait: { until: { at: video-player/frame-image, present: true }, timeout: 60s }
+  - expect: { at: video-player, starting: false, error: "", last-frame: 3 }
+  - expect: { at: window, assert: ['has-pane("VARIABLES")', 'has-pane("CALLTRACE")', 'has-pane("EVENT LOG")', 'has-pane("TERMINAL OUTPUT")'] }

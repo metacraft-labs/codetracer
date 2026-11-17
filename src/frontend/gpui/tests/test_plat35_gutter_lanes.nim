@@ -77,7 +77,8 @@ template ck(cond: untyped) =
 # fifth mark or a fifth width moves the expected total without an edit.
 # ---------------------------------------------------------------------------
 const
-  Marks = [emNone, emBreakpoint, emBreakpointDisabled, emTracepoint]
+  Marks = [emNone, emBreakpoint, emBreakpointDisabled, emTracepoint,
+           emBreakpointTracepoint]
     ## Every `EditorMark`. Written out rather than iterated as `EditorMark` so
     ## the arity is a number the formula can use; the first case asserts the
     ## list IS the enum, so a fifth mark cannot be quietly left out of it.
@@ -99,7 +100,8 @@ const
     ## the half that is right if the two ever disagree.
 
   LaneGlyphs = [ExecutionPointerGlyph, InspectionPointerGlyph,
-                BreakpointGlyph, BreakpointDisabledGlyph, TracepointGlyph]
+                BreakpointGlyph, BreakpointDisabledGlyph, TracepointGlyph,
+                BreakpointTracepointGlyph]
     ## Every glyph that can occupy a lane. `EmptyLaneGlyph` is deliberately
     ## not here: it is the ABSENCE of a glyph and carries no ink.
 
@@ -191,13 +193,13 @@ proc backgroundTokenOf(styles, cls: string): string =
   for raw in styles.splitLines():
     let line = raw.strip()
     if not seen:
-      if line == "." & cls:
+      if line == "." & cls or line == "&." & cls:
         seen = true
       continue
     if line.startsWith("background:"):
       return line["background:".len .. ^1].strip()
     # A new selector before the declaration means that rule carried none.
-    if line.startsWith("."):
+    if line.startsWith(".") or line.startsWith("&."):
       return ""
   ""
 
@@ -304,12 +306,15 @@ suite "PLAT-35 tier 3 — the gutter's lanes":
       # Independent of what it would have inherited: a mark whose colour moved
       # with the cursor would be a mark whose meaning does.
       ck markColour(m, resting) == markColour(m, active)
-    # The three drawn marks are three colours and not one.
+    # The drawn marks are distinct colours, except the combined breakpoint and
+    # tracepoint, which is the breakpoint's (it stops; Editor-Pane.md MC.5).
     var hexes = initHashSet[string]()
     for m in Marks:
-      if m == emNone: continue
+      if m in {emNone, emBreakpointTracepoint}: continue
       hexes.incl markColour(m, resting)
-    ck hexes.len == Marks.len - 1
+    ck hexes.len == Marks.len - 2
+    ck markColour(emBreakpointTracepoint, resting) ==
+       markColour(emBreakpoint, resting)
 
   test "PLAT35-F13: the mark's colour is the ELECTRON gutter's own token":
     # **THE REFERENCE, READ FROM THE REFERENCE** (§6: *"the Electron front-end
@@ -321,11 +326,13 @@ suite "PLAT-35 tier 3 — the gutter's lanes":
     let styles = readFile(requireFile(ElectronGutterStyles,
       "It is the Electron front-end's own gutter stylesheet, which is the " &
       "reference for what colour a gutter mark is."))
-    let classes = [("gutter-breakpoint-enabled", emBreakpoint,
+    # The marks are Monaco glyph-margin decorations on the desktop now
+    # (Editor-Pane.md MC.5), styled `.gutter-glyph-*:before`.
+    let classes = [("gutter-glyph-breakpoint:before", emBreakpoint,
                     dtColorsUiTextErrorPrimary),
-                   ("gutter-breakpoint-disabled", emBreakpointDisabled,
+                   ("gutter-glyph-breakpoint-disabled:before", emBreakpointDisabled,
                     dtColorsUiSurfacePrimaryTertiary),
-                   ("gutter-trace", emTracepoint, dtColorsUiBorderAction)]
+                   ("gutter-glyph-tracepoint:before", emTracepoint, dtColorsUiBorderAction)]
     for entry in classes:
       let (cls, mark, token) = entry
       let named = backgroundTokenOf(styles, cls)
@@ -452,8 +459,8 @@ suite "PLAT-35 tier 3 — the gutter's lanes":
       marked +                            # a drawn mark is in the mark's cell
       digitCells +                        # no digit reaches the lanes
       (2 * inked + Cases.len) +           # no lane glyph abuts a digit
-      (2 + 3 * drawn + 1) +               # markColour's four arms
-      3 * drawn +                         # the Electron classes
+      (2 + 3 * drawn + 2) +               # markColour's arms, and the combined mark
+      3 * 3 +                             # the Electron classes
       2 * Widths.len +                    # one surface, one width
       Cases.len +                         # PLAT-39's cluster bound
       Cases.len +                         # PLAT-42's reader, re-run

@@ -99,6 +99,8 @@ const
   GraphemeModeOffBytes* = "\x1b[?2027l"
   SyncOffBytes* = "\x1b[?2026l"
   CursorReportQuery* = "\x1b[6n"
+  MarkedCursorReportQuery* = "\x1b[?6n"
+    ## DECXCPR: answered `CSI ? r ; c R`, which no key shares (§4.3).
   StartupQueries* = Osc11Query & XtGetTcapQuery & DecrqssProbeSgr &
                     DecrqssQuery & SgrReset & Da1Query
     ## The whole round, written in ONE `write(2)` so a terminal answers it as
@@ -126,6 +128,26 @@ proc startupProbeTimeoutMs*(): int =
     except ValueError:
       discard
   DefaultStartupProbeMs
+
+proc diagnosticProbeTimeoutMs*(): int =
+  ## The wait a ONE-SHOT diagnostic gives the round (`--capabilities`, which
+  ## `ct doctor terminal` runs): it has no frame to protect, so it waits for
+  ## the fence as long as a late reply is still recognised (`ReplyWindowMs`)
+  ## instead of the session's `DefaultStartupProbeMs`. `CT_TUI_PROBE_TIMEOUT_MS`
+  ## still decides when it is set. Measured 2026-11-11 (§3.2.1): on a software
+  ## renderer kitty and xterm answered the fence 1–80 ms after the write, and
+  ## a cold kitty 2.7 s after it — every one of them after 10 ms.
+  let raw = getEnv("CT_TUI_PROBE_TIMEOUT_MS", "")
+  if raw.len > 0:
+    return startupProbeTimeoutMs()
+  ReplyWindowMs
+
+const
+  DiagnosticPointerGraceMs* = 1000
+    ## How long after the fence a one-shot diagnostic still waits for the
+    ## outer terminal's answer to the wrapped OSC 22 query: tmux answers the
+    ## fence itself, and the outer terminal's reply comes through after it
+    ## (4–20 ms measured in kitty 0.44.0 through tmux 3.6a, 2026-11-12).
 
 proc isDa1Reply*(token: string): bool =
   token.len >= 4 and token.startsWith("\x1b[?") and token[^1] == 'c'
@@ -162,23 +184,46 @@ proc isReplyToken*(token: string): bool =
 
 proc isCprToken*(token: string): bool =
   ## `CSI <row> ; <col> R` — a cursor report, or a modified F3 in legacy
-  ## xterm (`CSI 1 ; 5 R` is Ctrl+F3). Which one it is depends on whether the
-  ## width probe is still waiting (`cprOpen`).
+  ## xterm (`CSI 1 ; 5 R` is Ctrl+F3). Which one it is depends on whether a
+  ## plain-CPR round is still waiting (`cprOpen`).
   parseCpr(token)[0]
 
+proc isMarkedCprToken*(token: string): bool =
+  ## DECXCPR's answer, `CSI ? r ; c R`: a cursor report and never a key.
+  parseMarkedCpr(token)[0]
+
 proc cprOpen*(probe: TerminalProbe): bool =
-  ## §4.3's F3 rule: while the width probe has asked for N cursor reports and
-  ## fewer have arrived, a `CSI r ; c R` is a REPLY; after that it is a key.
-  ## The window also closes with the round: the reports are asked before the
-  ## DA1 fence, so none is still coming once the fence has arrived, and none
-  ## is waited for once `ReplyWindowMs` has passed without it.
-  if probe.answered or probe.replyWindowClosed:
+  ## §4.3's F3 rule: whether an UNMARKED `CSI r ; c R` is a reply now.
+  ##
+  ## A round that asked DECXCPR expects marked answers only, so an unmarked
+  ## one is a key from the start — a terminal that never answers can no
+  ## longer swallow Ctrl+F3 for the length of the reply window. Only while
+  ## the plain-CPR fallback round (asked after the fence, when no marked
+  ## answer came) waits for its reports is it a reply, until that round's own
+  ## fence. A round that asked plain CPR (the Linux console) keeps the rule
+  ## it always had: a reply while fewer than N have arrived and the fence has
+  ## not, and not past `ReplyWindowMs`.
+  if probe.replyWindowClosed or probe.cprAnswers.len >= probe.cprExpected:
     return false
-  probe.cprAnswers.len < probe.cprExpected
+  if probe.cprMarked:
+    return probe.cprFallbackAsked and not probe.cprFallbackFenced
+  not probe.answered
 
 proc isReplyTokenFor*(probe: TerminalProbe; token: string): bool =
-  ## `isReplyToken`, and a cursor report while the width probe waits for one.
-  isReplyToken(token) or (isCprToken(token) and probe.cprOpen)
+  ## `isReplyToken`; a marked cursor report while the width probe waits for
+  ## one; an unmarked one while a plain-CPR round does (`cprOpen`).
+  isReplyToken(token) or
+    (isMarkedCprToken(token) and probe.cprMarked and
+     probe.cprAnswers.len < probe.cprExpected) or
+    (isCprToken(token) and probe.cprOpen)
+
+proc cprFallbackDue*(probe: TerminalProbe): bool =
+  ## The fence came back, the round asked DECXCPR and not one marked answer
+  ## arrived: this terminal does not implement DECXCPR, and the widths are
+  ## asked again with plain CPR (§4.3).
+  probe.cprMarked and probe.answered and not probe.cprFallbackAsked and
+    probe.cprExpected > 0 and probe.cprAnswers.len == 0 and
+    not probe.replyWindowClosed
 
 proc decodeHex(s: string): string =
   result = ""
@@ -196,10 +241,18 @@ proc noteReply*(probe: var TerminalProbe; token: string): bool =
     return false
   probe.attempted = true
   if isDa1Reply(token):
+    # The second fence, when a plain-CPR fallback round was asked after the
+    # first, is that round's.
+    if probe.answered and probe.cprFallbackAsked:
+      probe.cprFallbackFenced = true
     probe.answered = true
     return true
   # PLAT-71: the width probe's cursor reports (§4.3), in the order asked;
   # the width of probe i is its column minus one.
+  if isMarkedCprToken(token):
+    let (_, _, col) = parseMarkedCpr(token)
+    probe.cprAnswers.add max(0, col - 1)
+    return true
   if isCprToken(token):
     let (_, _, col) = parseCpr(token)
     probe.cprAnswers.add max(0, col - 1)
@@ -227,6 +280,12 @@ proc noteReply*(probe: var TerminalProbe; token: string): bool =
     return true
   if isKittyKeyboardReply(token):
     probe.kittyKeyboardAnswered = true
+    return true
+  if isPointerReply(token):
+    let (ok, reply) = parsePointerReply(token)
+    if ok:
+      probe.pointerAnswered = true
+      probe.pointerReply = reply
     return true
   if isPixelMouseReply(token):
     # `CSI ? 1016 ; Ps $ y`: 1 set, 2 reset, 3 permanently set — the mode is
@@ -376,24 +435,26 @@ proc writeQueries(fd: cint; data: string): bool =
 const MinProbeColumns* = 3
   ## §4.3: on a terminal narrower than this the width probe is skipped.
 
-proc widthProbeBytes*(cols = 80): (string, int) =
+proc widthProbeBytes*(cols = 80; marked = false): (string, int) =
   ## §4.3's width probe and how many cursor reports it asks for: each probe
-  ## printed at the top-left of the alternate screen with a `CSI 6 n` after
-  ## it, the row erased in the same write, all inside a DEC 2026 bracket so a
+  ## printed at the top-left of the alternate screen with a cursor report
+  ## query after it — DECXCPR (`CSI ? 6 n`) when `marked`, else plain CPR —
+  ## the row erased in the same write, all inside a DEC 2026 bracket so a
   ## terminal that implements it never shows them. Frame 0 overwrites the
   ## row anyway.
   if cols < MinProbeColumns:
     return ("", 0)
+  let query = if marked: MarkedCursorReportQuery else: CursorReportQuery
   var bytes = "\x1b[?2026h"
   var n = 0
   for p in WidthProbe:
-    bytes.add "\x1b[1;1H" & WidthProbeText[p] & CursorReportQuery
+    bytes.add "\x1b[1;1H" & WidthProbeText[p] & query
     inc n
   bytes.add "\x1b[1;1H\x1b[2K" & SyncOffBytes
   (bytes, n)
 
 proc queriesFor*(flags: CapabilityFlags; env = TerminalEnv(term: "xterm");
-                 cols = 80): string =
+                 cols = 80; cprMarked = true): string =
   ## The round this command line needs, in the order the header lists.
   ##
   ## Only what can change a decision is asked: no background query when
@@ -407,6 +468,10 @@ proc queriesFor*(flags: CapabilityFlags; env = TerminalEnv(term: "xterm");
   ## their answers have all arrived (or never will) when DA1's does. The
   ## Linux console gets only the width probe and the fence: `console_codes(4)`
   ## documents DA and CPR, and nothing says it ignores the rest silently.
+  ##
+  ## The width probe asks DECXCPR (`CSI ? 6 n`, §4.3) everywhere but the Linux
+  ## console; `cprMarked = false` gives the plain-CPR round the personas
+  ## captured before that change were taken with.
   result = ""
   if env.term.toLowerAscii == "linux":
     result.add widthProbeBytes(cols)[0]
@@ -424,9 +489,66 @@ proc queriesFor*(flags: CapabilityFlags; env = TerminalEnv(term: "xterm");
   if not flags.noMouse:
     result.add PixelMouseQuery & CellSizeQuery
   result.add KittyKeyboardQuery
+  # Pointer-Affordances §5.2: before the fence, unless the shapes are off.
+  # A hardware terminal (`vt220`) has no pointer to shape: PA-5. Inside tmux
+  # the query is written after the fence instead (`pointerQueryAfterFence`).
+  if flags.pointerQueryWanted and not env.term.toLowerAscii.startsWith("vt") and
+     env.tmux.len == 0:
+    result.add pointerQuery(false)
   result.add XtversionQuery & Da2Query & SyncModeQuery & GraphemeModeQuery
-  result.add widthProbeBytes(cols)[0]
+  result.add widthProbeBytes(cols, marked = cprMarked)[0]
   result.add Da1Query
+
+proc cprMarkedFor*(env: TerminalEnv): bool =
+  ## Whether `queriesFor` asks DECXCPR. Everywhere but the Linux console,
+  ## whose `console_codes(4)` documents plain CPR only.
+  env.term.toLowerAscii != "linux"
+
+proc cprFallbackQueries*(cols: int): string =
+  ## §4.3's fallback round for a terminal that answered the fence but no
+  ## DECXCPR: the width probe with plain CPR, fenced by its own DA1. A
+  ## Ctrl+F3 typed while it is outstanding can be taken for a report — for
+  ## one round trip, on a terminal known to answer.
+  widthProbeBytes(cols)[0] & Da1Query
+
+proc pointerQueryAfterFence*(flags: CapabilityFlags; env: TerminalEnv): string =
+  ## Inside tmux, Pointer-Affordances §5.2's query goes through tmux's
+  ## passthrough, and it is written AFTER the fence, in a write of its own.
+  ## tmux 3.6a with `allow-passthrough on` drops a passthrough sequence that
+  ## arrives in the same read as the pane's switch to the alternate screen:
+  ## the switch flags the pane for a redraw, and tmux writes nothing of a
+  ## pane's output to its clients until that redraw (only `all` lets it
+  ## through). Measured 2026-11-12 in kitty 0.44.0: the wrapped query written
+  ## with `CSI ? 1049 h` was never answered and a wrapped title never set,
+  ## while 50 ms later, or with `all`, both arrived. tmux answers the fence
+  ## after it has read the whole round, so a write after the fence is a later
+  ## read, past the redraw.
+  if flags.pointerQueryWanted and not env.term.toLowerAscii.startsWith("vt") and
+     env.tmux.len > 0:
+    pointerQuery(true)
+  else:
+    ""
+
+proc writeWrappedPointerQuery(d: TerminalDriver; probe: var TerminalProbe;
+                              flags: CapabilityFlags; env: TerminalEnv) =
+  ## Write the wrapped OSC 22 query if it is due: when the fence has come
+  ## back, or the round's bounded wait is over without it (a later read for
+  ## tmux either way; the main loop may not read the late fence for seconds).
+  if not probe.pointerWrappedDue:
+    return
+  probe.pointerWrappedDue = false
+  if writeQueries(d.outFd, pointerQueryAfterFence(flags, env)):
+    probe.pointerWrappedAsked = true
+    d.expectReplies(true)
+
+proc writeCprFallback(d: TerminalDriver; probe: var TerminalProbe) =
+  ## Write §4.3's plain-CPR fallback round if it is due (`cprFallbackDue`).
+  if not probe.cprFallbackDue:
+    return
+  probe.cprFallbackAsked = true
+  if not writeQueries(d.outFd, cprFallbackQueries(d.size().cols)):
+    # Nothing was written, so nothing is owed: no window opens.
+    probe.cprFallbackFenced = true
 
 proc cprCountFor*(env: TerminalEnv; cols: int): int =
   ## How many cursor reports `queriesFor` asks for on this terminal.
@@ -436,8 +558,11 @@ proc monoMs(): int64 = (getMonoTime() - MonoTime()).inMilliseconds
 
 proc runStartupProbe*(d: TerminalDriver; env: TerminalEnv;
                       flags: CapabilityFlags;
-                      timeoutMs = startupProbeTimeoutMs()): TerminalProbe =
-  ## Write the round, then read until the DA1 fence or `timeoutMs`.
+                      timeoutMs = startupProbeTimeoutMs();
+                      pointerGraceMs = 0): TerminalProbe =
+  ## Write the round, then read until the DA1 fence or `timeoutMs`. With
+  ## `pointerGraceMs`, a wrapped OSC 22 query still unanswered at the fence
+  ## (inside tmux) is waited for that much longer, within `timeoutMs`.
   ##
   ## MUST RUN AFTER `d.start()`: the answers come back on the input fd, and a
   ## terminal in canonical mode holds them in its line buffer until a newline
@@ -450,6 +575,8 @@ proc runStartupProbe*(d: TerminalDriver; env: TerminalEnv;
   result = TerminalProbe(attempted: true)
   let cols = d.size().cols
   result.cprExpected = cprCountFor(env, cols)
+  result.cprMarked = cprMarkedFor(env)
+  result.pointerWrappedDue = pointerQueryAfterFence(flags, env).len > 0
   var tmux = TmuxQuery()
   if env.tmux.len > 0:
     tmux = startTmuxQuery()
@@ -458,8 +585,18 @@ proc runStartupProbe*(d: TerminalDriver; env: TerminalEnv;
     finishTmuxQuery(tmux, result)
     return
   d.expectReplies(true)
-  let deadline = writtenAt + initDuration(milliseconds = timeoutMs)
-  while not result.answered:
+  var deadline = writtenAt + initDuration(milliseconds = timeoutMs)
+  var graceSet = false
+  while not result.answered or
+        (result.cprFallbackAsked and not result.cprFallbackFenced) or
+        (pointerGraceMs > 0 and
+         (result.pointerWrappedAsked or result.pointerWrappedDue) and
+         not result.pointerAnswered):
+    if result.answered and not graceSet and
+       not (result.cprFallbackAsked and not result.cprFallbackFenced):
+      graceSet = true
+      deadline = min(deadline,
+                     getMonoTime() + initDuration(milliseconds = pointerGraceMs))
     let left = (deadline - getMonoTime()).inMilliseconds
     if left <= 0:
       break
@@ -471,19 +608,36 @@ proc runStartupProbe*(d: TerminalDriver; env: TerminalEnv;
     let (complete, token) = d.framer.feed(char(b))
     if not complete:
       continue
+    let wasAnswered = result.answered
     if not noteReply(result, token):
       d.buffered.add token
-    if result.answered:
+    d.takeExtra()
+    if result.answered and not wasAnswered:
       result.rttMeasured = true
       result.rttMs = int((getMonoTime() - writtenAt).inMilliseconds)
+      d.writeWrappedPointerQuery(result, flags, env)
+      d.writeCprFallback(result)
+      if result.cprFallbackAsked and not result.cprFallbackFenced:
+        # The fallback round gets the same bound as the first.
+        deadline = max(deadline,
+                       getMonoTime() + initDuration(milliseconds = timeoutMs))
+  # No fence within the bound: the wrapped query goes now all the same.
+  d.writeWrappedPointerQuery(result, flags, env)
   finishTmuxQuery(tmux, result)
-  if result.answered:
+  if result.answered and not result.pointerWrappedAsked and
+     not result.pointerWrappedDue:
     d.expectReplies(false)
 
 proc replyWindowOpen*(probe: TerminalProbe; startedMs, nowMs: int64): bool =
   ## Whether a late reply can still arrive: the fence has not, and the window
-  ## has not closed.
-  probe.attempted and not probe.answered and nowMs - startedMs < ReplyWindowMs
+  ## has not closed. Through tmux the fence is tmux's own and says nothing
+  ## about the wrapped pointer query, which the outer terminal answers later.
+  probe.attempted and
+    (not probe.answered or
+     ((probe.pointerWrappedAsked or probe.pointerWrappedDue) and
+      not probe.pointerAnswered) or
+     (probe.cprFallbackAsked and not probe.cprFallbackFenced)) and
+    nowMs - startedMs < ReplyWindowMs
 
 # ---------------------------------------------------------------------------
 # The negotiation, as the entrypoint holds it
@@ -522,7 +676,8 @@ proc rememberAnswers*(n: StartupNegotiation) =
   ## Write this terminal's answers to the cache once the fence has come back
   ## (a session the terminal did not answer remembers nothing).
   if n.isNil or n.cacheWritten or not n.useCache or not n.cacheReadable or
-     not n.probe.answered:
+     not n.probe.answered or
+     (n.probe.cprFallbackAsked and not n.probe.cprFallbackFenced):
     return
   n.cacheWritten = true
   let entry = cacheEntryOf(n.cacheKey, n.probe, n.caps)
@@ -531,10 +686,23 @@ proc rememberAnswers*(n: StartupNegotiation) =
   if failure.len > 0:
     n.cacheMessage = "the terminal cache could not be written: " & failure
 
+proc holdKeysForPointerReply(n: StartupNegotiation; d: TerminalDriver) =
+  ## Extended key reporting waits while the outer terminal's answer to the
+  ## wrapped OSC 22 query is still to come through tmux
+  ## (`TerminalDriver.keyProtocolHeld`), and not past the reply window.
+  d.holdKeyProtocol((n.probe.pointerWrappedAsked or
+                     n.probe.pointerWrappedDue) and
+                    not n.probe.pointerAnswered and
+                    not n.probe.replyWindowClosed)
+
 proc negotiateOnTerminal*(d: TerminalDriver; flags: CapabilityFlags;
                           prefs = TerminalPrefs();
-                          useCache = true): StartupNegotiation =
+                          useCache = true;
+                          timeoutMs = startupProbeTimeoutMs();
+                          pointerGraceMs = 0): StartupNegotiation =
   ## Run the start-up round on a STARTED driver and adopt what it decides.
+  ## A one-shot diagnostic passes `diagnosticProbeTimeoutMs()` and
+  ## `DiagnosticPointerGraceMs`; a session keeps the 10 ms bound.
   let env = readTerminalEnv(d.outFd)
   result = StartupNegotiation(env: env, flags: flags, startedMs: monoMs(),
                               prefs: prefs, useCache: useCache,
@@ -547,8 +715,9 @@ proc negotiateOnTerminal*(d: TerminalDriver; flags: CapabilityFlags;
     result.cacheMessage = loaded.message
     result.cache = lookupCache(loaded.entries, result.cacheKey, nowSeconds())
   if probeWanted(env, flags, prefs):
-    result.probe = d.runStartupProbe(env, flags)
+    result.probe = d.runStartupProbe(env, flags, timeoutMs, pointerGraceMs)
   result.caps = result.resolve()
+  result.holdKeysForPointerReply(d)
   d.adoptCapabilities(result.caps)
   result.rememberAnswers()
 
@@ -560,8 +729,16 @@ proc takeReply*(n: StartupNegotiation; d: TerminalDriver;
     return (false, false)
   let wasAnswered = n.probe.answered
   discard noteReply(n.probe, token)
+  if n.probe.answered and not wasAnswered:
+    # A late fence: the wrapped query that waited for it goes now, and so
+    # does the plain-CPR fallback round when no marked report came.
+    d.writeWrappedPointerQuery(n.probe, n.flags, n.env)
+    d.writeCprFallback(n.probe)
+  n.holdKeysForPointerReply(d)
   if n.probe.answered:
-    d.expectReplies(false)
+    if n.probe.pointerAnswered or
+       not (n.probe.pointerWrappedAsked or n.probe.pointerWrappedDue):
+      d.expectReplies(false)
     if not wasAnswered and not n.probe.rttMeasured:
       # A LATE fence: the round trip is the time since the round was
       # written (§4.6) — a slow link, measured.
@@ -598,11 +775,14 @@ proc restartProbe*(n: StartupNegotiation; d: TerminalDriver) =
     return
   let cols = d.size().cols
   n.probe = TerminalProbe(attempted: true,
-                          cprExpected: cprCountFor(n.env, cols))
+                          cprExpected: cprCountFor(n.env, cols),
+                          cprMarked: cprMarkedFor(n.env))
+  n.probe.pointerWrappedDue = pointerQueryAfterFence(n.flags, n.env).len > 0
   if n.env.tmux.len > 0:
     readTmuxFeatures(n.probe)
   n.startedMs = monoMs()
   n.cacheWritten = false
+  n.holdKeysForPointerReply(d)
   if writeQueries(d.outFd, queriesFor(n.flags, n.env, cols)):
     d.expectReplies(true)
 
@@ -627,6 +807,7 @@ proc closeReplyWindow*(n: StartupNegotiation; d: TerminalDriver) =
   if not replyWindowOpen(n.probe, n.startedMs, monoMs()):
     n.probe.replyWindowClosed = true
     d.expectReplies(false)
+    n.holdKeysForPointerReply(d)
 
 proc switchTheme*(n: StartupNegotiation; d: TerminalDriver;
                   theme: UiTheme): bool =

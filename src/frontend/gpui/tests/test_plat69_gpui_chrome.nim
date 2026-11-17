@@ -27,6 +27,7 @@ import replay_prerequisite
 import ../../tui/tests/fixtures/fixture_provider
 import std/[json, os, osproc, streams, strtabs, strutils, tempfiles, unittest]
 import ./gpui_child_env
+import ../../../common/content_file_cache # the icons' stored names
 
 import codetracer_embed
 import gpui/chrome
@@ -330,8 +331,8 @@ suite "PLAT-69: the window plan, where the top bar is the title bar":
       var img = false
       for c in b{"children"}.getElems:
         if c{"tag"}.getStr == "img":
-          img = c.attr("src").endsWith("window-" &
-                                       b.attr("data-ct-window-button") & ".svg")
+          img = c.attr("src").extractFilename.nameOfContentFile ==
+            "window-" & b.attr("data-ct-window-button") & ".svg"
       ck img
     ck names == @["minimize", "maximize", "close"]
     # Reported in the geometry, as every segment is, where they are drawn.
@@ -378,7 +379,7 @@ suite "PLAT-69: the window plan, where the top bar is the title bar":
     var src = ""
     for c in maxi[0]{"children"}.getElems:
       if c{"tag"}.getStr == "img": src = c.attr("src")
-    ck src.endsWith("window-restore.svg")
+    ck src.extractFilename.nameOfContentFile == "window-restore.svg"
 
   test "a frame that changes while the window is open is drawn again":
     # Restored -> maximized -> restored, and the layout moved to the left:

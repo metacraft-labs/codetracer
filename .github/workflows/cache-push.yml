@@ -1,0 +1,79 @@
+name: Cache push
+
+# Builds the CI dev shells and the codetracer package and pushes their closures
+# to the org's Attic cache (`metacraft-private-infrastructure`), which the
+# runner hosts substitute from. Without it, a runner with a cold store builds
+# the shells from source in every job: several hours (Noir, circom, sui,
+# cargo-build-sbf, the Python recorder), past the GPUI (90 min), test-ui-tests
+# (150 min) and TUI timeouts. codetracer-pm
+# issues/2026-11-16-ci-dev-shell-closure-is-never-pushed-so-cold-runners-build-it-for-hours.md
+# has the measurements and the decision.
+#
+# This replaces the `push-to-attic` job in codetracer.yml, which could never
+# run: it was gated on `refs/heads/main` (codetracer has no `main`) and needed
+# the test jobs, which timed out building the very shell it was meant to push.
+# A push depends only on the shells building, so this workflow builds and
+# pushes and nothing else. It runs on every push to the mainline (`dev`) and
+# the agent mainline (`agents`), and on `workflow_dispatch` to warm the cache.
+
+on:
+  push:
+    branches: [dev, agents]
+  workflow_dispatch:
+
+# One run per branch at a time, and a newer push does not kill a running push:
+# on `agents`, which several agents land on continuously, cancelling would
+# mean a cold build never finishes. GitHub keeps at most one pending run.
+concurrency:
+  group: cache-push-${{ github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  push-to-attic:
+    runs-on: [self-hosted, linux, x64]
+    # A cold store builds the whole closure (about 15 GiB): the TUI job's
+    # equivalent build ran past four hours (run 43765077986). Warm, the build
+    # is a no-op and the push uploads only what is new.
+    timeout-minutes: 360
+    steps:
+      - name: Mint installation token for cross-repo sibling access
+        id: ci_token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+          owner: metacraft-labs
+
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          submodules: recursive
+          token: ${{ steps.ci_token.outputs.token }}
+
+      - name: Install Nix
+        uses: ./.github/actions/setup-nix
+        with:
+          trusted-public-keys: ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
+          attic-token: ${{ secrets.ATTIC_TOKEN }}
+          substituters: ${{ vars.ATTIC_SUBSTITUTER }}
+          gh-token: ${{ steps.ci_token.outputs.token }}
+
+      # The build outlasts an installation token's hour on a cold store.
+      - name: Keep the GitHub token fresh
+        uses: ./.github/actions/refresh-github-token
+        with:
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+          keep-refreshing: "true"
+
+      # The flake's locked inputs are fetched while the token is fresh: a
+      # running `nix` reads its access-tokens once, at start (see
+      # provision-repro-lock-siblings). `.#ci` carries attic-client.
+      - name: Build the dev shells and the package, and push them
+        env:
+          ATTIC_ENDPOINT: ${{ vars.ATTIC_ENDPOINT }}
+          ATTIC_CACHE: ${{ vars.ATTIC_CACHE }}
+          ATTIC_TOKEN: ${{ secrets.ATTIC_TOKEN }}
+        run: |
+          nix flake prefetch-inputs || echo "nix flake prefetch-inputs failed or is unsupported; inputs are fetched lazily" >&2
+          nix develop .#devShells.x86_64-linux.ci --command ./ci/deploy/build-nix-and-push-to-attic.sh

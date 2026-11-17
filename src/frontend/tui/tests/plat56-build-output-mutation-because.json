@@ -4,7 +4,7 @@
   "D2": "Error: expect(received).toBe(expected) // Object.is equality",
   "D3": "Error: expect(received).toBe(expected) // Object.is equality",
   "D4": "TimeoutError: locator.click: Timeout 30000ms exceeded.",
-  "D5": "Error: expect(received).toBe(expected) // Object.is equality",
+  "D5": "Error: expect(locator).toHaveCount(expected) failed",
   "E1": "opened == @[\"5:17\"]",
   "E2": "opened == @[\"5:17\"]",
   "G1": "plan.compareLines(failing) == 0",

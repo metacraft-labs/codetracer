@@ -1,0 +1,24 @@
+scenario: 1
+name: terminal/edit-mode-typing-and-undo
+pack: codetracer
+summary: >-
+  A typed character reaches the buffer and the file's tab gains the dirty
+  marker; Ctrl+Z undoes it and the marker goes.
+stage:
+  - use: write-project
+    with:
+      files:
+        alpha.nim: "proc alpha() =\n  echo 1\n"
+  - use: open-project
+    with: { folder: $project, width: 170, height: 40 }
+steps:
+  - wait: { until: ready, timeout: 60s }
+  - wait: { until: { at: 'editor[file="alpha.nim"]', present: true }, timeout: 30s }
+  - expect: { at: 'pane-tab[label="alpha.nim ●"]', absent: true }
+  - type: "Z"
+  - wait: { until: { at: 'editor[file="alpha.nim"]/line[number="1"]', text: "Zproc alpha() =" }, timeout: 20s }
+  - expect: { at: 'pane-tab[label="alpha.nim ●"]', present: true }
+  - chord: Ctrl+Z
+  - wait: { until: { at: 'editor[file="alpha.nim"]/line[number="1"]', text: "proc alpha() =" }, timeout: 20s }
+  - expect: { at: 'pane-tab[label="alpha.nim ●"]', absent: true }
+  - expect: { at: 'pane-tab[label="alpha.nim"]', present: true }

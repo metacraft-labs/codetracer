@@ -18,6 +18,7 @@
 ##             span.low-level-code-instruction-offset  "0"
 ##             span.low-level-code-instruction-name    "BRILLIG"
 ##             span.low-level-code-instruction-args    "CALL func: 0, ..."
+##             span.constraints-where                  "src/main.nr:4"
 ##     div.constraints-provenance  text how the counts were obtained
 ##     div.constraints-absence[.hidden]
 ##       text  why there are no counts
@@ -176,7 +177,7 @@ when defined(js):
       if outcome.copied.len > 0:
         writeConstraintText(cstring(outcome.copied))
 
-  proc rowMenuItems(vm: ConstraintsVM; index: int): seq[ContextMenuItem] =
+  proc rowMenuItems*(vm: ConstraintsVM; index: int): seq[ContextMenuItem] =
     ## The row's context menu, the ViewModel's entries (`rowMenu`) — the same
     ## the terminal's and GPUI's panes show.
     for e in vm.rowMenu(index):
@@ -185,21 +186,12 @@ when defined(js):
         disabled: not e.enabled, disabledReason: cstring(e.reason),
         handler: rowMenuHandler(vm, index, e.action))
 
-  proc wireRowMenu(row: isonim_dom.Element; vm: ConstraintsVM; index: int) =
-    ## A right press selects the row and opens its menu.
-    isonim_dom.addEventListener(isonim_dom.Node(row), cstring"contextmenu",
-      proc(ev: isonim_dom.Event) =
-        ev.preventMenuDefault()
-        ev.stopMenuPropagation()
-        vm.selectRow(index)
-        showContextMenu(rowMenuItems(vm, index), ev.eventClientX(),
-                        ev.eventClientY()))
+  # A right press is the pointer row `context-menu.open`, performed by the
+  # front-end (`input/dom_pane_presses`) with the items below.
 
-proc onRowPress(vm: ConstraintsVM; index: int): proc() =
-  ## A press: select the row and open its source. A FACTORY so each row's
-  ## handler holds its own index.
-  let captured = index
-  result = proc() = discard vm.activateRow(captured)
+# A row's press (select it and open its source) is the pointer row
+# `constraints.go-to-source`, performed by the front-end on the row's
+# `data-constraint-index` (on the desktop `ui/constraints.nim`'s procedure).
 
 proc renderRow[R, N](r: R; vm: ConstraintsVM; row: ConstraintRow;
                      index: int; selected: bool): N =
@@ -210,7 +202,7 @@ proc renderRow[R, N](r: R; vm: ConstraintsVM; row: ConstraintRow;
   let where = whereText(row.source)
   result = ui(r):
     tdiv(class = rowElementClass(row, selected), `data-ct-row` = $index,
-         title = rowTitle(row), onclick = onRowPress(vm, index)):
+         title = rowTitle(row), `data-constraint-index` = $index):
       span(class = "constraints-name"):
         text row.name
       span(class = "constraints-kind"):
@@ -219,26 +211,23 @@ proc renderRow[R, N](r: R; vm: ConstraintsVM; row: ConstraintRow;
         text count
       span(class = "constraints-where"):
         text where
-  when defined(js):
-    when N is isonim_dom.Element:
-      wireRowMenu(result, vm, index)
 
 proc renderOpcode[R, N](r: R; vm: ConstraintsVM; row: ConstraintRow;
                         index: int; selected: bool): N =
   let name = row.name
   let args = row.args
+  let where = whereText(row.source)
   result = ui(r):
     tdiv(class = rowElementClass(row, selected), `data-ct-row` = $index,
-         title = rowTitle(row), onclick = onRowPress(vm, index)):
+         title = rowTitle(row), `data-constraint-index` = $index):
       span(class = "low-level-code-instruction-offset"):
         text row.count
       span(class = "low-level-code-instruction-name"):
         text name
       span(class = "low-level-code-instruction-args"):
         text args
-  when defined(js):
-    when N is isonim_dom.Element:
-      wireRowMenu(result, vm, index)
+      span(class = "constraints-where"):
+        text where
 
 proc renderFunctions[R, N](r: R; vm: ConstraintsVM; into: N) =
   ## ONE FUNCTION per block: its count row, then its opcodes — the rows of

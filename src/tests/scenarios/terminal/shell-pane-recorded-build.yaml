@@ -1,0 +1,39 @@
+scenario: 1
+name: terminal/shell-pane-recorded-build
+pack: codetracer
+summary: >-
+  `:shell` shows a running Shell pane; a build script typed there records a
+  program with `ct record`, and its output lines carry the recording's
+  gutter marks (● on the first, │ on the next) and the pane counts one
+  recording; a click on ● opens the recording in a new `rec-build` tab.
+stage:
+  - use: record-program
+    with: { program: calc }
+  - use: write-project
+    with:
+      files:
+        shellrc: "PS1='$ '\n"
+        build.sh: |
+          #!/bin/sh
+          cd "$(dirname "$0")"
+          echo "building prog.py"
+          printf 'def add(a, b):\n    return a + b\nprint("sum", add(2, 3))\nprint("done")\n' > prog.py
+          rm -rf rec-build
+          ct record -o rec-build prog.py
+  - use: front-end-options
+    with:
+      env: { CODETRACER_SHELL_COMMAND: "bash --noprofile --rcfile $project/shellrc -i" }
+  - use: open-recording
+    with: { width: 200, height: 50 }
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - chord: Ctrl+P
+  - type: ":shell"
+  - key: Enter
+  - wait: { until: { at: 'pane[title="Shell"]', assert: 'has-row("SHELL  running")' }, timeout: 30s }
+  - type: "sh ./build.sh"
+  - key: Enter
+  - wait: { until: { at: 'pane[title="Shell"]', assert: 'has-row("1 recording")' }, timeout: 180s }
+  - expect: { at: 'pane[title="Shell"]', assert: ['has-row("● sum 5")', 'has-row("│ done")', 'has-row("recordingId:")'] }
+  - click: { at: 'pane[title="Shell"]/row[text="● sum 5"]', anchor: text-start }
+  - wait: { until: { at: session-strip, assert: 'has-tab-matching("rec-build")' }, timeout: 60s }

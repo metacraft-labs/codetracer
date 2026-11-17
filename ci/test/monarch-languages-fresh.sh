@@ -21,6 +21,7 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$repo_root"
 
 committed=src/frontend/tui/app/syntax/monarch_languages.json
+committed_desktop=src/frontend/view_vocabulary/monarch_desktop_languages.json
 if ! command -v node >/dev/null 2>&1; then
 	echo "FAIL: monarch-languages-fresh needs node on PATH (the dev shell provides it)" >&2
 	exit 1
@@ -30,8 +31,15 @@ if [ ! -f node_modules/monaco-editor/package.json ]; then
 	exit 1
 fi
 scratch="$(mktemp)"
-trap 'rm -f "$scratch"' EXIT
-node scripts/monarch-languages.mjs "$scratch"
+scratch_desktop="$(mktemp)"
+trap 'rm -f "$scratch" "$scratch_desktop"' EXIT
+node scripts/monarch-languages.mjs "$scratch" "$scratch_desktop"
+if ! cmp -s "$scratch_desktop" "$committed_desktop"; then
+	echo "FAIL: $committed_desktop is not what scripts/monarch-languages.mjs generates" >&2
+	echo "      from the desktop's own definitions (src/frontend/languages/)." >&2
+	echo "      Regenerate it: node scripts/monarch-languages.mjs $committed $committed_desktop" >&2
+	exit 1
+fi
 if ! cmp -s "$scratch" "$committed"; then
 	echo "FAIL: $committed is not what scripts/monarch-languages.mjs generates" >&2
 	echo "      from node_modules/monaco-editor $(node -p "require('./node_modules/monaco-editor/package.json').version")." >&2

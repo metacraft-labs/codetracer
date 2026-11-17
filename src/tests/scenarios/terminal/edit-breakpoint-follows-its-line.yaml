@@ -1,0 +1,42 @@
+scenario: 1
+name: terminal/edit-breakpoint-follows-its-line
+pack: codetracer
+summary: >-
+  A breakpoint set while editing follows its line: F9 on `def second():`
+  marks line 3; Vim's `O` above the whole file moves the mark to line 4 with
+  the same text; `dd` on that line removes it, and the line that takes its
+  place is not marked.
+stage:
+  - use: write-project
+    with:
+      files:
+        doc.py: "def first():\n    pass\ndef second():\n    return 2\ndef third():\n    return 3\n"
+  - use: select-keymap
+    with: { preset: vim }
+  - use: open-project
+    with: { folder: $project, width: 120, height: 30 }
+steps:
+  - wait: { until: ready, timeout: 60s }
+  - wait: { until: { at: 'editor[file="doc.py"]', present: true }, timeout: 30s }
+  - key: j
+  - key: j
+  - key: F9
+  - wait: { until: { at: status-line, message: { contains: "breakpoint at doc.py:3" } }, timeout: 20s }
+  - expect: { at: 'editor[file="doc.py"]/line[number="3"]', breakpoint: true, text: "def second():" }
+  - expect: { at: 'editor[file="doc.py"]/line[number="4"]', breakpoint: false }
+  - chord: g g
+  - key: O
+  - type: { text: "# new", pace: careful }
+  - key: Esc
+  - wait: { until: { at: 'editor[file="doc.py"]/line[number="1"]', text: "# new" }, timeout: 20s }
+  - expect: { at: 'editor[file="doc.py"]/line[number="4"]', breakpoint: true, text: "def second():" }
+  - expect: { at: 'editor[file="doc.py"]/line[number="3"]', breakpoint: false }
+  - key: j
+  - key: j
+  - key: j
+  - chord: d d
+  - wait: { until: { at: 'editor[file="doc.py"]/line[number="4"]', text: "    return 2" }, timeout: 20s }
+  - expect: { at: 'editor[file="doc.py"]', assert: 'lacks-text("def second():")' }
+  - expect: { at: 'editor[file="doc.py"]/line[number="4"]', breakpoint: false }
+  - expect: { at: 'editor[file="doc.py"]/line[number="3"]', breakpoint: false }
+  - expect: { at: 'editor[file="doc.py"]/line[number="5"]', breakpoint: false }

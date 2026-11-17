@@ -1,0 +1,56 @@
+ SESSIONS                                  «
+ 14 sessions · 2 need input · 2 idle ·
+ 7 running · 1 queued · 1 failed · 1 ended
+ invented working set: 14 sessions over
+ 4 initiatives
+ ▸ ● Telemetry upload retries 1/4 1 needs i…
+ ▸ ● CI runner migration 4/10 1 needs input…
+ ▾ ● Route cache on the new st…  2/6 1 idle…
+ ○ Migrate cached routes without a cold…  5m
+   idle Telegram · Codex 0.9.4 · host-f
+   assistant: Routes migrate in 50k batches…
+ ● Port the route cache to the new stor…  1m
+   running CLI · Codex 0.9.4 · host-b
+   assistant: Moving RouteCache::get and ::…
+ ● Benchmark route cache reads on the n…  2m
+   failed CodeTracer · Codex 0.9.4 · host-d
+   assistant: The read benchmark crashed at…
+ ▾ ● Settings redesign         3/8 2 running
+ ● Split the settings page into tabs      2m
+   running WebUI · Grok 1.2.0 · host-c
+   assistant: Splitting SettingsPage into G…
+ ● Add search to the settings page        3m
+   running TUI · Grok 1.2.0 · host-e
+   assistant: Indexing every setting's labe…
+ ▾   No initiative      1 running · 1 queued
+ ● Replace the hand-rolled JSON writer    6m
+   running CLI · Codex 0.9.4 · host-b
+   assistant: Replacing the hand-rolled JSO…
+ ● Profile the importer on the large fi…  6m
+   queued CodeTracer · Grok 1.2.0 · host-a
+   assistant: Queued; waiting for an agent…
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             

@@ -291,6 +291,102 @@ test.describe("PLAT-51: the desktop's Event Log scrubber, no Timeline", () => {
     expect((out.afterEndPress as { ticks: number }).ticks).toBe(start.ticks);
     expect((out.afterDrag as { ticks: number }).ticks).toBe(start.ticks);
     writeAnswers("eventLog", out);
+
+    // ---- the same ends at a FRACTIONAL device-pixel ratio --------------------
+    // Scrollbar-Scrubbers.md §3: the track, drag and wheel endpoints "must all
+    // expose the full final row even at a fractional device-pixel ratio". The
+    // capture's own Xvfb is 96 dpi, so everything above ran at a ratio of 1,
+    // where the Event Log host's outward rounding of its scroll range
+    // (`isonim_event_log_view.physicalScrollExtent`) changes nothing, and a
+    // desktop without that rounding passed every check above (the PLAT-51
+    // mutation harness's D5 survived, graded at 69206138e). So
+    // the ratio is changed here as `pane_measure_resize_loop_chromium_test`
+    // changes it: Chromium's real device scale over CDP, the CSS viewport
+    // kept, and a media re-evaluation so the pane's own resolution listener
+    // (`pane_measure_dom`) hears it. Not recorded in the answers file: the
+    // native front-ends are measured against the ratio-1 desktop above.
+    //
+    // TWO CHECKS AT EACH RATIO. The behaviour: after a track press, a drag and
+    // a wheel to the end, the final event is inside the body. And the rule
+    // that guarantees it, Viewport-Driven-Loading §V4: the host's physical
+    // scroll extent is `C` when `C <= V`, else `V + ceil((C - V) × d) / d`
+    // (`C` the rows' height, `V` the body's measured height, `d` the ratio).
+    // The second is needed because under CDP's emulated ratio this
+    // Chromium does not quantize the scroll offset downward at this
+    // geometry: measured at 69206138e, the desktop without the outward
+    // rounding still showed the final row whole at 67/64 and at 1.25 (its
+    // extent stayed 1820 px where §V4 gives 1820.87 and 1820.4). The extent
+    // is the custom property the host writes
+    // (`--ct-event-log-scroll-height` on the body's parent), as
+    // `pane_measure_resize_loop_chromium_test` reads it.
+    const cdp = await ctPage.context().newCDPSession(ctPage);
+    const setScale = async (deviceScaleFactor: number | null) => {
+      if (deviceScaleFactor === null) {
+        await cdp.send("Emulation.clearDeviceMetricsOverride");
+      } else {
+        const viewport = await ctPage.evaluate(() => ({ width: innerWidth, height: innerHeight }));
+        await cdp.send("Emulation.setDeviceMetricsOverride", { ...viewport, deviceScaleFactor, mobile: false });
+      }
+      const reduced = await ctPage.evaluate(() => matchMedia("(prefers-reduced-motion: reduce)").matches);
+      await cdp.send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-motion", value: reduced ? "no-preference" : "reduce" }] });
+      await cdp.send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-motion", value: reduced ? "reduce" : "no-preference" }] });
+      if (deviceScaleFactor !== null) {
+        await ctPage.waitForFunction((s: number) => devicePixelRatio === s, deviceScaleFactor, { timeout: 20_000 });
+      }
+      await ctPage.waitForTimeout(1_000);
+    };
+    const finalRow = () => ctPage.evaluate(() => {
+      const body = document.querySelector(".eventLog-scroll-body") as HTMLElement;
+      const rows = Array.from(body.querySelectorAll("tbody tr"));
+      const last = rows[rows.length - 1] as HTMLElement;
+      const b = body.getBoundingClientRect(), r = last.getBoundingClientRect();
+      const track = document.querySelector(".ct-list-scrubber[data-ct-list-scrubber='eventLog']") as HTMLElement;
+      return { dpr: devicePixelRatio, position: Number(last.dataset.position),
+        rowTop: r.top, rowBottom: r.bottom, bodyTop: b.top, bodyBottom: b.bottom,
+        scrollTop: body.scrollTop, scrollHeight: body.scrollHeight, clientHeight: body.clientHeight,
+        total: Number(track.dataset.ctScrubTotal), pitch: last.getBoundingClientRect().height,
+        extent: parseFloat(body.parentElement!.style.getPropertyValue("--ct-event-log-scroll-height")) };
+    });
+    const fractional: Record<string, unknown> = {};
+    try {
+      for (const scale of [67 / 64, 1.25]) {
+        await setScale(scale);
+        await pressTrack(ctPage, "eventLog", 1.0);
+        const track = await finalRow();
+        await pressTrack(ctPage, "eventLog", 0.0);
+        await dragThumb(ctPage, "eventLog", 20);
+        const drag = await finalRow();
+        await pressTrack(ctPage, "eventLog", 0.0);
+        const box = await ctPage.locator(".eventLog-scroll-body").boundingBox();
+        if (!box) throw new Error("PLAT-51: the Event Log's body has no bounds for the wheel");
+        await ctPage.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+        await ctPage.mouse.wheel(0, 100_000);
+        await ctPage.waitForTimeout(1_500);
+        const wheel = await finalRow();
+        fractional[String(scale)] = { scale, track, drag, wheel };
+      }
+    } finally {
+      console.log("PLAT51-EVENTLOG-FRACTIONAL " + JSON.stringify(fractional));
+      await setScale(null);
+      await cdp.detach();
+    }
+    // Every scale was measured before any is judged, so a failure's log line
+    // shows all of them.
+    expect(Object.keys(fractional).length).toBe(2);
+    for (const { scale, track, drag, wheel } of Object.values(fractional) as any[]) {
+      for (const g of [track, drag, wheel]) {
+        expect(g.dpr).toBe(scale);
+        expect(g.position).toBe(69);
+        expect(g.rowTop).toBeGreaterThanOrEqual(g.bodyTop);
+        expect(g.rowBottom).toBeLessThanOrEqual(g.bodyBottom);
+        const content = g.total * g.pitch;
+        expect(g.total).toBe(70);
+        expect(content).toBeGreaterThan(g.clientHeight);
+        expect(g.extent).toBeCloseTo(
+          g.clientHeight + Math.ceil((content - g.clientHeight) * scale) / scale, 6);
+      }
+    }
+    expect((await where(ctPage)).ticks).toBe((out.afterRowClick as { ticks: number }).ticks);
   });
 });
 

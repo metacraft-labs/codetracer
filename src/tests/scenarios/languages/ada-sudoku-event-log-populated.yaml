@@ -1,0 +1,16 @@
+scenario: 1
+name: languages/ada-sudoku-event-log-populated
+pack: codetracer
+summary: >-
+  An Ada Sudoku solver recording opens and its event log lists the program's
+  events.
+
+stage:
+  - use: record-program
+    with: { program: ada_sudoku_solver/sudoku.adb }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 240s }
+  - click: 'pane-tab[label="EVENT LOG"]'
+  - wait: { until: event-log.loaded, timeout: 120s }

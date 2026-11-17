@@ -1,0 +1,28 @@
+scenario: 1
+name: launch-config/ruby-fibonacci-records-and-opens
+pack: codetracer
+summary: >-
+  Choosing Debug > Launch Configurations > "Ruby: Fibonacci" in the program
+  menu records fibonacci.rb and opens the recording: the replay shows
+  fibonacci.rb with the debug controls, and no error is notified.
+
+stage:
+  - use: copy-project
+    with: { folder: examples }
+  - use: open-project
+    with: { folder: $project }
+
+steps:
+  - wait: { until: { at: menu-bar, present: true }, timeout: 120s }
+  - wait: { until: settled, timeout: 30s }
+  - click: menu-bar
+  - wait: { until: { at: 'menu-bar/menu[label="Debug"]', present: true }, timeout: 15s }
+  - hover: { at: 'menu-bar/menu[label="Debug"]', for: 500ms }
+  - wait: { until: { at: 'menu-bar/menu[label="Launch Configurations"]', present: true }, timeout: 15s }
+  - hover: { at: 'menu-bar/menu[label="Launch Configurations"]', for: 500ms }
+  - wait: { until: { at: 'menu-bar/menu-item[label="Ruby: Fibonacci"]', present: true }, timeout: 15s }
+  - click: 'menu-bar/menu-item[label="Ruby: Fibonacci"]'
+    settle: false
+  - wait: { until: { at: 'editor[file="fibonacci.rb"]', present: true }, timeout: 180s }
+  - wait: { until: { at: 'toolbar/toolbar-button[label="continue-image"]', present: true }, timeout: 120s }
+  - expect: { at: status-line, assert: 'lacks("rror")' }

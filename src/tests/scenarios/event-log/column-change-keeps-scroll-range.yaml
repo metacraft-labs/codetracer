@@ -1,0 +1,44 @@
+scenario: 1
+name: event-log/column-change-keeps-scroll-range
+pack: codetracer
+summary: >-
+  After three column changes in the Event Log's Columns menu (hiding kind,
+  moving output, showing location), the log still scrolls to its end: the
+  footer reads "… to 80 of 80" and the last event's row is on screen in the
+  pane — as it did before the changes.
+
+stage:
+  - use: record-program
+    with: { program: py_long_event_log/main.py }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - wait: { until: { at: event-log, total: 80 }, timeout: 120s }
+  - expect: { at: event-log, last-shown: { lt: 80 } }
+  # Control: the end of the untouched log is reachable by scrolling.
+  - wheel: { at: event-log, direction: down, amount: 30 }
+  - wait: { until: { at: event-log, last-shown: 80 }, timeout: 30s }
+  - expect: { at: event-log, assert: 'has-output("[LAST]")' }
+  - expect: { at: 'event-log/event[text="stdout: event 080 [LAST]"]', geometry: { inside: event-log, visible: true } }
+  - wheel: { at: event-log, direction: up, amount: 30 }
+  - wait: { until: { at: event-log, last-shown: { lt: 80 } }, timeout: 30s }
+  # The three column changes.
+  - expect: { at: event-log, columns: ["tick", "#", "", "output"] }
+  - click: event-log/columns-button
+  - wait: { until: { at: event-log/columns-menu, present: true }, timeout: 10s }
+  - click: { at: 'event-log/columns-menu/column-option[name="kind"]', anchor: check }
+  - wait: { until: { at: event-log, columns: ["tick", "#", "output"] }, timeout: 10s }
+  - drag:
+      from: { at: 'event-log/columns-menu/column-option[name="output"]', anchor: handle }
+      to: 'event-log/columns-menu/column-option[name="tick"]'
+  - wait: { until: { at: event-log, columns: { subsequence: ["output", "tick"] } }, timeout: 10s }
+  - click: { at: 'event-log/columns-menu/column-option[name="location"]', anchor: check }
+  - wait: { until: { at: event-log, columns: { count: 4 } }, timeout: 10s }
+  - click: event-log/columns-button
+  - wait: { until: { at: event-log/columns-menu, absent: true }, timeout: 10s }
+  # The end is still reachable, and the log still counts every event.
+  - wheel: { at: event-log, direction: down, amount: 30 }
+  - wait: { until: { at: event-log, last-shown: 80 }, timeout: 30s }
+  - expect: { at: event-log, total: 80 }
+  - expect: { at: event-log, assert: 'has-output("[LAST]")' }

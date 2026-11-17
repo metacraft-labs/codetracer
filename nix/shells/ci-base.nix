@@ -248,7 +248,7 @@ with pkgs;
     # wins. `nim-fork` therefore supplies `nim`, `nimpretty` and `nim-gdb`
     # (its `bin/` holds exactly those three), and
     # `nim-codetracer` — kept immediately below — supplies everything the
-    # fork derivation does not build: `nimsuggest` (ci/lint/nim.sh,
+    # fork derivation does not put on PATH: `nimsuggest` (ci/lint/nim.sh,
     # ci/test/nimsuggest-check.sh, and the editor LSP path), `nim2`,
     # `nimgrep`, `testament` and `nim_dbg`.
     #
@@ -262,16 +262,14 @@ with pkgs;
     # lexer/parser/layouter sources as its `nim`, so there is no skew to
     # notice.
     #
-    # NOTE the skew this INTRODUCES, and be honest that it is new: before the
-    # fork, `nim` and `nimsuggest` both came from nixpkgs 2.2.8 and agreed.
-    # Now `nim` is 2.3.1 while `nimsuggest`, `nim2`, `nimgrep`, `testament`
-    # and `nim_dbg` are still 2.2.8, so nimsuggest analyses against a 2.2.8
-    # stdlib the compiler no longer uses and can report a diagnostic the build
-    # does not. That is an IDE/lint surface only — none of those five compile
-    # anything that ships — and `nimsuggest` is already quarantined here
-    # against an upstream crash (see the header of ci/test/nimsuggest-check.sh).
-    # Building nimsuggest from the fork is the right follow-up, not a
-    # precondition.
+    # The fork also builds a trace-enabled `nimsuggest`, but it is installed
+    # under `libexec/`, off PATH: it crashes under this repo's root
+    # `config.nims` (the failure ci/test/nimsuggest-check.sh documents), so it
+    # must not replace the stock nimsuggest that lint and the editors use. The
+    # shellHook below points `CODETRACER_NIMSUGGEST` at it for the PLAT-65
+    # real-stack suites, the only consumers of its `traceExpand` /
+    # `tracestatic` queries. `nimsuggest`, `nim2`, `nimgrep`, `testament` and
+    # `nim_dbg` still come from nixpkgs 2.2.8.
     ourPkgs.nim-fork
     ourPkgs.nim-codetracer
     nimble
@@ -581,6 +579,19 @@ with pkgs;
     # checkout, which still has them.
     export CT_DEV_SHELL=1
 
+    # The trace-enabled nimsuggest the PLAT-65 real-stack suites
+    # (tui/tests/real_terminal/test_plat65_nim_tracing_pty.nim,
+    # gpui/tests/test_plat65_gpui_nim_tracing.nim) drive. They skip with
+    # `MISSING-PREREQ SKIP` when this is unset. The PATH nimsuggest is the
+    # stock one, which has no trace queries.
+    export CODETRACER_NIMSUGGEST="${ourPkgs.nim-fork}/libexec/nimsuggest"
+
+    # A STOCK Nim compiler, nixpkgs' at this flake's pin: the scenarios that
+    # record a Nim program the way a user without CodeTracer's fork would
+    # (`record-program { nim: stock }`; its C carries `#line` directives and
+    # no source map) record with it. The fork on PATH is not one.
+    export GENC_STOCK_NIM="${pkgs.nim}/bin/nim"
+
     # PLAT-37 — THE GPUI RUNTIME LIBRARY PATH, exported under its OWN name
     # rather than prepended to `LD_LIBRARY_PATH`.
     #
@@ -724,6 +735,12 @@ with pkgs;
     export CT_LD_LIBRARY_PATH="${sqlite.out}/lib/:${pcre.out}/lib:${glib.out}/lib:${openssl.out}/lib:${gcc.cc.lib}/lib:${libzip.out}/lib:${zstd.out}/lib";
     export CODETRACER_LD_LIBRARY_PATH="$CT_LD_LIBRARY_PATH"
 
+    # libpcre's directory, from this shell's pinned nixpkgs, for
+    # scripts/detect-siblings.sh: the codetracer-nim sibling's bin/nim
+    # dlopen()s libpcre (pcre1; Nim's std/re does not bind pcre2) and the
+    # floating `nixpkgs` registry no longer carries it.
+    export CT_PCRE_LIB_DIR="${pcre.out}/lib";
+
     # LIBRARY_PATH = compile-time -L search path. Set so tup-sandboxed
     # linker steps resolve -lssl / -lcrypto / -lsqlite3 / -lpcre /
     # -lzip / -lzstd when Nim uses --dynlibOverride + --passL (tup
@@ -731,6 +748,23 @@ with pkgs;
     export LIBRARY_PATH="${openssl.out}/lib:${sqlite.out}/lib:${pcre.out}/lib:${libzip.out}/lib:${zlib.out}/lib:${zstd.out}/lib${
       pkgs.lib.optionalString (!stdenv.isDarwin) ":${libbpf.out}/lib:${elfutils.out}/lib"
     }''${LIBRARY_PATH:+:$LIBRARY_PATH}";
+
+    # NO SELF-RPATH. stdenv's setup appends `-rpath $out/lib` to NIX_LDFLAGS,
+    # which is right for a package build, whose libraries land in $out/lib. In
+    # a dev shell $out is `<checkout>/outputs/out`, which nothing populates, so
+    # every binary linked here carried a run-time search path into the
+    # checkout that never exists. Measured on replay-server: RUNPATH
+    # `$ORIGIN:<checkout>/outputs/out/lib` from `cargo build` in this shell,
+    # against `$ORIGIN` alone from tup (which does not export NIX_LDFLAGS).
+    # src/db-backend/build.rs gives replay-server exactly one search path, its
+    # own directory (codetracer-pm issue 2026-10-05, the 2026-10-12 addendum:
+    # a produced binary carries no load path into a build directory); this is
+    # the one entry the shell added behind its back. Only that flag is
+    # removed; anything else in NIX_LDFLAGS stays.
+    if [ -n "''${out:-}" ]; then
+      NIX_LDFLAGS="''${NIX_LDFLAGS//-rpath $out\/lib/}"
+      export NIX_LDFLAGS
+    fi
 
     # C_INCLUDE_PATH so Nim's direct gcc invocations see
     # #include <bpf/libbpf.h> when tup sandboxes the build.
@@ -785,6 +819,20 @@ with pkgs;
       esac
       export CODETRACER_BUILD_DIR="''${CODETRACER_BUILD_DIR:-$_ct_build_dir}"
       export CODETRACER_REPO_ROOT_PATH=$ROOT_PATH
+      # The roots src/Tuprules.tup refuses to parse without (the Cargo target
+      # base and the per-checkout Nim cache root, ci/lib/tup-cargo-target.sh
+      # --export), so a plain `tup` here builds where `just build-once` does.
+      # Preparing the shell is this hook's job, so inherited values are
+      # dropped first rather than checked; a refusal leaves them unset, and
+      # tup then stops with the remedy. No `--reap`: entering a shell must not
+      # remove a base a build in this checkout may be using.
+      unset CT_TUP_CARGO_TARGET_BASE CT_TUP_CARGO_TARGET_IGNORE CT_TUP_NIM_CACHE_ROOT
+      if _ct_tup_cargo_env="$(bash "$ROOT_PATH/ci/lib/tup-cargo-target.sh" --export "$ROOT_PATH")"; then
+        eval "$_ct_tup_cargo_env"
+      else
+        echo "codetracer dev shell: no Cargo target base for tup (see above); a plain tup will refuse." >&2
+      fi
+      unset _ct_tup_cargo_env
     fi
 
     # Materialized Python origin-DAP tests must not depend on a runner-global

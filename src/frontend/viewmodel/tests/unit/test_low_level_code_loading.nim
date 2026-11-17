@@ -24,6 +24,17 @@ import store/[replay_data_store, types]
 import viewmodels/[low_level_code_vm, source_vm]
 import sdk/[stop_loader, source_provider]
 import views/isonim_low_level_code_view
+import input/pane_presses
+
+proc pressReaderOf(node: MockNode): AttributeReader =
+  ## What a DOM front-end's reader does (`input/dom_pane_presses.readerOf`):
+  ## the attribute on the node pressed or its nearest ancestor carrying it.
+  result = proc(name: string): string =
+    var n = node
+    while not n.isNil:
+      if name in n.attributes: return n.attributes[name]
+      n = n.parent
+    ""
 
 proc setSourceProvider(vm: LowLevelCodeVM; provider: SourceProvider) =
   ## Use `provider` for the groups' source text instead of the DAP default:
@@ -212,7 +223,7 @@ suite "HSF-D3: the stop loader loads the low-level code while it is shown":
             errors[0].textContent.contains("no instructions recorded")
       dispose()
 
-  test "a generated listing painted at this stop is not replaced":
+  test "a generated listing is not replaced, at this stop or the next":
     let mock = newMockBackendService(autoRespond = true)
     let (session, _) = newSession(mock)
     let vm = session.lowLevelCodeVM
@@ -225,8 +236,15 @@ suite "HSF-D3: the stop loader loads the low-level code while it is shown":
     check mock.sent("ct/load-asm-function") == 0
     check vm.instructions.val.len == 1 and
           vm.instructions.val[0].name == "acir op"
-    # The next move shows the recording's code again.
+    # GCL-D28: the listing follows the stop (the host shows it again for the
+    # new line); the machine code does not replace it at the next move.
     session.store.move(20, "/src/main.nr", "main", "2", 6)
+    drainPlatformCallbacks()
+    check mock.sent("ct/load-asm-function") == 0
+    check vm.instructions.val.len == 1 and
+          vm.instructions.val[0].name == "acir op"
+    # View Disassembly clears the listing, and the machine code is asked for.
+    vm.clearInstructions()
     drainPlatformCallbacks()
     check mock.sent("ct/load-asm-function") == 1
 
@@ -307,7 +325,10 @@ suite "HSF-D3: the view groups the listing under its source lines":
       let rows = panel.allByClass("low-level-code-instruction")
       check rows.len == 2
       if rows.len == 2:
-        rows[1].fireEvent("click")
+        # The press is the pointer row `low-level.go-to-source-line`,
+        # performed by `pane_presses` on the row's own identity.
+        check pressLowLevel(vm, "low-level.go-to-source-line",
+                            pressReaderOf(rows[1]))
         let jump = mock.lastArgs("ct/source-line-jump")
         check not jump.isNil and jump["line"].getInt == 8
       dispose()

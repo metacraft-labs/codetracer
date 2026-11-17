@@ -1,0 +1,40 @@
+scenario: 1
+name: noir-space-ship/call-trace-search-results-jump
+pack: codetracer
+summary: >-
+  Searching the call trace for calculate_damage lists its calls, each with
+  its own tick (17 of them, the last #77 at tick 1239); activating each of
+  the three results the result box shows moves the replay to that result's
+  own tick and marks that call, and only it, in the call
+  trace (codetracer#860: every result jumped to the last match).
+
+stage:
+  - use: record-program
+    with: { program: noir_space_ship }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 180s }
+  - click: 'pane-tab[label="CALLTRACE"]'
+    settle: false
+  - wait: { until: call-trace.loaded, timeout: 120s }
+  - wait: { until: settled, timeout: 60s }
+  - click: { at: 'search-box[pane="call-trace"]' }
+  - type: calculate_damage
+  - key: Enter
+  - wait: { until: { at: 'search-box[pane="call-trace"]/search-result[text="#77 - stepId(1239): calculate_damage"]', present: true }, timeout: 60s }
+  - click: 'search-box[pane="call-trace"]/search-result[text="#3 - stepId(18): calculate_damage"]'
+    settle: false
+  - wait: { until: { at: status-line, location: { matches: "shield.nr:[0-9]+#18$" } }, timeout: 60s }
+  - wait: { until: replay-idle, timeout: 60s }
+  - wait: { until: { at: call-trace, assert: "marks-only(calculate_damage)" }, timeout: 60s }
+  - click: 'search-box[pane="call-trace"]/search-result[text="#8 - stepId(100): calculate_damage"]'
+    settle: false
+  - wait: { until: { at: status-line, location: { matches: "shield.nr:[0-9]+#100$" } }, timeout: 60s }
+  - wait: { until: replay-idle, timeout: 60s }
+  - wait: { until: { at: call-trace, assert: "marks-only(calculate_damage)" }, timeout: 60s }
+  - click: 'search-box[pane="call-trace"]/search-result[text="#13 - stepId(180): calculate_damage"]'
+    settle: false
+  - wait: { until: { at: status-line, location: { matches: "shield.nr:[0-9]+#180$" } }, timeout: 60s }
+  - wait: { until: replay-idle, timeout: 60s }
+  - wait: { until: { at: call-trace, assert: "marks-only(calculate_damage)" }, timeout: 60s }

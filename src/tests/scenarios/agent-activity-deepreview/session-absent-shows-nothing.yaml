@@ -1,0 +1,20 @@
+scenario: 1
+name: agent-activity-deepreview/session-absent-shows-nothing
+pack: codetracer
+summary: >-
+  A review whose dataset references no session shows no session, no notice
+  and no error in the Agent Activity panel, and no roll-up.
+
+stage:
+  - use: review-dataset
+    with: { variant: plain }
+  - use: open-review
+
+steps:
+  - wait: { until: { at: vcs, present: true }, timeout: 60s }
+  # the window has finished loading the review
+  - wait: { until: settled, timeout: 30s }
+  - wait: { until: { at: agent-activity, present: true }, timeout: 30s }
+  - expect: { at: agent-activity, notices: 0, roll-up: 0 }
+  - expect: { at: agent-activity, messages: { count: 0 } }
+  - expect: { at: agent-activity, assert: 'never-says("83.3%")' }

@@ -1,0 +1,31 @@
+scenario: 1
+name: multi-window/tab-menus-reach-a-second-window
+pack: codetracer
+summary: >-
+  A pane tab's menu offers Send to New Window beside the pin entries, and
+  choosing it moves the pane out of this window; with a second session open,
+  a session tab's menu offers Open in New Window.
+
+stage:
+  - use: record-program
+    with: { program: py_console_logs/main.py }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - wait: { until: { at: 'pane-tab[label="EVENT LOG"]', present: true }, timeout: 30s }
+
+  - beat: send-pane
+    steps:
+      - click: { at: 'pane-tab[label="EVENT LOG"]', button: right }
+      - wait: { until: { at: 'context-menu/menu-item[label="Send to New Window"]', present: true }, timeout: 15s }
+      - expect: { at: 'context-menu/menu-item[label="Pin to Left"]', present: true }
+      - click: 'context-menu/menu-item[label="Send to New Window"]'
+      - wait: { until: { at: 'pane-tab[label="EVENT LOG"]', absent: true }, timeout: 15s }
+
+  - beat: session-tab
+    steps:
+      - click: session-strip/session-add
+      - wait: { until: { at: session-strip, count: 2 }, timeout: 30s }
+      - click: { at: 'session-strip/session-tab[title="main.py"]', button: right }
+      - wait: { until: { at: 'context-menu/menu-item[label="Open in New Window"]', present: true }, timeout: 15s }

@@ -1,0 +1,25 @@
+scenario: 1
+name: terminal/nim-tracing-refused-on-a-proc
+pack: codetracer
+summary: >-
+  On an ordinary `proc` line the editor's menu offers neither Trace Static
+  Block Execution nor Trace Constant Initializer, and the static-block chord
+  is refused before anything runs, saying why and where — no new tab opens.
+stage:
+  - use: nim-project
+  - use: open-recording
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - wait: { until: editor.loaded, timeout: 60s }
+  - expect: { at: session-strip, count: 1 }
+  - click: { at: 'editor[file="tracing.nim"]/line[number="6"]', anchor: text-start }
+  - expect: { at: 'editor[file="tracing.nim"]', assert: "caret-at(6)" }
+  - click: { at: 'editor[file="tracing.nim"]/line[number="6"]', anchor: text-start, button: right }
+  - wait: { until: { at: context-menu, present: true }, timeout: 10s }
+  - expect: { at: context-menu, assert: ['lacks("Trace Static Block Execution")', 'lacks("Trace Constant Initializer")'] }
+  - key: Esc
+  - wait: { until: { at: context-menu, absent: true }, timeout: 10s }
+  - chord: { bound: editor.trace-static-block-at-cursor }
+  - wait: { until: { at: status-line, assert: 'says("is neither")' }, timeout: 30s }
+  - expect: { at: status-line, assert: 'says("tracing.nim:6")' }
+  - expect: { at: session-strip, count: 1 }

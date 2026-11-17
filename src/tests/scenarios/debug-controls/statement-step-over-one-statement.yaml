@@ -1,0 +1,34 @@
+scenario: 1
+name: debug-controls/statement-step-over-one-statement
+pack: codetracer
+summary: >-
+  On `var a = 1; var b = 2;` (line 1) and `var c = a + b;` (line 2), each
+  statement step-over (Alt+F10) advances exactly one statement: the first
+  moves the replay on but stays on line 1 (to `var b`), the second reaches
+  line 2.
+
+stage:
+  - use: write-project
+    with:
+      files:
+        program.js: "var a = 1; var b = 2;\nvar c = a + b;\n"
+  - use: record-program
+    with: { program: $project/program.js }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - click: 'toolbar/toolbar-button[label="run-to-entry-image"]'
+    settle: false
+  - wait: { until: { at: 'editor[file="program.js"]', current-line: 1 }, timeout: 60s }
+  - wait: replay-idle
+  - wait: { until: { at: status-line, location: { matches: "program\\.js:1#[0-9]+$" } }, timeout: 30s }
+  - chord: { bound: debugger.step-over-statement }
+    settle: false
+  - wait: replay-idle
+  - wait: { until: { at: status-line, location: { matches: "program\\.js:1#[0-9]+$" } }, timeout: 30s }
+  - expect: { at: 'editor[file="program.js"]', current-line: 1 }
+  - chord: { bound: debugger.step-over-statement }
+    settle: false
+  - wait: { until: { at: 'editor[file="program.js"]', current-line: 2 }, timeout: 60s }
+  - wait: { until: { at: status-line, location: { matches: "program\\.js:2#[0-9]+$" } }, timeout: 30s }

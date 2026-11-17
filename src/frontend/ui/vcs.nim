@@ -35,6 +35,10 @@ from ../viewmodel/viewmodels/review_session import
   ReviewSession, reviewSessionFrom
 
 from isonim/web/dom_api as isonim_dom_api import nil
+import ../viewmodel/input/dom_pointer
+from ../viewmodel/input/dom_pane_presses import readerOf
+from ../viewmodel/input/pane_presses import pressVcs
+from std/jsffi import JsObject
 import isonim/web/web_renderer
 import ./panel_host
 from ../viewmodel/session_vm import SessionViewModel
@@ -1058,3 +1062,42 @@ setPanelRenderer(Content.VCS,
     component.syncLegacyVCSIntoVM()
     renderVCSPanel[WebRenderer, isonim_dom_api.Element](
       r, vm, component.vcsCallbacks()))
+
+# ---------------------------------------------------------------------------
+# A press on a changed file or a commit's expander (K34, K53)
+# ---------------------------------------------------------------------------
+#
+# The pointer rows `vcs.open-file-diff` and `vcs.toggle-commit`, performed on
+# the element the key router's hit test found (`input/dom_pointer`), with the
+# callbacks of the pane the element is in: its host's VCS component, as the
+# panel renderer above finds it.
+
+proc closestVcsHost(element: JsObject): isonim_dom_api.Element {.importjs:
+  "((e) => (e && e.closest && e.closest('[id^=\"vCSComponent-\"]')) || null)(#)".}
+
+proc vcsOfPress(p: ElementPress): tuple[component: VCSComponent, vm: VCSVM] =
+  let host = closestVcsHost(p.element)
+  if cast[JsObject](host).isNil:
+    return
+  let component = VCSComponent(
+    data.hostTabComponent(host, Content.VCS, panelHostComponentId(host)))
+  if component.isNil:
+    return
+  (component, ensureVCSVM(component))
+
+for operation in ["vcs.open-file-diff", "vcs.toggle-commit"]:
+  closureScope:
+    let op = operation
+    registerElementOperation(op, proc(p: ElementPress): bool =
+      let (component, vm) = vcsOfPress(p)
+      if vm.isNil:
+        return false
+      result = pressVcs(vm, component.vcsCallbacks(), op, readerOf(p.element))
+      if result:
+        # Both elements sit inside one with a press of its own — a file's
+        # View Diff button in the file's row, a commit's expander in its
+        # header — and their press is not also that row's (the file
+        # opened, the commit's diff shown). The press is performed on the
+        # element as it bubbles (`dom_pointer`), so stopping it here keeps
+        # it from the row.
+        discard p.event.stopPropagation())

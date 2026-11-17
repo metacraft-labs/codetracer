@@ -1,0 +1,30 @@
+scenario: 1
+name: layout/plat45-desktop-remembers-own
+pack: codetracer
+summary: >-
+  The first run opens the Debug-mode default layout, with a VCS pane; closing
+  VCS with its tab's × removes it; View > Reset Layout brings back the shared
+  default, VCS and the editor with it, in the same window.
+
+stage:
+  - use: record-program
+    with: { program: calc }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 180s }
+  - wait: { until: call-trace.loaded, timeout: 120s }
+  - expect: { at: 'pane-tab[label="VCS"]', present: true }
+  - expect: { at: 'editor[file="main.py"]', present: true }
+  - click: { at: 'pane-tab[label="VCS"]', anchor: close }
+  - wait: { until: { at: 'pane-tab[label="VCS"]', absent: true }, timeout: 15s }
+  - click: { at: menu-bar }
+  - hover: { at: 'menu-bar/menu[label="View"]', for: 500ms }
+  - wait: { until: { at: 'menu-bar/menu-item[label="Reset Layout"]', present: true }, timeout: 10s }
+  # Along the open folder's first entry, then down its column: a pointer
+  # crossing the folders below View would open another.
+  - hover: { at: 'menu-bar/menu-item[label="Filesystem"]', for: 300ms }
+  - click: { at: 'menu-bar/menu-item[label="Reset Layout"]' }
+  - wait: { until: { at: 'pane-tab[label="VCS"]', present: true }, timeout: 30s }
+  - wait: { until: editor.loaded, timeout: 30s }
+  - expect: { at: 'editor[file="main.py"]', present: true }

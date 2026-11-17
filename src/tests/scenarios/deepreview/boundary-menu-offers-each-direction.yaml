@@ -1,0 +1,31 @@
+scenario: 1
+name: deepreview/boundary-menu-offers-each-direction
+pack: codetracer
+summary: >-
+  The two ends of a collapsed region are offered independently: the lower
+  handle's menu offers "Expand 10 lines below" and "Expand all 12 lines
+  below", and the first reveals the bottom ten lines (16 to 25) while 13 stays
+  the last line shown above and 14 stays hidden.
+
+stage:
+  - use: open-review
+    with: { dataset: src/tests/gui/tests/deepreview/fixtures/sample-review.json }
+
+steps:
+  - wait: { until: { at: vcs, present: true }, timeout: 120s }
+  - wait: { until: { at: 'review-diff[file="src/main.rs"]', present: true }, timeout: 60s }
+  - wait: { until: settled, timeout: 30s }
+  - wait: { until: { at: 'review-diff[file="src/main.rs"]', boundaries: 2 }, timeout: 30s }
+  - click: { at: 'review-diff[file="src/main.rs"]/review-boundary[direction="below"]', button: right }
+  - wait: { until: { at: expand-menu, present: true }, timeout: 30s }
+  - expect: { at: expand-menu, count: 2, direction: below }
+  - expect: { at: 'expand-menu/expand-option[label="Expand 10 lines below"]', present: true }
+  - expect: { at: 'expand-menu/expand-option[label="Expand all 12 lines below"]', present: true }
+  - click: 'expand-menu/expand-option[label="Expand 10 lines below"]'
+  - wait: { until: { at: expand-menu, absent: true }, timeout: 30s }
+  - wait: { until: { at: 'review-diff[file="src/main.rs"]', hidden: ["2", "2"] }, timeout: 30s }
+  - expect: { at: 'review-diff[file="src/main.rs"]', assert: 'shows-new-line("13")' }
+  - expect: { at: 'review-diff[file="src/main.rs"]', assert: 'lacks-new-line("14")' }
+  - wheel: { at: 'review-diff[file="src/main.rs"]', direction: down, amount: 20 }
+  - wait: { until: { at: 'review-diff[file="src/main.rs"]', assert: 'shows-new-line("25")' }, timeout: 30s }
+  - expect: { at: 'review-diff[file="src/main.rs"]', assert: 'shows-new-line("16")' }

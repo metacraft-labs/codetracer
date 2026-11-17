@@ -1,0 +1,21 @@
+scenario: 1
+name: debug-controls/tooltip-follows-a-keybindings-rebind
+pack: codetracer
+summary: >-
+  A user's keybindings.json that binds Go Back to Ctrl+Alt+9 is what the
+  History back control's tooltip names; the other controls keep theirs.
+
+stage:
+  - use: plant-config
+    with: { file: keybindings.json, content: '[{"key": "ctrl+alt+9", "command": "navigation.back"}]' }
+  - use: record-program
+    with: { program: py_console_logs/main.py }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - wait: { until: { at: 'toolbar/toolbar-button[label="next-image"]', present: true }, timeout: 60s }
+  - wait: { until: editor.loaded, timeout: 60s }
+  - expect: { at: 'toolbar/toolbar-button[label="history-back-image"]', tooltip-chord: "Ctrl+Alt+9" }
+  - expect: { at: 'toolbar/toolbar-button[label="next-image"]', tooltip-chord: "F10" }
+  - expect: { at: 'toolbar/toolbar-button[label="reverse-next-image"]', tooltip-chord: "Shift+F10" }

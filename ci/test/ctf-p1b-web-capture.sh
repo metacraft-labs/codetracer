@@ -1,0 +1,127 @@
+#!/usr/bin/env bash
+# NOT-A-CI-GATE: a capture tool that REWRITES a committed record, not a check.
+# Its output, `src/tests/visual/agent-harbor-web-regions.json`, is committed,
+# and the gate is the layout test that reads it
+# (`test_ctf_p1b_gpui_capture_matches_web_layout.nim`). Running this in CI
+# would only re-take the record the test compares against.
+# ctf-p1b-web-capture.sh [--no-build] [--moments] — CTF-P1b's WEB arm of the GPUI/web
+# layout comparison: every Agent Harbor story in StoryBook, both themes, at
+# the laptop and sidebar sizes, shot by `tools/visual-review/capture-storybook.mjs
+# --regions` into `build/ctf-p1b/web/` (`CTF_P1B_WEB_OUT` overrides), and the
+# regions the browser laid out merged into the COMMITTED record
+# `src/tests/visual/agent-harbor-web-regions.json`.
+#
+# The record is committed for the reason PLAT-35 commits its Electron arm: the
+# GPUI arm is re-taken wherever a compositor can open the window (the
+# `gpui-window-captures` CI job), which has no browser, and the layout test
+# (`test_ctf_p1b_gpui_capture_matches_web_layout.nim`) compares that fresh
+# GPUI capture with this record. Re-run this after changing a web view, a
+# story or the region declaration, and commit the record it rewrites. It holds
+# rectangles only, of stories over the committed synthetic fixture set (this
+# script refuses a StoryBook built over any other set), so it carries nothing
+# private.
+#
+# Text is set at the face's own advances (`--font-render-hinting none`).
+# Headless Chromium on Linux otherwise hints glyphs fully, which rounds the
+# advances of small text to whole, often wider, pixels: at the 12px caption
+# size "needs input" is 74px against the face's 69.6 (measured 2026-11-08),
+# while at 14px and above it matches the face. That is the rasteriser of the
+# machine taking the record, not the web views: a browser on macOS sets the
+# face's advances, as GPUI's text system does, so a hinted record would make
+# GPUI's wraps and cuts disagree with what the views lay out everywhere else.
+#
+# The images stay in the git-ignored build tree; the side-by-side pairs are
+# `tools/visual-review/parity-pairs.sh --agent-harbor`.
+#
+# `--moments` (CTF-P1c, `just ctf-p1c-web-captures`): the playback stories
+# instead, each at every named moment of its scenario (`capture-storybook.mjs
+# --moments`, capture ids `<view>-at-<moment>-<size>-<theme>`), into
+# `build/ctf-p1c/web/` (`CTF_P1C_WEB_OUT` overrides) and the committed
+# sibling record `src/tests/visual/agent-harbor-web-regions-at-moments.json`,
+# which `test_ctf_p1c_gpui_capture_matches_web_layout_at_moments.nim` reads.
+# The first-frame record above is left as it is.
+set -euo pipefail
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+cd "${root}"
+DECL="${root}/src/tests/visual/agent-harbor-regions.json"
+build=1
+moments=0
+for arg in "$@"; do
+	case "${arg}" in
+	--no-build) build=0 ;;
+	--moments) moments=1 ;;
+	*)
+		echo "ctf-p1b-web-capture: unknown argument ${arg}" >&2
+		exit 2
+		;;
+	esac
+done
+if [ "${moments}" = 1 ]; then
+	OUT="${CTF_P1C_WEB_OUT:-${root}/build/ctf-p1c/web}"
+	RECORD="${root}/src/tests/visual/agent-harbor-web-regions-at-moments.json"
+	views=(--view agent-harbor-playback --moments)
+	milestone=CTF-P1c
+	reader=test_ctf_p1c_gpui_capture_matches_web_layout_at_moments.nim
+	what="each Agent Harbor playback story at each named moment of its scenario"
+else
+	OUT="${CTF_P1B_WEB_OUT:-${root}/build/ctf-p1b/web}"
+	RECORD="${root}/src/tests/visual/agent-harbor-web-regions.json"
+	views=(--view agent-harbor-session-tabs --view agent-harbor-fleet)
+	milestone=CTF-P1b
+	reader=test_ctf_p1b_gpui_capture_matches_web_layout.nim
+	what="each region of each Agent Harbor story"
+fi
+if [ "${build}" = 1 ]; then
+	just storybook-build
+fi
+# The fixture set the StoryBook components embed (`fixture_source.nim` picks the
+# private set when it is checked out beside the workspace): the record is
+# public, so it is taken over the synthetic set only, the set CI embeds.
+grep -q '"fixtureSet\\": \\"synthetic\\"' storybook/dist/components.js || {
+	echo "FAIL: storybook/dist/components.js does not embed the synthetic fixture set;" \
+		"rebuild with AGENT_HARBOR_FIXTURES=synthetic" >&2
+	exit 1
+}
+mkdir -p "${OUT}"
+# A re-take starts from no regions and no frames: the record below is merged
+# from every regions file in OUT, so one left from an earlier run of a story
+# or moment that no longer exists would otherwise be recorded as if it had
+# been taken, and its frame would be paired (`parity-pairs.sh`) as a capture
+# with no partner.
+rm -f "${OUT}"/*.regions.json "${OUT}"/*.png
+for size in laptop sidebar; do
+	node tools/visual-review/capture-storybook.mjs --no-build --font-render-hinting none \
+		"${views[@]}" \
+		--size "${size}" --theme dark --theme light \
+		--out "${OUT}" --regions "${DECL}"
+done
+node - "${OUT}" "${RECORD}" "${milestone}" "${reader}" "${what}" <<'EOF'
+// Merge every `<capture id>.regions.json` into the committed record, sorted
+// by id so a re-take that changes nothing changes no byte.
+const { readdirSync, readFileSync, writeFileSync } = require("node:fs");
+const { join } = require("node:path");
+const [outDir, record, milestone, reader, what] = process.argv.slice(2);
+const captures = {};
+let fixtureSet = null;
+for (const name of readdirSync(outDir).filter((n) => n.endsWith(".regions.json")).sort()) {
+  const doc = JSON.parse(readFileSync(join(outDir, name), "utf8"));
+  if (doc.renderer !== "web") throw new Error(`${name}: not a web capture`);
+  captures[name.slice(0, -".regions.json".length)] = {
+    ...(doc.moment ? { moment: doc.moment } : {}), viewport: doc.viewport, regions: doc.regions,
+  };
+}
+if (Object.keys(captures).length === 0) throw new Error(`no web regions in ${outDir}`);
+writeFileSync(record, `${JSON.stringify({
+  _comment: [
+    `${milestone}: where the browser laid out ${what}`,
+    "(src/tests/visual/agent-harbor-regions.json), in CSS pixels of the capture's",
+    "viewport. WRITTEN by ci/test/ctf-p1b-web-capture.sh from StoryBook over the",
+    "synthetic fixture set, text at the face's own advances (no font hinting);",
+    `read by ${reader}.`,
+    "Do not edit by hand: re-take it.",
+  ],
+  schemaVersion: 1,
+  captures,
+}, null, 2)}\n`);
+console.log(`ctf-p1b-web-capture: ${Object.keys(captures).length} captures recorded in ${record}`);
+EOF

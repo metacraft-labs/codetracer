@@ -1,0 +1,18 @@
+scenario: 1
+name: terminal/layout-corrupt-document-reported
+pack: codetracer
+summary: >-
+  A corrupt saved layout is reported on the status line ("saved layout
+  ignored (NotJson)") and the shared default is shown instead.
+stage:
+  - use: record-program
+    with: { program: calc }
+  - use: plant-state
+    with: { file: tui-layout.json, content: "{ this is not json" }
+  - use: open-recording
+    with: { width: 160, height: 40 }
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - expect: { at: status-line, assert: 'says("saved layout ignored (NotJson)")' }
+  - expect: { at: 'pane-tab[label="Files"]', present: true }
+  - expect: { at: 'pane-tab[label="Constraints"]', absent: true }

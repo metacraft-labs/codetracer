@@ -1,0 +1,21 @@
+scenario: 1
+name: deepreview/hunk-selection-is-copy-only
+pack: codetracer
+summary: >-
+  In a review a diff tab's hunk can be selected and copied as a patch but not
+  staged: a click on the `@@` divider says "1 hunk selected" and offers "Copy
+  as patch" and no "Stage hunks".
+
+stage:
+  - use: open-review
+    with: { dataset: src/tests/gui/tests/deepreview/fixtures/sample-review.json }
+
+steps:
+  - wait: { until: { at: vcs, present: true }, timeout: 120s }
+  - wait: { until: { at: 'review-diff[file="src/main.rs"]', present: true }, timeout: 60s }
+  - wait: { until: settled, timeout: 30s }
+  - wait: { until: { at: 'review-diff[file="src/main.rs"]/hunk-divider', present: true }, timeout: 30s }
+  - click: 'review-diff[file="src/main.rs"]/hunk-divider'
+  - wait: { until: { at: 'review-diff[file="src/main.rs"]', hunk-selection: "1 hunk selected" }, timeout: 30s }
+  - expect: { at: 'review-diff[file="src/main.rs"]', hunk-actions: { subsequence: ["Copy as patch"] } }
+  - expect: { at: 'review-diff[file="src/main.rs"]', assert: 'offers-no-action("Stage hunks")' }

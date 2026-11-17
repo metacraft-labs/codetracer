@@ -1,0 +1,965 @@
+# ct start_backend: 53 argv cases through ct's loader (the parse probe)
+
+### 1: no kind
+argv: ct "start_backend"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The required option 'backendKind' was not specified\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 2: kind db
+argv: ct "start_backend" "db"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = start_backend
+  backendKind = "db"
+  isStdio = false
+  socketPath = none
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 3: kind rr
+argv: ct "start_backend" "rr"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = start_backend
+  backendKind = "rr"
+  isStdio = false
+  socketPath = none
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 4: two kinds
+argv: ct "start_backend" "db" "rr"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The subcommand 'start_backend' does not accept additional arguments\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 5: start-backend spelling
+argv: ct "start-backend" "db"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+ct has no such subcommand\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 6: startBackend spelling
+argv: ct "startBackend" "db"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = start_backend
+  backendKind = "db"
+  isStdio = false
+  socketPath = none
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 7: --stdio
+argv: ct "start_backend" "--stdio" "db"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = start_backend
+  backendKind = "db"
+  isStdio = true
+  socketPath = none
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 8: --stdio=true
+argv: ct "start_backend" "--stdio=true" "db"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = start_backend
+  backendKind = "db"
+  isStdio = true
+  socketPath = none
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 9: --stdio=false
+argv: ct "start_backend" "--stdio=false" "db"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = start_backend
+  backendKind = "db"
+  isStdio = false
+  socketPath = none
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 10: --stdio=on
+argv: ct "start_backend" "--stdio=on" "db"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = start_backend
+  backendKind = "db"
+  isStdio = true
+  socketPath = none
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 11: --stdio=off
+argv: ct "start_backend" "--stdio=off" "db"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = start_backend
+  backendKind = "db"
+  isStdio = false
+  socketPath = none
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 12: --stdio=yes
+argv: ct "start_backend" "--stdio=yes" "db"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = start_backend
+  backendKind = "db"
+  isStdio = true
+  socketPath = none
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 13: --stdio=no
+argv: ct "start_backend" "--stdio=no" "db"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = start_backend
+  backendKind = "db"
+  isStdio = false
+  socketPath = none
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 14: --stdio=1
+argv: ct "start_backend" "--stdio=1" "db"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = start_backend
+  backendKind = "db"
+  isStdio = true
+  socketPath = none
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 15: --stdio=0
+argv: ct "start_backend" "--stdio=0" "db"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = start_backend
+  backendKind = "db"
+  isStdio = false
+  socketPath = none
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 16: --stdio=maybe
+argv: ct "start_backend" "--stdio=maybe" "db"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Error while processing the \e[34mstdio=maybe\e[0m parameter: 'maybe' is not a valid boolean value. Supported values are on/off, yes/no, true/false or 1/0\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 17: --stdio=
+argv: ct "start_backend" "--stdio=" "db"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Error while processing the \e[34mstdio=db\e[0m parameter: 'db' is not a valid boolean value. Supported values are on/off, yes/no, true/false or 1/0\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 18: --stdio:false
+argv: ct "start_backend" "--stdio:false" "db"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = start_backend
+  backendKind = "db"
+  isStdio = false
+  socketPath = none
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 19: --stdio false (next word)
+argv: ct "start_backend" "--stdio" "false" "db"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The subcommand 'start_backend' does not accept additional arguments\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 20: --stdio twice
+argv: ct "start_backend" "--stdio" "--stdio" "db"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = start_backend
+  backendKind = "db"
+  isStdio = true
+  socketPath = none
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 21: --no-stdio
+argv: ct "start_backend" "--no-stdio" "db"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'no-stdio'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 22: --STDIO (style variant)
+argv: ct "start_backend" "--STDIO" "db"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = start_backend
+  backendKind = "db"
+  isStdio = true
+  socketPath = none
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 23: --s_tdio (style variant)
+argv: ct "start_backend" "--s_tdio" "db"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = start_backend
+  backendKind = "db"
+  isStdio = true
+  socketPath = none
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 24: --socket-path <v>
+argv: ct "start_backend" "--socket-path" "/s.sock" "db"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = start_backend
+  backendKind = "db"
+  isStdio = false
+  socketPath = some("/s.sock")
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 25: --socket-path=<v>
+argv: ct "start_backend" "--socket-path=/s.sock" "db"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = start_backend
+  backendKind = "db"
+  isStdio = false
+  socketPath = some("/s.sock")
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 26: --socket-path:<v>
+argv: ct "start_backend" "--socket-path:/s.sock" "db"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = start_backend
+  backendKind = "db"
+  isStdio = false
+  socketPath = some("/s.sock")
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 27: --socket-path /s.sock
+argv: ct "start_backend" "--socket-path" "/s.sock" "db"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = start_backend
+  backendKind = "db"
+  isStdio = false
+  socketPath = some("/s.sock")
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 28: --socket-path=/s.sock
+argv: ct "start_backend" "--socket-path=/s.sock" "db"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = start_backend
+  backendKind = "db"
+  isStdio = false
+  socketPath = some("/s.sock")
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 29: --socket-path empty
+argv: ct "start_backend" "--socket-path" "" "db"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = start_backend
+  backendKind = "db"
+  isStdio = false
+  socketPath = some("")
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 30: --socket-path= (empty)
+argv: ct "start_backend" "--socket-path=" "db"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The required option 'backendKind' was not specified\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 31: --socket-path= <v> (next word)
+argv: ct "start_backend" "--socket-path=" "/s.sock" "db"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = start_backend
+  backendKind = "db"
+  isStdio = false
+  socketPath = some("/s.sock")
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 32: --socket-path -x (value starts with -)
+argv: ct "start_backend" "--socket-path" "-x" "db"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = start_backend
+  backendKind = "db"
+  isStdio = false
+  socketPath = some("-x")
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 33: --socket-path --x (value starts with --)
+argv: ct "start_backend" "--socket-path" "--x" "db"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = start_backend
+  backendKind = "db"
+  isStdio = false
+  socketPath = some("--x")
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 34: --socket-path --new-tab <v> (an option between it and its value)
+argv: ct "start_backend" "--socket-path" "--new-tab" "/s.sock" "db"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The subcommand 'start_backend' does not accept additional arguments\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 35: --socket-path repeated, last wins
+argv: ct "start_backend" "--socket-path" "/s.sock" "--socket-path" "/s.sock" "db"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = start_backend
+  backendKind = "db"
+  isStdio = false
+  socketPath = some("/s.sock")
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 36: --socket-path missing value (last)
+argv: ct "start_backend" "db" "--socket-path"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The option '\e[34m--socket-path\e[0m' requires a value\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 37: --socket-path missing value (before the rest)
+argv: ct "start_backend" "--socket-path" "db"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The required option 'backendKind' was not specified\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 38: --SOCKET-PATH <v> (style variant)
+argv: ct "start_backend" "--SOCKET-PATH" "/s.sock" "db"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = start_backend
+  backendKind = "db"
+  isStdio = false
+  socketPath = some("/s.sock")
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 39: --s_ocket-path <v> (style variant)
+argv: ct "start_backend" "--s_ocket-path" "/s.sock" "db"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = start_backend
+  backendKind = "db"
+  isStdio = false
+  socketPath = some("/s.sock")
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 40: --socket_path <v> (style variant)
+argv: ct "start_backend" "--socket_path" "/s.sock" "db"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'socket_path'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 41: --socketpath <v> (style variant)
+argv: ct "start_backend" "--socketpath" "/s.sock" "db"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'socketpath'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 42: env <APP>_BACKENDKIND
+argv: ct "start_backend"
+env: <APP>_BACKENDKIND="db"
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = start_backend
+  backendKind = "db"
+  isStdio = false
+  socketPath = none
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 43: unknown long option
+argv: ct "start_backend" "--bogus" "db"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'bogus'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 44: unknown long option with value
+argv: ct "start_backend" "--bogus=1" "db"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'bogus'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 45: unknown short option
+argv: ct "start_backend" "-Z" "db"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'Z'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 46: lone -
+argv: ct "start_backend" "-" "db"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option ''\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 47: lone -- then a word
+argv: ct "start_backend" "--" "w" "db"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option ''\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 48: --=v
+argv: ct "start_backend" "--=v" "db"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option ''\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 49: extra positional
+argv: ct "start_backend" "db" "extra1" "extra2" "extra3" "extra4" "extra5"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The subcommand 'start_backend' does not accept additional arguments\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 50: global --cwd after the command
+argv: ct "start_backend" "--cwd" "/w" "db"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = some("/w")
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = start_backend
+  backendKind = "db"
+  isStdio = false
+  socketPath = none
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 51: global --new-tab after the command
+argv: ct "start_backend" "--new-tab" "db"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = true
+  newWindow = false
+  cmd = start_backend
+  backendKind = "db"
+  isStdio = false
+  socketPath = none
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 52: --version after the command
+argv: ct "start_backend" "--version" "db"
+env: (none)
+exit: 0
+--- stdout
+CodeTracer version: <VERSION>
+\e[0m
+(no newline at end of stdout)
+--- stderr
+--- end
+
+### 53: -h after the command
+argv: ct "start_backend" "-h" "db"
+env: (none)
+exit: 0
+--- stdout
+<the short help page clispec renders for this request: ct start_backend>
+--- stderr
+--- end

@@ -22,7 +22,8 @@ when defined(js):
 
 import nim_agents_isonim_viewmodels/agent_harbor/recording_switcher
 
-from ./agent_harbor_words import stateSuffix
+from ./agent_harbor_words import stateSuffix, hiddenRecordings, chipTitle,
+  HiddenSeverity
 
 export signals, computation, components, recording_switcher
 
@@ -67,8 +68,13 @@ proc renderRecordingSwitcher*[R, N](r: R; buttons: RecordingButtons;
   for rb in buttons.buttons:
     r.appendRendered(host, renderRecordingButton(r, rb, onSelect))
   if buttons.hidden > 0:
+    # The chip takes the most severe state of the recordings it hides: a
+    # failed one gives it the error colour and mark, and says so.
+    let hidden = hiddenRecordings(buttons.hiddenStates)
     let more = ui(r):
-      span(class = "ah-rec-more", title = $buttons.hidden & " more recordings"):
+      span(class = "ah-rec-more" &
+                   (if hidden.severity != hsNone: " ah-att-" & $hidden.severity else: ""),
+           title = chipTitle(hidden, "recording", "recordings")):
         text "+" & $buttons.hidden
     r.appendRendered(host, more)
   res

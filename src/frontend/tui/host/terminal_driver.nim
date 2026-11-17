@@ -118,9 +118,12 @@ type
     ## outstanding — `ESC ]` (OSC), `ESC P` (DCS) and `ESC _` (APC) begin a
     ## STRING that runs to BEL or ST (`ESC \`) and is delivered as one token,
     ## because that is the shape of a terminal's answer to OSC 11, DECRQSS and
-    ## XTGETTCAP. Outside the round those two-byte prefixes keep their old
-    ## meaning (the `ESC` is dropped and the byte honoured), so an Alt+`]` or
-    ## Alt+Shift+`P` typed later is never swallowed as the start of a reply.
+    ## XTGETTCAP. Outside the round such a prefix is HELD (§4.3): when the
+    ## next byte begins an answer's shape (`replyStart`) the string is framed
+    ## whole and the loop drops it, so a LATE answer is never typed into the
+    ## document; any other next byte, or `EscDelayMs` with none, makes it the
+    ## old key (the `ESC` dropped, the byte honoured), so an Alt+`]` or
+    ## Alt+Shift+`P` typed later is not swallowed either.
     ##
     ## A VALUE AND NOT A LOOP, which is what makes it assertable without a
     ## terminal: `app/input/keymap.keyName` takes a whole token, so the framing
@@ -143,6 +146,17 @@ type
       ## clipboard (kitty's and Ghostty's defaults) answers the OSC 52 read
       ## after the paste's wait has run out, and before this, outside the
       ## reply window, its bytes were typed as text.
+    unsolicited*: bool
+      ## The string being framed began OUTSIDE the reply window (§4.3): an
+      ## `ESC ]` / `ESC P` / `ESC _` whose next byte begins a reply's shape
+      ## (`replyStart`). It is framed to its terminator like any reply, and
+      ## the caller drops it (`isStringToken`): a terminal's late or
+      ## unsolicited answer is never typed into the document.
+    extra*: string
+      ## A second token completed by the same byte: an `ESC ]` / `ESC P` /
+      ## `ESC _` held to see whether a reply follows, and broken by a byte
+      ## that begins none, is the old Alt key AND that byte. The caller
+      ## queues it right after the returned token (`takeExtra`).
     paired*: bool
       ## The held lone `ESC` is the SECOND of an `ESC ESC` pair, whose first
       ## was already delivered as the `Esc` key. It begins the next escape
@@ -180,13 +194,49 @@ proc reset*(f: var InputFramer) =
   f.pending = ""
   f.escSinceMs = 0
   f.paired = false
+  f.unsolicited = false
 
 proc holdsLoneEsc*(f: InputFramer): bool =
   f.pending.len == 1 and f.pending[0] == '\x1b'
 
+proc holdsStringIntro*(f: InputFramer): bool =
+  ## An `ESC ]` / `ESC P` / `ESC _` held outside the reply window, waiting
+  ## for the byte that says whether a reply follows (§4.3).
+  f.pending.len == 2 and f.pending[0] == '\x1b' and
+    f.pending[1] in {']', 'P', '_'} and
+    not (f.expectStrings or f.altChordsAsCsiU)
+
+proc holdsEscPrefix*(f: InputFramer): bool =
+  ## Something the framer resolves by TIME: a lone `ESC`, or a string
+  ## introducer outside the reply window.
+  f.holdsLoneEsc or f.holdsStringIntro
+
 proc escDue*(f: InputFramer; nowMs: int64): bool =
-  ## Whether a held lone `ESC` has waited out `EscDelayMs` and is the key.
-  f.holdsLoneEsc and nowMs - f.escSinceMs >= EscDelayMs
+  ## Whether a held lone `ESC` (or string introducer) has waited out
+  ## `EscDelayMs` and is the key.
+  f.holdsEscPrefix and nowMs - f.escSinceMs >= EscDelayMs
+
+proc introKey*(f: InputFramer): string =
+  ## What a held string introducer is when nothing followed it: the byte
+  ## alone, as this framer has always delivered `ESC ]`, `ESC P` and `ESC _`
+  ## outside the reply window.
+  $f.pending[1]
+
+proc replyStart*(intro, b: char): bool =
+  ## Whether `b`, right after `ESC <intro>`, begins one of the answers a
+  ## terminal sends: DECRQSS / XTGETTCAP (`DCS 1 $ r`, `DCS 0 + r` …),
+  ## XTVERSION (`DCS > |`), DECRPTUI (`DCS ! |`); an OSC answer (`OSC 11 ;`,
+  ## `OSC 52 ;`, `OSC 22 ;` — a digit); a Kitty graphics answer (`APC G`).
+  case intro
+  of 'P': b in {'0', '1', '>', '!'}
+  of ']': b in {'0' .. '9'}
+  of '_': b == 'G'
+  else: false
+
+proc isStringToken*(token: string): bool =
+  ## A whole OSC / DCS / APC string, as `feed` frames one: a terminal's
+  ## answer, never a key.
+  token.len > 2 and token[0] == '\x1b' and token[1] in {']', 'P', '_'}
 
 proc isCsiFinal*(c: char): bool =
   ## Whether `c` terminates a CSI sequence: ECMA-48's final-byte range
@@ -210,9 +260,26 @@ proc feed*(f: var InputFramer; b: char): (bool, string) =
     return (false, "")
 
   f.pending.add b
+  if f.pending.len == 3 and f.pending[1] in {']', 'P', '_'} and
+     not (f.expectStrings or f.altChordsAsCsiU or f.unsolicited):
+    # §4.3: OUTSIDE THE REPLY WINDOW the introducer was held to see what
+    # follows. A byte that begins a reply's shape makes it a string — a late
+    # or unsolicited answer, framed whole and dropped by the caller, never
+    # typed. Any other byte: the introducer is the old key (the byte alone),
+    # and this byte is framed after it.
+    if replyStart(f.pending[1], b):
+      f.unsolicited = true
+      return (false, "")
+    let intro = $f.pending[1]
+    f.reset()
+    let (complete, token) = f.feed(b)
+    if complete:
+      f.extra = token
+    return (true, intro)
   if f.pending.len > 2 and f.pending[1] in {']', 'P', '_'}:
-    # A STRING (only reachable while `expectStrings` or `altChordsAsCsiU`):
-    # BEL or ST ends it.
+    # A STRING (reachable while `expectStrings` or `altChordsAsCsiU`, or
+    # outside them once a reply's shape began — `unsolicited`): BEL or ST
+    # ends it.
     if b == '\x07' or (b == '\\' and f.pending[^2] == Esc):
       let token = f.pending
       f.reset()
@@ -228,11 +295,10 @@ proc feed*(f: var InputFramer; b: char): (bool, string) =
       # A CSI or an SS3 is starting; keep accumulating.
       return (false, "")
     of ']', 'P', '_':
-      if f.expectStrings or f.altChordsAsCsiU:
-        return (false, "")
-      let broke = $b
-      f.reset()
-      return (true, broke)
+      # Inside the reply window a string begins here. Outside it the
+      # introducer is HELD: the next byte, or `EscDelayMs` with none, says
+      # whether it begins a late answer or is the key (§4.3).
+      return (false, "")
     else:
       if b == Esc:
         # `ESC ESC`: the first is the `Esc` key, now; the second is held as
@@ -604,6 +670,16 @@ type
       ## PLAT-68: the extended key reporting `caps.keyProtocol` negotiated,
       ## enabled on the alternate screen; `nim-termctl` undoes it on every
       ## exit path (`stop`, a signal, `atexit`).
+    pointer*: PointerEmitter
+      ## Pointer-Affordances §5.3: what the terminal was told about the pointer.
+    keyProtocolHeld*: bool
+      ## Extended key reporting waits while a reply is still to come THROUGH
+      ## tmux: the outer terminal's answer to the wrapped OSC 22 query reaches
+      ## the pane as input that tmux re-reads as keys, and once the pane has
+      ## asked for `modifyOtherKeys` (tmux's `extended-keys`), tmux re-encodes
+      ## the answer's `ESC ]` as Alt+`]` (`CSI 27 ; 3 ; 93 ~`) and the reply is
+      ## lost. Measured on tmux 3.6a in kitty 0.44.0 (2026-11-12). Set and
+      ## released by the negotiation (`holdKeyProtocol`).
     focusReporting: FocusReporting
       ## DECSET 1004, asked for by `start` whenever the terminal is ours (see
       ## "Focus reporting" above). `nim-termctl`'s, like the mouse and key
@@ -636,8 +712,8 @@ proc eraseByte*(d: TerminalDriver): char =
 proc applyKeyProtocol(d: TerminalDriver) =
   ## Bring the terminal's key reporting to `caps.keyProtocol`, on a started
   ## driver: undo what is on if it differs, then ask for what was negotiated.
-  ## Legacy asks for nothing.
-  if not d.started or not d.altOwned:
+  ## Legacy asks for nothing. Nothing changes while `keyProtocolHeld`.
+  if not d.started or not d.altOwned or d.keyProtocolHeld:
     return
   let want = case d.caps.keyProtocol
              of kpKitty: 1
@@ -656,6 +732,21 @@ proc applyKeyProtocol(d: TerminalDriver) =
   of 2: d.keyReporting = enableKeyReporting(krmModifyOtherKeys, d.outFd)
   else: discard
 
+proc holdKeyProtocol*(d: TerminalDriver; held: bool) =
+  ## Hold extended key reporting back while a wrapped reply is outstanding
+  ## (`keyProtocolHeld`); releasing it applies what was negotiated.
+  if d.keyProtocolHeld == held:
+    return
+  d.keyProtocolHeld = held
+  if held:
+    # Already on (`:terminal-info`'s `r` asks again mid-session): off until
+    # the reply has come through.
+    if d.keyReporting.active:
+      disableKeyReporting(d.keyReporting)
+      d.framer.altChordsAsCsiU = false
+  else:
+    d.applyKeyProtocol()
+
 proc restoreUnion*(d: TerminalDriver): string =
   ## PLAT-71 (Terminal-Adaptation §4.8 rule 3): the resets of every mode this
   ## driver set beyond `nim-termctl`'s own — grapheme clustering, synchronized
@@ -669,6 +760,8 @@ proc restoreUnion*(d: TerminalDriver): string =
     result.add "\x1b[?2026l"
   if d.pixelMouseOwned:
     result.add "\x1b[?1016l"
+  # Pointer-Affordances §5.4: on the alternate screen, like the keyboard pop.
+  result.add d.pointer.restoreBytes
   if d.mouseOwned:
     result.add "\x1b[?1003l"
 
@@ -687,6 +780,7 @@ proc resumeUnion*(d: TerminalDriver): string =
     result.add "\x1b[?1016h"
   if d.mouseOwned:
     result.add MotionTrackingOnBytes
+  result.add d.pointer.resumeBytes
 
 proc registerRestore(d: TerminalDriver) =
   discard setExtraRestore(d.restoreUnion())
@@ -700,6 +794,17 @@ proc adoptCapabilities*(d: TerminalDriver; caps: TerminalCapabilities) =
   ## cells painted in the old. PLAT-68: and put the terminal's key reporting
   ## on the protocol the round decided.
   d.caps = caps
+  if caps.pointer != d.pointer.caps:
+    # Another dialect (or none): give back what the old one was told.
+    if d.started:
+      writeAll(d.outFd, d.pointer.restoreBytes)
+    let wanted = d.pointer.wanted
+    let hadWanted = d.pointer.hasWanted
+    d.pointer = PointerEmitter(caps: caps.pointer, wanted: wanted,
+                               hasWanted: hadWanted,
+                               unfocused: d.pointer.unfocused)
+    if d.started and hadWanted:
+      writeAll(d.outFd, d.pointer.emit(wanted))
   d.emitter.caps = caps
   d.emitter.reset()
   d.applyKeyProtocol()
@@ -711,6 +816,29 @@ proc adoptCapabilities*(d: TerminalDriver; caps: TerminalCapabilities) =
     d.graphemeOwned = true
   if d.started:
     d.registerRestore()
+
+proc setPointerShape*(d: TerminalDriver; shape: PointerShape) =
+  ## The shape the shared function answered for the element under the pointer
+  ## (Pointer-Affordances §5.3): written only when it differs from the last one
+  ## written, and the restore re-registered with the shape it now owes.
+  let bytes = d.pointer.emit(shape)
+  if bytes.len > 0 and d.started:
+    writeAll(d.outFd, bytes)
+    d.registerRestore()
+
+proc pointerFocusChanged*(d: TerminalDriver; focused: bool) =
+  ## §5.3: focus-out gives the pointer back; focus-in applies the last shape.
+  let bytes = d.pointer.focusChanged(focused)
+  if bytes.len > 0 and d.started:
+    writeAll(d.outFd, bytes)
+    d.registerRestore()
+
+proc takeExtra*(d: TerminalDriver) =
+  ## Queue the second token a byte completed (`InputFramer.extra`) behind the
+  ## one `feed` returned.
+  if d.framer.extra.len > 0:
+    d.buffered.add d.framer.extra
+    d.framer.extra = ""
 
 proc expectReplies*(d: TerminalDriver; on: bool) =
   ## Whether `ESC ]` / `ESC P` / `ESC _` begin a terminal's reply string. On
@@ -811,6 +939,8 @@ proc stop*(d: TerminalDriver) =
   # 1003 — the same bytes a SIGTERM or a crash writes, then forgotten.
   if d.started:
     writeAll(d.outFd, d.restoreUnion())
+    d.pointer.pushed = false
+    d.pointer.dirty = false
     discard setExtraRestore("")
     discard setExtraResume("")
   d.graphemeOwned = false
@@ -929,6 +1059,7 @@ proc absorbInterruptByte*(d: TerminalDriver): bool =
   if not complete:
     return false
   d.buffered.add token
+  d.takeExtra()
   keyName(token, d.eraseByte) in InterruptKeys
 
 func tokenEvent*(token: string): DriverEvent =
@@ -973,6 +1104,26 @@ proc nextEvent*(d: TerminalDriver; timeoutMs: int = 100): DriverEvent =
   # `Esc` then typed `O` and `P` into the document. So a waiting `[` or `O`
   # (a CSI's or an SS3's introducer) continues the sequence; any other
   # waiting byte is a key of its own, after the `Esc`.
+  if d.framer.escDue(clock) and d.framer.holdsStringIntro:
+    # §4.3: an `ESC ]` / `ESC P` / `ESC _` held outside the reply window. A
+    # byte already waiting decides it (a late answer's next byte, or a key
+    # typed ahead); with none it is the old key, the byte alone.
+    if d.inputPending():
+      let nb = readByteWithTimeout(0, d.inFd)
+      if nb >= 0:
+        var (complete, token) = d.framer.feed(char(nb))
+        while not complete and d.framer.pending.len > 0:
+          let more = readByteWithTimeout(0, d.inFd)
+          if more < 0:
+            break
+          (complete, token) = d.framer.feed(char(more))
+        d.takeExtra()
+        if complete:
+          return tokenEvent(token)
+        return DriverEvent(kind: dekIdle)
+    let key = d.framer.introKey
+    d.framer.reset()
+    return tokenEvent(key)
   if d.framer.escDue(clock):
     var next = -1
     if d.inputPending():
@@ -984,6 +1135,7 @@ proc nextEvent*(d: TerminalDriver; timeoutMs: int = 100): DriverEvent =
         if more < 0:
           break
         (complete, token) = d.framer.feed(char(more))
+      d.takeExtra()
       if complete:
         return tokenEvent(token)
       return DriverEvent(kind: dekIdle)
@@ -995,18 +1147,20 @@ proc nextEvent*(d: TerminalDriver; timeoutMs: int = 100): DriverEvent =
       # The waiting byte, framed after the `Esc` (an `ESC` begins a new
       # sequence, held from now).
       let (complete, token) = d.framer.feed(char(next))
-      if d.framer.holdsLoneEsc:
+      if d.framer.holdsEscPrefix:
         d.framer.escSinceMs = (getMonoTime() - MonoTime()).inMilliseconds
       if complete:
         if paired:
+          d.takeExtra()
           return tokenEvent(token)
         d.buffered.add token
+      d.takeExtra()
     if not paired:
       return DriverEvent(kind: dekToken, token: $Esc)
     if next >= 0:
       return DriverEvent(kind: dekIdle)
   var wait = timeoutMs
-  if d.framer.holdsLoneEsc:
+  if d.framer.holdsEscPrefix:
     let left = int(EscDelayMs - (clock - d.framer.escSinceMs))
     if wait < 0 or left < wait: wait = max(0, left)
   let wake = if d.watcher.isNil: cint(-1) else: resizeWakeFd()
@@ -1026,6 +1180,10 @@ proc nextEvent*(d: TerminalDriver; timeoutMs: int = 100): DriverEvent =
     if not d.watcher.isNil and d.watcher.pump():
       return DriverEvent(kind: dekResize, size: d.watcher.currentSize())
     if d.framer.escDue((getMonoTime() - MonoTime()).inMilliseconds):
+      if d.framer.holdsStringIntro:
+        let key = d.framer.introKey
+        d.framer.reset()
+        return tokenEvent(key)
       let paired = d.framer.paired
       d.framer.reset()
       if not paired:
@@ -1048,8 +1206,9 @@ proc nextEvent*(d: TerminalDriver; timeoutMs: int = 100): DriverEvent =
     (complete, token) = d.framer.feed(char(more))
   # A lone `ESC` held from now — a pair's second, delivered with the pair's
   # `Esc` token, included — waits `EscDelayMs` from this moment.
-  if d.framer.holdsLoneEsc and d.framer.escSinceMs == 0:
+  if d.framer.holdsEscPrefix and d.framer.escSinceMs == 0:
     d.framer.escSinceMs = (getMonoTime() - MonoTime()).inMilliseconds
+  d.takeExtra()
   if complete:
     return tokenEvent(token)
   DriverEvent(kind: dekIdle)

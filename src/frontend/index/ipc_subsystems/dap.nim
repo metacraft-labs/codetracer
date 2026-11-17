@@ -3,7 +3,8 @@ import
   ../../[ types, config ],
   ../../lib/[ jslib ],
   ../../../common/ct_logging,
-  ../electron_vars
+  ../electron_vars,
+  ../window_routing
 
 type
   RawDapMessage* = ref object
@@ -48,10 +49,16 @@ var servedSession = 0
   ## The session of the last request forwarded: who an event that names no
   ## replay of a known owner is attributed to (`resolveSessionId`).
 
-var replayOwners: Table[int, int] = initTable[int, int]()
-  ## Desktop: replay id -> the tab that owns it, learned from the requests
-  ## that name it (a tab names only its own replay) and forgotten when the
-  ## replay is stopped. Says which tab an event of a replay is for.
+var servedWindow = -1
+  ## Desktop: the window (`window_routing.AppWindow.id`) of the last request
+  ## forwarded, -1 for the primary window; with `servedSession`, who an event
+  ## no tab is known to show is attributed to.
+  ##
+  ## Which tab of which window shows a replay is `window_routing`'s
+  ## (`tabReplays`, `viewersOf`): learned from the requests that name it (a
+  ## tab names only its own replay) and from the replay selections a window
+  ## is sent, and forgotten when the replay is stopped. Tab ids are per
+  ## window, so a tab is named only together with its window.
 
 type
   PendingDapRequest = object
@@ -59,6 +66,8 @@ type
     ## session that issued it and the `seq` that session numbered it with.
     sessionId: int
     seq: int
+    window: int
+      ## Desktop: the window of the tab that issued it (-1: the primary).
 
 var pendingRequests: Table[int, PendingDapRequest] =
     initTable[int, PendingDapRequest]()
@@ -224,13 +233,16 @@ proc noteReplayStopped*(replayId: int) =
   ## would reach no replay. Its id is never served again (the Backend Manager
   ## does not reuse one), so it has no owner any more.
   selectedReplay = -1
-  replayOwners.del(replayId)
+  forgetReplay(replayId)
 
-proc forwardRequest(sessionId: int; replayId: int; message: JsObject) =
-  ## Forward `message`, a request of `sessionId`, to the Backend Manager,
-  ## having selected `replayId` first (`selectReplay`).
+proc forwardRequest(sessionId: int; replayId: int; message: JsObject;
+                    window = -1) =
+  ## Forward `message`, a request of `sessionId` (of the desktop window
+  ## `window`), to the Backend Manager, having selected `replayId` first
+  ## (`selectReplay`).
   selectReplay(replayId)
   servedSession = sessionId
+  servedWindow = window
 
   # Track which session owns this request so the response can be tagged:
   # the frame goes out under a wire `seq` unique across sessions, recorded
@@ -239,21 +251,23 @@ proc forwardRequest(sessionId: int; replayId: int; message: JsObject) =
   if jsHasKey(message, cstring"seq"):
     let wireSeq = nextWireSeq()
     pendingRequests[wireSeq] = PendingDapRequest(
-      sessionId: sessionId, seq: message["seq"].to(int))
+      sessionId: sessionId, seq: message["seq"].to(int), window: window)
     frame = jsAssign(newJsObject(), message)
     frame["seq"] = wireSeq
 
   backendManagerSocket.write(wrapJsonForSending(frame))
 
-proc sendDapForSession*(sessionId: int; replayId: int; message: JsObject) =
-  ## Forward a DAP request of `sessionId` to the Backend Manager, on replay
-  ## `replayId`.  If the BM is currently serving a different replay, a
-  ## `ct/select-replay` command is sent first to switch contexts.
+proc sendDapForSession*(sessionId: int; replayId: int; message: JsObject;
+                        window = -1) =
+  ## Forward a DAP request of `sessionId` (a tab of the desktop window
+  ## `window`) to the Backend Manager, on replay `replayId`.  If the BM is
+  ## currently serving a different replay, a `ct/select-replay` command is
+  ## sent first to switch contexts.
   if backendManagerSocket.isNil:
     errorPrint "backend socket is nil, couldn't send DAP for session ",
       sessionId, ": ", message.toJs
     return
-  forwardRequest(sessionId, replayId, message)
+  forwardRequest(sessionId, replayId, message, window)
 
 proc sendLocalDapRequest*(sessionId: int; command: cstring;
                           arguments: JsObject;
@@ -307,10 +321,14 @@ proc onDapRawMessage*(sender: js, response: JsObject) {.async.} =
   # The desktop: the tab names its replay (`dap.stampReplay`).
   let replayId = getReplayId(response)
   if replayId >= 0:
-    # A tab names only its own replay, so this is who owns it — what an
-    # event of the replay is attributed to (`resolveSessionId`).
-    replayOwners[replayId] = sessionId
-    sendDapForSession(sessionId, replayId, response)
+    # A tab names only its own replay, so its window's tab shows it — what
+    # an event of the replay is delivered to (`window_routing.viewersOf`).
+    # The tab is its window's (tab ids are per window): the window whose
+    # renderer sent the request, or the primary one outside every window's
+    # context.
+    let window = currentWindowKey()
+    requestingWindow().noteTabReplay(sessionId, replayId)
+    sendDapForSession(sessionId, replayId, response, window)
     return
 
   # A TAB THAT NAMES NO REPLAY HAS NONE: a "+" tab on the Welcome Screen, a
@@ -328,17 +346,14 @@ proc onDapRawMessage*(sender: js, response: JsObject) {.async.} =
 
 proc resolveSessionId(body: JsObject): int =
   ## Determine which session a DAP message from the Backend Manager
-  ## belongs to.
+  ## belongs to, in the server (the desktop's windows and tabs are
+  ## `deliverDesktop`'s).
   ##
   ## * **Responses** carry a `request_seq` that maps back to the
   ##   originating request via `pendingRequests`; its `request_seq` is
   ##   rewritten to the `seq` that session sent.
-  ## * **Events** have no such link. On the desktop an event belongs to the
-  ##   tab that owns the replay the Backend Manager names on it
-  ##   (`ctReplayId`, `replayOwners`); an event of a replay no tab has named
-  ##   yet (the window's first replay, before the renderer is told it), or
-  ##   one without the tag, to the session of the last request forwarded
-  ##   (`servedSession`).
+  ## * **Events** have no such link: one without the replay tag goes to the
+  ##   session of the last request forwarded (`servedSession`).
   ## * If the message already has a `sessionId` (future-proofing), we
   ##   honour it as-is.
   ## * In the server (`installServerSessionRouting`), the replay the Backend
@@ -364,27 +379,56 @@ proc resolveSessionId(body: JsObject): int =
       body["request_seq"] = request.seq
       return request.sessionId
 
-  # The desktop: the Backend Manager names the replay of every message it
-  # relays, and a tab names only its own replay on its requests, so an event
-  # of a replay a tab owns is that tab's — exactly, where "the session that
-  # sent the last request" is wrong whenever another tab's replay is still
-  # sending (a hidden tab's replay finishing a move).
-  if jsHasKey(body, ReplayIdTag):
-    let owner = replayOwners.getOrDefault(body[ReplayIdTag].to(int), -1)
-    if owner >= 0:
-      return owner
-
   # Fallback: attribute to the session the last request was forwarded for.
   return servedSession
 
 proc deliverToSession(sessionId: int; channel: cstring; body: JsObject) =
-  ## Hand a replay's answer or event to whoever displays its session: in the
-  ## server, the client that owns the replay; on the desktop, every window
-  ## showing the session (M16).
-  if not serverRouting.isNil:
-    serverRouting.deliver(sessionId, channel, body)
-  else:
-    broadcastToSession(sessionId, channel, body)
+  ## Hand a replay's answer or event to the client that owns the replay
+  ## (the server).
+  serverRouting.deliver(sessionId, channel, body)
+
+proc deliverToWindowTab(window, tab: int; channel: cstring; body: JsObject) =
+  ## Desktop: a replay's answer or event to the tab `tab` of the window
+  ## `window` (-1: the primary window), under that tab's id. With no window
+  ## registered at all (an embedding, the tests) it goes to `mainWindow`.
+  let w = if window >= 0: windowWithId(window) else: primaryWindow()
+  if not w.isNil:
+    w.deliverToTab(tab, channel, body)
+  elif window < 0 and windows.len == 0 and not mainWindow.isNil:
+    body["sessionId"] = tab
+    mainWindow.webContents.send(channel, body)
+
+proc deliverDesktop(msgtype: string; body: JsObject) =
+  ## Desktop: an answer goes to the window and tab that asked; an event of a
+  ## replay to every tab, of every window, that shows it — each under its own
+  ## tab id, so stepping in one window moves another window showing the same
+  ## replay (`GUI/Multi-Window-Tab-Management.md` §"Cross-Window
+  ## Synchronization"). An event of a replay no tab is known to show yet (the
+  ## window's first replay before it is told it), or one without the
+  ## Backend Manager's tag, goes to the tab of the last request forwarded.
+  if msgtype == "response":
+    if jsHasKey(body, cstring"request_seq"):
+      var request: PendingDapRequest
+      if pendingRequests.pop(body["request_seq"].to(int), request):
+        body["request_seq"] = request.seq
+        deliverToWindowTab(request.window, request.sessionId,
+          "CODETRACER::dap-receive-response", body)
+        return
+    deliverToWindowTab(servedWindow, servedSession,
+      "CODETRACER::dap-receive-response", body)
+    return
+
+  if jsHasKey(body, ReplayIdTag):
+    let replayId = body[ReplayIdTag].to(int)
+    noteReplayEvent(replayId, body)
+    let viewers = viewersOf(replayId)
+    if viewers.len > 0:
+      for viewer in viewers:
+        viewer.window.deliverToTab(viewer.tab,
+          "CODETRACER::dap-receive-event", body)
+      return
+  deliverToWindowTab(servedWindow, servedSession,
+    "CODETRACER::dap-receive-event", body)
 
 proc handleFrame(frame: string) =
   let body: JsObject = Json.parse(frame)
@@ -410,12 +454,18 @@ proc handleFrame(frame: string) =
         handler(body)
         return
 
+    if serverRouting.isNil:
+      deliverDesktop("response", body)
+      return
     # M9: Tag the response with the session that issued the request.
     let sessionId = resolveSessionId(body)
     body["sessionId"] = sessionId
     deliverToSession(sessionId, "CODETRACER::dap-receive-response", body)
 
   elif msgtype == "event":
+    if serverRouting.isNil:
+      deliverDesktop("event", body)
+      return
     # M9: An event belongs to the replay the Backend Manager names (in the
     # server) or to the session it is serving (`resolveSessionId`).
     let sessionId = resolveSessionId(body)

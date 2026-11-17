@@ -142,27 +142,21 @@ proc makeTabClickHandler*(vm: RequestPanelVM; tab: string): proc() =
   let captured = tab
   result = proc() = vm.setDetailTab(captured)
 
-proc pressAndActivateRow(vm: RequestPanelVM; index: int): bool =
+proc pressAndActivateRow*(vm: RequestPanelVM; index: int): bool =
   ## Both a row click and the continuation of a click displaced by the
   ## detail resize use the ViewModel's one double-press rule.
   if vm.pressRow(index, int64(epochTime() * 1000)) == rpActivate:
     vm.jumpToHandler(index)
     return true
 
-proc onRowClick(vm: RequestPanelVM; index: int): proc() =
-  ## Closure factory that captures the row's filtered-list index so
-  ## each row's click handler refers to its own value.  Without the
-  ## per-row capture every row's closure would observe the loop
-  ## variable's final value (same closure-capture concern as the
-  ## low_level_code / step_list views).
-  ##
-  ## PLAT-58: a press is counted (`RequestPanelVM.pressRow`, the rule the
-  ## terminal's and GPUI's panes use): the second press on the same row in
-  ## time goes to its handler. The selection rebuilds the table body, so the
-  ## browser's own `dblclick` never reaches the row it replaced — measured by
-  ## the Electron capture, where a double click moved nothing.
-  let captured = index
-  result = proc() = discard pressAndActivateRow(vm, captured)
+# A row's press is the pointer row `requests.select`, performed by the
+# front-end on the row's `data-request-index` (on a DOM front-end
+# `input/pane_presses`, by `pressAndActivateRow`). PLAT-58: a
+# press is counted (`RequestPanelVM.pressRow`, the rule the terminal's and
+# GPUI's panes use): the second press on the same row in time goes to its
+# handler. The selection rebuilds the table body, so the browser's own
+# `dblclick` never reaches the row it replaced — measured by the Electron
+# capture, where a double click moved nothing.
 
 proc onRowDoubleClick(vm: RequestPanelVM; index: int): proc() =
   ## Closure factory for the per-row ``ondblclick`` handler: go to the
@@ -383,7 +377,7 @@ when defined(js):
       if outcome.copied.len > 0:
         writeRequestUrl(cstring(outcome.copied))
 
-  proc rowMenuItems(vm: RequestPanelVM; index: int): seq[ContextMenuItem] =
+  proc rowMenuItems*(vm: RequestPanelVM; index: int): seq[ContextMenuItem] =
     ## PLAT-58: the row's context menu, the ViewModel's entries
     ## (`RequestPanelVM.rowMenu`) — the same the terminal's and GPUI's panes
     ## show. A disabled entry carries its reason on the row.
@@ -393,15 +387,8 @@ when defined(js):
         disabled: not e.enabled, disabledReason: cstring(e.reason),
         handler: rowMenuHandler(vm, index, e.action))
 
-  proc wireRowMenu(row: isonim_dom.Element; vm: RequestPanelVM; index: int) =
-    ## A right press selects the row and opens its menu.
-    isonim_dom.addEventListener(isonim_dom.Node(row), cstring"contextmenu",
-      proc(ev: isonim_dom.Event) =
-        ev.preventMenuDefault()
-        ev.stopMenuPropagation()
-        vm.selectRequest(index)
-        showContextMenu(rowMenuItems(vm, index), ev.eventClientX(),
-                        ev.eventClientY()))
+  # A right press is the pointer row `context-menu.open`, performed by the
+  # front-end (`input/dom_pane_presses`) with the items below.
 
 proc renderRow[R, N](r: R; vm: RequestPanelVM; req: RequestRecord;
                      index: int; selected: bool): N =
@@ -414,7 +401,7 @@ proc renderRow[R, N](r: R; vm: RequestPanelVM; req: RequestRecord;
   result = ui(r):
     tdiv(role = "button", tabindex = "0", class = rowClass(selected, req.isOpen),
          `data-request-id` = $req.id,
-         onclick = onRowClick(vm, index),
+         `data-request-index` = $index,
          ondblclick = onRowDoubleClick(vm, index)):
       tdiv(class = "request-col-id"):
         text formatReqId(req.id)
@@ -430,9 +417,6 @@ proc renderRow[R, N](r: R; vm: RequestPanelVM; req: RequestRecord;
         text durationText(req)
       tdiv(class = "request-col-size"):
         text formatSize(req.responseSize)
-  when defined(js):
-    when N is isonim_dom.Element:
-      wireRowMenu(result, vm, index)
 
 when defined(js):
   proc keepSelectedRequestVisible(body: isonim_dom.Element) {.importjs: """
@@ -483,7 +467,7 @@ when defined(js):
         }
       };
       panel.addEventListener('click', click, true);
-      panel.addEventListener('mousedown', down, true);
+      panel.addEventListener('mousedown', down, true);  // ir1-gate: gesture (a double click's continuation)
       panel.addEventListener('pointermove', move, true);
       panel.addEventListener('pointerleave', leave, true);
       for (const event of ['contextmenu', 'wheel', 'keydown', 'pointercancel'])
@@ -649,7 +633,7 @@ proc renderRequestPanel*[R, N](r: R; vm: RequestPanelVM): N =
         when N is isonim_dom.Element:
           let capturePanel = panelRef
           let capturePct = detailHeightPct
-          isonim_dom.addEventListener(isonim_dom.Node(handle), cstring"mousedown",
+          isonim_dom.addEventListener(isonim_dom.Node(handle), cstring"mousedown",  # ir1-gate: gesture (the split's resize drag)
             proc(e: isonim_dom.Event) =
               e.preventDragDefault()
               let h = capturePanel.elemHeight

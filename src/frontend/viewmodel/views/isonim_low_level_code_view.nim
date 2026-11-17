@@ -138,16 +138,11 @@ proc lowLevelRows*(vm: LowLevelCodeVM): seq[LowLevelRowView] =
   ## The listing as rows — the ViewModel's (`displayRows`).
   vm.displayRows()
 
-proc onRowClick(vm: LowLevelCodeVM; index: int): proc() =
-  ## A row's click: go to the source line its instruction was generated
-  ## from. A factory, so each row's closure owns its index.
-  result = proc() =
-    let rows = vm.instructions.val
-    if index >= 0 and index < rows.len:
-      vm.jumpToInstruction(rows[index])
-
-proc onSyncToggle(vm: LowLevelCodeVM): proc() =
-  result = proc() = vm.setSyncEnabled(not vm.syncSettings.val.enabled)
+# An instruction's press and the sync toggle's are the pointer rows
+# `low-level.go-to-source-line` and `low-level.toggle-sync`, performed by the
+# front-end on the row's `data-low-level-row` and the toggle's
+# `data-ct-low-level-sync` (on the desktop by the procedures in
+# `input/pane_presses`).
 
 when defined(js):
   proc preventMenuDefault(ev: isonim_dom.Event) {.importjs: "#.preventDefault()".}
@@ -166,7 +161,7 @@ when defined(js):
       if outcome.copied.len > 0:
         writeClipboard(cstring(outcome.copied))
 
-  proc rowMenuItems(vm: LowLevelCodeVM; index: int): seq[ContextMenuItem] =
+  proc rowMenuItems*(vm: LowLevelCodeVM; index: int): seq[ContextMenuItem] =
     ## PLAT-60: an instruction's context menu, the ViewModel's entries
     ## (`LowLevelCodeVM.rowMenu`) — the same the terminal's and GPUI's panes
     ## open.
@@ -175,15 +170,8 @@ when defined(js):
         disabled: not e.enabled, disabledReason: cstring(e.reason),
         handler: rowMenuHandler(vm, index, e.action))
 
-  proc wireRowMenu(row: isonim_dom.Element; vm: LowLevelCodeVM; index: int) =
-    ## A right press selects the instruction and opens its menu.
-    isonim_dom.addEventListener(isonim_dom.Node(row), cstring"contextmenu",
-      proc(ev: isonim_dom.Event) =
-        ev.preventMenuDefault()
-        ev.stopMenuPropagation()
-        vm.selectInstruction(index)
-        showContextMenu(rowMenuItems(vm, index), ev.eventClientX(),
-                        ev.eventClientY()))
+  # A right press is the pointer row `context-menu.open`, performed by the
+  # front-end (`input/dom_pane_presses`) with the items below.
 
 proc renderLowLevelRow*[R, N](r: R; vm: LowLevelCodeVM;
                               row: LowLevelRowView): N =
@@ -200,7 +188,7 @@ proc renderLowLevelRow*[R, N](r: R; vm: LowLevelCodeVM;
     var item: N
     result = ui(r):
       tdiv(role = "button", tabindex = "0", ref = item, class = rowClass(row),
-           onclick = onRowClick(vm, row.index)):
+           `data-low-level-row` = $row.index):
         span(class = "low-level-code-instruction-offset"):
           text row.offsetText
         span(class = "low-level-code-instruction-name"):
@@ -221,9 +209,6 @@ proc renderLowLevelRow*[R, N](r: R; vm: LowLevelCodeVM;
         span(class = "low-level-code-instruction-count"):
           text row.countText
       r.appendChild(item, countSpan)
-    when defined(js):
-      when N is isonim_dom.Element:
-        wireRowMenu(item, vm, row.index)
 
 # ---------------------------------------------------------------------------
 # The panel
@@ -240,7 +225,7 @@ proc renderLowLevelCodePanel*[R, N](r: R; vm: LowLevelCodeVM): N =
         tdiv(ref = addressSlot, class = "low-level-code-address-slot"):
           discard
         tdiv(class = syncToggleClass(vm.syncSettings.val.enabled),
-             onclick = onSyncToggle(vm)):
+             `data-ct-low-level-sync` = "true"):
           text syncToggleLabel(vm.syncSettings.val.enabled)
         tdiv(class = "low-level-code-stepping"):
           text steppingText(vm)

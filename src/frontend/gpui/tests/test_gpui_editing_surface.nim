@@ -75,6 +75,7 @@ import ../app/leaves
 import ../app/shell
 import ../host/gpui_host
 import ../../view_vocabulary/pane_views
+import ../../view_vocabulary/gpui_layout_answers
 import ../../../common/view_vocabulary
 
 var asserted = 0
@@ -549,7 +550,12 @@ suite "PLAT-22: the GPUI editing surface":
         EditorPoint(path: path, line: 7, kind: epkTracepoint, enabled: true),
         EditorPoint(path: path, line: 9, kind: epkBreakpoint, enabled: true),
         EditorPoint(path: path, line: 11, kind: epkBreakpoint, enabled: false),
-        # BOTH on one line: the line stops, so it must show the breakpoint.
+        # BOTH on one line: the line stops AND records, so it shows the
+        # combined mark, which draws the breakpoint (`markFor` answers
+        # `emBreakpointTracepoint` for an armed breakpoint with a tracepoint,
+        # the desktop's `gutter-glyph-breakpoint-tracepoint`). The case reads
+        # it back from the RENDERED row, so a projection that refuses the
+        # combined class fails here.
         EditorPoint(path: path, line: 13, kind: epkTracepoint, enabled: true),
         EditorPoint(path: path, line: 13, kind: epkBreakpoint, enabled: true),
         # Another FILE's point must not appear on this one.
@@ -560,16 +566,25 @@ suite "PLAT-22: the GPUI editing surface":
       ck renderedMark(root, 7) == $emTracepoint
       ck renderedMark(root, 9) == $emBreakpoint
       ck renderedMark(root, 11) == $emBreakpointDisabled
-      ck renderedMark(root, 13) == $emBreakpoint
+      ck renderedMark(root, 13) == $emBreakpointTracepoint
       ck renderedMark(root, 8) == $emNone
       # The rendering agrees with the shared rule, asked independently.
       for line in 6 .. 14:
         ck renderedMark(root, line) == $markFor(points, path, line)
       # And the concern is NOT degraded when points are supplied, which is the
       # half that tells "no producer" from "the medium cannot draw it".
+      # The cross-renderer layout ANSWER read off the same rendered tree names
+      # the combined line `breakpoint+tracepoint`, as the Electron extractor
+      # does for `gutter-glyph-breakpoint-tracepoint`; before the fix it named
+      # no mark and the line was absent from the answer.
+      let marks = gpuiGutterMarks(root).split(';')
+      ck "13=breakpoint+tracepoint" in marks
+      ck "7=tracepoint" in marks
+      ck "9=breakpoint" in marks
+      ck "11=breakpoint-disabled" in marks
       ck s.support[ecLineStatus] == esRendered
       ck surfaceOf(h).support[ecLineStatus] == esDegraded
-      expectCount(16)
+      expectCount(20)
     finally:
       closeLive(h)
 
@@ -974,7 +989,10 @@ suite "PLAT-22: the GPUI editing surface":
 # 335 -> 338 on 2026-10-17: the edit-mode case also renders the editor's
 # LEAF, not live, through `renderLeaf` (arm U2's re-aimed killer), three.
 
-const ExpectedAssertions = 338
+# 338 -> 342 on 2026-11-09: the per-line status case also reads the gutter-marks
+# layout ANSWER off its rendered tree (the combined line names both points), four.
+
+const ExpectedAssertions = 342
 
 suite "PLAT-28: the rows ARE a projection, asserted against a direct build":
 

@@ -86,7 +86,7 @@
 ## naming another front-end and draws the refusal, so the field has a
 ## PRODUCTION READER and the arm has something to break.
 
-import std/[json, math, options, os, sets, strutils, tables]
+import std/[json, math, options, sets, strutils, tables]
 from std/unicode import runeLen, runeSubstr, Rune, toUTF8
 
 import isonim_gpui/renderer
@@ -106,6 +106,7 @@ from ../../view_vocabulary/fact_reader import ViewIdAttribute,
                                               ViewKindAttribute
 import ../../view_vocabulary/editor_surface
 import ../../../common/view_vocabulary
+import ../../../common/content_file_cache
 import ../../../common/value_presentation
 # Every ViewModel comes through the SDK facade, like every other ViewModel a
 # front-end consumes (`ci/test/sdk-facade-boundary.sh`, consumer-facade-only).
@@ -253,6 +254,8 @@ const
     ## browser accumulates inline runs at 1/64 px and rounds once.
     ##
     ## This asks for the same thing: one rounding for the whole row.
+  GutterHintAttribute* = "data-ct-gutter-hint"
+    ## On the hover hint's disc: its line (gesture 7a).
   GutterLaneAttribute* = "data-ct-gutter-lane"
     ## **WHICH LANE OF THE GUTTER A RUN IS** — `pointer`, `mark` or `number`
     ## (`GutterRunKind`). PLAT-35 / `PLAT35-F13`, `PLAT35-F14`.
@@ -340,6 +343,7 @@ const
   BreakpointGlyph* = "●"
   BreakpointDisabledGlyph* = "○"
   TracepointGlyph* = "◆"
+  BreakpointTracepointGlyph* = "◉"
   EmptyLaneGlyph* = "\u00A0"
     ## **AN EMPTY LANE IS ONE NO-BREAK SPACE, and the no-break is load-bearing
     ## rather than tidy.** Each lane is drawn as its own span (see
@@ -400,8 +404,7 @@ func markGlyph*(m: EditorMark): string =
   of emBreakpoint: BreakpointGlyph
   of emBreakpointDisabled: BreakpointDisabledGlyph
   of emTracepoint: TracepointGlyph
-
-var executionMarkFile {.threadvar.}: string
+  of emBreakpointTracepoint: BreakpointTracepointGlyph
 
 const
   InlineValuesAttribute* = "data-ct-inline-values"
@@ -420,15 +423,15 @@ const
     ## `ui/flow.nim`'s `max-width: 30ch` on a long value.
   FlowHideSvg = staticRead("../../../public/resources/shared/flow_hide_dark.svg")
 
-var flowHideFile {.threadvar.}: string
+const IconArea* = "gpui-icons"
+  ## The directory of the per-user cache (`content_file_cache`) the shell's
+  ## generated icons live in. A file is named by its content, so the number
+  ## of files is bounded by the distinct icons and no process leaves one
+  ## behind (codetracer-pm issue 2026-11-08, "The GPUI shell leaves a temp
+  ## icon directory behind for every process").
 
-proc flowHidePath(): string =
-  if flowHideFile.len == 0 or not fileExists(flowHideFile):
-    let dir = getTempDir() / ("codetracer-gpui-marks-" & $getCurrentProcessId())
-    createDir(dir)
-    flowHideFile = dir / "flow-hide.svg"
-    writeFile(flowHideFile, FlowHideSvg)
-  flowHideFile
+proc flowHidePath*(): string =
+  contentFile(IconArea, "flow-hide.svg", FlowHideSvg)
 
 const FoldChevronSvg = """<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 16 16"><path fill="#c5c5c5" fill-rule="evenodd" clip-rule="evenodd" d="M7.976 10.072l4.357-4.357.62.618L8.284 11h-.618L3 6.333l.619-.618 4.357 4.357z"/></svg>"""
   ## Monaco's `codicon-folding-expanded` (the codicon chevron-down), in the
@@ -442,25 +445,12 @@ const StickyChevronSvg = FoldChevronSvg.replace("#c5c5c5", "#717171")
   ## The same chevron as a sticky header draws it: dimmed, its ink #717171
   ## (measured 2026-10-17).
 
-var foldChevronFile {.threadvar.}: string
-var stickyChevronFile {.threadvar.}: string
-
-proc stickyChevronPath(): string =
-  if stickyChevronFile.len == 0 or not fileExists(stickyChevronFile):
-    let dir = getTempDir() / ("codetracer-gpui-marks-" & $getCurrentProcessId())
-    createDir(dir)
-    stickyChevronFile = dir / "fold-sticky.svg"
-    writeFile(stickyChevronFile, StickyChevronSvg)
-  stickyChevronFile
+proc stickyChevronPath*(): string =
+  contentFile(IconArea, "fold-sticky.svg", StickyChevronSvg)
 
 proc foldChevronPath*(): string =
-  ## The fold chevron written once to a file the shim's `img` can load.
-  if foldChevronFile.len == 0 or not fileExists(foldChevronFile):
-    let dir = getTempDir() / ("codetracer-gpui-marks-" & $getCurrentProcessId())
-    createDir(dir)
-    foldChevronFile = dir / "fold-expanded.svg"
-    writeFile(foldChevronFile, FoldChevronSvg)
-  foldChevronFile
+  ## The fold chevron as a file the shim's `img` can load.
+  contentFile(IconArea, "fold-expanded.svg", FoldChevronSvg)
 
 func indentOf(text: string): int =
   for c in text:
@@ -486,12 +476,7 @@ func foldableRows*(rows: openArray[EditorRow]): seq[bool] =
 
 proc executionMarkPath*(): string =
   ## The desktop's mark written once to a file the shim's `img` can load.
-  if executionMarkFile.len == 0 or not fileExists(executionMarkFile):
-    let dir = getTempDir() / ("codetracer-gpui-marks-" & $getCurrentProcessId())
-    createDir(dir)
-    executionMarkFile = dir / "highlight_line_arrow.svg"
-    writeFile(executionMarkFile, ExecutionMarkSvg)
-  executionMarkFile
+  contentFile(IconArea, "highlight_line_arrow.svg", ExecutionMarkSvg)
 
 func pointerGlyph*(p: EditorPointer): string =
   case p
@@ -545,6 +530,7 @@ func markColour*(m: EditorMark; inherited: string): string =
   of emBreakpointDisabled:
     DesignTokenHex[dtColorsUiSurfacePrimaryTertiary][dmDark]
   of emTracepoint: DesignTokenHex[dtColorsUiBorderAction][dmDark]
+  of emBreakpointTracepoint: DesignTokenHex[dtColorsUiTextErrorPrimary][dmDark]
 
 const GutterGap* = "\u00A0\u00A0\u00A0\u00A0"
   ## Between the gutter and the code. A reader — a person, or PLAT-39's
@@ -845,6 +831,7 @@ func gpuiTokenFor*(role: TextRole; row: EditorRow): string =
     of emBreakpoint: "gutter.breakpoint.enabled"
     of emBreakpointDisabled: "gutter.breakpoint.disabled"
     of emTracepoint: "gutter.tracepoint"
+    of emBreakpointTracepoint: "gutter.breakpoint.enabled"
     of emNone: "editor.lineNumber.foreground"
   of trPaneTitle: "pane.title.foreground"
   of trValueName: "value.name.foreground"
@@ -1109,6 +1096,9 @@ func editorNumberWidth*(rows: openArray[EditorRow]): int =
     result = max(result, len($row.line))
 
 const
+  GutterBreakpointHintColour* = DesignTokenHex[dtColorsUiSurfaceAlertError][dmDark]
+    ## `gutter.breakpoint.hint`: distinct from the enabled breakpoint's red and
+    ## the disabled one's muted ground (Editor-Pane.md MC.5).
   EditorGutterPx* = 110
     ## The code column starts after this margin. Lane order, ownership and
     ## widths inside it come from editor_gutter_lanes at CodeFontPx.
@@ -1479,9 +1469,15 @@ const
   DiagnosticSquigglePx* = 2
     ## The squiggle's thickness at the row's foot.
 
+func extrasOn(surface: EditorSurface; line: int): seq[int] =
+  for c in surface.extraCarets:
+    if c.line == line:
+      result.add c.column
+
 proc renderEditorRow(r: GpuiRenderer; row: EditorRow; runs: seq[TokenRun];
                      numberWidth = 1; skipCols = 0;
                      caretColumn = 0;
+                     extraCarets: openArray[int] = [];
                      selected: openArray[tuple[fromColumn, toColumn: int]] = [];
                      findMarks: openArray[tuple[fromColumn, toColumn: int;
                                                 current: bool]] = [];
@@ -1590,7 +1586,7 @@ proc renderEditorRow(r: GpuiRenderer; row: EditorRow; runs: seq[TokenRun];
       r.setStyle(lane, "justify", "end")
       if not stickyHeader:
         r.appendChild(lane, r.createTextNode($row.line))
-    of gbMarker:
+    of gbGlyph:
       r.setAttribute(lane, GutterLaneAttribute, $grkMark)
       r.setStyle(lane, "color", runs3[1].colour)
       r.setStyle(lane, "position", "relative")
@@ -1599,16 +1595,31 @@ proc renderEditorRow(r: GpuiRenderer; row: EditorRow; runs: seq[TokenRun];
         # glyph sizes and separation stay local to that band; neither changes
         # the flow width or the following folding control's position.
         let side = if row.mark == emTracepoint: 10 else: GutterBreakpointPx
+        let widthOfLane = band.rightPx - band.leftPx
         let disc = r.createElement("div")
         r.setAttribute(disc, "data-ct-mark-glyph", runs3[1].text)
         r.setStyle(disc, "position", "absolute")
-        r.setStyle(disc, "left", (if row.mark == emTracepoint: "11px" else: "0px"))
+        r.setStyle(disc, "left", $((widthOfLane - side) div 2) & "px")
         r.setStyle(disc, "top", formatFloat(float(EditorLinePx - side) / 2,
                                             ffDecimal, 1) & "px")
         r.setStyle(disc, "width", $side & "px")
         r.setStyle(disc, "height", $side & "px")
         r.setStyle(disc, "rounded", $(side div 2 + 1) & "px")
         r.setStyle(disc, "background-color", runs3[1].colour)
+        r.setStyle(disc, "flex-shrink", "0")
+        r.appendChild(lane, disc)
+      elif row.hinted:
+        # Gesture 7a: `gutter.breakpoint.hint`, a colour of its own.
+        let disc = r.createElement("div")
+        r.setAttribute(disc, GutterHintAttribute, $row.line)
+        r.setStyle(disc, "position", "absolute")
+        r.setStyle(disc, "left", $((band.rightPx - band.leftPx - GutterBreakpointPx) div 2) & "px")
+        r.setStyle(disc, "top", formatFloat(float(EditorLinePx - GutterBreakpointPx) / 2,
+                                            ffDecimal, 1) & "px")
+        r.setStyle(disc, "width", $GutterBreakpointPx & "px")
+        r.setStyle(disc, "height", $GutterBreakpointPx & "px")
+        r.setStyle(disc, "rounded", $(GutterBreakpointPx div 2 + 1) & "px")
+        r.setStyle(disc, "background-color", GutterBreakpointHintColour)
         r.setStyle(disc, "flex-shrink", "0")
         r.appendChild(lane, disc)
     of gbFolding:
@@ -1632,7 +1643,7 @@ proc renderEditorRow(r: GpuiRenderer; row: EditorRow; runs: seq[TokenRun];
         r.setStyle(chevron, "height", $side & "px")
         r.appendChild(holder, chevron)
         r.appendChild(lane, holder)
-    of gbVcs, gbVcsSplit, gbMarkerGap:
+    of gbVcs, gbVcsSplit:
       discard # Reserved even when this row has no indicator to paint.
     r.appendChild(gutter, lane)
   if stickyHeader:
@@ -1726,6 +1737,19 @@ proc renderEditorRow(r: GpuiRenderer; row: EditorRow; runs: seq[TokenRun];
       r.setStyle(band, "height", $DiagnosticSquigglePx & "px")
       r.setStyle(band, "background", colourOf(d.severity))
       r.appendChild(column, band)
+  for extra in extraCarets:
+    if extra > skipCols:
+      r.setStyle(column, "position", "relative")
+      let caret = r.createElement("div")
+      r.setAttribute(caret, EditorCaretAttribute, $row.line & ":" & $extra)
+      r.setStyle(caret, "position", "absolute")
+      r.setStyle(caret, "left", formatFloat(float(extra - 1 - skipCols) *
+                                            EditorColumnPx, ffDecimal, 1) & "px")
+      r.setStyle(caret, "top", "0px")
+      r.setStyle(caret, "width", "2px")
+      r.setStyle(caret, "height", "100%")
+      r.setStyle(caret, "background", EditorTextColour)
+      r.appendChild(column, caret)
   if caretColumn > 0 and caretColumn > skipCols:
     # PLAT-51: THE CARET of the read-only debugging editor — a thin bar
     # before its column, in the editor's foreground (Monaco's cursor),
@@ -2021,7 +2045,7 @@ func stickyScopeLines*(lines: openArray[string]; firstRow, offset: int;
     result.add (next, top)
     deepest = indent(file[next - 1])
 
-proc stateIconPath(name, svg, ink: string): string
+proc stateIconPath*(name, svg, ink: string): string
   ## Forward-declared: an icon written once in `ink` (defined with the state
   ## pane's controls).
 
@@ -2269,6 +2293,7 @@ proc renderEditor*(r: GpuiRenderer; parent: GpuiElement;
                                 scroll.leftCols,
                                 (if row.line == surface.caretLine:
                                    surface.caretColumn else: 0),
+                                extrasOn(surface, row.line),
                                 selected, found, folds[i], depths[i],
                                 guideCounts[i],
                                 markersView =
@@ -2484,7 +2509,6 @@ const
     ("expand-active", staticRead("../../../public/resources/calltrace/expand-active-call-calltrace-dark.svg")),
     ("dot-active", staticRead("../../../public/resources/calltrace/dot-active-call-calltrace-dark.svg"))]
 
-var callIconFiles {.threadvar.}: Table[string, string]
 
 # ---------------------------------------------------------------------------
 # PLAT-70 Part B — the table panes' cut cells (Horizontal-Overflow.md §5)
@@ -2591,16 +2615,11 @@ proc tableHBar*(r: GpuiRenderer; parent: GpuiElement; view: HorizontalView;
   r.appendChild(parent, track)
 
 
-proc callIconPath(name: string): string =
-  if callIconFiles.hasKey(name) and fileExists(callIconFiles[name]):
-    return callIconFiles[name]
-  let dir = getTempDir() / ("codetracer-gpui-marks-" & $getCurrentProcessId())
-  createDir(dir)
-  let path = dir / ("call-" & name & ".svg")
+proc callIconPath*(name: string): string =
   for (n, svg) in CallIcons:
-    if n == name: writeFile(path, svg)
-  callIconFiles[name] = path
-  path
+    if n == name: return contentFile(IconArea, "call-" & name & ".svg", svg)
+  # An unknown name has no icon: an empty one, as the file it used to be.
+  contentFile(IconArea, "call-" & name & ".svg", "")
 
 func callRowTopPx*(i: int): int =
   ## Row `i`'s top below the first row's, at the desktop's pitch — which is
@@ -2977,6 +2996,8 @@ const
     ## click goes to that moment.
   StateOriginHopAttribute* = "data-ct-origin-hop"
     ## PLAT-51: on a value-origin hop under its variable — the hop's index.
+  StateOriginPathAttribute* = "data-ct-origin-path"
+    ## On a hop — the path of the variable whose chain it belongs to.
   StateOriginTickAttribute* = "data-ct-origin-tick"
     ## PLAT-70 Part E: on a hop — the tick `Enter` on it seeks to.
   StateOriginOperandAttribute* = "data-ct-origin-operand"
@@ -3199,23 +3220,15 @@ func originIconSvg(name: string): string =
     if n == name: return svg
   OriginIconSvgs[5][1]
 
-var stateIconFiles {.threadvar.}: Table[string, string]
-
-proc stateIconPath(name, svg, ink: string): string =
+proc stateIconPath*(name, svg, ink: string): string =
   ## A state-pane icon written once in `ink` — the desktop paints these as
   ## masks in `colors-ui-icon-primary-default`.
-  let key = name & ink
-  if stateIconFiles.hasKey(key) and fileExists(stateIconFiles[key]):
-    return stateIconFiles[key]
-  let dir = getTempDir() / ("codetracer-gpui-marks-" & $getCurrentProcessId())
-  createDir(dir)
-  let path = dir / ("state-" & name & ".svg")
   var body = svg.replace("currentColor", ink)
   for fill in ["#DDDDDD", "#dddddd", "#F3F3F3", "#919191", "white", "#fff"]:
     body = body.replace("\"" & fill & "\"", "\"" & ink & "\"")
-  writeFile(path, body)
-  stateIconFiles[key] = path
-  path
+  # Named by content, so one icon in two inks is two files, never one
+  # overwritten under a path GPUI has already cached.
+  contentFile(IconArea, "state-" & name & ".svg", body)
 
 proc stateText(r: GpuiRenderer; text, colour: string; sizePx = 16;
                weight = ""; mono = true): GpuiElement =
@@ -3712,6 +3725,7 @@ proc renderState*(r: GpuiRenderer; parent: GpuiElement; vm: StateVM;
         let o = r.createElement("div")
         r.setAttribute(o, StateOriginHopAttribute, $i)
         r.setAttribute(o, StateOriginTickAttribute, $hop.tick)
+        r.setAttribute(o, StateOriginPathAttribute, row.path)
         # PLAT-70 Part E: a hop is a row the keyboard cursor stops on
         # (Value-Origin-Tracking.md §13.0), drawn on the selected row's
         # ground while it is there.

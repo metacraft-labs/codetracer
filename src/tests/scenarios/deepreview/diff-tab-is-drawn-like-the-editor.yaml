@@ -1,0 +1,24 @@
+scenario: 1
+name: deepreview/diff-tab-is-drawn-like-the-editor
+pack: codetracer
+summary: >-
+  A diff tab is drawn the way CodeTracer draws code: in its own dark Monaco
+  theme; a partially changed line is marked word by word, not as a whole
+  line; a deleted line keeps its syntax colours; the gutter's numbers keep
+  at least 6 px from the code; and the fold band of a collapsed region and
+  the `@@` divider start at one left edge in one colour.
+
+stage:
+  - use: open-review
+    with: { dataset: src/tests/gui/tests/deepreview/fixtures/sample-review.json }
+
+steps:
+  - wait: { until: { at: vcs, present: true }, timeout: 120s }
+  - wait: { until: { at: 'review-diff[file="src/main.rs"]', present: true }, timeout: 60s }
+  - wait: { until: settled, timeout: 30s }
+  - wait: { until: { at: 'review-diff[file="src/main.rs"]', word-inserts: { gt: 0 } }, timeout: 30s }
+  - expect: { at: 'review-diff[file="src/main.rs"]', theme: vs-dark, word-deletes: { gt: 0 }, narrow-marks: true }
+  - expect: { at: 'review-diff[file="src/main.rs"]', deleted-lines: { gt: 0 }, deleted-token-kinds: { gt: 1 } }
+  - expect: { at: 'review-diff[file="src/main.rs"]', gutter-gap: { ge: 6 } }
+  - wait: { until: { at: 'review-diff[file="src/main.rs"]', collapsed: { matches: "\\d+ hidden lines" } }, timeout: 30s }
+  - expect: { at: 'review-diff[file="src/main.rs"]', fold-divider-offset: { le: 1 }, fold-divider-same-fill: true }

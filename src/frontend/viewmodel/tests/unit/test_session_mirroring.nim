@@ -25,11 +25,12 @@
 ##
 ## Runs on the C and JS backends (`vm-unit`, `vm-unit-js`).
 
-import std/[json, jsonutils, options, sets, tables, unittest]
+import std/[json, jsonutils, options, sequtils, sets, tables, unittest]
 
 import isonim/core/[async_compat, computation, owner, signals]
 
 import ../../backend/mock_backend
+import ../../sdk/[breakpoints, debugger_session, trace_source]
 import ../../session_vm
 import ../../store/replay_data_store
 import ../../store/types
@@ -40,7 +41,8 @@ import ../../viewmodels/[calltrace_vm, debug_controls_vm, event_log_vm,
                          filesystem_vm, pixel_history_vm, request_panel_vm,
                          terminal_output_model,
                          terminal_output_vm, visual_replay_client,
-                         state_vm]
+                         state_vm, step_list_vm, origin_chain_vm,
+                         origin_chain_types]
 import ../../viewport
 import ./in_memory_transport
 
@@ -880,6 +882,99 @@ suite "a mirror whose panels act on the primary (a VS Code webview)":
       host.dispose()
       done()
 
+  test "the State panel shows the host's Origin Chain, and its hops are sought there":
+    # VS Code's host asks for the chain (`vscode_host.showValueOrigin`) on its
+    # own session's OriginChainVM; the State webview draws the side panel from
+    # its mirror. Without `originChain` the mirror had no OriginChainVM, the
+    # registry did not carry it, and the panel never showed a chain. A hop
+    # clicked in the mirror's panel is sought on the host's connection: the
+    # mirror's own backend is inert.
+    proc hop(line: int; ticks: uint64; step: int64): OriginHop =
+      OriginHop(kind: okTrivialCopy, targetExpr: "c", sourceExpr: "b",
+                location: OriginLocation(path: "main.py", line: line,
+                                         rrTicks: ticks),
+                stepId: step, confidence: 1.0)
+    createRoot proc(done: proc()) =
+      let (primary, mock) = newPrimary()
+      primary.attachOriginChainVM(createOriginChainVM(primary.store))
+      let host = newSyncHost(manual)
+      host.addPrimary("s1", primary)
+      let link = newInMemoryLink()
+      host.attach(link.a)
+      # CONTROL: a mirror that is not asked to show the chain has none.
+      let plainLink = newInMemoryLink()
+      host.attach(plainLink.a)
+      let plain = createMirrorSession(plainLink.b, relayActions = true)
+      ck plain.session.originChainVM.isNil
+      let mirror = createMirrorSession(link.b, relayActions = true,
+                                       originChain = true)
+      link.settle()
+      plainLink.settle()
+      let origin = mirror.session.originChainVM
+      ck not origin.isNil
+
+      primary.originChainVM.activeChain.val = some(OriginChain(
+        queryVariable: "c",
+        hops: @[hop(11, 110, 7), hop(10, 100, 5), hop(9, 90, 3)],
+        terminator: Terminator(expression: "10")))
+      primary.originChainVM.sidePanelOpen.val = true
+      link.settle()
+      ck origin.sidePanelOpen.val
+      ck origin.activeChain.val.isSome
+      if origin.activeChain.val.isSome:
+        let chain = origin.activeChain.val.get
+        ck chain.hops.len == 3
+        ck chain.terminator.expression == "10"
+        mock.clearReceivedCommands()
+        origin.onSeekToHop(chain.hops[1])
+        link.settle()
+        let jump = mock.findCommand("ct/history-jump")
+        ck jump.isSome
+        if jump.isSome:
+          ck jump.get.args["rrTicks"].getInt == 100
+          ck jump.get.args["line"].getInt == 10
+
+      # A hop the primary's chain does not hold is not sought.
+      mock.clearReceivedCommands()
+      origin.onSeekToHop(hop(4, 40, 99))
+      link.settle()
+      ck mock.findCommand("ct/history-jump").isNone
+
+      # "Continue tracing" in the mirror's side panel and under a mirrored
+      # State row: the primary goes on with the chain, over its connection.
+      var primaryContinued: seq[string] = @[]
+      primary.stateVM.onContinueOriginChainProc = proc(expression: string) =
+        primaryContinued.add expression
+      mirror.session.stateVM.continueOriginChain("c")
+      link.settle()
+      ck primaryContinued == @["c"]
+      var cut = primary.originChainVM.activeChain.val.get
+      cut.truncated = true
+      cut.continuationToken = some("next")
+      primary.originChainVM.activeChain.val = some(cut)
+      link.settle()
+      mock.clearReceivedCommands()
+      origin.continueActiveChain()
+      link.settle()
+      ck mock.findCommand("ct/originChain").isSome
+
+      # An Event Log boundary chip clicked in the mirror: its counterpart is
+      # looked up on the primary's connection (the mirror's is inert).
+      let marker = MarkerEventRow(eventIndex: 3, markerId: 1,
+                                  boundaryId: "account-balance",
+                                  keyValue: "req-0001", stepId: 17)
+      primary.eventLogVM.markerRows.val = @[marker]
+      link.settle()
+      mock.clearReceivedCommands()
+      mirror.session.eventLogVM.jumpToCounterpartOf(marker)
+      link.settle()
+      drainPlatformCallbacks()
+      ck mock.findCommand("ct/pairIndexLookup").isSome
+      plain.dispose()
+      mirror.dispose()
+      host.dispose()
+      done()
+
 suite "a ct host page's mirror (Shared-DOM-Front-Ends D2)":
   # `ct host`: the server owns the client's session and the page mirrors it,
   # relaying its panels' actions with `action_relay` exactly as a VS Code
@@ -1061,6 +1156,286 @@ suite "a ct host page's mirror (Shared-DOM-Front-Ends D2)":
       host.dispose()
       done()
 
+  test "a value history opened on the page is loaded by the server's session":
+    # The state pane's "Toggle history value" opens a variable's history,
+    # the answer to `ct/load-history` at the current stop. A `ct host` page's
+    # ViewModel sent that request through its mirror's inert backend, where
+    # it waited forever: the row opened empty and no request reached the
+    # replay (codetracer-pm
+    # issues/2026-11-12-a-ct-host-page-never-shows-a-variables-value-history.md).
+    # The toggle is relayed, and the server's session — a `DebuggerSession`,
+    # as `hosted_primary` makes it — loads the history over its own backend.
+    # The primary is the SDK's session (not `newPrimary`'s bare one) because
+    # its loader is the SDK's (`debugger_session.markReady`).
+    createRoot proc(done: proc()) =
+      let mock = newMockBackendService(autoRespond = true)
+      let debugger = newDebuggerSession(mock.toBackendService())
+      debugger.attach(localFolderTrace("/trace"))
+      let primary = debugger.session
+      let host = newSyncHost(manual)
+      host.addPrimary("ct-host/replay-0", primary)
+      let link = newInMemoryLink()
+      host.attach(link.a, follow = "ct-host/replay-0")
+      let mirror = createHostedPageMirror(link.b)
+      link.settle()
+      primary.moveTo(120, "shield.nr", 9)
+      link.settle()
+      drainPlatformCallbacks()
+      link.settle()
+
+      mock.expect("ct/load-history", %*{
+        "type": "response", "command": "ct/load-history", "success": true,
+        "body": {"expression": "damage", "total": 2, "start": 0, "results": [
+          {"location": {"path": "shield.nr", "line": 9, "rrTicks": 100},
+           "value": {"kind": 7, "i": "0", "typ": {"kind": 7,
+                                                   "langType": "u32"}}},
+          {"location": {"path": "shield.nr", "line": 9, "rrTicks": 110},
+           "value": {"kind": 7, "i": "4026", "typ": {"kind": 7,
+                                                      "langType": "u32"}}}]}})
+      mock.clearReceivedCommands()
+      mirror.session.stateVM.toggleHistory("damage")
+      link.settle()
+      drainPlatformCallbacks()
+      link.settle()
+
+      let sent = mock.findCommand("ct/load-history")
+      ck sent.isSome
+      if sent.isSome:
+        ck sent.get.args["expression"].getStr == "damage"
+        ck sent.get.args["location"]["rrTicks"].getInt == 120
+      # The page shows the row open, with the server's history in it.
+      ck "damage" in mirror.session.stateVM.expandedHistories.val
+      let histories = mirror.session.stateVM.valueHistory.val
+      ck histories.hasKey("damage")
+      if histories.hasKey("damage"):
+        ck histories["damage"].len == 2
+        ck histories["damage"].len == 2 and
+          histories["damage"][1].locationTicks == 110
+      ck primary.stateVM.valueHistory.val.hasKey("damage")
+      mirror.dispose()
+      host.dispose()
+      debugger.dispose()
+      done()
+
+  test "a breakpoint set on the page is sent to the replay by the server's session":
+    # A press on a line's glyph cell holds the breakpoint on the page at once
+    # (`sdk/breakpoints.requestBreakpoints`), and the replay must receive it,
+    # or Continue runs past it. A `ct host` page sent `setBreakpoints` through
+    # its mirror's inert backend, where it waited forever: the gutter showed
+    # the breakpoint and the replay never had it.
+    # The change is relayed, and the server's session sends the file's set
+    # over its own connection and holds the rows the engine verified.
+    createRoot proc(done: proc()) =
+      let (primary, mock) = newPrimary()
+      let host = newSyncHost(manual)
+      host.addPrimary("ct-host/replay-0", primary)
+      let link = newInMemoryLink()
+      host.attach(link.a, follow = "ct-host/replay-0")
+      let mirror = createHostedPageMirror(link.b)
+      link.settle()
+      primary.moveTo(100, "src/main.nr", 38)
+      link.settle()
+      let page = mirror.session.store
+      # The page's own connection, as `ui_js` sets it: a breakpoint must not
+      # take it, because the rows are the server's session's.
+      let pageConnection = newMockBackendService(autoRespond = true)
+      page.navigationBackend = pageConnection.toBackendService()
+
+      # SET: shown on the page at once, then sent by the server's session.
+      mock.expect("setBreakpoints", %*{
+        "type": "response", "command": "setBreakpoints", "success": true,
+        "body": {"breakpoints": [{"verified": true, "line": 18}]}})
+      mock.clearReceivedCommands()
+      page.toggleBreakpoint("src/shield.nr", 18)
+      ck page.breakpointAt("src/shield.nr", 18).isSome
+      link.settle()
+      drainPlatformCallbacks()
+      link.settle()
+      let sent = mock.findCommand("setBreakpoints")
+      ck sent.isSome
+      if sent.isSome:
+        ck sent.get.args["source"]["path"].getStr == "src/shield.nr"
+        ck sent.get.args["lines"] == %*[18]
+      ck pageConnection.findCommand("setBreakpoints").isNone
+      ck primary.store.breakpointAt("src/shield.nr", 18).isSome
+      ck page.breakpointAt("src/shield.nr", 18).isSome
+      var resolutions: seq[string]
+      for r in page.pointList.rows.val:
+        if r.kind == PointKindBreakpoint: resolutions.add r.resolution
+      ck resolutions == @["verified"]
+
+      # DISABLE: the row stays, dimmed; the replay is sent the set without it.
+      mock.expect("setBreakpoints", %*{
+        "type": "response", "command": "setBreakpoints", "success": true,
+        "body": {"breakpoints": []}})
+      mock.clearReceivedCommands()
+      ck page.setBreakpointEnabled("src/shield.nr", 18, false)
+      link.settle()
+      drainPlatformCallbacks()
+      link.settle()
+      let disarmed = mock.findCommand("setBreakpoints")
+      ck disarmed.isSome
+      if disarmed.isSome:
+        ck disarmed.get.args["lines"] == newJArray()
+      ck page.breakpointAt("src/shield.nr", 18).isSome and
+        not page.breakpointAt("src/shield.nr", 18).get.enabled
+      ck primary.store.breakpointAt("src/shield.nr", 18).isSome and
+        not primary.store.breakpointAt("src/shield.nr", 18).get.enabled
+
+      # CLEAR: gone from the replay, the server's rows and the page's.
+      mock.expect("setBreakpoints", %*{
+        "type": "response", "command": "setBreakpoints", "success": true,
+        "body": {"breakpoints": []}})
+      mock.clearReceivedCommands()
+      page.clearBreakpoints("src/shield.nr")
+      link.settle()
+      drainPlatformCallbacks()
+      link.settle()
+      ck mock.findCommand("setBreakpoints").isSome
+      ck primary.store.breakpointAt("src/shield.nr", 18).isNone
+      ck page.breakpointAt("src/shield.nr", 18).isNone
+      ck pageConnection.findCommand("setBreakpoints").isNone
+      mirror.dispose()
+      host.dispose()
+      done()
+
+  test "a breakpoint set on the page before the server's session exists reaches it":
+    # The page shows the trace, and its gutter takes a click, before the
+    # replay's first stop makes the server's session. The change is held and
+    # sent once the page follows that session; sent before, no session would
+    # have run it, and the snapshot answering the page's subscription would
+    # have replaced the row the page held.
+    createRoot proc(done: proc()) =
+      let (primary, mock) = newPrimary()
+      let host = newSyncHost(manual)
+      let link = newInMemoryLink()
+      host.attach(link.a, follow = "ct-host/replay-0")
+      let mirror = createHostedPageMirror(link.b)
+      link.settle()
+      ck mirror.following == ""
+      mirror.session.store.toggleBreakpoint("src/shield.nr", 6)
+      link.settle()
+
+      mock.expect("setBreakpoints", %*{
+        "type": "response", "command": "setBreakpoints", "success": true,
+        "body": {"breakpoints": [{"verified": true, "line": 6}]}})
+      mock.clearReceivedCommands()
+      primary.moveTo(100, "src/main.nr", 38)
+      host.addPrimary("ct-host/replay-0", primary)
+      link.settle()
+      drainPlatformCallbacks()
+      link.settle()
+      ck mirror.following == "ct-host/replay-0"
+      ck mock.findCommand("setBreakpoints").isSome
+      ck primary.store.breakpointAt("src/shield.nr", 6).isSome
+      ck mirror.session.store.breakpointAt("src/shield.nr", 6).isSome
+      mirror.dispose()
+      host.dispose()
+      done()
+
+  test "a collection's next elements asked on the page are loaded by the server's session":
+    # "Load More" under a collection the locals budget cut short asks for its
+    # next elements (`ct/load-value-elements`) and appends them to the row.
+    # The locals are the server's session's, and a `ct host` page asked
+    # through its mirror's inert backend: nothing was loaded. Relayed, the
+    # server's session asks its replay and the longer row reaches the page.
+    createRoot proc(done: proc()) =
+      let (primary, mock) = newPrimary()
+      let host = newSyncHost(manual)
+      host.addPrimary("ct-host/replay-0", primary)
+      let link = newInMemoryLink()
+      host.attach(link.a, follow = "ct-host/replay-0")
+      let mirror = createHostedPageMirror(link.b)
+      link.settle()
+      primary.moveTo(100, "src/main.nr", 38)
+      primary.store.locals.locals.val = @[Variable(
+        name: "ships", value: "[..]", typeName: "[u32; 4]", hasChildren: true,
+        children: @[Variable(name: "[0]", value: "1"),
+                    Variable(name: "[1]", value: "2")],
+        moreElements: true, elementsTotal: 4)]
+      link.settle()
+      ck mirror.session.store.locals.locals.val.len == 1
+
+      mock.expect("ct/load-value-elements", %*{
+        "type": "response", "command": "ct/load-value-elements",
+        "success": true,
+        "body": {"startIndex": 2, "more": false, "elements": [
+          {"kind": 7, "i": "3", "typ": {"kind": 7, "langType": "u32"}},
+          {"kind": 7, "i": "4", "typ": {"kind": 7, "langType": "u32"}}]}})
+      mock.clearReceivedCommands()
+      mirror.session.stateVM.loadMore("ships")
+      link.settle()
+      drainPlatformCallbacks()
+      link.settle()
+      let sent = mock.findCommand("ct/load-value-elements")
+      ck sent.isSome
+      if sent.isSome:
+        ck sent.get.args["expression"].getStr == "ships"
+        ck sent.get.args["startIndex"].getInt == 2
+      let rows = mirror.session.store.locals.locals.val
+      ck rows.len == 1 and rows[0].children.len == 4
+      ck rows.len == 1 and not rows[0].moreElements
+      mirror.dispose()
+      host.dispose()
+      done()
+
+  test "the page's own panes ask over the page's connection":
+    # The step list, the origin chain and the event log's counterpart chip
+    # run on the page, with state the server's session does not have (the
+    # step list's rows come over the page's IPC; the origin chain and the
+    # counterparts are kept where they were asked). Their requests went
+    # through the mirror's inert backend and were never sent. They take the
+    # page's connection (`ReplayDataStore.directBackend`).
+    createRoot proc(done: proc()) =
+      let (primary, mock) = newPrimary()
+      let host = newSyncHost(manual)
+      host.addPrimary("ct-host/replay-0", primary)
+      let link = newInMemoryLink()
+      host.attach(link.a, follow = "ct-host/replay-0")
+      let mirror = createHostedPageMirror(link.b)
+      link.settle()
+      primary.moveTo(100, "src/main.nr", 38)
+      link.settle()
+      let page = newMockBackendService(autoRespond = true)
+      let origin = createOriginChainVM(mirror.session.store)
+      let marker = MarkerEventRow(boundaryId: "http", keyValue: "req-7",
+                                  stepId: 40)
+      let row = StepLine(kind: slkLine, delta: 2, location: StepLineLocation(
+        path: "src/shield.nr", line: 6, rrTicks: 140))
+
+      proc act() =
+        mirror.session.stepListVM.jumpToStepLine(row)
+        origin.onShowOrigin("damage", Location(file: "src/shield.nr", line: 9))
+        mirror.session.eventLogVM.jumpToCounterpartOf(marker)
+        link.settle()
+        drainPlatformCallbacks()
+        link.settle()
+
+      # CONTROL: without the page's connection none of them is sent anywhere.
+      mock.clearReceivedCommands()
+      act()
+      for command in ["ct/goto-ticks", "ct/originChain", "ct/pairIndexLookup"]:
+        ck page.findCommand(command).isNone
+        ck mock.findCommand(command).isNone
+
+      mirror.session.store.navigationBackend = page.toBackendService()
+      page.expect("ct/pairIndexLookup", %*{"counterparts": [
+        {"boundaryId": "http", "keyValue": "req-7", "stepId": 90,
+         "recordingId": "be"}]})
+      act()
+      let jumps = page.receivedCommands.filterIt(it.command == "ct/goto-ticks")
+      ck jumps.len == 2
+      if jumps.len == 2:
+        ck jumps[0].args["ticks"].getInt == 140
+        ck jumps[1].args["ticks"].getInt == 90
+      ck page.findCommand("ct/originChain").isSome
+      ck page.findCommand("ct/pairIndexLookup").isSome
+      for command in ["ct/goto-ticks", "ct/originChain", "ct/pairIndexLookup"]:
+        ck mock.findCommand(command).isNone
+      mirror.dispose()
+      host.dispose()
+      done()
+
   test "a pane measured before the server's session exists loads once it does":
     # The page mounts and measures its panes as soon as the trace is shown;
     # the server hosts the client's session only on the replay's first stop
@@ -1090,6 +1465,73 @@ suite "a ct host page's mirror (Shared-DOM-Front-Ends D2)":
       ck primary.calltraceVM.viewport.val.cols == 87
       ck primary.eventLogVM.viewport.val.rows == 12
       ck mock.findCommand("ct/load-calltrace-section").isSome
+      mirror.dispose()
+      host.dispose()
+      done()
+
+  test "the page's file tree is the page's: the server's session does not replace it":
+    # A `ct host` page loads its Files pane itself, over its own IPC to the
+    # index (`ui/filesystem.syncLegacyFilesystemIntoVM`); the server's
+    # session never loads a tree and keeps its initial "Loading..." state.
+    # Applying the server's file-tree signals put the page's pane back on
+    # "Loading..." for good at the first snapshot (`HostedPageOwnedSignals`).
+    # The plain mirror beside it (a VS Code webview, whose host DOES load the
+    # tree into the primary) still takes the primary's.
+    createRoot proc(done: proc()) =
+      let (primary, _) = newPrimary()
+      let host = newSyncHost(manual)
+      let link = newInMemoryLink()
+      let webviewLink = newInMemoryLink()
+      host.attach(link.a, follow = "ct-host/replay-0")
+      host.attach(webviewLink.a, follow = "ct-host/replay-0")
+      let mirror = createHostedPageMirror(link.b)
+      let webview = createMirrorSession(webviewLink.b)
+      let tree = FilesystemEntryNode(text: "source folders", isFolder: true,
+        children: @[FilesystemEntryNode(text: "main.nr",
+                                        path: "/src/main.nr")])
+      # The page's tree arrives before the server's session exists: the
+      # index answers `filesystem-loaded` before the replay's first stop.
+      mirror.session.fileTreeVM.setRoot(tree)
+      mirror.session.fileTreeVM.expandPath("/src")
+      link.settle()
+      ck primary.fileTreeVM.loadingState.val == lsLoading
+
+      primary.moveTo(100, "/src/main.nr", 13)
+      host.addPrimary("ct-host/replay-0", primary)
+      link.settle()
+      webviewLink.settle()
+      ck mirror.following == "ct-host/replay-0"
+      ck mirror.subscriber.inStep
+      # The snapshot brought the session's position ...
+      ck mirror.session.store.debugger.val.rrTicks == 100
+      # ... and left the page's tree, its state and its expansion alone.
+      ck mirror.session.fileTreeVM.loadingState.val == lsIdle
+      ck mirror.session.fileTreeVM.rootEntry.val == tree
+      ck "/src" in mirror.session.fileTreeVM.expandedPaths.val
+      ck webview.session.fileTreeVM.loadingState.val == lsLoading
+
+      # A batch that carries a file tree of the server's does not replace
+      # the page's either, while the rest of that batch is applied. The
+      # webview takes it: its host is the one that loads the tree.
+      let serverTree = FilesystemEntryNode(text: "server folders",
+                                           isFolder: true)
+      primary.fileTreeVM.setRoot(serverTree)
+      primary.fileTreeVM.expandPath("/server")
+      primary.moveTo(200, "/src/main.nr", 15)
+      link.settle()
+      webviewLink.settle()
+      ck mirror.subscriber.inStep
+      ck mirror.session.store.debugger.val.rrTicks == 200
+      ck mirror.session.fileTreeVM.rootEntry.val == tree
+      ck mirror.session.fileTreeVM.loadingState.val == lsIdle
+      ck "/src" in mirror.session.fileTreeVM.expandedPaths.val
+      ck "/server" notin mirror.session.fileTreeVM.expandedPaths.val
+      ck webview.subscriber.inStep
+      ck webview.session.store.debugger.val.rrTicks == 200
+      ck webview.session.fileTreeVM.rootEntry.val == serverTree
+      ck webview.session.fileTreeVM.loadingState.val == lsIdle
+      ck "/server" in webview.session.fileTreeVM.expandedPaths.val
+      webview.dispose()
       mirror.dispose()
       host.dispose()
       done()

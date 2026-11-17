@@ -1,0 +1,26 @@
+scenario: 1
+name: vcs/commit-opens-its-whole-document
+pack: codetracer
+summary: >-
+  A click on a commit opens its whole-commit document: one "Diff:" tab with
+  a section per file (lib/helper.py, src/main.nim), each a diff editor; a
+  second click does not open another.
+
+stage:
+  - use: project-fixture
+    with: { name: vcs-document }
+  - use: open-project
+    with: { folder: $project }
+
+steps:
+  - wait: { until: { at: 'pane-tab[label="VCS"]', present: true }, timeout: 120s }
+  - wait: { until: settled, timeout: 30s }
+  - click: 'pane-tab[label="VCS"]'
+  - wait: { until: { at: 'vcs/commit[message="touch both files"]', present: true }, timeout: 60s }
+  - click: { at: 'vcs/commit[message="touch both files"]', anchor: header }
+  - wait: { until: { at: 'diff-section[path="src/main.nim"]', editors: 1 }, timeout: 30s }
+  - expect: { at: 'diff-section[path="lib/helper.py"]', editors: 1, geometry: { above: 'diff-section[path="src/main.nim"]' } }
+  - expect: { at: window, diff-tabs: 1 }
+  - click: { at: 'vcs/commit[message="touch both files"]', anchor: header }
+  - wait: { until: settled, timeout: 15s }
+  - expect: { at: window, diff-tabs: 1 }

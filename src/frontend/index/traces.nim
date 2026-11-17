@@ -1,4 +1,4 @@
-import nim_sourcemap_paths
+import nim_sourcemap_paths, nim_c_listing
 import
   std / [ async, jsffi, strutils, sequtils, strformat, os, json, jsconsole ],
   electron_vars, files, config, debugger,
@@ -454,6 +454,19 @@ proc sourceFoldersFromTracePaths*(trace: Trace): Future[seq[cstring]] {.async.} 
     var sourceFolders: seq[cstring] = trace.sourceFolders
     if sourceFolders.len == 0:
       sourceFolders = fallbackLiveSourceFolders(trace)
+    # When all recorded source folders are subdirectories of the workdir,
+    # use the workdir as the single root so that project-level files
+    # (Nargo.toml, Cargo.toml, …) appear in the Files pane and the
+    # edit-mode toolbar can derive the project kind from them (EMT-A28).
+    if not trace.workdir.isNil and trace.workdir.len > 0 and pathExists(trace.workdir):
+      let workdir = $trace.workdir
+      var allUnderWorkdir = sourceFolders.len > 0
+      for f in sourceFolders:
+        if not ($f).startsWith(workdir):
+          allUnderWorkdir = false
+          break
+      if allUnderWorkdir:
+        return @[trace.workdir]
     return sourceFolders
 
   var input = ImportedTraceTreeInputs(
@@ -610,11 +623,14 @@ proc loadTrace*(main: js, trace: Trace, config: Config, helpers: Helpers): Futur
   # For Nim traces, locate every module sourcemap so the renderer can load them
   # for ViewTargetSource line synchronization between Nim and C code.
   var sourcemapPaths: seq[cstring] = @[]
+  var generatedCPaths: seq[cstring] = @[]
   var macroSourcemapPath = cstring""
   if trace.lang == LangNim:
     sourcemapPaths = findSourcemapPaths(trace.outputFolder)
     if sourcemapPaths.len > 0:
       infoPrint "index: found sourcemaps at ", $sourcemapPaths
+    # And the C files they map, for View Generated C Source (§13.4).
+    generatedCPaths = findNimcacheCPaths(trace.outputFolder)
     macroSourcemapPath = findMacroSourcemapPath(trace.outputFolder)
     if macroSourcemapPath.len > 0:
       infoPrint "index: found macro sourcemap at ", $macroSourcemapPath
@@ -639,6 +655,7 @@ proc loadTrace*(main: js, trace: Trace, config: Config, helpers: Helpers): Futur
     rawDiffIndex: startOptions.rawDiffIndex,
     dontAskAgain: dontAskAgain,
     sourcemapPaths: sourcemapPaths,
+    generatedCPaths: generatedCPaths,
     macroSourcemapPath: macroSourcemapPath,
     visualReplayAvailable: visualReplayAvailable,
     visualReplayPlayerUrl: visualReplayPlayerUrl,
@@ -1049,8 +1066,9 @@ var
   replayStopAllowed*: proc(replayId: int): bool = nil
     ## Whether the client asking may stop `replayId`. `ct host` allows a
     ## client its own replays only (`host_clients`): its clients are separate
-    ## sessions, and one must not end another's. Nil, the desktop, allows
-    ## every one: its windows are one user's.
+    ## sessions, and one must not end another's. The desktop allows it once
+    ## no other window shows the replay (`window_routing.releaseReplay`): a
+    ## tab closed in one window must not end what another window shows.
   replayStopped*: proc(replayId: int) = nil
     ## Told after a client's request stopped `replayId`.
 
@@ -1081,8 +1099,8 @@ proc onCloseReplaySession*(sender: js, response: JsObject) {.async.} =
   if replayId < 0:
     return
   if not replayStopAllowed.isNil and not replayStopAllowed(replayId):
-    warnPrint "index: refused to stop replay ", $replayId,
-      ": it is not the asking client's"
+    warnPrint "index: kept replay ", $replayId,
+      " running: it is another client's, or another window shows it"
     return
   stopReplayProcess(replayId)
   if not replayStopped.isNil:
@@ -1209,6 +1227,52 @@ proc onOpenLocalTrace*(sender: js, response: js) {.async.} =
     else:
       errorPrint "There is no record at given path."
 
+proc loadFoundTrace(trace: Trace) {.async.} =
+  ## Opens a trace the trace store has registered: the window's session takes
+  ## it and its replay starts.
+  mainWindow.webContents.send "CODETRACER::loading-trace",
+    forLoadTab(js{trace: trace})
+  prefetchedTrace = trace
+  data.trace = trace
+  data.pluginClient.trace = trace
+  if await prepareForLoadingTrace(trace.recordingId, nodeProcess.pid.to(int)):
+    await loadExistingRecord(trace.recordingId)
+
+proc jsIsNullish(value: cstring): bool {.importjs: "(# == null)".}
+  ## True for both `null` and `undefined`: a field the sender left out.
+
+proc onLoadNimTraceFile*(sender: js,
+    response: jsobject(tracePath=cstring, sourcePath=cstring)) {.async.} =
+  ## Opens a Nim compile-time trace the Trace Macro / Static Block / Constant
+  ## actions asked for (`ui/trace_macro`). The language server names the `.ct`
+  ## nimsuggest wrote under its nimcache, and nothing has registered it, so it
+  ## is imported first: laid out in a folder of its own with the sources beside
+  ## it, as the terminal and GPUI lay it out (`host/native_nim_tracer`). An
+  ## import that fails is answered with a message naming the path it was asked
+  ## for.
+  # Every message of the load this starts answers the tab that asked.
+  startLoadFor(response.toJs)
+  let tracePath = response.tracePath
+  if tracePath.len == 0:
+    errorPrint "onLoadNimTraceFile: empty trace path"
+    return
+  let sourcePath =
+    if jsIsNullish(response.sourcePath): cstring""
+    else: response.sourcePath
+
+  infoPrint "index: loading Nim trace at ", tracePath
+
+  var trace = await electron_vars.app.findByPath(tracePath)
+  if trace.isNil:
+    trace = await electron_vars.app.importNimTraceFile(tracePath, sourcePath)
+  if not trace.isNil:
+    await loadFoundTrace(trace)
+  else:
+    errorPrint "onLoadNimTraceFile: could not import the Nim trace at ", tracePath
+    mainWindow.webContents.send "CODETRACER::trace-load-error",
+      forLoadTab(js{error: cstring("Could not open the Nim trace at " &
+         $tracePath & ". It could not be imported as a trace.")})
+
 proc onLoadTraceFile*(sender: js, response: jsobject(tracePath=cstring)) {.async.} =
   ## Load a .ct trace file by path.  Used by the "Trace Macro Execution"
   ## action (M11) to open a trace produced by the Nim langserver's
@@ -1247,13 +1311,7 @@ proc onLoadTraceFile*(sender: js, response: jsobject(tracePath=cstring)) {.async
   if trace.isNil:
     trace = await electron_vars.app.findByPath(traceDir)
   if not trace.isNil:
-    mainWindow.webContents.send "CODETRACER::loading-trace",
-      forLoadTab(js{trace: trace})
-    prefetchedTrace = trace
-    data.trace = trace
-    data.pluginClient.trace = trace
-    if await prepareForLoadingTrace(trace.recordingId, nodeProcess.pid.to(int)):
-      await loadExistingRecord(trace.recordingId)
+    await loadFoundTrace(trace)
   else:
     # Name the path the caller actually asked for, not the dirname.  While
     # `dirname` was the only lookup this handler did, naming it was the same
@@ -2145,3 +2203,38 @@ proc onRunTestSuite*(sender: JsObject,
   finally:
     if eventsPath.len > 0:
       removeFileQuietly(eventsPath)
+
+proc onNimCListingCompile*(sender: JsObject; request: JsObject) {.async.} =
+  ## `CODETRACER::nim-c-listing-compile` {source, requestId}: compile, then
+  ## answer the asking tab with `CODETRACER::nim-c-listing-compiled`
+  ## {requestId, source, compiled, cFiles, message} — on every exit. (Not
+  ## `ok`: a `js{}` key of that name, with `results` imported here, reached
+  ## the renderer as `invalid` — measured.)
+  let source =
+    if request.isNil or request.source.isNil or request.source.isUndefined: ""
+    else: $request.source.to(cstring)
+  let requestId =
+    if request.isNil or request.requestId.isNil or request.requestId.isUndefined: 0
+    else: request.requestId.to(int)
+  var outcome: NimCListingOutcome
+  if source.len == 0:
+    outcome = NimCListingOutcome(message: "no Nim file was named to compile")
+  else:
+    # A save the renderer started just before asking is on its way to disk,
+    # and the compile must read it (Run waits the same way).
+    var waited = 0
+    while files.savesInFlight > 0 and waited < 10_000:
+      await asyncSleep(20)
+      waited += 20
+    let nim = nimCListingCompiler()
+    infoPrint "index: nim-c-listing: ", nim, " c --compileOnly ", source
+    outcome = await compileNimCListing(nim, source, nimCListingCacheOf(source))
+    if not outcome.ok:
+      warnPrint "index: nim-c-listing: ", outcome.message
+  var cFiles: seq[cstring] = @[]
+  for f in outcome.cFiles:
+    cFiles.add cstring(f)
+  mainWindow.webContents.send "CODETRACER::nim-c-listing-compiled",
+    answerFor(request, js{requestId: requestId, source: cstring(source),
+                          compiled: outcome.ok, cFiles: cFiles,
+                          message: cstring(outcome.message)})

@@ -215,6 +215,12 @@ mkShell {
     export CT_LD_LIBRARY_PATH="${sqlite.out}/lib/:${pcre.out}/lib:${glib.out}/lib:${openssl.out}/lib:${gcc.cc.lib}/lib:${libzip.out}/lib";
     export CODETRACER_LD_LIBRARY_PATH="$CT_LD_LIBRARY_PATH"
 
+    # libpcre's directory, from this shell's pinned nixpkgs, for
+    # scripts/detect-siblings.sh: the codetracer-nim sibling's bin/nim
+    # dlopen()s libpcre (pcre1; Nim's std/re does not bind pcre2) and the
+    # floating `nixpkgs` registry no longer carries it.
+    export CT_PCRE_LIB_DIR="${pcre.out}/lib";
+
     export RUST_LOG=info
 
     # NODE MODULES

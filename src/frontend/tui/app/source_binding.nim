@@ -219,8 +219,10 @@ proc marksForFile*(points: openArray[SourcePoint];
   ## The gutter marks on `path`, in the order the pane's `markFor` reads them.
   ##
   ## TRACEPOINTS FIRST, BREAKPOINTS SECOND, because `markFor` lets the last
-  ## declaration win and a line carrying both must show `●` — the one that
-  ## stops — rather than `◆`.
+  ## declaration win: a line carrying an armed line breakpoint and a tracepoint
+  ## shows their one combined mark, and with a disabled breakpoint its `○`.
+  ## A column breakpoint is a mark of the glyph column too, and is also drawn at
+  ## its column in the text (`columnMarksForFile`).
   result = @[]
   for p in points:
     if p.path != path or p.line <= 0:
@@ -231,8 +233,13 @@ proc marksForFile*(points: openArray[SourcePoint];
     if p.path != path or p.line <= 0:
       continue
     if p.kind == sptBreakpoint:
-      result.add (p.line, (if p.enabled: gmBreakpoint
-                           else: gmBreakpointDisabled))
+      var both = false
+      for t in points:
+        if t.path == path and t.line == p.line and t.kind == sptTracepoint:
+          both = true
+      result.add (p.line, (if not p.enabled: gmBreakpointDisabled
+                           elif both: gmBreakpointTracepoint
+                           else: gmBreakpoint))
 
 proc columnMarksForFile*(points: openArray[SourcePoint];
                          path: string): seq[(int, int)] =

@@ -1,0 +1,17 @@
+scenario: 1
+name: terminal/find-ctrl-f3-whole-word
+pack: codetracer
+summary: >-
+  With the find field closed, Ctrl+F3 on a word selects its next whole-word
+  occurrence and says where (`left` at line …).
+stage:
+  - use: record-program
+    with: { program: calc }
+  - use: open-recording
+    with: { width: 200, height: 50 }
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - wait: { until: { at: 'editor[file="main.py"]', assert: "shows-line(29)" }, timeout: 30s }
+  - click: { at: 'editor[file="main.py"]/line[number="29"]', anchor: "column(11)" }
+  - chord: Ctrl+F3
+  - wait: { until: { at: status-line, assert: 'says("`left` at line 31")' }, timeout: 10s }

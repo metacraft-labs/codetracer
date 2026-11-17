@@ -1,0 +1,29 @@
+scenario: 1
+name: terminal/welcome-record-new-trace
+pack: codetracer
+summary: >-
+  A new tab's welcome screen records a new trace: Record new trace asks for
+  the program, runs a real `ct record` and opens the recording in the tab,
+  which then shows the program's call instead of the welcome screen.
+stage:
+  - use: record-program
+    with: { program: calc }
+  - use: write-project
+    with:
+      files:
+        greeter.py: "def greet(name):\n    return 'hello ' + name\n\nprint(greet('plat51'))\n"
+  - use: open-recording
+    with: { width: 200, height: 50 }
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - chord: Alt+f
+  - wait: { until: { at: 'dropdown[level="2"]/dropdown-item[label="New Trace Tab"]', present: true }, timeout: 10s }
+  - click: { at: 'dropdown[level="2"]/dropdown-item[label="New Trace Tab"]' }
+  - wait: { until: { at: welcome, present: true }, timeout: 10s }
+  - click: { at: 'welcome/welcome-action[label="Record new trace"]' }
+  - wait: { until: { at: welcome, assert: 'shows("Program to record")' }, timeout: 10s }
+  - type: "greeter.py"
+  - key: Enter
+  - wait: { until: { at: 'call-trace/call[name="greet"]', present: true }, timeout: 240s }
+  - expect: { at: session-strip, assert: 'has-tab-matching("greeter")' }
+  - expect: { at: welcome, absent: true }

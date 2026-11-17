@@ -1,0 +1,32 @@
+scenario: 1
+name: keymaps/removed-press-row-does-nothing
+pack: codetracer
+summary: >-
+  With a user's keybindings.json that removes the base keymap's row for a
+  press on a call-trace row (`-calltrace.go-to-call`), a press on a call's
+  name runs nothing: the replay stays where it was. The row is what performs
+  the press, not the view.
+
+stage:
+  - use: record-program
+    with: { program: calc }
+  - use: plant-config
+    with:
+      file: keybindings.json
+      content: |
+        [
+          { "key": "click", "command": "-calltrace.go-to-call",
+            "when": "paneKind == calltrace && elementKind == row" }
+        ]
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 180s }
+  - wait: { until: call-trace.loaded, timeout: 120s }
+  - expect: { at: 'editor[file="main.py"]', assert: "stopped-at(1)" }
+  - click: { at: 'call-trace/call[name="add", arguments="(left=2, right=3)"]', anchor: name }
+    # long enough for a move the press might have started to have shown
+    dwell: 3s
+  - wait: { until: replay-idle, timeout: 60s }
+  - expect: { at: 'editor[file="main.py"]', assert: "stopped-at(1)" }
+  - expect: { at: 'call-trace/call[name="add", arguments="(left=2, right=3)"]', current: false }

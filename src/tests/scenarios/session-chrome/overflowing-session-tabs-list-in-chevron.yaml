@@ -1,0 +1,46 @@
+scenario: 1
+name: session-chrome/overflowing-session-tabs-list-in-chevron
+pack: codetracer
+summary: >-
+  With twelve sessions the caption shows only the tabs that fit, the
+  overflow chevron and `+` after them; the chevron lists all twelve, and
+  choosing the first makes it the active tab again.
+
+stage:
+  - use: record-program
+    with: { program: py_console_logs/main.py }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - wait: { until: { at: 'caption-bar/caption-tabs/panel-button[label="New tab"]', present: true }, timeout: 30s }
+  - click: 'caption-bar/caption-tabs/panel-button[label="New tab"]'
+  - wait: { until: { at: session-strip, active: "Trace 2" }, timeout: 30s }
+  - click: 'caption-bar/caption-tabs/panel-button[label="New tab"]'
+  - wait: { until: { at: session-strip, active: "Trace 3" }, timeout: 30s }
+  - click: 'caption-bar/caption-tabs/panel-button[label="New tab"]'
+  - wait: { until: { at: session-strip, active: "Trace 4" }, timeout: 30s }
+  - click: 'caption-bar/caption-tabs/panel-button[label="New tab"]'
+  - wait: { until: { at: session-strip, active: "Trace 5" }, timeout: 30s }
+  - click: 'caption-bar/caption-tabs/panel-button[label="New tab"]'
+  - wait: { until: { at: session-strip, active: "Trace 6" }, timeout: 30s }
+  - click: 'caption-bar/caption-tabs/panel-button[label="New tab"]'
+  - wait: { until: { at: session-strip, active: "Trace 7" }, timeout: 30s }
+  - click: 'caption-bar/caption-tabs/panel-button[label="New tab"]'
+  - wait: { until: { at: session-strip, active: "Trace 8" }, timeout: 30s }
+  - click: 'caption-bar/caption-tabs/panel-button[label="New tab"]'
+  - wait: { until: { at: session-strip, active: "Trace 9" }, timeout: 30s }
+  - click: 'caption-bar/caption-tabs/panel-button[label="New tab"]'
+  - wait: { until: { at: session-strip, active: "Trace 10" }, timeout: 30s }
+  - click: 'caption-bar/caption-tabs/panel-button[label="New tab"]'
+  - wait: { until: { at: session-strip, active: "Trace 11" }, timeout: 30s }
+  - click: 'caption-bar/caption-tabs/panel-button[label="New tab"]'
+  - wait: { until: { at: session-strip, active: "Trace 12" }, timeout: 30s }
+  - expect: { at: caption-bar/caption-tabs, shown: { lt: 12 } }
+  - expect:
+      at: 'caption-bar/caption-tabs/panel-button[label="More tabs"]'
+      geometry: { left-of: 'caption-bar/caption-tabs/panel-button[label="New tab"]' }
+  - click: 'caption-bar/caption-tabs/panel-button[label="More tabs"]'
+  - wait: { until: { at: caption-bar/session-overflow-menu, count: 12 }, timeout: 10s }
+  - click: 'caption-bar/session-overflow-menu/menu-row[label="main.py"]'
+  - wait: { until: { at: session-strip, active: main.py }, timeout: 30s }

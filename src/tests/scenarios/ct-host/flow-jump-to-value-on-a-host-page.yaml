@@ -1,0 +1,37 @@
+scenario: 1
+name: ct-host/flow-jump-to-value-on-a-host-page
+pack: codetracer
+summary: >-
+  On a `ct host` page, stopped in iterate_asteroids after its first pass,
+  "Jump to value" on the flow's mass value (shield.nr line 5) moves the
+  debugger to the line that value was computed on.
+
+stage:
+  - use: record-program
+    with: { program: noir_space_ship }
+  - use: open-recording
+    with: { deployment: web, width: 2400, height: 1300 }
+
+steps:
+  - wait: { until: call-trace.loaded, timeout: 360s }
+  - wait: { until: replay-idle, timeout: 120s }
+  - click: 'pane-tab[label="EVENT LOG"]'
+  - wait: { until: event-log.loaded, timeout: 180s }
+  - wait: { until: settled, timeout: 30s }
+  # the first "Damage:" line stops in status_report; a step out returns to
+  # its call in iterate_asteroids, after the first pass computed damage
+  - click: 'event-log/event[text="stdout: Damage: 100"]'
+    settle: false
+  - wait: { until: { at: status-line, location: { matches: "shield.nr:(5[0-9]|6[0-9])#" } }, timeout: 120s }
+  - wait: { until: replay-idle, timeout: 60s }
+  - click: 'toolbar/toolbar-button[label="step-out-image"]'
+    settle: false
+  - wait: { until: { at: status-line, location: { matches: "shield.nr:14#" } }, timeout: 120s }
+  - wait: { until: replay-idle, timeout: 60s }
+  - wait: { until: { at: 'editor[file="shield.nr"]/flow-value[line="5", name="mass"]', present: true }, timeout: 60s }
+  - click: { at: 'editor[file="shield.nr"]/flow-value[line="5", name="mass"]', button: right }
+  - wait: { until: { at: 'context-menu/menu-item[label="Jump to value"]', present: true }, timeout: 30s }
+  - click: 'context-menu/menu-item[label="Jump to value"]'
+    settle: false
+  - wait: { until: { at: status-line, location: { matches: "shield.nr:5#" } }, timeout: 120s }
+  - wait: { until: { at: 'editor[file="shield.nr"]', current-line: 5 }, timeout: 60s }

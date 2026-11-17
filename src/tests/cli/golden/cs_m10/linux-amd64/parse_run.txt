@@ -1,0 +1,259 @@
+# ct run: 18 argv cases through ct's loader (the parse probe)
+
+### 1: bare
+argv: ct "run"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The required option 'runTracePathOrId' was not specified\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 2: one word
+argv: ct "run" "prog"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = run
+  runTracePathOrId = "prog"
+  runArgs = @[]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 3: words
+argv: ct "run" "prog" "a" "b"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = run
+  runTracePathOrId = "prog"
+  runArgs = @["a", "b"]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 4: words that look like options
+argv: ct "run" "prog" "-x" "--y=1" "--cwd" "/z"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = run
+  runTracePathOrId = "prog"
+  runArgs = @["-x", "--y=1", "--cwd", "/z"]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 5: a ct option first
+argv: ct "run" "--new-tab" "prog" "a"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The required option 'runTracePathOrId' was not specified\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 6: -- inside
+argv: ct "run" "prog" "--" "a"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = run
+  runTracePathOrId = "prog"
+  runArgs = @["--", "a"]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 7: --help inside
+argv: ct "run" "prog" "a" "--help"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = run
+  runTracePathOrId = "prog"
+  runArgs = @["a", "--help"]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 8: unknown long option
+argv: ct "run" "--bogus" "prog"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'bogus'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 9: unknown long option with value
+argv: ct "run" "--bogus=1" "prog"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'bogus'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 10: unknown short option
+argv: ct "run" "-Z" "prog"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option 'Z'\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 11: lone -
+argv: ct "run" "-" "prog"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option ''\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 12: lone -- then a word
+argv: ct "run" "--" "w" "prog"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option ''\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 13: --=v
+argv: ct "run" "--=v" "prog"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+Unrecognized option ''\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 14: extra positional
+argv: ct "run" "prog" "extra1" "extra2" "extra3" "extra4" "extra5"
+env: (none)
+exit: 0
+--- stdout
+PARSED
+  cwd = none
+  envFiles = @[]
+  env0Files = @[]
+  tmpEnvFiles = @[]
+  tmpEnv0Files = @[]
+  inspect = none
+  remoteDebuggingPort = none
+  remoteDebuggingPipe = false
+  newTab = false
+  newWindow = false
+  cmd = run
+  runTracePathOrId = "prog"
+  runArgs = @["extra1", "extra2", "extra3", "extra4", "extra5"]
+VALIDATED replayInteractive = false
+--- stderr
+--- end
+
+### 15: global --cwd after the command
+argv: ct "run" "--cwd" "/w" "prog"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The required option 'runTracePathOrId' was not specified\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 16: global --new-tab after the command
+argv: ct "run" "--new-tab" "prog"
+env: (none)
+exit: 1
+--- stdout
+--- stderr
+The required option 'runTracePathOrId' was not specified\e[0m
+Try \e[36mct --help\e[0m for more information.
+--- end
+
+### 17: --version after the command
+argv: ct "run" "--version" "prog"
+env: (none)
+exit: 0
+--- stdout
+CodeTracer version: <VERSION>
+\e[0m
+(no newline at end of stdout)
+--- stderr
+--- end
+
+### 18: -h after the command
+argv: ct "run" "-h" "prog"
+env: (none)
+exit: 0
+--- stdout
+<the short help page clispec renders for this request: ct run>
+--- stderr
+--- end
