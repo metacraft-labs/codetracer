@@ -369,6 +369,9 @@ const OK_EXIT_CODE = 0;
 const MAX_CONNECT_ATTEMPTS = 20;
 const RETRY_DELAY_MS = 1_500;
 const GOTO_TIMEOUT_MS = 3_000;
+// The page's load, once ct host has answered: its bundle is large, and on a
+// loaded host it takes well past `GOTO_TIMEOUT_MS` (12 s measured at load 90).
+const PAGE_LOAD_TIMEOUT_MS = 120_000;
 const PORT_RELEASE_DELAY_MS = 500;
 
 // ---------------------------------------------------------------------------
@@ -1828,8 +1831,12 @@ async function launchTraceWeb(
   let connected = false;
   for (let attempt = 1; attempt <= MAX_CONNECT_ATTEMPTS && !connected; attempt++) {
     try {
+      // Each attempt asks only whether ct host answers (the response is
+      // committed); the page's load is waited for once it has, with its own
+      // timeout, so a slow load is not taken for a server that is not up.
       await page.goto(ctHostPageUrl(httpPort), {
         timeout: GOTO_TIMEOUT_MS,
+        waitUntil: "commit",
       });
       connected = true;
     } catch {
@@ -1849,6 +1856,8 @@ async function launchTraceWeb(
       `Failed to connect to ct host on port ${httpPort} after ${MAX_CONNECT_ATTEMPTS} attempts`,
     );
   }
+  // ct host answered; now the page itself, which may load slowly.
+  await page.waitForLoadState("load", { timeout: PAGE_LOAD_TIMEOUT_MS });
   const totalMs = Date.now() - t0;
   console.log(`#   ct host connect: ${connectMs}ms  total web setup: ${totalMs}ms`);
   if (connectMs > LIMIT_CT_HOST_STARTUP_MS) {
@@ -1975,8 +1984,12 @@ async function launchTracePathWeb(tracePath: string): Promise<LaunchResult> {
   let connected = false;
   for (let attempt = 1; attempt <= MAX_CONNECT_ATTEMPTS && !connected; attempt++) {
     try {
+      // Each attempt asks only whether ct host answers (the response is
+      // committed); the page's load is waited for once it has, with its own
+      // timeout, so a slow load is not taken for a server that is not up.
       await page.goto(ctHostPageUrl(httpPort), {
         timeout: GOTO_TIMEOUT_MS,
+        waitUntil: "commit",
       });
       connected = true;
     } catch {
@@ -1996,6 +2009,8 @@ async function launchTracePathWeb(tracePath: string): Promise<LaunchResult> {
       `Failed to connect to ct host on port ${httpPort} after ${MAX_CONNECT_ATTEMPTS} attempts`,
     );
   }
+  // ct host answered; now the page itself, which may load slowly.
+  await page.waitForLoadState("load", { timeout: PAGE_LOAD_TIMEOUT_MS });
 
   const totalMs = Date.now() - t0;
   console.log(`#   ct host connect: ${connectMs}ms  total trace-path setup: ${totalMs}ms`);
