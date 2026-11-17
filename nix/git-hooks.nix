@@ -221,12 +221,27 @@ in
 
   # Reclamation preserves an existing dispatcher; it cannot create one in a
   # fresh clone. Bootstrap with the same pinned Repro that will service it.
+  #
+  # On a CI runner (GITHUB_ACTIONS=true) that build IS the one the checkout
+  # should run, so a hook a different build wrote is re-anchored to it. The
+  # persistent runners keep their checkout's .git/hooks between jobs, and
+  # after the pin moved from repro 0.2.24 to 0.2.25 a plain `ensure` refused
+  # the hooks 0.2.24 had written ("refused-foreign-contract") and failed every
+  # job on gpu-server-002 in sibling provisioning (run 44081496736: GPUI 1,
+  # TUI 2, 4 and 8). On a workstation a foreign hook still means a different
+  # `repro` supplies the shell, which the operator reconciles, so it fails
+  # there as before.
+  ct_repro_anchor=()
+  if [ "''${GITHUB_ACTIONS:-}" = true ]; then
+    ct_repro_anchor=(--re-anchor)
+  fi
   if [ -n "$ROOT_PATH" ]; then
-    ${repro}/bin/repro hooks ensure --vcs "$ROOT_PATH" || {
+    ${repro}/bin/repro hooks ensure --vcs "''${ct_repro_anchor[@]}" "$ROOT_PATH" || {
       echo "ERROR: CodeTracer could not install the Repro publication gate." >&2
       return 1 2>/dev/null || exit 1
     }
   fi
+  unset ct_repro_anchor
   if [ "$ct_hooks_status" -ne 0 ]; then
     echo "ERROR: CodeTracer could not install its configured Git checks." >&2
     return 1 2>/dev/null || exit 1

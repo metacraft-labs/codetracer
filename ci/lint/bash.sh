@@ -358,6 +358,11 @@ lint_step "a build job pushes its closure, best effort, from dev and agents" \
 lint_step "a shard that fails uploads what held its memory" \
 	bash ci/test/memory-sampler-test.sh
 
+# On a CI runner the dev shell re-anchors Repro hooks an older pinned build
+# wrote into a persistent runner's checkout; on a workstation it does not.
+lint_step "a CI dev shell re-anchors hooks another Repro build wrote" \
+	bash ci/test/ci-hooks-re-anchor-test.sh
+
 # A GPUI shard gives a bare host the Vulkan driver, cursor theme and D-Bus
 # session configuration the window and its compositor need.
 lint_step "a GPUI shard provisions what a bare host lacks" \
