@@ -60,7 +60,7 @@ from std/unicode import runes, Rune, `$`, runeAtPos
 import ../app/views/styled_row
 import isonim/viewmodel
 import nim_agents_isonim_viewmodels/agent_harbor/data_source
-from ../../viewmodel/views/agent_harbor_words import trimBeforeEllipsis
+from ../../viewmodel/views/agent_harbor_words import trimBeforeEllipsis, cutPath
 import ../../viewmodel/views/agent_harbor_palette
 
 export styled_row, agent_harbor_palette, data_source, viewmodel
@@ -321,6 +321,17 @@ proc elide*(s: string; cells: int): string =
   if cells == 1: return Ellipsis
   let kept = trimCut(cellSlice(s, 0, cells - 1))
   if kept.len == 0: Ellipsis else: kept & Ellipsis
+
+proc elidePath*(path: string; cells: int): string =
+  ## A file path in at most `cells` columns: whole when it fits, else cut in
+  ## its middle by the views' one rule for a path (`cutPath`: its first
+  ## segment and its file name kept, `src/…/client.py`), and only when even
+  ## `…/client.py` does not fit, cut at its end like any text (`elide`).
+  ## Either side of the "…" is trimmed by the same rule as an end cut.
+  if cells <= 0: return ""
+  let room = cells
+  cutPath(path, proc(t: string): bool = widthOf(t) <= room,
+          proc(): string = elide(path, room))
 
 type
   WrappedLine* = object

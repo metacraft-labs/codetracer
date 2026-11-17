@@ -48,6 +48,14 @@
 ## (CTF-P1c D7, a tree node's counts: `1…`; the title reads it in
 ## `agent_harbor.styl`).
 ##
+## A marked element whose value is `path` (`data-ah-cut="path"`,
+## `CutPathValue`) holds a file path, cut in its middle (CTF-P1c D6, amended
+## for paths): the first of the shared `pathCutCandidates` whose width fits
+## the content box (`src/…/retry/client.py`, `src/…/client.py`,
+## `…/client.py`), and when none fits, the end cut above. The terminal
+## (`elidePath`) and GPUI (isonim-gpui's middle cut, `ah_theme.pathText`)
+## cut a path the same way.
+##
 ## Every element marked must hold its text in one colour: the drawn cut is
 ## one string. A line made of spans in different colours keeps CSS's
 ## ellipsis (`agent_harbor.styl` says which, and why).
@@ -58,6 +66,7 @@
 
 {.used.}
 
+import std/strutils
 import ./agent_harbor_words
 
 const
@@ -68,6 +77,8 @@ const
     ## `countsFloor`, CTF-P1c D7): its box is kept at least that wide.
   CutShownAttribute* = "data-ah-shown"
     ## The cut text drawn over the element, present only while it is cut.
+  CutPathValue* = "path"
+    ## `CutTextAttribute`'s value on a file path: cut in its middle.
 
 when defined(js):
   proc ahCutTextTrim(kept: cstring): cstring {.exportc.} =
@@ -76,12 +87,23 @@ when defined(js):
     cstring(trimBeforeEllipsis($kept) & CutEllipsis)
 
   proc ahCutTextDangles(shown: cstring): bool {.exportc.} =
-    ## The shared rule's check, for the render check.
-    danglesBeforeEllipsis($shown)
+    ## The shared rule's check, for the render check: on both sides of a
+    ## middle cut's "…".
+    danglesAroundEllipsis($shown)
+
+  proc ahCutTextPathCandidates(path: cstring): cstring {.exportc.} =
+    ## The shared middle cuts of a path, longest first, one a line.
+    cstring(pathCutCandidates($path).join("\n"))
 
   proc installCutText(trim: proc(kept: cstring): cstring;
-                      dangles: proc(shown: cstring): bool) {.importjs: """
-    (function (trim, dangles) {
+                      dangles: proc(shown: cstring): bool;
+                      pathCuts: proc(path: cstring): cstring) {.importjs: """
+    (function (trim, dangles, pathCuts) {
+      // Every rule must reach the page: a rule the call drops would fail
+      // only at the first element that needs it.
+      if (typeof trim !== 'function' || typeof dangles !== 'function' ||
+          typeof pathCuts !== 'function')
+        throw new TypeError('ah_cut_text: a shared cut rule did not reach the page');
       if (typeof document === 'undefined' || typeof ResizeObserver === 'undefined' ||
           globalThis.__ahCutText) return;
       globalThis.__ahCutText = true;
@@ -193,6 +215,7 @@ when defined(js):
         }
         var cs = getComputedStyle(el);
         var contentLeft = box.left + px(cs.borderLeftWidth) + px(cs.paddingLeft);
+        var isPath = el.getAttribute(ATTR) === 'path';
         var contentRight = box.right - px(cs.borderRightWidth) - px(cs.paddingRight);
         var all = document.createRange();
         all.setStart(nodes[0], 0);
@@ -201,6 +224,18 @@ when defined(js):
         if (text.right <= contentRight + 0.01) {
           el.removeAttribute(SHOWN);
           return;
+        }
+        // A path: the first middle cut that fits the content box.
+        if (isPath) {
+          var room = contentRight - text.left + 0.01;
+          var cuts = String(pathCuts(full)).split('\n');
+          for (var c = 0; c < cuts.length; c++) {
+            if (cuts[c].length > 0 && textWidth(cs, cuts[c]) <= room) {
+              el.style.setProperty('--ah-cut-indent', Math.max(0, text.left - contentLeft) + 'px');
+              if (el.getAttribute(SHOWN) !== cuts[c]) el.setAttribute(SHOWN, cuts[c]);
+              return;
+            }
+          }
         }
         // CSS's cut: the most text whose last glyph, and the ellipsis after
         // it, end inside the content box.
@@ -270,6 +305,6 @@ when defined(js):
         document.fonts.addEventListener('loadingdone', again);
         document.fonts.ready.then(again);
       }
-    })(#, #)""".}
+    })(#, #, #)""".}
 
-  installCutText(ahCutTextTrim, ahCutTextDangles)
+  installCutText(ahCutTextTrim, ahCutTextDangles, ahCutTextPathCandidates)

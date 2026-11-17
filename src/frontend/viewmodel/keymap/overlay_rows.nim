@@ -70,6 +70,18 @@ const
     BaseRow(chords: "]", operation: "story-playback.next", table: StoryPlaybackTable),
     BaseRow(chords: "0", operation: "story-playback.rewind", table: StoryPlaybackTable),
 
+    # --- The session activity timeline (the cardless timeline of one Agent
+    # Harbor session): the same under every base, as a list pane's arrows
+    # are. `Right` / `Left` open and close the focused line, `Enter` steps
+    # in, `+` / `-` open every group and close everything.
+    BaseRow(chords: "Right", operation: "session-activity.open", table: SessionActivityTable),
+    BaseRow(chords: "Left", operation: "session-activity.close", table: SessionActivityTable),
+    BaseRow(chords: "Enter", operation: "session-activity.step-in", table: SessionActivityTable),
+    BaseRow(chords: "+", operation: "session-activity.expand-all", table: SessionActivityTable),
+    BaseRow(chords: "-", operation: "session-activity.collapse-all", table: SessionActivityTable),
+    BaseRow(chords: "Down", operation: "session-activity.focus-next", table: SessionActivityTable),
+    BaseRow(chords: "Up", operation: "session-activity.focus-previous", table: SessionActivityTable),
+
     # --- The Video Player (Visual-Replay.md § Keyboard Shortcuts): its keys
     # while it has the focus, the same under every base, as the desktop's
     # player always had them.

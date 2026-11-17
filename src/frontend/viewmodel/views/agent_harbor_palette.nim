@@ -213,3 +213,23 @@ proc stateWordColour*(p: AhPalette; state: InitiativeState): string =
   of isWorking: p.textSuccess
   of isBlocked: p.textError
   else: p.textCaption
+
+proc timelineInk*(p: AhPalette; role: string): string =
+  ## The ink of a session activity timeline line's part, by the role the
+  ## viewmodel gives it (`SessionTimelineVM`'s `LinePart.role`): the GPUI and
+  ## terminal timelines draw with it, and `agent_harbor_activity.styl` names
+  ## the same design-system roles for the web. The operator's words in the
+  ## label colour (and weight), the agent's in the body colour, quiet lines
+  ## (thoughts, statuses, gaps) as captions, a failure in the error colour,
+  ## an unanswered question in the warning colour, a running command in the
+  ## info colour, an ending in the ended word's colour, a diff's counts in
+  ## the success and error colours.
+  case role
+  of "label": p.textLabel
+  of "quiet": p.textCaption
+  of "error", "removed": p.textError
+  of "warning": p.textWarning
+  of "running": p.iconInfo
+  of "ended": p.endedWord
+  of "added": p.textSuccess
+  else: p.textBody

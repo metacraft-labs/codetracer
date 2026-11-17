@@ -127,7 +127,15 @@ const
     ## The scope a press on a story host's playback chrome is routed in (the
     ## bar under an Agent Harbor playback story, `stories/agent_harbor_playback`):
     ## no pane, but its controls are buttons carrying their operations.
-  NonPaneScopes* = [TopBarScope, BreakpointConditionScope, StoryPlaybackScope]
+  SessionActivityScope* = "sessionActivity"
+    ## The scope the session activity timeline's keys and presses are routed
+    ## in (the cardless timeline of one Agent Harbor session,
+    ## `agent_harbor_activity_words`). It is a prototype drawn in story hosts,
+    ## framed as the Agent Activity panel, and no pane of the layout: the
+    ## production `agentActivity` pane keeps its own keys until the timeline
+    ## replaces its rendering.
+  NonPaneScopes* = [TopBarScope, BreakpointConditionScope, StoryPlaybackScope,
+                    SessionActivityScope]
     ## The scopes a press names in `paneKind` that are not panes.
 
 func element*(kind: ElementKind; id: string; paneKind = ""): ScopeElement =

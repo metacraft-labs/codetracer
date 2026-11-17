@@ -99,6 +99,9 @@ const
   StoryPlaybackTable* = PaneTablePrefix & "storyPlayback"
     ## A story host's playback chrome (the bar under an Agent Harbor
     ## playback story): its keys, while a playback story is shown.
+  SessionActivityTable* = PaneTablePrefix & "sessionActivity"
+    ## The session activity timeline's keys (`agent_harbor_activity_words`),
+    ## while the timeline has the focus.
   PointerTable* = "pointer"
     ## The rows whose key is a pointer gesture (`pointer_rows`). Never on a
     ## scope path: only `keymap_router.routePointer` consults it.
@@ -608,6 +611,22 @@ const
     op("story-playback.previous", StoryPlaybackTable, "Playback: Previous Moment"),
     op("story-playback.next", StoryPlaybackTable, "Playback: Next Moment"),
     op("story-playback.rewind", StoryPlaybackTable, "Playback: Rewind"),
+    # The session activity timeline (`agent_harbor_activity_words`): open and
+    # close the focused line, step into it, open every group, close
+    # everything, and move the focus.
+    op("session-activity.open", SessionActivityTable, "Activity: Open the Line"),
+    op("session-activity.close", SessionActivityTable, "Activity: Close the Line"),
+    op("session-activity.step-in", SessionActivityTable, "Activity: Step In"),
+    op("session-activity.expand-all", SessionActivityTable, "Activity: Expand All"),
+    op("session-activity.collapse-all", SessionActivityTable, "Activity: Collapse All"),
+    op("session-activity.focus-next", SessionActivityTable, "Activity: Next Line"),
+    op("session-activity.focus-previous", SessionActivityTable, "Activity: Previous Line"),
+    op("session-activity.toggle", SessionActivityTable, "Activity: Open or Close",
+       oaTarget),
+    op("session-activity.copy", SessionActivityTable, "Activity: Copy", oaTarget),
+    op("session-activity.jump-to-latest", SessionActivityTable,
+       "Activity: Jump to Latest"),
+    op("session-activity.retry", SessionActivityTable, "Activity: Retry"),
     op("video-player.toggle-play", VideoPlayerTable, "Video: Play / Pause"),
     op("video-player.rewind", VideoPlayerTable, "Video: Rewind"),
     op("video-player.fast-forward", VideoPlayerTable, "Video: Fast Forward"),

@@ -1,0 +1,272 @@
+// Agent Harbor session activity timeline
+// (isonim_agent_harbor_session_activity_view.nim): the cardless timeline of
+// one session, framed as the Agent Activity panel. A file of its own so the
+// timeline's rules stay apart from agent_harbor.styl, which other Agent
+// Harbor work edits.
+//
+// Cardless: no border, outline or background around an
+// event. Every line sits on the panel's ground; indentation, a leading glyph
+// and the type role of each part tell lines apart. The focused line is the
+// one exception, an inset bar in the action colour down its left edge
+// (`box-shadow: inset`), never a fill. The `Running: <command>` strip is the
+// one ground step the timeline allows. The roles match the GPUI and
+// terminal timelines' `timelineInk` (agent_harbor_palette.nim). Every colour
+// is a design-system role, its Light value under COLOR_MODE = "Light".
+
+AH_ACTIVITY_INDENT = 1rem          // one drill-down level (GPUI: 16px)
+AH_ACTIVITY_GLYPH = 1rem           // the leading glyph's column
+AH_ACTIVITY_INSET = 0.5rem         // PANEL_INSET
+AH_ACTIVITY_LINE = 1.25rem         // 14px on 20px
+AH_ACTIVITY_DETAIL_LINE = 1rem     // 12px on 16px
+AH_ACTIVITY_TURN_GAP = 0.5rem      // above each turn after the first
+
+.agent-harbor-activity
+  display: flex
+  flex-direction: column
+  height: 100%
+  background: colors-ui-surface-base-panel
+  overflow: hidden
+
+.ah-activity-body
+  display: flex
+  flex-direction: column
+  flex: 1 1 auto
+  min-height: 0
+
+// The head: the session's status and the connection badge.
+.ah-activity-head
+  display: flex
+  align-items: center
+  gap: 0.5rem
+  height: 2rem
+  padding: 0 AH_ACTIVITY_INSET
+  flex-shrink: 0
+
+.ah-activity-status
+  flex: 1 1 auto
+  min-width: 0
+  font-size: unit(type-ui-size-caption-md / 16, 'rem')
+  color: colors-ui-text-primary-caption
+  white-space: nowrap
+  overflow: hidden
+
+.ah-activity-badge
+  flex-shrink: 0
+  height: 1.25rem
+  display: inline-flex
+  align-items: center
+  padding: 0 0.375rem
+  border: 0.0625rem solid colors-ui-border-primary
+  border-radius: 0.25rem
+  font-size: unit(type-ui-size-caption-md / 16, 'rem')
+  color: colors-ui-text-primary-label
+
+// The filter's query and count.
+.ah-activity-filter
+  display: flex
+  align-items: center
+  gap: 0.5rem
+  height: 1.5rem
+  padding: 0 AH_ACTIVITY_INSET
+  flex-shrink: 0
+  font-size: unit(type-ui-size-caption-md / 16, 'rem')
+
+.ah-activity-filter-query
+  min-width: 0
+  white-space: nowrap
+  overflow: hidden
+  color: colors-ui-text-primary-label
+
+.ah-activity-filter-count
+  flex-shrink: 0
+  color: colors-ui-text-primary-caption
+
+// The running strip, on the raised ground (GPUI: the secondary surface).
+.ah-activity-running-strip
+  display: flex
+  align-items: center
+  gap: 0.375rem
+  height: 1.5rem
+  padding: 0 AH_ACTIVITY_INSET
+  flex-shrink: 0
+  background: colors-ui-surface-primary-secondary
+  font-size: unit(type-ui-size-caption-md / 16, 'rem')
+  color: colors-ui-text-primary-body
+
+  &[hidden]
+    display: none
+
+.ah-activity-running-command
+  min-width: 0
+  white-space: nowrap
+  overflow: hidden
+
+.ah-activity-running-mark
+  flex-shrink: 0
+  color: colors-ui-icon-information-primary
+
+// The lines.
+.ah-activity-lines
+  flex: 1 1 auto
+  min-height: 0
+  overflow-y: auto
+  outline: none
+
+.ah-activity-line
+  position: relative
+  display: flex
+  align-items: flex-start
+  min-height: AH_ACTIVITY_LINE
+  padding: 0 AH_ACTIVITY_INSET 0 calc(AH_ACTIVITY_INSET + var(--ah-indent, 0) * AH_ACTIVITY_INDENT)
+  font-size: unit(type-ui-size-body-md / 16, 'rem')
+  line-height: AH_ACTIVITY_LINE
+  // Cardless: nothing around an event.
+  border: 0
+  outline: none
+  background: transparent
+
+  &.ah-activity-expandable
+    cursor: pointer
+
+.ah-activity-turn:not(:first-child)
+  margin-top: AH_ACTIVITY_TURN_GAP
+
+.ah-activity-detail
+.ah-activity-trace
+.ah-activity-trace-line
+  font-size: unit(type-ui-size-caption-md / 16, 'rem')
+  line-height: AH_ACTIVITY_DETAIL_LINE
+  min-height: AH_ACTIVITY_DETAIL_LINE
+
+// The focused line: an inset bar, never a fill.
+.ah-activity-focused
+  box-shadow: inset 0.125rem 0 0 colors-ui-border-action
+
+.ah-activity-glyph
+  flex: 0 0 AH_ACTIVITY_GLYPH
+  width: AH_ACTIVITY_GLYPH
+  color: colors-ui-text-primary-caption
+
+.ah-activity-turn-mark
+  color: colors-ui-surface-action-primary
+
+.ah-activity-text
+  display: flex
+  align-items: center
+  gap: 0.375rem
+  flex: 1 1 auto
+  min-width: 0
+
+  .ah-activity-prose &
+    display: block
+
+.ah-activity-part
+  white-space: nowrap
+  flex-shrink: 0
+
+  &[data-ah-cut]
+    flex-shrink: 1
+    min-width: 0
+    overflow: hidden
+
+  .ah-activity-prose &
+    white-space: pre-wrap
+    overflow-wrap: anywhere
+
+.ah-activity-toggle
+  position: absolute
+  top: 0
+  bottom: 0
+  left: 0
+  right: 0
+
+.ah-activity-copy
+  flex-shrink: 0
+  position: relative
+  z-index: 1
+  margin-left: AH_ACTIVITY_INSET
+  border: 0
+  background: transparent
+  padding: 0
+  cursor: pointer
+  font-size: unit(type-ui-size-caption-md / 16, 'rem')
+  color: colors-ui-text-primary-caption
+
+// The type roles (`LinePart.role`).
+.ah-activity-role-label
+  color: colors-ui-text-primary-label
+  font-weight: 600
+
+.ah-activity-role-body
+  color: colors-ui-text-primary-body
+
+.ah-activity-role-quiet
+  color: colors-ui-text-primary-caption
+
+.ah-activity-role-error
+.ah-activity-role-removed
+  color: colors-ui-text-error-primary
+
+.ah-activity-role-warning
+  color: colors-ui-text-warning-primary
+
+.ah-activity-role-running
+  color: colors-ui-icon-information-primary
+
+.ah-activity-role-ended
+  color: by-mode(colors-ui-text-primary-caption, colors-ui-text-primary-label)
+
+.ah-activity-role-added
+  color: colors-ui-text-success-primary
+
+.ah-activity-role-mono
+  color: colors-ui-text-primary-body
+  font-family: "SpaceMono", monospace
+
+// The loading, empty and cannot-be-loaded notices, and the error block.
+.ah-activity-notice
+  flex: 1 1 auto
+
+.ah-activity-error
+  flex: 1 1 auto
+  display: flex
+  flex-direction: column
+  align-items: center
+  justify-content: center
+  gap: 0.5rem
+  padding: 0 2.5rem
+  text-align: center
+
+.ah-activity-error-title
+  color: colors-ui-text-error-primary
+  font-size: unit(type-ui-size-body-md / 16, 'rem')
+
+.ah-activity-error-message
+  color: colors-ui-text-primary-caption
+  font-size: unit(type-ui-size-caption-md / 16, 'rem')
+
+.ah-activity-retry
+  height: 1.5rem
+  padding: 0 0.75rem
+  border: 0.0625rem solid colors-ui-border-primary
+  border-radius: 0.375rem
+  background: colors-ui-surface-primary-secondary
+  color: colors-ui-text-primary-label
+
+// The unseen chip at the bottom edge.
+.ah-activity-unseen-row
+  display: flex
+  justify-content: center
+  align-items: center
+  height: 1.5rem
+  flex-shrink: 0
+
+.ah-activity-unseen
+  height: 1.5rem
+  padding: 0 0.5rem
+  border: 0.0625rem solid colors-ui-border-primary
+  border-radius: 0.375rem
+  background: transparent
+  color: colors-ui-text-primary-label
+  font-size: unit(type-ui-size-caption-md / 16, 'rem')
+  cursor: pointer

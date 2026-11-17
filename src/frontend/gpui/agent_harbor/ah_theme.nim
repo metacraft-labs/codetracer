@@ -31,7 +31,7 @@ import nim_agents_isonim_viewmodels/agent_harbor/[data_source, session_items]
 
 import ../../styles/generated/design_tokens
 import ../../viewmodel/views/agent_harbor_palette
-from ../../viewmodel/views/agent_harbor_words import CutSeparators
+from ../../viewmodel/views/agent_harbor_words import CutSeparators, PathSeparator
 import ../chrome
 import ../design_font_metrics
 
@@ -112,6 +112,18 @@ proc text*(r: GpuiRenderer; s: string; sizePx: int; colour: string;
     r.setStyle(result, "flex-shrink", "0")
   r.styles(result, pairs)
   r.appendChild(result, r.createTextNode(s))
+
+proc pathText*(r: GpuiRenderer; path: string; sizePx: int; colour: string;
+               bold = false): GpuiElement =
+  ## A file path on one line, cut in its middle when it does not fit (CTF-P1c
+  ## D6, amended for paths): isonim-gpui's text element keeps its first
+  ## segment and its file name (`src/…/client.py`), as the web's
+  ## `ah_cut_text` (`data-ah-cut="path"`) and the terminal's `elidePath`
+  ## cut it by the shared `pathCutCandidates`, with the same trim on both
+  ## sides of the "…".
+  result = r.text(path, sizePx, colour, bold = bold)
+  r.setAttribute(result, EllipsisAtAttribute, "middle")
+  r.setAttribute(result, EllipsisSegmentsAttribute, $PathSeparator)
 
 proc tracked*(r: GpuiRenderer; el: GpuiElement): GpuiElement =
   ## `el`, an uppercase label, spaced as the stylesheet spaces those
