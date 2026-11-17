@@ -349,6 +349,16 @@ runs:
               provision-test-siblings "${test_siblings}" "${siblings_root}"
           fi
 
+    # One package catalog for the whole graph. reprobuild compiles a solve's
+    # recipes against a single reprobuild-packages revision and refuses a
+    # compile that would mix two, so a sibling whose own repro.lock pins another
+    # catalog than repro.lock breaks every refresh and re-solve of this lock.
+    # bash builtins only, like the build-input selector.
+    - name: Every cloned sibling's lock pins repro.lock's package catalog
+      shell: bash
+      working-directory: ${{ github.workspace }}
+      run: bash ci/repro-lock-catalog-agreement.sh repro.lock ..
+
     # Hand the clone's fresh token to the rest of the job. Every store the
     # job's setup filled (nix.conf, NIX_CONFIG, the Nix netrc, the exported
     # git extraHeader, the checkout's persisted credential) still holds the

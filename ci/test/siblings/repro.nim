@@ -33,6 +33,24 @@ package codetracer_test_siblings:
     "DemoVideoScript-TermAssert"
     "DemoVideoScript-GuiAssert"
     "DemoVideoScript-Playwright"
+    # Cloned by a workflow at an explicit ref; declared so a lock names it.
+    "codetracer-cairo-recorder"
+    "codetracer-cardano-recorder"
+    "codetracer-circom-recorder"
+    "codetracer-flow-recorder"
+    "codetracer-fuel-recorder"
+    "codetracer-leo-recorder"
+    "codetracer-miden-recorder"
+    "codetracer-move-recorder"
+    "codetracer-php-recorder"
+    "codetracer-polkavm-recorder"
+    "codetracer-solana-recorder"
+    "codetracer-ton-recorder"
+    "codetracer-flame-demo"
+    "codetracer-pm"
+    "codetracer-visual-replay-fixtures"
+    "test-certificates-spec"
+    "codetracer-example-recordings"
   build:
     # Nothing is built here: the siblings are consumed as source by the test
     # lanes. A package with no `build:` block is not solved, so the lock would

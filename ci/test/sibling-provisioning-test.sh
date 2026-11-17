@@ -738,7 +738,9 @@ fi
 # names no repo in this workspace's lock set" (codetracer-pm issue
 # 2026-11-15-repro-lock-refreshes-drop-the-scenario-lanes-test-siblings).
 readonly TEST_LOCK="$REPO_ROOT/ci/test/siblings/repro.lock"
-readonly TEST_LOCK_DECLARED_DEPS='DemoVideoScript,DemoVideoScript-TermAssert,DemoVideoScript-GuiAssert,DemoVideoScript-Playwright,GuiAssert,TermAssert,TermAssertClient,nim-libvterm,nim-pty'
+# The scenario siblings, and the repositories a workflow clones at an explicit
+# ref that repro.nim does not declare (2026-11-17).
+readonly TEST_LOCK_DECLARED_DEPS='DemoVideoScript,DemoVideoScript-TermAssert,DemoVideoScript-GuiAssert,DemoVideoScript-Playwright,GuiAssert,TermAssert,TermAssertClient,nim-libvterm,nim-pty,codetracer-cairo-recorder,codetracer-cardano-recorder,codetracer-circom-recorder,codetracer-flow-recorder,codetracer-fuel-recorder,codetracer-leo-recorder,codetracer-miden-recorder,codetracer-move-recorder,codetracer-php-recorder,codetracer-polkavm-recorder,codetracer-solana-recorder,codetracer-ton-recorder,codetracer-flame-demo,codetracer-pm,codetracer-visual-replay-fixtures,test-certificates-spec,codetracer-example-recordings'
 # The members that are ONLY test siblings. They must not come back into
 # repro.lock: two locks pinning one repository is two answers to "which
 # revision?", and the product lock's answer is the one a refresh deletes.
@@ -750,9 +752,13 @@ lock_rev() {
 		sed 's/.*revision = "//; s/"$//' | head -n 1
 }
 
+# The test lock's closure: every entry it pins. Its root entry's `depends`
+# names only the direct dependencies (reprobuild 0.2.25 records the graph), and
+# DemoVideoScript, GuiAssert and the terminal harness arrive through the
+# backends.
 if [ -f "$TEST_LOCK" ]; then
-	test_lock_deps="$(grep -o 'self = "true"[^}]*depends = "[^"]*"' "$TEST_LOCK" |
-		sed 's/.*depends = "//; s/"$//' | head -n 1)"
+	test_lock_deps="$(grep -o '{ name = "[^"]*", coord_kind = "vcs"' "$TEST_LOCK" |
+		sed 's/{ name = "//; s/".*//' | paste -sd, -)"
 else
 	test_lock_deps="<$TEST_LOCK not found>"
 fi
@@ -824,6 +830,122 @@ if [ "${#test_sibling_defects[@]}" -eq 0 ]; then
 	ok "every test-siblings name is one the test lock pins"
 else
 	fail "every test-siblings name is one the test lock pins" "${test_sibling_defects[@]}"
+fi
+
+# EVERY REPO A WORKFLOW CLONES IS DECLARED BY A LOCK. A sibling that no lock
+# declares is one `repro lock refresh` is free to drop, or never had, and each
+# such drop surfaced only when a job died on it. So every clone in the
+# workflows and the composite actions is matched against the two locks' develop
+# sets: a BARE `siblings:` / `extra-siblings:` entry is resolved by
+# `clone-siblings` against repro.lock, so repro.lock must declare it; an entry
+# with an explicit `=<ref>`, and a `clone-repo` / `checkout` of a
+# `metacraft-labs/<repo>`, must be declared by one of the two (a ref chosen in a
+# workflow is still a dependency some repro.nim owns). `test-siblings` names are
+# checked against the test lock above.
+cloned_repos() {
+	local f label
+	for f in "$WORKFLOW_DIR"/*.yml "$ACTIONS_DIR"/*/action.yml; do
+		[ -f "$f" ] || continue
+		label="${f#"$REPO_ROOT"/}"
+		awk -v F="$label" '
+			/^[ \t]+(siblings|extra-siblings): \|[ \t]*$/ { inblock = 1; next }
+			inblock {
+				if ($0 ~ /^[ \t]*$/ || $0 ~ /^[ \t]*#/ || index($0, "${{") > 0) next
+				if ($0 ~ /^[ \t]+[A-Za-z0-9_.-]+(=[^ \t]+)?[ \t]*(#.*)?$/) {
+					entry = $1
+					kind = (index(entry, "=") > 0) ? "ref" : "bare"
+					sub(/=.*/, "", entry)
+					print F ":" NR " " kind " " entry
+					next
+				}
+				inblock = 0
+			}
+			/^[ \t]+repo(sitory)?:[ \t]*metacraft-labs\/[A-Za-z0-9_.-]+[ \t]*$/ {
+				name = $2
+				sub(/^metacraft-labs\//, "", name)
+				print F ":" NR " clone " name
+			}
+		' "$f"
+	done
+}
+
+# The repos a workflow clones that neither lock declares, each with the reason.
+# Keep it short: an entry leaves as soon as its repo can be declared, and an
+# entry whose repo a lock does declare is itself a failure, so the list cannot
+# go stale.
+declare -A CLONED_BUT_UNDECLARED=(
+)
+
+root_set="$(sorted_dep_set "$lock_develop_set")"
+test_set="$(sorted_dep_set "$test_lock_deps")"
+undeclared_clones=()
+for name in "${!CLONED_BUT_UNDECLARED[@]}"; do
+	if grep -qx -- "$name" <<<"$root_set" || grep -qx -- "$name" <<<"$test_set"; then
+		undeclared_clones+=("'$name' is declared by a lock now; remove it from CLONED_BUT_UNDECLARED")
+	fi
+done
+cloned_count=0
+while read -r where kind name; do
+	[ -n "$name" ] || continue
+	[ "$name" = codetracer ] && continue
+	cloned_count=$((cloned_count + 1))
+	in_root=0
+	in_test=0
+	grep -qx -- "$name" <<<"$root_set" && in_root=1
+	grep -qx -- "$name" <<<"$test_set" && in_test=1
+	if [ "$kind" = bare ]; then
+		if [ "$in_root" -eq 0 ]; then
+			if [ "$in_test" -eq 1 ]; then
+				undeclared_clones+=("$where: '$name' is a bare entry, which clone-siblings resolves against repro.lock, but only the test lock declares it; pass it as provision-repro-lock-siblings' test-siblings")
+			else
+				undeclared_clones+=("$where: '$name' (bare) is declared by neither repro.lock nor the test lock")
+			fi
+		fi
+	elif [ "$in_root" -eq 0 ] && [ "$in_test" -eq 0 ] && [ -z "${CLONED_BUT_UNDECLARED[$name]:-}" ]; then
+		undeclared_clones+=("$where: '$name' ($kind) is declared by neither repro.lock nor the test lock")
+	fi
+done < <(cloned_repos)
+if [ "$cloned_count" -eq 0 ]; then
+	fail "every repo a workflow clones is declared by repro.lock or the test lock" \
+		"no clone was found at all, so this checked nothing"
+elif [ "${#undeclared_clones[@]}" -eq 0 ]; then
+	ok "every repo a workflow clones is declared by repro.lock or the test lock ($cloned_count clones)"
+else
+	fail "every repo a workflow clones is declared by repro.lock or the test lock" \
+		"declare a test-only sibling in ci/test/siblings/repro.nim, a product one in" \
+		"repro.nim, and refresh that lock" \
+		"${undeclared_clones[@]}"
+fi
+
+# ONE PACKAGE CATALOG. ci/repro-lock-catalog-agreement.sh fails when a sibling's
+# own repro.lock pins another reprobuild-packages revision than repro.lock;
+# reprobuild refuses to compile a solve against two catalogs, which is how the
+# arm64-macosx re-solve died (root 2c58192a, runquota 15ceea67). It must run
+# after the clone, and it must tell agreement from disagreement.
+readonly CATALOG_CHECK="$REPO_ROOT/ci/repro-lock-catalog-agreement.sh"
+catalog_fixture="$(mktemp -d)"
+cat_rev_a=1111111111111111111111111111111111111111
+cat_rev_b=2222222222222222222222222222222222222222
+cat_entry() { printf '{ name = "reprobuild-packages", coord_kind = "vcs", url = "https://github.com/metacraft-labs/reprobuild-packages", revision = "%s", integrity = "git-sha1:%s", version = "", visibility = "public", participation = "", depends = "", tags = "" }' "$1" "$1"; }
+mkdir -p "$catalog_fixture/root" "$catalog_fixture/alpha" "$catalog_fixture/beta"
+printf 'deps = [{ name = "root", self = "true", coord_kind = "vcs", url = "", revision = "", integrity = "", version = "", visibility = "public", participation = "", depends = "alpha,beta,reprobuild-packages", tags = "" }, %s]\n' "$(cat_entry $cat_rev_a)" >"$catalog_fixture/root/repro.lock"
+printf 'deps = [%s]\n' "$(cat_entry $cat_rev_a)" >"$catalog_fixture/alpha/repro.lock"
+printf 'deps = [%s]\n' "$(cat_entry $cat_rev_a)" >"$catalog_fixture/beta/repro.lock"
+catalog_agree_rc=0
+bash "$CATALOG_CHECK" "$catalog_fixture/root/repro.lock" "$catalog_fixture" >/dev/null 2>&1 || catalog_agree_rc=$?
+printf 'deps = [%s]\n' "$(cat_entry $cat_rev_b)" >"$catalog_fixture/beta/repro.lock"
+catalog_disagree_rc=0
+catalog_disagree_out="$(bash "$CATALOG_CHECK" "$catalog_fixture/root/repro.lock" "$catalog_fixture" 2>&1)" || catalog_disagree_rc=$?
+rm -rf "$catalog_fixture"
+catalog_defects=()
+[ "$catalog_agree_rc" -eq 0 ] || catalog_defects+=("it rejects siblings that pin the root's catalog (rc $catalog_agree_rc)")
+[ "$catalog_disagree_rc" -eq 1 ] || catalog_defects+=("it accepts a sibling that pins another catalog (rc $catalog_disagree_rc)")
+grep -q 'beta pins reprobuild-packages' <<<"$catalog_disagree_out" || catalog_defects+=("its refusal does not name the sibling")
+grep -q 'bash ci/repro-lock-catalog-agreement.sh repro.lock \.\.' "$LOCK_ACTION" || catalog_defects+=("provision-repro-lock-siblings does not run it on the cloned siblings")
+if [ "${#catalog_defects[@]}" -eq 0 ]; then
+	ok "every cloned sibling's lock must pin repro.lock's package catalog, and the check tells the two apart"
+else
+	fail "every cloned sibling's lock must pin repro.lock's package catalog, and the check tells the two apart" "${catalog_defects[@]}"
 fi
 
 # The scenario jobs upload a failed run with DemoVideoScript's own action. It
@@ -1305,7 +1427,7 @@ fi
 # nim-stackable-hooks stays out until its two flake.lock nodes agree (see the
 # ceiling note above); its entries are `=dev` anyway.
 # ---------------------------------------------------------------------------
-readonly FLAKE_PINNED_SIBLINGS='codetracer-trace-format codetracer-trace-format-nim codetracer-native-recorder codetracer-native-backend codetracer-visual-replay io-mon isonim isonim-tui isonim-gpui nim-everywhere nim-termctl nim-pty nim-acp nim-agent-harbor nim-agents'
+readonly FLAKE_PINNED_SIBLINGS='codetracer-trace-format codetracer-trace-format-nim codetracer-native-recorder codetracer-native-backend codetracer-visual-replay io-mon isonim isonim-tui isonim-gpui nim-everywhere nim-termctl nim-pty nim-acp nim-agent-harbor nim-agents reprobuild'
 
 # jq, not python3: jq is on every runner this suite is meant to run on -- the
 # stock ubuntu-latest of `ci-contract-suites` and the self-hosted NixOS and
@@ -3030,7 +3152,9 @@ echo
 # root's direct dependencies, each direct dependency is declared in repro.nim,
 # and every bare-name workflow sibling is in the lock. The build-input
 # assertion now expects every solved sibling ("clone all").
-readonly EXPECTED_ASSERTIONS=49
+# 49 -> 51 (2026-11-17): every repo a workflow clones is declared by a lock,
+# and every cloned sibling's lock pins repro.lock's package catalog.
+readonly EXPECTED_ASSERTIONS=51
 if [ "$assertions" -ne "$EXPECTED_ASSERTIONS" ]; then
 	printf 'FAIL: ran %d assertions, expected %d\n' "$assertions" "$EXPECTED_ASSERTIONS"
 	failures=$((failures + 1))

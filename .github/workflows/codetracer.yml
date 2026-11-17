@@ -5938,11 +5938,11 @@ jobs:
             codetracer-visual-replay=92d39d8d249356bd05d8fca5db4d526e1ac4505a
             codetracer-native-backend=3715b91249518a27975ea18dda49910a475a6323
             # The desktop scenario lane's recorders and recordings: the BEAM
-            # recorder at repro.lock's pin, and the example recordings (not a
-            # build input, so not in the lock) at the commit their scenarios
-            # were measured against.
+            # recorder at repro.lock's pin, and the example recordings at the
+            # pin of the test lock (ci/test/siblings/repro.lock), the commit their
+            # scenarios were measured against.
             codetracer-beam-recorder=e8ba8f7b77ac609faca152b7139b19ed4db7cffb
-            codetracer-example-recordings=87f64e3eb365d879f065784ae85ff035668c8720
+            codetracer-example-recordings=f2a1d4a80d9685fcf92e94cc7e2cf576dfb1b2e4
             # The HCR flame scenarios' demo, and reprobuild (repro.lock's pin) for the
             # HCR coordinator driver, the patchable-profile emitter and the in-target
             # agent the patchable Godot links.

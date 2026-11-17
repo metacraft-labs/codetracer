@@ -1284,11 +1284,11 @@
         "pre-commit-hooks": "pre-commit-hooks"
       },
       "locked": {
-        "lastModified": 1794842619,
-        "narHash": "sha256-iPHTEdXt2PDEvmWghdl4FFuu6z+nOxfheXQ3fB+MnE4=",
+        "lastModified": 1794923569,
+        "narHash": "sha256-IC1gabgU0k2pduuJdWrNPp814VtjImTIdB5Zx9QuEQI=",
         "owner": "metacraft-labs",
         "repo": "codetracer-js-recorder",
-        "rev": "1df4100fb244bb334dbf9f0a691d11846c2ac39f",
+        "rev": "6f699e3112484c6c73f7cf8d654e1f3106e76162",
         "type": "github"
       },
       "original": {
