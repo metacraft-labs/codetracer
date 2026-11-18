@@ -1033,6 +1033,20 @@ proc normLabel(s: string): string =
       if want.len >= 5 and flat.startsWith(want) and flat.len - want.len in 1 .. 2:
         extended.add k
   if extended.len == 1: return gpuiPaneName(extended[0])
+  # a caption the tab is too narrow for, cut and followed by the pin's ink
+  # (`PIXEL HISS>` for PIXEL HISTORY): its letters, the last one misread at
+  # the cut, starting exactly one pane's caption
+  var letters = ""
+  for c in flat:
+    if c.isAlphaAscii: letters.add c
+    else: break
+  for cut in [letters, (if letters.len > 0: letters[0 ..< letters.len - 1] else: "")]:
+    if cut.len < 6: continue
+    var starts: seq[PaneKind]
+    for k in PaneKind:
+      let want = desktopTabTitle(k).replace(" ", "")
+      if want.len > cut.len and want.startsWith(cut): starts.add k
+    if starts.len == 1: return gpuiPaneName(starts[0])
   # a short caption (the footer's `BUILD`) is the first word of one pane's
   # name when it is the first word of no other's
   var prefixed: seq[PaneKind]
