@@ -59,7 +59,7 @@ inside() {
 	rm -rf "${OUT}"
 	mkdir -p "${PROJECT}"
 	printf '%s' "${PROJECT_TEXT}" >"${PROJECT}/${PROJECT_FILE}"
-	local w="wtype -s ${KEY_GAP_MS}"
+	local w="WTYPE_LEAD_MS=${KEY_GAP_MS} bash '${root}/ci/test/wtype-keys.sh'"
 	bash -c "sleep ${SETTLE_S}; \
              ${w} xy; sleep ${PAUSE_S}; \
              ${w} -M shift -k Right -k Right -k Right -m shift; \

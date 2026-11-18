@@ -8527,6 +8527,13 @@ jobs:
         if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
         run: bash ci/test/wasm-recordings-ci-test.sh
 
+      - name: Assert every capture lane types through ci/test/wtype-keys.sh
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
+        # A bare `wtype` call can lose its first key while the client is still
+        # taking the new virtual keyboard's keymap: the VCS off-loop capture's
+        # keys never reached its window. The helper primes the keyboard first.
+        run: bash ci/test/wtype-keys-guard-test.sh
+
       - name: Assert ct-instrument is found wherever cargo put it
         if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
         # test-non-gui's build of the instrumenter sibling, and the recording

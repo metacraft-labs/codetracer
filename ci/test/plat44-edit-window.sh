@@ -101,13 +101,13 @@ inside() {
 	# `CODETRACER_PLAT44_NEGATIVE=1` is the lane's NEGATIVE TWIN: the same run
 	# with the Shift+q left out, which must end in `VERDICT: FAIL` — the proof
 	# that the verdict below can fail at all (§4).
-	local typed="wtype -s ${KEY_GAP_MS} -M shift q -m shift"
+	local typed="WTYPE_LEAD_MS=${KEY_GAP_MS} bash '${root}/ci/test/wtype-keys.sh' -M shift q -m shift"
 	[ "${CODETRACER_PLAT44_NEGATIVE:-0}" = "1" ] && typed="true"
 	bash -c "sleep ${SETTLE_S}; grim -t ppm '${before}' >/dev/null 2>&1; \
              ${typed}; sleep 2; \
              grim -t ppm '${after}' >/dev/null 2>&1; \
-             wtype -s ${KEY_GAP_MS} -M ctrl s -m ctrl; sleep 2; \
-             wtype -s ${KEY_GAP_MS} -k F12" >"${OUT}/typist.log" 2>&1 &
+             WTYPE_LEAD_MS=${KEY_GAP_MS} bash '${root}/ci/test/wtype-keys.sh' -M ctrl s -m ctrl; sleep 2; \
+             WTYPE_LEAD_MS=${KEY_GAP_MS} bash '${root}/ci/test/wtype-keys.sh' -k F12" >"${OUT}/typist.log" 2>&1 &
 	local typist=$!
 	local started ended rc
 	started=$(date +%s%3N)

@@ -43,6 +43,18 @@ import subprocess
 import sys
 import time
 
+# Every lane types through ci/test/wtype-keys.sh, which primes each new
+# virtual keyboard and waits before the keys (its header has why).
+WTYPE_KEYS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "wtype-keys.sh")
+
+
+def wtype_keys(args, lead_ms=400, prime=True, popen=False):
+    env = dict(os.environ, WTYPE_LEAD_MS=str(lead_ms), WTYPE_PRIME="1" if prime else "0")
+    cmd = ["bash", WTYPE_KEYS] + list(args)
+    if popen:
+        return subprocess.Popen(cmd, env=env)
+    return subprocess.run(cmd, env=env, check=True)
+
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 WS = os.path.dirname(ROOT)
 ISONIM_GPUI = os.environ.get("ISONIM_GPUI_DIR", os.path.join(WS, "isonim-gpui"))
@@ -240,8 +252,7 @@ def capture():
         for _ in range(3):
             before = win.traced("control next tick=")
             for attempt in range(1, 4):
-                subprocess.run(["wtype", "-M", "shift", "-m", "shift", "-s", "400",
-                                "-k", "F10"], check=True)
+                wtype_keys(["-k", "F10"])
                 if wait_trace(win, "control next tick=", before, 15.0) != before:
                     break
             tries.append(attempt)

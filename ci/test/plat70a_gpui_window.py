@@ -42,6 +42,18 @@ import subprocess
 import sys
 import time
 
+# Every lane types through ci/test/wtype-keys.sh, which primes each new
+# virtual keyboard and waits before the keys (its header has why).
+WTYPE_KEYS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "wtype-keys.sh")
+
+
+def wtype_keys(args, lead_ms=400, prime=True, popen=False):
+    env = dict(os.environ, WTYPE_LEAD_MS=str(lead_ms), WTYPE_PRIME="1" if prime else "0")
+    cmd = ["bash", WTYPE_KEYS] + list(args)
+    if popen:
+        return subprocess.Popen(cmd, env=env)
+    return subprocess.run(cmd, env=env, check=True)
+
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 WS = os.path.dirname(ROOT)
 ISONIM_GPUI = os.environ.get("ISONIM_GPUI_DIR", os.path.join(WS, "isonim-gpui"))
@@ -243,7 +255,8 @@ def capture():
         # Shift + the vertical wheel: Shift held on the compositor's virtual
         # keyboard while the wheel turns.
         before = win.traced("editor-hscroll")
-        held = subprocess.Popen(["wtype", "-M", "shift", "-s", "2500", "-m", "shift"])
+        held = wtype_keys(["-M", "shift", "-s", "2500", "-m", "shift"], lead_ms=200, prime=False,
+                          popen=True)
         time.sleep(0.8)
         ptr.send("wheel 1", "sleep 400")
         held.wait(timeout=20)

@@ -31,6 +31,18 @@ import subprocess
 import sys
 import time
 
+# Every lane types through ci/test/wtype-keys.sh, which primes each new
+# virtual keyboard and waits before the keys (its header has why).
+WTYPE_KEYS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "wtype-keys.sh")
+
+
+def wtype_keys(args, lead_ms=400, prime=True, popen=False):
+    env = dict(os.environ, WTYPE_LEAD_MS=str(lead_ms), WTYPE_PRIME="1" if prime else "0")
+    cmd = ["bash", WTYPE_KEYS] + list(args)
+    if popen:
+        return subprocess.Popen(cmd, env=env)
+    return subprocess.run(cmd, env=env, check=True)
+
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 WS = os.path.dirname(ROOT)
 ISONIM_GPUI = os.environ.get("ISONIM_GPUI_DIR", os.path.join(WS, "isonim-gpui"))
@@ -105,10 +117,10 @@ def settle(name, differs_from=None):
 def keys(*names, gap_ms=150):
     """One `wtype`, for all of them: each process is a new virtual keyboard, and a
     press in the moment it is announced to the window can be lost."""
-    args = ["wtype", "-d", str(gap_ms), "-s", "500"]
+    args = ["-d", str(gap_ms)]
     for name in names:
         args += ["-k", name]
-    subprocess.run(args, check=True)
+    wtype_keys(args, lead_ms=500, prime=False)
 
 
 def capture():
