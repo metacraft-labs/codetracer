@@ -185,6 +185,20 @@ def handled(win):
         return -1
 
 
+def await_geom(win, what, pred, ceiling_s=60.0):
+    """Wait until the window's geometry report satisfies `pred`, with a
+    generous ceiling; a state that never comes is a failure, named."""
+    deadline = time.time() + ceiling_s
+    while time.time() < deadline:
+        try:
+            if pred(win.geom()):
+                return
+        except (OSError, ValueError):
+            pass
+        time.sleep(0.1)
+    raise RuntimeError(f"PLAT-47: the window never showed {what} within {ceiling_s:.0f}s")
+
+
 def await_input(win, before, what, pointer=None, gesture_active=None,
                 revealing=None, ceiling_s=60.0):
     """Wait until the window has HANDLED the input just sent — its report
@@ -447,11 +461,18 @@ def capture():
         # way first, so the target is where it was aimed above.
         ptr.jump(sx, sy)
         ptr.send("down", "sleep 150")
+        n = handled(win)
         ptr.jump(FRAME_W - 2, FRAME_H // 2)
-        time.sleep(0.5)
+        await_input(win, n, "the second drag's lift", pointer=(FRAME_W - 2, FRAME_H // 2),
+                    gesture_active=True)
         tx, ty = targets["drop-split"]
+        n = handled(win)
         ptr.move(tx, ty)
+        await_input(win, n, "the second drag over its split", pointer=(tx, ty),
+                    gesture_active=True)
+        n = handled(win)
         ptr.send("sleep 300", "up", "sleep 300")
+        await_input(win, n, "the second drag released", gesture_active=False)
         steps["drop-commit"] = settle("drop-commit")
         # --- deliverable 4: a click on the VCS tab.
         g = win.geom()
@@ -500,7 +521,13 @@ def capture():
         # (`x + w - 36`, `y + 5`, `TabPinPx` square).
         ptr.jump(tab[0] + tab[2] - 36 + 7, tab[1] + 5 + 7)
         ptr.send("down", "sleep 120", "up", "sleep 300")
+        n = handled(win)
         ptr.jump(FRAME_W // 2, FRAME_H // 3)
+        await_geom(win, "the Variables pane docked to a strip by its pin",
+                   lambda g: any(sl.get("pane") == "state" for st in g.get("strips", [])
+                                 for sl in st.get("slots", [])))
+        await_input(win, n, "the pointer moved off the pin",
+                    pointer=(FRAME_W // 2, FRAME_H // 3))
         steps["dock-committed"] = settle("dock-committed")
         shutil.copy(win.geometry, os.path.join(OUT, "a-dock.geometry.json"))
         g = win.geom()
