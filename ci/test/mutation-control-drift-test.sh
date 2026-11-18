@@ -395,6 +395,75 @@ printf '%s  src/a/subj1.nim\n' "${ZEROS}" >"${A}/src/d/plat4-scratch-mutation-co
 expect_green "UNTRACKED: an untracked control file is not read" \
 	"$(run_guard "${A}")" "3 control file(s)"
 
+# --- VIEWS -----------------------------------------------------------------
+# A `<path>#<view>` entry digests the part of a shared file a harness's suites
+# read (ci/lib/mutation_views.py), so an unrelated edit to that file (a sibling
+# pin bump in the CI workflow) owes nothing, and an edit inside the part the
+# suite reads is drift like any other. The workflow below is shaped like the
+# real one: a pin elsewhere in the file, and the two collaboration steps.
+VIEWS_PY="${repo_root}/ci/lib/mutation_views.py"
+WF=".github/workflows/codetracer.yml"
+VIEW="plat33-collab-lanes"
+stage_views() {
+	local d="$1"
+	stage "${d}"
+	mkdir -p "${d}/.github/workflows"
+	cat >"${d}/${WF}" <<'YAML'
+env:
+  CODETRACER_NATIVE_RECORDER_REV: 8a79c040e7a2a1d1f0c4b8a5e6d7c8b9a0f1e2d3
+jobs:
+  viewmodel-tests:
+    steps:
+      # More than the suite's 400-character window lies between the pin and
+      # the first collaboration step, as it does in the real workflow, so the
+      # pin is outside the part the suite reads.
+      - name: Run the ViewModel unit suites
+        if: ${{ !cancelled() }}
+        run: just test-vm-unit
+      - name: Run the ViewModel integration suites
+        if: ${{ !cancelled() }}
+        run: just test-vm-integration
+      - name: Run the ViewModel property suites
+        if: ${{ !cancelled() }}
+        run: just test-vm-properties
+      - name: Run the ViewModel soak suites
+        if: ${{ !cancelled() }}
+        run: just test-vm-soak
+      - name: Run the collaboration ViewModel unit suites
+        if: ${{ !cancelled() }}
+        run: just test-vm-collab-units
+      - name: Run the collaboration integration and soak suites
+        if: ${{ !cancelled() }}
+        run: just test-vm-collab-integration
+YAML
+	printf '%s  %s#%s\n' "$(python3 "${VIEWS_PY}" --sha256 "${d}/${WF}" "${VIEW}")" "${WF}" "${VIEW}" \
+		>>"${d}/${C2}"
+	git -C "${d}" add -A
+}
+
+stage_views "${A}"
+expect_green "VIEWS: a current view entry is green" "$(run_guard "${A}")" \
+	"7 in-repo entries"
+
+stage_views "${A}"
+python3 -c 'import sys; p = sys.argv[1]; t = open(p).read(); open(p, "w").write(t.replace("8a79c040e7a2a1d1f0c4b8a5e6d7c8b9a0f1e2d3", "bafd73847c3a0e3b1d2f4a5b6c7d8e9f0a1b2c3d"))' "${A}/${WF}"
+expect_green "VIEWS: a pin bump elsewhere in the file leaves the view's digest where it was" \
+	"$(run_guard "${A}")" "7 in-repo entries"
+
+stage_views "${A}"
+# The `if: !cancelled()` of the first collaboration step is removed.
+# shellcheck disable=SC2016 # the `${{ }}` is the workflow's own syntax, not the shell's
+python3 -c 'import sys; p = sys.argv[1]; t = open(p).read(); k = "collaboration ViewModel unit suites\n        if: ${{ !cancelled() }}\n"; assert t.count(k) == 1; open(p, "w").write(t.replace(k, "collaboration ViewModel unit suites\n"))' "${A}/${WF}"
+expect_red "VIEWS: an edit inside the part the suite reads is NEW DRIFT on the view entry" \
+	"$(run_guard "${A}")" \
+	"NEW DRIFT" "control: ${C2}" "harness: ${H2}" "subject: ${WF}#${VIEW}"
+
+stage_views "${A}"
+printf '%s  %s#no-such-view\n' "${ZEROS}" "${WF}" >>"${A}/${C2}"
+expect_red "VIEWS: an entry naming a view nobody defines digests as absent, not as the file" \
+	"$(run_guard "${A}")" \
+	"NEW DRIFT" "subject: ${WF}#no-such-view"
+
 # --- NO WRITER --------------------------------------------------------------
 # The ledger is edited by a person, deliberately, in the diff a reviewer reads.
 # A red run must leave it byte-for-byte as it was, and there is no flag to make

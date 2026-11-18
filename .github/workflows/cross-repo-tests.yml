@@ -34,7 +34,7 @@ on:
         required: false
         default: ''
       shell_recorders_ref:
-        description: 'shell-recorders git ref to test against (default: dev)'
+        description: 'shell-recorders git ref to test against (default: agents, the branch flake.nix follows)'
         required: false
         default: ''
 
@@ -374,7 +374,7 @@ jobs:
           attic-token: ${{ secrets.ATTIC_TOKEN }}
           attic-cache: ${{ vars.ATTIC_CACHE }}
           extra-siblings: |
-            codetracer-shell-recorders=${{ github.event.inputs.shell_recorders_ref || 'dev' }}
+            codetracer-shell-recorders=${{ github.event.inputs.shell_recorders_ref || 'agents' }}
 
       - name: Build shell trace writer
         run: |

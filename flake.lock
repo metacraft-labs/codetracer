@@ -1407,15 +1407,16 @@
         "pre-commit-hooks": "pre-commit-hooks_4"
       },
       "locked": {
-        "lastModified": 1794788547,
-        "narHash": "sha256-T84G5YxZkEOBoU2fmFh84cnCkOzW2ZkB0q/5AvGYCNI=",
+        "lastModified": 1794810430,
+        "narHash": "sha256-3yv8CFLav2J8MIVTz1LLe4UzMRmlhGyF22Biaap71GY=",
         "owner": "metacraft-labs",
         "repo": "codetracer-shell-recorders",
-        "rev": "985ab230d69bd762fb94c0096641cbd657ab856b",
+        "rev": "a863407d4e8db1e52512e9b816e3312d197368ec",
         "type": "github"
       },
       "original": {
         "owner": "metacraft-labs",
+        "ref": "agents",
         "repo": "codetracer-shell-recorders",
         "type": "github"
       }

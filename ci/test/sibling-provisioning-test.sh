@@ -267,7 +267,15 @@ echo "siblings: entries pin a reproducible revision"
 # and its `codetracer-js-recorder=dev` name the commits both locks lock
 # (073193067, 1df4100fb), now that flake.nix follows those repositories'
 # `agents` branches.
-readonly BRANCH_TIP_CEILING=11
+#
+# 11 -> 10 (2026-11-18): the visual-replay gate's
+# `codetracer-visual-replay-fixtures=dev` is gone. Nothing the gate runs reads
+# that checkout (ci/test/visual-replay-gate.sh, and the seven
+# codetracer-visual-replay tests it runs, never name it; only that repo's
+# `regen-golden` recipes and golden-image tests do, and the gate runs neither),
+# so it was a clone with no consumer, not a pin to convert. Converted by
+# deletion, together with its declaration in the test lock.
+readonly BRANCH_TIP_CEILING=10
 
 # Classify one sibling entry's ref text. Factored out of the scanner so it can
 # be exercised directly by the self-test below: a detector that silently stops
@@ -740,7 +748,7 @@ fi
 readonly TEST_LOCK="$REPO_ROOT/ci/test/siblings/repro.lock"
 # The scenario siblings, and the repositories a workflow clones at an explicit
 # ref that repro.nim does not declare (2026-11-17).
-readonly TEST_LOCK_DECLARED_DEPS='DemoVideoScript,DemoVideoScript-TermAssert,DemoVideoScript-GuiAssert,DemoVideoScript-Playwright,GuiAssert,TermAssert,TermAssertClient,nim-libvterm,nim-pty,codetracer-cairo-recorder,codetracer-cardano-recorder,codetracer-circom-recorder,codetracer-flow-recorder,codetracer-fuel-recorder,codetracer-leo-recorder,codetracer-miden-recorder,codetracer-move-recorder,codetracer-php-recorder,codetracer-polkavm-recorder,codetracer-solana-recorder,codetracer-ton-recorder,codetracer-flame-demo,codetracer-pm,codetracer-visual-replay-fixtures,test-certificates-spec,codetracer-example-recordings'
+readonly TEST_LOCK_DECLARED_DEPS='DemoVideoScript,DemoVideoScript-TermAssert,DemoVideoScript-GuiAssert,DemoVideoScript-Playwright,GuiAssert,TermAssert,TermAssertClient,nim-libvterm,nim-pty,codetracer-cairo-recorder,codetracer-cardano-recorder,codetracer-circom-recorder,codetracer-flow-recorder,codetracer-fuel-recorder,codetracer-leo-recorder,codetracer-miden-recorder,codetracer-move-recorder,codetracer-php-recorder,codetracer-polkavm-recorder,codetracer-solana-recorder,codetracer-ton-recorder,codetracer-flame-demo,codetracer-pm,test-certificates-spec,codetracer-example-recordings'
 # The members that are ONLY test siblings. They must not come back into
 # repro.lock: two locks pinning one repository is two answers to "which
 # revision?", and the product lock's answer is the one a refresh deletes.
