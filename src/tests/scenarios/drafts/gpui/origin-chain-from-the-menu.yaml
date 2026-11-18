@@ -16,7 +16,7 @@ steps:
   - wait: { until: { at: replay-position, tick: 118 }, timeout: 60s }
   # at module scope the list is long and `value` sorts below what the pane
   # shows: the wheel brings it in
-  - wait: { until: { at: 'variables/variable[name="main"]', present: true }, timeout: 30s }
+  - wait: { until: { at: 'variables/variable[name="expression"]', present: true }, timeout: 30s }
   - wheel: { at: 'pane[title="Variables"]', direction: down, amount: 10 }
   - wait: { until: { at: 'variables/variable[name="value"]', present: true }, timeout: 30s }
   - click: { at: 'variables/variable[name="value"]', button: right }

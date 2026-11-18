@@ -1613,6 +1613,10 @@ proc readFindField(ctx: GuiContext; f: Frame; left, top, right: int): Option[Sur
   for wd in ws:
     if wd.text.startsWith("Aa"): widget = true
   var counter = ""
+  if getEnv("CT_GUI_BINDING_DEBUG").len > 0:
+    var t: seq[string]
+    for wd in ws: t.add wd.text & "@" & $wd.x
+    stderr.writeLine "find-field words ", $t, " counter-at ", at, " widget ", widget
   if at < 0 and widget:
     # The counter is drawn dim and small: read the field's right part again
     # as ink on paper (its words run together there: `3of12`), and take the
@@ -1624,9 +1628,19 @@ proc readFindField(ctx: GuiContext; f: Frame; left, top, right: int): Option[Sur
       if wd.text.startsWith("Aa"): break
       joined.add wd.text
       startX = min(startX, wd.x)
-    let o = joined.find("of")
-    if o > 0 and o + 2 < joined.len and joined[0 ..< o].allCharsInSet(Digits) and
-       joined[o + 2 .. ^1].allCharsInSet(Digits):
+    if getEnv("CT_GUI_BINDING_DEBUG").len > 0:
+      stderr.writeLine "find-field ink right part ", joined
+    # `n of m` with its words run together; the dim `o` is read as `0` or
+    # `O` too (`20f11` is 2 of 11), so the split is where an o-like letter
+    # and `f` stand between two runs of digits.
+    var o = -1
+    for i in 1 ..< joined.len - 2:
+      if joined[i] in {'o', '0', 'O'} and joined[i + 1] == 'f' and
+         joined[0 ..< i].allCharsInSet(Digits) and
+         joined[i + 2 .. ^1].allCharsInSet(Digits):
+        o = i
+        break
+    if o > 0:
       counter = joined[0 ..< o] & " of " & joined[o + 2 .. ^1]
       var q: seq[Word]
       for wd in ws:
@@ -1822,7 +1836,12 @@ proc ctGuiBinding*(): GuiBinding =
                   break find
                 xx = x0 - 1
               else: dec xx
-        return some((x, if anchor == "scrubber-start": int(n.y) + 4 else: int(n.y + n.h) - 4))
+        # The track's ends: 4 px in on a list's edge track; a track inset in
+        # its pane (the VCS pane's, `ChromePaddingPx`, 12 px, from every
+        # side) starts and ends that far in, and a press 4 px in misses it.
+        let pad = if x < right - 12: 12 + 4 else: 4
+        return some((x, if anchor == "scrubber-start": int(n.y) + pad
+                        else: int(n.y + n.h) - pad))
       if n.role != "line":
         # a row of a pane: its text's ends, and a call's toggle before it
         let midY = int(n.y + n.h / 2)
