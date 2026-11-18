@@ -35,6 +35,7 @@ TOOL
 cat >"$work/bin/repro" <<'TOOL'
 #!/usr/bin/env bash
 printf '%s\n' "$@" >"$TEST_ARGS"
+printf '%s\n' "${REPRO_VARIANTS:-}" >"$TEST_ARGS.variants"
 # Stop at the real build boundary; no successful output bundle is fabricated.
 exit 71
 TOOL
@@ -46,6 +47,7 @@ run_driver() {
 		TEST_ARGS="$work/args" REPROBUILD_BIN="$work/bin/repro" \
 		CODETRACER_REPROBUILD_COMMAND="$command" \
 		RUNQUOTA_SOCKET="$work/unused.sock" CODETRACER_REPROBUILD_LINUX=1 \
+		CODETRACER_TRACE_FORMAT_NIM_TOOL_PATHS="$work/tool-paths.json" \
 		bash "$work/scripts/build-once.sh") >"$work/log" 2>&1 || status=$?
 	[ "$status" = 71 ] || {
 		cat "$work/log" >&2
@@ -53,6 +55,7 @@ run_driver() {
 		exit 1
 	}
 }
+printf '{"schema":1,"paths":{}}\n' >"$work/tool-paths.json"
 for platform in 'Darwin arm64' 'Darwin x86_64' 'Linux x86_64' 'MINGW64_NT x86_64'; do
 	read -r os arch <<<"$platform"
 	run_driver "$os" "$arch"
@@ -78,8 +81,56 @@ for platform in 'Darwin arm64' 'Darwin x86_64' 'Linux x86_64' 'MINGW64_NT x86_64
 		echo "FAIL: $platform did not build $want_target" >&2
 		exit 1
 	}
+	grep -Fq "toolPathsFile=$work/tool-paths.json" "$work/args.variants" || {
+		cat "$work/args.variants" >&2
+		echo "FAIL: $platform did not select trace-format-nim's tool-path manifest" >&2
+		exit 1
+	}
 	echo "PASS: $platform lock binding and target"
 done
+
+# The tool-path manifest codetracer-trace-format-nim's recipe requires. Without
+# it the recipe's provider does not start, and repro reports that as a provider
+# protocol mismatch, so the driver refuses before the build instead.
+tool_paths_run() { # $1 = os, then env assignments; leaves $status
+	local os="$1"
+	shift
+	status=0
+	rm -f "$work/args" "$work/args.variants"
+	(cd "$work" && env -u CODETRACER_TRACE_FORMAT_NIM_TOOL_PATHS -u REPRO_VARIANTS \
+		PATH="$work/bin:$PATH" TEST_OS="$os" TEST_ARCH=x86_64 \
+		TEST_ARGS="$work/args" REPROBUILD_BIN="$work/bin/repro" \
+		RUNQUOTA_SOCKET="$work/unused.sock" CODETRACER_REPROBUILD_LINUX=1 "$@" \
+		bash scripts/build-once.sh) >"$work/log" 2>&1 || status=$?
+}
+tool_paths_run Linux
+if [ "$status" = 71 ] || [ -e "$work/args" ] || ! grep -q CODETRACER_TRACE_FORMAT_NIM_TOOL_PATHS "$work/log"; then
+	cat "$work/log" >&2
+	echo 'FAIL: a build without the tool-path manifest was not refused before repro ran' >&2
+	exit 1
+fi
+tool_paths_run Linux CODETRACER_TRACE_FORMAT_NIM_TOOL_PATHS=relative/tool-paths.json
+if [ "$status" = 71 ] || [ -e "$work/args" ]; then
+	echo 'FAIL: a relative tool-path manifest was accepted' >&2
+	exit 1
+fi
+echo 'PASS: a build without an absolute tool-path manifest refuses before repro'
+tool_paths_run Linux REPRO_VARIANTS=toolPathsFile=/chosen/paths.json \
+	CODETRACER_TRACE_FORMAT_NIM_TOOL_PATHS="$work/tool-paths.json"
+if [ "$status" != 71 ] || ! grep -Fq 'toolPathsFile=/chosen/paths.json' "$work/args.variants" ||
+	grep -Fq "$work/tool-paths.json" "$work/args.variants"; then
+	cat "$work/args.variants" >&2
+	echo 'FAIL: an explicit toolPathsFile in REPRO_VARIANTS did not win' >&2
+	exit 1
+fi
+echo 'PASS: an explicit toolPathsFile selection wins over the dev shell manifest'
+tool_paths_run MINGW64_NT
+if [ "$status" != 71 ] || grep -q toolPathsFile "$work/args.variants"; then
+	cat "$work/log" >&2
+	echo 'FAIL: the Windows branch, which has no dev-shell manifest, changed behaviour' >&2
+	exit 1
+fi
+echo 'PASS: the Windows branch selects a manifest only when one is named'
 mkdir "$work/other"
 run_driver Darwin arm64 build "$work/other"
 grep -Fx -- "$work/locks/arm64-macosx.lock" "$work/args" >/dev/null

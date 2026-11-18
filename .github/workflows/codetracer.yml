@@ -1344,7 +1344,7 @@ jobs:
             # sibling cloned at `dev` fails to compile. Full account and the refresh
             # rule: .github/actions/setup-db-backend-siblings/action.yml.
             codetracer-trace-format=2f01e602e70f69a04675293f3fa0d5bad9f196a1
-            codetracer-trace-format-nim=8eef47d71a2431311a4b9d6b6cf38a2acb37a33f
+            codetracer-trace-format-nim=3e50ca3f2bf6316e8f764952a84078cf59b11023
 
       - name: Install Nim dependencies
         shell: bash
@@ -1872,7 +1872,7 @@ jobs:
             # sibling cloned at `dev` fails to compile. Full account and the refresh
             # rule: .github/actions/setup-db-backend-siblings/action.yml.
             codetracer-trace-format=2f01e602e70f69a04675293f3fa0d5bad9f196a1
-            codetracer-trace-format-nim=8eef47d71a2431311a4b9d6b6cf38a2acb37a33f
+            codetracer-trace-format-nim=3e50ca3f2bf6316e8f764952a84078cf59b11023
             codetracer-native-recorder=d108d85b97713a243e7985e6e9c1123d7c688881
 
       # MEASURE THE FETCH ENVIRONMENT BEFORE NIX TOUCHES THE NETWORK, and
@@ -4612,7 +4612,7 @@ jobs:
             # sibling cloned at `dev` fails to compile. Full account and the refresh
             # rule: .github/actions/setup-db-backend-siblings/action.yml.
             codetracer-trace-format=2f01e602e70f69a04675293f3fa0d5bad9f196a1
-            codetracer-trace-format-nim=8eef47d71a2431311a4b9d6b6cf38a2acb37a33f
+            codetracer-trace-format-nim=3e50ca3f2bf6316e8f764952a84078cf59b11023
             codetracer-native-recorder=d108d85b97713a243e7985e6e9c1123d7c688881
             # Required by scripts/require-siblings.sh, which build-once.sh runs first.
             # BARE: this job only runs on codetracer, so clone-siblings resolves
@@ -5929,7 +5929,7 @@ jobs:
             # sibling cloned at `dev` fails to compile. Full account and the refresh
             # rule: .github/actions/setup-db-backend-siblings/action.yml.
             codetracer-trace-format=2f01e602e70f69a04675293f3fa0d5bad9f196a1
-            codetracer-trace-format-nim=8eef47d71a2431311a4b9d6b6cf38a2acb37a33f
+            codetracer-trace-format-nim=3e50ca3f2bf6316e8f764952a84078cf59b11023
             codetracer-native-recorder=d108d85b97713a243e7985e6e9c1123d7c688881
             # codetracer-native-backend and codetracer-visual-replay BY COMMIT as well: both are
             # `/agents` inputs in flake.nix (7ab073a22), so `=dev` cloned a different tree than the
@@ -7083,7 +7083,7 @@ jobs:
             # sibling cloned at `dev` fails to compile. Full account and the refresh
             # rule: .github/actions/setup-db-backend-siblings/action.yml.
             codetracer-trace-format=2f01e602e70f69a04675293f3fa0d5bad9f196a1
-            codetracer-trace-format-nim=8eef47d71a2431311a4b9d6b6cf38a2acb37a33f
+            codetracer-trace-format-nim=3e50ca3f2bf6316e8f764952a84078cf59b11023
             io-mon=5f7a7ec976c9adf091e092aff4f548946be387d2
             nim-shm-queue=0d6049997d77421b6e4748f819657cf6042e9508
             nim-shm-gset=0b2896adc65d0d62c0ee84af1356c909da2975d0
@@ -7430,7 +7430,7 @@ jobs:
             # sibling cloned at `dev` fails to compile. Full account and the refresh
             # rule: .github/actions/setup-db-backend-siblings/action.yml.
             codetracer-trace-format=2f01e602e70f69a04675293f3fa0d5bad9f196a1
-            codetracer-trace-format-nim=8eef47d71a2431311a4b9d6b6cf38a2acb37a33f
+            codetracer-trace-format-nim=3e50ca3f2bf6316e8f764952a84078cf59b11023
             io-mon=5f7a7ec976c9adf091e092aff4f548946be387d2
             nim-shm-queue=0d6049997d77421b6e4748f819657cf6042e9508
             nim-shm-gset=0b2896adc65d0d62c0ee84af1356c909da2975d0

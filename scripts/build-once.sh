@@ -244,6 +244,37 @@ if [ -n "$ct_reprobuild_host" ]; then
 		export REPRO_VARIANTS="${REPRO_VARIANTS},buildType=${ct_config}"
 	fi
 
+	# codetracer-trace-format-nim's recipe reads its tool paths (zstd, pcre and
+	# its Nim source dependencies) from a schema-1 JSON manifest that the
+	# `toolPathsFile` variant selects, and it has no ambient fallback. Without
+	# the variant its provider's startup body asserts ("owning builds require
+	# --variant toolPathsFile=<absolute JSON manifest>"), and repro 0.2.25
+	# reports that as "unsupported provider protocol version 1" -- in daemon
+	# mode with no other line (reprobuild-pm
+	# issues/2026-11-18-repro-e2fe4eb9-rejects-codetracers-provider-with-unsupported-provider-protocol-version-1.md).
+	# The recipe's own flake publishes the manifest as `repro-tool-paths`, and
+	# the dev shell exports its path as CODETRACER_TRACE_FORMAT_NIM_TOOL_PATHS
+	# (nix/shells/ci-base.nix). A `toolPathsFile=` already in REPRO_VARIANTS
+	# wins. The Windows branch has no dev-shell manifest yet, so it selects one
+	# only when the variable names one.
+	if ! grep -Eq '(^|,)[[:space:]]*toolPathsFile[[:space:]]*=' <<<"$REPRO_VARIANTS"; then
+		ct_tool_paths="${CODETRACER_TRACE_FORMAT_NIM_TOOL_PATHS:-}"
+		if [ -n "$ct_tool_paths" ] || [ "$ct_reprobuild_host" != "windows" ]; then
+			case "$ct_tool_paths" in
+			/*) ;;
+			*) ct_tool_paths="" ;;
+			esac
+			if [ -z "$ct_tool_paths" ] || [ ! -f "$ct_tool_paths" ]; then
+				echo "Error: the reprobuild build needs codetracer-trace-format-nim's tool-path manifest," >&2
+				echo "but CODETRACER_TRACE_FORMAT_NIM_TOOL_PATHS names no absolute file ('${CODETRACER_TRACE_FORMAT_NIM_TOOL_PATHS:-}')." >&2
+				echo "The dev shell sets it; outside it, pass REPRO_VARIANTS=toolPathsFile=<absolute JSON manifest>," >&2
+				echo "e.g. the output of: nix build --no-link --print-out-paths github:metacraft-labs/codetracer-trace-format-nim/agents#repro-tool-paths" >&2
+				exit 1
+			fi
+			export REPRO_VARIANTS="${REPRO_VARIANTS},toolPathsFile=${ct_tool_paths}"
+		fi
+	fi
+
 	repro_bin="${REPROBUILD_BIN:-}"
 	reprobuild_root="${CODETRACER_REPROBUILD_REPO_PATH:-}"
 

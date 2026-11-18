@@ -135,6 +135,7 @@ chmod +x "$work/bin/uname"
 
 # run_driver <path> [extra env...]: runs the driver, leaves its status in
 # $status, its output in $work/log and the stub that ran in $work/ran.
+printf '{"schema":1,"paths":{}}\n' >"$work/tool-paths.json"
 run_driver() {
 	local path="$1"
 	shift
@@ -143,6 +144,7 @@ run_driver() {
 	(cd "$ct" && env PATH="$path" TEST_RAN="$work/ran" \
 		CODETRACER_REPROBUILD_REPO_PATH="$rb" \
 		RUNQUOTA_SOCKET="$work/unused.sock" CODETRACER_REPROBUILD_LINUX=1 \
+		CODETRACER_TRACE_FORMAT_NIM_TOOL_PATHS="$work/tool-paths.json" \
 		"$@" bash "$ct/scripts/build-once.sh") >"$work/log" 2>&1 || status=$?
 }
 expect_ran() {

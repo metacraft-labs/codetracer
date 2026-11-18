@@ -230,6 +230,7 @@ SCRUBBED_VARS=(
 	REPROBUILD_BIN
 	REPROBUILD_SOURCE_ROOT
 	REPRO_VARIANTS
+	CODETRACER_TRACE_FORMAT_NIM_TOOL_PATHS
 	REPRO_MONITOR_SHIM_LIB
 	RUNQUOTA_SOCKET
 	RUNQUOTAD_BIN
@@ -1246,8 +1247,13 @@ echo "under recording stubs, and comparing their traces."
 
 run_scenario linux-legacy-debug Linux tup src/build-debug
 run_scenario linux-legacy-release Linux tup src/build-release CODETRACER_CONFIG=release
-run_scenario linux-reprobuild Linux repro src/build-debug-repro CODETRACER_REPROBUILD_LINUX=1
-run_scenario darwin Darwin repro src/build-debug-repro
+# The reprobuild branch selects codetracer-trace-format-nim's tool-path
+# manifest (scripts/build-once.sh); the dev shell names it, so the scenarios do.
+printf '{"schema":1,"paths":{}}\n' >"$WORK_ROOT/tool-paths.json"
+run_scenario linux-reprobuild Linux repro src/build-debug-repro CODETRACER_REPROBUILD_LINUX=1 \
+	CODETRACER_TRACE_FORMAT_NIM_TOOL_PATHS="$WORK_ROOT/tool-paths.json"
+run_scenario darwin Darwin repro src/build-debug-repro \
+	CODETRACER_TRACE_FORMAT_NIM_TOOL_PATHS="$WORK_ROOT/tool-paths.json"
 run_scenario windows MINGW64_NT-10.0-22631 repro src/build-debug-repro
 run_port_busy_scenario
 run_nim_flag_alignment_check
