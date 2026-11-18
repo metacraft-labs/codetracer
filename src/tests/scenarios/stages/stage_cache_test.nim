@@ -2,8 +2,10 @@
 ## an entry `ct record` has not finished, or one that names its program under
 ## a `.partial` staging folder (the stage recorded there before it recorded in
 ## place) or at a path that is gone, is absent, and the next run records again.
+## So is an rr entry whose `trace_db_metadata.json` names its output folder
+## under `.partial` or gone.
 ## Run by `ci/test/scenarios.sh stage-test`.
-import std/[os, unittest]
+import std/[json, os, unittest]
 import ./ct_stages
 
 suite "the fixture cache's whole entries":
@@ -34,3 +36,29 @@ suite "the fixture cache's whole entries":
     writeFile(kept / "prog", "")
     check not staleRecordedProgram(kept / "prog")
     check not staleRecordedProgram("")
+
+  test "an rr entry whose metadata names a .partial or gone output folder is absent":
+    # As an rr recording of the stock-Nim flow test made before the stage
+    # recorded in place left it: `rr/`, and metadata naming the staging folder.
+    let dest = root / "src_db-backend_nim_nim_flow_test_nim_rr_stocknim-scenario"
+    createDir(dest / "rr")
+    writeFile(root / "prog", "")
+    proc meta(output: string; sources: seq[string] = @[]) =
+      writeFile(dest / "trace_db_metadata.json", $(%*{
+        "program": root / "prog", "outputFolder": output,
+        "sourceFolders": sources, "lang": 0}))
+    meta(dest & ".partial")
+    check staleRecordedPaths(dest)
+    check not isWholeCachedRecording(dest)
+    meta(root / "gone")
+    check not isWholeCachedRecording(dest)
+    meta(dest, @[dest & ".partial" / "nimcache"])
+    check not isWholeCachedRecording(dest)
+    # the control: the same entry recorded in place is whole, and a source
+    # folder that is merely elsewhere does not make it stale
+    meta(dest, @[root / "elsewhere"])
+    check not staleRecordedPaths(dest)
+    check isWholeCachedRecording(dest)
+    # and a program that is gone does
+    removeFile(root / "prog")
+    check not isWholeCachedRecording(dest)
