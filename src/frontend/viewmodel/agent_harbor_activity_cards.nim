@@ -28,6 +28,14 @@ import ./viewmodels/agent_activity_vm
 
 export agent_activity_vm, session_timeline_vm
 
+const AgainstCardsCaption* =
+  "Today's Agent Activity cards, including a known mis-rendering (issue filed)"
+  ## The one-line caption over the cards half of the comparison story, in
+  ## every host: the cards are drawn as today's pane draws them, and that
+  ## pane draws these events wrongly (every event as a "Thinking" card, an
+  ## event with no text as a bare field name). The caption says so, so the
+  ## mis-rendering is not read as the timeline's.
+
 type
   ActivityAgainstCards* = object
     ## One session's events, as the timeline's source and as the cards.

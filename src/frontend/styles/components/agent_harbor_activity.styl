@@ -314,6 +314,15 @@ AH_ACTIVITY_TURN_GAP = 0.5rem      // above each turn after the first
 .ah-against-timeline
   border-right: 0.0625rem solid colors-ui-border-primary
 
+// The cards half's caption: one caption sentence above today's cards (it
+// wraps in a narrow panel), saying they are today's pane as it draws.
+.ah-against-half > .ah-against-caption
+  flex: 0 0 auto
+  padding: 0.25rem 0.5rem
+  font-size: unit(type-ui-size-caption-md / 16, 'rem')
+  line-height: unit(type-ui-lineheight-caption-md / 16, 'rem')
+  color: colors-ui-text-primary-caption
+
 // A session the source does not hold: an error state, laid out as the
 // notices are (`.empty-overlay`: centred, a step down from the body size).
 .ah-activity-unresolvable

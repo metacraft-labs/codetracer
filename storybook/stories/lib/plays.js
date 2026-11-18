@@ -668,6 +668,10 @@ export const plays = {
     expect(row.getAttribute("data-ah-timeline-events")).toBe(row.getAttribute("data-ah-cards-events"));
     await activityChecks(row.querySelector(".ah-against-timeline"));
     expect(row.querySelector(".ah-against-card-feed .agent-msg-wrapper")).toBeTruthy();
+    // The cards half says the cards are today's pane, which mis-draws these
+    // events, so the mis-rendering is not read as the timeline's.
+    expect(row.querySelector(".ah-against-card-feed > .ah-against-caption")?.textContent)
+      .toMatch(/^Today's Agent Activity cards, including a known mis-rendering/);
   },
   // A playback story of the timeline: the playback bar's check, then the
   // timeline's own.

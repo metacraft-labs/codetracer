@@ -19,7 +19,7 @@
 ## No test doubles: the viewmodels read the seam's own `TimelineDataSource`,
 ## `PendingDataSource` and `FailingDataSource`, over invented events.
 
-import std/[json, sequtils, strutils, unicode, unittest]
+import std/[json, os, sequtils, strutils, tables, unicode, unittest]
 
 import isonim/core/owner
 import nim_agents_isonim_viewmodels/agent_harbor/[data_source, session_events]
@@ -28,6 +28,11 @@ import ../agent_harbor/ah_tui_session_activity
 import ../../styles/generated/design_tokens
 from ../../viewmodel/views/agent_harbor_words import danglesAroundEllipsis,
   pathCutCandidates
+import nim_agents_isonim_viewmodels/agent_harbor/synthetic_timelines
+import ../../viewmodel/agent_harbor_activity_cards
+import ../../viewmodel/viewmodels/agent_activity_feed
+import ../../viewmodel/store/[replay_data_store, types]
+import ../../viewmodel/backend/[mock_backend, backend_service]
 
 const
   Session = "5ca1ab1e-0e11-4e00-8000-00000000e011"
@@ -256,3 +261,55 @@ suite "the chrome":
       check n.attr("message").startsWith(UnresolvablePrefix)
       for vm in [loading, empty, failing, unknown]: vm.dispose()
       disposeRoot()
+
+suite "PENDING: today's Agent Activity cards name each event's kind":
+  # PENDING. Reported as a skip with its reason (the runner surfaces the
+  # `SKIP:` line), never run as a gate: today's Agent Activity pane draws
+  # every Agent Harbor event as a "Thinking" card, and an event with no text
+  # as a bare field or enum name (`aseStatus`, `runCmd`), because the events
+  # reach the cards through a projection that keeps no event kind for them.
+  # The comparison story `SessionActivityAgainstCards` shows it. It is
+  # turned on, by deleting the skip, with the projection's fix; until then
+  # `CT_PENDING_AGENT_ACTIVITY_CARDS=1` runs it, and it fails.
+  #
+  # The cards are fed the comparison story's events through the production
+  # path (`agent_harbor_activity_cards`), over a story store on the mock
+  # backend: nothing is replayed, the cards read the session's store entry.
+  test "every card's heading names its event's kind, and no card body is a bare field name":
+    if getEnv("CT_PENDING_AGENT_ACTIVITY_CARDS") != "1":
+      echo "  SKIP: PENDING until the Agent Activity cards draw Agent Harbor " &
+        "events by their kind (CT_PENDING_AGENT_ACTIVITY_CARDS=1 runs it)"
+      skip()
+    else:
+      createRoot proc(disposeRoot: proc()) =
+        let timeline = syntheticTimeline("against-cards")
+        let store = createReplayDataStore(newMockBackendService().toBackendService())
+        let pair = newActivityAgainstCards(store, timeline.sessionId, timeline.events)
+        var events = initTable[string, AgentServiceEventEntry]()
+        for e in pair.entry.events: events[e.id] = e
+        var problems: seq[string]
+        var cards = 0
+        var current = AgentServiceEventEntry()
+        for row in pair.cards.agentFeed():
+          if row.kind in {frAgentHeader, frUserHeader} and row.messageId in events:
+            inc cards
+            current = events[row.messageId]
+            # A thought may be headed "Thinking"; no other event may.
+            if current.kind != aseThought and "Thinking" in row.plainText:
+              problems.add "the " & $current.kind & " event " & current.id &
+                " is headed '" & row.plainText.strip & "'"
+          elif row.kind in {frText, frCode} and row.messageId == current.id:
+            let body = row.plainText.strip
+            # An enum identifier (`aseStatus`) or the tool's own name.
+            let enumName = body.len > 3 and body.startsWith("ase") and
+              body[3] in {'A'..'Z'} and body.allIt(it in {'a'..'z', 'A'..'Z', '0'..'9'})
+            if enumName or
+                (current.toolName.len > 0 and body == current.toolName):
+              problems.add "the " & $current.kind & " event " & current.id &
+                "'s card body is the bare field name '" & body & "'"
+        for p in problems: echo "  ", p
+        check cards > 0
+        check problems.len == 0
+        pair.cards.dispose()
+        store.dispose()
+        disposeRoot()

@@ -1977,6 +1977,12 @@ proc mountActivityAgainstCards(container: isonim_dom.Element; fixture: string): 
     discard isonim_dom.appendChild(isonim_dom.Node(row), isonim_dom.Node(right))
     discard isonim_dom.appendChild(isonim_dom.Node(container), isonim_dom.Node(row))
     mountTimelineIn(left, vm)
+    let caption = isonim_dom.createElement(isonim_dom.document, cstring"div")
+    isonim_dom.setAttribute(caption, cstring"class", cstring"ah-against-caption")
+    isonim_dom.setAttribute(caption, cstring"data-ah-against-caption", cstring"")
+    discard isonim_dom.appendChild(isonim_dom.Node(caption),
+      isonim_dom.createTextNode(isonim_dom.document, cstring(AgainstCardsCaption)))
+    discard isonim_dom.appendChild(isonim_dom.Node(right), isonim_dom.Node(caption))
     discard isonim_dom.appendChild(isonim_dom.Node(right), isonim_dom.Node(
       renderAgentActivityPanel[WebRenderer, isonim_dom.Element](WebRenderer(), pair.cards, 102,
         "storybook-agent-input-against-cards")))

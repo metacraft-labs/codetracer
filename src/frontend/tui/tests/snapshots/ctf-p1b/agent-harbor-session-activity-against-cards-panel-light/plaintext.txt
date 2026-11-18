@@ -1,6 +1,6 @@
  Agent Activity  ⚲ ✕
- running                           Connected      aseStatus
- › Make the upload client retry with jitter.    ▾ Thinking
+ running                           Connected    Today's Agent Activity cards, including a
+ › Make the upload client retry with jitter.    known mis-rendering (issue filed)
  ▸ Thinking: Read the client and its tests b…     rg
  ▸ Read 4 files                                 ▾ Thinking
  ▸ Searched 2 times                               src/upload/backoff.py:22: time.sleep(delay)

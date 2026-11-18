@@ -254,7 +254,15 @@ proc draw*(m: AhTuiMount) =
       c.area("against-gap", top, half - 1, 1, h, c.tone.filters)
       c.area("card-feed", top, half, m.cols - half, h, c.tone.body)
       let cards = m.cards.cards
-      let area = CellArea(col: half + 1, row: top, width: m.cols - half - 2, height: h)
+      # The caption over the cards half (`AgainstCardsCaption`): today's
+      # cards as that pane draws them, wrapped in the caption's ink.
+      let captionLines = wrapCells(AgainstCardsCaption, m.cols - half - 2)
+      for k, line in captionLines:
+        discard c.put(top + k, half + 1, line, c.p.textCaption)
+      discard c.node(c.root, top, half, m.cols - half, captionLines.len,
+                     [("against-caption", AgainstCardsCaption)])
+      let area = CellArea(col: half + 1, row: top + captionLines.len,
+                          width: m.cols - half - 2, height: h - captionLines.len)
       let screen = layoutAgent(AgentPaneModel(loaded: true, rows: cards.agentFeed(),
         prompt: promptPlaceholder(cards), promptIsPlaceholder: true,
         scroll: initFeedScroll()), area)

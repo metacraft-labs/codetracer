@@ -302,16 +302,38 @@ proc mountAgentHarborStoryGpui*(r: GpuiRenderer; surface, fixture: string;
         r.appendChild(row, r.box(pairs = [("width", "1px"), ("height", $bodyH & "px"),
                                          ("background", p.borderPrimary),
                                          ("flex-shrink", "0")]))
-        m.cardsFeed = r.box(column = true, pairs = [("width", $(bodyW - half) & "px"),
-                                                    ("height", $bodyH & "px"),
+        # The cards half: a caption saying these are today's cards as that
+        # pane draws them (`AgainstCardsCaption`; 12px on 16px lines,
+        # wrapped, 4px above and below, 8px in, as the web's
+        # `.ah-against-caption`), then the cards below it.
+        let halfW = bodyW - half
+        let captionH = wrappedRows(AgainstCardsCaption, CaptionPx, halfW - 16) *
+                       DetailLinePx + 8
+        let cardsHalf = r.box(column = true, pairs = [("width", $halfW & "px"),
+                                                      ("height", $bodyH & "px"),
+                                                      ("flex-shrink", "0")])
+        let caption = r.box(pairs = [("height", $captionH & "px"), ("flex-shrink", "0"),
+                                     ("padding-left", "8px"), ("padding-right", "8px"),
+                                     ("padding-top", "4px")])
+        r.tag(caption, "against-caption", AgainstCardsCaption)
+        r.appendChild(caption, r.text(AgainstCardsCaption, CaptionPx, p.textCaption,
+                                      shrink = false,
+                                      pairs = [("white-space", "pre-wrap"),
+                                               ("line-height", $DetailLinePx & "px"),
+                                               ("flex-shrink", "1"), ("min-width", "0px")]))
+        r.appendChild(cardsHalf, caption)
+        m.cardsFeed = r.box(column = true, pairs = [("width", $halfW & "px"),
+                                                    ("height", $(bodyH - captionH) & "px"),
                                                     ("flex-shrink", "0")])
         r.tag(m.cardsFeed, "card-feed", "")
         discard r.drawAgentActivity(m.cardsFeed, m.cards.cards.agentFeed(),
                                     promptPlaceholder(m.cards.cards), true, false,
                                     GAgentPane(scroll: initFeedScroll()),
-                                    PxRect(x: FrameInsetPx + half, y: FrameTitlePx + 8,
-                                           w: bodyW - half, h: bodyH))
-        r.appendChild(row, m.cardsFeed)
+                                    PxRect(x: FrameInsetPx + half,
+                                           y: FrameTitlePx + 8 + captionH,
+                                           w: halfW, h: bodyH - captionH))
+        r.appendChild(cardsHalf, m.cardsFeed)
+        r.appendChild(row, cardsHalf)
         r.appendChild(host, row)
       else:
         m.timeline = createSessionActivityStoryVM(fixture, pb)

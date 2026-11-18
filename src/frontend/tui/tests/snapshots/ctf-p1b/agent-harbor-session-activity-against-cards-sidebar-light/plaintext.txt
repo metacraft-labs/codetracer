@@ -1,9 +1,9 @@
  Agent Activity  ⚲ ✕
- running               ▾ Thinking
- › Make the upload       src/upload/client.
-   client retry          py:41: for
-   with jitter.          attempt in
- ▸ Thinking: Read t…     range(retries):
+ running               Today's Agent
+ › Make the upload     Activity cards,
+   client retry        including a known
+   with jitter.        mis-rendering
+ ▸ Thinking: Read t…   (issue filed)
  ▸ Read 4 files        ▾ Thinking
  ▸ Searched 2 times      aseStatus
  ▸ Ran 3… (1 failed)   ▾ Thinking

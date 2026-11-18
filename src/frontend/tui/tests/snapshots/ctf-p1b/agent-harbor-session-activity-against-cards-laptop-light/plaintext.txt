@@ -1,5 +1,5 @@
  Agent Activity  ⚲ ✕
- running                                                                      Connected    ▾ Thinking
+ running                                                                      Connected    Today's Agent Activity cards, including a known mis-rendering (issue filed)
  › Make the upload client retry with jitter.                                                 Make the upload client retry with jitter.
  ▸ Thinking: Read the client and its tests before changing anything.                       ▾ Thinking
  ▸ Read 4 files                                                                              Read the client and its tests before changing anything.
