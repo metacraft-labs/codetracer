@@ -8,7 +8,7 @@ electron split 109
 electron lower-tier 86
 gpui user-level 1
 gpui split 40
-gpui lower-tier 53
+gpui lower-tier 54
 terminal user-level 36
 terminal split 8
 terminal lower-tier 37

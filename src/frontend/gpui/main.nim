@@ -8059,6 +8059,8 @@ proc applyHoverReply(r: GpuiRenderer; reply: AutoHideReply) =
 
 proc hoverTick() {.cdecl.}
 proc vcsTick() {.cdecl.}
+proc vcsPollTick() {.cdecl.}
+  ## Forward-declared; defined with the VCS pane's refresh.
 proc recordTick() {.cdecl.}
 proc searchTick() {.cdecl.}
 proc requestsTick() {.cdecl.}
@@ -8087,6 +8089,13 @@ proc runGpuiNimTrace(r: GpuiRenderer; action: NimTraceAction; path = "";
   ## Forward-declared; defined with the editor's Nim trace operations.
   ## PLAT-51: how often a welcome tab's running `ct record` is polled.
 var gVcsDirectory = ""
+const VcsPollMs = 50
+  ## How often a VCS read out on the background worker is looked for.
+var gVcsBackground = false
+  ## Whether the VCS pane reads git off the loop's thread: in a window, so a
+  ## slow `git` never holds its input; not in a one-shot report, which must
+  ## hold the read it reports.
+  ## How often a VCS read out on the background worker is looked for.
   ## The repository the VCS pane shows, re-read every `VCSRefreshIntervalMs`
   ## by `vcsTick` and on every return to the window by `vcsWindowActivated`;
   ## "" when the window has no VCS pane.
@@ -8148,6 +8157,15 @@ proc armHoverTick() =
     if gArmedTick != want:
       gArmedTick = want
       gpui_set_tick(uint32(ShellPollMs), shellTick)
+    return
+  # A VCS read out on the background worker: polled every `VcsPollMs` until
+  # it comes back, so the pane shows it then, not one refresh interval
+  # later.
+  if due < 0 and gpuiVcsBusy():
+    let want = (due: -9'i64, vcs: false)
+    if gArmedTick != want:
+      gArmedTick = want
+      gpui_set_tick(uint32(VcsPollMs), vcsPollTick)
     return
   # PLAT-51: a welcome tab's `ct record` is polled on the same tick, every
   # `RecordPollMs`, while it runs.
@@ -8578,7 +8596,9 @@ proc attachVcs(leafSet: var GpuiLeafSet; directory: string) =
   ## the same rule.
   for leaf in leafSet.leaves.mitems:
     if leaf.kind == glkBuiltin and leaf.builtin == paneVcs:
-      leaf.vm = ViewModel(openGpuiVcs(directory))
+      # In the background: the first read must not hold the window (a slow
+      # `git` froze it at open); `vcsPollTick` applies it when it comes.
+      leaf.vm = ViewModel(openGpuiVcs(directory, background = gVcsBackground))
       gVcsDirectory = directory
   let h = agentHost()
   if not h.isNil:
@@ -10459,13 +10479,39 @@ proc refreshVcsPane() =
   for leaf in gLeafSet.leaves:
     if leaf.kind == glkBuiltin and leaf.builtin == paneVcs and
        not leaf.vm.isNil:
-      if refreshGpuiVcs(VCSVM(leaf.vm), gVcsDirectory):
+      if refreshGpuiVcs(VCSVM(leaf.vm), gVcsDirectory, background = gVcsBackground):
         var r: GpuiRenderer
         let pane = gPanes.getOrDefault($paneVcs)
         redrawWindowLeaf(r, pane, leaf)
         applyTextFaces(r, pane)
         traceGesture("vcs refreshed")
       break
+  # the read it asked for comes back on the worker: poll for it
+  armHoverTick()
+
+proc pollVcsPane() =
+  ## Apply a background read of the VCS pane that has come back (never start
+  ## one), and draw the pane again when what it shows changed.
+  if gVcsDirectory.len == 0:
+    return
+  for leaf in gLeafSet.leaves:
+    if leaf.kind == glkBuiltin and leaf.builtin == paneVcs and
+       not leaf.vm.isNil:
+      if pollGpuiVcs(VCSVM(leaf.vm), gVcsDirectory):
+        var r: GpuiRenderer
+        let pane = gPanes.getOrDefault($paneVcs)
+        redrawWindowLeaf(r, pane, leaf)
+        applyTextFaces(r, pane)
+        traceGesture("vcs refreshed")
+      break
+
+proc vcsPollTick() {.cdecl.} =
+  ## Every `VcsPollMs` while a VCS read is out: apply it when it is back,
+  ## then let the scheduler pick the next tick (this one again while the
+  ## worker is still busy).
+  pollVcsPane()
+  gArmedTick = (due: -2'i64, vcs: false)
+  armHoverTick()
 
 proc followVcsViewport(r: GpuiRenderer) =
   ## THE VCS HISTORY READS WHAT ITS LIST SHOWS (Viewport-Driven-Loading V6):
@@ -10486,10 +10532,13 @@ proc followVcsViewport(r: GpuiRenderer) =
       let vm = VCSVM(leaf.vm)
       let w = vcsHistoryWindow(vcsPaneView(vm).root, vcsScroll.top,
                                vcsScroll.rows)
-      if followGpuiVcsViewport(vm, gVcsDirectory, w.rows, w.firstRow):
+      if followGpuiVcsViewport(vm, gVcsDirectory, w.rows, w.firstRow,
+                               background = gVcsBackground):
         redrawListPane(r, paneVcs)
         traceGesture("vcs history read to " & $vm.commits.val.len)
       break
+  # a further read it asked for comes back on the worker: poll for it
+  armHoverTick()
 
 proc followListViewports(r: GpuiRenderer) =
   ## The call trace and the event log follow the bodies they were laid out
@@ -16515,6 +16564,9 @@ proc main() =
   of gckOpen:
     var cmd = cmd
     applyWindowPolicy(cmd)
+    # An open window reads git in the background; a one-shot plan or frame
+    # reads it before it reports, as it always did.
+    gVcsBackground = opensWindow(cmd)
     try:
       quit(runOpen(cmd))
     except DapLaunchRefusedError as e:

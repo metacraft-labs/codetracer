@@ -2,7 +2,7 @@
 # gpui-window-captures.sh — RE-TAKE the GPUI window's measurements on a real
 # compositor and assert them, end to end, from nothing but a checkout.
 #
-#   bash ci/test/gpui-window-captures.sh [plat45] [plat47] [plat48] [plat68] [plat69] [plat59] [plat70a] [plat70b] [m71]
+#   bash ci/test/gpui-window-captures.sh [plat45] [plat47] [plat48] [plat68] [plat69] [plat59] [plat70a] [plat70b] [m71] [vcsoffloop]
 #   just gpui-window-captures                 # all nine
 #   bash ci/test/gpui-window-captures.sh --shim-only    # step 1 only: the
 #                                             # windowed shim and the virtual
@@ -84,11 +84,11 @@ case "${1:-}" in
 	;;
 esac
 which=("$@")
-[ "${#which[@]}" -gt 0 ] || which=(plat45 plat47 plat48 plat59 plat68 plat69 plat70a plat70b m71)
+[ "${#which[@]}" -gt 0 ] || which=(plat45 plat47 plat48 plat59 plat68 plat69 plat70a plat70b m71 vcsoffloop)
 for w in "${which[@]}"; do
 	case "${w}" in
-	plat45 | plat47 | plat48 | plat59 | plat68 | plat69 | plat70a | plat70b | m71) ;;
-	*) fail "unknown capture '${w}' (plat45, plat47, plat48, plat59, plat68, plat69, plat70a, plat70b, m71)" ;;
+	plat45 | plat47 | plat48 | plat59 | plat68 | plat69 | plat70a | plat70b | m71 | vcsoffloop) ;;
+	*) fail "unknown capture '${w}' (plat45, plat47, plat48, plat59, plat68, plat69, plat70a, plat70b, m71, vcsoffloop)" ;;
 	esac
 done
 
@@ -256,6 +256,14 @@ for w in "${which[@]}"; do
 		in_compositor_shell "CODETRACER_PLAT68_ISONIM_GPUI='${ISONIM_GPUI}' bash ci/test/plat68-cua-window.sh" &&
 			bash ci/test/plat68-cua-window.sh --record &&
 			suite gpui-shell src/frontend/gpui/tests/test_plat68_cua_window.nim ||
+			failed+=("${w}")
+		;;
+	vcsoffloop)
+		# The window answers a key while the VCS pane's git is held by a
+		# fake git first on PATH; the record is the window's own trace order.
+		in_compositor_shell "CODETRACER_VCSOFF_ISONIM_GPUI='${ISONIM_GPUI}' bash ci/test/gpui-vcs-off-loop-window.sh" &&
+			bash ci/test/gpui-vcs-off-loop-window.sh --record &&
+			suite gpui-shell src/frontend/gpui/tests/test_gpui_vcs_off_loop_window.nim ||
 			failed+=("${w}")
 		;;
 	plat59)
