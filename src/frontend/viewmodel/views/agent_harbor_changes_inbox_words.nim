@@ -68,6 +68,10 @@ type
     onTyping*: proc(typing: bool)
       ## Told whether the page's text field holds typed text, so the inbox's
       ## auto-switch holds still while the operator types.
+    onContinue*: proc()
+      ## The host's action behind a completed sign-in's `Continue`: moving
+      ## on from the item (the Inbox panel's Next); the button is drawn only
+      ## when the host has one.
 
 # ---------------------------------------------------------------------------
 # Shared
@@ -87,6 +91,8 @@ const
   DiscardLabel* = "Discard"
   RequestChangesLabel* = "Request Changes"
   RevertLabel* = "Undo / Revert"
+  ConfirmRevertLabel* = "Revert"
+    ## The confirmation's own button: the press that sends the revert.
   SummaryLabel* = "Summary"
   DiffLabel* = "Diff"
   RequestChangesPlaceholder* = "What should change in this spec?"
@@ -130,6 +136,8 @@ const
   DenyLabel* = "Deny"
   AcknowledgeLabel* = "Acknowledge"
   OpenSignInLabel* = "Open sign-in"
+  ContinueLabel* = "Continue"
+    ## A completed sign-in's press: move on from the item.
   PasswordPlaceholder* = "Password"
   AnswerPlaceholder* = "Your answer"
   InstructionPlaceholder* = "Your next instruction"
@@ -169,15 +177,19 @@ proc testStatusWord*(entry: VerificationEntry): string =
   ## a status with no known leading token, the status as written.
   if entry.status == vsUnknown: entry.rawStatus.strip else: $entry.status
 
-proc actionStatusText*(status: ActionStatus; reason: string): string =
+proc actionStatusText*(status: ActionStatus; reason: string;
+                       kind = oaApproveSpecChange): string =
   ## The line under a card for its last write: submitting, sent, or failed
-  ## with the source's reason; "" before any.
+  ## with the source's reason; "" before any. A revert says what it does
+  ## (`Reverting…`, `Reverted`, `Revert failed: <reason>`).
+  let revert = kind == oaRevertSpecChange
   case status
   of astIdle: ""
-  of astSubmitting: "Sending\xE2\x80\xA6"
-  of astConfirmed: "Sent"
+  of astSubmitting: (if revert: "Reverting\xE2\x80\xA6" else: "Sending\xE2\x80\xA6")
+  of astConfirmed: (if revert: "Reverted" else: "Sent")
   of astFailed:
-    if reason.len > 0: "Failed: " & reason else: "Failed"
+    let head = if revert: "Revert failed" else: "Failed"
+    if reason.len > 0: head & ": " & reason else: head
 
 proc actionStatusRole*(status: ActionStatus): string =
   case status
@@ -207,6 +219,11 @@ proc tabTitle*(tab: ChangesTabView): string =
 proc changeStateRole*(card: SpecCardView): string =
   ## The role of a card's state word, as the viewmodel names it.
   if card.stateRole.len > 0: card.stateRole else: "quiet"
+
+proc revertQuestion*(card: SpecCardView): string =
+  ## The question a card asks after Undo / Revert, before anything is sent:
+  ## what reverting undoes, named by the spec's path.
+  "Revert this task's changes to " & card.path & "?"
 
 proc commitsText*(card: SpecCardView): string =
   card.commits.join(" ")
@@ -258,13 +275,6 @@ proc inboxCountsText*(vm: InboxVM): string =
   if feedback > 0:
     result.add Dot & $feedback & (if feedback == 1: " feedback request" else: " feedback requests")
 
-proc pendingFeedbackFor*(items: openArray[InboxItem]; sessionId: string): int =
-  ## How many feedback requests of the session `sessionId` the inbox holds:
-  ## the count a feedback row shows (`Needs Follow-up`, `N pending`). Here,
-  ## not in a view, so every host counts the same way.
-  for item in items:
-    if item.kind == ikAsyncFeedback and item.session.id == sessionId: inc result
-
 proc kindRole*(kind: InboxKind): string =
   ## The role of an inbox row's kind mark: an agent stopped on it (a
   ## question, a permission, a sign-in, an ended turn) amber; a feedback
@@ -275,6 +285,15 @@ proc kindRole*(kind: InboxKind): string =
   of ikEndedTurn: "idle"
   of ikAsyncFeedback: "info"
   of ikUnknown: "quiet"
+
+proc loginStateRole*(state: LoginState; hasRequest: bool): string =
+  ## The role of a login request's state line: completed green, failed red,
+  ## pending, cancelling and no request quiet.
+  if not hasRequest: return "quiet"
+  case state
+  of lsCompleted: "success"
+  of lsFailed: "error"
+  of lsPending, lsCancelling: "quiet"
 
 proc kindWordOf*(kind: InboxKind): string =
   ## A page's kind words, the same as its row's (`inbox.kindWord`).

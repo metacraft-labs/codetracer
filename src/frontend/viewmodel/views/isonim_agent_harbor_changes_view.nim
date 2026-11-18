@@ -34,7 +34,10 @@
 ## **Writes.** Approve, Request Changes, Undo / Revert, Approve & Apply and
 ## Discard call the viewmodel, which sends them through the data source's
 ## `submitAction` and nothing else; a card's last write's state is the
-## tracker's, shown under it. Nothing here talks to a server.
+## tracker's, shown under it. Undo / Revert only asks: while the viewmodel
+## says a card waits for confirmation (`confirmingRevert`), the card's
+## buttons give way to the question and its `Revert` and `Cancel`, and the
+## revert is sent on `Revert` alone. Nothing here talks to a server.
 ##
 ## Every element a host test reads carries its fact (`data-ah-*`): the tab
 ## (`data-ah-tab`, `data-ah-count`, `data-ah-active`), a card
@@ -246,8 +249,24 @@ proc renderCardActions[R, N](r: R; vm: ChangesVM; card: SpecCardView): N =
     if card.canApprove:
       add(ApproveLabel, proc() = discard vm.approve(key))
     if card.tier == stSpec:
-      add(RevertLabel, proc() = discard vm.revert(key))
+      add(RevertLabel, proc() = discard vm.requestRevert(key))
   add(RequestChangesLabel, proc() = vm.openRequestChanges(key))
+
+proc renderRevertConfirm[R](r: R; vm: ChangesVM; card: SpecCardView): auto =
+  ## The question Undo / Revert asks, in place of the card's buttons: the
+  ## spec it would revert, `Revert` (the press that sends it) and `Cancel`.
+  ui(r):
+    tdiv(class = "ah-revert-confirm", `data-ah-confirm` = "revert"):
+      tdiv(class = "ah-revert-question"):
+        text revertQuestion(card)
+      tdiv(class = "ah-card-actions"):
+        button(class = "ct-button-sm-primary ah-card-action",
+               `data-ah-action` = ConfirmRevertLabel,
+               onclick = proc() = discard vm.confirmRevert()):
+          text ConfirmRevertLabel
+        button(class = "ct-button-sm-secondary ah-card-action", `data-ah-action` = CancelLabel,
+               onclick = proc() = vm.cancelRevert()):
+          text CancelLabel
 
 proc renderRequestInput[R, N](r: R; vm: ChangesVM): N =
   ## The inline Request Changes input under a card: its text (kept by the
@@ -336,10 +355,13 @@ proc renderSpecCard[R, N](r: R; vm: ChangesVM; card: SpecCardView): N =
       tdiv(class = "ah-card-summary"):
         text card.summary
     r.appendRendered(body, s)
-  r.appendRendered(body, renderCardActions[R, N](r, vm, card))
+  if card.confirmingRevert:
+    r.appendRendered(body, renderRevertConfirm(r, vm, card))
+  else:
+    r.appendRendered(body, renderCardActions[R, N](r, vm, card))
   if card.requestOpen:
     r.appendRendered(body, renderRequestInput[R, N](r, vm))
-  let status = actionStatusText(card.action, card.actionReason)
+  let status = actionStatusText(card.action, card.actionReason, card.actionKind)
   if status.len > 0:
     let line = ui(r):
       tdiv(class = "ah-action-status " & roleClass(actionStatusRole(card.action)),

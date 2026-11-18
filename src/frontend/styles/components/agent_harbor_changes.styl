@@ -431,6 +431,20 @@ AH_STATE_DOT = 0.4375rem
 .ah-action-status
   font-size: ah-rem(type-ui-size-caption-md)
 
+// Undo / Revert's question, in place of the card's buttons until the reader
+// answers it: the card's own prose, then Revert and Cancel. No box: it sits
+// on the card's ground like the Request Changes input.
+.ah-revert-confirm
+  display: flex
+  flex-direction: column
+  gap: 0.375rem
+
+.ah-revert-question
+  font-size: ah-rem(type-ui-size-body-md)
+  line-height: ah-rem(type-ui-lineheight-body-md)
+  color: colors-ui-text-primary-body
+  word-break: break-word
+
 // ---------------------------------------------------------------------------
 // A diff's hunks (a spec card's Diff side, a file's diff)
 // ---------------------------------------------------------------------------
