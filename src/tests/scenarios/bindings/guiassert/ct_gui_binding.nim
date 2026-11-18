@@ -1203,9 +1203,21 @@ proc readVariables(ctx: GuiContext; f: Frame; t: var Tree; b: PaneBox) =
   pane.unreadable["focused"] = "keyboard focus has no mark of its own on this pane"
   t.add(t.root, pane)
   var n = 0
+  # A name's first letter is lost to the engine now and then (`value` read
+  # `alue`, its glyph inside the word's box): each row is read again
+  # stretched (cached with the frame), and that reading's name replaces this
+  # one only when it is this one with one or two letters before it restored.
   for r in rows:
-    let (ok, name, value, typ) = splitVariableRow(r.text)
+    var (ok, name, value, typ) = splitVariableRow(r.text)
     if not ok: continue
+    let again = ctx.wordsS(f, b.left, r.y0 - 3, min(320, b.right - b.left), r.y1 - r.y0 + 6, psm = 7)
+    for wd in again:
+      let c = wd.text.find(':')
+      if c <= 0: continue
+      let other = wd.text[0 ..< c]
+      if other.len > name.len and other.len - name.len <= 2 and other.endsWith(name):
+        name = other
+      break
     let v = rowNode("variable", b, r, %*{"name": name, "value": value, "type": typ},
                     @[("name", name)])
     v.unreadable["expanded"] = "an expanded value is told by its disclosure glyph"
