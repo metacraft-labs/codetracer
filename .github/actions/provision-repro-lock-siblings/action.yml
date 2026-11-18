@@ -58,11 +58,22 @@ description: |
   members of the develop set that are also solved packages in the lock, i.e.
   what ``repro.nim`` ``uses`` from source --
 
-      isonim, isonim-tui, codetracer-trace-format-nim, nim-everywhere,
-      nim-agent-harbor, nim-agents, nim-acp, test-certificates-tools, io-mon,
-      nim-stackable-hooks, codetracer-image-diff, isonim-render-serve,
-      nim-termctl, nim-pty, nim-shm-queue, isonim-gpui, isonim-freya,
-      isonim-cocoa   (repro.lock, 2026-10-31)
+      codetracer-beam-recorder, codetracer-cairo-recorder,
+      codetracer-cardano-recorder, codetracer-flow-recorder,
+      codetracer-image-diff, codetracer-js-recorder,
+      codetracer-leo-recorder, codetracer-miden-recorder,
+      codetracer-move-recorder, codetracer-python-recorder,
+      codetracer-ruby-recorder, codetracer-trace-format,
+      codetracer-trace-format-nim, codetracer-wasm-instrumenter,
+      codetracer-wasm-recorder, io-mon, isonim, isonim-cocoa,
+      isonim-freya, isonim-gpui, isonim-render-serve, isonim-tui,
+      nim-acp, nim-agent-harbor, nim-agents,
+      nim-agents-isonim-viewmodels, nim-cli-spec, nim-everywhere,
+      nim-faststreams, nim-pty, nim-shm-gset, nim-shm-lease,
+      nim-shm-queue, nim-stackable-hooks, nim-stew, nim-termctl,
+      reprobuild, reprobuild-test-adapters, runquota,
+      test-certificates-tools
+      (repro.lock, 2026-11-18)
 
   ``ci/repro-lock-build-input-siblings.sh`` derives that list from the lock
   and the step passes it as ``--only=``, so the lock stays the only answer
