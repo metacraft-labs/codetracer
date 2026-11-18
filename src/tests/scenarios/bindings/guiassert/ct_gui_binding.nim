@@ -472,8 +472,14 @@ proc sessionTabs(ctx: GuiContext; f: Frame): seq[(string, int)] =
   if omniRight < 0: return
   var rest: seq[Word]
   for w in ws:
-    if w.x > omniRight + 24 and w.x < f.image.width - 120 and
-       w.text notin ["x", "X", "×", "+", "*", "~"]:
+    # A tab's close `×` and the strip's `+` are no title: OCR reads them as
+    # `x`, `+` or with stray marks around (`_+_`), never with a letter or a
+    # digit beside them.
+    var titled = false
+    for c in w.text:
+      if c.isAlphaNumeric: titled = true
+    if w.x > omniRight + 24 and w.x < f.image.width - 120 and titled and
+       w.text notin ["x", "X"]:
       rest.add w
   rest.sort(proc (a, b: Word): int = cmp(a.x, b.x))
   var cur = ""
