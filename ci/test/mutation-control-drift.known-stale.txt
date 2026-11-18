@@ -191,7 +191,7 @@ src/frontend/viewmodel/tests/unit/plat34-front-end-mutation-control.sha256	ci/li
 # 96daf956e5 (a file opened in a second window, host-page clients) moved the
 # Playwright binding under its record. A re-grade of the arms whose needles
 # sit in it is owed.
-src/tests/scenarios/plat66-pack-mutation-control.sha256	src/tests/scenarios/bindings/playwright/codetracer-binding.ts	dac9e35953b0d93636c2284d9c9a858c2bba982b92e9311b0f41fb666e6879c0	e5b5fc4defcd8607d16baa17736cb782bb93f4c7b589735aad5f315cdf818c78
+src/tests/scenarios/plat66-pack-mutation-control.sha256	src/tests/scenarios/bindings/playwright/codetracer-binding.ts	dac9e35953b0d93636c2284d9c9a858c2bba982b92e9311b0f41fb666e6879c0	ef93749622a4bf254ac1859cb65e5e95f2b19f2b383f37d81c2a4a64676b92c4
 # plat51: graded at f1788c93b4; 8f8906730e  moved src/db-
 # backend/src/dap_handler.rs after the grade. Re-grade the arms whose needles
 # sit in them.
