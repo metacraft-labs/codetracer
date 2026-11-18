@@ -132,6 +132,29 @@ if paramCount() >= 1 and paramStr(1) == "dap-server":
       discard stdin.readLine()
     except EOFError:
       discard
+  of "stall-worker":
+    # The shape of a real stall: the engine waits on a worker of its own, and
+    # the worker waits too. Each reads a pipe only the other could write, so
+    # neither ever returns until the engine is killed: the worker's read
+    # then sees EOF and it exits, so the case leaves no process behind.
+    when defined(posix):
+      var toWorker, toEngine: array[2, cint]
+      doAssert pipe(toWorker) == 0 and pipe(toEngine) == 0
+      let worker = fork()
+      doAssert worker >= 0
+      if worker == 0:
+        discard close(toWorker[1])
+        discard close(toEngine[0])
+        var b: char
+        discard read(toWorker[0], addr b, 1)
+        quit(0)
+      discard close(toWorker[0])
+      discard close(toEngine[1])
+      writeFile(getEnv("CT_STDIO_DIAGNOSTICS_MARKER"), $worker)
+      var b: char
+      discard read(toEngine[0], addr b, 1)
+    else:
+      raise newException(IOError, "stall-worker fixture requires POSIX fork")
   of "held":
     sendBody()
     stderr.write(Diagnostic)
@@ -386,6 +409,45 @@ suite "stdio DAP diagnostics":
                 not error.msg.contains(dumps)
 
   when defined(posix):
+    test "a stall's dump covers the engine's own workers":
+      # The engine waits on a worker it started, and the worker is what is
+      # stuck. The dump must say what THAT process is doing: its status, its
+      # wait channel and each thread's blocked call, under its own heading.
+      let root = createTempDir("ct-stall-worker-", "")
+      defer: removeDir(root)
+      let dumps = root / "engine-stalls"
+      let previous = getEnv(StallDiagnosticsEnvVar)
+      defer: putEnv(StallDiagnosticsEnvVar, previous)
+      putEnv(StallDiagnosticsEnvVar, dumps)
+      let marker = root / "worker-pid"
+      let backend = start("stall-worker", marker)
+      defer: backend.close()
+      let deadline = getMonoTime() + initDuration(seconds = 30)
+      while getMonoTime() < deadline and
+            (not fileExists(marker) or readFile(marker).len == 0):
+        sleep(5)
+      require fileExists(marker)
+      let worker = readFile(marker).strip()
+      backend.bound.timeoutMs = 100
+      try:
+        discard backend.readDapMessage()
+        check false
+      except DapStalledError as error:
+        let at = error.msg.find("engine state: ")
+        require at >= 0
+        let dump = readFile(error.msg[at + "engine state: ".len .. ^1].strip())
+        checkpoint(dump)
+        check dump.contains("== descendants\n1\n")
+        let heading = "== descendant " & worker & " ("
+        check dump.contains(heading)
+        let own = dump[dump.find(heading) .. ^1]
+        check own.contains("State:")
+        check own.contains("wchan: ")
+        # The worker's thread is blocked in read(2): syscall 0 on x86-64,
+        # 63 on aarch64; either way the line names a number, not an error.
+        check own.contains(worker & " syscall: ")
+        check not own.contains(" syscall: (unreadable")
+
     test "close kills and reaps a direct child that ignores stdin EOF":
       let backend = start("stubborn")
       let childPid = Pid(processID(backend.process))

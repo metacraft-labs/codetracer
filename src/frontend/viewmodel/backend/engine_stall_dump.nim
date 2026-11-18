@@ -24,17 +24,29 @@
 ## a `futex` is a lock), so a dump without a backtrace still says what the
 ## engine was waiting for.
 ##
+## AND THE ENGINE'S CHILDREN. The replay server does much of its work in
+## processes of its own (`ct_native_replay` workers, `rr` and its tracees), and
+## a stalled server is often only waiting on one of them: on one stall its flow
+## thread sat in a `read` on a worker's socket, and the worker's state, which
+## said why, was not in the dump. Every descendant, found through
+## `/proc/<pid>/task/*/children`, gets the same status, wait channel and
+## per-thread lines. Only the engine itself is attached with a debugger, since
+## a tracee under `rr` cannot be attached again. The walk is bounded by
+## `MaxDescendants` and by the same `ToolTimeoutSeconds`.
+##
 ## BOUNDED AND SILENT ON FAILURE: each external tool runs under `timeout`, a
 ## file that cannot be read is noted and skipped, and nothing here raises —
 ## the stall's own error is what the caller reports.
 
-import std/[os, osproc, strutils, times]
+import std/[monotimes, os, osproc, strutils, times]
 
 const
   StallDiagnosticsEnvVar* = "CODETRACER_STALL_DIAGNOSTICS_DIR"
     ## The directory a stall's dump goes to; unset (the default), nothing is
     ## written. The test lanes set it under `test-logs/`, which CI uploads.
   ToolTimeoutSeconds = 20
+  MaxDescendants = 64
+    ## A fork bomb is not a reason for the dump to never finish.
 
 proc section(title, body: string): string =
   "== " & title & "\n" & body.strip(leading = false) & "\n\n"
@@ -54,6 +66,48 @@ proc runTool(args: seq[string]): string =
   except CatchableError as e:
     "(" & args[0] & " failed: " & e.msg & ")"
 
+proc threadsText(proc0: string): string =
+  ## Each thread's `stat`, `wchan`, `syscall` and, where readable, `stack`.
+  try:
+    for kind, path in walkDir(proc0 / "task"):
+      let tid = path.extractFilename
+      result.add tid & " stat: " & readOr(path / "stat").strip() & "\n"
+      result.add tid & " wchan: " & readOr(path / "wchan").strip() & "\n"
+      result.add tid & " syscall: " & readOr(path / "syscall").strip() & "\n"
+      let stack = readOr(path / "stack").strip()
+      if stack.len > 0:
+        result.add tid & " stack:\n" & stack & "\n"
+  except CatchableError as e:
+    result.add "(task list unreadable: " & e.msg & ")\n"
+
+proc childrenOf(pid: int): seq[int] =
+  ## The direct children of every thread of `pid`.
+  try:
+    for kind, path in walkDir("/proc" / $pid / "task"):
+      let text =
+        try: readFile(path / "children")
+        except CatchableError: ""
+      for token in text.splitWhitespace:
+        try: result.add parseInt(token)
+        except ValueError: discard
+  except CatchableError:
+    discard
+
+proc descendantsOf*(pid: int): seq[(int, int)] =
+  ## Every descendant of `pid` as (pid, parent), breadth first, at most
+  ## `MaxDescendants`, within `ToolTimeoutSeconds`.
+  let deadline = getMonoTime() + initDuration(seconds = ToolTimeoutSeconds)
+  var frontier = @[pid]
+  while frontier.len > 0 and result.len < MaxDescendants and
+        getMonoTime() < deadline:
+    var next: seq[int]
+    for parent in frontier:
+      for child in childrenOf(parent):
+        if result.len >= MaxDescendants: break
+        result.add (child, parent)
+        next.add child
+    frontier = next
+
 proc engineStateText*(pid: int; reason: string): string =
   ## The dump's text, for `pid`, headed by `reason` (the stall's message).
   let proc0 = "/proc" / $pid
@@ -61,27 +115,26 @@ proc engineStateText*(pid: int; reason: string): string =
                    $now().utc & "\n" & reason)
   result.add section("status", readOr(proc0 / "status"))
   result.add section("wchan", readOr(proc0 / "wchan"))
-  var tasks = ""
-  try:
-    for kind, path in walkDir(proc0 / "task"):
-      tasks.add path.extractFilename & " stat: " &
-                readOr(path / "stat").strip() & "\n"
-      tasks.add path.extractFilename & " wchan: " &
-                readOr(path / "wchan").strip() & "\n"
-      tasks.add path.extractFilename & " syscall: " &
-                readOr(path / "syscall").strip() & "\n"
-      let stack = readOr(path / "stack").strip()
-      if stack.len > 0:
-        tasks.add path.extractFilename & " stack:\n" & stack & "\n"
-  except CatchableError as e:
-    tasks.add "(task list unreadable: " & e.msg & ")\n"
-  result.add section("threads", tasks)
+  result.add section("threads", threadsText(proc0))
   let backtrace =
     if findExe("gdb").len > 0:
       runTool(@["gdb", "-p", $pid, "-batch", "-ex", "thread apply all bt"])
     else:
       runTool(@["eu-stack", "-p", $pid])
   result.add section("backtrace", backtrace)
+  let descendants = descendantsOf(pid)
+  result.add section("descendants", $descendants.len &
+    (if descendants.len >= MaxDescendants:
+       " (the first " & $MaxDescendants & ")"
+     else: ""))
+  for (child, parent) in descendants:
+    let childProc = "/proc" / $child
+    let name = readOr(childProc / "comm").strip()
+    result.add section("descendant " & $child & " (" & name & ") of " &
+                       $parent,
+      readOr(childProc / "status").strip() & "\n" &
+      "wchan: " & readOr(childProc / "wchan").strip() & "\n" &
+      threadsText(childProc))
 
 proc dumpEngineState*(pid: int; reason: string): string =
   ## Write `engineStateText` into `StallDiagnosticsEnvVar`'s directory and
