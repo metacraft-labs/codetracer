@@ -48,4 +48,5 @@ applicable:
   - ../gpui/fit-event-log-wide-column-scrolls.yaml
   - ../gpui/multiclick-double-selects-the-word.yaml
   - ../gpui/tables-cut-cell-detail.yaml
+  - ../gpui/no-timeline-pane.yaml
 unsupported: []

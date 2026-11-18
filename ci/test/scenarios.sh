@@ -69,7 +69,13 @@ warn_off_pin() {
 	fi
 }
 
-nim_common=(--hints:off --warnings:off --threads:on --path:src/frontend/viewmodel)
+# Optimised, with assertions and runtime checks kept on by name (a tool's or
+# a binding's `assert` must still fail it): the GPUI binding derives a
+# surface from every capture, and unoptimised its pixel loops were most of a
+# run's time (a call-trace scenario's surfaces 202 s of pixel work against
+# 23 s optimised, the same captures).
+nim_common=(--hints:off --warnings:off --threads:on -d:release --assertions:on --checks:on
+	--path:src/frontend/viewmodel)
 
 build_dvs() {
 	require "DemoVideoScript" "${dvs_src}/dvs.nim"

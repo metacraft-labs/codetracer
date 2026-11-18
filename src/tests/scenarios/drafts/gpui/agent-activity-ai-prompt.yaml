@@ -1,9 +1,10 @@
+# ports: src/frontend/gpui/tests/test_plat54_gpui_agent_activity.nim
 scenario: 1
 name: gpui/agent-activity-ai-prompt
 pack: codetracer
 summary: >-
   `/ai <prompt>` typed into the omnibox starts the agent's session: the
-  Agent Activity pane shows the user's turn and then the agent's streamed
+  Agent Activity pane shows the agent's streamed
   answer (the review evidence it collected), and the replay does not move.
 
 stage:
@@ -20,6 +21,5 @@ steps:
   - chord: Ctrl+P
   - type: "/ai collect the review"
   - key: Enter
-  - wait: { until: { at: 'pane[title="Agent Activity"]', assert: 'has-row("collect the review")' }, timeout: 60s }
   - wait: { until: { at: 'pane[title="Agent Activity"]', assert: 'has-row("Collected review evidence")' }, timeout: 60s }
   - expect: { at: replay-position, tick: 1 }

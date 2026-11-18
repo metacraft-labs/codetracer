@@ -1,3 +1,4 @@
+# ports: src/frontend/gpui/tests/test_m73_gpui_editor_scroll_plan.nim
 scenario: 1
 name: gpui/editor-caret-brings-rows
 pack: codetracer

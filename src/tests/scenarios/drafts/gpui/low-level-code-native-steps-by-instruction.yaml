@@ -1,3 +1,4 @@
+# ports: src/frontend/gpui/tests/test_plat60_gpui_native_low_level_code.nim
 scenario: 1
 name: gpui/low-level-code-native-steps-by-instruction
 pack: codetracer

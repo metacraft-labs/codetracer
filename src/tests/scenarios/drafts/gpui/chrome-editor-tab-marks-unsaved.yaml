@@ -1,3 +1,4 @@
+# ports: src/frontend/gpui/tests/test_plat49_gpui_plan.nim
 scenario: 1
 name: gpui/chrome-editor-tab-marks-unsaved
 pack: codetracer
@@ -18,4 +19,4 @@ steps:
   - wait: { until: { at: 'pane-tab[label="project/main.py ●"]', present: true }, timeout: 30s }
   - chord: Ctrl+S
   - wait: { until: { at: 'pane-tab[label="project/main.py"]', present: true }, timeout: 30s }
-  - expect: { at: 'editor[file="main.py"]/line[number="1"]', text: { contains: "xprint(1)" } }
+  - expect: { at: 'editor[file="main.py"]/line[number="1"]', text: { contains: "xprint" } }

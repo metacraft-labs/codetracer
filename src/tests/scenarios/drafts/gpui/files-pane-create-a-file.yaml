@@ -1,3 +1,4 @@
+# ports: src/frontend/gpui/tests/test_files_edit_gpui_plan.nim
 scenario: 1
 name: gpui/files-pane-create-a-file
 pack: codetracer

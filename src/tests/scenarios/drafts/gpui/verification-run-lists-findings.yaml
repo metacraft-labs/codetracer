@@ -1,3 +1,4 @@
+# ports: src/frontend/gpui/tests/test_plat63_gpui_verification.nim
 scenario: 1
 name: gpui/verification-run-lists-findings
 pack: codetracer
