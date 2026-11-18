@@ -496,3 +496,6 @@ src/frontend/tui/tests/plat70e-origin-mutation-control.sha256	src/frontend/gpui/
 src/frontend/tui/tests/plat61-shell-mutation-control.sha256	src/frontend/gpui/main.nim	7953de7932634c94ba38056c6f5e8454c74131be118557bc674f6f8c5d6ce036	0919f2826ccd682270eaa531bf0600c16dcffb01c00840416b21c9f4b5d637eb
 src/frontend/tui/tests/plat61-shell-mutation-control.sha256	src/frontend/gpui/tests/test_plat61_gpui_shell.nim	0c832b3a768a775ffc9c5a20762dabc42fd72e604482120a0df094704bdc0939	bd85e9233b6ece10d66424ab2cc75ee184c76d3cc4081fc84b44d96f3650d111
 src/frontend/tui/tests/plat70g-multiclick-mutation-control.sha256	src/frontend/gpui/tests/test_plat70g_gpui_plan.nim	b834be1646bacbe9e4475695c28bf236a804e9f85561b40a6b48ef04b5b68404	d81699256c7a81be61f7a4247a72dfe1c8a77d0855f59c0ae593ff57a05f9c25
+# The spec-checkout fixture carries ci/lib/mutation_views.py (3c1b1a5558d, after the collaboration
+# harness began importing it) moved ci/test/spec-checkout-paths-test.py. Re-grade the arms whose needles sit in it.
+src/frontend/tui/tests/plat70e-origin-mutation-control.sha256	ci/test/spec-checkout-paths-test.py	f697e37156544b2ed9b0d70912306607156676a695e61ac024e6b8dff6e50fcd	caffd1675e4dbc261adcbdc44cc27591cbbbe904dbcb42bec42620a44e30b6a9
