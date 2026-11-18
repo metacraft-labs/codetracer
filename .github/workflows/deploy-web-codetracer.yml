@@ -446,7 +446,9 @@ jobs:
             # flake.lock and repro.lock pin (they had moved past this list).
             # isonim-gpui 2026-11-18 (it renders only what changed per frame).
             # nim-agents 2026-11-18, after flake.lock moved it to 2758cde.
-            isonim=03183989147a6e5d109bf03638dc49bb74ecf248
+            # isonim and nim-agents 2026-11-18, after flake.lock and repro.lock
+            # moved them to 38ace5de and 77f8a5a6.
+            isonim=38ace5de5bf42c708a22dff54d74ab76270996e6
             isonim-tui=8e43ce06f7f078530c7a8585c210ad7648fa0051
             isonim-gpui=2fdadfdf9baaa9af67fd4cc9e0039c4c83fb7af0
             nim-everywhere=2f5b67a5dafd96ca5d57c9270fc3c2da2c5f2b0b
@@ -454,7 +456,7 @@ jobs:
             nim-pty=6ffb8d788e8a740ca78ec29c7a3a489a13818bcb
             nim-acp=0bf10b4c35064a08d8c96eb912190521322017e2
             nim-agent-harbor=9694f6b41be21315243df1b19cabd02c5f271d7d
-            nim-agents=2758cdec844f659ecf04a63059b3560d208de38e
+            nim-agents=77f8a5a6c4af477f60979063a36290f6d09f77b3
             # THE REPROBUILD-PACKAGES CATALOG, pinned to the revision the
             # locked reprobuild (flake.lock `reprobuild`, 372aece6) is tested
             # against: its own `.github/sibling-repos` pins
