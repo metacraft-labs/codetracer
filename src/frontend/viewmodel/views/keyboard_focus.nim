@@ -23,7 +23,8 @@
 when defined(js):
   const
     DropdownListSelector* =
-      ".ct-picker-dropdown, .vcs-branch-dropdown, .agent-add-context-dropdown, .eventLog-columns-menu"
+      ".ct-picker-dropdown, .vcs-branch-dropdown, .agent-add-context-dropdown, .eventLog-columns-menu, " &
+      ".agent-model-dropdown, .agent-branch-dropdown, .agent-settings-dropdown-list"
     CompositeItemSelector* =
       ".state-tabs button, #auto-hide-bottom-strip .auto-hide-strip-tab, " &
       "#auto-hide-bottom-strip .auto-hide-strip-tab-hide, " &
@@ -50,8 +51,10 @@ when defined(js):
     (function (LIST) {
       if (typeof document === 'undefined' || globalThis.__ctKeyboardFocus) return;
       globalThis.__ctKeyboardFocus = true;
-      var CONTAINER = '.ct-picker, .vcs-branch-picker, .agent-add-context-wrapper';
-      var TRIGGER = '.ct-picker-trigger, .vcs-branch-current, .agent-add-context-button, .eventLog-columns-button';
+      var CONTAINER = '.ct-picker, .vcs-branch-picker, .agent-add-context-wrapper, ' +
+        '.agent-model-wrapper, .agent-branch-wrapper, .agent-settings-select-wrapper';
+      var TRIGGER = '.ct-picker-trigger, .vcs-branch-current, .agent-add-context-button, .eventLog-columns-button, ' +
+        '.agent-model-select, .agent-branch-button, .agent-settings-select-trigger';
       var COLUMNS = '.eventLog-columns-menu';
       var COLUMN_ITEM = '.eventLog-column-check, .eventLog-column-handle';
       var STRIP_ITEM = '.auto-hide-strip-tab, .auto-hide-strip-tab-hide';
@@ -85,6 +88,8 @@ when defined(js):
         { open: '.dropdown-list.active', prev: true },
         { open: '[id="category-image"].open', blur: true }
       ];
+      // tooltips.nim reads it too: an open dropdown's button shows no tooltip (D-35).
+      globalThis.__ctDropdowns = DROPDOWNS;
       // Closing it ourselves clicks the trigger; that click must not move focus.
       var closing = false;
       // A press inside a dropdown is not focus leaving it: on macOS a pressed
@@ -222,8 +227,11 @@ when defined(js):
           afterRender(function () {
             var now = all(document, TRIGGER)[index];
             var list = now ? listFor(now) : null;
+            // A menu with a search field (the agent's branch menu) opens on the
+            // field, so typing filters at once; ArrowDown goes on to the rows.
             var to = !now ? null : !list ? now
-              : list.querySelector('.ct-menu-item--chosen') || itemsOf(list)[0] || now;
+              : list.querySelector('input[type="text"], input[type="search"]') ||
+                list.querySelector('.ct-menu-item--chosen') || itemsOf(list)[0] || now;
             if (to) to.focus();
           });
           return;
@@ -260,7 +268,27 @@ when defined(js):
         var to = ev.relatedTarget;
         if (to && (list.contains(to) || trigger.contains(to))) return;
         if (pressed && (list.contains(pressed) || trigger.contains(pressed))) return;
-        closing = true; trigger.click(); closing = false;
+        // Decided a frame later: a row picked from the keyboard is removed with
+        // its list, and the browser reports that as focus leaving while the
+        // list is still on screen.  Clicking the trigger then would reopen the
+        // list the pick just closed (the agent's settings selects did).
+        afterRender(function () {
+          if (!document.contains(list) || !shown(list) || !document.contains(trigger)) return;
+          var now = document.activeElement;
+          if (now && (list.contains(now) || trigger.contains(now))) return;
+          // Closing can redraw the controls around the list (the agent
+          // toolbar redraws all its buttons), and the one Tab moved to goes
+          // with them. Focus its redrawn twin, found by its classes and place.
+          var sel = now && now !== document.body && typeof now.className === 'string' && now.className.trim()
+            ? '.' + now.className.trim().split(/\s+/).map(CSS.escape).join('.') : null;
+          var at = sel ? all(document, sel).indexOf(now) : -1;
+          closing = true; trigger.click(); closing = false;
+          if (sel && at >= 0) afterRender(function () {
+            if (document.contains(now)) return;
+            var again = all(document, sel)[at];
+            if (again) again.focus();
+          });
+        });
       });
     })(#)""".}
 

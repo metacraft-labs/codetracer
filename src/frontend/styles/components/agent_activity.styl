@@ -7,6 +7,8 @@
 // control radius, CONTROL_RADIUS (Nikolay, 2026-10-11: 8px → 6px).
 AGENT_TOOLBAR_CONTROL_SIZE = CONTROL_HEIGHT_MD
 AGENT_TOOLBAR_CONTROL_RADIUS = 0.375rem
+// Text of the panel's text buttons, in rem so it lands on a whole pixel.
+AGENT_BUTTON_TEXT = 0.75rem
 
 .log-item
     border-top: 0.0625em solid #4a4a4a
@@ -337,8 +339,10 @@ AGENT_TOOLBAR_CONTROL_RADIUS = 0.375rem
     border-radius: 50% !important
     margin-left: auto !important
 
-    &:hover
-      background-color: colors-red-700 !important
+    // Red says "this stops the agent" (Nikolay, 2026-11-05), and the hover is
+    // one step darker, so it answers the pointer as every button does.
+    &:hover:not(:disabled)
+      background-color: colors-red-800 !important
 
 .agent-model-text
   overflow: hidden
@@ -346,13 +350,11 @@ AGENT_TOOLBAR_CONTROL_RADIUS = 0.375rem
   white-space: nowrap
   min-width: 0
 
+// The chevron on the branch and model buttons: the Design System's
+// chevron-down at 16px in the button's text colour (`mask-icon()`,
+// button.styl), as the session tabs' overflow button draws it (D-33).
 .agent-model-img
-  height: 1.5em
-  min-width: 1.5em
-  background-image: COMMAND_PALETTE_ARROW_IMG
-  background-repeat: no-repeat
-  background-size: 0.5625em 0.375em
-  background-position: center
+  mask-icon(ICON_CHEVRON_DOWN)
 
 .agent-com
   flex: 1 1 auto
@@ -401,8 +403,10 @@ AGENT_TOOLBAR_CONTROL_RADIUS = 0.375rem
   cursor: pointer
   user-select: none
 
-  &:hover
-    opacity: 0.85
+  // Hover brightens the label, as the "N tools used" toggle does, instead of
+  // fading the whole header.
+  &:hover .agent-thought-label
+    color: colors-ui-text-primary-body
 
   .agent-thought-header-left
     display: flex
@@ -410,14 +414,10 @@ AGENT_TOOLBAR_CONTROL_RADIUS = 0.375rem
     align-items: center
     gap: 0.375em
 
+  // The Design System chevron, in the label's colour (`mask-icon()`).
   .agent-chevron
-    display: inline-block
-    width: 0.5625rem
-    height: 0.3125rem
-    background-image: url("data:image/svg+xml,%3Csvg width='9' height='5' viewBox='0 0 9 5' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M0.353577 0.353516L4.35358 4.35352L8.35358 0.353515' stroke='%23DDDDDD' stroke-linejoin='round'/%3E%3C/svg%3E")
-    background-repeat: no-repeat
-    background-position: center
-    background-size: contain
+    mask-icon(ICON_CHEVRON_DOWN)
+    color: colors-ui-text-primary-label
     transition: transform 0.15s ease
     flex-shrink: 0
 
@@ -517,8 +517,10 @@ AGENT_TOOLBAR_CONTROL_RADIUS = 0.375rem
   border-bottom: 0.0625rem solid colors-ui-border-primary
   &:last-child
     border-bottom: none
+  // LIST_HOVER_BG, the hover of every list and table row (button.styl).
+  // #282828 was the panel's own colour, so the hover did not show.
   &:hover
-    background: colors-ui-surface-primary-secondary
+    background: LIST_HOVER_BG
 
 .agent-table-cell
   display: table-cell
@@ -956,26 +958,19 @@ AGENT_TOOLBAR_CONTROL_RADIUS = 0.375rem
   font-size: 0.8125rem
   color: colors-ui-text-primary-body-subtle
 
+// A real `button` now (the keyboard reaches it, D-17), at the md size with
+// the control corner.
 .agent-diff-unified-btn
-  display: inline-flex !important
-  align-items: center
-  gap: 0.375em
-  padding: 0.375em 0.75em !important
-  border-radius: 0.375em !important
-  font-size: 0.8125rem
+  gap: 0.375rem
+  padding: 0 0.75rem !important
+  border-radius: CONTROL_RADIUS !important
+  font-size: AGENT_BUTTON_TEXT
   font-family: inherit !important
-  cursor: pointer
   flex: 0 0 auto !important
-  user-select: none
   white-space: nowrap
 
 .agent-diff-unified-icon
-  width: 0.6875rem
-  height: 0.8125rem
-  background-image: url("data:image/svg+xml,%3Csvg width='11' height='13' viewBox='0 0 11 13' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M0.5 2.57324C0.776004 2.57324 0.999775 2.79729 1 3.07324V9.65234C1.0002 10.4803 1.67147 11.1503 2.5 11.1504H7.09766C7.37351 11.1504 7.59718 11.3747 7.59766 11.6504C7.59766 11.9265 7.3738 12.1504 7.09766 12.1504H2.5C1.11978 12.1503 0.000204816 11.0331 0 9.65234V3.07324C0.000224474 2.79734 0.224065 2.57332 0.5 2.57324ZM7.69629 0.00878906C7.78876 0.0266271 7.87584 0.071257 7.94531 0.136719L10.7393 2.77539C10.8392 2.86976 10.8954 3.00222 10.8955 3.13965V8.85742C10.8955 9.23267 10.7379 9.58654 10.4668 9.84277C10.1965 10.098 9.8354 10.2372 9.46484 10.2373H3.41016C3.0396 10.2372 2.67844 10.098 2.4082 9.84277C2.13723 9.58655 1.97852 9.2326 1.97852 8.85742V1.37988C1.97862 1.00464 2.13706 0.650698 2.4082 0.394531C2.67844 0.139294 3.0396 0.000119562 3.41016 0H7.60156L7.69629 0.00878906ZM3.41016 1C3.28703 1.00012 3.17363 1.04661 3.09473 1.12109C3.01684 1.19469 2.97862 1.28882 2.97852 1.37988V8.85742C2.97852 8.94846 3.01698 9.04256 3.09473 9.11621C3.17363 9.19073 3.287 9.23718 3.41016 9.2373H9.46484C9.58789 9.23721 9.70038 9.19059 9.7793 9.11621C9.85734 9.0425 9.89551 8.94863 9.89551 8.85742V3.35352L7.40234 1H3.41016ZM6.93945 4.55273H8.41895V5.55273H6.93945V7.03223H5.93945V5.55273H4.45996V4.55273H5.93945V3.07324H6.93945V4.55273Z' fill='%23DDDDDD'/%3E%3C/svg%3E")
-  background-repeat: no-repeat
-  background-size: contain
-  flex-shrink: 0
+  mask-icon(ICON_OPEN_DIFF, 0.8125rem)
 
 .agent-diff-file-row
   display: flex
@@ -1012,17 +1007,14 @@ AGENT_TOOLBAR_CONTROL_RADIUS = 0.375rem
   color: colors-ui-icon-error-primary
   flex-shrink: 0
 
+// The VCS panel's open-diff icon (vc-open-diff.svg), in the row's text
+// colour, so it brightens with the path on hover.
 .agent-diff-open-icon
-  width: 0.6875rem
-  height: 0.8125rem
-  background-image: url("data:image/svg+xml,%3Csvg width='11' height='13' viewBox='0 0 11 13' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M0.5 2.57324C0.776004 2.57324 0.999775 2.79729 1 3.07324V9.65234C1.0002 10.4803 1.67147 11.1503 2.5 11.1504H7.09766C7.37351 11.1504 7.59718 11.3747 7.59766 11.6504C7.59766 11.9265 7.3738 12.1504 7.09766 12.1504H2.5C1.11978 12.1503 0.000204816 11.0331 0 9.65234V3.07324C0.000224474 2.79734 0.224065 2.57332 0.5 2.57324ZM7.69629 0.00878906C7.78876 0.0266271 7.87584 0.071257 7.94531 0.136719L10.7393 2.77539C10.8392 2.86976 10.8954 3.00222 10.8955 3.13965V8.85742C10.8955 9.23267 10.7379 9.58654 10.4668 9.84277C10.1965 10.098 9.8354 10.2372 9.46484 10.2373H3.41016C3.0396 10.2372 2.67844 10.098 2.4082 9.84277C2.13723 9.58655 1.97852 9.2326 1.97852 8.85742V1.37988C1.97862 1.00464 2.13706 0.650698 2.4082 0.394531C2.67844 0.139294 3.0396 0.000119562 3.41016 0H7.60156L7.69629 0.00878906ZM3.41016 1C3.28703 1.00012 3.17363 1.04661 3.09473 1.12109C3.01684 1.19469 2.97862 1.28882 2.97852 1.37988V8.85742C2.97852 8.94846 3.01698 9.04256 3.09473 9.11621C3.17363 9.19073 3.287 9.23718 3.41016 9.2373H9.46484C9.58789 9.23721 9.70038 9.19059 9.7793 9.11621C9.85734 9.0425 9.89551 8.94863 9.89551 8.85742V3.35352L7.40234 1H3.41016ZM6.93945 4.55273H8.41895V5.55273H6.93945V7.03223H5.93945V5.55273H4.45996V4.55273H5.93945V3.07324H6.93945V4.55273Z' fill='%23DDDDDD'/%3E%3C/svg%3E")
-  background-repeat: no-repeat
-  background-size: contain
-  flex-shrink: 0
-  opacity: 0.7
+  mask-icon(ICON_OPEN_DIFF, 0.8125rem)
+  color: colors-ui-text-primary-body-subtle
 
 .agent-diff-file-row:hover .agent-diff-open-icon
-  opacity: 1
+  color: colors-ui-text-primary-body
 
 .agent-diff-editor-wrapper
   display: none
@@ -1060,18 +1052,18 @@ AGENT_TOOLBAR_CONTROL_RADIUS = 0.375rem
   &:hover
     color: colors-ui-text-primary-body
 
+// The Design System chevron: up while the history is hidden (it opens
+// above), down once it shows.
 .agent-tc-toggle-icon
-  width: 0.625rem
-  height: 0.625rem
-  flex-shrink: 0
-  opacity: 0.6
-  background-image: url("data:image/svg+xml,%3Csvg width='10' height='10' viewBox='0 0 10 10' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M5 2L9 6H1L5 2Z' fill='%23888'/%3E%3C/svg%3E")
-  background-repeat: no-repeat
-  background-position: center
-  background-size: contain
+  mask-icon(ICON_CHEVRON_DOWN)
+  transform: rotate(180deg)
+  transition: transform 0.15s ease
+
+  @media (prefers-reduced-motion: reduce)
+    transition: none
 
 .agent-tc-history-expanded ~ .agent-tc-toggle .agent-tc-toggle-icon
-  background-image: url("data:image/svg+xml,%3Csvg width='10' height='10' viewBox='0 0 10 10' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M5 8L1 4H9L5 8Z' fill='%23888'/%3E%3C/svg%3E")
+  transform: none
 
 // Individual tool call row
 .agent-tc-row
@@ -1101,20 +1093,14 @@ AGENT_TOOLBAR_CONTROL_RADIUS = 0.375rem
 // Chevron icon (left side of each row) — same icon as model/branch arrow buttons.
 // Default: rotate -90deg so it points right (collapsed). When expanded: 0deg (down).
 .agent-tc-icon
-  width: 1.25em
-  height: 1.25em
-  flex-shrink: 0
+  mask-icon(ICON_CHEVRON_DOWN)
   cursor: pointer
-  opacity: 0.65
-  transition: transform 0.15s ease
+  color: colors-ui-text-primary-body-subtle
+  transition: transform 0.15s ease, color BUTTON_TRANSITION_TIMING
   transform: rotate(-90deg)
-  background-image: COMMAND_PALETTE_ARROW_IMG
-  background-repeat: no-repeat
-  background-size: 0.5625em 0.375em
-  background-position: center
 
   &:hover
-    opacity: 0.9
+    color: colors-ui-text-primary-body
 
 // Tool name — truncated (Space Grotesk: a UI label, not code)
 .agent-tc-name
@@ -1185,9 +1171,14 @@ AGENT_TOOLBAR_CONTROL_RADIUS = 0.375rem
   // (SELECTED_PANEL_BORDER, golden_layout.styl), in CodeTracer's active colour
   // brand/600 #4F46E5 (Nikolay, 2026-10-11).  `outline`, not `border`: it takes
   // no space, so nothing shifts by a pixel on focus, and it follows the
-  // corners.  `:focus-within`: whichever control inside has focus.  (Clicking
-  // a toolbar button does not count: on macOS a button takes no focus.)
-  &:focus-within
+  // corners.
+  //
+  // Only a FIELD: the keyboard can also land on a toolbar button inside, and
+  // then that button shows key-focus and the prompt must not show a second
+  // line (Focus rule 4).  Two selectors, not `:has(a, b)`: Stylus splits
+  // selector commas.
+  &:has(textarea:focus),
+  &:has(input:focus)
     outline: SELECTED_PANEL_BORDER solid colors-brand-600
     outline-offset: 0
 
@@ -1211,13 +1202,15 @@ AGENT_TOOLBAR_CONTROL_RADIUS = 0.375rem
     align-items: center
     gap: 0.5em
 
+    // The panel field (`ct-input-panel`, input.styl): 26px, the field border
+    // and corners.  Only its width and margins are set here.
     .password-prompt-input
       flex: 1 1 12em
+      width: auto
       background-image: none !important
       margin-left: 0 !important
       margin-bottom: 0 !important
       padding-left: 0.5em !important
-      background: colors-ui-surface-input-secondary
 
     .password-continue-button
       flex: 0 0 auto !important
@@ -1365,28 +1358,17 @@ AGENT_TOOLBAR_CONTROL_RADIUS = 0.375rem
   gap: CONTROL_GAP
   justify-content: center
 
+// The suggestion chips keep their pill shape (Nikolay, 2026-11-05), and take
+// everything else from the shared button: the markup gives them
+// `ct-button-md-secondary`, so the border, fill, hover, 100ms timing and the
+// 26px height (CONTROL_HEIGHT_MD) are the same as every panel button's.  Text
+// in rem, so the 12px is the same wherever the panel's font size lands.
 .agent-idle-chip
-  background: colors-ui-surface-input-default
-  border: 0.0625em solid colors-ui-border-secondary
   border-radius: 624.9375rem !important
-  color: colors-ui-text-primary-body
-  font-size: 0.8em
+  font-size: AGENT_BUTTON_TEXT
   font-family: inherit
-  // 30px tall with 1px borders, whole pixels: em padding, line-height and
-  // border came to 30.43px, so the chips and the rows under them sat on part
-  // pixels.
-  box-sizing: border-box
-  height: 1.875rem
-  border-width: 0.0625rem
   padding: 0 1rem
-  cursor: pointer
-  transition: background-color 0.15s ease, border-color 0.15s ease
   white-space: nowrap
-  line-height: 1.75rem
-
-  &:hover
-    background: colors-ui-surface-primary-secondary
-    border-color: colors-ui-border-primary
 
 // Model selector button wrapper
 .agent-model-wrapper
@@ -1396,37 +1378,24 @@ AGENT_TOOLBAR_CONTROL_RADIUS = 0.375rem
   display: flex
   overflow: visible
 
-.agent-model-dropdown
+// The model and branch menus are the shared dropdown (Nikolay, 2026-11-05: "we
+// look for consistency"): `dropdown-surface()` with a 4px inset and
+// `ct-menu-item` rows, the Requests pickers' menu (`.ct-picker-dropdown`,
+// shared_widgets.styl) turned upward, because the prompt sits at the bottom of
+// the panel.  The rows, their hover, the chosen row and the keyboard come from
+// the shared row (menu_item.styl, keyboard_focus.nim; D-18, D-26, D-29, D-30).
+agent-toolbar-menu()
   position: absolute
-  bottom: calc(100% + 0.375em)
+  bottom: DROPDOWN_TRIGGER_OFFSET
   left: 0
   right: 0
   z-index: 100
-  dropdown-surface-chrome()
-  animation: ct-dropdown-reveal 120ms ease-out
-  @media (prefers-reduced-motion: reduce)
-    animation: none
+  dropdown-surface()
+  padding: 0.25rem
   min-width: 10rem
-  overflow: hidden
 
-.agent-model-item
-  padding: 0.625em 0.75em
-  cursor: pointer
-  font-size: 0.875rem
-  color: colors-ui-text-primary-body
-  border-top: 0.0625rem solid colors-ui-border-tertiary
-
-  &:first-child
-    border-top: none
-
-  &:hover
-    // DROPDOWN_HOVER_BG (button.styl), the hover on every dropdown's rows.
-    // The name these rows carried, `colors-ui-surface-primary-hover`,
-    // is not a design token, so the hover was dropped; the same below.
-    background: DROPDOWN_HOVER_BG
-
-  &.agent-model-item--active
-    background: colors-ui-surface-primary-secondary
+.agent-model-dropdown
+  agent-toolbar-menu()
 
 // Branch context button in the agent toolbar
 .agent-branch-wrapper
@@ -1485,27 +1454,23 @@ agent-toolbar-icon(img)
   min-width: 0
   overflow: hidden
 
+// Search on top, the branches, "New branch" at the bottom.  The search and
+// "New branch" are set apart by a line: they are parts of the menu, not rows
+// of the list, so D-29 (no line between rows) leaves them be.
 .agent-branch-dropdown
-  position: absolute
-  bottom: calc(100% + 0.375em)
-  left: 0
-  right: 0
-  z-index: 100
-  dropdown-surface-chrome()
-  animation: ct-dropdown-reveal 120ms ease-out
-  @media (prefers-reduced-motion: reduce)
-    animation: none
+  agent-toolbar-menu()
   display: flex
   flex-direction: column
-  min-width: 12rem
   max-height: 18rem
+  // The list scrolls inside the menu, not the menu itself.
   overflow: hidden
 
 .agent-branch-search-row
   display: flex
   align-items: center
-  gap: 0.5em
-  padding: 0.5em 0.75em
+  gap: 0.5rem
+  padding: 0.25rem 0.5rem 0.5rem
+  margin-bottom: 0.25rem
   border-bottom: 0.0625rem solid colors-ui-border-tertiary
   flex-shrink: 0
 
@@ -1523,52 +1488,24 @@ agent-toolbar-icon(img)
     outline: none
     color: colors-ui-text-primary-body
     font-size: 0.875rem
+    line-height: 1.25rem
+    padding: 0.25rem 0
     min-width: 0
 
     // The app-wide placeholder colour (components/input.styl).
     &::placeholder
       color: colors-ui-text-primary-label-subtle
 
+// The line under the list sets "New branch" apart.
 .agent-branch-list
   flex: 1 1 auto
   overflow-y: auto
-
-.agent-branch-item
-  padding: 0.625em 0.75em
-  cursor: pointer
-  font-family: "SpaceGrotesk", sans-serif
-  font-size: 0.875rem
-  color: colors-ui-text-primary-body
-  border-top: 0.0625rem solid colors-ui-border-tertiary
-
-  &:first-child
-    border-top: none
-
-  &:hover
-    background: DROPDOWN_HOVER_BG
-
-  &.agent-branch-item--active
-    background: colors-ui-surface-primary-secondary
+  padding-bottom: 0.25rem
+  margin-bottom: 0.25rem
+  border-bottom: 0.0625rem solid colors-ui-border-tertiary
 
 .agent-branch-create-row
-  display: flex
-  align-items: center
-  gap: 0.625em
-  padding: 0.5em 0.75em
-  cursor: pointer
-  border-top: 0.0625rem solid colors-ui-border-tertiary
   flex-shrink: 0
-  font-size: 0.875rem
-  color: colors-ui-text-primary-body
-
-  &:hover
-    background: LIST_HOVER_BG
-
-  .agent-branch-create-icon
-    display: flex
-    align-items: center
-    justify-content: center
-    flex-shrink: 0
 
 // Dropdown opened by the + (add context) button.
 // Anchors to the left edge of the wrapper and opens upward by default.
@@ -1678,27 +1615,19 @@ agent-toolbar-icon(img)
 .agent-settings-select-wrapper
   position: relative
 
-.agent-settings-select-trigger
-  display: flex
-  align-items: center
-  background: colors-ui-surface-primary-default
-  border: 0.0625rem solid colors-ui-border-primary
-  border-radius: 0.375em
-  // 28px tall (Nikolay, 2026-10-16; it was 40px from the 24px line plus
-  // 0.5em padding): a fixed border-box height, the text centred by the flex
-  // row, so the vertical padding goes and only the sides keep theirs.
-  box-sizing: border-box
-  height: 1.75rem
-  padding: 0 0.75em
-  cursor: pointer
-  font-family: "SpaceGrotesk", sans-serif
-  font-size: 0.875em
-  color: colors-ui-text-primary-body
-  user-select: none
-  gap: 0.5em
-
-  &:hover
-    background: colors-ui-surface-primary-default-hover
+// A settings select is the shared dropdown (Nikolay, 2026-11-05): the trigger
+// is a `ct-button-md-secondary` button (26px, 6px corners, the shared border,
+// fill and hover; D-06), the list is `dropdown-surface()` with `ct-menu-item`
+// rows, as the Requests pickers' (`.ct-picker`, shared_widgets.styl).  The
+// chosen row has the shared grey fill (D-18) and, here only, keeps a tick.
+.agent-settings-select-trigger.agent-settings-select-trigger
+  width: 100%
+  justify-content: space-between
+  gap: 0.375rem
+  padding: 0 0.5rem 0 0.75rem
+  border-radius: CONTROL_RADIUS !important
+  font-size: AGENT_BUTTON_TEXT
+  text-align: start
 
 .agent-settings-select-text
   flex: 1 1 auto
@@ -1707,51 +1636,22 @@ agent-toolbar-icon(img)
   white-space: nowrap
 
 .agent-settings-select-chevron
-  flex: 0 0 auto
-  width: 0.75em
-  height: 0.75em
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='M2 4l4 4 4-4' stroke='%23999' stroke-width='1.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E")
-  background-repeat: no-repeat
-  background-position: center
-  background-size: contain
+  mask-icon(ICON_CHEVRON_DOWN)
 
 .agent-settings-dropdown-list
+  dropdown-surface()
   position: absolute
   left: 0
   right: 0
-  top: calc(100% + 0.25em)
-  background: colors-ui-surface-primary-secondary
-  border: 0.0625rem solid colors-ui-border-primary
-  border-radius: 0.5em
+  top: DROPDOWN_TRIGGER_OFFSET
   z-index: 200
-  overflow: hidden
-  box-shadow: 0 0.5em 1.5em rgba(0, 0, 0, 0.4)
+  padding: 0.25rem
 
-.agent-settings-dropdown-item
-  display: flex
-  align-items: center
-  padding: 0.625em 1em
-  cursor: pointer
-  font-size: 0.875em
-  color: colors-ui-text-primary-body
-  font-family: "SpaceGrotesk", sans-serif
-  gap: 0.5em
-
-  &:hover
-    background: LIST_HOVER_BG
-
-  &--active
-    color: colors-ui-text-primary-label
-
+// The tick on the chosen row: the Design System checkbox's own check
+// (checkmark.styl), in the row's text colour.
 .agent-settings-check-icon
+  mask-icon(CHECKMARK_CHECK_16)
   margin-left: auto
-  width: 0.875em
-  height: 0.875em
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 14 14'%3E%3Cpath d='M2 7l4 4 6-6' stroke='%23fff' stroke-width='1.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E")
-  background-repeat: no-repeat
-  background-position: center
-  background-size: contain
-  flex-shrink: 0
 
 .agent-settings-two-col
   display: flex
@@ -1770,71 +1670,40 @@ agent-toolbar-icon(img)
   justify-content: space-between
   padding-top: 0.25em
 
-.agent-settings-toggle
-  width: 2.25em
-  height: 1.25em
-  border-radius: 0.625em
-  // Off: #1B1B1B (surface/primary/default), the fill of the select fields
-  // above it, so the track reads against the panel — primary-secondary was
-  // the panel's own colour and left only the knob visible (Nikolay,
-  // 2026-10-16).
-  background: colors-ui-surface-primary-default
-  position: relative
-  cursor: pointer
-  transition: background 0.2s
-  flex-shrink: 0
-
-  &--on
-    background: colors-ui-surface-action-primary
-
-  .agent-settings-toggle-thumb
-    position: absolute
-    top: 0.125em
-    left: 0.125em
-    width: 1em
-    height: 1em
-    border-radius: 50%
-    background: colors-ui-text-on-action-primary
-    transition: left 0.15s
-
-  &--on .agent-settings-toggle-thumb
-    left: 1.125em
+// "Network access" is the shared switch (`.ct-toggle`, toggle.styl), small.
+// Its sizes are in em, so the toggle is set to the root size here: 32 × 18px,
+// on whole pixels, instead of a part-pixel switch at the panel's 14px.
+.agent-settings-toggle-row .ct-toggle
+  font-size: 1rem
 
 .agent-settings-agents-row
   display: flex
   align-items: center
   flex-wrap: wrap
-  gap: 0.375em
-  padding-top: 0.125em
+  gap: CONTROL_GAP
+  padding-top: 0.125rem
 
-// The agent badges look like the design system's Status pill for now
-// (Nikolay, 2026-10-16; Figma `status-pill`, node 3689:26, with its dot):
-// 20px tall, fully round, a 0.5px border, 6px dot + 10px Space Grotesk label,
-// 4px between
-// them, 6px in on the left and 8px on the right.  The dot is the label's own
-// colour in Figma, so it is drawn here as a circle in `currentColor`.
-// GREY, not the pill's blue `running` colours (Nikolay, 2026-10-17): an agent
-// has no run state to colour yet, so the pill takes neutral surface, border
-// and label tokens.
-agent-status-pill()
+// The Agents row in the shared look (Nikolay, 2026-11-05: "not like ours").
+// Each agent is a pill like the suggestion chips: 26px (CONTROL_HEIGHT_MD),
+// fully round, the shared button's 0.5px border, fill and subtle text, 12px,
+// with a dot in the text colour before the name.  It is a label, not a
+// control, so it has no hover.  The dot and the round ends tell it apart from
+// "Add", which is a real button (`ct-button-md-secondary`).
+.agent-settings-agent-chip
   display: inline-flex
   align-items: center
-  gap: 0.25rem
+  gap: 0.375rem
   box-sizing: border-box
-  height: 1.25rem
-  padding: 0.125rem 0.5rem 0.125rem 0.375rem
-  border: 0.03125rem solid colors-ui-border-primary   // border/border-width/thin
-  border-radius: 6.25rem
-  background: colors-ui-surface-primary-tertiary
-  color: colors-ui-text-primary-label
+  height: CONTROL_HEIGHT_MD
+  padding: 0 0.75rem 0 0.625rem
+  border: BUTTON_BORDER_WIDTH solid BUTTON_BORDER_COLOR
+  border-radius: 624.9375rem
+  background: colors-ui-surface-primary-default
+  color: colors-ui-text-primary-body-subtle
   font-family: "SpaceGrotesk", sans-serif
   font-weight: 400
-  font-size: 0.625rem      // type/ui/size/label/sm
-  line-height: 1rem        // type/ui/lineheight/label/sm
+  font-size: AGENT_BUTTON_TEXT
   white-space: nowrap
-
-.agent-settings-agent-chip
-  agent-status-pill()
 
   &::before
     content: ''
@@ -1844,15 +1713,17 @@ agent-status-pill()
     border-radius: 50%
     background: currentColor
 
-// "+ add" takes the same pill, without the dot — it is an action, not an
-// agent.  On hover its fill takes the surface's -hover step.
-.agent-settings-add-chip
-  agent-status-pill()
-  padding-left: 0.5rem
-  cursor: pointer
+// "Add" is the shared md button with a plus in front, the toolbar's own plus
+// (agent_add_context.svg) painted in the button's text colour.
+.agent-settings-add-button
+  gap: 0.375rem
+  padding: 0 0.75rem 0 0.5rem !important
+  border-radius: CONTROL_RADIUS !important
+  font-size: AGENT_BUTTON_TEXT
+  font-family: "SpaceGrotesk", sans-serif
 
-  &:hover
-    background: colors-ui-surface-primary-tertiary-hover
+.agent-settings-add-icon
+  mask-icon(url('../../public/resources/agent/agent_add_context.svg'), 0.75rem)
 
 .agent-settings-footer
   display: flex
@@ -1876,13 +1747,14 @@ agent-status-pill()
   &:hover
     color: colors-ui-text-primary-body
 
+// The md button (26px, CONTROL_HEIGHT_MD) with the control corner, like
+// every other panel button.  It was padded to about 28px, with 6.1px corners.
 .agent-settings-done
-  font-size: 0.875em
+  font-size: AGENT_BUTTON_TEXT
   font-family: "SpaceGrotesk", sans-serif
-  padding: 0.5em 1.25em !important
-  height: auto !important
+  padding: 0 1rem !important
   flex: 0 0 auto !important
-  border-radius: 0.5em !important
+  border-radius: CONTROL_RADIUS !important
 
 // ---------------------------------------------------------------------------
 // Narrow Agent panel: branch and model buttons become icons only.
@@ -1955,8 +1827,8 @@ agent-status-pill()
 // border that the screen blurs, menu rows padded in fractions of a pixel
 // (41.5px / 66.5px rows), branch names wrapping onto two lines in the code
 // font, the field and the toolbar touching, and the two menus sized by
-// different rules.  All of it is set here, scoped to the prompt: the menus
-// elsewhere in the app keep the shared `dropdown-surface-chrome()` look.
+// different rules.  The controls are set here, scoped to the prompt.  The
+// menus were too, until 2026-11-05, when they moved to the shared dropdown.
 // ---------------------------------------------------------------------------
 
 // 14px between the field and the toolbar (Nikolay, 2026-11-03).  The field
@@ -1986,37 +1858,5 @@ agent-status-pill()
   .agent-stop-button.agent-stop-button
     border-radius: 50% !important
 
-// Both menus: 6px corners like the buttons they open from, a whole 1px border,
-// and the same rule for width — as wide as the button, never under 160px.
-.agent-branch-dropdown,
-.agent-model-dropdown
-  border-radius: AGENT_TOOLBAR_CONTROL_RADIUS
-  border: 0.0625rem solid colors-ui-border-primary
-  min-width: 10rem
-
-// Rows: 14px text on a 20px line with 8px / 12px padding — 36px rows, the
-// height of every other menu row in the app (`ct-menu-item`, 2.25rem), all on
-// whole pixels.
-.agent-branch-item,
-.agent-model-item,
-.agent-branch-create-row
-  font-size: 0.875rem
-  line-height: 1.25rem
-  padding: 0.5rem 0.75rem
-
-// Branch names on one line, cut with "…" (the full name on hover), in the
-// interface font like the branch button that shows the same name — not the
-// code font, which is for program text.
-.agent-branch-item
-  font-family: "SpaceGrotesk", sans-serif
-  white-space: nowrap
-  overflow: hidden
-  text-overflow: ellipsis
-
-.agent-branch-search-row
-  padding: 0.5rem 0.75rem
-
-  .agent-branch-search-input
-    font-size: 0.875rem
-    line-height: 1.25rem
-    padding: 0.25rem 0
+// The model and branch menus are the shared dropdown now: see
+// `agent-toolbar-menu()` above.

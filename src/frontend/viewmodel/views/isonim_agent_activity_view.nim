@@ -547,6 +547,7 @@ proc renderMessage[R](r: R; componentId: int;
                 span: text " " & AgentCanceledText
           tdiv(class = "msg-controls"):
             tdiv(class = "agent-user-copy-button", title = "Copy message",
+                 role = "button", tabindex = "0",
                  onclick = proc() =
                    when defined(js):
                      let content = message.content
@@ -647,7 +648,7 @@ proc renderMessage[R](r: R; componentId: int;
     let failureText = turnFailureText(message)
     ui(r):
       tdiv(class = wrapperClass):
-        tdiv(class = "agent-thought-header",
+        tdiv(class = "agent-thought-header", role = "button", tabindex = "0",
              onclick = proc() =
                when defined(js):
                  let contentEl = jsQuerySelector(cstring("#" & contentId))
@@ -765,10 +766,11 @@ proc renderMessage[R](r: R; componentId: int;
                         let histClickHandler = makeToolRowClickHandler(stableId)
                         tdiv(class = rowClass, id = stableId):
                           span(class = "agent-tc-icon", title = "Show or hide this tool call",
+                               role = "button", tabindex = "0",
                                onclick = histClickHandler)
                           span(class = "agent-tc-name"): text tc.toolName
                           span(class = dotClass)
-                    tdiv(class = "agent-tc-toggle",
+                    tdiv(class = "agent-tc-toggle", role = "button", tabindex = "0",
                          onclick = toolHistoryToggleHandler(grpHistId)):
                       span(class = "agent-tc-toggle-icon")
                       text toolsUsedText(grpTools.len)
@@ -783,6 +785,7 @@ proc renderMessage[R](r: R; componentId: int;
                   let currentClickHandler = makeToolRowClickHandler(currentStableId)
                   tdiv(class = currentRowClass, id = currentStableId):
                     span(class = "agent-tc-icon", title = "Show or hide this tool call",
+                         role = "button", tabindex = "0",
                          onclick = currentClickHandler)
                     span(class = "agent-tc-name"): text currentTc.toolName
                     span(class = currentDotClass)
@@ -885,17 +888,19 @@ proc renderMessage[R](r: R; componentId: int;
               span(class = "agent-diff-status-dot")
               span(class = "agent-diff-status-label"):
                 text filesChangedText(message.diffs.len)
-              tdiv(class = "ct-button-md-primary agent-diff-unified-btn",
-                   onclick = proc() =
-                     if callbacks.onOpenFileDiff != nil:
-                       callbacks.onOpenFileDiff("unified:" & msgId)):
+              # A real button: Tab reaches it and Enter or Space press it (D-17).
+              button(class = "ct-button-md-primary agent-diff-unified-btn",
+                     `type` = "button",
+                     onclick = proc() =
+                       if callbacks.onOpenFileDiff != nil:
+                         callbacks.onOpenFileDiff("unified:" & msgId)):
                 span(class = "agent-diff-unified-icon")
                 text AgentUnifiedDiffLabel
             for diffValue in message.diffs:
               let diff = diffValue
               let (added, removed) = computeDiffStats(diff.original, diff.modified)
               let singleTarget = "file:" & msgId & ":" & $diff.id
-              tdiv(class = "agent-diff-file-row",
+              tdiv(class = "agent-diff-file-row", role = "button", tabindex = "0",
                    onclick = openFileDiffHandler(callbacks, singleTarget)):
                 span(class = "agent-diff-file-path"): text diff.path
                 span(class = "agent-diff-stat-added"): text "+" & $added
@@ -933,7 +938,7 @@ proc renderTestRow[R](r: R; vm: AgentActivityVM; anchorId: string;
       callbacks.onOpenTestRecording(anchorId, testId, policy)
   ui(r):
     tdiv(class = testRowClass(row), id = testRowId(anchorId, row.testId)):
-      tdiv(class = "agent-test-row-header",
+      tdiv(class = "agent-test-row-header", role = "button", tabindex = "0",
            onclick = proc() = vm.toggleTest(anchorId, testId)):
         span(class = "agent-test-row-status"):
           text $row.outcome
@@ -947,12 +952,12 @@ proc renderTestRow[R](r: R; vm: AgentActivityVM; anchorId: string;
       # a trace, both fall through here and render no button at all.
       if row.hasRecording:
         tdiv(class = "agent-test-row-actions"):
-          button(class = "ct-button-sm-secondary " &
+          button(class = "ct-button-md-secondary " &
                    AgentActivityOpenRecordingClass,
                  `type` = "button",
                  onclick = proc() = open(topCurrentTab)):
             text AgentOpenRecordingLabel
-          button(class = "ct-button-sm-secondary " &
+          button(class = "ct-button-md-secondary " &
                    AgentActivityOpenRecordingClass & "-new-tab",
                  `type` = "button",
                  onclick = proc() = open(topNewTab)):
@@ -998,7 +1003,7 @@ proc renderTestRun[R](r: R; vm: AgentActivityVM; entry: AgentTestRunEntry;
   var body: typeof(r.createElement("div"))
   let card = ui(r):
     tdiv(class = testRunStateClass(summary), id = testRunId(anchorId)):
-      tdiv(class = "agent-test-run-header",
+      tdiv(class = "agent-test-run-header", role = "button", tabindex = "0",
            onclick = proc() = vm.toggleTestRun(anchorId)):
         span(class = "agent-test-run-toggle"):
           text expansionGlyph(expanded)
@@ -1071,7 +1076,7 @@ proc renderEvidenceCall[R](r: R; vm: AgentActivityVM; callValue: EvidenceCall;
           text note
       if call.canOpenEvidence():
         tdiv(class = "agent-evidence-actions"):
-          button(class = "ct-button-sm-secondary " &
+          button(class = "ct-button-md-secondary " &
                    AgentActivityEvidenceOpenClass,
                  `type` = "button",
                  onclick = proc() = open()):
@@ -1098,9 +1103,9 @@ proc renderPasswordPrompt[R](r: R): auto =
   ui(r):
     tdiv(class = "prompt-wrapper"):
       tdiv(class = "password-wrapper"):
-        input(class = "password-prompt-input", `type` = "password",
+        input(class = "ct-input-panel password-prompt-input", `type` = "password",
               placeholder = AgentPasswordPlaceholder)
-        button(class = "ct-button-sm-primary password-continue-button",
+        button(class = "ct-button-md-primary password-continue-button",
                `type` = "button"):
           text AgentPasswordContinueLabel
 
@@ -1118,19 +1123,19 @@ proc renderPermissionPrompt[R](r: R; vm: AgentActivityVM;
       tdiv(class = "permission-subtitle"):
         text AgentPermissionSubtitle
       tdiv(class = "permission-buttons"):
-        button(class = "ct-button-sm-primary permission-allow-once",
+        button(class = "ct-button-md-primary permission-allow-once",
                `type` = "button",
                onclick = proc() =
                  if callbacks.onPermissionResponse != nil:
                    callbacks.onPermissionResponse("allow_once")):
           text AgentPermissionChoices[0][1]
-        button(class = "ct-button-sm-secondary permission-allow-always",
+        button(class = "ct-button-md-secondary permission-allow-always",
                `type` = "button",
                onclick = proc() =
                  if callbacks.onPermissionResponse != nil:
                    callbacks.onPermissionResponse("allow_always")):
           text AgentPermissionChoices[1][1]
-        button(class = "ct-button-sm-secondary permission-deny",
+        button(class = "ct-button-md-secondary permission-deny",
                `type` = "button",
                onclick = proc() =
                  if callbacks.onPermissionResponse != nil:
@@ -1238,14 +1243,17 @@ proc renderModelOption[R](r: R; vm: AgentActivityVM; model: string): auto =
   let name = model
   let isActive = name == vm.selectedModel.val or
                  (vm.selectedModel.val.len == 0 and name == AvailableAgentModels[0])
-  let cls = if isActive: "agent-model-item agent-model-item--active"
-            else: "agent-model-item"
+  # The shared dropdown row (`ct-menu-item`, menu_item.styl): its hover, the
+  # chosen row's fill (D-18) and the arrow keys (keyboard_focus.nim) come with it.
+  let cls = if isActive: "agent-model-item ct-menu-item ct-menu-item--chosen"
+            else: "agent-model-item ct-menu-item"
   ui(r):
-    tdiv(class = cls,
+    tdiv(class = cls, role = "button", tabindex = "-1",
          onclick = proc() =
            vm.modelDropdownOpen.val = false
            vm.selectedModel.val = name):
-      text name
+      span(class = "ct-menu-item-label"):
+        text name
 
 proc renderModelButton[R](r: R; vm: AgentActivityVM;
                           callbacks: AgentActivityCallbacks): auto =
@@ -1314,8 +1322,8 @@ const SettingsPermissionsOptions = ["Ask before commands", "Allow all", "Deny al
 # ---------------------------------------------------------------------------
 
 proc settingsToggleClass(on: bool): string =
-  if on: "agent-settings-toggle agent-settings-toggle--on"
-  else: "agent-settings-toggle"
+  if on: "ct-toggle agent-settings-toggle agent-settings-toggle--on"
+  else: "ct-toggle agent-settings-toggle"
 
 proc settingsAgentChipText(selectedModel: string): string =
   (if selectedModel.len > 0: selectedModel else: "Claude·Sonnet") & " ×1"
@@ -1345,14 +1353,19 @@ proc renderSettingsDropdownItem[R](r: R; vm: AgentActivityVM; value: string;
   ## handler captures its own `value` (the JS backend shares a loop-local
   ## `let` between the closures created in a loop; see
   ## `makeToolRowClickHandler`).
-  let cls = if isActive: "agent-settings-dropdown-item agent-settings-dropdown-item--active"
-            else: "agent-settings-dropdown-item"
+  # The shared dropdown row, with the chosen row's fill (D-18) and, in these
+  # menus only, a tick (Nikolay, 2026-11-05).
+  let cls = if isActive:
+              "agent-settings-dropdown-item agent-settings-dropdown-item--active " &
+              "ct-menu-item ct-menu-item--chosen"
+            else: "agent-settings-dropdown-item ct-menu-item"
   ui(r):
-    tdiv(class = cls,
+    tdiv(class = cls, role = "button", tabindex = "-1",
          onclick = proc() =
            vm.settingsActiveDropdown.val = ""
            onSelect(value)):
-      text value
+      span(class = "ct-menu-item-label"):
+        text value
       if isActive:
         span(class = "agent-settings-check-icon")
 
@@ -1368,14 +1381,17 @@ proc renderSettingsDropdown[R](r: R; vm: AgentActivityVM; dropdownId: string;
   var wrapperRef: typeof(r.createElement("div"))
   let panel = ui(r):
     tdiv(ref = wrapperRef, class = "agent-settings-select-wrapper"):
-      tdiv(class = "agent-settings-select-trigger",
-           onclick = proc() =
-             if vm.settingsActiveDropdown.val == dropdownId:
-               vm.settingsActiveDropdown.val = ""
-             else:
-               vm.settingsActiveDropdown.val = dropdownId):
-        span(class = "agent-settings-select-text"): text currentValue()
-        span(class = "agent-settings-select-chevron")
+      # A real button with the shared look (`ct-button-md-secondary`): the
+      # keyboard reaches it, and Enter or Space opens the list (D-17, D-18).
+      button(class = "ct-button-md-secondary agent-settings-select-trigger",
+             `type` = "button",
+             onclick = proc() =
+               if vm.settingsActiveDropdown.val == dropdownId:
+                 vm.settingsActiveDropdown.val = ""
+               else:
+                 vm.settingsActiveDropdown.val = dropdownId):
+          span(class = "agent-settings-select-text"): text currentValue()
+          span(class = "agent-settings-select-chevron")
 
   # Narrowed to this dropdown, so opening a different one does not re-run
   # the list effect below (and churn its click-outside listener) unless this
@@ -1426,10 +1442,16 @@ proc renderSettingsPanel[R](r: R; vm: AgentActivityVM;
         tdiv(ref = twocolRef, class = "agent-settings-two-col")
         tdiv(class = "agent-settings-toggle-row"):
           span(class = "agent-settings-label"): text "Network access"
-          tdiv(class = settingsToggleClass(vm.settingsNetworkAccess.val),
+          # The shared switch (`.ct-toggle`, toggle.styl), small.  Its hidden
+          # checkbox is the Tab stop, and Space on it clicks through to here.
+          span(class = settingsToggleClass(vm.settingsNetworkAccess.val),
+               `data-size` = "sm",
+               `data-checked` = (if vm.settingsNetworkAccess.val: "true" else: "false"),
                onclick = proc() =
                  vm.settingsNetworkAccess.val = not vm.settingsNetworkAccess.val):
-            tdiv(class = "agent-settings-toggle-thumb")
+            input(class = "ct-toggle-input", `type` = "checkbox", role = "switch",
+                  `aria-label` = "Network access")
+            span(class = "ct-toggle-thumb")
       tdiv(ref = sDelRef, class = "agent-settings-section"):
         span(class = "agent-settings-section-header"): text "DELIVERY"
         span(class = "agent-settings-label"): text "Mode"
@@ -1439,7 +1461,10 @@ proc renderSettingsPanel[R](r: R; vm: AgentActivityVM;
         tdiv(class = "agent-settings-agents-row"):
           tdiv(class = "agent-settings-agent-chip"):
             text settingsAgentChipText(vm.selectedModel.val)
-          tdiv(class = "agent-settings-add-chip"): text "+ add"
+          button(class = "ct-button-md-secondary agent-settings-add-button",
+                 `type` = "button", title = "Add an agent"):
+            span(class = "agent-settings-add-icon")
+            text "Add"
       tdiv(ref = sPermRef, class = "agent-settings-section agent-settings-section--last"):
         span(class = "agent-settings-section-header"): text "PERMISSIONS"
         span(class = "agent-settings-label"): text "Permission level"
@@ -1536,18 +1561,20 @@ proc renderBranchOption[R](r: R; vm: AgentActivityVM;
                            branch: string): auto =
   let branchName = branch
   let isActive = branchName == vm.currentBranch.val
-  let itemClass = if isActive: "agent-branch-item agent-branch-item--active"
-                  else: "agent-branch-item"
+  # The shared dropdown row, as in the model menu above.
+  let itemClass = if isActive: "agent-branch-item ct-menu-item ct-menu-item--chosen"
+                  else: "agent-branch-item ct-menu-item"
   ui(r):
     # `title`: the full name on hover — a long one is cut with "…" in the row
-    # (agent_activity.styl, `.agent-branch-item`).
-    tdiv(class = itemClass,
+    # (`.ct-menu-item-label`, menu_item.styl).
+    tdiv(class = itemClass, role = "button", tabindex = "-1",
          title = branchName,
          onclick = proc() =
            vm.branchDropdownOpen.val = false
            if callbacks.onCheckoutBranch != nil:
              callbacks.onCheckoutBranch(branchName)):
-      text branchName
+      span(class = "ct-menu-item-label"):
+        text branchName
 
 proc renderBranchButton[R](r: R; vm: AgentActivityVM;
                            callbacks: AgentActivityCallbacks): auto =
@@ -1583,12 +1610,13 @@ proc renderBranchButton[R](r: R; vm: AgentActivityVM;
             input(ref = searchRef, class = "agent-branch-search-input",
                   `type` = "text", placeholder = "Search")
           tdiv(ref = listRef, class = "agent-branch-list")
-          tdiv(class = "agent-branch-create-row",
+          tdiv(class = "agent-branch-create-row ct-menu-item",
+               role = "button", tabindex = "-1",
                onclick = proc() =
                  vm.branchDropdownOpen.val = false
                  callbacks.invokeCreateBranch()):
-            tdiv(ref = createIconRef, class = "agent-branch-create-icon")
-            span:
+            tdiv(ref = createIconRef, class = "agent-branch-create-icon ct-menu-item-icon")
+            span(class = "ct-menu-item-label"):
               text "New branch"
   if isOpen:
     when defined(js):
@@ -1625,17 +1653,17 @@ proc renderIdleState[R](r: R; vm: AgentActivityVM;
         tdiv(class = "agent-idle-subtitle"):
           text AgentIdleSubtitle
       tdiv(class = "agent-idle-suggestions"):
-        button(class = "agent-idle-chip", `type` = "button",
+        button(class = "ct-button-md-secondary agent-idle-chip", `type` = "button",
                onclick = proc() =
                  vm.invokeInputChange(callbacks, chip1)
                  callbacks.invokeFocus()):
           text chip1
-        button(class = "agent-idle-chip", `type` = "button",
+        button(class = "ct-button-md-secondary agent-idle-chip", `type` = "button",
                onclick = proc() =
                  vm.invokeInputChange(callbacks, chip2)
                  callbacks.invokeFocus()):
           text chip2
-        button(class = "agent-idle-chip", `type` = "button",
+        button(class = "ct-button-md-secondary agent-idle-chip", `type` = "button",
                onclick = proc() =
                  vm.invokeInputChange(callbacks, chip3)
                  callbacks.invokeFocus()):
