@@ -48,7 +48,6 @@ package codetracer_test_siblings:
     "codetracer-ton-recorder"
     "codetracer-flame-demo"
     "codetracer-pm"
-    "codetracer-visual-replay-fixtures"
     "test-certificates-spec"
     "codetracer-example-recordings"
   build:

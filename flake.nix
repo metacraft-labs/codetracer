@@ -155,7 +155,10 @@
     };
 
     codetracer-shell-recorders = {
-      url = "github:metacraft-labs/codetracer-shell-recorders";
+      # `/agents`, the recorder's agent mainline, like the other
+      # codetracer-family inputs. cross-repo-tests.yml's shell-recorders job
+      # clones the same branch when no dispatch ref is given.
+      url = "github:metacraft-labs/codetracer-shell-recorders/agents";
       inputs.nixpkgs.follows = "nixpkgs";
       inputs.codetracer-trace-format-nim.follows = "codetracer-trace-format-nim";
       inputs.codetracer-trace-format.follows = "codetracer-trace-format";

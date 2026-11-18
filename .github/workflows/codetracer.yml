@@ -7122,7 +7122,6 @@ jobs:
             codetracer-native-backend=3715b91249518a27975ea18dda49910a475a6323
             codetracer-native-recorder=bafd73847c9261bc46bfcdd90a20fc4dcee93005
             codetracer-native-test-programs=dev
-            codetracer-visual-replay-fixtures=dev
             runquota=40523b624eb050dc9712ae83ef14dbaf8a1b25c7
             isonim-tui
             test-certificates-tools
