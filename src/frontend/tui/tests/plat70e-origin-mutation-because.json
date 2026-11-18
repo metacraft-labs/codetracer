@@ -20,7 +20,7 @@
   "T2": "Unhandled exception: never: the first hop selected in CUA: Ctrl+Shift+O, Down onto a hop, Escape, Enter seeks, Menu",
   "T3": "Unhandled exception: never: `Show value origin` on the screen in CUA: Ctrl+Shift+O, Down onto a hop, Escape, Enter seeks, Menu",
   "T4": "Unhandled exception: never: the tick the hop names in CUA: Ctrl+Shift+O, Down onto a hop, Escape, Enter seeks, Menu",
-  "T5": "Unhandled exception: never: the hop still selected after the seek in CUA: Ctrl+Shift+O, Down onto a hop, Escape, Enter seeks, Menu",
+  "T5": "not s.selected(rx, cx)",
   "T6": "Unhandled exception: never selected value: in Vim: g o in the pane; Esc on a hop closes it; o walks and Shift+O walks back",
   "V1": "e.cursor == onHop0",
   "V2": "e.kind == skeSeek",
