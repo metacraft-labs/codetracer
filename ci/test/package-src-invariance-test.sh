@@ -7,7 +7,7 @@
 # push could cover the tree a CI run had, and the nixos leg rebuilt db-backend
 # and codetracer from source (run 44081496736, cancelled at 150 minutes).
 # nix/packages/default.nix now builds them from explicit file sets: the
-# packages' source leaves out src/tests/, ci/, docs/ and .github/, and
+# packages' source leaves out src/tests/, ci/, docs/, .github/ and nix/, and
 # db-backend's holds only its crate and libraries.
 #
 # This evaluates db-backend's, codetracer's and codetracer-tui's drvPaths at the
@@ -30,6 +30,7 @@ outside=(
 	"ci/lint/bash.sh|db codetracer tui"
 	"docs/UI-Design-Decisions.md|db codetracer tui"
 	".github/workflows/codetracer.yml|db codetracer tui"
+	"nix/shells/armShell.nix|db codetracer tui"
 	"src/frontend/ui/CROSS_WINDOW_PANEL_TRANSFER.md|db"
 )
 control=src/db-backend/notes.md

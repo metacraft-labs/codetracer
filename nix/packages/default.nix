@@ -16,14 +16,18 @@
       # codetracer and its front-end bundles from source). Left out: ci/,
       # .github/, docs/ and src/tests/, which no package build reads (the
       # scenario packs, page objects, stages and Playwright suites, and the
-      # CI scripts) -- except docs/agent-prompt/deepreview-evidence.md, which
+      # CI scripts), and nix/, whose expressions Nix reads while evaluating,
+      # not a build while it runs (an edit there that changes a package
+      # changes its derivation anyway; one that does not, such as a dev
+      # shell's, no longer rebuilds every package) -- except
+      # docs/agent-prompt/deepreview-evidence.md, which
       # `ct agent` embeds with `staticRead` (src/ct/agent_cli.nim). A path
       # added at the top level, or directly under src/, is left out until it
       # is listed here; ci/test/package-src-completeness.nix fails a package
       # module that `staticRead`s or `slurp`s a file the list leaves out, and
       # ci/test/package-src-invariance-test.sh holds that an edit under
-      # src/tests, ci/, docs/ or .github/ leaves the packages' derivations
-      # as they were. db-backend narrows further (see below).
+      # src/tests, ci/, docs/, .github/ or a dev shell's file in nix/ leaves
+      # the packages' derivations as they were. db-backend narrows further (see below).
       src =
         let
           root = ../../.;
@@ -85,7 +89,6 @@
             "libs"
             "locks"
             "media"
-            "nix"
             "node-packages"
             "non-nix-build"
             "package.json"
