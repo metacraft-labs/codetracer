@@ -53,6 +53,11 @@ test-ui-tests-rr
 cross-process-linux
 ct-host-container-gate
 viewmodel-tests
+# The TUI's two lanes (`just test-tui`, `just test-tui-real-terminal`) were
+# called by no workflow, so their 197 files ran nowhere while every guard was
+# green. Listed for the reason ct-test's gates below are: a run in which the job
+# is skipped or missing is lost coverage, not a pass.
+tui-tests
 visual-replay-regression-gate
 # ct-test's two gate scripts (ci/test/m16-release-gate.sh and
 # ci/test/ct-providers.sh) were maintained for months while no pipeline ran

@@ -6,7 +6,7 @@
   "B13": "u.press(debugFacts(), EditorPath, \"F10\").op == \"nothing:unbound\"",
   "B14": "gpuiWrongPath == 0",
   "B15": "$rt.scopePath == before",
-  "B16": "Unhandled exception: never: the sweep [AssertionFailedError]",
+  "B16": "Unhandled exception: never: the tracepoint editor [AssertionFailedError]",
   "B17": "imp.translated == 2",
   "B18": "MonacoOperations[\"clipboard-copy\"] == \"editor.action.clipboardCopyAction\"",
   "B19": "seen[] ==",

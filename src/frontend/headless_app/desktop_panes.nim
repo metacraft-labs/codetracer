@@ -123,7 +123,12 @@ const
                               label: "errorsComponent-0"),
     paneRequests: DesktopPane(placement: dpLayout,
                               content: Content.RequestPanel,
-                              label: "requestPanelComponent-0")]
+                              label: "requestPanelComponent-0"),
+    # PLAT-60: the Low Level Code view, which the desktop opens beside the
+    # source on demand (`openLowLevelCode`) and no default places.
+    paneLowLevelCode: DesktopPane(placement: dpLayout,
+                                  content: Content.LowLevelCode,
+                                  label: "lowLevelCodeComponent-0")]
     ## **THE TABLE.** Indexed by `PaneKind`, so a `PaneKind` added without a
     ## row does not compile. One-to-one on the rows that have a `Content`
     ## (`dpNone` is the one row without), asserted by the suite.

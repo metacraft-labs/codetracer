@@ -123,6 +123,8 @@ pkgs.mkShell {
     # plain nixpkgs Nim rather than the pinned codetracer toolchain, because
     # the check is "does nimsuggest start", not "does it agree with the
     # product's compiler" — and the toolchain input is one of the heavy ones.
+    # `ci/test/chromium-theme-build-dir-test.sh` also compiles one renderer
+    # suite with it, to read which file the compiler embedded.
     nim
 
     # Everything else the scripts call, named individually rather than pulled

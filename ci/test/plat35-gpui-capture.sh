@@ -103,16 +103,11 @@ esac
 SHIM_DIR="${ISONIM_GPUI}/rust/target/plat37"
 LIVE_SHIM="${ISONIM_GPUI}/rust/target/debug/libgpui_nim_shim.${SHIM_EXT}"
 HEADLESS_SHIM="${SHIM_DIR}/libgpui_nim_shim.headless.${SHIM_EXT}"
-SHIM_BACKUP=""
 
-restore_shim() {
-	if [ -n "${SHIM_BACKUP}" ] && [ -f "${SHIM_BACKUP}" ]; then
-		mv -f "${SHIM_BACKUP}" "${LIVE_SHIM}"
-		SHIM_BACKUP=""
-		echo "restored ${LIVE_SHIM}"
-	fi
-}
-trap restore_shim EXIT
+# Stages and restores the shim: `ci/lib/gpui-shim-stage.sh` says how, and why.
+# shellcheck source=ci/lib/gpui-shim-stage.sh disable=SC1091
+source "${root}/ci/lib/gpui-shim-stage.sh" || fail "ci/lib/gpui-shim-stage.sh could not be loaded"
+gpui_shim_install_traps
 
 [ -x "${BIN}" ] || fail "${BIN} is not built. Run \`just build-gpui\`."
 [ -f "${SCENARIOS}" ] || fail "the scenario set is not at ${SCENARIOS}"
@@ -199,17 +194,50 @@ PY
 # ---------------------------------------------------------------------------
 # Stage the headless shim and capture
 # ---------------------------------------------------------------------------
-if [ -z "${SHIM_BACKUP}" ] && [ -f "${LIVE_SHIM}" ]; then
-	SHIM_BACKUP="${LIVE_SHIM}.plat35-backup"
-	cp -f "${LIVE_SHIM}" "${SHIM_BACKUP}"
-fi
-cp -f "${HEADLESS_SHIM}" "${LIVE_SHIM}"
+# Moved aside and never copied over: `ci/lib/gpui-shim-stage.sh` says why.
+gpui_shim_stage "${LIVE_SHIM}" "${HEADLESS_SHIM}" ||
+	fail "the headless shim could not be staged at ${LIVE_SHIM}"
 echo "shim in place: headless ($(wc -c <"${LIVE_SHIM}" | tr -d ' ') bytes)"
 
 RECORDS="${OUT}/records.jsonl"
 : >"${RECORDS}"
 captured=0
 refused=0
+
+capture_verdict() {
+	python3 - "$@" <<'PY'
+import json, os, struct, sys
+rec = json.load(open(sys.argv[1]))
+png, width, height, sid, view = sys.argv[2], int(sys.argv[3]), int(sys.argv[4]), sys.argv[5], sys.argv[6]
+problems = []
+if rec["scenario"] != sid or rec["view"] != view:
+    problems.append(f"the census says {rec['view']}/{rec['scenario']}")
+if rec["width"] != width or rec["height"] != height:
+    problems.append(f"the census says {rec['width']}x{rec['height']}")
+if not rec["producedAFrame"]:
+    problems.append(f"no frame: rc={rec['rc']} ({rec['rcMeaning']})")
+if rec["isBlank"]:
+    problems.append("the frame is blank")
+if rec["satisfiesG1"]:
+    problems.append("this path must never claim G1")
+if not problems:
+    # THE PNG'S OWN IHDR, against the declared viewport. The census is the
+    # binary's word for what it rendered; the IHDR is the artefact's word
+    # for what it holds, and PLAT-35 already lost a milestone-month to a
+    # viewport matrix that was asserted from the DECLARATION.
+    if not os.path.exists(png):
+        problems.append("the census claims a frame and there is no image")
+    else:
+        head = open(png, "rb").read(33)
+        if head[:8] != b"\x89PNG\r\n\x1a\n":
+            problems.append("the image is not a PNG")
+        else:
+            iw, ih = struct.unpack(">II", head[16:24])
+            if (iw, ih) != (width, height):
+                problems.append(f"the PNG's IHDR is {iw}x{ih}")
+print("OK" if not problems else "BAD: " + "; ".join(problems))
+PY
+}
 
 while IFS=$'\t' read -r id view width height ops; do
 	[ -n "${id}" ] || continue
@@ -242,41 +270,7 @@ while IFS=$'\t' read -r id view width height ops; do
 		refused=$((refused + 1))
 		continue
 	fi
-	verdict="$(
-		python3 - "${png}.json" "${png}" "${width}" "${height}" "${id}" \
-			"${view}" <<'PY'
-import json, os, struct, sys
-rec = json.load(open(sys.argv[1]))
-png, width, height, sid, view = sys.argv[2], int(sys.argv[3]), int(sys.argv[4]), sys.argv[5], sys.argv[6]
-problems = []
-if rec["scenario"] != sid or rec["view"] != view:
-    problems.append(f"the census says {rec['view']}/{rec['scenario']}")
-if rec["width"] != width or rec["height"] != height:
-    problems.append(f"the census says {rec['width']}x{rec['height']}")
-if not rec["producedAFrame"]:
-    problems.append(f"no frame: rc={rec['rc']} ({rec['rcMeaning']})")
-if rec["isBlank"]:
-    problems.append("the frame is blank")
-if rec["satisfiesG1"]:
-    problems.append("this path must never claim G1")
-if not problems:
-    # THE PNG'S OWN IHDR, against the declared viewport. The census is the
-    # binary's word for what it rendered; the IHDR is the artefact's word
-    # for what it holds, and PLAT-35 already lost a milestone-month to a
-    # viewport matrix that was asserted from the DECLARATION.
-    if not os.path.exists(png):
-        problems.append("the census claims a frame and there is no image")
-    else:
-        head = open(png, "rb").read(33)
-        if head[:8] != b"\x89PNG\r\n\x1a\n":
-            problems.append("the image is not a PNG")
-        else:
-            iw, ih = struct.unpack(">II", head[16:24])
-            if (iw, ih) != (width, height):
-                problems.append(f"the PNG's IHDR is {iw}x{ih}")
-print("OK" if not problems else "BAD: " + "; ".join(problems))
-PY
-	)"
+	verdict="$(capture_verdict "${png}.json" "${png}" "${width}" "${height}" "${id}" "${view}")"
 	echo "  ${verdict}"
 	if [ "${verdict}" = "OK" ]; then
 		captured=$((captured + 1))
@@ -296,7 +290,7 @@ print(json.dumps(rec))" "${png}.json" "${verdict}" >>"${RECORDS}"
 	fi
 done <"${SPEC}"
 
-restore_shim
+gpui_shim_restore || fail "the live shim could not be restored after the captures"
 
 echo
 echo "=== ${captured} captured, ${refused} refused ==="

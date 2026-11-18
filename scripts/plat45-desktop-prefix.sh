@@ -25,12 +25,21 @@ out="${1:?usage: plat45-desktop-prefix.sh <dir> [<default_layout.json>]}"
 repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 layout="${2:-$repo/src/config/default_layout.json}"
 
-ct_bin="$(readlink -f "$repo/src/build-debug/bin/ct")"
-base="$(dirname "$(dirname "$ct_bin")")"
-[ -x "$ct_bin" ] || {
-	echo "FAIL: no built ct — run 'just build-once'" >&2
+# The build the prefix borrows from: the dev shell's build output when it names
+# one (`CODETRACER_BUILD_DIR`, e.g. `src/build-debug-repro` on macOS), else the
+# tup build — the same idiom `scripts/build-desktop-component.sh` uses.
+#
+# Checked BEFORE `readlink -f`: under `set -euo pipefail` a `readlink -f` of a
+# missing path inside `$(...)` ends the script on the spot, so a check after it
+# never ran and a missing ct exited 1 with nothing on stderr.
+build_dir="${CODETRACER_BUILD_DIR:-$repo/src/build-debug}"
+[ -x "$build_dir/bin/ct" ] || {
+	echo "FAIL: no built ct at $build_dir/bin/ct — run 'just build-once'" \
+		"(CODETRACER_BUILD_DIR selects the build output; unset, it is src/build-debug)" >&2
 	exit 1
 }
+ct_bin="$(readlink -f "$build_dir/bin/ct")"
+base="$(dirname "$(dirname "$ct_bin")")"
 
 # A linked worktree has empty submodule directories; the libraries are the
 # main checkout's.

@@ -94,9 +94,6 @@ proc run(ops: string; subject: string; pre: seq[string] = @[];
   if not fileExists(bin):
     raise newException(IOError, "prerequisite missing: " & bin &
                        " (just build-gpui)")
-  if subject.len == 0:
-    raise newException(IOError, "prerequisite missing: a tui-fixtures " &
-      "recording (the tui lane records them on its first run)")
   let state = createTempDir("m71-gpui-plan-", "")
   var env = newStringTable()
   for k, v in envPairs():

@@ -132,6 +132,7 @@ TIER2_PATHS = ["--path:../TermAssert/src", "--path:../TermAssertClient/src",
 
 PMODE = "src/frontend/viewmodel/viewmodels/product_mode.nim"
 KEYMAP = "src/frontend/tui/app/input/keymap.nim"
+NAVIGATION = "src/frontend/viewmodel/keymap/navigation_keymap.nim"
 STATUS = "src/frontend/tui/app/views/status_bar.nim"
 SHELL = "src/frontend/tui/app/views/shell.nim"
 EDITPANE = "src/frontend/tui/app/views/edit_pane.nim"
@@ -165,7 +166,7 @@ MAIN = "src/frontend/tui/main.nim"
 # arm, killed through a rebuilt binary.
 TOUCHED = [DIMS, ORACLE, SOURCE, BUILDS, PROCESS, REALPTY,
            PMODE, KEYMAP, STATUS, SHELL, EDITPANE, EDITBIND, BUILDSESS,
-           BUILDPANE, RUNTIME, PROFILE, CLI, BUILDRUNNER, MAIN]
+           BUILDPANE, RUNTIME, PROFILE, CLI, BUILDRUNNER, MAIN, NAVIGATION]
 
 
 @dataclass
@@ -284,18 +285,21 @@ MUTATIONS = [
         "The debug-only arm empties: scoping exists and decides nothing."),
     Mutation(
         "M11", KEYMAP,
-        "    if not appliesIn(bnd.action, product):",
-        "    if false:",
+        "  case scopeOf(action)\n"
+        "  of asBoth: true\n"
+        "  of asDebugOnly: product == pmDebug\n"
+        "  of asEditOnly: product == pmEdit",
+        "  true",
         DIMS,
         "one physical key, two product modes, two answers — and a control",
         "§8.1's inert-and-says-so goes: Step Over fires in Edit mode."),
     Mutation(
-        "M12", KEYMAP,
-        '  r.add b(mmNormal, "Ctrl+F5", kaToggleProductMode)',
-        "  discard",
+        "M12", NAVIGATION,
+        "    BaseRow(chords: \"Ctrl+F5\", operation: \"session.toggle-product-mode\", table: G, navModes: N),\n",
+        "",
         DIMS,
         "Ctrl+F5 is one command, reachable from both product modes",
-        "§8.4 goes: the transition is one-way from the keyboard."),
+        "The shared physical toggle row is absent, so Ctrl+F5 cannot switch from either product mode."),
     Mutation(
         "M13", KEYMAP,
         "  of kaToggleProductMode: ssModeTransitions",
@@ -341,8 +345,10 @@ MUTATIONS = [
         "not a mutation."),
     Mutation(
         "M18", SHELL,
-        "  if region.pane == paneEditor and model.product == pmEdit:",
-        "  if region.pane == paneEditor and not model.edit.isEmpty:",
+        "  if region.pane == paneEditor and\n"
+        "     (model.product == pmEdit or model.editorWritable):",
+        "  if region.pane == paneEditor and\n"
+        "     (not model.edit.isEmpty or model.editorWritable):",
         SOURCE,
         "the editor rectangle is painted from the PRODUCT mode and nothing else",
         "The pane branches on the DATA rather than on the mode, so Debug mode "
@@ -360,15 +366,20 @@ MUTATIONS = [
         "A cancelled build is reported as a FAILED one: §5a's merged events."),
     Mutation(
         "M20", BUILDSESS,
-        "  of bvIdle, bvCancelled: bsIdle",
-        "  of bvIdle: bsIdle\n  of bvCancelled: bsFailed",
+        "  of bvCancelled: bsCancelled",
+        "  of bvCancelled: bsFailed",
         BUILDS,
-        "the core's four states are reachable and the fifth maps onto idle",
-        "The lossy direction loses the distinction it exists to keep."),
+        "every verdict is the core's, the cancellation included",
+        "A cancelled build is reported as failed, wrongly blaming the code."),
     Mutation(
         "M21", BUILDSESS,
-        "    s.lines.delete(0)\n    s.truncated = true",
-        "    s.lines.delete(0)",
+        "    s.lines.delete(0)\n"
+        "    if s.stderrFlags.len > 0:\n"
+        "      s.stderrFlags.delete(0)\n"
+        "    s.truncated = true",
+        "    s.lines.delete(0)\n"
+        "    if s.stderrFlags.len > 0:\n"
+        "      s.stderrFlags.delete(0)",
         BUILDS,
         "output is capped and the cap is REPORTED",
         "The pane silently loses the first error."),
@@ -425,9 +436,13 @@ MUTATIONS = [
         "nothing."),
     Mutation(
         "M27", RUNTIME,
-        "  if rt.app.modes.product != pmEdit or rt.modal.mode != mmNormal:\n"
-        "    return false",
-        "  if true:\n    return false",
+        "    if id.len > 0:\n"
+        "      inner.add element(ekEditor, id)\n"
+        "      focusOwner = id",
+        "    if id.len > 0:\n"
+        "      if rt.app.modes.product != pmEdit or rt.modal.mode != mmNormal:\n"
+        "        inner.add element(ekEditor, id)\n"
+        "      focusOwner = id",
         REALPTY,
         "a typed byte reaches the buffer, and the dirty marker appears",
         "The editor stops owning its keys: a typed character is a command "
@@ -519,8 +534,9 @@ MUTATIONS = [
         "buffer, which Mode-Transitions.md §5 calls data loss by name."),
     Mutation(
         "M34", MAIN,
-        "  let edit = wireEditServices(rt, projectRoot, proc(): EditListResult =\n"
-        "    let listing = listProjectFiles(projectRoot)\n"
+        "  let edit = wireEditServices(rt, projectRoot, command.keymap,\n"
+        "                              proc(): EditListResult =\n"
+        "    let listing = listProjectFiles(rt.app.projectRoot)\n"
         "    EditListResult(files: listing.files, truncated: listing.truncated))",
         "  let edit = EditHostState()",
         REALPTY,
@@ -621,11 +637,10 @@ DECLARED_SURVIVORS = [
         "arguments, so the order is not behaviour. Pairs M19/M20/M21/M22."),
     Mutation(
         "S6", STATUS,
-        "  let mode = $m.mode & \" \" & productIndicator(m.product)",
-        "  let mode = ($m.mode) & \" \" & productIndicator(m.product)",
+        "  let mode = m.modeText & \" \" & productIndicator(m.product) &",
+        "  let mode = (m.modeText) & \" \" & productIndicator(m.product) &",
         DIMS, "",
-        "Redundant parentheses around `$m.mode`. Pairs M14: the dimension "
-        "cases redden because an INDICATOR went, not because this line moved."),
+        "Redundant parentheses around `m.modeText`. Pairs M14: the dimension cases redden because an INDICATOR went, not because this line moved."),
     Mutation(
         "S7", RUNTIME,
         "    of \"cancel\":\n      if rt.app.build.isNil or "
@@ -664,8 +679,8 @@ DECLARED_SURVIVORS = [
         "changed meaning, not because `edit_binding.nim` was edited."),
     Mutation(
         "S10", BUILDRUNNER,
-        "  if rb.isNil or rb.fd < 0 or rb.sawEof:",
-        "  if rb.isNil or rb.sawEof or rb.fd < 0:",
+        "  if rb.isNil or st.fd < 0 or st.sawEof:",
+        "  if rb.isNil or st.sawEof or st.fd < 0:",
         PROCESS, "",
         "Two pure predicates in an `or` chain swapped. Neither can raise and "
         "neither has an effect, so the order is not behaviour. Pairs "
@@ -761,7 +776,7 @@ SUITE_CASES = {
     BUILDS: [
         "cancellation is a verdict of its own, and the exit code does not "
         "decide it",
-        "the core's four states are reachable and the fifth maps onto idle",
+        "every verdict is the core's, the cancellation included",
         "the deadline is a bound and is NOT reported as a cancellation",
         "output is capped and the cap is REPORTED",
         "each verdict has its own colour, and no two share one",
@@ -778,7 +793,7 @@ SUITE_CASES = {
         "screen",
         "a typed byte reaches the buffer, and the dirty marker appears",
         "Ctrl+z undoes, written as the byte 0x1a",
-        "`sendKey(\"ctrl+f5\")` loses the modifier; the raw bytes do not",
+        "a plain F5 is inert in Edit mode; Ctrl+F5 toggles, spelled or as bytes",
         "Ctrl+F5 switches the product mode, as bytes, and the indicator moves",
         "a recording, an edit, a save, and the switch back TELLS the user",
         "with NO edit, the same route says nothing — the notice is not a "

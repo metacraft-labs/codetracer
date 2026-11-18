@@ -102,6 +102,15 @@ proc selectFirstChild*(vm: CalltraceVM) =
   if next.isSome and next.get.depth > here.get.depth:
     vm.selectIndex(next.get.index)
 
+proc toggleSelected*(vm: CalltraceVM) =
+  ## Space: fold or unfold the selected call, as a click on its icon does.
+  let sel = vm.selectedEntry.val
+  if sel.isNone:
+    return
+  let here = vm.heldAt(sel.get)
+  if here.isSome and here.get.hasChildren:
+    vm.toggleExpandCallChildren(here.get.index)
+
 proc activateSelected*(vm: CalltraceVM) =
   ## Enter: go to the selected call, as a click on its row does.
   let sel = vm.selectedEntry.val

@@ -33,7 +33,8 @@ keyboard). After every step it waits for the window to SETTLE (two identical
     drop-cancel     Esc pressed, the button still held
     drop-released   the button released after the cancel
     drop-commit     a second drag, released over the editor's right edge
-    vcs             a click on the VCS tab of the Files stack
+    vcs             a click on the VCS tab, then the editor's body: the
+                    Files stack stays unfocused for the tab-colour comparison
     vcs-refresh     a new untracked file written into the repository by
                     another program, then the pane's refresh interval waited
                     out: the pane lists it without any input
@@ -385,8 +386,23 @@ def capture():
         vx, vy = centre(files["tabs"][files["panes"].index("vcs")])
         ptr.jump(vx, vy)
         ptr.send("down", "sleep 120", "up", "sleep 300")
+        # Compare active/inactive tabs with the same focus as `base`: the
+        # editor owns the focus while the Files/VCS stack stays unfocused.
+        g = win.geom()
+        eb = node_of(g, "editor")["body"]
+        ptr.jump(eb[0] + eb[2] - 40, eb[1] + eb[3] - 40)
+        ptr.send("down", "sleep 120", "up", "sleep 300")
         steps["vcs"] = settle("vcs")
         shutil.copy(win.geometry, os.path.join(OUT, "a-final.geometry.json"))
+        g = win.geom()
+        vcs = node_of(g, "vcs")
+        if vcs["panes"][vcs["active"]] != "vcs":
+            raise RuntimeError("PLAT-47: the VCS sample needs its VCS tab active")
+        editor_rect = node_of(g, "editor")["rect"]
+        focus = ring_box(read_ppm(os.path.join(OUT, "vcs.ppm")), FOCUS_RING)
+        if focus != editor_rect:
+            raise RuntimeError(
+                f"PLAT-47: the VCS sample needs Editor focus: {focus} != {editor_rect}")
         # --- the VCS pane refreshes on its own, as the desktop's does: a file
         # written by ANOTHER program, no input to the window, one refresh
         # interval (5 s, `vcs_vm.VCSRefreshIntervalMs`) and a margin.

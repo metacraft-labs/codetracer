@@ -326,10 +326,20 @@ total_checks=0
 declared_files=0
 undeclared_files=0
 files=0
+platform_skipped=0
+host_platform="$(uname -s)"
 
 while read -r f; do
 	[ -n "${f}" ] || continue
 	files=$((files + 1))
+	# Reject only a declared platform mismatch, before invoking the compiler.
+	# The full discovered inventory remains intact for coverage accounting.
+	skip_reason="$(test_lane_file_skip_reason "${f}" "${host_platform}")"
+	if [ -n "${skip_reason}" ]; then
+		printf '  %s ... SKIPPED (%s)\n' "${f}" "${skip_reason}"
+		platform_skipped=$((platform_skipped + 1))
+		continue
+	fi
 	name="$(basename "${f}" .nim)"
 	cache="${cache_root}/${lane}-${name}"
 	mkdir -p "${_ct_lane_home}/${name}"
@@ -723,6 +733,10 @@ if [ "${total_skips}" -gt 0 ]; then
 		"${total_skips} SKIPPED"
 else
 	echo "${lane}: ${passed} file(s) passed, ${failed} failed, ${total_oks} case(s)"
+fi
+
+if [ "${platform_skipped}" -gt 0 ]; then
+	echo "${lane}: ${platform_skipped} file(s) SKIPPED (platform eligibility)"
 fi
 
 # HOW MUCH OF THAT TALLY IS AN ASSERTION COUNT, AND HOW MUCH IS CASE MARKERS.

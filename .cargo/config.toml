@@ -38,7 +38,10 @@
 # `src/db-backend/tests/panic_message_visibility.rs` is the regression guard:
 # it runs a deliberately failing test in a child process and asserts the
 # assertion's own text and values reach the output. Remove these two entries
-# and that test goes red.
+# and that test goes red -- outside the dev shell. Inside it, the shell's
+# CARGO_TARGET_<triple>_LINKER (nix/shells/ci-base.nix) outranks these entries
+# and names the same clang for every crate, inside this checkout or not;
+# `ci/test/dev-shell-rust-unwinds-test.sh` guards that half.
 [target.aarch64-apple-darwin]
 linker = "clang"
 

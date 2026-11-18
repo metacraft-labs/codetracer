@@ -37,6 +37,8 @@ ONE ARM PER CLAIM, each naming the case that must die:
   | G   | a call-trace row's click seeks one tick past the row | "a call-trace row's click jumps to that row's own tick" |
   | H   | an event-log row's click seeks nowhere | "an event-log row's click jumps to that event" |
   | CT1 | every call-trace row is given the same call key | "every call-trace row carries its own call key" |
+  | SE  | a failed call's Error return is dropped from its row | "a failed call's return is drawn as its error" |
+  | CK  | following the debugger's call undoes a row click | test_calltrace_follows_debugger: "the clicked call stays marked at the stop the jump lands on" |
 
 VD3 GUARDS THE MODEL, NOT THE DRAWING. Every front-end draws an added binding
 and a modified one alike, in the changed-value style
@@ -94,11 +96,12 @@ STORE = "src/frontend/viewmodel/store/replay_data_store.nim"
 # The suites that grade them.
 T_LOADER = "src/frontend/viewmodel/tests/unit/test_stop_loader.nim"
 T_JOBS = "src/frontend/viewmodel/tests/unit/test_hsf_sdk_jobs.nim"
-SUITES = [T_LOADER, T_JOBS]
+T_FOLLOW = "src/frontend/viewmodel/tests/unit/test_calltrace_follows_debugger.nim"
+SUITES = [T_LOADER, T_JOBS, T_FOLLOW]
 BACKENDS = ["c", "js"]
 
 TOUCHED = [STOPLOADER, FLOWVM, ADAPTER, CHANGES, STATEVM, CALLTRACEVM,
-           EVENTLOGVM, STORE, T_LOADER, T_JOBS]
+           EVENTLOGVM, STORE, T_LOADER, T_JOBS, T_FOLLOW]
 CONTROL_HASHES = HERE / "hsf-sdk-mutation-control.sha256"
 
 SUITE_TIMEOUT = 2400
@@ -120,13 +123,16 @@ K_KEPT = "a move keeps the values on screen until its answer arrives"
 K_CALLJUMP = "a call-trace row's click jumps to that row's own tick"
 K_EVENTJUMP = "an event-log row's click jumps to that event"
 K_CALLKEY = "every call-trace row carries its own call key"
+K_ERRORRETURN = "a failed call's return is drawn as its error"
+K_CLICKKEEPS = "the clicked call stays marked at the stop the jump lands on"
 
 NAMED_CASES = {
     K_LOCALS: T_LOADER, K_FLOW: T_LOADER,
     K_LANDING: T_JOBS, K_INT: T_JOBS, K_STRING: T_JOBS,
     K_SELECTION: T_JOBS, K_UNCHANGED: T_JOBS, K_ADDED: T_JOBS,
     K_KEPT: T_JOBS, K_CALLJUMP: T_JOBS, K_EVENTJUMP: T_JOBS,
-    K_CALLKEY: T_JOBS,
+    K_CALLKEY: T_JOBS, K_ERRORRETURN: T_JOBS,
+    K_CLICKKEEPS: T_FOLLOW,
 }
 
 BT_SELFTEST = "BlockTracer tools/journeys/selftest.mjs"
@@ -261,6 +267,33 @@ ARMS += [
         "**TWO FRAMES ANSWER TO ONE IDENTITY.** Every row is drawn, named and "
         "placed, and a link to a frame can no longer say which row it means",
         "CT1/two-frames-answer-to-one-identity",
+    ),
+    Arm(
+        "SE", STORE,
+        '  if v.getOrDefault("kind").getInt(NoneValueKind) == NoneValueKind: return ""\n',
+        '  if v.getOrDefault("kind").getInt(NoneValueKind) == NoneValueKind: return ""\n'
+        '  if v.getOrDefault("kind").getInt(NoneValueKind) == 24: return ""\n',
+        K_ERRORRETURN,
+        "**A FAILED CALL'S ERROR IS DROPPED FROM ITS ROW.** The call is drawn, "
+        "named and placed, and reads as one that returned nothing: a Starknet "
+        "entry point that failed inside a succeeding transaction is "
+        "indistinguishable from one that succeeded. BlockTracer's Starknet "
+        "journey 01 reads the same return on the live page",
+        "SE/a-failed-call-reads-as-returning-nothing",
+    ),
+    Arm(
+        "CK", CALLTRACEVM,
+        "        if vm.selectedForMove.len > 0:\n",
+        "        if false:\n",
+        K_CLICKKEEPS,
+        "**FOLLOWING THE DEBUGGER'S CALL UNDOES A ROW CLICK.** The click "
+        "selects its row's call and jumps to it; where the call shares its "
+        "first step with calls it makes, the engine reports the innermost as "
+        "current and the follow marks that one instead. Measured on a deep "
+        "Aztec capture before the skip existed: 6 of 31 row clicks marked a "
+        "deeper frame. BlockTracer's journey 25 reads the clicked row back on "
+        "the live page",
+        "CK/the-follow-overrides-a-row-click",
     ),
 ]
 

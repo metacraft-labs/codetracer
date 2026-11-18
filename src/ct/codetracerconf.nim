@@ -425,6 +425,13 @@ type
           "text (default), json, csv"
       .}: Option[string]
 
+      # `--verify` and `--follow` are flags, declared as plain `bool` with a
+      # default like every other ct flag (`install --json`, `upload
+      # --no-portable`); nothing here needs to tell "not given" from "false".
+      # Declared `Option[bool]`, they once took the NEXT token as their value,
+      # so `ct print --verify <path>` spent the path on it and
+      # `ct print <path> --verify` dropped it. See
+      # src/ct/cli/print_options_test.nim.
       printVerify* {.
         name: "verify",
         desc: "Verify recording quality " &
@@ -432,14 +439,16 @@ type
           "Checks: trace files exist, " &
           "events present, " &
           "HTTP requests found."
-      .}: Option[bool]
+        defaultValue: false
+      .}: bool
 
       printFollow* {.
         name: "follow",
         abbr: "F",
         desc: "Follow mode: watch for " &
           "new events (like tail -f)"
-      .}: Option[bool]
+        defaultValue: false
+      .}: bool
 
     of help:
       helpArgs* {.

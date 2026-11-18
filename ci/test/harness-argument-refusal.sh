@@ -47,6 +47,13 @@ python3 ci/lib/harness_guard.py || {
 	exit 1
 }
 
+# Attribution is the other mutation-harness contract: compiler-generated
+# counters must not change which assertion killed an arm.
+python3 ci/test/plat3-vocabulary-because-test.py || {
+	echo "FAIL: PLAT-3 failure attribution is unstable or over-normalized" >&2
+	exit 1
+}
+
 # THE DISCOVERY IS GENERAL, AND ANY EXEMPTION IS NAMED, COUNTED AND FROZEN.
 #
 # It was `run-plat*mutations*.py` alone, which was a statement about the only

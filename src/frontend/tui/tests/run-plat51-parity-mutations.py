@@ -466,7 +466,7 @@ ARMS = [
         "    discard rt.editorCaretLine()\n",
         P_CARET, "Alt+t and Ctrl+Enter do not open the tracepoint editor"),
     Arm("T14", TDRIVER,
-        "      if (b >= ' ' and b <= '~') or b == '\\x7f' or (b < ' ' and b != Esc):\n        let alt = Esc & $b\n",
+        "      if (b >= ' ' and b <= '~') or b == '\\x7f' or b < ' ':\n        let alt = Esc & $b\n",
         "      if false:\n        let alt = Esc & $b\n",
         Y_CARET, "the framer drops Alt's ESC: a real terminal's Alt+T is a bare t"),
     # T15 RE-AIMED 2026-10-12 (PLAT-68 Phase B): an Alt chord is the key

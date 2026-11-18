@@ -135,6 +135,13 @@ type
     caRequestFilterStatus = "request-filter-status"
       ## …and a Status picker's choice (`text`: "2xx" … "5xx", or "").
     caRequestClearFilters = "request-clear-filters"
+    caLowLevelGoToSourceLine = "low-level-go-to-source-line"
+      ## PLAT-60: an instruction's menu in the Low Level Code pane, the
+      ## entries `LowLevelCodeVM.rowMenu` decides, in its order; the
+      ## instruction is `ContextTarget.index`, its offset `line`.
+    caLowLevelShowSourceLine = "low-level-show-source-line"
+    caLowLevelCopyInstruction = "low-level-copy-instruction"
+    caLowLevelCopySourceLocation = "low-level-copy-source-location"
 
   ContextMenuKind* = enum
     cmkTab = "tab"
@@ -157,6 +164,8 @@ type
     cmkRequestPicker = "request-picker"
       ## PLAT-58: the Requests pane's Method or Status picker, opened as a
       ## dropdown (K60): one entry per option, the current one hinted.
+    cmkLowLevelRow = "low-level-row"
+      ## PLAT-60: an instruction of the Low Level Code pane (K62).
 
   ContextMenuEntry* = object
     label*: string
@@ -486,6 +495,27 @@ func requestPickerContextMenu*(statusPicker: bool;
     e.value = value
     result.entries.add e
 
+func lowLevelRowContextMenu*(index, offset: int;
+                             decided: openArray[tuple[label: string;
+                                                      action: ContextAction;
+                                                      enabled: bool;
+                                                      reason: string]]):
+    ContextMenuModel =
+  ## PLAT-60: an instruction's menu in the Low Level Code pane, from the
+  ## entries the shared model decided (`headless_app/low_level_menu.
+  ## lowLevelRowContextMenuOf` reads them off `LowLevelCodeVM.rowMenu`). A
+  ## disabled entry's reason is its hint too, as the Files menu's is. The
+  ## target carries the instruction's index and offset, so a choice made
+  ## after the listing changed finds no row rather than another one.
+  result = ContextMenuModel(kind: cmkLowLevelRow,
+                            target: ContextTarget(pane: paneLowLevelCode,
+                                                  index: int64(index),
+                                                  line: offset))
+  for d in decided:
+    result.entries.add entry(d.label, d.action,
+                             hint = (if d.enabled: "" else: d.reason),
+                             enabled = d.enabled, reason = d.reason)
+
 func variablesContextMenu*(path: string): ContextMenuModel =
   ## A Variables row's right-click menu — the State pane's
   ## `buildVariableRowContextMenu`: value history and value origin.
@@ -638,7 +668,7 @@ func k(id, target: string; gestures: set[ClickGesture];
                  desktop: desktop, sharedOp: sharedOp, terminal: terminal,
                  gpui: gpui, note: note)
 
-const ClickInventory*: array[60, ClickBehaviour] = [
+const ClickInventory*: array[63, ClickBehaviour] = [
   k("K1", "Top bar: menu button / item", {cgClick},
     "open the menu; run the item / enter the folder", "MenuVM",
     nsExisting, nsExisting, "PLAT-48/49"),
@@ -825,7 +855,20 @@ const ClickInventory*: array[60, ClickBehaviour] = [
     "RequestPanelVM.setFilterMethod / setFilterStatus / setSearchText",
     nsDone, nsDone,
     "PLAT-58: the pickers open as dropdowns; the field is the omnibox's " &
-      "(the terminal's command line's) `:requests <text>`")]
+      "(the terminal's command line's) `:requests <text>`"),
+  k("K61", "Low Level Code: instruction", {cgClick},
+    "go to the source line it came from (`ct/source-line-jump`)",
+    "LowLevelCodeVM.jumpToInstruction", nsDone, nsDone,
+    "PLAT-60: the pane is drawn natively; the keys move the listing's " &
+      "cursor, whose source line the editor cross-references"),
+  k("K62", "Low Level Code: instruction", {cgRightClick},
+    "menu: Go to Source Line, Show Source Line, Copy Instruction, Copy " &
+      "Source Location", "LowLevelCodeVM.rowMenu", nsDone, nsDone,
+    "PLAT-60 added the menu on all three front-ends"),
+  k("K63", "Low Level Code: sync toggle", {cgClick},
+    "keep the listing in step with the source, or stop",
+    "LowLevelCodeVM.setSyncEnabled", nsDone, nsDone,
+    "PLAT-60: the header's `sync on` / `sync off`")]
 
 func behaviour*(id: string): ClickBehaviour =
   ## The inventory row named `id` (`K1` …); an empty value for an unknown id.

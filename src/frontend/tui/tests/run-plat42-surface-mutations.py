@@ -142,7 +142,13 @@ ARMS = [
     ("F4", FLOWVM, "  vm.styledLines.val = flowLineFactsOf(windows[0])",
      "  vm.styledLines.val = @[]", [FACTS, FLOW_TERM],
      "the flow window's per-line facts are discarded again (PLAT22-PG2)"),
-    ("S1", STDIO, "    deliver()", "    discard", [FLOW_TERM],
+    # S1 RE-AIMED 2026-11-02 (PLAT-58 re-grade, §32a): the subscriber list and
+    # the delivery loop moved out of `toBackendService` into the transport's
+    # own `deliverPendingEvents`, which `send` and the headless session's
+    # explicit drains both call. Silencing only `send`'s call would leave the
+    # other drains delivering, so the arm now drops the one hand-off every
+    # path shares: the subscriber is never called with the event.
+    ("S1", STDIO, "          handler(envelope)", "          discard", [FLOW_TERM],
      "the native transport stops handing the engine's events to subscribers"),
     # --- PG3: the terminal host's inline values ----------------------------
     # RE-AIMED 2026-09-23 (PLAT-29, §32a): the values reach the pane through

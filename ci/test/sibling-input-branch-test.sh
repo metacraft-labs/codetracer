@@ -158,9 +158,17 @@ for repo in $(printf '%s\n' "$flake_list" "$workflow_list" | cut -f1 | sort -u);
 			python3 - "$repo" <<'PY' 2>/dev/null || true
 import json,sys
 repo=sys.argv[1]
-try: nodes=json.load(open("flake.lock"))["nodes"]
+try: lock=json.load(open("flake.lock"))
 except Exception: sys.exit(0)
-for v in nodes.values():
+nodes=lock.get("nodes",{})
+# The ROOT's input first: the lock also holds other copies of a repo that
+# some input pulls in at its own rev, and the Nix lane builds the root's.
+root=nodes.get(lock.get("root","root"),{}).get("inputs",{})
+cands=[]
+for name,target in root.items():
+    if isinstance(target,str): cands.append(nodes.get(target,{}))
+cands+=list(nodes.values())
+for v in cands:
     l=v.get("locked",{})
     if l.get("repo")==repo and l.get("rev"):
         print(l["rev"]); break

@@ -71,7 +71,7 @@ type
 
 const
   PaneTitleKeywords*: array[4, tuple[id: PaneId, words: seq[string]]] = [
-    (piProgramState, @["STATE"]),
+    (piProgramState, @["STATE", "VARIABLES"]),
     # PLAT-40. The desktop titles the breakpoint list's TAB `POINT LIST`, the
     # native window titles its pane `Breakpoints`; neither is near enough to
     # the other for the nearest-neighbour classifier, so both are keywords.
@@ -429,8 +429,9 @@ const
     ##
     ## Exact matching is still preferred and tried first; this is the fallback.
 
-  KnownPaneTitles*: array[15, tuple[id: PaneId, title: string]] = [
+  KnownPaneTitles*: array[16, tuple[id: PaneId, title: string]] = [
     (piProgramState, "State"),
+    (piProgramState, "Variables"),
     (piEventLog, "Event Log"),
     (piEditor, "Editor"),
     (piDebugControls, "Debug Controls"),

@@ -15,15 +15,16 @@ type
     forceReload*: bool
 
   Instruction* = object ## Instruction object. Represents asm/bytecode instruction
+    ## Offsets and addresses retain their wire width on JS (`int` is 32-bit).
     name*: langstring
     args*: langstring
     other*: langstring
-    offset*: int
+    offset*: int64
     highLevelPath*: langstring
     highLevelLine*: int
 
   Instructions* = object ## Instruction objects. Represents a sequence of instructions
-    address*: int
+    address*: int64
     instructions*: seq[Instruction]
     error*: langstring
 
@@ -68,10 +69,10 @@ type
     highLevelFunctionLast*: int
     sourceGeneration*: int
     sourceDigest*: langstring
-    offset*: int
+    offset*: int64
     error*: bool
     callstackDepth*: int
-    originatingInstructionAddress*: int
+    originatingInstructionAddress*: int64
     key*: langstring
     globalCallKey*: langstring
     # expansion location
@@ -91,5 +92,5 @@ type
     kind*: string
 
   FrameInfo* = object
-    offset*: int
+    offset*: int64
     hasSelected*: bool

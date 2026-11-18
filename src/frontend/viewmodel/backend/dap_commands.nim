@@ -43,6 +43,7 @@ const VALID_DAP_COMMANDS_SEQ*: seq[string] = @[
   # Standard DAP commands
   "stopped",
   "initialized",
+  "capabilities",
   "initialize",
   "configurationDone",
   "launch",

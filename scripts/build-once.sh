@@ -191,6 +191,30 @@ if [ -n "$ct_reprobuild_host" ]; then
 	ct_repro_out_root="src/build-${ct_config}-repro"
 	# The reprobuild branch has no tup variant, hence the empty third field.
 	ct_publish_build_env "$ct_reprobuild_host" "$ct_config" "" "$ct_repro_out_root"
+	# A solved lock describes one platform. Keep the shared Linux solve
+	# intact and bind the separately committed Apple-arm solve through repro's
+	# whole-build --lock API. The watch CLI has no --lock flag; retain its
+	# existing invocation when build.sh starts its incremental watcher.
+	# `.` schedules every declared target. Two of them cannot pass on a Mac:
+	# `dmg` shells out to system tools the hermetic PATH does not carry, and
+	# `docs-book-assets` needs recorder and player builds. CI builds this same
+	# target (.github/workflows/codetracer.yml); `just build-dmg` names its own.
+	ct_repro_target="${CODETRACER_REPROBUILD_TARGET:-.}"
+	if [ "${CODETRACER_REPROBUILD_COMMAND:-build}" = build ] &&
+		[ "$ct_reprobuild_host" = darwin ] &&
+		[ -z "${CODETRACER_REPROBUILD_TARGET:-}" ]; then
+		ct_repro_target=".#macos-app"
+	fi
+	ct_lock_args=()
+	if [ "${CODETRACER_REPROBUILD_COMMAND:-build}" = build ] &&
+		[ "$ct_reprobuild_host" = darwin ] && [ "$(uname -m)" = arm64 ]; then
+		ct_native_lock="$CT_ROOT/locks/arm64-macosx.lock"
+		if [ ! -f "$ct_native_lock" ]; then
+			echo "Error: committed native lock is missing: $ct_native_lock" >&2
+			exit 1
+		fi
+		ct_lock_args=(--lock "$ct_native_lock")
+	fi
 	if [ -z "${REPRO_VARIANTS:-}" ]; then
 		export REPRO_VARIANTS="buildType=${ct_config}"
 	elif ! grep -q "buildType=" <<<"$REPRO_VARIANTS"; then
@@ -214,27 +238,136 @@ if [ -n "$ct_reprobuild_host" ]; then
 		reprobuild_root="$REPROBUILD_SOURCE_ROOT"
 	fi
 
-	# On Windows, `repro` ships as `repro.exe`; the `repro` (no extension)
-	# alias may not exist depending on how the sibling reprobuild was
-	# built. Probe both filenames under the sibling's `build/bin/`.
+	# WHICH `repro` RUNS, AND WHY IT IS FIT TO.
+	#
+	# reprobuild is a participating repo of the workspace, so the sibling
+	# checkout above is nearly always found, and a developer working on
+	# reprobuild beside codetracer wants their own build used. But that build
+	# is gitignored output nothing refreshes: on 2026-10-31 a `repro 0.2.6`
+	# built 13 days earlier ran here instead of the pinned 0.2.19 and refused
+	# the committed lock ("unsupported lock schema … v3 (expected … v2)"),
+	# inviting a rewrite of a correct shared artefact to suit a stale tool —
+	# and nothing said which binary had spoken (codetracer-pm issue
+	# 2026-10-31-build-once-prefers-the-sibling-reprobuild-checkouts-build-
+	# over-the-pinned-repro-with-no-version-check.md). So the sibling build is
+	# used only when both hold:
+	#
+	#   * it is fresh: reprobuild's own `scripts/bootstrap_guard.sh decide`
+	#     says `skip`, i.e. the engine pair exists, is this host's machine
+	#     format, and is newer than every source it is built from. That guard
+	#     is the definition `just bootstrap` uses; it is called, not copied.
+	#   * its checkout carries the pin: the revision this repo's flake.lock
+	#     pins for its `reprobuild` input is an ancestor of the sibling's HEAD,
+	#     so the build is at least as new as the tool the dev shell supplies
+	#     and can read what that tool wrote (the committed locks among it).
+	#
+	# Otherwise the pinned `repro` on PATH runs and the reason is printed; with
+	# none on PATH the build is refused. REPROBUILD_BIN is an explicit choice
+	# and is taken as given. Whichever runs is named before the build, and
+	# again if the build fails.
+	ct_repro_origin=""
+	if [ -n "$repro_bin" ]; then
+		ct_repro_origin="REPROBUILD_BIN"
+	fi
+
+	# Print why the sibling checkout $1's build cannot serve this
+	# repository, or nothing when it can.
+	ct_sibling_repro_unfit_reason() {
+		local root="$1" guard decision pinned
+		guard="$root/scripts/bootstrap_guard.sh"
+		if [ ! -f "$guard" ]; then
+			echo "its checkout has no scripts/bootstrap_guard.sh to judge the build's freshness"
+			return 0
+		fi
+		decision="$(bash "$guard" decide "$root" 2>&1 || true)"
+		case "$decision" in
+		skip\ *) ;;
+		*)
+			echo "the build is not fresh (bootstrap_guard: ${decision:-no decision})"
+			return 0
+			;;
+		esac
+		pinned="$(ct_pinned_reprobuild_revision)"
+		if [ -z "$pinned" ]; then
+			echo "the reprobuild revision pinned by $CT_ROOT/flake.lock could not be read"
+			return 0
+		fi
+		# A commit HEAD descends from is always present locally, so a pin
+		# missing from the object store answers "not an ancestor" as it is; a
+		# lazy fetch from a partial clone's promisor could not change that.
+		if ! GIT_NO_LAZY_FETCH=1 git -C "$root" merge-base --is-ancestor "$pinned" HEAD 2>/dev/null; then
+			echo "its checkout's HEAD ($(git -C "$root" rev-parse --short HEAD 2>/dev/null || echo unknown)) does not contain the pinned reprobuild $pinned (fetch it, or bring the checkout up to the pin)"
+			return 0
+		fi
+	}
+
+	# The revision flake.lock locks for the root's `reprobuild` input. The lock
+	# node is looked up through the root's input map, never by the name
+	# "reprobuild": node names are assigned by nix and need not match. An
+	# input declared with `follows` is a list edge, a path of input names
+	# from the root (https://nix.dev/manual/nix/latest/command-ref/new-cli/nix3-flake#lock-files),
+	# and is resolved to the node it names.
+	ct_pinned_reprobuild_revision() {
+		local py
+		py="$(command -v python3 || command -v python || true)"
+		[ -n "$py" ] && [ -f "$CT_ROOT/flake.lock" ] || return 0
+		"$py" - "$CT_ROOT/flake.lock" <<'PY' 2>/dev/null || true
+import json, sys
+lock = json.load(open(sys.argv[1]))
+nodes = lock["nodes"]
+def resolve(path, depth=0):
+    if depth > 32:
+        raise SystemExit("follows cycle")
+    node = lock["root"]
+    for name in path:
+        edge = nodes[node]["inputs"][name]
+        node = resolve(edge, depth + 1) if isinstance(edge, list) else edge
+    return node
+print(nodes[resolve(["reprobuild"])]["locked"]["rev"])
+PY
+	}
+
+	# Only this host's artefact name is a candidate: `repro.exe` on Windows,
+	# `repro` elsewhere. That is the file bootstrap_guard.sh judges, and a
+	# `build/` tree shared between a Windows and a WSL checkout carries the
+	# other platform's binary under the other name, so taking whichever
+	# exists could run a build the guard never looked at.
+	ct_unfit_sibling=""
+	ct_unfit_reason=""
 	if [ -z "$repro_bin" ] && [ -n "$reprobuild_root" ]; then
-		for cand in "$reprobuild_root/build/bin/repro.exe" "$reprobuild_root/build/bin/repro"; do
-			if [ -x "$cand" ]; then
+		case "$ct_reprobuild_host" in
+		windows) cand="$reprobuild_root/build/bin/repro.exe" ;;
+		*) cand="$reprobuild_root/build/bin/repro" ;;
+		esac
+		if [ -x "$cand" ]; then
+			ct_unfit_reason="$(ct_sibling_repro_unfit_reason "$reprobuild_root")"
+			if [ -z "$ct_unfit_reason" ]; then
 				repro_bin="$cand"
-				break
+				ct_repro_origin="sibling reprobuild build, fresh and carrying the pinned revision"
+			else
+				ct_unfit_sibling="$cand"
+				echo "build-once: not using $cand: $ct_unfit_reason" >&2
 			fi
-		done
+		fi
 	fi
 
 	if [ -z "$repro_bin" ]; then
 		repro_bin="$(command -v repro || true)"
+		ct_repro_origin="first repro on PATH"
 	fi
 
 	if [ -z "$repro_bin" ]; then
 		echo "Error: repro is required for codetracer reprobuild builds on $ct_reprobuild_host." >&2
-		echo "Set REPROBUILD_BIN or CODETRACER_REPROBUILD_REPO_PATH, or put repro on PATH." >&2
+		if [ -n "$ct_unfit_sibling" ]; then
+			echo "The sibling build $ct_unfit_sibling was refused: $ct_unfit_reason." >&2
+			echo "Rebuild it (cd $reprobuild_root && just build), set REPROBUILD_BIN to choose a binary explicitly, or put the pinned repro on PATH." >&2
+		else
+			echo "Set REPROBUILD_BIN or CODETRACER_REPROBUILD_REPO_PATH, or put repro on PATH." >&2
+		fi
 		exit 127
 	fi
+	ct_repro_version="$("$repro_bin" --version 2>/dev/null | head -n 1 || true)"
+	echo "build-once: repro: $repro_bin ($ct_repro_origin): ${ct_repro_version:-version unknown}" >&2
 
 	if [ -n "$reprobuild_root" ]; then
 		export REPROBUILD_SOURCE_ROOT="$reprobuild_root"
@@ -500,11 +633,19 @@ if [ -n "$ct_reprobuild_host" ]; then
 	*) ct_tool_provisioning_default="nix" ;;
 	esac
 
-	"$repro_bin" "${CODETRACER_REPROBUILD_COMMAND:-build}" "${CODETRACER_REPROBUILD_TARGET:-.}" \
+	# A refusal (an unreadable lock schema, say) names what it could not read
+	# but not which tool was reading, so name the tool here.
+	ct_repro_status=0
+	"$repro_bin" "${CODETRACER_REPROBUILD_COMMAND:-build}" "$ct_repro_target" \
+		${ct_lock_args[@]+"${ct_lock_args[@]}"} \
 		--tool-provisioning="${CODETRACER_REPROBUILD_TOOL_PROVISIONING:-$ct_tool_provisioning_default}" \
 		--progress="${CODETRACER_REPROBUILD_PROGRESS:-bar-line}" \
 		--write-diagnostics="${CODETRACER_REPROBUILD_DIAGNOSTICS:-.repro/build/reprobuild/build-diagnostics.log}" \
-		--log="${CODETRACER_REPROBUILD_LOG:-quiet}"
+		--log="${CODETRACER_REPROBUILD_LOG:-quiet}" || ct_repro_status=$?
+	if [ "$ct_repro_status" != 0 ]; then
+		echo "build-once: repro ${CODETRACER_REPROBUILD_COMMAND:-build} exited $ct_repro_status; the tool was $repro_bin ($ct_repro_origin): ${ct_repro_version:-version unknown}" >&2
+		exit "$ct_repro_status"
+	fi
 	# post-build-setcap.sh re-applies BPF capabilities (cap_bpf +
 	# cap_perfmon + cap_dac_read_search) to the freshly built ct binary
 	# via the codetracer-setcap helper — the same post-build step the

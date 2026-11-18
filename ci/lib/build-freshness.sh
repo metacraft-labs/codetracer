@@ -59,8 +59,9 @@
 # So this file compares CONTENT, in the shape `wasm-engine-freshness.sh`
 # established: the build writes a STAMP recording the digest of the inputs it
 # compiled, and a gate recomputes that digest from the tree it is standing in.
-# The remedy therefore ALWAYS clears the gate — the stamp is rewritten from the
-# current tree on every build, whether or not the emitted bytes changed.
+# With the same compiler, rebuilding clears a source mismatch: the stamp is
+# rewritten from the current tree whether or not the emitted bytes changed.
+# A different compiler on PATH is refused separately, with a dev-shell remedy.
 #
 # WHERE THE INPUT SET COMES FROM — the compiler, not a guess
 # ----------------------------------------------------------
@@ -112,8 +113,12 @@
 #    requires editing a file already in it (you must write the `import`
 #    somewhere), and that edit moves the digest.
 #  * **Link-time inputs that are not Nim modules** — the `isonim-gpui` cdylib
-#    above all. That one is already covered, separately and better, by the
-#    windowed shim's two-polarity `font_kit` literal probe in the GPUI lane.
+#    above all. This digest cannot see it, because `dlopen` finds the shim at
+#    run time. `bf_gpui_shim_assert_fresh` and `bf_gpui_shim_assert_compatible`
+#    below are its gates, with a stamp of the shim's own. This bullet used to
+#    say the `font_kit` literal probe covered it. That probe answers "will this
+#    shim draw text", and on 2026-10-31 it passed on a shim from before a
+#    symbol the binary imports, so all seven scenarios refused.
 #
 # USAGE
 # -----
@@ -389,19 +394,45 @@ bf_gpui_nim_args() {
 	printf '%s\n' --mm:orc -d:release --path:src/frontend/viewmodel
 }
 
-# bf_gpui_input_digest <repo-root> — regenerate the closure and digest it.
+# bf_gpui_input_digest <repo-root> [<stamp>] — regenerate and digest the closure.
+# Gates pass the stamp to compare compiler identities BEFORE computing inputs.
+# Builders and digest-only diagnostics omit it: an older stamp must not prevent
+# an intentional toolchain upgrade from producing a new build and stamp.
 # Prints the digest on stdout; everything else goes to stderr so the caller can
 # capture it in a `$(...)`.
 bf_gpui_input_digest() {
-	local root="$1" ws deps_cache deps rc
+	local root="$1" stamp="${2:-}" ws deps_cache deps rc compiler recorded_compiler
 	ws="$(cd "${root}/.." && pwd)"
 	deps_cache="${root}/build/nimcache/codetracer-gpui-deps"
 
-	if ! command -v nim >/dev/null 2>&1; then
+	if ! compiler="$(command -v nim)"; then
 		echo "build-freshness: nim is not on PATH, so the gpui input closure" >&2
 		echo "  cannot be recomputed. Run inside the dev shell:" >&2
 		echo "      cd ${root} && nix develop" >&2
 		return 2
+	fi
+
+	# A closure computed by another compiler includes another standard library.
+	# Comparing it with the builder's closure cannot diagnose source freshness.
+	# Keep this check on the shared digest route so the capture lane (which saves
+	# the digest for its manifest) and the standalone gate cannot disagree.
+	if [ -n "${stamp}" ] && [ -f "${stamp}" ]; then
+		recorded_compiler="$(bf_stamp_field "${stamp}" built_by)"
+		if [ -z "${recorded_compiler}" ]; then
+			echo "build-freshness: the GPUI stamp records no compiler identity." >&2
+			echo "  Rebuild and stamp inside the dev shell:" >&2
+			echo "      cd ${root} && nix develop --command just build-gpui" >&2
+			return 2
+		fi
+		if [ "${compiler}" != "${recorded_compiler}" ]; then
+			echo "build-freshness: the resolved GPUI compiler differs from the one recorded in the stamp." >&2
+			echo "  artefact built by: ${recorded_compiler}" >&2
+			echo "  resolved nim:      ${compiler}" >&2
+			echo "  Source freshness cannot be compared across these compilers." >&2
+			echo "  Please re-run inside the dev shell:" >&2
+			echo "      cd ${root} && nix develop" >&2
+			return 2
+		fi
 	fi
 
 	rm -rf "${deps_cache}"
@@ -413,7 +444,7 @@ bf_gpui_input_digest() {
 	while IFS= read -r a; do args+=("${a}"); done < <(bf_gpui_nim_args)
 	(
 		cd "${root}" || exit 2
-		nim c --genDeps:on --compileOnly --hints:off --warnings:off \
+		"${compiler}" c --genDeps:on --compileOnly --hints:off --warnings:off \
 			"${args[@]}" \
 			--nimcache:"${deps_cache}" \
 			-o:"${deps_cache}/unused-deps-probe" \
@@ -452,11 +483,126 @@ bf_gpui_write_stamp() {
 # bf_gpui_assert_fresh <repo-root> — the gate.
 bf_gpui_assert_fresh() {
 	local root="$1" digest
-	digest="$(bf_gpui_input_digest "${root}")" || return 1
+	digest="$(bf_gpui_input_digest "${root}" "${root}/${BF_GPUI_STAMP}")" || return 1
 	bf_assert_fresh "${root}/${BF_GPUI_STAMP}" "${root}/${BF_GPUI_BIN}" \
 		"${digest}" "GPUI BINARY" \
 		"  Rebuild it, which rewrites the stamp from this tree:
       cd ${root} && nix develop --command just build-gpui"
+}
+
+# ==========================================================================
+# The shim a GPUI lane loads: is it of this tree, and can this binary load it?
+#
+# `isonim_gpui/bindings.nim` imports every shim symbol under a `{.dynlib.}`
+# pragma, which Nim resolves at process start, so one absent name kills the
+# front-end with `could not import: <name>` before it can open a window. The
+# binary's stamp cannot notice: it covers the Nim closure, and the shim is a
+# build output of a sibling repository whose age no lane bounds.
+#
+# Two separate questions, because each sees what the other cannot. The stamp
+# tests the shim against the TREE, and needs no binary. The set difference
+# tests the PAIR actually about to run, which also catches a binary and a shim
+# that are each of a tree, but not of one tree.
+# ==========================================================================
+
+# bf_gpui_shim_imports <binary> — the `gpui_` names the binary asks `dlopen`
+# for, one per line, sorted. They are string literals rather than undefined
+# symbols, so `nm` cannot list them. The pattern is `strings -a | grep -E
+# '^gpui_[A-Za-z0-9_]+$'`: a whole run of printable bytes, which is what keeps
+# a message such as "gpui_launch failed" out of the set. Python rather than
+# strings(1), which the lane's shells do not all carry.
+bf_gpui_shim_imports() {
+	python3 - "$1" <<'PY'
+import re, sys
+data = open(sys.argv[1], "rb").read()
+names = re.findall(rb"(?<![\x20-\x7e])gpui_[A-Za-z0-9_]+(?![\x20-\x7e])", data)
+sys.stdout.write("".join(sorted({n.decode() + "\n" for n in names})))
+PY
+}
+
+# bf_gpui_shim_exports <shim> — the `gpui_` names the library exports, one per
+# line, sorted. Returns non-zero when `nm` fails, which must not read as a shim
+# that exports nothing. Mach-O has no `-D`, and its ABI prepends a `_`; these
+# are the spellings of isonim-gpui's `plat37-shims` recipe.
+bf_gpui_shim_exports() {
+	local listing
+	case "$(uname -s)" in
+	Darwin) listing="$(nm -gU "$1")" || return 2 ;;
+	*) listing="$(nm -D --defined-only "$1")" || return 2 ;;
+	esac
+	printf '%s\n' "${listing}" | awk '{print $NF}' | sed 's/^_//' |
+		{ grep '^gpui_' || true; } | LC_ALL=C sort -u
+}
+
+# bf_gpui_shim_assert_compatible <binary> <shim> <remedy>
+#
+# THE PAIR GATE. Every name the binary imports must be exported by the shim.
+# A comparison whose scan matched nothing satisfies "nothing is missing", so
+# empty sides are refused, and so is a side without `gpui_launch`: every GPUI
+# binary imports it, and its absence means the scan did not read the artefact
+# it was pointed at. A false red remains possible if a binary holds a literal
+# spelled exactly like a shim symbol that it does not import; that direction
+# refuses a capture, and cannot grade the wrong program.
+bf_gpui_shim_assert_compatible() {
+	local bin="$1" shim="$2" remedy="$3" imports exports missing
+	if ! imports="$(bf_gpui_shim_imports "${bin}")"; then
+		echo "SHIM PAIR: the imports of ${bin} could not be read." >&2
+		echo "${remedy}" >&2
+		return 1
+	fi
+	if ! exports="$(bf_gpui_shim_exports "${shim}")"; then
+		echo "SHIM PAIR: the exports of ${shim} could not be read." >&2
+		echo "${remedy}" >&2
+		return 1
+	fi
+	if ! grep -qx gpui_launch <<<"${imports}" ||
+		! grep -qx gpui_launch <<<"${exports}"; then
+		echo "SHIM PAIR: gpui_launch is not on both sides, so nothing was compared." >&2
+		echo "  binary: ${bin} ($(printf '%s' "${imports}" | grep -c . || true) gpui_ names)" >&2
+		echo "  shim:   ${shim} ($(printf '%s' "${exports}" | grep -c . || true) gpui_ names)" >&2
+		echo "${remedy}" >&2
+		return 1
+	fi
+	# An unchecked failure here would leave `missing` empty, which reads as a pass.
+	if ! missing="$(LC_ALL=C comm -23 <(printf '%s\n' "${imports}") <(printf '%s\n' "${exports}"))"; then
+		echo "SHIM PAIR: the import and export lists could not be compared." >&2
+		echo "${remedy}" >&2
+		return 1
+	fi
+	if [ -n "${missing}" ]; then
+		echo "SHIM PAIR: this binary cannot load this shim." >&2
+		echo "  binary: ${bin}" >&2
+		echo "  shim:   ${shim}" >&2
+		echo "  imported by the binary and not exported by the shim:" >&2
+		printf '%s\n' "${missing}" | sed 's/^/    /' >&2
+		echo "${remedy}" >&2
+		return 1
+	fi
+	echo "  SHIM PAIR: the shim exports all $(printf '%s\n' "${imports}" | wc -l | tr -d ' ') gpui_ names" \
+		"the binary imports ($(printf '%s\n' "${exports}" | wc -l | tr -d ' ') exported)"
+}
+
+# bf_gpui_shim_assert_fresh <isonim-gpui-root> <stamp> <shim> <remedy>
+#
+# THE SHIM'S OWN GATE. `plat37-shims` writes the stamp, and the digest comes
+# from that repository's `tools/shim_input_digest.sh` on both sides, so a build
+# and its check run one definition of the inputs. Stale-binary reasoning is
+# `bf_assert_fresh`'s and applies unchanged.
+bf_gpui_shim_assert_fresh() {
+	local isonim_gpui="$1" stamp="$2" shim="$3" remedy="$4" script digest
+	script="${isonim_gpui}/tools/shim_input_digest.sh"
+	if [ ! -f "${script}" ]; then
+		echo "STALE WINDOWED SHIM: ${script} does not exist, so this tree cannot" >&2
+		echo "  say what the shim should have been built from." >&2
+		echo "${remedy}" >&2
+		return 1
+	fi
+	if ! digest="$(bash "${script}" "${isonim_gpui}")"; then
+		echo "STALE WINDOWED SHIM: the shim's input digest could not be computed." >&2
+		echo "${remedy}" >&2
+		return 1
+	fi
+	bf_assert_fresh "${stamp}" "${shim}" "${digest}" "WINDOWED SHIM" "${remedy}"
 }
 
 # (The direct-invocation dispatch is at the END of this file, deliberately.
@@ -529,6 +675,8 @@ bf_electron_roots() {
 		src/ct \
 		libs \
 		repro.nim \
+		repro.lock \
+		locks \
 		package.json \
 		config.nims
 }

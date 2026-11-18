@@ -455,7 +455,9 @@ impl Instruction {
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 #[serde(rename_all(serialize = "camelCase", deserialize = "camelCase"))]
 pub struct Instructions {
-    pub address: usize,
+    /// Native instruction addresses remain 64-bit in browser replay too.
+    /// A host-sized integer would reject a recorded x86-64 PC on wasm32.
+    pub address: u64,
     pub instructions: Vec<Instruction>,
     pub error: String,
 }

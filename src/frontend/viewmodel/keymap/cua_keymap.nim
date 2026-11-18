@@ -387,9 +387,9 @@ const
             table: G),
     BaseRow(chords: "Ctrl+Shift+M", operation: "layout.focus-pane(problems)", table: G),
     # The desktop's low-level code view (§5): the menu does not carry it, so
-    # the chord is its only key path.
-    BaseRow(chords: "Alt+1", operation: "view.low-level-code",
-            whenText: "frontEnd == desktop || frontEnd == web", table: G),
+    # the chord is its only key path. PLAT-60: the terminal and GPUI draw the
+    # view too (beside the source), so the chord is every front-end's.
+    BaseRow(chords: "Alt+1", operation: "view.low-level-code", table: G),
     BaseRow(chords: "Ctrl+Shift+U", operation: "layout.focus-pane(build-output)",
             platforms: {pkWindows, pkMac}, table: G),
     BaseRow(chords: "Ctrl+K Ctrl+H", operation: "layout.focus-pane(build-output)",

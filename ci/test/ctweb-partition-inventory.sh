@@ -42,7 +42,7 @@ cd "$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 # converted on 2026-10-01. Shrinking is free; growing
 # means editing this table, deliberately.
 #
-#   frontend/ui_js.nim                        7  the renderer entry: the
+#   frontend/ui_js.nim                        8  the renderer entry: the
 #                                                socket.io arm (§7.5's own
 #                                                example) and four siblings;
 #                                                +2 RECORDED 2026-10-30 (landed
@@ -57,6 +57,12 @@ cd "$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 #                                                toolbar in `ui/web_noir_build`;
 #                                                converting these two is the
 #                                                same §7.5 trade as the rest.
+#                                                8: +1 RECORDED 2026-10-31
+#                                                (landed `15f72e9ec36`, "a build
+#                                                runner, build tasks…"): Run's
+#                                                runner — the desktop's
+#                                                `index/build_runner` over IPC,
+#                                                the web's `data.update(build)`.
 #   frontend/platform_host.nim                2  the host-module switch and the
 #                                                bootstrap that matches it
 #   frontend/ui/layout.nim                    2  the `panel_transfer` import and
@@ -83,7 +89,7 @@ frontend/subwindow.nim 1
 frontend/ui/agentic_worktree_test_hooks.nim 1
 frontend/ui/layout.nim 2
 frontend/ui/panel_transfer.nim 1
-frontend/ui_js.nim 7"
+frontend/ui_js.nim 8"
 
 actual="$(
 	grep -rn 'defined(ctWeb)' src/ |

@@ -40,6 +40,7 @@
 #   source ci/lib/test-lane-files.sh
 #   test_lane_ids                    # every lane id, one per line
 #   test_lane_files <id>             # the lane's files, sorted, one per line
+#   test_lane_file_skip_reason <file> <uname-s> # empty when eligible
 #   test_lane_backend <id>           # "c" or "js"
 #   test_lane_extra_flags <id>       # extra nim flags (may be empty)
 #   test_lane_description <id>       # one-line human description
@@ -419,7 +420,9 @@ test_lane_recipe() {
 		# captures, needs `--path:../GuiAssert/src` and tesseract, and is
 		# scored against the milestone's case floor by
 		# `ci/test/editor-model-case-floor.sh PLAT-39` (`plat39-case-floor`).
-		echo "plat39-record-gate plat39-case-floor"
+		# The pane-census regression needs no captured frames and has its own
+		# recipe, because delegation here bypasses the generic file runner.
+		echo "plat39-record-gate test-pane-census plat39-case-floor"
 		;;
 	*) ;;
 	esac
@@ -1152,6 +1155,9 @@ test_lane_files() {
 		echo src/frontend/tests/agent_editor_selection_hover_chromium_test.nim
 		# Native history context menus, exact destinations and dismissal.
 		echo src/frontend/tests/debug_history_context_menu_chromium_test.nim
+		# Measuring a pane stays out of the browser's ResizeObserver delivery.
+		# Only a browser has that delivery loop; jsdom observes nothing.
+		echo src/frontend/tests/pane_measure_resize_loop_chromium_test.nim
 		;;
 
 	main-process)
@@ -1372,6 +1378,9 @@ test_lane_files() {
 		# table (`ui/monaco_operations`) to the CUA base, row by row, and
 		# resolves the chords the retired Mousetrap / Monaco registries
 		# disagreed about in the desktop's own delivery (PLAT-68).
+		# `desktop_list_operations_test.nim` holds its list table the same way:
+		# every list row the desktop delivers runs there or is answered on the
+		# status bar (`Ctrl+Enter`, CUA-Keymap §3.6).
 		# `debug_toolbar_tooltips_test.nim` is the same shape one level up: the
 		# debug toolbar's tooltips must NAME the chord that is bound rather than
 		# restate it as a literal, so it asserts the shipped table drives all 13
@@ -1416,6 +1425,7 @@ test_lane_files() {
 			src/frontend/tests/component_registry_binding_test.nim \
 			src/frontend/tests/dap_refusal_surfaces_test.nim \
 			src/frontend/tests/debug_toolbar_tooltips_test.nim \
+			src/frontend/tests/desktop_list_operations_test.nim \
 			src/frontend/tests/frontend_lang_test.nim \
 			src/frontend/tests/ipc_registry_test.nim \
 			src/frontend/tests/monaco_operations_test.nim \
@@ -2281,7 +2291,21 @@ test_lane_files() {
 	esac
 }
 
-# test_lane_all_files — the union of every lane's files, deduplicated.
+# Platform eligibility is independent of discovery: coverage inventories must
+# continue to claim Linux suites on every host. Keep the reason here, beside
+# lane data, so every runner uses the same decision.
+# An empty reason means eligible on the supplied uname -s host.
+test_lane_file_skip_reason() {
+	local file="$1" host="$2"
+	case "${file}" in
+	src/tests/ct_host/test_ct_host_killed_leaves_no_process_behind.nim)
+		[ "${host}" = Linux ] || printf '%s\n' linux-only
+		;;
+	esac
+	return 0
+}
+
+# test_lane_all_files — the union of every lane's files, sorted, unique.
 test_lane_all_files() {
 	local id
 	while read -r id; do

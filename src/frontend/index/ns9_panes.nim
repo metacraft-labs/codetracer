@@ -54,6 +54,9 @@ from ../viewmodel/viewmodels/no_project_folder import NoProjectFolderText
 # Test-Results-Pane.md §9.3: the folder's `replay-open-in`, sent with its
 # tests.
 from ./replay_open_in import replayOpenInFor
+# PLAT-62: the Constraints pane's measurement rule, shared with the native
+# hosts.
+import ../viewmodel/viewmodels/constraints_answer
 
 # ---------------------------------------------------------------------------
 # The node side, and the one rule it has: CROSS THE BOUNDARY AS `cstring`.
@@ -151,28 +154,34 @@ proc nodeNargoInfo(projectRoot: cstring): JsObject {.importjs: """
   ## `nargo info --json` run in `root`, as `{failed, message, output}` with
   ## JavaScript-string fields.
 
-proc nargoInfoJson(projectRoot: string): tuple[info, absence: string] =
-  ## `nargo info --json` for one project root.
-  ##
-  ## Every failure is a sentence. The one thing this must never do is return
-  ## an empty string with an empty reason, because the pane renders that as
-  ## "no circuit" — a claim about the project rather than about the attempt.
-  if projectRoot.len == 0:
-    return ("", NoProjectFolderText)
-  if not fileExistsIn(projectRoot, NoirProjectMarker):
-    return ("", "This project has no " & NoirProjectMarker &
-                ", so it is not a Noir crate and has no circuit to measure. " &
-                "Constraint counts are produced per language; Noir is the " &
-                "first producer CodeTracer has.")
+proc nargoInfoAnswer(projectRoot: string):
+    tuple[answer: ConstraintsAnswer, output: string] =
+  ## `nargo info --json` for one project root, through the shared rule
+  ## (`constraints_answer`) the terminal and the GPUI window answer their own
+  ## pane with: every failure is a sentence, never an empty report.
+  let hasMarker = projectRoot.len > 0 and
+                  fileExistsIn(projectRoot, NoirProjectMarker)
+  if absenceBeforeRun(projectRoot, hasMarker).len > 0:
+    return (constraintsAnswer(projectRoot, hasMarker, NargoInfoRun()), "")
   let answer = nodeNargoInfo(cstring(projectRoot))
+  var run = NargoInfoRun(started: true)
   if answer.failed.to(bool):
     let message = $answer.message.to(cstring)
-    if message.contains("ENOENT"):
-      return ("", "`nargo` is not on this machine's PATH, so the circuit " &
-                  "cannot be measured. Install the Noir toolchain to see " &
-                  "constraint counts.")
-    return ("", "nargo info could not measure this project: " & message)
-  ($answer.output.to(cstring), "")
+    if answer.output.to(cstring).len == 0 and message.contains("ENOENT"):
+      run.missing = true
+    run.exitCode = 1
+    run.message = message
+  else:
+    run.output = $answer.output.to(cstring)
+  (constraintsAnswer(projectRoot, hasMarker, run), run.output)
+
+proc sourcesJson(files: seq[NoirSourceFile]): string =
+  ## The sources the Constraints rows are placed against, for the renderer
+  ## (`ui_js.onNs9PanesConstraints` → `ConstraintsVM.setSources`).
+  var arr = newJArray()
+  for f in files:
+    arr.add %*{"path": f.path, "content": f.content}
+  $arr
 
 proc onNs9Panes*(sender: js, response: jsobject(folder=cstring)) =
   ## Answer both halves. Sent unconditionally rather than lazily: the panes are
@@ -202,11 +211,18 @@ proc onNs9Panes*(sender: js, response: jsobject(folder=cstring)) =
     tab: tab
   }
 
-  let (info, absence) = nargoInfoJson(folder)
+  let (measured, info) = nargoInfoAnswer(folder)
+  # PLAT-62: the sources the rows are placed against, read where the circuit
+  # was measured.
+  let sources =
+    if measured.hasReport: sourcesJson(noirSourcesUnder(folder)) else: "[]"
   mainWindow.webContents.send "CODETRACER::ns9-panes-constraints", js{
-    info: cstring(info),
-    provenance: cstring("nargo info --json, run just now"),
-    absence: cstring(absence),
+    # `nargo info`'s own JSON, parsed by the renderer with the parser every
+    # host uses; empty with the reason when there is no report.
+    info: cstring(if measured.hasReport: info else: ""),
+    provenance: cstring(NargoInfoProvenance),
+    absence: cstring(measured.absence),
+    sources: cstring(sources),
     tab: tab
   }
   debugPrint "ns9-panes: answered for ", folder

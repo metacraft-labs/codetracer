@@ -47,7 +47,7 @@ template counted(condition: untyped) =
   inc countedAssertions
   check condition
 
-const ExpectedAssertions = 46
+const ExpectedAssertions = 48
 
 # ---------------------------------------------------------------------------
 
@@ -235,11 +235,20 @@ suite "NS4 view: the three not-aligned states are told apart (GCL-A8, §9.4)":
     counted refused.len > 0
     counted "notice-refused" in noticeClass(vm)
 
-    # 4. SUSPENDED — a clean artefact that simply carries no mapping.
-    vm.clearAnchors()
+    # 4. SUSPENDED — a clean GENERATED artefact that simply carries no
+    # mapping. (PLAT-60: only a generated listing is kept in step by a
+    # mapping, so only one can lack it; the recording's own code is kept in
+    # step by each instruction's source line, below.)
+    discard vm.showGeneratedListing(@[instr(0, "ASSERT", 9)], @[],
+                                    PositionalSupport, "", 0, "")
     let suspended = mappingNotice(vm)
     counted suspended.len > 0
     counted "notice-suspended" in noticeClass(vm)
+    # …and the recording's own listing, with no mapping, says nothing.
+    vm.clearInstructions()
+    vm.setInstructions(@[instr(0, "ASSERT", 9)])
+    counted mappingNotice(vm) == ""
+    counted "hidden" in noticeClass(vm)
 
     # THE ASSERTION THIS CASE EXISTS FOR: all three are DIFFERENT, and none is
     # the empty aligned state. Pairwise, because "not equal to one of them"

@@ -92,7 +92,7 @@ gates=(
 	ci/test/reprobuild-daemon-guard-test.sh
 	ci/test/detect-siblings-recorder-artifacts-test.sh
 	ci/test/recorder-clone-implies-build-test.sh
-	ci/test/readonly-leftovers-sweep-test.sh
+	ci/test/runner-lifecycle-ownership-test.sh
 )
 unwired=0
 for g in "${gates[@]}"; do

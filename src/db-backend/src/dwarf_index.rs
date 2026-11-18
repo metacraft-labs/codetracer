@@ -345,6 +345,21 @@ impl DwarfIndex {
         })
     }
 
+    /// Resolve an instruction's own line-table entry, without replacing its
+    /// inline-body source with the enclosing frame's call site. Disassembly
+    /// needs this source correspondence; stack/frame queries keep using
+    /// [`Self::resolve_pc`] and its existing frame-selection semantics.
+    pub fn resolve_instruction_source(&self, pc: u64) -> Option<PcInfo> {
+        let location = self.context.find_location(pc).ok()??;
+        Some(PcInfo {
+            file: PathBuf::from(location.file?),
+            line: location.line?,
+            column: location.column,
+            // A line-table entry identifies source, not a function frame.
+            function: None,
+        })
+    }
+
     /// Enumerate every source file referenced by the binary's DWARF.
     ///
     /// The iterator yields each path **once** even if multiple CUs

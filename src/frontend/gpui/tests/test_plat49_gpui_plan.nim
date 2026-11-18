@@ -29,8 +29,8 @@
 ##      ViewModel's placeholder on the bar's ground; open, the query with its caret — a bar while
 ##      inserting, a block after `Insert` — where the ViewModel's caret is.
 ##
-## Run (needs `just build-gpui`, the `calc` recording under
-## `test-logs/tui-fixtures/`, `REPLAY_SERVER_BIN`, isonim-gpui's shim):
+## Run (needs `just build-gpui`, the Python recorder, which records the `calc`
+## fixture on first use, `REPLAY_SERVER_BIN`, isonim-gpui's shim):
 ##   nim c -r --path:src/frontend/viewmodel \
 ##     src/frontend/gpui/tests/test_plat49_gpui_plan.nim
 ##
@@ -38,6 +38,7 @@
 ## real recording. A missing prerequisite fails by name.
 
 import replay_prerequisite
+import ../../tui/tests/fixtures/fixture_provider
 import std/[json, os, osproc, streams, strtabs, strutils, tables, tempfiles,
             unittest]
 import ./gpui_child_env
@@ -62,7 +63,6 @@ const
     ## The old 212 included 95 per-text-node assertions at Linux's 22 px
     ## pitch. Keep the 117 fixed checks, plus three population checks below;
     ## the no-heading sweep is counted separately from the plan it inspects.
-  CalcFixture = "test-logs/tui-fixtures/calc-2f0db4f45192"
   StateDirEnvVar = "CODETRACER_TUI_LAYOUT_DIR"
   W = 1920
   H = 1080
@@ -71,7 +71,7 @@ let repo = getEnv("CODETRACER_REPO_ROOT", getCurrentDir())
 let bin = repo / "build/bin/codetracer-gpui"
 let shimDir = getEnv("ISONIM_GPUI_SHIM_DIR",
                    repo.parentDir / "isonim-gpui/rust/target/debug")
-let calc = repo / CalcFixture
+let calc = requireFixture(fixtureSpec("calc"))
 
 proc windowPlan(ops: string; geometry: var JsonNode;
                 pre: seq[string] = @[]; subject = ""): JsonNode =
@@ -80,8 +80,6 @@ proc windowPlan(ops: string; geometry: var JsonNode;
   if not fileExists(bin):
     raise newException(IOError, "prerequisite missing: " & bin &
                        " (just build-gpui)")
-  if not dirExists(calc):
-    raise newException(IOError, "prerequisite missing: " & calc)
   let state = createTempDir("plat49-gpui-plan-", "")
   var env = newStringTable()
   for k, v in envPairs():

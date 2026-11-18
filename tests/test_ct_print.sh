@@ -54,14 +54,33 @@ echo "=== Test: ct print with --format csv ==="
 "$CT" print "$MANIFEST" --format csv
 echo ""
 
-echo "=== Test: ct print --verify (valid manifest) ==="
-if "$CT" print "$MANIFEST" --verify; then
-	echo "PASS: verify passed"
-else
-	echo "FAIL: verify should pass"
-	exit 1
-fi
-echo ""
+# `--verify` is a switch, so it must work on either side of the path. Exit 0
+# alone proves nothing: a dropped `--verify` prints the table and also exits
+# 0, so each case also checks that the verification report was printed.
+for ORDER in after before; do
+	echo "=== Test: ct print --verify $ORDER the path (valid manifest) ==="
+	set +e
+	if [ "$ORDER" = after ]; then
+		VERIFY_OUT=$("$CT" print "$MANIFEST" --verify)
+	else
+		VERIFY_OUT=$("$CT" print --verify "$MANIFEST")
+	fi
+	VERIFY_EXIT=$?
+	set -e
+	echo "$VERIFY_OUT"
+	if [ "$VERIFY_EXIT" -ne 0 ]; then
+		echo "FAIL: verify should pass (exit $VERIFY_EXIT)"
+		exit 1
+	fi
+	if grep -q "Trace verification:" <<<"$VERIFY_OUT" &&
+		grep -qE "HTTP requests: +3" <<<"$VERIFY_OUT"; then
+		echo "PASS: verify passed"
+	else
+		echo "FAIL: --verify $ORDER the path printed no verification report"
+		exit 1
+	fi
+	echo ""
+done
 
 echo "=== Test: ct print --verify (empty file) ==="
 EMPTY=$(mktemp /tmp/ct_empty_XXXX.jsonl)

@@ -1,0 +1,32 @@
+# `just` recipes that a CI WORKFLOW LANE must reach.
+#
+# Read by `ci/test/ci-reached-recipes-test.sh`, which fails, by name, on any
+# recipe listed here that the reachability walk in
+# `ci/test/shell-gate-coverage.sh` does not reach from `.github/workflows/`.
+# "Reach" is that walk's rule: a workflow step invokes the recipe, or a recipe or
+# script a reached step invokes does. A remedy message that names the recipe in a
+# string is not a wire (Verification-Harness-Traps.md §4f).
+#
+# WHAT BELONGS HERE. A recipe that is the ONLY route to a body of tests, so that
+# no lane calling it means those tests run nowhere -- and nothing else fails,
+# because `shell-gate-coverage.sh` measures scripts, not recipes, and
+# `test-lane-coverage.sh` asks whether a Nim file is IN a lane, not whether a
+# workflow RUNS that lane.
+#
+# WHAT DOES NOT. The other recipes no lane reaches today. Most are things a
+# person types, and the walk cannot tell those from a lane somebody forgot.
+# Each entry is a decision that a lane runs the recipe, made where the spec
+# governing those tests says so, and recorded here so it cannot be undone
+# silently. Adding a recipe means wiring it in the same change, or this file's
+# test is red.
+#
+# Format: one recipe name per line, then `#` and why it must be reached.
+# Blank lines and `#` lines are ignored.
+
+# The only route to the `tui` Nim lane (ci/lib/run-nim-test-lane.sh tui):
+# CodeTracer-TUI.md §7.1.6, Tier 1, "fast, per-PR". Run by the `tui-tests` job.
+test-tui # TUI Tier-1 suites (codetracer-pm issues/2026-11-01-no-ci-lane-calls-the-test-tui-recipes.md)
+
+# The only route to the `tui-real-terminal` Nim lane: CodeTracer-TUI.md §7.1.6,
+# Tier 2, the terminal-peer check. Run by the `tui-tests` job.
+test-tui-real-terminal # TUI Tier-2 suites (same issue)

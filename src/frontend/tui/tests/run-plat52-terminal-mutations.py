@@ -89,7 +89,8 @@ MODEL = "src/frontend/viewmodel/viewmodels/terminal_output_model.nim"
 SCRUB = "src/frontend/viewmodel/viewmodels/scrollbar_scrubber.nim"
 TVM = "src/frontend/viewmodel/viewmodels/terminal_output_vm.nim"
 DVIEW = "src/frontend/viewmodel/views/isonim_terminal_output_view.nim"
-PHOST = "src/frontend/ui/panel_host.nim"
+# The pane's measured viewport is now reported by this shared DOM hook.
+MEASURE = "src/frontend/viewmodel/views/pane_measure_dom.nim"
 TPANE = "src/frontend/tui/app/views/terminal_output_pane.nim"
 RUNTIME = "src/frontend/tui/app/runtime.nim"
 TSESSION = "src/frontend/tui/host/tui_session.nim"
@@ -115,8 +116,8 @@ GPLAN = "src/frontend/gpui/tests/test_plat52_gpui_plan.nim"
 DESKTOP_GATE = "scripts/plat52-capture-electron.sh"
 SPEC = "src/tests/gui/tests/visual/plat52-terminal-capture.spec.ts"
 
-SUBJECTS = [MODEL, SCRUB, TVM, DVIEW, PHOST, TPANE, RUNTIME, TSESSION, PROFILE,
-            GLEAF, GMAIN, PVIEWS, SOURCE]
+SUBJECTS = [MODEL, SCRUB, TVM, DVIEW, MEASURE, TPANE, RUNTIME, TSESSION,
+            PROFILE, GLEAF, GMAIN, PVIEWS, SOURCE]
 SUITES = [VMU, VNAT, T1S, REF, PTY, REFT, GPLAN, DESKTOP_GATE]
 
 
@@ -395,7 +396,7 @@ ARMS = [
     # the pane's viewport and the ViewModel asks the engine for that window.
     # `ui/terminal_output.nim`'s `setEvents` path has no caller left
     # (`onLoadedTerminal` is never dispatched), so the arm lives here.
-    Arm("DE1", PHOST,
+    Arm("DE1", MEASURE,
         "        terminal_output_vm.setViewport(vm, v),\n",
         "        discard v,\n",
         D_DESKTOP, "the desktop's pane loads no output"),

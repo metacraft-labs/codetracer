@@ -102,9 +102,10 @@ template ck(condition: untyped) =
   inc countedAssertions
   check condition
 
-const ExpectedAssertions = 807
+const ExpectedAssertions = 815
   ## Written from a run. See the final case. (353 until 2026-09-26, before
-  ## the shared-script, Markdown-outline and Menu-Enter cases existed.)
+  ## the shared-script, Markdown-outline and Menu-Enter cases existed; eight
+  ## more assertions cover a nonzero initial List highlight.)
 
 # The view is `cross_medium_script.settingsPanel()`: ONE definition, shared
 # with the Chromium suite, so the browser and this file render the same view.
@@ -262,6 +263,26 @@ suite "PLAT-3: one view, two media, the same state":
     sendBoth(c, "wrap", kDown)
     bothSay(c, "wrap.checked", "false")
     agree(c, "an unclaimed key on the checkbox")
+
+  test "List: the supplied highlight survives binding and seeds motion":
+    # The two models start on the last row. A binding that silently starts
+    # its widget at zero can pass every default-state keyboard script while
+    # rendering a different selection from the supplied view.
+    let choices = @[ViewOption(id: "first", label: "First"),
+                    ViewOption(id: "second", label: "Second"),
+                    ViewOption(id: "third", label: "Third")]
+    let h = newTerminalTestHarness(80, 20)
+    var mr = MockRenderer()
+    var c = CrossMedium(
+      terminal: tbind.bindView(h, viewList("seeded", choices, highlight = 2)),
+      web: wbind.renderWeb[MockRenderer, MockNode](
+        mr, viewList("seeded", choices, highlight = 2)))
+    ck terminalFacts(c).len == 1
+    bothSay(c, "seeded.highlight", "2")
+    ck divergences(c).len == 0
+    sendBoth(c, "seeded", kUp)
+    bothSay(c, "seeded.highlight", "1")
+    ck divergences(c).len == 0
 
   test "List: motion skips the unavailable member, on both media":
     var c = newCrossMedium()

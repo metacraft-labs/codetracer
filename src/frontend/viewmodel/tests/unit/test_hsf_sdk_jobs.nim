@@ -230,3 +230,27 @@ suite "HSF SDK jobs: a call-trace row's identity":
     let lines = store.calltrace.lines.val
     check lines.len == 2
     check lines.len == 2 and lines[0].callKey == "4" and lines[1].callKey == "9"
+
+suite "HSF SDK jobs: a failed call's return":
+
+  test "a failed call's return is drawn as its error":
+    # A Starknet entry point that fails inside a transaction that does not
+    # revert returns an `Error` value (`ValueRecord::Error`, wire kind 24)
+    # carrying the executor's message. The call-trace row is where a reader
+    # sees that the call failed and why; a return dropped because it is not
+    # a value reads as a call that returned nothing.
+    let mock = newMockBackendService(autoRespond = true)
+    let store = createReplayDataStore(mock.toBackendService())
+    const msg = "Entry point EntryPointSelector(0xfe80f537) not found in contract."
+    let body = %*{"startCallLineIndex": 0, "totalCallsCount": 1, "callLines": [
+      {"depth": 0, "content": {"count": 0, "hiddenChildren": false, "call": {
+        "rawName": "0xfe80f537", "key": "236", "children": [],
+        "returnValue": {"kind": 24, "msg": msg},
+        "location": {"path": "/src/a.casm", "line": 7, "rrTicks": 15904,
+                     "callstackDepth": 3}}}}]}
+    check store.applyCalltraceResponse(body) == 1
+    let args = store.calltrace.args.val.getOrDefault("236")
+    var ret = ""
+    for a in args:
+      if a.name == "__return": ret = a.text
+    check ret == "<error: " & msg & ">"

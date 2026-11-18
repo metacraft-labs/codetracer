@@ -230,6 +230,7 @@
 ## Every helper that calls `check` is a `template`. The `proc`s return values.
 
 import replay_prerequisite
+import ../../tui/tests/fixtures/fixture_provider
 import std/[json, os, osproc, sets, streams, strtabs, strutils, tables,
             tempfiles, unittest]
 import ./gpui_child_env
@@ -303,7 +304,6 @@ const
     ## `std/unittest` prints one `[OK]` per test BLOCK and
     ## never one per `check`, so a file of empty cases scores a full pass; this
     ## is what makes a case that stopped running fail instead (§7).
-  CalcFixture = "test-logs/tui-fixtures/calc-2f0db4f45192"
   StateDirEnvVar = "CODETRACER_TUI_LAYOUT_DIR"
   Viewports = [(1920, 1080), (1440, 900)]
     ## `scenarios.json`'s two, which are the two the finding was measured at.
@@ -347,7 +347,7 @@ let repo = getEnv("CODETRACER_REPO_ROOT", getCurrentDir())
 let bin = repo / "build/bin/codetracer-gpui"
 let shimDir = getEnv("ISONIM_GPUI_SHIM_DIR",
                      repo.parentDir / "isonim-gpui/rust/target/debug")
-let calc = repo / CalcFixture
+let calc = requireFixture(fixtureSpec("calc"))
 
 # ---------------------------------------------------------------------------
 # Reading the shipped binary's plan
@@ -372,9 +372,6 @@ proc windowPlan(width, height: int; ops: string): JsonNode =
   if not fileExists(bin):
     raise newException(IOError, "prerequisite missing: " & bin &
                        " (just build-gpui)")
-  if not dirExists(calc):
-    raise newException(IOError, "prerequisite missing: " & calc &
-                       " (run 'just test-tui' once)")
   let state = createTempDir("plat40-statecols-", "")
   var env = newStringTable()
   for k, v in envPairs():

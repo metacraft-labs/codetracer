@@ -164,7 +164,8 @@ mkShell {
     # ci deps
     pythonEnv.pythonPackages.flake8
     shellcheck
-    awscli2
+    # Built for nixpkgs' default Python; see `binariesOnly` in ../python.nix.
+    (pythonEnv.binariesOnly "awscli2-bin" [ awscli2 ])
 
     # This dependency is needed only while compiling the `lzma-native`
     # node.js module, and only when building an AppImage on Linux/ARM.

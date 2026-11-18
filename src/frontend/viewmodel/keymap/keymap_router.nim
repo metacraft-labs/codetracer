@@ -134,18 +134,20 @@ proc applyUserKeymap*(router: var KeymapRouter; uk: UserKeymap) =
   router.userKeymap = uk
   router.errors = uk.errors
   router.effective = keymapOf(router.base).keymap
-  router.user = EditingKeymap(bindings: @[])
+  router.user = newEditingKeymap(@[])
   router.shadows = @[]
   router.removed = 0
   var userRows: seq[UserRow] = @[]
+  var effectiveBindings = router.effective.bindings
+  var userBindings: seq[EditingBinding] = @[]
   for r in uk.rows:
     if not r.appliesTo(router.base): continue
     if r.removal:
       var kept: seq[EditingBinding] = @[]
-      for b in router.effective.bindings:
+      for b in effectiveBindings:
         if removes(r, b): inc router.removed
         else: kept.add b
-      router.effective.bindings = kept
+      effectiveBindings = kept
       continue
     if not deliverable(router.delivery, r.chords):
       router.errors.add UserRowError(
@@ -155,24 +157,31 @@ proc applyUserKeymap*(router: var KeymapRouter; uk: UserKeymap) =
                  "modifyOtherKeys would deliver it)")
       continue
     userRows.add r
-    router.user.bindings.add bindingOf(r, router.base)
+    userBindings.add bindingOf(r, router.base)
+  router.effective = newEditingKeymap(effectiveBindings)
+  router.user = newEditingKeymap(userBindings)
+  var baseTables, userTables: Table[string, seq[EditingBinding]]
+  for b in effectiveBindings:
+    baseTables.mgetOrPut(tableOf(b), @[]).add b
+  for b in userBindings:
+    userTables.mgetOrPut(tableOf(b), @[]).add b
   router.baseByTable = initTable[string, EditingKeymap]()
-  for b in router.effective.bindings:
-    router.baseByTable.mgetOrPut(tableOf(b), EditingKeymap()).bindings.add b
+  for table, rows in baseTables:
+    router.baseByTable[table] = newEditingKeymap(rows)
   router.userByTable = initTable[string, EditingKeymap]()
-  for b in router.user.bindings:
-    router.userByTable.mgetOrPut(tableOf(b), EditingKeymap()).bindings.add b
+  for table, rows in userTables:
+    router.userByTable[table] = newEditingKeymap(rows)
   # Shadows: a user row over a base row with the same sequence whose `when`s
   # can both hold, in any table; and an earlier user row in the same table.
-  for i, u in router.user.bindings:
-    for b in router.effective.bindings:
+  for i, u in userBindings:
+    for b in effectiveBindings:
       if b.chords == u.chords and canBothHold(u.scope.cond, b.scope.cond):
         router.shadows.add Shadow(
           keyText: userRows[i].keyText, userIndex: userRows[i].index,
           shadowedSource: lsBase, shadowedOperation: b.operation,
           shadowedTable: tableOf(b), shadowedIndex: -1)
     for j in 0 ..< i:
-      let earlier = router.user.bindings[j]
+      let earlier = userBindings[j]
       if earlier.chords == u.chords and tableOf(earlier) == tableOf(u) and
          canBothHold(u.scope.cond, earlier.scope.cond):
         router.shadows.add Shadow(
@@ -264,9 +273,9 @@ proc layersFor(router: KeymapRouter; facts: SessionFacts; path: ScopePath;
         if source == lsUser: router.userByTable.getOrDefault(table)
         elif table == EditorTable and router.hasImported: router.importedEditor
         else: router.baseByTable.getOrDefault(table)
-      if km.bindings.len == 0: continue
+      if km.bindingCount == 0: continue
       let trie = trieFor(km, scope, table, laterFirst = source == lsUser)
-      if trie.nodes.len > 1:
+      if trie.nodeCount > 1:
         result.add ResolutionLayer(name: $source & ":" & table,
                                    source: source, trie: trie,
                                    atFocus: atFocus)
@@ -459,18 +468,18 @@ proc chordFor*(lookup: var ChordLookup; router: KeymapRouter;
   ## sequence, typed here, RESOLVES to it. A shadowed row is never shown,
   ## because typing it would run something else. "" when nothing typed here
   ## reaches the operation.
-  for i in countdown(router.user.bindings.len - 1, 0):
+  let userBindings = router.user.bindingsFor(operation, argument)
+  let baseBindings = router.effective.bindingsFor(operation, argument)
+  for i in countdown(userBindings.len - 1, 0):
     # A template, not a `let`: on the JS backend a `let` deep-copies the row.
-    template b: untyped = router.user.bindings[i]
-    if b.operation == operation and b.argument == argument and
-       lookup.typesTo(router, b):
+    template b: untyped = userBindings[i]
+    if lookup.typesTo(router, b):
       # The display form of a user's row — who may have written
       # `ctrl+alt+n`.
       return displaySequence(b.chords)
-  for i in 0 ..< router.effective.bindings.len:
-    template b: untyped = router.effective.bindings[i]
-    if b.operation == operation and b.argument == argument and
-       lookup.typesTo(router, b):
+  for i in 0 ..< baseBindings.len:
+    template b: untyped = baseBindings[i]
+    if lookup.typesTo(router, b):
       # The data's own spelling for a base row (CUA's `Ctrl+K Ctrl+W`,
       # §4.2's `r f`).
       return b.spelling

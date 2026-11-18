@@ -3,9 +3,9 @@
 ## a named code and says so on stderr, instead of waiting for ever with both
 ## streams empty.**
 ##
-## Run (needs `just build-gpui`, `python3` on `PATH`, the `calc` recording
-## under `test-logs/tui-fixtures/` and `REPLAY_SERVER_BIN` naming a built
-## `replay-server`):
+## Run (needs `just build-gpui`, `python3` on `PATH`, the Python recorder,
+## which records the `calc` fixture on first use, and `REPLAY_SERVER_BIN`
+## naming a built `replay-server`):
 ##   nim c -r --path:src/frontend/viewmodel src/frontend/gpui/tests/test_gpui_handshake_bound.nim
 ##
 ## `codetracer-pm/issues/2026-10-02-codetracer-gpui-hangs-for-ever-on-a-replay-server-that-never-reports-a-stop.md`
@@ -80,6 +80,7 @@
 ## shape the issue describes (a spawn failure, a refused folder).
 
 import replay_prerequisite
+import ../../tui/tests/fixtures/fixture_provider
 import std/[os, osproc, strtabs, strutils, tempfiles, times, unittest]
 
 import gpui/host/gpui_host
@@ -90,7 +91,6 @@ template ck(cond: untyped) =
   check(cond)
 
 const
-  CalcFixture = "test-logs/tui-fixtures/calc-2f0db4f45192"
   ExitEngineStalled = 4
     ## The terminal front-end's `cli.ExitEngineStalled`, restated: this suite
     ## asserts the number the CONTRACT publishes (`codetracer-pm/spec/CLI/ct/
@@ -198,7 +198,7 @@ while True:
 
 let repo = getEnv("CODETRACER_REPO_ROOT", getCurrentDir())
 let bin = repo / "build/bin/codetracer-gpui"
-let calc = repo / CalcFixture
+let calc = requireFixture(fixtureSpec("calc"))
 
 proc requirePrereq(ok: bool; what: string) =
   ## **A MISSING PREREQUISITE FAILS BY NAME. It does not skip.**
@@ -288,7 +288,6 @@ suite "codetracer-gpui bounds the replay engine's handshake":
     requirePrereq(fileExists(bin), bin & " (just build-gpui)")
     requirePrereq(findExe("python3").len > 0,
                   "python3 on PATH (it runs this suite's fake engine)")
-    requirePrereq(dirExists(calc), calc & " (run 'just test-tui' once)")
     requirePrereq(existsEnv("REPLAY_SERVER_BIN") and
                   fileExists(getEnv("REPLAY_SERVER_BIN")),
                   "REPLAY_SERVER_BIN naming a built replay-server")

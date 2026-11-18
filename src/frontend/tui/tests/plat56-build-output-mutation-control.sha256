@@ -26,5 +26,5 @@ dbb52430b77a34b34fc15168404461b8c2a54fd8ea5d9eb559925173b1b70dc0  src/frontend/t
 0cf7ec60146dd3d84a8a4c6121f336cea1e763e9972e0f82f41b2df7d93e91b0  src/frontend/gpui/tests/test_plat56_gpui_plan.nim
 04a2f286c16492bd51d862b795e9bda81fbe683f8fd064e2f08a2d1ba2bab2db  src/frontend/gpui/tests/test_plat55_gpui_plan.nim
 edb3585f19694d13c4c6a818500510998961572f5d72f766caef77abe4dda80b  src/tests/gui/tests/build/plat56-build-output-capture.spec.ts
-a4d5c8a6a304256e44c32badc6510499935f7cbfde6c0a3bf6c690d47fec8b5e  src/tests/gui/tests/problems-pane/plat55-problems-capture.spec.ts
+a769bb39b3657c029704a53ac621328ffd5ddb9e8a57d4890626975c96d97d6d  src/tests/gui/tests/problems-pane/plat55-problems-capture.spec.ts
 ea379b40aaac394c5d3d2f66433070a276446318d685dd290822149f0b2e1c4c  src/frontend/viewmodel/tests/unit/build_fixtures/plat56_c_build.nim

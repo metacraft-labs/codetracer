@@ -406,6 +406,12 @@ proc paneViewModel*(slot: HeadlessSessionSlot; kind: PaneKind): ViewModel =
     # docks. Its ViewModel is the desktop's (a build's diagnostics); the
     # replay session owns none, so nil, for the reason above.
     nil
+  of paneLowLevelCode:
+    # PLAT-60. The function the debugger is in, as instructions under the
+    # source lines they came from: the session's own `LowLevelCodeVM`, the
+    # one the desktop's Low Level Code view draws (loaded per stop by the
+    # session's stop loader while a front-end shows it).
+    ViewModel(s.lowLevelCodeVM)
 
 proc paneIsLive*(slot: HeadlessSessionSlot; kind: PaneKind): bool =
   ## Whether the pane has a ViewModel to render. False for every pane of a

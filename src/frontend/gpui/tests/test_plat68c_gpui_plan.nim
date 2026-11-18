@@ -30,6 +30,7 @@
 ## user keymap is a real file the binary reads.
 
 import replay_prerequisite
+import ../../tui/tests/fixtures/fixture_provider
 import std/[json, os, osproc, streams, strtabs, strutils, tempfiles, unittest]
 import ./gpui_child_env
 
@@ -57,13 +58,7 @@ let bin = repo / "build/bin/codetracer-gpui"
 let shimDir = getEnv("ISONIM_GPUI_SHIM_DIR",
                    repo.parentDir / "isonim-gpui/rust/target/debug")
 
-proc fixture(prefix: string): string =
-  for kind, path in walkDir(repo / "test-logs/tui-fixtures"):
-    if kind == pcDir and path.extractFilename.startsWith(prefix & "-"):
-      return path
-  ""
-
-let calc = fixture("calc")
+let calc = requireFixture(fixtureSpec("calc"))
 
 proc windowPlan(ops: string; keybindings = ""; trace: var string;
                 project = ""): JsonNode =
@@ -72,9 +67,6 @@ proc windowPlan(ops: string; keybindings = ""; trace: var string;
   if not fileExists(bin):
     raise newException(IOError, "prerequisite missing: " & bin &
                        " (just build-gpui)")
-  if calc.len == 0:
-    raise newException(IOError, "prerequisite missing: the calc tui-fixtures " &
-      "recording (the tui lane records it on its first run)")
   let state = createTempDir("plat68c-gpui-", "")
   var env = newStringTable()
   for k, v in envPairs():

@@ -785,6 +785,9 @@ suite "ct test verify (CTC-3f)":
 
     # The USER root UNRESOLVED: every variable it could come from is
     # relative or empty. The system root is still searched.
+    # ct-home-sweep: not codetracer state -- HOME / XDG_STATE_HOME are
+    # redirected to exercise the cross-tool test-certificates store's own §2.1
+    # rules, which CODETRACER_HOME deliberately does not override.
     let savedHome = getEnv("HOME")
     let savedState = getEnv("XDG_STATE_HOME")
     putEnv(UserRootVariable, "relative/user-root")

@@ -13,7 +13,7 @@
   "H2": "s.rt.app.notification.contains(\"src/main.nr was not found\")",
   "L1": "area.width > 0 and screen.listRows > 0",
   "L2": "countedAssertions == ExpectedAssertions",
-  "M1": "line[0 ..< at].strip().endsWith(\" 2\") or",
+  "M1": "words.len > 0 and words[^1] == \"2\"",
   "P1": "not table.isNil and table.columns == ProblemsColumns",
   "R1": "s.activeEditor() == (\"src/util.nr\", 2, 9)",
   "R2": "area.width > 0 and screen.listRows > 0",

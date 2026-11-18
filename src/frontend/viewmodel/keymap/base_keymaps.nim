@@ -28,8 +28,7 @@ proc withNavigation(def: KeymapDefinition): KeymapDefinition =
   ## among them refuses the base exactly as a data base's would.
   result = def
   let nav = definitionOf(def.model, NavigationRows & ModalSurfaceRows)
-  for b in nav.keymap.bindings:
-    result.keymap.bindings.add b
+  result.keymap = newEditingKeymap(def.keymap.bindings & nav.keymap.bindings)
 
 proc buildBase(model: BaseKeymap): KeymapDefinition =
   ## **ONE `case`, total over the enum**, so a fifth base does not compile

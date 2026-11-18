@@ -51,7 +51,7 @@ binary(lean_flow_integration)           | rr, ct-native-replay | rr-backend-test
 binary(nim_flow_integration)            | rr, ct-native-replay | rr-backend-tests (cross-repo-tests.yml)
 binary(rust_flow_integration)           | rr, ct-native-replay | rr-backend-tests (cross-repo-tests.yml)
 binary(origin_rr_smoke)                 | rr, ct-native-replay | rr-backend-tests (cross-repo-tests.yml)
-binary(native_calltrace_jump_test) and test(/^(c|go)_rr_[a-z0-9_]+$/) | rr, ct-native-replay, dlv | rr-backend-tests (cross-repo-tests.yml)
+binary(native_calltrace_jump_test) and test(/^(c|go|rust)_rr_[a-z0-9_]+$/) | rr, ct-native-replay, dlv | rr-backend-tests (cross-repo-tests.yml)
 
 binary(origin_aiken_dap_test)           | codetracer-cardano-recorder | recorder-tests (cross-repo-tests.yml)
 binary(origin_cairo_dap_test)           | codetracer-cairo-recorder | recorder-tests (cross-repo-tests.yml)

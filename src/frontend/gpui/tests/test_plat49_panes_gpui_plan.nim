@@ -26,6 +26,7 @@
 ## tabs' layout is the pure `gpuiTopBarLayout` over `SessionTabView` values.
 
 import replay_prerequisite
+import ../../tui/tests/fixtures/fixture_provider
 import std/[json, options, os, osproc, sets, streams, strtabs, strutils,
             tables, tempfiles, unittest]
 import ./gpui_child_env
@@ -59,7 +60,6 @@ const
     ## visits one row more, because the recording now has one more call line
     ## (the Python recorder's `<toplevel>` root). 136 -> 137: the footer case
     ## reads the entry tick from the top bar before comparing the position.
-  CalcFixture = "test-logs/tui-fixtures/calc-2f0db4f45192"
   StateDirEnvVar = "CODETRACER_TUI_LAYOUT_DIR"
   W = 1920
   H = 1080
@@ -70,7 +70,7 @@ let repo = getEnv("CODETRACER_REPO_ROOT", getCurrentDir())
 let bin = repo / "build/bin/codetracer-gpui"
 let shimDir = getEnv("ISONIM_GPUI_SHIM_DIR",
                    repo.parentDir / "isonim-gpui/rust/target/debug")
-let calc = repo / CalcFixture
+let calc = requireFixture(fixtureSpec("calc"))
 
 proc windowPlan(ops: string; geometry: var JsonNode;
                 pre: seq[string] = @[]; subject = ""): JsonNode =
@@ -79,8 +79,6 @@ proc windowPlan(ops: string; geometry: var JsonNode;
   if not fileExists(bin):
     raise newException(IOError, "prerequisite missing: " & bin &
                        " (just build-gpui)")
-  if not dirExists(calc):
-    raise newException(IOError, "prerequisite missing: " & calc)
   let state = createTempDir("plat49b-gpui-plan-", "")
   var env = newStringTable()
   for k, v in envPairs():
@@ -581,9 +579,12 @@ suite "PLAT-49 part B review: the GPUI band's + opens a recording in a new tab":
       result.add (if toRow > fromRow: ",key:down" else: ",key:up")
 
   test "the + with one session; a recording chosen opens beside it; a tab switches; a close stops it":
-    let pages = repo / "test-logs/tui-fixtures/call_pages-d6745afd1e2e"
-    if not dirExists(pages):
-      raise newException(IOError, "prerequisite missing: " & pages)
+    # Recorded on first use, like `calc`; the tab titles and welcome rows
+    # below name each recording by its cache directory, whose key is the
+    # provider's, not this suite's.
+    let pages = requireFixture(pythonScriptSpec("call_pages"))
+    let pagesName = pages.extractFilename
+    let calcName = calc.extractFilename
     # One session: no tabs drawn (the desktop's `single-session`), the "+".
     let one = windowPlan("")
     ck one.nodesWith("data-ct-session-tab").len == 0
@@ -616,9 +617,9 @@ suite "PLAT-49 part B review: the GPUI band's + opens a recording in a new tab":
     checkpoint("rows: " & $rows & " at " & $indices)
     var pagesAt, calcAt, localAt = -1
     for i, k in rows:
-      if k.startsWith("recent-trace:") and k.contains("call_pages-d6745afd1e2e"):
+      if k.startsWith("recent-trace:") and k.contains(pagesName):
         pagesAt = i
-      if k.startsWith("recent-trace:") and k.contains("calc-2f0db4f45192"):
+      if k.startsWith("recent-trace:") and k.contains(calcName):
         calcAt = i
       if k.startsWith("option:") and labels[i] == "Open local trace":
         localAt = i
@@ -634,8 +635,8 @@ suite "PLAT-49 part B review: the GPUI band's + opens a recording in a new tab":
     for t in two.nodesWith("data-ct-session-tab"):
       titles.add t.attr("data-ct-session-tab")
       if t.attr("data-ct-tab-active") == "true": active = t.attr("data-ct-session-tab")
-    ck titles == @["calc-2f0db4f45192", "call_pages-d6745afd1e2e"]
-    ck active == "call_pages-d6745afd1e2e"
+    ck titles == @[calcName, pagesName]
+    ck active == pagesName
     # The ACTIVE session tab on a ground of its own (`chrome.tabStyle`, the
     # strips' selected-tab rule the band's tabs apply), the other on the
     # strip's (PLAT-49 arm TC5's surviving half, graded since 2026-10-17).

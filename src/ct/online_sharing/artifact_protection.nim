@@ -326,6 +326,9 @@ const
     ## now spells it `--password-stdin`, a boolean flag that cannot be
     ## swallowed, and this constant is what that flag resolves to.
 
+const BareDashRefusal = "a bare `-` is not a password source. To read " &
+  "the password from standard input, use --password-stdin."
+
 proc secretSource*(fromStdin: bool, file: string,
     bareDashInArgv = false): tuple[path: string, error: string] =
   ## Which source a password should be read from, or why that is ambiguous.
@@ -343,22 +346,30 @@ proc secretSource*(fromStdin: bool, file: string,
   ## `bareDashInArgv` is the second half of §8 defect 16's fix, and it is
   ## needed because replacing the spelling did not retire it. The retired form
   ## was `--password-file -`, which is the conventional Unix one and the one
-  ## this campaign shipped, so people will keep typing it — and `confutils`
-  ## eats the bare `-` before this code ever sees it, leaving no password and,
-  ## without `--encrypt`, **no refusal either**. So the caller reports whether
+  ## this campaign shipped, so people will keep typing it. Older `confutils`
+  ## builds ate the bare `-` before this code saw it, leaving no password and,
+  ## without `--encrypt`, **no refusal either**; so the caller reports whether
   ## a bare `-` appeared on the command line at all, and a `-` that named no
   ## source is refused with the spelling that works. Silence there is the
-  ## unsafe direction: it uploads in the clear.
+  ## unsafe direction: it uploads in the clear. Current `confutils` takes the
+  ## token after a value-taking option verbatim, so the same spelling arrives
+  ## as `file == "-"` instead, and is refused the same way.
   if fromStdin and file.len > 0:
     return ("", "--password-stdin and --password-file are mutually " &
       "exclusive; a password has one source")
   if fromStdin:
     return (SecretFromStdin, "")
+  if file == SecretFromStdin:
+    # The same retired spelling, reaching us as a VALUE: `confutils` now
+    # takes the token after a value-taking option verbatim, so
+    # `--password-file -` arrives as the file `-` instead of being eaten.
+    # Passed on, it would be read as the stdin marker, silently reviving the
+    # spelling this function exists to refuse.
+    return ("", BareDashRefusal)
   if file.len > 0:
     return (file, "")
   if bareDashInArgv:
-    return ("", "a bare `-` is not a password source. To read the password " &
-      "from standard input, use --password-stdin.")
+    return ("", BareDashRefusal)
   ("", "")
 
 proc optionGivenWithoutValue*(parameters: openArray[string],

@@ -178,6 +178,26 @@ EDITOR_GROUND_SELECTOR = ".lm_content"
 MONACO_SURFACE_SELECTOR = ".monaco-editor-background"
 MIN_TEXT_CONTRAST = 4.5
 
+# Watch rows share the Variables pane's ground. Pin their semantic colours,
+# including the active toggle's ink: a contrast-only check could miss pale
+# active text while its accidentally dark fill still makes it readable.
+# The last column preserves the dark stylesheet's existing appearance; the
+# light column is resolved from the design system, never copied from output.
+WATCH_COLOURS = [
+    (".isonim-state .hide-other-process-watches", "border",
+     "colors-ui-border-primary", "#3a3a3a"),
+    (".isonim-state .hide-other-process-watches", "color",
+     "colors-ui-text-primary-body-subtle", "#b4b4b4"),
+    (".isonim-state .hide-other-process-watches.active", "background-color",
+     "colors-ui-surface-base-card", "#262626"),
+    (".isonim-state .hide-other-process-watches.active", "color",
+     "colors-ui-text-primary-body", "#f3f3f3"),
+    (".isonim-state .value-watch.watch-invalid .value-expanded-text", "color",
+     "colors-ui-text-primary-body-subtle", "#b4b4b4"),
+    (".isonim-state .value-watch.watch-pending .value-expanded-text", "color",
+     "colors-ui-text-primary-body-subtle", "#b4b4b4"),
+]
+
 # Below this WCAG relative luminance a colour is a DARK ground.  0.05 is the
 # threshold #858 was measured with.  Every Light-mode `surface/primary/*` and
 # `surface/base/*` token sits far above it (the darkest, `surface/primary/
@@ -1016,6 +1036,25 @@ def check_every_foreground(light_decls, dark_decls, tokens, failures, repo_root)
               f"on its ground")
 
 
+def check_watch_colours(sheets, tokens, failures):
+    """Require each shipped watch declaration, in its role's colour per mode."""
+    for selector, prop, token, dark in WATCH_COLOURS:
+        if token not in tokens:
+            failures.append(f"{token} is not a mapped colour token in design_tokens.nim")
+            continue
+        for mode, want in (("dark", dark), ("light", tokens[token][1])):
+            got = winning(sheets[mode], selector, prop)
+            # Stylus retains the border shorthand; its final word is its
+            # colour. Missing declarations stay None and fail explicitly.
+            colour = got.split()[-1] if got and prop == "border" else got
+            if norm_hex(colour) != want:
+                failures.append(
+                    f"{mode} watch colour `{selector} {{ {prop} }}` is {got!s}, "
+                    f"expected {want} ({token} in Light, existing colour in Dark)")
+            else:
+                print(f"  ok   {mode:5} watch {selector} {{ {prop}: {want} }}")
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--repo-root", required=True, type=Path)
@@ -1049,6 +1088,8 @@ def main():
             failures.append(
                 f"{mode} stylesheet paints {what} (`{selector} {{ {prop} }}`) "
                 f"{got!s}, not {var}'s {mode.capitalize()} value {want}{why}")
+
+    check_watch_colours(sheets, tokens, failures)
 
     # The editor's ground: Monaco transparent over its pane, the pane's ground
     # under the light theme's default text.

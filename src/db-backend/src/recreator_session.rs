@@ -266,6 +266,7 @@ type WorkerStream = ();
 
 #[derive(Debug)]
 pub struct RecreatorReplaySession {
+    instruction_stepping: Option<bool>,
     pub stable: ReplayWorker,
     pub recreator_exe: PathBuf,
     pub rr_trace_folder: PathBuf,
@@ -1051,6 +1052,7 @@ impl RecreatorReplaySession {
         stable.live_cwd = ct_rr_args.live_cwd.clone();
         stable.live_recording_dir = ct_rr_args.live_recording_dir.clone();
         RecreatorReplaySession {
+            instruction_stepping: None,
             name: name.to_string(),
             index,
             // M-REC-11: propagate the trace's recording_id to the
@@ -1194,6 +1196,32 @@ fn default_materialization_cache_ctfs_path(path: &Path) -> Option<PathBuf> {
 }
 
 impl ReplaySession for RecreatorReplaySession {
+    fn supports_instruction_stepping(&mut self) -> bool {
+        if let Some(supported) = self.instruction_stepping {
+            return supported;
+        }
+        let capability = (|| -> Result<bool, Box<dyn Error>> {
+            self.ensure_active_stable()?;
+            let answer = self
+                .stable
+                .dispatch_replay_query(ReplayQuery::SupportsInstructionStepping)?;
+            Ok(serde_json::from_str(&answer)?)
+        })();
+        match capability {
+            Ok(supported) => {
+                self.instruction_stepping = Some(supported);
+                supported
+            }
+            Err(error) => {
+                // Older and cooperative workers may not implement the
+                // negotiation query. Never advertise motions on inference
+                // from a file extension or a language name.
+                warn!("instruction stepping capability unavailable: {error}");
+                false
+            }
+        }
+    }
+
     fn load_location(&mut self, _expr_loader: &mut ExprLoader) -> Result<Location, Box<dyn Error>> {
         self.ensure_active_stable()?;
         self.load_location_with_sourcemap()
@@ -1279,6 +1307,19 @@ impl ReplaySession for RecreatorReplaySession {
         // or directly embed Db? or separate events in a separate EventList?
         warn!("load_step_events not implemented for rr traces");
         vec![]
+    }
+
+    fn load_asm_function(
+        &mut self,
+        function: &crate::task::FunctionLocation,
+    ) -> Result<crate::task::Instructions, Box<dyn Error>> {
+        self.ensure_active_stable()?;
+        Ok(serde_json::from_str(&self.stable.dispatch_replay_query(
+            ReplayQuery::LoadAsmFunction {
+                name: function.name.clone(),
+                path: function.path.clone(),
+            },
+        )?)?)
     }
 
     fn load_callstack(&mut self) -> Result<Vec<CallLine>, Box<dyn Error>> {
@@ -2124,6 +2165,7 @@ mod tests {
         });
 
         let mut session = RecreatorReplaySession {
+            instruction_stepping: None,
             stable: ReplayWorker {
                 name: "materialize-test".to_string(),
                 index: 0,
@@ -2200,6 +2242,7 @@ mod tests {
         });
 
         let mut session = RecreatorReplaySession {
+            instruction_stepping: None,
             stable: ReplayWorker {
                 name: "live-gate-test".to_string(),
                 index: 0,

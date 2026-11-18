@@ -95,6 +95,10 @@ type
     sentFor: array[StopPane, string]
       ## The key (stop identity and watch list) each pane's load was last
       ## issued for; "" when nothing is held.
+    localsAskedFor: string
+      ## The stop and watch list of the last `ct/load-locals`.
+    localsAskedBudget: int
+      ## That load's budget: what the session holds, or is about to, for them.
     following: bool
     owner: OwnerBase
       ## The loader's reactive root, so `follow`'s effect is disposed with it.
@@ -141,13 +145,32 @@ proc localsBudget(l: StopLoader): int =
   if l.session.stateVM.isNil: LocalsCountBudget
   else: localsCountBudgetFor(l.session.stateVM.viewport.val)
 
+proc localsRequestKey(l: StopLoader): string =
+  ## The stop and watch list: a change of either makes the values held stale.
+  stopIdentityOf(l.session.store.debugger.val) & "\x02" &
+    l.watchList().join("\x1f")
+
+proc localsBudgetToAsk(l: StopLoader): int =
+  ## The pane's budget, but never less than was already asked for at this
+  ## stop (Viewport-Driven-Loading Q2): a shorter pane shows fewer of the
+  ## values held and has nothing new to ask.
+  ##
+  ## Going by the pane alone is a feedback loop. A load shows the State pane's
+  ## loading indicator, which is taller than a row, so the pane loses a row
+  ## and its budget changes; the answer hides the indicator and the pane gets
+  ## the row back. Each of those would ask again, for as long as the indicator
+  ## keeps crossing a row boundary.
+  result = l.localsBudget()
+  if l.localsRequestKey() == l.localsAskedFor:
+    result = max(result, l.localsAskedBudget)
+
 proc stopKey(l: StopLoader; pane: StopPane): string =
   ## What makes two loads of `pane` the same request.
   let store = l.session.store
   result = stopIdentityOf(store.debugger.val)
   case pane
   of spLocals:
-    result.add "\x02" & l.watchList().join("\x1f") & "\x02" & $l.localsBudget()
+    result.add "\x02" & l.watchList().join("\x1f") & "\x02" & $l.localsBudgetToAsk()
   of spCallStackFallback:
     # The fallback is a fact about the stop AND about whether the recording
     # gave a call trace: a section that arrives (or is cleared) at the same
@@ -196,8 +219,10 @@ proc settle(l: StopLoader; pane: StopPane; key: string;
 proc loadLocals(l: StopLoader; key: string) =
   let store = l.session.store
   let ticks = store.debugger.val.rrTicks
-  let args = store.localsLoadArgs(ticks, l.watchList(),
-                                  countBudget = l.localsBudget())
+  let budget = l.localsBudgetToAsk()
+  l.localsAskedFor = l.localsRequestKey()
+  l.localsAskedBudget = budget
+  let args = store.localsLoadArgs(ticks, l.watchList(), countBudget = budget)
   let requestedAt = store.stopStamp()
   let loader = l
   store.locals.loadingState.val = lsLoading

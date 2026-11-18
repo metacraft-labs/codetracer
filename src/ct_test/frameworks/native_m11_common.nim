@@ -167,9 +167,10 @@ proc runCommand*(providerId: string; scope: TestScope; args,
     if outcome.output.len > 0:
       events.add event(tekOutput, providerId, runId, testId,
           output = outcome.output, durationMs = duration)
-    # `go test`, `crystal spec` and `dub test` are each launched once per file
-    # or project here and only their exit code is read, so this contributes one
-    # unit-level `tekTestFinished` on either branch.
+    # These adapters launch one framework command per requested scope and read
+    # only its exit code here, so each call contributes one unit-level
+    # `tekTestFinished` on either branch. `rust_libtest.runRust` is the one
+    # caller that then checks that pass against the framework's own summary.
     events.add unitOutcomeEvents(providerId, runId, testId, outcome.exitCode,
         "test command exited with " & $outcome.exitCode, outcome.output,
         duration)

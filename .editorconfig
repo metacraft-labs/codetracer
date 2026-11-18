@@ -43,24 +43,17 @@ indent_size = 4
 [*.sh]
 indent_style = tab
 
-# ...EXCEPT THESE TWO, WHERE SPACE INDENTATION IS A CONTRACT AND NOT A STYLE.
+# ...EXCEPT THIS ONE, WHERE SPACE INDENTATION IS A CONTRACT AND NOT A STYLE.
 #
-# Both are excluded from the formatting hooks in nix/pre-commit.nix -- see the
-# `excludes` list there for the full reasoning -- because each is compared
-# byte-for-byte against a copy that lives somewhere a formatter cannot reach:
+# tools/check-test-assertions.sh is excluded from the formatting hooks in
+# nix/pre-commit.nix -- see the `excludes` list there for the full reasoning --
+# because it is a byte-for-byte vendored copy of the editable original in
+# codetracer-specs, which a formatter cannot reach.
 #
-#   ci/runner/sweep-readonly-leftovers.sh  its inline body is pasted verbatim
-#                                          into seven `run:` blocks in
-#                                          .github/workflows/codetracer.yml, and
-#                                          YAML block scalars cannot be indented
-#                                          with tabs at all
-#   tools/check-test-assertions.sh         a byte-for-byte vendored copy of the
-#                                          editable original in codetracer-specs
-#
-# Both are 100% space-indented today (0 tab-indented lines in either). The hook
-# exclusions are what protect them from shfmt; this stanza is what protects them
-# from every OTHER tool that reads .editorconfig -- editors, and any future
-# formatter -- now that `[*.sh]` above would otherwise tell those tools to tab.
-[{ci/runner/sweep-readonly-leftovers.sh,tools/check-test-assertions.sh}]
+# It is 100% space-indented today (0 tab-indented lines). The hook exclusion is
+# what protects it from shfmt; this stanza is what protects it from every OTHER
+# tool that reads .editorconfig -- editors, and any future formatter -- now that
+# `[*.sh]` above would otherwise tell those tools to tab.
+[tools/check-test-assertions.sh]
 indent_style = space
 indent_size = 2

@@ -469,7 +469,10 @@ suite "PLAT-68 Tier 2: switching the base":
     try:
       sess.answerProbe(kitty = false)
       discard waitForEditorTab(sess)
-      let told = runCommand(sess, bkEmacs, "keymap", "keymap emacs")
+      # Waited for by the WHOLE answer: its prefix `keymap emacs` can be on
+      # screen a frame before the note that ends `(flag)` is drawn, and under
+      # load the read landed between the two.
+      let told = runCommand(sess, bkEmacs, "keymap", "keymap emacs (flag)")
       ck told.contains("keymap emacs (flag)")
     finally:
       sess.quit(bkEmacs)

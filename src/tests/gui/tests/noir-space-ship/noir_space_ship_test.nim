@@ -36,6 +36,7 @@ import vm_test_helpers
 import isonim/core/[computation, signals]
 import isonim/viewmodel
 import headless_session
+import ../../../../frontend/test_support/recording_fixtures
 import ../../../../common/replay_server_path   # the one search order
 import store/types
 import viewmodels/[calltrace_vm, scratchpad_vm, trace_log_vm]
@@ -58,54 +59,6 @@ proc findReplayServer(): string =
   if result.len == 0:
     raise newException(IOError, missingReplayServerMessage())
 
-proc findCtFile(dir: string): string =
-  for kind, path in walkDir(dir):
-    if kind != pcFile:
-      continue
-    if path.endsWith(".ct"):
-      return path
-  return ""
-
-proc isUsableTraceDir(dir: string): bool =
-  if fileExists(dir / "trace.bin"):
-    return true
-  if dirExists(dir / "rr"):
-    return true
-  if findCtFile(dir).len > 0:
-    return true
-  return false
-
-proc traceDirForRecordingId(idStr: string): string =
-  let baseDir = getHomeDir() / ".local" / "share" / "codetracer"
-  let bareDir = baseDir / idStr
-  if dirExists(bareDir):
-    return bareDir
-  let legacyDir = baseDir / ("trace-" & idStr)
-  if dirExists(legacyDir):
-    return legacyDir
-  bareDir
-
-proc findExistingTrace(programPattern: string): string =
-  ## Search ``~/.local/share/codetracer/`` for a pre-recorded trace whose
-  ## metadata program OR workdir field contains ``programPattern``.
-  ## (Noir traces have ``program = "zk_shields"`` but ``workdir`` includes
-  ## ``noir_space_ship`` — match either to find them.)
-  let baseDir = getHomeDir() / ".local" / "share" / "codetracer"
-  if not dirExists(baseDir):
-    return ""
-  for kind, path in walkDir(baseDir):
-    if kind != pcDir:
-      continue
-    if not isUsableTraceDir(path):
-      continue
-    # M-REC-1.5: derive the program identifier from the folder name
-    # (legacy JSON sidecars retired).
-    let dirname = path.extractFilename()
-    let program = dirname
-    if programPattern in program:
-      return path
-  return ""
-
 const recordTimeoutMs = 120_000
 
 proc recordTraceToDefaultLocation(programPath: string): string =
@@ -120,14 +73,7 @@ proc recordTraceToDefaultLocation(programPath: string): string =
     raise newException(IOError,
       "ct record failed (exit " & $exitCode & "): " & output)
   # M-REC-6: stdout marker renamed from "traceId:" to "recordingId:".
-  for line in output.splitLines():
-    if line.startsWith("recordingId:"):
-      let idStr = line[("recordingId:").len..^1].strip()
-      let traceDir = traceDirForRecordingId(idStr)
-      if dirExists(traceDir):
-        return traceDir
-  raise newException(IOError,
-    "ct record succeeded but could not parse recordingId from output: " & output)
+  recordingDirFromOutput(output)
 
 # Cache the trace path to avoid repeated lookups across tests.
 var cachedTracePath: string = ""
@@ -149,9 +95,6 @@ proc findOrRecordNoirTrace(): string =
   echo "  Recording trace for: ", programDir
   let traceDir = recordTraceToDefaultLocation(programDir)
   echo "  Recorded trace to: ", traceDir
-  if not isUsableTraceDir(traceDir):
-    raise newException(IOError,
-      "Recorded trace at " & traceDir & " uses an unrecognized format.")
   cachedTracePath = traceDir
   return traceDir
 

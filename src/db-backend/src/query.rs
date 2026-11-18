@@ -44,6 +44,7 @@ impl From<CtLoadLocalsArguments> for WireLoadLocalsArguments {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind")]
 pub enum ReplayQuery {
+    SupportsInstructionStepping,
     RunToEntry,
     LoadLocation,
     /// Load the current location with Nim sourcemap translation applied.
@@ -88,6 +89,11 @@ pub enum ReplayQuery {
     },
     LoadAllEvents,
     LoadCallstack,
+    /// Return the requested native function's disassembly without moving replay.
+    LoadAsmFunction {
+        name: String,
+        path: String,
+    },
     /// Search inside this replay operation without moving its browsing context.
     SearchCalls {
         pattern: String,
@@ -465,5 +471,21 @@ mod tests {
             serde_json::to_string(&response).unwrap(),
             r#"{"tickLo":100,"tickHi":200,"format":"WLOG","memwritesBase64":"V0xPRw==","linehitsBase64":"TEhUUw=="}"#
         );
+    }
+    #[test]
+    fn native_disassembly_query_uses_the_shared_worker_wire_shape() {
+        let query = ReplayQuery::LoadAsmFunction {
+            name: "calculate_sum".into(),
+            path: "/recorded/program.c".into(),
+        };
+        let wire = r#"{"kind":"LoadAsmFunction","name":"calculate_sum","path":"/recorded/program.c"}"#;
+        assert_eq!(serde_json::to_string(&query).unwrap(), wire);
+        match serde_json::from_str::<ReplayQuery>(wire).unwrap() {
+            ReplayQuery::LoadAsmFunction { name, path } => {
+                assert_eq!(name, "calculate_sum");
+                assert_eq!(path, "/recorded/program.c");
+            }
+            other => panic!("unexpected worker query: {other:?}"),
+        }
     }
 }

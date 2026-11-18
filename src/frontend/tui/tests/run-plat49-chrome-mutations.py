@@ -1128,8 +1128,12 @@ ARMS = [
         S3_ADDRUN,
         "the chosen recording never reaches the host"),
     Arm("NT4", OMNIVM,
-        "    if needle.contains('/'):\n",
-        "    if false:\n",
+        "    if needle.contains('/'):\n"
+        "      result.add OmnibarResult(entry: OmnibarEntry(\n"
+        "        kind: omRecording,",
+        "    if false:\n"
+        "      result.add OmnibarResult(entry: OmnibarEntry(\n"
+        "        kind: omRecording,",
         V3_OPEN,
         "a typed path is not offered"),
     Arm("NT5", TUIMAIN,

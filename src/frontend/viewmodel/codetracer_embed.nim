@@ -251,6 +251,15 @@ export debug_controls_vm
 import viewmodels/request_panel_vm
 export request_panel_vm
 
+# PLAT-62: the Constraints pane's ViewModel — its rows, their links to source,
+# the selection and the row menu — which the terminal and GPUI front-ends draw
+# (and the native row menu reads, `headless_app/constraint_menu`). Adds
+# `common/noir_constraints` and the pure Noir declaration scan
+# (`ct_test/frameworks/noir_test_syntax`, `std/*` and `ct_test/contracts`
+# only) to the facade's graph.
+import viewmodels/constraints_vm
+export constraints_vm
+
 # PLAT-52: the Terminal Output pane — its ViewModel and the pure model under
 # it (the line view's styled fragments, the screen emulator with its snapshots
 # and the built-in scrubber's marks; `terminal_output_vm` re-exports
@@ -288,6 +297,14 @@ export table_fit
 # lays them out (`errors_vm.problemsFit`), which the terminal's pane fits.
 from viewmodels/errors_vm import problemsFit, ProblemColumnNames
 export problemsFit, ProblemColumnNames
+
+# PLAT-60: the Low Level Code pane — the listing's rows, its cross-reference
+# with the source, its header's words and its row menu, which the terminal's
+# and GPUI's panes draw as the desktop's view does. Imports `std/*`,
+# `isonim/*`, `backend_service`, `store/*`, `generated_code_anchors` (pure),
+# `source_vm` (here already) and `sdk/source_provider` (here already).
+import viewmodels/low_level_code_vm
+export low_level_code_vm
 
 # PLAT-70 Part C: the editor's find session — highlight as you type, the
 # walk, accept and cancel, the seeds and the word-under-the-caret launchers

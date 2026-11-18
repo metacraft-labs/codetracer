@@ -53,6 +53,11 @@ test.describe("codetracer-ci dev shell entry", () => {
       `the codetracer-ci sibling is not checked out at ${codetracerCiDir}; ` +
         "the up-front refusal for that case is covered below",
     );
+    // ct-home-sweep: not codetracer state -- XDG_DATA_HOME is redirected only to
+    // give direnv an empty allow list. The children are `direnv exec … true` and
+    // `dotnet --version` in codetracer-ci's dev shell, whose hook writes only
+    // inside that checkout and exports sibling paths without running a CodeTracer
+    // binary, so CODETRACER_HOME has nothing to isolate here.
     const xdgDataHome = fs.mkdtempSync(path.join(os.tmpdir(), "ct-ci-shell-xdg-"));
     try {
       const env = { ...process.env, XDG_DATA_HOME: xdgDataHome };

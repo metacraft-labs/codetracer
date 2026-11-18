@@ -716,20 +716,19 @@ suite "EMT anti-drift and exclusion — the controls":
     ck "LangC,        # 1" in CommonLangSrc    # C is no longer the zero value
     expectCount(4)
 
-  test "EMT-A22 a provider's DECLARED capability is not its availability":
-    ## §2.4 hazard 3, and the trap this campaign was warned about by name.
-    ## `rust_libtest` declares `canRunProject/File/Single: true` and installs
-    ## `notImplementedRun`. Availability per verb must be read from the
-    ## INSTALLED proc; a Run Tests button built from the capability flags is
-    ## enabled for Rust and does nothing.
-    ##
-    ## Derived and green today. The toolbar half — that the button is DISABLED —
-    ## is asserted in `test_edit_mode_toolbar_model.nim`.
+  test "EMT-A22 Rust's declared run capability has a real implementation":
+    ## §2.4 hazard 3 is still a two-sided contract: availability is read from
+    ## the installed proc, and a provider declaring run support must install a
+    ## real run proc. Rust used to violate the second half. Pinning both the
+    ## flags and the installed callback stops that contradiction returning.
     startCount()
     ck "canRunProject: true" in RustLibtestSrc
-    ck "notImplementedRun" in RustLibtestSrc
-    ck "provider.run = notImplementedRun" in RustLibtestSrc
-    expectCount(3)
+    ck "canRunFile: true" in RustLibtestSrc
+    ck "canRunSingle: true" in RustLibtestSrc
+    ck "proc runRust" in RustLibtestSrc
+    ck "provider.run = runRust" in RustLibtestSrc
+    ck "notImplementedRun" notin RustLibtestSrc
+    expectCount(6)
 
   test "EMT-A21 Noir refuses test RECORDING, in the provider's own words":
     ## EMT-F6, and it is load-bearing for the acceptance journey: the one

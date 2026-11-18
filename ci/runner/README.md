@@ -158,14 +158,15 @@ Fixed by `083aa0c23`, anchored by `444cfa989`.
 **Cause.** A Nix-store-mode `.app` bundle is copied out read-only; the next
 job's checkout cannot delete it.
 
-**State.** `ci/runner/sweep-readonly-leftovers.sh`, plus a `chmod -R u+w`
-remediation at `.github/workflows/codetracer.yml:6068-6083`. Fixed at the source
-(the bundle is made writable when produced) *and* swept where already poisoned.
-Landed in `444cfa989`.
+**State.** Fixed at the source: the bundle is made writable when produced.
+Persistent-runner recovery is owned by Infra's registered job-start and
+job-completion hook, before repository workflow code exists; CodeTracer's
+workflows carry no mount or permission cleanup copy. Landed in `444cfa989`,
+then centralized at the runner boundary.
 
-**Gate.** `ci/test/readonly-leftovers-sweep-test.sh`, in the bash lint lane. It
-asserts a **non-zero** count on a poisoned fixture, not merely a zero
-afterwards.
+**Gate.** `ci/test/runner-lifecycle-ownership-test.sh`, in the bash lint lane,
+refuses reintroduction of product-owned pre-checkout cleanup and mutation-tests
+renamed permission and FUSE implementations.
 
 ---
 

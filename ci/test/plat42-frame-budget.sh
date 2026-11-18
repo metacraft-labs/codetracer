@@ -49,16 +49,10 @@ fail() {
 }
 
 LIVE_SHIM="${ISONIM_GPUI}/rust/target/debug/libgpui_nim_shim.so"
-SHIM_BACKUP=""
-# shellcheck disable=SC2329  # invoked indirectly, by the EXIT trap below
-restore_shim() {
-	if [ -n "${SHIM_BACKUP}" ] && [ -f "${SHIM_BACKUP}" ]; then
-		mv -f "${SHIM_BACKUP}" "${LIVE_SHIM}"
-		SHIM_BACKUP=""
-		echo "restored ${LIVE_SHIM}"
-	fi
-}
-trap restore_shim EXIT INT TERM
+# Stages and restores the shim: `ci/lib/gpui-shim-stage.sh` says how, and why.
+# shellcheck source=ci/lib/gpui-shim-stage.sh disable=SC1091
+source "${root}/ci/lib/gpui-shim-stage.sh" || fail "ci/lib/gpui-shim-stage.sh could not be loaded"
+gpui_shim_install_traps
 
 one_viewport() {
 	local w="$1" h="$2"
@@ -122,9 +116,9 @@ grep -q 'gpui_frame_count' <<<"$(nm -D --defined-only "${WINDOWED_SHIM}" 2>/dev/
 # the shared one is left alone (`CODETRACER_WINDOW_BIN_PINS_SHIM=1`); otherwise
 # the shared file is swapped for the run and restored by the trap.
 if [ "${CODETRACER_WINDOW_BIN_PINS_SHIM:-0}" != "1" ]; then
-	SHIM_BACKUP="${LIVE_SHIM}.plat42-backup"
-	[ -f "${LIVE_SHIM}" ] && mv -f "${LIVE_SHIM}" "${SHIM_BACKUP}"
-	cp -f "${WINDOWED_SHIM}" "${LIVE_SHIM}"
+	# Moved aside and never copied over: `ci/lib/gpui-shim-stage.sh` says why.
+	gpui_shim_stage "${LIVE_SHIM}" "${WINDOWED_SHIM}" ||
+		fail "the windowed shim could not be staged at ${LIVE_SHIM}"
 fi
 bash "${ISONIM_GPUI}/scripts/wayland-run-test.sh" -- \
 	bash "${root}/ci/test/plat42-frame-budget.sh" --inside

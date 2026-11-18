@@ -47,15 +47,11 @@ run_playwright() {
 
 if [[ "$(uname -s)" == "Linux" ]] && [[ -z ${DISPLAY:-} ]]; then
 	echo "Starting Xvfb..."
-	DISPLAY_NUM=99
-	while [ -e "/tmp/.X${DISPLAY_NUM}-lock" ]; do
-		DISPLAY_NUM=$((DISPLAY_NUM + 1))
-	done
-	Xvfb ":${DISPLAY_NUM}" -screen 0 1920x1080x24 -nolisten tcp &
-	XVFB_PID=$!
-	trap 'kill $XVFB_PID 2>/dev/null || true' EXIT
-	sleep 1
-	export DISPLAY=":${DISPLAY_NUM}"
+	# Started through the shared helper, which waits for the display to
+	# answer instead of sleeping (scripts/lib/own-xvfb.sh).
+	. "${REPO_ROOT}/scripts/lib/own-xvfb.sh"
+	trap 'own_xvfb_stop' EXIT
+	own_xvfb_start -screen 0 1920x1080x24 -nolisten tcp || exit 1
 	run_playwright
 else
 	run_playwright

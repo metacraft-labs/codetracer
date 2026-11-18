@@ -257,6 +257,14 @@ suite "AS-3 — a password is validated the same way everywhere":
     # The stdin marker is not a path a user could name by accident from the
     # file option — it is reached only through the flag.
     check SecretFromStdin == "-"
+    # ...and when the parser hands the retired `--password-file -` over as a
+    # value (confutils takes the next token verbatim), it is refused by name
+    # rather than read as the stdin marker.
+    let dash = secretSource(false, "-")
+    check dash.path == ""
+    check "bare `-` is not a password source" in dash.error
+    check "--password-stdin" in dash.error
+    check "mutually" in secretSource(true, "-").error
 
   test "a long passphrase is accepted, and no composition rule is imposed":
     # Explicitly asserted, because "require a digit and a symbol" is the rule

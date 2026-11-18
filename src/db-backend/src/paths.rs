@@ -38,9 +38,9 @@ pub static CODETRACER_PATHS: LazyLock<Mutex<Paths>> = LazyLock::new(|| Mutex::ne
 ///
 /// Base directory resolution (first match wins):
 /// 1. `$CODETRACER_RUNTIME_DIR` — explicit escape hatch (tests, unusual deployments).
-/// 2. **macOS**: `/tmp/codetracer/`, because the normal per-user cache path
-///    is too long for Unix-domain socket names once worker names and run ids
-///    are appended.
+/// 2. **macOS**: private `/tmp/ct-<euid>/`, because the normal per-user cache
+///    path is too long for Unix-domain socket names once worker names and run
+///    ids are appended, while a shared child of `/tmp` is cross-user unsafe.
 /// 3. **Linux**: `$XDG_RUNTIME_DIR/codetracer/` when the path exists.
 ///    The XDG Base Directory spec designates this for sockets and other
 ///    runtime files; systemd-logind sets it at login (`/run/user/<uid>`,
@@ -53,7 +53,7 @@ pub static CODETRACER_PATHS: LazyLock<Mutex<Paths>> = LazyLock::new(|| Mutex::ne
 /// 4. Fallback: the supplied `tmp_path` (preserves historical behaviour
 ///    in environments without XDG / in unit tests).
 pub fn run_dir_for(tmp_path: &Path, run_id: &str) -> Result<PathBuf, Box<dyn Error>> {
-    let base = socket_runtime_base_dir(tmp_path);
+    let base = socket_runtime_base_dir(tmp_path)?;
     let run_dir = base.join(format!("run-{run_id}"));
     std::fs::create_dir_all(&run_dir)?;
     Ok(run_dir)
@@ -91,7 +91,11 @@ pub fn run_dir_for(tmp_path: &Path, run_id: &str) -> Result<PathBuf, Box<dyn Err
 /// run dir; we additionally hard-skip `current_pid` defensively in
 /// case the caller does it the other way around.
 pub fn gc_stale_run_dirs(tmp_path: &Path, current_pid: u32) -> usize {
-    let base = socket_runtime_base_dir(tmp_path);
+    let Ok(base) = socket_runtime_base_dir(tmp_path) else {
+        // Cleanup is best-effort.  The real run-directory creation path
+        // returns the validation error instead of writing into an unsafe base.
+        return 0;
+    };
     let mut removed = gc_stale_run_dirs_in(&base, current_pid, &PosixKillProbe);
     // The short directory replay workers move to when their socket would
     // not fit under `base` (`worker_runtime_base_dir`) collects run
@@ -201,7 +205,7 @@ fn gc_stale_run_dirs_in(base: &Path, current_pid: u32, probe: &dyn PidLivenessPr
     removed
 }
 
-fn socket_runtime_base_dir(fallback_tmp: &Path) -> PathBuf {
+fn socket_runtime_base_dir(fallback_tmp: &Path) -> Result<PathBuf, Box<dyn Error>> {
     // The cleaner `if let Ok(x) = ... && !x.is_empty()` let-chain form
     // requires Rust edition 2024; this crate is currently on edition
     // 2021 (`Cargo.toml`), so we nest the checks manually.  Revisit
@@ -209,18 +213,38 @@ fn socket_runtime_base_dir(fallback_tmp: &Path) -> PathBuf {
     if let Ok(explicit) = env::var(CODETRACER_RUNTIME_DIR_ENV)
         && !explicit.is_empty()
     {
-        return PathBuf::from(explicit);
+        return Ok(PathBuf::from(explicit));
     }
     if cfg!(target_os = "macos") {
-        return PathBuf::from("/tmp/codetracer");
+        // `/tmp` is shared by every login and the local CI service account.
+        // A single `/tmp/codetracer` is therefore owned by whichever account
+        // creates it first.  Reuse the same secure short-directory rule that
+        // handles long worker sockets: effective-uid name, mode 0700, no
+        // symlink, and ownership checked before any socket or log is written.
+        #[cfg(unix)]
+        {
+            // SAFETY: geteuid has no preconditions and cannot fail.
+            let euid = unsafe { libc::geteuid() };
+            return private_runtime_base_dir(Path::new("/tmp"), euid);
+        }
     }
     if !cfg!(target_os = "macos")
         && let Ok(xdg) = env::var("XDG_RUNTIME_DIR")
         && let Some(base) = xdg_runtime_base(Path::new(&xdg), &|dir| accepts_writes(dir))
     {
-        return base;
+        return Ok(base);
     }
-    fallback_tmp.to_path_buf()
+    Ok(fallback_tmp.to_path_buf())
+}
+
+/// Create and validate the short per-user directory used in a system-wide
+/// temporary parent.  This is the common primitive for Darwin's default and
+/// for the overlong-socket fallback.
+#[cfg(unix)]
+fn private_runtime_base_dir(parent: &Path, euid: u32) -> Result<PathBuf, Box<dyn Error>> {
+    let dir = short_worker_runtime_dir(parent, euid);
+    ensure_private_dir(&dir, euid)?;
+    Ok(dir)
 }
 
 /// `<xdg>/codetracer` when `$XDG_RUNTIME_DIR` (`xdg`) can hold it, else
@@ -473,7 +497,7 @@ pub const CODETRACER_RUNTIME_DIR_ENV: &str = "CODETRACER_RUNTIME_DIR";
 /// depend on the two resolutions agreeing.
 pub fn runtime_base_dir() -> Result<PathBuf, Box<dyn Error>> {
     let tmp_path: PathBuf = { CODETRACER_PATHS.lock()?.tmp_path.clone() };
-    Ok(socket_runtime_base_dir(&tmp_path))
+    socket_runtime_base_dir(&tmp_path)
 }
 
 /// Environment variable carrying the per-run identifier from spawner to
@@ -580,6 +604,22 @@ mod tests {
     use std::collections::HashSet;
     use std::fs;
     use std::path::Path;
+
+    /// Darwin's system-wide `/tmp` is shared by every login and by the local
+    /// CI service account.  The default runtime base must therefore include
+    /// the effective uid; otherwise the first user to create
+    /// `/tmp/codetracer` owns it and every other user's logger/worker fails
+    /// with `PermissionDenied` before the licensed operation begins.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn darwin_runtime_base_is_private_to_the_effective_user() {
+        // SAFETY: geteuid has no preconditions and cannot fail.
+        let euid = unsafe { libc::geteuid() };
+        assert_eq!(
+            super::socket_runtime_base_dir(Path::new("/ignored")).expect("resolve Darwin runtime base"),
+            std::path::PathBuf::from(format!("/tmp/ct-{euid}"))
+        );
+    }
 
     /// M-REC-11: run_id widens from `usize` to `&str`; the directory
     /// name still uses the `run-` prefix, but the suffix is now the

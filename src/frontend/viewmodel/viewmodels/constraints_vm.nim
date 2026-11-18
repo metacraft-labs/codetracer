@@ -94,6 +94,34 @@
 ## and asserts the pane's painted headline changes.
 ##
 ## See `Generated-Code-Listing.md` §15.
+##
+## ## The rows, and where each one is written (PLAT-62)
+##
+## The pane is drawn by three front-ends — the desktop's view, the terminal's
+## pane and the GPUI window's leaf — and each used to decide its own rows from
+## the report. They are decided HERE now: `rows` is the list in display
+## order (each function's row, then its printed opcodes when the report has
+## a listing), and every row carries its LINK TO SOURCE — the line that
+## declares the function the compiler named, or the reason there is none.
+##
+## The link is computed from the project's own sources (`setSources`) by the
+## parser test discovery uses (`noir_test_syntax.noirFunctionDeclarations`),
+## and it refuses rather than guesses (`linkFunction`):
+##
+##   * `nargo info` names a function as its source does — `main`, `halve` —
+##     so a name declared exactly once is placed on that line;
+##   * a name declared more than once is placed nowhere, with the count,
+##     because the report does not say which one it compiled — except `main`,
+##     which is the crate root's (`src/main.nr`);
+##   * a `directive_*` function is one the compiler generated, and no source
+##     in the project declares it;
+##   * a listing's `func N` numbers a circuit and does not name a function,
+##     and an opcode row carries no source position: neither is placed.
+##
+## A row's activation (a press, Enter, the menu's Go to Source) goes through
+## `activateRow`, which calls the host's `onOpenSource` with the
+## project-relative path and line; the host opens it in its editor. The
+## row menu (`rowMenu` / `runRowMenu`) is the same on every front-end.
 
 import std/strutils
 
@@ -101,20 +129,119 @@ import isonim/core/[signals, computation, owner]
 import isonim/viewmodel
 
 import ../../../common/noir_constraints
+from ../../../ct_test/frameworks/noir_test_syntax import NoirSourceFile,
+  NoirFnDecl, noirFunctionDeclarations
 
 export noir_constraints
+export NoirSourceFile, NoirFnDecl
 
 type
+  ConstraintSourceLink* = object
+    ## Where a row is written in the project, or why it is not placed.
+    linked*: bool
+    path*: string
+      ## Project-relative, `/`-separated; "" when not linked.
+    line*: int
+      ## 1-based; 0 when not linked.
+    column*: int
+    reason*: string
+      ## Why the row has no source; "" when linked.
+
+  ConstraintRowKind* = enum
+    crkFunction = "function"
+      ## A function `nargo info` (or the listing) names, with its count.
+    crkOpcode = "opcode"
+      ## One printed opcode of a function's listing.
+
+  ConstraintRow* = object
+    ## One row of the pane, as every front-end draws it.
+    kind*: ConstraintRowKind
+    function*: int
+      ## The function's index in `report.functions`.
+    opcode*: int
+      ## crkOpcode: the opcode's index in its function's `rows`; -1 otherwise.
+    name*: string
+      ## The function's name, or the opcode's name.
+    kindLabel*: string
+      ## crkFunction: `acir` or `unconstrained`; "" for an opcode.
+    count*: string
+      ## crkFunction: its opcode count; crkOpcode: the opcode's index.
+    args*: string
+      ## crkOpcode: the opcode's operands, verbatim; "" otherwise.
+    source*: ConstraintSourceLink
+
+  ConstraintMenuAction* = enum
+    cmGoToSource = "go-to-source"
+    cmCopyName = "copy-name"
+    cmCopySourceLocation = "copy-source-location"
+
+  ConstraintMenuEntry* = object
+    label*: string
+    action*: ConstraintMenuAction
+    enabled*: bool
+    reason*: string
+      ## Why a disabled entry is disabled.
+
+  ConstraintActivation* = object
+    ## What activating a row did.
+    opened*: bool
+      ## The host was asked to open the row's source.
+    path*: string
+    line*: int
+    reason*: string
+      ## Why nothing opened ("" when it did).
+
+  ConstraintMenuOutcome* = object
+    done*: bool
+      ## The entry ran (false for a disabled one, or no such row).
+    activation*: ConstraintActivation
+      ## cmGoToSource.
+    copied*: string
+      ## cmCopyName / cmCopySourceLocation: the text for the clipboard.
+
+  ConstraintOpenSource* = proc(path: string; line, column: int) {.closure.}
+    ## The host's "open this project-relative file at this line".
+
   ConstraintsVM* = ref object of ViewModel
     # -- Mutable state --
     report*: Signal[ConstraintReport]
     projectName*: Signal[string]
+    sources*: Signal[seq[NoirSourceFile]]
+      ## The project's `.nr` sources under `src/`, by project-relative path —
+      ## what the rows are placed against (`setSources`).
+    selected*: Signal[int]
+      ## The selected row's index in `rows`, -1 for none. The cursor a press,
+      ## the list keys and the menu share.
 
     # -- Derived state --
     hasReport*: Memo[bool]
     acirOpcodes*: Memo[int]
     unconstrainedOpcodes*: Memo[int]
     headline*: Memo[string]
+    rows*: Memo[seq[ConstraintRow]]
+      ## The pane's rows in display order, each with its link to source.
+
+    # -- Host --
+    onOpenSource*: ConstraintOpenSource
+      ## Installed by the host; nil when it cannot open files.
+
+const
+  GoToSourceLabel* = "Go to Source"
+  CopyNameLabel* = "Copy Name"
+  CopySourceLocationLabel* = "Copy Source Location"
+  ConstraintsCommandVerb* = "constraints"
+    ## `:constraints` — shows the pane (the terminal's command line, the GPUI
+    ## window's omnibox).
+  NumberedCircuitReason* =
+    "the listing numbers this circuit; it does not name the source " &
+    "function it was compiled from"
+  OpcodeHasNoSourceReason* =
+    "the listing carries no source position for an opcode"
+  DirectiveReason* =
+    "the compiler generated this function (a directive); no source in the " &
+    "project declares it"
+  NoSourcesReason* = "the project's sources have not been read"
+  CannotOpenReason* = "this window cannot open files"
 
 const NoCircuitCompiledYet = "No circuit has been compiled for this project yet."
   ## What the pane says before anything has reported on a circuit: a fresh
@@ -122,6 +249,12 @@ const NoCircuitCompiledYet = "No circuit has been compiled for this project yet.
 
 proc setReport*(vm: ConstraintsVM; report: ConstraintReport) =
   vm.report.val = report
+
+proc setSources*(vm: ConstraintsVM; files: seq[NoirSourceFile]) =
+  ## The project's sources the rows are placed against. The host reads them
+  ## where it measures the circuit, so a report and its links describe the
+  ## same files.
+  vm.sources.val = files
 
 proc setAbsence*(vm: ConstraintsVM; reason: string) =
   vm.report.val = absentReport(reason)
@@ -212,6 +345,31 @@ proc noteSourceEdited*(vm: ConstraintsVM; path: string) =
     return
   vm.markStale(true)
 
+proc listingNoticeFor*(report: ConstraintReport): string =
+  ## The line that appears when the pane has counts but NO rows, and "" when
+  ## there is nothing to explain.
+  ##
+  ## THIS IS THE STATE THE LIVE SITE IS ACTUALLY IN, and it is why this notice
+  ## exists rather than an empty listing body. The bundled report comes from
+  ## `nargo info`, which prints totals and no opcodes at all, so there is
+  ## genuinely nothing to list until something compiles. A pane that rendered a
+  ## blank listing area for that would look broken; one that says which of the
+  ## two answers it is holding is merely honest about a real difference.
+  if report.absence.len > 0:
+    return ""
+  if report.functions.len == 0:
+    return ""
+  if report.hasListing():
+    return ""
+  # WHAT THE PANE WAS TOLD BEATS WHAT IT CAN INFER. A compile that succeeded
+  # without emitting a listing knows why; the default sentence below is a
+  # guess that would be wrong in exactly that case, and wrong in the
+  # reassuring direction — it would tell a user to press Build when Build is
+  # what had just failed to produce a listing.
+  if report.listingAbsence.len > 0:
+    return report.listingAbsence
+  "Totals only. Build the project to see the generated opcodes themselves."
+
 proc headlineFor*(report: ConstraintReport): string =
   ## The one line above the rows.
   if report.absence.len > 0:
@@ -226,10 +384,178 @@ proc headlineFor*(report: ConstraintReport): string =
   if report.stale:
     result.add " (stale)"
 
+# ---------------------------------------------------------------------------
+# Links to source
+# ---------------------------------------------------------------------------
+
+proc unlinked(reason: string): ConstraintSourceLink =
+  ConstraintSourceLink(linked: false, reason: reason)
+
+proc linkFunction*(fn: ConstraintFunction;
+                   decls: seq[NoirFnDecl]): ConstraintSourceLink =
+  ## Where `fn` is written, from the project's declarations — or why it is
+  ## placed nowhere. See the header for the rules; each refuses rather than
+  ## guesses, because a row that opens the wrong line is worse than one that
+  ## says it has none.
+  if fn.kind == cfkAcir and fn.name.startsWith("func "):
+    return unlinked(NumberedCircuitReason)
+  var found: seq[NoirFnDecl] = @[]
+  for d in decls:
+    if d.name == fn.name and not d.isTest:
+      found.add d
+  if found.len == 0:
+    if fn.name.startsWith("directive_"):
+      return unlinked(DirectiveReason)
+    return unlinked("no function named " & fn.name &
+                    " is declared in this project's sources")
+  var pick = -1
+  if found.len == 1:
+    pick = 0
+  elif fn.name == "main":
+    # The program's entry point is the crate root's `main`.
+    for i, d in found:
+      if d.path == "src/main.nr":
+        pick = i
+  if pick < 0:
+    return unlinked($found.len & " functions in this project are named " &
+                    fn.name & ", and the report does not say which one " &
+                    "this is")
+  ConstraintSourceLink(linked: true, path: found[pick].path,
+                       line: found[pick].line, column: found[pick].column)
+
+proc linksFor*(report: ConstraintReport;
+               sources: seq[NoirSourceFile]): seq[ConstraintSourceLink] =
+  ## Every function's link, in `report.functions` order.
+  if sources.len == 0:
+    for _ in report.functions:
+      result.add unlinked(NoSourcesReason)
+    return
+  let decls = noirFunctionDeclarations(sources)
+  for fn in report.functions:
+    result.add linkFunction(fn, decls)
+
+proc whereText*(link: ConstraintSourceLink): string =
+  ## `src/main.nr:3`, or "" for a row placed nowhere.
+  if link.linked: link.path & ":" & $link.line else: ""
+
+proc kindLabelOf*(kind: ConstraintFunctionKind): string =
+  case kind
+  of cfkAcir: "acir"
+  of cfkUnconstrained: "unconstrained"
+
+proc rowsFor*(report: ConstraintReport;
+              sources: seq[NoirSourceFile]): seq[ConstraintRow] =
+  ## The pane's rows in display order: each function's row, then its printed
+  ## opcodes. None for an absent report.
+  if report.absence.len > 0:
+    return @[]
+  let links = linksFor(report, sources)
+  for f, fn in report.functions:
+    result.add ConstraintRow(kind: crkFunction, function: f, opcode: -1,
+                             name: fn.name, kindLabel: kindLabelOf(fn.kind),
+                             count: $fn.opcodes, source: links[f])
+    for o, op in fn.rows:
+      result.add ConstraintRow(kind: crkOpcode, function: f, opcode: o,
+                               name: op.name, count: $op.index, args: op.args,
+                               source: unlinked(OpcodeHasNoSourceReason))
+
+proc rowTitle*(row: ConstraintRow): string =
+  ## The row's tooltip: where a press goes, or why it goes nowhere.
+  if row.source.linked: "Go to " & whereText(row.source)
+  else: "No source: " & row.source.reason
+
+proc rowText*(row: ConstraintRow): string =
+  ## The row as one line of text (Copy Name's text for an opcode).
+  case row.kind
+  of crkFunction: row.name
+  of crkOpcode:
+    if row.args.len > 0: row.name & " " & row.args else: row.name
+
+# ---------------------------------------------------------------------------
+# Selection, activation and the row menu — the same on every front-end
+# ---------------------------------------------------------------------------
+
+proc selectRow*(vm: ConstraintsVM; index: int) =
+  ## Select row `index` (-1 clears); an index past the rows clears.
+  let n = vm.rows.val.len
+  vm.selected.val = if index >= 0 and index < n: index else: -1
+
+proc moveSelection*(vm: ConstraintsVM; operation: string; page = 10): bool =
+  ## The list keys (`list.focus-next` …): move the selection. Whether
+  ## `operation` was a move.
+  let n = vm.rows.val.len
+  let cur = vm.selected.val
+  var next = cur
+  case operation
+  of "list.focus-next": next = (if cur < 0: 0 else: cur + 1)
+  of "list.focus-previous": next = (if cur < 0: n - 1 else: cur - 1)
+  of "list.focus-first": next = 0
+  of "list.focus-last": next = n - 1
+  of "list.focus-page-down": next = (if cur < 0: 0 else: cur + max(1, page))
+  of "list.focus-page-up": next = (if cur < 0: 0 else: cur - max(1, page))
+  else: return false
+  if n == 0:
+    vm.selected.val = -1
+  else:
+    vm.selected.val = clamp(next, 0, n - 1)
+  true
+
+proc activateRow*(vm: ConstraintsVM; index: int): ConstraintActivation =
+  ## Select row `index` and open its source through the host — a press, Enter
+  ## or Go to Source. A row placed nowhere opens nothing and says why.
+  let rows = vm.rows.val
+  if index < 0 or index >= rows.len:
+    return ConstraintActivation(reason: "no such row")
+  vm.selected.val = index
+  let link = rows[index].source
+  if not link.linked:
+    return ConstraintActivation(reason: link.reason)
+  if vm.onOpenSource.isNil:
+    return ConstraintActivation(reason: CannotOpenReason)
+  vm.onOpenSource(link.path, link.line, link.column)
+  ConstraintActivation(opened: true, path: link.path, line: link.line)
+
+proc rowMenu*(vm: ConstraintsVM; index: int): seq[ConstraintMenuEntry] =
+  ## Row `index`'s context menu, in order; empty for no such row.
+  let rows = vm.rows.val
+  if index < 0 or index >= rows.len:
+    return @[]
+  let link = rows[index].source
+  result.add ConstraintMenuEntry(label: GoToSourceLabel, action: cmGoToSource,
+                                 enabled: link.linked, reason: link.reason)
+  result.add ConstraintMenuEntry(label: CopyNameLabel, action: cmCopyName,
+                                 enabled: true)
+  result.add ConstraintMenuEntry(label: CopySourceLocationLabel,
+                                 action: cmCopySourceLocation,
+                                 enabled: link.linked, reason: link.reason)
+
+proc runRowMenu*(vm: ConstraintsVM; index: int;
+                 action: ConstraintMenuAction): ConstraintMenuOutcome =
+  ## Choose `action` of row `index`'s menu. A disabled entry does nothing
+  ## (`done` false), as the desktop's disabled entries do.
+  var enabled = false
+  for e in vm.rowMenu(index):
+    if e.action == action:
+      enabled = e.enabled
+  if not enabled:
+    return
+  let row = vm.rows.val[index]
+  vm.selected.val = index
+  result.done = true
+  case action
+  of cmGoToSource:
+    result.activation = vm.activateRow(index)
+  of cmCopyName:
+    result.copied = row.rowText
+  of cmCopySourceLocation:
+    result.copied = whereText(row.source)
+
 proc createConstraintsVM*(): ConstraintsVM =
   withViewModel proc(dispose: proc()): ConstraintsVM =
     let report = createSignal(absentReport(NoCircuitCompiledYet))
     let projectName = createSignal("")
+    let sources = createSignal(newSeq[NoirSourceFile]())
+    let selected = createSignal(-1)
 
     let hasReport = createMemo[bool] proc(): bool =
       report.val.hasCounts()
@@ -243,12 +569,18 @@ proc createConstraintsVM*(): ConstraintsVM =
     let headline = createMemo[string] proc(): string =
       headlineFor(report.val)
 
+    let rows = createMemo[seq[ConstraintRow]] proc(): seq[ConstraintRow] =
+      rowsFor(report.val, sources.val)
+
     ConstraintsVM(
       report: report,
       projectName: projectName,
+      sources: sources,
+      selected: selected,
       hasReport: hasReport,
       acirOpcodes: acirOpcodes,
       unconstrainedOpcodes: unconstrainedOpcodes,
       headline: headline,
+      rows: rows,
       disposeProc: dispose,
     )

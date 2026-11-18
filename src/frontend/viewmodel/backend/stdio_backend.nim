@@ -233,6 +233,10 @@ type
       ## one, so on every native host `FlowVM`'s `ct/updated-flow` handler —
       ## the only path the flow window arrives by — was dead, and the flow
       ## overlay had nothing to draw.
+    eventHandlers: seq[EventHandler]
+      ## Subscribers belong to the transport so a host that reads the raw
+      ## channel can explicitly deliver pending events without another RPC.
+    deliveringEvents: bool
     bound*: DapReadBound
       ## CTUI-14.  Unbounded by default; see this module's header.
     stalled: bool
@@ -844,6 +848,33 @@ proc subscriberEnvelope*(event: JsonNode): JsonNode =
   let body = event.getOrDefault("body")
   result["data"] = if body.isNil: newJObject() else: body
 
+proc deliverPendingEvents*(backend: DapStdioBackend) =
+  ## Deliver already-read events outside the raw protocol read loops. Raw
+  ## waiters retain their independent eventQueue; before subscription, the
+  ## subscriber debt stays pending. Nested requests are drained by the outer
+  ## dispatcher after the older batch, preserving arrival order.
+  if backend.closed or backend.deliveringEvents or backend.eventHandlers.len == 0:
+    return
+  backend.deliveringEvents = true
+  defer: backend.deliveringEvents = false
+  while backend.undelivered.len > 0:
+    let pending = backend.takeUndelivered()
+    var index = 0
+    try:
+      while index < pending.len:
+        let envelope = subscriberEnvelope(pending[index])
+        let handlers = backend.eventHandlers
+        for handler in handlers:
+          if backend.closed: return
+          handler(envelope)
+        inc index
+    except:
+      # A failed callback must not lose later events, including ones queued
+      # by a nested request. Do not retry the callback's own side effects.
+      if index + 1 < pending.len:
+        backend.undelivered = pending[index + 1 .. ^1] & backend.undelivered
+      raise
+
 # ---------------------------------------------------------------------------
 # Lifecycle
 # ---------------------------------------------------------------------------
@@ -903,6 +934,7 @@ proc close*(backend: DapStdioBackend) =
   if backend.closed:
     return
   backend.closed = true
+  backend.eventHandlers = @[]
   try:
     if backend.process.running:
       try:
@@ -939,15 +971,6 @@ proc toBackendService*(backend: DapStdioBackend): BackendService =
   ## continue, reverseContinue) directly.
   let b = backend  # capture for closures
 
-  var eventHandlers: seq[EventHandler] = @[]
-
-  let deliver = proc() =
-    # Snapshot first: a handler may send, and a send delivers again.
-    for event in b.takeUndelivered():
-      let envelope = subscriberEnvelope(event)
-      for handler in eventHandlers:
-        handler(envelope)
-
   let sendProc = proc(command: string;
                       args: JsonNode): BackendFuture[JsonNode] =
     # The BackendService interface uses CT-prefixed command names.
@@ -959,13 +982,16 @@ proc toBackendService*(backend: DapStdioBackend): BackendService =
     # `ct/updated-flow` and then responds). Delivering here — after the read
     # loop has returned, never from inside it — is what keeps a handler that
     # issues a request of its own from re-entering a half-read stream.
-    deliver()
+    # A nested send leaves delivery to the active outer dispatcher, so its
+    # newer events cannot overtake older events in that dispatcher's batch.
+    b.deliverPendingEvents()
     var fut = newFuture[JsonNode]("DapStdioBackend.send")
     fut.complete(resp)
     return fut
 
   let onEventProc = proc(handler: EventHandler) =
-    eventHandlers.add(handler)
+    if not b.closed:
+      b.eventHandlers.add(handler)
 
   let disconnectProc = proc() =
     try:

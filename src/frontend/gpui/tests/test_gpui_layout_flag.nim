@@ -1,8 +1,8 @@
 ## test_gpui_layout_flag.nim — **a saved layout with a DOCKED pane opens
 ## through the shipped binary's `--layout=`.**
 ##
-## Run (needs `just build-gpui`, the `calc` recording under
-## `test-logs/tui-fixtures/`, and `REPLAY_SERVER_BIN`):
+## Run (needs `just build-gpui`, the Python recorder, which records the `calc`
+## fixture on first use, and `REPLAY_SERVER_BIN`):
 ##   nim c -r --path:src/frontend/viewmodel src/frontend/gpui/tests/test_gpui_layout_flag.nim
 ##
 ## `codetracer-gpui --layout=<file>` used to decode with the TREE-ONLY
@@ -26,6 +26,7 @@
 ## recording and a real file.
 
 import replay_prerequisite
+import ../../tui/tests/fixtures/fixture_provider
 import std/[json, os, osproc, sets, streams, strtabs, strutils, tempfiles,
             unittest]
 import ./gpui_child_env
@@ -37,13 +38,11 @@ template ck(cond: untyped) =
   inc CHECKS
   check(cond)
 
-const CalcFixture = "test-logs/tui-fixtures/calc-2f0db4f45192"
-
 let repo = getEnv("CODETRACER_REPO_ROOT", getCurrentDir())
 let bin = repo / "build/bin/codetracer-gpui"
 let shimDir = getEnv("ISONIM_GPUI_SHIM_DIR",
                    repo.parentDir / "isonim-gpui/rust/target/debug")
-let calc = repo / CalcFixture
+let calc = requireFixture(fixtureSpec("calc"))
 
 proc requirePrereq(ok: bool; what: string) =
   ## **A MISSING PREREQUISITE FAILS BY NAME. It does not skip.**
@@ -99,7 +98,6 @@ suite "codetracer-gpui --layout= opens a saved layout with a docked pane":
 
   test "the prerequisites are here":
     requirePrereq(fileExists(bin), bin & " (just build-gpui)")
-    requirePrereq(dirExists(calc), calc & " (run 'just test-tui' once)")
     requirePrereq(existsEnv("REPLAY_SERVER_BIN") and
                   fileExists(getEnv("REPLAY_SERVER_BIN")),
                   "REPLAY_SERVER_BIN naming a built replay-server")

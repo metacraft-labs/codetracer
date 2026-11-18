@@ -40,6 +40,11 @@ let
   };
   ourPkgs = self'.packages;
   preCommit = config.pre-commit;
+  pythonEnv = import ../python.nix { inherit pkgs inputs; };
+  # The hooks that are Python packages are built for nixpkgs' default Python,
+  # not the pin, like pre-commit itself; see the package list below.
+  preCommitPythonHooks = builtins.filter (p: p ? pythonModule) preCommit.settings.enabledPackages;
+  preCommitOtherHooks = builtins.filter (p: !(p ? pythonModule)) preCommit.settings.enabledPackages;
   toolchainsPkgs = inputs'."codetracer-toolchains".packages;
 in
 with pkgs;
@@ -139,7 +144,9 @@ mkShell {
       # AppImage build (local release artifacts).
       inputs'.appimage-channel.legacyPackages.appimagekit
       appimage-run
-      pax-utils
+      # lddtree is built for nixpkgs' default Python; see `binariesOnly` in
+      # ../python.nix.
+      (pythonEnv.binariesOnly "pax-utils-bin" [ pax-utils ])
     ]
     ++ pkgs.lib.optionals stdenv.isDarwin [
       # macOS DMG build (local release artefacts).
@@ -148,8 +155,16 @@ mkShell {
     # Pre-commit hooks (dev-only — CI runs `pre-commit run` explicitly
     # against the staged diff, it doesn't need the hook scripts staged
     # into .git/hooks).
-    ++ [ preCommit.settings.package ]
-    ++ preCommit.settings.enabledPackages;
+    #
+    # pre-commit and its Python hooks are built for nixpkgs' default Python,
+    # not the pin. Listed directly, their interpreter's setup hook replaced the
+    # pinned one's and PYTHONPATH held 3.13 site-packages only, which the
+    # pinned interpreter then imported. So only their executables go on PATH;
+    # see `binariesOnly` in ../python.nix.
+    ++ [
+      (pythonEnv.binariesOnly "pre-commit-bin" ([ preCommit.settings.package ] ++ preCommitPythonHooks))
+    ]
+    ++ preCommitOtherHooks;
 
   # Compose: build-critical exports from ci-base, then dev-only tail. The tail
   # runs with its stdout sent to stderr, for the reason ci-base.nix gives at
@@ -175,55 +190,15 @@ mkShell {
     # entered from another repository the shell writes nothing there.
     # ci/test/dev-shell-writes-nothing-elsewhere-test.sh
 
-    # Install pre-commit hooks automatically -- but NOT from a linked worktree
-    # that would be reinstalling on another checkout's behalf.
-    #
-    # git-hooks.nix's installationScript writes `core.hooksPath` with `git config
-    # --local`, which IS NOT PER-WORKTREE here, and it first `pre-commit
-    # uninstall`s nine hook types and blanks that key before reinstalling. Run
-    # from a worktree it therefore tears down and rebuilds the hooks every OTHER
-    # worktree is relying on, mid-flight. The decision and its full rationale
-    # live in the script below so they can be tested directly; it prints its
-    # reason on stderr either way, and never writes to the repository.
-    #
-    # Before it runs, copy every Reprobuild hook dispatcher aside: when another
-    # hook manager (prek) has already moved one to `<hook>.legacy`, the
-    # installer's own move overwrites it, and only this copy survives. See "A
-    # DISPATCHER THE INSTALLER DESTROYS" in ci/dev/reclaim-hook-dispatchers.sh.
-    ct_hooks_snapshot=""
-    if [ -n "$ROOT_PATH" ]; then
-      ct_hooks_snapshot="$(bash "$ROOT_PATH/ci/dev/reclaim-hook-dispatchers.sh" snapshot || true)"
-    fi
-    if [ -n "$ROOT_PATH" ] && bash "$ROOT_PATH/ci/dev/should-install-git-hooks.sh"; then
-      ${preCommit.installationScript}
-    fi
+    ${import ../git-hooks.nix {
+      inherit preCommit;
+      inherit (pkgs) lib writeShellScript;
+      repro = inputs'.reprobuild.packages.reprobuild;
+    }}
 
-    # The installer moves each Reprobuild hook dispatcher aside to
-    # `<hook>.legacy` and takes its slot; put the dispatchers back, restore any
-    # it destroyed from the snapshot, and chain the pre-commit shim as
-    # `<hook>.repro-local` (see the script).
-    if [ -n "$ROOT_PATH" ]; then
-      bash "$ROOT_PATH/ci/dev/reclaim-hook-dispatchers.sh" --snapshot "$ct_hooks_snapshot" || true
-    fi
-    unset ct_hooks_snapshot
-
-    # The installer above ends by writing the RELATIVE `core.hooksPath=.git/hooks`
-    # into the config every worktree shares; in a linked worktree that path names
-    # nothing, so git silently runs no hooks there. `anchor` repairs that value
-    # and runs on every entry, from any checkout, so a value an earlier entry
-    # left behind is healed too. `check` then reports, loudly, any relative
-    # value `anchor` could not attribute; it does not stop the shell opening.
-    if [ -n "$ROOT_PATH" ]; then
-      bash "$ROOT_PATH/ci/dev/git-hooks-path.sh" anchor || true
-      bash "$ROOT_PATH/ci/dev/git-hooks-path.sh" check || true
-    fi
-
-    # The config symlink is per-worktree and mutates nothing shared, so it is
-    # created unconditionally -- including on the skip path above, where the
-    # installer never runs. Without it the shared hooks fire in a worktree that
-    # has no `.pre-commit-config.yaml` and abort with "No .pre-commit-config.yaml
-    # file was found", which is exactly what a worktree entering this shell used
-    # to get.
+    # Manual pre-commit commands can use the per-worktree config link. Installed
+    # shared hooks read the immutable configFile directly, so a fresh worktree
+    # needs no shell entry or copied symlink to run its checks.
     if [ -n "$ROOT_PATH" ]; then
       ln -sf ${preCommit.settings.configFile} "$ROOT_PATH/.pre-commit-config.yaml"
     fi

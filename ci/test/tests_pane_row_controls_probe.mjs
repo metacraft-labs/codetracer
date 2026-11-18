@@ -201,7 +201,14 @@ const clickRowButton = async (index, which, withShift) => {
     const b = document.querySelector(s);
     if (!b) return null;
     return {
-      title: b.getAttribute('title') || '',
+      // READ THE NAME, NOT THE `title`, WHILE HOVERED. The shared tooltip
+      // (`views/tooltips.nim`) takes a hovered control's `title` off for as
+      // long as it shows its own tooltip, so the browser's does not draw a
+      // second one; read here, mid-hover, `title` is always empty. The view
+      // writes the same text to `aria-label`, in the same refresh that
+      // follows the modifier (`isonim_test_results_view.nim`), and the
+      // tooltip leaves an `aria-label` it did not add alone.
+      title: b.getAttribute('aria-label') || b.getAttribute('title') || '',
       className: b.className || '',
       openMode: b.getAttribute('data-ct-open-mode') || '',
       mark: (b.textContent || '').trim(),

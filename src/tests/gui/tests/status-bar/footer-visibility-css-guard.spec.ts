@@ -182,9 +182,11 @@ function identifiersEmittedBy(viewPath: string): Set<string> {
  *
  * Text content is representative rather than recorded: the readouts need
  * *some* text to have a width, and what the strings say is irrelevant to a
- * visibility check.  `.test-movement` is included because the app renders it
+ * visibility check.  `.test-movement` is included because the app emits it
  * under `data.startOptions.inTest`, which is exactly the configuration every
- * GUI spec runs in.
+ * GUI spec runs in.  (The launch fixture hides it with `display: none`
+ * unless a spec sets `showTestMovementCounter`.  This guard lays the markup
+ * out under the built theme alone, so that rule is not in play here.)
  */
 const FOOTER_MARKUP = `
   <div id="root-container">

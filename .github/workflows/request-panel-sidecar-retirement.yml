@@ -97,6 +97,9 @@ jobs:
         # `Install Nix`, because the action reaches `repro` through this repo's
         # dev shell.
         uses: ./.github/actions/provision-repro-lock-siblings
+        with:
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
 
       # The six recorder siblings, cloned into the workspace-sibling layout
       # `workspaceRoot() / lang.recorderRepo` resolves (see

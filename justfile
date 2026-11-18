@@ -4,6 +4,20 @@ build:
 build-once:
   bash scripts/build-once.sh
 
+# Capture a Bash-only dev environment with a guard before Nix's assignments.
+[positional-arguments]
+capture-dev-env output *nix_args:
+  bash scripts/capture-dev-env.sh "$@"
+
+# Real Nix installer, linked worktrees, local checker and publication gate.
+test-nix-git-hooks:
+  bash ci/test/nix-git-hooks-test.sh
+
+# Host integration: real Nix capture, clean Bash/zsh consumers, atomic failure.
+[positional-arguments]
+test-captured-dev-env *args:
+  bash scripts/test-captured-dev-env.sh "$@"
+
 # Install the commit/push checks nix/pre-commit.nix declares on a host WITHOUT
 # the Nix dev shell -- native Windows is the case it exists for. The Nix shell
 # installs its own leg on entry; this one runs the same hooks through the
@@ -27,6 +41,20 @@ portable-pre-commit-doctor:
 test-build-alignment:
   bash scripts/test-build-alignment.sh
 
+# Compile a tiny real Nim fixture and exercise compiler-aware GPUI freshness.
+test-build-freshness:
+  bash ci/test/build-freshness-test.sh
+
+# Exercise the GPUI shim's stamp and the binary/shim pair gate over real
+# compiled fixtures, and the macOS capture lane's refusals through the lane.
+test-plat37-shim-gate:
+  bash ci/test/plat37-shim-gate-test.sh
+
+# Run the five GPUI lanes that stage a shim at the live path against a sandbox
+# fixture, and assert that cargo's hardlinked output survives each of them.
+test-gpui-shim-staging:
+  bash ci/test/gpui-shim-staging-test.sh
+
 # Assert that entering the dev shell from ANOTHER git repository writes nothing
 # there (no node_modules link, no hook config, no git hooks), and that entered
 # from inside this repository it still prepares this repository's top level.
@@ -34,6 +62,21 @@ test-build-alignment:
 # header of ci/test/dev-shell-writes-nothing-elsewhere-test.sh.
 test-dev-shell-writes-nothing-elsewhere:
   bash ci/test/dev-shell-writes-nothing-elsewhere-test.sh
+
+# Assert that a Rust crate built with plain `cargo test` in the dev shell,
+# outside this checkout, unwinds its panics (on macOS the shell's `cc` is GCC,
+# which drops the unwind index). Runs `nix develop`, so it is slow and not part
+# of the in-shell suites. See the header of ci/test/dev-shell-rust-unwinds-test.sh.
+test-dev-shell-rust-unwinds:
+  bash ci/test/dev-shell-rust-unwinds-test.sh
+
+# Assert that in the default and the `ci` dev shell PYTHONPATH carries
+# site-packages of the declared Python minor version only, so the pinned
+# interpreter imports no package built for another one. Runs `nix develop`, so
+# it is slow and not part of the in-shell suites. See the header of
+# ci/test/dev-shell-pythonpath-test.sh.
+test-dev-shell-pythonpath:
+  bash ci/test/dev-shell-pythonpath-test.sh
 
 # Assert that build-once.sh sources the cached dev-shell profile (and so runs
 # its shellHook) inside this repository, not in the directory it is invoked
@@ -45,6 +88,15 @@ test-build-once-profile-cwd:
 # Failed builds must not leave stale or partial renderer bundles runnable.
 test-build-once-failed-bundle:
   bash scripts/test-build-once-failed-bundle.sh
+
+# The Apple-arm build binds its native solve and never rewrites the Linux lock.
+test-build-once-platform-lock:
+  bash scripts/test-build-once-platform-lock.sh
+
+# build-once uses the sibling reprobuild build only while it is fresh and
+# carries the flake's pinned revision, and names the repro it runs.
+test-build-once-repro-selection:
+  bash scripts/test-build-once-repro-selection.sh
 
 # Assert this repo's `runquota` flake pin equals the `runquota-src` revision
 # its pinned `reprobuild` locks. `runquota.follows = "reprobuild/runquota-src"`
@@ -756,15 +808,11 @@ test-hmr-e2e:
       cd src/tests/gui && ./node_modules/.bin/playwright test tests/hmr/hmr_views_and_styles.spec.ts
       ;;
     *)
-      DISPLAY_NUM=99
-      while [ -e "/tmp/.X${DISPLAY_NUM}-lock" ]; do
-        DISPLAY_NUM=$((DISPLAY_NUM + 1))
-      done
-      Xvfb ":${DISPLAY_NUM}" -screen 0 1920x1080x24 -nolisten tcp &
-      XVFB_PID=$!
-      trap "kill $XVFB_PID 2>/dev/null || true" EXIT
-      sleep 1
-      export DISPLAY=":${DISPLAY_NUM}"
+      # Started through the shared helper, which waits for the display to
+      # answer instead of sleeping (scripts/lib/own-xvfb.sh).
+      . "{{justfile_directory()}}/scripts/lib/own-xvfb.sh"
+      trap "own_xvfb_stop" EXIT
+      own_xvfb_start -screen 0 1920x1080x24 -nolisten tcp || exit 1
       cd src/tests/gui && ./node_modules/.bin/playwright test tests/hmr/hmr_views_and_styles.spec.ts
       ;;
   esac
@@ -942,6 +990,11 @@ test-rust:
   trap 'report_skips; rm -rf ${ct_scratch_home_created:+"$ct_scratch_home_created"}' EXIT
   # The resolver itself (both sides of the CODETRACER_HOME contract).
   ( cd libs/ct-home && cargo test )
+  # `libs/ct-dap-client` is a plain path dev-dependency of src/db-backend, so
+  # db-backend's run never builds its test targets. Its own tests cover the
+  # DAP runners' ct-native-replay finder, which must resolve the worker the
+  # db-backend harness recorded with.
+  ( cd libs/ct-dap-client && cargo test )
   # `libs/ct-data-breakpoints` holds the admission rules for DAP data
   # breakpoints (watchpoints) and is a plain path dependency of BOTH
   # src/db-backend and src/backend-manager -- neither of which builds a
@@ -1157,6 +1210,11 @@ test:
   # placed earlier it would SKIP there and verify nothing.
   bash ci/lib/run-just-lanes.sh test \
     test-build-alignment \
+    test-build-once-platform-lock \
+    test-build-once-repro-selection \
+    test-build-freshness \
+    test-plat37-shim-gate \
+    test-gpui-shim-staging \
     test-flake-pin-alignment \
     test-reprobuild-catalog-coverage \
     test-dev-env-flake-metadata \
@@ -1191,15 +1249,11 @@ test-gui-prebuilt *args:
       ;;
     *)
       # Linux: start a persistent Xvfb so Playwright/Electron tests have a display.
-      DISPLAY_NUM=99
-      while [ -e "/tmp/.X${DISPLAY_NUM}-lock" ]; do
-        DISPLAY_NUM=$((DISPLAY_NUM + 1))
-      done
-      Xvfb ":${DISPLAY_NUM}" -screen 0 1920x1080x24 -nolisten tcp &
-      XVFB_PID=$!
-      trap "kill $XVFB_PID 2>/dev/null || true" EXIT
-      sleep 1
-      export DISPLAY=":${DISPLAY_NUM}"
+      # Started through the shared helper, which waits for the display to
+      # answer instead of sleeping (scripts/lib/own-xvfb.sh).
+      . "{{justfile_directory()}}/scripts/lib/own-xvfb.sh"
+      trap "own_xvfb_stop" EXIT
+      own_xvfb_start -screen 0 1920x1080x24 -nolisten tcp || exit 1
 
       just test-e2e "$@"
       ;;
@@ -1420,7 +1474,7 @@ test-launcher-recorder-e2e recorder="codetracer-python-recorder" lang="python":
 # name the workflow can emit, and that the primary `actions/checkout` still
 # pins the repo under test to the caller's `github.sha` expression -- since
 # LRC-6 dropped the `*-ref` inputs, that one line IS the repo-under-test
-# guarantee.  Thirteen mutations of real wiring, each of which must be
+# guarantee.  Fourteen mutations of real wiring, each of which must be
 # rejected, plus a positive control, keep the checker itself honest.
 # Stock bash: no Nix, no dev shell, no network.
 # See ci/test/launcher-recorder-e2e-workflow-test.sh.
@@ -1864,6 +1918,7 @@ test-frontend-js:
   target_axes_js_test="$(mktemp "${TMPDIR:-/tmp}/codetracer-target-axes-js-test.XXXXXX.js")"
   ipc_registry_test="$(mktemp "${TMPDIR:-/tmp}/codetracer-ipc-registry-test.XXXXXX.js")"
   monaco_operations_test="$(mktemp "${TMPDIR:-/tmp}/codetracer-monaco-operations-test.XXXXXX.js")"
+  desktop_list_operations_test="$(mktemp "${TMPDIR:-/tmp}/codetracer-desktop-list-operations-test.XXXXXX.js")"
   shortcut_presets_test="$(mktemp "${TMPDIR:-/tmp}/codetracer-shortcut-presets-test.XXXXXX.js")"
   shortcut_dialog_test="$(mktemp "${TMPDIR:-/tmp}/codetracer-shortcut-dialog-test.XXXXXX.js")"
   debug_toolbar_tooltips_test="$(mktemp "${TMPDIR:-/tmp}/codetracer-debug-toolbar-tooltips-test.XXXXXX.js")"
@@ -1873,7 +1928,7 @@ test-frontend-js:
   run_to_cursor_test="$(mktemp "${TMPDIR:-/tmp}/codetracer-run-to-cursor-test.XXXXXX.js")"
   html_sinks_probe="$(mktemp "${TMPDIR:-/tmp}/codetracer-html-sinks-probe.XXXXXX.js")"
   dap_refusal_test="$(mktemp "${TMPDIR:-/tmp}/codetracer-dap-refusal-test.XXXXXX.js")"
-  trap 'rm -f "$nim_sourcemap_test" "$frontend_lang_test" "$scratchpad_dispatch_test" "$target_axes_js_test" "$ipc_registry_test" "$monaco_operations_test" "$shortcut_presets_test" "$shortcut_dialog_test" "$debug_toolbar_tooltips_test" "$component_registry_binding_test" "$component_ids_across_sessions_test" "$stop_command_test" "$run_to_cursor_test" "$html_sinks_probe" "$dap_refusal_test"; rm -rf ${ct_scratch_home_created:+"$ct_scratch_home_created"}' EXIT
+  trap 'rm -f "$nim_sourcemap_test" "$frontend_lang_test" "$scratchpad_dispatch_test" "$target_axes_js_test" "$ipc_registry_test" "$monaco_operations_test" "$desktop_list_operations_test" "$shortcut_presets_test" "$shortcut_dialog_test" "$debug_toolbar_tooltips_test" "$component_registry_binding_test" "$component_ids_across_sessions_test" "$stop_command_test" "$run_to_cursor_test" "$html_sinks_probe" "$dap_refusal_test"; rm -rf ${ct_scratch_home_created:+"$ct_scratch_home_created"}' EXIT
   echo "Running Nim Source Map V3 frontend tests..."
   nim -d:nodejs -d:chronicles_enabled=off -d:ctIndex -d:server \
     --out:"$nim_sourcemap_test" js src/frontend/tests/nim_sourcemap_test.nim
@@ -1917,6 +1972,14 @@ test-frontend-js:
     --path:src/frontend/viewmodel \
     --out:"$monaco_operations_test" js src/frontend/tests/monaco_operations_test.nim
   node -e 'globalThis.window = globalThis; require(process.argv[1])' "$monaco_operations_test"
+  # The desktop router's list table, held to the CUA base the same way:
+  # every list row the desktop delivers runs there, or is answered on the
+  # status bar (`ui/native_key_operations.desktopAnswerOf`).
+  echo "Running the desktop router's list-table tests..."
+  nim -d:nodejs -d:chronicles_enabled=off -d:ctRenderer -d:ctInExtension \
+    --path:src/frontend/viewmodel \
+    --out:"$desktop_list_operations_test" js src/frontend/tests/desktop_list_operations_test.nim
+  node -e 'globalThis.window = globalThis; require(process.argv[1])' "$desktop_list_operations_test"
 
   # The preset tables, and the dialog that lists what they resolved to. Same
   # lane and same invocation as the suite above: all three read the SHIPPED
@@ -5415,15 +5478,11 @@ plat35-capture-electron *args:
       just test-e2e tests/visual/visual-alignment-capture.spec.ts "$@"
       ;;
     *)
-      DISPLAY_NUM=99
-      while [ -e "/tmp/.X${DISPLAY_NUM}-lock" ]; do
-        DISPLAY_NUM=$((DISPLAY_NUM + 1))
-      done
-      Xvfb ":${DISPLAY_NUM}" -screen 0 2560x1440x24 -dpi 96 -nolisten tcp &
-      XVFB_PID=$!
-      trap "kill $XVFB_PID 2>/dev/null || true" EXIT
-      sleep 1
-      export DISPLAY=":${DISPLAY_NUM}"
+      # Started through the shared helper, which waits for the display to
+      # answer instead of sleeping (scripts/lib/own-xvfb.sh).
+      . "{{justfile_directory()}}/scripts/lib/own-xvfb.sh"
+      trap "own_xvfb_stop" EXIT
+      own_xvfb_start -screen 0 2560x1440x24 -dpi 96 -nolisten tcp || exit 1
       just test-e2e tests/visual/visual-alignment-capture.spec.ts "$@"
       ;;
   esac
@@ -5569,15 +5628,11 @@ plat46-capture-electron *args:
       just test-e2e tests/visual/plat46-token-parity-capture.spec.ts "$@"
       ;;
     *)
-      DISPLAY_NUM=99
-      while [ -e "/tmp/.X${DISPLAY_NUM}-lock" ]; do
-        DISPLAY_NUM=$((DISPLAY_NUM + 1))
-      done
-      Xvfb ":${DISPLAY_NUM}" -screen 0 2560x1440x24 -dpi 96 -nolisten tcp &
-      XVFB_PID=$!
-      trap "kill $XVFB_PID 2>/dev/null || true" EXIT
-      sleep 1
-      export DISPLAY=":${DISPLAY_NUM}"
+      # Started through the shared helper, which waits for the display to
+      # answer instead of sleeping (scripts/lib/own-xvfb.sh).
+      . "{{justfile_directory()}}/scripts/lib/own-xvfb.sh"
+      trap "own_xvfb_stop" EXIT
+      own_xvfb_start -screen 0 2560x1440x24 -dpi 96 -nolisten tcp || exit 1
       just test-e2e tests/visual/plat46-token-parity-capture.spec.ts "$@"
       ;;
   esac
@@ -5647,6 +5702,15 @@ plat52-capture-electron *args:
 plat53-capture-electron *args:
   bash scripts/plat53-capture-electron.sh "$@"
 
+# PLAT-62: the desktop's Constraints pane is the reference the terminal's and
+# the GPUI window's are measured against: its rows after a real
+# `nargo info --json` over a Noir crate, where each function is declared, what
+# a right-click on a row opens and where a press goes — written to
+# `src/tests/visual/answers/plat62-constraints.electron.json`.
+[positional-arguments]
+plat62-capture-electron *args:
+  bash scripts/plat62-capture-electron.sh "$@"
+
 # PLAT-55: the desktop's Problems panel is the reference the terminal's and the
 # GPUI window's are measured against: its rows after a real `nargo compile` of
 # a crate with one warning and two errors in two files, its filters, and what
@@ -5671,6 +5735,12 @@ plat56-capture-electron *args:
 # real `gcc` builds run by its main process (Xvfb 2560x1440 when no DISPLAY).
 build-tasks-electron *args:
   bash scripts/build-tasks-electron.sh "$@"
+
+# PLAT-60: the desktop's Low Level Code view on the `noir_space_ship`
+# recording — the reference the terminal's and GPUI's panes are measured
+# against (`src/tests/visual/answers/plat60-low-level-code.electron.json`).
+plat60-capture-electron *args:
+  bash scripts/plat60-capture-electron.sh "$@"
 
 # The §30a arm: the two answer producers are independent readers.
 plat35-answer-independence:
@@ -5862,6 +5932,14 @@ plat39-record-gate:
     -o:build/test_plat39_record \
     src/tests/visual/screen_oracle/test_plat39_record.nim
 
+# Pixel geometry and title classification, using constructed rasters rather
+# than the live capture corpus. This runs in the screen-oracle lane even on a
+# host without a window server or captured frames.
+test-pane-census:
+  nim c -r --hints:off --warnings:off --path:../GuiAssert/src \
+    --nimcache:nimcache/pane-census -o:build/test_pane_census \
+    src/tests/visual/screen_oracle/test_pane_census.nim
+
 # PLAT-42 — record the GPUI editor's debugger surfaces from the SHIPPED binary.
 # Headless (`--report-plan`), but needs `just build-gpui`, the isonim-gpui shim
 # and the calc recording — none of which CI has — so the measurement is taken
@@ -5969,15 +6047,11 @@ plat40-capture-electron *args:
       # A screen LARGER than the 1920x1080 window, as PLAT-35's capture uses:
       # on a 1920x1080 screen the window's content area lands at 1920x1081
       # and the capture refuses it.
-      DISPLAY_NUM=99
-      while [ -e "/tmp/.X${DISPLAY_NUM}-lock" ]; do
-        DISPLAY_NUM=$((DISPLAY_NUM + 1))
-      done
-      Xvfb ":${DISPLAY_NUM}" -screen 0 2560x1440x24 -dpi 96 -nolisten tcp &
-      XVFB_PID=$!
-      trap "kill $XVFB_PID 2>/dev/null || true" EXIT
-      sleep 1
-      export DISPLAY=":${DISPLAY_NUM}"
+      # Started through the shared helper, which waits for the display to
+      # answer instead of sleeping (scripts/lib/own-xvfb.sh).
+      . "{{justfile_directory()}}/scripts/lib/own-xvfb.sh"
+      trap "own_xvfb_stop" EXIT
+      own_xvfb_start -screen 0 2560x1440x24 -dpi 96 -nolisten tcp || exit 1
       just test-e2e tests/visual/plat40-panes-capture.spec.ts "$@"
       ;;
   esac
@@ -6005,15 +6079,11 @@ plat41-capture-electron *args:
       just test-e2e tests/visual/plat41-parity-capture.spec.ts "$@"
       ;;
     *)
-      DISPLAY_NUM=99
-      while [ -e "/tmp/.X${DISPLAY_NUM}-lock" ]; do
-        DISPLAY_NUM=$((DISPLAY_NUM + 1))
-      done
-      Xvfb ":${DISPLAY_NUM}" -screen 0 2560x1440x24 -dpi 96 -nolisten tcp &
-      XVFB_PID=$!
-      trap "kill $XVFB_PID 2>/dev/null || true" EXIT
-      sleep 1
-      export DISPLAY=":${DISPLAY_NUM}"
+      # Started through the shared helper, which waits for the display to
+      # answer instead of sleeping (scripts/lib/own-xvfb.sh).
+      . "{{justfile_directory()}}/scripts/lib/own-xvfb.sh"
+      trap "own_xvfb_stop" EXIT
+      own_xvfb_start -screen 0 2560x1440x24 -dpi 96 -nolisten tcp || exit 1
       just test-e2e tests/visual/plat41-parity-capture.spec.ts "$@"
       ;;
   esac
@@ -6970,6 +7040,14 @@ plat51-capture-electron *args:
 # Ctrl+Shift+B, the user's keybindings.json and its reload).
 plat68-desktop-keys *args:
   bash scripts/plat68-desktop-keys.sh {{args}}
+
+# Every script and recipe that starts its own Xvfb starts its clients only once
+# the server answers (scripts/lib/own-xvfb.sh), and fails naming Xvfb when it
+# never does: plat68-desktop-keys.sh run with stand-ins for the prefix and
+# Playwright and a real, delayed Xvfb, plus a gate over every launch; seconds.
+# See the header of scripts/test-own-xvfb.sh.
+test-own-xvfb:
+  bash scripts/test-own-xvfb.sh
 
 # One keybindings.json read by the terminal (a real pty), GPUI (the window
 # plan) and the desktop (the real Electron app) in one run: a rebound pane

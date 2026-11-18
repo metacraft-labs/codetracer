@@ -809,6 +809,9 @@ pub struct EmulatorReplaySession {
     /// When `None`, the session falls back to the M-DWARF-2 behaviour
     /// where `build_location` synthesises `(paths[0], 1)`.
     dwarf: Option<DwarfIndex>,
+    /// The recording's executable, retained for disassembling its function
+    /// ranges without an external debugger (including browser replay).
+    executable_bytes: Option<Vec<u8>>,
     /// PC rebase offset for the main executable: the value to subtract
     /// from the runtime PC before consulting the bundled DWARF index.
     ///
@@ -972,6 +975,7 @@ impl EmulatorReplaySession {
             cp0_mem_bytes: None,
             cp0_regs_bytes: None,
             dwarf: None,
+            executable_bytes: None,
             pc_rebase: None,
             stack_unwinder: None,
             breakpoint_static_pcs: HashSet::new(),
@@ -1180,6 +1184,7 @@ impl EmulatorReplaySession {
             cp0_mem_bytes,
             cp0_regs_bytes,
             dwarf,
+            executable_bytes: elf_bytes,
             pc_rebase,
             stack_unwinder,
             breakpoint_static_pcs: HashSet::new(),
@@ -1477,7 +1482,7 @@ impl EmulatorReplaySession {
         // always produces a well-formed location.
         let mut path = self.primary_path();
         let mut line: i64 = 1;
-        let function_name = self.root_function_name();
+        let mut function_name = self.root_function_name();
 
         if let Some(info) = self.dwarf_pc_info() {
             // Adopt the DWARF-reported source file when it disagrees
@@ -1490,6 +1495,14 @@ impl EmulatorReplaySession {
                 path = dwarf_path;
             }
             line = info.line as i64;
+            // A listing request names the function reported on this stop.
+            // Match build_location_for: the executable's basename is only
+            // a fallback when debug information supplies no function name.
+            if let Some(name) = info.function
+                && !name.is_empty()
+            {
+                function_name = name;
+            }
         }
 
         Location {
@@ -1838,6 +1851,160 @@ impl Default for EmulatorReplaySession {
 }
 
 impl ReplaySession for EmulatorReplaySession {
+    fn load_asm_function(
+        &mut self,
+        args: &crate::task::FunctionLocation,
+    ) -> Result<crate::task::Instructions, Box<dyn Error>> {
+        use iced_x86::{Decoder, DecoderOptions, Formatter, IntelFormatter};
+        use object::{Object, ObjectSection, ObjectSymbol};
+
+        let bytes = self
+            .executable_bytes
+            .as_deref()
+            .ok_or("the recording contains no executable for disassembly")?;
+        let object = object::File::parse(bytes)?;
+        let bitness = match object.architecture() {
+            object::Architecture::X86_64 => 64,
+            object::Architecture::I386 => 32,
+            architecture => return Err(format!("unsupported disassembly architecture: {architecture:?}").into()),
+        };
+        if args.name.is_empty() {
+            return Err("function disassembly requires a function name".into());
+        }
+
+        // A name can occur in several compilation units. Validate its source
+        // where DWARF supplies one, then prefer the range containing the stop
+        // PC. Never silently answer with an unrelated current function.
+        let mut candidates = Vec::new();
+        for symbol in object.symbols().chain(object.dynamic_symbols()) {
+            if !symbol.is_definition()
+                || !matches!(symbol.kind(), object::SymbolKind::Text | object::SymbolKind::Unknown)
+            {
+                continue;
+            }
+            let Some(section_index) = symbol.section_index() else {
+                continue;
+            };
+            let section = object.section_by_index(section_index)?;
+            if section.kind() != object::SectionKind::Text {
+                continue;
+            }
+            let start = symbol.address();
+            let info = self.dwarf.as_ref().and_then(|dwarf| dwarf.resolve_pc(start));
+            if symbol.name().ok() != Some(args.name.as_str())
+                && (symbol.kind() != object::SymbolKind::Text
+                    || info.as_ref().and_then(|info| info.function.as_deref()) != Some(args.name.as_str()))
+            {
+                continue;
+            }
+            if let Some(info) = &info
+                && !args.path.is_empty()
+                && !info.file.ends_with(Path::new(&args.path))
+                && !Path::new(&args.path).ends_with(&info.file)
+            {
+                continue;
+            }
+            let end = if symbol.size() > 0 {
+                start
+                    .checked_add(symbol.size())
+                    .ok_or("function address range overflows")?
+            } else {
+                // Assembly symbols may omit their size. The next symbol in
+                // the same executable section bounds the range conservatively.
+                object
+                    .symbols()
+                    .filter(|next| next.section_index() == Some(section_index) && next.address() > start)
+                    .map(|next| next.address())
+                    .min()
+                    .unwrap_or(
+                        section
+                            .address()
+                            .checked_add(section.size())
+                            .ok_or("section address range overflows")?,
+                    )
+            };
+            if end > start {
+                candidates.push((start, end, section_index));
+            }
+        }
+        candidates.sort_unstable_by_key(|&(start, end, _)| (start, end));
+        candidates.dedup();
+        let selected = if candidates.len() == 1 {
+            candidates[0]
+        } else {
+            let pc = self.current_static_pc();
+            let mut containing = candidates.iter().filter(|&&(start, end, _)| start <= pc && pc < end);
+            let selected = containing.next().copied();
+            match (selected, containing.next()) {
+                (Some(selected), None) => selected,
+                _ => {
+                    return Err(format!(
+                        "function `{}` in `{}` has no unique executable range",
+                        args.name, args.path
+                    )
+                    .into());
+                }
+            }
+        };
+        let (start, end, section_index) = selected;
+        let section = object.section_by_index(section_index)?;
+        let mut code = section
+            .data_range(start, end - start)?
+            .ok_or("function code lies outside the recorded executable")?
+            .to_vec();
+        let load_bias = self.pc_rebase.unwrap_or(0);
+        let address = start.wrapping_add(load_bias);
+
+        // Prefer the replay's mapped code so recorded code patches are visible.
+        // Before a module is mapped, the bundled executable remains the exact
+        // recorded compilation artefact and can still supply a static listing.
+        if let Ok(length) = i32::try_from(code.len()) {
+            let mut mapped = vec![0; code.len()];
+            // SAFETY: the destination owns `length` writable bytes; reading
+            // emulator memory neither steps nor changes its register state.
+            if unsafe { emulator_ffi::mcrReadMemory(address, mapped.as_mut_ptr(), length) } == 0 {
+                code = mapped;
+            }
+        }
+
+        // https://docs.rs/iced-x86/latest/iced_x86/#disassemble-decode-and-format-instructions
+        // Decode with runtime IPs so relative branch operands and row offsets
+        // agree with the program counter. DWARF still uses static addresses.
+        let mut decoder = Decoder::with_ip(bitness, &code, address, DecoderOptions::NONE);
+        let mut formatter = IntelFormatter::new();
+        let mut instructions = Vec::new();
+        while decoder.can_decode() {
+            let instruction = decoder.decode();
+            if instruction.is_invalid() {
+                return Err(format!("invalid instruction at {:#x} in `{}`", instruction.ip(), args.name).into());
+            }
+            let mut name = String::new();
+            let mut args = String::new();
+            formatter.format_mnemonic(&instruction, &mut name);
+            formatter.format_all_operands(&instruction, &mut args);
+            let source = self
+                .dwarf
+                .as_ref()
+                .and_then(|dwarf| dwarf.resolve_instruction_source(instruction.ip().wrapping_sub(load_bias)));
+            instructions.push(crate::task::Instruction {
+                name,
+                args,
+                other: String::new(),
+                offset: instruction.ip() as i64,
+                high_level_path: source
+                    .as_ref()
+                    .map(|info| info.file.to_string_lossy().into_owned())
+                    .unwrap_or_default(),
+                high_level_line: source.map(|info| i64::from(info.line)).unwrap_or(NO_POSITION),
+            });
+        }
+        Ok(crate::task::Instructions {
+            address,
+            instructions,
+            error: String::new(),
+        })
+    }
+
     fn load_location(&mut self, _expr_loader: &mut ExprLoader) -> Result<Location, Box<dyn Error>> {
         Ok(self.build_location())
     }
@@ -2839,11 +3006,204 @@ mod tests {
     const PC_ADD_BODY: u64 = 0x40100a;
     const PC_ADD_BODY_LINE: i64 = 24;
 
+    /// The bundled executable is real compiler output, wrapped in the same
+    /// CTFS members the recorder writes. No fake disassembler or source-map
+    /// adapter is involved: this catches the empty-reader native listing gap.
+    #[test]
+    fn native_assembly_listing_decodes_bundled_function_without_moving_replay() {
+        let _guard = FFI_TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        let bytes = synthetic_mcr_ctfs_bytes_for_step(PC_ADD_BODY, STACK_INIT_RSP, STACK_INIT_RBP);
+        let mut session = EmulatorReplaySession::new_from_ctfs_bytes(bytes).unwrap();
+        let before = session.build_location();
+        let listing = session
+            .load_asm_function(&crate::task::FunctionLocation {
+                name: "add".into(),
+                path: "hello.c".into(),
+                ..Default::default()
+            })
+            .expect("native replay must provide the function's assembly");
+        assert!(listing.error.is_empty(), "{}", listing.error);
+        assert_eq!(listing.address, PC_ADD_ENTRY);
+        assert!(listing.instructions.len() > 5, "must decode the full function");
+        assert_eq!(listing.instructions.first().unwrap().offset, PC_ADD_ENTRY as i64);
+        assert_eq!(listing.instructions.first().unwrap().name, "push");
+        assert_eq!(listing.instructions.last().unwrap().name, "ret");
+        let current = listing
+            .instructions
+            .iter()
+            .find(|i| i.offset == PC_ADD_BODY as i64)
+            .expect("the stop PC must name an instruction");
+        assert_eq!(current.high_level_line, PC_ADD_BODY_LINE);
+        assert!(current.high_level_path.ends_with("hello.c"));
+        assert!(
+            listing
+                .instructions
+                .windows(2)
+                .all(|pair| pair[0].offset < pair[1].offset)
+        );
+        assert_eq!(session.build_location().offset, before.offset);
+        assert_eq!(session.current_step_id, StepId(0));
+    }
+
+    #[test]
+    fn native_assembly_listing_rebases_addresses_and_respects_requested_function() {
+        let _guard = FFI_TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        let bytes = synthetic_mcr_ctfs_bytes_for_step(PC_ADD_BODY, STACK_INIT_RSP, STACK_INIT_RBP);
+        let mut session = EmulatorReplaySession::new_from_ctfs_bytes(bytes).unwrap();
+        // Model the load bias independently of disassembly; the production
+        // cp0.maps parser has its own real-container tests below.
+        session.pc_rebase = Some(FAKE_ASLR_REBASE_OFFSET);
+        unsafe {
+            emulator_ffi::mcrSetRegisters(
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                FAKE_ASLR_RUNTIME_PC,
+                0x202,
+            );
+        }
+        let request = crate::task::FunctionLocation {
+            name: "compute".into(),
+            path: "hello.c".into(),
+            ..Default::default()
+        };
+        let listing = session.load_asm_function(&request).unwrap();
+        assert_eq!(listing.address, PC_COMPUTE_ENTRY + FAKE_ASLR_REBASE_OFFSET);
+        assert!(
+            listing
+                .instructions
+                .iter()
+                .all(|i| { i.offset >= listing.address as i64 && i.high_level_path.ends_with("hello.c") })
+        );
+        assert_eq!(unsafe { emulator_ffi::mcrGetPC() }, FAKE_ASLR_RUNTIME_PC);
+        let missing = crate::task::FunctionLocation {
+            name: "does_not_exist".into(),
+            ..request.clone()
+        };
+        assert!(session.load_asm_function(&missing).is_err());
+        let wrong_path = crate::task::FunctionLocation {
+            path: "different.c".into(),
+            ..request
+        };
+        assert!(session.load_asm_function(&wrong_path).is_err());
+        assert!(EmulatorReplaySession::new().load_asm_function(&missing).is_err());
+    }
+
+    /// Recreate the shipped DAP route: real emulator, bundled executable and
+    /// an empty reader, as in setup_from_vfs. The reader intentionally has
+    /// no call records; native assembly belongs to the replay session.
+    #[test]
+    fn native_assembly_listing_dap_request_works_with_the_empty_native_reader() {
+        let _guard = FFI_TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        let bytes = synthetic_mcr_ctfs_bytes_for_step(PC_ADD_BODY, STACK_INIT_RSP, STACK_INIT_RBP);
+        let mut handler = emulator_handler(bytes);
+        // The stop loader sends the actual stop's name/path; using a hand
+        // written symbol here would hide a wrong function name on the move.
+        let location = handler.replay.load_location(&mut handler.expr_loader).unwrap();
+        let (sender, receiver) = std::sync::mpsc::channel();
+        handler
+            .load_asm_function(
+                jump_request("ct/load-asm-function"),
+                crate::task::FunctionLocation {
+                    name: location.function_name,
+                    path: location.path,
+                    key: "0".into(),
+                    ..Default::default()
+                },
+                sender,
+            )
+            .expect("the native DAP listing must not look up a call in its empty reader");
+        let messages: Vec<_> = receiver.try_iter().collect();
+        assert_response_for(&messages, "ct/load-asm-function");
+        let response = messages
+            .iter()
+            .find_map(|message| match message {
+                crate::dap::DapMessage::Response(response) => Some(response),
+                _ => None,
+            })
+            .unwrap();
+        let instructions = response.body["instructions"].as_array().expect("instruction rows");
+        assert!(instructions.len() > 5);
+        assert_eq!(instructions[0]["name"], "push");
+        assert_eq!(instructions[0]["offset"], PC_ADD_ENTRY);
+        let current = instructions
+            .iter()
+            .find(|instruction| instruction["offset"] == PC_ADD_BODY)
+            .expect("current PC must name an instruction in the DAP answer");
+        assert_eq!(current["highLevelLine"], PC_ADD_BODY_LINE);
+        assert_eq!(unsafe { emulator_ffi::mcrGetPC() }, PC_ADD_BODY);
+    }
+
+    /// An optimized executable has inline DWARF frames without a separate
+    /// inline-function symbol. Ask with the location the shipped session
+    /// actually reports, rather than manufacturing an unreachable name.
+    #[test]
+    fn native_assembly_listing_accepts_the_reported_optimized_inline_location() {
+        use object::{Object, ObjectSymbol};
+        const INLINE_ELF: &[u8] = include_bytes!("../tests/fixtures/dwarf/inline.elf");
+        let _guard = FFI_TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        let object = object::File::parse(INLINE_ELF).unwrap();
+        assert!(!object.symbols().any(|symbol| symbol.name().ok() == Some("bump")));
+        let bytes = synthetic_mcr_ctfs_bytes_with_executable(INLINE_ELF);
+        let mut session = EmulatorReplaySession::new_from_ctfs_bytes(bytes).unwrap();
+        let dwarf = session.dwarf.as_ref().unwrap();
+        let path = dwarf.source_files().find(|path| path.ends_with("inline.c")).unwrap();
+        let pc = *dwarf
+            .pcs_for_line(&path, 5)
+            .first()
+            .expect("inline body must have a line-table PC");
+        unsafe {
+            emulator_ffi::mcrSetRegisters(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, pc, 0x202);
+        }
+        let location = session.build_location();
+        // DwarfIndex currently reports the physical (outermost) frame.
+        // That is the real request sent by the native/browser stop loader.
+        assert_eq!(location.function_name, "outer");
+        let listing = session
+            .load_asm_function(&crate::task::FunctionLocation {
+                name: location.function_name,
+                path: location.path,
+                ..Default::default()
+            })
+            .expect("an optimized current function must have a native listing");
+        assert!(
+            listing
+                .instructions
+                .iter()
+                .any(|instruction| instruction.offset == pc as i64)
+        );
+        assert!(listing.instructions.len() > 3);
+        assert!(
+            listing.instructions.iter().any(|instruction| {
+                instruction.high_level_path.ends_with("inline.c") && instruction.high_level_line == 5
+            }),
+            "the inline body's instructions must retain the line-table source, not the outer call site"
+        );
+        assert_eq!(unsafe { emulator_ffi::mcrGetPC() }, pc);
+    }
+
     /// Build a synthetic CTFS payload like `synthetic_mcr_ctfs_bytes()`
     /// but **with** a bundled `debug.dat` file carrying the hello.elf
     /// fixture. The resulting session's `dwarf` field should round-trip
     /// the parsed DWARF index so `build_location` can resolve PCs.
     fn synthetic_mcr_ctfs_bytes_with_dwarf() -> Vec<u8> {
+        synthetic_mcr_ctfs_bytes_with_executable(HELLO_ELF_FIXTURE)
+    }
+
+    fn synthetic_mcr_ctfs_bytes_with_executable(executable: &[u8]) -> Vec<u8> {
         let meta = MetaDat {
             version: META_DAT_VERSION,
             flags: FLAG_HAS_MCR_FIELDS,
@@ -2884,7 +3244,7 @@ mod tests {
                 ("paths.dat", &paths_dat),
                 ("paths.off", &paths_off),
                 ("t00000000000", b""),
-                (BUNDLED_DEBUG_FILE, HELLO_ELF_FIXTURE),
+                (BUNDLED_DEBUG_FILE, executable),
             ],
         )
         .unwrap();

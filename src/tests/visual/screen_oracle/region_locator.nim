@@ -95,8 +95,9 @@ const
     ## its own to identify the cell, because OCRing the whole cell returns the
     ## pane's CONTENT as well and the first line is not reliably the title.
 
-  MinInteriorRowGutter* = 6
-    ## **A pane's horizontal split is 8 px; everything thinner is furniture.**
+  MinInteriorRowGutter* = 3
+    ## Horizontal splitter width in point-extent frames. Width is only the
+    ## first test: `splitRect` also requires the run to reach both sides.
     ##
     ## This constant exists because the grid is NOT a clean 2-D grid and a
     ## naive one is wrong: the editor column runs the full height of the frame
@@ -104,8 +105,7 @@ const
     ## scan sees the right-hand split and cuts the editor in half with it, so
     ## the rows are segmented PER COLUMN BAND instead.
     ##
-    ## Within a band, interior dark runs are of two kinds, and they are cleanly
-    ## separated — measured over all six pinned frames, interior runs only
+    ## Historical measurement over all six pinned frames, interior runs only
     ## (frame chrome and status bar excluded):
     ##
     ## | scenario | interior run widths |
@@ -117,14 +117,25 @@ const
     ## | returned-calltrace | 2, 3, 3, 4, **8, 8, 8** |
     ## | continued-event-log | 1, 1, 2, 3, 3, 4, **8, 8, 8** |
     ##
-    ## Every real pane split is 8 and every piece of furniture — a tab strip's
-    ## underline, a search box's border — is at most 4. Three 8s per frame, in
-    ## all six, which is the three right-hand column bands. A threshold of 6
-    ## sits between the two populations with 2 px of margin below and 4 above.
+    ## Those real splits included a transparent 4px header strip. The desktop
+    ## deliberately removed it: current nominal splits are 4px, matching the
+    ## vertical splitters. Re-measured 2026-11-03 at 977b82e43 on the six
+    ## settled Electron page rasters, reduced to points with the capture lane's
+    ## Lanczos filter: wide frames have 4 gutter-dark rows (539..542), laptop
+    ## frames have 3 (450..452). All connect both sides of their column. The
+    ## laptop editor's inset furniture has a 3-row run at y=112 with zero rows
+    ## dark at both sides. Allow the same one-pixel margin as MinGutterWidth.
+    ## Furniture still reaches 4px, so width no longer separates the
+    ## populations. A real splitter connects both sides of the current rect;
+    ## an inset search-box border can pass the 95% bulk test without doing so.
     ##
-    ## Rejected: 4 would promote the search-box border into a pane split and
-    ## shatter the calltrace pane; 9 would find no splits at all and merge each
-    ## right-hand column into one pane.
+    ## | candidate | consequence | decision |
+    ## |---|---|---|
+    ## | 3, width only | promotes inset borders into pane splits | rejected |
+    ## | 3, with side continuity | accepts both viewports and historical splitters, rejects inset furniture | chosen |
+    ## | 4, with side continuity | accepts wide frames but merges every laptop right column | rejected |
+    ## | 6 | merges the current right column into one cell | rejected |
+    ## | 9 | also loses the historical 8px splits | rejected |
 
   GutterDarkFraction* = 0.95
     ## A line counts as a gutter when at least this fraction of it, inside the
@@ -241,7 +252,10 @@ proc darkFractionIn*(img: GrayImage, r: Rect, vertical: bool,
 proc splitRect*(img: GrayImage, r: Rect, vertical: bool,
                 minGutter: int,
                 threshold = GutterMedianThreshold): seq[GutterRun] =
-  ## Gutters inside `r`, measured inside `r` only.
+  ## Gutters inside `r`, measured inside `r` only. `minGutter` is the
+  ## thickness floor; horizontal runs additionally need a core of that many
+  ## consecutive rows connecting both sides, so an inset border cannot split
+  ## the pane even when it covers `GutterDarkFraction` of each row.
   let n = if vertical: r.w else: r.h
   let origin = if vertical: r.x else: r.y
   var frac = newSeq[float](n)
@@ -254,7 +268,22 @@ proc splitRect*(img: GrayImage, r: Rect, vertical: bool,
       while j < n and frac[j] >= GutterDarkFraction: inc j
       # Edge-touching runs are the rect's own border, not an interior split.
       if j - i >= minGutter and i > 0 and j < n:
-        result.add GutterRun(first: origin + i, last: origin + j - 1)
+        # A thin inset border can occupy >=95% of a wide pane. Unlike a
+        # splitter it does not connect the rectangle's sides. Count a
+        # continuous core, rather than requiring every row: rounded corners
+        # can extend a dark run above/below its full-width part.
+        var sideRun = 0
+        var connectsSides = vertical
+        if not vertical:
+          for row in origin + i ..< origin + j:
+            if int(uint8(img.pixels[row * img.width + r.x])) < threshold and
+               int(uint8(img.pixels[row * img.width + r.x + r.w - 1])) < threshold:
+              inc sideRun
+              if sideRun >= minGutter: connectsSides = true
+            else:
+              sideRun = 0
+        if connectsSides:
+          result.add GutterRun(first: origin + i, last: origin + j - 1)
       i = j
     else:
       inc i

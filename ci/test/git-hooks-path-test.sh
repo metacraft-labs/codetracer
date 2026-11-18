@@ -23,7 +23,7 @@
 #     from a linked worktree -- after which a worktree commit runs the hook.
 #   * `anchor` leaves a relative value it cannot prove means the common hooks
 #     directory alone, and `check` still refuses it.
-#   * nix/shells/main.nix runs `anchor` after the installer and `check` after
+#   * nix/git-hooks.nix runs `anchor` after the installer and `check` after
 #     that, so entering the shell can never leave the relative value behind.
 #
 # No mocks: every case is a real repository with a real `git worktree` and real
@@ -194,15 +194,21 @@ fi
 echo "the dev shell"
 
 # --- Case 7: main.nix anchors after the installer, then checks -------------
-shell_nix="$REPO_ROOT/nix/shells/main.nix"
-order="$(grep -n -e 'installationScript}' -e 'git-hooks-path.sh" anchor' -e 'git-hooks-path.sh" check' "$shell_nix" | cut -d: -f1 | tr '\n' ' ')"
-read -r l_install l_anchor l_check _ <<<"$order $(printf ' x x x')"
+grep -q 'import ../git-hooks.nix' "$REPO_ROOT/nix/shells/main.nix" || {
+	echo 'FAIL: devShells.default does not import the tested hook lifecycle' >&2
+	exit 1
+}
+shell_nix="$REPO_ROOT/nix/git-hooks.nix"
+l_install=$(grep -n 'installationScript}' "$shell_nix" | head -1 | cut -d: -f1)
+l_anchor=$(grep -n 'git-hooks-path.sh" anchor' "$shell_nix" | head -1 | cut -d: -f1)
+l_check=$(grep -n 'git-hooks-path.sh" check' "$shell_nix" | head -1 | cut -d: -f1)
+order="$l_install $l_anchor $l_check"
 if [ "$(grep -c 'git-hooks-path.sh" anchor' "$shell_nix")" -ge 1 ] &&
 	[ "$(grep -c 'git-hooks-path.sh" check' "$shell_nix")" -ge 1 ] &&
 	[ "$l_install" -lt "$l_anchor" ] 2>/dev/null && [ "$l_anchor" -lt "$l_check" ] 2>/dev/null; then
-	ok "nix/shells/main.nix runs anchor after the installer, then check"
+	ok "nix/git-hooks.nix runs anchor after the installer, then check"
 else
-	fail "nix/shells/main.nix runs anchor after the installer, then check" \
+	fail "nix/git-hooks.nix runs anchor after the installer, then check" \
 		"line numbers (installer anchor check): $order" \
 		"without this, entering the shell in the main checkout writes '.git/hooks' back."
 fi

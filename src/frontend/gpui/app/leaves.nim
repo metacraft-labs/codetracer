@@ -211,6 +211,11 @@ const
     ## locates the execution line GEOMETRICALLY by a band; it now reads it on
     ## the code column (`EditorCodeColumnAttribute`).
   EditorGround* = DesignTokenHex[dtEditorThemeGround][dmDark]
+  EditorCrossRefGround* =
+    DesignTokenHex[dtColorsUiSurfacePrimarySecondaryHover][dmDark]
+    ## PLAT-60: the line the Low Level Code listing's selected instruction
+    ## came from, on the hover ground the listing's linked rows use.
+  EditorCrossRefAttribute* = "data-ct-cross-ref"
     ## The editor's ground — Monaco's `editor.background` (PLAT-47 B1).
   EditorLineNumberColour* = DesignTokenHex[dtEditorThemeLineNumber][dmDark]
   EditorTextColour* = DesignTokenHex[dtEditorThemeRuleDefault][dmDark]
@@ -2260,17 +2265,23 @@ proc renderEditor*(r: GpuiRenderer; parent: GpuiElement;
     var found: seq[tuple[fromColumn, toColumn: int; current: bool]] = @[]
     for m in surface.findMarks:
       if m.line == row.line: found.add (m.fromColumn, m.toColumn, m.current)
-    r.appendChild(parent, renderEditorRow(r, row, runs[i], widest,
-                                          scroll.leftCols,
-                                          (if row.line == surface.caretLine:
-                                             surface.caretColumn else: 0),
-                                          selected, found, folds[i], depths[i],
-                                          guideCounts[i],
-                                          markersView =
-                                            (if overflowMarkers and
-                                                scroll.present: scroll.view
-                                             else: HorizontalView()),
-                                          diagnostics = surface.diagnostics))
+    let rowEl = renderEditorRow(r, row, runs[i], widest,
+                                scroll.leftCols,
+                                (if row.line == surface.caretLine:
+                                   surface.caretColumn else: 0),
+                                selected, found, folds[i], depths[i],
+                                guideCounts[i],
+                                markersView =
+                                  (if overflowMarkers and
+                                      scroll.present: scroll.view
+                                   else: HorizontalView()),
+                                diagnostics = surface.diagnostics)
+    # PLAT-60: the Low Level Code listing's cross-reference — the line its
+    # selected instruction came from — on the hover ground.
+    if surface.crossRefLine > 0 and row.line == surface.crossRefLine:
+      r.setAttribute(rowEl, EditorCrossRefAttribute, "true")
+      r.setStyle(rowEl, "background-color", EditorCrossRefGround)
+    r.appendChild(parent, rowEl)
   if scroll.present:
     r.appendChild(parent, renderEditorScrollbar(r, scroll, caretMark))
   if editorPaneHeightPx > 0 and viewportPx > 0:

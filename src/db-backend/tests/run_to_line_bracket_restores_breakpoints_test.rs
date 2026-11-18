@@ -46,6 +46,11 @@
 //! those calls, not in the worker. So the double supplies the calls'
 //! outcomes and nothing else; every trait method these requests do not use
 //! is unreachable and panics if called.
+//!
+//! The instruction-dispatch regression also uses this double to observe the
+//! action and direction sent by the real DAP dispatcher. Real rr/LLDB motion
+//! is covered in the native backend; this test isolates the protocol hop so
+//! a line step cannot pass by happening to land at the same native address.
 
 #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
 
@@ -86,6 +91,7 @@ enum Failure {
 /// What the double knows about the session's breakpoints.
 #[derive(Debug, Default)]
 struct BracketState {
+    actions: Vec<(Action, bool)>,
     /// `disable_breakpoints` has run and `enable_breakpoints` has not.
     suppressed: bool,
     /// Ids of the temporary breakpoints still set.
@@ -111,6 +117,9 @@ struct BracketReplay {
 const ONLY_THE_BRACKET: &str = "BracketReplay answers the moves of a run-to-line bracket or a step only";
 
 impl ReplaySession for BracketReplay {
+    fn supports_instruction_stepping(&mut self) -> bool {
+        true
+    }
     fn disable_breakpoints(&mut self) -> Result<(), Box<dyn Error>> {
         self.state.lock().expect("state").suppressed = true;
         Ok(())
@@ -151,12 +160,16 @@ impl ReplaySession for BracketReplay {
             .retain(|id| *id != breakpoint.id);
         Ok(true)
     }
-    fn step(&mut self, action: Action, _forward: bool) -> Result<bool, Box<dyn Error>> {
+    fn step(&mut self, action: Action, forward: bool) -> Result<bool, Box<dyn Error>> {
         assert!(
-            matches!(action, Action::Continue | Action::StepIn),
+            matches!(
+                action,
+                Action::Continue | Action::StepIn | Action::Next | Action::StepI | Action::NextI
+            ),
             "these requests only continue and step in"
         );
         let mut state = self.state.lock().expect("state");
+        state.actions.push((action, forward));
         if matches!(action, Action::Continue) {
             state.continues += 1;
             if let Failure::Continue(n) = self.fail
@@ -286,6 +299,74 @@ fn request(command: &str) -> dap::Request {
         },
         command: command.to_string(),
         arguments: json!({}),
+    }
+}
+
+#[test]
+fn dap_instruction_granularity_reaches_native_actions_in_both_directions() {
+    let log_dir = std::env::temp_dir().join("codetracer-instruction-tests");
+    std::fs::create_dir_all(&log_dir).unwrap();
+    let log = tempfile::Builder::new()
+        .prefix("dap-instruction-")
+        .suffix(".log")
+        .tempfile_in(log_dir)
+        .unwrap()
+        .keep()
+        .unwrap();
+    let (mut file, path) = log;
+    use std::io::Write;
+    let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        for (command, expected, forward) in [
+            ("next", Action::NextI, true),
+            ("stepIn", Action::StepI, true),
+            ("stepBack", Action::NextI, false),
+            ("ct/reverseStepIn", Action::StepI, false),
+        ] {
+            let (mut handler, state) = handler_failing(Failure::Continue(usize::MAX));
+            let (sender, receiver) = mpsc::channel();
+            let mut req = request(command);
+            req.arguments = json!({"threadId": 1, "granularity": "instruction"});
+            db_backend::dap_server::handle_request(&mut handler, req, sender).unwrap();
+            let state = state.lock().unwrap();
+            writeln!(file, "{command}: {:?}", state.actions).unwrap();
+            assert_eq!(
+                state.actions,
+                vec![(expected, forward)],
+                "{command} must preserve instruction granularity and direction"
+            );
+            let messages: Vec<_> = receiver.try_iter().collect();
+            let sequences: Vec<_> = messages
+                .iter()
+                .map(|message| match message {
+                    DapMessage::Request(request) => request.base.seq,
+                    DapMessage::Response(response) => response.base.seq,
+                    DapMessage::Event(event) => event.base.seq,
+                })
+                .collect();
+            assert!(
+                sequences.windows(2).all(|pair| pair[0] < pair[1]),
+                "handler DAP sequence must increase before transport normalization: {sequences:?}"
+            );
+            assert!(
+                messages
+                    .iter()
+                    .any(|m| matches!(m, DapMessage::Event(e) if e.event == "ct/complete-move"))
+            );
+            assert!(
+                messages
+                    .iter()
+                    .any(|m| matches!(m, DapMessage::Response(r) if r.success && r.command == command))
+            );
+        }
+    }));
+    file.flush().unwrap();
+    if let Err(failure) = outcome {
+        eprintln!(
+            "DAP instruction log: {} ({} bytes)",
+            path.display(),
+            file.metadata().unwrap().len()
+        );
+        std::panic::resume_unwind(failure);
     }
 }
 

@@ -215,13 +215,14 @@ suite "PLAT-45 deliverable 1 — the vocabulary covers the desktop's default":
       if p.isSome: image.incl p.get
     ck image == EditModeHiddenPanes
 
-suite "PLAT-45 deliverable 1 — LayoutSchemaVersion 3 -> 4 (and PLAT-48's 5, PLAT-51's 6)":
+suite "PLAT-45 deliverable 1 — LayoutSchemaVersion 3 -> 4 (and PLAT-48's 5, PLAT-51's 6, PLAT-60's 7)":
 
   # PLAT-48 bumped the schema to 5 (the desktop's PROBLEMS and REQUESTS
   # footer panels are new `PaneKind`s, docked by the shared default); v3 and
-  # v4 documents migrate forward unchanged in their trees.
-  test "the version is 6 and the chain still starts at 1":
-    ck LayoutSchemaVersion == 6
+  # v4 documents migrate forward unchanged in their trees. PLAT-60 bumped it to
+  # 7 (`lowLevelCode`, a new `PaneKind`); a v6 document is re-stamped.
+  test "the version is 7 and the chain still starts at 1":
+    ck LayoutSchemaVersion == 7
     ck FirstLayoutSchemaVersion == 1
 
   test "every committed v3 document restores unchanged, migrated to the current version":
@@ -253,7 +254,7 @@ suite "PLAT-45 deliverable 1 — LayoutSchemaVersion 3 -> 4 (and PLAT-48's 5, PL
   test "a current document naming the new panes round-trips":
     let layout = initLayout(sharedDefaultLayout().tree)
     let doc = saveLayout(layout)
-    ck doc["version"].getInt == 6
+    ck doc["version"].getInt == 7
     let back = restoreLayoutDocument(parseJson($doc))
     ck equalTrees(back.tree, layout.tree)
     ck panesOf(back.tree) == panesOf(layout.tree)
@@ -262,7 +263,7 @@ suite "PLAT-45 deliverable 1 — LayoutSchemaVersion 3 -> 4 (and PLAT-48's 5, PL
     var doc = saveLayout(initLayout(defaultReplayLayout()))
     doc["version"] = %3
     let back = restoreLayoutDocument(doc)
-    ck back.version == 6
+    ck back.version == 7
     ck equalTrees(back.tree, defaultReplayLayout())
 
   test "a v4 document as the previous build wrote it restores exactly, docked panes included":
@@ -278,7 +279,7 @@ suite "PLAT-45 deliverable 1 — LayoutSchemaVersion 3 -> 4 (and PLAT-48's 5, PL
       for field in ["beside", "weight"]:
         if d.hasKey(field): d.delete(field)
     let back = restoreLayoutDocument(doc)
-    ck back.version == 6
+    ck back.version == 7
     ck equalTrees(back.tree, docked.layout.tree)
     ck back.docked.len == 1
     ck back.docked[0].pane == paneFileTree and back.docked[0].edge == leLeft
@@ -318,7 +319,7 @@ suite "PLAT-51 — LayoutSchemaVersion 5 -> 6: the Timeline panel is removed":
         {"kind": "pane", "pane": "timeline", "weight": 1.0},
         {"kind": "pane", "pane": "terminalOutput", "weight": 1.0}]}]})
     let back = restoreLayoutDocument(doc)
-    ck back.version == 6
+    ck back.version == 7
     ck ofTree(back.tree).canonical ==
       "column(editor,stack[eventLog*,terminalOutput])"
     ck validate(back, {}).len == 0

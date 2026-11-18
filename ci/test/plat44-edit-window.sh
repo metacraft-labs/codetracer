@@ -69,16 +69,10 @@ check_prereqs() {
 
 SHIM_DIR="${ISONIM_GPUI}/rust/target/plat37"
 LIVE_SHIM="${ISONIM_GPUI}/rust/target/debug/libgpui_nim_shim.so"
-SHIM_BACKUP=""
-# shellcheck disable=SC2329  # invoked indirectly, by the EXIT trap below
-restore_shim() {
-	if [ -n "${SHIM_BACKUP}" ] && [ -f "${SHIM_BACKUP}" ]; then
-		mv -f "${SHIM_BACKUP}" "${LIVE_SHIM}"
-		SHIM_BACKUP=""
-		echo "restored ${LIVE_SHIM}"
-	fi
-}
-trap restore_shim EXIT INT TERM
+# Stages and restores the shim: `ci/lib/gpui-shim-stage.sh` says how, and why.
+# shellcheck source=ci/lib/gpui-shim-stage.sh disable=SC1091
+source "${root}/ci/lib/gpui-shim-stage.sh" || fail "ci/lib/gpui-shim-stage.sh could not be loaded"
+gpui_shim_install_traps
 
 select_windowed_shim() {
 	local src="${SHIM_DIR}/libgpui_nim_shim.windowed.so"
@@ -87,9 +81,9 @@ select_windowed_shim() {
 	nm -D --defined-only "${src}" 2>/dev/null |
 		grep -q 'gpui_dispatch_key_to_focus' ||
 		fail "${src} predates PLAT-38's key ABI. Rebuild it."
-	SHIM_BACKUP="${LIVE_SHIM}.plat44-backup"
-	[ -f "${LIVE_SHIM}" ] && mv -f "${LIVE_SHIM}" "${SHIM_BACKUP}"
-	cp -f "${src}" "${LIVE_SHIM}"
+	# Moved aside and never copied over: `ci/lib/gpui-shim-stage.sh` says why.
+	gpui_shim_stage "${LIVE_SHIM}" "${src}" ||
+		fail "the windowed shim could not be staged at ${LIVE_SHIM}"
 	echo "selected the WINDOWED shim at ${LIVE_SHIM}"
 }
 

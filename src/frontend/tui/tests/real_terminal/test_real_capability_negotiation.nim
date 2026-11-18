@@ -135,6 +135,12 @@ const
     ## makes EVERY start slower still fails; what no longer fails is one start
     ## that waited for a CPU. The palette gate takes the best of nine for the
     ## same reason.
+    ##
+    ## Best-of-five was still not enough at load 50-70, and the idle 44-49
+    ## was itself mostly the harness: the clock stopped when
+    ## `waitForCompleteFrame` returned, 20 ms after the child's last byte, a
+    ## pause its post-frame writes restart. The clock now stops at the frame
+    ## barrier itself (`frameCompletedAt`): 28-38 ms at load 25-30.
 
 var tracePath = ""
 
@@ -176,6 +182,27 @@ proc statusRowText(sess: var TuiTestSession): string =
   ## where `strutils.strip` returns "". A blank row would otherwise read as 120
   ## characters long.
   strutils.strip(sess.regionText(Rows - 1, 0, Cols, 1), leading = false)
+
+proc frameCompletedAt(sess: var TuiTestSession; timeoutMs: int): MonoTime =
+  ## When the first whole frame had been parsed: `waitForCompleteFrame`'s
+  ## cursor barrier, read after every burst instead of after 20 ms of silence.
+  ##
+  ## `waitForCompleteFrame` drains until the child has been QUIET for 20 ms,
+  ## so a clock stopped when it returns holds those 20 ms, and every byte the
+  ## child writes after its frame (the graphics query, a status repaint)
+  ## restarts them. That is the harness's pause, not the cold start, and on
+  ## a loaded host the child's later writes come later and stretch it.
+  let deadline = getMonoTime() + initDuration(milliseconds = timeoutMs)
+  while getMonoTime() < deadline:
+    discard sess.drainOutput(1)
+    let pos = sess.cursorPosition()
+    if pos.row == Rows - 1 and pos.col == Cols - 1:
+      return getMonoTime()
+    if not sess.isAlive: break
+  # The barrier's own diagnosis: what the cursor and the screen hold, and
+  # whether the child is alive.
+  waitForCompleteFrame(sess, Cols, Rows, timeoutMs = 0)
+  getMonoTime()
 
 proc settleOnDebugger(sess: var TuiTestSession; timeoutMs = 60000) =
   ## Wait for FRAME 1 — the debugger — rather than for frame 0. See this file's
@@ -539,8 +566,7 @@ suite "CTUI-11 Tier 2: what the terminal was actually told":
     for i in 0 ..< ColdStarts:
       started = getMonoTime()
       sess = baseSession(@[tracePath]).spawn()
-      waitForCompleteFrame(sess, Cols, Rows, timeoutMs = 20000)
-      samples.add (getMonoTime() - started).inMilliseconds
+      samples.add (sess.frameCompletedAt(20000) - started).inMilliseconds
       let firstRow = strutils.strip(sess.regionText(Rows - 1, 0, Cols, 1),
                                     leading = false)
       checkpoint("cold start " & $i & ": first frame at " & $samples[^1] &

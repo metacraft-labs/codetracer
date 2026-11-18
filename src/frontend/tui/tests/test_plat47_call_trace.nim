@@ -278,6 +278,40 @@ suite "PLAT-47: the calltrace pane lists the call trace; FILES the tree":
     ck vm.selectedEntry.val != some(namesake)
     ck vm.selectedEntry.val.isNone
 
+  test "Space, Left and Right fold the current call on the focused call trace":
+    require resolved.outcome == foRecorded
+    let rt = newRuntime()
+    let session = openTuiSession(resolved.tracePath, viewportHeight = Rows - 6)
+    defer: session.close()
+    session.header(rt)
+    session.learnExtent()
+    session.refresh(rt)
+    var parent = -1'i64
+    for l in session.session.getCalltraceLines():
+      if l.name == "evaluate" and l.hasChildren:
+        parent = l.index
+        break
+    require parent >= 0
+    ck session.session.jumpToCall(parent) == ""
+    session.refresh(rt)
+    ck rt.app.callTrace.currentTraceIndex == parent.int
+    ck rt.focus.focusPaneKind(paneCalltrace)
+    proc press(token: string) =
+      session.applyOutcome(rt, rt.handleToken(token, 0))
+    proc expanded(): bool =
+      for l in session.session.getCalltraceLines():
+        if l.index == parent:
+          return l.isExpanded
+    ck expanded()
+    press(" ")
+    ck not expanded()
+    press("\e[C")
+    ck expanded()
+    press("\e[C")   # already open: Right changes nothing
+    ck expanded()
+    press("\e[D")
+    ck not expanded()
+
   test "no call trace: the pane shows the call stack and says so, in both front-ends":
     require resolved.outcome == foRecorded
     let rt = newRuntime()

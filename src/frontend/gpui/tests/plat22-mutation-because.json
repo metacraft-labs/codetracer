@@ -2,7 +2,7 @@
   "E1": "Check failed: renderedMark(root, 9) == $emBreakpoint",
   "E10": "Check failed: edit.handoffArgs.len >= 2",
   "E11": "Check failed: surfaceOf(h).support[ecLineStatus] == esDegraded",
-  "E12": "Check failed: \"Locals\" in output",
+  "E12": "Check failed: \"Enter a watch expression\" in output",
   "E13": "Check failed: seen[0] != seen[1]",
   "E14": "Check failed: getAttribute(root, EditorSourceStatementAttribute) == contract.statement",
   "E2": "Check failed: pointing == 1",

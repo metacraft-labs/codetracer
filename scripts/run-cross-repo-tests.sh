@@ -13,7 +13,7 @@
 #   lean-flow   Run Lean build/record/replay tests
 #   origin-rr   Run the rr value-origin tests (origin_rr_dap_test rr::)
 #   origin-rr-smoke  Run the rr origin API smoke (origin_rr_smoke)
-#   calltrace-jump-rr  Run the rr and Delve call-trace jump tests
+#   calltrace-jump-rr  Run the native rr/Delve call-trace and low-level listing tests
 #               (native_calltrace_jump_test, its `_rr_` tests; its MCR ones run
 #               in mcr-dap-flow)
 #
@@ -560,7 +560,7 @@ selector_to_test_name() {
 	lean-flow) echo "test_lean" ;;
 	origin-rr) echo "rr::test_origin_rr" ;;
 	origin-rr-smoke) echo "test_origin_rr_smoke" ;;
-	calltrace-jump-rr) echo "_rr_calltrace_jump_" ;;
+	calltrace-jump-rr) echo "_rr_" ;;
 	*) die "Unknown db-backend selector: $1" ;;
 	esac
 }
@@ -711,12 +711,16 @@ run_test() {
 		local test_name
 		test_name="$(selector_to_test_name "$selector")"
 		log "Running: $selector (db-backend test: $test_name)"
+		local -a cargo_test_args=("$test_name")
+		if [[ $selector == calltrace-jump-rr ]]; then
+			cargo_test_args=(--test native_calltrace_jump_test "$test_name")
+		fi
 
 		env_vars+=("CT_NATIVE_REPLAY_PATH=$CT_NATIVE_REPLAY_PATH")
 
 		(
 			cd "$REPO_ROOT/src/db-backend"
-			env "${env_vars[@]}" cargo test "$test_name" -- --nocapture
+			env "${env_vars[@]}" cargo test "${cargo_test_args[@]}" -- --nocapture
 		) >"$log_file" 2>&1 || exit_code=$?
 
 		# A name filter that matches nothing exits 0. For the origin suites that
@@ -727,7 +731,7 @@ run_test() {
 			log "$selector: no $test_name test ran; refusing to report it as passed"
 			exit_code=1
 		fi
-		# The same for the call-trace jump tests, whose names carry the filter
+		# The same for the native call-trace/listing tests, whose names carry the filter
 		# in the middle and whose output interleaves with the `test` lines, so
 		# it is read from the binaries' summaries instead.
 		if [[ $selector == calltrace-jump-rr && $exit_code -eq 0 ]] &&

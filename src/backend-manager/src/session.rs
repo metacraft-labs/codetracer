@@ -272,6 +272,11 @@ impl SessionManager {
         self.sessions.len()
     }
 
+    /// Identities only, for request rollback without cloning trace metadata.
+    pub fn session_keys(&self) -> Vec<SessionKey> {
+        self.sessions.keys().cloned().collect()
+    }
+
     /// Since when no session has been loaded, after at least one was: see
     /// the `emptied_at` field.
     pub fn emptied_at(&self) -> Option<std::time::Instant> {

@@ -241,6 +241,8 @@ impl TraceSourceArgument {
 #[derive(Serialize, Deserialize, Debug, PartialEq, Default, Clone)]
 #[serde(deny_unknown_fields)]
 pub struct Capabilities {
+    #[serde(rename = "supportsSteppingGranularity", skip_serializing_if = "Option::is_none")]
+    pub supports_stepping_granularity: Option<bool>,
     #[serde(rename = "supportsLoadedSourcesRequest", skip_serializing_if = "Option::is_none")]
     pub supports_loaded_sources_request: Option<bool>,
     #[serde(rename = "supportsStepBack", skip_serializing_if = "Option::is_none")]
@@ -388,6 +390,19 @@ impl Default for DapClient {
 }
 
 impl DapClient {
+    /// Publish the capability of the engine that owns the following stop.
+    /// DAP capabilities are partial updates; source-only engines send false.
+    pub fn instruction_stepping_capabilities_event(&mut self, supported: bool) -> DapMessage {
+        DapMessage::Event(Event {
+            base: ProtocolMessage {
+                seq: self.next_seq(),
+                type_: "event".to_string(),
+            },
+            event: "capabilities".to_string(),
+            body: serde_json::json!({"capabilities": {"supportsSteppingGranularity": supported}}),
+        })
+    }
+
     pub fn request(&mut self, command: &str, arguments: Value) -> DapMessage {
         DapMessage::Request(Request {
             base: ProtocolMessage {

@@ -11,6 +11,7 @@ type
     CtCompleteMove,
     DapStopped,
     DapInitialized,
+    DapCapabilities,
     DapInitialize,
     DapInitializeResponse,
     DapConfigurationDone,

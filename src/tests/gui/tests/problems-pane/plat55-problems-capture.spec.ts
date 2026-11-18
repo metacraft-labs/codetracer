@@ -15,8 +15,9 @@
  *   * THE ROWS — per row its severity class, icon and the icon's computed
  *     colour, path, location and message, in order; the header's counts and
  *     its buttons (label, active);
- *   * THE FIRST ERROR HIGHLIGHTED after the failed build (EMT-D21) — which
- *     row is `problems-row-selected`;
+ *   * THE FIRST ERROR HIGHLIGHTED after the failed build (EMT-D21), while
+ *     another session tab is shown when the build finishes — which row in
+ *     the building tab is `problems-row-selected`;
  *   * THE ERRORS FILTER and GROUP BY FILE — the rows and file headers each
  *     shows;
  *   * what a right-click on a row opens (measured, not assumed);
@@ -32,11 +33,11 @@
  * `src/frontend/gpui/tests/test_plat55_gpui_plan.nim` assert the native panes
  * against (`just plat55-capture-electron`).
  *
- * THE ONE STAND-IN, AND WHY IT IS NOT A MOCK. The desktop's Electron main
- * process has no build runner: nothing in it sends `CODETRACER::build-*`
- * (a working-tree build exists on the web arm, through the wasm worker, and on
- * the native front-ends, through `tui/host/build_runner`). So the build is the
- * REAL `nargo compile`, run here on the crate, and its stdout / stderr lines
+ * THE ONE STAND-IN, AND WHY. This exercises the legacy record-and-debug
+ * build completion, not the newer task runner's `runner: true` completion
+ * (`build-tasks.spec.ts` exercises that runner). The legacy renderer request
+ * (`data.functions.update(data, true)`) has no Electron main-process handler.
+ * So the build is the REAL `nargo compile`, run here on the crate, and its stdout / stderr lines
  * and exit code are sent through the main process's own
  * `CODETRACER::build-command` / `build-stdout` / `build-stderr` / `build-code`
  * messages — exactly as `tests/build/build-output.spec.ts` and
@@ -158,6 +159,17 @@ async function activeEditor(ctPage: any) {
   });
 }
 
+/** The owning tab's legacy build record, independent of the shown tab. */
+async function ownerBuildState(ctPage: any): Promise<{ running: boolean; code: number }[]> {
+  return await ctPage.evaluate(() => {
+    const d = (globalThis as any).data;
+    const components = Object.values(d.sessions[0].ui.componentMapping)
+      .flatMap((mapping: any) => Object.values(mapping));
+    return components.filter((c: any) => typeof c?.build?.running === "boolean")
+      .map((c: any) => ({ running: c.build.running, code: c.build.code }));
+  });
+}
+
 /** `p` relative to the crate (the capture's temporary directory varies). */
 function inProject(p: string | null): string | null {
   return p && p.startsWith(project + path.sep) ? p.slice(project.length + 1) : p;
@@ -182,14 +194,55 @@ test.describe("PLAT-55: the desktop's Problems panel, captured", () => {
     const pane = new ProblemsPane(ctPage);
     await expect(pane.root.first()).toBeVisible({ timeout: 60_000 });
 
+    // Two initialized sessions, created through the shipped UI. An empty
+    // welcome tab has no ErrorsVM and cannot distinguish the building tab's
+    // model from a missing one. New File gives the companion its own model.
+    await ctPage.locator(".session-tab-add").click();
+    await expect(ctPage.locator(".start-option.new-file")).toBeVisible();
+    await ctPage.locator(".start-option.new-file").click();
+    await expect(ctPage.locator(".welcome-screen")).toBeHidden();
+    await ctPage.locator("#session-tab-0").click();
+    await expect(ctPage.locator("#session-tab-0")).toHaveClass(/\bactive\b/);
+
+    // Use the product's legacy build request, which records the owning
+    // session before any output arrives. IPC alone would follow the shown
+    // tab and recreate the one-tab self-comparison D1 used to survive.
+    await ctPage.evaluate(() => {
+      const d = (globalThis as any).data;
+      d.functions.update(d, true);
+    });
     await electronApp!.evaluate(({ BrowserWindow }, b) => {
       const w = BrowserWindow.getAllWindows()[0];
       w.webContents.send("CODETRACER::build-command", { command: "nargo compile" });
       for (const data of b.stdout) w.webContents.send("CODETRACER::build-stdout", { data });
       for (const data of b.stderr) w.webContents.send("CODETRACER::build-stderr", { data });
-      w.webContents.send("CODETRACER::build-code", { code: b.code });
     }, build);
     await expect(pane.rows()).toHaveCount(3, { timeout: 60_000 });
+
+    // Finish with the OTHER tab shown: the shown slot and the build's own
+    // ErrorsVM must be distinct, live models when onBuildCode runs.
+    await ctPage.locator("#session-tab-1").click();
+    await expect.poll(async () => ctPage.evaluate(() => {
+      const d = (globalThis as any).data;
+      const owner = d.sessions[0]?.viewModels?.vm?.errorsVM;
+      const shown = d.sessions[1]?.viewModels?.vm?.errorsVM;
+      return { sessions: d.sessions.length, active: d.activeSessionIndex,
+               distinctModels: !!owner && !!shown && owner !== shown };
+    })).toEqual({ sessions: 2, active: 1, distinctModels: true });
+    expect((await ownerBuildState(ctPage)).map((b) => b.running)).toEqual([true]);
+    await electronApp!.evaluate(({ BrowserWindow }, code) => {
+      BrowserWindow.getAllWindows()[0].webContents.send("CODETRACER::build-code", { code });
+    }, build.code);
+    // Wait for completion while tab 1 is STILL shown. Returning earlier
+    // would let the IPC race the tab switch and make the mutation a no-op.
+    await expect.poll(async () => ownerBuildState(ctPage))
+      .toEqual([{ running: false, code: build.code }]);
+    await expect(ctPage.locator("#session-tab-1")).toHaveClass(/\bactive\b/);
+    // The empty companion has served its purpose. Close it through the UI
+    // so the remaining capture's selectors and reference stay single-pane.
+    await ctPage.locator("#session-tab-1 .session-tab-close").click();
+    await expect(ctPage.locator(".session-tab")).toHaveCount(1);
+    await expect(ctPage.locator("#session-tab-0")).toHaveClass(/\bactive\b/);
 
     // The failed build shows the BUILD panel in the bottom overlay (the
     // desktop's `onBuildCode`), over the docked PROBLEMS; dismiss it.
