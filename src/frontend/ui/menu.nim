@@ -521,7 +521,15 @@ when defined(js):
         break
       var separators = countSeparators(current, index)
       current = currentElements[index]
-      sum += index
+      # Count only visible (rendered) items before `index` to get the visual
+      # row position: hidden platform-specific items (e.g. macOS-only entries)
+      # occupy no space on screen, so using the raw array index skews the
+      # submenu top offset by one item height per hidden predecessor.
+      var visibleIndex = 0
+      for i in 0 ..< index:
+        if currentElements[i].shouldRenderMenuNode():
+          visibleIndex += 1
+      sum += visibleIndex
       separators += 1
 
       let widths = self.calculateMaxMenuElementWidth(current)
