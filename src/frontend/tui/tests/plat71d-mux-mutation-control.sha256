@@ -3,6 +3,6 @@
 # Refreshed with --record-control-hashes, gated by the
 # needle scan.
 4a709e46e1c01539fda428f6784b3535f3a42183eb307651eea4fa86b87714f0  src/frontend/tui/app/theme/capabilities.nim
-f76737aff180ffb8ce2023c92a130fc74397ae5e7e14ed1e9c295b95440a4672  src/frontend/tui/host/terminal_probe.nim
+f10f7110453df54a68784ec44af2ff981d0385ab03d8ceb826f70bbf78d446c2  src/frontend/tui/host/terminal_probe.nim
 47d1c433c9838314c782aa53510815f5fdf60c93486b1da9a63f1f9719f04c2a  src/frontend/tui/app/tests/test_plat71_terminal_profile.nim
 6fdddbbeb04c8164678eca6a41799f08d206377ccefd55553226d3f08cfdb091  src/frontend/tui/tests/real_terminal/test_plat71_terminal_pty.nim
