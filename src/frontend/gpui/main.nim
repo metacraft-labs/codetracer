@@ -1334,6 +1334,12 @@ proc editKey(key: string; mods: seq[string]) =
   ## One key of an EDIT window's editor pane: its `keydown` listener's body,
   ## and what `--window-ops`' `key:` dispatches in an edit window (the editor
   ## holds the focus there).
+  # The capture's sentinel ends the loop whatever the key does here: `F12` is
+  # a replay-only key, which `editKeyInert` takes before the document sees
+  # it, so a check after the key's handling never ran in an Edit window.
+  let sentinel = probeSentinel.len > 0 and key == probeSentinel
+  defer:
+    if sentinel: gpui_quit()
   if openArm.isNil: return
   # K19: the Files pane's name field or Delete question takes the keys
   # while it is open; an open right-click menu closes on `Esc`.
@@ -1366,8 +1372,6 @@ proc editKey(key: string; mods: seq[string]) =
       stderr.writeLine("edit-key " & key & " -> " & applied.name & " " &
                        $applied.outcome & " " & formatFloat(handledMs,
                        ffDecimal, 1) & "ms")
-    if probeSentinel.len > 0 and key == probeSentinel:
-      gpui_quit()
 
 proc editKeyHandler(el: GpuiElement): GpuiEventHandler =
   ## The editor pane's `keydown` listener. Built by a separate proc so `el`
