@@ -55,6 +55,7 @@ import
   ../codetracerconf,
   ../ui_selection,
   ../version,
+  ./path_completion,
   confutils/[ defs, runtime_surface, clispec_config ]
 
 export defs, runtime_surface
@@ -922,24 +923,9 @@ proc completionsForSubcommand(asm0: HelpAssembly,
       if tok.startsWith(prefix):
         result.add tok
     return
-  # File-system completion filtered by the subcommand's file-types.
-  let dirPart = prefix.parentDir
-  let basePart = prefix.extractFilename
-  let searchDir = if dirPart.len == 0: getCurrentDir() else: dirPart
-  if not dirExists(searchDir): return
-  for kind, child in walkDir(searchDir, relative = (dirPart.len == 0)):
-    let leaf = (if dirPart.len == 0: child else: child.extractFilename)
-    if not leaf.startsWith(basePart): continue
-    let full = (if dirPart.len == 0: leaf else: dirPart / leaf)
-    if kind == pcDir:
-      result.add full & "/"
-      continue
-    if cmd.fileTypes.len == 0:
-      result.add full
-      continue
-    let ext = splitFile(leaf).ext
-    if ext in cmd.fileTypes:
-      result.add full
+  # File-system completion filtered by the subcommand's file-types, sorted
+  # so it does not depend on the filesystem's readdir order.
+  result = pathCompletions(prefix, cmd.fileTypes)
 
 proc fastTopLevelCommandNames*(): seq[string] =
   ## M8 fast path: enumerate every top-level command name known to the
