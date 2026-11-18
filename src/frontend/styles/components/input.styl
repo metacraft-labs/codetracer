@@ -21,11 +21,11 @@ INPUT_HEIGHT_SM = CONTROL_HEIGHT_SM
 INPUT_HEIGHT_XS = CONTROL_HEIGHT_XS
 
 // D-43: every text field's fill.  The dark theme keeps each field's own value
-// (passed in); the light theme fills every field with the canvas colour
-// (`surface/base/canvas`, Nikolay, 2026-11-18), so a field reads as set into
-// the panel rather than as a lighter card on it.
+// (passed in).  The light theme takes the field token the Figma light screens
+// use, `surface/input/default` (#F8F6F2), the same colour as the frame around
+// the panels (Nikolay, 2026-11-18).
 field-fill(dark)
-  by-mode(dark, colors-ui-surface-base-canvas)
+  by-mode(dark, colors-ui-surface-input-default)
 
 input
   font-family: "SpaceGrotesk" !important
