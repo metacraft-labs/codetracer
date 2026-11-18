@@ -1,4 +1,3 @@
-# ports: src/frontend/gpui/tests/test_plat58_gpui_requests.nim
 scenario: 1
 name: gpui/requests-pane-filters-and-goes-to-the-handler
 pack: codetracer

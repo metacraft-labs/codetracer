@@ -1,4 +1,3 @@
-# ports: src/frontend/gpui/tests/test_plat54_gpui_agent_activity.nim
 scenario: 1
 name: gpui/agent-activity-ai-prompt
 pack: codetracer

@@ -1,4 +1,3 @@
-# ports: src/frontend/gpui/tests/test_plat40_calltrace_current_frame.nim
 scenario: 1
 name: gpui/call-trace-current-frame
 pack: codetracer

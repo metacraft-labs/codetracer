@@ -1,4 +1,3 @@
-# ports: src/frontend/gpui/tests/test_plat45_gpui_layout.nim
 scenario: 1
 name: gpui/layout-shared-default
 pack: codetracer

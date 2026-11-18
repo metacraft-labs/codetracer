@@ -1,4 +1,3 @@
-# ports: src/frontend/gpui/tests/test_build_tasks_gpui_plan.nim
 scenario: 1
 name: gpui/build-tasks-default-task-from-the-picker
 pack: codetracer
