@@ -170,6 +170,8 @@ const
   TopBarH = 36            ## the top bar: menu, transport, omnibox, session tabs
   StripH = 26             ## a box's strip of pane tabs
   FooterH = 32            ## the status line
+  CopyButtonW = 34        ## the status line's copy button, at its right end
+  LocationTailW = 400     ## the status line's location as far as it is read
 
 proc isSourceName(t: string): bool =
   let base = t.split('/')[^1]
@@ -208,6 +210,7 @@ type EditorRow = object
 
 proc wordsL(ctx: GuiContext; f: Frame; x, y, w, h: int; psm = 6): seq[Word]
 proc normLabel(s: string): string
+proc inkRuns(f: Frame; y0, y1, x0, x1: int): seq[(int, int)]
 
 proc editorRows(ctx: GuiContext; f: Frame; b: EditorBox): seq[EditorRow] =
   ## The editor's rows: the gutter's numbers read as a column, the row
@@ -280,6 +283,27 @@ proc editorRows(ctx: GuiContext; f: Frame; b: EditorBox): seq[EditorRow] =
     for n in nums: nr = max(nr, n.x + n.w)
     result.add EditorRow(numbersRight: nr, number: first + k, y: y, h: pitch, text: text,
                          textLeft: (if parts.len > 0: parts[0].x else: b.left + 110))
+  # a row the editor draws between two lines (a loop's iteration control, an
+  # inline note on a row of its own) carries no number in the gutter: it is
+  # no line, and the lines after it are numbered from the numbers read
+  var kept: seq[EditorRow]
+  for r in result:
+    var ink = false
+    for (a, z) in inkRuns(f, r.y + r.h div 4, r.y + r.h - r.h div 4, b.left + 30, r.numbersRight + 1):
+      if z - a >= 2: ink = true
+    if ink: kept.add r
+  if kept.len > 0 and kept.len < result.len:
+    var votes2 = initCountTable[int]()
+    for n in nums:
+      let cy = n.y + n.h div 2
+      for k, r in kept:
+        if cy >= r.y and cy < r.y + r.h:
+          try: votes2.inc parseInt(n.text.strip(chars = {'|', '.', ',', ';', ' '})) - k
+          except ValueError: discard
+    if votes2.len > 0:
+      let first2 = votes2.largest.key
+      for k in 0 ..< kept.len: kept[k].number = first2 + k
+      result = kept
 
 proc inkRuns(f: Frame; y0, y1, x0, x1: int): seq[(int, int)] =
   ## The runs of columns holding ink (text lighter than the ground) in a band.
@@ -381,16 +405,25 @@ proc caretRow(f: Frame; b: EditorBox; rows: seq[EditorRow]): int =
   ## The caret: a light vertical bar one row tall, with background above and
   ## below it — what neither a glyph (shorter) nor an indent guide (running
   ## through the rows) is.
+  proc lit(x, y0, y1: int): int =
+    for y in y0 ..< y1:
+      if y >= 0 and y < f.image.height and x >= 0 and x < f.image.width and
+         f.luma(x, y) > 150: inc result
   for r in rows:
     let need = (r.h * 2) div 3
+    let tall = (r.h * 85) div 100
     for x in b.left + 90 ..< b.right - 2:
-      var run = 0
-      for y in r.y ..< r.y + r.h:
-        if y >= 0 and y < f.image.height and f.luma(x, y) > 150: inc run
-      if run >= need and f.luma(x + 2, r.y + r.h div 2) < 110 and
-         f.luma(x - 2, r.y + r.h div 2) < 110 and
-         (r.y - 3 < 0 or f.luma(x, r.y - 3) < 110) and
-         (r.y + r.h + 2 >= f.image.height or f.luma(x, r.y + r.h + 2) < 110):
+      let run = lit(x, r.y, r.y + r.h)
+      if run < need: continue
+      let ends = (r.y - 3 < 0 or f.luma(x, r.y - 3) < 110) and
+                 (r.y + r.h + 2 >= f.image.height or f.luma(x, r.y + r.h + 2) < 110)
+      if not ends: continue
+      if f.luma(x + 2, r.y + r.h div 2) < 110 and f.luma(x - 2, r.y + r.h div 2) < 110:
+        return r.number
+      # between two letters (`r|eturn`) the glyphs touch the bar: it is still
+      # the caret when it is (nearly) the row's whole height, which no
+      # glyph's stroke is, and the columns beside it are not
+      if run >= tall and lit(x - 3, r.y, r.y + r.h) < tall and lit(x + 3, r.y, r.y + r.h) < tall:
         return r.number
   0
 
@@ -435,20 +468,28 @@ proc locationWord(t: string; needTick: bool): string =
   t.split('/')[^1]
 
 proc statusLocation(ctx: GuiContext; f: Frame): string =
-  ## Where the replay is, as the status line says it (`…/tracing.nim:18#0`).
-  ## The footer's small text is read twice when the first reading lost the
-  ## tick's `#` (it reads as `H` or merges into the digits): plainly, then
-  ## from its stretched image.
+  ## Where the replay is, as the status line says it (`…/tracing.nim:18#0`),
+  ## from the footer's last `LocationTailW` pixels (the location ends at the
+  ## copy button). The small text is read twice, plainly and from its
+  ## stretched image, and of the two readings that name a tick the one with
+  ## the longer tick is taken: OCR drops one of two narrow repeated digits
+  ## (`main.py:22#11` read `#1`, on one reading or the other depending on
+  ## the path before it) but does not invent one. Measured on the frames of
+  ## two CI-runner and two local runs.
   let y = f.image.height - FooterH
-  var plain = ""
-  for w in ctx.words(f, f.image.width div 2, y, f.image.width div 2, FooterH, psm = 7):
-    let full = locationWord(w.text, needTick = true)
-    if full.len > 0: return full
-    if plain.len == 0: plain = locationWord(w.text, needTick = false)
-  for w in ctx.wordsS(f, f.image.width div 2, y, f.image.width div 2, FooterH, psm = 7):
-    let full = locationWord(w.text, needTick = true)
-    if full.len > 0: return full
-  plain
+  let x = max(f.image.width div 2, f.image.width - CopyButtonW - LocationTailW)
+  let width = f.image.width - CopyButtonW - x
+  var plain, best = ""
+  proc tickLen(loc: string): int = loc.len - loc.rfind('#') - 1
+  for reading in [ctx.words(f, x, y, width, FooterH, psm = 7),
+                  ctx.wordsS(f, x, y, width, FooterH, psm = 7)]:
+    for w in reading:
+      let full = locationWord(w.text, needTick = true)
+      if full.len > 0:
+        if best.len == 0 or tickLen(full) > tickLen(best): best = full
+        break
+      if plain.len == 0: plain = locationWord(w.text, needTick = false)
+  if best.len > 0: best else: plain
 
 # --- gpui batch: the window's boxes, their strips and their rows ---------------------------
 #
@@ -611,8 +652,10 @@ proc paneBoxes(ctx: GuiContext; f: Frame): seq[PaneBox] =
   var found: seq[PaneTab]
   for y in TopBarH - 6 ..< footer - 40:
     for x in 0 ..< w:
+      # (two rows of ground above the corner: the top bar's menu button can
+      # end three rows above the first strip in a short window)
       if f.isGround(g, x, y) or not f.isGround(g, x - 1, y) or not f.isGround(g, x, y - 1) or
-         not f.isGround(g, x + 3, y - 2) or not f.isGround(g, x + 3, y - 3):
+         not f.isGround(g, x + 3, y - 2):
         continue
       # a tab's top-left corner (its rounded corner: the same tab is met again
       # a row or two lower, a pixel or two further left)
@@ -675,10 +718,26 @@ proc paneBoxes(ctx: GuiContext; f: Frame): seq[PaneBox] =
               strips.mgetOrPut(y, @[]).add sel
         continue
       if tabH < 16 or tabH > 34: continue
+      # the focused box's band running on past this tab, over a selected tab
+      # cut out of it on the window's ground (the selected tab not first)
+      let topC = f.rgb(x + 1, y + 2)
+      var cutTo = -1
+      if x1 + 3 < w and near(f.rgb(x1 + 3, y + 2), topC, 2) and f.isGround(g, x1 + 3, ym):
+        cutTo = x1 + 1
+        while cutTo + 1 < w and f.isGround(g, cutTo + 1, ym): inc cutTo
+        if cutTo - x1 < 30: cutTo = -1
       let tab = PaneTab(x0: x0, x1: x1, y0: y, y1: y1,
-                        active: not near(f.rgb(x + 1, y1 + 2), g, 4))
+                        active: cutTo < 0 and not near(f.rgb(x + 1, y1 + 2), g, 4))
       found.add tab
       strips.mgetOrPut(y, @[]).add tab
+      if cutTo > 0:
+        let sel = PaneTab(x0: x1 + 1, x1: cutTo, y0: y, y1: y1, active: true)
+        found.add sel
+        strips.mgetOrPut(y, @[]).add sel
+  if getEnv("CT_GUI_BINDING_DEBUG").len > 0:
+    for t in found:
+      stderr.writeLine "tab ", t.x0, "..", t.x1, " y ", t.y0, "..", t.y1, " band=", t.band,
+        " active=", t.active, " cut=", t.cut
   # tabs of one strip met on neighbouring rows (rounded corners) are one strip
   var ys: seq[int]
   for y in strips.keys: ys.add y
@@ -889,6 +948,13 @@ proc normLabel(s: string): string =
           if want[i] != flat[i]: inc diff
         if diff == 1: close.add k
   if close.len == 1: return gpuiPaneName(close[0])
+  # a short caption (the footer's `BUILD`) is the first word of one pane's
+  # name when it is the first word of no other's
+  var prefixed: seq[PaneKind]
+  if drawn.len >= 4 and ' ' notin drawn:
+    for k in PaneKind:
+      if desktopTabTitle(k).split(' ')[0] == drawn: prefixed.add k
+  if prefixed.len == 1: return gpuiPaneName(prefixed[0])
   drawn
 
 proc rowNode(role: string; b: PaneBox; r: TextRow; props: JsonNode;
@@ -1171,8 +1237,14 @@ proc overlays(f: Frame; boxes: seq[PaneBox]): seq[Overlay] =
       # a pane's own bordered field (the search, the watch expression) is
       # one row on the pane's surface; what is drawn over the panes is taller
       # or on the window's ground
+      # (a one-entry right-click menu is as short; a field runs across its
+      # pane or heads its body)
+      var spansBox = false
+      for b in boxes:
+        if lx >= b.left - 4 and rx <= b.right + 4 and y >= b.top - 4 and y <= b.bottom and
+           ((rx - lx) * 10 >= (b.right - b.left) * 8 or y - b.top <= 16): spansBox = true
       let field = y1 - y < 40 and not near(f.rgb(lx + 6, y + 4), f.groundOf, 3) and
-                  y > TopBarH + 4
+                  y > TopBarH + 4 and spansBox
       if not inside and not isBox and not field and not near(c, f.groundOf, 3):
         seen.add Overlay(x0: lx, x1: rx, y0: y, y1: y1, border: c)
       x = x1 + 1
@@ -1245,6 +1317,7 @@ proc readOverlays(ctx: GuiContext; f: Frame; t: var Tree; boxes: seq[PaneBox]) =
       q.add r.text
     # the caret, a bar between two characters, reads as `|`
     q = q.replace("|", "").strip
+    if q.endsWith("]") and q.count('[') == 0: q = q[0 ..< q.len - 1].strip
     if q.replace(" ", "") == OmnibarPlaceholderText.replace(" ", ""): q = ""
     omni = node("omnibox", fl(fx0), fl(fy0), fl(fx1 - fx0), fl(fy1 - fy0), %*{"query": q, "count": 0})
     omni.unreadable["focused"] = "the field draws the same border open or closed"
@@ -1639,7 +1712,26 @@ proc ctGuiBinding*(): GuiBinding =
         case anchor
         of "text-start": return some((x0 + 3, midY))
         of "text-end": return some((max(x0 + 3, x1 - 3), midY))
-        of "expander": return some((x0 + 6, midY))
+        of "expander":
+          # the toggle's box, by its pixels: OCR reads the expanded box (⊟)
+          # as the row's first word but not always the collapsed one (⊞), so
+          # the row's text can start at the box or after it. A box is a run
+          # of ink 8-16 px wide; the guides beside it are 1 px, a leaf's dot
+          # narrower than 8.
+          let runs = inkRuns(ctx.grab(), midY - 5, midY + 5, int(n.x) + 2, x0 + 16)
+          # Before the text first (the text starts after the box); else
+          # the run the text starts with is the box.
+          var before, at = -1
+          for (a, b) in runs:
+            let w = b - a + 1
+            if w < 8 or w > 16: continue
+            if b < x0 - 2: before = (a + b) div 2
+            elif at < 0 and abs(a - x0) <= 3: at = (a + b) div 2
+          let box = if before >= 0: before elif at >= 0: at else: x0 + 6
+          if getEnv("CT_GUI_BINDING_DEBUG").len > 0:
+            stderr.writeLine "anchor expander on ", n.keyText, " x0=", x0, " y=", midY,
+              " runs=", runs, " -> ", box
+          return some((box, midY))
         of "name":
           let nx = n.props{"$name"}.getInt(-1)
           return (if nx >= 0: some((nx, midY)) else: none((int, int)))

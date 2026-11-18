@@ -240,6 +240,7 @@ OPTIONS:
                     OWN pointer and key handlers (in an Edit window a
                     key reaches the editor, which holds the focus):
                       key:<key>[:<mod>+<mod>]   press:<x>:<y>
+                      contextmenu:<x>:<y> (a right-click's second event)
                       move:<x>:<y>              release:<x>:<y>
                     and the same events aimed at a part of the window by
                     name, read off the window's geometry:
@@ -704,7 +705,7 @@ func parseGpuiCommand*(argv: openArray[string]): GpuiCommand =
         # the copy nothing exercised was the wrong one. The op is now driven
         # by `test_plat48_gpui_plan.nim`, so an arm added to one and not the
         # other reddens by name instead of being discovered by hand.
-        if head notin ["key", "press", "move", "release", "menu", "control",
+        if head notin ["key", "press", "contextmenu", "move", "release", "menu", "control",
                        "label", "pin", "unpin", "drag", "hold",
                        "hover-label", "wait", "tab", "tab-close",
                        "tab-add", "hwheel", "swheel", "hbar", "click",
@@ -5379,18 +5380,25 @@ proc drawFooter(r: GpuiRenderer) =
     gTopEls.add strip
   # PLAT-54: the status line's note — after the file info and the bottom
   # strip, before the right-hand items — in the same face.
+  # The note and the location share the row: when both do not fit, the
+  # location gives way first (`fitFooterRow`), so a long path (a CI runner's
+  # work directory) does not cut what a key just said to a few letters.
+  var noteX = gGeom.footer.x + FooterFileInfoX
+  if info.len > 0:
+    noteX = max(noteX, FooterFileInfoX + FooterFileInfoPx + 16)
+  noteX = max(noteX, footerLabelsEnd() + 16)
+  let location = footerLocation()
+  let cert = if gSession.isNil: "" else: certificateLabel()
+  let certW = if cert.len > 0: groteskTextPx(cert, 14.0) + 8 else: 0
+  let locationW = if gSession.isNil: 0 else: groteskTextPx(location, 14.0)
+  let rowEnd = if gSession.isNil: gGeom.footer.x + gGeom.footer.w - 8
+               else: copyPathRect().x - 8
+  let noteNeed = if gStatusNote.len > 0: groteskTextPx(gStatusNote, 14.0) + 8
+                 else: 0
+  let fit = fitFooterRow(rowEnd - noteX - 16 - certW, noteNeed, locationW)
   if gStatusNote.len > 0:
-    var noteX = gGeom.footer.x + FooterFileInfoX
-    if info.len > 0:
-      noteX = max(noteX, FooterFileInfoX + FooterFileInfoPx + 16)
-    noteX = max(noteX, footerLabelsEnd() + 16)
-    var noteEnd = gGeom.footer.x + gGeom.footer.w - 8
-    if not gSession.isNil:
-      let lw = groteskTextPx(footerLocation(), 14.0)
-      noteEnd = copyPathRect().x - 8 - lw - 16
-      let cert = certificateLabel()
-      if cert.len > 0:
-        noteEnd -= groteskTextPx(cert, 14.0) + 8
+    let noteEnd = if gSession.isNil: rowEnd
+                  else: rowEnd - fit.location - 16 - certW
     let note = absBox(r, PxRect(x: noteX, y: rowY, w: max(0, noteEnd - noteX),
                                 h: TabHeightPx))
     r.setAttribute(note, "data-ct-footer-note", gStatusNote)
@@ -5412,17 +5420,24 @@ proc drawFooter(r: GpuiRenderer) =
     r.setStyle(icon, "height", "16px")
     r.appendChild(cb, icon)
     gTopEls.add cb
-    let location = footerLocation()
-    let lw = groteskTextPx(location, 14.0)
+    let lw = if gStatusNote.len > 0: fit.location else: locationW
     let lx = max(gGeom.footer.x, copy.x - 8 - lw)
     let p = absBox(r, PxRect(x: lx, y: rowY, w: copy.x - 8 - lx,
                              h: TabHeightPx))
     r.setAttribute(p, "data-ct-footer-position", location)
     r.setStyle(p, "color", ink)
     r.setStyle(p, "overflow", "hidden")
-    text(r, p, location)
+    # Cut at its start, keeping the file, the line and the ticks.
+    var shown = location
+    if groteskTextPx(shown, 14.0) > copy.x - 8 - lx:
+      var tail = location
+      while tail.len > 1 and groteskTextPx("…" & tail, 14.0) > copy.x - 8 - lx:
+        tail = tail[1 .. ^1]
+        while tail.len > 1 and (ord(tail[0]) and 0xC0) == 0x80:
+          tail = tail[1 .. ^1]
+      shown = "…" & tail
+    text(r, p, shown)
     gTopEls.add p
-    let cert = certificateLabel()
     if cert.len > 0:
       let cw = groteskTextPx(cert, 14.0)
       let c = absBox(r, PxRect(x: lx - 8 - cw, y: rowY, w: cw, h: TabHeightPx))
@@ -10751,10 +10766,16 @@ proc openContextMenuAt(r: GpuiRenderer; menu: ContextMenuModel; x, y: int) =
   traceGesture("context menu " & $menu.kind & " " & menu.labels.join("|"))
   drawTopBar(r)
 
+var gContentOpenedByPress = false
+  ## The content was opened by a press whose `contextmenu` event has not
+  ## arrived yet: a right-click is a pointer-down AND then a contextmenu
+  ## event, and the second must not close what the first opened.
+
 proc showContent(r: GpuiRenderer; title, text: string; diff = false) =
   ## PLAT-50: a text over the window — an event's content, a value's
   ## history, a value's origin, a changed file's diff.
   gContent = GContent(open: true, title: title, text: text, diff: diff)
+  gContentOpenedByPress = true
   traceGesture("content " & title)
   drawTopBar(r)
 
@@ -13257,6 +13278,15 @@ proc routeWindowKey(r: GpuiRenderer; key: string; mods: seq[string]) =
   let name = canonicalKeyOfGpui(key, mods)
   if name.len == 0:
     return
+  # Input-Routing-And-Keymaps §6: `Escape` on a transient surface — a docked
+  # pane revealed over the window (Ctrl+O, a label's hover), a layout gesture
+  # in flight — closes it BEFORE the key is routed; it never reaches the
+  # focused editor (whose Vim layer would take it as "back to normal mode"
+  # and leave the revealed pane standing).
+  if name == "Esc" and (gGestures.active or gGestures.revealing) and
+     cancelWindowGesture():
+    traceGesture("dismissed by Esc")
+    return
   let nowMs = int64(epochTime() * 1000)
   # The user's file changed since it loaded: the key resolves under the new
   # rows (the window's loop has no frame hook of its own to poll from).
@@ -13655,6 +13685,11 @@ proc handlePopoverPress(r: GpuiRenderer; kind: GpuiEventKind;
     drawTopBar(r)
     return true
   if gContent.open:
+    if kind == gekContextMenu and gContentOpenedByPress:
+      # the same right-click's second event: the content stays
+      gContentOpenedByPress = false
+      return true
+    gContentOpenedByPress = false
     gContent = GContent()
     drawTopBar(r)
     return true
@@ -14967,6 +15002,9 @@ proc runWindowOp(r: GpuiRenderer; op: string; release = true): string =
       else:
         return "unknown scrub event '" & parts[2] & "'"
     of "press": windowPointer(r, gekPointerDown, at(1), at(2))
+    of "contextmenu":
+      # the `contextmenu` event a right-click sends after its press
+      windowPointer(r, gekContextMenu, at(1), at(2))
     of "move": windowPointer(r, gekPointerMove, at(1), at(2))
     of "release": windowPointer(r, gekPointerUp, at(1), at(2))
     of "vbar":

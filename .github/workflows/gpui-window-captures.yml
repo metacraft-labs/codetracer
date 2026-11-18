@@ -42,11 +42,6 @@ jobs:
     # (codetracer-specs issues/2026-09-26-window-capture-gates-recorded-
     # blocked-although-ci-can-run-them.md).
     steps:
-      - name: Record when the job started
-        # For the cache push at the end, whose budget is what the job's time
-        # limit leaves.
-        run: echo "CT_JOB_STARTED_AT=$(date +%s)" >>"$GITHUB_ENV"
-
       - name: Generate CI token
         id: ci_token
         uses: actions/create-github-app-token@v2
@@ -212,7 +207,24 @@ jobs:
           path: ${{ runner.temp }}/ct-build
 
       - name: Unpack them beside the siblings
-        run: tar -xzf "${RUNNER_TEMP}/ct-build/ct-build-products.tar.gz" -C ..
+        # Tested whole first: download-artifact can finish "successfully" with
+        # a short file (GPUI shard 15 and TUI shard 7 of run 44269676398: "gzip:
+        # stdin: unexpected end of file" after a 20-minute download). A short
+        # one exits 3 and is downloaded again below.
+        id: unpack
+        continue-on-error: true
+        run: bash ci/unpack-ct-build-products.sh "${RUNNER_TEMP}/ct-build"
+
+      - name: Restore the ct-build products again, the first download being incomplete
+        if: ${{ steps.unpack.outcome == 'failure' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: ct-build-products
+          path: ${{ runner.temp }}/ct-build-retry
+
+      - name: Unpack the second download
+        if: ${{ steps.unpack.outcome == 'failure' }}
+        run: bash ci/unpack-ct-build-products.sh "${RUNNER_TEMP}/ct-build-retry"
 
       - name: Build the windowed GPUI front-end the scenario lane opens
         # Linked here, against the restored shim, because the front-end pins
@@ -315,29 +327,6 @@ jobs:
             src/tests/visual/plat47-gpui-window.json
             src/tests/visual/plat48-gpui-window.json
           retention-days: 7
-
-      - name: Push the dev shells this shard realised to the cache
-        # The shells ct-build and every shard realise (ci, default, isonim-gpui,
-        # GuiAssert), and the flake's inputs, so the next run substitutes them
-        # when the lock has moved faster than cache-push.yml can finish (run
-        # 44048043714 found nothing built on the lock 64a81f1844c moved to).
-        # Pushed here, at the end of ONE shard, not in ct-build: every shard
-        # waits for ct-build to finish, and nothing waits for a shard. Best
-        # effort (a 15-minute budget, exit 0 on any failure, continue-on-error),
-        # and only dev and agents write the shared cache
-        # (ci/test/push-built-closure-test.sh).
-        if: ${{ !cancelled() && matrix.shard == 1 && steps.provision.outcome == 'success' && (github.ref_name == 'dev' || github.ref_name == 'agents') }}
-        continue-on-error: true
-        timeout-minutes: 20
-        env:
-          ATTIC_ENDPOINT: ${{ vars.ATTIC_ENDPOINT }}
-          ATTIC_CACHE: ${{ vars.ATTIC_CACHE }}
-          ATTIC_TOKEN: ${{ secrets.ATTIC_TOKEN }}
-          CT_JOB_TIMEOUT_MINUTES: 90
-        # CT_JOB_TIMEOUT_MINUTES is this job's timeout-minutes: the push's
-        # budget is capped at what the limit leaves, so it never cancels the
-        # job (push-built-closure-test.sh holds the two numbers equal).
-        run: bash ci/deploy/push-built-closure.sh --gcroots "${CT_GCROOT_DIR:-$RUNNER_TEMP/ct-gcroots}" --flake-inputs
 
       - name: Upload the memory samples
         # What held the memory when the job failed or was cancelled; an OOM kill

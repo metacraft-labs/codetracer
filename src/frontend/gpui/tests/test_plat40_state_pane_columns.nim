@@ -392,7 +392,7 @@ proc windowPlan(width, height: int; ops: string): JsonNode =
   args.add calc
   let errFile = genTempPath("plat40-statecols-", ".err")
   let p = startProcess("/bin/sh",
-    args = @["-c", "exec \"$0\" \"$@\" 2>" & quoteShell(errFile), bin] & args,
+    args = @["-c", gpuiRunScript("2>" & quoteShell(errFile)), bin] & args,
     env = env, options = {})
   let output = p.outputStream.readAll()
   let rc = p.waitForExit()
@@ -401,7 +401,7 @@ proc windowPlan(width, height: int; ops: string): JsonNode =
   removeFile(errFile)
   removeDir(state)
   if rc != 0:
-    checkpoint("codetracer-gpui exited " & $rc & ": " & err)
+    checkpoint("codetracer-gpui " & gpuiExitText(rc) & ": " & err)
     raise newException(IOError, "the window plan run failed (" & ops & ")")
   result = parseJson(output)
   planCache[key] = result

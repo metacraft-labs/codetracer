@@ -2,13 +2,13 @@ scenario: 1
 name: languages/nim-sudoku
 pack: codetracer
 summary: >-
-  The Nim sudoku solver's rr recording opens a .nim file and fills the event
+  The Nim sudoku solver's MCR recording opens a .nim file and fills the event
   log, whose output says "Solved"; the call trace holds the Nim runtime's
   NimMain entries, and the Variables pane lists variables.
 
 stage:
   - use: record-program
-    with: { program: nim_sudoku_solver/main.nim, backend: rr }
+    with: { program: nim_sudoku_solver/main.nim, backend: mcr }
   - use: open-recording
 
 steps:

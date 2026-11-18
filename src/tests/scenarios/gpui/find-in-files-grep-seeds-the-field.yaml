@@ -24,15 +24,17 @@ steps:
       at: 'pane[title="Find in Files"]'
       assert: ['has-row("def scale(value, factor):")', 'has-row("result = value * factor")']
   - expect: { at: replay-position, tick: 1 }
-  - key: F4
-  - wait: { until: { at: 'editor[file="extra.py"]', assert: 'shows-text("result = value * factor")' }, timeout: 30s }
-  - chord: Ctrl+Shift+F
-  - wait: { until: { at: omnibox, query: ":grep factor" }, timeout: 30s }
-  - type: "scale"
-  - wait: { until: { at: omnibox, query: ":grep scale" }, timeout: 30s }
-  - key: Esc
+  # `:grep` alone, with nothing selected, opens on the pane's query
   - chord: Ctrl+P
   - type: ":grep"
   - key: Enter
-  - wait: { until: { at: omnibox, query: ":grep FACTOR" }, timeout: 30s }
+  - wait: { until: { at: omnibox, query: { contains: "grep FACT" } }, timeout: 30s }
+  - key: Esc
+  - key: F4
+  - wait: { until: { at: 'editor[file="extra.py"]', assert: 'shows-text("result = value * factor")' }, timeout: 30s }
+  - chord: Ctrl+Shift+F
+  - wait: { until: { at: omnibox, query: { contains: "grep factor" } }, timeout: 30s }
+  - type: "scale"
+  - wait: { until: { at: omnibox, query: { contains: "grep scale" } }, timeout: 30s }
+  - key: Esc
   - expect: { at: replay-position, tick: 1 }

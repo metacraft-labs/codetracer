@@ -79,7 +79,7 @@ proc run(args: seq[string]; geometry = ""; state = ""): tuple[rc: int;
   if geometry.len > 0: env["CODETRACER_GPUI_GEOMETRY_OUT"] = geometry
   let errFile = genTempPath("plat69-gpui-", ".err")
   let p = startProcess("/bin/sh",
-    args = @["-c", "exec \"$0\" \"$@\" 2>" & quoteShell(errFile), bin] & args,
+    args = @["-c", gpuiRunScript("2>" & quoteShell(errFile)), bin] & args,
     env = env, options = {})
   result.output = p.outputStream.readAll()
   result.rc = p.waitForExit()
@@ -97,7 +97,7 @@ proc windowPlan(chrome: string; ops = ""; width = W; height = H;
   args.add calc
   let r = run(args, geometry, state)
   if r.rc != 0:
-    checkpoint("codetracer-gpui exited " & $r.rc & ": " & r.err)
+    checkpoint("codetracer-gpui " & gpuiExitText(r.rc) & ": " & r.err)
     raise newException(IOError, "the window plan run failed (" & chrome &
                        " " & ops & ")")
   result = parseJson(r.output)

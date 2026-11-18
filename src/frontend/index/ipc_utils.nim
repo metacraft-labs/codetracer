@@ -702,7 +702,7 @@ proc ready*(): Future[void] {.async.} =
     # The desktop's windows are `window_routing`'s: `mainWindow` is the
     # window whose request is being served (else the first still open), and
     # what it is sent goes to the windows `window_routing.routeSend` names.
-    discard registerDesktopWindow(firstWindow)
+    watchForReload(registerDesktopWindow(firstWindow))
     mainWindow = windowRouter()
     firstWindow.setMenuBarVisibility(false)
     firstWindow.setMenu(jsNull)

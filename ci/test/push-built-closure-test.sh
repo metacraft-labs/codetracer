@@ -12,7 +12,7 @@
 #     exits 0, as does a failed login;
 #   * with CT_JOB_STARTED_AT and CT_JOB_TIMEOUT_MINUTES it pushes only within
 #     what the job's limit leaves;
-#   * GPUI shard 1 (at its end), test-ui-tests' nixos leg and test-ui-tests-rr
+#   * TUI shard 1 (at its end), test-ui-tests' nixos leg and test-ui-tests-rr
 #     (after their build) run it, gated on dev/agents, with continue-on-error
 #     and their own timeout-minutes;
 #   * no job that another job `needs` pushes -- ct-build in particular, which
@@ -140,7 +140,7 @@ job_timeout() {
 	head -n "$2" "$1" | grep -E '^    timeout-minutes: [0-9]+' | tail -1 | grep -oE '[0-9]+$'
 }
 for spec in \
-	".github/workflows/gpui-window-captures.yml|Push the dev shells this shard realised to the cache|1" \
+	".github/workflows/tui-tests.yml|Push the dev shells this shard realised to the cache|1" \
 	".github/workflows/codetracer.yml|Push the build to the cache|2"; do
 	IFS='|' read -r f name want <<<"$spec"
 	n="$(grep -c "name: ${name}\$" "$f")"
@@ -159,9 +159,11 @@ for spec in \
 			grep -q "CT_JOB_TIMEOUT_MINUTES: ${t}\$" <<<"$block"
 	done < <(grep -n "name: ${name}\$" "$f" | cut -d: -f1)
 done
-check "the GPUI push runs on one shard only" "the GPUI push is not limited to one shard" \
-	grep -q "matrix.shard == 1 &&" <(step_block .github/workflows/gpui-window-captures.yml \
-		"$(grep -n 'name: Push the dev shells this shard realised to the cache$' .github/workflows/gpui-window-captures.yml | cut -d: -f1)")
+check "the TUI push runs on one shard only" "the TUI push is not limited to one shard" \
+	grep -q "matrix.shard == 1 &&" <(step_block .github/workflows/tui-tests.yml \
+		"$(grep -n 'name: Push the dev shells this shard realised to the cache$' .github/workflows/tui-tests.yml | cut -d: -f1)")
+check "no GPUI shard pushes: they run out of their 90 minutes first" "gpui-window-captures.yml still pushes" \
+	test "$(grep -c push-built-closure.sh .github/workflows/gpui-window-captures.yml)" = 0
 
 # Nothing a job `needs` may push: a needed job holds its dependants until it
 # ends, so a push there would sit on their critical path (ct-build's did, in

@@ -1,3 +1,4 @@
+# ports: src/frontend/gpui/tests/test_plat52_gpui_plan.nim
 scenario: 1
 name: gpui/terminal-output-press-goes-to-the-write
 pack: codetracer

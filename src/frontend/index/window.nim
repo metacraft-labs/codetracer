@@ -513,6 +513,31 @@ proc sendWindowBootstrap(w: AppWindow; source: AppWindow; sourceTab: int;
     if panelGiven: layout else: nil)
   pushWindowList()
 
+proc watchForReload*(w: AppWindow) =
+  ## When `w`'s page loads again (a reload: the disconnect notice's Reconnect
+  ## calls `location.reload()`, and Windows keeps Electron's hidden menu with
+  ## its Ctrl+Shift+R), its new renderer is handshaken again and sent the
+  ## session it showed (`window_routing.bootstrapReloadedWindow`).
+  when not defined(server):
+    var loads = 0
+    w.window.webContents.on(cstring"did-finish-load", proc() =
+      inc loads
+      if loads < 2 or w.closed:
+        return
+      infoPrint "index: window ", $w.id, " reloaded: sending it its session again"
+      w.handshakeDone = false
+      w.onHandshake = proc() =
+        runAsWindow(w, proc() =
+          bootstrapReloadedWindow(w, js{
+            "home": paths.home.cstring,
+            "config": data.config,
+            "layout": data.layout,
+            "helpers": data.helpers,
+            "startOptions": windowStartOptions(),
+            "bypass": true})
+          pushWindowList())
+      startWindowHandshake(w))
+
 proc openSessionWindow*(source: AppWindow; sourceTab: int;
                         panel: JsObject = nil): AppWindow =
   ## Open a window showing `source`'s tab `sourceTab` (its session and its
@@ -523,6 +548,7 @@ proc openSessionWindow*(source: AppWindow; sourceTab: int;
     win.setMenuBarVisibility(false)
     win.setMenu(jsNull)
     let w = registerDesktopWindow(win)
+    watchForReload(w)
     w.onHandshake = proc() =
       runAsWindow(w, proc() = sendWindowBootstrap(w, source, sourceTab, panel))
     win.webContents.once(cstring"did-finish-load", proc() =

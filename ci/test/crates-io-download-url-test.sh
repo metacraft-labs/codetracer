@@ -304,18 +304,17 @@ if [ -z "$NIXPKGS_REV" ]; then
 	fail "flake.lock names a locked nixpkgs revision" \
 		"could not read .nodes.nixpkgs.locked.rev, so the inertness check cannot run"
 else
-	# The locked node itself, narHash included, rather than
-	# `builtins.getFlake "github:NixOS/nixpkgs/<rev>"`: a locked tree is a
-	# store path Nix substitutes by its NAR hash (cache-push pushes the
-	# flake's inputs), where the bare github: reference has to be fetched from
-	# GitHub. That fetch failed on a fresh runner (lint-bash, run
-	# 44228447027) with nothing to say why, because the probe's stderr was
-	# discarded; it is now kept and reported.
+	# The flake's own nixpkgs input, as the cargo-stylus check below reads its
+	# inputs, rather than a fresh fetch of nixpkgs from GitHub: the job has
+	# already realised it to evaluate the flake. Fetching
+	# `github:NixOS/nixpkgs/<rev>` failed on fresh runners twice (lint-bash,
+	# runs 44228447027 and 44269676398), the second time with GitHub's "Bad
+	# credentials" for the job's token; the probe's stderr is kept and reported
+	# so a failure says why.
 	inert_expr() { # withOverlay(true|false) -> drvPath of a non-crates fetch
 		nix eval --raw --impure --expr "
       let
-        lock = builtins.fromJSON (builtins.readFile $REPO_ROOT/flake.lock);
-        nixpkgs = builtins.fetchTree lock.nodes.nixpkgs.locked;
+        nixpkgs = (builtins.getFlake (toString $REPO_ROOT)).inputs.nixpkgs;
         pkgs = import nixpkgs {
           system = \"$SYSTEM\";
         };

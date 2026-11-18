@@ -1,3 +1,4 @@
+# ports: src/frontend/gpui/tests/test_plat55_gpui_plan.nim
 scenario: 1
 name: gpui/problems-after-a-failed-build
 pack: codetracer

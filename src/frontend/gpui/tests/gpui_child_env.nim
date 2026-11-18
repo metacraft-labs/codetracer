@@ -42,6 +42,31 @@
 
 import std/[os, strtabs, strutils]
 
+const WindowRunCeilingS* = 300
+  ## How long one run of `codetracer-gpui` a GPUI suite starts may take
+  ## before it is killed (`timeout`), in seconds. A HANG CEILING, NOT A
+  ## TIMING EXPECTATION: a run that never finishes (a move the engine never
+  ## answers) fails instead of waiting forever, and nothing else is read
+  ## into it. Two minutes was not enough on a machine at load 150, where
+  ## three plat50 runs were cut off mid-run; CI runners are loaded too.
+
+proc gpuiRunScript*(redirects = ""; ceilingS = WindowRunCeilingS): string =
+  ## The `/bin/sh -c` script a suite starts `codetracer-gpui` with: `$0` is
+  ## the binary, `$@` its arguments, `redirects` its streams' files; run
+  ## under `timeout` at the hang ceiling, so every run a suite starts this
+  ## way has one.
+  "exec timeout " & $ceilingS & " \"$0\" \"$@\"" &
+    (if redirects.len > 0: " " & redirects else: "")
+
+const TimeoutKilledExit* = 124
+  ## The status `timeout` exits with when it killed the run at its ceiling.
+
+proc gpuiExitText*(rc: int; ceilingS = WindowRunCeilingS): string =
+  ## How a suite names a run's non-zero status: a run `gpuiRunScript`'s
+  ## `timeout` killed is a HANG, said as one, not one more failed exit.
+  if rc == TimeoutKilledExit: "hung past WindowRunCeilingS (" & $ceilingS & " s) and was killed"
+  else: "exited " & $rc
+
 const RuntimeLibPathEnvVar* = "CODETRACER_GPUI_RUNTIME_LIB_PATH"
   ## The dev shell's GPUI runtime library path (`nix/shells/ci-base.nix`).
 

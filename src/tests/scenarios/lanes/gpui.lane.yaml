@@ -48,4 +48,17 @@ applicable:
   - ../gpui/fit-event-log-wide-column-scrolls.yaml
   - ../gpui/multiclick-double-selects-the-word.yaml
   - ../gpui/tables-cut-cell-detail.yaml
+  - ../gpui/no-timeline-pane.yaml
+  - ../gpui/agent-activity-ai-prompt.yaml
+  - ../gpui/build-tasks-default-task-from-the-picker.yaml
+  - ../gpui/call-trace-current-frame.yaml
+  - ../gpui/chrome-editor-tab-marks-unsaved.yaml
+  - ../gpui/clicks-call-menu-collapse.yaml
+  - ../gpui/editor-caret-brings-rows.yaml
+  - ../gpui/files-pane-create-a-file.yaml
+  - ../gpui/find-in-files-grep-seeds-the-field.yaml
+  - ../gpui/layout-shared-default.yaml
+  - ../gpui/nim-tracing-constant-from-the-menu.yaml
+  - ../gpui/requests-pane-filters-and-goes-to-the-handler.yaml
+  - ../gpui/top-bar-ctrl-o-reveals-docked.yaml
 unsupported: []

@@ -293,6 +293,43 @@ suite "two windows showing one replay":
     ck noTrace.len == 1
     ck noTrace[0]["layout"].to(cstring) == cstring"pane"
 
+  test "a reloaded window is sent its first tab's session again":
+    # The page reloaded (Reconnect's `location.reload()`): the new renderer
+    # has one tab and was told nothing, and the main process sends a window
+    # its session once. An edit session's `no-trace` is its startup message
+    # (no `init`); the page's other tabs are gone, and so forgotten
+    # (codetracer-pm issue 2026-11-17 "a reloaded edit-mode window stays blank").
+    resetWindows()
+    let (first, firstTold) = openWindow(1, "first")
+    first.sendTo(cstring"CODETRACER::no-trace",
+                 js{"tab": 0, "layout": cstring"edit-layout", "path": cstring"src/"})
+    first.sendTo(cstring"CODETRACER::filesystem-loaded", js{"tab": 0, "nodes": 4})
+    first.sendTo(cstring"CODETRACER::trace-loaded",
+                 js{"tab": 3, "trace": js{"program": cstring"main.py"}})
+    firstTold.messages.setLen(0)
+    bootstrapReloadedWindow(first, js{"layout": cstring"debug-layout"})
+    ck firstTold.channels == @["CODETRACER::no-trace",
+      "CODETRACER::filesystem-loaded", "CODETRACER::init-session"]
+    let noTrace = firstTold.said("CODETRACER::no-trace")[0]
+    ck noTrace["tab"].to(int) == 0
+    ck noTrace["layout"].to(cstring) == cstring"edit-layout"
+    ck first.tabSessionMessages(3).len == 0
+    ck first.tabSessionMessages(0).len == 2
+
+  test "a reloaded window started on the welcome screen is sent it again":
+    # No tab had a session: the window showed its startup's welcome screen
+    # and recent items, and a reload is sent those again — the last of each.
+    resetWindows()
+    let (first, firstTold) = openWindow(1, "first")
+    first.sendTo(cstring"CODETRACER::welcome-screen", js{"layout": cstring"welcome"})
+    first.sendTo(cstring"CODETRACER::recent-items", js{"recentTraces": 1})
+    first.sendTo(cstring"CODETRACER::recent-items", js{"recentTraces": 2})
+    firstTold.messages.setLen(0)
+    bootstrapReloadedWindow(first, js{"layout": cstring"debug-layout"})
+    ck firstTold.channels == @["CODETRACER::welcome-screen", "CODETRACER::recent-items"]
+    ck firstTold.said("CODETRACER::recent-items")[0]["recentTraces"].to(int) == 2
+    ck firstTold.said("CODETRACER::init").len == 0
+
   test "a replay another window shows is not stopped with one window's tab":
     resetWindows()
     let (first, _) = openWindow(1, "first")

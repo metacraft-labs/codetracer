@@ -24,7 +24,7 @@
 ## No mocks: a real window, a real compositor, a real pointer, real OCR, the
 ## real `calc` recording stepped by a real replay-server.
 
-import std/[json, os, strutils, unittest]
+import std/[editdistance, json, os, strutils, unittest]
 
 import codetracer_embed
 import headless_app/layout_model
@@ -37,7 +37,7 @@ template ck(cond: untyped) =
 
 const
   Record = "src/tests/visual/plat48-gpui-window.json"
-  ExpectedAssertions = 134
+  ExpectedAssertions = 137
     ## The real Top context-menu frame adds one settled-frame assertion;
     ## pin and unpin each assert that they did not navigate the debugger.
 
@@ -148,10 +148,34 @@ suite "PLAT-48: the GPUI window's top bar and auto-hide panels, read from its pi
     ck rep["omnibarSymResults"][0].getStr == "add"
 
   test "the footer strip is the shared default's docked panes":
+    # The labels are read by OCR, which on some hosts misreads one letter of
+    # the small caps ("PROELEMS"). A label counts as drawn when a line reads
+    # it exactly, or within one edit of it while no other pane's label is
+    # that close: a misread letter is tolerated, a different label is not.
+    var vocabulary: seq[string]
+    for k in PaneKind:
+      vocabulary.add desktopTabTitle(k)
+    for d in sharedDefaultDocked():
+      vocabulary.add d.title
+    proc drawn(ocr, title: string): bool =
+      if ocr.contains(title): return true
+      for raw in ocr.splitLines:
+        let line = raw.strip
+        if line.len == 0 or editDistanceAscii(line, title) > 1: continue
+        var others = 0
+        for v in vocabulary:
+          if v != title and editDistanceAscii(line, v) <= 1: inc others
+        if others == 0: return true
+      false
+    # The controls: one misread letter passes; another pane's label in its
+    # place, or a reading as close to another label, does not.
+    ck drawn("BUILD\nPROELEMS\nFIND IN FILES\nREQUESTS", "PROBLEMS")
+    ck not drawn("BUILD\nTESTS\nFIND IN FILES\nREQUESTS", "PROBLEMS")
+    ck not drawn("BUILD\nPROBLEMXX\nFIND IN FILES\nREQUESTS", "PROBLEMS")
     let ocr = rec["footerOcr"].getStr
     for d in sharedDefaultDocked():
       checkpoint(d.title)
-      ck ocr.contains(d.title)
+      ck drawn(ocr, d.title)
 
   test "hover reveals the pane itself as an overlay; Esc restores every pixel":
     let rect = arr(rec["revealBottom"]["rect"])

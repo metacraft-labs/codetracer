@@ -110,13 +110,15 @@ let shimDir = getEnv("ISONIM_GPUI_SHIM_DIR",
                    repo.parentDir / "isonim-gpui/rust/target/debug")
 
 proc runKeys(project, stateDir: string; specs: seq[string]): (int, string) =
-  let p = startProcess(bin,
-    args = @["--edit", "--report-plan", "--width=1280", "--height=800",
+  let p = startProcess("/bin/sh",
+    args = @["-c", gpuiRunScript("2>&1"), bin,
+             "--edit", "--report-plan", "--width=1280", "--height=800",
              "--edit-keys=" & specs.join(","), project],
     env = gpuiChildEnv(shimDir, stateDir),
-    options = {poStdErrToStdOut})
+    options = {})
   let output = p.outputStream.readAll()
   let rc = p.waitForExit()
+  if rc == TimeoutKilledExit: checkpoint("codetracer-gpui " & gpuiExitText(rc))
   p.close()
   (rc, output)
 
@@ -160,11 +162,12 @@ suite "PLAT-44: the shipped binary, headless, through the shim's own dispatch":
     var args = @["--edit", "--report-plan", "--width=1280", "--height=800"]
     if keys.len > 0: args.add "--edit-keys=" & keys
     args.add project
-    let p = startProcess(bin, args = args,
+    let p = startProcess("/bin/sh", args = @["-c", gpuiRunScript("2>&1"), bin] & args,
                          env = gpuiChildEnv(shimDir, project / ".state"),
-                         options = {poStdErrToStdOut})
+                         options = {})
     let output = p.outputStream.readAll()
     let rc = p.waitForExit()
+    if rc == TimeoutKilledExit: checkpoint("codetracer-gpui " & gpuiExitText(rc))
     p.close()
     (rc, output, readFile(project / ProjectFile))
 

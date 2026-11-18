@@ -1,0 +1,20 @@
+scenario: 1
+name: gpui/no-timeline-pane
+pack: codetracer
+summary: >-
+  A replay opens with no Timeline pane anywhere: no tab names it and no
+  docked label does, while the panes beside it (Event Log, Call Trace) are
+  there.
+
+stage:
+  - use: record-program
+    with: { program: calc }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - wait: call-trace.loaded
+  # the control: the pane beside it, by the same kind of reading
+  - expect: { at: 'pane-tab[label="Event Log"]', present: true }
+  - expect: { at: 'pane-tab[label="Timeline"]', absent: true }
+  - expect: { at: 'pane[title="Timeline"]', absent: true }

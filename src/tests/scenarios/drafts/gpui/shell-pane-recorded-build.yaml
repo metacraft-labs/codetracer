@@ -1,3 +1,4 @@
+# ports: src/frontend/gpui/tests/test_plat61_gpui_shell.nim
 scenario: 1
 name: gpui/shell-pane-recorded-build
 pack: codetracer

@@ -874,3 +874,20 @@ proc dropIndicationRects*(g: WindowGeometry; ind: DropIndication;
     (tint: n.strip,
      caret: PxRect(x: max(n.strip.x, cx - DropCaretPx div 2), y: n.strip.y,
                    w: DropCaretPx, h: n.strip.h))
+
+const MinFooterLocationPx* = 240
+  ## The least the status bar's location keeps beside a note that does not
+  ## fit: enough for its tail, the file, the line and the ticks.
+
+proc fitFooterRow*(available, noteW, locationW: int): tuple[note, location: int] =
+  ## The status bar's note and its location share `available` pixels (the
+  ## row from the note's start to the copy button, less the gap between the
+  ## two and the certificate label). Both at their own widths when they fit.
+  ## Otherwise the location gives way first — a long path is cut at its start
+  ## and keeps its tail — down to `MinFooterLocationPx`, then the note is
+  ## cut: a note says what a key just did, and is read once.
+  let room = max(0, available)
+  if noteW + locationW <= room:
+    return (note: noteW, location: locationW)
+  let location = min(locationW, max(MinFooterLocationPx, room - noteW))
+  (note: max(0, min(noteW, room - location)), location: min(location, room))

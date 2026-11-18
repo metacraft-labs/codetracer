@@ -368,6 +368,11 @@ lint_step "a CI dev shell re-anchors hooks another Repro build wrote" \
 lint_step "native-backend's submodules are checked out before the visual replay policy" \
 	bash ci/test/native-backend-submodules-test.sh
 
+# A short ct-build products download is caught before extraction and
+# downloaded again, rather than failing the shard in tar.
+lint_step "a short ct-build products download is retried" \
+	bash ci/test/unpack-ct-build-products-test.sh
+
 # A GPUI shard gives a bare host the Vulkan driver, cursor theme and D-Bus
 # session configuration the window and its compositor need.
 lint_step "a GPUI shard provisions what a bare host lacks" \

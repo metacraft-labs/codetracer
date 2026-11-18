@@ -2,15 +2,16 @@ scenario: 1
 name: nim-views/nim-step-moves-by-nim-lines
 pack: codetracer
 summary: >-
-  On an rr recording of the Nim sudoku solver, the Nim source view steps by
+  On an MCR recording of the Nim sudoku solver, the Nim source view steps by
   Nim lines: from line 60 (the board literal spanning lines 60-70) Next stops
   at line 72, the next statement, in main.nim. (Reverse Next back to 60 is
-  not here: it never completes on this recording; codetracer-pm issue
-  2026-11-15-reverse-next-never-completes-on-an-rr-nim-recording.)
+  not here: MCR's stage0 replay answers reverse execution with E0C, codetracer-pm
+  milestones/MCR-Debug-Server.status.org, Linux row; on rr it is
+  nim-views/reverse-next-returns-to-the-nim-line.yaml.)
 
 stage:
   - use: record-program
-    with: { program: nim_sudoku_solver/main.nim, backend: rr }
+    with: { program: nim_sudoku_solver/main.nim, backend: mcr }
   - use: open-recording
 
 steps:

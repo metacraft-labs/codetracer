@@ -81,10 +81,11 @@ proc runPlan(cwd = ""): (int, JsonNode, JsonNode, string) =
   let args = @["--report-plan", "--width=1440", "--height=" & $PlanHeight,
                "--dock-out=" & dockFile, calc]
   let p = startProcess("/bin/sh",
-    args = @["-c", "exec \"$0\" \"$@\" 2>" & quoteShell(errFile), bin] & args,
+    args = @["-c", gpuiRunScript("2>" & quoteShell(errFile)), bin] & args,
     workingDir = cwd, env = env, options = {})
   let output = p.outputStream.readAll()
   let rc = p.waitForExit()
+  if rc == TimeoutKilledExit: checkpoint("codetracer-gpui " & gpuiExitText(rc))
   p.close()
   let err = if fileExists(errFile): readFile(errFile) else: ""
   removeFile(errFile)

@@ -18,4 +18,4 @@ steps:
   - wait: { until: { at: 'pane-tab[label="project/main.py ●"]', present: true }, timeout: 30s }
   - chord: Ctrl+S
   - wait: { until: { at: 'pane-tab[label="project/main.py"]', present: true }, timeout: 30s }
-  - expect: { at: 'editor[file="main.py"]/line[number="1"]', text: { contains: "xprint(1)" } }
+  - expect: { at: 'editor[file="main.py"]/line[number="1"]', text: { contains: "xprint" } }

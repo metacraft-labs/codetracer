@@ -30,7 +30,11 @@ flake_check() {
 	fi
 	# The `+` expansion keeps an empty array from tripping `set -u` on the
 	# older bashes this script still has to run under.
-	NIXPKGS_ALLOW_UNFREE=1 nix flake check --impure \
+	# `.?submodules=1`, as every package build is: the packages read their
+	# submodule libraries (libs/tree-sitter-*), and without it the evaluation
+	# stopped on "path '.../libs/tree-sitter-aiken' does not exist" (lint-nix,
+	# run 44269676398).
+	NIXPKGS_ALLOW_UNFREE=1 nix flake check '.?submodules=1' --impure \
 		${override_args[@]+"${override_args[@]}"}
 }
 

@@ -82,8 +82,11 @@ const
     <input type="checkbox" id="flag">
     <button id="button">a button</button>
     <div id="editor"><textarea id="editor-input"></textarea></div>
+    <div data-scope-kind="pane" id="llc-pane" tabindex="-1">
+      <div class="low-level-code"><div role="button" tabindex="0" id="llc-row">push %rbp</div></div>
+    </div>
   """
-  ExpectedChecks = 22
+  ExpectedChecks = 28
     ## Written from a run. See the end of `main`.
 
 proc freshEditor(): JsObject =
@@ -151,6 +154,21 @@ proc caseFocusAlreadyInEditor() {.async.} =
   ck $activeId() == "editor-input"
   endCase("a text field INSIDE the editor is the editor's: it is focused as before")
 
+proc caseLowLevelListingKeepsTheKeyboard() {.async.} =
+  beginCase()
+  # A step pressed in the Low Level Code listing (on a row, or on its pane,
+  # where a press on the header leaves the focus) stops somewhere, and the
+  # stop is revealed in the editor: the listing keeps the keyboard, so the
+  # next step goes by instruction too (codetracer-pm issue 2026-11-14).
+  for id in ["llc-row", "llc-pane"]:
+    let editor = freshEditor()
+    focusEl(qs(cstring("#" & id)))
+    revealLineAndFocus(editor, 4, 0)
+    ck $activeId() == id, id & ": the keyboard went to `" & $activeId() & "`"
+    ck editor.num("focusCalls") == 0
+    ck editor.num("line") == 4
+  endCase("a focused Low Level Code listing keeps the keyboard when a stop is revealed")
+
 proc main() {.async.} =
   echo ""
   echo "[Suite] a programmatic editor focus and the field being typed in"
@@ -158,6 +176,7 @@ proc main() {.async.} =
   await caseOtherTextFields()
   await caseNoTextField()
   await caseFocusAlreadyInEditor()
+  await caseLowLevelListingKeepsTheKeyboard()
   beginCase()
   # THE TALLY: a case that returned early is a count mismatch, not a pass.
   inc checks

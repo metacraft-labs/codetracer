@@ -350,10 +350,11 @@ template shownSessionVM(): SessionViewModel =
   ## was wired for).
   data.activeSessionVM()
 
-proc lowLevelListingHasFocus(): bool {.importjs:
-  "(function(){ var e = document.activeElement; return !!(e && e.closest && e.closest('.low-level-code')); })()".}
-  ## Whether the keyboard focus is in a Low Level Code listing (its rows are
-  ## focusable buttons).
+from ui/editor_focus import focusInLowLevelListing
+  # Whether the keyboard is in a Low Level Code listing, on a row or on the
+  # pane that holds it (where a press on the header puts the focus). Asking
+  # for `.low-level-code` alone answered false on the pane, and F10 /
+  # Shift+F10 went by source line (codetracer-pm issue 2026-11-14).
 
 # A step pressed while the tab's Low Level Code listing has the focus goes by
 # instruction when the tab's engine says it can (`renderer.step`,
@@ -365,7 +366,7 @@ listingStepsByInstruction = proc(action: CtEventKind): bool =
     of DapStepBack: "debugger.reverse-step-over"
     of CtReverseStepIn: "debugger.reverse-step-into"
     else: ""
-  if operation.len == 0 or not lowLevelListingHasFocus():
+  if operation.len == 0 or not focusInLowLevelListing():
     return false
   let vm = shownSessionVM()
   not vm.isNil and not vm.lowLevelCodeVM.isNil and

@@ -1,3 +1,4 @@
+# ports: src/frontend/gpui/tests/test_plat62_gpui_constraints.nim
 scenario: 1
 name: gpui/constraints-pane-in-edit-mode
 pack: codetracer

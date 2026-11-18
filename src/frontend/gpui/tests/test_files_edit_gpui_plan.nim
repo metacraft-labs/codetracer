@@ -88,7 +88,7 @@ proc run(args: seq[string]; dataHome: string; trace: var string): JsonNode =
   env["CODETRACER_GPUI_GESTURE_TRACE"] = "1"
   let errFile = genTempPath("files-edit-gpui-", ".err")
   let p = startProcess("/bin/sh",
-    args = @["-c", "exec timeout 120 \"$0\" \"$@\" 2>" & quoteShell(errFile),
+    args = @["-c", gpuiRunScript("2>" & quoteShell(errFile)),
              bin] & args, env = env, options = {})
   let output = p.outputStream.readAll()
   let rc = p.waitForExit()
@@ -97,7 +97,7 @@ proc run(args: seq[string]; dataHome: string; trace: var string): JsonNode =
   removeFile(errFile)
   removeDir(state)
   if rc != 0:
-    checkpoint("codetracer-gpui exited " & $rc & ": " & trace)
+    checkpoint("codetracer-gpui " & gpuiExitText(rc) & ": " & trace)
     raise newException(IOError, "the plan run failed: " & args.join(" "))
   result = parseJson(output)
   proc sweep(n: JsonNode) =

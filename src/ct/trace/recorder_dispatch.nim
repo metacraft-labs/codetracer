@@ -220,6 +220,24 @@ func displayName*(sel: RecorderSelector): string =
   elif sel.targetIsa != tiUnknown: token(sel.targetIsa)
   else: "unknown"
 
+func honouringBackend*(sel: RecorderSelector; requested: string): RecorderSelector =
+  ## `sel` with an explicit `--backend rr` / `ttd` honoured.
+  ##
+  ## A compiled `.nim` is `(slNim, tiNative, raMcr)` by default, recorded with
+  ## `ct-mcr` through this table; the selector is made from recognition alone,
+  ## so `--backend rr` was silently not honoured and the program was recorded
+  ## with MCR, whose replay refuses reverse execution (codetracer-pm issue
+  ## 2026-11-15 "Reverse Next never completes on an rr recording of a Nim
+  ## program"). With the user's backend the program is built and recorded
+  ## natively, as a C program is (`src/ct/trace/record.nim`); whether the host
+  ## can honour it is `native_backend_selection`'s question, asked next.
+  result = sel
+  if sel.language == slNim and sel.targetIsa == tiNative and sel.approach == raMcr:
+    case requested.strip.toLowerAscii
+    of "rr": result.approach = raRr
+    of "ttd": result.approach = raTtd
+    else: discard
+
 func isDeclared*(tool: RecorderTool): bool =
   ## Does this table have ANYTHING to say about the selector?  ``true`` for
   ## every supported recorder AND for every declared-unsupported one (a retired

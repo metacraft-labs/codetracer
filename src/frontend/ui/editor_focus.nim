@@ -25,7 +25,8 @@
 ## still placed: only the keyboard stays where the user put it. A focus
 ## already inside the editor (its own text area, its find widget) or on
 ## something that takes no text (a button, a list, the page) is moved as
-## before.
+## before — except the Low Level Code listing, whose steps go by instruction
+## only while it keeps the keyboard (`focusInLowLevelListing`).
 ##
 ## Browser-target module (it reads `document.activeElement`); tested in a real
 ## page by `src/frontend/tests/editor_focus_chromium_test.nim`.
@@ -83,6 +84,21 @@ proc focusIsTypingOutside*(editorNode: JsObject): bool =
     return false
   isNativeTextField(fieldFactsOf(a, editorNode))
 
+proc focusInLowLevelListing*(): bool {.importjs: """
+  (() => {
+    const a = document.activeElement;
+    if (!a || !a.closest) return false;
+    if (a.closest('.low-level-code')) return true;
+    const pane = a.closest('[data-scope-kind="pane"]');
+    return !!(pane && pane.querySelector('.low-level-code'));
+  })()""".}
+  ## Whether the keyboard is in a Low Level Code listing (or the pane that
+  ## holds it). Its steps go by machine instruction only while it has the
+  ## keyboard (`ui_js.listingStepsByInstruction`), and each step's stop
+  ## reveals the stop in the editor: focusing the editor there made the next
+  ## F10 / Shift+F10 a SOURCE step (codetracer-pm issue 2026-11-14, Shift+F10
+  ## by line from a function's first line left the function).
+
 proc revealLineAndFocus*(monacoEditor: JsObject; line, col: int) =
   ## Move the caret to `line` (and `col`; Monaco columns are 1-based, and one
   ## below 1 is clamped to 1), scroll it into the centre, and give the editor
@@ -93,5 +109,6 @@ proc revealLineAndFocus*(monacoEditor: JsObject; line, col: int) =
     return
   discard monacoEditor.revealLineInCenter(line)
   discard monacoEditor.setPosition(js{lineNumber: line, column: max(col, 1)})
-  if not focusIsTypingOutside(monacoEditor.getDomNode()):
+  if not focusIsTypingOutside(monacoEditor.getDomNode()) and
+     not focusInLowLevelListing():
     discard monacoEditor.focus()

@@ -84,10 +84,11 @@ proc runGpui(stateDir, configHome: string; extra: seq[string] = @[]): Run =
   args.add extra
   args.add calc
   let p = startProcess("/bin/sh",
-    args = @["-c", "exec \"$0\" \"$@\" 2>" & quoteShell(errFile), bin] & args,
+    args = @["-c", gpuiRunScript("2>" & quoteShell(errFile)), bin] & args,
     env = env, options = {})
   let output = p.outputStream.readAll()
   result.rc = p.waitForExit()
+  if result.rc == TimeoutKilledExit: checkpoint("codetracer-gpui " & gpuiExitText(result.rc))
   p.close()
   result.err = if fileExists(errFile): readFile(errFile) else: ""
   removeFile(errFile)

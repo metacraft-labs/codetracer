@@ -32,6 +32,7 @@ import std/[json, os, osproc, streams, strtabs, strutils, tempfiles, unittest]
 
 import ../../viewmodel/tests/unit/build_fixtures/plat56_c_build
 import ../../viewmodel/tests/unit/build_fixtures/plat56_gcc_quotes
+import ./gpui_child_env
 from ../../viewmodel/viewmodels/build_tasks import NoBuildTasksText
 
 var CHECKS = 0
@@ -89,7 +90,7 @@ proc windowPlan(project, ops: string;
                "--window-ops=" & ops, "--edit",
                (if editTarget.len > 0: editTarget else: project)]
   let p = startProcess("/bin/sh",
-    args = @["-c", "exec \"$0\" \"$@\" 2>" & quoteShell(errFile), bin] & args,
+    args = @["-c", gpuiRunScript("2>" & quoteShell(errFile)), bin] & args,
     workingDir = project, env = env, options = {})
   let output = p.outputStream.readAll()
   let rc = p.waitForExit()
@@ -98,7 +99,7 @@ proc windowPlan(project, ops: string;
   removeFile(errFile)
   removeDir(state)
   if rc != 0:
-    checkpoint("codetracer-gpui exited " & $rc & ": " & result.trace)
+    checkpoint("codetracer-gpui " & gpuiExitText(rc) & ": " & result.trace)
     raise newException(IOError, "the window plan run failed (" & ops & ")")
   result.plan = parseJson(output)
 
