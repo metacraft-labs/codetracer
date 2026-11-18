@@ -1011,6 +1011,16 @@ proc normLabel(s: string): string =
           if want[i] != flat[i]: inc diff
         if diff == 1: close.add k
   if close.len == 1: return gpuiPaneName(close[0])
+  # the tab's pin, drawn right after the caption, read as one or two more
+  # characters (`VERIFICATIONS?`): one pane's whole caption and at most two
+  # more, when no other caption is also a start of it
+  var extended: seq[PaneKind]
+  if flat.len >= 5:
+    for k in PaneKind:
+      let want = desktopTabTitle(k).replace(" ", "")
+      if want.len >= 5 and flat.startsWith(want) and flat.len - want.len in 1 .. 2:
+        extended.add k
+  if extended.len == 1: return gpuiPaneName(extended[0])
   # a short caption (the footer's `BUILD`) is the first word of one pane's
   # name when it is the first word of no other's
   var prefixed: seq[PaneKind]

@@ -17,6 +17,10 @@ steps:
   - wait: { until: { at: 'dropdown[level="1"]', present: true }, timeout: 30s }
   - click: { at: 'dropdown[level="1"]/dropdown-item[label="View"]' }
   - wait: { until: { at: 'dropdown[level="2"]', assert: 'offers("Verification")' }, timeout: 30s }
+  # into the submenu level with View first, as a hand does: a straight line
+  # from View to Verification crosses Build, Reset, Debug and Help, and the
+  # parent menu opens each one under the pointer
+  - hover: { at: 'dropdown[level="2"]/dropdown-item[label="Filesystem"]' }
   - click: { at: 'dropdown[level="2"]/dropdown-item[label="Verification"]' }
   - wait: { until: { at: 'pane[title="Verification"]', present: true }, timeout: 30s }
   # the pane's own Run control (▶ at the header's right end)
