@@ -677,16 +677,17 @@ src/frontend/styles/components/flow.styl :: light-icon(FLOW_HIDE_ICON, auto)
 src/frontend/styles/components/menu_bar.styl :: -webkit-mask: url('../../public/resources/menu/ct_logo_dark.svg') center / cover no-repeat
 ```
 
-### D-43: In the light theme, every text field is the canvas colour
+### D-43: In the light theme, every text field is `surface/input/default`
 
-Every text field (panel and search fields, the welcome forms, the command
-prompt, the Event Log "Rows" field, the Search panel's field) is filled with
-`colors/ui/surface/base/canvas` in the light theme, at rest and while in use. The
-dark theme keeps each field's own fill. One helper, `field-fill()` in `input.styl`,
-so a new field takes the same rule. (Nikolay, 2026-11-18)
+Every text field (panel and search fields, the welcome forms, the command prompt,
+the Event Log "Rows" field, the Search panel's field) takes the field token the
+Figma light screens use, `colors/ui/surface/input/default` (#F8F6F2), at rest and
+while in use: the same colour as the frame around the panels. The dark theme keeps
+each field's own fill. One helper, `field-fill()` in `input.styl`, so a new field
+takes the same rule. (Nikolay, 2026-11-18)
 
 ```guard
-src/frontend/styles/components/input.styl :: by-mode(dark, colors-ui-surface-base-canvas)
+src/frontend/styles/components/input.styl :: by-mode(dark, colors-ui-surface-input-default)
 src/frontend/styles/components/input.styl :: background: field-fill(colors-ui-surface-input-secondary)
 src/frontend/styles/components/command-palette.styl :: background: field-fill(colors-ui-surface-primary-default)
 src/frontend/styles/components/event_log.styl :: background: field-fill(colors-ui-surface-input-secondary)
