@@ -13041,6 +13041,12 @@ proc buildWindowOperationTables(r: GpuiRenderer) =
                  "view.scroll-right-half", "view.scroll-to-line-start"],
                 act(runGpuiViewOperation(r, c.name)))
   window.bindOp("help.keyboard-shortcuts", act(showShortcutReference(r)))
+  # The desktop's `Ctrl+N` (CUA `session-tabs.new`): a new tab on the
+  # Welcome screen, as the strip's "+" opens one — the element table answers
+  # only the "+"'s press, so the key reaches it here.
+  window.bindOp("session-tabs.new", act do:
+    gHoverTabAdd = false
+    openWelcomeTab(r))
   # PLAT-70 Part C: `Escape` ends a committed search's browsing.
   window.bindOp("modal.return-to-normal", act do:
     gFindBrowsing = false
