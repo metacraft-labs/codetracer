@@ -98,6 +98,18 @@ proc launchGpui(ctx: GuiContext; s: StageState) =
     if v.len > 0: lib.add v
   ctx.env["LD_LIBRARY_PATH"] = lib.join(":")
   ctx.env.del("LD_PRELOAD")
+  # The host's interactive-shell state is not the app's: a shell the app
+  # starts (the Shell pane's) would run the host's prompt hook — the repro
+  # shell hook a workstation installs, which walks the directories and may
+  # activate a dev environment between commands — and direnv's. So the
+  # prompt command, the repro hook's own state and direnv's are dropped.
+  # (A system rc file can install the hook again: a scenario that starts a
+  # shell starts it with --norc, as the Shell drafts do.)
+  ctx.env.del("PROMPT_COMMAND")
+  var hostShellState: seq[string]
+  for k, _ in ctx.env:
+    if k.startsWith("__REPRO") or k.startsWith("DIRENV_"): hostShellState.add k
+  for k in hostShellState: ctx.env.del(k)
   if getEnv("CT_GUI_BINDING_DEBUG").len > 0: ctx.env["CODETRACER_GPUI_GESTURE_TRACE"] = "1"
   # The pointer's shapes are the cursor theme's: a window on a display with
   # no theme it can load keeps the X server's own `X` cursor whatever it
