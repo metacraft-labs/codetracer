@@ -1,0 +1,61 @@
+scenario: 1
+name: shared-editor/debug-mode-shared-editor
+pack: codetracer
+summary: >-
+  With the sharedEditor setting on, a recording opens in the shared editor
+  and no editor on the page is Monaco's. The palette's "Developer: Toggle
+  Shared Editor" switches the running window to Monaco and back, the caret
+  staying on its line. In Debug mode the stepping keys reach the debugger
+  (Ctrl+F8 to line 9, F10 to 10), the arrows move the caret and typing
+  changes nothing; the right-click menu is CodeTracer's.
+
+stage:
+  - use: record-program
+    with: { program: src/db-backend/tests/fixtures/origin/python/simple_trivial_chain/main.py }
+  - use: front-end-options
+    with: { env: { CODETRACER_SHARED_EDITOR: "1" } }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 180s }
+  - wait: { until: { at: 'editor[file="main.py"]', shared: true }, timeout: 60s }
+  - expect: { at: window, monaco-editors: 0 }
+  # the palette switches a running window, and the caret keeps its line
+  # where the spec presses: line 10, column 5
+  - click: { at: 'editor[file="main.py"]/line[number="10"]', anchor: caret(5) }
+  - wait: { until: { at: 'editor[file="main.py"]', caret-line: 10 }, timeout: 10s }
+  - chord: Ctrl+p
+  - type: ":Toggle Shared Editor"
+  - wait: { until: { at: 'omnibox/option[label="Developer: Toggle Shared Editor"]', kind: command }, timeout: 15s }
+  - click: 'omnibox/option[label="Developer: Toggle Shared Editor"]'
+  - wait: { until: { at: 'editor[file="main.py"]', shared: false }, timeout: 30s }
+  # the caret keeps its line (the editor highlights it, whichever surface has
+  # the keys)
+  - wait: { until: { at: 'editor[file="main.py"]', highlighted-line: 10 }, timeout: 30s }
+  - chord: Ctrl+p
+  - type: ":Toggle Shared Editor"
+  - wait: { until: { at: 'omnibox/option[label="Developer: Toggle Shared Editor"]', kind: command }, timeout: 15s }
+  - click: 'omnibox/option[label="Developer: Toggle Shared Editor"]'
+  - wait: { until: { at: 'editor[file="main.py"]', shared: true }, timeout: 30s }
+  - wait: { until: { at: 'editor[file="main.py"]', highlighted-line: 10 }, timeout: 30s }
+  # Debug mode: F10 steps, the arrows move the caret, typing changes nothing
+  - click: { at: 'editor[file="main.py"]/line[number="9"]', anchor: text-start }
+  - wait: { until: { at: 'editor[file="main.py"]', caret-line: 9 }, timeout: 10s }
+  - chord: Ctrl+F8
+    settle: false
+  - wait: { until: { at: 'editor[file="main.py"]', current-line: 9 }, timeout: 60s }
+  - wait: { until: replay-idle, timeout: 60s }
+  - key: F10
+    settle: false
+  - wait: { until: { at: 'editor[file="main.py"]', current-line: 10 }, timeout: 60s }
+  - wait: { until: replay-idle, timeout: 60s }
+  - click: { at: 'editor[file="main.py"]/line[number="9"]', anchor: text-start }
+  - key: Down
+  - wait: { until: { at: 'editor[file="main.py"]', caret-line: 10 }, timeout: 10s }
+  - type: "zz"
+  - expect: { at: 'editor[file="main.py"]', assert: 'lacks-text("zz")' }
+  # the right-click menu is CodeTracer's
+  - click: { at: 'editor[file="main.py"]/line[number="3"]', anchor: text-start, button: right }
+  - wait: { until: { at: context-menu, present: true }, timeout: 15s }
+  - expect: { at: context-menu, assert: 'offers("Jump to line")' }
+  - key: Esc

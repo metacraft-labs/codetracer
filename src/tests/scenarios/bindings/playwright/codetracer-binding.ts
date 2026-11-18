@@ -89,7 +89,7 @@ const ROLES: Record<string, { affordances: string[]; properties: string[] }> = {
                  // pw8
                  "flow-values",
                  // pw6: the shared editor
-                 "shared", "keymap", "mode"],
+                 "shared", "keymap", "mode", "highlighted-line"],
   },
   line: {
     affordances: ["click", "double-click", "context-click"],
@@ -616,7 +616,7 @@ function readSurface(): any {
     const ed = comp.querySelector(".monaco-editor") as HTMLElement | null;
     const props: Record<string, unknown> = {
       file, active: isActive, focused: within(comp), "read-only": false,
-      "current-line": 0, "caret-line": 0, "first-visible": 0, "last-visible": 0, text: [] as string[],
+      "current-line": 0, "caret-line": 0, "highlighted-line": 0, "first-visible": 0, "last-visible": 0, text: [] as string[],
     };
     // the shared editor (the `sharedEditor` setting) marks its root; it
     // reports its keymap and, for modal keymaps, the mode it is in
@@ -643,6 +643,10 @@ function readSurface(): any {
         .map((e) => e.getBoundingClientRect().top);
       const cursorTop = (ed.querySelector(".cursors-layer .cursor") as HTMLElement | null)?.getBoundingClientRect();
       const cursorShown = !!cursorTop && cursorTop.height > 0 && within(comp);
+      // the caret's line as the editor highlights it (`.current-line`, drawn
+      // whether or not the editor has the keys): where the caret is, also
+      // while a palette or another pane holds the focus
+      const lineHl = (ed.querySelector(".view-overlays .current-line") as HTMLElement | null)?.getBoundingClientRect();
       const texts: string[] = [];
       for (const r of rows) {
         const lineEl = r.l ?? r.g;
@@ -654,6 +658,7 @@ function readSurface(): any {
         const caret = cursorShown && cursorTop!.top >= lb.top - 1 && cursorTop!.top < lb.bottom - 1;
         if (current) props["current-line"] = r.n;
         if (caret) props["caret-line"] = r.n;
+        if (lineHl && lineHl.height > 0 && Math.abs(lineHl.top - lb.top) < 3) props["highlighted-line"] = r.n;
         const lnode = {
           role: "line", keys: [["number", String(r.n)]],
           props: {

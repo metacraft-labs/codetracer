@@ -6799,21 +6799,6 @@ jobs:
         # borrows from. The recipe starts its own Xvfb.
         run: nix develop .#devShells.x86_64-linux.default --command just plat60-native-capture-electron
 
-      - name: The desktop's generated C and disassembly of a Nim recording
-        if: ${{ !cancelled() && steps.ct.outcome == 'success' }}
-        # View > View Generated C Source and View Disassembly in the REAL
-        # Electron app (`low-level-code/generated-c-source.spec.ts`): on a
-        # `ct record` recording of a Nim program, whose C and source maps the
-        # recording keeps, and in Edit mode on a small Nim project. It runs
-        # here for the same reason as the step above: `ct-native-replay`, rr
-        # and the `build-once` tree come from `just test-gui`, and the GUI
-        # fixture builds ct-mcr from the codetracer-native-recorder sibling
-        # this job clones. The dev shell's `nim` is CodeTracer's own compiler,
-        # which the `ct record` and Edit-mode cases need; the stock-compiler
-        # case records with nixpkgs' Nim, which the shell exports as
-        # GENC_STOCK_NIM (nix/shells/ci-base.nix).
-        run: nix develop .#devShells.x86_64-linux.default --command just generated-c-desktop
-
       - name: TUI Tier 1 over a native rr recording (the `tui-native` lane)
         if: ${{ !cancelled() && steps.ct.outcome == 'success' }}
         # The terminal's suites that open an rr recording of a native program

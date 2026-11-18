@@ -195,7 +195,7 @@ src/frontend/viewmodel/tests/unit/plat34-front-end-mutation-control.sha256	ci/li
 # 96daf956e5 (a file opened in a second window, host-page clients) moved the
 # Playwright binding under its record. A re-grade of the arms whose needles
 # sit in it is owed.
-src/tests/scenarios/plat66-pack-mutation-control.sha256	src/tests/scenarios/bindings/playwright/codetracer-binding.ts	dac9e35953b0d93636c2284d9c9a858c2bba982b92e9311b0f41fb666e6879c0	c5521cb5043142cc1a7dec7787822fe54925664c626b8de3cc8b1fab8e192b5b
+src/tests/scenarios/plat66-pack-mutation-control.sha256	src/tests/scenarios/bindings/playwright/codetracer-binding.ts	dac9e35953b0d93636c2284d9c9a858c2bba982b92e9311b0f41fb666e6879c0	8ccca3c61e3613acfd33944385af51bc6ec7c72ad3ebf38a9948042267cc9c36
 # plat51: graded at f1788c93b4; 8f8906730e  moved src/db-
 # backend/src/dap_handler.rs after the grade. Re-grade the arms whose needles
 # sit in them.
@@ -232,8 +232,8 @@ src/frontend/tui/tests/plat51-parity-mutation-control.sha256	src/frontend/tui/te
 # plat47: graded at 39e4112f69; b9396a9502  moved
 # src/frontend/tui/app/runtime.nim after the grade. Re-grade the arms whose
 # needles sit in them.
-src/frontend/viewmodel/tests/unit/plat17-wasm-mutation-control.sha256	justfile	e0b0f1e05b1e7907a3cc8a424293bf7353eb6f4cd1bf6a624ce1d927128d1443	5c01a4afad146983fce6045d349b701d59fa82bd226bebcf2d27338a7f1aa6f0
-src/frontend/viewmodel/tests/unit/plat33-collab-mutation-control.sha256	justfile	e0b0f1e05b1e7907a3cc8a424293bf7353eb6f4cd1bf6a624ce1d927128d1443	5c01a4afad146983fce6045d349b701d59fa82bd226bebcf2d27338a7f1aa6f0
+src/frontend/viewmodel/tests/unit/plat17-wasm-mutation-control.sha256	justfile	e0b0f1e05b1e7907a3cc8a424293bf7353eb6f4cd1bf6a624ce1d927128d1443	2861fd4f2ac37e7a9501aa67818592239b505c79a23dbe9d7daeec710b607694
+src/frontend/viewmodel/tests/unit/plat33-collab-mutation-control.sha256	justfile	e0b0f1e05b1e7907a3cc8a424293bf7353eb6f4cd1bf6a624ce1d927128d1443	2861fd4f2ac37e7a9501aa67818592239b505c79a23dbe9d7daeec710b607694
 src/tests/scenarios/plat66-pack-mutation-control.sha256	ci/test/scenarios.sh	4edebac246b9c375f8b5e181b3fb621774088543476bea5c556b0e1d642c0e77	9a18568110d632f5b205c1de4351a6d177b8dd22bcef360ba21ac1b878b5ca99
 
 # The shared editor on every editor surface (ui/editor_surface: the macro
@@ -266,7 +266,7 @@ src/frontend/viewmodel/tests/unit/plat68-keymaps-mutation-control.sha256	src/fro
 src/frontend/tui/tests/plat61-shell-mutation-control.sha256	src/ct/db_backend_record.nim	a64446b2acf2dc15bad6f4a77da0132753283c5af6ecd390b4c8650c6966114c	001fa9cb53c251ec472b956f1e5f2c27828206e11e3b08b44acc13c2b7b605d5
 src/frontend/tui/tests/plat70e-origin-mutation-control.sha256	ci/lib/run-nim-test-lane.sh	da6b4e46c486f1a7762fd79b05a42a15dd1b862ab4599ffa22c1bbc166d63783	d1a2a215a9f74c50d465925aaa14ad2fbc674db88c4dfa5e4a2e24ea222ef97e
 src/frontend/viewmodel/tests/unit/plat17-wasm-mutation-control.sha256	ci/lib/run-nim-test-lane.sh	da6b4e46c486f1a7762fd79b05a42a15dd1b862ab4599ffa22c1bbc166d63783	d1a2a215a9f74c50d465925aaa14ad2fbc674db88c4dfa5e4a2e24ea222ef97e
-src/frontend/viewmodel/tests/unit/plat33-collab-mutation-control.sha256	.github/workflows/codetracer.yml	4329483bcc55e3898b373e4b379234071ee6e7d04c19bd109045028c62c94d56	40da4b0f7493b6d533dd395438b79c68250ba9a97dfa2231602a1660b98290b7
+src/frontend/viewmodel/tests/unit/plat33-collab-mutation-control.sha256	.github/workflows/codetracer.yml	4329483bcc55e3898b373e4b379234071ee6e7d04c19bd109045028c62c94d56	b7822f67408bd10abefaf58d84b011d7fd930253404be13820b3a5fe2ce4b586
 src/frontend/tui/tests/plat70f-pointer-mutation-control.sha256	src/db-backend/src/db.rs	5643f4af288ed8fc9f76c0fb60b2a71af66f1dce2dc96235009e4994b42a398b	222a83df863a814d1f930f15f4f2b6a478c03c30cac3b5bd8eaac74a6a5e63d5
 src/frontend/tui/tests/plat60-low-level-code-mutation-control.sha256	src/db-backend/src/dap_handler.rs	23f8ff8145f2d5a678588557c9c855a9701cd2bf5fa7afa677028b7262076e76	67fe6a943d6ceef4e79b1aa750128af830f3e26222cd96119ee00a7e0d9884c2
 src/frontend/tui/tests/plat51-parity-mutation-control.sha256	src/db-backend/src/dap_handler.rs	23f8ff8145f2d5a678588557c9c855a9701cd2bf5fa7afa677028b7262076e76	67fe6a943d6ceef4e79b1aa750128af830f3e26222cd96119ee00a7e0d9884c2

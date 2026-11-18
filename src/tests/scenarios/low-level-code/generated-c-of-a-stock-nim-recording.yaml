@@ -1,0 +1,49 @@
+scenario: 1
+name: low-level-code/generated-c-of-a-stock-nim-recording
+pack: codetracer
+summary: >-
+  On a recording of a Nim program made with a stock Nim compiler (whose C
+  carries `#line` directives and no source map), View › View Generated C
+  Source shows the stop line's C in the Low Level Code pane with a row
+  anchored to it, and View › View Disassembly then shows the stop's machine
+  code.
+
+stage:
+  - use: record-program
+    with: { program: src/db-backend/test-programs/nim/nim_flow_test.nim, nim: stock }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 300s }
+  - wait: { until: { at: window, front-tabs: { contains: ".nim" } }, timeout: 120s }
+  - click: menu-bar
+  - wait: { until: { at: 'menu-bar/menu[label="View"]', present: true }, timeout: 10s }
+  - hover: { at: 'menu-bar/menu[label="View"]', for: 300ms }
+  - wait: { until: { at: 'menu-bar/menu-item[label="View Generated C Source"]', present: true }, timeout: 10s }
+  # Across into View's entries along its own row first, as a user does: a
+  # diagonal path over Build and Reset would open their folders instead.
+  - hover: { at: 'menu-bar/menu-item[label="Filesystem"]', for: 200ms }
+  # the event log and call trace may still be filling in behind the menu
+  - wait: { until: settled, timeout: 30s }
+  - click: 'menu-bar/menu-item[label="View Generated C Source"]'
+    # the pane loads the listing after the click; the next wait covers it
+    settle: false
+  - wait: { until: { at: low-level-code, count: { gt: 5 } }, timeout: 120s }
+  - wait: { until: { at: low-level-code, assert: has-active-row }, timeout: 60s }
+  # the stop is `main()` on line 23. The stock compiler's C attributes it by
+  # `#line 23 FX_63` (FX_63 is nim_flow_test.nim) and the lines under it up
+  # to the next directive; the pane anchors on the directive itself (C line
+  # 316 of the module's C, as the spec's check accepted)
+  - expect: { at: low-level-code, assert: 'active-row-shows("^#line 23 FX_63$")' }
+  - expect: { at: low-level-code, error: "" }
+  - click: menu-bar
+  - wait: { until: { at: 'menu-bar/menu[label="View"]', present: true }, timeout: 10s }
+  - hover: { at: 'menu-bar/menu[label="View"]', for: 300ms }
+  - wait: { until: { at: 'menu-bar/menu-item[label="View Disassembly"]', present: true }, timeout: 10s }
+  - hover: { at: 'menu-bar/menu-item[label="Filesystem"]', for: 200ms }
+  # the event log and call trace may still be filling in behind the menu
+  - wait: { until: settled, timeout: 30s }
+  - click: 'menu-bar/menu-item[label="View Disassembly"]'
+    settle: false
+  - wait: { until: { at: low-level-code, address: { matches: "^Originating address: 0x[0-9A-Fa-f]+$" } }, timeout: 120s }
+  - wait: { until: { at: low-level-code, count: { gt: 5 } }, timeout: 60s }

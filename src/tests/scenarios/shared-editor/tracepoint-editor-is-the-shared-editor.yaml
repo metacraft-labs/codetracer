@@ -1,0 +1,27 @@
+scenario: 1
+name: shared-editor/tracepoint-editor-is-the-shared-editor
+pack: codetracer
+summary: >-
+  With the sharedEditor setting on, Enter on a line of a recording opens the
+  tracepoint editor, drawn by the shared editor too: typing goes into it,
+  and no editor root on the page is Monaco's.
+
+stage:
+  - use: record-program
+    with: { program: src/db-backend/tests/fixtures/origin/python/simple_trivial_chain/main.py }
+  - use: front-end-options
+    with: { env: { CODETRACER_SHARED_EDITOR: "1" } }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 180s }
+  - wait: { until: { at: 'editor[file="main.py"]', shared: true }, timeout: 60s }
+  # where the spec presses: line 10, column 5
+  - click: { at: 'editor[file="main.py"]/line[number="10"]', anchor: caret(5) }
+  - wait: { until: { at: 'editor[file="main.py"]', caret-line: 10 }, timeout: 10s }
+  - key: Enter
+  - wait: { until: { at: 'tracepoint-editor[line="10"]', present: true }, timeout: 30s }
+  - wait: { until: { at: 'tracepoint-editor[line="10"]', shared: true }, timeout: 30s }
+  - type: "log(1)"
+  - wait: { until: { at: 'tracepoint-editor[line="10"]', text: { contains: "log(1)" } }, timeout: 10s }
+  - expect: { at: window, monaco-editors: 0 }

@@ -1,0 +1,36 @@
+scenario: 1
+name: keymaps/monaco-unbound-f7-does-nothing
+pack: codetracer
+summary: >-
+  In Monaco, the default editor (the sharedEditor setting is off), a
+  shortcut that no keymap binds does nothing. Monaco's own F7 and Shift+F7
+  move to the next or previous occurrence of the word under the caret, and
+  the CUA base gives them to the diff editor only. With the caret on `left`
+  in add's body, which the file holds many times, F7 and then Shift+F7 leave
+  the caret on its line with nothing selected.
+  keymaps/f7-bound-by-a-row-reaches-the-editor.yaml is the control: once a
+  user row binds F7, the same press changes the selection.
+
+stage:
+  - use: record-program
+    with: { program: calc }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 180s }
+  - expect: { at: 'editor[file="main.py"]', assert: "stopped-at(1)" }
+  - expect: { at: 'editor[file="main.py"]', shared: false }
+  # the caret inside `left` in `return left + right`
+  - click: { at: 'editor[file="main.py"]/line[number="31"]', anchor: caret(14) }
+  - wait: { until: { at: 'editor[file="main.py"]', highlighted-line: 31 }, timeout: 10s }
+  - expect: { at: 'editor[file="main.py"]', selected-text: "" }
+  - key: F7
+    # long enough for Monaco's word-highlight move to have shown
+    dwell: 2s
+  - expect: { at: 'editor[file="main.py"]', highlighted-line: 31 }
+  - expect: { at: 'editor[file="main.py"]', selected-text: "" }
+  - chord: Shift+F7
+    dwell: 2s
+  - expect: { at: 'editor[file="main.py"]', highlighted-line: 31 }
+  - expect: { at: 'editor[file="main.py"]', selected-text: "" }
+  - expect: { at: 'editor[file="main.py"]', assert: "stopped-at(1)" }

@@ -1,0 +1,54 @@
+scenario: 1
+name: low-level-code/generated-c-in-edit-mode
+pack: codetracer
+summary: >-
+  In Edit mode on a Nim project, View › View Generated C Source compiles the
+  saved file and shows the caret line's C in the Low Level Code pane, a row
+  anchored to it; on a file that does not compile it shows the compiler's
+  own error instead ("could not compile broken.nim to C: … Error: type
+  mismatch") and no rows.
+
+stage:
+  - use: write-project
+    with:
+      files:
+        main.nim: "proc twice(x: int): int =\n  result = x * 2\n\necho twice(21)\n"
+        broken.nim: "let answer: int = \"forty-two\"\necho answer\n"
+  - use: open-project
+    with: { folder: $project, file: main.nim }
+
+steps:
+  - wait: { until: { at: 'editor[file="main.nim"]/line[number="2"]', present: true }, timeout: 120s }
+  - click: { at: 'editor[file="main.nim"]/line[number="2"]', anchor: text-start }
+  - wait: { until: { at: 'editor[file="main.nim"]', caret-line: 2 }, timeout: 10s }
+  - click: menu-bar
+  - wait: { until: { at: 'menu-bar/menu[label="View"]', present: true }, timeout: 10s }
+  - hover: { at: 'menu-bar/menu[label="View"]', for: 300ms }
+  - wait: { until: { at: 'menu-bar/menu-item[label="View Generated C Source"]', present: true }, timeout: 10s }
+  # Across into View's entries along its own row first, as a user does: a
+  # diagonal path over Build and Reset would open their folders instead.
+  - hover: { at: 'menu-bar/menu-item[label="Filesystem"]', for: 200ms }
+  - wait: settled
+  - click: 'menu-bar/menu-item[label="View Generated C Source"]'
+    settle: false
+  - wait: { until: { at: low-level-code, count: { gt: 5 } }, timeout: 180s }
+  # the row anchored to the caret's line is that line's own marker in the C,
+  # `nimlf_(2, "…/main.nim")`
+  - wait: { until: { at: low-level-code, assert: 'active-row-shows("^nimlf_\\(2, ")' }, timeout: 60s }
+  - expect: { at: low-level-code, error: "" }
+  # the file that does not compile
+  - click: 'filesystem/file-node[name="broken.nim"]'
+  - wait: { until: { at: 'editor[file="broken.nim"]/line[number="1"]', present: true }, timeout: 60s }
+  - click: { at: 'editor[file="broken.nim"]/line[number="1"]', anchor: text-start }
+  - wait: { until: { at: 'editor[file="broken.nim"]', caret-line: 1 }, timeout: 10s }
+  - click: menu-bar
+  - wait: { until: { at: 'menu-bar/menu[label="View"]', present: true }, timeout: 10s }
+  - hover: { at: 'menu-bar/menu[label="View"]', for: 300ms }
+  - wait: { until: { at: 'menu-bar/menu-item[label="View Generated C Source"]', present: true }, timeout: 10s }
+  - hover: { at: 'menu-bar/menu-item[label="Filesystem"]', for: 200ms }
+  - wait: settled
+  - click: 'menu-bar/menu-item[label="View Generated C Source"]'
+    settle: false
+  - wait: { until: { at: low-level-code, error: { matches: "^could not compile broken\\.nim to C: " } }, timeout: 180s }
+  - expect: { at: low-level-code, error: { matches: "broken\\.nim\\(1, [0-9]+\\) Error: type mismatch" } }
+  - expect: { at: low-level-code, count: 0 }

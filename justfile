@@ -6174,12 +6174,6 @@ plat60-capture-electron *args:
 plat60-native-capture-electron *args:
   bash scripts/plat60-native-capture-electron.sh "$@"
 
-# View > View Generated C Source and View Disassembly in the real desktop app
-# (Generated-Code-Listing.md §13.4): a stock-Nim recording (GENC_STOCK_NIM),
-# a `ct record` recording and Edit mode.
-generated-c-desktop *args:
-  bash scripts/generated-c-desktop.sh "$@"
-
 # The §30a arm: the two answer producers are independent readers.
 plat35-answer-independence:
   bash ci/test/plat35-answer-independence.sh
