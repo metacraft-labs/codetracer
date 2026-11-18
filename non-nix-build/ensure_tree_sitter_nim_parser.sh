@@ -30,6 +30,26 @@ fi
 
 pushd "$TREE_SITTER_NIM_DIR" >/dev/null
 
+# A prebuilt parser (the Nix dev shells pass the tree-sitter-nim-parser
+# package's output, substituted from the cache), copied when this checkout's
+# grammar.js is the one it was generated from -- its recorded sha256 -- and
+# src/parser.c is missing or older than grammar.js. Anything else falls through
+# to generating, exactly as before.
+if [[ -n ${CT_TREE_SITTER_NIM_PARSER:-} && -f "$CT_TREE_SITTER_NIM_PARSER/grammar.js.sha256" ]] &&
+	{ [[ ! -f src/parser.c ]] || [[ grammar.js -nt src/parser.c ]]; }; then
+	want="$(<"$CT_TREE_SITTER_NIM_PARSER/grammar.js.sha256")"
+	have="$(sha256sum grammar.js | cut -d' ' -f1)"
+	if [[ $want == "$have" ]]; then
+		cp "$CT_TREE_SITTER_NIM_PARSER/src/parser.c" "$CT_TREE_SITTER_NIM_PARSER/src/node-types.json" src/
+		chmod u+w src/parser.c src/node-types.json
+		touch src/parser.c src/node-types.json
+		echo "tree-sitter-nim: copied the prebuilt src/parser.c ($CT_TREE_SITTER_NIM_PARSER, generated from this grammar.js)"
+		popd >/dev/null
+		exit 0
+	fi
+	echo "tree-sitter-nim: the prebuilt parser was generated from another grammar.js; generating"
+fi
+
 LOCAL_TREE_SITTER_CLI="./node_modules/.bin/tree-sitter"
 TREE_SITTER_CLI_CMD=""
 TREE_SITTER_CLI_VERSION_RAW="$(sed -n 's/.*"tree-sitter-cli":[[:space:]]*"\([^"]*\)".*/\1/p' package.json | head -n1 || true)"

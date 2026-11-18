@@ -734,8 +734,15 @@ with pkgs;
     # point: three hand-rolled `tree-sitter generate` copies already exist
     # (three powershell jobs in codetracer.yml, and nix/packages/default.nix),
     # and a fourth is how the next path gets missed.
+    #
+    # CT_TREE_SITTER_NIM_PARSER is the parser generated ONCE by the
+    # tree-sitter-nim-parser package and substituted from the cache: the gate
+    # copies it when the checkout's grammar.js is the one it was generated
+    # from, rather than running `tree-sitter generate` (about 6 minutes at a
+    # 7.6 GB peak on a fresh CI runner), and generates as before otherwise.
     if [ -n "$ROOT_PATH" ] && [ -f "$ROOT_PATH/libs/tree-sitter-nim/grammar.js" ]; then
-      ROOT_DIR="$ROOT_PATH" bash "$ROOT_PATH/non-nix-build/ensure_tree_sitter_nim_parser.sh"
+      CT_TREE_SITTER_NIM_PARSER="${ourPkgs.tree-sitter-nim-parser}" \
+        ROOT_DIR="$ROOT_PATH" bash "$ROOT_PATH/non-nix-build/ensure_tree_sitter_nim_parser.sh"
     fi
 
     # CT_LD_LIBRARY_PATH is consumed at runtime by `ct` itself

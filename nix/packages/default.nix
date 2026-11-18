@@ -860,6 +860,57 @@
           '';
         };
 
+        # tree-sitter-nim's generated parser, built ONCE and substituted from
+        # the cache. `src/parser.c` (and `src/node-types.json`) are generated
+        # from `grammar.js` and never committed, so every fresh checkout --
+        # every CI runner's dev shell, and db-backend's and backend-manager's
+        # builds -- ran `tree-sitter generate`: about 6 minutes at a 7.6 GB
+        # peak RSS on each garm shard of run 44269676398, over a third of the
+        # runner's 20 GiB cap. Its only inputs are the grammar and the CLI:
+        # `grammar.js` (which `require`s nothing), `tree-sitter.json` and
+        # `package.json`, and the same `pkgs.tree-sitter` the dev shells carry.
+        # `grammar.js.sha256` records the grammar it was generated from; the
+        # dev shell copies the parser only when the checkout's grammar has
+        # that hash, and generates it as before otherwise
+        # (non-nix-build/ensure_tree_sitter_nim_parser.sh).
+        # ci/test/tree-sitter-nim-parser-test.sh holds that the copy equals
+        # what `tree-sitter generate` writes for the pinned grammar.
+        tree-sitter-nim-parser = pkgs.stdenvNoCC.mkDerivation {
+          name = "tree-sitter-nim-parser";
+          src = pkgs.lib.fileset.toSource {
+            root = ../../libs/tree-sitter-nim;
+            fileset = pkgs.lib.fileset.unions (
+              map (f: pkgs.lib.fileset.maybeMissing (../../libs/tree-sitter-nim + "/${f}")) [
+                "grammar.js"
+                "tree-sitter.json"
+                "package.json"
+              ]
+            );
+          };
+          nativeBuildInputs = [
+            pkgs.tree-sitter
+            pkgs.nodejs_20
+          ];
+          dontConfigure = true;
+          buildPhase = ''
+            runHook preBuild
+            test -f grammar.js || {
+              echo "no libs/tree-sitter-nim/grammar.js: evaluate the flake with ?submodules=1" >&2
+              exit 1
+            }
+            tree-sitter generate
+            runHook postBuild
+          '';
+          installPhase = ''
+            runHook preInstall
+            mkdir -p $out/src
+            cp src/parser.c src/node-types.json $out/src/
+            sha256sum grammar.js | cut -d' ' -f1 >$out/grammar.js.sha256
+            tree-sitter --version >$out/tree-sitter.version
+            runHook postInstall
+          '';
+        };
+
         db-backend =
           let
             # ONLY what the build reads, as an explicit union -- never "the
@@ -948,10 +999,13 @@
               ;
 
             postUnpack = ''
-              # Generate tree-sitter-nim parser
+              # tree-sitter-nim's parser, from tree-sitter-nim-parser above
+              # (generated once from this same grammar) rather than a
+              # `tree-sitter generate` of its own.
               if [ ! -f $sourceRoot/libs/tree-sitter-nim/src/parser.c ]; then
-                echo "Generating tree-sitter-nim parser..."
-                (cd $sourceRoot/libs/tree-sitter-nim && tree-sitter generate)
+                cp ${tree-sitter-nim-parser}/src/parser.c ${tree-sitter-nim-parser}/src/node-types.json \
+                  $sourceRoot/libs/tree-sitter-nim/src/
+                chmod u+w $sourceRoot/libs/tree-sitter-nim/src/parser.c $sourceRoot/libs/tree-sitter-nim/src/node-types.json
               fi
 
               # Materialize codetracer-trace-format as a sibling of $sourceRoot
@@ -1104,7 +1158,8 @@
                 cp -r ${inputs.codetracer-trace-format} $out/codetracer-trace-format
                 chmod -R u+w $out/codetracer/libs/tree-sitter-nim
                 if [ ! -f $out/codetracer/libs/tree-sitter-nim/src/parser.c ]; then
-                  (cd $out/codetracer/libs/tree-sitter-nim && tree-sitter generate)
+                  cp ${tree-sitter-nim-parser}/src/parser.c ${tree-sitter-nim-parser}/src/node-types.json \
+                    $out/codetracer/libs/tree-sitter-nim/src/
                 fi
               '';
           sourceRoot = "backend-manager-src/codetracer/src/backend-manager";
