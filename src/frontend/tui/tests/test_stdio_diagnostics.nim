@@ -376,6 +376,9 @@ suite "stdio DAP diagnostics":
           check dump.contains("voluntary_ctxt_switches")
           check dump.contains("== wchan")
           check dump.contains("== threads")
+          # The floor that needs no debugger: each thread's blocked call.
+          check dump.contains(" syscall: ")
+          check not dump.contains(" syscall: (unreadable")
           check dump.contains("== backtrace")
         else:
           check not error.msg.contains("engine state:")

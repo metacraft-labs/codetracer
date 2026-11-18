@@ -11,10 +11,18 @@
 ## `dumpEngineState` with the engine's pid BEFORE anything tears the engine
 ## down, and the file written there answers both: the kernel's view of the
 ## process and of each thread (`/proc/<pid>/status` — State, the voluntary and
-## non-voluntary context switches — `wchan`, `task/*/stat`, `task/*/wchan`),
-## and a backtrace of every thread (`gdb -batch -ex "thread apply all bt"`, or
+## non-voluntary context switches — `wchan`, and per thread `stat`, `wchan`,
+## `syscall` and, where the kernel lets this user read it, `stack`), and a
+## backtrace of every thread (`gdb -batch -ex "thread apply all bt"`, or
 ## `eu-stack`, whichever is on PATH). A host starved at the same moment shows
 ## in the job's memory samples.
+##
+## THE /proc PART IS THE FLOOR. A backtrace needs a debugger on PATH and
+## ptrace permission, and a CI lane has had neither ("(eu-stack is not on
+## PATH)"). Each thread's `syscall` line still names the call it is blocked
+## in and its arguments (a `read` on fd 0 is a server waiting for a request;
+## a `futex` is a lock), so a dump without a backtrace still says what the
+## engine was waiting for.
 ##
 ## BOUNDED AND SILENT ON FAILURE: each external tool runs under `timeout`, a
 ## file that cannot be read is noted and skipped, and nothing here raises —
@@ -60,6 +68,11 @@ proc engineStateText*(pid: int; reason: string): string =
                 readOr(path / "stat").strip() & "\n"
       tasks.add path.extractFilename & " wchan: " &
                 readOr(path / "wchan").strip() & "\n"
+      tasks.add path.extractFilename & " syscall: " &
+                readOr(path / "syscall").strip() & "\n"
+      let stack = readOr(path / "stack").strip()
+      if stack.len > 0:
+        tasks.add path.extractFilename & " stack:\n" & stack & "\n"
   except CatchableError as e:
     tasks.add "(task list unreadable: " & e.msg & ")\n"
   result.add section("threads", tasks)
