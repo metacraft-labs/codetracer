@@ -363,6 +363,12 @@ lint_step "a shard that fails uploads what held its memory" \
 lint_step "a CI dev shell re-anchors hooks another Repro build wrote" \
 	bash ci/test/ci-hooks-re-anchor-test.sh
 
+# A linked worktree's dev shell checks the hooks it shares with its main
+# checkout and never rewrites them; only the main checkout (or an explicit
+# CT_REPRO_HOOKS_WRITE=1) does.
+lint_step "a linked worktree's dev shell never rewrites the shared Repro hooks" \
+	bash ci/test/repro-hooks-worktree-check-test.sh
+
 # codetracer-native-backend's submodules are checked out, with the job's
 # credentials, before the visual replay Git policy applies to a Nix fetch of it.
 lint_step "native-backend's submodules are checked out before the visual replay policy" \

@@ -29,7 +29,7 @@ chmod +x "$work/repro/bin/repro"
 
 # The shell hook from its `ct_repro_anchor=()` to the `ensure` call's closing
 # brace, with Nix's escapes undone and `${repro}` pointed at the fake.
-snippet="$(sed -n '/^  ct_repro_anchor=()$/,/^  unset ct_repro_anchor$/p' nix/git-hooks.nix |
+snippet="$(sed -n '/^  ct_repro_anchor=()$/,/^  unset ct_repro_anchor ct_repro_git_dir ct_repro_common_dir$/p' nix/git-hooks.nix |
 	sed -e "s|''\\\${|\${|g" -e "s|\\\${repro}|$work/repro|g")"
 if [ -z "$snippet" ]; then
 	fail "nix/git-hooks.nix has no ct_repro_anchor block: the shell hook no longer re-anchors in CI"

@@ -235,13 +235,49 @@ in
   if [ "''${GITHUB_ACTIONS:-}" = true ]; then
     ct_repro_anchor=(--re-anchor)
   fi
+  # ONLY THE MAIN CHECKOUT WRITES THE SHARED HOOKS. A linked worktree shares
+  # its main checkout's hooks directory, and a worktree whose flake pins a
+  # different Repro build rewrote them on shell entry -- for the main checkout
+  # and every other worktree, whose shells then refused with "could not install
+  # the Repro publication gate" (11-18, worktrees on reprobuild 0.2.24 and
+  # a765c3e79d4). From a linked worktree the step is check-only: each managed
+  # hook's contract token is put to this build with `repro hooks protocol`
+  # (the handshake the hooks themselves make), a mismatch is reported with the
+  # remedy, and nothing is written. CT_REPRO_HOOKS_WRITE=1 opts a worktree back
+  # in. ci/test/repro-hooks-worktree-check-test.sh holds both.
+  ct_repro_git_dir=""
+  ct_repro_common_dir=""
   if [ -n "$ROOT_PATH" ]; then
+    ct_repro_git_dir="$(git -C "$ROOT_PATH" rev-parse --path-format=absolute --git-dir 2>/dev/null || true)"
+    ct_repro_common_dir="$(git -C "$ROOT_PATH" rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true)"
+  fi
+  if [ -n "$ROOT_PATH" ] && [ -n "$ct_repro_git_dir" ] && [ "$ct_repro_git_dir" != "$ct_repro_common_dir" ] &&
+    [ "''${CT_REPRO_HOOKS_WRITE:-}" != 1 ]; then
+    ct_repro_hooks_dir="$(git -C "$ROOT_PATH" rev-parse --path-format=absolute --git-path hooks)"
+    ct_repro_foreign=()
+    ct_repro_seen=0
+    for ct_repro_hook in "$ct_repro_hooks_dir"/*.repro-managed; do
+      [ -f "$ct_repro_hook" ] || continue
+      ct_repro_seen=1
+      ct_repro_token="$(grep -o 'reprobuild\.managed-hook\.v1\.[a-z-]*\.[0-9a-f]*' "$ct_repro_hook" | head -n 1)"
+      if [ -z "$ct_repro_token" ] ||
+        ! ${repro}/bin/repro hooks protocol --require=2 --hook-contract="$ct_repro_token" >/dev/null 2>&1; then
+        ct_repro_foreign+=("''${ct_repro_hook##*/}")
+      fi
+    done
+    if [ "$ct_repro_seen" = 0 ]; then
+      echo "repro hooks: the shared hooks in $ct_repro_hooks_dir are not installed; this linked worktree does not write them. Enter the dev shell from the main checkout ($(dirname "$ct_repro_common_dir")), or set CT_REPRO_HOOKS_WRITE=1 here." >&2
+    elif [ "''${#ct_repro_foreign[@]}" -gt 0 ]; then
+      echo "repro hooks: ''${ct_repro_foreign[*]} in $ct_repro_hooks_dir were written by a different Repro build than this shell's (${repro}); this linked worktree leaves them as they are. The main checkout's shell, or CT_REPRO_HOOKS_WRITE=1 here, re-anchors them -- only once the build every checkout should run is agreed." >&2
+    fi
+    unset ct_repro_hooks_dir ct_repro_foreign ct_repro_seen ct_repro_hook ct_repro_token
+  elif [ -n "$ROOT_PATH" ]; then
     ${repro}/bin/repro hooks ensure --vcs "''${ct_repro_anchor[@]}" "$ROOT_PATH" || {
       echo "ERROR: CodeTracer could not install the Repro publication gate." >&2
       return 1 2>/dev/null || exit 1
     }
   fi
-  unset ct_repro_anchor
+  unset ct_repro_anchor ct_repro_git_dir ct_repro_common_dir
   if [ "$ct_hooks_status" -ne 0 ]; then
     echo "ERROR: CodeTracer could not install its configured Git checks." >&2
     return 1 2>/dev/null || exit 1
