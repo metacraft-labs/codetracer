@@ -232,8 +232,8 @@ src/frontend/tui/tests/plat51-parity-mutation-control.sha256	src/frontend/tui/te
 # plat47: graded at 39e4112f69; b9396a9502  moved
 # src/frontend/tui/app/runtime.nim after the grade. Re-grade the arms whose
 # needles sit in them.
-src/frontend/viewmodel/tests/unit/plat17-wasm-mutation-control.sha256	justfile	e0b0f1e05b1e7907a3cc8a424293bf7353eb6f4cd1bf6a624ce1d927128d1443	f545a5dd3dafd64411def5226f4136c5a226558cdaf7ae1cd990f00bac7bb404
-src/frontend/viewmodel/tests/unit/plat33-collab-mutation-control.sha256	justfile	e0b0f1e05b1e7907a3cc8a424293bf7353eb6f4cd1bf6a624ce1d927128d1443	f545a5dd3dafd64411def5226f4136c5a226558cdaf7ae1cd990f00bac7bb404
+src/frontend/viewmodel/tests/unit/plat17-wasm-mutation-control.sha256	justfile	e0b0f1e05b1e7907a3cc8a424293bf7353eb6f4cd1bf6a624ce1d927128d1443	5c01a4afad146983fce6045d349b701d59fa82bd226bebcf2d27338a7f1aa6f0
+src/frontend/viewmodel/tests/unit/plat33-collab-mutation-control.sha256	justfile	e0b0f1e05b1e7907a3cc8a424293bf7353eb6f4cd1bf6a624ce1d927128d1443	5c01a4afad146983fce6045d349b701d59fa82bd226bebcf2d27338a7f1aa6f0
 src/tests/scenarios/plat66-pack-mutation-control.sha256	ci/test/scenarios.sh	4edebac246b9c375f8b5e181b3fb621774088543476bea5c556b0e1d642c0e77	9a18568110d632f5b205c1de4351a6d177b8dd22bcef360ba21ac1b878b5ca99
 
 # The shared editor on every editor surface (ui/editor_surface: the macro
@@ -485,3 +485,8 @@ src/frontend/tui/tests/plat51-parity-mutation-control.sha256	src/frontend/tui/te
 src/frontend/tui/tests/plat54-agent-activity-mutation-control.sha256	src/frontend/tui/host/vcs_source.nim	84b0838544676ec33f6ff1bd3c8032ae09a115b3a1da59261698ee28a00cb9eb	05a8d30a43770330a91c1dc81a4dab65a7ba841984b4fd079a8d094944529337
 src/frontend/tui/tests/plat54-agent-activity-mutation-control.sha256	src/frontend/tui/tests/test_plat54_agent_activity.nim	91107e05b3e44e1a40a3358e915c65e8d8274cfee6e7f0d2aac5c3acc7ed5405	345687ebd0a0177fc6cda0ca9b53dc2028d795db1a9c9802a2bb8bab4ce671e2
 src/frontend/tui/tests/plat65-nim-tracing-mutation-control.sha256	src/frontend/gpui/main.nim	7953de7932634c94ba38056c6f5e8454c74131be118557bc674f6f8c5d6ce036	a3c60badbc8a116ce08fe16348dde9571c3a5ad1c5dc8a01131f7e8d71e87ae2
+# The stall diagnostic and the plat51 / keymap pty waits (`test(tui): a stalled engine says what it was doing; two pty waits wait for states`)
+# moved stdio_backend.nim, the justfile and test_plat51_pty.nim. Re-grade the arms whose needles sit in them.
+src/frontend/tui/tests/plat42-surface-mutation-control.sha256	src/frontend/viewmodel/backend/stdio_backend.nim	59bc2f08f98659cdba4e0a3fe7053873cf7cf6eb4b4138f846c2877e94754ea2	0ce2c7aad74a90c98350a4a2b1c8cd65b8d214919334abbe8bdf5646e7e3c1d3
+src/frontend/tui/tests/plat51-parity-mutation-control.sha256	src/frontend/tui/tests/real_terminal/test_plat51_pty.nim	b64a204ec9eed957a1fc524199a8383c81306fc2864b45e4ab93b1ef0836e8b0	75e63c0e673c13a419a8739bc4e04392eda4032e45d0ca1a0833dbfde494a384
+src/frontend/tui/tests/plat59-visual-replay-mutation-control.sha256	src/frontend/viewmodel/backend/stdio_backend.nim	59bc2f08f98659cdba4e0a3fe7053873cf7cf6eb4b4138f846c2877e94754ea2	0ce2c7aad74a90c98350a4a2b1c8cd65b8d214919334abbe8bdf5646e7e3c1d3

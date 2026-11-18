@@ -396,30 +396,42 @@ suite "M71 (#838) on a real terminal: the State pane's scrollbar":
     ck row > 0
     sess.press(row, ctl)
     discard sess.waitFor("↳ ")
-    # The history's rows and the track beside them are one frame: read it
-    # whole.
-    waitForCompleteFrame(sess, Cols, Rows)
-    var s = sess.snap()
-    # The pane's last column: the cell before the divider to the right of
-    # the control (or the screen's last column).
-    var right = Cols - 1
-    for x in ctl + 1 ..< Cols:
-      if $s[row][x].rune == "▏":
-        right = x - 1
-        break
-    # Its body rows: up from `total`'s row and down to the pane's end, as
-    # long as the column holds a track, thumb or mark glyph.
-    var top = row
-    while top - 1 > 0 and $s[top - 1][right].rune in TrackGlyphs:
-      dec top
-    var bottom = row
-    while bottom + 1 < Rows and $s[bottom + 1][right].rune in TrackGlyphs:
-      inc bottom
+    # The history's rows and the track beside them are one frame — read it
+    # whole, ONCE IT SHOWS A THUMB. The track is drawn as soon as the pane
+    # opens; the thumb only once the history's length has come back, and a
+    # loaded host can paint the first between the two (a read taken there
+    # found the track and no thumb). So the read waits for the state, under
+    # a ceiling generous for a loaded host.
+    var s: Snapshot
+    var right, top, bottom, track: int
     var thumb: seq[int] = @[]
-    var track = 0
-    for r in top .. bottom:
-      if $s[r][right].rune == "│": inc track
-      elif $s[r][right].rune in TrackGlyphs: thumb.add r
+    let thumbDeadline = getMonoTime() + initDuration(seconds = 60)
+    while true:
+      waitForCompleteFrame(sess, Cols, Rows)
+      s = sess.snap()
+      # The pane's last column: the cell before the divider to the right of
+      # the control (or the screen's last column).
+      right = Cols - 1
+      for x in ctl + 1 ..< Cols:
+        if $s[row][x].rune == "▏":
+          right = x - 1
+          break
+      # Its body rows: up from `total`'s row and down to the pane's end, as
+      # long as the column holds a track, thumb or mark glyph.
+      top = row
+      while top - 1 > 0 and $s[top - 1][right].rune in TrackGlyphs:
+        dec top
+      bottom = row
+      while bottom + 1 < Rows and $s[bottom + 1][right].rune in TrackGlyphs:
+        inc bottom
+      thumb = @[]
+      track = 0
+      for r in top .. bottom:
+        if $s[r][right].rune == "│": inc track
+        elif $s[r][right].rune in TrackGlyphs: thumb.add r
+      if thumb.len > 0 or getMonoTime() > thumbDeadline:
+        break
+      sleep(100)
     checkpoint("track col " & $right & " rows " & $top & ".." & $bottom &
                " thumb " & $thumb)
     # A track down the pane's body (more than the few rows `total` and its
