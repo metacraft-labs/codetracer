@@ -88,6 +88,28 @@ key-focus()
 BUTTON_TRANSITION_TIMING = 100ms ease
 BUTTON_TRANSITION = background-color BUTTON_TRANSITION_TIMING, color BUTTON_TRANSITION_TIMING, border-color BUTTON_TRANSITION_TIMING
 
+// A Design System icon (Figma icons page, node 1:12) painted through a mask in
+// the element's text colour, so it follows the theme and the hover colour —
+// the way the session tabs' chevron is drawn (D-33).  For an empty element of
+// its own: the mask covers the whole box.
+ICON_CHEVRON_DOWN = url('../../public/resources/shared/build_chevron_down.svg')
+ICON_OPEN_DIFF = url('../../public/resources/shared/vc-open-diff.svg')
+
+mask-icon(img, size = 1rem)
+  display: inline-block
+  flex: 0 0 auto
+  width: size
+  height: size
+  background: currentColor
+  -webkit-mask-image: img
+  mask-image: img
+  -webkit-mask-repeat: no-repeat
+  mask-repeat: no-repeat
+  -webkit-mask-position: center
+  mask-position: center
+  -webkit-mask-size: contain
+  mask-size: contain
+
 // Button look — ONE look and ONE set of states for every button that is not a
 // primary call to action, in the panels and on the welcome screens (Nikolay,
 // 2026-10-20: "all buttons should look the same and behave the same.  They may
