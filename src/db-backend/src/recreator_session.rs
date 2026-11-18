@@ -232,6 +232,18 @@ impl Error for ReplayWorkerDied {}
 /// the death report carries.
 const WORKER_EXIT_GRACE: Duration = Duration::from_secs(10);
 
+/// How often a query waiting on a worker checks that the worker's process is
+/// still there (see `dispatch_replay_query`).
+#[cfg(any(unix, windows))]
+const WORKER_EXIT_POLL: Duration = Duration::from_millis(200);
+
+/// Whether the worker's process has exited. Its status stays with the
+/// `Child`, so a later reap still reports how it ended.
+#[cfg(any(unix, windows))]
+fn worker_has_exited(process: Option<&mut Child>) -> bool {
+    process.is_some_and(|child| matches!(child.try_wait(), Ok(Some(_))))
+}
+
 /// The kind of a serialized replay query, for naming it in a diagnostic
 /// without repeating its payload: `ReplayQuery` is internally tagged
 /// (`#[serde(tag = "kind")]`), so `{"kind":"JumpToCall",…}` → `JumpToCall`.
@@ -1048,6 +1060,14 @@ impl ReplayWorker {
         let raw_json = serde_json::to_string(&query)?;
 
         let worker_pid = self.process.as_ref().map(Child::id);
+        if self.stream.is_some() && worker_has_exited(self.process.as_mut()) {
+            // The worker died between queries. Its socket can outlive it
+            // (`rr` and the replayed program inherit it), so the send would
+            // succeed and the answer never come.
+            return Err(Box::new(
+                self.record_death(&raw_json, "its process had exited before the query was sent"),
+            ));
+        }
         let Some(stream) = self.stream.as_mut() else {
             return Err(format!("the replay worker is not connected; cannot send: {raw_json}").into());
         };
@@ -1080,29 +1100,56 @@ impl ReplayWorker {
         let waits_on_busy = waits_on_a_busy_worker(&self.name, &raw_json);
         let mut progress = WorkerProgress::new(worker_pid);
         let mut line = Vec::new();
+        // The wait is read in short slices, and between them the worker's
+        // process is checked: a worker that exits while its socket stays open
+        // (`rr` and the replayed program inherit the socket, so its peer end
+        // does not close) sends no EOF, and without the check the query
+        // waited out its whole timeout -- or, while that orphaned tree kept
+        // using CPU, the busy-worker ceiling -- on a worker that was gone.
+        let slice = query_timeout.map_or(WORKER_EXIT_POLL, |timeout| timeout.min(WORKER_EXIT_POLL));
+        let _ = stream.set_read_timeout(Some(slice));
+        let mut next_timeout_check = query_timeout;
+        let mut worker_exited = false;
         let read_result = {
-            let mut reader = BufReader::new(stream);
+            let mut reader = BufReader::new(&mut *stream);
             loop {
                 match reader.read_until(b'\n', &mut line) {
-                    Err(e)
-                        if waits_on_busy
-                            && is_read_timeout(&e)
-                            && progress.still_working(Duration::from_millis(
-                                crate::wall_clock::monotonic_ms().saturating_sub(started_ms),
-                            )) =>
-                    {
-                        info!(
-                            "worker {}[{}] has not answered {} yet but is still working; waiting on",
-                            self.name,
-                            self.index,
-                            replay_query_kind(&raw_json)
-                        );
-                        continue;
+                    Err(e) if is_read_timeout(&e) => {
+                        if worker_has_exited(self.process.as_mut()) {
+                            worker_exited = true;
+                            break Err(e);
+                        }
+                        let waited =
+                            Duration::from_millis(crate::wall_clock::monotonic_ms().saturating_sub(started_ms));
+                        let Some(timeout_at) = next_timeout_check else {
+                            continue;
+                        };
+                        if waited < timeout_at {
+                            continue;
+                        }
+                        if waits_on_busy && progress.still_working(waited) {
+                            info!(
+                                "worker {}[{}] has not answered {} yet but is still working; waiting on",
+                                self.name,
+                                self.index,
+                                replay_query_kind(&raw_json)
+                            );
+                            next_timeout_check = query_timeout.map(|timeout| waited + timeout);
+                            continue;
+                        }
+                        break Err(e);
                     }
                     other => break other,
                 }
             }
         };
+        let _ = stream.set_read_timeout(query_timeout);
+        if worker_exited {
+            return Err(Box::new(self.record_death(
+                &raw_json,
+                "its process exited without answering, while its connection was still open",
+            )));
+        }
         let mut res = String::from_utf8_lossy(&line).into_owned();
         if let Err(e) = read_result {
             // Capture these before cleanup kills/reaps the worker: that time

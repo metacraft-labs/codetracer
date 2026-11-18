@@ -254,7 +254,7 @@ src/frontend/viewmodel/tests/unit/plat68-keymaps-mutation-control.sha256	src/fro
 # src/frontend/tui/app/runtime.nim,src/frontend/tui/host/tui_session.nim after
 # the grade. Re-grade the arms whose needles sit in them.
 src/frontend/viewmodel/tests/unit/plat17-wasm-mutation-control.sha256	ci/lib/run-nim-test-lane.sh	da6b4e46c486f1a7762fd79b05a42a15dd1b862ab4599ffa22c1bbc166d63783	d1a2a215a9f74c50d465925aaa14ad2fbc674db88c4dfa5e4a2e24ea222ef97e
-src/frontend/viewmodel/tests/unit/plat33-collab-mutation-control.sha256	.github/workflows/codetracer.yml	4329483bcc55e3898b373e4b379234071ee6e7d04c19bd109045028c62c94d56	86fd980f7676754f0fd4e5534cd5d9678be126077967228d598826ead4be13cb
+src/frontend/viewmodel/tests/unit/plat33-collab-mutation-control.sha256	.github/workflows/codetracer.yml	4329483bcc55e3898b373e4b379234071ee6e7d04c19bd109045028c62c94d56	93552e346db0f8592d9bcc6f25597166935fca497f0b435bad2164d265ea22c8
 src/frontend/tui/tests/plat70f-pointer-mutation-control.sha256	src/db-backend/src/db.rs	5643f4af288ed8fc9f76c0fb60b2a71af66f1dce2dc96235009e4994b42a398b	222a83df863a814d1f930f15f4f2b6a478c03c30cac3b5bd8eaac74a6a5e63d5
 src/frontend/tui/tests/plat60-low-level-code-mutation-control.sha256	src/db-backend/src/dap_handler.rs	23f8ff8145f2d5a678588557c9c855a9701cd2bf5fa7afa677028b7262076e76	67fe6a943d6ceef4e79b1aa750128af830f3e26222cd96119ee00a7e0d9884c2
 src/frontend/tui/tests/plat51-parity-mutation-control.sha256	src/db-backend/src/dap_handler.rs	23f8ff8145f2d5a678588557c9c855a9701cd2bf5fa7afa677028b7262076e76	67fe6a943d6ceef4e79b1aa750128af830f3e26222cd96119ee00a7e0d9884c2

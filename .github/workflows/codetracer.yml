@@ -3840,9 +3840,12 @@ jobs:
     # (StoryBook, IsoNim's node modules, the `isonim-review` daemon) and 157 s
     # warm, on nixos-ci-bare-003 at load ~180 (2026-11-05). `just build-once`,
     # the rest of the body, is what `cross-process-linux` is bounded at 45m
-    # for. 45 + 15 is 60; 90 leaves half again for sibling provisioning and a
-    # cold Nix store. Tighten it from the first green runs.
-    timeout-minutes: 90
+    # for. The layouts step after the smoke took at most 17.5 minutes on
+    # xps-nixos (2026-11-18, warm Nim cache; 14 of them in the browser),
+    # reusing the smoke's bundle and daemon; count it as 18. 45 + 15 + 18 is
+    # 78; 120 leaves half again for sibling provisioning and a cold Nix store.
+    # Tighten it from the first green runs.
+    timeout-minutes: 120
     name: IsoNim Editor instance smoke
     # WHY THIS JOB EXISTS. `scripts/isonim-editor-codetracer.sh --smoke` is a
     # check: it builds StoryBook and the IsoNim Editor instance over the same
@@ -3928,12 +3931,35 @@ jobs:
         # build/isonim-editor-codetracer-smoke/smoke/, uploaded below.
         run: nix develop .#devShells.x86_64-linux.default --command just isonim-editor-codetracer --smoke
 
+      - name: Layout stories fit the preview and show at 100%
+        # e2e_codetracer_instance_layouts_fit_and_100: builds the instance into
+        # its own tree (build/isonim-editor-codetracer-layouts/), reusing the
+        # `build-once` tree, the components bundle and the `isonim-review`
+        # daemon the smoke step above already built, and checks in headless
+        # Chromium at 1920x1080 that every full-window layout story (Layouts L1
+        # to L14) fits the editor's page preview and shows at 100% with
+        # scrollbars, in both themes, by measurement. It is in this job rather
+        # than its own for the reason the smoke is: everything it needs is
+        # already here. `!cancelled()` so a smoke failure does not hide the
+        # layouts result; the step still fails the job on its own.
+        if: ${{ !cancelled() }}
+        run: nix develop .#devShells.x86_64-linux.default --command just test-isonim-editor-layouts-fit-and-100
+
       - name: Upload smoke artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: isonim-editor-smoke
           path: build/isonim-editor-codetracer-smoke/smoke/
+          retention-days: 14
+          if-no-files-found: ignore
+
+      - name: Upload layouts artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: isonim-editor-layouts-fit-and-100
+          path: build/isonim-editor-codetracer-layouts/layouts/
           retention-days: 14
           if-no-files-found: ignore
 
