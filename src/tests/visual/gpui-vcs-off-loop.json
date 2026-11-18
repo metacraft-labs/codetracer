@@ -1,0 +1,81 @@
+{
+ "takenAt": "2026-11-18T17:51:43.318306+00:00",
+ "host": "gpu-server-001",
+ "binary": "codetracer-gpui-window-vcs2",
+ "rc": 0,
+ "elapsedMs": 28085,
+ "endedOnDeadline": false,
+ "typedAtMs": 1795024289831,
+ "releasedAtMs": 1795024293891,
+ "git": [
+  {
+   "what": "held",
+   "atMs": 1795024275297,
+   "verb": "--no-optional-locks"
+  },
+  {
+   "what": "released",
+   "atMs": 1795024293945,
+   "verb": "--no-optional-locks"
+  },
+  {
+   "what": "held",
+   "atMs": 1795024294012,
+   "verb": "--no-optional-locks"
+  },
+  {
+   "what": "released",
+   "atMs": 1795024294015,
+   "verb": "--no-optional-locks"
+  },
+  {
+   "what": "held",
+   "atMs": 1795024299355,
+   "verb": "--no-optional-locks"
+  },
+  {
+   "what": "released",
+   "atMs": 1795024299372,
+   "verb": "--no-optional-locks"
+  },
+  {
+   "what": "held",
+   "atMs": 1795024299412,
+   "verb": "--no-optional-locks"
+  },
+  {
+   "what": "released",
+   "atMs": 1795024299420,
+   "verb": "--no-optional-locks"
+  },
+  {
+   "what": "held",
+   "atMs": 1795024302538,
+   "verb": "--no-optional-locks"
+  },
+  {
+   "what": "released",
+   "atMs": 1795024302548,
+   "verb": "--no-optional-locks"
+  },
+  {
+   "what": "held",
+   "atMs": 1795024302709,
+   "verb": "--no-optional-locks"
+  },
+  {
+   "what": "released",
+   "atMs": 1795024302731,
+   "verb": "--no-optional-locks"
+  }
+ ],
+ "order": [
+  {
+   "event": "key",
+   "name": "x"
+  },
+  {
+   "event": "vcs-applied"
+  }
+ ]
+}
