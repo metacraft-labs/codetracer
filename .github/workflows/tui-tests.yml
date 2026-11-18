@@ -164,7 +164,24 @@ jobs:
           path: ${{ runner.temp }}/ct-build
 
       - name: Unpack them beside the siblings
-        run: tar -xzf "${RUNNER_TEMP}/ct-build/ct-build-products.tar.gz" -C ..
+        # Tested whole first: download-artifact can finish "successfully" with
+        # a short file (GPUI shard 15 and TUI shard 7 of run 44269676398: "gzip:
+        # stdin: unexpected end of file" after a 20-minute download). A short
+        # one exits 3 and is downloaded again below.
+        id: unpack
+        continue-on-error: true
+        run: bash ci/unpack-ct-build-products.sh "${RUNNER_TEMP}/ct-build"
+
+      - name: Restore the ct-build products again, the first download being incomplete
+        if: ${{ steps.unpack.outcome == 'failure' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: ct-build-products
+          path: ${{ runner.temp }}/ct-build-retry
+
+      - name: Unpack the second download
+        if: ${{ steps.unpack.outcome == 'failure' }}
+        run: bash ci/unpack-ct-build-products.sh "${RUNNER_TEMP}/ct-build-retry"
 
       - name: Build the GPUI front-end the cross-front-end suites drive
         # Four files in these lanes hold the terminal to the same answers as
