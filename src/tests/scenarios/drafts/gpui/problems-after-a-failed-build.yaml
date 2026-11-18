@@ -21,6 +21,7 @@ steps:
   - wait: { until: settled, timeout: 60s }
   - click: { at: 'dock-label[label="Problems"]' }
   - wait: { until: { at: 'pane[title="Problems"]', assert: 'has-row("Expected type bool, found type Field")' }, timeout: 30s }
-  - expect: { at: 'pane[title="Problems"]', assert: ['has-row("unused variable unused")', 'has-row("src/main.nr")'] }
+  # the file column is cut to its width (`src/main…`): its start is read
+  - expect: { at: 'pane[title="Problems"]', assert: ['has-row("unused variable unused")', 'has-row("src/main")', 'has-row("5:19")'] }
   - key: F8
   - wait: { until: { at: 'editor[file="util.nr"]', assert: 'shows-text("Field")' }, timeout: 30s }

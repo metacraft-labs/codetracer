@@ -14,7 +14,7 @@ steps:
   - wait: { until: replay-idle, timeout: 180s }
   - expect: { at: 'pane-tab[label="Low Level Code"]', absent: true }
   - chord: Alt+1
-  - wait: { until: { at: 'pane[title="Low Level Code"]', assert: 'has-row("sync on")' }, timeout: 60s }
+  - wait: { until: { at: 'pane[title="Low Level Code"]', assert: 'has-row("steps by")' }, timeout: 60s }
   - expect: { at: 'pane[title="Low Level Code"]', assert: 'has-row("StepId")' }
   - click: { at: 'pane[title="Low Level Code"]/row[#4]', anchor: text-start, button: right }
   - wait: { until: { at: context-menu, assert: 'offers("Go to Source Line")' }, timeout: 20s }

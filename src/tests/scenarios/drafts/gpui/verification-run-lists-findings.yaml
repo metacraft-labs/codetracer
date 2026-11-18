@@ -13,15 +13,14 @@ stage:
 
 steps:
   - wait: { until: ready, timeout: 60s }
-  - chord: Ctrl+P
-  - type: ":verify"
-  - key: Enter
-  - wait: { until: { at: 'pane-tab[label="Verification"]', present: true }, timeout: 30s }
-  - click: { at: 'pane-tab[label="Verification"]' }
+  - click: { at: 'menu-bar/menu[label="Menu"]' }
+  - wait: { until: { at: 'dropdown[level="1"]', present: true }, timeout: 30s }
+  - click: { at: 'dropdown[level="1"]/dropdown-item[label="View"]' }
+  - wait: { until: { at: 'dropdown[level="2"]', assert: 'offers("Verification")' }, timeout: 30s }
+  - click: { at: 'dropdown[level="2"]/dropdown-item[label="Verification"]' }
   - wait: { until: { at: 'pane[title="Verification"]', present: true }, timeout: 30s }
-  - chord: Ctrl+P
-  - type: ":Verification: Run"
-  - key: Enter
+  # the pane's own Run control (▶ at the header's right end)
+  - click: { at: 'pane[title="Verification"]/row[#1]', anchor: row-end }
     settle: false
   - wait: { until: { at: 'pane[title="Verification"]', assert: 'has-row("Expected type Field, found type u32")' }, timeout: 180s }
   - expect: { at: 'pane[title="Verification"]', assert: 'has-row("typeerr/src/main.nr")' }

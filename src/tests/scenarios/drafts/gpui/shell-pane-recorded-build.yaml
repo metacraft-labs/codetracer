@@ -33,7 +33,7 @@ steps:
   - type: "sh ./build.sh"
   - key: Enter
     settle: false
-  - wait: { until: { at: 'pane[title="Shell"]', assert: 'has-row("recordingId")' }, timeout: 240s }
+  - wait: { until: { at: 'pane[title="Shell"]', assert: 'has-row("1 recording")' }, timeout: 240s }
   - expect: { at: 'pane[title="Shell"]', assert: ['has-row("sum 5")', 'has-row("done")'] }
-  - click: { at: 'pane[title="Shell"]/row[text="sum 5"]', anchor: text-start }
+  - click: { at: 'pane[title="Shell"]/row[#4]', anchor: text-start }
   - wait: { until: { at: session-strip, count: 2 }, timeout: 120s }

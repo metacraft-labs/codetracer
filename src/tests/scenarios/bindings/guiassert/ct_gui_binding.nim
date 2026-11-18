@@ -162,6 +162,39 @@ proc words(ctx: GuiContext; f: Frame; x, y, w, h: int; psm = 11): seq[Word] =
     m.h = wd.h div scale
     if m.text.strip.len > 0: result.add m
 
+proc wordsInk(ctx: GuiContext; f: Frame; x, y, w, h: int; level: int; psm = 7): seq[Word] =
+  ## The words in a region read as ink on paper: every pixel lighter than
+  ## `level` black, the rest white, scaled 4x. For small text drawn dim on a
+  ## dark ground (the find field's `3 of 12`), which the gray reading loses.
+  const scale = 4
+  let x0 = max(0, x)
+  let y0 = max(0, y)
+  let ww = max(1, min(w, f.image.width - x0))
+  let hh = max(1, min(h, f.image.height - y0))
+  var img = newImage(GrayImage, ww * scale, hh * scale)
+  # Interpolated before the threshold (bilinear), so a glyph's edges are
+  # cut where its ink crosses the level rather than at whole source pixels.
+  proc lum(x, y: int): float =
+    float(f.luma(clamp(x, 0, f.image.width - 1), clamp(y, 0, f.image.height - 1)))
+  for yy in 0 ..< hh * scale:
+    let sy = (float(yy) + 0.5) / float(scale) - 0.5
+    let iy = int(floor(sy))
+    let fy = sy - float(iy)
+    for xx in 0 ..< ww * scale:
+      let sx = (float(xx) + 0.5) / float(scale) - 0.5
+      let ix = int(floor(sx))
+      let fx = sx - float(ix)
+      let v = (lum(x0 + ix, y0 + iy) * (1 - fx) + lum(x0 + ix + 1, y0 + iy) * fx) * (1 - fy) +
+              (lum(x0 + ix, y0 + iy + 1) * (1 - fx) + lum(x0 + ix + 1, y0 + iy + 1) * fx) * fy
+      img.pixels[yy * ww * scale + xx] = (if v > float(level): char(0) else: char(255))
+  for wd in ctx.recognize(img, psm):
+    var m = wd
+    m.x = x0 + wd.x div scale
+    m.y = y0 + wd.y div scale
+    m.w = wd.w div scale
+    m.h = wd.h div scale
+    if m.text.strip.len > 0: result.add m
+
 proc fl(i: int): float = float(i)
 
 # --- the window's parts ------------------------------------------------------------------
@@ -170,6 +203,7 @@ const
   TopBarH = 36            ## the top bar: menu, transport, omnibox, session tabs
   StripH = 26             ## a box's strip of pane tabs
   FooterH = 32            ## the status line
+  StripTabH = 24          ## a strip's tab, top to bottom
   CopyButtonW = 34        ## the status line's copy button, at its right end
   LocationTailW = 400     ## the status line's location as far as it is read
 
@@ -509,6 +543,7 @@ type
     active: bool
     band: bool               ## the focused box's whole strip (its tabs are cut from it)
     cut: (int, int)          ## on a band: the selected tab, on the window's ground
+    ring: int                ## a focused one-tab box's: its focus ring's colour's luma, else 0
   PaneBox = object
     left, right, top, bottom: int   ## the body, below the strip
     stripTop: int
@@ -690,6 +725,19 @@ proc paneBoxes(ctx: GuiContext; f: Frame): seq[PaneBox] =
           var yy = y + 2
           while yy + 1 < footer and near(f.rgb(col, yy + 1), cb, 2): inc yy
           if yy - y >= 22 and yy - y <= 40: by1 = yy
+        if by1 < 0 and bx1 - x >= 150:
+          # a focused box whose ONE tab is the cut-out: the ring's top edge
+          # runs the box's width and its sides go on down, with the tab on
+          # the window's ground between them (no band to measure)
+          var sides = true
+          for yy in y + 2 .. y + 22:
+            if not near(f.rgb(x, yy), cb, 2) or not near(f.rgb(bx1, yy), cb, 2): sides = false
+          if sides and f.isGround(g, x + 3, y + 12):
+            let sel = PaneTab(x0: x + 1, x1: bx1 - 1, y0: y, y1: y + StripTabH - 1, active: true,
+                              ring: max(1, cb[0]))
+            found.add sel
+            strips.mgetOrPut(y, @[]).add sel
+          continue
         if bx1 - x < 150 or by1 < 0: continue
         var cut = (-1, -1)
         var cx = x + 3
@@ -830,6 +878,15 @@ proc paneBoxes(ctx: GuiContext; f: Frame): seq[PaneBox] =
     var seen: seq[int]
     for t in tabs:
       let yb = t.y1 + 8
+      if t.ring > 0:
+        # a focused one-tab box: its body is inside its ring, whose sides run
+        # down to its bottom edge (the body may be drawn on the ground)
+        var b = t.y1
+        while b + 1 < footer + 4 and f.rgb(t.x0 - 1, b + 1)[0] == t.ring: inc b
+        var box = PaneBox(left: t.x0, right: t.x1, top: t.y1 + 1, bottom: b - 1, stripTop: y)
+        box.tabs.add t
+        result.add box
+        continue
       if f.isGround(g, t.x0 + 2, yb): continue
       var l = t.x0 + 2
       while l > 0 and not f.isGround(g, l - 1, yb): dec l
@@ -1483,22 +1540,6 @@ proc readPanes(ctx: GuiContext; f: Frame; t: var Tree) =
       # the editor: its own role above; its box is also a pane by its title
       for tab in b.tabs:
         if tab.active: ctx.readGenericPane(f, t, b, tab.label)
-      # the in-document find, when open: a field over the editor's first row,
-      # its query then `n of m`
-      let ws = ctx.wordsS(f, b.left + 8, b.top + 2, b.right - b.left - 16, 30, psm = 7)
-      var at = -1
-      for i in 1 ..< ws.len - 1:
-        if ws[i].text == "of" and ws[i - 1].text.allCharsInSet(Digits) and
-           ws[i + 1].text.allCharsInSet(Digits): at = i
-      if at >= 0:
-        var q = ""
-        for wd in ws[0 ..< at - 1]:
-          if q.len > 0: q.add " "
-          q.add wd.text
-        q = q.strip(leading = false, chars = {'|', ' '})
-        let fw = node("find-field", fl(b.left), fl(b.top), fl(b.right - b.left), 30,
-                      %*{"query": q, "count": ws[at - 1].text & " of " & ws[at + 1].text})
-        t.add(t.root, fw)
       continue
     case label
     of "Call Trace": ctx.readCallTrace(f, t, b)
@@ -1558,6 +1599,57 @@ proc readPanes(ctx: GuiContext; f: Frame; t: var Tree) =
       stderr.writeLine "box ", b.left, "..", b.right, " x ", b.top, "..", b.bottom, " ", ls.join(" | ")
     for d in docks: stderr.writeLine "dock ", d.label, " ", d.x0, "..", d.x1
 
+proc readFindField(ctx: GuiContext; f: Frame; left, top, right: int): Option[SurfaceNode] =
+  # the in-document find, when open: a field over the editor's first row,
+  # its query then `n of m`
+  var ws = ctx.wordsS(f, left + 8, top + 2, right - left - 16, 30, psm = 7)
+  proc counterAt(ws: seq[Word]): int =
+    result = -1
+    for i in 1 ..< ws.len - 1:
+      if ws[i].text == "of" and ws[i - 1].text.allCharsInSet(Digits) and
+         ws[i + 1].text.allCharsInSet(Digits): result = i
+  var at = counterAt(ws)
+  var widget = false     # the field's case toggle, `Aa`
+  for wd in ws:
+    if wd.text.startsWith("Aa"): widget = true
+  var counter = ""
+  if at < 0 and widget:
+    # The counter is drawn dim and small: read the field's right part again
+    # as ink on paper (its words run together there: `3of12`), and take the
+    # query from the first reading, left of where the counter starts.
+    let right = ctx.wordsInk(f, right - 150, top + 2, 140, 30, level = 77)
+    var joined = ""
+    var startX = high(int)
+    for wd in right:
+      if wd.text.startsWith("Aa"): break
+      joined.add wd.text
+      startX = min(startX, wd.x)
+    let o = joined.find("of")
+    if o > 0 and o + 2 < joined.len and joined[0 ..< o].allCharsInSet(Digits) and
+       joined[o + 2 .. ^1].allCharsInSet(Digits):
+      counter = joined[0 ..< o] & " of " & joined[o + 2 .. ^1]
+      var q: seq[Word]
+      for wd in ws:
+        if wd.x + wd.w < startX - 4: q.add wd
+      ws = q
+  if counter.len > 0:
+    var q = ""
+    for wd in ws:
+      if q.len > 0: q.add " "
+      q.add wd.text
+    q = q.strip(leading = false, chars = {'|', ' '})
+    return some(node("find-field", fl(left), fl(top), fl(right - left), 30,
+                     %*{"query": q, "count": counter}))
+  if at >= 0:
+    var q = ""
+    for wd in ws[0 ..< at - 1]:
+      if q.len > 0: q.add " "
+      q.add wd.text
+    q = q.strip(leading = false, chars = {'|', ' '})
+    let fw = node("find-field", fl(left), fl(top), fl(right - left), 30,
+                  %*{"query": q, "count": ws[at - 1].text & " of " & ws[at + 1].text})
+    result = some(fw)
+
 proc readSurface*(ctx: GuiContext; f: Frame): Tree =
   # a replay names its position (`main.py:1#1`) on the status line; an Edit
   # window names none
@@ -1590,6 +1682,10 @@ proc readSurface*(ctx: GuiContext; f: Frame): Tree =
   let box = ctx.findEditor(f)
   if box.isSome:
     let b = box.get
+    # the in-document find, when open (the editor's box is found here even
+    # when the field over its first row hides it from the boxes' walk)
+    let ff = ctx.readFindField(f, b.left, b.top, b.right)
+    if ff.isSome: result.add(result.root, ff.get)
     var rows = ctx.editorRows(f, b)
     let left = if rows.len > 0: codeLeft(f, b, rows, rows[0].numbersRight) else: b.left + 110
     if rows.len > 0: ctx.readCode(f, b, rows, left)
@@ -1701,7 +1797,31 @@ proc ctGuiBinding*(): GuiBinding =
       if n.role != "line" and anchor in ["scrubber-start", "scrubber-end"]:
         # a list's scrubber: the track down the body's right edge (its ends
         # a few pixels in, past the thumb's rounding)
-        let x = int(n.x + n.w) - 5
+        var x = int(n.x + n.w) - 5
+        # The track's column, by its thumb: a run 6-16 px wide of one colour
+        # off the body's ground, down 20 px or more, in the pane's last 40 px
+        # (a list inset in its pane, the VCS pane's, draws it short of the
+        # edge, where the press would miss it).
+        let fr = ctx.grab()
+        let right = int(n.x + n.w) - 2
+        let ground = fr.rgb(right - 1, int(n.y) + 8)
+        block find:
+          for yy in countup(int(n.y) + 8, int(n.y + n.h) - 8, 12):
+            var xx = right
+            while xx > right - 40:
+              let c = fr.rgb(xx, yy)
+              if not near(c, ground, 6):
+                var x0 = xx
+                while x0 > right - 40 and near(fr.rgb(x0 - 1, yy), c, 2): dec x0
+                let wid = xx - x0 + 1
+                var tall = 0
+                while yy + tall < int(n.y + n.h) and near(fr.rgb((x0 + xx) div 2, yy + tall), c, 2):
+                  inc tall
+                if wid >= 6 and wid <= 16 and tall >= 20:
+                  x = (x0 + xx) div 2
+                  break find
+                xx = x0 - 1
+              else: dec xx
         return some((x, if anchor == "scrubber-start": int(n.y) + 4 else: int(n.y + n.h) - 4))
       if n.role != "line":
         # a row of a pane: its text's ends, and a call's toggle before it
@@ -1732,6 +1852,15 @@ proc ctGuiBinding*(): GuiBinding =
             stderr.writeLine "anchor expander on ", n.keyText, " x0=", x0, " y=", midY,
               " runs=", runs, " -> ", box
           return some((box, midY))
+        of "row-end":
+          # the row's last ink, past its text: a button drawn at the row's
+          # right end (the Tests headline's ▶), which OCR does not read as a
+          # word. The pane's own right edge and scrollbar are left out.
+          let runs = inkRuns(ctx.grab(), midY - 5, midY + 5, x0,
+                             int(n.x + n.w) - 8)
+          if runs.len == 0: return none((int, int))
+          let (a, b) = runs[^1]
+          return some(((a + b) div 2, midY))
         of "name":
           let nx = n.props{"$name"}.getInt(-1)
           return (if nx >= 0: some((nx, midY)) else: none((int, int)))
