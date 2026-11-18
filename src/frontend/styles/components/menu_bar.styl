@@ -210,6 +210,12 @@ CAPTION_BAR_PADDING_BOTTOM = unquote("var(--caption-bar-padding-bottom)")
     mask-position: center
     -webkit-mask-repeat: no-repeat
     mask-repeat: no-repeat
+    // `contain` scales the icon proportionally to fit within the circle at any
+    // zoom level.  Without it the mask renders at the SVG's intrinsic pixel
+    // size (10×2, 14×11, 10×10), which is smaller than the button at default
+    // zoom but larger when zoomed out, clipping the icon.
+    -webkit-mask-size: contain
+    mask-size: contain
 
     &.minimize
       -webkit-mask-image: url('../../public/resources/window/minimize_window_dark.svg')
