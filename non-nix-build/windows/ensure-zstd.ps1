@@ -61,6 +61,47 @@ function Ensure-Zstd {
 
     Write-Host "Copying manual zstd install from '$manualZstdRoot' into the install root; a junction there would not survive relocation."
     Copy-Item -LiteralPath $manualZstdRoot -Destination $extractDir -Recurse -Force
+
+    # A C:\zstd adopted for its include/ and lib/ is a library install
+    # (CMake/vcpkg layout), which keeps zstd.exe under bin\ or not at all.
+    # Consumers look for it at the root: ensure-clingo.ps1 unpacks clingo's
+    # .tar.zst with it, and on win-ci-bare-001 every run failed there with
+    # "zstd.exe not found at ...\zstd-v1.5.6-win64\zstd.exe" while this arm
+    # reported ZSTD ok. It also made the up-to-date check above miss, so each
+    # run re-copied. Take bin\'s exe (with its DLLs), else the pinned release's.
+    if (-not (Test-Path -LiteralPath $zstdExe -PathType Leaf)) {
+      $binDir = Join-Path $extractDir "bin"
+      if (Test-Path -LiteralPath (Join-Path $binDir "zstd.exe") -PathType Leaf) {
+        Write-Host "The manual zstd install keeps zstd.exe under bin\; copying it (and its DLLs) to $extractDir."
+        Get-ChildItem -LiteralPath $binDir -File |
+          Where-Object { $_.Extension -in @(".exe", ".dll") } |
+          Copy-Item -Destination $extractDir -Force
+      } else {
+        Write-Host "The manual zstd install has no zstd.exe; taking it from the pinned zstd $version release."
+        $tempZip = Join-Path $env:TEMP $asset
+        $tempDir = Join-Path $env:TEMP ("zstd-exe-" + [guid]::NewGuid().ToString("N"))
+        Download-File -Url "https://github.com/facebook/zstd/releases/download/v$version/$asset" -OutFile $tempZip
+        try {
+          $expected = $Toolchain["ZSTD_WIN_X64_SHA256"]
+          if ([string]::IsNullOrWhiteSpace($expected)) {
+            throw "ZSTD_WIN_X64_SHA256 is not set in toolchain-versions.env; refusing to install an unverified zstd."
+          }
+          Assert-FileSha256 -Path $tempZip -Expected $expected
+          Expand-Archive -Path $tempZip -DestinationPath $tempDir -Force
+          $releaseExe = Get-ChildItem -LiteralPath $tempDir -Recurse -File -Filter "zstd.exe" | Select-Object -First 1
+          if ($null -eq $releaseExe) {
+            throw "The zstd $version release archive '$asset' contains no zstd.exe."
+          }
+          Copy-Item -LiteralPath $releaseExe.FullName -Destination $zstdExe -Force
+        } finally {
+          Remove-Item -LiteralPath $tempZip -Force -ErrorAction SilentlyContinue
+          Remove-Item -LiteralPath $tempDir -Recurse -Force -ErrorAction SilentlyContinue
+        }
+      }
+      if (-not (Test-Path -LiteralPath $zstdExe -PathType Leaf)) {
+        throw "zstd $version (manual-copy from '$manualZstdRoot') left no zstd.exe at '$zstdExe'."
+      }
+    }
     $relative = Write-InstallPointer -Root $Root -Component "zstd" `
       -VersionRoot $zstdVersionRoot -InstallDir $extractDir -Metadata @{
         zstd_version = $version
