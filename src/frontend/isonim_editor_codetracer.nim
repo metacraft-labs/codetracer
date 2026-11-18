@@ -2,8 +2,10 @@
 ##
 ## CodeTracer is the editor's user project here: every story declared in
 ## `stories/codetracer_stories.nim` (the declaration StoryBook's story files
-## are generated from) is a component story of the editor, one story group per
-## StoryBook section, the Agent Harbor prototypes first.
+## are generated from) is a story of the editor, one story group per StoryBook
+## section, the Agent Harbor prototypes first. A section of whole windows
+## (Layouts) is a page group, listed under Pages and opened in the page
+## preview; every other section is a component group (`editorKind`).
 ##
 ## How a story reaches the preview. The editor hands a project an element in
 ## its preview frame (`EditorWorkspace.previewMount`). The frame's document is
@@ -29,7 +31,7 @@ when not defined(js):
 
 import std/[strutils, tables]
 
-import isonim/core/owner
+import isonim/core/[owner, signals]
 import isonim/editor
 import isonim/editor/browser
 
@@ -101,18 +103,23 @@ static:
   doAssert hasTheme, "src/frontend/index.html no longer declares <link id='theme'>"
 
 func frameHeight(kind: string): int =
-  ## The preview frame's height for a story kind. The editor sizes a preview
-  ## frame to its content, and CodeTracer's surfaces fill their viewport
-  ## (`100vh`), so the document fixes a height: the brief's `panel` size
-  ## (760 x 640) for panels, a laptop height for whole layouts.
+  ## The component preview frame's height for a story kind. The detail and
+  ## edit views size a preview frame to its content, and CodeTracer's surfaces
+  ## fill their viewport (`100vh`), so the document fixes a height: the
+  ## brief's `panel` size (760 x 640) for panels, a laptop height for whole
+  ## layouts. A page story has no such height: see `codeTracerPreviewDocument`.
   case kind
   of "layout": 900
   of "panel": 640
   of "view": 480
   else: 320
 
-proc codeTracerPreviewDocument*(story: CodeTracerStory; theme: string): string =
+proc codeTracerPreviewDocument*(story: CodeTracerStory; theme: string;
+                                page = false): string =
   ## The preview frame's document for `story` in `theme` (`dark`/`light`).
+  ## `page` is true when the story is opened as a page: the page preview's
+  ## frame is the selected screen size (isonim-editor, "Screen-size pinned
+  ## values"), so the document fills it instead of fixing its own height.
   let themeFile = themeStylesheets.getOrDefault(theme, themeStylesheets["dark"])
   let themeKey = if theme in themeStylesheets: theme else: "dark"
   result = "<!doctype html><html data-codetracer-theme=\"" & themeKey &
@@ -124,11 +131,11 @@ proc codeTracerPreviewDocument*(story: CodeTracerStory; theme: string): string =
       href = href[0 .. slash] & themeFile
     result.add "<link rel=\"stylesheet\" href=\"" & href & "\"" &
       (if link.id.len > 0: " id=\"" & link.id & "\"" else: "") & ">"
-  let height = $frameHeight(story.kind)
+  let height = if page: "100%" else: $frameHeight(story.kind) & "px"
   # Harness sizing only, as storybook/README.md allows: the frame's height,
   # no visual property.
   result.add "<style>html,body{margin:0;padding:0;height:" & height &
-    "px;overflow:hidden}</style>"
+    ";overflow:hidden}</style>"
   result.add "<script src=\"" & componentsBundleUrl & "\"></script>"
   result.add "<script type=\"module\">import { renderSurface } from \"" &
     surfacesModuleUrl & "\"; window.__ctRenderStory = renderSurface;</script>"
@@ -142,13 +149,29 @@ proc storyTable(sections: seq[CodeTracerStorySection]): Table[StoryKey, CodeTrac
     for story in section.stories:
       result[(section.group, story.name)] = story
 
+func editorKind(section: CodeTracerStorySection): StoryKind =
+  ## The editor kind of a section's stories, which decides the sidebar section
+  ## they are listed in and the view that opens them (isonim-editor.md,
+  ## "Sidebar drives view selection"). A section that is mostly whole windows
+  ## (`layout` stories, such as Layouts) is a set of pages: it is listed under
+  ## Pages and opens in the page preview, at a screen size with Fit and 100%.
+  ## Every other section lists its stories as components, opened in the
+  ## component detail view. The kind is the section's, not each story's: a
+  ## story keeps its section's group either way, so its editor identity
+  ## (group, name, kind) stays one story in one place.
+  var windows = 0
+  for story in section.stories:
+    if story.kind == "layout": inc windows
+  if windows * 2 > section.stories.len: skPage else: skComponent
+
 proc storyGroups(sections: seq[CodeTracerStorySection]): seq[StoryGroup] =
   for index, section in sections:
+    let kind = editorKind(section)
     var items: seq[StoryItem]
     for story in section.stories:
       items.add StoryItem(name: story.name, description: story.describe,
-                          kind: skComponent, group: section.group)
-    result.add StoryGroup(name: section.group, kind: skComponent,
+                          kind: kind, group: section.group)
+    result.add StoryGroup(name: section.group, kind: kind,
                           expanded: index == 0,
                           description: section.description, items: items)
 
@@ -197,12 +220,16 @@ proc newCodeTracerEditorWorkspace*(): EditorWorkspace =
     raise newException(ValueError, "invalid story declaration: " & problems.join("; "))
   let stories = storyTable(sections)
   let groups = storyGroups(sections)
+  var groupKinds: Table[string, StoryKind]
+  for group in groups: groupKinds[group.name] = group.kind
   let theme = previewTheme()
   let first = sections[0]
 
   let previewHook = proc(story: StoryRef; platform: Platform): ProjectPreview =
     let key = (story.group, story.name)
-    if story.kind != skComponent or key notin stories:
+    # A story is previewed under the kind its group is listed with: a page in
+    # the page preview, a component in the detail and edit views.
+    if key notin stories or groupKinds.getOrDefault(story.group, skComponent) != story.kind:
       return ProjectPreview(status: ppsUnsupportedStory, story: story)
     let declared = stories[key]
     ProjectPreview(
@@ -210,7 +237,8 @@ proc newCodeTracerEditorWorkspace*(): EditorWorkspace =
       story: story,
       title: story.group & " / " & declared.name,
       bodyText: declared.describe,
-      documentHtml: codeTracerPreviewDocument(declared, theme),
+      documentHtml: codeTracerPreviewDocument(declared, theme,
+                                              page = story.kind == skPage),
       metadata: StoryRenderMetadata(
         story: story, title: declared.name, sourceFile: catalogSource,
         fixtureName: declared.fixture, renderKind: declared.kind))
@@ -227,7 +255,7 @@ proc newCodeTracerEditorWorkspace*(): EditorWorkspace =
     description = "CodeTracer's StoryBook stories, from their one declaration",
     initialView = evComponentDetail,
     initialStory = some(StoryRef(group: first.group, name: first.stories[0].name,
-                                 kind: skComponent, index: 0)),
+                                 kind: editorKind(first), index: 0)),
     previewHook = previewHook,
     previewMount = previewMount,
     # Web only: the stories render CodeTracer's web views.
@@ -252,7 +280,9 @@ const
     ## the frame fits the column and is drawn at its own size, so the preview
     ## a reviewer comments on is the StoryBook render
     ## (`tools/isonim-editor/smoke.mjs` compares the two). A viewport named on
-    ## the URL (`?viewport=desktop`, `custom-<w>x<h>`) still wins.
+    ## the URL (`?viewport=desktop`, `custom-<w>x<h>`) still wins, and a URL
+    ## that opens a page story keeps the editor's default screen size, since
+    ## a page is a whole window.
 
 proc routeNamesViewport(): bool =
   var named = false
@@ -264,5 +294,5 @@ when isMainModule:
   # included, into the URL.
   let viewportNamed = routeNamesViewport()
   let vm = mountEditor(newCodeTracerEditorWorkspace())
-  if not viewportNamed:
+  if not viewportNamed and vm.activeView.val != evPagePreview:
     vm.changeViewport(makeCustomViewport(previewViewportWidth, previewViewportHeight))

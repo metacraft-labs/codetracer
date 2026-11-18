@@ -66,17 +66,29 @@ function check(name, ok, detail = "") {
   console.log(`${ok ? "PASS" : "FAIL"} ${name}${detail ? ` — ${detail}` : ""}`);
 }
 
+// The groups the instance lists under Pages (isonim_editor_codetracer.nim,
+// `editorKind`): a group that is mostly whole windows. Its stories are page
+// stories, opened in the page preview; every other story is a component,
+// opened in the detail view.
+function isPageGroup(group) {
+  const inGroup = stories.filter((s) => s.editorGroup === group);
+  return inGroup.filter((s) => s.kind === "layout").length * 2 > inGroup.length;
+}
+
 function storyUrl(group, name) {
   // The story's position in its group is part of its identity (a brief
   // covers `<group>/<name>:component#<index>`), as a sidebar click sets it.
   const index = Math.max(0, stories.filter((s) => s.editorGroup === group).findIndex((s) => s.name === name));
-  const q = new URLSearchParams({ view: "detail", storyGroup: group, story: name, kind: "component", index: String(index) });
+  const page = isPageGroup(group);
+  const q = new URLSearchParams({ view: page ? "page" : "detail", storyGroup: group, story: name,
+    kind: page ? "page" : "component", index: String(index) });
   return `${origin}/?${q}`;
 }
 
-// In View mode the story is in the detail view's frame; Comment and Edit
-// mode move it to the edit view's (isonim views/component_edit).
-const frameSelector = 'iframe[title^="Component preview"], iframe[title="Editable component preview"]';
+// In View mode a component story is in the detail view's frame; Comment and
+// Edit mode move it to the edit view's (isonim views/component_edit). A page
+// story is in the page preview's frame in every mode.
+const frameSelector = 'iframe[title^="Component preview"], iframe[title="Editable component preview"], iframe[data-page-project-frame]';
 
 async function frameDocument(page, predicate, arg, timeout = 90000) {
   // Wait until the visible project frame's document satisfies `predicate`.
@@ -197,6 +209,13 @@ async function main() {
     const groupsShown = await page.evaluate((names) => names.filter((n) => document.body.innerText.includes(n)), groups);
     check("the sidebar shows every declared story group", groupsShown.length === groups.length,
       `${groupsShown.length}/${groups.length}`);
+    // The whole windows are pages: the Layouts group is in the Pages section,
+    // and the Components section does not list it too.
+    const layoutsSection = await page.evaluate(() => {
+      const row = document.querySelector('[aria-label="Toggle Layouts stories"]');
+      return row?.closest("[data-quicknav-section]")?.getAttribute("data-quicknav-section") ?? null;
+    });
+    check("the Layouts group is listed under Pages", layoutsSection === "pages", `${layoutsSection}`);
 
     await frameDocument(page, (doc) => doc.querySelectorAll(".agent-harbor-fleet .ah-fleet-row").length > 0);
     const fleet = await inFrame(page, (doc) => {
@@ -263,7 +282,11 @@ async function main() {
     // rendered. The editor ignores an unknown route story; whatever a frame
     // shows must be a declared surface and fixture.
     await page.goto(storyUrl("Agent Harbor", "No Such Story"), { waitUntil: "domcontentloaded" });
-    await page.locator("[data-story-row]").first().waitFor({ timeout: 60000 });
+    // An Agent Harbor row: that group is expanded. A collapsed group's rows
+    // are in the document but hidden, and the Pages section (Layouts,
+    // collapsed) is listed before Components, so the first row of all is
+    // never visible.
+    await page.locator('[data-story-row^="Agent Harbor/"]').first().waitFor({ timeout: 60000 });
     await page.waitForTimeout(3000);
     const ghostRow = await page.locator('[data-story-row="Agent Harbor/No Such Story"]').count();
     const shown = await page.evaluate((selector) =>

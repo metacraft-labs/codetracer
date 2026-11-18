@@ -350,11 +350,24 @@ struct WorkerProgress {
 }
 
 impl WorkerProgress {
-    fn new(pid: Option<u32>) -> Self {
+    /// A progress record whose first look is put off until [`Self::begin`].
+    /// A look reads `/proc/<pid>/status` for every process on the host (to
+    /// find the processes rr traces, see `worker_tree_cpu_ticks`): tens of
+    /// milliseconds on a busy host. Taken for every query, it was most of the
+    /// cost of a flow step (a Pascal loop's 1,934 steps, 2026-11-18), for
+    /// queries that answer in a few milliseconds and never wait.
+    fn deferred(pid: Option<u32>) -> Self {
         Self {
             pid,
-            last: pid.and_then(worker_tree_cpu_ticks),
+            last: None,
             ceiling: replay_query_ceiling(),
+        }
+    }
+
+    /// Take the first look, unless one was taken.
+    fn begin(&mut self) {
+        if self.last.is_none() {
+            self.last = self.pid.and_then(worker_tree_cpu_ticks);
         }
     }
 
@@ -448,8 +461,20 @@ fn process_cpu_ticks(pid: u32) -> Option<u64> {
 
 /// Every traced process of the host, by its tracer (`TracerPid` in
 /// /proc/<pid>/status).
+/// How many sweeps of `/proc` [`processes_by_tracer`] has made in this
+/// process. Each reads every process's status, so a query that sweeps is
+/// slow on a busy host; tests use the count to hold queries answered at once
+/// to none (`tests/replay_query_proc_sweep_test.rs`).
+static PROC_SWEEPS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+/// The number of `/proc` sweeps made so far (see [`PROC_SWEEPS`]).
+pub fn proc_sweeps() -> usize {
+    PROC_SWEEPS.load(std::sync::atomic::Ordering::Relaxed)
+}
+
 #[cfg(target_os = "linux")]
 fn processes_by_tracer() -> std::collections::HashMap<u32, Vec<u32>> {
+    PROC_SWEEPS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let mut by_tracer: std::collections::HashMap<u32, Vec<u32>> = std::collections::HashMap::new();
     let Ok(entries) = std::fs::read_dir("/proc") else {
         return by_tracer;
@@ -1098,7 +1123,9 @@ impl ReplayWorker {
         // query (a value-origin walk) found no worker. Every other query keeps
         // the plain timeout (`waits_on_a_busy_worker`).
         let waits_on_busy = waits_on_a_busy_worker(&self.name, &raw_json);
-        let mut progress = WorkerProgress::new(worker_pid);
+        // Its first look is taken once the answer is late (the first read
+        // slice passes), so a query answered at once never pays for it.
+        let mut progress = WorkerProgress::deferred(worker_pid);
         let mut line = Vec::new();
         // The wait is read in short slices, and between them the worker's
         // process is checked: a worker that exits while its socket stays open
@@ -1118,6 +1145,9 @@ impl ReplayWorker {
                         if worker_has_exited(self.process.as_mut()) {
                             worker_exited = true;
                             break Err(e);
+                        }
+                        if waits_on_busy {
+                            progress.begin();
                         }
                         let waited =
                             Duration::from_millis(crate::wall_clock::monotonic_ms().saturating_sub(started_ms));
@@ -2224,7 +2254,8 @@ while True:
         };
 
         let tree = worker_tree_cpu_ticks(tracer.id()).unwrap();
-        let mut progress = WorkerProgress::new(Some(tracer.id()));
+        let mut progress = WorkerProgress::deferred(Some(tracer.id()));
+        progress.begin();
         std::thread::sleep(Duration::from_millis(500));
         let working = progress.still_working(Duration::from_secs(11));
 

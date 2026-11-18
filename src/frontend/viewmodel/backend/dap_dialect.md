@@ -314,6 +314,15 @@ Measured against the native `replay-server` while capturing
   which is why it costs an hour rather than a minute.
 
 The working sequence is therefore: drain, request, then wait for the event.
+
+While the walk runs, the engine sends **`ct/flow-progress`** at most every two
+seconds, `{"stepsWalked": <steps visited>, "elapsedMs": <since the walk
+began>}` (`Handler::load_flow`, `FlowPreloader::report_progress`). It is
+advisory: it says the engine is working, not that a window is coming, and a
+client with no kind for it ignores it (the desktop and the VS Code bridge
+catch the unmapped event). It exists for a client that reads silence as a
+stalled engine: GPUI keeps a 30 s per-message clock while its window opens,
+and a first flow on a loaded host took longer than that.
 (This was measured while `flowMode` was still an ordinal; it is a name now —
 see the Status below, which also records that `flow_vm` consumes the event.)
 
