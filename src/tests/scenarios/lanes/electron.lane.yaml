@@ -403,6 +403,7 @@ applicable:
   - ../noir-space-ship/tracepoints-log-messages.yaml
   - ../nim-views/generated-c-follows-the-nim-stop.yaml
   - ../nim-views/disassembly-steps-by-instruction.yaml
+  - ../nim-views/disassembly-steps-back-by-instruction.yaml
   - ../nim-views/nim-step-moves-by-nim-lines.yaml
   - ../nim-views/toggle-macro-expansion-shows-the-expansion.yaml
   - ../low-level-code/generated-c-of-a-stock-nim-recording.yaml

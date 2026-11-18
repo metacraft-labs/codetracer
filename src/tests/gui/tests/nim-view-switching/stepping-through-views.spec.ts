@@ -15,12 +15,13 @@
  *   - The RR backend (ct-native-replay)
  *   - The trace recorded with a sourcemap-enabled Nim compiler
  *
- * Stepping forward in the C view, in the assembly view and by Nim lines are
- * scenarios now (src/tests/scenarios/nim-views/generated-c-follows-the-nim-stop.yaml,
- * disassembly-steps-by-instruction.yaml, nim-step-moves-by-nim-lines.yaml).
- * The two backward steps stay until their scenarios pass (codetracer-pm issues
- * 2026-11-15-reverse-next-never-completes-on-an-rr-nim-recording.md,
- * 2026-11-14-desktop-low-level-code-reverse-instruction-step-leaves-the-function.md).
+ * Stepping forward in the C view, in the assembly view and by Nim lines, and
+ * back by an instruction in the assembly view, are scenarios now
+ * (src/tests/scenarios/nim-views/generated-c-follows-the-nim-stop.yaml,
+ * disassembly-steps-by-instruction.yaml, nim-step-moves-by-nim-lines.yaml,
+ * disassembly-steps-back-by-instruction.yaml). The backward step in the C view
+ * stays until its scenario passes (codetracer-pm issue
+ * 2026-11-15-reverse-next-never-completes-on-an-rr-nim-recording.md).
  */
 
 import { test, expect } from "../../lib/fixtures";
@@ -29,7 +30,6 @@ import { StatusBar } from "../../page-objects/status_bar";
 import { retry } from "../../lib/retry-helpers";
 import { moveAndSettle, waitForNotBusy } from "../../lib/operation-settled";
 import {
-  ViewInstructions,
   ViewTargetSource,
   openAlternativeView,
 } from "../../lib/alternative-views";
@@ -182,51 +182,6 @@ test.describe("SteppingThroughViews", () => {
     // If we can reliably parse ticks, verify backward direction.
     if (beforeBackTicks > 0 && afterBackTicks > 0) {
       expect(afterBackTicks).toBeLessThanOrEqual(beforeBackTicks);
-    }
-  });
-
-  // Was permanently skipped for the same reason as "step forward in assembly
-  // view" above; same disposition.
-  test("step backward in assembly view", async ({ ctPage }) => {
-    const layout = new LayoutPage(ctPage);
-    const statusBar = new StatusBar(ctPage, ctPage.locator("#status-base"));
-
-    await waitForNimEditorReady(layout, ctPage);
-    await waitForSourcemap(ctPage);
-
-    await openAlternativeView(ctPage, ViewInstructions, async () => {
-      await moveAndSettle(ctPage, () => ctPage.locator("#next-image").click());
-    });
-    await waitForNotBusy(ctPage);
-
-    // Step forward a few times first.
-    const nextBtn = ctPage.locator("#next-image");
-    for (let i = 0; i < 3; i++) {
-      await moveAndSettle(ctPage, () => nextBtn.click());
-    }
-
-    // Record position before stepping back.
-    const beforeRaw = await getRawStatusBarText(statusBar);
-    const beforeTicks = parseRrTicks(beforeRaw);
-    const beforeLocation = await waitForStatusBarLocation(statusBar);
-
-    // Step backward in assembly view.
-    const reverseNextBtn = ctPage.locator("#reverse-next-image");
-    await moveAndSettle(ctPage, () => reverseNextBtn.click());
-
-    // Verify backward movement.
-    const afterRaw = await getRawStatusBarText(statusBar);
-    const afterTicks = parseRrTicks(afterRaw);
-    const afterLocation = await waitForStatusBarLocation(statusBar);
-
-    const positionChanged =
-      afterLocation.line !== beforeLocation.line ||
-      afterTicks !== beforeTicks;
-    expect(positionChanged).toBe(true);
-
-    // Ticks should have decreased for backward stepping.
-    if (beforeTicks > 0 && afterTicks > 0) {
-      expect(afterTicks).toBeLessThanOrEqual(beforeTicks);
     }
   });
 
