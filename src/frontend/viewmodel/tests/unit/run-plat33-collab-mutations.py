@@ -140,9 +140,20 @@ TOUCHED = [COLLAB_TEXT, REDUCER, TEXT_OPS, TRANSACTION, OPS, GENERATOR,
 # `src/frontend/test_support/spec_documents.nim`, whose `SpecSubdir` is the
 # canonical statement of the layout; this is the one Python spelling of it and
 # it is deliberately not a second copy of that module.
+#
+# **THE WORKFLOW AND THE JUSTFILE ARE DIGESTED AS VIEWS, NOT WHOLE.** The suite
+# reads a handful of facts out of each (whether each collaboration lane's step
+# and recipe exist, and the window before the step it searches for
+# `!cancelled()`), and both files are edited many times a day for unrelated
+# reasons: every sibling pin bump moved `codetracer.yml`, so this harness owed
+# a re-grade three times in one afternoon with nothing it reads changed. A
+# `path#view` entry digests the text `ci/lib/mutation_views.py` extracts, the
+# definition the drift gate (`ci/test/mutation-control-drift.sh`) computes the
+# same entry with. An edit that can change the suite's verdict changes the
+# view; a pin bump elsewhere in the file does not.
 READ_ONLY_INPUTS = [
-    ".github/workflows/codetracer.yml",
-    "justfile",
+    ".github/workflows/codetracer.yml#plat33-collab-lanes",
+    "justfile#plat33-collab-recipes",
     "ci/lib/test-lane-files.sh",
     "../codetracer-pm/spec/Architecture/Editor-ViewModel.md",
     # Executed by this harness (it is in `SUITES`) but not mutated by it — see
@@ -539,6 +550,9 @@ def resolve_input(rel):
 
 
 def digest(rel):
+    path, view = split_subject(rel)
+    if view:
+        return view_digest(resolve_input(path), view)
     return hashlib.sha256(resolve_input(rel).read_bytes()).hexdigest()
 
 
@@ -728,6 +742,7 @@ def install_restore_on_signal():
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[5] / "ci" / "lib"))
 from harness_guard import refuse_undeclared_arms  # noqa: E402
+from mutation_views import split_subject, view_digest  # noqa: E402
 
 
 def main():

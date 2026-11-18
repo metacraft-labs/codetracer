@@ -212,11 +212,23 @@ harness_for() {
 	harness_of["${c}"]="${found}"
 }
 
+# A subject spelled `<path>#<view>` is digested as the VIEW's text, the part
+# of the file the harness's suites read (ci/lib/mutation_views.py, which the
+# harness's `digest()` calls too). The views are this gate's own, read from
+# beside it rather than from `--root`: a view is a definition, like the gate.
+# A view that cannot be computed (the file is gone, or no view has that name)
+# digests as `absent`, so the entry reads as drift rather than as agreement.
+VIEWS_PY="$(cd "$(dirname "${BASH_SOURCE[0]}")/../lib" && pwd)/mutation_views.py"
 declare -A digest_cache=()
 current_digest() {
-	local p="$1"
+	local p="$1" file view
 	if [ -z "${digest_cache["${p}"]+x}" ]; then
-		if [ -f "${p}" ]; then
+		file="${p%%#*}"
+		if [ "${file}" != "${p}" ]; then
+			view="${p#*#}"
+			digest_cache["${p}"]="$(python3 "${VIEWS_PY}" --sha256 "${file}" "${view}" 2>/dev/null)" ||
+				digest_cache["${p}"]="absent"
+		elif [ -f "${p}" ]; then
 			digest_cache["${p}"]="$(sha256sum -- "${p}" | cut -d' ' -f1)"
 		else
 			digest_cache["${p}"]="absent"
