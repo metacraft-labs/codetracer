@@ -354,7 +354,11 @@ suite "cardless: the stylesheet frames no event":
   test "no rule that styles a line or a part sets a border, outline or background":
     # Read at compile time, so the check runs on every backend (the JS one
     # has no file system).
-    const styl = staticRead("../../../styles/components/agent_harbor_activity.styl")
+    const stylText = staticRead("../../../styles/components/agent_harbor_activity.styl")
+    # A `let`, not the const: a for-loop over a const string is re-evaluated
+    # per iteration on the JS backend (quadratic; ci/lint's js-const-iteration
+    # guard).
+    let styl = stylText
     var selector = ""
     var problems: seq[string]
     var lineRules = 0

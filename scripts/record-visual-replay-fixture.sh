@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# NOT-A-CI-GATE: a fixture recorder, run by hand to refresh a committed
+# recording (the suites open the committed one, never this script's output).
 # record-visual-replay-fixture.sh [OUT_DIR] — RE-RECORDS the visual recording
 # the Visual Replay suites on the terminal and in the GPUI window (and the
 # desktop's capture) open. The suites do not run this: they open the recording

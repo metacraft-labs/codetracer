@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+# NOT-A-CI-GATE: a parity measurement for docs/shared-editor-parity.md, run by
+# hand: it replays the electron lane's editor and tracing scenarios under
+# Monaco and the shared editor and compares every step, and the parity table
+# records differences it reports that the scenarios' own assertions accept.
 # ci/test/shared-editor-differential.sh — the editor differential: every
 # desktop scenario of CodeTracer's scenario pack that drives the editor, run
 # with Monaco (`CODETRACER_SHARED_EDITOR=0`) and with the shared editor
