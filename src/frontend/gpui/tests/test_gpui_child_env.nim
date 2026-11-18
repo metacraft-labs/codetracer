@@ -34,7 +34,7 @@ template ck(cond: untyped) =
   check(cond)
 
 const
-  ExpectedAssertions = 27
+  ExpectedAssertions = 33
     ## Measured. 25 -> 27 (2026-10-26): the library-path rule became its own
     ## `gpuiLibraryPath`, and a case asserts `gpuiChildEnv` uses it (+2, one
     ## per environment shape). A case that stops asserting, or a child whose
@@ -186,6 +186,29 @@ suite "gpuiChildEnv: what a real child sees":
           ck lines[4] == getEnv("PATH")
       finally:
         removeDir(state)
+
+suite "gpuiRunScript: the hang ceiling every window run has":
+
+  test "the script runs the binary under timeout at the ceiling":
+    ck gpuiRunScript("2>e") == "exec timeout " & $WindowRunCeilingS &
+                               " \"$0\" \"$@\" 2>e"
+    ck gpuiRunScript() == "exec timeout " & $WindowRunCeilingS & " \"$0\" \"$@\""
+
+  test "a run past the ceiling is killed and named a hang; a finished one is not":
+    # A deterministic hang: `sleep 30` under a 1 s ceiling.
+    let hung = startProcess("/bin/sh", args = @["-c", gpuiRunScript("", 1), "sleep", "30"],
+                            options = {})
+    let rc = hung.waitForExit()
+    hung.close()
+    ck rc == TimeoutKilledExit
+    ck gpuiExitText(rc, 1).startsWith("hung past WindowRunCeilingS (1 s)")
+    # The control: a run that ends inside its ceiling keeps its own status.
+    let quick = startProcess("/bin/sh", args = @["-c", gpuiRunScript("", 5), "sh", "-c", "exit 3"],
+                             options = {})
+    let qrc = quick.waitForExit()
+    quick.close()
+    ck qrc == 3
+    ck gpuiExitText(qrc) == "exited 3"
 
 suite "gpuiChildEnv — assertion tally":
   test "CHECKS":
