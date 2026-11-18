@@ -47,7 +47,7 @@ template ck(cond: untyped) =
   check(cond)
 
 const
-  ExpectedAssertions = 248
+  ExpectedAssertions = 249
     ## 247 -> 248: the top strip's label too. Measured.
     ## 243 -> 247 (2026-11-10, issue gpui-shell-measures-panel-tab-labels-with-
     ## letter-spacing-but-draws-them-without): each of the footer strip's four
@@ -136,7 +136,7 @@ proc windowPlan(ops: string; pre: seq[string] = @[]; trace = false): JsonNode =
   args.add calc
   let errFile = genTempPath("plat48-gpui-plan-", ".err")
   let p = startProcess("/bin/sh",
-    args = @["-c", "exec \"$0\" \"$@\" 2>" & quoteShell(errFile), bin] & args,
+    args = @["-c", gpuiRunScript("2>" & quoteShell(errFile)), bin] & args,
     env = env, options = {})
   let output = p.outputStream.readAll()
   let rc = p.waitForExit()
@@ -146,7 +146,7 @@ proc windowPlan(ops: string; pre: seq[string] = @[]; trace = false): JsonNode =
   removeFile(errFile)
   if rc != 0:
     removeDir(state)
-    checkpoint("codetracer-gpui exited " & $rc & ": " & err)
+    checkpoint("codetracer-gpui " & gpuiExitText(rc) & ": " & err)
     raise newException(IOError, "the window plan run failed (" & ops & ")")
   result = parseJson(output)
   proc keep(n: JsonNode) =
@@ -419,6 +419,11 @@ suite "PLAT-48: the GPUI window's top bar and auto-hide panels, as drawn":
     let rev = plan.nodesWith("data-ct-revealed")
     ck rev.len == 1
     ck rev[0].attr("data-ct-revealed") == $paneBuildOutput
+    # Escape closes it before the key is routed, so the Vim editor under it
+    # does not take the key (Input-Routing-And-Keymaps §6: a revealed dock
+    # is a transient surface).
+    let closed = windowPlan("key:o:control,key:escape", @["--keymap=vim"])
+    ck closed.nodesWith("data-ct-revealed").len == 0
     let rr = rev[0].rectOf
     ck rr.y + rr.h <= H and rr.w > W div 2
     # The pane's own leaf is inside the overlay.

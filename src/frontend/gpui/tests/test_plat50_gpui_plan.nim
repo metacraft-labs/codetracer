@@ -68,7 +68,8 @@ template ck(cond: untyped) =
   check(cond)
 
 const
-  ExpectedAssertions = 122
+  ExpectedAssertions = 129
+    ## 124 -> 129: the status bar's note and location sharing their row.
     ## The native Top action adds two checks of the actual window plan.
     ## Four checks keep a file opened from Files through docking and resize.
     ## K19: 108 -> 115 — a Files node opens the Files pane's menu (its
@@ -118,8 +119,8 @@ proc windowPlan(ops: string; subject = ""; pre: seq[string] = @[];
   let errFile = genTempPath("plat50-gpui-plan-", ".err")
   let p = startProcess("/bin/sh",
     # A run that never finishes (a move the engine never answers) is a
-    # failure, not a wait: the window is given two minutes.
-    args = @["-c", "exec timeout 120 \"$0\" \"$@\" 2>" & quoteShell(errFile),
+    # failure, not a wait: the shared hang ceiling (`WindowRunCeilingS`).
+    args = @["-c", gpuiRunScript("2>" & quoteShell(errFile)),
              bin] & args,
     workingDir = workDir, env = env, options = {})
   let output = p.outputStream.readAll()
@@ -129,7 +130,7 @@ proc windowPlan(ops: string; subject = ""; pre: seq[string] = @[];
   removeFile(errFile)
   removeDir(state)
   if rc != 0:
-    checkpoint("codetracer-gpui exited " & $rc & ": " & trace)
+    checkpoint("codetracer-gpui " & gpuiExitText(rc) & ": " & trace)
     raise newException(IOError, "the window plan run failed (" & ops & ")")
   result = parseJson(output)
   proc sweep(n: JsonNode) =
@@ -241,6 +242,13 @@ suite "PLAT-50 GPUI: the event log, the editor and the timeline":
     ck content[0].style("bg") == dark(dtColorsUiSurfacePrimaryDefault)
     # The debugger did not move.
     ck shown.executionLine != 111
+    # A real right-click is a press AND a `contextmenu` event: the second
+    # does not close what the first opened (it once did, before a frame).
+    let kept = windowPlan("click:event:2:right,contextmenu:20:20")
+    ck kept.nodesWith("data-ct-event-content").len == 1
+    # ... and a later press does
+    let closed = windowPlan("click:event:2:right,contextmenu:20:20,press:20:20")
+    ck closed.nodesWith("data-ct-event-content").len == 0
 
   test "the gutter sets a breakpoint; a right click disables it":
     let plan = windowPlan("click:gutter:31:left")
@@ -565,6 +573,20 @@ suite "PLAT-50 GPUI: the sweep's other rows":
     ck list.contains("A notes.txt") and list.contains("A unchanged.txt")
 
 suite "PLAT-50 GPUI: the chrome":
+  test "the status bar's location gives way to a note before the note is cut":
+    # Room for both: each keeps its width.
+    ck fitFooterRow(900, 300, 400) == (note: 300, location: 400)
+    # A long path (a CI runner's work directory) beside a note: the location
+    # shrinks, the note is whole.
+    ck fitFooterRow(900, 300, 800) == (note: 300, location: 600)
+    # The location keeps at least its tail; past that the note is cut.
+    ck fitFooterRow(500, 400, 800) == (note: 500 - MinFooterLocationPx,
+                                       location: MinFooterLocationPx)
+    # A short location is never widened to the floor.
+    ck fitFooterRow(300, 400, 100) == (note: 200, location: 100)
+    # No room at all: nothing is negative.
+    ck fitFooterRow(-20, 400, 800) == (note: 0, location: 0)
+
 
   test "the desktop's grounds, a bordered omnibox after the controls":
     let plan = windowPlan("")
