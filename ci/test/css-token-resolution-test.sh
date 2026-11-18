@@ -18,7 +18,7 @@
 # out of the findings, and a guard that cries wolf gets disabled.
 #
 # NOTHING HERE MUTATES THE WORKTREE.
-# Each arm builds a synthetic repo root under a scratch directory — a Tupfile,
+# Each arm builds a synthetic repo root under a scratch directory — a recipe,
 # a generated token file, a palette, and hand-written "compiled" CSS. The
 # checker is pointed at that. The final arm is the exception and runs the real
 # pipeline over the real tree, read-only, to assert it is green.
@@ -62,9 +62,11 @@ make_fixture() {
 		colors-ui-border-secondary = #3a3a3a
 	EOF
 	printf '%s' "${palette}" >"${styles}/theme.styl"
-	cat >"${styles}/Tupfile" <<-'EOF'
-		include_rules
-		: theme.styl |> !stylus |> theme.css
+	cat >"${root}/repro.nim" <<-'EOF'
+		const
+		  StylusCssEntryPoints = @[
+		    "theme"
+		  ]
 	EOF
 	printf '%s\n' "${css}" >"${root}/css/theme.css"
 }
@@ -162,19 +164,19 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# 6. INSTRUMENT. The Tupfile is the guard's file list. If its rule syntax
+# 6. INSTRUMENT. The recipe's entry-point list is the guard's file list. If its rule syntax
 #    changes and the list comes back empty, the guard must say so rather than
 #    scan nothing and exit 0.
 # ---------------------------------------------------------------------------
 make_fixture "${work}/f6" '.pane {
   color: #fff;
 }'
-printf 'include_rules\n' >"${work}/f6/src/frontend/styles/Tupfile"
+printf 'const StylusCssEntryPoints = @[]\n' >"${work}/f6/repro.nim"
 out="$(run_guard "${work}/f6" || true)"
-if grep -q "no !stylus outputs" <<<"${out}" && grep -q "^FAIL" <<<"${out}"; then
-	report ok "a Tupfile the guard cannot read fails instead of scanning nothing"
+if grep -q "no StylusCssEntryPoints" <<<"${out}" && grep -q "^FAIL" <<<"${out}"; then
+	report ok "a recipe list the guard cannot read fails instead of scanning nothing"
 else
-	report fail "a Tupfile the guard cannot read fails instead of scanning nothing" "${out}"
+	report fail "a recipe list the guard cannot read fails instead of scanning nothing" "${out}"
 fi
 
 # ---------------------------------------------------------------------------

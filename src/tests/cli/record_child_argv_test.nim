@@ -230,7 +230,7 @@ suite "ct record: the program and its arguments around --":
 
   test "the real ct: both forms hand the recorder the same program and arguments":
     let ct = getEnv("CODETRACER_E2E_CT_PATH",
-      currentSourcePath.parentDir.parentDir.parentDir / "build-debug" /
+      currentSourcePath.parentDir.parentDir.parentDir / "build-debug-repro" /
       "bin" / "ct")
     check fileExists(ct)
     check findExe("ct-native-replay").len > 0

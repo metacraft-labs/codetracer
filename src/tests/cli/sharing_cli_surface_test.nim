@@ -33,7 +33,7 @@
 ##
 ## ## On mocking
 ##
-## Nothing is mocked. The subject is `src/build-debug/bin/ct`, the shipped
+## Nothing is mocked. The subject is `src/build-debug-repro/bin/ct`, the shipped
 ## binary, run as a user runs it. `just build-once` must have produced it;
 ## a missing binary is a loud failure rather than a skip, because "the CLI is
 ## untested" is the condition this file exists to end.
@@ -43,7 +43,7 @@
 import std/[algorithm, os, osproc, sets, strutils, unittest]
 
 const
-  CtBinary = "src/build-debug/bin/ct"
+  CtBinary = "src/build-debug-repro/bin/ct"
   SharingDir = "src/ct/online_sharing"
 
   ScannedSubcommands = ["upload", "download", "record", "replay", "review"]

@@ -125,7 +125,7 @@ if [ -z "$RECORD_WEB_BIN" ]; then
 	RECORD_WEB_BIN="$(newest_executable \
 		"$CODETRACER_ROOT/src/backend-manager/target/release/session-manager" \
 		"$CODETRACER_ROOT/src/backend-manager/target/debug/session-manager" \
-		"$CODETRACER_ROOT/src/build-debug/bin/session-manager")" ||
+		"$CODETRACER_ROOT/src/build-debug-repro/bin/session-manager")" ||
 		RECORD_WEB_BIN=""
 fi
 if [ -z "$RECORD_WEB_BIN" ]; then

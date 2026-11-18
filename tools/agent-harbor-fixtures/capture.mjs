@@ -529,7 +529,7 @@ function ctBinary() {
     process.env.CODETRACER_CT_BIN,
     process.env.CODETRACER_BUILD_DIR && join(process.env.CODETRACER_BUILD_DIR, "bin/ct"),
     join(repoRoot, "src/build-debug-repro/bin/ct"),
-    join(repoRoot, "src/build-debug/bin/ct"),
+    join(repoRoot, "src/build-debug-repro/bin/ct"),
   ].filter(Boolean);
   const found = candidates.find((c) => existsSync(c));
   if (!found) throw new Error(`no ct binary (tried ${candidates.join(", ")}); run \`just build-once\` first`);

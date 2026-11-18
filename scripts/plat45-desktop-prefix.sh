@@ -7,10 +7,11 @@
 # symlinked in unchanged, except:
 #
 #   * `index.js` / `src/index.js` (the main process) and `ui.js` /
-#     `public/ui.js` (the renderer), compiled here from this checkout with the
-#     flags `src/Tuprules.tup`'s `!nim_node_index` and `!nim_js` rules use —
-#     so a desktop change (View > Reset Layout) is what runs, and the
-#     `staticRead` copy of the default inside them is this checkout's;
+#     `public/ui.js` (the renderer), built from this checkout by `repro build`
+#     of the build graph's own `frontend-index-js` / `frontend-ui-js` actions —
+#     so the flags are the build's, not a copy of them — and a desktop change
+#     (View > Reset Layout) is what runs, and the `staticRead` copy of the
+#     default inside them is this checkout's;
 #   * `bin/ct`, copied rather than linked (see below), so the `ct` the specs
 #     launch starts THIS prefix's `src/index.js`;
 #   * `config/`, holding `default_config.yaml` and the default layout given as
@@ -26,66 +27,34 @@ repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 layout="${2:-$repo/src/config/default_layout.json}"
 
 # The build the prefix borrows from: the dev shell's build output when it names
-# one (`CODETRACER_BUILD_DIR`, e.g. `src/build-debug-repro` on macOS), else the
-# tup build — the same idiom `scripts/build-desktop-component.sh` uses.
+# one (`CODETRACER_BUILD_DIR`), else this checkout's `src/build-debug-repro` —
+# the same idiom `scripts/build-desktop-component.sh` uses.
 #
 # Checked BEFORE `readlink -f`: under `set -euo pipefail` a `readlink -f` of a
 # missing path inside `$(...)` ends the script on the spot, so a check after it
 # never ran and a missing ct exited 1 with nothing on stderr.
-build_dir="${CODETRACER_BUILD_DIR:-$repo/src/build-debug}"
+build_dir="${CODETRACER_BUILD_DIR:-$repo/src/build-debug-repro}"
 [ -x "$build_dir/bin/ct" ] || {
 	echo "FAIL: no built ct at $build_dir/bin/ct — run 'just build-once'" \
-		"(CODETRACER_BUILD_DIR selects the build output; unset, it is src/build-debug)" >&2
+		"(CODETRACER_BUILD_DIR selects the build output; unset, it is src/build-debug-repro)" >&2
 	exit 1
 }
 ct_bin="$(readlink -f "$build_dir/bin/ct")"
 base="$(dirname "$(dirname "$ct_bin")")"
 
-# A linked worktree has empty submodule directories; the libraries are the
-# main checkout's.
-libs_root="$repo"
-if [ ! -e "$repo/libs/nim-chronicles/chronicles.nim" ]; then
-	common="$(git -C "$repo" rev-parse --path-format=absolute --git-common-dir)"
-	libs_root="$(dirname "$common")"
-fi
-
-flags="$(
-	python3 - "$repo" "$libs_root" <<'PY'
-import re, sys
-repo, libs_root = sys.argv[1], sys.argv[2]
-text = open(repo + "/src/Tuprules.tup").read()
-def var(name):
-    m = re.search(r"^" + name + r"\s*=\s*\\?\n?((?:.*\\\n)*.*)$", text, re.M)
-    out = []
-    for line in m.group(1).split("\n"):
-        line = line.strip().rstrip("\\").strip()
-        out.extend(line.split())
-    return out
-flags = var("NIM_COMMON_FLAGS") + var("NIM_REPO_PATH_FLAGS")
-flags += [f for f in var("NIM_DEBUG_FLAGS") if not f.startswith("$(")]
-flags = [f.replace("$(ROOT)/libs", libs_root + "/libs").replace("$(ROOT)", repo)
-         for f in flags]
-print(" ".join(flags))
-PY
-)"
-
+# The two bundles are built by the build itself, from this checkout, into this
+# checkout's own output tree. `repro` is the dev shell's; REPRO selects another.
 work="$out.build"
 mkdir -p "$out" "$work"
-# shellcheck disable=SC2086
-nim $flags -d:ctIndex -d:nodejs --sourcemap:on --nimcache:"$work/nc-index" \
-	--out:"$work/index.js" js "$repo/src/frontend/index.nim" >"$work/index.log" 2>&1 ||
-	{
-		tail -20 "$work/index.log" >&2
-		exit 1
-	}
-# shellcheck disable=SC2086
-nim $flags -d:chronicles_enabled=off -d:ctRenderer -d:ctHmr -d:isonimHmr \
-	--debugInfo:on --lineDir:on --hints:off --warnings:off \
-	--nimcache:"$work/nc-ui" --out:"$work/ui.js" js "$repo/src/frontend/ui_js.nim" \
-	>"$work/ui.log" 2>&1 || {
-	tail -20 "$work/ui.log" >&2
+repro_out="$repo/src/build-debug-repro"
+if ! (cd "$repo" && "${REPRO:-repro}" build \
+	frontend-index-js frontend-src-index-js frontend-ui-js frontend-public-ui-js \
+	--progress=quiet) >"$work/build.log" 2>&1; then
+	tail -20 "$work/build.log" >&2
 	exit 1
-}
+fi
+cp "$repro_out/index.js" "$work/index.js"
+cp "$repro_out/ui.js" "$work/ui.js"
 
 mirror() { # mirror <src-dir> <dst-dir> <name-to-skip>...
 	local src="$1" dst="$2"

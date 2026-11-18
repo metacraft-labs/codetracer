@@ -9,9 +9,9 @@
 ## the same polling loop using non-blocking I/O to avoid deadlocks.
 ##
 ## Prerequisites:
-##   - Built ``ct`` binary at ``src/build-debug/bin/ct`` with BPF capabilities
+##   - Built ``ct`` binary at ``src/build-debug-repro/bin/ct`` with BPF capabilities
 ##     (via ``just build-once`` + ``just developer-setup`` or the NixOS module)
-##   - Compiled BPF object at ``src/build-debug/share/monitor.bpf.o``
+##   - Compiled BPF object at ``src/build-debug-repro/share/monitor.bpf.o``
 ##     (via ``just build-bpf-programs``)
 ##   - Linux kernel >= 5.8 with BPF support
 ##
@@ -28,8 +28,8 @@ import std/[json, net, os, osproc, posix, strformat, strtabs, strutils,
 # ---------------------------------------------------------------------------
 
 const
-  CtBinRelPath = "src/build-debug/bin/ct"
-  BpfObjRelPath = "src/build-debug/share/monitor.bpf.o"
+  CtBinRelPath = "src/build-debug-repro/bin/ct"
+  BpfObjRelPath = "src/build-debug-repro/share/monitor.bpf.o"
 
 # ---------------------------------------------------------------------------
 # Resolve repo root and binary paths

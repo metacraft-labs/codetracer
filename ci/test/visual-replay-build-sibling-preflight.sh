@@ -7,7 +7,7 @@ WORKSPACE_ROOT="${1:-$(cd "$(dirname "$0")/../../.." && pwd)}"
 # prerequisites compile. Keep this list aligned with the lock-resolved
 # `visual-replay-regression-gate` sibling inventory. Checking the imported
 # module or manifest (rather than only the repository directory) catches an
-# incomplete or incompatible checkout before Tup fans out the real build.
+# incomplete or incompatible checkout before the real build fans out.
 REQUIRED_BUILD_SIBLING_FILES=(
 	"isonim/src/isonim/core/platform.nim"
 	"nim-everywhere/src/nim_everywhere/platform.nim"

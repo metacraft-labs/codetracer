@@ -16,7 +16,7 @@
 
 set -u
 
-CT=${CT_BIN:-src/build-debug/bin/ct}
+CT=${CT_BIN:-src/build-debug-repro/bin/ct}
 if [ ! -x "$CT" ]; then
 	# A missing prerequisite is a hard failure, not a silent pass. The old
 	# "SKIP-discipline" comment justified exit 0 with "real CI runs this test

@@ -474,18 +474,14 @@ TRACE="${CODETRACER_PLAT37_TRACE:-${CODETRACER_PLAT35_TRACE:-${root}/test-logs/t
       Point CODETRACER_PLAT37_TRACE at one, or produce it through the tui
       lane's fixture provider (\`just test-tui\` once)."
 
-# The engine the window talks to. The repro output root FIRST, then the tup
-# tree. `src/build-debug` does not exist in a checkout only ever built through
-# `repro` — `ci/lib/build-freshness.sh` defaults `CODETRACER_BUILD_DIR` to
-# `src/build-debug-repro` — and searching only the tup tree is why this lane
-# refused all six views against a replay-server that was in fact built, until
-# `REPLAY_SERVER_BIN` was supplied by hand (codetracer-pm
-# `issues/2026-09-29-replay-server-discovery-misses-the-repro-build-output-root.md`).
+# The engine the window talks to: the build's output root first
+# (`CODETRACER_BUILD_DIR`, which `ci/lib/build-freshness.sh` defaults to
+# `src/build-debug-repro`), then this checkout's own `src/build-debug-repro`.
 # Exported, not merely computed: the window binary reads it from the
 # environment, and the three sibling lanes resolve it exactly this way.
 _ct_replay_default="${CODETRACER_BUILD_DIR:-${root}/src/build-debug-repro}/bin/replay-server"
 [ -x "${_ct_replay_default}" ] ||
-	_ct_replay_default="${root}/src/build-debug/bin/replay-server"
+	_ct_replay_default="${root}/src/build-debug-repro/bin/replay-server"
 export REPLAY_SERVER_BIN="${REPLAY_SERVER_BIN:-${_ct_replay_default}}"
 [ -x "${REPLAY_SERVER_BIN}" ] || fail "no replay-server at ${REPLAY_SERVER_BIN}.
       Build one (\`just build-once\`) or point REPLAY_SERVER_BIN at it. A lane

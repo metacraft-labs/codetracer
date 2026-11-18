@@ -307,7 +307,7 @@ proc findCtBinary*(): string =
   let rs = locateReplayServer()
   if rs.len > 0 and fileExists(rs.parentDir / "ct".addFileExt(ExeExt)):
     return rs.parentDir / "ct".addFileExt(ExeExt)
-  let candidate = repoRoot() / "src" / "build-debug" / "bin" / "ct"
+  let candidate = repoRoot() / "src" / "build-debug-repro" / "bin" / "ct"
   if fileExists(candidate):
     return candidate
   ""

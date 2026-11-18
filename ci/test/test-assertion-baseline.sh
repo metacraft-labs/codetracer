@@ -41,7 +41,7 @@
 # exception has a place to go that is not "turn the gate off".
 #
 # The record fails in BOTH directions, the shape `scripts/test-build-alignment.sh`
-# uses for the tup/nix flag divergence:
+# uses for the repro/nix flag divergence:
 #
 #   * a newly added assertion-less test appears as a line the baseline does not
 #     have -- the regression this exists to catch;

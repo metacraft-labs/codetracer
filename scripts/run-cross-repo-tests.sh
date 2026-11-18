@@ -754,10 +754,10 @@ run_test() {
 		#
 		# EXECUTABILITY DECIDED THIS ONE TOO. The C/C++/D/Pascal flow suites
 		# replay through whatever `DB_BACKEND_BIN` names, and `-x` says only
-		# that a build happened at some point — `src/build-debug/bin/db-backend`
+		# that a build happened at some point — `src/build-debug-repro/bin/db-backend`
 		# is never deleted. Handing an old replay engine to four suites that
 		# then go green is the whole defect, so it is refused here instead.
-		local db_backend_bin="$REPO_ROOT/src/build-debug/bin/db-backend"
+		local db_backend_bin="$REPO_ROOT/src/build-debug-repro/bin/db-backend"
 		if [[ -x $db_backend_bin ]]; then
 			ctdr_require_tracked_sources_not_newer "build" "db-backend" \
 				"$db_backend_bin" \

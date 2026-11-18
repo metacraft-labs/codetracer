@@ -824,7 +824,7 @@ const
     ## that compiled this file `--mm:refc` would carry two green cases that
     ## grade nothing. `common-units` uses Nim 2.x's default ORC today;
     ## `ct-cli-units` uses `--mm:refc`, and every SHIPPED binary is refc
-    ## (`repro.nim`'s `ctNative` and `ctNimJs`, and `src/Tuprules.tup`), which
+    ## (`repro.nim`'s `ctNative` and `ctNimJs`), which
     ## is the plain statement of which builds were ever affected: this one's
     ## lane, and no shipped `ct`.
 

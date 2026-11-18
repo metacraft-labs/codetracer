@@ -36,11 +36,11 @@ portable-pre-commit-doctor:
   python3 ci/dev/portable-pre-commit.py doctor
 
 # Assert that `just build` is `just build-once` plus watchers, and nothing
-# else. Executes BOTH scripts under a PATH of recording stubs (tup, webpack,
+# else. Executes BOTH scripts under a PATH of recording stubs (webpack,
 # livereload, repro, runquotad, nix, uname) and compares the resulting command
-# traces: same host branch, same tup variant, same steps in the same order,
+# traces: same host branch, same steps in the same order,
 # and — the assertion that catches issue #599 — no webpack invocation ordered
-# before the first tup/repro invocation. Builds nothing, needs no toolchain,
+# before the first repro invocation. Builds nothing, needs no toolchain,
 # runs in seconds. See the header of scripts/test-build-alignment.sh.
 test-build-alignment:
   bash scripts/test-build-alignment.sh
@@ -103,6 +103,17 @@ test-dev-shell-codex-acp:
 # See the header of scripts/test-build-once-profile-cwd.sh.
 test-build-once-profile-cwd:
   bash scripts/test-build-once-profile-cwd.sh
+
+# no_tup_left: nothing in the repository builds with, installs or
+# invokes tup. Pure bash and git; also runs in the `lint-bash` job.
+test-no-tup-left:
+  bash ci/test/no-tup-left.sh
+
+# products_parity: the output tree of a clean build (the dev shell's
+# CODETRACER_BUILD_DIR, or --out-root DIR) holds every product the last tup build
+# produced (ci/build/linux-products-baseline.txt). Run `just build-once` first.
+test-products-parity *args:
+  bash ci/test/products-parity.sh {{args}}
 
 # Failed builds must not leave stale or partial renderer bundles runnable.
 test-build-once-failed-bundle:
@@ -181,7 +192,7 @@ test-flake-lock-node-dates:
 # parsing the manifests) is EXACTLY the lock cargo writes for the trace-format
 # tree at that pin AND for the sibling checkout on disk. A path dependency
 # writes the sibling crate's own edges into the lock, so a trace-format commit
-# that adds a dependency breaks `cargo build --locked` (src/Tuprules.tup) and
+# that adds a dependency breaks `cargo build --locked` (the build's cargo actions) and
 # the cargo-check pre-commit hook here unless the pins and the locks move
 # together. Needs python3 and cargo, offline; a few seconds. Skips LOUDLY
 # (never silently passes) when the sibling checkout or the pinned revision is
@@ -285,14 +296,14 @@ test-build-siblings-keep-going:
   bash ci/test/build-siblings-keep-going-test.sh
 
 # Assert that the built output tree carries the assets `ct` reads on startup
-# (`<prefix>/config/default_config.yaml` and `default_layout.json`). A tup
-# build exits 0 when a runtime asset is simply never published -- there is no
-# rule to fail -- which is how `src/build-debug/config/` stayed empty across
-# every clean build while `ct` died on first run with an uncaught OSError.
-# `scripts/build-once.sh` runs this at the end of both build branches; the
+# (`<prefix>/config/default_config.yaml` and `default_layout.json`). A build
+# exits 0 when a runtime asset is simply never published -- there is no
+# action to fail -- which is how `config/` stayed empty across every clean
+# build of the retired tup build while `ct` died on first run with an uncaught
+# OSError. `scripts/build-once.sh` runs this at the end of the build; the
 # recipe exists so it can be run against an existing tree on its own.
-# Defaults to the debug tup variant; pass another output root to override.
-require-runtime-assets OUT_ROOT="src/build-debug":
+# Defaults to the debug output tree; pass another output root to override.
+require-runtime-assets OUT_ROOT="src/build-debug-repro":
   bash scripts/require-runtime-assets.sh {{OUT_ROOT}}
 
 # The contract suite for that guard -- synthetic trees, no toolchain, ~1s.
@@ -491,7 +502,7 @@ build-vscode-middleware output:
 # the env var CT_HMR=1 — without it the transport stays uninstalled
 # even in this binary, so this output can be the everyday dev binary.
 # CT_HMR_BUNDLE optionally overrides the bundle file the FS watcher
-# observes; the default is `src/build-debug/public/ui.js`.
+# observes; the default is `src/build-debug-repro/public/ui.js`.
 #
 # `--hotCodeReloading:on` is absent here for the reason spelled out over
 # `build-ui-js` above, and the two flags are unrelated despite both being about
@@ -841,12 +852,12 @@ test-reprobuild-hcr-in-codetracer:
   # so a platform/sibling SKIP above exits cleanly without an expensive build.
   just build-once
 
-  ct_bin="${CODETRACER_BUILD_DIR:-$repo_root/src/build-debug}/bin/ct"
+  ct_bin="${CODETRACER_BUILD_DIR:-$repo_root/src/build-debug-repro}/bin/ct"
   if [ ! -x "$ct_bin" ]; then
     echo "Error: CodeTracer build did not produce executable ct at $ct_bin" >&2
     exit 1
   fi
-  export PATH="$repo_root/src/build-debug/bin:$PATH"
+  export PATH="$repo_root/src/build-debug-repro/bin:$PATH"
 
   cd src/db-backend
   cargo test --offline --no-default-features --features io-transport,syntax-highlight \
@@ -854,7 +865,7 @@ test-reprobuild-hcr-in-codetracer:
 
 # End-to-end HMR test against the actual ct binary. Requires
 # `just build` (or `just build-once`) to have produced the
-# HMR-enabled renderer at src/build-debug/bin/ct. Tests:
+# HMR-enabled renderer at src/build-debug-repro/bin/ct. Tests:
 #   - JS-bundle hot reload by directly mutating ui.js
 #   - CSS LiveReload by directly mutating loader.css
 #   - No full-page navigation across a JS reload
@@ -967,7 +978,7 @@ storybook-build: build-storybook-components storybook-deps
   chmod -R u+w storybook/storybook-static 2>/dev/null || true
   rm -rf storybook/storybook-static
   cd storybook && npm run build-storybook
-  # tup/webpack/storybook all exit 0 on an empty output tree; assert the
+  # webpack/storybook exit 0 on an empty output tree; assert the
   # artefact `ensure-storybook-static` promises its callers.
   test -f storybook/storybook-static/index.html
 
@@ -1282,7 +1293,7 @@ test-rust:
 # `spans.dat` and only falls back to a `session_manifest.jsonl` /
 # `codetracer_spans.jsonl` sidecar when the container has no stream.
 #
-# The script FAILS when `src/build-debug/bin/ct` has not been built, so run
+# The script FAILS when `src/build-debug-repro/bin/ct` has not been built, so run
 # `just build-once` first.  It is deliberately not safe to run in a bare dev
 # shell: exiting 0 on a missing binary made "ct print is untested" and
 # "ct print works" indistinguishable.  Set CT_PRINT_ALLOW_MISSING=1 to skip it
@@ -1309,7 +1320,7 @@ test-python-api-gate:
   bash ci/test/python-api-gate-test.sh
 
 # Run all non-GUI tests.
-# test-frontend-js needs npm-installed jsdom (available after tup build, not in bare nix shell).
+# test-frontend-js needs npm-installed jsdom (available after the build, not in bare nix shell).
 # test-python-recorder needs a built ct binary.
 # Both are skipped here; they run in their own CI steps or via dev builds.
 #
@@ -1415,7 +1426,7 @@ test-gui-prebuilt *args:
 # For visible windows on your desktop, use `just test-gui-visible` instead.
 #
 # `build-once` runs as a prereq so the rebuilt frontend + replay-server are
-# fresh before tests launch — without this, db-backend / Nim frontend / Tup
+# fresh before tests launch — without this, db-backend / Nim frontend
 # changes that haven't been compiled silently produce stale-binary test
 # failures (see task #317 + the May 19→20 staleness incident that produced
 # the "ct-mcr binary not found" Cluster B failure).
@@ -1522,7 +1533,7 @@ test-gui-visible *args: build-once build-siblings
 # Linux, starts Xvfb via `test-gui-prebuilt`, and builds storybook, none of
 # which these need. It is also not given `build-once` as a prereq, so it
 # stays usable as a fast local loop — the cost is that it reads whatever
-# `src/build-debug/frontend/styles` currently holds, so RUN `just build-once`
+# `src/build-debug-repro/frontend/styles` currently holds, so RUN `just build-once`
 # FIRST after editing any `.styl` or you are grading the previous build. CI
 # gets this right by construction: it runs after the package is built.
 #
@@ -1787,7 +1798,7 @@ pid pid_or_current_or_last:
   #!/usr/bin/env bash
   # argument can be either `current`, `last` or a pid number
   if [[ "{{pid_or_current_or_last}}" == "current" ]]; then \
-    echo $(ps aux | grep src/build-debug/codetracer | head -n 1 | awk '{print $2}') ; \
+    echo $(ps aux | grep src/build-debug-repro/bin/ct | head -n 1 | awk '{print $2}') ; \
   elif [[ "{{pid_or_current_or_last}}" == "last" ]]; then \
     TTMP=$(just findtmp) ; \
     echo $(cat $TTMP/last-start-pid) ; \
@@ -1918,7 +1929,7 @@ setcap-bpf:
   if [ "$(uname)" != "Linux" ]; then
     exit 0
   fi
-  CT_BIN="${CODETRACER_BUILD_DIR:-$(pwd)/src/build-debug}/bin/ct"
+  CT_BIN="${CODETRACER_BUILD_DIR:-$(pwd)/src/build-debug-repro}/bin/ct"
   if [ ! -f "$CT_BIN" ]; then
     exit 0
   fi
@@ -1944,13 +1955,13 @@ build-bpf-programs:
   #!/usr/bin/env bash
   set -euo pipefail
   LIBBPF_PATH=$(nix build nixpkgs#libbpf --no-link --print-out-paths 2>/dev/null)
-  mkdir -p src/build-debug/share
+  mkdir -p src/build-debug-repro/share
   clang -target bpf -D__TARGET_ARCH_x86 \
     -I src/bpf-monitor -I "$LIBBPF_PATH/include" \
     -O2 -g \
     -c src/bpf-monitor/monitor.bpf.c \
-    -o src/build-debug/share/monitor.bpf.o
-  echo "Built src/build-debug/share/monitor.bpf.o"
+    -o src/build-debug-repro/share/monitor.bpf.o
+  echo "Built src/build-debug-repro/share/monitor.bpf.o"
 
 # Native BPF monitor unit tests — exercises ring buffer event processing,
 # struct layout verification, and environment deduplication without BPF.
@@ -1969,7 +1980,7 @@ test-bpf-native:
 # process events, and reports them to a mock CI backend.
 # Requires: build-once + build-bpf-programs + developer-setup.
 # The test binary does NOT need BPF caps — it spawns the ct binary which
-# already has them from the tup build rule or `just setcap-bpf`.
+# already has them from the post-build setcap step or `just setcap-bpf`.
 test-bpf-native-integration:
   #!/usr/bin/env bash
   set -euo pipefail
@@ -3691,8 +3702,7 @@ test-vm: test-vm-native test-vm-js
 #                                points CODETRACER_PREFIX at the tree build-once
 #                                reports building.  Before that, the dev env's
 #                                src/build-<type>-repro prefix overrode the
-#                                recipe's default, tup never writes that tree,
-#                                and the suite reported DID NOT RUN.  With
+#                                recipe's default, and the suite reported DID NOT RUN.  With
 #                                both fixes, and the suite waiting for the
 #                                host to bind instead of sleeping, the lane
 #                                was measured green under `repro exec` on one
@@ -3877,18 +3887,13 @@ test-frontend-units:
   #
   # WHICH build tree is the one scripts/build-once.sh builds, and the recipe
   # asks it rather than guessing.  It used to export
-  # `${CODETRACER_PREFIX:-$PWD/src/build-debug}`, but the repro dev env used to
-  # set CODETRACER_PREFIX to src/build-<type>-repro (repro.nim `devEnv:`, which
-  # now exports CODETRACER_BUILD_DIR instead), so the default never applied
-  # under `repro exec`.  On Linux build-once builds
-  # with tup into src/build-<config>, so after a successful build the suite
-  # still found no server_index.js, reported DID NOT RUN, and the lane exited 1.
-  # build-once publishes the output root it resolved (tup or reprobuild, per
-  # host) through CODETRACER_BUILD_ENV_FILE, the contract scripts/build.sh
-  # reads, so the prefix follows the build on every host.  It is not free on a
-  # built tree: tup skips its commands, but build-once invalidates and rebuilds
-  # the webpack renderer bundle every time (208 s on a loaded Linux CI host,
-  # 2026-10-23).
+  # `${CODETRACER_PREFIX:-$PWD/src/build-debug}`, a tree nothing builds any
+  # more (the repro dev env set CODETRACER_PREFIX to src/build-<type>-repro, so
+  # the default never applied under `repro exec`, and a tree built elsewhere
+  # left the suite with no server_index.js: DID NOT RUN, and the lane exited 1).
+  # build-once publishes the output root it resolved through
+  # CODETRACER_BUILD_ENV_FILE, the contract scripts/build.sh reads, so the
+  # prefix follows the build on every host.
   ct_build_env_file="$(mktemp "${TMPDIR:-/tmp}/codetracer-build-env.XXXXXX")"
   # Removed on every exit, including a failed build that stops the recipe.
   trap 'rm -f "$ct_build_env_file"' EXIT
@@ -4123,7 +4128,8 @@ test-hostfree:
 # three were found by a person looking at the screen. This is the check that
 # was missing, and `components/ns9_panes.styl` already asks for it in prose.
 #
-# It compiles the stylesheets the Tupfile ships and reads the OUTPUT: the
+# It compiles the stylesheets the build ships (`StylusCssEntryPoints` in
+# repro.nim) and reads the OUTPUT: the
 # failure mode IS source and output disagreeing silently, so a source-level
 # check could only re-implement Stylus and would be wrong exactly where it
 # matters. Needs `stylus`, so it runs in the dev shell; ~30s.
@@ -4138,7 +4144,7 @@ test-css-token-resolution:
 # unresolved token, a theme redefining a token, and a legacy palette leak —
 # alone, and beside the retired ceilings file), three legal constructs it must
 # not, the two instrument checks that stop an empty stylesheet or an
-# unreadable Tupfile scoring as a pass, and the real tree. Hermetic
+# unreadable entry-point list scoring as a pass, and the real tree. Hermetic
 # and sub-second — synthetic fixtures in a scratch directory, nothing in the
 # worktree is touched — except the last arm, which runs the real pipeline
 # over the real tree and needs `stylus` (it skips without it).
@@ -4309,7 +4315,7 @@ test-host-instantiations:
 # selects std/dom's dummy document instead of the page's DOM. It used to also
 # fail compilation through an obsolete SVG helper; that helper's removal did
 # not make the node configuration a shipped renderer. The only thing compiling
-# the renderer was the tup product build, at package time.
+# the renderer was the product build, at package time.
 #
 # THAT GAP COST A WORKING RENDERER ON `dev`. Commit 333ec709 removed
 # `ui/ui_imports.nim`'s blanket re-export of `electron_lib` after auditing its
@@ -5477,7 +5483,7 @@ build-tui: tui-prereqs
 # this lane needs a built `replay-server` (anywhere
 # src/common/replay_server_path.nim searches, or $REPLAY_SERVER_BIN) and,
 # until `test-logs/tui-fixtures/` is warm, `ct` (beside that engine, or
-# `src/build-debug/bin/ct`) plus the recorders the fixtures name. Missing ones
+# `src/build-debug-repro/bin/ct`) plus the recorders the fixtures name. Missing ones
 # are reported as counted `MISSING-PREREQ SKIP:` lines and an all-skipped run
 # FAILS — see that file's header. The first run on a workspace therefore costs
 # a few recordings; every run after it hits the content-addressed cache.
@@ -5619,7 +5625,7 @@ test-tui-real-emulators: build-tui build-capture-terminal-persona
 # (codetracer-specs/CLI/ct/ui-selection.md).
 #
 # FOUR REAL ARTEFACTS, and the recipe names the two it can build. The lane
-# drives `codetracer-launcher/out/launcher` -> `src/build-debug/bin/ct` ->
+# drives `codetracer-launcher/out/launcher` -> `src/build-debug-repro/bin/ct` ->
 # `build/bin/codetracer-tui` on a real recording, and separately starts a real
 # `ct host` server (which spawns `node server_index.js`) twice, once by each
 # spelling, and compares the served bytes.

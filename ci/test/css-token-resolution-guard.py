@@ -38,8 +38,8 @@ resolution and would be wrong in exactly the cases that matter.  The runner
 (``css-token-resolution.sh``) compiles each shipped entry point with the same
 ``stylus`` the build uses and hands the emitted CSS to this script.
 
-The list of stylesheets is READ FROM ``src/frontend/styles/Tupfile`` rather
-than copied here, so a theme added to the build is covered the day it is
+The list of stylesheets is READ FROM ``StylusCssEntryPoints`` in ``repro.nim``
+rather than copied here, so a theme added to the build is covered the day it is
 added and cannot drift out of this guard's sight.
 
 THE RULE (token arm — enforcing)
@@ -85,9 +85,10 @@ bring the ceilings back.
 INSTRUMENT CHECKS
 -----------------
 A guard that scans an empty file passes.  ``default_white_theme.styl`` is a
-palette-only entry point that the Tupfile nonetheless ships as a stylesheet,
-and it compiles to ZERO BYTES today — so this is not hypothetical, it is the
-state of the tree.  Two checks stop that reading as a pass:
+palette-only entry point that the retired tup build shipped as a stylesheet,
+and it compiles to ZERO BYTES — so this is not hypothetical.  The reprobuild
+recipe does not ship it, which is why ``PALETTE_ONLY`` is empty today, but a
+palette added to the list would read as a pass without these two checks:
 
   * every shipped stylesheet must emit at least one declaration, unless it is
     listed in ``PALETTE_ONLY`` below with a reason;
@@ -139,19 +140,14 @@ import sys
 from collections import Counter
 from typing import Dict, Iterable, List, NamedTuple, Set, Tuple
 
-# Entry points the Tupfile ships that compile to nothing because they hold
+# Entry points the build ships that compile to nothing because they hold
 # variables and no rules.  An entry here must say why, and is itself checked:
 # if the named stylesheet ever emits declarations, this guard fails until the
 # entry is removed.
-PALETTE_ONLY: Dict[str, str] = {
-    "default_white_theme.css": (
-        "default_white_theme.styl is a palette: it assigns variables and "
-        "declares no rules, so it compiles to zero bytes. The Tupfile ships "
-        "it as a stylesheet anyway. The rules for the light build come from "
-        "default_white_theme_electron.styl, which imports this palette and "
-        "then codetracer.styl."
-    ),
-}
+# Empty on purpose: the build ships no palette-only entry point (the retired tup
+# build shipped default_white_theme.css, which compiled to zero bytes and which
+# nothing read). An entry here needs the reason it emits nothing.
+PALETTE_ONLY: Dict[str, str] = {}
 
 # A bare hyphenated identifier. The lookbehind keeps us out of hex colours
 # (#fff-ish), class fragments in url() targets (…svg#dot-call-…) and the tails
@@ -166,7 +162,8 @@ LEGACY_RE = re.compile(r"(?<![\w\-])([A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+)(?![\w\-])")
 DECL_RE = re.compile(r"^(-{0,2}[a-zA-Z][-a-zA-Z0-9]*)\s*:\s*(.+?);?$")
 
 VAR_DEF_RE = re.compile(r"^\s*([a-zA-Z][\w-]*)\s*=")
-TUP_SHIP_RE = re.compile(r"^:\s*(\S+\.styl)\s*\|>\s*!stylus\s*\|>\s*(\S+\.css)\s*$")
+ENTRY_POINTS_RE = re.compile(r"StylusCssEntryPoints\s*=\s*@\[(.*?)\]", re.S)
+ENTRY_NAME_RE = re.compile(r'^\s*"([A-Za-z0-9_\-]+)"\s*,?\s*$')
 
 
 class Finding(NamedTuple):
@@ -176,18 +173,26 @@ class Finding(NamedTuple):
     identifier: str
 
 
-def read_shipped_stylesheets(tupfile: str) -> List[Tuple[str, str]]:
-    """The (source, output) pairs the build compiles with !stylus.
+def read_shipped_stylesheets(recipe: str) -> List[Tuple[str, str]]:
+    """The (source, output) pairs the build compiles with Stylus.
 
-    Read rather than hardcoded: a theme added to the build is covered the day
-    it is added.
+    Read from ``StylusCssEntryPoints`` in ``repro.nim``, the list the build's
+    ``ctStylus`` actions are made from, rather than hardcoded: a theme added to
+    the build is covered the day it is added. Comment lines inside the list are
+    skipped; an entry is ``"<name>"``, compiled from ``<name>.styl`` to
+    ``<name>.css``.
     """
+    with open(recipe, encoding="utf-8") as handle:
+        # Comments inside the list may hold brackets and quotes of their own.
+        text = re.sub(r"#[^\n]*", "", handle.read())
+    match = ENTRY_POINTS_RE.search(text)
+    if not match:
+        return []
     pairs: List[Tuple[str, str]] = []
-    with open(tupfile, encoding="utf-8") as handle:
-        for raw in handle:
-            match = TUP_SHIP_RE.match(raw.strip())
-            if match:
-                pairs.append((match.group(1), match.group(2)))
+    for raw in match.group(1).split("\n"):
+        name = ENTRY_NAME_RE.match(raw)
+        if name:
+            pairs.append((name.group(1) + ".styl", name.group(1) + ".css"))
     return pairs
 
 
@@ -272,26 +277,40 @@ def main() -> int:
     parser.add_argument(
         "--css-dir",
         required=True,
-        help="directory holding the COMPILED stylesheets, one per Tupfile output",
+        help="directory holding the COMPILED stylesheets, one per shipped entry point",
     )
     parser.add_argument("--json", default=None)
+    parser.add_argument(
+        "--print-shipped",
+        action="store_true",
+        help="print the '<source> <output>' pairs the build ships, one per line, and exit",
+    )
     args = parser.parse_args()
 
     styles_dir = os.path.join(args.repo_root, "src", "frontend", "styles")
     generated_dir = os.path.join(styles_dir, "generated")
-    tupfile = os.path.join(styles_dir, "Tupfile")
+    recipe = os.path.join(args.repo_root, "repro.nim")
+
+    if args.print_shipped:
+        # The runner compiles exactly this list before it calls this script
+        # again, so the two cannot disagree about what is shipped. An empty
+        # list prints nothing and exits 0; the runner's own check then reports
+        # it, as the full run does.
+        for source, output in read_shipped_stylesheets(recipe):
+            print(f"{source} {output}")
+        return 0
 
     names, namespaces = read_defined_variables(styles_dir)
     generated_names, _ = read_defined_variables(generated_dir)
-    shipped = read_shipped_stylesheets(tupfile)
+    shipped = read_shipped_stylesheets(recipe)
 
     failures: List[str] = []
 
     if not shipped:
         failures.append(
-            f"{tupfile}: no !stylus outputs found. The guard reads its file "
-            "list from the build; if the Tupfile's rule syntax changed, this "
-            "guard has been scanning nothing."
+            f"{recipe}: no StylusCssEntryPoints found. The guard reads its "
+            "file list from the build; if the recipe's list changed shape, "
+            "this guard has been scanning nothing."
         )
 
     # ---- instrument check: the token set must be theme-independent ---------
@@ -313,7 +332,7 @@ def main() -> int:
         path = os.path.join(args.css_dir, output)
         if not os.path.exists(path):
             failures.append(
-                f"{output}: the Tupfile ships this stylesheet and it was not "
+                f"{output}: the build ships this stylesheet and it was not "
                 f"compiled into {args.css_dir}. The guard cannot report on a "
                 "file it never read."
             )

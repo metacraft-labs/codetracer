@@ -12,7 +12,7 @@ cat >"$MANIFEST" <<'EOF'
 {"span_type":"web-request","metadata":{"http.method":"GET","http.url":"/error","http.status_code":"500","http.duration_ms":"8"},"status":"error"}
 EOF
 
-CT=${CT_BIN:-src/build-debug/bin/ct}
+CT=${CT_BIN:-src/build-debug-repro/bin/ct}
 if [ ! -x "$CT" ]; then
 	# A missing prerequisite is a hard failure, not a silent pass: exiting 0
 	# here made "ct print is untested" and "ct print works" indistinguishable

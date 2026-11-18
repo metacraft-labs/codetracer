@@ -63,8 +63,8 @@ dev-build:
     - merge_requests
   script:
     - git clean -xfd
-    - nix develop .#devShells.x86_64-linux.default --command ./ci/build/dev.sh
-  resource_group: tup-build
+    - nix develop .#devShells.x86_64-linux.default --command just build-once
+  resource_group: build
 
 nix-build:
   stage: build

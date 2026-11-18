@@ -94,57 +94,12 @@ ct_nim_cache_root() {
 	printf '%s' "/tmp/ct-nim-cache/$(basename "${checkout}")-${tag}"
 }
 
-# The nimcache root for the TUP build of a checkout (`src/Tuprules.tup`).
-#
-# The same per-checkout directory as `ct_nim_cache_root`, with one difference:
-# an explicit CT_NIM_CACHE_ROOT is NOT honoured. Three reasons, all specific
-# to tup:
-#
-#   * On Windows tup flags every write a command makes outside its declared
-#     outputs, so the Nim rules carry a STATIC exclusion regex for the cache
-#     (`NIM_SIDE_OUTPUTS_IGNORE`, `[/\\]tmp[/\\]ct-nim-cache[/\\].*`). A scratch
-#     override elsewhere would fail the Windows build with undeclared outputs;
-#     tup cannot escape an arbitrary path into a regex at parse time.
-#   * The root is part of every Nim rule's command string, and tup re-runs
-#     every command whose string changes. A per-caller override would turn a
-#     child process's scratch directory into a full Nim rebuild of the
-#     checkout, and another one when the next plain build runs.
-#   * The callers that set CT_NIM_CACHE_ROOT (the mutation graders) hand it to
-#     a single `nim` invocation, never to a tup build.
-#
-# The callers (`scripts/build-once.sh`, `scripts/build.sh`, `ci/build/dev.sh`,
-# the dev shell and the non-Nix environment scripts) export the answer as
-# CT_TUP_NIM_CACHE_ROOT, which `src/Tuprules.tup` imports.
-#
-# The checkout is normalised to its physical path first. The checksum is of
-# the path STRING, and these callers spell one tree differently (build-once.sh
-# `cd .. && pwd`, the dev shell `git rev-parse --show-toplevel`, which resolves
-# symlinks, non-nix-build/env.sh `.../non-nix-build/..`). Disagreeing would not
-# collide, but it would make every switch between `just build-once` and a plain
-# `tup` rebuild all Nim targets.
-ct_tup_nim_cache_root() {
-	local CT_NIM_CACHE_ROOT=""
-	local checkout="${1:-}"
-	if [ -n "${checkout}" ] && [ -d "${checkout}" ]; then
-		checkout="$(cd "${checkout}" && pwd -P)"
-	fi
-	ct_nim_cache_root "${checkout}"
-}
-
 # Run directly rather than sourced: print the root and exit. `${BASH_SOURCE[0]}`
 # differs from `$0` exactly when this file was sourced, which is the discrimination
 # needed — a version check or a `return` probe would both be less direct.
 if [ "${BASH_SOURCE[0]}" = "${0}" ]; then
 	# Executed from a checkout, so `git rev-parse` is the right question to ask;
 	# the caller has no `repo_root` variable to hand us.
-	#
-	# `--tup` selects the tup build's root (see `ct_tup_nim_cache_root`), so the
-	# environment scripts that are not bash libraries can ask for it too.
-	if [ "${1:-}" = "--tup" ]; then
-		shift
-		ct_tup_nim_cache_root "$@"
-	else
-		ct_nim_cache_root "$@"
-	fi
+	ct_nim_cache_root "$@"
 	printf '\n'
 fi

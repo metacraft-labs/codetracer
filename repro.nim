@@ -13,15 +13,14 @@ when defined(windows):
 const
   PublicResourceRoot = "src/public"
 
-# Reprobuild's output root — codetracer's tup-friendly override of
-# reprobuild's cargo-like default (see codetracer-specs
-# Architecture/Build-Outputs-And-Path-Resolution.md and reprobuild-specs
-# Standard-Configurations.md).
+# Reprobuild's output root — codetracer's override of reprobuild's cargo-like
+# default (see codetracer-specs Architecture/Build-Outputs-And-Path-Resolution.md
+# and reprobuild-specs Standard-Configurations.md).
 #
-# ``src/build-<buildType>-repro`` on ALL platforms: reprobuild's output must
-# never share a directory with tup's ``src/build-debug`` variant dir (tup
-# refuses to build when its variant dir contains files it did not create), so
-# the reprobuild outputs sit beside the tup dirs with a ``-repro`` suffix.
+# ``src/build-<buildType>-repro`` on ALL platforms, Linux included. Reprobuild
+# is the only build system; the ``-repro`` suffix dates from the retired tup
+# build, whose ``src/build-debug`` variant dir the outputs had to stay out of,
+# and is kept so every recorded path stays valid.
 #
 # ``buildType`` is a reprobuild VARIANT — a tracked solver input that is part
 # of the graph cache key, unlike a runtime ``getEnv`` (which is silently
@@ -52,17 +51,11 @@ proc buildDebugRoot(): string =
 
 proc activeBuildRoot(): string =
   ## The build output dir the dev shells name as ``CODETRACER_BUILD_DIR``, as
-  ## ``nix/shells/ci-base.nix`` does: the tup tree on Linux
-  ## (``src/build-<buildType>``), the reprobuild tree on macOS and Windows
-  ## (``buildDebugRoot()``).
-  when defined(macosx) or defined(windows):
-    buildDebugRoot()
-  else:
-    "src/build-" & resolvedBuildType()
+  ## ``nix/shells/ci-base.nix`` does: ``buildDebugRoot()`` on every platform.
+  buildDebugRoot()
 
 # Windows: extra C/linker flags so the bundled libzip C sources compile under
-# MinGW UCRT (mirror of src/Tuprules.tup's NIM_WINDOWS_CFLAGS / DYNLIB_OVERRIDE_FLAGS
-# windows branch). zlib lives at the vendored DIY path because env.ps1 does not
+# MinGW UCRT (the Windows branch of the Nim C and linker flags). zlib lives at the vendored DIY path because env.ps1 does not
 # yet install a system zlib; -Wno-implicit-function-declaration demotes the
 # getpid/unlink/mkstemp implicit-decl errors to warnings so MinGW's import
 # library can wire the names at link time.
@@ -85,8 +78,7 @@ const
     "scripts/detect-siblings.sh",
     "scripts/developer-setup.sh",
     "non-nix-build/env.sh",
-    "non-nix-build/windows/setup-codetracer-runtime-env.sh",
-    "src/Tuprules.tup"
+    "non-nix-build/windows/setup-codetracer-runtime-env.sh"
   ]
   CodeTracerKnownSiblingDirs = [
     "codetracer-native-backend",
@@ -171,7 +163,7 @@ const
 # input — see the buildType note at the top of this file. That is acceptable
 # for this one value because it names a per-MACHINE toolchain location rather
 # than anything that changes what is built, and because no CI lane exercises
-# it (the Windows jobs do not run tup or this Nim build; `just build-once`
+# it (the Windows jobs do not run this Nim build; `just build-once`
 # runs only on the Linux and macOS legs).
 let
   WindowsInstallRoot = block:
@@ -225,7 +217,7 @@ const
     "debug",
     "testing",
     "ctEntrypoint",
-    "withTup",
+    "ctDevTree",
     "useOpenssl3",
     "ssl"
   ]
@@ -293,21 +285,17 @@ else:
 
 # The Cargo target directory of this checkout's repro build, relative to the
 # checkout. It used to be the host-global `/tmp/codetracer` (`C:/tmp/...`),
-# and two measured failures came from that alone (codetracer-pm
-# issues/2026-10-05-ui-tup-cargo-targets-collide-across-workspaces-and-compilers.md):
-# another account owned the directory, so `.cargo-lock` could not be opened
+# and two measured failures came from that alone: another account owned the directory, so `.cargo-lock` could not be opened
 # (2026-10-27), and macOS's /tmp cleanup emptied an `out/` a built
 # `replay-server` still loaded `libmcr_emulator.dylib` from (2026-10-12).
 #
-# It is a CONSTANT, not a per-compiler path like the tup build's, because the
-# graph is: reprobuild reuses the provider snapshot and the lowered-graph
+# It is a CONSTANT, not a per-compiler path, because the graph is: reprobuild reuses the provider snapshot and the lowered-graph
 # cache across invocations that differ only in the ambient environment
 # (reprobuild docs/user-guide/idiomatic-reprobuild.md §4.4), so a compiler
 # probed here would be frozen at the first build. The compiler binding happens
 # when the build RUNS instead: `repro-cargo-target-slot` below, an uncacheable
 # action ordered before both Cargo actions, runs
-# `ci/lib/tup-cargo-target.sh --repro-slot`, which checks the slot's owner
-# marker (the same marker, written by the same file, as a tup base) and swaps
+# `ci/lib/repro-cargo-slot.sh`, which checks the slot's owner marker and swaps
 # in a directory for the compiler about to run when it names another one.
 const ReproCargoSlot = "build/repro-cargo-targets/active"
 
@@ -598,25 +586,43 @@ package codeTracer:
     # `codetracer-image-diff`, and its package `image_diff` resolves from it.
     "codetracer-image-diff >=0"
 
-    # EVERY ENTRY BELOW IS A SIBLING THIS REPOSITORY'S BUILD, TESTS OR CI READ
-    # FROM A CHECKOUT BESIDE IT. `uses:` is the only place a dependency is
-    # declared and `repro.lock` is derived from it (reprobuild 5a1326957), so a
-    # sibling a job checks out by bare name -- `provision-repro-lock-siblings`,
+    # EVERY ENTRY BELOW IS A PUBLIC SIBLING THIS REPOSITORY'S BUILD, TESTS OR
+    # CI READ FROM A CHECKOUT BESIDE IT. `uses:` is the only place a dependency
+    # is declared and `repro.lock` is derived from it (reprobuild 5a1326957), so
+    # a sibling a job checks out by bare name -- `provision-repro-lock-siblings`,
     # `setup-db-backend-siblings`' `extra-siblings`, a `siblings:` block -- but
     # that this list omits is a sibling the lock cannot pin. Each names its
     # consumer. Siblings that build nothing carry a minimal `repro.nim` so they
     # can be named here.
     #
-    # The test lanes' scenario runner, its backends and the terminal harness
-    # (DemoVideoScript*, GuiAssert, TermAssert, TermAssertClient, nim-libvterm)
-    # are NOT here: no build compiles them, and ci/test/siblings/repro.nim
-    # declares them for the test lock that provision-repro-lock-siblings
-    # clones `test-siblings` from.
+    # Only repositories that can be read without credentials are named: this
+    # file is public, and so is `repro.lock`, so a private sibling can be
+    # neither declared nor pinned here. The lanes that need one provision it
+    # themselves (`extra-siblings`, a `siblings:` block with an explicit
+    # revision).
+    #
+    # NOT DECLARED, though a lane reads them:
+    #   * the test lanes' scenario runner, its backends and the terminal harness
+    #     (DemoVideoScript*, GuiAssert, TermAssert, TermAssertClient,
+    #     nim-libvterm) -- ci/test/siblings/repro.nim declares them for the
+    #     test lock that provision-repro-lock-siblings clones `test-siblings`
+    #     from. TermAssert and TermAssertClient also stay out of this lock
+    #     because they depend on nim-libvterm, and nim-libvterm cannot be
+    #     solved here: its libvterm_sdk_contribution.nim contributes the
+    #     `gcc` package, which this recipe's own tool resolution also
+    #     provisions, and the solver stops with "ambiguous nix provisioning
+    #     for package gcc";
+    #   * codetracer-circom-recorder and codetracer-evm-recorder: their
+    #     tools/source_inputs.nim are compiled into the same provider nimcache
+    #     as another declared recorder's, and the provider link then fails
+    #     ("undefined reference", "hidden symbol eqdestroy"). A lane that
+    #     needs one clones it by name.
     #
     # Read from source by config.nims (`../<name>/src` on the Nim path), so
     # every `ct` build reaches them; also named in the deploy-web-codetracer
     # and launcher-recorder-e2e `siblings:` blocks.
     "isonim-gpui >=0"
+    "isonim-render-serve >=0"
     "nim-termctl >=0"
     "nim-pty >=0"
     # `ct` imports `runquota_process` (config.nims; the "Clone runquota
@@ -626,57 +632,39 @@ package codeTracer:
     # the codetracer.yml jobs that compile it.
     "nim-shm-queue >=0"
     "nim-shm-gset >=0"
-    # The db-backend Cargo path dependencies and the replay-server build
-    # (.github/actions/setup-db-backend-siblings, scripts/build-siblings.sh,
-    # scripts/detect-siblings.sh, .github/sibling-repos).
+    # The db-backend and backend-manager Cargo path dependencies
+    # (src/db-backend/Cargo.toml, src/backend-manager/Cargo.toml,
+    # .github/actions/setup-db-backend-siblings, scripts/build-siblings.sh,
+    # scripts/detect-siblings.sh); scripts/test-sibling-cargo-locks.sh
+    # requires this pin in `repro.lock`.
     "codetracer-trace-format >=0"
-    "codetracer-native-recorder >=0"
-    "codetracer-native-backend >=0"
-    "codetracer-visual-replay >=0"
-    # The recorders the GUI / launcher / cross-process lanes record with
+    # The recorders the GUI / launcher / cross-process lanes record with, built
+    # from `../<name>` by `just build-recorder-siblings`
     # (.github/sibling-repos, scripts/detect-siblings.sh,
-    # scripts/build-siblings.sh, launcher-recorder-e2e*.yml, beam-flow.yml,
+    # scripts/build-siblings.sh, ci/test/build-recorder-siblings.sh,
+    # launcher-recorder-e2e*.yml, beam-flow.yml,
     # request-panel-sidecar-retirement.yml, cross-repo-tests.yml).
-    "codetracer-launcher >=0"
     "codetracer-python-recorder >=0"
     "codetracer-ruby-recorder >=0"
     "codetracer-js-recorder >=0"
     "codetracer-beam-recorder >=0"
-    "codetracer-evm-recorder >=0"
     "codetracer-wasm-recorder >=0"
     "codetracer-wasm-instrumenter >=0"
-    # Test programs scripts/detect-siblings.sh locates for the recording lanes.
-    "codetracer-native-test-programs >=0"
+    "codetracer-cairo-recorder >=0"
+    "codetracer-cardano-recorder >=0"
+    "codetracer-flow-recorder >=0"
+    "codetracer-leo-recorder >=0"
+    "codetracer-miden-recorder >=0"
+    "codetracer-move-recorder >=0"
     # The `isonim-review` daemon: IsoNim's `isonim-review-build` compiles it
     # with `--path:../nim-faststreams` and `--path:../nim-stew` (codetracer.yml
-    # `extra-siblings`).
+    # `extra-siblings`); also the book-isonim nim.cfg (ci/lib/book-isonim-nimcfg.sh).
     "nim-faststreams >=0"
     "nim-stew >=0"
-    # The observability GUI specs (src/tests/gui/tests/observability-m34-*
-    # and -m29-*) and the MCP dive-in gateway test
-    # (`just t_mcp_dive_in_fetch_sends_token_only_to_gateway`).
-    "codetracer-observability-cli >=0"
-    "codetracer-observability-e2e >=0"
-    "codetracer-observability-grafana >=0"
-    "codetracer-observability-jaeger >=0"
-    # The scenario inventory's extension rows (ci/test/scenario-inventory.py).
-    "codetracer-vscode-extension >=0"
-    # The plat68 keymap mutation runner puts `../isonim-examples` on its Nim
-    # path (src/frontend/viewmodel/tests/unit/run-plat68-keymaps-mutations.py).
-    "isonim-examples >=0"
     # The HCR flame scenarios' coordinator driver, patchable-profile emitter
-    # and in-target agent (codetracer.yml's desktop scenario `siblings:`).
+    # and in-target agent (codetracer.yml's desktop scenario `siblings:`), and
+    # ci/reprobuild/macos-daemon-build.sh.
     "reprobuild >=0"
-    # ci/test/identity-live-device-grant.sh reads infra's shared SSO
-    # descriptor and drives isonim-platform's local stack;
-    # ci/test/host-image-serves-in-incus-vm.sh uses isonim-platform's
-    # sessionctl.
-    "infra >=0"
-    "isonim-platform >=0"
-    # ci/test/sibling-provisioning-test.sh verifies the git-auth pin in
-    # provision-repro-lock-siblings against a checkout beside this one
-    # (codetracer.yml's "Clone metacraft-github-actions beside the checkout").
-    "metacraft-github-actions >=0"
 
     # Windows-only build tools. ``nsis`` (the Nullsoft Scriptable
     # Install System compiler) is what the ``windows-installer``
@@ -736,12 +724,6 @@ package codeTracer:
       "wget >=0"
       "yarn >=1"
       "zstd >=0"
-    # Tup is the legacy build driver on Linux. macOS now uses reprobuild
-    # exclusively, and the Windows build (reprobuild via env.ps1) has no
-    # Tup story (the env.ps1 Ensure-Tup is preserved for the old non-
-    # reprobuild fallback only).
-    when not defined(macosx) and not defined(windows):
-      "tup >=0"
     when defined(linux):
       "bpftrace >=0"
       "bpftool >=0"
@@ -999,9 +981,9 @@ package codeTracer:
       # isonim-specs/Hot-Module-Reload.md — so nothing
       # here needs it.  The same flag had to be removed from the three other
       # build definitions that compile these sources (`justfile`,
-      # `src/Tuprules.tup`, `build_for_extension.sh`);
+      # `build_for_extension.sh`);
       # `src/frontend/tests/renderer_js_symbol_uniqueness_test.nim` guards all
-      # four.
+      # of them.
       nim.js(
         defines = definesValue,
         mm = "refc",
@@ -1487,9 +1469,9 @@ package codeTracer:
       extraOutputs = @[reproCargoProbeBinary])
     let reproCargoTargetSlot = ctShell(
       actionIdValue = "repro-cargo-target-slot",
-      commandValue = "bash ci/lib/tup-cargo-target.sh --repro-slot --rustc-probe " &
+      commandValue = "bash ci/lib/repro-cargo-slot.sh --rustc-probe " &
         reproCargoProbeBinary & " .",
-      extraInputsValue = ["ci/lib/tup-cargo-target.sh", "ci/lib/nim-cache-root.sh",
+      extraInputsValue = ["ci/lib/repro-cargo-slot.sh", "ci/lib/nim-cache-root.sh",
         reproCargoProbeBinary],
       afterValue = [reproCargoProbe],
       cacheableValue = false)
@@ -1704,7 +1686,7 @@ package codeTracer:
       #
       #   * no `NativeDefines`, no `NativePassL`, no `NativeDynlibOverrides`.
       #     Those carry `-lssl -lcrypto -lsqlite3 -lpcre -lzip` and the
-      #     chronicles/tup/ssl define set that the CodeTracer product needs;
+      #     chronicles/ctDevTree/ssl define set that the CodeTracer product needs;
       #     `ct-test` links none of them (its whole non-stdlib dependency set
       #     is `src/ct_test/**` plus runquota's process/host libraries). Pulling
       #     them in only made this target unbuildable anywhere CodeTracer's full

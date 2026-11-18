@@ -49,8 +49,8 @@ if [ ! -f "$isonim_root/build/tailwind-styles.json" ]; then
 	)
 fi
 
-rm -f "$repo_root/src/build-debug/ui.js" \
-	"$repo_root/src/build-debug/public/ui.js"
+rm -f "$repo_root/src/build-debug-repro/ui.js" \
+	"$repo_root/src/build-debug-repro/public/ui.js"
 just build-once
 
 : >"$stdout_log"

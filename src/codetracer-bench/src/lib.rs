@@ -206,7 +206,7 @@ pub fn which(binary: &str) -> Option<PathBuf> {
 /// Resolution order:
 ///   1. `CT_BIN` env var (full override; the operator picks the binary).
 ///   2. `ct` on PATH that responds to `trace omniscient-prep`.
-///   3. The known build path `src/build-debug/bin/ct` relative to
+///   3. The known build path `src/build-debug-repro/bin/ct` relative to
 ///      `CODETRACER_REPO_ROOT_PATH`.
 pub fn ct_binary() -> Option<PathBuf> {
     if let Some(env) = std::env::var_os("CT_BIN") {
@@ -225,7 +225,7 @@ pub fn ct_binary() -> Option<PathBuf> {
     if let Some(root) = std::env::var_os("CODETRACER_REPO_ROOT_PATH") {
         let candidate = PathBuf::from(root)
             .join("src")
-            .join("build-debug")
+            .join("build-debug-repro")
             .join("bin")
             .join("ct");
         if candidate.is_file() && binary_supports_trace_omniscient_prep(&candidate) {
@@ -247,7 +247,7 @@ pub fn ct_binary() -> Option<PathBuf> {
 ///      mentions `start_backend` — that filters out unrelated `ct`
 ///      binaries the operator may have on PATH (e.g. `cargo-cinit ct`,
 ///      C-Tools, etc.) without dragging in heavyweight probes.
-///   3. The known build path `src/build-debug/bin/ct` relative to
+///   3. The known build path `src/build-debug-repro/bin/ct` relative to
 ///      `CODETRACER_REPO_ROOT_PATH`.
 pub fn ct_cli_binary() -> Option<PathBuf> {
     if let Some(env) = std::env::var_os("CT_CLI_BIN") {
@@ -266,7 +266,7 @@ pub fn ct_cli_binary() -> Option<PathBuf> {
     if let Some(root) = std::env::var_os("CODETRACER_REPO_ROOT_PATH") {
         let candidate = PathBuf::from(root)
             .join("src")
-            .join("build-debug")
+            .join("build-debug-repro")
             .join("bin")
             .join("ct");
         if candidate.is_file() && binary_supports_start_backend(&candidate) {
@@ -558,7 +558,7 @@ impl FixtureRecorder {
 
         let ct = ct_cli_binary().ok_or_else(|| {
             RecorderError::Unavailable(
-                "ct CLI not on PATH and not discoverable at src/build-debug/bin/ct \
+                "ct CLI not on PATH and not discoverable at src/build-debug-repro/bin/ct \
                  — run `just build-once` to produce it, or set CT_CLI_BIN"
                     .to_string(),
             )

@@ -561,7 +561,7 @@ proc defaultBpfObjectPath*(): string =
   ##   1. CODETRACER_BPF_OBJECT environment variable
   ##   2. $CODETRACER_PREFIX/share/monitor.bpf.o
   ##   3. <exe-dir>/../share/monitor.bpf.o (relative to the ct binary)
-  ##   4. <repo-root>/src/build-debug/share/monitor.bpf.o
+  ##   4. <repo-root>/src/build-debug-repro/share/monitor.bpf.o
   ##   5. /usr/local/lib/codetracer/monitor.bpf.o
   ##      (installed by ct install --bpf)
   result = getEnv("CODETRACER_BPF_OBJECT")
@@ -584,7 +584,7 @@ proc defaultBpfObjectPath*(): string =
   # Fallback: relative to repo root (dev builds).
   let repoRoot = getEnv("CODETRACER_REPO_ROOT_PATH")
   if repoRoot.len > 0:
-    result = repoRoot / "src" / "build-debug" / "share" / "monitor.bpf.o"
+    result = repoRoot / "src" / "build-debug-repro" / "share" / "monitor.bpf.o"
     if fileExists(result):
       return result
 

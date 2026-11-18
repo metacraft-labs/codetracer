@@ -104,13 +104,12 @@ const currentDir = path.resolve();
 const codetracerInstallDir = path.resolve(currentDir, "..", "..", "..");
 const testProgramsPath = path.join(codetracerInstallDir, "test-programs");
 // The active build output directory: honour CODETRACER_BUILD_DIR (set by the
-// dev shells to the platform/config-specific dir, e.g. src/build-debug or
-// src/build-debug-repro), falling back to src/build-debug for the Linux tup
-// default. See codetracer-specs Architecture/Build-Outputs-And-Path-Resolution.md.
+// dev shells to the config-specific dir, e.g. src/build-debug-repro or
+// src/build-release-repro), falling back to src/build-debug-repro. See codetracer-specs Architecture/Build-Outputs-And-Path-Resolution.md.
 const codetracerPrefix =
   process.env.CODETRACER_BUILD_DIR && process.env.CODETRACER_BUILD_DIR.length > 0
     ? process.env.CODETRACER_BUILD_DIR
-    : path.join(codetracerInstallDir, "src", "build-debug");
+    : path.join(codetracerInstallDir, "src", "build-debug-repro");
 // Imports also run in the collector, in --list, and in base-Playwright tests
 // that never use _workerCleanup. Keep their import-time isolation, but give
 // every allocating process its own synchronous exit cleanup. Register before
@@ -1016,7 +1015,7 @@ function makeCleanEnv(
   delete env.CODETRACER_RECORDING_ID;
   delete env.CODETRACER_CALLER_PID;
   // On Windows with direct Electron launch, we MUST set CODETRACER_PREFIX
-  // because Electron's own exe path is not inside build-debug/ so the Nim
+  // because Electron's own exe path is not inside build-debug-repro/ so the Nim
   // code cannot derive the prefix from getAppDir().  On other platforms
   // (or when ct.exe launches Electron), remove it so the ct binary derives
   // it from its own location (getAppDir().parentDir).

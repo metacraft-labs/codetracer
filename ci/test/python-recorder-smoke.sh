@@ -6,7 +6,7 @@ ROOT_DIR=$(git rev-parse --show-toplevel)
 cd "${ROOT_DIR}"
 
 # Use a pre-built ct binary if CODETRACER_E2E_CT_PATH is set (e.g. from
-# `nix build`), otherwise fall back to building a dev binary via tup.
+# `nix build`), otherwise fall back to building a dev binary with `just build-once`.
 if [[ -n ${CODETRACER_E2E_CT_PATH:-} ]]; then
 	CT_BIN="${CODETRACER_E2E_CT_PATH}"
 	echo "Using pre-built ct: ${CT_BIN}"
@@ -15,9 +15,9 @@ else
 	echo "Building Codetracer CLI for smoke test"
 	echo '###############################################################################'
 
-	nix develop .#devShells.x86_64-linux.default --command ./ci/build/dev.sh
+	nix develop .#devShells.x86_64-linux.default --command just build-once
 
-	CT_BIN="${CODETRACER_BUILD_DIR:-${ROOT_DIR}/src/build-debug}/bin/ct"
+	CT_BIN="${CODETRACER_BUILD_DIR:-${ROOT_DIR}/src/build-debug-repro}/bin/ct"
 fi
 if [[ ! -x ${CT_BIN} ]]; then
 	echo "error: ${CT_BIN} not found after build"

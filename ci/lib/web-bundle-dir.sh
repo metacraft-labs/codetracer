@@ -12,23 +12,24 @@
 # --------------------------------------------
 # `ci/test/web-bundle-smoke.sh` (`just test-web-bundle`) and
 # `ci/test/web-bundle-assets.sh` (`just test-web-bundle-assets`) each defaulted
-# to `src/build-debug/web`. `src/build-debug/` is tup's DEBUG VARIANT
-# DIRECTORY: it holds a tracked `tup.config`, and tup refuses to build a
-# variant whose directory holds anything else ("Variant directory must only
-# contain a tup.config file. Found extra files: web"). The `ViewModel` job of
-# .github/workflows/codetracer.yml runs `just test-web-bundle` BEFORE its
-# `build-once` step, on `agents` and on `dev`, so in a fresh checkout the
-# second step could never succeed once the first had run: measured in the
-# 2026-11-02 stabilisation run's viewmodel.log.
+# to `src/build-debug/web`, inside a build output tree. The tup build that owned
+# that tree refused a directory holding anything it had not created ("Variant
+# directory must only contain a ... file. Found extra files: web"). The
+# `ViewModel` job of .github/workflows/codetracer.yml runs
+# `just test-web-bundle` BEFORE its `build-once` step, on `agents` and on
+# `dev`, so in a fresh checkout the second step could never succeed once the
+# first had run: measured in the 2026-11-02 stabilisation run's viewmodel.log.
+# A build output tree belongs to the build whatever the build is, so the
+# default stays out of it.
 #
 # One definition, here, for both scripts, so they cannot drift apart again;
 # `ci/test/web-bundle-default-dir-test.sh` fails when the default (or a
-# literal default in any script) lies inside a directory that holds a tracked
-# `tup.config`, or is not ignored by git.
+# literal default in any script) lies inside a build output directory
+# (`src/build-*`), or is not ignored by git.
 #
 # `build/` is the checkout's untracked build-output root (`/build/` in
 # .gitignore; reprobuild's recipe writes `build/generated/` and `build/c/`
-# there) and lies outside `src/`, tup's tree (`src/Tupfile.ini`), entirely.
+# there) and lies outside `src/`, where the build trees are, entirely.
 
 ct_web_bundle_default_dir() {
 	local root="${1:?ct_web_bundle_default_dir: the checkout root is required}"

@@ -55,7 +55,7 @@ const fixtureRequestDetailsPath = path.join(
   "requests",
   "inventory-response.json",
 );
-const codetracerPrefix = path.join(codetracerInstallDir, "src", "build-debug");
+const codetracerPrefix = path.join(codetracerInstallDir, "src", "build-debug-repro");
 const ctMcrCandidates = [
   path.join(codetracerPrefix, "bin", "ct-mcr"),
   path.join(

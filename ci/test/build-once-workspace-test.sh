@@ -74,7 +74,7 @@
 #      from src/ct/codetracer.nim to the importing module still holds, and the
 #      preflight accepts a workspace of exactly the required siblings and
 #      refuses one missing any of those repos, by name, even when only the
-#      repo's `*_SRC` variable (which tup strips) points at a copy.
+#      repo's `*_SRC` variable (which a build's environment may not carry) points at a copy.
 #
 # # No mocks
 #
@@ -119,8 +119,8 @@ readonly PREFLIGHT="$REPO_ROOT/scripts/require-siblings.sh"
 # not -- that suite's own classify_ref calls it `sha` and accepts it. So
 # launcher-recorder-e2e.yml now pins both to the revisions this repo's
 # flake.lock already pins them to, which is also the only value that keeps the
-# tup driver (which reads ../isonim and ../runquota) and the nix driver (which
-# reads flake.lock) on one tree. The remedy below is still the right end state
+# relative-path resolver (which reads ../isonim and ../runquota) and the nix
+# driver (which reads flake.lock) on one tree. The remedy below is still the right end state
 # and is still owed; the SHAs are a bridge, and deleting them once the manifest
 # declares the two repos is a one-line change.
 #
@@ -140,10 +140,17 @@ readonly PREFLIGHT="$REPO_ROOT/scripts/require-siblings.sh"
 # (Two viewmodel-tests entries stood here too; they closed once that job
 # provisioned the lock-pinned siblings, and the suite asked for their removal.)
 KNOWN_GAPS=(
+	# viewmodel-tests provisions the IsoNim family and a few recorders through
+	# the lock, but codetracer-native-recorder is a private repository and so is
+	# declared by no public lock (repro.lock names only siblings that can be
+	# read without credentials); the lane that needs it must provision it
+	# itself, with an explicit revision, before this gap can close.
+	"codetracer.yml|viewmodel-tests|codetracer-native-recorder"
+
 	# windows-installer-build runs `bash scripts/build-once.sh` directly with an
 	# `env-flavor: windows-diy` setup-dev-env whose siblings: block carries only
 	# the three db-backend repos. The preflight is driver-agnostic -- it runs
-	# before the reprobuild/tup branch is even selected -- so the Windows leg
+	# before the build driver is even selected -- so the Windows leg
 	# needs the same workspace as the Linux one. Four of these six close with a
 	# bare entry; isonim and runquota need the manifest change above.
 	"codetracer.yml|windows-installer-build|isonim"
@@ -592,7 +599,7 @@ fi
 #     but-build-once-cannot-compile-ct-without-it: io-mon and
 #     nim-stackable-hooks sat in the ADVISORY tier, so a workspace without them
 #     passed the preflight ("optional sibling repo(s) are missing ... The build
-#     continues") and then failed in tup on `cannot open file: io_mon/depfile`.
+#     continues") and then failed in the compile on `cannot open file: io_mon/depfile`.
 #     `src/ct_test/incremental/io_mon_capture.nim` imports both
 #     unconditionally and is reached from every `ct` build.
 #   * codetracer-pm issue 2026-11-08-ct-core-imports-nim-pty-which-the-
@@ -618,14 +625,15 @@ fi
 #      `io_mon/depfile` closure does not reach, are NOT required);
 #   b. refuse it, naming the repo, once one of CT_IMPORT_SIBLINGS is removed;
 #   c. still refuse when only the repo's *_SRC variable points at a copy,
-#      because tup strips those variables before `config.nims` reads them.
-#      nim-pty has no such variable (config.nims and src/Tuprules.tup reach it
-#      only as ../nim-pty/src), so its row leaves the column empty and c does
+#      because the preflight requires the checkout the relative-path resolvers
+#      read; a variable that only some builds carry does not stand in for it.
+#      nim-pty has no such variable (config.nims reaches it only as
+#      ../nim-pty/src), so its row leaves the column empty and c does
 #      not apply to it.
 # -----------------------------------------------------------------------------
 echo "every sibling the ct compile imports is a REQUIRED sibling"
 
-# repo | module the chain's last file imports | env var tup does not export
+# repo | module the chain's last file imports | env var the preflight does not honour
 #   (empty: none exists) | import chain
 #
 # The chain is space-separated `<file>:<import spelling>` links, starting at
@@ -759,11 +767,11 @@ for entry in "${CT_IMPORT_SIBLINGS[@]}"; do
 	else
 		fail "the preflight refuses a workspace without $name and names it" \
 			"exit $omit_rc. \`ct\` cannot compile without \`$module\`, so a zero exit here is" \
-			"the defect: the build proceeds and dies in tup on \`cannot open file: $module\`." \
+			"the defect: the build proceeds and dies in the compile on \`cannot open file: $module\`." \
 			"First line: $(printf '%s' "$omit_out" | head -1)"
 	fi
 
-	# A copy of the repo reachable ONLY through the variable tup strips.
+	# A copy of the repo reachable ONLY through the *_SRC variable.
 	if [ -z "$var" ]; then
 		echo "  skip $name has no *_SRC override variable to test (the build reaches it only as ../$name/src)"
 		continue
@@ -774,12 +782,12 @@ for entry in "${CT_IMPORT_SIBLINGS[@]}"; do
 	alias_out="$(run_tier_preflight "$omit_ws" "$var=$alias_dir")"
 	alias_rc=$?
 	if [ "$alias_rc" -ne 0 ] && grep -qE "^[[:space:]]*\*[[:space:]]+$name([[:space:]]|$)" <<<"$alias_out"; then
-		ok "$var alone does not satisfy the $name requirement (tup strips it)"
+		ok "$var alone does not satisfy the $name requirement (the checkout is required)"
 	else
 		fail "$var alone does not satisfy the $name requirement" \
-			"exit $alias_rc with $var=$alias_dir and no ../$name checkout. src/Tuprules.tup" \
-			"does not export $var, so under tup config.nims never sees it and the" \
-			"compile still fails on \`$module\`."
+			"exit $alias_rc with $var=$alias_dir and no ../$name checkout. The" \
+			"preflight requires the checkout, because a build whose environment" \
+			"does not carry $var still fails on \`$module\`."
 	fi
 done
 

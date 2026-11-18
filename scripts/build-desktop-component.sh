@@ -16,7 +16,7 @@
 # The capability file the product ships is checked in at
 # `resources/codetracer-desktop-capabilities`, but until now nothing copied
 # it into a component bundle and the core was only ever emitted as
-# `src/build-debug/bin/ct`. This script is that missing producer
+# `src/build-debug-repro/bin/ct`. This script is that missing producer
 # (codetracer-specs/Testing/Launcher-Recorder-Compatibility-Tests.md §5.1,
 # deliverable D1 / milestone LRC-0).
 #
@@ -224,10 +224,8 @@ COMPONENT_VERSION="$(printf '%s.%02d.%s' "$CT_YEAR" "$((10#$CT_MONTH))" "$CT_BUI
 # ---------------------------------------------------------------------------
 if [[ -z $CORE_BIN ]]; then
 	for candidate in \
-		"${CODETRACER_BUILD_DIR:-$ROOT_DIR/src/build-debug}/bin/ct$EXE_SUFFIX" \
-		"$ROOT_DIR/src/build-debug/bin/ct$EXE_SUFFIX" \
+		"${CODETRACER_BUILD_DIR:-$ROOT_DIR/src/build-debug-repro}/bin/ct$EXE_SUFFIX" \
 		"$ROOT_DIR/src/build-debug-repro/bin/ct$EXE_SUFFIX" \
-		"$ROOT_DIR/src/build-release/bin/ct$EXE_SUFFIX" \
 		"$ROOT_DIR/src/build-release-repro/bin/ct$EXE_SUFFIX"; do
 		if [[ -x $candidate ]]; then
 			CORE_BIN="$candidate"
@@ -250,8 +248,8 @@ CORE_BIN="$(cd "$(dirname "$CORE_BIN")" && pwd)/$(basename "$CORE_BIN")"
 
 # EXECUTABILITY IS NOT CURRENCY, AND THE LOOP ABOVE ASKS FOR NOTHING ELSE.
 #
-# Five candidate build trees are tried in a fixed order and the FIRST ONE THAT
-# EXISTS wins. `src/build-debug/bin/ct` from a month ago beats a `build-release`
+# Three candidate build trees are tried in a fixed order and the FIRST ONE THAT
+# EXISTS wins. `src/build-debug-repro/bin/ct` from a month ago beats a `build-release-repro`
 # built ten minutes ago, and both beat nothing at all — so the deciding property
 # was "somebody once ran a build", never "this binary is the code on disk".
 #

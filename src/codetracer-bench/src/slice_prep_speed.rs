@@ -108,7 +108,7 @@ pub fn run(
     // so we don't probe per-language here.
     if crate::ct_cli_binary().is_none() {
         outcome.skip_reason = Some(
-            "ct CLI not on PATH and not discoverable at src/build-debug/bin/ct \
+            "ct CLI not on PATH and not discoverable at src/build-debug-repro/bin/ct \
              — run `just build-once` first"
                 .to_string(),
         );

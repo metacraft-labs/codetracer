@@ -8,12 +8,11 @@
 # PATH is not checked out next to this repo.
 #
 # CodeTracer is built inside a multi-repo workspace: `<workspace>/codetracer`
-# sits next to `<workspace>/isonim`, `<workspace>/io-mon`, ... and both build
-# drivers reach across by relative path:
+# sits next to `<workspace>/isonim`, `<workspace>/io-mon`, ... and the build
+# reaches across by relative path:
 #
-#   * Nim   -- `src/Tuprules.tup:72-88` passes `--path:$(ROOT)/../<sibling>/src`
-#              unconditionally, and `config.nims` adds the same directories
-#              through `addPathIfDir`.
+#   * Nim   -- `config.nims` adds `../<sibling>/src` through `addPathIfDir`,
+#              which is silent on a directory that is not there.
 #   * Cargo -- `src/db-backend/Cargo.toml` declares `path = "../../../
 #              codetracer-trace-format/<crate>"` dependencies.
 #   * cc    -- `src/db-backend/build.rs` compiles the Nim MCR emulator out of
@@ -72,10 +71,10 @@ workspace_root="$(cd "$repo_root/.." && pwd)"
 #
 # `workspace_root` is the checkout's PARENT, and that is not an accident this
 # script could route around: `config.nims` (`repoRoot.parentDir()`),
-# `src/Tuprules.tup` (`$(ROOT)/../<sibling>`), `src/db-backend/Cargo.toml`
+# `src/db-backend/Cargo.toml`
 # (`path = "../../../..."`), `build.rs` and `.envrc` all reach siblings by the
 # same relative path. The parent directory of a checkout IS the workspace root,
-# for four independent resolvers, and only one of them reads anything this
+# for independent resolvers, and only one of them reads anything this
 # script could set.
 #
 # So a `git worktree` has to be created BESIDE the sibling repos -- directly
@@ -180,28 +179,23 @@ sibling_remote_org="${CODETRACER_SIBLING_REMOTE_ORG:-https://github.com/metacraf
 # imports `../ct_test/ct_test`, which reaches `src/ct_test/process_exec.nim` ->
 # `import runquota_process`, so every `ct` build needs it somehow.
 #
-# The two build drivers get it from different places, and that is the whole
-# reason this entry is worded the way it is:
+# The Nim search path gets it from two places, and that is the whole reason
+# this entry is worded the way it is:
 #
-#   * tup (the Linux default) takes its Nim search path from
-#     `src/Tuprules.tup`'s NIM_REPO_PATH_FLAGS, whose runquota entries are
-#     `$(ROOT)/../runquota/...`. Tup also sanitizes the environment down to that
-#     file's `export` list, which does NOT name RUNQUOTA_SRC. On this driver the
-#     sibling checkout is the ONLY way in.
-#   * reprobuild (Darwin/Windows, opt-in on Linux) resolves runquota as a nix
-#     flake input, with RUNQUOTA_SRC as its repo-path alias (`repro.nim`'s
-#     CodeTracerNixSiblingInputs / CodeTracerRepoEnvAliases). This driver does
-#     not strictly need a checkout at all.
+#   * the sibling checkout: `config.nims` reaches `../runquota/libs/runquota_*/src`
+#     by relative path;
+#   * reprobuild resolves runquota as a nix flake input, with RUNQUOTA_SRC as its
+#     repo-path alias (`repro.nim`'s CodeTracerNixSiblingInputs /
+#     CodeTracerRepoEnvAliases), which does not strictly need a checkout.
 #
-# The override column is nonetheless left EMPTY, i.e. the checkout is required
-# on both drivers. Honouring RUNQUOTA_SRC here would make this check pass on the
-# strength of a variable tup strips, and hand the tup lane back precisely the
-# `cannot open file: runquota_process` that this entry exists to pre-empt --
-# a false green on the one driver that actually needed the warning. Requiring
-# the checkout keeps ONE workspace-completeness rule that holds on every driver,
-# which is also how every other `--path` sibling in NIM_REPO_PATH_FLAGS is
-# handled. The cost is that a reprobuild-only build now wants a checkout it
-# could have done without; CODETRACER_SKIP_SIBLING_CHECK=1 is the escape hatch.
+# The override column is nonetheless left EMPTY, i.e. the checkout is required.
+# Honouring RUNQUOTA_SRC here would make this check pass for a tree with no
+# checkout, on the strength of a variable that reaches the compiler only when
+# the build's environment carries it, and would hand back precisely the
+# `cannot open file: runquota_process` that this entry exists to pre-empt. Requiring the checkout keeps ONE workspace-completeness rule, which
+# is also how every other relative-path sibling is handled. The cost is that a
+# build that resolves runquota from the flake wants a checkout it could have
+# done without; CODETRACER_SKIP_SIBLING_CHECK=1 is the escape hatch.
 #
 # All four jobs that reach `just build-once` (visual-replay-regression-gate,
 # test-ui-tests, viewmodel-tests, cross-process-linux) provision it in
@@ -220,15 +214,15 @@ sibling_remote_org="${CODETRACER_SIBLING_REMOTE_ORG:-https://github.com/metacraf
 # read-file capture in the runner that `ct test` IS, and gates only the LIVE
 # capture -- at run time, on the interpose shim being locatable -- never the
 # compile. A tree without io-mon passed this preflight as "5 optional sibling
-# repo(s) are missing ... The build continues" and then died in tup on
+# repo(s) are missing ... The build continues" and then died in the compile on
 # `cannot open file: io_mon/depfile`.
 #
 # Their override columns are EMPTY for the same reason as runquota's: the dev
 # shell seeds IO_MON_SRC / NIM_STACKABLE_HOOKS_SRC from flake inputs
-# (nix/shells/main.nix), but `src/Tuprules.tup` exports neither, so under tup
-# the repo-root `config.nims` sees only the `../io-mon` / `../nim-stackable-hooks`
-# sibling checkouts. Honouring the variables here is exactly how the issue's
-# failing tree got its green preflight.
+# (nix/shells/main.nix), and `config.nims` reads them, but only a build whose
+# environment carries them sees them; the `../io-mon` / `../nim-stackable-hooks`
+# sibling checkouts are what every build sees. Honouring the variables here is
+# exactly how the issue's failing tree got its green preflight.
 #
 # `nim-pty` joined that tier on 2026-11-08 (codetracer-pm issue
 # 2026-11-08-ct-core-imports-nim-pty-which-the-sibling-check-calls-optional).
@@ -242,13 +236,13 @@ sibling_remote_org="${CODETRACER_SIBLING_REMOTE_ORG:-https://github.com/metacraf
 # carries a Windows backend. A tree without nim-pty passed this preflight as
 # advisory and then died in `Build the codetracer-desktop core` on
 # `shell_session.nim(40, 8) Error: cannot open file: nim_pty`. Its override
-# column is empty because no override exists: `config.nims` and
-# `src/Tuprules.tup` reach it only as `../nim-pty/src`.
+# column is empty because no override exists: `config.nims` reaches it only as
+# `../nim-pty/src`.
 #
 # Everything else the source references across a relative path goes in the
 # advisory tier: a warning naming the module that will fail to resolve, and a
 # zero exit. `isonim-gpui` / `nim-termctl` are on
-# `src/Tuprules.tup`'s `--path` list and are imported, but only by the GPUI and
+# `config.nims`'s search path and are imported, but only by the GPUI and
 # TUI frontends and their tests (`just build-gpui`, `just build-tui`,
 # `just test-tui`), which `build-once` does not compile: no file in the import
 # closure of its targets (src/ct/{codetracer,db_backend_record}.nim,
@@ -275,20 +269,20 @@ sibling_remote_org="${CODETRACER_SIBLING_REMOTE_ORG:-https://github.com/metacraf
 required_siblings=(
 	'isonim|src/isonim.nim|ISONIM_SRC|the reactive UI framework the whole renderer is written against — hundreds of `import isonim/...` sites across the frontend; count them with: grep -rl "import isonim/" --include=*.nim src | wc -l . Also the source `build-tailwind.sh` extracts utility classes from'
 	'nim-agents|src/nim_agents.nim||`import nim_agents` in src/frontend/viewmodel/agent_service.nim and the agentic-session UI'
-	"nim-agent-harbor|src/nim_agent_harbor.nim||the session/worktree backend nim_agents is written against; passed unconditionally by src/Tuprules.tup:80"
-	"nim-acp|src||the Agent Client Protocol bindings src/Tuprules.tup:79 puts on the Nim search path"
-	"nim-everywhere|src||the patched Nim 2.x distribution src/Tuprules.tup:78 puts on the Nim search path"
+	"nim-agent-harbor|src/nim_agent_harbor.nim||the session/worktree backend nim_agents is written against; on the Nim search path (config.nims)"
+	"nim-acp|src||the Agent Client Protocol bindings config.nims puts on the Nim search path"
+	"nim-everywhere|src||the patched Nim 2.x distribution config.nims puts on the Nim search path"
 	'isonim-tui|src/isonim_tui/text/width.nim|ISONIM_TUI_SRC|`import isonim_tui/text/width` -- the grapheme segmenter -- in src/frontend/viewmodel/editor/{selection,selection_ops,wrap}.nim, so every editor-model build and the editor import-closure gate need it'
 	'codetracer-trace-format-nim|src/codetracer_ct_print_lib.nim|CODETRACER_TRACE_FORMAT_NIM_SRC|`ct print` (src/ct/cli/print_trace.nim) imports codetracer_trace_writer/* and codetracer_ct_print_lib'
 	'codetracer-trace-format|codetracer_trace_types/Cargo.toml||every `path = "../../../codetracer-trace-format/..."` dependency in src/db-backend/Cargo.toml resolves through it (grep -c that path in the manifest for how many); cargo cannot even parse the manifest without them'
 	'codetracer-native-recorder|ct_emulator/src/ct_emulator/emulator_wasm_api.nim|CT_CODETRACER_NATIVE_RECORDER_SIBLING|src/db-backend/build.rs compiles the Nim MCR emulator from ct_emulator/ and links it as lib${CT_MCR_EMULATOR_LINK_NAME}.so; without it the db-backend link fails with 81 undefined `mcr*` symbols'
 	# Override column deliberately empty -- see the RUNQUOTA_SRC discussion in
-	# the tier notes above. Accepting the env var here would green this check on
-	# the tup driver, which strips it.
-	'runquota|libs/runquota_process/src/runquota_process.nim||`import runquota_process` in src/ct_test/process_exec.nim, reached from EVERY `ct` build via src/ct/codetracer.nim -> ../ct_test/ct_test; src/Tuprules.tup puts libs/runquota_*/src on the Nim search path'
-	# The override IS honoured here, unlike runquota's: src/Tuprules.tup exports
-	# TEST_CERTIFICATES_TOOLS_SRC, so the tup driver sees it too, and the dev
-	# shell seeds it from the pinned flake input (nix/shells/main.nix).
+	# the tier notes above. Accepting the env var here would green this check
+	# on a variable the build's environment may not carry.
+	'runquota|libs/runquota_process/src/runquota_process.nim||`import runquota_process` in src/ct_test/process_exec.nim, reached from EVERY `ct` build via src/ct/codetracer.nim -> ../ct_test/ct_test; config.nims puts libs/runquota_*/src on the Nim search path'
+	# The override IS honoured here, unlike runquota's: the dev shell seeds
+	# TEST_CERTIFICATES_TOOLS_SRC from the pinned flake input
+	# (nix/shells/main.nix).
 	'test-certificates-tools|src/test_certificates.nim|TEST_CERTIFICATES_TOOLS_SRC|`ct` links the test-certificate reference library (`test_certificates/*`) in src/ct_test/certificate_local_store.nim and certificate_store_roots_native.nim, reached from EVERY `ct` build via src/ct/codetracer.nim -> ../ct_test/ct_test'
 	# Probe the FORMAT module, not the `io_mon` umbrella -- the umbrella is a
 	# false green. Nothing in this repo imports `io_mon`: the only io-mon
@@ -308,13 +302,13 @@ required_siblings=(
 	# imports turns that into a refusal, by name, before any compile.
 	#
 	# Override columns deliberately empty -- see the io-mon paragraph in the
-	# tier notes above: tup strips IO_MON_SRC / NIM_STACKABLE_HOOKS_SRC.
+	# tier notes above: a build's environment may not carry IO_MON_SRC / NIM_STACKABLE_HOOKS_SRC.
 	'io-mon|src/io_mon/depfile.nim||`import io_mon/depfile` in src/ct_test/incremental/io_mon_capture.nim:83, reached from EVERY `ct` build via src/ct/codetracer.nim -> ../ct_test/incremental_cli -> incremental/io_mon_capture; config.nims puts ../io-mon/src on the Nim search path'
 	# Probe the module imported, for the same reason as io-mon's row.
 	'nim-stackable-hooks|src/stackable_hooks/propagation.nim||`import stackable_hooks/propagation` in src/ct_test/incremental/io_mon_capture.nim:91, reached from EVERY `ct` build by the same chain as io-mon; config.nims puts ../nim-stackable-hooks/src on the Nim search path'
 	# Override column empty because none exists -- see the nim-pty paragraph in
 	# the tier notes above.
-	'nim-pty|src/nim_pty.nim||`import nim_pty` in src/common/shell_session.nim, reached from EVERY `ct` build via src/ct/codetracer.nim -> shell_session_command (`ct shell-session`); the TUI tests (test_terminal_driver_start.nim, test_focus_reporting.nim) and src/frontend/tui/benchmarks/tui_benchmarks.nim import it too. src/Tuprules.tup and config.nims put ../nim-pty/src on the Nim search path'
+	'nim-pty|src/nim_pty.nim||`import nim_pty` in src/common/shell_session.nim, reached from EVERY `ct` build via src/ct/codetracer.nim -> shell_session_command (`ct shell-session`); the TUI tests (test_terminal_driver_start.nim, test_focus_reporting.nim) and src/frontend/tui/benchmarks/tui_benchmarks.nim import it too. config.nims puts ../nim-pty/src on the Nim search path'
 )
 
 advisory_siblings=(
@@ -506,7 +500,7 @@ EOF
 A checkout of this repo -- INCLUDING A WORKTREE -- must sit directly under the
 workspace root, beside the sibling repos. The parent directory of a checkout is
 the workspace root by definition for four independent resolvers, none of which
-can be redirected per-worktree: Nim (\`config.nims\`, \`src/Tuprules.tup\`), Cargo
+can be redirected per-worktree: Nim (\`config.nims\`), Cargo
 (\`src/db-backend/Cargo.toml\` path dependencies), cc (\`src/db-backend/build.rs\`)
 and direnv (\`.envrc\`). Moving the worktree is the only thing that fixes all four.
 

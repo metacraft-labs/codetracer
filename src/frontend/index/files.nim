@@ -72,6 +72,7 @@ proc shouldSkipIndexedDirectory(path: cstring): bool =
   let name = $nodePath.basename(path)
   name in [".git", ".hg", ".svn", "node_modules", ".direnv", ".devenv",
            "result", "dist", "build", "build-debug", "src/build-debug",
+           "build-debug-repro", "build-release-repro",
            "test-results", "test-diagnostics", ".next", ".cache", "nimcache"]
 
 const FilesystemLoadDepth = 1

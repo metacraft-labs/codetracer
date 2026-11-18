@@ -450,7 +450,7 @@ assert(!scanned.some((rel) => rel.split(path.sep).some(isGeneratedDir)),
 // only on a built tree would make that total depend on whether anyone had run
 // `just build-once` — reintroducing, in the counter, exactly the build-state
 // dependence this fix removes from the scan.
-const builtDirs = ['src/build-debug', 'src/public/dist']
+const builtDirs = ['src/build-debug-repro', 'src/public/dist']
   .filter((rel) => fs.existsSync(path.join(REPO, rel)));
 console.log(`  \x1b[2mbuild output present: ${builtDirs.length > 0 ? builtDirs.join(', ') : '(none)'}; generated dirs skipped: ${skippedGenerated.length}\x1b[0m`);
 assert(builtDirs.length === 0 || skippedGenerated.length > 0,
@@ -972,13 +972,13 @@ assertEqual(shippedMatchesAcross(/setAttribute\((cstring)?"(href|src|srcdoc|acti
   'exactly two URL attributes are ever set');
 // One is a literal asset path.  The other re-creates a <script> during
 // browser-sync hot reload with the `src` READ BACK OFF a script tag already in
-// the page — it introduces no new value — and `src/Tupfile`'s rule for
-// `browsersync_serv.js` is commented out, so it is not even built.
+// the page — it introduces no new value — and the build (`repro.nim`) has no
+// action for `browsersync_serv.js`, so it is not even built.
 assert(/scriptTagSrc = existingScript\.getAttribute\("src"\)/.test(
   shipped.get('src/frontend/browsersync_serv.nim')),
   "and browser-sync's copies a src off an existing tag rather than minting one");
-assert(/^# : frontend\/browsersync_serv\.nim/m.test(
-  fs.readFileSync(path.join(REPO, 'src/Tupfile'), 'utf8')),
+assert(!/browsersync_serv/.test(
+  fs.readFileSync(path.join(REPO, 'repro.nim'), 'utf8')),
   'and that dev-only module has no build rule at all');
 assertEqual(shippedMatchesAcross(/executeJavaScript\("[^"]*"\)/g),
   'src/frontend/index/window.nim:executeJavaScript("document.body.style.backgroundColor = \'black\';") | '

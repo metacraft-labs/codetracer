@@ -802,32 +802,20 @@ function Ensure-NodeModulesJunction {
 # `src/public/third_party/golden-layout/dist` is a git mode-120000 POSIX
 # symlink into `node_modules/golden-layout/dist`.  On a Windows checkout
 # with `core.symlinks=false` it materializes as a ~44-byte text-file
-# stub.  The Tup rule `: third_party/golden-layout/dist |> !tup_preserve
-# |> %f` treats that stub as a single opaque leaf - exactly the way the
-# sibling `third_party/monaco-editor/min`, `@exuanbo`,
-# `vex-js`, and `xterm` stubs are handled.  This MUST stay a plain-file
-# stub in the source tree: if it is materialized as a real directory
-# (junction or directory symlink) Tup's scanner registers `dist` as a
-# directory node and the leaf `!tup_preserve` rule then fails with
-# "Attempting to insert '.../dist' as a generated node when it already
-# exists as a different type (directory)".  We therefore DO NOT touch
-# the source stub here.
-#
-# Tup `!tup_preserve` copies that stub verbatim to
-# `build-debug/public/third_party/golden-layout/dist`, so the build
-# output also ends up with a useless text stub and the `<link>` to
+# stub.  The build publishes that stub verbatim to
+# `build-debug-repro/public/third_party/golden-layout/dist`, so the build
+# output ends up with a useless text stub and the `<link>` to
 # `goldenlayout-base.css` from index.html / server_index.ejs 404s,
 # leaving GoldenLayout unstyled (collapsed, unclickable tab headers).
 #
-# The fix: after Tup has produced the build tree, replace the build-only
-# stub with a real directory symlink into the actual
-# `node_modules/golden-layout/dist`.  This is a build-output-only change
-# - the tup-scanned source tree stays a plain stub, so the leaf rule
-# keeps parsing cleanly on every platform.  A directory symlink is
+# The fix: after the build has produced the output tree, replace the
+# build-only stub with a real directory symlink into the actual
+# `node_modules/golden-layout/dist`.  This is a build-output-only change;
+# the source tree keeps the plain stub.  A directory symlink is
 # preferred (resolves with relative `<link>` paths exactly like a Linux
 # symlink); a junction is the fallback when the symlink privilege is
 # unavailable.  When the build output does not exist yet (first shell
-# activation before any `tup upd`), this is a silent no-op and the next
+# activation before any build), this is a silent no-op and the next
 # activation after a build installs the link.
 function Ensure-GoldenLayoutAsset {
   param([Parameter(Mandatory = $true)][string]$RepoRoot)
@@ -838,7 +826,7 @@ function Ensure-GoldenLayoutAsset {
     return
   }
 
-  $ctBuildDir = if ($env:CODETRACER_BUILD_DIR) { $env:CODETRACER_BUILD_DIR } else { Join-Path $RepoRoot "src/build-debug" }
+  $ctBuildDir = if ($env:CODETRACER_BUILD_DIR) { $env:CODETRACER_BUILD_DIR } else { Join-Path $RepoRoot "src/build-debug-repro" }
   $buildDistParent = Join-Path $ctBuildDir "public/third_party/golden-layout"
   if (-not (Test-Path -LiteralPath $buildDistParent -PathType Container)) {
     # Build output not produced yet - nothing to fix up.
@@ -858,7 +846,7 @@ function Ensure-GoldenLayoutAsset {
         return
       }
     }
-    # Plain Tup-preserved stub (or stale dir) - replace it.
+    # Plain published stub (or stale dir) - replace it.
     try {
       if (($null -ne $item) -and $item.PSIsContainer -and -not $isReparse) {
         Remove-Item -LiteralPath $linkPath -Force -Recurse -ErrorAction Stop
@@ -1075,7 +1063,6 @@ foreach ($guard in (Assert-NonInteractiveDebugger)) {
 . "$windowsDir/ensure-uv.ps1"
 . "$windowsDir/ensure-nim.ps1"
 . "$windowsDir/ensure-capnp.ps1"
-. "$windowsDir/ensure-tup.ps1"
 . "$windowsDir/ensure-dotnet.ps1"
 . "$windowsDir/ensure-ct-remote.ps1"
 . "$windowsDir/ensure-nargo.ps1"
@@ -1114,13 +1101,6 @@ Set-EnvDefault -Name "CAPNP_WINDOWS_SOURCE_MODE" -Value "auto"
 Set-EnvDefault -Name "CAPNP_WINDOWS_SOURCE_REPO" -Value $toolchain["CAPNP_SOURCE_REPO"]
 Set-EnvDefault -Name "CAPNP_WINDOWS_SOURCE_REF" -Value $toolchain["CAPNP_SOURCE_REF"]
 
-Set-EnvDefault -Name "TUP_WINDOWS_SOURCE_MODE" -Value "prebuilt"
-Set-EnvDefault -Name "TUP_WINDOWS_SOURCE_REPO" -Value $toolchain["TUP_SOURCE_REPO"]
-Set-EnvDefault -Name "TUP_WINDOWS_SOURCE_REF" -Value $toolchain["TUP_SOURCE_REF"]
-Set-EnvDefault -Name "TUP_WINDOWS_SOURCE_BUILD_COMMAND" -Value $toolchain["TUP_SOURCE_BUILD_COMMAND"]
-Set-EnvDefault -Name "TUP_WINDOWS_PREBUILT_VERSION" -Value $toolchain["TUP_PREBUILT_VERSION"]
-Set-EnvDefault -Name "TUP_WINDOWS_PREBUILT_URL" -Value $toolchain["TUP_PREBUILT_URL"]
-Set-EnvDefault -Name "TUP_WINDOWS_PREBUILT_SHA256" -Value $toolchain["TUP_PREBUILT_SHA256"]
 Set-EnvDefault -Name "TUP_WINDOWS_MSYS2_BASE_VERSION" -Value $toolchain["TUP_MSYS2_BASE_VERSION"]
 Set-EnvDefault -Name "TUP_WINDOWS_MSYS2_PACKAGES" -Value $toolchain["TUP_MSYS2_PACKAGES"]
 
@@ -1235,7 +1215,6 @@ if ($doSync) {
   # Phase 4: May need MSYS2 for source builds
   Invoke-BootstrapStep -Step "NIM"   -Relocatability relocatable -Root $installRoot -Action { Ensure-Nim   -Root $installRoot -Arch $arch -Toolchain $toolchain }
   Invoke-BootstrapStep -Step "CAPNP" -Relocatability relocatable -Root $installRoot -Action { Ensure-Capnp -Root $installRoot -Arch $arch -Toolchain $toolchain }
-  Invoke-BootstrapStep -Step "TUP"   -Relocatability relocatable -Root $installRoot -Action { Ensure-Tup   -Root $installRoot -Toolchain $toolchain }
 
   # Phase 5: Depends on Rust + MSYS2
   Invoke-BootstrapStep -Step "NARGO" -Relocatability relocatable -Root $installRoot -Action { Ensure-Nargo -Root $installRoot -Toolchain $toolchain -RepoRoot $repoRoot }
@@ -1453,18 +1432,9 @@ if (-not (Test-Path -LiteralPath $capnpBinDir -PathType Container)) {
   $capnpBinDir = $capnpDir
 }
 
-$tupRoot = Join-Path $installRoot "tup"
-$tupDir = Resolve-InstallDirFromRelativePathFile -InstallRoot $installRoot -RelativePathFile (Join-Path $tupRoot "tup.install.relative-path")
-if ([string]::IsNullOrWhiteSpace($tupDir)) {
-  $fallbackCurrent = Join-Path $tupRoot "current"
-  if (Test-Path -LiteralPath $fallbackCurrent -PathType Container) {
-    $tupDir = $fallbackCurrent
-  } else {
-    $tupDir = $tupRoot
-  }
-}
-$tupExe = Join-Path $tupDir "tup.exe"
-$tupMsys2MingwBin = Join-Path $installRoot ("tup\msys2\" + [Environment]::GetEnvironmentVariable("TUP_WINDOWS_MSYS2_BASE_VERSION") + "\msys64\mingw64\bin")
+# The MSYS2 mingw toolchain the Nim/Nargo bootstraps provision (its directory
+# and variable names date from when the tup bootstrap shared it).
+$msys2MingwBin = Join-Path $installRoot ("tup\msys2\" + [Environment]::GetEnvironmentVariable("TUP_WINDOWS_MSYS2_BASE_VERSION") + "\msys64\mingw64\bin")
 $shimsDir = Join-Path $installRoot "shims"
 
 $nargoRoot = Join-Path $installRoot "nargo"
@@ -1512,7 +1482,7 @@ $zstdDir = Resolve-InstallDirFromRelativePathFile `
 
 # zlib install layout is `$installRoot/zlib/<version>/{include,lib}/`. Both
 # subdirs must be added to the toolchain search paths so the MinGW linker can
-# resolve `-lz` (see `src/Tuprules.tup`'s WINDOWS_ZLIB_DIR pin) and so any
+# resolve `-lz` and so any
 # build that consults `LIBRARY_PATH`/`C_INCLUDE_PATH` finds the headers.
 $zlibDir = Join-Path $installRoot ("zlib\" + $toolchain["ZLIB_VERSION"])
 $zlibIncludeDir = Join-Path $zlibDir "include"
@@ -1618,8 +1588,6 @@ function Resolve-ClExePath {
 [Environment]::SetEnvironmentVariable("CT_NIM_CC_FLAGS", "--cc:gcc", "Process")
 [Environment]::SetEnvironmentVariable("NIM1", $nim1, "Process")
 [Environment]::SetEnvironmentVariable("CAPNP_DIR", $capnpDir, "Process")
-[Environment]::SetEnvironmentVariable("TUP_DIR", $tupDir, "Process")
-[Environment]::SetEnvironmentVariable("TUP", $tupExe, "Process")
 [Environment]::SetEnvironmentVariable("NARGO_DIR", $nargoDir, "Process")
 [Environment]::SetEnvironmentVariable("GCC_DIR", $gccDir, "Process")
 [Environment]::SetEnvironmentVariable("GNAT_DIR", $gnatDir, "Process")
@@ -1632,7 +1600,7 @@ function Resolve-ClExePath {
 [Environment]::SetEnvironmentVariable("ZLIB_DIR", $zlibDir, "Process")
 [Environment]::SetEnvironmentVariable("CLINGO_DIR", $clingoDir, "Process")
 # Prepend the zlib lib dir to LIBRARY_PATH so the MinGW gcc linker finds
-# `libz.a` when codetracer's Nim build emits `-lz` via Tuprules.tup. PATH gets
+# `libz.a` when codetracer's Nim build emits `-lz`. PATH gets
 # the same dir below (mirrors how ZSTD_DIR is consumed downstream) for any
 # build that resolves runtime DLLs from the same install root layout.
 $existingLibraryPath = [Environment]::GetEnvironmentVariable("LIBRARY_PATH")
@@ -1686,7 +1654,6 @@ if (-not [string]::IsNullOrWhiteSpace($msvcToolsetPinnedVersion) -and
 }
 
 # In PowerShell, prefer native executables over extensionless bash shims.
-Set-ExecutableAliasIfPresent -Name "tup" -ExePath $tupExe
 Set-ExecutableAliasIfPresent -Name "dotnet" -ExePath (Join-Path $dotnetRoot "dotnet.exe")
 Set-ExecutableAliasIfPresent -Name "node" -ExePath (Join-Path $nodeDir "node.exe")
 Set-ExecutableAliasIfPresent -Name "npm" -ExePath (Join-Path $nodeDir "npm.exe")
@@ -1724,7 +1691,6 @@ if (-not [string]::IsNullOrWhiteSpace($cdbExe)) {
 }
 
 New-Item -ItemType Directory -Force -Path $shimsDir | Out-Null
-New-BashExeShim -ShimsDir $shimsDir -CommandName "tup" -ExePath $tupExe
 New-BashExeShim -ShimsDir $shimsDir -CommandName "dotnet" -ExePath (Join-Path $dotnetRoot "dotnet.exe")
 New-BashExeShim -ShimsDir $shimsDir -CommandName "node" -ExePath (Join-Path $nodeDir "node.exe")
 New-BashExeShim -ShimsDir $shimsDir -CommandName "npm" -ExePath (Join-Path $nodeDir "npm.exe")
@@ -1769,7 +1735,7 @@ Prepend-PathEntries -Entries @(
   $(if (-not [string]::IsNullOrWhiteSpace($ttdExe)) { Split-Path -Parent $ttdExe }),
   $(if (-not [string]::IsNullOrWhiteSpace($cdbExe)) { Split-Path -Parent $cdbExe }),
   $(if (-not [string]::IsNullOrWhiteSpace($dbgengDll)) { Split-Path -Parent $dbgengDll }),
-  $tupMsys2MingwBin,
+  $msys2MingwBin,
   $dotnetRoot,
   $nodePackagesBin,
   $shimsDir,
@@ -1781,7 +1747,6 @@ Prepend-PathEntries -Entries @(
   $ctRemoteDir,
   $capnpBinDir,
   $capnpDir,
-  $tupDir,
   $nargoDir,
   $gccBinDir,
   $gnatBinDir,
@@ -1906,17 +1871,8 @@ Write-Host "CAPNP_WINDOWS_SOURCE_MODE=$env:CAPNP_WINDOWS_SOURCE_MODE"
 Write-Host "CAPNP_WINDOWS_SOURCE_REPO=$env:CAPNP_WINDOWS_SOURCE_REPO"
 Write-Host "CAPNP_WINDOWS_SOURCE_REF=$env:CAPNP_WINDOWS_SOURCE_REF"
 Write-Host "CAPNP_DIR=$capnpDir"
-Write-Host "TUP_WINDOWS_SOURCE_MODE=$env:TUP_WINDOWS_SOURCE_MODE"
-Write-Host "TUP_WINDOWS_SOURCE_REPO=$env:TUP_WINDOWS_SOURCE_REPO"
-Write-Host "TUP_WINDOWS_SOURCE_REF=$env:TUP_WINDOWS_SOURCE_REF"
-Write-Host "TUP_WINDOWS_SOURCE_BUILD_COMMAND=$env:TUP_WINDOWS_SOURCE_BUILD_COMMAND"
-Write-Host "TUP_WINDOWS_PREBUILT_VERSION=$env:TUP_WINDOWS_PREBUILT_VERSION"
-Write-Host "TUP_WINDOWS_PREBUILT_URL=$env:TUP_WINDOWS_PREBUILT_URL"
-Write-Host "TUP_WINDOWS_PREBUILT_SHA256=$env:TUP_WINDOWS_PREBUILT_SHA256"
 Write-Host "TUP_WINDOWS_MSYS2_BASE_VERSION=$env:TUP_WINDOWS_MSYS2_BASE_VERSION"
 Write-Host "TUP_WINDOWS_MSYS2_PACKAGES=$env:TUP_WINDOWS_MSYS2_PACKAGES"
-Write-Host "TUP_DIR=$tupDir"
-Write-Host "TUP=$tupExe"
 Write-Host "NARGO_DIR=$nargoDir"
 Write-Host "GCC_DIR=$gccDir"
 Write-Host "GO_DIR=$goDir"

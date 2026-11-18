@@ -121,7 +121,7 @@ pub fn run(
     if ct_cli_binary().is_none() {
         outcome
             .skipped
-            .push("ct CLI not on PATH and not discoverable at src/build-debug/bin/ct".to_string());
+            .push("ct CLI not on PATH and not discoverable at src/build-debug-repro/bin/ct".to_string());
         return outcome;
     }
     if ct_binary().is_none() {

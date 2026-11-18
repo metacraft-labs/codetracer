@@ -22,7 +22,7 @@
 ##
 ## ## What runs
 ##
-## The real `ct host --manifest` (default: `src/build-debug/bin/ct`, or
+## The real `ct host --manifest` (default: `src/build-debug-repro/bin/ct`, or
 ## `CODETRACER_CT_BIN`), which starts the real `node server_index.js`. The two
 ## slices are two different recordings checked into this repository, each
 ## recorded in a directory named after it:
@@ -118,7 +118,7 @@ proc repoRoot(): string =
 
 let
   root = repoRoot()
-  ctBinary = getEnv("CODETRACER_CT_BIN", root / "src" / "build-debug" / "bin" / "ct")
+  ctBinary = getEnv("CODETRACER_CT_BIN", root / "src" / "build-debug-repro" / "bin" / "ct")
   prefixModules = ctBinary.parentDir.parentDir / "node_modules"
   nodeModules =
     if dirExists(prefixModules / "socket.io-client"): prefixModules

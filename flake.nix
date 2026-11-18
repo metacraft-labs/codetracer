@@ -702,9 +702,9 @@
           _module.args.pkgs = import nixpkgs {
             inherit system;
             config = {
-              # tup is currently considered broken by Nix, but this is not true
-              # TODO: this is already fixed in nixpkgs/unstable, so it may become
-              #       unnecessary after a future `flake update`
+              # Added for tup, which nixpkgs marked broken although it was not.
+              # tup is gone from this repo; whether another package still needs
+              # the permit has not been measured, so it is left in place.
               allowBroken = true;
               # NOTE: `permittedInsecurePackages = [ "electron-24.8.6" ]` used to
               # sit here (and in the `nixpkgs-unstable` import below). It was
