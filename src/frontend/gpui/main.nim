@@ -16020,7 +16020,10 @@ proc runEdit(cmd: GpuiCommand): int =
   # pair, so the omnibox lists **Project: Run** and **Project: Run in Current
   # Tab** (with the Tests commands beside them) — a project with no Run says
   # why there, as a lone file's folder does (EMT-D34).
-  gOmnibar.setIndex(replayOpenCommands())
+  # And the menu's own commands, as a replay window's index has them (the
+  # omnibox runs `View › Verification` by name; with only the palette pair
+  # an Edit window answered `:verification` with no match).
+  gOmnibar.setIndex(commandsOf(gMenu) & replayOpenCommands())
   # `PLAT35-F3`: the editor pane's inner width, from the geometry this
   # window is about to be laid out at.
   gEditorSurface = surface
