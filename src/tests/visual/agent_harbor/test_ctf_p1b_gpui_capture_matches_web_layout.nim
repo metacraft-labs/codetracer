@@ -136,6 +136,37 @@ suite "CTF-P1b: the GPUI captures lay the stories out as the web does":
     check expected.len == wanted
     check failing.len == 0
 
+suite "CTF-P2b: a static timeline story's list cuts no line at its top edge":
+  # The session activity timeline's static stories open with the list at its
+  # top, so in the browser and in GPUI the first line is whole and starts on
+  # the list's top edge (`cutTopLineProblems`). The playback stories follow
+  # their session's end and are not held to it.
+  test "the first line of every static timeline capture is whole":
+    let web = loadWebRecord()
+    var problems: seq[string]
+    var checked = 0
+    for e in expectedCaptures(section):
+      if not e.id.startsWith(ViewPrefix & "session-activity") or "-playback-" in e.id: continue
+      let webNode = web{e.id}
+      if not webNode.isNil:
+        for p in cutTopLineProblems("web", regionsOf(webNode["regions"])): problems.add e.id & " " & p
+      let path = gpuiDir / (e.id & ".regions.json")
+      if fileExists(path):
+        for p in cutTopLineProblems("GPUI", regionsOf(parseJson(readFile(path))["regions"])):
+          problems.add e.id & " " & p
+      inc checked
+    for p in problems: echo "  CUT ", p
+    check checked >= 19 * 3 * 2
+    check problems.len == 0
+
+  test "a line cut by the list's top edge is reported":
+    var regions: RegionSet
+    regions["timeline"] = Rect(x: 0, y: 72, w: 760, h: 568)
+    regions["timeline-line-first"] = Rect(x: 4, y: 72, w: 752, h: 20)
+    check cutTopLineProblems("web", regions).len == 0
+    regions["timeline-line-first"] = Rect(x: 4, y: 84, w: 752, h: 16)
+    check cutTopLineProblems("web", regions).len == 1
+
 suite "CTF-P1b: the layout judge fails what it must (negative controls)":
   # One real capture, copied into a scratch directory and planted with each
   # defect in turn. Chosen from the expected set so the controls need nothing

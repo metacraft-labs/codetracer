@@ -463,7 +463,10 @@ proc createInitiativeTabsStoryVM*(fixture: string; playback: AhPlayback = nil): 
 # `synthetic_timelines.nim`, one state each, loaded with the reader's state
 # the timeline names (`newSyntheticTimelineVM`). The story adds what only a
 # host sets: the connection badge of the panel's head (static stories only;
-# the source reports no connection) and, for `filter`, the list filter. The
+# the source reports no connection), for `filter` the list filter, and where
+# the reader stands: a static story opens with its list at its top, as a
+# reader who opens a session reads it from its start, so the list's top edge
+# never cuts a line (`reading-back` keeps the place its timeline names). The
 # playback stories follow the session `session-run` names for the view
 # `session-activity`; `+expanded` opens the shell group the moment it forms
 # and leaves it open while lines arrive below it.
@@ -482,6 +485,8 @@ const
     ## upload client's file.
   sessionActivityFixtures* = @SyntheticTimelineNames & @[FilterFixture]
     ## Every fixture a static `agent-harbor-session-activity` story may name.
+  ReadingBackFixture = "reading-back"
+    ## The static story whose reader scrolled away (its own place).
   ExpandedVariant* = "expanded"
     ## The playback variant that keeps the shell group open.
 
@@ -534,3 +539,9 @@ proc createSessionActivityStoryVM*(fixture: string;
   result = newSyntheticTimelineVM(timeline)
   result.connection.val = connectionOf(fixture)
   if fixture == FilterFixture: result.setFilter(FilterQuery)
+  if fixture != ReadingBackFixture:
+    # Opened at the top of the list: not following its end, the first line
+    # read (`readAt`), so every host draws the list from its first line.
+    let lines = result.lines
+    result.setFollow(false)
+    if lines.len > 0: result.readAt(lines[0].id)

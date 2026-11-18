@@ -399,6 +399,19 @@ proc drawnCutProblems*(gpuiDoc: JsonNode): seq[string] =
       result.add "GPUI draws the cut text '" & cut.getStr &
                  "' with a space or a separator before its \"…\""
 
+proc cutTopLineProblems*(side: string; regions: RegionSet): seq[string] =
+  ## A list drawn from its first line (the session activity timeline's
+  ## static stories open at the top of their list) cuts no line at its top
+  ## edge: the first line drawn wholly inside it (`timeline-line-first`,
+  ## counted `within` the list) starts on the list's top edge. A line the
+  ## edge cuts in half is not counted, so the first whole one starts lower.
+  if "timeline" notin regions or "timeline-line-first" notin regions: return
+  let list = regions["timeline"]
+  let first = regions["timeline-line-first"]
+  if first.y > list.y + 0.5:
+    result.add side & ": the list's top edge (y " & $list.y & ") cuts a line; its first " &
+               "whole line starts at y " & $first.y
+
 proc judgeCapture*(id: string; dir: string; webCapture: JsonNode;
                   vw, vh: int): CaptureJudgement =
   ## Everything this suite asserts about ONE capture, as a verdict and the
