@@ -359,31 +359,43 @@ proc renderPermission[R, N](r: R; page: InboxItemVM; d: InboxItemDetail; host: N
 
 proc renderLogin[R, N](r: R; page: InboxItemVM; d: InboxItemDetail;
                        ctx: AgentHarborInboxItemContext; host: N) =
+  ## A login request in the state the viewmodel gives it: the provider and
+  ## the prompt, the state line (the local-desktop handoff, `Cancelling
+  ## sign-in…`, the completion in place, `Sign-in failed`), a carry error or
+  ## a failure's reason inline, and `Open sign-in` and `Cancel` while Cancel
+  ## is offered, `Continue` once it completed (when the host can move on). A
+  ## login item with no request says so and nothing else.
   let login = d.login
-  let state = page.loginText
+  let hasRequest = page.hasLoginRequest
+  let state = page.loginState
+  let error = page.loginError
+  let canCancel = page.canCancelLogin
   var actions: N
   let node = ui(r):
-    tdiv(class = "ah-item-login", `data-ah-login` = $login.state):
-      if login.provider.len > 0:
+    tdiv(class = "ah-item-login",
+         `data-ah-login` = (if hasRequest: $state else: "none")):
+      if hasRequest and login.provider.len > 0:
         tdiv(class = "ah-item-login-provider"):
           text login.provider
-      if login.prompt.len > 0 and login.mode == lmLocalDesktop:
+      if hasRequest and login.prompt.len > 0 and login.mode == lmLocalDesktop:
         tdiv(class = "ah-item-prose"):
           text login.prompt
-      tdiv(class = "ah-item-login-state " &
-                   roleClass(case login.state
-                             of lsFailed: "error"
-                             of lsCompleted: "success"
-                             else: "quiet")):
-        text state
+      tdiv(class = "ah-item-login-state " & roleClass(loginStateRole(state, hasRequest))):
+        text page.loginText
+      if error.len > 0:
+        tdiv(class = "ah-item-login-error " & roleClass("error"), `data-ah-login-error` = error):
+          text error
       tdiv(ref = actions, class = "ah-item-actions")
-  let pending = login.state == lsPending
-  if pending and ctx.onOpenSignIn != nil:
+  if canCancel and ctx.onOpenSignIn != nil:
     let open = ctx.onOpenSignIn
     r.appendRendered(actions, renderButton(r, OpenSignInLabel, true, false, proc() = open()))
-  if pending:
+  if canCancel:
     r.appendRendered(actions, renderButton(r, CancelLabel, ctx.onOpenSignIn == nil, false,
                                            proc() = discard page.cancelLogin()))
+  if page.canContinueLogin and ctx.onContinue != nil:
+    let onContinue = ctx.onContinue
+    r.appendRendered(actions, renderButton(r, ContinueLabel, true, false,
+                                           proc() = onContinue()))
   r.appendRendered(host, node)
 
 proc renderAttachment[R](r: R; att: Attachment): auto =
@@ -542,7 +554,7 @@ proc renderStepper[R, N](r: R; vm: InboxVM): N =
   r.setFlag(next, "disabled", not canNext)
 
 proc renderRow[R, N](r: R; vm: InboxVM; ctx: AgentHarborInboxContext;
-                     item: InboxItem; onScreen: bool; pending: int): N =
+                     item: InboxItem; onScreen: bool): N =
   let itemRef = item.refOf
   let label = if item.session.label.len > 0: item.session.label else: item.session.title
   let priority = priorityChip(item)
@@ -581,8 +593,8 @@ proc renderRow[R, N](r: R; vm: InboxVM; ctx: AgentHarborInboxContext;
     r.appendRendered(line2, renderRoleWord(r, holder,
                                            (if item.heldBy == ihOperator: "warning" else: "quiet"),
                                            "ah-inbox-holder"))
-  let pendingText = pendingCountText(pending)
-  if item.kind == ikAsyncFeedback and pendingText.len > 0:
+  let pendingText = vm.pendingFeedbackText(itemRef)
+  if pendingText.len > 0:
     r.appendRendered(line2, renderChip(r, pendingText, "info", "pending"))
   if item.kind == ikUnknown:
     let open = ui(r):
@@ -612,12 +624,10 @@ proc renderRows[R, N](r: R; vm: InboxVM; ctx: AgentHarborInboxContext; list: N) 
             text $(j - i)
       r.appendRendered(list, head)
       for k in i ..< j:
-        r.appendRendered(list, renderRow[R, N](r, vm, ctx, items[k], items[k].refOf == current,
-                                               pendingFeedbackFor(items, items[k].session.id)))
+        r.appendRendered(list, renderRow[R, N](r, vm, ctx, items[k], items[k].refOf == current))
       i = j
     else:
-      r.appendRendered(list, renderRow[R, N](r, vm, ctx, items[i], items[i].refOf == current,
-                                             pendingFeedbackFor(items, items[i].session.id)))
+      r.appendRendered(list, renderRow[R, N](r, vm, ctx, items[i], items[i].refOf == current))
       inc i
 
 proc renderDegraded[R](r: R; line: string): auto =
@@ -636,7 +646,8 @@ proc renderAgentHarborInboxPanel*[R, N](r: R; vm: InboxVM;
     tdiv(class = AgentHarborInboxClass):
       tdiv(ref = body, class = "ah-fleet-body ah-inbox-body")
   let itemCtx = AgentHarborInboxItemContext(nowMs: ctx.nowMs, onOpenSignIn: ctx.onOpenSignIn,
-    onTyping: proc(typing: bool) = vm.setTyping(typing))
+    onTyping: proc(typing: bool) = vm.setTyping(typing),
+    onContinue: proc() = discard vm.next())
   createRenderEffect proc() =
     r.clearChildren(body)
     discard vm.revision.val

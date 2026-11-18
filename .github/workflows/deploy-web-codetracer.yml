@@ -446,8 +446,8 @@ jobs:
             # flake.lock and repro.lock pin (they had moved past this list).
             # isonim-gpui 2026-11-18 (it renders only what changed per frame).
             # nim-agents 2026-11-18, after flake.lock moved it to 2758cde.
-            # isonim and nim-agents 2026-11-18, after flake.lock and repro.lock
-            # moved them to 38ace5de and 77f8a5a6.
+            # nim-agents 2026-11-18 again, after flake.lock moved it to 77f8a5a;
+            # isonim 2026-11-18, after flake.lock and repro.lock moved it to 38ace5de.
             isonim=38ace5de5bf42c708a22dff54d74ab76270996e6
             isonim-tui=8e43ce06f7f078530c7a8585c210ad7648fa0051
             isonim-gpui=2fdadfdf9baaa9af67fd4cc9e0039c4c83fb7af0

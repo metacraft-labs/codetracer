@@ -49,15 +49,19 @@ const
     "populated", "spec-changes", "staged", "request-open", "malformed",
     "tests", "all-passing", "all-pending", "implementation", "code",
     "code-file-open", "code-filtered", "code-long", "no-plan",
-    "no-spec-changes", "milestone", "running", "empty", "loading", "error"]
+    "no-spec-changes", "milestone", "running", "empty", "loading", "error",
+    "revert-confirm", "reverting", "revert-failed"]
     ## Every fixture an `agent-harbor-changes` story may name.
+  RevertFailedReason* = "the plan changed on the server since this change was read"
+    ## The scripted refusal of `revert-failed` (invented).
 
 proc changesSourceFixture(fixture: string): string =
   ## The viewmodel fixture (`synthetic_changes.ChangesFixtureNames`) a story
   ## fixture is built over.
   case fixture
   of "spec-changes", "request-open", "tests", "implementation", "code",
-     "code-file-open", "code-filtered", "milestone", "running": "populated"
+     "code-file-open", "code-filtered", "milestone", "running",
+     "revert-confirm", "reverting", "revert-failed": "populated"
   else: fixture
 
 proc changesStoryContext*(fixture: string): AgentHarborChangesContext =
@@ -83,6 +87,15 @@ proc createChangesStoryVM*(fixture: string): ChangesVM =
   if fixture notin changesStoryFixtures:
     raise newException(ValueError, "no Agent Harbor Changes story fixture named " & fixture)
   let source = changesFixture(changesSourceFixture(fixture))
+  # `reverting` holds the revert unanswered, `revert-failed` has it refused;
+  # every other press is answered as the scripted source's default.
+  case fixture
+  of "reverting":
+    ScriptedActionSource(source).script.setRule(oaRevertSpecChange, neverAnswered())
+  of "revert-failed":
+    ScriptedActionSource(source).script.setRule(oaRevertSpecChange,
+                                                failedWith(RevertFailedReason))
+  else: discard
   result = newChangesVM(source, relayScope())
   result.load()
   case fixture
@@ -119,6 +132,13 @@ proc createChangesStoryVM*(fixture: string): ChangesVM =
   of "milestone":
     let choices = result.milestoneChoices
     if choices.len > 1: result.selectMilestone(choices[1][0])
+  of "revert-confirm", "reverting", "revert-failed":
+    # A spec card open, its Undo / Revert pressed: `revert-confirm` waits
+    # for the reader's answer (nothing sent); the other two were confirmed.
+    let card = result.firstCard(stSpec)
+    result.toggleCard(card)
+    discard result.requestRevert(card)
+    if fixture != "revert-confirm": discard result.confirmRevert()
   else: discard
 
 # ---------------------------------------------------------------------------
@@ -129,8 +149,8 @@ const
   InboxPlaybackFixture* = "playback-inbox-run"
     ## The Inbox's playback story: the `inbox-run` scenario.
   inboxStoryFixtures* = [
-    "populated", "long", "fleet", "empty", "prev-next", "manager-held",
-    "loading", "error", InboxPlaybackFixture]
+    "populated", "long", "fleet", "empty", "prev-next", "prev-next-first",
+    "prev-next-end", "manager-held", "loading", "error", InboxPlaybackFixture]
     ## Every fixture an `agent-harbor-inbox` story may name.
   InboxScope* = ThisServerLabel
   FleetInboxScope* = "fleet: every server you can reach"
@@ -138,9 +158,11 @@ const
 type
   StoryHostRequests* = ref object
     ## What a story's host was asked to do that has no viewmodel seam (the
-    ## login request's `Open sign-in`): counted, so the story's record shows
-    ## the press arrived and nothing else happened.
+    ## login request's `Open sign-in`, a completed sign-in's `Continue` on a
+    ## page standing alone): counted, so the story's record shows the press
+    ## arrived and nothing else happened.
     openSignIn*: int
+    continued*: int
 
 proc inboxStoryContext*(fixture: string; requests: StoryHostRequests = nil): AgentHarborInboxContext =
   ## The scope phrase and the moment the inbox stories are read at (the
@@ -155,7 +177,11 @@ proc createInboxStoryVM*(fixture: string; playback: AhPlayback = nil): InboxVM =
   ## (`inboxStoryFixtures`). `prev-next` opens in the middle of a walk: the
   ## operator went through the first four items with Next and stepped back
   ## once, so the item on screen is the third (`3 of 5`, Previous enabled,
-  ## the explanation strip shown); its page is under the rows. The playback
+  ## the explanation strip shown); its page is under the rows.
+  ## `prev-next-first` is the walk's first step: Next from no item lands on
+  ## the top of the order (`1 of 5`, Previous disabled). `prev-next-end` is
+  ## on the last item of the order, reached by stepping back (`5 of 5`): Next
+  ## stays enabled while the inbox holds items. The playback
   ## fixture reads `playback`'s source and replays the operator's presses
   ## through the viewmodel. Raises `ValueError` for an unknown fixture.
   if fixture notin inboxStoryFixtures:
@@ -178,6 +204,17 @@ proc createInboxStoryVM*(fixture: string; playback: AhPlayback = nil): InboxVM =
     result = newInboxVM(source, showPages = true)
     result.load()
     discard result.prev()
+  of "prev-next-first":
+    result = newInboxVM(inboxFixture("populated"), showPages = true)
+    result.load()
+    discard result.next()
+  of "prev-next-end":
+    let source = ScriptedActionSource(inboxFixture("populated"))
+    let order = source.inbox.orderOf
+    source.setCursor("default", InboxCursor(current: order[0], visited: @[order[^1]]))
+    result = newInboxVM(source, showPages = true)
+    result.load()
+    discard result.prev()
   else:
     result = newInboxVM(inboxFixture(fixture))
     result.load()
@@ -192,7 +229,8 @@ const
     "question-no-options", "ended-turn", "permission", "sudo", "network",
     "login", "feedback", "feedback-options", "feedback-expired",
     "feedback-invalid", "feedback-options-invalid", "draft", "unfamiliar",
-    "answered", "answer-failed"]
+    "answered", "answer-failed", "login-cancelling", "login-completed",
+    "login-failed", "login-carry-error-pending", "login-none"]
     ## Every fixture an `agent-harbor-inbox-item` story may name.
   AnswerFailedReason* = "the session ended before the answer arrived"
     ## The scripted failure of `answer-failed` (invented).
@@ -216,6 +254,7 @@ proc inboxItemStoryContext*(fixture: string;
       result.sessionLabel = i.session.label
   if not requests.isNil:
     result.onOpenSignIn = proc() = inc requests.openSignIn
+    result.onContinue = proc() = inc requests.continued
 
 proc createInboxItemStoryVM*(fixture: string): InboxItemVM =
   ## The viewmodel of the item page story named by `fixture`
