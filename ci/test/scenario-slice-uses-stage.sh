@@ -14,11 +14,21 @@ lane="${1:?usage: scenario-slice-uses-stage.sh <lane> <i/n> <stage>}"
 shard="${2:?usage: scenario-slice-uses-stage.sh <lane> <i/n> <stage>}"
 stage="${3:?usage: scenario-slice-uses-stage.sh <lane> <i/n> <stage>}"
 lanes=src/tests/scenarios/lanes
+# The slice first, into a variable, so a failure to compute it fails this
+# script: read from a process substitution, a missing python3 (TUI shard 6 of
+# run 44269676398, a persistent runner's bare PATH) produced an empty slice,
+# `needed=false`, and a skipped player build -- the very failure this exists
+# to prevent.
+slice="$(python3 ci/test/scenario-lane-shard.py "${lanes}/${lane}.lane.yaml" "${shard}" --list)"
+[ -n "${slice}" ] || {
+	echo "scenario-slice-uses-stage: shard ${shard} of the ${lane} lane is empty" >&2
+	exit 1
+}
 needed=false
 while read -r entry; do
 	[ -n "${entry}" ] || continue
 	if grep -Eq "^[[:space:]]*-[[:space:]]*use:[[:space:]]*${stage}[[:space:]]*\$" "${lanes}/${entry}"; then
 		needed=true
 	fi
-done < <(python3 ci/test/scenario-lane-shard.py "${lanes}/${lane}.lane.yaml" "${shard}" --list)
+done <<<"${slice}"
 echo "needed=${needed}"

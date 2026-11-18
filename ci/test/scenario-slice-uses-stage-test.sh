@@ -58,6 +58,26 @@ else
 	fail "${wf} does not gate the player's build on steps.player.outputs.needed"
 fi
 
+if grep -qF "nix develop .#devShells.x86_64-linux.default --command bash ci/test/scenario-slice-uses-stage.sh" "${wf}"; then
+	ok "${wf} runs the helper in the dev shell, which has its python3"
+else
+	fail "${wf} runs the helper on the runner's bare PATH, which may have no python3"
+fi
+
+# Without python3 the helper must FAIL, not answer needed=false: from a process
+# substitution the missing interpreter used to read as an empty slice, and TUI
+# shard 6 of run 44269676398 skipped the player its scenario needed.
+nopy="$(mktemp -d)"
+for tool in bash dirname grep sed cat; do
+	ln -s "$(command -v "${tool}")" "${nopy}/${tool}"
+done
+if PATH="${nopy}" bash ci/test/scenario-slice-uses-stage.sh "${lane}" "6/8" "${stage}" >/dev/null 2>&1; then
+	fail "with no python3 on PATH the helper still exits 0"
+else
+	ok "with no python3 on PATH the helper fails instead of answering needed=false"
+fi
+rm -rf "${nopy}"
+
 if [ "${failures}" -gt 0 ]; then
 	echo "scenario-slice-uses-stage: ${failures} failure(s)"
 	exit 1

@@ -240,7 +240,14 @@ jobs:
         # the shards moves the player with its scenarios
         # (ci/test/scenario-slice-uses-stage-test.sh).
         id: player
-        run: bash ci/test/scenario-slice-uses-stage.sh terminal "${{ matrix.shard }}/8" visual-recording >> "$GITHUB_OUTPUT"
+        # In the dev shell: it runs python3, which a persistent runner's bare
+        # PATH lacks (TUI shard 6 of run 44269676398 skipped the player build).
+        # Only its last line, checked, goes to $GITHUB_OUTPUT: the shell's hook
+        # may print too.
+        run: |
+          result="$(nix develop .#devShells.x86_64-linux.default --command bash ci/test/scenario-slice-uses-stage.sh terminal "${{ matrix.shard }}/8" visual-recording | tail -n 1)"
+          [[ $result =~ ^needed=(true|false)$ ]] || { echo "scenario-slice-uses-stage printed '${result}', not needed=true|false" >&2; exit 1; }
+          echo "$result" | tee -a "$GITHUB_OUTPUT"
 
       - name: Build the visual replay player for this shard's visual-recording scenarios
         # terminal/visual-replay-video-player opens a visual recording, which
