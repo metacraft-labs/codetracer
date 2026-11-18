@@ -288,9 +288,13 @@
   width: 31.25em
   overflow: hidden !important
 
+// A macro expansion's inline editor, one surface step above the editor per
+// nesting level. Theme tokens, not fixed greys: the fixed light greys left
+// the dark theme's near-white code unreadable (codetracer-pm issue
+// 2026-11-17 "a macro expansion draws its rows white on a light background").
 .expansion // unspecified or >= 4
-  .monaco-editor, .marginm
-    background-color: #bbb
+  .monaco-editor, .margin, .monaco-editor-background
+    background-color: colors-ui-surface-primary-secondary-hover !important
 
 // Right click context menu in the code editor
 #context-menu-container
@@ -352,16 +356,16 @@
   border-radius: 0 0 DROPDOWN_RADIUS DROPDOWN_RADIUS
 
 .expansion-1
-  .monaco-editor, .margin
-    background-color: #eee !important
+  .monaco-editor, .margin, .monaco-editor-background
+    background-color: colors-ui-surface-base-raised !important
 
 .expansion-2
-  .monaco-editor, .margin
-    background-color: #ddd !important
+  .monaco-editor, .margin, .monaco-editor-background
+    background-color: colors-ui-surface-primary-secondary !important
 
 .expansion-3
-  .monaco-editor, .margin
-    background-color: #ccc !important
+  .monaco-editor, .margin, .monaco-editor-background
+    background-color: colors-ui-surface-primary-tertiary !important
 
 .monaco-inputbox
   border-radius: 1.5625em
