@@ -1345,6 +1345,12 @@ proc overlays(f: Frame; boxes: seq[PaneBox]): seq[Overlay] =
       for b in boxes:
         if (abs(b.left - x) <= 3 and abs(b.right - x1) <= 3) or
            (abs(b.left - lx) <= 3 and abs(b.right - rx) <= 3): isBox = true
+        # a pane's edge that something drawn over it cuts short (a menu
+        # over the line between two panes): its left side and its top on
+        # one of a box's own edges
+        if abs(b.left - lx) <= 3 and
+           (abs(y - b.top) <= 12 or abs(y - b.stripTop) <= 12 or abs(y - b.bottom) <= 12):
+          isBox = true
       # a pane's own bordered field (the search, the watch expression) is
       # one row on the pane's surface; what is drawn over the panes is taller
       # or on the window's ground
@@ -1354,8 +1360,11 @@ proc overlays(f: Frame; boxes: seq[PaneBox]): seq[Overlay] =
       for b in boxes:
         if lx >= b.left - 4 and rx <= b.right + 4 and y >= b.top - 4 and y <= b.bottom and
            ((rx - lx) * 10 >= (b.right - b.left) * 8 or y - b.top <= 16): spansBox = true
-      let field = y1 - y < 40 and not near(f.rgb(lx + 6, y + 4), f.groundOf, 3) and
-                  y > TopBarH + 4 and spansBox
+      # (and a one-row strip wider than any one-entry menu is a field — the
+      # event log's Find event — whatever its ground)
+      let field = (y1 - y < 40 and not near(f.rgb(lx + 6, y + 4), f.groundOf, 3) and
+                   y > TopBarH + 4 and spansBox) or
+                  (y1 - y < 30 and rx - lx > 500 and y > TopBarH + 4)
       if not inside and not isBox and not field and not near(c, f.groundOf, 3):
         seen.add Overlay(x0: lx, x1: rx, y0: y, y1: y1, border: c)
       x = x1 + 1
