@@ -35,3 +35,9 @@ test-tui-real-terminal # TUI Tier-2 suites (same issue)
 # recording of a native program, split out of `tui` because they need rr and
 # ct-native-replay. Run by the `test-ui-tests-rr` job.
 test-tui-native # TUI Tier-1 rr-recording suites (codetracer-pm issues/2026-11-09-tui-job-runs-plat60-and-plat65-without-their-prerequisites.md)
+
+# The only route to e2e_codetracer_instance_layouts_fit_and_100
+# (tools/isonim-editor/layouts-fit-and-100.mjs): the layout stories fit the
+# IsoNim Editor's page preview and show at 100% with scrollbars, in both themes.
+# Run by the `isonim-editor-smoke` job, after the smoke.
+test-isonim-editor-layouts-fit-and-100 # layout stories at Fit and 100% in the editor's page preview
