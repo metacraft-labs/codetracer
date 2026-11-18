@@ -955,6 +955,7 @@ body:has(#auto-hide-strip-right .auto-hide-strip-tab.active:first-child)
 .auto-hide-strip-tab-unpin
   background-image: url('../../public/resources/shared/sidebar_unpin.svg')
   background-size: 0.85em 0.85em
+  light-icon(url('../../public/resources/shared/sidebar_unpin.svg'), 0.85em 0.85em, colors-ui-icon-primary-subtle) // D-42
   width: 0.85em
   height: 0.85em
   opacity: 0.7
@@ -1309,6 +1310,12 @@ body:has(#auto-hide-strip-right .auto-hide-strip-tab.active:first-child)
     background-size: contain
     background-repeat: no-repeat
     background-position: center
+    // D-42: a #919191 file; the light theme paints the shape in a token.
+    if COLOR_MODE is defined and COLOR_MODE == "Light"
+      background-image: none
+      background-color: colors-ui-icon-primary-subtle
+      -webkit-mask: url('../../public/resources/shared/sidebar_unpin.svg') center / contain no-repeat
+      mask: url('../../public/resources/shared/sidebar_unpin.svg') center / contain no-repeat
 
 // ---------------------------------------------------------------------------
 // Collapsed-mode icon zone — rendered in the status bar.

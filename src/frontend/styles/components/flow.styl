@@ -174,9 +174,11 @@
 
 .flow-hide-content
   background-image: FLOW_HIDE_ICON !important
+  light-icon(FLOW_HIDE_ICON, auto) // D-42
 
 .flow-show-content
   background-image: FLOW_SHOW_ICON !important
+  light-icon(FLOW_SHOW_ICON, auto) // D-42
 
 .flow-error-name
   background: colors-editor-surface-primary !important
@@ -652,6 +654,7 @@
     height: 1em
     background-image: ADD_TO_SCRATCHPAD_BUTTON_IMAGE
     background-size: 1em 1em
+    light-icon(ADD_TO_SCRATCHPAD_BUTTON_IMAGE, 1em 1em) // D-42
     background-position: center
     background-repeat: no-repeat
     cursor: pointer

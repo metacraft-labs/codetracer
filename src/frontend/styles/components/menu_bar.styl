@@ -223,6 +223,16 @@ CAPTION_BAR_PADDING_BOTTOM = unquote("var(--caption-bar-padding-bottom)")
       opacity: 1
       font-size: inherit !important
 
+    // D-42: the light theme's window controls are white files.
+    &.minimize
+      light-icon(WINDOW_MINIMIZE_ICON_PATH, auto)
+    &.restore
+      light-icon(WINDOW_RESTORE_ICON_PATH, auto)
+    &.maximize
+      light-icon(WINDOW_MAXIMIZE_ICON_PATH, auto)
+    &.close
+      light-icon(WINDOW_CLOSE_ICON_PATH, auto)
+
     &:hover
       opacity: 0.5;
 
@@ -306,6 +316,7 @@ CAPTION_BAR_PADDING_BOTTOM = unquote("var(--caption-bar-padding-bottom)")
       height: 1.25em
       background-image: ct-images-logo-dark
       background-size: cover
+      light-icon(ct-images-logo-dark, cover) // D-42
       background-position: center
       display: inline-block
       position: relative

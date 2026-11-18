@@ -266,21 +266,22 @@
   display: flex
   align-items: center
 
-  .caret-collapse
-    display: block
-    background-image: SHARED_OPEN_FA_ICON
-    background-position: center
-    background-repeat: no-repeat
-    width: 0.5em
-    height: 0.5em
-
+  // D-38: the Design System chevrons in the text colour.  The pictures they
+  // replace were near-white files both themes shared, so in the light theme
+  // the arrows all but vanished.  The 16px artwork is centred in the same
+  // 8px box; its chevron is 4x8, so nothing is cut off.
+  .caret-collapse,
   .caret-expand
     display: block
-    background-image: SHARED_CLOSE_FA_ICON
-    background-position: center
-    background-repeat: no-repeat
     width: 0.5em
     height: 0.5em
+    background-color: currentColor
+    -webkit-mask: ICON_CHEVRON_RIGHT center / 1rem no-repeat
+    mask: ICON_CHEVRON_RIGHT center / 1rem no-repeat
+
+  .caret-expand
+    -webkit-mask-image: ICON_CHEVRON_DOWN
+    mask-image: ICON_CHEVRON_DOWN
 
 .value-line-view-text
   display: flex
