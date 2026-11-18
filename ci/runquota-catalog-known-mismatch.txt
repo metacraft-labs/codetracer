@@ -1,0 +1,12 @@
+# Pairs of runquota revisions on different reprobuild-packages catalogs that
+# scripts/test-flake-pin-alignment.sh lets pass, each with the issue tracking it.
+#
+#   <codetracer's runquota sha> <its reprobuild's runquota-src sha> <issue>
+#
+# At most the current pair. The check fails on an entry naming any other pair,
+# or on a listed pair whose catalogs agree: delete the line then.
+#
+# runquota 40523b6 is on catalog 29b7bb9b (repro.lock's); reprobuild e2fe4eb9's
+# runquota-src 6ff97313 is on 15ceea67. No reprobuild revision yet pins a
+# runquota on 29b7bb9b.
+40523b624eb050dc9712ae83ef14dbaf8a1b25c7 6ff973131e7f715f0237cb0f08b8dd16cbeba0dc reprobuild-pm:issues/2026-11-18-the-runquota-reprobuild-pins-as-runquota-src-carries-catalog-15ceea67-while-reprobuilds-own-lock-pins-29b7bb9b-or-56ffd67.md

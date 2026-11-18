@@ -1,105 +1,66 @@
 #!/usr/bin/env bash
 # =============================================================================
-# Flake pin alignment — this repo's `runquota` must be EXACTLY the `runquota`
-# its `reprobuild` was locked against.
+# Flake pin alignment — this repo's `runquota` and the `runquota-src` its
+# `reprobuild` was locked against must be on the SAME reprobuild-packages
+# catalog, and reprobuild must still be compiled against its own runquota.
 #
-# ## The defect this exists to catch
+# ## The two hazards
 #
-# `flake.nix` used to pin BOTH `reprobuild` and `runquota` to exact SHAs, and
-# then override five of reprobuild's own inputs — one of them
+# 1. reprobuild COMPILES AGAINST runquota's sources. `flake.nix` once
+#    overrode reprobuild's own input (`inputs.runquota-src.follows =
+#    "runquota"`), so bumping reprobuild compiled it against a runquota it was
+#    never developed against. Commit c9cb186c did exactly that, and `nix
+#    develop` died minutes in with
 #
-#     inputs.runquota-src.follows = "runquota";
+#        libs/repro_runquota/src/repro_runquota.nim(932, 18)
+#          Error: undeclared identifier: 'ExtensionCellWire'
 #
-# which was the whole hazard: bumping the `reprobuild` SHA moved the code,
-# while `runquota` stayed wherever its own SHA left it. reprobuild was then
-# compiled against a runquota it was never developed against, and the failure
-# is an ordinary Nim `undeclared identifier` several minutes into a `nix
-# develop` — attributed to reprobuild, in a store path, with nothing naming the
-# pin that actually moved.
+#    (and, moved the other way, `'LeaseFinishOutcome'`). Ahead breaks exactly
+#    as behind does. The fix is that reprobuild's `runquota-src` is never
+#    overridden from here; this script fails if the locked graph shows it
+#    overridden, and ci/test/dev-env-flake-metadata-test.sh fails if
+#    flake.nix declares the override.
 #
-# ## That hazard is now STRUCTURALLY REMOVED, and this check guards the removal
+# 2. reprobuild compiles a SOLVE against one reprobuild-packages catalog and
+#    refuses a closure that resolves catalog interfaces from two. This repo
+#    used to derive its runquota from reprobuild (`runquota.follows =
+#    "reprobuild/runquota-src"`). That runquota's own repro.lock was on catalog
+#    15ceea67 while repro.lock here was on a newer one, so every refresh and
+#    platform re-solve of repro.lock failed. flake.nix now pins runquota as
+#    its own input, on this repo's catalog. That reopens a gap the follows edge
+#    had closed: the `repro` client these shells ship is built against
+#    reprobuild's runquota-src, the `runquotad` and `runquota_process` they
+#    ship come from this runquota. So this script compares the CATALOGS the
+#    two runquota revisions' locks pin, and fails when they differ.
 #
-# `flake.nix` no longer states either revision. `reprobuild` names a BRANCH
-# (`agents` since 2026-10-15; `release/0.2.10` before that — either way a
-# line, never a SHA) and `runquota` is DERIVED from it:
+# ## Known mismatches
 #
-#     runquota.follows = "reprobuild/runquota-src";
+# A pair whose catalogs differ is allowed only when it is recorded, exactly,
+# in ci/runquota-catalog-known-mismatch.txt with the issue that tracks it:
 #
-# with no nested `inputs.runquota-src` override. The producer owns both
-# the source and its parameterisation, so a parent update carries its child.
-# The closure holds exactly ONE runquota node and it is reprobuild's own.
-# Two revisions that could disagree have become one that cannot. This script
-# therefore checks both the declaration and its locked result:
+#     <this repo's runquota sha> <reprobuild's runquota-src sha> <issue>
 #
-#   1. STRUCTURE — that root input `runquota` is still a `follows` path onto
-#      `reprobuild`'s `runquota-src`. If someone reintroduces an independent
-#      `runquota` input, the guarantee is gone even on the day the two
-#      revisions happen to match, so that is a failure in its own right.
-#   2. SOURCE — that the locked original source agrees with the producer.
-#      The Nix metadata regression also rejects nested source overrides.
-#   3. VALUE — that the revision this repo's flake.lock resolves `runquota` to
-#      equals the `runquota-src` revision reprobuild's OWN committed flake.lock
-#      states. This is NOT vacuous under (1): the two numbers come from two
-#      different files, and a hand-edited or half-relocked codetracer
-#      flake.lock can state a runquota-src its reprobuild never locked.
-#
-# That is not hypothetical. Commit c9cb186c ("build(deps): mirror the
-# nixos-modules reprobuild pin (b5b88139)") bumped reprobuild to b5b88139
-# while `runquota` stayed at f3382f5 (2026-07-04). reprobuild@b5b88139's OWN
-# flake.lock pins runquota-src at b71e8e9 — the commit that introduced
-# `ExtensionCellWire`. The result was that `nix develop` (and therefore
-# `just build-once`, `just test`, and every lane that needs the dev shell)
-# died with
-#
-#     libs/repro_runquota/src/repro_runquota.nim(932, 18)
-#       Error: undeclared identifier: 'ExtensionCellWire'
-#
-# on a tree whose own sources were fine.
-#
-# ## The invariant: EQUALITY, in both directions
-#
-# The revision this repo pins for `runquota` must EQUAL the `runquota-src`
-# revision that the pinned `reprobuild` locks. Not "at least" — equal.
-#
-# "At least" was the first thing tried here and it is wrong, which is worth
-# recording because it looks so reasonable. `runquota` was moved forward from
-# f3382f5 to its `dev` tip (6dea983) to acquire `ExtensionCellWire`; that fixed
-# the error above and produced a new one in the same file,
-#
-#     libs/repro_runquota/src/repro_runquota.nim(501, 52)
-#       Error: undeclared identifier: 'LeaseFinishOutcome'
-#
-# because `dev` had since REMOVED that type ("Make a self-contradicting finish
-# unrepresentable"). reprobuild@b5b88139 is source that compiles against
-# runquota@b71e8e9 and against nothing else; ahead breaks exactly as behind
-# does. So the check is `=`, and the remedy is to mirror, never to freshen.
-#
-# Only `runquota` is checked, because it is the only overridden input that is
-# a flake whose code reprobuild COMPILES AGAINST. The nixpkgs/flake-parts/
-# git-hooks overrides are environment.
+# The file holds at most the CURRENT pair. An entry naming any other pair, or
+# a listed pair whose catalogs now agree, is stale and fails: it would
+# otherwise excuse a mismatch nobody has looked at.
 #
 # ## Why this is a static check and not "just build it"
 #
-# Building the dev shell does prove it, and takes minutes and a warm store.
-# This compares two strings read out of two flake.lock files: no toolchain, no
-# network, well under a second — so it can sit in `just test` and fail the
-# moment a pin is bumped alone, instead of at the far end of a lane.
+# Building the dev shell proves hazard 1 and takes minutes and a warm store;
+# hazard 2 shows only in a refresh, which takes half an hour. This reads two
+# flake.locks and two repro.locks out of git: no toolchain, no network, well
+# under a second, so it sits in `just test`.
 #
 # ## Skips are loud, never silent
 #
-# The check needs one thing it cannot synthesise: the sibling `reprobuild`
-# checkout, which is where the revision to compare against is read from (that
-# revision's own flake.lock). When it is absent, or is present but has not
-# fetched the pinned revision, this script prints a SKIP naming exactly what is
-# missing and the command that fixes it, and exits 0 — it never reports success
-# for a comparison it did not make. Set CT_FLAKE_PIN_ALIGNMENT_STRICT=1 to turn
-# those skips into failures, which is what a lane with a guaranteed workspace
-# should do.
-#
-# The sibling `runquota` checkout is OPTIONAL and its absence is not a skip:
-# comparing two SHAs needs no repository. It is consulted only to label a
-# failure "BEHIND" or "AHEAD of", which changes the message and never the
-# verdict.
+# The check needs two things it cannot synthesise: the sibling `reprobuild`
+# checkout (for that revision's flake.lock) and the sibling `runquota`
+# checkout holding both runquota revisions (for their repro.locks). When
+# either is missing, this script prints a SKIP naming what is missing and the
+# command that fixes it, and exits 0 — it never reports success for a
+# comparison it did not make. Set CT_FLAKE_PIN_ALIGNMENT_STRICT=1 to turn
+# those skips into failures, which is what a lane with a guaranteed
+# workspace should do.
 # =============================================================================
 set -uo pipefail
 
@@ -164,9 +125,8 @@ command -v python3 >/dev/null 2>&1 || fail \
 # edge, and the answer cannot be shadowed by a homonym.
 #
 # A root input may ALSO be a `follows` path — a JSON list of segments rather
-# than a node key — and since this repo made `runquota` derived
-# (`runquota.follows = "reprobuild/runquota-src"`) that is the normal case
-# here. The resolver below walks such a path to the node it lands on, so
+# than a node key — as `runquota` was while this repo derived it
+# (`runquota.follows = "reprobuild/runquota-src"`). The resolver below walks such a path to the node it lands on, so
 # `lock_rev <lock> runquota` answers with the revision the edge resolves to
 # whichever shape the input has. The previous version did NOT: its comment
 # said "a list would be a follows path, which no root input in either lock
@@ -253,72 +213,62 @@ REPROBUILD_REV="$(lock_rev "$CT_LOCK" reprobuild)" || exit 1
 
 # --- Check 2: STRUCTURE ------------------------------------------------------
 #
-# Assert that `runquota` is still derived rather than independently pinned.
-# `nodes.root.inputs.runquota` is a JSON list (a follows path) exactly when
-# flake.nix says `runquota.follows = "..."`; it is a bare string (a node key)
-# when flake.nix declares an input with a url of its own.
+# `nodes.root.inputs.runquota` is a bare string (a node key) when flake.nix
+# declares an input with a url of its own, and a JSON list (a follows path)
+# when it says `runquota.follows = "..."`. This repo pins its own (see
+# flake.nix for why). And reprobuild's `runquota-src` edge must be a node key:
+# a follows path there is an override of the source reprobuild compiles
+# against — hazard 1 above.
 #
-# A failure here is NOT "the revisions disagree" — they may well agree today.
-# It is "the mechanism that makes them unable to disagree has been removed",
-# which is worth catching in its own right.
-#
-# It runs AFTER Check 1 and BEFORE Check 3 deliberately: by here the lock is
-# known to parse and to carry both inputs, so every outcome below is a real
-# statement about the SHAPE of the edge rather than a restatement of a parse
-# or a missing-input failure Check 1 already named.
+# It runs AFTER Check 1: by here the lock is known to parse and to carry both
+# inputs, so every outcome below is a statement about the SHAPE of the edges.
 # shellcheck disable=SC2016
-RUNQUOTA_EDGE="$(python3 -c '
+EDGES="$(python3 -c '
 import json, sys
 with open(sys.argv[1]) as handle:
     nodes = json.load(handle)["nodes"]
-edge = nodes.get("root", {}).get("inputs", {}).get("runquota")
-if edge is None:
-    print("ABSENT")
-elif isinstance(edge, list):
+root = nodes.get("root", {}).get("inputs", {})
+edge = root.get("runquota")
+if isinstance(edge, list):
     print("FOLLOWS " + "/".join(edge))
 else:
-    print("OWN-NODE " + edge)
-' "$CT_LOCK" 2>&1)" || fail "could not read '$CT_LOCK' to classify the 'runquota' input edge. This is a parse failure, NOT a statement about any pin. Parser output:
-$RUNQUOTA_EDGE"
+    print("OWN-NODE " + str(edge))
+rb = root.get("reprobuild")
+rb_edge = nodes.get(rb, {}).get("inputs", {}).get("runquota-src") if isinstance(rb, str) else None
+if isinstance(rb_edge, list):
+    print("RB-OVERRIDDEN " + "/".join(rb_edge))
+else:
+    print("RB-OWN " + str(rb_edge))
+' "$CT_LOCK" 2>&1)" || fail "could not read '$CT_LOCK' to classify the runquota input edges. This is a parse failure, NOT a statement about any pin. Parser output:
+$EDGES"
+RUNQUOTA_EDGE="$(sed -n 1p <<<"$EDGES")"
+RB_EDGE="$(sed -n 2p <<<"$EDGES")"
+
+case "$RB_EDGE" in
+"RB-OVERRIDDEN "*)
+	fail "reprobuild's 'runquota-src' input is overridden to follow '${RB_EDGE#RB-OVERRIDDEN }'. reprobuild is COMPILED against that source, so it must be reprobuild's own locked runquota-src. Remove the override from flake.nix and re-lock with 'nix flake update reprobuild'."
+	;;
+esac
 
 case "$RUNQUOTA_EDGE" in
-"FOLLOWS reprobuild/runquota-src")
-	echo "structure: runquota follows reprobuild/runquota-src (derived, cannot diverge)"
+"OWN-NODE "*)
+	echo "structure: runquota is this repo's own input (${RUNQUOTA_EDGE#OWN-NODE }); reprobuild keeps its own runquota-src"
 	;;
 "FOLLOWS "*)
-	fail "root input 'runquota' is a follows path, but onto '${RUNQUOTA_EDGE#FOLLOWS }' rather than 'reprobuild/runquota-src'. reprobuild is COMPILED against this source, so it must be reprobuild's own runquota-src and nothing else. Fix flake.nix: \`runquota.follows = \"reprobuild/runquota-src\";\`"
-	;;
-"OWN-NODE "*)
-	# Not fatal by itself — fall through to the value comparison below, which
-	# is the check that was in force while runquota was independently pinned.
-	echo "structure: WARNING — 'runquota' is an independent input node (${RUNQUOTA_EDGE#OWN-NODE }), not a follows path onto reprobuild/runquota-src." >&2
-	echo "structure: the two revisions can drift again; the value comparison below is now the only thing stopping them." >&2
-	;;
-"ABSENT")
-	# Defensive only, and say so: Check 1 resolves `runquota` before this runs
-	# and already fails with "flake.lock has no locked rev for input
-	# 'runquota'" when the root declares no such input, so nothing reaches
-	# here today. It is kept because the two checks read the lock through
-	# different code paths, and a classifier that silently treated "absent"
-	# as "fine" would be the worse failure.
-	fail "flake.lock's root has no input named 'runquota' at all. If the input was renamed or dropped, update this check (scripts/test-flake-pin-alignment.sh) to match."
+	fail "root input 'runquota' follows '${RUNQUOTA_EDGE#FOLLOWS }'. flake.nix pins runquota as its own input because reprobuild's runquota-src is on another reprobuild-packages catalog than repro.lock (see the comment on the runquota input). If a reprobuild pin now carries a runquota on this repo's catalog, returning to the follows edge is right: update this check, and repro.lock's runquota, with it."
 	;;
 *)
 	fail "unrecognised classification '$RUNQUOTA_EDGE' for the 'runquota' input edge; update this check."
 	;;
 esac
 
-# --- Check 3: VALUE ----------------------------------------------------------
+# --- Check 3: CATALOG --------------------------------------------------------
 
 REPROBUILD_DIR="${CT_REPROBUILD_CHECKOUT:-$WORKSPACE_ROOT/reprobuild}"
 RUNQUOTA_DIR="${CT_RUNQUOTA_CHECKOUT:-$WORKSPACE_ROOT/runquota}"
+KNOWN="$REPO_ROOT/ci/runquota-catalog-known-mismatch.txt"
 
-# Only the reprobuild checkout is REQUIRED: it is the sole source of the
-# revision this check compares against. The runquota checkout is optional —
-# comparing two SHAs for equality needs no repository; it is consulted purely
-# to label a failure "BEHIND" or "AHEAD of", and its absence weakens the
-# message, not the verdict.
-[ -d "$REPROBUILD_DIR/.git" ] || skip "no reprobuild checkout at $REPROBUILD_DIR (set CT_REPROBUILD_CHECKOUT, or clone it beside this repo) — cannot read the flake.lock of reprobuild@${REPROBUILD_REV}."
+[ -e "$REPROBUILD_DIR/.git" ] || skip "no reprobuild checkout at $REPROBUILD_DIR (set CT_REPROBUILD_CHECKOUT, or clone it beside this repo) — cannot read the flake.lock of reprobuild@${REPROBUILD_REV}."
 
 git -C "$REPROBUILD_DIR" cat-file -e "${REPROBUILD_REV}^{commit}" 2>/dev/null ||
 	skip "reprobuild checkout at $REPROBUILD_DIR does not have revision ${REPROBUILD_REV}. Run: git -C '$REPROBUILD_DIR' fetch origin ${REPROBUILD_REV}"
@@ -328,61 +278,90 @@ trap 'rm -f "$RB_LOCK_TMP"' EXIT HUP INT TERM
 git -C "$REPROBUILD_DIR" show "${REPROBUILD_REV}:flake.lock" >"$RB_LOCK_TMP" 2>/dev/null ||
 	fail "reprobuild@${REPROBUILD_REV} has no flake.lock. The pin cannot be validated; re-examine this check."
 
-# reprobuild owns `runquota-src`; this repo derives its root `runquota`
-# through `runquota.follows = "reprobuild/runquota-src"`.
 RB_RUNQUOTA="$(lock_rev "$RB_LOCK_TMP" runquota-src)" || exit 1
 [ -n "$RB_RUNQUOTA" ] || fail "reprobuild@${REPROBUILD_REV} flake.lock has no locked rev for 'runquota-src'; the input reprobuild expects has been renamed. Update this check to match."
-
-# Equal revisions can still name different source branches. A parent update
-# must inherit its child source; the exact declaration-level check lives in
-# the Nix metadata regression so this offline guard needs no Nix parser.
-CT_RUNQUOTA_SOURCE="$(lock_rev "$CT_LOCK" runquota source)" || exit 1
-RB_RUNQUOTA_SOURCE="$(lock_rev "$RB_LOCK_TMP" runquota-src source)" || exit 1
-[ "$CT_RUNQUOTA_SOURCE" = "$RB_RUNQUOTA_SOURCE" ] || fail \
-	"RunQuota source differs from reprobuild; remove the nested source override and re-lock the parent with 'nix flake update reprobuild'."
 
 echo "reprobuild pinned here:       ${REPROBUILD_REV}"
 echo "  its runquota-src:           ${RB_RUNQUOTA}"
 echo "this repo's runquota:         ${CT_RUNQUOTA}"
 
-if [ "$CT_RUNQUOTA" = "$RB_RUNQUOTA" ]; then
-	echo "OK: runquota is pinned to exactly the revision reprobuild was locked against."
+[ -e "$RUNQUOTA_DIR/.git" ] || skip "no runquota checkout at $RUNQUOTA_DIR (set CT_RUNQUOTA_CHECKOUT, or clone it beside this repo) — cannot read the repro.locks of runquota@${CT_RUNQUOTA} and runquota@${RB_RUNQUOTA}."
+for rev in "$CT_RUNQUOTA" "$RB_RUNQUOTA"; do
+	git -C "$RUNQUOTA_DIR" cat-file -e "${rev}^{commit}" 2>/dev/null ||
+		skip "runquota checkout at $RUNQUOTA_DIR does not have revision ${rev}. Run: git -C '$RUNQUOTA_DIR' fetch origin ${rev}"
+done
+
+# <runquota rev> -> the reprobuild-packages revision its repro.lock pins,
+# "none" when it pins none. A revision without a repro.lock is a failure: the
+# question cannot be answered, and "none" would be a guess.
+catalog_of() {
+	local text entry='name = "reprobuild-packages", coord_kind = "vcs", url = "[^"]*", revision = "([0-9a-f]{40})"'
+	text="$(git -C "$RUNQUOTA_DIR" show "$1:repro.lock" 2>/dev/null)" ||
+		fail "runquota@$1 has no repro.lock, so its catalog cannot be read. Re-examine this check."
+	if [[ $text =~ $entry ]]; then
+		echo "${BASH_REMATCH[1]}"
+	else
+		echo none
+	fi
+}
+CT_CATALOG="$(catalog_of "$CT_RUNQUOTA")" || exit 1
+RB_CATALOG="$(catalog_of "$RB_RUNQUOTA")" || exit 1
+echo "  catalogs:                   this repo's runquota ${CT_CATALOG}, reprobuild's ${RB_CATALOG}"
+
+known=()
+if [ -f "$KNOWN" ]; then
+	while read -r line; do
+		line="${line%%#*}"
+		[ -n "${line// /}" ] && known+=("$line")
+	done <"$KNOWN"
+fi
+CURRENT="$CT_RUNQUOTA $RB_RUNQUOTA"
+listed=""
+stale=()
+for entry in "${known[@]}"; do
+	read -r a b issue <<<"$entry"
+	if [ "$a $b" = "$CURRENT" ] && [ -n "$issue" ] && [ "$CT_CATALOG" != "$RB_CATALOG" ]; then
+		listed="$issue"
+	else
+		stale+=("$entry")
+	fi
+done
+
+if [ "${#stale[@]}" -gt 0 ]; then
+	echo "FAIL: ${#stale[@]} stale entr(y/ies) in ${KNOWN#"$REPO_ROOT"/}:" >&2
+	printf '  %s\n' "${stale[@]}" >&2
+	cat >&2 <<STALE
+An entry must name exactly the current pair, <this repo's runquota>
+<reprobuild's runquota-src>, followed by the issue that tracks it, and the two
+must still be on different catalogs. The current pair is
+  ${CURRENT}  (catalogs ${CT_CATALOG} / ${RB_CATALOG})
+Delete the stale line; record the current pair only if its catalogs differ.
+STALE
+	exit 1
+fi
+
+if [ "$CT_CATALOG" = "$RB_CATALOG" ]; then
+	echo "OK: this repo's runquota and reprobuild's runquota-src are on the same catalog (${CT_CATALOG})."
 	exit 0
 fi
 
-# Not equal. Say WHICH WAY it diverged when the checkout can tell us, because
-# the two directions read very differently in the resulting compile error even
-# though the remedy is the same.
-RELATION="diverged from"
-if [ -d "$RUNQUOTA_DIR/.git" ] &&
-	git -C "$RUNQUOTA_DIR" cat-file -e "${RB_RUNQUOTA}^{commit}" 2>/dev/null &&
-	git -C "$RUNQUOTA_DIR" cat-file -e "${CT_RUNQUOTA}^{commit}" 2>/dev/null; then
-	if git -C "$RUNQUOTA_DIR" merge-base --is-ancestor "$CT_RUNQUOTA" "$RB_RUNQUOTA"; then
-		RELATION="BEHIND"
-	elif git -C "$RUNQUOTA_DIR" merge-base --is-ancestor "$RB_RUNQUOTA" "$CT_RUNQUOTA"; then
-		RELATION="AHEAD of"
-	fi
+if [ -n "$listed" ]; then
+	echo "OK (known mismatch): runquota catalogs differ, as recorded in ${KNOWN#"$REPO_ROOT"/}; tracked by ${listed}"
+	exit 0
 fi
 
-cat >&2 <<EOF
-FAIL: this repo's 'runquota' pin is ${RELATION} the runquota revision that the
-      pinned reprobuild was locked against. They must be EQUAL.
+cat >&2 <<EOF2
+FAIL: this repo's runquota and the runquota-src its reprobuild was locked
+      against are on different reprobuild-packages catalogs.
 
-  flake.lock          runquota     = ${CT_RUNQUOTA}
+  flake.lock          runquota     = ${CT_RUNQUOTA}  (catalog ${CT_CATALOG})
   reprobuild@${REPROBUILD_REV}
-                      runquota-src = ${RB_RUNQUOTA}
+                      runquota-src = ${RB_RUNQUOTA}  (catalog ${RB_CATALOG})
 
-The derived runquota input resolves to the revision on the first line,
-while reprobuild was locked against the second. The lock graph is stale.
-Divergence in EITHER direction surfaces minutes later as an 'undeclared
-identifier' inside reprobuild's own sources — behind it loses types that were
-added, ahead of it loses types that were removed.
-
-Keep runquota.follows = "reprobuild/runquota-src" in flake.nix. Re-lock the
-parent and its dependency graph together from this checkout:
-
-    nix flake update reprobuild
-
-Then run this check again and confirm with 'nix develop --command true'.
-EOF
+Move whichever side is behind onto the other's catalog: this repo's runquota
+with 'repro lock update runquota --to <rev>' (it moves repro.lock and
+flake.lock together), or reprobuild to a revision whose runquota-src is on
+this catalog. If neither can move yet, record the pair and the issue that
+tracks it in ${KNOWN#"$REPO_ROOT"/}.
+EOF2
 exit 1

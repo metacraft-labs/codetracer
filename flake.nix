@@ -162,47 +162,56 @@
       flake = true;
     };
 
-    # runquota is DERIVED, not pinned: it is whatever the `reprobuild` input
-    # below locks as its own `runquota-src`. No revision for it appears in
-    # this file, and flake.lock grows no independent node for it — the
-    # `follows` edge means the closure holds exactly ONE runquota, and it is
-    # the one reprobuild was compiled against.
+    # runquota is this repo's OWN input, locked in flake.lock and in repro.lock
+    # at the same revision (the repro-lock/flake-lock agreement gate holds the
+    # two equal). It used to be `runquota.follows = "reprobuild/runquota-src"`.
     #
-    # ## Why derived rather than pinned
+    # ## Why the follows edge was dropped
     #
-    # reprobuild COMPILES AGAINST runquota's sources. This repo used to pin
-    # runquota to an exact revision here and, separately, override
-    # `inputs.runquota-src.follows = "runquota"` on the reprobuild input — so
-    # reprobuild was compiled against whatever THIS file said, rather than
-    # against what reprobuild itself had locked and been developed on. Drift
-    # in either direction is a compile error inside reprobuild's own sources,
-    # minutes into `nix develop`, naming an identifier nobody here has heard
-    # of:
+    # reprobuild compiles a solve against ONE reprobuild-packages catalog and
+    # refuses a closure that would resolve catalog interfaces from two. The
+    # runquota that reprobuild's flake pins as `runquota-src` (6ff97313 at
+    # reprobuild e2fe4eb9, 98ea3e58 at the 0.2.26 release) has a lock on
+    # catalog 15ceea67, while this repo's repro.lock, and reprobuild's own,
+    # are on 29b7bb9b. Following reprobuild therefore put two catalogs in
+    # codetracer's lock closure, and every refresh and platform re-solve of
+    # repro.lock failed. runquota moved to 29b7bb9b itself in 40523b6; no
+    # reprobuild revision pins a runquota that new yet. reprobuild-pm
+    # issues/2026-11-18-the-runquota-reprobuild-pins-as-runquota-src-carries-catalog-15ceea67-while-reprobuilds-own-lock-pins-29b7bb9b-or-56ffd67.md
     #
-    #   behind  -> repro_runquota.nim(932): undeclared identifier: 'ExtensionCellWire'
-    #   ahead   -> repro_runquota.nim(501): undeclared identifier: 'LeaseFinishOutcome'
+    # ## What still holds
     #
-    # Both were observed on this tree — commit c9cb186c bumped reprobuild
-    # while runquota stayed put — which is why
-    # `scripts/test-flake-pin-alignment.sh` exists. That check compares two
-    # revisions, so it can only report divergence AFTER someone has written
-    # it. The `follows` edge makes the divergence UNREPRESENTABLE instead:
-    # there is no second revision left to disagree with. The check now asserts
-    # that structure rather than comparing two numbers.
+    # reprobuild is still compiled against ITS OWN `runquota-src`: nothing
+    # below overrides that nested input, and
+    # `ci/test/dev-env-flake-metadata-test.sh` fails if anything does. That was
+    # the compile hazard the follows edge guarded against (an override of
+    # reprobuild's runquota-src surfaced as `undeclared identifier:
+    # 'ExtensionCellWire'` / `'LeaseFinishOutcome'` inside reprobuild).
     #
-    # ## Two overrides deliberately given up
+    # What this input feeds is codetracer's own use of runquota: `runquotad`
+    # in the CI shells (`inputs'.runquota.packages`, nix/shells/ci-base.nix)
+    # and `RUNQUOTA_SRC`, whose `runquota_process` libraries ct_test compiles.
+    # The `repro` client those shells ship is still built against reprobuild's
+    # runquota-src, so client and daemon can be on different runquota
+    # revisions. `scripts/test-flake-pin-alignment.sh` fails when this
+    # runquota and reprobuild's runquota-src are on different catalogs,
+    # unless the pair is recorded in ci/runquota-catalog-known-mismatch.txt.
     #
-    # `follows` replaces the whole input node, so the four overrides this
-    # block used to carry (`nixos-modules`, `nixpkgs`, `flake-parts`,
-    # `git-hooks`) are gone with it. runquota is now evaluated as reprobuild's
-    # own lock parameterises it — its nixpkgs resolves through
-    # `runquota-src/nixos-modules/nixpkgs-unstable` rather than through this
-    # repo's `nixpkgs`. That is the intended trade, not an oversight:
-    # `inputs'.runquota.packages.runquota` (nix/shells/ci-base.nix) and
-    # `RUNQUOTA_SRC` (ci-base.nix, nix/packages/default.nix) now resolve to
-    # the runquota the shipped `repro` was actually built against, instead of
-    # a separately-parameterised rebuild of it.
-    runquota.follows = "reprobuild/runquota-src";
+    # Return to the follows edge once a reprobuild pin carries a runquota on
+    # this repo's catalog.
+    runquota = {
+      url = "github:metacraft-labs/runquota/agents";
+      inputs.nixos-modules.follows = "nix-blockchain-development/nixos-modules";
+      inputs.nixpkgs.follows = "nixpkgs";
+      inputs.flake-parts.follows = "flake-parts";
+      inputs.git-hooks.follows = "git-hooks-nix";
+      # runquota's release dev shell takes reprobuild's packaging sources as
+      # `release-packaging-src`, pinned to a reprobuild revision of its own.
+      # Point it at the one `reprobuild` input below rather than add a second
+      # reprobuild pin to this lock.
+      inputs.release-packaging-src.follows = "reprobuild";
+      flake = true;
+    };
 
     reprobuild = {
       # NAMES A BRANCH, NOT A REVISION. The revision lives in flake.lock and
@@ -246,7 +255,7 @@
       # halves are provably unsatisfiable together, so a commit-pinned URL
       # cannot satisfy both gates at once.
       # reprobuild's own flake takes this same shape for its `runquota-src`
-      # (`url = "github:metacraft-labs/runquota/dev"`).
+      # input, whose URL names runquota's `dev` branch.
       #
       # This still does NOT `follows` nixos-modules' own reprobuild node,
       # because a bare `follows` replaces the whole input node and would drop
@@ -291,10 +300,10 @@
       inputs.nixpkgs.follows = "nixpkgs";
       inputs.flake-parts.follows = "flake-parts";
       inputs.git-hooks.follows = "git-hooks-nix";
-      # Reprobuild owns RunQuota's source and its input parameterisation.
-      # Restating a nested URL overrides the producer's locked child when
-      # this parent is updated, even if both happen to match today. Keep
-      # the root `runquota` follows edge above and inherit the complete input.
+      # Reprobuild owns its own RunQuota source (`runquota-src`) and its input
+      # parameterisation. Restating a nested URL overrides the producer's
+      # locked child when this parent is updated, even if both happen to
+      # match today, so none is restated here.
       flake = true;
     };
 
@@ -514,7 +523,7 @@
     # 2026-09-30) and have never been promoted to `dev`, whose tip has not
     # moved since 2026-09-29.
     reprobuild-packages = {
-      url = "github:metacraft-labs/reprobuild-packages/2c58192ab2e936da98440be5986a999339108cf6";
+      url = "github:metacraft-labs/reprobuild-packages/29b7bb9bac83ccb2a69e5c626df7fc900a5fbc25";
       flake = false;
     };
 
