@@ -648,6 +648,35 @@ src/frontend/viewmodel/views/isonim_editor_test_controls_view.nim :: button(clas
 src/frontend/viewmodel/views/isonim_status_view.nim :: input(id = "bug-report-title", `type` = "text", class = "ct-input-panel")
 ```
 
+### D-42: No near-white picture in the light theme
+
+The light theme used to point many icons at the dark theme's near-white files,
+so they all but vanished on light surfaces. The Files panel's tree (expand arrows,
+folder, plain file) and the State panel's expand arrows are now Design System icons
+(`icons-lg=chevron-down` / `chevron-right`, `icons-lg=folder`, `type=content-file`)
+painted in the row's text colour, in both themes. The remaining older pictures
+(value history, welcome trace buttons, VCS copy and open-diff, Flow show and hide,
+copy path, unpin, the window controls, the call trace's end-of-program
+mark) are redrawn in the light theme only, by `light-icon()` (button.styl), as a
+mask in an icon token on a layer over the element, so the dark theme's output is
+unchanged. Swapping those pictures for Design System icons in both themes remains
+open. The menu logo is a mask in `icon/primary/default` in both themes, as the
+agents branch draws it: that branch removed the `ct-images-logo-dark` picture.
+Kept on purpose: the Agent's Stop icon (white on its red fill, D-37).
+(2026-11-18; logo 2026-11-24)
+
+```guard
+src/frontend/styles/components/filesystem.styl :: .filesystem.jstree-default
+src/frontend/styles/components/filesystem.styl :: -webkit-mask: ICON_FOLDER center / 1rem no-repeat
+src/frontend/styles/components/state.styl :: -webkit-mask: ICON_CHEVRON_RIGHT center / 1rem no-repeat
+src/frontend/styles/components/button.styl :: light-icon(img, size = contain, color = colors-ui-icon-primary-default)
+src/frontend/styles/components/history.styl :: light-icon(HISTORY_VALUE_VIEW_TOGGLE_IMAGE, 0.625rem 0.625rem)
+src/frontend/styles/components/welcome_screen.styl :: light-icon(WELCOME_SCREEN_COPY_BUTTON, 1em 1em, colors-ui-icon-primary-subtle)
+src/frontend/styles/components/vcs.styl :: light-icon(url("../../public/resources/shared/vc-open-diff.svg"))
+src/frontend/styles/components/flow.styl :: light-icon(FLOW_HIDE_ICON, auto)
+src/frontend/styles/components/menu_bar.styl :: -webkit-mask: url('../../public/resources/menu/ct_logo_dark.svg') center / cover no-repeat
+```
+
 ## Focus rules
 
 Agreed by Nikolay on 2026-11-02, from

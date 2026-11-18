@@ -591,6 +591,7 @@ VCS_BRANCH_PICKER_INSET = 0.25em
   background-image: url("../../public/resources/shared/vcs-copy-details.svg")
   background-repeat: no-repeat
   background-size: contain
+  light-icon(url("../../public/resources/shared/vcs-copy-details.svg")) // D-42
   background-position: center
   opacity: 0.6
   transition: background-image 0s, opacity 150ms ease
@@ -600,6 +601,7 @@ VCS_BRANCH_PICKER_INSET = 0.25em
 
   &.copied
     background-image: url("../../public/resources/shared/vcs-copy-success.svg")
+    light-icon(url("../../public/resources/shared/vcs-copy-success.svg"), contain, colors-ui-icon-success-primary) // D-42
     opacity: 1
 
 // Inline file rows inside an expanded accordion entry.
@@ -910,6 +912,7 @@ VCS_BRANCH_PICKER_INSET = 0.25em
   background-image: url("../../public/resources/shared/vc-open-diff.svg")
   background-repeat: no-repeat
   background-size: contain
+  light-icon(url("../../public/resources/shared/vc-open-diff.svg")) // D-42
   background-position: center
 
   .custom-tooltip

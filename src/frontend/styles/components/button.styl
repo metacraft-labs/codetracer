@@ -103,6 +103,8 @@ ICON_CLOSE_SM = url('../../public/resources/shared/close_sm.svg') // icons-lg=cl
 ICON_CHEVRON_LEFT = url('../../public/resources/shared/chevron_left.svg') // icons-lg=chevron-left
 ICON_CHEVRON_RIGHT = url('../../public/resources/shared/chevron_right.svg') // icons-lg=chevron-right
 ICON_TAB_MENU = url('../../public/resources/shared/tab_menu.svg') // icons-lg=tab-menu
+ICON_FOLDER = url('../../public/resources/shared/folder.svg') // icons-lg=folder
+ICON_FILE = url('../../public/resources/shared/file.svg') // type=content-file
 // alert-icons, size=lg (20px).  Painted in the status icon tokens, which the
 // light theme re-maps, so one file serves both themes.
 ICON_ALERT_INFO = url('../../public/resources/notifications/alert_info_lg.svg')
@@ -121,6 +123,26 @@ button-icon(img, w = 1rem, h = null)
     mask-icon(img, w)
     if h
       height: h
+
+// D-42: for the light theme only.  A picture with a near-white colour baked in
+// (the dark theme's file, which the light theme also points at) is redrawn as a
+// mask on a layer over the element, in an icon token, so it shows on a light
+// surface.  The dark theme's output is unchanged.  A layer, not the element
+// itself, because these buttons also hold a tooltip, an outline or a fill.
+// `size` is what the picture was drawn at: `auto` for its own size.
+light-icon(img, size = contain, color = colors-ui-icon-primary-default)
+  if COLOR_MODE is defined and COLOR_MODE == "Light"
+    position: relative
+    background-image: none !important
+
+    &::before
+      content: ""
+      position: absolute
+      inset: 0
+      pointer-events: none
+      background-color: color
+      -webkit-mask: img center / size no-repeat
+      mask: img center / size no-repeat
 
 mask-icon(img, size = 1rem)
   display: inline-block
