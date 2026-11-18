@@ -413,6 +413,7 @@ applicable:
   - ../shared-editor/edit-mode-shared-editor-keymaps.yaml
   - ../keymaps/monaco-unbound-f7-does-nothing.yaml
   - ../keymaps/f7-bound-by-a-row-reaches-the-editor.yaml
+  - ../nim-views/rr-nim-recording-opens-as-nim.yaml
   - ../layout/event-log-and-scratchpad-tabs.yaml
   - ../point-list/breakpoint-rows-follow-the-gutter.yaml
   - ../point-list/tracepoint-rows-beside-breakpoints.yaml

@@ -1,0 +1,22 @@
+scenario: 1
+name: nim-views/rr-nim-recording-opens-as-nim
+pack: codetracer
+summary: >-
+  An rr recording of the Nim sudoku solver is a Nim recording: it opens at
+  the program's first top-level statement (main.nim:60), as the MCR
+  recording does, and its View menu offers View Generated C Source and View
+  Disassembly.
+
+stage:
+  - use: record-program
+    with: { program: nim_sudoku_solver/main.nim, backend: rr }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 300s }
+  - wait: { until: { at: status-line, location: { matches: "main.nim:60#" } }, timeout: 120s }
+  - click: { at: menu-bar }
+  - hover: { at: 'menu-bar/menu[label="View"]', for: 500ms }
+  - wait: { until: { at: 'menu-bar/menu-item[label="View Disassembly"]', present: true }, timeout: 10s }
+  - expect: { at: menu-bar, assert: "offers(\"View Generated C Source\")" }
+  - expect: { at: menu-bar, assert: "offers(\"View Disassembly\")" }
