@@ -2262,6 +2262,12 @@ proc drawOverlay(r: GpuiRenderer) =
     r.appendChild(gRoot, e)
 
 let geometryOut = getEnv("CODETRACER_GPUI_GEOMETRY_OUT", "")
+var
+  gGeometryInputs = 0
+    ## Pointer and key events handled, for the geometry report: a capture
+    ## waits until the window has handled its input, not for the screen to
+    ## look still.
+  gGeometryPointer = (x: -1, y: -1)
   ## A window lane's instrument: where the window drew every pane, tab and
   ## divider, rewritten after every redraw — so a lane can AIM a pointer
   ## (which tab to press, where a divider is). What a gesture did is read
@@ -2360,7 +2366,15 @@ proc writeGeometry() =
                                 "openDock": openDock,
                                 "editorVScrollbar":
                                   editorVScrollbarGeometry(rect),
-                                "eventColumns": eventColumns}))
+                                "eventColumns": eventColumns,
+                                # What the window has handled when it wrote
+                                # this: a capture waits on these, since a
+                                # still screen can be one not yet redrawn.
+                                "input": %*{"handled": gGeometryInputs,
+                                            "pointer": [gGeometryPointer.x,
+                                                        gGeometryPointer.y]},
+                                "gesture": %*{"active": gGestures.active,
+                                              "revealing": gGestures.revealing}}))
   except IOError:
     discard
 
@@ -4252,6 +4266,11 @@ proc windowPointer(r0: GpuiRenderer; kind: GpuiEventKind; x, y: int;
   ## listener (`pointerHandler`) and `--window-ops` (the plan's scripted
   ## pointer) both call this, so a scripted press is the press a user makes.
   defer: applyWindowCursor(r0)
+  gGeometryPointer = (x: x, y: y)
+  defer:
+    if geometryOut.len > 0:
+      inc gGeometryInputs
+      writeGeometry()
   var r = r0
   if kind in {gekPointerDown, gekContextMenu, gekAuxDown}:
     gAltTap.interrupted()        # Alt+press is not Alt tapped
@@ -4822,6 +4841,10 @@ proc windowKey(key: string; mods: seq[string]) =
   ## editor's caret and selection, the palette's and the right-click menu's
   ## keys (their pushed layers), `Esc` ending a layout gesture.
   var r: GpuiRenderer
+  defer:
+    if geometryOut.len > 0:
+      inc gGeometryInputs
+      writeGeometry()
   traceGesture("window key " & key & (if mods.len > 0: " " & $mods else: ""))
   # Any key between Alt's press and release makes it a chord, not a tap.
   if key != "alt":

@@ -176,6 +176,44 @@ def settle(name):
 # The window and the input devices
 # ---------------------------------------------------------------------------
 
+def handled(win):
+    """How many pointer and key events the window has handled (its geometry
+    report's `input.handled`); -1 from a window that does not report it."""
+    try:
+        return win.geom().get("input", {}).get("handled", -1)
+    except (OSError, ValueError):
+        return -1
+
+
+def await_input(win, before, what, pointer=None, gesture_active=None, ceiling_s=60.0):
+    """Wait until the window has HANDLED the input just sent — its report
+    counts more events than `before`, at `pointer` (within 2 px) and with the
+    gesture state asked for — and drawn after it. A still screen is not that:
+    under load the grabs can agree on a frame the window has not redrawn yet
+    (an Esc's cancel measured as the drag it cancelled). A state that never
+    comes within the generous ceiling is a failure, named."""
+    if before < 0:
+        return
+    deadline = time.time() + ceiling_s
+    while time.time() < deadline:
+        try:
+            g = win.geom()
+        except (OSError, ValueError):
+            time.sleep(0.1)
+            continue
+        inp = g.get("input", {})
+        ok = inp.get("handled", -1) > before
+        if ok and pointer is not None:
+            px_, py_ = inp.get("pointer", [-9, -9])
+            ok = abs(px_ - pointer[0]) <= 2 and abs(py_ - pointer[1]) <= 2
+        if ok and gesture_active is not None:
+            ok = g.get("gesture", {}).get("active") == gesture_active
+        if ok:
+            return
+        time.sleep(0.1)
+    raise RuntimeError(f"PLAT-47: the window never handled {what} within {ceiling_s:.0f}s")
+
+
 class Window:
     def __init__(self, sid, trace, cwd, extra_env=None):
         self.sid = sid
@@ -329,9 +367,13 @@ def capture():
         dx, dy = centre(div["rect"])
         ptr.jump(dx, dy)
         ptr.send("down", "sleep 150")
+        n = handled(win)
         ptr.move(dx + 80, dy)
+        await_input(win, n, "the divider dragged 80 px", pointer=(dx + 80, dy))
         steps["resize-live"] = settle("resize-live")
+        n = handled(win)
         ptr.send("up", "sleep 200")
+        await_input(win, n, "the divider released")
         steps["resize-done"] = settle("resize-done")
         g = win.geom()
         eb = node_of(g, "editor")["body"]
@@ -339,7 +381,10 @@ def capture():
         ptr.jump(bx, by)
         ptr.send("down", "sleep 150")
         ptr.move(bx + 80, by)
+        n = handled(win)
         ptr.send("up", "sleep 200")
+        await_input(win, n, "the press on the editor's body released",
+                    pointer=(bx + 80, by))
         steps["press-body"] = settle("press-body")
 
         # --- deliverable 6: the Variables tab over the four drop kinds.
@@ -356,11 +401,16 @@ def capture():
         # frame) — the frame each drop's tint is read against, and the
         # geometry its targets are aimed in.
         ptr.jump(sx, sy)
+        n = handled(win)
         ptr.send("down", "sleep 150")
+        await_input(win, n, "the press on the Variables tab", pointer=(sx, sy))
         # The press alone, before any motion: it focuses the Variables pane
         # (its outline and strip), and is the frame `Esc` must restore.
         steps["drop-pressed"] = settle("drop-pressed")
+        n = handled(win)
         ptr.jump(FRAME_W - 2, FRAME_H // 2)
+        await_input(win, n, "the tab lifted past the layout's edge",
+                    pointer=(FRAME_W - 2, FRAME_H // 2), gesture_active=True)
         steps["drop-lifted"] = settle("drop-lifted")
         shutil.copy(win.geometry, os.path.join(OUT, "a-lift.geometry.json"))
         g = win.geom()
@@ -374,12 +424,19 @@ def capture():
         }
         pointers = {}
         for name, (tx, ty) in targets.items():
+            n = handled(win)
             ptr.move(tx, ty)
+            await_input(win, n, f"the tab over {name}", pointer=(tx, ty),
+                        gesture_active=True)
             pointers[name] = [tx, ty]
             steps[name] = settle(name)
+        n = handled(win)
         key("Escape")
+        await_input(win, n, "Esc during the drag", gesture_active=False)
         steps["drop-cancel"] = settle("drop-cancel")
+        n = handled(win)
         ptr.send("up", "sleep 200")
+        await_input(win, n, "the release after Esc")
         steps["drop-released"] = settle("drop-released")
         # A second drag, released: the split is committed. Lifted the same
         # way first, so the target is where it was aimed above.
@@ -417,6 +474,12 @@ def capture():
         # --- the VCS pane refreshes on its own, as the desktop's does: a file
         # written by ANOTHER program, no input to the window, one refresh
         # interval (5 s, `vcs_vm.VCSRefreshIntervalMs`) and a margin.
+        # The refreshes counted are the ones after this write: the pane's
+        # first read is applied in the background and traced the same way.
+        with open(os.path.join(OUT, "a.run.log")) as f:
+            seen = sum(1 for l in f.read().splitlines() if l == "gesture vcs refreshed")
+        with open(os.path.join(OUT, "vcs-refresh.before"), "w") as f:
+            f.write(str(seen))
         with open(os.path.join(repo, "late.txt"), "w") as f:
             f.write("written while the window was open\n")
         time.sleep(7.0)
@@ -1004,7 +1067,8 @@ def record():
     log_a = open(os.path.join(OUT, "a.run.log")).read().splitlines()
     out["vcsRefresh"] = {
         "text": ocr(os.path.join(OUT, "vcs-refresh.ppm"), files["body"], "vcs-refresh"),
-        "refreshes": sum(1 for l in log_a if l == "gesture vcs refreshed"),
+        "refreshes": sum(1 for l in log_a if l == "gesture vcs refreshed") -
+                     int(open(os.path.join(OUT, "vcs-refresh.before")).read()),
         "changedPixels": changed_bbox(frames["vcs"], frames["vcs-refresh"])[1],
         "changedBBox": changed_bbox(frames["vcs"], frames["vcs-refresh"])[0],
         "paneBody": files["body"],
