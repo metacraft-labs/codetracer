@@ -68,12 +68,20 @@ const WRITES: [&str; 6] = [
 
 /// The probe: every attempt in a `try`, its outcome recorded by name, the
 /// record printed as the last line.
+///
+/// `swap_until_other` ends the symlink swap at the first answer from the
+/// other recording.  The unconfined run sets it: one such answer is all the
+/// vacuity guard needs, and with nothing refused every further open starts
+/// another `replay-server`, which only ties the call's wall time to the
+/// host's load.  The confined run keeps all its attempts, since the number
+/// of chances the swap gets to win the race is what it tests.
 fn probe_script(
     outside: &Path,
     socket: &Path,
     port: u16,
     other_trace: &Path,
     shutdown: bool,
+    swap_until_other: bool,
 ) -> String {
     format!(
         r#"import json, os, socket, subprocess, sys
@@ -159,6 +167,8 @@ def swap():
                 # Closed again, so the next open resolves the link afresh
                 # rather than finding the session this one left.
                 trace._connection.send_request("ct/close-trace", {{"tracePath": link}})
+                if {swap_until_other} and seen["other"]:
+                    break
     finally:
         stop.append(True)
         flipper.join()
@@ -180,6 +190,7 @@ R["source_files"] = len(trace.source_files)
 print(json.dumps(R))
 "#,
         shutdown = if shutdown { "True" } else { "False" },
+        swap_until_other = if swap_until_other { "True" } else { "False" },
     )
 }
 
@@ -204,11 +215,15 @@ fn reset_outside(outside: &Path) {
     std::fs::write(outside.join("keep2.txt"), "kept too").unwrap();
 }
 
+/// The probe's budget is generous because the timeout is not under test here
+/// (`mcp_exec_script_limits_test.rs` covers it): the confined run still
+/// starts a `replay-server` for every swap that opens its own trace, and on
+/// a loaded builder each start-up takes far longer than on a workstation.
 async fn run_probe(mcp: &mut Mcp, trace_dir: &Path, script: &str) -> Value {
     let out = mcp
         .call_tool(
             "exec_script",
-            json!({"trace_path": trace_dir, "script": script, "timeout_seconds": 60}),
+            json!({"trace_path": trace_dir, "script": script, "timeout_seconds": 300}),
         )
         .await
         .unwrap_or_else(|e| panic!("exec_script failed: {e}"));
@@ -254,7 +269,7 @@ async fn t_mcp_exec_script_cannot_write_outside_its_scratch() {
     // --- Confined (the default) ---
     reset_outside(&outside);
     let mut confined = start_mcp(&server, &root, &socket, &[]).await;
-    let script = probe_script(&outside, &socket, port, &other_trace, true);
+    let script = probe_script(&outside, &socket, port, &other_trace, true, false);
     let record = run_probe(&mut confined, &trace_dir, &script).await;
     eprintln!("confined: {record}");
 
@@ -339,7 +354,7 @@ async fn t_mcp_exec_script_cannot_write_outside_its_scratch() {
     // --- Vacuity guard: the same script, unconfined ---
     reset_outside(&outside);
     let mut unconfined = start_mcp(&server, &root, &socket, &["--allow-unconfined-scripts"]).await;
-    let script = probe_script(&outside, &socket, port, &other_trace, false);
+    let script = probe_script(&outside, &socket, port, &other_trace, false, true);
     let record = run_probe(&mut unconfined, &trace_dir, &script).await;
     eprintln!("unconfined: {record}");
     for name in WRITES.iter().chain(&[
