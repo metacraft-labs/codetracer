@@ -825,7 +825,12 @@ else:
     proc onDidSendMessage(message: VsCodeDapMessage) =
       console.log cstring"<- dap message:", message.`type`, message.command, message.event, message
       if message.`type` == cstring"event":
-        dap.receiveEvent(message.event, message.body)
+        # An event this front-end has no kind for (an advisory one such as
+        # `ct/flow-progress`) is ignored, as the desktop does.
+        try:
+          dap.receiveEvent(message.event, message.body)
+        except ValueError as e:
+          console.warn cstring"  receive event error: ", cstring(e.msg)
       elif message.`type` == cstring"response":
         try:
           dap.receiveResponse(message.command, message.body)

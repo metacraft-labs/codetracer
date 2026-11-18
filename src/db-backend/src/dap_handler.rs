@@ -1724,8 +1724,20 @@ impl Handler {
                     }
                 }
             }
+            // The flow's answer is one event at the end of the walk, and a
+            // walk on a replay can take tens of seconds; a front-end that
+            // reads silence as a stalled engine (GPUI gives up after 30 s
+            // without a message) is told how it is going meanwhile.
+            let progress_sender = sender.clone();
             self.flow_preloader
-                .load(location, arg.flow_mode, self.trace_kind, &mut *flow_replay)
+                .report_progress(FLOW_PROGRESS_INTERVAL, move |progress| {
+                    let _ = progress_sender.send(flow_progress_event(progress));
+                });
+            let flow_update = self
+                .flow_preloader
+                .load(location, arg.flow_mode, self.trace_kind, &mut *flow_replay);
+            self.flow_preloader.stop_reporting_progress();
+            flow_update
             // let step_id = StepId(arg.location.rr_ticks.0);
             // let call_key = self.db.steps[step_id].call_key;
             // let function_id = self.db.calls[call_key].function_id;
@@ -8433,6 +8445,22 @@ fn forked_process_executable(
         current = parent;
     }
     None
+}
+
+/// How often a flow walk reports its progress (`ct/flow-progress`).
+const FLOW_PROGRESS_INTERVAL: std::time::Duration = std::time::Duration::from_secs(2);
+
+/// The `ct/flow-progress` event: a flow walk is under way and has visited
+/// `stepsWalked` steps in `elapsedMs`. Its `seq` is set by the sending thread.
+pub fn flow_progress_event(progress: crate::flow_preloader::FlowProgress) -> DapMessage {
+    DapMessage::Event(dap::Event {
+        base: dap::ProtocolMessage {
+            seq: 0,
+            type_: "event".to_string(),
+        },
+        event: "ct/flow-progress".to_string(),
+        body: serde_json::to_value(progress).unwrap_or_default(),
+    })
 }
 
 #[cfg(test)]
