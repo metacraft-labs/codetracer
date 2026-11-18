@@ -668,7 +668,7 @@ suite "M71 (#838): the wheel and the track move the State, Files and VCS panes":
     # VCS: the product's source over a real repository, its tab shown.
     let repo = makeVcsRepo()
     defer: removeDir(repo.parentDir)
-    let vcs = newVcsSource(repo)
+    let vcs = newVcsSource(repo, background = false)
     defer: vcs.close()
     vcs.refresh(rt)
     ck rt.app.vcs.files.len == InHandRows
@@ -697,7 +697,7 @@ suite "M71 (#838): the wheel and the track move the State, Files and VCS panes":
                         proc(): int = rt.app.fileTree.scrollTop)
     let repo = makeVcsRepo()
     defer: removeDir(repo.parentDir)
-    let vcs = newVcsSource(repo)
+    let vcs = newVcsSource(repo, background = false)
     defer: vcs.close()
     vcs.refresh(rt)
     ck s.showVcsTab(rt)

@@ -143,7 +143,7 @@ suite "the terminal's VCS history reads what its list shows":
     checkpoint("VCS pane: " & $a)
     # The fixture is what the case says: a list taller than the fallback.
     ck a.height + LeadRows > VcsHistoryUnmeasured
-    let vcs = newVcsSource(repo)
+    let vcs = newVcsSource(repo, background = false)
     defer: vcs.close()
     vcs.refresh(rt)
     checkpoint("commits read: " & $rt.app.vcs.commits.len)
@@ -164,7 +164,7 @@ suite "the terminal's VCS history reads what its list shows":
     checkpoint("VCS pane: " & $a)
     ck a.height > 0
     ck a.height + LeadRows < VcsHistoryUnmeasured
-    let vcs = newVcsSource(repo)
+    let vcs = newVcsSource(repo, background = false)
     defer: vcs.close()
     vcs.refresh(rt)
     checkpoint("commits read: " & $rt.app.vcs.commits.len)
@@ -177,7 +177,7 @@ suite "the terminal's VCS history reads what its list shows":
     defer: removeDir(repo.parentDir)
     let rt = newRuntime(200, 30)
     ck rt.showVcsTab()
-    let vcs = newVcsSource(repo)
+    let vcs = newVcsSource(repo, background = false)
     defer: vcs.close()
     vcs.refresh(rt)
     let before = rt.app.vcs.commits.len
@@ -211,7 +211,7 @@ suite "the terminal's VCS history reads what its list shows":
     defer: removeDir(repo.parentDir)
     let rt = newRuntime(200, 30)
     ck rt.showVcsTab()
-    let vcs = newVcsSource(repo)
+    let vcs = newVcsSource(repo, background = false)
     defer: vcs.close()
     vcs.refresh(rt)
     let before = rt.app.vcs.commits.len
@@ -234,7 +234,7 @@ suite "the terminal's VCS history reads what its list shows":
     defer: removeDir(repo.parentDir)
     let rt = newRuntime(200, 30)
     ck rt.showVcsTab()
-    let vcs = newVcsSource(repo)
+    let vcs = newVcsSource(repo, background = false)
     defer: vcs.close()
     vcs.refresh(rt)
     vcs.toggleCommit(rt, 0)
@@ -250,7 +250,7 @@ suite "the terminal's VCS history reads what its list shows":
     defer: removeDir(repo.parentDir)
     let rt = newRuntime(200, 30)
     ck rt.showVcsTab()
-    let vcs = newVcsSource(repo)
+    let vcs = newVcsSource(repo, background = false)
     defer: vcs.close()
     vcs.refresh(rt)
     ck rt.app.vcs.commits.len == 5

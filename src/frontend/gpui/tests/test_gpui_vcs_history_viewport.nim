@@ -64,7 +64,7 @@ proc follow(vm: VCSVM; repo: string; top, rows: int): bool =
   ## What `gpui/main.followVcsViewport` does for a body of `rows` rows with
   ## the reader at `top`.
   let w = vcsHistoryWindow(vcsPaneView(vm).root, top, rows)
-  followGpuiVcsViewport(vm, repo, w.rows, w.firstRow)
+  followGpuiVcsViewport(vm, repo, w.rows, w.firstRow, background = false)
 
 suite "GPUI's VCS history reads what its list shows":
 
@@ -97,7 +97,7 @@ suite "GPUI's VCS history reads what its list shows":
     let vm = openGpuiVcs(repo)
     ck not follow(vm, repo, 0, 10)
     ck vm.commits.val.len == VcsHistoryUnmeasured
-    ck refreshGpuiVcs(vm, repo)
+    ck refreshGpuiVcs(vm, repo, background = false)
     ck vm.commits.val.len == historyCommitCount(Viewport(rows: 10))
     ck vm.commits.val.len < VcsHistoryUnmeasured
 
@@ -109,7 +109,7 @@ suite "GPUI's VCS history reads what its list shows":
     defer: removeDir(repo.parentDir)
     let vm = openGpuiVcs(repo)
     discard follow(vm, repo, 0, 10)
-    discard refreshGpuiVcs(vm, repo)
+    discard refreshGpuiVcs(vm, repo, background = false)
     let before = vm.commits.val.len
     # Ten commits scrolled past (four caption rows above the first), the
     # body's ten rows still short of the last commit read.
@@ -124,7 +124,7 @@ suite "GPUI's VCS history reads what its list shows":
     defer: removeDir(repo.parentDir)
     let vm = openGpuiVcs(repo)
     discard follow(vm, repo, 0, 10)
-    discard refreshGpuiVcs(vm, repo)
+    discard refreshGpuiVcs(vm, repo, background = false)
     let before = vm.commits.val.len
     # The commit the reader opened (PLAT-50) stays open across the deeper
     # read: same history, read further.

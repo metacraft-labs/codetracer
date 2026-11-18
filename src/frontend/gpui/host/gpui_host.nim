@@ -115,6 +115,7 @@ import tui/app/syntax/lexical
 # repository is a HOST capability, like opening a recording.
 import viewmodels/vcs_vm
 import host/native_vcs
+import host/vcs_refresh_worker
 import isonim/core/owner
 
 proc gpuiFrontEndVersion*(): string =
@@ -573,7 +574,35 @@ proc close*(s: GpuiSourceService) =
     return
   s.vm.dispose()
 
-proc openGpuiVcs*(directory: string): VCSVM =
+var gVcsWorker: VcsRefreshWorker
+  ## The window's VCS reads, off its loop (`vcs_refresh_worker`). Started on
+  ## the first background read; the window's loop is its only user.
+
+proc vcsWorker(): VcsRefreshWorker =
+  if gVcsWorker.isNil:
+    gVcsWorker = startVcsRefreshWorker()
+  gVcsWorker
+
+proc gpuiVcsBusy*(): bool =
+  ## Whether a background read is out (or waiting to go out): a loop that
+  ## polls with `pollGpuiVcs` can poll fast only while this holds.
+  not gVcsWorker.isNil and gVcsWorker.busy
+
+proc pollGpuiVcs*(vm: VCSVM; directory: string): bool =
+  ## Apply the newest background read that has come back, if any, and never
+  ## start one: cheap enough for every frame or tick. Answers whether what
+  ## the pane draws changed. A read of another directory (the window was
+  ## re-rooted while it ran) is dropped.
+  if vm.isNil or gVcsWorker.isNil:
+    return false
+  var read: VcsRefreshRead
+  if not gVcsWorker.take(read) or read.directory != directory:
+    return false
+  let before = vm.workingStateKey()
+  vm.applyRefreshRead(read)
+  vm.workingStateKey() != before
+
+proc openGpuiVcs*(directory: string; background = false): VCSVM =
   ## PLAT-47 deliverable 4: the VCS pane's ViewModel for `directory` — the
   ## desktop's `VCSVM`, read through the system `git`
   ## (`vcs_vm.refreshFromFacade`: the branch, `git status --porcelain=v2`
@@ -584,24 +613,49 @@ proc openGpuiVcs*(directory: string): VCSVM =
   ## The caller passes it, and re-reads it every `VCSRefreshIntervalMs`
   ## through `refreshGpuiVcs` (the window's tick, `gpui/main.nim`).
   ## The reactive root lives as long as the window (the process).
+  ##
+  ## `background`: the first read is REQUESTED, not waited for — the pane is
+  ## empty until `pollGpuiVcs` applies it — so opening the window never waits
+  ## for git. Without it the first read is synchronous, as before.
   var vm: VCSVM
   createRoot proc(dispose: proc()) =
     vm = createVCSVM()
-  vm.refreshFromFacade(nativeVcs(NativeVcsProfile), directory)
+  if background:
+    if directory.len == 0:
+      vm.setNoProjectFolder()
+    else:
+      vcsWorker().request(directory, vm.wantedCommitCount())
+  else:
+    vm.refreshFromFacade(nativeVcs(NativeVcsProfile), directory)
   vm
 
-proc refreshGpuiVcs*(vm: VCSVM; directory: string): bool =
+proc refreshGpuiVcs*(vm: VCSVM; directory: string;
+                     background = true): bool =
   ## Re-read `directory` into the VCS pane's ViewModel, as the desktop's panel
   ## does every `VCSRefreshIntervalMs`; answers whether what the pane draws
   ## changed (`workingStateKey`), so the window redraws the pane only then.
+  ##
+  ## THE WINDOW'S LOOP NEVER WAITS FOR GIT (`background`, the default): the
+  ## read this call asks for runs on a thread, and the read that came back
+  ## since the last call is what is applied now — so the pane shows a change
+  ## one refresh later, and a slow `git status` freezes nothing
+  ## (codetracer-pm issue 2026-11-17). `background = false` reads and applies
+  ## at once, for an in-process suite that asserts right after the call.
   if vm.isNil or directory.len == 0:
     return false
   let before = vm.workingStateKey()
-  vm.refreshFromFacade(nativeVcs(NativeVcsProfile), directory)
+  if background:
+    var read: VcsRefreshRead
+    if vcsWorker().take(read) and read.directory == directory:
+      vm.applyRefreshRead(read)
+    if not gVcsWorker.busy:
+      gVcsWorker.request(directory, vm.wantedCommitCount())
+  else:
+    vm.refreshFromFacade(nativeVcs(NativeVcsProfile), directory)
   vm.workingStateKey() != before
 
 proc followGpuiVcsViewport*(vm: VCSVM; directory: string;
-                            rows, firstRow: int): bool =
+                            rows, firstRow: int; background = true): bool =
   ## The VCS pane's history list was given `rows` rows with `firstRow`
   ## commits scrolled past (`leaves.vcsHistoryWindow`, from the body's
   ## laid-out height and the reader's place): write it as the list's viewport
@@ -614,7 +668,7 @@ proc followGpuiVcsViewport*(vm: VCSVM; directory: string;
   if vm.isNil or rows <= 0:
     return false
   if vm.setHistoryViewport(Viewport(rows: rows, firstRow: max(0, firstRow))):
-    return refreshGpuiVcs(vm, directory)
+    return refreshGpuiVcs(vm, directory, background)
   false
 
 type
