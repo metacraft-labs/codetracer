@@ -10,8 +10,11 @@ stage:
   - use: open-recording
 
 steps:
-  - wait: { until: replay-idle, timeout: 300s }
-  - wait: { until: { at: 'pane-tab[label="Video Player"]', present: true }, timeout: 120s }
+  # Visual Replay needs no debugging session: the gl_scene recording is made
+  # with the premain arm, which ct-mcr's debugserver refuses by design
+  # (spec/CLI/ct-mcr/debugserver.md), and the panes play it on their own, so
+  # the wait is for them, not for the replay
+  - wait: { until: { at: 'pane-tab[label="Video Player"]', present: true }, timeout: 300s }
   - expect: { at: 'pane-tab[label="Pixel History"]', present: true }
   - expect: { at: 'pane-tab[label="Shader Debug"]', present: true }
   - click: { at: 'pane-tab[label="Video Player"]' }

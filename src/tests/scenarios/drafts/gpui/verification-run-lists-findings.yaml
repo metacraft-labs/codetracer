@@ -13,18 +13,16 @@ stage:
 
 steps:
   - wait: { until: ready, timeout: 60s }
-  - click: { at: 'menu-bar/menu[label="Menu"]' }
-  - wait: { until: { at: 'dropdown[level="1"]', present: true }, timeout: 30s }
-  - click: { at: 'dropdown[level="1"]/dropdown-item[label="View"]' }
-  - wait: { until: { at: 'dropdown[level="2"]', assert: 'offers("Verification")' }, timeout: 30s }
-  # into the submenu level with View first, as a hand does: a straight line
-  # from View to Verification crosses Build, Reset, Debug and Help, and the
-  # parent menu opens each one under the pointer
-  - hover: { at: 'dropdown[level="2"]/dropdown-item[label="Filesystem"]' }
-  - click: { at: 'dropdown[level="2"]/dropdown-item[label="Verification"]' }
+  # View › Verification through the palette, which runs the menu's commands
+  # by name (a pointer's way through the menu crosses the other folders)
+  - chord: Ctrl+P
+  - type: ":verification"
+  - key: Enter
   - wait: { until: { at: 'pane[title="Verification"]', present: true }, timeout: 30s }
   # the pane's own Run control (▶ at the header's right end)
   - click: { at: 'pane[title="Verification"]/row[#1]', anchor: row-end }
     settle: false
-  - wait: { until: { at: 'pane[title="Verification"]', assert: 'has-row("Expected type Field, found type u32")' }, timeout: 180s }
+  # the run's verdict, then its findings (the pane cuts their messages at its
+  # width; the file each names is read)
+  - wait: { until: { at: 'pane[title="Verification"]', assert: 'has-row("Nothing was proved")' }, timeout: 180s }
   - expect: { at: 'pane[title="Verification"]', assert: 'has-row("typeerr/src/main.nr")' }
