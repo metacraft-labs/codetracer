@@ -185,7 +185,8 @@ def handled(win):
         return -1
 
 
-def await_input(win, before, what, pointer=None, gesture_active=None, ceiling_s=60.0):
+def await_input(win, before, what, pointer=None, gesture_active=None,
+                revealing=None, ceiling_s=60.0):
     """Wait until the window has HANDLED the input just sent — its report
     counts more events than `before`, at `pointer` (within 2 px) and with the
     gesture state asked for — and drawn after it. A still screen is not that:
@@ -208,6 +209,8 @@ def await_input(win, before, what, pointer=None, gesture_active=None, ceiling_s=
             ok = abs(px_ - pointer[0]) <= 2 and abs(py_ - pointer[1]) <= 2
         if ok and gesture_active is not None:
             ok = g.get("gesture", {}).get("active") == gesture_active
+        if ok and revealing is not None:
+            ok = g.get("gesture", {}).get("revealing") == revealing
         if ok:
             return
         time.sleep(0.1)
@@ -299,7 +302,9 @@ def hover_reveal(win, ptr, rect):
     ptr.jump(lx - 2, ly)
     ptr.move(lx, ly, steps=2)
     rv = None
-    for _ in range(20):
+    # The reveal is waited for with a generous ceiling: the preview delay is
+    # 300 ms, but a loaded host answers late.
+    for _ in range(300):
         time.sleep(0.2)
         rv = win.geom().get("revealed")
         if rv:
@@ -507,8 +512,11 @@ def capture():
             hover_reveal(win, ptr, slot)
             steps["dock-revealed"] = settle("dock-revealed")
             shutil.copy(win.geometry, os.path.join(OUT, "a-revealed.geometry.json"))
+            n = handled(win)
             key("Escape")
             ptr.jump(4, FRAME_H // 2)
+            await_input(win, n, "Esc over the revealed pane, then the pointer away",
+                        pointer=(4, FRAME_H // 2), revealing=False)
             steps["dock-dismissed"] = settle("dock-dismissed")
         else:
             steps["dock-revealed"] = False
