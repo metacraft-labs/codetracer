@@ -1,5 +1,10 @@
 """codetracer_workflow.py -- codetracer.yml with its local reusable workflows inlined.
 
+NOT-A-CI-GATE: a library, not a check -- the contract suites that read
+codetracer.yml import it (ci/test/launcher-suites-build-launcher-test.py,
+ci/test/native-recording-suites-run-where-rr-is-test.py, both run by
+ci-contract-suites), so their verdicts cover the jobs it inlines.
+
 codetracer.yml reached GitHub's 512,000-byte limit, so some of its jobs live in
 reusable workflows of their own (`tui-tests.yml`, `gpui-window-captures.yml`),
 called from a stub job:
