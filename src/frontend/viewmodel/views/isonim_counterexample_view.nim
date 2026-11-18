@@ -124,19 +124,19 @@ proc renderCounterexampleSessionTree[R, N](r: R; mdl: CounterexampleSessionModel
         # that disappears at the end of a trace reads as a broken panel.
         tdiv(class = "ct-counterexample-controls",
              `data-ct-counterexample-controls` = "true"):
-          button(class = "ct-counterexample-step-backward",
+          button(class = "ct-button-md-secondary ct-counterexample-step-backward",
                  `data-ct-counterexample-action` = "step-backward",
                  `data-ct-counterexample-enabled` = $mdl.canStepBackward,
                  onclick = handler(hnd.onStepBackward),
                  `aria-label` = "Previous step of this counterexample"):
             text "Step back"
-          button(class = "ct-counterexample-step-forward",
+          button(class = "ct-button-md-secondary ct-counterexample-step-forward",
                  `data-ct-counterexample-action` = "step-forward",
                  `data-ct-counterexample-enabled` = $mdl.canStepForward,
                  onclick = handler(hnd.onStepForward),
                  `aria-label` = "Next step of this counterexample"):
             text "Step"
-          button(class = "ct-counterexample-continue",
+          button(class = "ct-button-md-secondary ct-counterexample-continue",
                  `data-ct-counterexample-action` = "continue",
                  onclick = handler(hnd.onContinue),
                  `aria-label` = "Run to the violated obligation"):
@@ -151,19 +151,23 @@ proc renderCounterexampleSessionTree[R, N](r: R; mdl: CounterexampleSessionModel
                `data-ct-counterexample-loop` = $mdl.currentLoop,
                `data-ct-counterexample-iteration` = $mdl.currentIteration,
                `data-ct-counterexample-iteration-count` = $mdl.iterationCount):
-            button(class = "ct-counterexample-iteration-backward",
+            # The Design System chevrons (button.styl, D-38/D-41), not "‹ ›"
+            # typed as text.  `title` is the one tooltip (D-31).
+            button(class = "ct-button-image-sm-secondary ct-counterexample-iteration-backward",
                    `data-ct-counterexample-action` = "iteration-backward",
                    onclick = handler(hnd.onIterationBackward),
-                   `aria-label` = "Previous loop iteration"):
-              text "‹"
+                   `aria-label` = "Previous loop iteration",
+                   title = "Previous loop iteration"):
+              discard
             span(class = "iteration-label"):
               text "iteration " & $(mdl.currentIteration + 1) & " of " &
                 $mdl.iterationCount
-            button(class = "ct-counterexample-iteration-forward",
+            button(class = "ct-button-image-sm-secondary ct-counterexample-iteration-forward",
                    `data-ct-counterexample-action` = "iteration-forward",
                    onclick = handler(hnd.onIterationForward),
-                   `aria-label` = "Next loop iteration"):
-              text "›"
+                   `aria-label` = "Next loop iteration",
+                   title = "Next loop iteration"):
+              discard
 
         # Deliverable 2, as far as the payload allows it. A mdl binding may
         # carry the span where its variable was declared even when no step

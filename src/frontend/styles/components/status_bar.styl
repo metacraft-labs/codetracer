@@ -247,7 +247,8 @@ NOTIFICATION_STACK_BOTTOM = STATUS_BAR_OUTER_HEIGHT + NOTIFICATION_STACK_GAP
 
     &:hover
       color: colors-ui-text-primary-body
-      background-color: rgba(255, 255, 255, 0.1)
+      // D-40: the list hover in the light theme; white at 10% vanished there.
+      background-color: by-mode(rgba(255, 255, 255, 0.1), colors-ui-surface-primary-secondary-hover)
 
     &.active
       color: colors-ui-text-success-primary
@@ -272,7 +273,7 @@ NOTIFICATION_STACK_BOTTOM = STATUS_BAR_OUTER_HEIGHT + NOTIFICATION_STACK_GAP
       white-space: nowrap
 
       &:hover
-        background-color: rgba(255, 255, 255, 0.1)
+        background-color: by-mode(rgba(255, 255, 255, 0.1), colors-ui-surface-primary-secondary-hover)
 
       &.active
         color: colors-ui-text-success-primary
@@ -1143,6 +1144,9 @@ NOTIFICATION_STACK_BOTTOM = STATUS_BAR_OUTER_HEIGHT + NOTIFICATION_STACK_GAP
 
     #bug-report-title
       margin-left: 10% !important
+      // The shared panel field (D-41) fills its row; match the description box.
+      width: 80%
+      max-width: 80%
 
     textarea
       color: colors-ui-text-primary-body

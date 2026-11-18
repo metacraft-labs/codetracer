@@ -831,7 +831,9 @@ AGENT_BUTTON_TEXT = 0.75rem
 
 .user-wrapper
   background: colors-ui-surface-primary-default !important
-  border-radius: border-border-radius-2xs !important
+  // The token is a bare number (4); without a unit the browser dropped the
+  // declaration and the bubble had square corners.  As session_tabs.styl does.
+  border-radius: unit(border-border-radius-2xs / 16, 'rem') !important
   padding-top: 0.5em !important
   padding-bottom: 0.5em !important
 

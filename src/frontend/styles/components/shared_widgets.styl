@@ -73,14 +73,12 @@ if IS_EXTENSION
       padding-bottom: 0.5rem
       border-bottom: 0.0625rem solid var(--vscode-editorWidget-border)
 
-input::-webkit-input-placeholder
-  color: colors-ui-text-primary-label;
-
-input:-moz-placeholder
-  color: colors-ui-text-primary-label
-
-input::-moz-placeholder
-  color: colors-ui-text-primary-label
+// No placeholder colour here.  A vendor block (`::-webkit-input-placeholder`,
+// `colors-ui-text-primary-label`) used to sit here; Chromium treats it as the
+// same pseudo-element as `::placeholder`, and this file loads after input.styl,
+// so it overrode input.styl's `label-subtle` and every resting placeholder
+// painted in the typed-text colour (#C8C8C8 on #C8C8C8 text).  The one
+// placeholder rule is in input.styl (D-39).
 
 TRACE_LOG_EDITOR_Z_INDEX = 50
 
