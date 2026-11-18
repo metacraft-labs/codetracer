@@ -1461,32 +1461,6 @@
           };
         };
 
-        console = stdenv.mkDerivation {
-          name = "console";
-
-          inherit src;
-
-          nativeBuildInputs = [
-            nim-codetracer
-          ];
-
-          buildPhase = ''
-            ${nim-codetracer.out}/bin/nim2 \
-              -d:ctRepl --debugInfo --lineDir:on --threads:on \
-              --hints:off --warnings:off \
-              -d:chronicles_enabled=off \
-              -d:chronicles_sinks=codetracer_output[notimestamps,file] \
-              -d:chronicles_line_numbers=true \
-              --nimcache:nimcache \
-              --out:./console c src/repl/repl.nim
-          '';
-
-          installPhase = ''
-            mkdir -p $out/bin
-            cp ./console $out/bin/
-          '';
-        };
-
         # because of `/nix/store/-dispatcher/bin/dispatcher`
         # `/nix/store/<hash2>-task_process/bin/task_process`
         # ..
@@ -2415,11 +2389,6 @@
           meta.description =
             "codetracer-tui as a `ct` launcher component: point "
             + "CODETRACER_COMPONENTS_ROOT at $out/components";
-        };
-
-        codetracer-dependency-paths = pkgs.writeTextFile {
-          name = "all-paths.json";
-          text = builtins.toJSON { };
         };
 
         # AppImage-based package for end-user distribution.

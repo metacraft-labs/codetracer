@@ -21,8 +21,6 @@ cd "$(dirname "$0")/../.."
 # name|reason
 exceptions=(
 	"codetracer-appimage|flake package not shipped through CI: AppImages are built by appimage-scripts/ (release.yml), and no release doc or script references the package"
-	"codetracer-dependency-paths|an empty all-paths.json placeholder; nothing builds or ships it"
-	"console|the REPL console; its source, src/repl/repl.nim, no longer exists, so it cannot build"
 	"chromedriver-102|a pinned chromedriver for manual browser testing; referenced only commented out (nix/shells/armShell.nix)"
 	"darwin-lzma-native-clang|a macOS-only build helper: node-modules-derivation takes it only when stdenv.isDarwin"
 	"darwin-lzma-native-cxx|as darwin-lzma-native-clang"
