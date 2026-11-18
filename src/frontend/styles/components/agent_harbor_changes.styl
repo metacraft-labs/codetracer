@@ -1,0 +1,707 @@
+// Agent Harbor Changes panel (isonim_agent_harbor_changes_view.nim): one
+// session's change in four tabs -- Spec Changes, Tests, Implementation
+// Details, Code. A file of its own so its rules stay apart from
+// agent_harbor.styl, which other Agent Harbor work edits (the timeline did
+// the same, agent_harbor_activity.styl).
+//
+// The panel reuses the Agent Harbor panels' parts from agent_harbor.styl --
+// the header strip (`.ah-fleet-head`, `.ah-fleet-section-header`), the
+// centred notices and the error block -- and the VCS panel's changed-file
+// row (vcs.styl `.vcs-file-item`) in its Code tab.
+//
+// Cardless, the agentic panels' calm posture: no border, outline or background around a spec
+// card, a test or a file. Groups are set apart by a small-caps head with a
+// count over a hairline, as the Initiative Progress panel's status groups.
+// An open card carries the focus inset bar at its left (`box-shadow:
+// inset`), never a fill. A state is a word at the row's right with a dot in
+// its colour. Every colour is a design-system role (generated/mapped.styl),
+// its Light value under COLOR_MODE = "Light".
+//
+// The state roles (`.ah-role-*`), the state word, the chips and the shared
+// form parts are defined here and used by the Inbox too
+// (agent_harbor_inbox.styl), which is imported after this file.
+
+AH_CARD_INDENT = 1.25rem        // a card body's indent: under its title, past the fold glyph
+AH_STATE_DOT = 0.4375rem
+
+.agent-harbor-changes
+  height: 100%
+  display: flex
+  flex-direction: column
+  overflow: hidden
+  background: colors-ui-surface-base-panel
+  color: colors-ui-text-primary-body
+  // The tab labels shorten by the panel's own width, not the window's.
+  container-type: inline-size
+  container-name: ah-changes
+
+.ah-changes-body
+  min-height: 0
+
+.ah-changes-notice
+  flex: 1 1 auto
+
+.ah-mono
+  font-family: "SpaceMono", monospace
+
+// ---------------------------------------------------------------------------
+// State roles, shared with the Inbox
+// ---------------------------------------------------------------------------
+// A role's word and its dot: amber, green, red, blue, quiet. `idle` is the
+// hollow ring of a session whose turn ended (agent_harbor.styl `.ah-att-idle`).
+
+.ah-role-warning
+  color: colors-ui-text-warning-primary
+  --ah-role-ink: colors-ui-icon-warning-primary
+
+.ah-role-success
+  color: colors-ui-text-success-primary
+  --ah-role-ink: colors-ui-icon-success-primary
+
+.ah-role-error
+  color: colors-ui-text-error-primary
+  --ah-role-ink: colors-ui-icon-error-primary
+
+.ah-role-info
+  color: colors-ui-text-information-primary
+  --ah-role-ink: colors-ui-icon-information-primary
+
+.ah-role-quiet
+.ah-role-idle
+  color: colors-ui-text-primary-caption
+  --ah-role-ink: by-mode(colors-ui-icon-primary-subtle, colors-ui-icon-primary-default-hover)
+
+// It keeps its whole width: on a line too short for the row's title and the
+// word, the word wraps under the title rather than being cut (at `sidebar`
+// nothing is hidden).
+.ah-state-word
+  display: inline-flex
+  align-items: center
+  gap: 0.3125rem
+  flex: 0 0 auto
+  max-width: 100%
+  min-width: 0
+  margin-left: auto
+  font-size: ah-rem(type-ui-size-caption-md)
+  line-height: ah-rem(type-ui-lineheight-caption-md)
+  white-space: nowrap
+
+.ah-state-dot
+  flex-shrink: 0
+  width: AH_STATE_DOT
+  height: AH_STATE_DOT
+  border-radius: 50%
+  background: var(--ah-role-ink)
+
+.ah-role-idle .ah-state-dot,
+.ah-role-idle.ah-item-mark
+  background: transparent
+  box-shadow: inset 0 0 0 0.09375rem var(--ah-role-ink)
+
+.ah-state-text
+  min-width: 0
+  white-space: nowrap
+  overflow: hidden
+
+// A chip: a small word on the raised ground, in its role's colour.
+.ah-chip
+  flex-shrink: 0
+  display: inline-flex
+  align-items: center
+  height: 1.125rem
+  padding: 0 0.375rem
+  border-radius: 0.25rem
+  background: colors-ui-surface-primary-secondary
+  font-size: ah-rem(type-ui-size-caption-md)
+  white-space: nowrap
+
+// A text field of a form: the panel input's surface and border.
+.ah-text-field
+  display: block
+  width: 100%
+  box-sizing: border-box
+  min-height: INPUT_HEIGHT_MD
+  padding: 0.375rem 0.5rem
+  border: CONTROL_BORDER_WIDTH solid CONTROL_BORDER_COLOR
+  border-radius: 0.375rem
+  background: colors-ui-surface-input-secondary
+  color: colors-ui-text-primary-body
+  font-family: inherit
+  font-size: ah-rem(type-ui-size-body-md)
+  line-height: ah-rem(type-ui-lineheight-body-sm)
+  resize: vertical
+
+  &::placeholder
+    color: colors-ui-text-primary-label-subtle
+
+  &:hover
+    border-color: colors-ui-border-primary-hover
+
+  &:focus-visible
+    outline: 0.0625rem solid colors-ui-border-focus
+    outline-offset: -0.0625rem
+
+  &:disabled
+    border-color: colors-ui-border-disabled
+    background: colors-ui-surface-primary-disabled
+    color: colors-ui-text-primary-disabled
+
+// A compact select on the panel's ground (the milestone, the base, the
+// status filter, the priority).
+.ah-changes-select
+  height: CONTROL_HEIGHT_SM
+  max-width: 100%
+  padding: 0 0.375rem
+  border: CONTROL_BORDER_WIDTH solid CONTROL_BORDER_COLOR
+  border-radius: ah-rem(border-border-radius-control)
+  background: colors-ui-surface-primary-secondary
+  color: colors-ui-text-primary-label
+  font-family: inherit
+  font-size: ah-rem(type-ui-size-label-md)
+
+  &:hover
+    border-color: colors-ui-border-primary-hover
+
+// ---------------------------------------------------------------------------
+// The tab bar
+// ---------------------------------------------------------------------------
+// The VCS diff-toggle row's small toggles (`.ah-fleet-filter`): words on the
+// panel's ground, the active one raised with the action-colour bar under it.
+
+.ah-changes-tabs
+  display: flex
+  flex-shrink: 0
+  gap: 0.125rem
+  padding: 0.25rem PANEL_INSET 0
+  border-bottom: 0.0625rem solid colors-ui-border-secondary
+  min-width: 0
+
+.ah-changes-tab
+  display: inline-flex
+  align-items: center
+  gap: 0.375rem
+  height: 1.75rem
+  padding: 0 0.625rem
+  border: none
+  border-radius: 0.25rem 0.25rem 0 0
+  background: transparent
+  color: colors-ui-text-primary-label
+  font-family: inherit
+  font-size: ah-rem(type-ui-size-label-md)
+  white-space: nowrap
+  cursor: pointer
+
+  &:hover
+    background: colors-ui-surface-primary-secondary-hover
+
+  &:focus-visible
+    outline: 0.0625rem solid colors-ui-border-focus
+    outline-offset: -0.0625rem
+
+.ah-changes-tab-active
+  background: colors-ui-surface-primary-secondary
+  color: colors-ui-text-primary-body
+  box-shadow: inset 0 -0.125rem 0 colors-ui-border-action
+
+.ah-changes-tab-count
+  color: colors-ui-text-primary-caption
+
+.ah-changes-tab-empty .ah-changes-tab-count
+  color: colors-ui-text-primary-disabled
+
+// The full labels; the compact ones at a narrow panel (`sidebar`, 360px).
+.ah-changes-tab-compact
+  display: none
+
+// (Written out: Stylus does not substitute variables inside `@container`.)
+// 30rem: below it the four full labels and their counts do not fit one row.
+@container ah-changes (max-width: 30rem)
+  .ah-changes-tab-full
+    display: none
+
+  .ah-changes-tab-compact
+    display: inline
+
+  .ah-changes-tab
+    padding: 0 0.5rem
+
+.ah-changes-scope
+  display: flex
+  flex-shrink: 0
+  align-items: center
+  gap: 0.5rem
+  padding: 0.375rem PANEL_INSET
+  border-bottom: 0.0625rem solid colors-ui-border-secondary
+
+.ah-changes-content
+  flex: 1 1 auto
+  display: flex
+  flex-direction: column
+  min-height: 0
+  overflow-y: auto
+  overflow-x: hidden
+
+// ---------------------------------------------------------------------------
+// Groups
+// ---------------------------------------------------------------------------
+
+.ah-changes-group
+  flex-shrink: 0
+
+  & + .ah-changes-group
+    margin-top: 0.25rem
+
+// The progress panel's status-group head: small caps, a count, a hairline.
+.ah-changes-group-head
+  display: flex
+  align-items: baseline
+  min-width: 0
+  padding: 0.375rem PANEL_INSET 0.25rem
+  font-size: ah-rem(type-ui-size-label-md)
+  font-weight: 600
+  text-transform: uppercase
+  letter-spacing: 0.03125em
+  color: colors-ui-text-primary-label
+  border-bottom: 0.0625rem solid colors-ui-border-secondary
+  user-select: none
+
+.ah-changes-group-name
+  min-width: 0
+  white-space: nowrap
+  overflow: hidden
+
+.ah-changes-group-count
+  flex-shrink: 0
+  margin-left: 0.375rem
+  font-weight: 400
+  color: colors-ui-text-primary-caption
+
+// ---------------------------------------------------------------------------
+// Spec Changes cards (cardless rows)
+// ---------------------------------------------------------------------------
+
+.ah-spec-card
+  padding: 0.3125rem PANEL_INSET
+
+  &:hover
+    background: colors-ui-surface-primary-secondary-hover
+
+// Open: the focus inset bar, never a fill.
+.ah-card-open
+  box-shadow: inset 0.125rem 0 0 colors-ui-border-action
+
+  &:hover
+    background: transparent
+
+.ah-spec-card-head
+  display: flex
+  flex-wrap: wrap
+  align-items: center
+  gap: 0.125rem 0.375rem
+  min-width: 0
+  min-height: 1.5rem
+  cursor: pointer
+  user-select: none
+
+  &:focus-visible
+    outline: 0.0625rem solid colors-ui-border-focus
+    outline-offset: -0.0625rem
+
+.ah-fold
+  flex-shrink: 0
+  width: 0.875rem
+  color: colors-ui-text-primary-caption
+  font-size: ah-rem(type-ui-size-caption-md)
+
+.ah-spec-card-title
+  flex: 0 1 auto
+  min-width: 0
+  font-size: ah-rem(type-ui-size-body-md)
+  line-height: ah-rem(type-ui-lineheight-body-sm)
+  color: colors-ui-text-primary-body
+  white-space: nowrap
+  overflow: hidden
+
+.ah-origin-badge
+  flex-shrink: 0
+  padding: 0 0.375rem
+  border-radius: 0.25rem
+  background: colors-ui-surface-primary-secondary
+  font-size: ah-rem(type-ui-size-caption-md)
+  color: colors-ui-text-primary-label
+  white-space: nowrap
+
+.ah-spec-card-body
+  display: flex
+  flex-direction: column
+  gap: 0.375rem
+  padding-left: AH_CARD_INDENT
+
+  &:empty
+    display: none
+
+.ah-card-open .ah-spec-card-body
+  padding-top: 0.25rem
+  padding-bottom: 0.375rem
+
+.ah-card-meta
+  display: flex
+  align-items: baseline
+  gap: 0.5rem
+  min-width: 0
+  font-size: ah-rem(type-ui-size-caption-md)
+  line-height: ah-rem(type-ui-lineheight-caption-md)
+  color: colors-ui-text-primary-caption
+
+.ah-card-meta-label
+  flex-shrink: 0
+  font-weight: 600
+  text-transform: uppercase
+  letter-spacing: 0.03125em
+  color: colors-ui-text-primary-label
+
+.ah-card-meta-text
+  min-width: 0
+  word-break: break-word
+
+.ah-card-meta-path
+  min-width: 0
+  white-space: nowrap
+  overflow: hidden
+  font-family: "SpaceMono", monospace
+
+.ah-card-summary
+  font-size: ah-rem(type-ui-size-body-md)
+  line-height: ah-rem(type-ui-lineheight-body-md)
+  color: colors-ui-text-primary-body
+  white-space: pre-wrap
+  word-break: break-word
+
+// Summary ⇄ Diff: the fleet panel's small toggles (`.ah-fleet-filter`), the
+// shown side raised as the VCS panel's active toggle.
+.ah-side-toggle
+  display: inline-flex
+  align-self: flex-start
+  gap: 0.25rem
+
+.ah-side
+  height: CONTROL_HEIGHT_SM
+  display: inline-flex
+  align-items: center
+  padding: 0 0.5rem
+  border: 0.0625rem solid transparent
+  border-radius: ah-rem(border-border-radius-control)
+  background: transparent
+  color: colors-ui-text-primary-label
+  font-family: inherit
+  font-size: ah-rem(type-ui-size-label-md)
+  cursor: pointer
+
+  &:hover
+    background: colors-ui-surface-primary-secondary-hover
+    color: colors-ui-text-primary-body
+
+  &:focus-visible
+    outline: none
+    border-color: colors-ui-border-focus
+
+.ah-side-active
+  background: colors-ui-surface-primary-secondary-hover
+  border-color: colors-ui-border-primary
+  color: colors-ui-text-primary-body
+
+.ah-card-actions
+  display: flex
+  flex-wrap: wrap
+  gap: 0.375rem
+
+  button
+    flex: 0 0 auto
+
+// A form's buttons at the label size the panel's other controls use.
+.ah-card-action,
+.ah-item-action
+  font-size: ah-rem(type-ui-size-label-md)
+
+.ah-request-input
+  display: flex
+  flex-direction: column
+  gap: 0.375rem
+
+.ah-action-status
+  font-size: ah-rem(type-ui-size-caption-md)
+
+// ---------------------------------------------------------------------------
+// A diff's hunks (a spec card's Diff side, a file's diff)
+// ---------------------------------------------------------------------------
+
+.ah-hunks
+  display: flex
+  flex-direction: column
+  min-width: 0
+  overflow-x: auto
+  font-family: "SpaceMono", monospace
+  font-size: ah-rem(type-ui-size-caption-md)
+  line-height: ah-rem(type-ui-lineheight-caption-md)
+
+.ah-hunks-none
+  color: colors-ui-text-primary-caption
+
+.ah-hunk-head
+  padding: 0.125rem 0
+  color: colors-ui-text-information-primary
+  white-space: pre
+
+.ah-hunk-line
+  display: flex
+  white-space: pre
+  color: colors-ui-text-primary-body
+
+.ah-hunk-marker
+  flex-shrink: 0
+  width: 1ch
+
+.ah-hunk-added
+  color: colors-ui-text-success-primary
+
+.ah-hunk-removed
+  color: colors-ui-text-error-primary
+
+.ah-hunk-context
+  color: colors-ui-text-primary-label
+
+// ---------------------------------------------------------------------------
+// Tests and Implementation Details
+// ---------------------------------------------------------------------------
+
+.ah-test-row
+  display: flex
+  flex-direction: column
+  gap: 0.125rem
+  padding: 0.3125rem PANEL_INSET
+
+  &:hover
+    background: colors-ui-surface-primary-secondary-hover
+
+.ah-test-head
+  display: flex
+  flex-wrap: wrap
+  align-items: center
+  gap: 0.125rem 0.5rem
+  min-width: 0
+
+.ah-test-name
+  flex: 0 1 auto
+  min-width: 0
+  font-size: ah-rem(type-ui-size-body-md)
+  line-height: ah-rem(type-ui-lineheight-body-sm)
+  white-space: nowrap
+  overflow: hidden
+
+.ah-test-description
+  font-size: ah-rem(type-ui-size-caption-md)
+  line-height: ah-rem(type-ui-lineheight-caption-md)
+  color: colors-ui-text-primary-label
+  word-break: break-word
+
+// An annotated status (`passing 2026-11-04 (review) …`): the word at the
+// right, the annotation quietly under the description.
+.ah-test-annotation
+  font-size: ah-rem(type-ui-size-caption-md)
+  line-height: ah-rem(type-ui-lineheight-caption-md)
+  color: colors-ui-text-primary-caption
+  word-break: break-word
+
+.ah-test-file
+  display: flex
+  min-width: 0
+
+.ah-file-link
+  min-width: 0
+  max-width: 100%
+  font-size: ah-rem(type-ui-size-caption-md)
+  line-height: ah-rem(type-ui-lineheight-caption-md)
+  color: colors-ui-text-information-primary
+  white-space: nowrap
+  overflow: hidden
+  cursor: pointer
+
+  &:hover
+    text-decoration: underline
+
+.ah-details-notes
+  padding: 0.375rem PANEL_INSET
+  font-size: ah-rem(type-ui-size-body-md)
+  line-height: ah-rem(type-ui-lineheight-body-md)
+  color: colors-ui-text-primary-body
+  // As written: an Org list stays a list, prose wraps.
+  white-space: pre-wrap
+  word-break: break-word
+
+.ah-details-label
+  padding: 0.25rem PANEL_INSET 0.125rem
+  font-size: ah-rem(type-ui-size-label-md)
+  font-weight: 600
+  text-transform: uppercase
+  letter-spacing: 0.03125em
+  color: colors-ui-text-primary-label
+
+.ah-key-file
+  display: flex
+  align-items: baseline
+  gap: 0.5rem
+  min-width: 0
+  padding: 0.125rem PANEL_INSET
+
+.ah-key-file-purpose
+  min-width: 0
+  font-size: ah-rem(type-ui-size-caption-md)
+  color: colors-ui-text-primary-caption
+
+// ---------------------------------------------------------------------------
+// Code: the VCS panel's rows
+// ---------------------------------------------------------------------------
+
+.ah-code-head
+  display: flex
+  flex-wrap: wrap
+  align-items: center
+  gap: 0.375rem 0.5rem
+  padding: 0.375rem PANEL_INSET
+
+.ah-code-summary
+  order: 2
+  margin-left: auto
+  font-size: ah-rem(type-ui-size-caption-md)
+  color: colors-ui-text-primary-caption
+  white-space: nowrap
+
+.ah-base-label
+  font-size: ah-rem(type-ui-size-label-md)
+  color: colors-ui-text-primary-label
+
+.ah-code-toolbar
+  display: flex
+  align-items: center
+  gap: 0.5rem
+  padding: 0 PANEL_INSET 0.375rem
+  border-bottom: 0.0625rem solid colors-ui-border-secondary
+
+.ah-code-search
+  flex: 1 1 auto
+  min-width: 0
+
+.ah-status-filter
+  flex-shrink: 0
+
+.ah-code-files
+  display: flex
+  flex-direction: column
+
+.ah-code-file
+  display: flex
+  flex-direction: column
+
+// The VCS row, drawn whole; its name cell holds the repository path, cut in
+// its middle (`data-ah-cut="path"`), so it keeps no CSS ellipsis.
+.ah-code-file .vcs-file-item
+  .vcs-file-name
+    flex: 1 1 auto
+    min-width: 0
+    white-space: nowrap
+    overflow: hidden
+    text-overflow: clip
+
+  .vcs-file-stats
+    order: 3
+
+  .ah-file-marks
+    order: 2
+
+  .vcs-file-diff-btn
+    order: 4
+
+// The selected file: the focus inset bar, as an open card.
+.ah-code-file-selected
+  box-shadow: inset 0.125rem 0 0 colors-ui-border-action
+
+.ah-file-marks
+  display: inline-flex
+  flex-shrink: 0
+  align-items: center
+  gap: 0.25rem
+
+.ah-origin-mark,
+.ah-key-mark,
+.ah-binary-mark
+  padding: 0 0.25rem
+  border-radius: 0.1875rem
+  background: colors-ui-surface-primary-secondary
+  font-size: ah-rem(type-ui-size-caption-sm)
+  line-height: 1rem
+  color: colors-ui-text-primary-label
+  white-space: nowrap
+
+.ah-origin-uncommitted,
+.ah-origin-both
+  color: colors-ui-text-warning-primary
+
+.ah-key-mark
+  color: colors-ui-text-information-primary
+
+.ah-renamed-from
+  display: flex
+  align-items: baseline
+  gap: 0.375rem
+  min-width: 0
+  padding: 0 PANEL_INSET 0.25rem (PANEL_INSET + AH_CARD_INDENT)
+  font-size: ah-rem(type-ui-size-caption-md)
+  color: colors-ui-text-primary-caption
+
+.ah-renamed-path
+  min-width: 0
+  white-space: nowrap
+  overflow: hidden
+  font-family: "SpaceMono", monospace
+
+.ah-file-diff
+  display: flex
+  flex-direction: column
+  gap: 0.375rem
+  padding: 0.25rem PANEL_INSET 0.5rem (PANEL_INSET + AH_CARD_INDENT)
+
+.ah-file-nav
+  display: flex
+  align-items: center
+  gap: 0.375rem
+
+.ah-file-position
+  font-size: ah-rem(type-ui-size-caption-md)
+  color: colors-ui-text-primary-caption
+
+.ah-file-step
+  height: CONTROL_HEIGHT_SM
+  min-width: CONTROL_HEIGHT_SM
+  border: CONTROL_BORDER_WIDTH solid CONTROL_BORDER_COLOR
+  border-radius: ah-rem(border-border-radius-control)
+  background: colors-ui-surface-primary-secondary
+  color: colors-ui-text-primary-label
+  font-family: inherit
+  cursor: pointer
+
+  &:hover
+    border-color: colors-ui-border-primary-hover
+
+.ah-file-open,
+.ah-load-diff
+  font-size: ah-rem(type-ui-size-label-md)
+
+.ah-file-open
+  margin-left: auto
+
+.ah-load-diff
+  align-self: flex-start
+
+.ah-file-diff-note
+  font-size: ah-rem(type-ui-size-caption-md)
+  color: colors-ui-text-primary-caption
