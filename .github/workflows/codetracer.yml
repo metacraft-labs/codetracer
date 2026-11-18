@@ -1403,9 +1403,11 @@ jobs:
   lint-bash:
     runs-on: [self-hosted, linux, x64]  # CIP-5 nix job; H4: routed to GPU host gpu-server-001
     # 200-run window (2026-09-03..05): 22 green, median 2.8m, max 3.1m.
-    # 15m is ~5x the slowest green; the floor this file uses for a job whose
-    # whole body is one linter and whose variance is runner setup, not work.
-    timeout-minutes: 15
+    # No longer one linter: ci/lint/bash.sh also runs ~46 contract suites.
+    # Run 44269676398 took 14.5m (6.5m setup, ~8m of suites); on 44379188088
+    # a garm runner spent 9.5m on setup and the 15m limit cut the suites off
+    # mid-way. 30m is ~2x the slowest measured body plus setup.
+    timeout-minutes: 30
     steps:
       - name: Mint installation token for cross-repo sibling access
         # GitHub free plan restricts org-level secrets with visibility
