@@ -41,6 +41,7 @@ class SpecCheckoutPaths(unittest.TestCase):
         self.env["CODETRACER_HOME"] = str(self.workspace / "state")
         for rel in (BASELINE, Path("tools/check-test-assertions.sh"),
                     Path("ci/lib/harness_guard.py"),
+                    Path("ci/lib/mutation_views.py"),
                     UNIT / "plat33-collab-mutation-control.sha256",
                     *(value[0] for value in HARNESSES.values())):
             target = self.repo / rel
