@@ -175,11 +175,11 @@ src/frontend/tui/tests/plat70g-multiclick-mutation-control.sha256	src/frontend/l
 # run-plat62-constraints-mutations.py was re-graded at 25ef4c6b12; since then
 # The desktop windows change (a second window shows its session) edits these
 # digested subjects; the harnesses owe a re-grade for these bytes.
-src/frontend/tui/tests/build-residuals-mutation-control.sha256	src/frontend/ui_js.nim	3ede9f3c111db3d01340561893b2b1253c83ed7c5b3b690475d0a70b67c5acac	4528ed56f9567b4736e575bd0ed2725773aead94c7cf743a51fb775a9b82e4b7
-src/frontend/tui/tests/plat53-test-results-mutation-control.sha256	src/frontend/ui_js.nim	3ede9f3c111db3d01340561893b2b1253c83ed7c5b3b690475d0a70b67c5acac	4528ed56f9567b4736e575bd0ed2725773aead94c7cf743a51fb775a9b82e4b7
+src/frontend/tui/tests/build-residuals-mutation-control.sha256	src/frontend/ui_js.nim	3ede9f3c111db3d01340561893b2b1253c83ed7c5b3b690475d0a70b67c5acac	05e93488175750566f43c1f2bae41b0dbf60b7c81ac3143be12aa261c4e8f10c
+src/frontend/tui/tests/plat53-test-results-mutation-control.sha256	src/frontend/ui_js.nim	3ede9f3c111db3d01340561893b2b1253c83ed7c5b3b690475d0a70b67c5acac	05e93488175750566f43c1f2bae41b0dbf60b7c81ac3143be12aa261c4e8f10c
 src/frontend/tui/tests/plat53-test-results-mutation-control.sha256	src/frontend/index/traces.nim	cda2e63aac9f69017e71b603b3f5edc1890cf1ff1cff28bd368044a20daf25b6	6f9ce5f953d4fc4d9de79d679a901cbbcb30a3319623f14d38e219f70deb3663
-src/frontend/tui/tests/plat57-find-in-files-mutation-control.sha256	src/frontend/index/ipc_utils.nim	2acc5c524b519326cd294dfc9b9ae7738885e60c230a967b746bdbb5970dfc45	be32903921826cd6e1e0470d79ecc1051bd27c296d86ef16a1bc2f8a690021ef
-src/frontend/tui/tests/plat70d-grep-mutation-control.sha256	src/frontend/ui_js.nim	3ede9f3c111db3d01340561893b2b1253c83ed7c5b3b690475d0a70b67c5acac	4528ed56f9567b4736e575bd0ed2725773aead94c7cf743a51fb775a9b82e4b7
+src/frontend/tui/tests/plat57-find-in-files-mutation-control.sha256	src/frontend/index/ipc_utils.nim	2acc5c524b519326cd294dfc9b9ae7738885e60c230a967b746bdbb5970dfc45	a53224d20b1f09892a1cc716844346f8bf784895a7cc04e20928647b1a24f259
+src/frontend/tui/tests/plat70d-grep-mutation-control.sha256	src/frontend/ui_js.nim	3ede9f3c111db3d01340561893b2b1253c83ed7c5b3b690475d0a70b67c5acac	05e93488175750566f43c1f2bae41b0dbf60b7c81ac3143be12aa261c4e8f10c
 src/frontend/viewmodel/tests/unit/plat34-front-end-mutation-control.sha256	ci/lib/test-lane-files.sh	44699b1d86c3a974c29d8b12c349689e65fb2d357e232cbaad494a98f6da8b2a	166f483f99e6679e34a4fcbe74b96920fbd89561316a7f8a025a8e6c745c450c
 # plat70f was graded at 5e672b6611 (agents 781807611e and the batch before it);
 # c79bee58b1 (the GPUI status line's note, a cell's tooltip off a right-click
@@ -191,7 +191,7 @@ src/frontend/viewmodel/tests/unit/plat34-front-end-mutation-control.sha256	ci/li
 # 96daf956e5 (a file opened in a second window, host-page clients) moved the
 # Playwright binding under its record. A re-grade of the arms whose needles
 # sit in it is owed.
-src/tests/scenarios/plat66-pack-mutation-control.sha256	src/tests/scenarios/bindings/playwright/codetracer-binding.ts	dac9e35953b0d93636c2284d9c9a858c2bba982b92e9311b0f41fb666e6879c0	8ccca3c61e3613acfd33944385af51bc6ec7c72ad3ebf38a9948042267cc9c36
+src/tests/scenarios/plat66-pack-mutation-control.sha256	src/tests/scenarios/bindings/playwright/codetracer-binding.ts	dac9e35953b0d93636c2284d9c9a858c2bba982b92e9311b0f41fb666e6879c0	e5b5fc4defcd8607d16baa17736cb782bb93f4c7b589735aad5f315cdf818c78
 # plat51: graded at f1788c93b4; 8f8906730e  moved src/db-
 # backend/src/dap_handler.rs after the grade. Re-grade the arms whose needles
 # sit in them.
