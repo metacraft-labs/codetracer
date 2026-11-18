@@ -2,16 +2,17 @@ scenario: 1
 name: nim-views/generated-c-follows-the-nim-stop
 pack: codetracer
 summary: >-
-  On an rr recording of the Nim sudoku solver, the editor shows main.nim at
+  On an MCR recording of the Nim sudoku solver, the editor shows main.nim at
   the stop (line 60); View › View Generated C Source opens the generated C in
   the Low Level Code pane with the row of line 60 (`nimln_(60)`) marked, and
   a Next moves the Nim stop and the marked C row together (line 72). (Reverse
-  Next back is not here: it never completes on this recording; codetracer-pm
-  issue 2026-11-15-reverse-next-never-completes-on-an-rr-nim-recording.)
+  Next back is not here: MCR's stage0 replay answers reverse execution with E0C, codetracer-pm
+  milestones/MCR-Debug-Server.status.org, Linux row; on rr it is
+  nim-views/reverse-next-returns-to-the-nim-line.yaml.)
 
 stage:
   - use: record-program
-    with: { program: nim_sudoku_solver/main.nim, backend: rr }
+    with: { program: nim_sudoku_solver/main.nim, backend: mcr }
   - use: open-recording
 
 steps:

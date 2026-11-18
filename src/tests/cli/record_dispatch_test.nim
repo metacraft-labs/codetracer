@@ -747,6 +747,35 @@ suite "one language, two recorders: .nim versus .nims":
 # The assessment refuses what it may not decide (rule K2)
 # ---------------------------------------------------------------------------
 
+suite "an explicit --backend for a compiled .nim is honoured":
+  ## A `.nim` is recorded with `ct-mcr` by default; `--backend rr` must record
+  ## it with rr instead, natively (codetracer-pm issue 2026-11-15 "Reverse
+  ## Next never completes on an rr recording of a Nim program": it was recorded
+  ## with MCR, whose replay refuses reverse execution).
+
+  let source = selectorOfLang(LangNim)
+
+  test "--backend rr takes a .nim off the ct-mcr row":
+    let sel = source.honouringBackend("rr")
+    check sel.approach == raRr
+    check sel.language == slNim and sel.targetIsa == tiNative
+    # Not declared by the table: `record.nim` builds and records it natively.
+    check not recorderToolFor(sel).isDeclared
+    check recorderToolFor(source).isDeclared
+
+  test "--backend ttd likewise; none, mcr or another value keep MCR":
+    check source.honouringBackend("TTD ").approach == raTtd
+    check source.honouringBackend("").approach == raMcr
+    check source.honouringBackend("mcr").approach == raMcr
+    check source.honouringBackend("db").approach == raMcr
+
+  test "a selector that is not a compiled .nim is unchanged":
+    let scriptFile = getTempDir() / "ct-dispatch-backend-b.nims"
+    writeFile(scriptFile, "echo 1\n")
+    defer: removeFile(scriptFile)
+    let script = assessedSelector(scriptFile, LangNim)
+    check script.honouringBackend("rr") == script
+
 suite "the assessment is loud about two facts it may not choose between":
 
   let scratch = getTempDir() / "ct-dispatch-test-ambiguous"

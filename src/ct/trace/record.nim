@@ -376,7 +376,8 @@ proc record*(lang: string,
     for line in assessment.diagnostics:
       stderr.writeLine("error: " & line)
     quit(1)
-  let recorderSel = recorderSelectorFor(assessment, detectedLang)
+  # `--backend rr` / `ttd` for a compiled `.nim` (`honouringBackend`).
+  let recorderSel = recorderSelectorFor(assessment, detectedLang).honouringBackend(recordBackend)
   let viaDispatchTable = recorderToolFor(recorderSel).isDeclared
   debugPrint "assessment: kind=" & assessment.kind.specificKinds.join(",") &
     " family=" & token(assessment.kind.family) &
@@ -544,10 +545,26 @@ proc record*(lang: string,
       # Ensure the output folder is passed to the recorder after we create it.
       pargs.add("-o")
       pargs.add(outputFolderValue)
+    elif detectedLang == LangNim and nimcachePath.len == 0:
+      # A named output folder keeps the build's nimcache too: its macro
+      # source maps are copied out of it below.
+      createDir(outputFolderValue)
+      nimcachePath = outputFolderValue / "nimcache"
     if isExistingExecutable(program):
       programToRecord = program
     else:
       programToRecord = build(program, "", nimcachePath)
+      # The Nim compiler's macro source maps belong at the recording's root,
+      # where the replay reads them (`macro_sourcemap.rs`); the MCR route
+      # copies them the same way (`db_backend_record.copyMacroSourcemaps`).
+      # Without them an rr recording of a Nim program answers every Toggle
+      # Macro Expansion with nothing.
+      if detectedLang == LangNim and nimcachePath.len > 0 and dirExists(nimcachePath):
+        for (kind, source) in walkDir(nimcachePath):
+          let name = source.extractFilename
+          if kind == pcFile and name.startsWith("macro_sourcemap") and
+              name.endsWith(".json"):
+            copyFile(source, outputFolderValue / name)
 
   pargs.add(programToRecord)
   if args.len != 0:

@@ -2,17 +2,18 @@ scenario: 1
 name: nim-views/disassembly-steps-by-instruction
 pack: codetracer
 summary: >-
-  On an rr recording of the Nim sudoku solver, View › View Disassembly opens
+  On an MCR recording of the Nim sudoku solver, View › View Disassembly opens
   the stop's machine code in the Low Level Code pane under "Originating
   address: 0x…", grouped by the generated C's lines, with the replay at the
   first instruction of line 60's C (`movq $0x3c, -0x100(%rbp)`); with the
   listing focused, F10 steps one instruction forward. (Shift+F10
-  back is not here: it leaves the function; codetracer-pm issue
-  2026-11-14-desktop-low-level-code-reverse-instruction-step-leaves-the-function.)
+  back is not here: MCR's stage0 replay answers reverse execution with E0C,
+  codetracer-pm milestones/MCR-Debug-Server.status.org, Linux row; on rr it
+  is low-level-code/plat60-native-low-level-code.yaml.)
 
 stage:
   - use: record-program
-    with: { program: nim_sudoku_solver/main.nim, backend: rr }
+    with: { program: nim_sudoku_solver/main.nim, backend: mcr }
   - use: open-recording
 
 steps:
