@@ -16,7 +16,14 @@ upgraded_config_file=$(bash "$upgraded_installer" --config-file)
 }
 export REPROBUILD_REPRO
 REPROBUILD_REPRO=$(bash "$installer" --repro-bin)
-scratch=$(mktemp -d)
+# Not under /tmp on a CI runner: the NixOS github-runner service runs with
+# PrivateTmp, so an indirect GC root this test registers for a link under the
+# job's /tmp points at a path the Nix daemon, outside that namespace, cannot
+# see, and `nix-store --query --roots` omits it ("new shared hook configuration
+# is not rooted by the migrated worktree", lint-nix on gpu-server-002-mcl-001,
+# run 44269676398). $RUNNER_TEMP is in the runner's work directory, which both
+# sides see.
+scratch=$(mktemp -d -p "${RUNNER_TEMP:-${TMPDIR:-/tmp}}")
 trap 'rm -rf "${scratch:?}"' EXIT
 export GIT_CONFIG_GLOBAL="$scratch/gitconfig" GIT_CONFIG_NOSYSTEM=1
 export PRE_COMMIT_HOME="$scratch/pre-commit-home"
