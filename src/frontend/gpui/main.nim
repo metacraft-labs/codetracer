@@ -8132,6 +8132,13 @@ var gArmedTick = (due: -2'i64, vcs: false)
 proc armHoverTick() =
   ## Wake the loop when the hover machine has something due (a preview, a
   ## dismissal) — the shim's one tick, shared with the VCS refresh.
+  # The gesture trace names the tick each arming chose, so a pane that stops
+  # being pumped (a shell's output never drawn) shows which one took over.
+  let armedBefore = gArmedTick
+  defer:
+    if gArmedTick != armedBefore:
+      traceGesture("tick armed " & $gArmedTick.due &
+                   (if shellLive(): " shell live" else: ""))
   var due = gAutoHide.nextDueMs
   # PLAT-70 Part B: and a truncated cell's tooltip, on the same tick.
   let cellDue = gCellHover.dueMs
