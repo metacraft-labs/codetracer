@@ -159,6 +159,14 @@ KNOWN_VIOLATIONS=(
 	# so the surface stays enumerated; scenario 1b removes it automatically the
 	# day the dependency stops linking osproc.
 	"src/frontend/viewmodel/viewmodels/agentic_session_vm.nim|transitively imports nim_agents (via agent_service), which links std/osproc to spawn agent processes. Its own direct host calls were migrated to the facade."
+	# The session activity timeline's shared rules and its web view make no
+	# host call of their own. What reaches the host is transitive and in other
+	# repositories: `SessionTimelineVM` (nim-agents-isonim-viewmodels) folds
+	# wire events through nim-agents' `activity_groups`, which imports the
+	# Agent Harbor client (`nim_agent_harbor`), and that package's native
+	# transport links std/os, std/httpclient and std/asyncdispatch.
+	"src/frontend/viewmodel/views/agent_harbor_activity_words.nim|transitively imports nim_agent_harbor's native transport (std/os, std/httpclient) through SessionTimelineVM and nim-agents' activity_groups; makes no host call of its own."
+	"src/frontend/viewmodel/views/isonim_agent_harbor_session_activity_view.nim|transitively imports nim_agent_harbor's native transport (std/os, std/httpclient) through SessionTimelineVM and nim-agents' activity_groups; makes no host call of its own."
 )
 
 is_known_violation() {

@@ -37,7 +37,7 @@
 ##     previous and next named moment), redrawn as the host redraws it
 ##     (`idle`); and the story host itself, spawned in a real pty with
 ##     `--moment=<name>` for every named moment, at the laptop and sidebar
-##     sizes (`ah_tui_stories.TuiSizes`) in both colour modes, its screen
+##     sizes (`ah_tui_stories.sizesOf`) in both colour modes, its screen
 ##     compared cell by cell (glyph, ink and ground) with the in-process
 ##     drawing at that moment.
 ##
@@ -128,7 +128,8 @@ import ../../../gpui/agent_harbor/ah_stories
 import ../../../gpui/agent_harbor/ah_playback_bar
 import ../../../viewmodel/views/[isonim_agent_harbor_session_tabs_view,
   isonim_agent_harbor_initiatives_view, isonim_agent_harbor_initiative_tabs_view,
-  isonim_agent_harbor_fleet_view, isonim_agent_harbor_playback_view]
+  isonim_agent_harbor_fleet_view, isonim_agent_harbor_playback_view,
+  isonim_agent_harbor_session_activity_view]
 import ../../../viewmodel/input/element_press
 import ../../../viewmodel/keymap/[base_keymaps, context_keys, editing_keymap,
                                   keymap_router, scope_path]
@@ -141,10 +142,10 @@ const
   LaptopH = 900
   LaptopCols = 180
   LaptopRows = 56
-  MinimumPlaybackStories = 6
+  MinimumPlaybackStories = 8
     ## One per P2a surface: the session tab strip, the session list, the
     ## initiative tab bar, the Initiatives and Initiative Progress panels and
-    ## the fleet list.
+    ## the fleet list; and the session activity timeline's two (CTF-P2b).
 
 let captureOut = getEnv("CTF_P1C_TUI_OUT")
   ## Where the real-terminal test writes its screens; empty: nowhere.
@@ -193,6 +194,13 @@ proc stateMark(label: string): string =
   while rest.len > 0 and rest[0] in Digits: rest = rest[1 .. ^1]
   rest = rest.strip
   if rest.len > 0: " marked " & rest else: ""
+
+proc timelineLineFacts(kind, text, role, expanded, state: string): seq[string] =
+  ## One timeline line as facts: its kind, its text, the role of its text
+  ## and its state; and, for a line that is open, `open | <text>`.
+  result.add "line " & kind & " | " & text & " <" & role & ">" &
+             (if state.len > 0: " {" & state & "}" else: "")
+  if expanded == "true": result.add "open | " & text
 
 proc drawnFacts[N](view: N; surface: string): seq[string] =
   ## The facts a GPUI or terminal drawing of `surface` shows, in drawing
@@ -253,6 +261,12 @@ proc drawnFacts[N](view: N; surface: string): seq[string] =
       # reason once, as the failure (never again as an activity line).
       for f in row.all("failure"): result.add "failure " & f.attr("failure")
       for a in row.all("activity"): result.add "activity " & a.attr("activity")
+  of "agent-harbor-session-activity":
+    result.add "status " & view.attr("session-status")
+    for n in view.all("notice"): result.add "notice " & n.attr("notice")
+    for l in view.all("line"):
+      result.add timelineLineFacts(l.attr("line-kind"), l.attr("text"), l.attr("role"),
+                                   l.attr("expanded"), l.attr("state"))
   else: result.add "no reading for surface " & surface
 
 proc barFacts[N](root: N): string =
@@ -365,6 +379,17 @@ proc webFacts(view: MockNode; surface: string): seq[string] =
                  row.textOf("ah-fleet-status-label") & " [" & row.tokenAfter("ah-fleet-cat-") & "]"
       for f in row.byClass("ah-fleet-row-failure"): result.add "failure " & f.textContent
       for a in row.byClass("ah-fleet-activity-line"): result.add "activity " & a.textContent
+  of "agent-harbor-session-activity":
+    let a = proc(n: MockNode; name: string): string =
+      if n.attributes.hasKey(name): n.attributes[name] else: ""
+    let panel = view.byClass("agent-harbor-activity")
+    result.add "status " & (if panel.len > 0: panel[0].a("data-ah-session-status") else: "")
+    for n in view.byClass("ah-activity-notice"): result.add "notice " & n.a("data-ah-notice")
+    for n in view.byClass("ah-activity-error"): result.add "notice " & n.a("data-ah-notice")
+    for l in view.byClass("ah-activity-line"):
+      result.add timelineLineFacts(l.a("data-ah-line-kind"), l.a("data-ah-text"),
+                                   l.a("data-ah-role"), l.a("data-ah-expanded"),
+                                   l.a("data-ah-state"))
   else: result.add "no reading for surface " & surface
 
 proc webBarFacts(bar: MockNode): string =
@@ -431,6 +456,10 @@ proc mountWeb(story: CodeTracerStory; clock: ClockBase; moment = "";
     of "agent-harbor-fleet":
       let vm = createFleetStoryVM(story.fixture, pb)
       m.view = renderAgentHarborFleetPanel[MockRenderer, MockNode](r, vm)
+      disposeVm = proc() = vm.dispose()
+    of "agent-harbor-session-activity":
+      let vm = createSessionActivityStoryVM(story.fixture, pb)
+      m.view = renderAgentHarborSessionActivity[MockRenderer, MockNode](r, vm)
       disposeVm = proc() = vm.dispose()
     else: raise newException(ValueError, "no web view for " & story.surface)
     m.bar = renderAgentHarborPlaybackBar[MockRenderer, MockNode](r, pb)
@@ -537,6 +566,10 @@ const
   Config = "Answer the question about the config format"
   Bench = "Benchmark route cache reads on the new layer"
   Dot = " \xC2\xB7 "
+  Instruction = "Add jitter to the upload client's retries, so clients that fail " &
+    "together do not retry together."
+  Pipeline = "pytest -q | tee test.log | tail -n 5"
+  Question = "Use full jitter or equal jitter for the retry delay?"
 
 type SpotCheck = tuple[surface, moment: string; facts: seq[string]]
 
@@ -621,7 +654,43 @@ let SpotChecks: seq[SpotCheck] = @[
     "activity assistant: Reads are three times faster on the new layer.",
     "activity assistant: The config format is TOML.",
     "!activity Asked a single-choice question"]),
-  ("agent-harbor-fleet", "port-completes", @["row " & Port & " | completed [ended]"])]
+  ("agent-harbor-fleet", "port-completes", @["row " & Port & " | completed [ended]"]),
+  # The session activity timeline over session-run (CTF-P2b): the jitter
+  # session's events, one line or one group each; the logging session's
+  # events never show. Before the instruction the session runs with no
+  # event; the reads, searches, commands and edits group from their second
+  # of a kind, the thoughts and the model request between them inside the
+  # group; the second command runs, then fails with exit 1 (a group counts
+  # it and does not break); the question waits in the warning role until
+  # the operator's answer starts a second turn; the stop hook's three waits
+  # are one line; the session completes with its summary.
+  ("agent-harbor-session-activity", "", @["status running", "notice empty"]),
+  ("agent-harbor-session-activity", "instruction", @[
+    "line turn | " & Instruction & " <label>"]),
+  ("agent-harbor-session-activity", "reads-grouped", @[
+    "line group | Read 4 files <body>", "!line item | Read src/upload/client.py <body>"]),
+  ("agent-harbor-session-activity", "searches-grouped", @[
+    "line group | Read 4 files <body>", "line group | Searched 3 times <body>"]),
+  ("agent-harbor-session-activity", "command-running", @[
+    "line group | Ran 2 shell commands Ran " & Pipeline & " <body> {running}"]),
+  ("agent-harbor-session-activity", "command-fails", @[
+    "line group | Ran 2 shell commands (1 failed) <body> {failed}",
+    "!line group | Ran 2 shell commands Ran " & Pipeline & " <body> {running}"]),
+  ("agent-harbor-session-activity", "agent-asks", @["status needs input",
+    "line item | " & Question & " <warning>"]),
+  ("agent-harbor-session-activity", "answered", @["status running",
+    "line item | " & Question & " <body>", "line turn | Full jitter. <label>",
+    "line item | Resumed by operator <quiet>"]),
+  ("agent-harbor-session-activity", "edits-grouped", @[
+    "line group | Edited 3 files +40 \xE2\x88\x9212 <body>"]),
+  ("agent-harbor-session-activity", "hook-repeats", @["status needs input",
+    "line group | Waiting for input (claude stop hook) \xC3\x973 <quiet>",
+    "line item | Plan updated: 3 steps, 2 done, 1 in progress <body>"]),
+  ("agent-harbor-session-activity", "agent-replies", @["status running",
+    "line item | The retry client backs off with full jitter; 18 tests pass. <body>",
+    "!line item | Read src/upload/log.py <body>"]),
+  ("agent-harbor-session-activity", "session-completes", @["status completed",
+    "line item | Status: completed Retries now wait a random time up to the exponential cap. <ended>"])]
 
 proc momentName(moment: string): string =
   if moment.len == 0: "the first frame" else: moment
@@ -641,6 +710,7 @@ const
   Fleet = "agent-harbor-fleet"
   Bar = "agent-harbor-initiative-tabs"
   Progress = "agent-harbor-initiative-progress"
+  Activity = "agent-harbor-session-activity"
 
 let MomentChanges: seq[tuple[moment: string; surfaces: seq[string]]] = @[
   # front-ends: a session's state moves its tab, its row in the list and in
@@ -673,7 +743,22 @@ let MomentChanges: seq[tuple[moment: string; surfaces: seq[string]]] = @[
   ("queue-done", @[Bar, Progress]),
   ("recording-reloaded", @[Bar]),
   ("plan-done", @[Bar, Progress]),
-  ("session-ends", @[Bar])]
+  ("session-ends", @[Bar]),
+  # session-run: every moment is an event of the session in view, which its
+  # timeline draws (a line, a group's count, a group's failed or running
+  # mark, the question's role, the header's status); the other session's
+  # events interleave and name no moment.
+  ("instruction", @[Activity]),
+  ("reads-grouped", @[Activity]),
+  ("searches-grouped", @[Activity]),
+  ("command-running", @[Activity]),
+  ("command-fails", @[Activity]),
+  ("agent-asks", @[Activity]),
+  ("answered", @[Activity]),
+  ("edits-grouped", @[Activity]),
+  ("hook-repeats", @[Activity]),
+  ("agent-replies", @[Activity]),
+  ("session-completes", @[Activity])]
 
 proc changesOf(moment: string): seq[string] =
   for c in MomentChanges:
@@ -939,14 +1024,15 @@ suite "CTF-P1c: the three hosts agree at every named moment":
       ## The first frame and each of the story's moments, at every size and
       ## in both modes.
     var written = 0
-    var playback = 0
+    var firstFrames = 0
+      ## The first frames shown (no capture is written of one).
     for story in playbackStories():
-      inc playback
+      firstFrames += sizesOf(story.surface).len * 2
       let id = storybookId(section, story)
       let names = storyMomentNames(story.surface, story.fixture)
-      expectedShown += (names.len + 1) * TuiSizes.len * 2
+      expectedShown += (names.len + 1) * sizesOf(story.surface).len * 2
       for name in @[""] & names:
-        for (sizeName, cols, rows) in TuiSizes:
+        for (sizeName, cols, rows) in sizesOf(story.surface):
           for mode in [dmDark, dmLight]:
             let at = id & " at " & momentName(name) & " @ " & sizeName & "/" & themeOf(mode)
             let m = mountStory(story, cols, rows, mode, newTestClock(), name)
@@ -977,7 +1063,7 @@ suite "CTF-P1c: the three hosts agree at every named moment":
     ck shown >= MinimumPlaybackStories * 5 * TuiSizes.len * 2
     if captureOut.len > 0:
       # One capture per story, named moment, size and mode, none skipped.
-      ck written == (shown + failures.len) - playback * TuiSizes.len * 2
+      ck written == (shown + failures.len) - firstFrames
       echo "  wrote ", written, " terminal captures at named moments to ", captureOut
 
   test "the story host's keys play and seek on a real terminal":

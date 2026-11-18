@@ -131,7 +131,9 @@ suite "CTF-P1b: the GPUI captures lay the stories out as the web does":
     echo "CTF-P1b layout: ", judgements.len - failing.len, " of ", judgements.len,
          " captures within the tolerance; report in ", reportDir / "report.md"
     for f in failing: echo "  FAIL ", f
-    check expected.len == section.stories.len * Sizes.len * Themes.len
+    var wanted = 0
+    for story in section.stories: wanted += sizesOf(story).len * Themes.len
+    check expected.len == wanted
     check failing.len == 0
 
 suite "CTF-P1b: the layout judge fails what it must (negative controls)":

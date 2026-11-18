@@ -1,0 +1,56 @@
+ Agent Activity  ⚲ ✕
+ running                                                                                                                                                                 Connected
+ › Run the checks and show me what ran.
+ ▾ Ran 5 shell commands (1 failed)
+   ▾ Ran pytest -q tests/test_backoff.py
+       Exit code: 0
+       Arguments: {"command":"pytest -q tests/test_backoff.py"}                                                                                                                Copy
+       6 passed in 0.4s                                                                                                                                                        Copy
+     ▸ Command trace: 1 process
+   ▾ Ran pytest -q | tee test.log | tail -n 5 exit 1
+       Exit code: 1
+       Arguments: {"command":"pytest -q | tee test.log | tail -n 5"}                                                                                                           Copy
+       1 failed, 17 passed                                                                                                                                                     Copy
+     ▾ Command trace: 3 processes, stage 1 failed
+         pytest -q                                                                                                                                                             Copy
+         pid 6202 · parent 6201 · exit 1 · 0.0 s to 14.2 s · /usr/bin/python3 · /work/upload-client
+         FAILED tests/test_client.py::test_retry_waits_with_jitter                                                                                                             Copy
+         AssertionError: delay 0.0 not in (0.0, 2.0]                                                                                                                           Copy
+         tee test.log                                                                                                                                                          Copy
+         pid 6203 · parent 6201 · exit 0 · 0.0 s to 14.2 s · /usr/bin/tee · /work/upload-client
+         tail -n 5                                                                                                                                                             Copy
+         pid 6204 · parent 6201 · exit 0 · 0.0 s to 14.2 s · /usr/bin/tail · /work/upload-client
+         1 failed, 17 passed in 14.1s                                                                                                                                          Copy
+         Environment: PATH=/usr/bin · UPLOAD_API_TOKEN=[private] · PYTHONHASHSEED=0
+         Raw output
+         1 failed, 17 passed in 14.1s                                                                                                                                          Copy
+   ▾ Ran make serve-fixture & make smoke
+       Exit code: 0
+       Arguments: {"command":"make serve-fixture & make smoke"}                                                                                                                Copy
+       smoke passed                                                                                                                                                            Copy
+     ▾ Command trace: 2 processes
+         make serve-fixture                                                                                                                                                    Copy
+         pid 6302 · parent 6301 · running · 0.0 s to now · /usr/bin/make · /work/upload-client
+         listening on 127.0.0.1:8081                                                                                                                                           Copy
+         make smoke                                                                                                                                                            Copy
+         pid 6303 · parent 6301 · exit 0 · 0.1 s to 3.4 s · /usr/bin/make · /work/upload-client
+         smoke passed                                                                                                                                                          Copy
+         Environment: PATH=/usr/bin
+         Raw output
+         smoke passed                                                                                                                                                          Copy
+   ▾ Ran nohup ./scripts/watch.sh &
+       Exit code: 0
+       Arguments: {"command":"nohup ./scripts/watch.sh &"}                                                                                                                     Copy
+     ▾ Command trace: 2 processes
+         nohup ./scripts/watch.sh                                                                                                                                              Copy
+         pid 6402 · parent 6401 · exit 0 · 0.0 s to 0.0 s · /usr/bin/nohup · /work/upload-client
+         inotifywait -m src                                                                                                                                                    Copy
+         pid 6403 · parent 6402 · running · 0.0 s to now · /usr/bin/inotifywait · /work/upload-client
+         src/ MODIFY client.py                                                                                                                                                 Copy
+         Environment: PATH=/usr/bin
+   ▾ Ran git status --short
+       Exit code: 0
+       Arguments: {"command":"git status --short"}                                                                                                                             Copy
+       M src/upload/backoff.py                                                                                                                                                 Copy
+       No command trace was recorded
+                                                                                                                                                                                    

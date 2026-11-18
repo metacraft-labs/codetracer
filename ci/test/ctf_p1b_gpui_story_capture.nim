@@ -26,7 +26,8 @@
 ## Environment (set by `ci/test/ctf-p1b-gpui-story-capture.sh`):
 ##   CTF_P1B_STORY_BIN, CTF_P1B_GPUI_LD_LIBRARY_PATH, CTF_P1B_REGIONS (the
 ##   declaration), CTF_P1B_OUT; optional CTF_P1B_ONLY (comma-separated
-##   substrings of the story ids to keep), CTF_P1B_SIZES (default `laptop,sidebar`),
+##   substrings of the story ids to keep), CTF_P1B_SIZES (default `laptop,sidebar`,
+##   and `panel` too for the session activity timeline's stories),
 ##   CTF_P1B_THEMES (default `dark,light`), CTF_P1B_MOMENTS.
 ##
 ## With `CTF_P1B_MOMENTS=1` (CTF-P1c, `just ctf-p1c-gpui-captures`) it
@@ -74,6 +75,15 @@ let regionsDecl = need("CTF_P1B_REGIONS")
 let outDir = need("CTF_P1B_OUT")
 let only = listOf("CTF_P1B_ONLY", "")
 let sizes = listOf("CTF_P1B_SIZES", "laptop,sidebar")
+let sizesGiven = getEnv("CTF_P1B_SIZES").len > 0
+const PanelFamily = StoryIdPrefix & "session-activity"
+  ## The session activity timeline's stories, which are also taken at the
+  ## `panel` size (the timeline is a panel) unless CTF_P1B_SIZES names the
+  ## sizes.
+
+proc sizesFor(id: string): seq[string] =
+  result = sizes
+  if not sizesGiven and id.startsWith(PanelFamily): result.add "panel"
 let themes = listOf("CTF_P1B_THEMES", "dark,light")
 let atMoments = getEnv("CTF_P1B_MOMENTS") == "1"
 
@@ -132,7 +142,7 @@ try:
     let view = ViewPrefix & id[StoryIdPrefix.len .. ^1] &
                (if moment.len > 0: "-at-" & moment else: "")
     for (sizeName, w, h) in Sizes:
-      if sizeName notin sizes: continue
+      if sizeName notin sizesFor(id): continue
       for theme in themes:
         let captureId = view & "-" & sizeName & "-" & theme
         let regionsOut = outDir / (captureId & ".regions.json")

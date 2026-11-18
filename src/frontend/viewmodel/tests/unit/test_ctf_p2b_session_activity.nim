@@ -195,7 +195,7 @@ suite "the web view draws what the viewmodel publishes":
       let panel = vm.render
       check panel.attr("surface") == "agent-harbor-session-activity"
       check panel.attr("state") == "ready"
-      check panel.attr("status") == vm.statusLabel
+      check panel.attr("session-status") == vm.statusLabel
       let drawn = panel.all("line")
       check drawn.mapIt(it.attr("line")) == vm.lines.mapIt(it.id)
       check drawn.mapIt(it.attr("text")) == vm.lines.mapIt(it.text)

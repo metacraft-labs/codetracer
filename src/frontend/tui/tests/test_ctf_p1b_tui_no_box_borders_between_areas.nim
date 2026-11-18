@@ -4,8 +4,8 @@
 ##
 ## For every story of the `CodeTracer/Agent Harbor` section (read from its
 ## one declaration, as the coverage suites do), at the laptop and sidebar
-## sizes and in both colour modes, the screen the views draw is read cell by
-## cell:
+## sizes (and panel, for the session activity timeline) and in both colour
+## modes, the screen the views draw is read cell by cell:
 ##
 ##   * NO BOX-DRAWING GLYPH anywhere: nothing in U+2500–U+257F (the Box
 ##     Drawing block, https://www.unicode.org/charts/PDF/U2500.pdf). The one
@@ -22,7 +22,10 @@
 ##     terminal draws with a change of ground;
 ##   * AND EVERY AREA IS ITS OWN GROUND: the cells along an area's edges are on
 ##     the background the area declared, so the check above reads the
-##     grounds the areas really have.
+##     grounds the areas really have;
+##   * THE TIMELINE IS CARDLESS: every cell of a session activity timeline's
+##     line is on the timeline's own ground (`timelineLineProblems`); only
+##     the focus bar `▎` differs, by its ink.
 ##
 ## The same views drive the terminal story host that
 ## `real_terminal/test_ctf_p1b_tui_views_cover_web_states.nim` compares, cell
@@ -38,7 +41,7 @@ from std/unicode import runes, Rune, `$`
 import ../agent_harbor/ah_tui_stories
 import ../../styles/generated/design_tokens
 
-const ExpectedAssertions = 11
+const ExpectedAssertions = 14
 
 const Modes = [dmDark, dmLight]
 
@@ -121,6 +124,22 @@ proc areaProblems*(c: AhCanvas): seq[string] =
       result.add "the " & a.name & " at (" & $a.row & "," & $a.col & ") declares " & a.bg &
                  " but most of its edge is on other grounds"
 
+proc timelineLineProblems*(c: AhCanvas): seq[string] =
+  ## The session activity timeline is cardless: every cell of every drawn
+  ## line is on the ground of the timeline's own area (`timeline`), so no
+  ## line is set apart by a ground of its own; only the focus bar `▎`
+  ## differs, and by its ink, not its ground.
+  var ground = ""
+  for a in c.areas:
+    if a.name == "timeline": ground = a.bg
+  if ground.len == 0: return
+  for line in c.root.all("line"):
+    for r in line.row ..< min(c.rows, line.row + max(1, line.height)):
+      for col in line.col ..< min(c.cols, line.col + line.width):
+        if c.bgAt(r, col) != ground:
+          return @["the timeline line " & line.attr("line") & " at (" & $r & "," & $col &
+                   ") is on " & c.bgAt(r, col) & ", not the timeline's ground " & ground]
+
 let section = agentHarborSection()
 
 proc storyProblems(story: CodeTracerStory; cols, rows: int; mode: DesignMode): seq[string] =
@@ -134,6 +153,7 @@ proc storyProblems(story: CodeTracerStory; cols, rows: int; mode: DesignMode): s
       break
   result.add frameProblems(lines)
   result.add areaProblems(m.canvas)
+  result.add timelineLineProblems(m.canvas)
 
 suite "CTF-P1b: no box borders between the terminal's Agent Harbor areas":
   test "test_ctf_p1b_tui_no_box_borders_between_areas":
@@ -142,7 +162,7 @@ suite "CTF-P1b: no box borders between the terminal's Agent Harbor areas":
     var checked = 0
     for story in section.stories:
       let id = storybookId(section, story)
-      for (sizeName, cols, rows) in TuiSizes:
+      for (sizeName, cols, rows) in sizesOf(story.surface):
         for mode in Modes:
           let problems = storyProblems(story, cols, rows, mode)
           inc checked
@@ -153,7 +173,9 @@ suite "CTF-P1b: no box borders between the terminal's Agent Harbor areas":
       echo "Story renderings with a border, or areas on one ground (" & $failures.len &
         "):\n  " & failures.join("\n  ")
     ck failures.len == 0
-    ck checked == section.stories.len * TuiSizes.len * Modes.len
+    var wanted = 0
+    for story in section.stories: wanted += sizesOf(story.surface).len * Modes.len
+    ck checked == wanted
     echo "  checked ", checked, " story renderings"
 
   test "the committed snapshots hold no box-drawing glyph":
@@ -167,7 +189,9 @@ suite "CTF-P1b: no box borders between the terminal's Agent Harbor areas":
       inc found
       if isBoxDrawing(readFile(plain)): bordered.add path.extractFilename
     # Every story, size and mode has one (the coverage suite records them).
-    ck found == section.stories.len * TuiSizes.len * Modes.len
+    var wanted = 0
+    for story in section.stories: wanted += sizesOf(story.surface).len * Modes.len
+    ck found == wanted
     if bordered.len > 0: echo "  bordered snapshots: " & bordered.join(", ")
     ck bordered.len == 0
 
@@ -180,6 +204,24 @@ suite "CTF-P1b: the checks can fail":
     c.area("top", 0, 0, 10, 2, c.tone.body)
     c.area("bottom", 2, 0, 10, 2, c.tone.body)
     ck areaProblems(c).len > 0
+
+  test "a timeline line on a ground of its own is reported, the focus bar is not":
+    # The session activity timeline's area rule: its lines on the
+    # timeline's ground. One line repainted on the card surface is a box;
+    # the focus bar, an ink on the same ground, is not.
+    let story = block:
+      var found: CodeTracerStory
+      for s in section.stories:
+        if s.surface == "agent-harbor-session-activity" and s.fixture == "focused": found = s
+      found
+    let m = mountStory(story, 95, 40, dmDark)
+    defer: m.dispose()
+    ck timelineLineProblems(m.canvas).len == 0
+    let line = m.canvas.root.first("line")
+    ck line != nil
+    for col in line.col ..< line.col + line.width:
+      discard m.canvas.put(line.row, col, " ", m.canvas.p.textBody, bg = m.canvas.p.menu)
+    ck timelineLineProblems(m.canvas).len > 0
 
 suite "CTF-P1c: an ended mark and word keep their contrast on every surface":
   # The ended role is grey, and grey has no hue to fall back on: on Light's

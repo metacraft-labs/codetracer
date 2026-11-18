@@ -8,7 +8,8 @@
 ## published copy is generated this way).
 ##
 ## No mocks: the catalogue, the four bases, the click inventory, the context
-## menus' table and the product menu are the shipped data.
+## menus' table, the product menu and the session activity timeline's press
+## operations are the shipped data.
 
 import std/[algorithm, os, sets, strutils, unittest]
 
@@ -18,6 +19,7 @@ import ../../viewmodel/keymap/[base_keymaps, client_actions, editing_keymap,
                                operation_catalogue]
 import ../../viewmodel/viewmodels/product_menu
 import ../../viewmodel/viewmodels/transport_icons
+from ../../viewmodel/views/agent_harbor_activity_words import ActivityPressOperations
 
 const
   OnlyByName = [
@@ -59,12 +61,6 @@ const
     "view.preview-multiline", "view.preview-none", "view.preview-single-line",
     "view.previous-point-in-time", "view.source-code", "view.start-window",
     "view.theme-0", "view.theme-2",
-    # The session activity timeline's presses. Its elements carry them
-    # (`agent_harbor_activity_words`), but no story host or pane draws the
-    # timeline yet, so no surface offers them. Off this list once the story
-    # hosts mount the timeline.
-    "session-activity.copy", "session-activity.jump-to-latest",
-    "session-activity.retry", "session-activity.toggle",
   ]
 
 proc bound(): HashSet[string] =
@@ -79,6 +75,12 @@ proc offered(): HashSet[string] =
   for a in ContextAction: result.incl ContextActionOperations[a]
   for c in TransportControls:
     result.incl splitOperation(operationOfClientAction(c.clientAction)).name
+  # The session activity timeline's presses: its elements carry them (a line
+  # that opens, a detail's Copy, the unseen chip, Retry), and the three story
+  # hosts draw the timeline and route them (StoryBook's
+  # `stories/dom_activity_presses`, GPUI's `ah_stories.activityPresses`, the
+  # terminal's `ah_tui_stories.pressActivity`).
+  for op in ActivityPressOperations: result.incl op
 
 proc onMenu(): HashSet[string] =
   result = initHashSet[string]()

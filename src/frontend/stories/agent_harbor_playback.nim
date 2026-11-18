@@ -3,8 +3,10 @@
 ## chrome offers over it.
 ##
 ## A playback story names its scenario in its fixture,
-## `playback-<scenario>` (`front-ends`, `initiative-run`: the synthetic
-## scenarios of nim-agents-isonim-viewmodels' `playback_scenarios.nim`). Its
+## `playback-<scenario>` (`front-ends`, `initiative-run`, `session-run`: the
+## synthetic scenarios of nim-agents-isonim-viewmodels'
+## `playback_scenarios.nim`), and optionally a variant after it
+## (`playback-session-run+expanded`). Its
 ## viewmodels are built by the same constructors as every other Agent Harbor
 ## story (`agent_harbor_stories.nim`), over ONE `PlaybackDataSource` of that
 ## scenario, and nothing else feeds them: the source sends the scenario's
@@ -38,6 +40,10 @@ export signals, clock, playback_source, playback_scenarios
 const
   PlaybackFixturePrefix* = "playback-"
     ## A playback story's fixture: `playback-<scenario name>`.
+  PlaybackVariantSeparator* = '+'
+    ## A story variant over the same scenario: `playback-<scenario>+<variant>`
+    ## (`playback-session-run+expanded`), whose constructor sets a reader's
+    ## state the plain story does not. The scenario is the part before it.
   TickerMs = 500.0
     ## How often a playing story's chrome is told the time moved.
 
@@ -62,7 +68,15 @@ proc playbackScenarioNameOf*(fixture: string): string =
   ## fixture that is not one.
   if not fixture.isPlaybackFixture:
     raise newException(ValueError, "not a playback story fixture: " & fixture)
-  fixture[PlaybackFixturePrefix.len .. ^1]
+  let named = fixture[PlaybackFixturePrefix.len .. ^1]
+  let cut = named.find(PlaybackVariantSeparator)
+  if cut >= 0: named[0 ..< cut] else: named
+
+proc playbackVariantOf*(fixture: string): string =
+  ## The variant a playback fixture names after its scenario
+  ## (`playback-session-run+expanded` -> `expanded`); "" for none.
+  let cut = fixture.find(PlaybackVariantSeparator)
+  if fixture.isPlaybackFixture and cut >= 0: fixture[cut + 1 .. ^1] else: ""
 
 proc bump(pb: AhPlayback) =
   if not pb.disposed: pb.changed.val = pb.changed.val + 1

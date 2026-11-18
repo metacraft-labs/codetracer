@@ -94,6 +94,8 @@ import ../../agent_harbor/ah_tui_stories
 import ../../agent_harbor/ah_tui_session_views
 import ../../agent_harbor/ah_tui_initiative_tab_bar
 import ../../agent_harbor/ah_tui_fleet_panel
+import ../../agent_harbor/ah_tui_session_activity
+import ../../../viewmodel/agent_harbor_activity_cards
 import nim_agents/agent_harbor/fleet_records
 import nim_agents_isonim_viewmodels/agent_harbor/[fleet_vm, session_tabs_vm,
   initiative_tabs_vm, initiatives_vm, initiative_progress_vm, fixture_source, data_source]
@@ -101,7 +103,7 @@ from ../../../viewmodel/views/agent_harbor_words import tabLabelOf, filterCount,
   countsText, activityLineIsError, countsFloor, danglesBeforeEllipsis
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads this spelling.
-const ExpectedAssertions = 133
+const ExpectedAssertions = 164
 
 const CountsLeast = 8
   ## The least room a tree node's counts give up to before its title is
@@ -116,9 +118,10 @@ const TitleLeast = 4
 const
   Stem = "app_agent_harbor_story"
   Modes = [dmDark, dmLight]
-  MinimumStories = 59
+  MinimumStories = 59 + 21
     ## The section's stories at CTF-P2a's landing (9 fleet, 11 session tabs,
-    ## 10 session list, 12 initiative tabs, 8 initiatives, 9 progress).
+    ## 10 session list, 12 initiative tabs, 8 initiatives, 9 progress), and
+    ## CTF-P2b's 21 of the session activity timeline.
 
 var countedAssertions = 0
 template ck(cond: untyped) =
@@ -691,6 +694,91 @@ proc checkFleet(view: AhNode; vm: FleetSnapshotVM): seq[string] =
                       row.activity[0 ..< shown])
         result.expect("title of " & row.shortId, e.first("title").attr("title"), row.title)
 
+const TimelineFacts = ["line-kind", "level", "indent", "text", "role", "item-kind", "state",
+                       "expanded", "focused", "count", "failed", "running", "path", "copy"]
+  ## The facts a drawn timeline line carries (`lineFacts`), each compared
+  ## with the viewmodel's line of the same id.
+
+proc factsOf(line: TimelineLine): seq[(string, string)] =
+  ## The viewmodel's line as the facts it should be drawn with, written out
+  ## here rather than through `lineFacts`, so the check does not share the
+  ## views' function.
+  result = @[("line-kind", $line.kind), ("level", $line.level), ("indent", $line.indent),
+             ("text", line.text), ("role", line.textRole)]
+  if line.itemKind.len > 0: result.add ("item-kind", line.itemKind)
+  if line.state != tisNone: result.add ("state", $line.state)
+  if line.expandable: result.add ("expanded", $line.expanded)
+  if line.focused: result.add ("focused", "true")
+  if line.kind == tlkGroup:
+    result.add ("count", $line.count)
+    result.add ("failed", $line.failed)
+    result.add ("running", $line.running)
+  if line.path.len > 0: result.add ("path", line.path)
+  if line.copyText.len > 0: result.add ("copy", line.copyText)
+
+proc checkTimeline(view: AhNode; vm: SessionTimelineVM): seq[string] =
+  ## The timeline's drawn lines against the viewmodel's: a run of its lines
+  ## with no gap (the window the view shows), each with the viewmodel's
+  ## facts; the chrome (status, badge, filter, the unseen chip, the running
+  ## strip) as the viewmodel says. A group holding a running command names
+  ## it in its cells (`drawnTextProblems` holds the text to them; here, the
+  ## running mark `●` must be drawn in the line).
+  result.expect("load state", view.attr("state"),
+                (case vm.state.val
+                 of asIdle, asLoading: "loading"
+                 of asError: "error"
+                 of asReady: "ready"))
+  result.expect("status", view.attr("session-status"), vm.statusLabel)
+  result.expect("connection", view.attr("connection"), vm.connection.val)
+  case vm.state.val
+  of asIdle, asLoading:
+    result.expect("loading notice", view.values("notice"), @["loading"])
+    return
+  of asError:
+    if vm.unresolvable.val.len > 0:
+      result.expect("cannot-be-loaded notice", view.values("notice"), @["unresolvable"])
+    else:
+      commonState(view, vm.state.val, vm.error.val, result)
+    return
+  of asReady: discard
+  if vm.isEmpty:
+    result.expect("empty notice", view.values("notice"), @["empty"])
+    return
+  let lines = vm.lines
+  let drawn = view.all("line")
+  if drawn.len == 0:
+    result.add "no line is drawn of the " & $lines.len & " the viewmodel has"
+    return
+  var start = -1
+  for i, line in lines:
+    if line.id == drawn[0].attr("line"): start = i
+  if start < 0:
+    result.add "the first drawn line " & drawn[0].attr("line") & " is not the viewmodel's"
+    return
+  for k, e in drawn:
+    if start + k >= lines.len:
+      result.add "a line drawn past the viewmodel's last: " & e.attr("line")
+      break
+    let line = lines[start + k]
+    if e.attr("line") != line.id:
+      result.add "drawn line " & $k & " is " & e.attr("line") & ", the viewmodel's is " & line.id
+      continue
+    let wanted = factsOf(line)
+    for fact in TimelineFacts:
+      var want = ""
+      for (k2, v) in wanted:
+        if k2 == fact: want = v
+      if e.attr(fact) != want:
+        result.add line.id & "'s " & fact & ": drawn '" & e.attr(fact) &
+                   "', the viewmodel says '" & want & "'"
+  let ids = drawn.mapIt(it.attr("line"))
+  let runningId = runningLineId(lines, vm.runningLine)
+  let strip = runningStripText(vm)
+  let wantStrip = if strip.len > 0 and runningId notin ids: @[strip] else: @[]
+  result.expect("running strip", view.values("running-strip"), wantStrip)
+  result.expect("unseen chip", view.values("unseen"),
+                if showsUnseenChip(vm): @[$vm.unseen.val] else: @[])
+
 proc checkStory(m: AhTuiMount): seq[string] =
   let view = m.view
   if view.isNil: return @["no node says which surface was drawn"]
@@ -703,6 +791,15 @@ proc checkStory(m: AhTuiMount): seq[string] =
   of "agent-harbor-initiatives": checkInitiatives(view, m.initiatives)
   of "agent-harbor-initiative-progress": checkProgress(view, m.progress)
   of "agent-harbor-fleet": checkFleet(view, m.fleet)
+  of "agent-harbor-session-activity":
+    var problems = checkTimeline(view, m.timeline)
+    if not m.cards.cards.isNil:
+      # The comparison story's cards half: today's pane, drawn from the
+      # cards' viewmodel over the same events.
+      let feed = m.canvas.root.first("card-feed")
+      if feed.isNil: problems.add "the cards half is not drawn"
+      problems.add m.cards.againstCardsProblems(m.timeline, m.cards.timelineSource)
+    problems
   else: @["this suite has no comparison for surface " & m.surface]
 
 # ---------------------------------------------------------------------------
@@ -756,6 +853,21 @@ proc expectInk(problems: var seq[string]; look: LookOf; n: AhNode; rows: int;
                  ", not " & wanted
 
 proc markInk(m: MarkStyle): string = m.colour
+
+const
+  TextMinContrast = 4.5
+    ## A timeline line's words in the body, label, monospace and ended roles
+    ## against the panel's ground (WCAG 2.2 SC 1.4.3,
+    ## https://www.w3.org/TR/WCAG22/#contrast-minimum).
+  StatusMinContrast = 3.0
+    ## A status role's text (quiet, error, removed, warning, added, running):
+    ## the design system's status colours, whose Light steps reach 3:1 and
+    ## not 4.5:1 on the panel (WCAG 2.2 SC 1.4.11's floor for what tells a
+    ## state apart, https://www.w3.org/TR/WCAG22/#non-text-contrast).
+
+proc minContrastOf(role: string): float =
+  if role in ["quiet", "error", "removed", "warning", "added", "running"]: StatusMinContrast
+  else: TextMinContrast
 
 const NoticeGroundMinContrast = 1.3
   ## The least contrast ratio between a tab bar's notice ground and the bar
@@ -1026,6 +1138,30 @@ proc styleProblems(m: AhTuiMount; look: LookOf): seq[string] =
                          " against the row's " & rowBg & ", under " &
                          formatFloat(ControlGroundMinContrast, ffDecimal, 2) & ":1"
     result.add fleetInkProblems(view, look, rows, p, vm)
+  of "agent-harbor-session-activity":
+    # Cardless: every cell of a drawn line on the panel's ground (only the
+    # focus bar `▎` differs, and in its ink, not its ground); each line's
+    # text in its role's ink (`timelineInk`), at least `TextMinContrast`
+    # against that ground.
+    for e in view.all("line"):
+      if e.row >= rows: continue
+      result.expectGround(look, e, rows, "the timeline line " & e.attr("line"), t.body)
+      let role = e.attr("role")
+      let col = e.col + 1 + parseInt(e.attr("indent")) * IndentCells + GlyphCells
+      let probe = AhNode(row: e.row, col: col, width: max(1, e.col + e.width - col), height: 1)
+      # The line's first glyph is in its main text's role's ink.
+      result.expectInk(look, probe, rows, "the timeline line " & e.attr("line") & "'s text",
+                       timelineInk(p, role))
+      let ink = look(probe.row, probe.col).fg
+      if ink.len > 0 and contrastRatio(ink, t.body) < minContrastOf(role):
+        result.add "the timeline line " & e.attr("line") & " is drawn in " & ink & ", " &
+                   formatFloat(contrastRatio(ink, t.body), ffDecimal, 2) & ":1 on " & t.body &
+                   ", under " & $minContrastOf(role) & ":1"
+      if e.attr("focused") == "true":
+        let bar = look(e.row, e.col)
+        if bar.rune != FocusBar or bar.fg != p.action:
+          result.add "the focused line " & e.attr("line") & " has no " & FocusBar &
+                     " in the action ink at its first cell"
   else: discard
 
 # ---------------------------------------------------------------------------
@@ -1136,7 +1272,7 @@ suite "CTF-P1b: every Agent Harbor story has a terminal rendering":
     var rendered = 0
     for story in section.stories:
       let id = storybookId(section, story)
-      for (sizeName, cols, rows) in TuiSizes:
+      for (sizeName, cols, rows) in sizesOf(story.surface):
         for mode in Modes:
           let problems = renderOnTerminal(story, sizeName, cols, rows, mode)
           if problems.len == 0: inc rendered
@@ -1147,9 +1283,11 @@ suite "CTF-P1b: every Agent Harbor story has a terminal rendering":
       echo "Terminal renderings that differ (" & $failures.len & "):\n  " &
         failures.join("\n  ")
     ck failures.len == 0
-    ck rendered == section.stories.len * TuiSizes.len * Modes.len
+    var wanted = 0
+    for story in section.stories: wanted += sizesOf(story.surface).len * Modes.len
+    ck rendered == wanted
     echo "  rendered ", rendered, " story renderings on a terminal (",
-      section.stories.len, " stories × ", TuiSizes.len, " sizes × ", Modes.len, " modes)"
+      section.stories.len, " stories at their sizes × ", Modes.len, " modes)"
 
 proc storyOf(surface, fixture: string): CodeTracerStory =
   for s in section.stories:
@@ -1169,6 +1307,24 @@ suite "CTF-P1b: the comparisons can fail":
     ck stale.join(" ").contains("active tab")
     m.draw()
     ck checkStory(m).len == 0
+    m.dispose()
+
+  test "a timeline line opened after drawing is a mismatch until the view redraws":
+    # The session activity timeline: a group opened in the viewmodel with no
+    # redraw is drawn closed and reported; a redraw agrees again; a group
+    # line whose drawn count is not the viewmodel's is reported.
+    let m = mountStory(storyOf("agent-harbor-session-activity", "populated"), 95, 40, dmDark)
+    ck checkStory(m).len == 0
+    var group = ""
+    for line in m.timeline.lines:
+      if line.kind == tlkGroup and group.len == 0: group = line.id
+    m.timeline.toggle(group)
+    ck checkStory(m).join(" ").contains(group & "'s expanded")
+    m.draw()
+    ck checkStory(m).len == 0
+    for e in m.view.all("line"):
+      if e.attr("line") == group: e.tag("count", "99")
+    ck checkStory(m).join(" ").contains(group & "'s count")
     m.dispose()
 
   test "a click on a fold redraws the tree from the viewmodel":
@@ -1697,6 +1853,117 @@ suite "CTF-P1b: the story host answers the pointer on a real terminal":
     ck ps.cellAt(fold.row, fold.col).rune == "\xE2\x96\xB8".runeAt(0)
     ps.send("q")
     ps.close()
+
+suite "CTF-P2b: the story host routes the timeline's presses and keys on a real terminal":
+  # A press on a line that opens (SGR 1006, as the initiatives' fold above)
+  # acts on it through the viewmodel, level by level: it opens a group and
+  # one of its commands, and closes a command's open trace; a press on Copy
+  # hands the terminal its text through OSC 52; and the keys (Down, Up,
+  # Right, Left, Enter, `+`, `-`) are routed in the timeline's scope.
+  test "a press opens a group and a command, and closes a trace; Copy writes OSC 52":
+    let story = storyOf("agent-harbor-session-activity", "populated")
+    let m = mountStory(story, 95, 40, dmDark)
+    var group: AhNode
+    for e in m.view.all("line"):
+      if group.isNil and e.attr("line-kind") == "group" and e.attr("item-kind") == "shell": group = e
+    ck group != nil
+    if group.isNil:
+      m.dispose()
+      return
+    discard m.canvas.press(group.row, group.col + 4)
+    m.draw()
+    var item: AhNode
+    for e in m.view.all("line"):
+      if item.isNil and e.attr("line-kind") == "item" and e.attr("expanded") == "false" and
+          e.attr("state") == "failed": item = e
+    ck item != nil
+    if item.isNil:
+      # The press did not open the group (no command line under it): the
+      # failure is the check above; nothing below can be measured.
+      m.dispose()
+      return
+    let itemRow = item.row
+    m.dispose()
+    var sess = spawnStory(storybookId(section, story), 95, 40, dmDark)
+    sess.sendMouseClick(group.row, group.col + 4)
+    sess.waitForText("\xE2\x96\xBE", initDuration(seconds = 10))
+    ck sess.cellAt(group.row, group.col + 1 + IndentCells * 0).rune == "\xE2\x96\xBE".runeAt(0)
+    sess.sendMouseClick(itemRow, item.col + 6)
+    sess.waitForText("Exit code", initDuration(seconds = 10))
+    ck sess.screenContents().contains("Exit code")
+    sess.send("q")
+    sess.close()
+    # The third level: `populated`'s commands carry no trace, so a trace is
+    # pressed in `command-trace`, whose traces are open. The press closes it
+    # in-process, and the line the terminal then shows is the one drawn
+    # in-process after the press (its closed mark `▸`).
+    let traced = storyOf("agent-harbor-session-activity", "command-trace")
+    let tm = mountStory(traced, 95, 40, dmDark)
+    var trace: AhNode
+    for e in tm.view.all("line"):
+      if trace.isNil and e.attr("line-kind") == "trace" and e.attr("expanded") == "true": trace = e
+    ck trace != nil
+    if trace.isNil:
+      tm.dispose()
+      return
+    let traceId = trace.attr("line")
+    let (traceRow, traceCol) = (trace.row, trace.col)
+    discard tm.canvas.press(traceRow, traceCol + 8)
+    tm.draw()
+    var closedLine = ""
+    for e in tm.view.all("line"):
+      if e.attr("line") == traceId and e.attr("expanded") == "false":
+        closedLine = tm.canvas.grid.cellsText(e.row, e.col, e.width).strip
+    tm.dispose()
+    ck closedLine.contains("\xE2\x96\xB8")
+    var ts = spawnStory(storybookId(section, traced), 95, 40, dmDark)
+    ts.sendMouseClick(traceRow, traceCol + 8)
+    if closedLine.len > 0: ts.waitForText(closedLine, initDuration(seconds = 10))
+    ck closedLine.len > 0 and ts.screenContents().contains(closedLine)
+    ts.send("q")
+    ts.close()
+    # Copy: the host's clipboard is the terminal's, through OSC 52.
+    let details = storyOf("agent-harbor-session-activity", "details")
+    let dm = mountStory(details, 95, 40, dmDark)
+    let copy = dm.view.first("copy-action")
+    ck copy != nil
+    if copy.isNil:
+      dm.dispose()
+      return
+    discard dm.canvas.press(copy.row, copy.col)
+    ck dm.copied.len > 0
+    ck dm.output.startsWith("\e]52;c;")
+    dm.dispose()
+
+  test "the keys move the focus, open, step in, close, open all and close all":
+    let story = storyOf("agent-harbor-session-activity", "focused")
+    let m = mountStory(story, 95, 40, dmDark)
+    let focused = m.timeline.focus.val
+    ck focused.len > 0
+    ck m.activityKey("\e[B")              # Down
+    ck m.timeline.focus.val != focused
+    ck m.activityKey("\e[A")              # Up
+    ck m.timeline.focus.val == focused
+    ck m.activityKey("\e[C")              # Right
+    ck m.timeline.isExpanded(focused)
+    ck m.activityKey("\e[D")              # Left
+    ck not m.timeline.isExpanded(focused)
+    ck m.activityKey("\r")                # Enter
+    ck m.timeline.isExpanded(focused) and m.timeline.focus.val != focused
+    ck m.activityKey("+")
+    ck m.timeline.expandedIds.len >= 3
+    ck m.activityKey("-")
+    ck m.timeline.expandedIds.len == 0
+    ck m.lastOperation == "session-activity.collapse-all"
+    m.dispose()
+    # The same keys through a real terminal: Right opens the focused group.
+    var sess = spawnStory(storybookId(section, story), 95, 40, dmDark)
+    let before = sess.screenContents()
+    sess.send("\e[C")
+    sess.waitForText("\xE2\x96\xBE", initDuration(seconds = 10))
+    ck sess.screenContents() != before
+    sess.send("q")
+    sess.close()
 
 suite "CTF-P1b: the terminal views share the viewmodels, not the web views":
   test "no terminal Agent Harbor view imports a web view or the web renderer":

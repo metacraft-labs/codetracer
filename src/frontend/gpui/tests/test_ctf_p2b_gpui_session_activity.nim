@@ -90,7 +90,7 @@ suite "the GPUI timeline draws what the viewmodel publishes":
       let root = vm.drawn
       check root.attr("surface") == "agent-harbor-session-activity"
       check root.attr("state") == "ready"
-      check root.attr("status") == vm.statusLabel
+      check root.attr("session-status") == vm.statusLabel
       let lines = root.all("line")
       check lines.mapIt(it.attr("line")) == vm.lines.mapIt(it.id)
       check lines.mapIt(it.attr("text")) == vm.lines.mapIt(it.text)

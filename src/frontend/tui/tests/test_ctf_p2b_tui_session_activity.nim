@@ -68,7 +68,7 @@ suite "the terminal timeline draws what the viewmodel publishes":
       let surface = c.root.first("surface")
       check surface.attr("surface") == "agent-harbor-session-activity"
       check surface.attr("state") == "ready"
-      check surface.attr("status") == vm.statusLabel
+      check surface.attr("session-status") == vm.statusLabel
       let nodes = c.lineNodes
       check nodes.mapIt(it.attr("line")) == vm.lines.mapIt(it.id)
       check nodes.mapIt(it.attr("text")) == vm.lines.mapIt(it.text)

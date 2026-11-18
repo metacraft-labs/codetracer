@@ -1,0 +1,40 @@
+ Agent Activity  ⚲ ✕
+ needs input                                                                        Connected
+ › Make retries configurable.
+ ▸ Read 2 files
+ ▸ Read the retry count from the config file or from an environment variable?
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               

@@ -36,7 +36,9 @@ const playbackFixtures* = [
   ("agent-harbor-initiative-tabs", "playback-initiative-run"),
   ("agent-harbor-initiatives", "playback-front-ends"),
   ("agent-harbor-initiative-progress", "playback-initiative-run"),
-  ("agent-harbor-fleet", "playback-front-ends")]
+  ("agent-harbor-fleet", "playback-front-ends"),
+  ("agent-harbor-session-activity", "playback-session-run"),
+  ("agent-harbor-session-activity", "playback-session-run+expanded")]
   ## Every playback story's surface and fixture.
 
 proc isPlaybackStory*(surface, fixture: string): bool =
@@ -451,3 +453,84 @@ proc createInitiativeTabsStoryVM*(fixture: string; playback: AhPlayback = nil): 
     discard result.stepInbox(1)
     result.markResumed(result.activeSessionId)
   else: discard
+
+# ---------------------------------------------------------------------------
+# The session activity timeline
+# ---------------------------------------------------------------------------
+#
+# One session's activity as the cardless timeline (`SessionTimelineVM`). The
+# static stories show the invented timelines of nim-agents-isonim-viewmodels'
+# `synthetic_timelines.nim`, one state each, loaded with the reader's state
+# the timeline names (`newSyntheticTimelineVM`). The story adds what only a
+# host sets: the connection badge of the panel's head (static stories only;
+# the source reports no connection) and, for `filter`, the list filter. The
+# playback stories follow the session `session-run` names for the view
+# `session-activity`; `+expanded` opens the shell group the moment it forms
+# and leaves it open while lines arrive below it.
+
+import isonim/core/[computation, batch]
+import nim_agents_isonim_viewmodels/agent_harbor/[synthetic_timelines, playback_scenario]
+
+export synthetic_timelines
+
+const
+  SessionActivitySurface* = "agent-harbor-session-activity"
+  FilterFixture* = "filter"
+    ## `populated` under the list filter.
+  FilterQuery* = "client.py"
+    ## What the filter story's list filter holds: the lines that name the
+    ## upload client's file.
+  sessionActivityFixtures* = @SyntheticTimelineNames & @[FilterFixture]
+    ## Every fixture a static `agent-harbor-session-activity` story may name.
+  ExpandedVariant* = "expanded"
+    ## The playback variant that keeps the shell group open.
+
+func connectionOf*(fixture: string): string =
+  ## The connection badge a static story's head shows (one of the WebUI's
+  ## five states): connecting while the first answer is awaited, an error
+  ## when the read failed, reconnecting while the reader catches up on a
+  ## session that kept running, disconnected for a session that failed, and
+  ## connected otherwise.
+  case fixture
+  of "loading": "Connecting"
+  of "error": "Connection error"
+  of "reading-back": "Reconnecting"
+  of "failed": "Disconnected"
+  else: "Connected"
+
+proc shellGroupId(vm: SessionTimelineVM): string =
+  ## The first shell group's line, "" while none has formed.
+  for line in vm.lines:
+    if line.kind == tlkGroup and line.itemKind == "shell": return line.id
+
+proc createSessionActivityStoryVM*(fixture: string;
+                                   playback: AhPlayback = nil): SessionTimelineVM =
+  ## The timeline of the story named by `fixture`: an invented timeline of
+  ## `SyntheticTimelineNames`, or `filter`; a playback fixture reads
+  ## `playback`'s source and shows the session its scenario names for the
+  ## view. Call inside a reactive root; the caller disposes it. An unknown
+  ## fixture raises rather than showing some other state under its name.
+  if isPlaybackStory(SessionActivitySurface, fixture):
+    let source = playbackSourceOf(SessionActivitySurface, fixture, playback)
+    let sessionId = playback.source.scenario.sessionOf(viewOfSurface(SessionActivitySurface))
+    let vm = newSessionTimelineVM(source, sessionId)
+    vm.load()
+    if playbackVariantOf(fixture) == ExpandedVariant:
+      # Open the shell group when it forms (the second command), once: the
+      # reader's open lines survive a seek back (`restart` keeps them), and a
+      # reader who closes it later keeps it closed.
+      var opened = false
+      createEffect proc() =
+        discard vm.revision.val
+        if opened: return
+        let id = untrack(proc(): string = vm.shellGroupId)
+        if id.len > 0:
+          opened = true
+          vm.expand(id)
+    return vm
+  if fixture notin sessionActivityFixtures:
+    raise newException(ValueError, "no session activity story fixture named " & fixture)
+  let timeline = if fixture == FilterFixture: "populated" else: fixture
+  result = newSyntheticTimelineVM(timeline)
+  result.connection.val = connectionOf(fixture)
+  if fixture == FilterFixture: result.setFilter(FilterQuery)

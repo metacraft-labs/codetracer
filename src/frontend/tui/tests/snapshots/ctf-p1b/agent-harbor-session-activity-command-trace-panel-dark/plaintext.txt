@@ -1,0 +1,40 @@
+ Agent Activity  ⚲ ✕
+ running                                                                            Connected
+         pid 6204 · parent 6201 · exit 0 · 0.0 s to 14.2 s ·
+         /usr/bin/tail · /work/upload-client
+         1 failed, 17 passed in 14.1s                                                     Copy
+         Environment: PATH=/usr/bin · UPLOAD_API_TOKEN=[private] · PYTHONHASHSEED=0
+         Raw output
+         1 failed, 17 passed in 14.1s                                                     Copy
+   ▾ Ran make serve-fixture & make smoke
+       Exit code: 0
+       Arguments: {"command":"make serve-fixture & make smoke"}                           Copy
+       smoke passed                                                                       Copy
+     ▾ Command trace: 2 processes
+         make serve-fixture                                                               Copy
+         pid 6302 · parent 6301 · running · 0.0 s to now · /usr/bin/make · /work/upload-client
+         listening on 127.0.0.1:8081                                                      Copy
+         make smoke                                                                       Copy
+         pid 6303 · parent 6301 · exit 0 · 0.1 s to 3.4 s ·
+         /usr/bin/make · /work/upload-client
+         smoke passed                                                                     Copy
+         Environment: PATH=/usr/bin
+         Raw output
+         smoke passed                                                                     Copy
+   ▾ Ran nohup ./scripts/watch.sh &
+       Exit code: 0
+       Arguments: {"command":"nohup ./scripts/watch.sh &"}                                Copy
+     ▾ Command trace: 2 processes
+         nohup ./scripts/watch.sh                                                         Copy
+         pid 6402 · parent 6401 · exit 0 · 0.0 s to 0.0 s ·
+         /usr/bin/nohup · /work/upload-client
+         inotifywait -m src                                                               Copy
+         pid 6403 · parent 6402 · running · 0.0 s to now ·
+         /usr/bin/inotifywait · /work/upload-client
+         src/ MODIFY client.py                                                            Copy
+         Environment: PATH=/usr/bin
+   ▾ Ran git status --short
+       Exit code: 0
+       Arguments: {"command":"git status --short"}                                        Copy
+       M src/upload/backoff.py                                                            Copy
+       No command trace was recorded

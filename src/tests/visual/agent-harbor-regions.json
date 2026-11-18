@@ -80,13 +80,23 @@
     "with a Range, GPUI from the width the view says they take, `data-ah-text-px`).",
     "`same`: cut on both sides or on neither -- a box can be the same width on",
     "both sides within every tolerance and still cut the words on one (a 0.2px",
-    "shortfall elides a title). `never`: cut on neither side."
+    "shortfall elides a title). `never`: cut on neither side.",
+    "",
+    "The `timeline-*` regions are the session activity timeline's (CTF-P2b): its",
+    "list (`timeline`), its first and last line, its first group line, its first",
+    "open line, the focused line, the `N new` chip, the `Running:` strip and the",
+    "filter row. A region with `within` counts only the matches drawn wholly",
+    "inside the first element of that selector on each side (a scrolling list):",
+    "the browser lays out every line of a list and scrolls it, GPUI draws only",
+    "the lines its list shows, so a line scrolled out of the list's box is no",
+    "match on either side. The line regions are `fill` regions too: a line sits",
+    "on the panel's ground, with nothing behind it (the timeline is cardless)."
   ],
   "schemaVersion": 1,
   "regions": [
     {
       "name": "surface",
-      "web": ".ah-tab-caption, .ah-session-list, .agent-harbor-initiatives, .agent-harbor-progress, .agent-harbor-fleet",
+      "web": ".ah-tab-caption, .ah-session-list, .agent-harbor-initiatives, .agent-harbor-progress, .agent-harbor-fleet, .agent-harbor-activity",
       "gpui": {
         "data-ah-surface": ""
       }
@@ -100,7 +110,7 @@
     },
     {
       "name": "head",
-      "web": ".ah-fleet-head, .ah-session-list-head",
+      "web": ".ah-fleet-head, .ah-session-list-head, .ah-activity-head",
       "gpui": {
         "data-ah-head": ""
       }
@@ -175,7 +185,7 @@
     },
     {
       "name": "notice",
-      "web": ".empty-overlay, .ah-fleet-error, .ah-tab-loading, .ah-tab-error, .ah-tab-empty",
+      "web": ".empty-overlay, .ah-fleet-error, .ah-tab-loading, .ah-tab-error, .ah-tab-empty, .ah-activity-error, .ah-activity-unresolvable",
       "gpui": {
         "data-ah-notice": ""
       }
@@ -333,7 +343,7 @@
     },
     {
       "name": "error-reason",
-      "web": ".ah-fleet-error-message",
+      "web": ".ah-fleet-error-message, .ah-activity-error-message",
       "gpui": {
         "data-ah-error-reason": ""
       },
@@ -500,6 +510,106 @@
       "web": ".ah-initiative-tab-bar .session-tab.ah-tab:not(.ah-tab-notice).active .ah-tab-recordings",
       "gpui": {
         "data-ah-recordings": ""
+      }
+    },
+    {
+      "name": "timeline",
+      "web": ".ah-activity-lines",
+      "gpui": {
+        "data-ah-activity-lines": ""
+      }
+    },
+    {
+      "name": "timeline-line-first",
+      "web": ".ah-activity-line",
+      "gpui": {
+        "data-ah-line": ""
+      },
+      "pick": "first",
+      "within": {
+        "web": ".ah-activity-lines",
+        "gpui": {
+          "data-ah-activity-lines": ""
+        }
+      },
+      "fill": true
+    },
+    {
+      "name": "timeline-line-last",
+      "web": ".ah-activity-line",
+      "gpui": {
+        "data-ah-line": ""
+      },
+      "pick": "last-whole",
+      "within": {
+        "web": ".ah-activity-lines",
+        "gpui": {
+          "data-ah-activity-lines": ""
+        }
+      },
+      "fill": true
+    },
+    {
+      "name": "timeline-group-first",
+      "web": ".ah-activity-group",
+      "gpui": {
+        "data-ah-line-kind": "group"
+      },
+      "pick": "first",
+      "within": {
+        "web": ".ah-activity-lines",
+        "gpui": {
+          "data-ah-activity-lines": ""
+        }
+      }
+    },
+    {
+      "name": "timeline-expanded",
+      "web": ".ah-activity-line[data-ah-expanded=\"true\"]",
+      "gpui": {
+        "data-ah-expanded": "true"
+      },
+      "pick": "first",
+      "within": {
+        "web": ".ah-activity-lines",
+        "gpui": {
+          "data-ah-activity-lines": ""
+        }
+      }
+    },
+    {
+      "name": "timeline-focus",
+      "web": ".ah-activity-focused",
+      "gpui": {
+        "data-ah-focused": "true"
+      },
+      "within": {
+        "web": ".ah-activity-lines",
+        "gpui": {
+          "data-ah-activity-lines": ""
+        }
+      },
+      "fill": true
+    },
+    {
+      "name": "timeline-new",
+      "web": ".ah-activity-unseen",
+      "gpui": {
+        "data-ah-unseen": ""
+      }
+    },
+    {
+      "name": "timeline-running-strip",
+      "web": ".ah-activity-running-strip",
+      "gpui": {
+        "data-ah-running-strip": ""
+      }
+    },
+    {
+      "name": "timeline-filter",
+      "web": ".ah-activity-filter",
+      "gpui": {
+        "data-ah-activity-filter": ""
       }
     }
   ]

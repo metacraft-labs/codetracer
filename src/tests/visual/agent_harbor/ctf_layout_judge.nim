@@ -48,6 +48,9 @@ const
   Sizes* = [("laptop", 1440, 900), ("sidebar", 360, 900)]
     ## The design brief's laptop and narrow sizes (`capture-storybook.mjs`'s
     ## `laptop` and `sidebar`).
+  PanelSize* = ("panel", 760, 640)
+    ## The brief's `panel` size, at which the session activity timeline's
+    ## stories are also captured (the timeline is a panel; `sizesOf`).
   Themes* = ["dark", "light"]
   FillTolerance* = 1
     ## Per channel, between the GPUI frame's pixel and the colour the browser
@@ -475,12 +478,18 @@ proc agentHarborSection*(): CodeTracerStorySection =
   for s in codeTracerStorySections():
     if s.title == SectionTitle: return s
 
+proc sizesOf*(story: CodeTracerStory): seq[(string, int, int)] =
+  ## The sizes a story is captured at: laptop and sidebar, and panel for the
+  ## session activity timeline.
+  result = @Sizes
+  if story.surface == "agent-harbor-session-activity": result.add PanelSize
+
 proc expectedCaptures*(section: CodeTracerStorySection): seq[Expected] =
   for story in section.stories:
     let sid = storybookId(section, story)
     doAssert sid.startsWith(StoryIdPrefix), sid
     let view = ViewPrefix & sid[StoryIdPrefix.len .. ^1]
-    for (size, w, h) in Sizes:
+    for (size, w, h) in sizesOf(story):
       for theme in Themes:
         result.add Expected(id: view & "-" & size & "-" & theme, width: w, height: h)
 

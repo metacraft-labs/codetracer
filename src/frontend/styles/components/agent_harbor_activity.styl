@@ -110,6 +110,9 @@ AH_ACTIVITY_TURN_GAP = 0.5rem      // above each turn after the first
   flex: 1 1 auto
   min-height: 0
   overflow-y: auto
+  // Lines wrap or are cut, so nothing scrolls sideways; a horizontal
+  // scrollbar would take a row's height off the list's foot.
+  overflow-x: hidden
   outline: none
 
 .ah-activity-line
@@ -117,7 +120,9 @@ AH_ACTIVITY_TURN_GAP = 0.5rem      // above each turn after the first
   display: flex
   align-items: flex-start
   min-height: AH_ACTIVITY_LINE
-  padding: 0 AH_ACTIVITY_INSET 0 calc(AH_ACTIVITY_INSET + var(--ah-indent, 0) * AH_ACTIVITY_INDENT)
+  // Stylus does not substitute its variables inside `calc()`: the left
+  // padding is interpolated (the inset, then one indent per level).
+  padding: 0 AH_ACTIVITY_INSET 0 "calc(%s + var(--ah-indent, 0) * %s)" % (AH_ACTIVITY_INSET AH_ACTIVITY_INDENT)
   font-size: unit(type-ui-size-body-md / 16, 'rem')
   line-height: AH_ACTIVITY_LINE
   // Cardless: nothing around an event.
@@ -204,8 +209,10 @@ AH_ACTIVITY_TURN_GAP = 0.5rem      // above each turn after the first
 .ah-activity-role-removed
   color: colors-ui-text-error-primary
 
+// Light's warning and success text fall under 3:1 on the panel; their
+// hover steps hold it (agent_harbor_palette.timelineWarning, timelineAdded).
 .ah-activity-role-warning
-  color: colors-ui-text-warning-primary
+  color: by-mode(colors-ui-text-warning-primary, colors-ui-text-warning-primary-hover)
 
 .ah-activity-role-running
   color: colors-ui-icon-information-primary
@@ -214,7 +221,7 @@ AH_ACTIVITY_TURN_GAP = 0.5rem      // above each turn after the first
   color: by-mode(colors-ui-text-primary-caption, colors-ui-text-primary-label)
 
 .ah-activity-role-added
-  color: colors-ui-text-success-primary
+  color: by-mode(colors-ui-text-success-primary, colors-ui-text-success-primary-hover)
 
 .ah-activity-role-mono
   color: colors-ui-text-primary-body
@@ -241,6 +248,15 @@ AH_ACTIVITY_TURN_GAP = 0.5rem      // above each turn after the first
 .ah-activity-error-message
   color: colors-ui-text-primary-caption
   font-size: unit(type-ui-size-caption-md / 16, 'rem')
+  // The caption's own line pitch, as GPUI sets the reason (`.ah-fleet-error-message`).
+  line-height: unit(type-ui-lineheight-caption-md / 16, 'rem')
+  // A word longer than the line (a request's path) moves to a line of its
+  // own and breaks only there, as GPUI wraps it.
+  overflow-wrap: break-word
+
+// A word of the reason kept whole (no break after an id's hyphens).
+.ah-activity-error-word
+  white-space: nowrap
 
 .ah-activity-retry
   height: 1.5rem
@@ -266,3 +282,48 @@ AH_ACTIVITY_TURN_GAP = 0.5rem      // above each turn after the first
   background: transparent
   color: colors-ui-text-primary-label
   font-size: unit(type-ui-size-caption-md / 16, 'rem')
+
+// The comparison story: the timeline and today's Agent Activity cards side
+// by side over one session's events, each half the panel's full height, a
+// rule between them.
+.ah-against-cards
+  // The panel's whole body: in a frame that lays its child out as a flex
+  // item, the row would otherwise take its content's width.
+  flex: 1 1 100%
+  width: 100%
+  min-width: 0
+  display: flex
+  height: 100%
+  min-height: 0
+
+.ah-against-half
+  // Each half exactly half the panel (the cards' panel would otherwise take
+  // its own content's width).
+  flex: 0 0 50%
+  max-width: 50%
+  min-width: 0
+  min-height: 0
+  display: flex
+  flex-direction: column
+  overflow: hidden
+
+  > *
+    flex: 1 1 auto
+    min-height: 0
+
+.ah-against-timeline
+  border-right: 0.0625rem solid colors-ui-border-primary
+
+// A session the source does not hold: an error state, laid out as the
+// notices are (`.empty-overlay`: centred, a step down from the body size).
+.ah-activity-unresolvable
+  flex: 1 1 auto
+  display: flex
+  justify-content: center
+  align-items: center
+  padding: 0 2.5rem
+  text-align: center
+  font-size: 0.875rem
+  line-height: 1.25rem
+  color: colors-ui-text-primary-body
+  opacity: 0.6

@@ -43,7 +43,9 @@
 ## pixels, beside the viewport they were measured in. A region is the first
 ## element in document order carrying its facts, or, for `"pick":
 ## "last-whole"`, the last one drawn whole, its bottom edge inside the window
-## (the last row of a list the window shows entirely); a region with a
+## (the last row of a list the window shows entirely). With `within`, only
+## the matches drawn wholly inside the first element carrying `within`'s
+## facts count: the rows a scrolling list shows. A region with a
 ## `pick` also reports its `index` among the matches laid out with an area,
 ## as the web capture does, so the layout test can tell the same row from
 ## another. Beside the regions, `drawnCuts` lists every text the window drew
@@ -106,6 +108,11 @@ type
     facts: seq[(string, string)]
     pick: RegionPick
     elements: seq[GpuiElement]
+    within: seq[(string, string)]
+      ## `within`'s facts: only the matches drawn wholly inside the first
+      ## element carrying them (a scrolling list) count; empty: every match.
+    container: seq[GpuiElement]
+      ## The element(s) carrying `within`'s facts, in document order.
 
   StoryWindow = object
     ## Everything the cdecl root builder and the tick need, which cannot be
@@ -189,6 +196,8 @@ proc readDeclaration(path: string): seq[RegionProbe] =
       of "last-whole": rpLastWhole
       else: raise newException(ValueError, path & ": region " & probe.name &
                                ": unknown pick " & region{"pick"}.getStr)
+    if region.hasKey("within"):
+      for k, v in region["within"]["gpui"].pairs: probe.within.add (k, v.getStr)
     if probe.name.len == 0 or probe.facts.len == 0:
       raise newException(ValueError, path & ": a region needs a name and gpui facts")
     result.add probe
@@ -219,13 +228,25 @@ proc readRegions(probes: seq[RegionProbe]; viewportHeight: int): JsonNode =
   for probe in probes:
     if probe.elements.len == 0: continue
     var shown: seq[tuple[x, y, w, h: float; el: GpuiElement]]
+    # `within`: the box of the container the matches must lie inside.
+    var boxY, boxH = 0.0
+    var hasBox = false
+    for c in probe.container:
+      var cx, cy, cw, ch: float
+      if layoutBounds(c, cx, cy, cw, ch) and cw > 0 and ch > 0:
+        boxY = cy
+        boxH = ch
+        hasBox = true
+        break
+    if probe.within.len > 0 and not hasBox: continue
     for i, el in probe.elements:
       var x, y, w, h: float
       if not layoutBounds(el, x, y, w, h):
         if i == 0: return nil
         continue
+      if hasBox and (y < boxY - 0.5 or y + h > boxY + boxH + 0.5): continue
       if w > 0 and h > 0: shown.add (x, y, w, h, el)
-      if probe.pick == rpNone: break
+      if probe.pick == rpNone and shown.len > 0: break
     var chosen = if shown.len > 0: 0 else: -1
     if probe.pick == rpLastWhole:
       chosen = -1
@@ -327,10 +348,18 @@ proc buildStory(root: GpuiElement) {.cdecl.} =
   for probe in gWindow.probes.mitems:
     probe.elements.setLen 0
     allMatches(gWindow.mount.root, probe.facts, probe.elements)
-    # Only the first match is measured unless one of several is picked.
-    if probe.pick == rpNone and probe.elements.len > 1: probe.elements.setLen 1
+    # Only the first match is measured unless one of several is picked, or
+    # the matches must lie inside a container (`within`).
+    if probe.pick == rpNone and probe.within.len == 0 and probe.elements.len > 1:
+      probe.elements.setLen 1
     for el in probe.elements:
       r.setAttribute(el, LayoutProbeAttribute, probe.name)
+    probe.container.setLen 0
+    if probe.within.len > 0:
+      allMatches(gWindow.mount.root, probe.within, probe.container)
+      for el in probe.container:
+        if getAttribute(el, LayoutProbeAttribute).len == 0:
+          r.setAttribute(el, LayoutProbeAttribute, probe.name & ":within")
   if gWindow.probes.len > 0:
     gpui_layout_bounds_reset()
   if gWindow.probes.len > 0 or not gWindow.mount.playback.isNil:
