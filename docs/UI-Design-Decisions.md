@@ -180,15 +180,18 @@ Tabs, strip tabs, and docked and overlay panels share one corner size.
 src/frontend/styles/components/golden_layout.styl :: TAB_CORNER_RADIUS = 0.375rem
 ```
 
-### D-13: The agent status pill is grey
+### D-13: The agent pills in the settings take the shared look
 
-Figma `status-pill`, node 3689:26, with neutral colours rather than the blue
-`running` ones, because an agent has no run state to colour yet. (2026-10-16,
-2026-10-17)
+The Agents row in the Agent panel's settings: each agent is a pill like the
+suggestion chips, 26px and fully round, with the shared button's border, fill and
+subtle text, 12px, and a dot before the name. It is a label, so it has no hover.
+"Add" is a real button, the shared md button with a plus. It was the grey Figma
+`status-pill` (20px, 10px text), with "+ add" drawn as a second pill.
+(2026-10-16, 2026-10-17; changed by Nikolay 2026-11-05)
 
 ```guard
-src/frontend/styles/components/agent_activity.styl :: agent-status-pill()
-src/frontend/styles/components/agent_activity.styl :: background: colors-ui-surface-primary-tertiary
+src/frontend/styles/components/agent_activity.styl :: The Agents row in the shared look
+src/frontend/viewmodel/views/isonim_agent_activity_view.nim :: button(class = "ct-button-md-secondary agent-settings-add-button",
 ```
 
 ### D-14: The welcome screens keep their own button look
@@ -441,6 +444,117 @@ src/frontend/viewmodel/views/isonim_agent_activity_view.nim :: title = "Agent se
 src/frontend/viewmodel/views/isonim_state_view.nim :: title = badgeAriaForRow(vm, item())
 src/frontend/viewmodel/views/tooltips.nim :: OURS_INSIDE = '.trace'
 src/frontend/ui/trace.nim :: runButton.setAttribute(cstring"title", cstring"Run tracepoints (Ctrl+Enter)")
+```
+
+### D-32: 6px between controls, from Figma, on whole pixels
+
+Neighbouring controls are 6px apart: button and button, field and button, side by
+side or stacked. The value is Figma's `space / gap/control` variable (Compact
+density), which is the source of truth, so the code reads it from the generated
+token as `CONTROL_GAP` in `button.styl` and never writes 6px by hand. Tabs are not
+controls here: strip tabs stay 4px apart and sub-tabs keep their track. The status
+bar's sidebar toggle and tab-list button still touch (2026-10-16) until Nikolay
+decides otherwise. Every size lands on a whole pixel: a value that comes to a
+fraction (0.24em = 3.84px, 11.6px, 14.5px) is rounded to the nearest whole pixel,
+and the debug toolbar's half-pixel dividers sit in a 1px box. (2026-11-03)
+
+```guard
+src/frontend/styles/components/button.styl :: CONTROL_GAP = unit(gap-control / 16, 'rem')
+src/frontend/styles/components/custom_components.styl :: gap: CONTROL_GAP
+src/frontend/styles/components/shared_components.styl :: gap: CONTROL_GAP
+src/frontend/styles/components/menu_bar.styl :: gap: CONTROL_GAP
+src/frontend/styles/components/request_panel.styl :: gap: CONTROL_GAP
+src/frontend/styles/components/shared_widgets.styl :: background: linear-gradient(to right, colors-ui-divider-primary 50%, transparent 50%)
+src/frontend/styles/components/auto_hide.styl :: margin-right: 0.25rem
+src/frontend/styles/components/agent_activity.styl :: margin-top: 0.875rem
+```
+
+### D-33: The session tabs' overflow button shows the Design System chevron
+
+When the session tabs don't fit, the button that lists them all shows the chevron-down
+from the Design System icons page (`icons-lg=chevron-down`), shown at 18px, not a typed "⌄"
+character. It is painted through a mask in the button's text colour. The button looks
+and behaves like the "+" beside it: a 26px circle filled with
+`colors/ui/surface/primary/tertiary`, its mark at 70% at rest, and the "+"'s hover and
+press. While its list is open, the chevron turns to point up and the circle is the hover
+colour (`colors/ui/surface/primary/tertiary-hover`) at 35% opacity. Inactive session tabs
+are filled with that hover colour at 25% on screen. The session tabs, the overflow
+button and the "+" are all 6px apart. (2026-11-03)
+
+```guard
+src/frontend/styles/components/session_tabs.styl :: mask-image url('../../public/resources/shared/build_chevron_down.svg')
+src/frontend/styles/components/session_tabs.styl :: flex 0 0 CONTROL_HEIGHT_MD
+src/frontend/styles/components/session_tabs.styl :: controls (CONTROL_GAP, D-32).  Was 0.25em (4px)
+src/frontend/styles/components/session_tabs.styl :: background-color rgba(colors-ui-surface-primary-tertiary-hover, 0.35)
+src/frontend/styles/components/session_tabs.styl :: background-color rgba(colors-ui-surface-primary-tertiary-hover, (0.25 / 0.7))
+```
+
+### D-34: An empty trace tab hides the debugger controls
+
+A session tab with no trace loaded (a blank welcome tab, not an edit workspace) hides
+the debugger's navigation buttons in the caption bar: there is nothing for them to
+step through. They keep their space, so the command prompt and the tabs do not move
+when switching between an empty tab and a trace. (2026-11-03)
+
+```guard
+src/frontend/ui/session_tabs.nim :: menu.setClass(cstring CaptionBarNoTraceClass, activeSessionIsEmpty(data))
+src/frontend/styles/components/menu_bar.styl :: &.menu-shell--no-trace #isonim-debug-controls
+```
+
+### D-35: An open or pressed button shows no tooltip
+
+A button that is open (its dropdown or menu is showing) shows no tooltip, however
+long the pointer rests on it or comes back to it. A button that was just clicked
+shows no tooltip either, until the pointer leaves it. This holds for every control
+and every future one: the open dropdowns are the ones listed in `DROPDOWNS` in
+`views/keyboard_focus.nim` (the list Esc closes), plus any button marked
+`aria-expanded="true"`, so a new dropdown added there is covered too. (2026-11-05)
+
+```guard
+src/frontend/viewmodel/views/keyboard_focus.nim :: globalThis.__ctDropdowns = DROPDOWNS
+src/frontend/viewmodel/views/tooltips.nim :: if (current.el === quiet || isOpen(current.el)) return;
+src/frontend/viewmodel/views/tooltips.nim :: if (current && current.el.contains(ev.target)) quiet = current.el;
+```
+
+### D-36: The gap between panels shows a thin line only when it is used
+
+Every gap between panels, side by side or one above the other, behaves the same.
+It stays 4px, so it is easy to grab, and draws one 1px line inside it, 2px in from
+the edge. At rest the line is hidden. While the pointer is on the gap, the line is
+the quiet grey `colors/ui/border/primary`, the selected panel's outline (D-15).
+While the gap is dragged, the line is the accent `colors/ui/border/action`. The
+gap itself never changes colour. (2026-11-05)
+
+```guard
+src/frontend/styles/components/golden_layout.styl :: EVERY GAP BETWEEN PANELS IS ONE 1px LINE (D-36)
+src/frontend/styles/components/golden_layout.styl :: .lm_splitter:hover .lm_drag_handle
+src/frontend/styles/components/golden_layout.styl :: .lm_splitter.lm_dragging .lm_drag_handle
+```
+
+### D-37: The Agent panel uses the shared controls
+
+The Agent Activity panel has no controls of its own look. Its model, branch and
+settings menus are the shared dropdown (`dropdown-surface()` with `ct-menu-item`
+rows): a 4px inset, 36px rows, no line between them, the quiet row hover and the
+grey chosen row, and the arrow keys work in them. The settings selects open from a
+26px shared button with the Design System chevron, and their chosen row also keeps
+a tick. "Network access" is the shared switch. Its buttons are the md size (26px)
+with 6px corners. The suggestion chips keep their pill shape but take the shared
+button's colours, hover and height. Stop stays red, with a darker red on hover. Its
+icons are Design System icons painted in the text colour. The prompt's indigo
+outline shows only while a field in it is being typed in, never beside a
+toolbar button's key-focus. (2026-11-05)
+
+```guard
+src/frontend/styles/components/agent_activity.styl :: agent-toolbar-menu()
+src/frontend/styles/components/agent_activity.styl :: .agent-settings-select-trigger.agent-settings-select-trigger
+src/frontend/styles/components/agent_activity.styl :: mask-icon(CHECKMARK_CHECK_16)
+src/frontend/styles/components/agent_activity.styl :: &:has(textarea:focus),
+src/frontend/styles/components/agent_activity.styl :: background-color: colors-red-800 !important
+src/frontend/viewmodel/views/isonim_agent_activity_view.nim :: "agent-model-item ct-menu-item ct-menu-item--chosen"
+src/frontend/viewmodel/views/isonim_agent_activity_view.nim :: button(class = "ct-button-md-secondary agent-settings-select-trigger",
+src/frontend/viewmodel/views/isonim_agent_activity_view.nim :: button(class = "ct-button-md-secondary agent-idle-chip"
+src/frontend/viewmodel/views/keyboard_focus.nim :: '.agent-model-wrapper, .agent-branch-wrapper, .agent-settings-select-wrapper'
 ```
 
 ## Focus rules

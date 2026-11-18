@@ -32,6 +32,8 @@ when defined(js):
     importcpp: "#.classList.add(#)".}
   proc hasClass(el: isonim_dom.Element; className: cstring): bool {.
     importcpp: "#.classList.contains(#)".}
+  proc setClass(el: isonim_dom.Element; className: cstring; on: bool) {.
+    importcpp: "#.classList.toggle(#, #)".}
   proc clientWidth(el: isonim_dom.Element): int {.importcpp: "#.clientWidth".}
   proc appendToDocumentBody(node: isonim_dom.Element) {.importjs: "document.body.appendChild(#)".}
   proc insertBeforeNode(parent, node, reference: isonim_dom.Element) {.importjs: "#.insertBefore(#, #)".}
@@ -54,6 +56,18 @@ proc sessionLabel(session: ReplaySession, index: int): cstring =
   if not session.trace.isNil and session.trace.program.len > 0:
     return baseName(session.trace.program)
   cstring(fmt"Trace {index + 1}")
+
+const CaptionBarNoTraceClass* = "menu-shell--no-trace"
+  ## On `#menu` while the active tab is an empty one (D-34): the debugger
+  ## controls have nothing to drive there, so the stylesheet hides them.
+
+proc activeSessionIsEmpty(data: Data): bool =
+  ## A blank welcome tab: no trace loaded, and not an edit workspace — that
+  ## one fills the same host with its own edit commands.
+  if data.activeSessionIndex < 0 or data.activeSessionIndex >= data.sessions.len:
+    return false
+  let session = data.sessions[data.activeSessionIndex]
+  session.trace.isNil and not session.startOptions.edit
 
 proc sessionTabRecords(data: Data): seq[SessionTabRecord] =
   for i in 0 ..< data.sessions.len:
@@ -164,6 +178,12 @@ when defined(js):
       sessionTabCallbacks(data))
     if overflowWasOpen:
       container.addClass(cstring"overflow-open")
+
+    # Every tab switch comes through here, so this is where `#menu` learns
+    # whether the active tab is empty.
+    let menu = isonim_dom.getElementById(isonim_dom.document, cstring"menu")
+    if not isonim_dom.isNodeNil(isonim_dom.Node(menu)):
+      menu.setClass(cstring CaptionBarNoTraceClass, activeSessionIsEmpty(data))
 
   proc requestSessionTabsRender*(data: Data) =
     ## Refresh the direct IsoNim tab-bar mount after explicit session state

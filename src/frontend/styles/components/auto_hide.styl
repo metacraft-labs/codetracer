@@ -603,7 +603,7 @@ DOCK_BOTTOM_HANDLE_SIZE = 0.25rem
   margin: 0 auto
   flex: none
 
-  // The tabs' trailing 0.24em gap would sit the row that much left of centre.
+  // The tabs' trailing 4px gap would sit the row that much left of centre.
   .auto-hide-strip-tab:last-child
     margin-right: 0
 
@@ -621,7 +621,8 @@ DOCK_BOTTOM_HANDLE_SIZE = 0.25rem
   // on each side that the side strip uses as padding-left/right.
   padding: 0 0.5em
   margin-bottom: 0
-  margin-right: 0.24em
+  // 4px, a whole pixel; 0.24em came to 3.84px.
+  margin-right: 0.25rem
   // Tab height is the full status-bar height — no explicit height needed
   // since the parent is align-items: stretch.
   // All corners TAB_CORNER_RADIUS (golden_layout.styl), like every other tab.

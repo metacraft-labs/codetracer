@@ -16,7 +16,10 @@ NATIVE_WINDOW_CONTROLS_INSET = "calc(%s + %s)" % (NATIVE_WINDOW_CONTROLS_EDGE NA
 FULLSCREEN_EDGE_GAP = 0.5rem
 
 // Command prompt: floor, viewport-tracking middle, ceiling.
-COMMAND_PROMPT_WIDTH = unquote("clamp(24em, 24vw, 40em)")
+// Rounded to an even number of pixels: the viewport term made it fractional,
+// which put the prompt's edges and the new-tab button on part pixels, and an
+// even width splits the space left over for its two neighbours evenly.
+COMMAND_PROMPT_WIDTH = unquote("round(clamp(24em, 24vw, 40em), 0.125rem)")
 
 // The caption bar's vertical padding: 6px above its row; below it, 2px in the
 // working area and 6px while a welcome / new-trace screen is showing — the
@@ -54,9 +57,10 @@ CAPTION_BAR_PADDING_BOTTOM = unquote("var(--caption-bar-padding-bottom)")
   user-select: none
   // Spacing between the caption bar's three regions — the debug toolbar, the
   // command prompt and the session tabs, so this is also the gap between the
-  // prompt and the new-tab button.  In rem, not em: it should stay 8px whatever
-  // font size the bar inherits, rather than scaling with it.
-  gap: 0.5rem
+  // prompt and the new-tab button: the control gap (CONTROL_GAP, 6px —
+  // button.styl), a rem constant, so it stays 6px whatever font size the bar
+  // inherits.
+  gap: CONTROL_GAP
   // Must equal `#root-container`'s `top` (shared_widgets.styl) — the content
   // below starts there, so any shortfall leaves an unpainted strip between the
   // two.  Because the strip shows the body background, which is the same colour
@@ -250,6 +254,14 @@ CAPTION_BAR_PADDING_BOTTOM = unquote("var(--caption-bar-padding-bottom)")
 
     &:focus
       outline: 0 !important
+
+  // An empty trace tab (`menu-shell--no-trace`, ui/session_tabs.nim): the
+  // debugger controls have no trace to drive, so they are hidden (Nikolay,
+  // 2026-11-03; D-34).  `visibility`, not `display`, so they keep their
+  // share of the bar and the prompt and tabs stay put when switching tabs.
+  &.menu-shell--no-trace #isonim-debug-controls
+    visibility: hidden
+    pointer-events: none
 
   #isonim-debug-controls
     order: 2

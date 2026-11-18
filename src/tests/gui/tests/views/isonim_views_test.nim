@@ -1180,7 +1180,8 @@ suite "IsoNim Session Tabs — structure":
     check tabs.len == 3
     let overflow = findByClass(panel, "session-tab-overflow")
     check overflow != nil
-    check overflow.textContent in [">", "v", "⌄", "⋯"]
+    # The chevron is the Design System icon drawn by CSS (D-33), not a glyph.
+    check overflow.textContent == ""
     let overflowItems = findAllByClass(panel, SessionTabOverflowItemClass)
     check overflowItems.len == 8
     check overflowItems[6].attributes["class"].contains("active")

@@ -12,6 +12,8 @@
 ##   * a `title` that repeats the text on screen shows nothing, unless that text is
 ##     cut off;
 ##   * text cut off with an ellipsis shows its full value, with no `title` needed;
+##   * an open control (its dropdown showing) and a pressed one, until the pointer
+##     leaves it, show nothing (D-35);
 ##   * a `.custom-tooltip` child keeps its own hover rule (the debug toolbar's tests
 ##     read it there); only the keyboard reads its text from here.
 ##
@@ -29,6 +31,8 @@ when defined(js):
       var OWN_TOOLTIPS = '.monaco-editor, [data-ct-cell]', OURS_INSIDE = '.trace';
       var BUILT_IN = [['.jstree-ocl', 'Show or hide the folder']];
       var box = null, current = null, timer = 0;
+      // A pressed control stays quiet until the pointer leaves it (D-35).
+      var quiet = null;
 
       function isOwn(el) {
         return !!el.closest(OWN_TOOLTIPS) && !el.closest(OURS_INSIDE);
@@ -37,6 +41,28 @@ when defined(js):
       function isCut(el) {
         return el.scrollWidth > el.clientWidth &&
           getComputedStyle(el).textOverflow === 'ellipsis';
+      }
+      // An open control shows no tooltip (D-35): its menu is on screen. The
+      // dropdowns are keyboard_focus.nim's list, the one Escape closes.
+      function onScreen(el) { return !!el && el.getClientRects().length > 0; }
+      function isOpen(el) {
+        if (el.matches('[aria-expanded="true"]') &&
+            el.matches('button, [role="button"], [role="combobox"]')) return true;
+        var list = globalThis.__ctDropdowns || [];
+        for (var i = 0; i < list.length; i++) {
+          var d = list[i];
+          if (el.matches(d.open)) return true;
+          if (d.prev) {
+            if (el.nextElementSibling && el.nextElementSibling.matches(d.open) &&
+                onScreen(el.nextElementSibling)) return true;
+            continue;
+          }
+          if (!d.box) continue;
+          var owner = el.closest(d.box);
+          if (!owner || !(el.closest(d.trigger) || (d.focus && el.closest(d.focus)))) continue;
+          if (owner.matches(d.open) || onScreen(owner.querySelector(d.open))) return true;
+        }
+        return false;
       }
       function restore() {
         if (!current) return;
@@ -53,6 +79,7 @@ when defined(js):
       function leave() { hide(); restore(); current = null; }
       function place() {
         if (!current || !current.text || !current.el.isConnected) return;
+        if (current.el === quiet || isOpen(current.el)) return;
         if (!box) {
           box = document.createElement('div');
           box.className = 'ct-tooltip';
@@ -128,13 +155,16 @@ when defined(js):
       }
 
       document.addEventListener('pointerover', function (ev) {
+        if (quiet && !quiet.contains(ev.target)) quiet = null;
         var found = sourceOf(ev.target);
         if (found && current && current.el === found.el) return;
         if (found) enter(found, 'pointer');
         else if (current) leave();
       }, { capture: true, passive: true });
       document.addEventListener('pointerout', function (ev) {
-        if (!ev.relatedTarget && current && current.how === 'pointer') leave();
+        if (ev.relatedTarget) return;
+        quiet = null;
+        if (current && current.how === 'pointer') leave();
       }, { capture: true, passive: true });
       document.addEventListener('focusin', function (ev) {
         var el = ev.target;
@@ -151,7 +181,10 @@ when defined(js):
       window.addEventListener('keydown', function (ev) {
         if (ev.key !== 'Tab') hide();
       }, true);
-      document.addEventListener('pointerdown', hide, { capture: true, passive: true });
+      document.addEventListener('pointerdown', function (ev) {
+        if (current && current.el.contains(ev.target)) quiet = current.el;
+        hide();
+      }, { capture: true, passive: true });
       document.addEventListener('scroll', function (ev) {
         if (current && ev.target.contains && ev.target.contains(current.el)) hide();
       }, { capture: true, passive: true });
