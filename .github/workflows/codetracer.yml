@@ -1088,7 +1088,7 @@ jobs:
           consumer-directory: wr3-${{ github.run_id }}-${{ github.run_attempt }}/codetracer
           workspace-directory: wr3-${{ github.run_id }}-${{ github.run_attempt }}
           sibling-strategy: repro-lock
-          repro-version: v0.2.17
+          repro-version: v0.2.26
           gh-token: ${{ steps.ci_token.outputs.token }}
           # THIS LIST HOLDS ONLY WHAT THE LOCK PATH WILL NOT CLONE. `repro develop
           # --all` materialises what repro.lock pins, but it skips a row a recipe
