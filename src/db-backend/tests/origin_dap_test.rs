@@ -1406,7 +1406,11 @@ fn take_flow_event_body(rx: &mpsc::Receiver<DapMessage>) -> JsonValue {
     let mut flow = None;
     while let Ok(msg) = rx.try_recv() {
         match msg {
-            DapMessage::Event(event) if event.event == "ct/updated-flow" => flow = Some(event.body),
+            DapMessage::Event(event) if event.event == "ct/updated-flow" => {
+                let mut body = event.body;
+                ct_flow_wire::restore_flow_update(&mut body).expect("a readable flow update");
+                flow = Some(body);
+            }
             DapMessage::Response(resp) if resp.command == "ct/load-flow" => {
                 assert!(
                     resp.success,

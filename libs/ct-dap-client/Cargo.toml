@@ -10,6 +10,7 @@ license = "MIT OR Apache-2.0"
 # `types::common` re-exports it.  A leaf crate by design: this crate is a
 # dev-dependency of db-backend, so it cannot depend on db-backend for the type.
 ct-lang = { path = "../ct-lang" }
+ct-flow-wire = { path = "../ct-flow-wire" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 serde_repr = "0.1"

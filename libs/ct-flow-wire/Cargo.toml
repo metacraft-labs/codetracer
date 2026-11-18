@@ -1,0 +1,12 @@
+[package]
+name = "ct-flow-wire"
+version = "0.1.0"
+edition = "2021"
+description = "The wire encoding of the values a `ct/updated-flow` event carries: default-valued fields elided, and restored."
+license = "MIT OR Apache-2.0"
+
+# A leaf, like `ct-lang`: the replay server writes the encoding, and the DAP
+# test client and the backend manager read it, and neither of the readers can
+# afford the replay server's build.
+[dependencies]
+serde_json = "1.0"

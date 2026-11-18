@@ -7,7 +7,7 @@ use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
 use log::info;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 /// Scale factor applied to every DAP timeout in this module.
 ///
@@ -539,7 +539,11 @@ impl DapStdioClient {
         // operation (step, load_location, load_value), so the flow loop
         // for even a small function can take several minutes.
         let event = self.recv_event("ct/updated-flow", scaled(Duration::from_secs(10)))?;
-        Ok(event.body)
+        // Read with every value whole: the replay server elides the
+        // default-valued fields of the step values (`ct_flow_wire`).
+        let mut body = event.body;
+        ct_flow_wire::restore_flow_update(&mut body)?;
+        Ok(body)
     }
 
     /// Load locals at the current stop using CodeTracer's DAP extension.

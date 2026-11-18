@@ -478,6 +478,7 @@ dependencies = [
 name = "ct-dap-client"
 version = "0.1.0"
 dependencies = [
+ "ct-flow-wire",
  "ct-lang",
  "libc",
  "log",
@@ -491,6 +492,13 @@ name = "ct-data-breakpoints"
 version = "0.1.0"
 dependencies = [
  "serde",
+]
+
+[[package]]
+name = "ct-flow-wire"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
 ]
 
 [[package]]
@@ -1648,6 +1656,7 @@ dependencies = [
  "criterion",
  "ct-dap-client",
  "ct-data-breakpoints",
+ "ct-flow-wire",
  "ct-home",
  "ct-lang",
  "ct-open-beneath",

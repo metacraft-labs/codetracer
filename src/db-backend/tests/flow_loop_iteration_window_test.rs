@@ -149,7 +149,11 @@ fn request_raw_flow(client: &mut DapStdioTestClient, location: Location) -> RawF
         .read_until_event_msg("ct/updated-flow", Duration::from_secs(30))
         .expect("no ct/updated-flow event");
     let body = match event {
-        DapMessage::Event(e) => e.body,
+        DapMessage::Event(e) => {
+            let mut body = e.body;
+            ct_flow_wire::restore_flow_update(&mut body).expect("a readable flow update");
+            body
+        }
         _ => panic!("expected an event"),
     };
     let view_update = body["viewUpdates"]

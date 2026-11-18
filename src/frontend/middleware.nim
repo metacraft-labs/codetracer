@@ -1,6 +1,6 @@
 import
   std/[jsffi, jsconsole],
-  ../common/[ct_event, ct_logging],
+  ../common/[ct_event, ct_logging, flow_wire],
   lib/[jslib, logging],
   types,
   communication, dap,
@@ -330,7 +330,14 @@ proc setupMiddlewareApis*(dapApi: DapApi, viewsApi: MediatorWithSubscribers) {.e
   dapApi.on(CtCalltraceSearchResponse, proc(kind: CtEventKind, value: seq[Call]) = viewsApi.emit(CtCalltraceSearchResponse, value))
   dapApi.on(CtUpdatedTrace, proc(kind: CtEventKind, value: TraceUpdate) = viewsApi.emit(CtUpdatedTrace, value))
   dapApi.on(CtTracepointResults, proc(kind: CtEventKind, value: TracepointResultsAggregate) = viewsApi.emit(CtTracepointResults, value))
-  dapApi.on(CtUpdatedFlow, proc(kind: CtEventKind, value: FlowUpdate) = viewsApi.emit(CtUpdatedFlow, value))
+  dapApi.on(CtUpdatedFlow, proc(kind: CtEventKind, value: FlowUpdate) =
+    # Every step value whole before a view reads one (`common/flow_wire`);
+    # an encoding this front end does not know is the flow's error.
+    let unreadable = restoreElidedFlowValuesJs(value.toJs)
+    if unreadable.len > 0:
+      value.error = true
+      value.errorMessage = unreadable
+    viewsApi.emit(CtUpdatedFlow, value))
   # `ct/notification` and `ct/launch-failed`: wired by the one proc every
   # session's wiring goes through, so the first session and each later tab
   # forward them identically.

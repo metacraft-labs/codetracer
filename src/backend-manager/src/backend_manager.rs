@@ -1362,7 +1362,16 @@ impl BackendManager {
                 {
                     let pending = ds.py_bridge.pending_requests.remove(idx);
 
-                    let body = msg.get("body").unwrap_or(&Value::Null);
+                    // The Python client reads the steps' values whole: restore
+                    // what the replay server elided (`ct_flow_wire`); an
+                    // encoding this bridge does not know is the flow's error.
+                    let mut restored = msg.get("body").cloned().unwrap_or(Value::Null);
+                    let restore_error = ct_flow_wire::restore_flow_update(&mut restored).err();
+                    if let (Some(why), Some(fields)) = (&restore_error, restored.as_object_mut()) {
+                        fields.insert("error".to_string(), Value::Bool(true));
+                        fields.insert("errorMessage".to_string(), Value::String(why.clone()));
+                    }
+                    let body = &restored;
                     let is_error = body.get("error").and_then(Value::as_bool).unwrap_or(false);
 
                     if is_error {
@@ -7086,7 +7095,9 @@ impl BackendManager {
         // The DAP init sequence's per-step bound (`dap_init::DAP_INIT_TIMEOUT_ENV`,
         // default 120 s), checked before anything is spawned.
         let dap_timeout = match dap_init::dap_init_timeout_from(
-            std::env::var(dap_init::DAP_INIT_TIMEOUT_ENV).ok().as_deref(),
+            std::env::var(dap_init::DAP_INIT_TIMEOUT_ENV)
+                .ok()
+                .as_deref(),
         ) {
             Ok(timeout) => timeout,
             Err(message) => {
@@ -7203,7 +7214,6 @@ impl BackendManager {
             }
             opts
         };
-
 
         match dap_init::run_dap_init(
             &sender,
