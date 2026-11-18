@@ -1460,6 +1460,11 @@ proc readOverlays(ctx: GuiContext; f: Frame; t: var Tree; boxes: seq[PaneBox]) =
       for r in rows[1 .. ^1]: lines.add r.text
       t.add(t.root, node("popup", fl(o.x0), fl(o.y0), fl(o.x1 - o.x0), fl(o.y1 - o.y0),
                          %*{"title": rows[0].text, "text": lines}))
+    elif o.x1 - o.x0 < 190:
+      # narrower than any right-click menu (`window_clicks.ContextMenuMinPx`,
+      # 200 px): an editor's inline widget (a loop's `iteration 3 from 5`),
+      # no menu
+      discard
     else:
       # a right-click menu: its entries, the enabled ones drawn brighter
       var bright = 0
