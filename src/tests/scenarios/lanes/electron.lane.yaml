@@ -405,6 +405,13 @@ applicable:
   - ../nim-views/disassembly-steps-by-instruction.yaml
   - ../nim-views/nim-step-moves-by-nim-lines.yaml
   - ../nim-views/toggle-macro-expansion-shows-the-expansion.yaml
+  - ../low-level-code/generated-c-of-a-stock-nim-recording.yaml
+  - ../low-level-code/generated-c-in-edit-mode.yaml
+  - ../shared-editor/debug-mode-shared-editor.yaml
+  - ../shared-editor/tracepoint-editor-is-the-shared-editor.yaml
+  - ../shared-editor/edit-mode-shared-editor-keymaps.yaml
+  - ../keymaps/monaco-unbound-f7-does-nothing.yaml
+  - ../keymaps/f7-bound-by-a-row-reaches-the-editor.yaml
   - ../layout/event-log-and-scratchpad-tabs.yaml
   - ../point-list/breakpoint-rows-follow-the-gutter.yaml
   - ../point-list/tracepoint-rows-beside-breakpoints.yaml

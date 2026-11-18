@@ -48,13 +48,42 @@ if [ -z "$want" ]; then
 	exit 0
 fi
 
+# The catalog's package names, from the cloned reprobuild-packages beside the
+# siblings. A sibling whose recipe uses one of them while its lock pins no
+# catalog resolves it from an unpinned checkout, and reprobuild counts that as
+# a second catalog too (io-mon's `patchelf`, against the root's pinned one).
+catalog_names=()
+for interface in "$siblings_root"/reprobuild-packages/packages/interfaces/*/; do
+	[ -d "$interface" ] || continue
+	interface="${interface%/}"
+	catalog_names+=("${interface##*/}")
+done
+
+uses_catalog_package() { # $1 = recipe path -> prints the first catalog package it uses
+	local recipe name
+	recipe="$(<"$1")"
+	for name in "${catalog_names[@]}"; do
+		if [[ $recipe == *"\"$name\""* || $recipe == *"\"$name "* ]]; then
+			echo "$name"
+			return 0
+		fi
+	done
+	return 1
+}
+
 checked=0
 mismatches=()
 for member in "${members[@]}"; do
 	sibling_lock="$siblings_root/$member/repro.lock"
 	[ -f "$sibling_lock" ] || continue
 	got="$(catalog_rev "$sibling_lock")"
-	[ -n "$got" ] || continue
+	if [ -z "$got" ]; then
+		sibling_recipe="$siblings_root/$member/repro.nim"
+		if [ -f "$sibling_recipe" ] && used="$(uses_catalog_package "$sibling_recipe")"; then
+			mismatches+=("$member uses the catalog package '$used' but its lock pins no reprobuild-packages; $root_lock pins $want")
+		fi
+		continue
+	fi
 	checked=$((checked + 1))
 	if [ "$got" != "$want" ]; then
 		mismatches+=("$member pins reprobuild-packages $got, $root_lock pins $want")
@@ -62,7 +91,7 @@ for member in "${members[@]}"; do
 done
 
 if [ "${#mismatches[@]}" -gt 0 ]; then
-	echo "repro-lock-catalog-agreement: ${#mismatches[@]} lock(s) in the closure pin another package catalog than the root:" >&2
+	echo "repro-lock-catalog-agreement: ${#mismatches[@]} lock(s) in the closure disagree with the root's package catalog:" >&2
 	printf '  %s\n' "${mismatches[@]}" >&2
 	echo "  Move the older side forward: refresh that sibling's lock onto the root's catalog, or the root onto the sibling's." >&2
 	exit 1

@@ -265,7 +265,7 @@ proc open(path: string): (TuiRuntime, TuiSession, VcsSource) =
   s.header(rt)
   s.learnExtent()
   s.refresh(rt)
-  let vcs = newVcsSource(scratch)
+  let vcs = newVcsSource(scratch, background = false)
   s.agent.vcs = vcs.vm
   rt.app.agentPress = proc(row, button: int): string =
     result = s.agentPress(rt, row, button)

@@ -57,7 +57,12 @@ template ck(cond: untyped) =
 const
   Cols = 140
   Rows = 40
-  FrameTimeoutMs = 20000
+  FrameTimeoutMs = 60000
+    ## How long a wait for a STATE may take: every wait here is for what the
+    ## screen shows (a frame, a status, the editor's tab), so the ceiling
+    ## costs nothing when the state comes at once. 20 s failed on loaded CI
+    ## runners with the binary doing what was asserted, only later — a save
+    ## still "writing doc.txt…" at 20 s, the editor's tab not yet named.
   ProjectFile = "doc.txt"
   F1 = "\eOP"
     ## F1 (`SS3 P`): the command palette under CUA, Vim and Kakoune alike
@@ -172,7 +177,7 @@ proc editorTabShows(screen, file: string): bool =
       return true
 
 proc waitForEditorTab(sess: var TuiTestSession; file: string;
-                      timeoutMs = 20000): string =
+                      timeoutMs = FrameTimeoutMs): string =
   let deadline = getMonoTime() + initDuration(milliseconds = timeoutMs)
   var last = ""
   while getMonoTime() < deadline:

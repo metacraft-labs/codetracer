@@ -69,6 +69,7 @@ FIELD = "src/frontend/viewmodel/views/field_keys.nim"
 KEYROUTER = "src/frontend/ui/key_router.nim"
 DESKHIT = "src/frontend/viewmodel/input/dom_pointer.nim"
 DESKOPS = "src/frontend/viewmodel/input/pane_presses.nim"
+DESKMENUS = "src/frontend/viewmodel/input/dom_pane_presses.nim"
 EVVIEW = "src/frontend/viewmodel/views/isonim_event_log_view.nim"
 GATE = "ci/test/input-routing-gate.sh"
 
@@ -86,15 +87,17 @@ TOPBAR = "src/frontend/tui/tests/test_plat48_top_bar.nim"
 VPSPEC = "src/tests/gui/tests/frame-viewer/video-player-keymap-rows.spec.ts"
 DESKSPEC = "src/tests/gui/tests/keymaps/plat64-desktop-pointer-rows.spec.ts"
 PRESSES = "src/frontend/viewmodel/tests/unit/test_plat64_pane_presses.nim"
+MONACOSPEC = "src/tests/gui/tests/keymaps/plat64-monaco-unbound-chords.spec.ts"
 GATERUN = "ci/test/input-routing-gate.sh"
   # The gate run on the tree itself (a suite as well as a subject): an arm
   # that puts a handler back in a view is graded by the gate's own count.
 
 SUBJECTS = [TABLE, ROUTER, KEYNAMES, POINTER, OVERLAY, CLIENT, CLICKS, RUNTIME,
-            MOUSE, GMAIN, GKEYS, FIELD, KEYROUTER, DESKHIT, DESKOPS, EVVIEW,
+            MOUSE, GMAIN, GKEYS, FIELD, KEYROUTER, DESKHIT, DESKOPS, DESKMENUS,
+            EVVIEW,
             GATE]
 SUITES = [MAP, TABLES, CENSUS, UNIT, LAYERS, PTY, PLAN, SPEC, GATETEST, TOPBAR,
-          VPSPEC, DESKSPEC, PRESSES]
+          VPSPEC, DESKSPEC, PRESSES, MONACOSPEC]
 
 # (id, [(subject, find, replace), ...], [(suite, filter), ...], what it breaks)
 ARMS = [
@@ -252,15 +255,10 @@ ARMS = [
      [(PLAN, None)],
      "GPUI's + press bypasses the router"),
     # ---- the desktop -----------------------------------------------------------
-    # Re-aimed after 234a6bcc67: the user's-row clause is now the first of
-    # two alternatives (the second hands a right click to a pane's menu).
     ("W1", [(KEYROUTER, '      (res.layer.startsWith("user:") and runDesktopOperation(res) == nkHandled) or',
              '      (false and runDesktopOperation(res) == nkHandled) or')],
      [(SPEC, None)],
      "the desktop ignores a user's pointer row"),
-    # Re-aimed after 49f7146380: the chord is spelled inside
-    # `element_press.resolveElementPress` from the modifiers the listener
-    # hands it, so the listener drops Ctrl from what it hands over.
     ("W2", [(DESKHIT, '                                    mods, gestureKey)',
              '                                    mods - {kmodCtrl}, gestureKey)')],
      [(SPEC, None)],
@@ -269,16 +267,12 @@ ARMS = [
              '  of "calltrace.go-to-call-unregistered":')],
      [(PRESSES, None), (DESKSPEC, None)],
      "a DOM front-end has no procedure for a call row's base row: a plain press does nothing"),
-    # Re-aimed after 49f7146380: the listener no longer asks the router
-    # itself, it hands it to `element_press.resolveElementPress`. The press
-    # bypasses the router by handing that call a resolver that answers
-    # without the keymap, as the arm's earlier spelling answered in place.
-    ("W4", [(DESKHIT, '  let outcome = resolveElementPress(resolver, path, hit.kind, carried,',
-             '  let outcome = resolveElementPress(\n'
-             '    proc(p: ScopePath; g: string): EditingResolution =\n'
-             '      EditingResolution(kind: erOperation, operation:\n'
-             '        (if hit.kind == "row" and paneKind == "calltrace": "calltrace.go-to-call" else: "")),\n'
-             '    path, hit.kind, carried,')],
+    ("W4", [(DESKHIT, '  let outcome = resolveElementPress(resolver, path, hit.kind, carried,\n'
+             '                                    mods, gestureKey)',
+             '  let bypass = (if hit.kind == "row" and paneKind == "calltrace":\n'
+             '                  "calltrace.go-to-call" else: "")\n'
+             '  let outcome = PressOutcome(operation: bypass, byRow: true,\n'
+             '    resolution: EditingResolution(kind: erOperation, operation: bypass))')],
      [(SPEC, None)],
      "a press bypasses the router: the element's procedure runs whatever the keymap says"),
     ("W5", [(EVVIEW, '       role = "button", tabindex = "0"):\n      discard\n\n  forEachKeyed[EventLogColumn, R, N](r, rowEl,',
@@ -290,6 +284,18 @@ ARMS = [
              '    ("eventLog", "tr[data-position]", "button"),')],
      [(DESKSPEC, None)],
      "the desktop's hit test names an event row a button: its row's operation never runs"),
+    ("W7", [(DESKMENUS, 'const MenuPanes* = ["calltrace", "state", "fileTree", "lowLevelCode",',
+             'const MenuPanes* = ["state", "fileTree", "lowLevelCode",')],
+     [(DESKSPEC, None)],
+     "the desktop has no procedure for a call's right press: the call's menu never opens"),
+    ("W8", [(KEYROUTER, '    elif monacoWouldAnswer(name, ev):',
+             '    elif false:')],
+     [(MONACOSPEC, None)],
+     "a shortcut no keymap binds reaches Monaco's own keybinding service"),
+    ("W9", [(DESKHIT, '  ChromeMenuSelector = "[data-ct-press-menu]"',
+             '  ChromeMenuSelector = "[data-ct-no-press-menu]"')],
+     [(DESKSPEC, None)],
+     "a pane tab's right press is not routed: its menu never opens"),
     # ---- the source gate -------------------------------------------------------
     ("G1", [(GATE, 'if stack and KEYISH.search(stack[-1][1]):', 'if False:')],
      [(GATETEST, None)],
@@ -309,11 +315,11 @@ IN_BINARY = {TABLE, ROUTER, KEYNAMES, POINTER, OVERLAY, CLIENT, CLICKS, RUNTIME,
 IN_GPUI = {TABLE, ROUTER, KEYNAMES, POINTER, OVERLAY, CLIENT, CLICKS, GMAIN, GKEYS}
   # Subjects compiled into `codetracer-gpui`.
 IN_DESKTOP = {ROUTER, KEYNAMES, POINTER, OVERLAY, CLIENT, FIELD, KEYROUTER,
-              DESKHIT, DESKOPS, EVVIEW}
+              DESKHIT, DESKOPS, DESKMENUS, EVVIEW}
   # Subjects compiled into the desktop's bundle.
 PTY_SUITES = {PTY}
 GPUI_SUITES = {PLAN}
-DESKTOP_SUITES = {SPEC, VPSPEC, DESKSPEC}
+DESKTOP_SUITES = {SPEC, VPSPEC, DESKSPEC, MONACOSPEC}
 SHELL_SUITES = {GATETEST, GATERUN}
 
 

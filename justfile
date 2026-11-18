@@ -5492,6 +5492,10 @@ test-tui: tui-prereqs
   set -euo pipefail
   mkdir -p test-logs
   exec > >(tee test-logs/test-tui.log) 2>&1
+  # A stalled engine's state goes to test-logs/ (uploaded with every CI run):
+  # `viewmodel/backend/engine_stall_dump.nim`, written before anything tears
+  # the engine down, says whether a `DapStalledError` was a hang or starvation.
+  export CODETRACER_STALL_DIAGNOSTICS_DIR="${CODETRACER_STALL_DIAGNOSTICS_DIR:-$PWD/test-logs/engine-stalls}"
   bash ci/lib/run-nim-test-lane.sh tui
 
 # Tier 1, the rr half: the TUI suites that open an rr recording of a native
@@ -5530,6 +5534,10 @@ test-tui-real-terminal: build-tui
   set -euo pipefail
   mkdir -p test-logs
   exec > >(tee test-logs/test-tui-real-terminal.log) 2>&1
+  # A stalled engine's state goes to test-logs/ (uploaded with every CI run):
+  # `viewmodel/backend/engine_stall_dump.nim`, written before anything tears
+  # the engine down, says whether a `DapStalledError` was a hang or starvation.
+  export CODETRACER_STALL_DIAGNOSTICS_DIR="${CODETRACER_STALL_DIAGNOSTICS_DIR:-$PWD/test-logs/engine-stalls}"
   bash ci/lib/run-nim-test-lane.sh tui-real-terminal
 
 # ─── Scenarios: CodeTracer's DemoVideoScript pack ────────────────────────────
@@ -5552,6 +5560,12 @@ scenario-lint:
 # One flavour's lane: `terminal`, `gpui` or `electron` (the last two need a
 # display: run them under Xvfb, as `scenario-lane-xvfb` does).
 scenario-lane flavour: build-tui
+  #!/usr/bin/env bash
+  set -euo pipefail
+  # A stalled engine's state goes to test-logs/ (uploaded with every CI run):
+  # `viewmodel/backend/engine_stall_dump.nim`, written before anything tears
+  # the engine down, says whether a `DapStalledError` was a hang or starvation.
+  export CODETRACER_STALL_DIAGNOSTICS_DIR="${CODETRACER_STALL_DIAGNOSTICS_DIR:-$PWD/test-logs/engine-stalls}"
   bash ci/test/scenarios.sh lane {{flavour}}
 
 # A lane on a private Xvfb at 2560x1440, 96 dpi (the desktop's and GPUI's).
@@ -6159,12 +6173,6 @@ plat60-capture-electron *args:
 # (`src/tests/visual/answers/plat60-native-low-level-code.electron.json`).
 plat60-native-capture-electron *args:
   bash scripts/plat60-native-capture-electron.sh "$@"
-
-# View > View Generated C Source and View Disassembly in the real desktop app
-# (Generated-Code-Listing.md §13.4): a stock-Nim recording (GENC_STOCK_NIM),
-# a `ct record` recording and Edit mode.
-generated-c-desktop *args:
-  bash scripts/generated-c-desktop.sh "$@"
 
 # The §30a arm: the two answer producers are independent readers.
 plat35-answer-independence:

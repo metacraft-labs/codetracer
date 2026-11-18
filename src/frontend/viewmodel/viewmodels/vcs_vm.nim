@@ -689,20 +689,49 @@ func sameHistoryDeeper(previous, rows: openArray[VCSCommitRow]): bool =
       return false
   true
 
-proc refreshFromFacade*(vm: VCSVM; facade: platform_vcs.VcsFacade;
-                        directory: string; commitCount = -1) =
-  ## `commitCount` -1 (the default) reads what the history list's viewport
-  ## calls for (`historyCommitCount`); a caller may name a count instead.
-  ## Fill the panel for `directory` through the VCS facade — what a native
-  ## front-end (the terminal, GPUI) calls, with the platform's own `git`. The
-  ## desktop fills the same ViewModel from `ui/vcs.nim`, which runs the same
-  ## `git status --porcelain=v2 --branch` and reads it with the same
-  ## `parsePorcelainV2`.
+type
+  VcsRefreshRead* = object
+    ## What one refresh read from the repository: plain values, no futures and
+    ## no closures, so the read can run away from the input loop
+    ## (`vcs_refresh_worker`) and be applied on it (`applyRefreshRead`).
+    directory*: string
+    commitCount*: int
+      ## How many commits the log was asked for.
+    repository*: bool
+      ## Whether `directory` is inside a git working tree.
+    status*: PlatformOutcome[platform_vcs.VcsStatus]
+      ## Read only for a repository.
+    log*: PlatformOutcome[seq[platform_vcs.VcsCommit]]
+      ## Read only when the status was.
+
+proc wantedCommitCount*(vm: VCSVM; commitCount = -1): int =
+  ## `commitCount` when a caller names one, else what the history list's
+  ## viewport calls for (`historyCommitCount`).
+  if commitCount > 0: commitCount
+  else: historyCommitCount(vm.historyViewport.val)
+
+proc readRepository*(facade: platform_vcs.VcsFacade; directory: string;
+                     commitCount: int): VcsRefreshRead =
+  ## The read half of `refreshFromFacade`, through the facade.
   ##
   ## Settled synchronously (`awaitSync`): the native instantiation's git is a
   ## synchronous subprocess, so there is nothing to wait for; a facade that
   ## cannot settle here reports "not a repository" rather than a stale list.
-  if vm.isNil or facade.isNil:
+  result = VcsRefreshRead(directory: directory, commitCount: commitCount)
+  if facade.isNil or directory.len == 0:
+    return
+  let isRepo = awaitSync(facade.isRepository(directory))
+  result.repository = isRepo.ok and isRepo.value
+  if not result.repository:
+    return
+  result.status = awaitSync(facade.status(directory))
+  if not result.status.ok:
+    return
+  result.log = awaitSync(facade.log(directory, commitCount, ""))
+
+proc applyRefreshRead*(vm: VCSVM; read: VcsRefreshRead) =
+  ## The apply half: fill the panel from what `read` found.
+  if vm.isNil:
     return
   # NO DIRECTORY IS NO PROJECT FOLDER, and git is not asked. An empty
   # directory would reach the facade as "the platform's default" — the
@@ -710,28 +739,22 @@ proc refreshFromFacade*(vm: VCSVM; facade: platform_vcs.VcsFacade;
   # instead of the absence (codetracer-pm issue 2026-10-21, "...its VCS pane
   # shows the launch directory's repository"). The native hosts already
   # treat "" this way on refresh (`gpui_host.refreshGpuiVcs`).
-  if directory.len == 0:
+  if read.directory.len == 0:
     vm.setNoProjectFolder()
     return
-  let isRepo = awaitSync(facade.isRepository(directory))
-  if not isRepo.ok or not isRepo.value:
+  if not read.repository:
     vm.setGitRepoState(false, "Not a git repository")
     vm.setWorkingTreeFiles([])
     vm.setCommits([], [])
     return
-  let status = awaitSync(facade.status(directory))
-  if not status.ok:
-    vm.setGitRepoState(false, $status.error)
+  if not read.status.ok:
+    vm.setGitRepoState(false, $read.status.error)
     return
-  vm.applyWorkingTreeStatus(status.value)
-  let wanted =
-    if commitCount > 0: commitCount
-    else: historyCommitCount(vm.historyViewport.val)
-  let log = awaitSync(facade.log(directory, wanted, ""))
+  vm.applyWorkingTreeStatus(read.status.value)
   var rows: seq[VCSCommitRow] = @[]
-  if log.ok:
-    vm.historyAsked = wanted
-    for c in log.value:
+  if read.log.ok:
+    vm.historyAsked = read.commitCount
+    for c in read.log.value:
       rows.add VCSCommitRow(hash: c.shortId, message: c.subject,
                             author: c.authorName, fullHash: c.id, dotLane: -1)
   else:
@@ -757,6 +780,25 @@ proc refreshFromFacade*(vm: VCSVM; facade: platform_vcs.VcsFacade;
   else:
     vm.setCommits(rows, [])
     vm.syncCommitFilesMap([])
+
+
+proc refreshFromFacade*(vm: VCSVM; facade: platform_vcs.VcsFacade;
+                        directory: string; commitCount = -1) =
+  ## `commitCount` -1 (the default) reads what the history list's viewport
+  ## calls for (`historyCommitCount`); a caller may name a count instead.
+  ## Fill the panel for `directory` through the VCS facade — what a native
+  ## front-end (the terminal, GPUI) calls, with the platform's own `git`. The
+  ## desktop fills the same ViewModel from `ui/vcs.nim`, which runs the same
+  ## `git status --porcelain=v2 --branch` and reads it with the same
+  ## `parsePorcelainV2`.
+  ##
+  ## SYNCHRONOUS: the caller waits for git. A front-end's input loop reads the
+  ## repository away from itself instead (`vcs_refresh_worker`), and applies
+  ## the read with `applyRefreshRead`.
+  if vm.isNil or facade.isNil:
+    return
+  vm.applyRefreshRead(readRepository(facade, directory,
+                                     vm.wantedCommitCount(commitCount)))
 
 proc workingStateKey*(vm: VCSVM): string =
   ## Everything a native VCS pane draws from this ViewModel — repository or

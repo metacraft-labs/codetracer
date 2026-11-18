@@ -119,6 +119,7 @@ when defined(posix):
   import std/posix
 import backend_service
 import stderr_capture
+import engine_stall_dump
 
 type
   DapReadBound* = object
@@ -584,6 +585,13 @@ proc readDapMessage*(backend: DapStdioBackend;
       let diagnostic = backend.diagnosticTail()
       if diagnostic.len > 0:
         error.msg.add("\nreplay-server stderr:\n" & diagnostic)
+      # WHAT THE ENGINE WAS DOING, captured now, before anything tears it
+      # down — when `engine_stall_dump.StallDiagnosticsEnvVar` asks for it
+      # (the test lanes do), so a stall on a CI runner says whether the
+      # engine was hung or starved.
+      let dump = dumpEngineState(backend.process.processID, error.msg)
+      if dump.len > 0:
+        error.msg.add("\nengine state: " & dump)
     raise
   except CatchableError as error:
     # ABANDONED PART WAY THROUGH: the stream is no longer at a message

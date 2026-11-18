@@ -28,7 +28,7 @@
   "R1": "r.route(facts(), path, nmNormal, \"Down\", 0).operation == \"menu.focus-next\"",
   "R2": "rt.app.menu.highlightedItem().label == \"Debug\"",
   "T1": "rt.app.menu.highlightedItem().label == first",
-  "T2": "afterPress != afterCtrl",
+  "T2": "sess.atRecordingEnd",
   "T3": "\"Stop\" in rt.app.notification",
   "T4": "Unhandled exception: the window plan run failed (wait:1500,key:j:control+alt,wait:1000) [IOError]",
   "T5": "\"pointer Ctrl+Click -> debugger.continue\" in r.trace",
@@ -42,5 +42,8 @@
   "W3": "pressCalltrace(vm, op, readerOf(text))",
   "W4": "Error: expect(received).toEqual(expected) // deep equality",
   "W5": "FAIL  [click] src/frontend/viewmodel/views/isonim_event_log_view.nim: 7 site(s), the ledger allows 6 (lines 497,526,606,692,739,837,842)",
-  "W6": "Error: expect(received).toEqual(expected) // deep equality"
+  "W6": "Error: electron.launch: Process failed to launch!",
+  "W7": "Error: electron.launch: Process failed to launch!",
+  "W8": "Error: electron.launch: Process failed to launch!",
+  "W9": "Error: electron.launch: Process failed to launch!"
 }

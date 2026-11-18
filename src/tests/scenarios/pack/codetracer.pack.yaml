@@ -198,6 +198,9 @@ roles:
       current-line: int
       # The line the caret is on; 0 when the editor shows no caret.
       caret-line: int
+      # pw6: the line the editor highlights as the caret's, drawn also while
+      # another surface (the palette, a pane) has the keys; 0 for none.
+      highlighted-line: int
       first-visible: int
       last-visible: int
       # The text of every line on screen, in order.

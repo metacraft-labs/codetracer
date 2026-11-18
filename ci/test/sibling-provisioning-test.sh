@@ -936,16 +936,27 @@ bash "$CATALOG_CHECK" "$catalog_fixture/root/repro.lock" "$catalog_fixture" >/de
 printf 'deps = [%s]\n' "$(cat_entry $cat_rev_b)" >"$catalog_fixture/beta/repro.lock"
 catalog_disagree_rc=0
 catalog_disagree_out="$(bash "$CATALOG_CHECK" "$catalog_fixture/root/repro.lock" "$catalog_fixture" 2>&1)" || catalog_disagree_rc=$?
+# A sibling whose recipe uses a catalog package while its lock pins no catalog
+# resolves that package from an unpinned checkout: a second catalog too.
+printf 'deps = [%s]\n' "$(cat_entry $cat_rev_a)" >"$catalog_fixture/beta/repro.lock"
+mkdir -p "$catalog_fixture/reprobuild-packages/packages/interfaces/patchelf" "$catalog_fixture/gamma"
+printf 'package gamma:\n  uses:\n    "patchelf"\n' >"$catalog_fixture/gamma/repro.nim"
+printf 'deps = []\n' >"$catalog_fixture/gamma/repro.lock"
+sed -i 's/depends = "alpha,beta,reprobuild-packages"/depends = "alpha,beta,gamma,reprobuild-packages"/' "$catalog_fixture/root/repro.lock"
+catalog_unpinned_rc=0
+catalog_unpinned_out="$(bash "$CATALOG_CHECK" "$catalog_fixture/root/repro.lock" "$catalog_fixture" 2>&1)" || catalog_unpinned_rc=$?
 rm -rf "$catalog_fixture"
 catalog_defects=()
+[ "$catalog_unpinned_rc" -eq 1 ] || catalog_defects+=("it accepts a sibling that uses a catalog package with no catalog pin (rc $catalog_unpinned_rc)")
+grep -q "gamma uses the catalog package 'patchelf'" <<<"$catalog_unpinned_out" || catalog_defects+=("its refusal of an unpinned catalog user does not name it")
 [ "$catalog_agree_rc" -eq 0 ] || catalog_defects+=("it rejects siblings that pin the root's catalog (rc $catalog_agree_rc)")
 [ "$catalog_disagree_rc" -eq 1 ] || catalog_defects+=("it accepts a sibling that pins another catalog (rc $catalog_disagree_rc)")
 grep -q 'beta pins reprobuild-packages' <<<"$catalog_disagree_out" || catalog_defects+=("its refusal does not name the sibling")
 grep -q 'bash ci/repro-lock-catalog-agreement.sh repro.lock \.\.' "$LOCK_ACTION" || catalog_defects+=("provision-repro-lock-siblings does not run it on the cloned siblings")
 if [ "${#catalog_defects[@]}" -eq 0 ]; then
-	ok "every cloned sibling's lock must pin repro.lock's package catalog, and the check tells the two apart"
+	ok "every cloned sibling's lock must pin repro.lock's package catalog, and the check tells the cases apart"
 else
-	fail "every cloned sibling's lock must pin repro.lock's package catalog, and the check tells the two apart" "${catalog_defects[@]}"
+	fail "every cloned sibling's lock must pin repro.lock's package catalog, and the check tells the cases apart" "${catalog_defects[@]}"
 fi
 
 # The scenario jobs upload a failed run with DemoVideoScript's own action. It

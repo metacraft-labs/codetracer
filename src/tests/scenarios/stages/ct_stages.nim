@@ -144,16 +144,57 @@ proc recordedProgramOf(dest: string): string =
         except CatchableError: return ""
   ""
 
+proc underStaging(path: string): bool =
+  ## A path inside a `.partial` staging folder, or that folder itself.
+  ".partial" & $DirSep in path or path.endsWith(".partial")
+
+proc staleRecordedPaths*(dest: string): bool =
+  ## Whether the `trace_db_metadata.json` of the recording in `dest` (or one
+  ## level down), which an rr or db-backend recording carries, names a folder
+  ## the replay cannot use: its `outputFolder`, `program` or a source folder
+  ## under a `.partial` staging folder, or an `outputFolder` or absolute
+  ## `program` that is gone. An rr entry made before the stage recorded in
+  ## place says `outputFolder: <dest>.partial`, and its Nim program's C was
+  ## generated outside it, so no View Generated C Source could find it. A
+  ## missing source folder alone is not stale: a source folder names the
+  ## sources the program was compiled from, which may be elsewhere. No
+  ## metadata, or metadata that does not parse, is not stale either: the
+  ## `.ct` container's own program is checked by `staleRecordedProgram`.
+  var dirs = @[dest]
+  for kind, path in walkDir(dest):
+    if kind == pcDir: dirs.add path
+  for d in dirs:
+    let meta = d / "trace_db_metadata.json"
+    if not fileExists(meta): continue
+    var j: JsonNode
+    try: j = parseFile(meta)
+    except CatchableError: return false
+    if j.kind != JObject: return false
+    let output = j{"outputFolder"}.getStr("")
+    let program = j{"program"}.getStr("")
+    if output.len > 0 and (underStaging(output) or
+                           (output.isAbsolute and not dirExists(output))):
+      return true
+    if program.len > 0 and (underStaging(program) or
+                            (program.isAbsolute and not fileExists(program))):
+      return true
+    for f in j{"sourceFolders"}.getElems():
+      if underStaging(f.getStr("")): return true
+    return false
+  false
+
 proc isWholeCachedRecording*(dest: string): bool =
   ## A cache entry a run may replay: a recording `replay-server` can open,
   ## that this build's reader reads, that `ct record` finished writing, and
-  ## whose recorded program is still where the recording says (an entry from
-  ## before the stage recorded in place names a `.partial` path; it is
+  ## whose recorded program and folders are still where the recording says
+  ## (an entry from before the stage recorded in place names a `.partial`
+  ## path, in its `.ct` container or its `trace_db_metadata.json`; it is
   ## recorded again, once).
   let recorded = recordedTraceIn(dest)
   recorded.len > 0 and cachedRecordingRefusal(recorded).len == 0 and
     not fileExists(recordingIncompleteMarker(dest)) and
-    not staleRecordedProgram(recordedProgramOf(dest))
+    not staleRecordedProgram(recordedProgramOf(dest)) and
+    not staleRecordedPaths(dest)
 
 proc ctRecord(s: StageState; program, backend, lang, dest: string; workDir = "";
               stylusTrace = ""; nimExe = ""): string =

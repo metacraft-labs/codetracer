@@ -32,6 +32,7 @@ import ../../viewmodel/viewport
 import ../../viewmodel/platform/vcs
 import ../../viewmodel/host/native_vcs
 import ../../viewmodel/host/native_vcs_details
+import ../../viewmodel/host/vcs_refresh_worker
 import ../app/runtime
 import ../app/tui_app
 import ../app/views/vcs_pane
@@ -47,6 +48,10 @@ type
     vm*: VCSVM
     directory*: string
     facade: VcsFacade
+    worker: VcsRefreshWorker
+      ## The system git's reads, off the input loop (`vcs_refresh_worker`).
+      ## nil for a source given a facade of its own (the in-process suites),
+      ## which is read synchronously as before.
     lastRefresh: MonoTime
     dispose: proc()
 
@@ -87,12 +92,22 @@ proc paneModelOf*(vm: VCSVM): VcsPaneModel =
           result.commitFiles.add VcsFileLine(status: f.status, path: f.path)
 
 proc newVcsSource*(directory: string;
-                   facade: VcsFacade = nil): VcsSource =
+                   facade: VcsFacade = nil;
+                   background = true): VcsSource =
   ## A source for `directory`. `facade` defaults to the system git
   ## (`native_vcs`, the facade the desktop's native instantiation serves).
+  ## `background` (the default) reads the system git away from the caller; an
+  ## in-process suite that asserts on the pane right after `refresh` passes
+  ## `false` to read it synchronously.
   result = VcsSource(directory: directory,
                      facade: (if facade.isNil: nativeVcs(NativeVcsProfile)
                               else: facade))
+  # THE INPUT LOOP NEVER WAITS FOR GIT. With the system git the reads run on
+  # a thread (`vcs_refresh_worker`); before, a slow `git status` (a large
+  # checkout, a loaded machine) left every key typed meanwhile unread — 70 s,
+  # measured (codetracer-pm issue 2026-11-17).
+  if facade.isNil and background:
+    result.worker = startVcsRefreshWorker()
   let src = result
   createRoot proc(dispose: proc()) =
     src.vm = createVCSVM()
@@ -121,13 +136,31 @@ proc reportViewport(s: VcsSource; rt: TuiRuntime): bool =
 
 proc refresh*(s: VcsSource; rt: TuiRuntime) =
   ## Read the repository now — as many commits as the pane's history list
-  ## shows — and publish the pane's value.
+  ## shows — and publish the pane's value. With the system git the read is
+  ## REQUESTED here and applied by `tick` when it comes back; the pane keeps
+  ## what it shows until then.
   if s.isNil:
     return
   discard s.reportViewport(rt)
-  s.vm.refreshFromFacade(s.facade, s.directory)
+  if s.worker.isNil:
+    s.vm.refreshFromFacade(s.facade, s.directory)
+  else:
+    s.worker.request(s.directory, s.vm.wantedCommitCount())
   s.lastRefresh = getMonoTime()
   s.publish(rt)
+
+proc applyFinished(s: VcsSource; rt: TuiRuntime): bool =
+  ## A read that has come back from the worker, applied and published;
+  ## whether the pane's value changed.
+  if s.worker.isNil:
+    return false
+  var read: VcsRefreshRead
+  if not s.worker.take(read):
+    return false
+  let before = rt.app.vcs
+  s.vm.applyRefreshRead(read)
+  s.publish(rt)
+  rt.app.vcs != before
 
 proc refreshChanged(s: VcsSource; rt: TuiRuntime): bool =
   ## `refresh`, answering whether the pane's value changed — the one body
@@ -140,12 +173,17 @@ proc refreshChanged(s: VcsSource; rt: TuiRuntime): bool =
   rt.app.vcs != before
 
 proc tick*(s: VcsSource; rt: TuiRuntime): bool =
-  ## Refresh when `VcsRefreshMs` has passed; whether the pane's value changed.
+  ## Apply a read that has come back, and refresh when `VcsRefreshMs` has
+  ## passed; whether the pane's value changed.
   if s.isNil:
     return false
+  result = s.applyFinished(rt)
   if (getMonoTime() - s.lastRefresh).inMilliseconds < VcsRefreshMs:
-    return false
-  s.refreshChanged(rt)
+    return
+  if not s.worker.isNil and s.worker.busy:
+    # A read is still out: the interval does not stack another behind it.
+    return
+  result = s.refreshChanged(rt) or result
 
 proc refreshOnFocus*(s: VcsSource; rt: TuiRuntime; focused: bool): bool =
   ## The terminal window's focus changed (`terminal_driver.dekFocus`):
@@ -181,7 +219,10 @@ proc followViewport*(s: VcsSource; rt: TuiRuntime): bool =
   false
 
 proc close*(s: VcsSource) =
-  if not s.isNil and not s.dispose.isNil:
+  if s.isNil:
+    return
+  s.worker.stop()
+  if not s.dispose.isNil:
     s.dispose()
 
 proc toggleCommit*(s: VcsSource; rt: TuiRuntime; index: int) =

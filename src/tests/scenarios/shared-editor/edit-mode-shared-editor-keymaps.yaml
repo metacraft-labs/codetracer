@@ -1,0 +1,105 @@
+scenario: 1
+name: shared-editor/edit-mode-shared-editor-keymaps
+pack: codetracer
+summary: >-
+  In Edit mode with the sharedEditor setting on, the keys are the document's:
+  with CUA, typing goes into the file, Ctrl+Z undoes it and Ctrl+S saves to disk
+  (Find in Files finds the saved line); with the palette's Keymap Vim, j
+  moves down in normal mode, i inserts, Escape returns to normal and dd
+  deletes the line; with Keymap Kakoune, w selects the word and d deletes
+  it.
+
+stage:
+  - use: write-project
+    with:
+      files:
+        main.py: "answer = 42\nprint(answer)\nthird = 3\n"
+  - use: front-end-options
+    with: { env: { CODETRACER_SHARED_EDITOR: "1" } }
+  - use: open-project
+    with: { folder: $project, file: main.py }
+
+steps:
+  - wait: { until: { at: 'editor[file="main.py"]', shared: true }, timeout: 120s }
+  # CUA: type, undo, type, save
+  # where the spec presses: the boundary before column 1
+  - click: { at: 'editor[file="main.py"]/line[number="1"]', anchor: caret(1) }
+  - type: "#"
+  - wait: { until: { at: 'editor[file="main.py"]/line[number="1"]', text: "#answer = 42" }, timeout: 10s }
+  - chord: Ctrl+z
+  - wait: { until: { at: 'editor[file="main.py"]/line[number="1"]', text: "answer = 42" }, timeout: 10s }
+  - type: "x"
+  - chord: Ctrl+s
+  - wait: settled
+  # the bytes on disk, as the spec reads them: Find in Files searches the
+  # files, not the editor's buffer, and finds the saved line
+  - chord: Ctrl+Shift+f
+  - wait: { until: { at: find-in-files/search-field, focused: true }, timeout: 10s }
+  - type: xanswer
+  - key: Enter
+  - wait: { until: { at: find-in-files, count: 1 }, timeout: 30s }
+  - expect: { at: find-in-files, rows: ["project/main.py:1"] }
+  # the control: text typed and not saved is in the editor only, and Find in
+  # Files, which reads the files, does not find it. Find in Files is an
+  # overlay: its backdrop takes the first click on the workspace and only
+  # dismisses it (`auto_hide.nim`, the backdrop's click handler), so the
+  # editor gets the second.
+  - click: { at: 'editor[file="main.py"]/line[number="3"]', anchor: caret(1) }
+    # apart, so the two presses are two clicks and not a double-click
+    dwell: 1s
+  - click: { at: 'editor[file="main.py"]/line[number="3"]', anchor: caret(1) }
+  - wait: { until: { at: 'editor[file="main.py"]', caret-line: 3 }, timeout: 10s }
+  - type: "qqunsaved"
+  - wait: { until: { at: 'editor[file="main.py"]/line[number="3"]', text: { contains: "qqunsaved" } }, timeout: 10s }
+  - chord: Ctrl+Shift+f
+  - wait: { until: { at: find-in-files/search-field, focused: true }, timeout: 10s }
+  - chord: Ctrl+a
+  - type: qqunsaved
+  - key: Enter
+  - wait: { until: { at: find-in-files, query: qqunsaved }, timeout: 30s }
+  - wait: { until: settled, timeout: 30s }
+  - expect: { at: find-in-files, count: 0 }
+  - click: { at: 'editor[file="main.py"]/line[number="3"]', anchor: caret(1) }
+    # apart, so the two presses are two clicks and not a double-click
+    dwell: 1s
+  - click: { at: 'editor[file="main.py"]/line[number="3"]', anchor: caret(1) }
+  - wait: { until: { at: 'editor[file="main.py"]', caret-line: 3 }, timeout: 10s }
+  - chord: Ctrl+z
+  - wait: { until: { at: 'editor[file="main.py"]', assert: 'lacks-text("qqunsaved")' }, timeout: 10s }
+  # Vim: normal-mode motion, insert, Escape, dd
+  - chord: Ctrl+p
+  - wait: { until: { at: omnibox, focused: true }, timeout: 10s }
+  - chord: Ctrl+a
+  - type: ":Keymap Vim"
+  - wait: { until: { at: 'omnibox/option[label="Keymap Vim"]', kind: command }, timeout: 15s }
+  - click: 'omnibox/option[label="Keymap Vim"]'
+  - wait: { until: { at: 'editor[file="main.py"]', keymap: vim }, timeout: 15s }
+  - click: { at: 'editor[file="main.py"]/line[number="1"]', anchor: caret(1) }
+  - wait: { until: { at: 'editor[file="main.py"]', mode: normal }, timeout: 10s }
+  - key: j
+  - wait: { until: { at: 'editor[file="main.py"]', caret-line: 2 }, timeout: 10s }
+  - key: i
+  - wait: { until: { at: 'editor[file="main.py"]', mode: insert }, timeout: 10s }
+  - type: "v"
+  - key: Esc
+  - wait: { until: { at: 'editor[file="main.py"]', mode: normal }, timeout: 10s }
+  - expect: { at: 'editor[file="main.py"]/line[number="2"]', text: "vprint(answer)" }
+  - key: d
+  - key: d
+  - wait: { until: { at: 'editor[file="main.py"]', assert: 'lacks-text("print(answer)")' }, timeout: 10s }
+  # Kakoune: select the word, then act on it
+  - chord: Ctrl+p
+  # under Vim, Ctrl+P opens the palette with its ":" already typed; the
+  # query is replaced whole, as the spec filled it
+  - wait: { until: { at: omnibox, focused: true }, timeout: 10s }
+  - chord: Ctrl+a
+  - type: ":Keymap Kakoune"
+  - wait: { until: { at: 'omnibox/option[label="Keymap Kakoune"]', kind: command }, timeout: 15s }
+  - click: 'omnibox/option[label="Keymap Kakoune"]'
+  - wait: { until: { at: 'editor[file="main.py"]', keymap: kakoune }, timeout: 15s }
+  - click: { at: 'editor[file="main.py"]/line[number="2"]', anchor: caret(1) }
+  - wait: { until: { at: 'editor[file="main.py"]', mode: normal }, timeout: 10s }
+  - key: w
+  - wait: { until: { at: 'editor[file="main.py"]', selected-text: { contains: "third" } }, timeout: 10s }
+  - key: d
+  - wait: { until: { at: 'editor[file="main.py"]', assert: 'lacks-text("third")' }, timeout: 10s }

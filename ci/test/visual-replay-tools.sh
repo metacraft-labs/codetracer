@@ -19,15 +19,21 @@ for sibling in "${visual}" "${backend}" "${recorder}"; do
 	}
 done
 
-# ct-native-replay first, BEFORE the private-cargo Git policy below: that policy
-# allows only https (`protocol.allow=never`), and `nix develop '.?submodules=1'`
-# fetches codetracer-native-backend's own submodules (libs/rr, libs/delve) over
-# file://, which it then refuses ("transport 'file' not allowed", TUI shard 6
-# of run 44081496736). The private lldb-sys dependency is fetched with the git
-# CLI and answered by the job's credential helper.
+# ct-native-replay first, BEFORE the private-cargo Git policy below, and with
+# codetracer-native-backend's submodules checked out. The sibling is cloned
+# without them, so `nix develop '.?submodules=1'` tried to fetch libs/rr and
+# libs/delve from the empty submodule paths over file://, which the policy
+# (`protocol.allow=never`, https only) refused: "transport 'file' not allowed",
+# TUI shard 6 of run 44081496736. With them checked out Nix reads them in
+# place, and the policy has nothing to refuse. libs/rr is private, so they are
+# cloned with the job's credentials, which the policy would drop. The private
+# lldb-sys dependency is fetched with the git CLI and answered by the job's
+# credential helper. ci/test/native-backend-submodules-test.sh holds the order.
 native_replay="${backend}/target/debug/ct-native-replay"
-[ -x "${native_replay}" ] ||
+if [ ! -x "${native_replay}" ]; then
+	git -C "${backend}" submodule update --init --recursive
 	(cd "${backend}" && CARGO_NET_GIT_FETCH_WITH_CLI=true nix develop '.?submodules=1' --command cargo build --bin ct-native-replay)
+fi
 
 # shellcheck source=ci/test/visual-replay-private-cargo-env.sh
 source "${root}/ci/test/visual-replay-private-cargo-env.sh"

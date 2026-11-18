@@ -1,0 +1,32 @@
+scenario: 1
+name: keymaps/f7-bound-by-a-row-reaches-the-editor
+pack: codetracer
+summary: >-
+  The control for keymaps/monaco-unbound-f7-does-nothing.yaml. A user's
+  keybindings.json binds F7 to "move last cursor to next match", and the
+  same F7 press, with the caret on `left` in add's body in Monaco (the
+  default editor), now selects the word. F7 reaches the editor when a row
+  binds it, so what the unbound press leaves unchanged it would have
+  changed.
+
+stage:
+  - use: record-program
+    with: { program: calc }
+  - use: plant-config
+    with:
+      file: keybindings.json
+      content: |
+        [
+          { "key": "f7", "command": "editor.move-last-cursor-to-next-match" }
+        ]
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 180s }
+  - expect: { at: 'editor[file="main.py"]', assert: "stopped-at(1)" }
+  - expect: { at: 'editor[file="main.py"]', shared: false }
+  - click: { at: 'editor[file="main.py"]/line[number="31"]', anchor: caret(14) }
+  - wait: { until: { at: 'editor[file="main.py"]', highlighted-line: 31 }, timeout: 10s }
+  - expect: { at: 'editor[file="main.py"]', selected-text: "" }
+  - key: F7
+  - wait: { until: { at: 'editor[file="main.py"]', selected-text: "left" }, timeout: 10s }

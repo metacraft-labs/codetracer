@@ -1,0 +1,435 @@
+// Agent Harbor Inbox (isonim_agent_harbor_inbox_view.nim): the operator's
+// waiting items in the server's order, Previous / Next, and an item's page.
+// A file of its own so its rules stay apart from agent_harbor.styl, which
+// other Agent Harbor work edits.
+//
+// The panel reuses the Agent Harbor panels' header strip, notices and error
+// block (agent_harbor.styl) and the state roles, chips, text fields and
+// selects of agent_harbor_changes.styl, which is imported before this file.
+//
+// Cardless, the agentic panels' calm posture: an inbox row and an item's page are rows on the
+// panel's ground, no border, outline or background around an item. The row
+// of the item on screen is a selection, as the Initiatives panel's selected
+// initiative: the raised fill with the action-colour inset bar. A form's
+// first action is the filled primary button, the others outlined
+// (button.styl `ct-button-sm-primary`, `-secondary`), as the Agent Activity
+// pane's permission buttons. Every colour is a design-system role, its Light
+// value under COLOR_MODE = "Light".
+
+AH_ITEM_MARK = 0.5rem
+
+.agent-harbor-inbox
+.agent-harbor-inbox-item
+  height: 100%
+  display: flex
+  flex-direction: column
+  overflow: hidden
+  background: colors-ui-surface-base-panel
+  color: colors-ui-text-primary-body
+  container-type: inline-size
+  container-name: ah-inbox
+
+.ah-inbox-body
+  min-height: 0
+
+.ah-inbox-notice
+  flex: 1 1 auto
+
+// ---------------------------------------------------------------------------
+// Previous / Next
+// ---------------------------------------------------------------------------
+// The initiative bar's group: `←  3 of 5  →  Auto-switch: off`; at a narrow panel the
+// arrows and `Auto: off` without the position. Disabled arrows take the
+// disabled colour.
+
+.ah-inbox-stepper
+  display: flex
+  flex-shrink: 0
+  align-items: center
+  gap: 0.375rem
+  padding: 0.3125rem PANEL_INSET
+  border-bottom: 0.0625rem solid colors-ui-border-secondary
+
+.ah-step
+  height: CONTROL_HEIGHT_SM
+  min-width: CONTROL_HEIGHT_SM
+  padding: 0 0.375rem
+  border: CONTROL_BORDER_WIDTH solid CONTROL_BORDER_COLOR
+  border-radius: ah-rem(border-border-radius-control)
+  background: colors-ui-surface-primary-secondary
+  color: colors-ui-text-primary-body
+  font-family: inherit
+  font-size: ah-rem(type-ui-size-label-md)
+  cursor: pointer
+
+  &:hover:not(:disabled)
+    border-color: colors-ui-border-primary-hover
+
+  &:disabled
+    color: colors-ui-text-primary-disabled
+    border-color: colors-ui-border-disabled
+    cursor: default
+
+.ah-step-position
+  font-size: ah-rem(type-ui-size-label-md)
+  color: colors-ui-text-primary-label
+  white-space: nowrap
+
+.ah-auto-switch
+  margin-left: 0.5rem
+  height: CONTROL_HEIGHT_SM
+  padding: 0 0.5rem
+  border: none
+  border-radius: ah-rem(border-border-radius-control)
+  background: transparent
+  color: colors-ui-text-primary-label
+  font-family: inherit
+  font-size: ah-rem(type-ui-size-label-md)
+  white-space: nowrap
+  cursor: pointer
+
+  &:hover
+    background: colors-ui-surface-primary-secondary-hover
+
+.ah-auto-switch-on
+  color: colors-ui-text-primary-body
+
+.ah-auto-compact
+  display: none
+
+// (Written out: Stylus does not substitute variables inside `@container`.)
+// 50rem: the `panel` size (760px) and narrower show the compact group.
+@container ah-inbox (max-width: 50rem)
+  .ah-step-position
+    display: none
+
+  .ah-auto-full
+    display: none
+
+  .ah-auto-compact
+    display: inline
+
+.ah-inbox-degraded
+  flex-shrink: 0
+  padding: 0.25rem PANEL_INSET
+  font-size: ah-rem(type-ui-size-caption-md)
+  line-height: ah-rem(type-ui-lineheight-caption-md)
+  border-bottom: 0.0625rem solid colors-ui-border-secondary
+
+// ---------------------------------------------------------------------------
+// The rows and the page beside them
+// ---------------------------------------------------------------------------
+
+.ah-inbox-main
+  flex: 1 1 auto
+  display: flex
+  flex-direction: column
+  min-height: 0
+  overflow-y: auto
+
+.ah-inbox-list
+  flex: 0 0 auto
+  overflow: visible
+
+// At a laptop width the page stands beside the rows.
+@container ah-inbox (min-width: 60rem)
+  .ah-inbox-main
+    flex-direction: row
+    overflow: hidden
+
+  .ah-inbox-list
+    flex: 0 0 26rem
+    overflow-y: auto
+    border-right: 0.0625rem solid colors-ui-border-secondary
+
+  .ah-inbox-page
+    flex: 1 1 auto
+    overflow-y: auto
+
+.ah-inbox-page
+  min-width: 0
+
+  &[hidden]
+    display: none
+
+// A run of rows from another server, headed by its name and count.
+.ah-inbox-server-head
+  display: flex
+  align-items: baseline
+  gap: 0.5rem
+  padding: 0.375rem PANEL_INSET 0.25rem
+  font-size: ah-rem(type-ui-size-label-md)
+  font-weight: 600
+  color: colors-ui-text-primary-label
+  border-bottom: 0.0625rem solid colors-ui-border-secondary
+
+.ah-inbox-server-name
+  min-width: 0
+  white-space: nowrap
+  overflow: hidden
+
+.ah-inbox-server-count
+  flex-shrink: 0
+  font-weight: 400
+  color: colors-ui-text-primary-caption
+
+.ah-inbox-row
+  display: grid
+  grid-template-columns: AH_ITEM_MARK minmax(0, 1fr)
+  column-gap: 0.5rem
+  align-items: start
+  padding: 0.375rem PANEL_INSET
+  user-select: none
+  cursor: pointer
+
+  &:hover
+    background: colors-ui-surface-primary-secondary-hover
+
+  &:focus-visible
+    outline: 0.0625rem solid colors-ui-border-focus
+    outline-offset: -0.0625rem
+
+// The item on screen: a selection, the raised fill with the action-colour bar.
+.ah-inbox-row-current
+  background: colors-ui-surface-primary-secondary-hover
+  box-shadow: inset 0.125rem 0 0 colors-ui-border-action
+
+.ah-item-mark
+  display: inline-block
+  flex-shrink: 0
+  width: AH_ITEM_MARK
+  height: AH_ITEM_MARK
+  margin-top: 0.375rem
+  border-radius: 50%
+  background: var(--ah-role-ink)
+
+.ah-inbox-row-main
+  display: flex
+  flex-direction: column
+  gap: 0.125rem
+  min-width: 0
+
+.ah-inbox-row-line
+  display: flex
+  flex-wrap: wrap
+  align-items: center
+  gap: 0.125rem 0.375rem
+  min-width: 0
+
+.ah-inbox-row-label
+  flex: 1 1 auto
+  min-width: 0
+  font-size: ah-rem(type-ui-size-body-md)
+  line-height: ah-rem(type-ui-lineheight-body-sm)
+  color: colors-ui-text-primary-body
+  white-space: nowrap
+  overflow: hidden
+
+.ah-inbox-age
+  flex-shrink: 0
+  font-size: ah-rem(type-ui-size-caption-md)
+  color: colors-ui-text-primary-caption
+
+.ah-inbox-row-meta
+  flex-wrap: wrap
+  font-size: ah-rem(type-ui-size-caption-md)
+  line-height: ah-rem(type-ui-lineheight-caption-md)
+
+.ah-inbox-kind
+  color: colors-ui-text-primary-label
+
+.ah-inbox-holder
+  margin-left: 0
+
+.ah-inbox-open
+  margin-left: auto
+
+// The server's one line, as served: wraps under the label.
+.ah-inbox-explanation
+  font-size: ah-rem(type-ui-size-caption-md)
+  line-height: ah-rem(type-ui-lineheight-caption-md)
+  color: colors-ui-text-primary-caption
+  word-break: break-word
+
+// Under the session's header while it was reached through Previous / Next:
+// the position and the item's one-line explanation, on the raised ground.
+.ah-inbox-strip
+  padding: 0.3125rem PANEL_INSET
+  background: colors-ui-surface-primary-secondary
+  font-size: ah-rem(type-ui-size-caption-md)
+  line-height: ah-rem(type-ui-lineheight-caption-md)
+  color: colors-ui-text-primary-body
+
+// ---------------------------------------------------------------------------
+// An item's page
+// ---------------------------------------------------------------------------
+
+.ah-item-page
+  display: flex
+  flex-direction: column
+  gap: 0.5rem
+  min-height: 0
+  padding: 0.5rem PANEL_INSET 0.75rem
+  overflow-y: auto
+
+.ah-item-head
+  display: flex
+  align-items: center
+  gap: 0.5rem
+  min-width: 0
+
+  .ah-item-mark
+    margin-top: 0
+
+.ah-item-kind
+  flex-shrink: 0
+  font-size: ah-rem(type-ui-size-label-md)
+  font-weight: 600
+  text-transform: uppercase
+  letter-spacing: 0.03125em
+  color: colors-ui-text-primary-label
+
+.ah-item-session
+  flex: 1 1 auto
+  min-width: 0
+  font-size: ah-rem(type-ui-size-caption-md)
+  color: colors-ui-text-primary-caption
+  white-space: nowrap
+  overflow: hidden
+
+.ah-priority-select
+  flex-shrink: 0
+  margin-left: auto
+
+// A question's banner: a band on the raised ground, the dot in its role.
+.ah-item-banner
+  display: flex
+  align-items: center
+  gap: 0.5rem
+  padding: 0.375rem 0.5rem
+  border-radius: 0.25rem
+  background: colors-ui-surface-primary-secondary
+  font-size: ah-rem(type-ui-size-body-md)
+
+.ah-item-banner-text
+  min-width: 0
+
+.ah-item-prose
+  font-size: ah-rem(type-ui-size-body-md)
+  line-height: ah-rem(type-ui-lineheight-body-md)
+  color: colors-ui-text-primary-body
+  white-space: pre-wrap
+  word-break: break-word
+
+.ah-item-question
+  font-size: ah-rem(type-ui-size-body-lg)
+
+.ah-item-quiet
+  font-size: ah-rem(type-ui-size-caption-md)
+  line-height: ah-rem(type-ui-lineheight-caption-md)
+  color: colors-ui-text-primary-caption
+
+.ah-item-section
+  display: flex
+  flex-direction: column
+  gap: 0.25rem
+
+.ah-item-section-head
+  display: flex
+  align-items: baseline
+  gap: 0.5rem
+  min-width: 0
+
+.ah-item-section-name
+  flex-shrink: 0
+  font-size: ah-rem(type-ui-size-label-md)
+  font-weight: 600
+  text-transform: uppercase
+  letter-spacing: 0.03125em
+  color: colors-ui-text-primary-label
+
+.ah-item-section-meta
+  min-width: 0
+  font-size: ah-rem(type-ui-size-caption-md)
+  color: colors-ui-text-primary-caption
+
+// A manager's draft: the focus inset bar marks it as prepared, not typed.
+.ah-item-draft
+  padding-left: 0.5rem
+  box-shadow: inset 0.125rem 0 0 colors-ui-border-information
+
+.ah-item-form
+  display: flex
+  flex-direction: column
+  gap: 0.375rem
+
+.ah-item-actions
+  display: flex
+  flex-wrap: wrap
+  align-items: center
+  gap: 0.375rem
+
+  button
+    flex: 0 0 auto
+
+.ah-choices
+  display: flex
+  flex-direction: column
+  gap: 0.25rem
+
+.ah-choice
+  display: flex
+  align-items: baseline
+  gap: 0.5rem
+  font-size: ah-rem(type-ui-size-body-md)
+  color: colors-ui-text-primary-body
+  cursor: pointer
+
+.ah-choice-description
+  font-size: ah-rem(type-ui-size-caption-md)
+  color: colors-ui-text-primary-caption
+
+.ah-item-approval
+  display: flex
+  flex-direction: column
+  gap: 0.375rem
+  padding: 0.375rem 0
+  border-top: 0.0625rem solid colors-ui-border-secondary
+
+.ah-password-field
+  width: 12rem
+  min-height: CONTROL_HEIGHT_SM
+  padding: 0 0.5rem
+
+.ah-item-login
+  display: flex
+  flex-direction: column
+  gap: 0.375rem
+
+.ah-item-login-provider
+  font-size: ah-rem(type-ui-size-body-lg)
+  color: colors-ui-text-primary-body
+
+.ah-item-login-state
+  font-size: ah-rem(type-ui-size-body-md)
+
+.ah-item-attachment
+  min-width: 0
+  font-size: ah-rem(type-ui-size-caption-md)
+  color: colors-ui-text-primary-label
+  white-space: nowrap
+  overflow: hidden
+  font-family: "SpaceMono", monospace
+
+.ah-item-status-lines
+  display: flex
+  flex-direction: column
+  gap: 0.25rem
+
+  &:empty
+    display: none
+
+.ah-item-validation,
+.ah-item-phase
+  font-size: ah-rem(type-ui-size-caption-md)
+  line-height: ah-rem(type-ui-lineheight-caption-md)

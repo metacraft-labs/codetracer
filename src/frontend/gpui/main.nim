@@ -13994,12 +13994,24 @@ proc writeFrameReport(path: string; loadStart, loadEnd: string;
                       elapsedMs: int; deadlineMs: uint32): bool =
   ## PLAT-42. The frame-timing record, read out of the shim after the loop.
   var frames, latencies: seq[int64] = @[]
-  for i in 0'u64 ..< gpui_frame_count(): frames.add int64(gpui_frame_ns(i))
+  # Each frame's work, as the shim counted it: shadow nodes the plan build
+  # visited, plans rebuilt, GPUI elements built, and cached subtrees reused
+  # and rendered. A frame that redraws one changed row should count that
+  # row's path, not the window.
+  var work = newJArray()
+  for i in 0'u64 ..< gpui_frame_count():
+    frames.add int64(gpui_frame_ns(i))
+    var counts: array[5, uint64]
+    if gpui_frame_work(i, addr counts) == 1:
+      work.add %*{"nodesVisited": counts[0], "plansRebuilt": counts[1],
+                  "elementsBuilt": counts[2], "subtreesReused": counts[3],
+                  "subtreesRendered": counts[4]}
   for i in 0'u64 ..< gpui_key_latency_count():
     latencies.add int64(gpui_key_latency_ns(i))
   var doc = %*{
     "record": "plat42-frame-budget",
     "renderPathNs": frames,
+    "frameWork": work,
     "keyToFrameNs": latencies,
     "loadAverageStart": loadStart,
     "loadAverageEnd": loadEnd,

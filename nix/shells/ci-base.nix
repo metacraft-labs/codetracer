@@ -887,6 +887,11 @@ with pkgs;
     export BLAKE3_PREFIX=${pkgs.libblake3}
     export RUNQUOTA_SRC=${inputs.runquota}
     export XXHASH_PREFIX=${pkgs.xxHash}
+    # codetracer-trace-format-nim's recipe reads its tool paths from the
+    # schema-1 manifest its `toolPathsFile` variant selects, and that repo's
+    # flake publishes it. scripts/build-once.sh passes it to the reprobuild
+    # build; without it the recipe's provider refuses to start.
+    export CODETRACER_TRACE_FORMAT_NIM_TOOL_PATHS=${inputs'.codetracer-trace-format-nim.packages.repro-tool-paths}
 
     # repro's ASP solver dlopen()s libclingo by leaf name; ensure
     # the platform loader can find it. Match the flake-pinned clingo

@@ -13,6 +13,7 @@ import std/[json, monotimes, os, osproc, strutils, tempfiles, times, unittest]
 when defined(posix):
   import std/posix
 import ../../viewmodel/backend/stdio_backend
+import ../../viewmodel/backend/engine_stall_dump
 import ../../viewmodel/backend/backend_service
 import ../../viewmodel/headless_session
 import ../../viewmodel/store/replay_data_store
@@ -339,6 +340,47 @@ suite "stdio DAP diagnostics":
       check false
     except DapStalledError as error:
       check error.msg.contains("engine is unable to finish loading")
+
+  test "a stall writes what the engine was doing, when the lane asks for it":
+    # The engine is still running when the stall is declared: its /proc
+    # status, its threads and a backtrace are written where
+    # `StallDiagnosticsEnvVar` says, and the stall's message names the file.
+    # Unset, nothing is written and the message says nothing of it.
+    let root = createTempDir("ct-stall-dump-", "")
+    defer: removeDir(root)
+    let dumps = root / "engine-stalls"
+    let previous = getEnv(StallDiagnosticsEnvVar)
+    defer: putEnv(StallDiagnosticsEnvVar, previous)
+    for asked in [true, false]:
+      putEnv(StallDiagnosticsEnvVar, if asked: dumps else: "")
+      let marker = root / ("ready-" & $asked)
+      let backend = start("stall", marker)
+      defer: backend.close()
+      let deadline = getMonoTime() + initDuration(seconds = 30)
+      while not fileExists(marker) and getMonoTime() < deadline:
+        sleep(5)
+      require fileExists(marker)
+      backend.bound.timeoutMs = 100
+      try:
+        discard backend.readDapMessage()
+        check false
+      except DapStalledError as error:
+        if asked:
+          check error.msg.contains("engine state: " & dumps)
+          let at = error.msg.find("engine state: ")
+          let path = error.msg[at + "engine state: ".len .. ^1].strip()
+          check fileExists(path)
+          let dump = readFile(path)
+          check dump.contains("== status")
+          check dump.contains("State:")
+          check dump.contains("voluntary_ctxt_switches")
+          check dump.contains("== wchan")
+          check dump.contains("== threads")
+          check dump.contains("== backtrace")
+        else:
+          check not error.msg.contains("engine state:")
+          check not dirExists(dumps) or
+                not error.msg.contains(dumps)
 
   when defined(posix):
     test "close kills and reaps a direct child that ignores stdin EOF":

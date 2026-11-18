@@ -25,37 +25,63 @@ const NativeVcsProfile* = PlatformProfile(
   capabilities: {capVcsRead, capVcsWrite, capVcsRemote})
   ## A profile for a front-end that uses this facade on its own.
 
+const GitLogFormat* =
+  "--pretty=format:%H%x1f%h%x1f%P%x1f%an%x1f%ae%x1f%at%x1f%s%x1f%b%x1e"
+  ## One commit per record (`%x1e`), its fields split by `%x1f`, as
+  ## `parseGitLog` reads them.
+
+proc runGit*(repository: string; args: seq[string]): PlatformOutcome[string] =
+  ## `git <args>` in `repository`, to completion: its output, or why not.
+  ## A plain call with no futures and no closures, so the VCS pane's read can
+  ## run it on a thread of its own (`vcs_refresh_worker`) as well as through
+  ## the facade below.
+  ##
+  ## Every argv starts with `NoIndexLockGitOptions`: a refresh must never
+  ## write the index, nor take its lock (see that constant).
+  try:
+    let child = startProcess("git", workingDir = repository,
+                             args = noIndexLockGitArgs(args),
+                             options = {poUsePath})
+    # READ BEFORE WAITING. A child that writes more than a pipe holds (64 KiB
+    # on Linux) blocks until someone reads, so `waitForExit` first never
+    # returns: `git log --max-count=50` with commit bodies is well past that
+    # on an ordinary repository, and a front-end opened in one hung at
+    # start. stdout is drained to EOF first (git's stderr is a few lines),
+    # then stderr, then the exit code.
+    let output = child.outputStream.readAll()
+    let errText = child.errorStream.readAll()
+    let code = child.waitForExit()
+    child.close()
+    if code != 0:
+      failed[string](pkFailed, "git " & args.join(" ") & " failed", errText)
+    else:
+      succeeded(output)
+  except CatchableError as err:
+    failed[string](pkNotFound, "git is not available", err.msg)
+
+proc parseGitLog*(text: string): seq[VcsCommit] =
+  ## The commits of a `git log` written with `GitLogFormat`.
+  for record in text.split('\x1e'):
+    let trimmed = record.strip()
+    if trimmed.len == 0: continue
+    let f = trimmed.split('\x1f')
+    if f.len < 8: continue
+    var authoredAt: int64 = 0
+    try: authoredAt = parseBiggestInt(f[5]) * 1000
+    except ValueError: discard
+    result.add VcsCommit(
+      id: f[0], shortId: f[1],
+      parents: if f[2].len > 0: f[2].split(' ') else: @[],
+      authorName: f[3], authorEmail: f[4], authoredAtMs: authoredAt,
+      subject: f[6], body: f[7])
+
 proc nativeVcs*(profile: PlatformProfile): VcsFacade =
   ## The VCS facade over the system `git`, for every native process.
+  ## Synchronous internally, which is honest: the desktop's git IS a
+  ## synchronous subprocess. The facade's async signature is preserved by the
+  ## callers below, which is where the contract lives.
   result = unavailableVcs(profile)
-
-  proc git(repository: string; args: seq[string]): PlatformOutcome[string] =
-    ## Synchronous internally, which is honest: the desktop's git IS a
-    ## synchronous subprocess. The facade's async signature is preserved by the
-    ## callers below, which is where the contract lives.
-    ##
-    ## Every argv starts with `NoIndexLockGitOptions`: a refresh must never
-    ## write the index, nor take its lock (see that constant).
-    try:
-      let child = startProcess("git", workingDir = repository,
-                               args = noIndexLockGitArgs(args),
-                               options = {poUsePath})
-      # READ BEFORE WAITING. A child that writes more than a pipe holds (64 KiB
-      # on Linux) blocks until someone reads, so `waitForExit` first never
-      # returns: `git log --max-count=50` with commit bodies is well past that
-      # on an ordinary repository, and a front-end opened in one hung at
-      # start. stdout is drained to EOF first (git's stderr is a few lines),
-      # then stderr, then the exit code.
-      let output = child.outputStream.readAll()
-      let errText = child.errorStream.readAll()
-      let code = child.waitForExit()
-      child.close()
-      if code != 0:
-        failed[string](pkFailed, "git " & args.join(" ") & " failed", errText)
-      else:
-        succeeded(output)
-    except CatchableError as err:
-      failed[string](pkNotFound, "git is not available", err.msg)
+  let git = runGit
 
   result.isRepository = proc(path: string): PlatformFuture[PlatformOutcome[bool]] =
     let res = git(path, @["rev-parse", "--is-inside-work-tree"])
@@ -74,29 +100,14 @@ proc nativeVcs*(profile: PlatformProfile): VcsFacade =
 
   result.log = proc(repository: string; maxCount: int;
                     path: string): PlatformFuture[PlatformOutcome[seq[VcsCommit]]] =
-    var args = @["log", "--max-count=" & $maxCount,
-                 "--pretty=format:%H%x1f%h%x1f%P%x1f%an%x1f%ae%x1f%at%x1f%s%x1f%b%x1e"]
+    var args = @["log", "--max-count=" & $maxCount, GitLogFormat]
     if path.len > 0:
       args.add "--"
       args.add path
     let res = git(repository, args)
     if not res.ok:
       return resolved(failed[seq[VcsCommit]](res.error))
-    var commits: seq[VcsCommit] = @[]
-    for record in res.value.split('\x1e'):
-      let trimmed = record.strip()
-      if trimmed.len == 0: continue
-      let f = trimmed.split('\x1f')
-      if f.len < 8: continue
-      var authoredAt: int64 = 0
-      try: authoredAt = parseBiggestInt(f[5]) * 1000
-      except ValueError: discard
-      commits.add VcsCommit(
-        id: f[0], shortId: f[1],
-        parents: if f[2].len > 0: f[2].split(' ') else: @[],
-        authorName: f[3], authorEmail: f[4], authoredAtMs: authoredAt,
-        subject: f[6], body: f[7])
-    resolvedOk(commits)
+    resolvedOk(parseGitLog(res.value))
 
   result.readBlob = proc(repository, path: string;
                          source: VcsBlobSource): PlatformFuture[PlatformOutcome[string]] =

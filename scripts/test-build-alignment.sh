@@ -230,6 +230,8 @@ SCRUBBED_VARS=(
 	REPROBUILD_BIN
 	REPROBUILD_SOURCE_ROOT
 	REPRO_VARIANTS
+	CODETRACER_TRACE_FORMAT_NIM_TOOL_PATHS
+	CODETRACER_ALLOW_PLATFORM_LOCK_PIN_DRIFT
 	REPRO_MONITOR_SHIM_LIB
 	RUNQUOTA_SOCKET
 	RUNQUOTAD_BIN
@@ -872,20 +874,6 @@ nim_flag_divergence_recorded() {
 ./ui.js --hint[XDeclaredButNotUsed]:off
 ./ui.js --hint[XCannotRaiseY]:off
 ./ui.js --warning[CaseTransition]:off
-./console -d:asyncBackend=asyncdispatch
-./console -d:chronicles_sinks=json
-./console -d:chronicles_timestamps=UnixTime
-./console -d:ssl
-./console --mm:refc
-./console -d:nimNoLentIterators
-./console -d:nimOldCaseObjects
-./console --hint[Processing]:off
-./console --hint[Conf]:off
-./console --hint[CC]:off
-./console --hint[Pattern]:off
-./console --hint[XDeclaredButNotUsed]:off
-./console --hint[XCannotRaiseY]:off
-./console --warning[CaseTransition]:off
 ct -d:nimNoLentIterators
 ct -d:nimOldCaseObjects
 ct --hint[Processing]:off
@@ -1246,9 +1234,24 @@ echo "under recording stubs, and comparing their traces."
 
 run_scenario linux-legacy-debug Linux tup src/build-debug
 run_scenario linux-legacy-release Linux tup src/build-release CODETRACER_CONFIG=release
-run_scenario linux-reprobuild Linux repro src/build-debug-repro CODETRACER_REPROBUILD_LINUX=1
-run_scenario darwin Darwin repro src/build-debug-repro
-run_scenario windows MINGW64_NT-10.0-22631 repro src/build-debug-repro
+# The reprobuild branch selects codetracer-trace-format-nim's tool-path
+# manifest (scripts/build-once.sh); the dev shell (or, on Windows, the
+# binders) names it, so the scenarios do.
+printf '{"schema":1,"paths":{}}\n' >"$WORK_ROOT/tool-paths.json"
+run_scenario linux-reprobuild Linux repro src/build-debug-repro CODETRACER_REPROBUILD_LINUX=1 \
+	CODETRACER_TRACE_FORMAT_NIM_TOOL_PATHS="$WORK_ROOT/tool-paths.json"
+# The darwin branch also checks that the two committed solves (repro.lock and
+# locks/arm64-macosx.lock) pin the same sources. That is a fact about the
+# committed locks, not about whether build.sh and build-once.sh agree, and it is
+# asserted where it belongs: scripts/test-check-platform-lock-pins.sh and the
+# final check of scripts/test-build-once-platform-lock.sh. Without the override
+# this scenario failed whenever the native lock trailed repro.lock, reporting
+# a lock fact as a build-alignment failure.
+run_scenario darwin Darwin repro src/build-debug-repro \
+	CODETRACER_TRACE_FORMAT_NIM_TOOL_PATHS="$WORK_ROOT/tool-paths.json" \
+	CODETRACER_ALLOW_PLATFORM_LOCK_PIN_DRIFT=1
+run_scenario windows MINGW64_NT-10.0-22631 repro src/build-debug-repro \
+	CODETRACER_TRACE_FORMAT_NIM_TOOL_PATHS="$WORK_ROOT/tool-paths.json"
 run_port_busy_scenario
 run_nim_flag_alignment_check
 run_tui_flag_alignment_check

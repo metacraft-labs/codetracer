@@ -951,11 +951,15 @@ proc renderCommitGraph[R](r: R; vm: VCSVM; callbacks: VCSCallbacks): auto =
 # Changed-files panel (DeepReview mode and unified-diff view)
 # ---------------------------------------------------------------------------
 
-proc renderChangedFileRow[R](r: R; callbacks: VCSCallbacks;
-                             index: int; file: VCSFileRow): auto =
+proc renderChangedFileRow*[R](r: R; callbacks: VCSCallbacks;
+                              index: int; file: VCSFileRow): auto =
   ## Render a single changed-file row.  Extracted into its own proc so the
   ## ``onclick`` closure captures the per-row ``index``/``path`` through
   ## proc parameters — a guaranteed-fresh binding per call.
+  ##
+  ## Exported because the Agent Harbor Changes panel draws its Code tab's
+  ## files with this row (``isonim_agent_harbor_changes_view.nim``, through
+  ## ``agent_harbor_changes_code.nim``), so both panels show one row.
   let rowIndex = index
   let rowPath = file.path
   let rowStatus = file.status
