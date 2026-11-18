@@ -304,10 +304,18 @@ if [ -z "$NIXPKGS_REV" ]; then
 	fail "flake.lock names a locked nixpkgs revision" \
 		"could not read .nodes.nixpkgs.locked.rev, so the inertness check cannot run"
 else
+	# The locked node itself, narHash included, rather than
+	# `builtins.getFlake "github:NixOS/nixpkgs/<rev>"`: a locked tree is a
+	# store path Nix substitutes by its NAR hash (cache-push pushes the
+	# flake's inputs), where the bare github: reference has to be fetched from
+	# GitHub. That fetch failed on a fresh runner (lint-bash, run
+	# 44228447027) with nothing to say why, because the probe's stderr was
+	# discarded; it is now kept and reported.
 	inert_expr() { # withOverlay(true|false) -> drvPath of a non-crates fetch
 		nix eval --raw --impure --expr "
       let
-        nixpkgs = builtins.getFlake \"github:NixOS/nixpkgs/$NIXPKGS_REV\";
+        lock = builtins.fromJSON (builtins.readFile $REPO_ROOT/flake.lock);
+        nixpkgs = builtins.fetchTree lock.nodes.nixpkgs.locked;
         pkgs = import nixpkgs {
           system = \"$SYSTEM\";
         };
@@ -322,19 +330,21 @@ else
         url = \"https://example.invalid/not-a-crate.tar.gz\";
         sha256 = \"0000000000000000000000000000000000000000000000000000000000000000\";
       }).drvPath
-    " 2>/dev/null
+    " 2>>"$probe_err"
 	}
+	probe_err="$(mktemp)"
 	without=$(inert_expr false)
 	with=$(inert_expr true)
 	if [ -z "$without" ] || [ -z "$with" ]; then
 		fail "the overlay is inert for non-crates.io URLs" \
-			"could not instantiate the probe (without='$without' with='$with')"
+			"could not instantiate the probe (without='$without' with='$with'): $(grep -v '^warning:' "$probe_err" | tail -5)"
 	elif [ "$without" = "$with" ]; then
 		pass "the overlay is inert for non-crates.io URLs (identical .drv)"
 	else
 		fail "the overlay is inert for non-crates.io URLs" \
 			"a non-crate fetch changed .drv: $without -> $with"
 	fi
+	rm -f "$probe_err"
 fi
 
 # -----------------------------------------------------------------------------
