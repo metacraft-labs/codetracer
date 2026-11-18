@@ -15,7 +15,8 @@
 #   * the gate copies them when the grammar matches, and generates when it does
 #     not (a fake CLI records whether it ran), leaving a newer grammar.js
 #     regenerated rather than shadowed by a stale copy;
-#   * without submodules the package and the dev shell still evaluate.
+#   * without submodules the package and the dev shell still evaluate, and
+#     the shell does not depend on the package.
 # Run by ci/lint/nix.sh.
 set -euo pipefail
 cd "$(dirname "$0")/../.."
@@ -110,6 +111,19 @@ for attr in "packages.${system}.tree-sitter-nim-parser" "devShells.${system}.def
 		"${attr} does not evaluate without submodules" \
 		nix eval --raw "git+file://${root}#${attr}.drvPath" >/dev/null
 done
+# ...and the shell must not NAME the package there: an interpolated store path
+# is a build input of the shell, and `nix develop` then builds the package from
+# an empty source (run 44379188088's macOS legs). With the submodule it must.
+names_pkg() {
+	nix eval --raw "git+file://${root}$1#devShells.${system}.default.shellHook" |
+		grep -q -- '-tree-sitter-nim-parser'
+}
+check "the shell names the prebuilt parser with submodules" \
+	"the shell no longer names the prebuilt parser with submodules" \
+	names_pkg '?submodules=1'
+check "the shell does not name the parser without submodules" \
+	"the shell names the parser without submodules, so nix develop builds it from nothing" \
+	eval '! names_pkg ""'
 
 echo
 if [ "$failures" -gt 0 ]; then
