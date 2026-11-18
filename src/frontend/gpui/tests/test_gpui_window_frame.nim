@@ -95,7 +95,11 @@ import ../replay_ops
 # RE-COUNTED 2026-09-23: 535 → 555, by the second route above — PLAT-44 added
 # two non-test files under `src/frontend/gpui/app/` (`edit_arm.nim`,
 # `gpui_keys.nim`), 2 x 10 assertions in the registry scan.
-const ExpectedAssertions = 930
+const ExpectedAssertions = 966
+  ## 2026-11-18 (the Changes panel and the Inbox in GPUI): 930 -> 966. Four
+  ## more scanned source files, at 1 + 8 = 9 per file: `agent_harbor/
+  ## ah_changes_inbox_parts.nim`, `ah_changes_panel.nim`, `ah_inbox_panel.nim`
+  ## and `ah_changes_inbox_stories.nim`.
   ## 2026-11-16 (the Agent Harbor session activity timeline): 921 -> 930. One
   ## more scanned source file, `agent_harbor/ah_session_activity.nim`, at
   ## 1 + 8 = 9 per file.
