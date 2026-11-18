@@ -28,7 +28,7 @@
 ## is `unsupported` here, never answered from elsewhere.
 
 import std/[algorithm, exitprocs, json, options, os, strutils, tables, math]
-from std/unicode import toLower
+from std/unicode import toLower, runeLen
 import demo_video_script_guiassert
 import ../../stages/ct_stages
 import ../../resolver/ct_resolver
@@ -391,6 +391,20 @@ proc codeLeft(f: Frame; b: EditorBox; rows: seq[EditorRow]; numbersRight: int): 
     for x2, n2 in narrow:
       if abs(x2 - x) <= 1: near += n2
     if near >= 2 and (lane < 0 or x < lane): lane = x
+  if lane < 0:
+    # One chevron alone (a file with one foldable line: `def scale` in
+    # `extra.py`): a narrow mark a little left of where every other row
+    # starts is the lane too. A narrow first letter at column 0 (`x = 1`)
+    # starts where the other rows do.
+    var plain = high(int)
+    for runs in firsts:
+      if runs.len == 0: continue
+      let mark = runs.len > 1 and runs[0][1] - runs[0][0] <= 9 and
+                 runs[1][0] - runs[0][1] >= 3
+      if not mark: plain = min(plain, runs[0][0])
+    if plain < high(int):
+      for x in narrow.keys:
+        if plain - x >= 4 and plain - x <= 14 and (lane < 0 or x < lane): lane = x
   result = high(int)
   for runs in firsts:
     if runs.len == 0: continue
@@ -420,17 +434,24 @@ proc readCode(ctx: GuiContext; f: Frame; b: EditorBox; rows: var seq[EditorRow];
     parts.sort(proc (a, c: Word): int = cmp(a.x, c.x))
     var text = ""
     var lastRight = -1
+    var lastEnd = 0
     for p in parts:
-      # words a column or more apart are separated by as many blanks as the
-      # code face's advance says (an indent inside the line, `x  = 1`)
+      # Words a column or more apart are separated by as many blanks as the
+      # code face's advance says (an indent inside the line, `x  = 1`). Two
+      # counts, each too high in a case of its own, and the smaller is taken:
+      # the gap between inks (a word ending in `,` ends its ink mid-cell, and
+      # `value, factor` read as `value,  factor`), and the columns from where
+      # each word starts (a word the engine read with a letter fewer).
+      let startCol = int(round(float(p.x - left) / 9.792))
       if text.len > 0:
         let px = p.x - lastRight
-        let gap = int(round(float(px) / 9.792))
+        let blanks = min(int(round(float(px) / 9.792)), startCol - lastEnd)
         # (none when the engine split one word with no blank between: words
         # that touch)
-        text.add repeat(' ', if px >= 4: max(1, gap) else: max(0, gap))
+        text.add repeat(' ', if px >= 4: max(1, blanks) else: max(0, blanks))
       text.add p.text
       lastRight = p.x + p.w
+      lastEnd = startCol + p.text.runeLen
     # the caret, a bar before the line's first letter, reads as `|`
     if text.len > 1 and text[0] == '|' and text[1] != ' ': text = text[1 .. ^1]
     r.text = text
