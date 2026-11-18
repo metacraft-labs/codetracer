@@ -73,6 +73,9 @@ type
     tabSession: Table[int, seq[SessionMessage]]
       ## Per tab, the latest message of each `SessionChannels` channel, in
       ## the order they were first sent.
+    startup: seq[SessionMessage]
+      ## The last of each `StartupChannels` message it was sent: what it
+      ## shows when no tab has a session (the welcome screen).
     handshakeDone*: bool
       ## Whether its renderer answered `CODETRACER::started`.
     onHandshake*: proc()
@@ -100,6 +103,12 @@ const
     cstring"CODETRACER::dap-live-session-selected"]
     ## The messages that describe a tab's session: what a window opened for
     ## the tab is sent (the per-tab half of `bootstrap_cache.bootstrapEvents`).
+  StartupChannels* = [
+    cstring"CODETRACER::welcome-screen",
+    cstring"CODETRACER::recent-items"]
+    ## The startup messages that name no tab: a window started on the welcome
+    ## screen has no tab session, and a reload sends it these again
+    ## (`bootstrapReloadedWindow`).
   LatestEventNames* = [cstring"ct/complete-move"]
     ## A replay's events whose latest is a window's starting state: the stop
     ## the replay is at (`bootstrap_cache.bootstrapDapEvents`).
@@ -314,7 +323,15 @@ proc remember(w: AppWindow; tab: int; channel: cstring; payload: JsObject) =
   w.tabSession[tab] = kept
 
 proc note(w: AppWindow; channel: cstring; payload: JsObject) =
-  ## What `w` is told about one of its tabs' sessions.
+  ## What `w` is told about one of its tabs' sessions, and its startup.
+  if channel in StartupChannels:
+    var kept: seq[SessionMessage] = @[]
+    for m in w.startup:
+      if m.channel != channel:
+        kept.add m
+    kept.add SessionMessage(channel: channel, payload: payload)
+    w.startup = kept
+    return
   let tab = tabOf(payload)
   if tab < 0 or channel notin SessionChannels:
     return
@@ -451,6 +468,36 @@ proc bootstrapWindow*(w, source: AppWindow; sourceTab: int; init: JsObject;
   if replayId >= 0:
     for event in latestReplayEvents(replayId):
       w.deliverToTab(NewWindowTab, cstring"CODETRACER::dap-receive-event", event)
+
+proc bootstrapReloadedWindow*(w: AppWindow; init: JsObject) =
+  ## `w`'s page reloaded (the disconnect notice's Reconnect, a forced reload):
+  ## its new renderer has one tab, the first, and has been told nothing. It
+  ## is sent the session of its first tab that had one, as a window opened
+  ## for that tab is (`bootstrapWindow`), and its other tabs are forgotten:
+  ## the page that showed them is gone. A window whose tabs had none (it was
+  ## started on the welcome screen) is sent its startup messages again. Without it the main process, which
+  ## sends a window its session once, left the reloaded window an empty
+  ## surface (codetracer-pm issue 2026-11-17 "a reloaded edit-mode window
+  ## stays blank").
+  var tabs: seq[int] = @[]
+  for tab in w.tabSession.keys:
+    tabs.add tab
+  var first = -1
+  for tab in tabs:
+    if first < 0 or tab < first:
+      first = tab
+  if first < 0:
+    # No tab had a session: the window showed what its startup sent it (the
+    # welcome screen and its recent items), which is sent again.
+    # A copy: each send records itself in `w.startup` again.
+    let startup = w.startup
+    for m in startup:
+      w.sendTo(m.channel, m.payload)
+    return
+  bootstrapWindow(w, w, first, init)
+  for tab in tabs:
+    if tab != NewWindowTab:
+      w.forgetTab(tab)
 
 # ---------------------------------------------------------------------------
 # `mainWindow` on the desktop
