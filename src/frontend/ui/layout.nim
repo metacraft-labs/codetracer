@@ -334,7 +334,7 @@ proc setupDropdownDismissListeners() =
           open: '.ct-picker-trigger--open',
           trigger: '.ct-picker-trigger--open' },
         { container: '.hamburger-dropdown-container',
-          open: '.dropdown-list.active',
+          open: '.hamburger-dropdown-container > .dropdown-list:not(.hidden)',
           trigger: null }
       ];
 

@@ -587,6 +587,67 @@ src/frontend/styles/components/status_bar.styl :: mask-image: ICON_COPY
 ci/test/ui-design-decisions.py :: def undefined_theme_images(used, theme_sources):
 ```
 
+### D-39: A placeholder is quieter than typed text, and so is the magnifier
+
+A field's placeholder is `colors/ui/text/primary/label-subtle`, never the typed-text
+colour, and the one placeholder rule is in `input.styl`. A vendor-prefixed block
+in `shared_widgets.styl` used to repaint every placeholder in the typed-text grey
+(#C8C8C8). The search magnifier is the Design System `icons-lg=search`, built from
+the theme's own tokens: the placeholder colour at rest, the body colour while
+hovered, focused or filled, the disabled colour when disabled. It used to be three
+fixed-colour files the light theme borrowed from the dark one, so in light it
+turned near-white on a near-white field. (2026-11-18)
+
+```guard
+src/frontend/styles/components/input.styl :: search-icon(colors-ui-text-primary-label-subtle)
+src/frontend/styles/components/input.styl :: search-icon(colors-ui-text-primary-body)
+src/frontend/styles/components/shared_widgets.styl :: No placeholder colour here.
+```
+
+### D-40: No white see-through fill in the light theme
+
+A fill, line or hover written as white at low strength (`rgba(255, 255, 255, …)`)
+is invisible on a light surface. Each one keeps its dark value through
+`by-mode(dark, light)` and takes a token in the light theme. The switch's off
+track, hover and knob take the Design System Switch's own tokens
+(`surface/base/raised`, `surface/primary/default-hover`, `surface/on-color/default`),
+so an off switch is visible in light. The video player's spinner and loupe keep
+white: they sit on the video, which is dark in both themes. (2026-11-18)
+
+```guard
+src/frontend/styles/components/toggle.styl :: --ct-toggle-track: by-mode(rgba(255, 255, 255, 0.12), colors-ui-surface-base-raised)
+src/frontend/styles/components/toggle.styl :: --ct-toggle-thumb-color: by-mode(#ffffff, colors-ui-surface-on-color-default)
+src/frontend/styles/components/status_bar.styl :: background-color: by-mode(rgba(255, 255, 255, 0.1), colors-ui-surface-primary-secondary-hover)
+src/frontend/styles/components/unified_diff.styl :: background-color by-mode(rgba(255, 255, 255, 0.045), colors-ui-surface-base-card)
+src/frontend/styles/components/problems.styl :: background: by-mode(rgba(255, 255, 255, 0.03), colors-ui-surface-base-card)
+```
+
+### D-41: Every button has a look; every menu closes on Escape
+
+No button renders with the browser's default look: each carries a shared class
+from `button.styl` (`ct-button-md-secondary` in panels, `ct-button-xs-secondary`
+on a code line, `ct-button-image-*` for an icon) and every field one from
+`input.styl`. That covered the Verification and Counterexample buttons, the
+no-source "Jump back", the editor's test actions and the bug report's title.
+The counterexample's "‹ ›" became Design System chevrons. Every menu is in
+`keyboard_focus.nim`'s `DROPDOWNS`, so Escape closes it first (D-21): the
+tracepoint options menu (its entry waited for a `.active` class nothing adds),
+the diff's "show more lines" menu and the status bar's tab-list menu, which
+returns the focus to its button. (2026-11-18)
+
+```guard
+src/frontend/viewmodel/views/keyboard_focus.nim :: '.hamburger-dropdown-container > .dropdown-list:not(.hidden)'
+src/frontend/viewmodel/views/keyboard_focus.nim :: { open: '.ct-diff-expand-menu', close: function () {
+src/frontend/viewmodel/views/keyboard_focus.nim :: { open: 'body > .auto-hide-tablist-menu', close: function () {
+src/frontend/ui/auto_hide.nim :: proc publishClose(f: proc()) {.importjs: "globalThis.__ctCloseTabLists = #".}
+src/frontend/ui/layout.nim :: open: '.hamburger-dropdown-container > .dropdown-list:not(.hidden)',
+src/frontend/viewmodel/views/isonim_verification_view.nim :: button(class = "ct-button-md-secondary ct-verification-cancel",
+src/frontend/viewmodel/views/isonim_counterexample_view.nim :: button(class = "ct-button-image-sm-secondary ct-counterexample-iteration-backward",
+src/frontend/viewmodel/views/isonim_no_source_view.nim :: button(class = "ct-button-md-secondary jump-back-button",
+src/frontend/viewmodel/views/isonim_editor_test_controls_view.nim :: button(class = "ct-button-xs-secondary ct-test-action " & $action.kind,
+src/frontend/viewmodel/views/isonim_status_view.nim :: input(id = "bug-report-title", `type` = "text", class = "ct-input-panel")
+```
+
 ## Focus rules
 
 Agreed by Nikolay on 2026-11-02, from

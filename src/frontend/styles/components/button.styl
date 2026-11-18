@@ -463,6 +463,14 @@ button
   max-width: 1.3em !important
   max-height: 1.3em !important
 
+// The counterexample's loop iteration arrows: "‹ ›" typed as text in an
+// unstyled button until D-41.
+.ct-counterexample-iteration-backward
+  button-icon(ICON_CHEVRON_LEFT)
+
+.ct-counterexample-iteration-forward
+  button-icon(ICON_CHEVRON_RIGHT)
+
 // Disabled: the shared `:disabled` rule turns the text colour to
 // `text/primary/disabled`, and the masked icon follows it (D-20).  The
 // half-strength fill layer these two used to dim a picture is no longer needed.

@@ -544,7 +544,8 @@ proc renderStatusShell*[R, N](
               tdiv(class = "bug-report-text"):
                 text "Title (Optional)"
               tdiv():
-                input(id = "bug-report-title", `type` = "text")
+                # The shared panel field (input.styl, D-41); it had no class.
+                input(id = "bug-report-title", `type` = "text", class = "ct-input-panel")
               tdiv(class = "bug-report-text"):
                 text "Description (Optional)"
               tdiv():

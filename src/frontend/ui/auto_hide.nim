@@ -2191,6 +2191,10 @@ when defined(js):
     ## as every dropdown in the app does.
     if tabListDismissInstalled: return
     tabListDismissInstalled = true
+    # Escape-first (D-21): keyboard_focus.nim's DROPDOWNS closes this menu
+    # through the same proc, before a pane's own Escape can take the key.
+    proc publishClose(f: proc()) {.importjs: "globalThis.__ctCloseTabLists = #".}
+    publishClose(closeTabLists)
     proc inTabList(ev: kdom.Event): bool {.importjs: """
       (function(e) { const t = e && e.target;
         return !!(t && t.closest &&
