@@ -33,8 +33,10 @@ fi
 w=.github/workflows/codetracer.yml
 step="$(line_of "$w" "- name: Check out codetracer-native-backend's submodules")"
 gate="$(line_of "$w" '- name: Run visual replay regression gate')"
+step_text=""
+[ -z "$step" ] || step_text="$(sed -n "${step},$((step + 12))p" "$w")"
 if [ -n "$step" ] && [ -n "$gate" ] && [ "$step" -lt "$gate" ] &&
-	sed -n "${step},$((step + 12))p" "$w" | grep -q 'codetracer-native-backend" submodule update --init --recursive'; then
+	[[ $step_text == *'codetracer-native-backend" submodule update --init --recursive'* ]]; then
 	ok "$w checks out the submodules (line $step) before the gate step ($gate)"
 else
 	fail "$w: no submodule checkout step before 'Run visual replay regression gate'"
