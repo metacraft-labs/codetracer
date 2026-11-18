@@ -71,6 +71,11 @@ const
   OutputW = 1600
   OutputH = 1000
   WinW = 1280
+  WindowButtonEdgePx = 5
+    ## window_top_bar.nim's: a window button's distance from the band's end.
+  BarPadPx = 4
+    ## window_top_bar.nim's: the bar's padding at an end with no window
+    ## buttons (the desktop's `#menu` `padding-left: 4px`).
   WinH = 800
   Settle = 600   ## ms for "nothing happened" to have had its chance
 
@@ -404,11 +409,13 @@ suite "plat69-window-management":
     let H = w.rect.h
     # The top bar spans the new width, its buttons at its new end, the drag
     # strip with it; the arrangement and the footer fill it.
+    # The band is the window's top edge to edge (window_top_bar's `band`,
+    # since the desktop's chrome match of 2026-10-17 dropped the 12 px margin).
     check rectOf(g["topBar"]["band"]) ==
-          Rect(x: 12, y: 12, w: W - 24, h: before["topBar"]["band"][3].getInt)
+          Rect(x: 0, y: 0, w: W, h: before["topBar"]["band"][3].getInt)
     check g.win["drag"] == %*[0, 0, W, g.win["drag"][3].getInt]
     let close = g.seg("window-button", "close")
-    check close.x + close.w == W - 12 - 5
+    check close.x + close.w == W - WindowButtonEdgePx
     check g["footer"] == %*[0, H - footerH, W, footerH]
     check W - (g["area"][0].getInt + g["area"][2].getInt) == areaRight
     # Every pane box of the arrangement within it, the last one to its edge.
@@ -555,7 +562,7 @@ suite "plat69-button-placement":
     let g = l.geometry
     check g.buttonsDrawn == @["close"]
     let r = g.seg("window-button", "close")
-    check r.x == 12 + 5
+    check r.x == WindowButtonEdgePx
     t.click(t.window(AppId).onScreen(r.centre))
     t.waitUntil("closed from the left", proc(): bool = l.exited,
                 timeout = initDuration(seconds = 30))
@@ -675,7 +682,7 @@ suite "plat69-server-mode":
       check not g.win["clientDecorated"].getBool
       check g.buttonsDrawn.len == 0
       check g.win["drag"].kind == JNull
-      check g.seg("menu").x == 12
+      check g.seg("menu").x == BarPadPx
       # A drag on the bar's empty space is nothing's.
       var lastControl = Rect()
       for s in g["topBar"]["segs"]:
