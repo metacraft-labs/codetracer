@@ -14,4 +14,4 @@ steps:
   - wait: { until: replay-idle, timeout: 120s }
   - chord: Ctrl+N
   - wait: { until: { at: session-strip, count: 2 }, timeout: 30s }
-  - wait: { until: { at: 'pane[title="Welcome"]', assert: 'has-row("Record new trace")' }, timeout: 30s }
+  - wait: { until: { at: 'welcome/welcome-action[label="Record new trace"]', present: true }, timeout: 30s }

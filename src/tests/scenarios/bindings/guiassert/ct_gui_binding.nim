@@ -1715,6 +1715,57 @@ proc readFindField(ctx: GuiContext; f: Frame; left, top, right: int): Option[Sur
                   %*{"query": q, "count": ws[at - 1].text & " of " & ws[at + 1].text})
     result = some(fw)
 
+proc readWelcome(ctx: GuiContext; f: Frame; t: var Tree) =
+  ## A new tab's Welcome Screen (`Welcome to CodeTracer`, its recent lists and
+  ## its row of start actions), which holds no pane: the pack's `welcome`,
+  ## its text line by line and each action by its label.
+  let top = TopBarH + 20
+  let head = ctx.words(f, 0, top, min(700, f.image.width), 90)
+  var heading = ""
+  for w in head:
+    if heading.len > 0: heading.add " "
+    heading.add w.text
+  if not heading.contains("Welcome"): return
+  let bodyH = f.image.height - FooterH - top
+  let ws = ctx.words(f, 0, top, f.image.width, bodyH)
+  # the words in lines (a line's words within half a row of its first), each
+  # line's words in labels (a label's words within a gap of 24 px)
+  var sorted = ws
+  sorted.sort(proc (a, b: Word): int = cmp(a.y, b.y))
+  var lines: seq[seq[Word]]
+  for w in sorted:
+    if lines.len > 0 and abs(w.y - lines[^1][0].y) <= 8: lines[^1].add w
+    else: lines.add @[w]
+  let wel = node("welcome", 0, fl(top), fl(f.image.width), fl(bodyH),
+                 %*{"heading": heading.strip, "text": newJArray()})
+  wel.unreadable["sections"] = "the screen's parts are told by their frames, which this binding does not read"
+  t.add(t.root, wel)
+  for line in lines:
+    var l = line
+    l.sort(proc (a, b: Word): int = cmp(a.x, b.x))
+    var labels: seq[tuple[text: string, x0, x1, y0, y1: int]]
+    for w in l:
+      if labels.len > 0 and w.x - labels[^1].x1 <= 24:
+        labels[^1].text.add " " & w.text
+        labels[^1].x1 = w.x + w.w
+        labels[^1].y1 = max(labels[^1].y1, w.y + w.h)
+      else:
+        labels.add (w.text, w.x, w.x + w.w, w.y, w.y + w.h)
+    var text = ""
+    for lb in labels:
+      if text.len > 0: text.add "  "
+      text.add lb.text
+    wel.props["text"].add %text
+    # the start actions: the row whose labels include Record new trace
+    var actions = false
+    for lb in labels:
+      if lb.text == "Record new trace": actions = true
+    if actions:
+      for lb in labels:
+        t.add(wel, node("welcome-action", fl(lb.x0 - 6), fl(lb.y0 - 6),
+                        fl(lb.x1 - lb.x0 + 12), fl(lb.y1 - lb.y0 + 12),
+                        %*{"label": lb.text}, @[("label", lb.text)]))
+
 proc readSurface*(ctx: GuiContext; f: Frame): Tree =
   # a replay names its position (`main.py:1#1`) on the status line; an Edit
   # window names none
@@ -1783,12 +1834,15 @@ proc readSurface*(ctx: GuiContext; f: Frame): Tree =
   result.add(result.root, node("status-line", 0, fl(f.image.height - FooterH), fl(f.image.width),
                                fl(FooterH), %*{"location": loc}))
   ctx.readPanes(f, result)
+  if box.isNone: ctx.readWelcome(f, result)
 
 proc roles(): JsonNode =
   %*{
     "window": {"properties": ["mode", "pointer"], "affordances": []},
     "session-strip": {"properties": ["count"], "affordances": []},
     "session-tab": {"properties": ["title"], "affordances": ["click", "context-click"]},
+    "welcome": {"properties": ["heading", "text"], "affordances": []},
+    "welcome-action": {"properties": ["label"], "affordances": ["click"]},
     "editor": {"properties": ["file", "active", "focused", "current-line", "caret-line",
                               "first-visible", "last-visible"],
                "affordances": ["click", "context-click", "wheel", "focusable", "text-entry"]},
