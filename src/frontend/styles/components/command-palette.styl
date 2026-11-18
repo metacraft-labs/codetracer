@@ -148,7 +148,7 @@ COMMAND_INPUT_BOTTOM = COMMAND_INPUT_HEIGHT
     max-height: 40vh
 
   .ct-input-cp-background
-    background: colors-ui-surface-primary-secondary !important
+    background: field-fill(colors-ui-surface-primary-secondary) !important // D-43
     padding-left: 0.5rem !important
 
   // The agent prompt's text and placeholder: pale cyan on the dark input,
@@ -339,7 +339,7 @@ COMMAND_INPUT_BOTTOM = COMMAND_INPUT_HEIGHT
       // the tab surface, so the field simply traded one neighbour for another.
       // The border is the strong signal — around 50 levels above the bar — so it
       // carries the definition, at a full pixel rather than a hairline.
-      background: colors-ui-surface-primary-default
+      background: field-fill(colors-ui-surface-primary-default) // D-43
       border: CONTROL_BORDER_WIDTH solid CONTROL_BORDER_COLOR
       box-shadow: none
 
