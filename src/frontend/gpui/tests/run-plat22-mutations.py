@@ -500,10 +500,10 @@ def resolve_replay_server() -> Path | None:
     restated here only because Python cannot import Nim. Keep the two in step:
     `$REPLAY_SERVER_BIN` (when it names a file), `$CT_BUILD_OUT_ROOT/bin`, then
     `$CODETRACER_BUILD_DIR/bin` (both relative to the checkout or absolute),
-    then `src/build-<config>-repro/bin` and tup's `src/build-<config>/bin`
+    then `src/build-<config>-repro/bin`
     (`<config>` = `$CODETRACER_CONFIG`, default `debug`), then cargo's
     `target/debug` and `target/release`. Each is tested for the FILE: the
-    tracked `src/build-debug/` exists everywhere, holding only `tup.config`.
+    an output directory can exist, empty, on a checkout that was never built.
     """
     exe = "replay-server.exe" if os.name == "nt" else "replay-server"
     candidates: list[Path] = []
@@ -517,7 +517,6 @@ def resolve_replay_server() -> Path | None:
     config = os.environ.get("CODETRACER_CONFIG", "") or "debug"
     candidates += [
         REPO / "src" / f"build-{config}-repro" / "bin" / exe,
-        REPO / "src" / f"build-{config}" / "bin" / exe,
         REPO / "src" / "db-backend" / "target" / "debug" / exe,
         REPO / "src" / "db-backend" / "target" / "release" / exe,
     ]
@@ -533,8 +532,8 @@ def check_replay_server_runnable() -> bool:
     **PLAT-22 residue 13, closed by PLAT-23.** Every case in
     `test_gpui_editing_surface.nim` spawns a real `replay-server`, and the
     binary `native_host.findReplayServer` picks (`resolve_replay_server`
-    below; the tup tree `src/build-debug/bin/replay-server` when PLAT-23
-    measured it) resolves `libmcr_emulator.so` through
+    below; PLAT-23 measured the tup tree's
+    `src/build-debug/bin/replay-server`) resolves `libmcr_emulator.so` through
     neither an rpath nor `CT_LD_LIBRARY_PATH`. Without the emulator's build
     directory on `LD_LIBRARY_PATH` the suite is RED on an UNMUTATED tree, and
     the harness scored **5 of 15** with eight `MIS-ATTRIBUTED` and two

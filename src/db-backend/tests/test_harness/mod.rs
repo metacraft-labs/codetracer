@@ -2591,7 +2591,7 @@ pub fn find_wazero() -> Option<PathBuf> {
 
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let dev_locations = [
-        "../../src/build-debug/bin/wazero",
+        "../../src/build-debug-repro/bin/wazero",
         "../../result/bin/wazero",
         // Sibling recorder repo (workspace layout), built with `just build`.
         "../../../codetracer-wasm-recorder/wazero",

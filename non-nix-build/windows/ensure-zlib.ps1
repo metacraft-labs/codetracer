@@ -14,7 +14,7 @@ $ErrorActionPreference = "Stop"
 #     https://github.com/madler/zlib/releases/download/v<version>/zlib-<version>.tar.gz
 #   SHA256 for 1.3.1 is pinned in toolchain-versions.env as ZLIB_WIN_X64_SHA256.
 #
-# Layout produced (matches `src/Tuprules.tup`'s WINDOWS_ZLIB_DIR pin):
+# Layout produced (matches the WINDOWS_ZLIB_DIR pin in `repro.nim`):
 #   $Root/zlib/<version>/include/zlib.h
 #   $Root/zlib/<version>/include/zconf.h
 #   $Root/zlib/<version>/lib/libz.a

@@ -409,8 +409,8 @@ fn find_db_backend() -> Option<PathBuf> {
     }
 
     // Check the db-backend crate's target directories relative to
-    // CARGO_MANIFEST_DIR, plus the tup-driven `src/build-debug/bin`
-    // output directory used by the workspace `ct` build on Windows.
+    // CARGO_MANIFEST_DIR, plus the `src/build-debug-repro/bin`
+    // output directory of the workspace `ct` build.
     // The platform executable suffix (`.exe` on Windows) is appended so
     // the probe matches the real binary.
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
@@ -420,8 +420,8 @@ fn find_db_backend() -> Option<PathBuf> {
         format!("../db-backend/target/release/replay-server{exe}"),
         format!("../db-backend/target/debug/db-backend{exe}"),
         format!("../db-backend/target/release/db-backend{exe}"),
-        format!("../build-debug/bin/replay-server{exe}"),
-        format!("../build-debug/bin/db-backend{exe}"),
+        format!("../build-debug-repro/bin/replay-server{exe}"),
+        format!("../build-debug-repro/bin/db-backend{exe}"),
     ];
     for loc in &relative_locations {
         let path = manifest_dir.join(loc);

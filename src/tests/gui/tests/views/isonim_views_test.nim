@@ -1602,10 +1602,11 @@ suite "IsoNim State Panel — watches in the list":
       dispose()
 
   test "origin badge public resources contain the complete icon set":
-    # The badge stylesheet and public-resource Tupfile both resolve these
-    # names from this directory. Keeping this assertion beside the badge DOM
-    # test makes a misplaced or partially added icon fail the regular native
-    # and JavaScript ViewModel lanes before the frontend build reaches Tup.
+    # The badge stylesheet and the build's public-resource publication both
+    # resolve these names from this directory. Keeping this assertion beside
+    # the badge DOM test makes a misplaced or partially added icon fail the
+    # regular native and JavaScript ViewModel lanes before the frontend build
+    # runs.
     const repoRoot = currentSourcePath()
       .parentDir.parentDir.parentDir.parentDir.parentDir.parentDir
     const iconDir = repoRoot & "/src/public/resources/origin-icons/"
@@ -1629,23 +1630,20 @@ suite "IsoNim State Panel — watches in the list":
       staticRead(iconDir & expectedIconFiles[6]),
       staticRead(iconDir & expectedIconFiles[7]),
     ]
-    const resourceTupfile =
-      staticRead(repoRoot & "/src/public/resources/Tupfile")
-    const expectedTupRule =
-      ": foreach origin-icons/*.svg |> !tup_preserve |> %f"
+    # The build publishes the whole of src/public (`fs.preserveTree` in
+    # repro.nim, which excludes only the webpack output `dist`), so a file in
+    # this directory reaches the output tree without a rule of its own.
+    const recipe = staticRead(repoRoot & "/repro.nim")
 
     for iconContent in iconContents:
       check iconContent.len > 0
 
-    var originIconRules: seq[string] = @[]
-    # Walked through a `let`, never the `const`: an inline iterator over a
+    # Checked through a `let`, never the `const`: an inline iterator over a
     # `const` rebuilds the whole literal at every character access on the JS
     # backend (`ci/test/js-const-iteration-test.sh` says why and refuses it).
-    let resourceTupfileText = resourceTupfile
-    for line in resourceTupfileText.splitLines:
-      if "origin-icons" in line:
-        originIconRules.add(line)
-    check originIconRules == @[expectedTupRule]
+    let recipeText = recipe
+    check "PublicResourceRoot = \"src/public\"" in recipeText
+    check "excludePrefixes = @[\"dist\"]" in recipeText
 
     when not defined(js):
       var actualIconFiles: seq[string] = @[]

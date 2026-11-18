@@ -17,11 +17,10 @@
 # ## How this one works
 #
 # Both scripts are EXECUTED, in a sandbox whose PATH and `node_modules/.bin`
-# hold recording stubs for every external command they reach for — `tup`,
+# hold recording stubs for every external command they reach for —
 # `webpack`, `livereload`, `repro`, `runquotad`, `nix`, `uname`, and the
 # in-repo helper scripts. Each stub appends `name<TAB>cwd<TAB>argv` to a trace
-# file and exits 0. Tup's init stub also creates the local database that the
-# real command creates, so the ancestor-project guard remains exercised.
+# file and exits 0.
 # The sourced freshness helper records the stamp call without hashing a build
 # that recording stubs deliberately do not produce. These stubs isolate build
 # orchestration from compilation, daemons, and tool provisioning.
@@ -31,10 +30,10 @@
 # that preserves the source text still fails.
 #
 # The assertion that matters most is (D): in `build.sh`'s trace, no webpack
-# invocation may be ordered before the first tup/repro invocation. That is the
-# #599 regression — `src/public/Tupfile:38` globs webpack's output directory,
-# so starting `webpack --watch` first makes tup parse a directory another
-# process is concurrently writing. Run against the code as it stood before the
+# invocation may be ordered before the first repro invocation. That is the
+# #599 regression — the build publishes webpack's output directory, so starting
+# `webpack --watch` first makes the build read a directory another process is
+# concurrently writing. Run against the code as it stood before the
 # fix, (D) fails on the first scenario.
 #
 # This is Tier 1 of a three-tier design. Tier 2 (process hygiene: SIGINT a real
@@ -83,7 +82,7 @@ fail() {
 # ---------------------------------------------------------------------------
 
 # Every external command the two scripts invoke, replaced by a stub that
-# records the call. `tup`, `uname` and `runquotad` need behaviour beyond recording and
+# records the call. `uname` and `runquotad` need behaviour beyond recording and
 # are written separately below.
 STUB_COMMANDS=(repro nix xcrun node npm npx)
 # In-repo helper scripts that do real work we neither want nor need here. They
@@ -92,8 +91,6 @@ STUB_COMMANDS=(repro nix xcrun node npm npx)
 STUB_HELPER_SCRIPTS=(
 	build-tailwind.sh
 	require-siblings.sh
-	require-fuse-mount-helper.sh
-	require-tup-globs.sh
 	post-build-setcap.sh
 	require-runtime-assets.sh
 )
@@ -131,19 +128,6 @@ make_sandbox() {
 	for name in "${STUB_HELPER_SCRIPTS[@]}"; do
 		write_recording_stub "$sandbox/scripts/$name" "${name%.sh}"
 	done
-
-	# A successful init must leave its database in the command's cwd. Do not
-	# pre-create it: each fresh checkout must exercise build-once's bootstrap.
-	cat >"$sandbox/bin/tup" <<'EOF'
-#!/usr/bin/env bash
-set -euo pipefail
-printf '%s\t%s\t%s\n' 'tup' "$PWD" "$*" >>"$CT_ALIGN_TRACE"
-if [ "${1:-}" = "init" ]; then
-	mkdir -p .tup
-	: >.tup/db
-fi
-EOF
-	chmod +x "$sandbox/bin/tup"
 
 	# This helper is sourced, so it must provide the function build-once calls
 	# rather than be an executable stub. Its output depends on real build files.
@@ -190,8 +174,7 @@ EOF
 	#
 	# build.sh backgrounds webpack and then livereload (scripts/build.sh:234
 	# and :239) and, on the repro branch only, then runs build-once.sh and
-	# exits -- the tup branch ends in `wait`, which is why it was never
-	# affected. On exit the EXIT trap kills the watcher pids. With `repro
+	# exits. On exit the EXIT trap kills the watcher pids. With `repro
 	# watch` returning immediately there is almost no window for those two
 	# backgrounded stubs to be scheduled, so they were killed before they could
 	# append their record.
@@ -201,7 +184,7 @@ EOF
 	# build-once.sh's runquotad, not next to its own invocation -- and
 	# `livereload`, started microseconds later, never landing at all. Both
 	# watchers were racing the exit; the first won and the second lost, in all
-	# three repro scenarios and neither tup scenario. It passes on an idle
+	# every scenario. It passes on an idle
 	# developer machine, which is why "no livereload record" looked like a
 	# missing call rather than a lost one.
 	#
@@ -222,7 +205,6 @@ EOF
 # otherwise steer the scripts away from the scenario under test.
 SCRUBBED_VARS=(
 	CODETRACER_CONFIG
-	CODETRACER_REPROBUILD_LINUX
 	CODETRACER_REPROBUILD_COMMAND
 	CODETRACER_REPROBUILD_REPO_PATH
 	CODETRACER_BUILD_ENV_FILE
@@ -235,7 +217,6 @@ SCRUBBED_VARS=(
 	REPRO_MONITOR_SHIM_LIB
 	RUNQUOTA_SOCKET
 	RUNQUOTAD_BIN
-	TUP
 )
 
 # Run one of the scripts under test inside a fresh sandbox and leave its trace
@@ -268,7 +249,7 @@ run_script() {
 
 # ---------------------------------------------------------------------------
 # Trace helpers. Comparisons use `name<TAB>argv`; the cwd column is recorded
-# for debugging, and asserted for Tup's local-database bootstrap.
+# for debugging.
 # ---------------------------------------------------------------------------
 
 # `name<TAB>argv`, with the per-run volatile tokens folded away so two runs of
@@ -306,44 +287,12 @@ first_index() {
 	names "$1" | grep -n -x -F -- "$2" 2>/dev/null | head -n1 | cut -d: -f1
 }
 
-# Every distinct `build-*` argument handed to `tup`, one per line.
-tup_variants() {
-	awk -F'\t' '$1 == "tup" { print $3 }' "$1" |
-		tr ' ' '\n' | grep -E '^build-' | sort -u
-}
-
 count_records() {
 	awk -F'\t' -v name="$2" '$1 == name { n++ } END { print n + 0 }' "$1"
 }
 
 argv_of() {
 	awk -F'\t' -v name="$2" '$1 == name { print $3 }' "$1"
-}
-
-# A fresh sandbox must exercise the local-database bootstrap, not inherit a
-# project from an ancestor or merely record init without creating its result.
-# Check both build passes as well: init alone must not stand in for a build.
-assert_local_tup_database() {
-	local trace="$1" sandbox="$2" label="$3"
-	if [ -f "$sandbox/src/.tup/db" ] && awk -F'\t' -v src="$sandbox/src" '
-		$1 == "tup" {
-			if ($2 != src) { invalid = 1 }
-			if ($3 == "init --force") {
-				if (builds) { invalid = 1 }
-				inits++
-			} else if ($3 ~ /^build-/) {
-				if (inits != 1) { invalid = 1 }
-				builds++
-			}
-		}
-		END { exit !(inits == 1 && builds == 2 && !invalid) }
-	' "$trace"; then
-		pass "$label initialises src/.tup/db before both Tup build passes"
-	else
-		fail "$label initialises src/.tup/db before both Tup build passes" \
-			"expected one 'tup init --force' followed by two variant passes in $sandbox/src, with a local database
-$(awk -F'\t' '$1 == "tup" { print }' "$trace")"
-	fi
 }
 
 # Assert that every record of $1 appears in $2 in the same relative order.
@@ -440,11 +389,6 @@ run_scenario() {
 		"$WORK_ROOT/$label-build" "$uname_s" "$port" \
 		${scenario_env[@]+"${scenario_env[@]}"})"
 
-	if [ "$expected_branch" = "tup" ]; then
-		assert_local_tup_database "$once_trace" "$WORK_ROOT/$label-once" "build-once.sh"
-		assert_local_tup_database "$build_trace" "$WORK_ROOT/$label-build" "build.sh"
-	fi
-
 	if [ "$once_status" != "0" ]; then
 		fail "build-once.sh exits 0" "exit status $once_status
 $(sed 's/^/    /' "$once_trace.out")"
@@ -463,9 +407,7 @@ $(sed 's/^/    /' "$build_trace.out")"
 	# Observed through behaviour — which build driver ran — rather than by
 	# looking for a variable name, which is what the old test did.
 	local once_branch="" build_branch=""
-	[ -n "$(first_index "$once_trace" tup)" ] && once_branch="tup"
 	[ -n "$(first_index "$once_trace" repro)" ] && once_branch="repro"
-	[ -n "$(first_index "$build_trace" tup)" ] && build_branch="tup"
 	[ -n "$(first_index "$build_trace" repro)" ] && build_branch="repro"
 
 	if [ "$once_branch" = "$expected_branch" ] && [ "$build_branch" = "$expected_branch" ]; then
@@ -473,32 +415,6 @@ $(sed 's/^/    /' "$build_trace.out")"
 	else
 		fail "(A) both scripts take the '$expected_branch' branch" \
 			"build-once.sh took '${once_branch:-none}', build.sh took '${build_branch:-none}'"
-	fi
-
-	# --- (B) same tup variant -----------------------------------------------
-	if [ "$expected_branch" = "tup" ]; then
-		local once_variants build_variants
-		once_variants="$(tup_variants "$once_trace")"
-		build_variants="$(tup_variants "$build_trace")"
-		if [ "$once_variants" = "$build_variants" ] && [ -n "$once_variants" ]; then
-			pass "(B) same tup variant(s): $(printf '%s' "$once_variants" | tr '\n' ' ')"
-		else
-			fail "(B) same tup variant(s)" \
-				"build-once.sh: [$(printf '%s' "$once_variants" | tr '\n' ' ')]
-build.sh:      [$(printf '%s' "$build_variants" | tr '\n' ' ')]"
-		fi
-
-		# The two-pass structure is load-bearing: pass 2 is what lets tup see
-		# the files webpack wrote into src/public/dist.
-		local once_passes build_passes
-		once_passes="$(awk -F'\t' '$1 == "tup" && $3 ~ /^build-/ { n++ } END { print n + 0 }' "$once_trace")"
-		build_passes="$(awk -F'\t' '$1 == "tup" && $3 ~ /^build-/ { n++ } END { print n + 0 }' "$build_trace")"
-		if [ "$once_passes" = "2" ] && [ "$build_passes" = "2" ]; then
-			pass "(B') both scripts run two tup variant passes"
-		else
-			fail "(B') both scripts run two tup variant passes" \
-				"build-once.sh ran $once_passes, build.sh ran $build_passes"
-		fi
 	fi
 
 	# --- (C) build.sh does everything build-once.sh does, in order ----------
@@ -520,9 +436,9 @@ build.sh:      [$(printf '%s' "$build_variants" | tr '\n' ' ')]"
 	else
 		fail "(D) no webpack invocation precedes the first $expected_branch invocation" \
 			"webpack ran at record $first_webpack, the first $expected_branch at record $first_driver.
-This is issue #599: src/public/Tupfile:38 globs webpack's output directory
-(\`: foreach dist/*\`), so a watcher writing into it while tup parses produces
-a missing or half-written frontend_bundle.js.
+This is issue #599: the build publishes webpack's output directory
+(src/public/dist), so a watcher writing into it while the build reads it
+produces a missing or half-written frontend_bundle.js.
 
 build.sh trace:
 $(normalized "$build_trace" | sed 's/^/    /')"
@@ -530,14 +446,10 @@ $(normalized "$build_trace" | sed 's/^/    /')"
 
 	# --- (E) the preflights and post-steps build.sh used to skip ------------
 	local step
-	# `require-runtime-assets` is in the base list, not the tup-only one: the
-	# assets `ct` reads on startup have to be in EVERY output tree, so both
-	# branches run it. (It was added when a clean tup build was found to leave
-	# `src/build-debug/config/` empty and `ct` unable to start.)
+	# `require-runtime-assets`: the assets `ct` reads on startup have to be in
+	# EVERY output tree. (It was added when a clean build was found to leave
+	# `config/` empty and `ct` unable to start.)
 	local -a required_steps=(require-siblings build-tailwind require-runtime-assets)
-	if [ "$expected_branch" = "tup" ]; then
-		required_steps+=(require-fuse-mount-helper require-tup-globs post-build-setcap)
-	fi
 	for step in "${required_steps[@]}"; do
 		if [ -n "$(first_index "$build_trace" "$step")" ]; then
 			pass "(E) build.sh runs $step"
@@ -553,7 +465,7 @@ $(normalized "$build_trace" | sed 's/^/    /')"
 	if [ -z "$livereload_argv" ]; then
 		# `no livereload record` on its own is not enough to act on, and this
 		# check has failed on the macOS CI runner in all three REPRO scenarios
-		# while passing in both TUP scenarios -- deterministic by branch, not
+		# while passing -- deterministic by branch, not
 		# flaky. It has NOT been reproduced on an idle developer m4: bash 5.3,
 		# 3x-oversubscribed CPU load, and a util-linux-shaped `setsid` on PATH
 		# were each tried and all pass there, so the trigger is something about
@@ -561,7 +473,6 @@ $(normalized "$build_trace" | sed 's/^/    /')"
 		#
 		# build.sh backgrounds livereload (scripts/build.sh:239) and, on the
 		# repro branch ONLY, then calls build-once.sh and exits WITHOUT `wait`
-		# -- the tup branch ends in `wait`, which is why that branch is immune.
 		# The EXIT trap's cleanup then signals the watcher pids. So the two
 		# things worth seeing are which watchers DID record, and whether
 		# build.sh printed an exec failure.
@@ -581,19 +492,24 @@ $(sed 's/^/    /' "$build_trace.out" 2>/dev/null | tail -n 25)"
 		fail "(F) livereload watches $expected_out_root" "livereload argv: $livereload_argv"
 	fi
 
-	if [ "$expected_branch" = "tup" ]; then
-		if grep -qE '(^| )monitor( |$)' <<<"$(argv_of "$build_trace" tup)"; then
-			pass "(F') build.sh starts tup monitor"
-		else
-			fail "(F') build.sh starts tup monitor" "no 'tup monitor' record"
-		fi
+	if grep -qE '(^| )watch( |$)' <<<"$(argv_of "$build_trace" repro)"; then
+		pass "(F') build.sh starts repro watch"
 	else
-		if grep -qE '(^| )watch( |$)' <<<"$(argv_of "$build_trace" repro)"; then
-			pass "(F') build.sh starts repro watch"
-		else
-			fail "(F') build.sh starts repro watch" \
-				"repro argv seen: $(argv_of "$build_trace" repro | tr '\n' '|')"
-		fi
+		fail "(F') build.sh starts repro watch" \
+			"repro argv seen: $(argv_of "$build_trace" repro | tr '\n' '|')"
+	fi
+
+	# --- (F'') `repro watch` is handed only flags it accepts. It refuses
+	# --progress, --write-diagnostics and --log, which `repro build` takes.
+	# Here-string, not a pipe into `grep -q`: that fails under pipefail when the
+	# producer is still writing as grep exits.
+	local watch_argv
+	watch_argv="$(grep -E '(^| )watch( |$)' <<<"$(argv_of "$build_trace" repro)" || true)"
+	if grep -qE -- '--(progress|write-diagnostics|log)' <<<"$watch_argv"; then
+		fail "(F'') repro watch is not handed build-only flags" \
+			"repro argv seen: $(argv_of "$build_trace" repro | tr '\n' '|')"
+	else
+		pass "(F'') repro watch is not handed build-only flags"
 	fi
 
 	# --- (G) build-once.sh starts NO watcher --------------------------------
@@ -684,33 +600,30 @@ while time.time() < deadline:
 }
 
 # ---------------------------------------------------------------------------
-# (I) Nim flag alignment: the tup lane vs the Nix lane.
+# (I) Nim flag alignment: the build recipe vs the Nix lane.
 #
 # ## The defect this exists to catch
 #
-# `src/Tuprules.tup` defines NIM_COMMON_FLAGS, and EVERY tup Nim rule carries
-# it: each macro (`!nim_js`, `!nim_node`, `!nim_node_index`, `!codetracer`,
-# `!codetracer_bpf`, ...) expands `$(NIM_SELECTED)`, which is
-# `$(NIM_BIN) $(NIM_DEBUG_FLAGS)`, and NIM_DEBUG_FLAGS opens with
-# `$(NIM_COMMON_FLAGS)`. The Nix lane compiles the SAME sources
-# (`src/frontend/ui_js.nim`, `src/ct/codetracer.nim`, ...) from hand-written
-# flag lists in `nix/packages/default.nix` that were never derived from
-# NIM_COMMON_FLAGS and share no mechanism with it.
+# `repro.nim` declares the defines every Nim compile of the product carries
+# (`CommonNimDefines`) and compiles `ct` and the frontend bundles with
+# `--mm:refc`. The Nix lane compiles the SAME sources (`src/frontend/ui_js.nim`,
+# `src/ct/codetracer.nim`, ...) from hand-written flag lists in
+# `nix/packages/default.nix` that were never derived from the recipe and share
+# no mechanism with it.
 #
 # So a flag can be added to one lane and be silently absent from the other, and
 # the lanes then disagree about the dialect they are compiling. That is not
-# hypothetical. `-d:nimNoLentIterators` is in NIM_COMMON_FLAGS and in NONE of
-# the Nix invocations, which is why `src/frontend/ui_js.nim` compiled green
-# under tup and red under Nix: the failure arrived as an ordinary Nim error
+# hypothetical. `-d:nimNoLentIterators` was in the retired tup build's flags and
+# in NONE of the Nix invocations, which is why `src/frontend/ui_js.nim` compiled
+# green under tup and red under Nix: the failure arrived as an ordinary Nim error
 # inside a store path, naming neither the lane, nor the flag, nor the fact that
-# two lanes existed. `-d:nimOldCaseObjects` is missing from every Nix
-# invocation in exactly the same way and has simply not been stepped on yet.
+# two lanes existed. (The recipe carries it now; the Nix lane still does not.)
 #
 # ## Why a recorded baseline and not an equality assertion
 #
 # The two lanes are NOT equal today, and this script cannot make them equal:
 # aligning them means editing the Nix derivations, and that edit is only
-# provable by BUILDING them, which takes a warm store and minutes — the same
+# provable by BUILDING them, which takes a warm store and minutes -- the same
 # reason `test-flake-pin-alignment.sh` is a static check. Asserting equality
 # here would therefore either fail on mainline or force a fix nobody could
 # verify from this harness.
@@ -720,38 +633,31 @@ while time.time() < deadline:
 # left silent. The check fails when the real divergence differs from the record
 # in EITHER direction:
 #
-#   * a flag newly present in one lane and absent in the other (the regression
-#     this exists to catch) adds a line the baseline does not have;
+#   * a flag newly present in the recipe and absent in the Nix lane (the
+#     regression this exists to catch) adds a line the baseline does not have;
 #   * a divergence that gets FIXED removes a line the baseline still has, so
 #     the record cannot rot into a lie about a problem that is gone;
 #   * a new Nix Nim invocation added with no baseline entry shows up as an
 #     unrecorded target.
 #
-# Diagnostic-only flags (`--hint[...]`, `--warning[...]`, `--hints:`,
-# `--warnings:`) are recorded on the same footing as semantic ones. They do not
-# change generated code, but excluding them by category would mean this harness
-# silently decided which divergences matter, and the whole point is that it
-# decides nothing and reports everything.
+# Diagnostic-only flags are not part of the recipe's list, so they are not
+# compared; the recipe's defines and the memory manager are.
 # ---------------------------------------------------------------------------
 
-# The backslash-continued value of NIM_COMMON_FLAGS, one flag per line, in
-# source order. Continuation is detected by testing the last CHARACTER rather
-# than with a `/\\$/` regex: awk reads that as an escaped `$`, i.e. "contains a
-# literal dollar", which silently matches unrelated lines such as
-# `ln -sf $out/nim/bin/nim $out/bin/nim2`.
-tup_common_flags() {
+# The flags every Nim compile of the product carries, one per line, in recipe
+# order: `-d:<define>` for each entry of `CommonNimDefines` in `repro.nim`, then
+# `--mm:refc`, which the recipe passes to `ct` and to the frontend bundles.
+recipe_common_flags() {
 	awk '
-		function cont(s) { return substr(s, length(s), 1) == "\\" }
-		$0 == "NIM_COMMON_FLAGS=\\" { inblock = 1; next }
+		/^[[:space:]]*CommonNimDefines = @\[/ { inblock = 1; next }
+		inblock && /^[[:space:]]*\]/ { exit }
 		inblock {
 			line = $0
-			c = cont(line)
-			if (c) { line = substr(line, 1, length(line) - 1) }
-			gsub(/^[ \t]+|[ \t]+$/, "", line)
-			if (line != "") { print line }
-			if (!c) { exit }
+			gsub(/^[ \t]*"|"[ \t,]*$/, "", line)
+			if (line != "") { print "-d:" line }
 		}
-	' "$REPO_ROOT/src/Tuprules.tup"
+	' "$REPO_ROOT/repro.nim"
+	printf '%s\n' "--mm:refc"
 }
 
 # Each `nim2` invocation in the Nix packages, flattened to one line.
@@ -770,11 +676,11 @@ nix_nim_invocations() {
 	' "$REPO_ROOT/nix/packages/default.nix"
 }
 
-# `<nix target> <NIM_COMMON_FLAGS entry the Nix invocation does not carry>`
+# `<nix target> <recipe flag the Nix invocation does not carry>`
 nim_flag_divergence_actual() {
 	local block target tok flag found
 	local -a toks common
-	mapfile -t common < <(tup_common_flags)
+	mapfile -t common < <(recipe_common_flags)
 	while IFS= read -r block; do
 		read -r -a toks <<<"$block"
 		target=""
@@ -797,145 +703,86 @@ nim_flag_divergence_actual() {
 	done < <(nix_nim_invocations)
 }
 
-# The recorded divergence, as measured at b9677d24. See the header above for
+# The recorded divergence, re-measured against the recipe's flags when the tup
+# build was retired (it was measured against the tup flags before). See the header above for
 # what a difference from this list means and how to respond to it.
 #
 # The `ct-test` entries are by design, not drift (CTC-3i): the test runner is an
 # ORC build that links none of CodeTracer's native libraries, so neither its
-# Nix invocation nor its tup rule (`!ct_test_orc` in src/Tuprules.tup) carries
-# NIM_COMMON_FLAGS — `--mm:refc` least of all.
+# Nix invocation nor its recipe action (`ct-test` in `repro.nim`) carries
+# the product's common flags — `--mm:refc` least of all.
 #
-# The `codetracer-tui` entries are by design too: no Tup rule builds
+# The `codetracer-tui` entries are by design too: no recipe action builds
 # `src/frontend/tui/main.nim`. The binary is an ORC release build whose
-# developer lane is the `build-tui` just recipe. Of NIM_COMMON_FLAGS that recipe
-# passes only `--hints:off`, and the derivation adds `--warnings:off`; the other
-# fifteen are these lines, recorded at b52c0f719. They say only that it is not
-# a Tup target; the drift that matters for it, the derivation against the
+# developer lane is the `build-tui` just recipe. These lines say only that it is
+# not a build-graph target; the drift that matters for it, the derivation against the
 # recipe, is check (I''') below.
 nim_flag_divergence_recorded() {
 	cat <<'RECORDED'
-./index.js -d:asyncBackend=asyncdispatch
-./index.js -d:chronicles_line_numbers=true
-./index.js -d:chronicles_timestamps=UnixTime
-./index.js -d:ssl
-./index.js --mm:refc
-./index.js -d:nimNoLentIterators
-./index.js -d:nimOldCaseObjects
-./index.js --hints:off
-./index.js --hint[Processing]:off
-./index.js --hint[Conf]:off
-./index.js --hint[CC]:off
-./index.js --hint[Pattern]:off
-./index.js --hint[XDeclaredButNotUsed]:off
-./index.js --hint[XCannotRaiseY]:off
-./index.js --warning[CaseTransition]:off
-./server_index.js -d:asyncBackend=asyncdispatch
-./server_index.js -d:chronicles_line_numbers=true
-./server_index.js -d:chronicles_timestamps=UnixTime
-./server_index.js -d:ssl
-./server_index.js --mm:refc
-./server_index.js -d:nimNoLentIterators
-./server_index.js -d:nimOldCaseObjects
-./server_index.js --hints:off
-./server_index.js --hint[Processing]:off
-./server_index.js --hint[Conf]:off
-./server_index.js --hint[CC]:off
-./server_index.js --hint[Pattern]:off
-./server_index.js --hint[XDeclaredButNotUsed]:off
-./server_index.js --hint[XCannotRaiseY]:off
-./server_index.js --warning[CaseTransition]:off
-./subwindow.js -d:asyncBackend=asyncdispatch
-./subwindow.js -d:chronicles_sinks=json
-./subwindow.js -d:chronicles_line_numbers=true
-./subwindow.js -d:chronicles_timestamps=UnixTime
-./subwindow.js -d:ssl
-./subwindow.js --mm:refc
-./subwindow.js -d:nimNoLentIterators
-./subwindow.js -d:nimOldCaseObjects
-./subwindow.js --hint[Processing]:off
-./subwindow.js --hint[Conf]:off
-./subwindow.js --hint[CC]:off
-./subwindow.js --hint[Pattern]:off
-./subwindow.js --hint[XDeclaredButNotUsed]:off
-./subwindow.js --hint[XCannotRaiseY]:off
-./subwindow.js --warning[CaseTransition]:off
-./ui.js -d:asyncBackend=asyncdispatch
-./ui.js -d:chronicles_sinks=json
-./ui.js -d:chronicles_line_numbers=true
-./ui.js -d:chronicles_timestamps=UnixTime
-./ui.js -d:ssl
-./ui.js --mm:refc
-./ui.js -d:nimNoLentIterators
-./ui.js -d:nimOldCaseObjects
-./ui.js --hint[Processing]:off
-./ui.js --hint[Conf]:off
-./ui.js --hint[CC]:off
-./ui.js --hint[Pattern]:off
-./ui.js --hint[XDeclaredButNotUsed]:off
-./ui.js --hint[XCannotRaiseY]:off
-./ui.js --warning[CaseTransition]:off
-ct -d:nimNoLentIterators
-ct -d:nimOldCaseObjects
-ct --hint[Processing]:off
-ct --hint[Conf]:off
-ct --hint[CC]:off
-ct --hint[Pattern]:off
-ct --hint[XCannotRaiseY]:off
-ct --warning[CaseTransition]:off
-db-backend-record -d:nimNoLentIterators
-db-backend-record -d:nimOldCaseObjects
-db-backend-record --hint[Processing]:off
-db-backend-record --hint[Conf]:off
-db-backend-record --hint[CC]:off
-db-backend-record --hint[Pattern]:off
-db-backend-record --hint[XCannotRaiseY]:off
-db-backend-record --warning[CaseTransition]:off
-ct-test -d:asyncBackend=asyncdispatch
-ct-test -d:chronicles_sinks=json
-ct-test -d:chronicles_line_numbers=true
-ct-test -d:chronicles_timestamps=UnixTime
-ct-test -d:ssl
-ct-test --mm:refc
-ct-test -d:nimNoLentIterators
-ct-test -d:nimOldCaseObjects
-ct-test --hint[Processing]:off
-ct-test --hint[Conf]:off
-ct-test --hint[CC]:off
-ct-test --hint[Pattern]:off
-ct-test --hint[XDeclaredButNotUsed]:off
-ct-test --hint[XCannotRaiseY]:off
-ct-test --warning[CaseTransition]:off
-codetracer-tui -d:asyncBackend=asyncdispatch
-codetracer-tui -d:chronicles_sinks=json
 codetracer-tui -d:chronicles_line_numbers=true
+codetracer-tui -d:chronicles_sinks=json
 codetracer-tui -d:chronicles_timestamps=UnixTime
+codetracer-tui -d:debug
+codetracer-tui -d:nimNoLentIterators
 codetracer-tui -d:ssl
 codetracer-tui --mm:refc
-codetracer-tui -d:nimNoLentIterators
-codetracer-tui -d:nimOldCaseObjects
-codetracer-tui --hint[Processing]:off
-codetracer-tui --hint[Conf]:off
-codetracer-tui --hint[CC]:off
-codetracer-tui --hint[Pattern]:off
-codetracer-tui --hint[XDeclaredButNotUsed]:off
-codetracer-tui --hint[XCannotRaiseY]:off
-codetracer-tui --warning[CaseTransition]:off
+./console -d:chronicles_sinks=json
+./console -d:chronicles_timestamps=UnixTime
+./console -d:debug
+./console -d:nimNoLentIterators
+./console -d:ssl
+./console --mm:refc
+ct -d:nimNoLentIterators
+ct-test -d:chronicles_line_numbers=true
+ct-test -d:chronicles_sinks=json
+ct-test -d:chronicles_timestamps=UnixTime
+ct-test -d:debug
+ct-test -d:nimNoLentIterators
+ct-test -d:ssl
+ct-test --mm:refc
+db-backend-record -d:nimNoLentIterators
+./index.js -d:chronicles_line_numbers=true
+./index.js -d:chronicles_timestamps=UnixTime
+./index.js -d:debug
+./index.js -d:nimNoLentIterators
+./index.js -d:ssl
+./index.js --mm:refc
+./server_index.js -d:chronicles_line_numbers=true
+./server_index.js -d:chronicles_timestamps=UnixTime
+./server_index.js -d:debug
+./server_index.js -d:nimNoLentIterators
+./server_index.js -d:ssl
+./server_index.js --mm:refc
+./subwindow.js -d:chronicles_line_numbers=true
+./subwindow.js -d:chronicles_sinks=json
+./subwindow.js -d:chronicles_timestamps=UnixTime
+./subwindow.js -d:debug
+./subwindow.js -d:nimNoLentIterators
+./subwindow.js -d:ssl
+./subwindow.js --mm:refc
+./ui.js -d:chronicles_line_numbers=true
+./ui.js -d:chronicles_sinks=json
+./ui.js -d:chronicles_timestamps=UnixTime
+./ui.js -d:debug
+./ui.js -d:nimNoLentIterators
+./ui.js -d:ssl
+./ui.js --mm:refc
 RECORDED
 }
 
 run_nim_flag_alignment_check() {
-	printf '\n  scenario: nim-flag-alignment (tup NIM_COMMON_FLAGS vs nix/packages/default.nix)\n'
+	printf '\n  scenario: nim-flag-alignment (repro.nim common flags vs nix/packages/default.nix)\n'
 
 	local common_count invocation_count
-	common_count="$(tup_common_flags | grep -c .)"
+	common_count="$(recipe_common_flags | grep -c .)"
 	invocation_count="$(nix_nim_invocations | grep -c .)"
 
 	# A parser that silently matches nothing would make every assertion below
 	# vacuously true, so establish that both sides were actually read.
 	if [ "$common_count" -gt 0 ]; then
-		pass "(I) NIM_COMMON_FLAGS parsed from src/Tuprules.tup ($common_count flags)"
+		pass "(I) common flags parsed from repro.nim ($common_count flags)"
 	else
-		fail "(I) NIM_COMMON_FLAGS parsed from src/Tuprules.tup" \
+		fail "(I) common flags parsed from repro.nim" \
 			"parsed 0 flags -- the assignment moved or changed shape"
 		return 0
 	fi
@@ -953,11 +800,11 @@ run_nim_flag_alignment_check() {
 	recorded="$(nim_flag_divergence_recorded | sort)"
 
 	if [ "$actual" = "$recorded" ]; then
-		pass "(I'') tup/nix Nim flag divergence matches the recorded baseline"
+		pass "(I'') recipe/nix Nim flag divergence matches the recorded baseline"
 	else
 		delta="$(diff <(printf '%s\n' "$recorded") <(printf '%s\n' "$actual") |
 			sed -n 's/^< /  no longer diverging (fix the baseline): /p;s/^> /  NEW divergence: /p')"
-		fail "(I'') tup/nix Nim flag divergence matches the recorded baseline" "$delta"
+		fail "(I'') recipe/nix Nim flag divergence matches the recorded baseline" "$delta"
 	fi
 
 	# Called out by name because it is the one that has already cost a debugging
@@ -978,9 +825,9 @@ run_nim_flag_alignment_check() {
 # ---------------------------------------------------------------------------
 # (I''') The Nix `codetracer-tui` build vs the `build-tui` recipe it mirrors.
 #
-# `codetracer-tui` has no Tup rule: nothing under `src/` compiles
+# `codetracer-tui` has no recipe action: nothing under `src/` compiles
 # `src/frontend/tui/main.nim`, and the developer build is the `build-tui` just
-# recipe. Its NIM_COMMON_FLAGS lines in the baseline above therefore say only
+# recipe. Its common-flag lines in the baseline above therefore say only
 # that it is an ORC build; they cannot catch the drift that matters for this
 # binary, which is the derivation and the recipe disagreeing. This compares
 # exactly those two invocations, on the same footing as (I''): every flag one
@@ -1140,7 +987,7 @@ run_sibling_probe_alignment_check() {
 #
 # The advisory rows of `scripts/require-siblings.sh` are what a developer reads
 # when a sibling is missing, so they must say who will fail. They did not: the
-# isonim-gpui / nim-termctl / nim-pty rows said only "src/Tuprules.tup puts it
+# isonim-gpui / nim-termctl / nim-pty rows said only "config.nims puts it
 # on the Nim search path", and the tier notes said all three were no longer
 # cloned -- "nothing declares them, nothing imports them" -- while repro.lock
 # solved all three (so CI clones them), src/frontend/gpui/ and
@@ -1232,13 +1079,13 @@ run_advisory_sibling_importer_check() {
 echo "Build-alignment harness: executing scripts/build.sh and scripts/build-once.sh"
 echo "under recording stubs, and comparing their traces."
 
-run_scenario linux-legacy-debug Linux tup src/build-debug
-run_scenario linux-legacy-release Linux tup src/build-release CODETRACER_CONFIG=release
-# The reprobuild branch selects codetracer-trace-format-nim's tool-path
-# manifest (scripts/build-once.sh); the dev shell (or, on Windows, the
+# The Linux, Darwin and Windows branches all select codetracer-trace-format-nim's
+# tool-path manifest (scripts/build-once.sh); the dev shell (or, on Windows, the
 # binders) names it, so the scenarios do.
 printf '{"schema":1,"paths":{}}\n' >"$WORK_ROOT/tool-paths.json"
-run_scenario linux-reprobuild Linux repro src/build-debug-repro CODETRACER_REPROBUILD_LINUX=1 \
+run_scenario linux-debug Linux repro src/build-debug-repro \
+	CODETRACER_TRACE_FORMAT_NIM_TOOL_PATHS="$WORK_ROOT/tool-paths.json"
+run_scenario linux-release Linux repro src/build-release-repro CODETRACER_CONFIG=release \
 	CODETRACER_TRACE_FORMAT_NIM_TOOL_PATHS="$WORK_ROOT/tool-paths.json"
 # The darwin branch also checks that the two committed solves (repro.lock and
 # locks/arm64-macosx.lock) pin the same sources. That is a fact about the

@@ -244,7 +244,7 @@ resolve_record_web() {
 	for candidate in \
 		"$REPO_ROOT/src/backend-manager/target/release/session-manager" \
 		"$REPO_ROOT/src/backend-manager/target/debug/session-manager" \
-		"$REPO_ROOT/src/build-debug/bin/session-manager"; do
+		"$REPO_ROOT/src/build-debug-repro/bin/session-manager"; do
 		if [ -x "$candidate" ]; then
 			printf '%s\n' "$candidate"
 			return 0

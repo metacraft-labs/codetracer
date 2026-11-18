@@ -39,7 +39,7 @@ CAPTURE="${SCRIPT_DIR}/capture-deepreview-views.sh"
 DRIVER="${SCRIPT_DIR}/capture-deepreview-views.mjs"
 PROMPT="${SCRIPT_DIR}/deepreview-review-prompt.sh"
 BRIEF="${SCRIPT_DIR}/deepreview-diff-brief.md"
-STYLES_TUPFILE="${REPO_ROOT}/src/frontend/styles/Tupfile"
+BUILD_RECIPE="${REPO_ROOT}/repro.nim"
 
 # Every contract this suite claims to check. A suite that silently runs fewer
 # assertions than it advertises is a suite that stops protecting anything, so
@@ -237,11 +237,11 @@ assert_contains "${MATRIX}" $'theme\tlight\tdefault_white' "the matrix defines t
 # "Both themes" is only real if both stylesheets are actually built. Until the
 # light Electron sheet existed, `theme: default_white` pointed the window's
 # `#theme` link at a file that was not there and the app rendered unstyled.
-TUPFILE_TEXT="$(cat "${STYLES_TUPFILE}")"
-assert_contains "${TUPFILE_TEXT}" "default_dark_theme_electron.css" \
-	"the styles Tupfile builds the dark Electron stylesheet"
-assert_contains "${TUPFILE_TEXT}" "default_white_theme_electron.css" \
-	"the styles Tupfile builds the light Electron stylesheet"
+RECIPE_TEXT="$(cat "${BUILD_RECIPE}")"
+assert_contains "${RECIPE_TEXT}" '"default_dark_theme_electron"' \
+	"the build recipe builds the dark Electron stylesheet"
+assert_contains "${RECIPE_TEXT}" '"default_white_theme_electron"' \
+	"the build recipe builds the light Electron stylesheet"
 
 # The calibration instrument the methodology's checklist item 7 requires.
 assert_contains "${MATRIX}" $'sabotage\thide-value-chips' \

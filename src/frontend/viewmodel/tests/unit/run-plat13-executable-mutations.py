@@ -83,7 +83,7 @@ millisecond in this file is an ORC number, and that is not incidental: this harn
 `nim c` with no `--mm`, which is Nim 2.x's default ORC, and so does the `common-units` lane
 that carries the two long-body cases W18/W19 are killed by. The `ct-cli-units` lane compiles
 `--mm:refc`, and every SHIPPED binary is refc as well (`repro.nim`'s `ctNative` and
-`ctNimJs` both pass `mm = "refc"`; `src/Tuprules.tup` passes `--mm:refc`). Measured on
+`ctNimJs` both pass `mm = "refc"`). Measured on
 2026-09-13, same host, same fixtures, best of seven, work bound 200,001, `spent` identical
 at 200,002 in every row:
 

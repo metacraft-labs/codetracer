@@ -166,21 +166,27 @@ lint_step "shellcheck: sibling-revision resolver" \
 lint_step "contract suite: sibling-revision resolver" \
 	bash scripts/resolve-sibling-rev-test.sh
 
-# scripts/require-fuse-mount-helper.sh stands between `just build-once` and a
-# tup FUSE mount that cannot succeed. If it is broken, the build either dies
-# for the wrong reason or stops reporting the right one, so lint it here --
-# the glob above only reaches ci/.
-# scripts/require-siblings.sh and scripts/require-tup-globs.sh sit in the same
-# position: they are the only place a missing sibling repo, or a `: foreach`
-# rule pointing at a directory that is not there, is reported by name instead
-# of surfacing minutes later as `cannot open file: <module>`, undefined `mcr*`
-# symbols, or a missing asset in the variant tree.
-lint_step "shellcheck: build prerequisites checked before tup runs" \
+# scripts/require-siblings.sh and scripts/require-runtime-assets.sh stand between
+# `just build-once` and a build that cannot succeed. If they are broken, the
+# build either dies for the wrong reason or stops reporting the right one, so
+# lint them here -- the glob above only reaches ci/. They are the only place a
+# missing sibling repo, or an asset missing from the output tree, is reported by
+# name instead of surfacing minutes later as `cannot open file: <module>`,
+# undefined `mcr*` symbols, or a `ct` that cannot start.
+lint_step "shellcheck: build prerequisites checked before the build runs" \
 	shellcheck \
-	scripts/require-fuse-mount-helper.sh \
 	scripts/require-siblings.sh \
-	scripts/require-tup-globs.sh \
 	scripts/require-runtime-assets.sh
+
+# CodeTracer builds with Reprobuild only. This fails when a tup file, a
+# tup helper script or a tup invocation is committed again, and its scratch
+# repositories show it can find each of those. The products-parity test is the
+# other half: its self-test (no build needed) runs here, and the check against a
+# real build runs in the `dev-build` job, after the build.
+lint_step "contract suite: no tup left (no_tup_left)" \
+	bash ci/test/no-tup-left.sh
+lint_step "contract suite: the products-parity check can fail (products_parity self-test)" \
+	bash ci/test/products-parity.sh --self-test
 
 # scripts/test-build-alignment.sh asserts that `just build` is `just build-once`
 # plus watchers. It executes both scripts under recording stubs, so a break in

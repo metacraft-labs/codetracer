@@ -107,8 +107,7 @@ done
 
 # The app's built stylesheets, which every preview frame links. StoryBook
 # serves the same tree (storybook/.storybook/main.ts picks it the same way).
-build_tree="build-debug"
-[ -d "$repo/src/build-debug-repro/frontend" ] && build_tree="build-debug-repro"
+build_tree="build-debug-repro"
 [ -f "$repo/src/$build_tree/frontend/styles/default_dark_theme_electron.css" ] ||
 	die "src/$build_tree/frontend has no built styles; run \`just build-once\` first"
 

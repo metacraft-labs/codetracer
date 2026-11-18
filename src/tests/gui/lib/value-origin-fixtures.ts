@@ -25,7 +25,7 @@
  * - `isCtBinaryAvailable()` — confirms the `ct` binary exists and is
  *   executable at the same path `lib/fixtures.ts` will launch
  *   (`CODETRACER_E2E_CT_PATH`, else `$CODETRACER_BUILD_DIR/bin/ct`, else
- *   `src/build-debug/bin/ct`); absent on machines that haven't run
+ *   `src/build-debug-repro/bin/ct`); absent on machines that haven't run
  *   `just build-once` (e.g. the dev container where stylus is missing).
  */
 import * as childProcess from "node:child_process";
@@ -91,10 +91,10 @@ export function originFixturePath(
  * This MUST resolve the binary the same way `lib/fixtures.ts` does, or the
  * skip guard lies. `fixtures.ts` honours `CODETRACER_E2E_CT_PATH` and then
  * `CODETRACER_BUILD_DIR` (the dev shells export the latter as the
- * platform/config-specific output tree — `src/build-debug-repro` on macOS and
- * Windows, `src/build-debug` on the Linux tup default; see codetracer-specs
+ * config-specific output tree — `src/build-debug-repro`, or
+ * `src/build-release-repro`; see codetracer-specs
  * `Architecture/Build-Outputs-And-Path-Resolution.md`). This function used to
- * hard-code `src/build-debug`, so on any host whose output tree is named
+ * hard-code one output tree, so on any host whose output tree is named
  * anything else it reported "no `ct` binary" for a `ct` that was present and
  * executable, and every value-origin spec skipped itself with a plausible
  * reason while the harness around it was perfectly able to launch. That is a
@@ -109,7 +109,7 @@ export function ctBinaryPath(): string {
   }
   const buildDir = process.env.CODETRACER_BUILD_DIR ?? "";
   const prefix =
-    buildDir.length > 0 ? buildDir : path.join(repoRoot, "src", "build-debug");
+    buildDir.length > 0 ? buildDir : path.join(repoRoot, "src", "build-debug-repro");
   return path.join(prefix, "bin", process.platform === "win32" ? "ct.exe" : "ct");
 }
 

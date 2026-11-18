@@ -178,21 +178,21 @@ $duplicates = @($names | Group-Object | Where-Object { $_.Count -gt 1 } | ForEac
 Assert-True -Condition ($duplicates.Count -eq 0) `
   -Message ("component names are unique" + $(if ($duplicates.Count -gt 0) { " (duplicated: $($duplicates -join ','))" } else { "" }))
 
-# There are 22 gated components today. Assert the floor rather than equality:
+# There are 21 gated components today (22 before the tup bootstrap was removed). Assert the floor rather than equality:
 # adding a component is legitimate and must not break this gate, whereas
 # losing one silently is the failure mode the gate exists for.
-Assert-True -Condition ($stepCalls.Count -ge 22) `
-  -Message "the dispatch block covers at least the 22 known gated components (found $($stepCalls.Count))"
+Assert-True -Condition ($stepCalls.Count -ge 21) `
+  -Message "the dispatch block covers at least the 21 known gated components (found $($stepCalls.Count))"
 
 # ...and the NAMES, not just the count. A count floor alone is defeated by the
 # most likely edit of all: one component dropped while another is added, which
-# leaves the total at 22 and the decomposition quietly missing a tool. Pinning
+# leaves the total at 21 and the decomposition quietly missing a tool. Pinning
 # the names makes a removal an explicit, reviewable edit to this list rather
 # than an invisible consequence of an unrelated change. Additions still need no
 # edit here -- this is a required SUBSET, not an exact set.
 $requiredComponents = @(
   "TTD", "NODE", "UV", "GCC", "GNAT", "GO", "LDC", "VLANG", "FPC", "ZSTD",
-  "ZLIB", "LLVM", "CLINGO", "RUST", "JUST", "NEXTEST", "NIM", "CAPNP", "TUP",
+  "ZLIB", "LLVM", "CLINGO", "RUST", "JUST", "NEXTEST", "NIM", "CAPNP",
   "NARGO", "DOTNET", "CT_REMOTE"
 )
 $missingComponents = @($requiredComponents | Where-Object { $names -notcontains $_ })

@@ -159,8 +159,8 @@ bad() {
 # whole of `scripts/` OUTSIDE the universe of the check whose entire job is to
 # find gates nothing runs. A dark-gate finder that cannot see most of the
 # repository's shell reports a clean sweep of the corner it was pointed at, and
-# `scripts/require-tup-globs.sh` — a build prerequisite that only ever gets
-# SHELLCHECKED, never run — sat outside it the whole time.
+# a build prerequisite script under `scripts/` that only ever got
+# SHELLCHECKED, never run, sat outside it the whole time.
 #
 # `gate_home` is still `ci/test`, because that is where this guard and its
 # inventory file live. It is no longer where the subject lives.

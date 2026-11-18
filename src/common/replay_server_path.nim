@@ -37,18 +37,20 @@
 ##    and the `ci/test` shell lanes use for the same tree (the dev shell
 ##    exports it as an absolute path). Relative paths are taken against the
 ##    checkout root, which is where those lanes run.
-## 4. `src/build-<buildType>-repro/bin`, then `src/build-<buildType>/bin` — the
-##    Repro output root, then tup's variant directory (still real on hosts
-##    that drive tup). `<buildType>` is `$CODETRACER_CONFIG`, default `debug`,
-##    derived exactly as `scripts/build-once.sh` derives it for both branches.
+## 4. `src/build-<buildType>-repro/bin` — the Repro output root.
+##    `<buildType>` is `$CODETRACER_CONFIG`, default `debug`, derived exactly
+##    as `scripts/build-once.sh` derives it. (tup's `src/build-<buildType>/bin`
+##    was searched here until the tup build was retired: a stale tree of that
+##    name would outrank nothing a current build produced, and name a backend
+##    nobody had built for months.)
 ## 5. `src/db-backend/target/debug`, then `target/release` — cargo's own
 ##    output, LAST: it is what a developer's ad-hoc `cargo build` leaves
 ##    behind, and it is the tree most likely to be days older than the build
 ##    the rest of the checkout came from.
 ##
-## Every candidate is tested for the BINARY, never for its directory:
-## `src/build-debug/` is tracked in git holding only `tup.config`, so "the
-## directory exists" is true on every checkout and answers the wrong question.
+## Every candidate is tested for the BINARY, never for its directory: an output
+## directory can exist, empty, on a checkout that was never built, so "the
+## directory exists" answers the wrong question.
 
 import std/[monotimes, os, osproc, streams, strutils, times]
 when defined(windows):
@@ -119,7 +121,6 @@ proc replayServerCandidates*(root: string): seq[string] =
     let buildType = replayServerBuildType()
     result.addOnce(root / "src" / ("build-" & buildType & "-repro") / "bin" /
                ReplayServerExe)
-    result.addOnce(root / "src" / ("build-" & buildType) / "bin" / ReplayServerExe)
     for profile in ["debug", "release"]:
       result.addOnce(root / "src" / "db-backend" / "target" / profile /
                  ReplayServerExe)

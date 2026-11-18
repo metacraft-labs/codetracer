@@ -99,7 +99,7 @@ const javascriptFlowTraceFixture = path.join(
   "javascript",
   "flow_test",
 );
-const codetracerPrefix = path.join(codetracerInstallDir, "src", "build-debug");
+const codetracerPrefix = path.join(codetracerInstallDir, "src", "build-debug-repro");
 const ctMcrCandidates = [
   path.join(codetracerPrefix, "bin", "ct-mcr"),
   path.join(

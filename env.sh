@@ -22,7 +22,7 @@ fi
 # with `non-nix-build/windows/setup-codetracer-runtime-env.sh`, which it
 # sources near the end and which computes the same three names for itself.
 # Declared rather than renamed because they are load-bearing across two
-# languages — `ensure-tup.ps1` reads `ROOT_DIR` from the PowerShell side —
+# languages — the PowerShell bootstraps read `ROOT_DIR` from the PowerShell side —
 # and held to that declaration by `ci/test/sourced-var-collision-gate.sh`.
 #
 # THE SOURCE AT THE END OF THIS FILE USED TO REWRITE TWO OF THEM. That file's
@@ -126,27 +126,8 @@ export CAPNP_WINDOWS_SOURCE_MODE
 export CAPNP_WINDOWS_SOURCE_REPO
 export CAPNP_WINDOWS_SOURCE_REF
 #
-# Tup bootstrap source selection:
-# - prebuilt (default): use pinned official prebuilt Windows zip
-# - auto: prefer pinned prebuilt zip, then fallback to source build if prebuilt bootstrap fails
-# - source: require source build
-# - prebuilt: require prebuilt install (uses pinned defaults unless explicit URL/SHA overrides are set)
-: "${TUP_WINDOWS_SOURCE_MODE:=prebuilt}"
-: "${TUP_WINDOWS_SOURCE_REPO:="$TUP_SOURCE_REPO"}"
-: "${TUP_WINDOWS_SOURCE_REF:="$TUP_SOURCE_REF"}"
-: "${TUP_WINDOWS_SOURCE_BUILD_COMMAND:="$TUP_SOURCE_BUILD_COMMAND"}"
-: "${TUP_WINDOWS_PREBUILT_VERSION:="$TUP_PREBUILT_VERSION"}"
-: "${TUP_WINDOWS_PREBUILT_URL:="$TUP_PREBUILT_URL"}"
-: "${TUP_WINDOWS_PREBUILT_SHA256:="$TUP_PREBUILT_SHA256"}"
 : "${TUP_WINDOWS_MSYS2_BASE_VERSION:="$TUP_MSYS2_BASE_VERSION"}"
 : "${TUP_WINDOWS_MSYS2_PACKAGES:="$TUP_MSYS2_PACKAGES"}"
-export TUP_WINDOWS_SOURCE_MODE
-export TUP_WINDOWS_SOURCE_REPO
-export TUP_WINDOWS_SOURCE_REF
-export TUP_WINDOWS_SOURCE_BUILD_COMMAND
-export TUP_WINDOWS_PREBUILT_VERSION
-export TUP_WINDOWS_PREBUILT_URL
-export TUP_WINDOWS_PREBUILT_SHA256
 export TUP_WINDOWS_MSYS2_BASE_VERSION
 export TUP_WINDOWS_MSYS2_PACKAGES
 #
@@ -588,26 +569,9 @@ if [[ -d "$CAPNP_DIR/bin" ]]; then
 else
 	CAPNP_BIN_DIR="$CAPNP_DIR"
 fi
-TUP_ROOT="$WINDOWS_DIY_INSTALL_ROOT/tup"
-resolve_tup_dir() {
-	local tup_relative_path_file="$TUP_ROOT/tup.install.relative-path"
-	if [[ -f $tup_relative_path_file ]]; then
-		local tup_relative_path
-		tup_relative_path=$(tr -d '\r\n' <"$tup_relative_path_file")
-		echo "$WINDOWS_DIY_INSTALL_ROOT/$tup_relative_path"
-		return
-	fi
-	# Backward compatibility fallback for direct installs.
-	if [[ -d "$TUP_ROOT/current" ]]; then
-		echo "$TUP_ROOT/current"
-		return
-	fi
-	echo "$TUP_ROOT"
-}
-
-TUP_DIR=$(resolve_tup_dir)
-TUP="$TUP_DIR/tup.exe"
-TUP_MSYS2_MINGW_BIN="$WINDOWS_DIY_INSTALL_ROOT/tup/msys2/$TUP_WINDOWS_MSYS2_BASE_VERSION/msys64/mingw64/bin"
+# The MSYS2 mingw toolchain the Nim/Nargo bootstraps provision (the directory
+# and variable names date from when the tup bootstrap shared it).
+MSYS2_MINGW_BIN="$WINDOWS_DIY_INSTALL_ROOT/tup/msys2/$TUP_WINDOWS_MSYS2_BASE_VERSION/msys64/mingw64/bin"
 NARGO_ROOT="$WINDOWS_DIY_INSTALL_ROOT/nargo"
 resolve_nargo_dir() {
 	local nargo_relative_path_file="$NARGO_ROOT/nargo.install.relative-path"
@@ -717,7 +681,6 @@ if [[ ${WINDOWS_DIY_SYNC:-1} == "1" ]]; then
 		. \"\$windowsDir/ensure-uv.ps1\"
 		. \"\$windowsDir/ensure-nim.ps1\"
 		. \"\$windowsDir/ensure-capnp.ps1\"
-		. \"\$windowsDir/ensure-tup.ps1\"
 		. \"\$windowsDir/ensure-ct-remote.ps1\"
 		. \"\$windowsDir/ensure-nargo.ps1\"
 		. \"\$windowsDir/ensure-ttd.ps1\"
@@ -735,13 +698,10 @@ if [[ ${WINDOWS_DIY_SYNC:-1} == "1" ]]; then
 		if (Test-BootstrapStepEnabled 'NEXTEST') { Ensure-Nextest -Root \$installRoot -Toolchain \$toolchain }
 		if (Test-BootstrapStepEnabled 'NIM')   { Ensure-Nim   -Root \$installRoot -Arch \$arch -Toolchain \$toolchain }
 		if (Test-BootstrapStepEnabled 'CAPNP') { Ensure-Capnp -Root \$installRoot -Arch \$arch -Toolchain \$toolchain }
-		if (Test-BootstrapStepEnabled 'TUP')   { Ensure-Tup   -Root \$installRoot -Toolchain \$toolchain }
 		if (Test-BootstrapStepEnabled 'NARGO') { Ensure-Nargo -Root \$installRoot -Toolchain \$toolchain -RepoRoot \$repoRoot }
 		if (Test-BootstrapStepEnabled 'CT_REMOTE') { Ensure-CtRemote -Root \$installRoot -Arch \$arch -Toolchain \$toolchain -WindowsDir \$windowsDir }
 	"
 	CAPNP_DIR=$(resolve_capnp_dir)
-	TUP_DIR=$(resolve_tup_dir)
-	TUP="$TUP_DIR/tup.exe"
 	NARGO_DIR=$(resolve_nargo_dir)
 fi
 
@@ -782,7 +742,6 @@ EOF
 	chmod +x "$NIM_SHIMS_DIR/$shim_name"
 }
 
-create_bash_exe_shim "tup" "$TUP"
 create_bash_exe_shim "dotnet" "$DOTNET_ROOT/dotnet.exe"
 create_bash_exe_shim "node" "$NODE_DIR/node.exe"
 create_bash_exe_shim "npm" "$NODE_DIR/npm.exe"
@@ -806,8 +765,8 @@ if [[ -n ${WINDOWS_DIY_CDB_EXE:-} ]]; then
 fi
 
 path_prefix=()
-if [[ -d $TUP_MSYS2_MINGW_BIN ]]; then
-	path_prefix+=("$TUP_MSYS2_MINGW_BIN")
+if [[ -d $MSYS2_MINGW_BIN ]]; then
+	path_prefix+=("$MSYS2_MINGW_BIN")
 fi
 if [[ -n ${WINDOWS_DIY_TTD_EXE:-} ]]; then
 	path_prefix+=("$(dirname "$WINDOWS_DIY_TTD_EXE")")
@@ -822,7 +781,7 @@ path_prefix+=("$DOTNET_ROOT" "$NODE_PACKAGES_BIN" "$NIM_SHIMS_DIR" "$CARGO_HOME/
 if [[ -d $NIM_LEGACY_PREBUILT_BIN_DIR ]]; then
 	path_prefix+=("$NIM_LEGACY_PREBUILT_BIN_DIR")
 fi
-path_prefix+=("$NIM_DIR/bin" "$CT_REMOTE_DIR" "$CAPNP_BIN_DIR" "$CAPNP_DIR" "$TUP_DIR" "$NARGO_DIR")
+path_prefix+=("$NIM_DIR/bin" "$CT_REMOTE_DIR" "$CAPNP_BIN_DIR" "$CAPNP_DIR" "$NARGO_DIR")
 
 joined_path=""
 for entry in "${path_prefix[@]}"; do
@@ -838,8 +797,6 @@ done
 export PATH="$joined_path:$PATH"
 export NIM1
 export CAPNP_DIR
-export TUP
-export TUP_DIR
 export NARGO_DIR
 
 # Shared runtime env expected by ct/ct_wrapper and ui-tests launcher.
@@ -887,17 +844,8 @@ echo "CAPNP_WINDOWS_SOURCE_MODE=$CAPNP_WINDOWS_SOURCE_MODE"
 echo "CAPNP_WINDOWS_SOURCE_REPO=$CAPNP_WINDOWS_SOURCE_REPO"
 echo "CAPNP_WINDOWS_SOURCE_REF=$CAPNP_WINDOWS_SOURCE_REF"
 echo "CAPNP_DIR=$CAPNP_DIR"
-echo "TUP_WINDOWS_SOURCE_MODE=$TUP_WINDOWS_SOURCE_MODE"
-echo "TUP_WINDOWS_SOURCE_REPO=$TUP_WINDOWS_SOURCE_REPO"
-echo "TUP_WINDOWS_SOURCE_REF=$TUP_WINDOWS_SOURCE_REF"
-echo "TUP_WINDOWS_SOURCE_BUILD_COMMAND=$TUP_WINDOWS_SOURCE_BUILD_COMMAND"
-echo "TUP_WINDOWS_PREBUILT_VERSION=$TUP_WINDOWS_PREBUILT_VERSION"
-echo "TUP_WINDOWS_PREBUILT_URL=$TUP_WINDOWS_PREBUILT_URL"
-echo "TUP_WINDOWS_PREBUILT_SHA256=$TUP_WINDOWS_PREBUILT_SHA256"
 echo "TUP_WINDOWS_MSYS2_BASE_VERSION=$TUP_WINDOWS_MSYS2_BASE_VERSION"
 echo "TUP_WINDOWS_MSYS2_PACKAGES=$TUP_WINDOWS_MSYS2_PACKAGES"
-echo "TUP_DIR=$TUP_DIR"
-echo "TUP=$TUP"
 echo "NARGO_DIR=$NARGO_DIR"
 echo "CODETRACER_REPO_ROOT_PATH=$CODETRACER_REPO_ROOT_PATH"
 echo "CODETRACER_BUILD_DIR=$CODETRACER_BUILD_DIR"

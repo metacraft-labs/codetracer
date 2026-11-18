@@ -18,7 +18,7 @@
 #   ci/test/cli-record-smoke.sh ruby python bash
 #
 # Prerequisites:
-#   - ct binary built (src/build-debug/bin/ct or CODETRACER_E2E_CT_PATH)
+#   - ct binary built (src/build-debug-repro/bin/ct or CODETRACER_E2E_CT_PATH)
 #   - Recorder binaries on PATH (via detect-siblings or nix shell)
 #   - Test programs in test-programs/ or db-backend/test-programs/
 # =============================================================================
@@ -26,7 +26,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
-CT_BIN="${CODETRACER_E2E_CT_PATH:-${CODETRACER_BUILD_DIR:-$ROOT_DIR/src/build-debug}/bin/ct}"
+CT_BIN="${CODETRACER_E2E_CT_PATH:-${CODETRACER_BUILD_DIR:-$ROOT_DIR/src/build-debug-repro}/bin/ct}"
 
 if [[ ! -x $CT_BIN ]]; then
 	echo "error: ct binary not found at $CT_BIN"

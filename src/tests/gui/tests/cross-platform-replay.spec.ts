@@ -70,13 +70,13 @@ import { StatusBar } from "../page-objects/status_bar";
 // M49 — this used to be `path.dirname(path.resolve())`, i.e. one level
 // up from Playwright's cwd. The cwd is `src/tests/gui`, so it resolved
 // to `<repo>/src/tests`: `codetracerPrefix` became
-// `<repo>/src/tests/src/build-debug`, which does not exist, and
+// `<repo>/src/tests/src/build-debug-repro`, which does not exist, and
 // `workspaceRoot` became `<repo>/src` rather than the directory holding
 // the sibling repos. Three levels are needed, and `lib/fixtures.ts`
 // already exports the constant that does it — the same off-by-N this
 // spec family has now hit three times (see the note in
 // `lib/sibling-test-programs.ts`).
-const codetracerPrefix = path.join(codetracerInstallDir, "src", "build-debug");
+const codetracerPrefix = path.join(codetracerInstallDir, "src", "build-debug-repro");
 const ctBinaryName = process.platform === "win32" ? "ct.exe" : "ct";
 const envCodetracerPath = process.env.CODETRACER_E2E_CT_PATH ?? "";
 const codetracerPath =

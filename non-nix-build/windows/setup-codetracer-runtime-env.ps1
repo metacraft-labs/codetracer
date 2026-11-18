@@ -13,12 +13,8 @@ if ([string]::IsNullOrWhiteSpace($RepoRoot)) {
 }
 
 $resolvedRepoRoot = (Resolve-Path -LiteralPath $RepoRoot).Path
-$buildDebugDir = Join-Path $resolvedRepoRoot "src\build-debug"
+$buildDebugDir = Join-Path $resolvedRepoRoot "src\build-debug-repro"
 $buildDebugBinDir = Join-Path $buildDebugDir "bin"
-$buildDebugPublicDir = Join-Path $buildDebugDir "public"
-$buildDebugConfigDir = Join-Path $buildDebugDir "config"
-$repoPublicDir = Join-Path $resolvedRepoRoot "src\public"
-$repoConfigDir = Join-Path $resolvedRepoRoot "src\config"
 $repoNodeModulesBinDir = Join-Path $resolvedRepoRoot "node_modules\.bin"
 
 function Resolve-CtagsExe {
@@ -50,37 +46,12 @@ function Resolve-CtagsExe {
   return ""
 }
 
-# `ct host` serves static assets from `<build-debug>/public` in non-Nix mode.
-# Ensure the folder exists by linking it to `src/public` when missing.
-if ((-not (Test-Path -LiteralPath $buildDebugPublicDir)) -and (Test-Path -LiteralPath $repoPublicDir -PathType Container)) {
-  New-Item -ItemType Directory -Force -Path $buildDebugDir | Out-Null
-  try {
-    New-Item -ItemType Junction -Path $buildDebugPublicDir -Target $repoPublicDir | Out-Null
-  } catch {
-    Copy-Item -Recurse -Force -LiteralPath $repoPublicDir -Destination $buildDebugPublicDir
-  }
-}
-
-# `ct` runtime expects `<build-debug>/config/default_config.yaml` in non-Nix mode.
-if ((-not (Test-Path -LiteralPath $buildDebugConfigDir)) -and (Test-Path -LiteralPath $repoConfigDir -PathType Container)) {
-  New-Item -ItemType Directory -Force -Path $buildDebugDir | Out-Null
-  try {
-    New-Item -ItemType Junction -Path $buildDebugConfigDir -Target $repoConfigDir | Out-Null
-  } catch {
-    Copy-Item -Recurse -Force -LiteralPath $repoConfigDir -Destination $buildDebugConfigDir
-  }
-}
-
-if (Test-Path -LiteralPath $repoConfigDir -PathType Container) {
-  New-Item -ItemType Directory -Force -Path $buildDebugConfigDir | Out-Null
-  foreach ($filename in @("default_config.yaml", "default_layout.json")) {
-    $src = Join-Path $repoConfigDir $filename
-    $dst = Join-Path $buildDebugConfigDir $filename
-    if ((Test-Path -LiteralPath $src -PathType Leaf) -and (-not (Test-Path -LiteralPath $dst -PathType Leaf))) {
-      Copy-Item -LiteralPath $src -Destination $dst -Force
-    }
-  }
-}
+# `ct host` serves static assets from `<build>/public`, and `ct` reads
+# `<build>/config/default_config.yaml`, in non-Nix mode. The build publishes both
+# (repro.nim: `frontend-public-resources`, `config-default-config-yaml`,
+# `config-default-layout-json`) and scripts/require-runtime-assets.sh fails a
+# build that does not, so this helper lays out nothing: a link or a copy made
+# here, before the build, would land in the tree the build owns.
 
 [Environment]::SetEnvironmentVariable("CODETRACER_REPO_ROOT_PATH", $resolvedRepoRoot, "Process")
 [Environment]::SetEnvironmentVariable("CODETRACER_BUILD_DIR", $buildDebugDir, "Process")
@@ -121,7 +92,7 @@ $rubyExe = [Environment]::GetEnvironmentVariable("CODETRACER_RUBY_EXE_PATH")
 if ([string]::IsNullOrWhiteSpace($rubyExe) -or (-not (Test-Path -LiteralPath $rubyExe -PathType Leaf))) {
   $rubyExe = $null
   # The DIY bootstrap installs an MSYS2 MinGW Ruby under the install root
-  # (the same MSYS2 tree used for the tup/mingw toolchain).
+  # (the same MSYS2 tree used for the mingw toolchain).
   $installRoot = [Environment]::GetEnvironmentVariable("WINDOWS_DIY_INSTALL_ROOT")
   if (-not [string]::IsNullOrWhiteSpace($installRoot)) {
     $candidate = Join-Path $installRoot "msys2\msys64\mingw64\bin\ruby.exe"

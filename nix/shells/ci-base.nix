@@ -204,7 +204,7 @@ with pkgs;
     # exercise that added direnv above.
     jq
 
-    # C/C++ + linkers used by tup, nim's gcc backend, and Rust crates
+    # C/C++ + linkers used by nim's gcc backend, and Rust crates
     # with native dependencies. CMake/Ninja/GTest/Catch2 are exercised by
     # `just test-ct-providers`' real C/C++ provider fixtures.
     gcc
@@ -296,7 +296,7 @@ with pkgs;
     electron
 
     # Runtime libraries that get -l'd by Nim / Rust crates at link
-    # time inside the tup sandbox.
+    # time inside the build's hermetic action environment.
     sqlite
     pcre
     glib
@@ -391,50 +391,6 @@ with pkgs;
     toolchainsPkgs.go-default # Go programs in record/replay tests
   ]
   ++ pkgs.lib.optionals (!stdenv.isDarwin) [
-    # Tup is Linux-only (FUSE-based sandboxing). On Darwin we fall
-    # back to a different build path that doesn't need tup.
-    #
-    # `fuse` (FUSE 2) is deliberately NOT here: it ships `fusermount`, and
-    # nothing in this repo spawns it. tup links `libfuse3.so.4`.
-    #
-    # `fuse3` IS here, and the reason is worth stating precisely, because a
-    # plausible-sounding argument for dropping it is wrong. nixpkgs patches
-    # libfuse to try the absolute path `/run/wrappers/bin/fusermount3` — a
-    # NixOS `security.wrappers` setuid binary that a devShell cannot
-    # provide — and that much is true. But that is only the FIRST of two
-    # attempts. `fusermount_posix_spawn` in libfuse 3.17.4 then falls back
-    # to `posix_spawnp("fusermount3", …)`: a BARE name, no slash, so PATH
-    # *is* searched and the store copy below *is* consulted (verified by
-    # disassembly — the two call sites load `.rodata` 0x2bde1
-    # "/run/wrappers/bin/fusermount3" and 0x2bdf3 "fusermount3" — and under
-    # strace, which shows the PATH copy being execve'd). tup's own literal
-    # has the same shape: nixpkgs' `fusermount-setuid.patch` is headed
-    # "Tup needs a setuid fusermount which may be outside $PATH" and does
-    # `access("/run/wrappers/bin/fusermount3", X_OK) == 0 ? absolute : bare`.
-    #
-    # So this entry is not inert. What it cannot do is make the helper
-    # setuid, which is what unprivileged FUSE mounting ultimately needs:
-    # on a host without the setuid wrapper it upgrades
-    #
-    #   posix_spawn(p)() for fusermount3 failed: No such file or directory
-    #   tup error: Timed out waiting for the FUSE file-system to be ready.
-    #   tup error: Unable to mount FUSE on .tup/mnt
-    #
-    # (run 30726348404, `cross-process-linux`) into a permission error that
-    # names the real requirement — the honest failure, and a strictly better
-    # one. It does not by itself grant the mount.
-    #
-    # The remaining gap is a host capability, not a package: the system must
-    # provide the setuid wrapper (`programs.fuse` /
-    # `security.wrappers.fusermount3` on NixOS, the distribution's `fuse3`
-    # elsewhere) and a container must be given /dev/fuse. Neither is
-    # expressible here; both belong to whoever owns the `eph-linux-x64`
-    # runner image. `scripts/require-fuse-mount-helper.sh`, called by
-    # `scripts/build-once.sh`, checks for them and reports what is missing
-    # by name instead of letting it surface three layers down.
-    tup
-    fuse3
-
     # ctRemote is the codetracer remote replay helper used by some
     # CI lanes' integration tests. Not currently packaged for
     # Darwin shells.
@@ -762,10 +718,10 @@ with pkgs;
     # floating `nixpkgs` registry no longer carries it.
     export CT_PCRE_LIB_DIR="${pcre.out}/lib";
 
-    # LIBRARY_PATH = compile-time -L search path. Set so tup-sandboxed
-    # linker steps resolve -lssl / -lcrypto / -lsqlite3 / -lpcre /
-    # -lzip / -lzstd when Nim uses --dynlibOverride + --passL (tup
-    # strips NIX_LDFLAGS).
+    # LIBRARY_PATH = compile-time -L search path. Set so the build's
+    # hermetic linker steps resolve -lssl / -lcrypto / -lsqlite3 / -lpcre /
+    # -lzip / -lzstd when Nim uses --dynlibOverride + --passL (the build's
+    # action environment strips NIX_LDFLAGS).
     export LIBRARY_PATH="${openssl.out}/lib:${sqlite.out}/lib:${pcre.out}/lib:${libzip.out}/lib:${zlib.out}/lib:${zstd.out}/lib${
       pkgs.lib.optionalString (!stdenv.isDarwin) ":${libbpf.out}/lib:${elfutils.out}/lib"
     }''${LIBRARY_PATH:+:$LIBRARY_PATH}";
@@ -776,7 +732,7 @@ with pkgs;
     # every binary linked here carried a run-time search path into the
     # checkout that never exists. Measured on replay-server: RUNPATH
     # `$ORIGIN:<checkout>/outputs/out/lib` from `cargo build` in this shell,
-    # against `$ORIGIN` alone from tup (which does not export NIX_LDFLAGS).
+    # against `$ORIGIN` alone from a build that does not export NIX_LDFLAGS.
     # src/db-backend/build.rs gives replay-server exactly one search path, its
     # own directory (codetracer-pm issue 2026-10-05, the 2026-10-12 addendum:
     # a produced binary carries no load path into a build directory); this is
@@ -788,7 +744,7 @@ with pkgs;
     fi
 
     # C_INCLUDE_PATH so Nim's direct gcc invocations see
-    # #include <bpf/libbpf.h> when tup sandboxes the build.
+    # #include <bpf/libbpf.h> when the build runs its actions hermetically.
     ${pkgs.lib.optionalString (!stdenv.isDarwin) ''
       export C_INCLUDE_PATH="${libbpf}/include''${C_INCLUDE_PATH:+:$C_INCLUDE_PATH}";
     ''}
@@ -801,7 +757,7 @@ with pkgs;
     export CT_TEST_CXX="${clang}/bin/clang++"
     export CMAKE_PREFIX_PATH="${gtest.dev}:${catch2_3}''${CMAKE_PREFIX_PATH:+:$CMAKE_PREFIX_PATH}"
 
-    # Frontend node_modules: bundled via Nix so tup picks them up
+    # Frontend node_modules: bundled via Nix so the build picks them up
     # deterministically. The symlink is recreated every shell entry
     # so a stale local one never wins.
     export NIX_NODE_PATH="${ourPkgs.node-modules-derivation}/bin/node_modules"
@@ -822,8 +778,7 @@ with pkgs;
     # overriding a host configuration that already works.
     export FONTCONFIG_FILE="''${FONTCONFIG_FILE:-${fontsConf}}"
 
-    # Active build output directory. Linux defaults to the tup build
-    # (src/build-<config>); macOS/Windows default to the reprobuild build
+    # Active build output directory: the reprobuild build on every platform
     # (src/build-<config>-repro). CODETRACER_CONFIG (debug|release) selects
     # the configuration. We deliberately do NOT export CODETRACER_PREFIX: ct
     # and its sibling/test binaries resolve their prefix self-relatively from
@@ -834,26 +789,9 @@ with pkgs;
     # Build-Outputs-And-Path-Resolution.md.
     if [ -n "$ROOT_PATH" ]; then
       _ct_config="''${CODETRACER_CONFIG:-debug}"
-      case "$(uname -s)" in
-        Darwin) _ct_build_dir="$ROOT_PATH/src/build-''${_ct_config}-repro" ;;
-        *)      _ct_build_dir="$ROOT_PATH/src/build-''${_ct_config}" ;;
-      esac
+      _ct_build_dir="$ROOT_PATH/src/build-''${_ct_config}-repro"
       export CODETRACER_BUILD_DIR="''${CODETRACER_BUILD_DIR:-$_ct_build_dir}"
       export CODETRACER_REPO_ROOT_PATH=$ROOT_PATH
-      # The roots src/Tuprules.tup refuses to parse without (the Cargo target
-      # base and the per-checkout Nim cache root, ci/lib/tup-cargo-target.sh
-      # --export), so a plain `tup` here builds where `just build-once` does.
-      # Preparing the shell is this hook's job, so inherited values are
-      # dropped first rather than checked; a refusal leaves them unset, and
-      # tup then stops with the remedy. No `--reap`: entering a shell must not
-      # remove a base a build in this checkout may be using.
-      unset CT_TUP_CARGO_TARGET_BASE CT_TUP_CARGO_TARGET_IGNORE CT_TUP_NIM_CACHE_ROOT
-      if _ct_tup_cargo_env="$(bash "$ROOT_PATH/ci/lib/tup-cargo-target.sh" --export "$ROOT_PATH")"; then
-        eval "$_ct_tup_cargo_env"
-      else
-        echo "codetracer dev shell: no Cargo target base for tup (see above); a plain tup will refuse." >&2
-      fi
-      unset _ct_tup_cargo_env
     fi
 
     # Materialized Python origin-DAP tests must not depend on a runner-global

@@ -22,7 +22,7 @@
 #     error: cannot update the lock file …/src/db-backend/Cargo.lock because
 #     --locked was passed to prevent this
 #
-# `src/Tuprules.tup` builds both crates with `cargo build --locked`, so
+# The build runs `cargo build --locked` on both crates, so
 # `just build-once` died there, before its webpack step; and the cargo-check
 # pre-commit hook refused every db-backend commit because the build rewrote the
 # lock under it. Meanwhile codetracer's `repro.lock` AND `flake.lock` still
@@ -577,13 +577,13 @@ EOF
 		cat >&2 <<EOF
 
 FAIL: committed Cargo.lock(s) do not match the sibling checkout
-      that \`cargo build --locked\` (src/Tuprules.tup) actually reads:
+      that \`cargo build --locked\` (the build's cargo actions) actually reads:
         $disk_stale
 
   pinned (repro.lock, flake.lock)  $SIBLING_NAME = $PINNED_REV
   on disk                          $DISK_DESC
 
-A lock MISSING an edge the checkout has fails the tup build ("cannot update
+A lock MISSING an edge the checkout has fails the build ("cannot update
 the lock file ... because --locked was passed"); a lock carrying an edge the
 checkout lacks passes --locked but is rewritten by any unlocked cargo run,
 which is what fails the cargo-check pre-commit hook. Remedy, one of:

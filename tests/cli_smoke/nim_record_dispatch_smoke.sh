@@ -19,7 +19,7 @@
 
 set -u
 
-CT=${CT_BIN:-src/build-debug/bin/ct}
+CT=${CT_BIN:-src/build-debug-repro/bin/ct}
 if [ ! -x "$CT" ]; then
 	# A missing prerequisite is a hard failure, not a silent pass.
 	# CT_SMOKE_ALLOW_MISSING=1 is the local-iteration escape hatch; it is

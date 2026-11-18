@@ -231,8 +231,8 @@
 - `non-nix-build/windows/bootstrap-windows-diy.ps1` verifies pinned `DesktopClient.App-win-x64-<revision>.tar.gz` downloads with `CT_REMOTE_WIN_X64_SHA256`; pinned download mode is still x64-only, but Windows arm64 now routes `CT_REMOTE_WINDOWS_SOURCE_MODE=auto` to local source and does not fall back to x64 download.
 - Cap'n Proto Windows bootstrap now supports `CAPNP_WINDOWS_SOURCE_MODE=auto|source|prebuilt`; prebuilt mode stays pinned to `https://capnproto.org/capnproto-c++-win32-<version>.zip` with repo-managed `CAPNP_WIN_X64_SHA256`, while source mode caches deterministic installs under `.tools/windows-diy/capnp/<version>/cache/source/<cache-key>/` and reuses them via `capnp.source.meta` + `capnp.install.meta`.
 - Windows DIY Nim bootstrap supports `NIM_WINDOWS_SOURCE_MODE=auto|source|prebuilt`; source mode cache semantics remain deterministic under `$WINDOWS_DIY_INSTALL_ROOT/nim/<version>/cache/source/<cache-key>/` with `nim.source.meta` reuse checks, `prebuilt` is explicitly x64-only, and `auto` on arm64 fails after a source attempt instead of falling back to x64 prebuilt.
-- Nim source bootstrap compiler selection is now explicit: `NIM_WINDOWS_SOURCE_CC=auto|gcc|vcc` (default `auto`) prefers gcc when available, can provision/reuse pinned Tup MSYS2 gcc when enabled (`NIM_WINDOWS_SOURCE_BOOTSTRAP_GCC_FROM_TUP_MSYS2=1`), and only falls back to MSVC when gcc is unavailable or `vcc` is requested.
-- `non-nix-build/windows/env.sh` should not leave strict error mode in the caller shell: when sourced, it now restores prior shell options and still returns non-zero on setup failure; it also auto-installs missing Node deps by default (`WINDOWS_DIY_SETUP_NODE_DEPS=1`) so `stylus.cmd`/`webpack.cmd` are present for `just build-once` and Tup CSS rules.
+- Nim source bootstrap compiler selection is now explicit: `NIM_WINDOWS_SOURCE_CC=auto|gcc|vcc` (default `auto`) prefers gcc when available, can provision/reuse pinned MSYS2 gcc when enabled (`NIM_WINDOWS_SOURCE_BOOTSTRAP_GCC_FROM_TUP_MSYS2=1`), and only falls back to MSVC when gcc is unavailable or `vcc` is requested.
+- `non-nix-build/windows/env.sh` should not leave strict error mode in the caller shell: when sourced, it now restores prior shell options and still returns non-zero on setup failure; it also auto-installs missing Node deps by default (`WINDOWS_DIY_SETUP_NODE_DEPS=1`) so `stylus.cmd`/`webpack.cmd` are present for `just build-once`.
 - On Windows arm64 machines, current Nim source bootstrap in `non-nix-build/windows/bootstrap-windows-diy.ps1` is workable by pairing source mode with VS Build Tools discovery and an x64 bootstrap/toolchain path (because current `csources_v3` checkouts do not contain `bin/nim.exe`); cache reuse is explicit via `Nim <ver> source cache hit at ...`.
 - `non-nix-build/ensure_tree_sitter_nim_parser.sh` is the shared parser gate for both Unix and Windows non-Nix flows; it regenerates `libs/tree-sitter-nim/src/parser.c` only when missing or older than `grammar.js`, and now resolves CLI in this order: local `node_modules/.bin/tree-sitter`, lockfile `npm ci` (when lockfile exists), then isolated cached `tree-sitter-cli` install under `.tools/tree-sitter-cli-cache`.
 - Direct probes on 2026-02-09 at `CT_REMOTE_VERSION=102d2c8` showed `DesktopClient.App-win-x64-102d2c8.tar.gz` exists (HTTP 200) but `win-arm64`, `win-aarch64`, and `win-arm64ec` variants return HTTP 404, so Windows non-x64 ct-remote bootstrap cannot be pinned yet.
@@ -245,41 +245,31 @@
 - `windows-bootstrap-smoke` now includes deterministic arm64 routing probes that force `WINDOWS_DIY_ARCH_OVERRIDE=arm64` and trim `PATH` to avoid heavy installs, then assert Nim/Cap'n Proto/ct-remote `auto` mode follows source/local routing without x64 prebuilt/download fallback messages.
 - `non-nix-build/windows/bootstrap-windows-diy.ps1` local ct-remote mode now prefers `../codetracer-ci/non-nix-build/windows/publish-desktop-client.ps1` when available (or `CT_REMOTE_WINDOWS_PUBLISH_SCRIPT` override), so local-source publish can run with codetracer-ci's repo-local dotnet bootstrap instead of requiring host-global `dotnet` on PATH.
 - 2026-02-09 end-state verification on this Windows arm64 host: full default `pwsh -File non-nix-build/windows/bootstrap-windows-diy.ps1` (no skip flags), `pwsh -File non-nix-build/windows/validate-toolchain-versions.ps1`, `cargo build/test/clippy` in `src/db-backend`, and `cargo test --bin simple-tui windows_named_pipe -- --nocapture` in `src/tui` all pass.
-- Windows DIY bootstrap now defaults Tup to pinned official prebuilt ZIP (`TUP_WINDOWS_SOURCE_MODE=prebuilt` with `TUP_PREBUILT_URL=https://gittup.org/tup/win32/tup-latest.zip` and pinned `TUP_PREBUILT_SHA256`), while source mode (`TUP_WINDOWS_SOURCE_MODE=source`) remains available with deterministic source cache metadata under `.tools/windows-diy/tup/cache/source/<cache-key>/`.
-- Tup Windows source bootstrap now uses a codetracer-owned generated script path when `TUP_WINDOWS_SOURCE_BUILD_COMMAND` stays at its pinned default: `Ensure-TupFromSource` emits `codetracer-bootstrap-windows.sh` in the Tup source checkout, compiles Lua+Tup with MinGW (including `src/compat/win32` and `src/tup/server/windepfile.c`), and by default treats the manually built `build/tup.exe` as the final bootstrap artifact without running self-host `tup init/upd` (opt-in debug gate: `TUP_WINDOWS_SELF_HOST_UPDATE=1|true|yes|on`).
-- 2026-02-09 Step-25 Tup probe (`.tmp/windows-diy-step25`, source mode, skip non-Tup steps) passes end-to-end with installed-binary validation after bundling `tup-dllinject.dll` alongside `tup.exe` in the selected install directory; `tup.exe --version` now succeeds directly from `tup.install.relative-path`.
 - 2026-02-09: `Ensure-TupMsys2BuildPrereqs` must keep native command stdout off the function pipeline (now via `Out-Host`) so callers receive a pure hashtable; otherwise `Ensure-TupFromSource` can fail with `The property 'bashExe' cannot be found on this object`.
-- 2026-02-09: `non-nix-build/windows/toolchain-versions.env` is sourced directly from Bash (`env.sh`), so multi-token values must be quoted (notably `TUP_SOURCE_BUILD_COMMAND` and `TUP_MSYS2_PACKAGES`) to prevent accidental command execution during `source`.
-- `src/Tuprules.tup` should avoid shell-specific inline env assignment for Cargo on Windows; use `cargo build --target-dir ...` instead of `CARGO_TARGET_DIR=... cargo ...`, and use `nim` rather than hardcoded `nim1` for cross-platform Nim invocation.
+- 2026-02-09: `non-nix-build/windows/toolchain-versions.env` is sourced directly from Bash (`env.sh`), so multi-token values must be quoted (notably `TUP_MSYS2_PACKAGES`) to prevent accidental command execution during `source`.
 - 2026-02-10 (Step 33): `non-nix-build/windows/export-msvc-env.ps1` must prepend MSVC tool include/lib paths (`VC/Tools/MSVC/<ver>/include` and `lib/<arch>`) to `INCLUDE`/`LIB`/`LIBPATH`; `vcvarsall` output on this arm64 host can otherwise omit them, causing `msvcrt.lib` and standard-header lookup failures in Tup-driven Rust/Nim builds.
-- 2026-02-10 (Step 33): `src/config.nims` now forces `switch(\"cc\", \"vcc\")` on Windows so Tup-driven Nim C builds no longer depend on daemon shell env for compiler selection (`gcc.exe` was previously selected/missing).
+- 2026-02-10 (Step 33): `src/config.nims` now forces `switch(\"cc\", \"vcc\")` on Windows so Nim C builds no longer depend on daemon shell env for compiler selection (`gcc.exe` was previously selected/missing).
 - 2026-02-10 (Step 34): `src/common/paths.nim` must not import `std/posix` on Windows C builds; use `USERNAME` env fallback for username there to avoid generated C including `pwd.h` (missing on MSVC toolchains).
-- 2026-02-10: Tup executable outputs now use a shared `EXE_SUFFIX` derived from `@(TUP_PLATFORM)` and Nim/Cargo cache exclusions must be declared in Tup `extra outputs` form (`| ^regex`), using cross-platform separator-safe regexes like `([A-Za-z]:)?[/\\]tmp[/\\]...` so `tup upd build-debug/bin/tester.exe` does not fail on undeclared `C:/tmp/ct-nim-cache/...` writes.
-- 2026-02-10: On Windows, `stylus.cmd <input> -o <output>` can pass compilation but still fail Tup output tracking (`Expected to write to file ... but didn't`); using `stylus.cmd -p <input> > %o` in Tup rules makes the declared `%o` write explicit and reliable.
 - 2026-02-10: In Windows DIY env, `CAPNP_DIR` can point at an install root where executables live in `CAPNP_DIR/bin`; PATH must include `CAPNP_DIR/bin` (not only `CAPNP_DIR`) so Rust build scripts that invoke `capnp` succeed under Tup/Cargo.
 - 2026-02-09: `non-nix-build/ensure_tree_sitter_nim_parser.sh` now derives `ROOT_DIR` from its own location when unset, so `set -u` shells can source `non-nix-build/windows/env.sh` without `ROOT_DIR` unbound failures while preserving caller-provided `ROOT_DIR`.
 - `src/db-backend` no longer depends on `expanduser`; `io-transport` now uses `shellexpand` for `~` path expansion in `src/db-backend/src/trace_processor.rs`, which removes the Windows arm64 `pwd::Passwd` transitive compile failure.
 - 2026-02-09 (Windows arm64): `src/db-backend/src/core.rs` and `src/db-backend/src/rr_dispatcher.rs` now cfg-gate Unix socket transport (`UnixStream`) and return explicit runtime errors on non-Unix if rr/core socket paths are requested, so Windows builds no longer fail on `std::os::unix` imports.
 - 2026-02-09 (Windows arm64): `src/db-backend/src/dap_server.rs` disconnect handling must not call `process::exit(0)` immediately after queueing the response, because that can terminate before the sending thread flushes stdio framing. The server now waits for sending-thread confirmation that the `disconnect` response was written, then terminates the main loop cleanly; with `CAPNP_DIR=.tools/windows-diy/capnp/1.3.0/cache/source/274ee662fc8ba6332580d44c2adae6dc4b36b783c761d1e4fe43c389f50597b7/install` and PATH including `$CAPNP_DIR/bin`, `cargo test`, `cargo build`, and `cargo clippy` pass in `src/db-backend`.
 - 2026-02-09: `../codetracer-ci/global.json` pins SDK `9.0.0` with `rollForward=latestFeature`; on Windows arm64, exact `9.0.0` SDK download is unavailable, so repo-local bootstrap should fall back to channel `9.0` latest feature-band SDK (validated with `9.0.310`) to satisfy ct-remote/DesktopClient source bootstrap prerequisites.
-- 2026-02-10 (Windows Tup + Nim 2.2.6): Nim source bootstrap no longer includes `db_sqlite` in the bundled stdlib/impure paths; `src/common/trace_index.nim` now uses version-gated imports (`../db_connector/db_sqlite` on Nim >= 2, `impure/db_sqlite` otherwise) and the Nim 2 connector sources are vendored under `src/db_connector/`.
-- 2026-02-10 (Windows Tup + Nim 2.2.6 frontend): Nim now rejects several implicit JS interop conversions in frontend code; common fixes are (1) avoid capturing locals inside `nimcall` event handlers (derive target elements from `event.currentTarget` instead), (2) cast enum bitflags explicitly when assigning `int` fields in macro-generated nodes (for example `menuOs: ord(menuOsEnum)`), and (3) use `jsre.contains(...)` instead of `.test(...)`.
-- 2026-02-10 (Windows Tup full graph): for `!codetracer` C builds, per-target Nim caches (`--nimcache:/tmp/ct-nim-cache/%B_codetracer_binary`) avoid cross-target cache races, and Tup must ignore both Nim cache paths and Nim-generated `*_linkerArgs.txt` response files (`NIM_SIDE_OUTPUTS_IGNORE`) to prevent undeclared-output failures.
+- 2026-02-10 (Windows + Nim 2.2.6): Nim source bootstrap no longer includes `db_sqlite` in the bundled stdlib/impure paths; `src/common/trace_index.nim` now uses version-gated imports (`../db_connector/db_sqlite` on Nim >= 2, `impure/db_sqlite` otherwise) and the Nim 2 connector sources are vendored under `src/db_connector/`.
+- 2026-02-10 (Windows + Nim 2.2.6 frontend): Nim now rejects several implicit JS interop conversions in frontend code; common fixes are (1) avoid capturing locals inside `nimcall` event handlers (derive target elements from `event.currentTarget` instead), (2) cast enum bitflags explicitly when assigning `int` fields in macro-generated nodes (for example `menuOs: ord(menuOsEnum)`), and (3) use `jsre.contains(...)` instead of `.test(...)`.
 - 2026-02-10 (Windows ct launcher): `src/ct/launch/backends.nim` and `src/ct/launch/cleanup.nim` must `cfg`-gate POSIX signal handling (`posix`, `posix_utils`, `onSignal`, `kill`) on non-Windows, otherwise MinGW Nim C builds fail on missing `kill`/signal APIs.
 - 2026-02-10 (ct-remote arm64 downloads): URL probes against `https://downloads.codetracer.com/DesktopClient.App` for revision `102d2c8` still return HTTP 404 for `win-arm64`, `win-aarch64`, and `win-arm64ec` while `win-x64` is HTTP 200; keep arm64 bootstrap on local-source mode until an official arm64 artifact and SHA are published.
-- 2026-02-10: `just build-once` should create `src/public/dist` (not repo-root `public/dist`) and use `mkdir -p` so fresh Windows checkouts do not emit/fail on missing parent directory before Tup/Webpack runs.
-- 2026-02-10: Tup Rust rules should avoid inline Cargo `--config target.*.linker=\"rust-lld\"` quoting on Windows; shell quoting differences can break parsing. Keep linker selection in Cargo config/env and invoke `cargo build` without those inline `--config` fragments.
+- 2026-02-10: `just build-once` should create `src/public/dist` (not repo-root `public/dist`) and use `mkdir -p` so fresh Windows checkouts do not emit/fail on missing parent directory before the build/Webpack runs.
 - 2026-02-10: Windows non-Nix now has a PowerShell-native env bootstrap script at `non-nix-build/windows/env.ps1`; use dot-sourcing (`. .\non-nix-build\windows\env.ps1`) so variables persist in-session, mirroring `env.sh` behavior for PowerShell users.
 - 2026-02-11: `ct.exe` on Windows requires `ct_paths.json`; non-Nix Windows env scripts now run `non-nix-build/windows/setup-codetracer-runtime-env.{sh,ps1}` to create that file when missing and to export `NIX_CODETRACER_EXE_DIR`/`LINKS_PATH_DIR`/`CODETRACER_REPO_ROOT_PATH` plus a default `CODETRACER_E2E_CT_PATH`.
 - 2026-02-11: Windows non-Nix env now pins `.NET` via `DOTNET_SDK_VERSION` in `non-nix-build/windows/toolchain-versions.env`; `env.ps1` and `env.sh` export `DOTNET_ROOT`, prepend it to PATH, and fail fast if that SDK version is not installed.
 - 2026-02-11: Even when Nim source mode is active, `ct.exe` on Windows can require OpenSSL 1.1 DLLs (`libcrypto-1_1-x64.dll`/`libssl-1_1-x64.dll`) shipped in Nim prebuilt `bin`; keep `$WINDOWS_DIY_INSTALL_ROOT/nim/<ver>/prebuilt/nim-<ver>/bin` on PATH before running UI tests.
-- 2026-02-11: In Git Bash launched from PowerShell, Tup may be unavailable as bare `tup` even when the executable is on PATH as `tup.exe`; `just` bash recipes should invoke `${TUP:-tup}` and Windows env setup should export `TUP` to the full `tup.exe` path for deterministic resolution.
-- 2026-02-11: Windows non-Nix devenv now emits Bash shims under `$WINDOWS_DIY_INSTALL_ROOT/shims` for key `.exe` tools (`tup`, `dotnet`, `node`, `npm`, `npx`, `uv`, `capnp`, `capnpc-c++`, `nargo`, `nim`, `ct-remote`, `cargo`, `rustc`, `rustup`) and prepends that directory to PATH so Bash can invoke tools by extensionless names consistently.
+- 2026-02-11: Windows non-Nix devenv now emits Bash shims under `$WINDOWS_DIY_INSTALL_ROOT/shims` for key `.exe` tools (`dotnet`, `node`, `npm`, `npx`, `uv`, `capnp`, `capnpc-c++`, `nargo`, `nim`, `ct-remote`, `cargo`, `rustc`, `rustup`) and prepends that directory to PATH so Bash can invoke tools by extensionless names consistently.
 - 2026-02-11: On Windows, `just` inline bash recipes can fail before execution with `/bin/bash: C:...Temp...just-...: No such file or directory`; moving recipe bodies to `scripts/*.sh` and calling them via `bash scripts/<name>.sh` avoids temp-script path translation issues.
 - 2026-02-11: `non-nix-build/windows/env.ps1` now honors `WINDOWS_DIY_ENSURE_DOTNET=0` (matching `env.sh`) so PATH/shim setup can proceed on hosts without the pinned SDK, and it exports `WINDOWS_DIY_SHIMS_DIR` while re-prepending that directory after runtime-env setup to keep shims visible at the front of PATH.
 - 2026-02-11: `non-nix-build/windows/env.ps1` .NET validation now supports feature-band roll-forward by default (`WINDOWS_DIY_DOTNET_ROLL_FORWARD_FEATURE=1`): if exact pinned `DOTNET_SDK_VERSION` is missing, it selects the highest installed SDK with the same major.minor (e.g., `9.0.311` for pinned `9.0.310`) and stores it in `DOTNET_SDK_VERSION_EFFECTIVE`.
 - 2026-02-11: `non-nix-build/windows/env.ps1` now prefers Git Bash by default (`WINDOWS_DIY_PREFER_GIT_BASH=1`) by prepending detected `Git\bin`/`Git\usr\bin` to PATH; `Get-Command bash` should resolve to Git Bash, and `WINDOWS_DIY_GIT_BASH_BIN` reports the selected directory.
-- 2026-02-11: On Windows, Tup command failures like `'stylus' is not recognized` can come from a stale Tup server started with an older PATH; after sourcing env scripts, restart Tup-related processes before rebuilding. `env.ps1` also now sets PowerShell aliases (`tup`, `node`, `npm`, `npx`, etc.) to `.exe` paths so extensionless Bash shims on PATH do not get opened as text files in PowerShell.
 - 2026-02-11: Web UI tests in non-Nix Windows rely on additional runtime assets under `src/build-debug` beyond binaries: `ct host` serves static files from `src/build-debug/public` and `ct record` expects `src/build-debug/config/default_config.yaml`; `setup-codetracer-runtime-env.{ps1,sh}` should ensure both `public` and `config` are linked/copied from `src/`.
 - 2026-02-11: `src/frontend/index.html` can request `frontend/styles/default_dark_theme.css` in web/server mode; if only `default_dark_theme_extension.css` is generated, add a build artifact alias/copy so the unsuffixed path resolves.
 - 2026-02-11: `ct-native-replay` (named `ct-rr-support` when this note was written) compiles on Windows in `../codetracer-native-backend` via Windows stubs (compile-only mode), but runtime replay/record integration remains unsupported on Windows because RR is Linux-only; `ct record test-programs/noir_space_ship` can still fail when it requires a functional `ct-native-replay` runtime backend.
@@ -505,17 +495,6 @@ and inherent copies on `Db` in `db.rs`. Change one, change the other.
 a `TestRecording` around a committed fixture to reuse `initialize_and_launch` —
 it deletes the fixture from the working tree when the test ends. Use
 `DapStdioTestClient::initialize_and_launch_trace(path)` instead.
-
-The tup rule for the db-backend (`src/db-backend/Tupfile`) *names* only
-`src/main.rs` as its input, but that is not the whole dependency set: tup
-discovers the rest through its FUSE sandbox, recording every file the cargo
-invocation actually reads. Editing any file under `src/db-backend/src/` does
-re-run the rule on the next `just build-once`, and `src/build-debug/bin/
-replay-server` is refreshed — verified by editing `trace_reader.rs` alone and
-observing tup execute the rule and cargo emit `Compiling replay-server`. Note
-that `just build-once` runs tup twice (before and after webpack); the second
-pass legitimately reports "No commands to execute", so read the FIRST pass when
-checking whether the engine was rebuilt.
 
 In the Electron build, `dap.nim::asyncSendCtRequest` used to be fire-and-forget:
 it wrote the request frame over IPC and resolved the `Future[JsObject]` it
@@ -1729,17 +1708,10 @@ its `mtk<n>`, so collecting whole `className` strings counts `"mtk1"` and
 `"mtk1 char-delete"` as two token classes and passes on a document with no
 tokens at all. Match `/\bmtk\d+\b/`.
 
-## `tup` can miss a `.nim` edit, and the build then lies quietly (UD-4)
+## The renderer's own code is not the vendor bundle (UD-4)
 
-`just build-once` reported "No commands to execute" against a freshly edited
-`src/frontend/ui/unified_diff.nim`, and the Playwright suite then ran green
-against the previous build — which is the worst possible outcome for a
-red-before-green step, because the test passes for the wrong reason. `touch`ing
-the edited file made tup rebuild it immediately. After editing frontend Nim or
-styl, `touch` the file before building, and confirm the compile actually
-happened (`frontend/ui_js.nim` in tup's output) rather than trusting exit 0.
-Note also that `src/public/dist/frontend_bundle.js` is the *vendor* bundle
-(Monaco et al.) — the renderer's own code is `src/build-debug/public/ui.js`, so
+`src/public/dist/frontend_bundle.js` is the *vendor* bundle
+(Monaco et al.) — the renderer's own code is `src/build-debug-repro/public/ui.js`, so
 grepping the bundle for your change proves nothing.
 
 ## `.code-editor .flow-loop-step-container` absolutely positions whatever wears it (UD-4)
@@ -3345,12 +3317,8 @@ commands.
   recorded fixture directory showed up as untracked. Superseded cache entries
   are not pruned: editing a fixture program leaves the old `<name>-<md5>/`
   beside the new one.
-- 2026-09-05 (host, not the tree — three ways this workspace stops `ct` from
+- 2026-09-05 (host, not the tree — two ways this workspace stops `ct` from
   building, each diagnosed far from its cause):
-  * a stray `~/.tup` makes `tup` treat `$HOME` as the project root, and
-    `just build-once` then dies parsing an unrelated repo's Tupfile. This repo's
-    tup root is `src/` (that is what `src/Tupfile.ini` marks); `tup init --force`
-    run IN `src/` fixes it, and `.tup/` is gitignored.
   * `src/db-backend/build.rs` regenerates the MCR emulator's C by spawning
     `direnv exec <codetracer-native-recorder> bash ct_emulator/build_native_api.sh`.
     Under cargo's environment that nested shell failed with
@@ -3368,7 +3336,7 @@ commands.
     module in the sibling checkout.
     UPDATE 2026-10-31: io-mon and nim-stackable-hooks are now REQUIRED
     siblings (probing `io_mon/depfile.nim` / `stackable_hooks/propagation.nim`,
-    no env override because tup strips IO_MON_SRC / NIM_STACKABLE_HOOKS_SRC),
+    no env override, because a build's environment may not carry IO_MON_SRC / NIM_STACKABLE_HOOKS_SRC),
     so the preflight refuses such a tree by name. nim-shm-queue / nim-shm-gset
     stay optional: `ct`'s `io_mon/depfile` closure does not import them.
 - 2026-09-05: **a `HeadlessDebugSession` that steps in a loop and never calls
@@ -4516,11 +4484,12 @@ THE `system` SURFACE SWEEP NEEDS NIM'S LOCATION, NOT A RUNNING NIM (2026-09-11)
   sha256. A trace-format move now rebuilds every recorder. Contract:
   `ci/test/sibling-artifact-freshness-test.sh`.
 - 2026-09-14: A STALE RENDERER BUNDLE CAN SURVIVE A "SUCCESSFUL" SOURCE REVERT,
-  and it looks exactly like a product bug. `just build-once` runs tup, and tup
-  ABORTS ON THE FIRST FAILED JOB — so when the `db-backend` step dies (e.g. the
+  and it looks exactly like a product bug. A build stops at its first failed
+  action — so when the `db-backend` step dies (e.g. the
   `cargo build --locked` failure a stale `src/db-backend/Cargo.lock` produces),
   webpack never re-runs and `src/public/dist/frontend_bundle.js` keeps whatever
-  the LAST complete build baked in. The Nim source can be clean, `git diff`
+  the LAST complete build baked in (`scripts/build-once.sh` now removes the
+  bundle when a build fails, so a failed build leaves none). The Nim source can be clean, `git diff`
   empty, and the running Electron app still render the previous contents.
   Measured the hard way: a `.search-results` → `.search-results-MUTANT` class
   edit stayed live in the app across a source revert and two `build-once`
@@ -4776,15 +4745,11 @@ THE `system` SURFACE SWEEP NEEDS NIM'S LOCATION, NOT A RUNNING NIM (2026-09-11)
   `meta.dat: unsupported version N` when the RECORDER writes a newer version
   than the reader in the Nim half. The reader lives in
   `src/ct/trace/ctfs_sources.nim` (`SupportedMetaDatVersion`) and is compiled
-  into BOTH `src/build-debug/bin/ct` AND `src/build-debug/bin/db-backend-record`
-  — `ct record` shells out to the second, so rebuilding only `ct` leaves the old
-  message coming from a binary whose name never appears in the error. `tup upd`
-  in `src/build-debug` currently dies on
-  `tup error: Unable to use files from another variant (/build-debug) in this
-  variant (/build-release)` after refreshing `replay-server`, so the Nim
-  binaries have to be built by hand with the flags in `src/Tuprules.tup`
-  (`NIM_COMMON_FLAGS` + `NIM_REPO_PATH_FLAGS` + `CODETRACER_FLAGS`; `ct` also
-  needs `-d:ctEntrypoint`, `db_backend_record.nim` does not).
+  into BOTH `src/build-debug-repro/bin/ct` AND
+  `src/build-debug-repro/bin/db-backend-record` — `ct record` shells out to the
+  second, so rebuilding only `ct` leaves the old message coming from a binary
+  whose name never appears in the error. Build both (`just build-once` does;
+  `repro build ct db-backend-record` names them).
 
 - Nim's JS backend COPIES an `object` on assignment (`nimCopy`), so the
   "async proc cannot capture a `var` parameter" workaround `var data = dataArg`
@@ -5304,8 +5269,8 @@ THE `system` SURFACE SWEEP NEEDS NIM'S LOCATION, NOT A RUNNING NIM (2026-09-11)
   rustc then cannot read its output. The fix is to make the build scripts
   re-run: `rm -rf /tmp/codetracer/db_backend_target/debug/{build,.fingerprint}`.
   Look for other `out/` directories that are present and EMPTY as the tell. And
-  note what this costs if unnoticed: tup aborts on the first failed job, so
-  webpack and the `nim js` renderer never ran, `src/build-debug/ui.js` silently
+  note what this costs if unnoticed: the build stops at the first failed action, so
+  webpack and the `nim js` renderer never ran, `src/build-debug-repro/ui.js` silently
   kept its content from the previous build, and a GUI test then grades a
   fortnight-old renderer. ALWAYS read `build-once`'s real exit status.
 
@@ -5424,13 +5389,13 @@ setting. (That grep still reports one name: `debugRepl`, declared `{.exportc.}`
 in both `renderer.nim` and `services/debugger_service.nim` — a separate, latent
 instance of the same class.)
 
-**Four different files run `nim js` on these sources, and the flag was in all
-of them.** `repro.nim` is the reprobuild recipe, but it is not the only build
-definition: `src/Tuprules.tup` (`!nim_js`, `!nim_node_subwindow`) is what
-`just build-once` still uses by default on Linux, `justfile` has two
-hand-written renderer recipes, and `build_for_extension.sh` builds `ui.js` for
-the VS Code extension. Fixing one and not the others leaves the bug shipping on
-a platform or a surface you did not check; the guard above scans all four.
+**Several files run `nim js` on these sources, and the flag was in all of
+them.** `repro.nim` is the build recipe, but it is not the only build
+definition: `justfile` has two hand-written renderer recipes, and
+`build_for_extension.sh` builds `ui.js` for the VS Code extension. (A third,
+the tup build's rules file, is gone.) Fixing one and not the
+others leaves the bug shipping on a surface you did not check; the guard above
+scans all of them.
 
 ## `just build-once` on macOS
 
@@ -5448,8 +5413,8 @@ evidence the renderer is broken. To type-check the Electron-side Nim by hand:
         -d:nimNoLentIterators --out:/tmp/ui.js js src/frontend/ui_js.nim
     nim -d:ctIndex -d:nodejs --out:/tmp/index.js js src/frontend/index.nim
 
-(the defines are the ones `src/Tuprules.tup`'s `!nim_js` / `!nim_node_index`
-macros use; `-d:nimNoLentIterators` is only there to step past the unrelated
+(the defines are the ones `repro.nim`'s `frontend-ui-js` / `frontend-index-js`
+actions use; `-d:nimNoLentIterators` is only there to step past the unrelated
 `ui/unified_diff.nim` compile error.)
 
 ## The Playwright `electronApp` fixture handed `null` to EVERY test (fixed 2026-09-21)
@@ -5979,14 +5944,13 @@ Two traps in the same area, both live:
     `547497aa1` with `'filePath' is of type <lent cstring> which cannot be
     captured` (raised from `lib/js/jsffi.nim(441, 16)`, declared at
     `index/ipc_subsystems/acp_ipc.nim(786, 9)`), with and without unrelated
-    changes. Do NOT file that as a bug: `src/Tuprules.tup`'s
-    `NIM_COMMON_FLAGS` already carries `-d:nimNoLentIterators`, and
-    `!nim_node_index` — the rule that actually builds `index.js` — goes through
-    `$(NIM_SELECTED)`, so the real build has never seen this error. The lesson
-    generalises: a bare `nim c`/`nim js` of a file this repo builds under Tup
-    is missing the whole of `NIM_COMMON_FLAGS`, so read the rule in
-    `src/Tuprules.tup` before believing a compile failure you reproduced by
-    hand.
+    changes. Do NOT file that as a bug: the build's Nim defines
+    (`CommonNimDefines` in `repro.nim`) carry `-d:nimNoLentIterators`, and the
+    `frontend-index-js` action that actually builds `index.js` passes them, so
+    the real build has never seen this error. The lesson generalises: a bare
+    `nim c`/`nim js` of a file this repo builds is missing the build's defines,
+    so read the action in `repro.nim` before believing a compile failure you
+    reproduced by hand.
 - 2026-09-24: **A shell without zstd's `-isystem` turns `just test-vm-native`
   into EIGHT fake regressions, all in `src/tests/gui/tests/request-panel/`.**
   The real error is `fatal error: 'zstd.h' file not found`, from
@@ -6241,7 +6205,7 @@ Two traps in the same area, both live:
     <lent TimelineMarker> which cannot be captured as it would violate memory
     safety"*. Bind the seq to a `let` before `ui(r):` and index it
     (`for i in 0 ..< s.len: ... s[i] ...`). The test lanes do not pass
-    `-d:nimNoLentIterators`, whatever `src/Tuprules.tup` does for the real build.
+    `-d:nimNoLentIterators`, whatever the real build (`repro.nim`) does.
   * **AND THE CLOSURES IN THAT LOOP SHARE ONE ENVIRONMENT.** Measured
     2026-09-24 at `a9b3aaf4d` on the timeline's marks. Every dynamic attribute
     in the loop body becomes a `createRenderEffect` closing over the loop index
@@ -7574,8 +7538,8 @@ ONE ROUTER ON EVERY FRONT-END (2026-10-12, PLAT-68 Phase B).
   (`mergeColumnWidths`) and `table.resize-column`'s target
   (`event_log_vm.columnResizeTarget`) are shared; a front-end only measures
   the column's drawn width.
-- A desktop build from a worktree needs the pinned siblings beside it (tup's
-  `../isonim` paths): copy the tree's `git ls-files` (with
+- A desktop build from a worktree needs the pinned siblings beside it (the Nim
+  search path's `../isonim` paths): copy the tree's `git ls-files` (with
   `--recurse-submodules`; a `.gitignore`-filtered rsync drops tracked files
   such as `frontend/tests/test_suites/`) into a scratch workspace whose
   siblings are at the pins and `just build-once` there with
@@ -7591,13 +7555,14 @@ ONE ROUTER ON EVERY FRONT-END (2026-10-12, PLAT-68 Phase B).
   is its `:before`), which is why the wait is on the `.gutter` cell. After the
   wait the fixture clicks `#file-info-status` (no handler) to keep the old
   click's effects: pointer off the editor, focus off any input.
-- `src/Tuprules.tup` hard-codes `CARGO_TARGET_BASE = /tmp/codetracer`, so
+- `repro.nim` hard-codes `CargoTargetBase = "/tmp/codetracer"`, so
   every `just build-once` on the host shares one replay-server target. Two
   concurrent builds there (or two scratch copies sharing one
   `codetracer-native-recorder`) interleave the emulator's generated C and the
   link fails with `undefined reference to eqdestroy___…` / `hidden symbol …
-  isn't defined` in `libmcr_emulator.so`. In a scratch copy, point
-  `CARGO_TARGET_BASE` at a target of its own, give it its own native-recorder
+  isn't defined` in `libmcr_emulator.so`. In a scratch copy, edit
+  `CargoTargetBase` (a constant, not read from the environment) to a target of
+  its own, give it its own native-recorder
   copy, and delete that copy's `ct_emulator/build/` after such a failure.
 - `scripts/build-tui-grammars.sh` proves generation did not dirty a grammar
   submodule with `git -C libs/<grammar> diff`. In a scratch copy whose
@@ -7623,10 +7588,6 @@ ONE ROUTER ON EVERY FRONT-END (2026-10-12, PLAT-68 Phase B).
   below the last drawn call row, so it cannot tell "the scrubber answers
   first" from "the row answers first"; `test_plat51_gpui_plan`'s Call Trace
   case also presses the track's middle, where a row lies under it.
-- tup compiles every Nim binary of `just build-once` into `/tmp/ct-nim-cache`
-  (fixed in `src/Tuprules.tup`), whatever `CT_NIM_CACHE_ROOT` says: two
-  scratch copies building at once interleave their objects and `ct` /
-  `db-backend-record` fail to link. Run their `build-once`s one at a time.
 - The desktop Event Log's whole-log size reaches the store as the engine's
   `unfilteredTotal` (`applyEventLogResponse`); `total` is the searched /
   kind-filtered count. A defect in `total` alone shows only in a searched view.
@@ -7715,7 +7676,7 @@ ONE ROUTER ON EVERY FRONT-END (2026-10-12, PLAT-68 Phase B).
   `just build-once`: `db-backend/build.rs` stamps replay-server's
   `--build-revision` from git, and without it GPUI suites refuse the engine
   ("revision handshake unsupported ... unknown unknown"); touch build.rs to
-  re-stamp. Never copy `src/build-debug` between trees (tup rejects the variant).
+  re-stamp. Never copy `src/build-debug-repro` between trees.
 - layout_settings now carries VALUED settings (`settingValues`, `parseValue`,
   `assignValue`, `valueText`); `savePreference` hooks take (name, value: string).
 - Files pane menu (K19) in the native front-ends: the entries are
@@ -7798,7 +7759,7 @@ ONE ROUTER ON EVERY FRONT-END (2026-10-12, PLAT-68 Phase B).
 - The desktop's session-container-<n> carries `data-scope-kind=tab` / `data-scope-id=tab:<n+1>` so its scope path has the
   session tab like the terminal's and GPUI's (window / tab:tab:1 / pane:… ).
 - The macOS native menu (`index/menu.nim`, `when defined(ctmacos)`) is
-  compiled by NO Linux lane; `nim check -b:js <Tuprules NIM_COMMON_FLAGS>
+  compiled by NO Linux lane; `nim check -b:js <the build's Nim defines>
   -d:ctIndex -d:nodejs -d:ctmacos src/frontend/index.nim` type-checks it on
   Linux. Its accelerators come from `viewmodel/keymap/menu_accelerators`
   (a main-process router over the same keybindings.json), and
@@ -7814,9 +7775,6 @@ ONE ROUTER ON EVERY FRONT-END (2026-10-12, PLAT-68 Phase B).
   `yarn-project.nix` to `sentinelHash`, `nix build .#packages.x86_64-linux.
   node-modules-derivation`, paste the `got:` (it is the yarn-cache FOD), build
   again. The yarn-cache build takes ~15 s here (680 MiB of packages).
-- Re-syncing a /tmp mirror (`sync.sh`) while `build-once.sh` runs in it
-  reverts the patched `src/Tuprules.tup`, and cargo then builds into the
-  SHARED `/tmp/codetracer/db_backend_target`. Never sync a mirror mid-build.
 - Keymap router pending prefixes expire LAZILY in `resolveLayers` (at the next
   key). The terminal now also expires them on the idle clock
   (`keymap_router.expirePending` / `runtime.tickPendingPrefix`, woken by
@@ -8065,8 +8023,7 @@ ONE ROUTER ON EVERY FRONT-END (2026-10-12, PLAT-68 Phase B).
   submodule update --init -- libs`, then `git submodule foreach 'git checkout
   -f HEAD'` for any left empty); a `reprobuild.paths` file (gitignored) lists
   extra `--path`s that win over the workspace siblings (nim-everywhere,
-  nim-agents, nim-acp at their pins). The tup build's nimcache is hard-wired to
-  /tmp/ct-nim-cache, shared by every checkout on the host.
+  nim-agents, nim-acp at their pins).
 
 ## The Requests pane natively (PLAT-58, 2026-10-26)
 - The session's `RequestPanelVM` (built by `initializePanelViewModels`, the
@@ -8154,7 +8111,6 @@ ONE ROUTER ON EVERY FRONT-END (2026-10-12, PLAT-68 Phase B).
 - `Ctrl+Enter` → `list.activate-redirected` is a CUA-only `ListTable` row (`listFocus && frontEnd != web`, because the web studio's `Ctrl+Enter` is Run). It is in CUA-Keymap.md §3.6, so the oracle (`test_plat68_cua_oracle`, `ExpectedCuaTuples`) and `test_plat68_base_keymaps`' count move with it. The terminal only sees it with Kitty/modifyOtherKeys (`CSI 13;5u`); a legacy terminal delivers plain Enter.
 - The GPUI window's omnibox listed the `replayOpenIn:` commands but `runGpuiMenuAction` had no branch for them (they fell through to `gpuiMenuRouteOf` and were refused). `gpuiTestsCommand` (forward-declared before `runGpuiMenuAction`, defined after `placeGpuiTestRecording` so it can call `syncTestsTabs`) now handles both `replayOpenIn:` and `runTestIn:`.
 - The desktop editor's context-menu "Re-record and replay this test" now calls `editor.startEditorTestAt(line)` — the inline Run-test widget's own handler, through `editorTestRunHook` into the desktop host — instead of `renderer.runTests` directly (which loaded the recording into the edit session and began no pane run).
-- Local desktop build hazard: tup's style rules need `stylus` on PATH (`node_modules/.bin`); the f53 env did not put it there, so a stylus edit made tup fail with "stylus: command not found" and leave the old CSS.
 - Find in Files' field (PLAT-70 Part D): on the terminal and GPUI it is the
   omnibar's `:grep` line, opened with `OmnibarVM.openSelected(":grep ", seed)`
   so the seed is selected (`anchor`..`cursor`); the seed rule is
@@ -8222,7 +8178,7 @@ ONE ROUTER ON EVERY FRONT-END (2026-10-12, PLAT-68 Phase B).
   default); `test.use({ recordBackend: "rr" })` records with rr, and
   CODETRACER_RR_BACKEND_PRESENT=1 stops the fixture from skipping rr programs.
 - Mutation harnesses that restore a file with shutil.move keep its OLD mtime:
-  cargo/tup then keep the mutated binary. Touch it (`os.utime`) after restore.
+  cargo then keeps the mutated binary. Touch it (`os.utime`) after restore.
 
 - Verification pane (PLAT-63): the window-level pair `VerificationVM` +
   `CounterexampleSessionVM` (one per window, as `ui/verification.nim` keeps
@@ -8516,7 +8472,7 @@ ONE ROUTER ON EVERY FRONT-END (2026-10-12, PLAT-68 Phase B).
 - Monaco virtualises the diff: line numbers beyond the viewport are not in the DOM, and the boundary widgets are not re-stamped until the editor scrolls. After a press that reveals the last hidden lines, wheel the tab and THEN wait for `boundaries: 0`.
 - Tab order from the `@@` divider: the first call selector's enabled arrow, then the upper boundary handle. Once lines are revealed, the loop control's arrow and its noUiSlider handle come first.
 - The review's loop slider is built when its view zone is laid out (`ensureFlowLoopSliderWhenLaidOut`, a ResizeObserver). The bounded timer it replaced gave up before a zone revealed by an expansion was laid out on a loaded host.
-- A private copy of `src/build-debug` (to run a rebuilt `ui.js`) must live at `<checkout>/src/build-debug`. index.js finds `js-yaml` through the checkout's `node_modules`, and index.html, helpers.js and subwindow.html are relative links into `src/`. Outside a checkout Electron never opens a window. It also needs `src/public/dist` (the webpack bundles, gitignored; copy them from a built checkout); without it the window is blank. `find src/build-debug -xtype l` must print nothing. `src/build-debug` already exists in a worktree (it tracks `tup.config`), so `mv` a copy onto it nests it.
+- A private copy of `src/build-debug-repro` (to run a rebuilt `ui.js`) must live at `<checkout>/src/build-debug-repro`. index.js finds `js-yaml` through the checkout's `node_modules`, and index.html, helpers.js and subwindow.html are relative links into `src/`. Outside a checkout Electron never opens a window. It also needs `src/public/dist` (the webpack bundles, gitignored; copy them from a built checkout); without it the window is blank. `find src/build-debug -xtype l` must print nothing.
 
 ## Desktop scenarios: value origin, Tests pane, VCS, edit mode, welcome, verification (pw8, 2026-11-13)
 - `.gitignore` ignores every directory named `test-results` (Playwright's output), so a scenario folder of that name is silently untracked: the Tests pane's scenarios live in `src/tests/scenarios/tests-pane/`.

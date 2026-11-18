@@ -1,11 +1,8 @@
 import type { StorybookConfig } from "@storybook/html-webpack5";
-import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 
 const repoRoot = resolve(__dirname, "../..");
-const buildDir = existsSync(resolve(repoRoot, "src/build-debug-repro/frontend"))
-  ? "build-debug-repro"
-  : "build-debug";
+const buildDir = "build-debug-repro";
 
 const config: StorybookConfig = {
   stories: ["../stories/**/*.stories.@(js|ts)"],

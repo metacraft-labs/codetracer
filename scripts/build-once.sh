@@ -4,53 +4,51 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 CT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
+# Reprobuild is the only build system. The value is the reprobuild host id the
+# rest of this script (and scripts/build.sh, through the published build
+# environment) branches on.
 case "$(uname -s)" in
 Darwin) ct_reprobuild_host="darwin" ;;
-Linux)
-	# Reprobuild is the default build driver on macOS, but on Linux it is
-	# still experimental: keep `just build-once` on the legacy tup path by
-	# default while we gain more experience with reprobuild here. Developers
-	# can opt in per-invocation with CODETRACER_REPROBUILD_LINUX=1. Windows
-	# keeps the reprobuild branch because it has no tup fallback in this
-	# script.
-	if [ -n "${CODETRACER_REPROBUILD_LINUX:-}" ]; then
-		ct_reprobuild_host="linux"
-	else
-		ct_reprobuild_host=""
-	fi
-	;;
+Linux) ct_reprobuild_host="linux" ;;
 MINGW* | MSYS* | CYGWIN*) ct_reprobuild_host="windows" ;;
-*) ct_reprobuild_host="" ;;
+*)
+	echo "build-once: unsupported host $(uname -s): CodeTracer builds with Reprobuild on Linux, macOS and Windows only." >&2
+	exit 1
+	;;
 esac
 
-if [ -z "$ct_reprobuild_host" ]; then
-	ct_tup_config="${CODETRACER_CONFIG:-debug}"
-	ct_tup_variant="build-${ct_tup_config}"
-	# Invalidate both webpack's output and the published renderer before starting.
-	# Failed compiles must leave an absent renderer, not yesterday's runnable
-	# bundle. Also remove partially written outputs while keeping the tool's status.
-	ct_invalidate_renderer() {
-		rm -f -- "$CT_ROOT/src/public/dist/frontend_bundle.js" \
-			"$CT_ROOT/src/public/dist/frontend_bundle.js.map" \
-			"$CT_ROOT/src/$ct_tup_variant/public/dist/frontend_bundle.js" \
-			"$CT_ROOT/src/$ct_tup_variant/public/dist/frontend_bundle.js.map"
-	}
-	ct_renderer_exit() {
-		local status="$?"
-		if [ "$status" -ne 0 ]; then
-			if ct_invalidate_renderer; then
-				echo "build-once: build failed; renderer bundle invalidated" >&2
-			else
-				echo "build-once: ERROR: failed to invalidate renderer after build failure" >&2
-			fi
+# A failed build must not leave yesterday's runnable renderer behind.
+#
+# The webpack bundle (`frontend_bundle.js`) is gitignored, so a build that dies
+# before webpack runs (a compile that hits a disk quota, say) leaves whatever
+# the last successful build wrote, and nothing in `git status` says so: the
+# next `ct` starts against a bundle of unknown age. So a
+# non-zero exit of a `build` removes the bundle from both places it is kept,
+# the webpack output and the published copy; the next build restores it. The
+# status the failure ended with is kept even when the removal itself fails.
+# `watch` and the other reprobuild subcommands are left alone: a watcher that
+# is interrupted has not failed to build anything.
+ct_invalidate_renderer() {
+	local out_root="src/build-${CODETRACER_CONFIG:-debug}-repro"
+	rm -f -- "$CT_ROOT/src/public/dist/frontend_bundle.js" \
+		"$CT_ROOT/src/public/dist/frontend_bundle.js.map" \
+		"$CT_ROOT/$out_root/public/dist/frontend_bundle.js" \
+		"$CT_ROOT/$out_root/public/dist/frontend_bundle.js.map"
+}
+ct_renderer_exit() {
+	local status="$?"
+	if [ "$status" -ne 0 ] && [ "${CODETRACER_REPROBUILD_COMMAND:-build}" = build ]; then
+		if ct_invalidate_renderer; then
+			echo "build-once: build failed; renderer bundle invalidated" >&2
+		else
+			echo "build-once: ERROR: failed to invalidate renderer after build failure" >&2
 		fi
-		exit "$status"
-	}
-	trap ct_renderer_exit EXIT
-	ct_invalidate_renderer
-fi
+	fi
+	exit "$status"
+}
+trap ct_renderer_exit EXIT
 
-# Bootstrap the dev-shell PATH when key build tools (tup, nim, node) are not
+# Bootstrap the dev-shell PATH when key build tools (nim, node) are not
 # already available.  The .direnv/flake-profile-*.rc file is the nix-direnv
 # cached evaluation of the codetracer flake — sourcing it is instant (no
 # network, no nix evaluation) and sets PATH, NIX_*, etc. as the dev shell did
@@ -88,7 +86,7 @@ fi
 # from another one (`bash /path/to/codetracer/scripts/build-once.sh`), the hook
 # would otherwise prepare that repository instead.
 # scripts/test-build-once-profile-cwd.sh
-if ! command -v tup >/dev/null 2>&1 || ! command -v nim >/dev/null 2>&1; then
+if ! command -v node >/dev/null 2>&1 || ! command -v nim >/dev/null 2>&1; then
 	for _direnv_rc in "$CT_ROOT/.direnv"/flake-profile-*.rc; do
 		if [ -f "$_direnv_rc" ]; then
 			_ct_caller_dir="$PWD"
@@ -142,10 +140,9 @@ fi
 # Single source of truth for the resolved build identity.
 #
 # `scripts/build.sh` (`just build`) drives this script and then starts watchers
-# over the SAME output tree. Re-deriving config -> variant -> output root there
-# is exactly what let `just build` hardcode `tup build-debug` and
-# `livereload src/build-debug` while `just build-once` honoured
-# CODETRACER_CONFIG -- half of issue #599. So this script, which owns the
+# over the SAME output tree. Re-deriving config -> output root there
+# is exactly what let `just build` hardcode one configuration's output tree
+# while `just build-once` honoured CODETRACER_CONFIG -- half of issue #599. So this script, which owns the
 # derivation, publishes what it resolved and build.sh consumes it rather than
 # guessing.
 #
@@ -153,12 +150,9 @@ fi
 # shell-sourceable file with exactly these keys, and writes it BEFORE the build
 # work starts so a later failure still leaves callers a usable answer:
 #
-#   CT_BUILD_HOST     reprobuild host id ("darwin" | "linux" | "windows"), or
-#                     "" for the legacy tup branch. This is the branch
-#                     selector; callers must not re-implement the uname case.
+#   CT_BUILD_HOST     reprobuild host id ("darwin" | "linux" | "windows").
+#                     Callers must not re-implement the uname case.
 #   CT_BUILD_CONFIG   "debug" | "release" (from CODETRACER_CONFIG).
-#   CT_BUILD_VARIANT  tup variant directory name ("build-debug"), or "" on the
-#                     reprobuild branch, which has no tup variant.
 #   CT_BUILD_OUT_ROOT the output tree, relative to the repo root -- the
 #                     directory holding bin/ct and the assets livereload
 #                     watches.
@@ -169,7 +163,7 @@ ct_publish_build_env() {
 	if [ -z "${CODETRACER_BUILD_ENV_FILE:-}" ]; then
 		return 0
 	fi
-	local host="$1" config="$2" variant="$3" out_root="$4"
+	local host="$1" config="$2" out_root="$3"
 	local dir
 	dir="$(dirname "$CODETRACER_BUILD_ENV_FILE")"
 	mkdir -p "$dir"
@@ -177,7 +171,6 @@ ct_publish_build_env() {
 # Generated by scripts/build-once.sh -- do not edit.
 CT_BUILD_HOST='$host'
 CT_BUILD_CONFIG='$config'
-CT_BUILD_VARIANT='$variant'
 CT_BUILD_OUT_ROOT='$out_root'
 EOF
 }
@@ -194,8 +187,7 @@ EOF
 if [ -n "$ct_reprobuild_host" ]; then
 	# Build configuration (debug/release), selected by CODETRACER_CONFIG
 	# (default: debug). It picks the reprobuild output tree
-	# (`src/build-<config>-repro` on all platforms — the `-repro` suffix keeps
-	# it out of tup's `src/build-debug` variant dir) and threads the
+	# (`src/build-<config>-repro` on all platforms) and threads the
 	# `buildType` reprobuild variant to the recipe so the value participates in
 	# the graph cache key (see reprobuild-specs/Standard-Configurations.md and
 	# `buildDebugRoot()` in reprobuild.nim, the source of truth). `--release`
@@ -204,8 +196,7 @@ if [ -n "$ct_reprobuild_host" ]; then
 	# with any `repro` binary.
 	ct_config="${CODETRACER_CONFIG:-debug}"
 	ct_repro_out_root="src/build-${ct_config}-repro"
-	# The reprobuild branch has no tup variant, hence the empty third field.
-	ct_publish_build_env "$ct_reprobuild_host" "$ct_config" "" "$ct_repro_out_root"
+	ct_publish_build_env "$ct_reprobuild_host" "$ct_config" "$ct_repro_out_root"
 	# A solved lock describes one platform. Keep the shared Linux solve
 	# intact and bind the separately committed Apple-arm solve through repro's
 	# whole-build --lock API. The watch CLI has no --lock flag; retain its
@@ -492,8 +483,8 @@ PY
 	#     values codetracer-trace-format-nim uses. Without it the trace
 	#     writer's archive fails with "undeclared field: 'unsafeError' for type
 	#     results.Result [type declared in libs/nim-stew/stew/results.nim]".
-	#     The Linux tup branch below appends it; this branch did not, so a
-	#     macOS build-once failed there.
+	#     (The removed Linux tup branch appended it; this one did not, so a
+	#     macOS build-once failed there.)
 	# Windows skips direnv unconditionally in build.rs and sets up Nim via
 	# env.ps1, so leave that branch untouched.
 	if [ "$ct_reprobuild_host" != "windows" ]; then
@@ -697,21 +688,33 @@ PY
 
 	# A refusal (an unreadable lock schema, say) names what it could not read
 	# but not which tool was reading, so name the tool here.
+	#
+	# `repro watch` takes a narrower set of flags than `repro build`: it refuses
+	# `--progress`, `--write-diagnostics` and `--log` outright ("unsupported
+	# watch flag: --progress=bar-line", measured against the reprobuild 9dbf4e710d
+	# pin), so those go to a build only and a watch gets the provisioning flag
+	# alone (and no `--lock`, see above).
 	ct_repro_status=0
+	ct_repro_flags=(
+		"--tool-provisioning=${CODETRACER_REPROBUILD_TOOL_PROVISIONING:-$ct_tool_provisioning_default}"
+	)
+	if [ "${CODETRACER_REPROBUILD_COMMAND:-build}" = build ]; then
+		ct_repro_flags+=(
+			"--progress=${CODETRACER_REPROBUILD_PROGRESS:-bar-line}"
+			"--write-diagnostics=${CODETRACER_REPROBUILD_DIAGNOSTICS:-.repro/build/reprobuild/build-diagnostics.log}"
+			"--log=${CODETRACER_REPROBUILD_LOG:-quiet}"
+		)
+	fi
 	"$repro_bin" "${CODETRACER_REPROBUILD_COMMAND:-build}" "$ct_repro_target" \
 		${ct_lock_args[@]+"${ct_lock_args[@]}"} \
-		--tool-provisioning="${CODETRACER_REPROBUILD_TOOL_PROVISIONING:-$ct_tool_provisioning_default}" \
-		--progress="${CODETRACER_REPROBUILD_PROGRESS:-bar-line}" \
-		--write-diagnostics="${CODETRACER_REPROBUILD_DIAGNOSTICS:-.repro/build/reprobuild/build-diagnostics.log}" \
-		--log="${CODETRACER_REPROBUILD_LOG:-quiet}" || ct_repro_status=$?
+		"${ct_repro_flags[@]}" || ct_repro_status=$?
 	if [ "$ct_repro_status" != 0 ]; then
 		echo "build-once: repro ${CODETRACER_REPROBUILD_COMMAND:-build} exited $ct_repro_status; the tool was $repro_bin ($ct_repro_origin): ${ct_repro_version:-version unknown}" >&2
 		exit "$ct_repro_status"
 	fi
 	# post-build-setcap.sh re-applies BPF capabilities (cap_bpf +
 	# cap_perfmon + cap_dac_read_search) to the freshly built ct binary
-	# via the codetracer-setcap helper — the same post-build step the
-	# legacy Tup path runs below. It is Linux-only functionality, but the
+	# via the codetracer-setcap helper. It is Linux-only functionality, but the
 	# script self-guards (no-ops when codetracer-setcap is absent or
 	# passwordless sudo is unavailable), so it is safe to call on macOS
 	# too. Windows has no Linux setcap concept, so skip it there.
@@ -752,140 +755,3 @@ PY
 	}
 	exit 0
 fi
-
-# Tup build variant for the selected configuration. CODETRACER_CONFIG=release
-# builds the `build-release` variant (src/build-release/tup.config, CONFIG_DEBUG=0
-# → release Nim flags); the default is `build-debug`. The two variants live in
-# separate output dirs so they don't collide.
-ct_publish_build_env "" "$ct_tup_config" "$ct_tup_variant" "src/$ct_tup_variant"
-
-# Mirror the reprobuild branch's env-var setup so cargo build scripts work
-# without network access on the Linux tup path (Linux keeps tup as default):
-#   * CODETRACER_DB_BACKEND_SKIP_DIRENV=1 makes
-#     src/db-backend/build.rs::regenerate_c invoke ``bash`` directly instead of
-#     ``direnv exec <native-recorder> bash build_native_api.sh``.
-#   * CODETRACER_TRACE_FORMAT_NIM_SKIP_NIMBLE_INSTALL=1 prevents nimble from
-#     trying to download nim-stew over the network.
-#   * CODETRACER_TRACE_FORMAT_NIM_EXTRA_PATHS injects the vendored stew tree
-#     so `nim c` can resolve `results`/`stew` without a nimble package store.
-#
-# THE FIRST OF THE THREE WAS MISSING HERE, and that is a defect this comment
-# used to describe away: it claims to "mirror the reprobuild branch", and the
-# reprobuild branch sets all three (see the block above, and
-# nix/packages/default.nix:592 which sets it for the pure-Nix package build,
-# and five jobs in .github/workflows/codetracer.yml which set it as job env).
-# Only this branch -- the DEFAULT on Linux, and therefore the one every Linux
-# CI lane's `just build-once` takes -- copied two of the three.
-#
-# What that cost: on a runner where the adjacent codetracer-native-recorder
-# clone has never been `direnv allow`ed, build.rs takes the direnv path and
-# panics at build.rs:972 --
-#
-#   db-backend build.rs: generated C stale or missing at
-#     .../codetracer-native-recorder/ct_emulator/build/native_c_files;
-#     invoking .../build_native_api.sh
-#   direnv: error .../codetracer-native-recorder/.envrc is blocked.
-#     Run `direnv allow` to approve its content
-#   thread 'main' panicked at build.rs:972:17
-#   error: failed to run custom build command for `replay-server v0.1.0`
-#
-# -- which is exactly what happened on every arm of
-# `launcher-recorder-e2e (desktop edge)` (runs 33983224255, 33991455608),
-# INDEPENDENTLY of the missing tree-sitter-nim parser.c that failed the same
-# cargo invocation. Two roots, one command; either alone fails the build.
-#
-# Setting it is the right fix rather than allowing direnv in that sibling:
-# CT_EMULATOR_EXTRA_NIM_PATHS below already supplies what the direnv shell was
-# being entered to provide, so the direnv round-trip buys nothing here and
-# costs a full nested `nix develop` of the recorder's flake when it does work.
-export CODETRACER_DB_BACKEND_SKIP_DIRENV="${CODETRACER_DB_BACKEND_SKIP_DIRENV:-1}"
-export CODETRACER_TRACE_FORMAT_NIM_SKIP_NIMBLE_INSTALL="${CODETRACER_TRACE_FORMAT_NIM_SKIP_NIMBLE_INSTALL:-1}"
-if [ -z "${CT_EMULATOR_EXTRA_NIM_PATHS:-}" ] && [ -d "$PWD/libs/nim-stew/stew" ]; then
-	ct_nim_paths_lib="$PWD/libs/nim-stew/stew:$PWD/libs/nim-stew:$PWD/libs/nim-result"
-	export CT_EMULATOR_EXTRA_NIM_PATHS="$ct_nim_paths_lib"
-	export CODETRACER_TRACE_FORMAT_NIM_EXTRA_PATHS="${CODETRACER_TRACE_FORMAT_NIM_EXTRA_PATHS:-$ct_nim_paths_lib}"
-fi
-
-# The tup rules' roots, all three from one command (ci/lib/tup-cargo-target.sh
-# --export), and src/Tuprules.tup refuses to parse without any of them:
-#
-#   * the Cargo target base: this checkout's, keyed on the compiler, created
-#     or reopened only after the helper has checked that it is
-#     (codetracer-pm spec/Testing/UI-Cargo-Output-Ownership.md). A value
-#     already in the environment is passed to the helper, which refuses one
-#     that names another checkout or compiler, so a stale shell stops here
-#     instead of building into someone else's target;
-#   * the Nim cache root, `<checkout basename>-<cksum of its path>`,
-#     so two worktrees running `just build-once` at once no longer compile
-#     into one cache (measured 2026-11-14: "final link failed: bad value"
-#     linking ct-test). Printed fresh, so an inherited one is replaced.
-#
-# `--reap` because this is a build: it removes this checkout's older-compiler
-# bases (see the helper's REAPING section). A stripped-down fixture tree
-# without the helper leaves the variables unset, and its stub tup never parses.
-if [ -f "$CT_ROOT/ci/lib/tup-cargo-target.sh" ]; then
-	if ! ct_tup_cargo_env="$("${BASH:-bash}" "$CT_ROOT/ci/lib/tup-cargo-target.sh" --reap --export "$CT_ROOT")"; then
-		echo "build-once: no Cargo target base this checkout owns (see above); not building." >&2
-		exit 1
-	fi
-	eval "$ct_tup_cargo_env"
-fi
-
-# tup's dependency tracking is a FUSE mount, and libfuse can only obtain
-# /dev/fuse through a setuid helper at a path compiled into the binary. When
-# that helper is missing, tup reports a mount timeout three layers away from
-# the cause -- which is how `cross-process-linux` spent its runs failing at
-# "Unable to mount FUSE on .tup/mnt". Check it here, where the diagnostic can
-# still name the host requirement.
-"${BASH:-bash}" "$SCRIPT_DIR/require-fuse-mount-helper.sh" "${TUP:-tup}"
-
-# We have to make the dist directory here, because it's missing on a fresh check out
-# It will be created by the webpack command below, but we have an a chicken and egg
-# problem because the Tupfiles refer to it.
-mkdir -p src/public/dist
-
-# tup expands `: foreach <dir>/<glob>` at PARSE time and produces zero rules --
-# no warning, no error -- when the directory is absent or the glob matches
-# nothing. Issue #605 was exactly that: an asset-publication rule pointed at a
-# directory the SVGs had not been moved into yet, so it published nothing and
-# the build failed several steps later with an error that named neither the
-# Tupfile nor the directory. Run after the `mkdir -p` above, because
-# `src/public/dist` is one of the directories the rules glob.
-"${BASH:-bash}" "$SCRIPT_DIR/require-tup-globs.sh"
-
-cd src
-# A fresh checkout must not inherit a Tup database from a parent directory.
-# --force permits a nested project; it is used only when our own database is
-# absent, and leaves the ancestor database untouched.
-if [ ! -d .tup ]; then
-	"${TUP:-tup}" init --force
-fi
-if [ ! -f .tup/db ]; then
-	echo "build-once: src/.tup/db is missing; refusing to build in an ancestor Tup project" >&2
-	exit 1
-fi
-"${TUP:-tup}" "$ct_tup_variant"
-cd ..
-
-# Build frontend_bundle.js in the dist folder
-node_modules/.bin/webpack --progress
-
-# We need to execute another tup run because webpack may have created some new files
-# that tup will discover
-cd src
-"${TUP:-tup}" "$ct_tup_variant"
-cd ..
-
-# Re-apply BPF capabilities on the ct binary. Tup's FUSE sandbox prevents
-# sudo from running during the build, so we do this as a post-build step.
-# Silently skips if codetracer-setcap is not installed.
-scripts/post-build-setcap.sh "src/$ct_tup_variant/bin/ct"
-
-# Last: assert the variant tree actually carries the assets `ct` reads on
-# startup. tup exits 0 when a runtime asset is simply never published -- there
-# is no rule to fail -- which is how `src/build-debug/config/` stayed empty
-# across every clean build while `ct` died on first run with an uncaught
-# OSError naming `config/default_config.yaml`. `src/config/Tupfile` publishes
-# them now; this is what makes the next regression loud, here, rather than on a
-# user's machine. See scripts/require-runtime-assets.sh.
-"${BASH:-bash}" "$SCRIPT_DIR/require-runtime-assets.sh" "src/$ct_tup_variant"

@@ -32,7 +32,7 @@
 # (#b0b0b0 session tabs, #a5f3fc agent text, white checkbox outlines) survived
 # the fix of the second (codetracer-pm issue 2026-10-21).
 #
-# It compiles the two Electron stylesheets the Tupfile ships
+# It compiles the two Electron stylesheets the build ships
 # (`default_dark_theme_electron.styl`, `default_white_theme_electron.styl`)
 # with the same `stylus` the build uses, into a scratch directory, and hands
 # them to `css-light-theme-grounds.py`, whose header says what it asserts and
@@ -44,8 +44,8 @@
 # surfaces), so the output is what it reads.
 #
 # Only these two sheets: the web IDE loads the same `{name}_theme_electron.css`
-# (renderer.nim `loadTheme`), and the Tupfile's other light output,
-# `default_white_theme.css`, is the palette file alone and compiles empty.
+# (renderer.nim `loadTheme`), and the retired tup build's other light output,
+# `default_white_theme.css`, was the palette file alone and compiled empty.
 
 set -euo pipefail
 

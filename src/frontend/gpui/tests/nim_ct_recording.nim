@@ -23,7 +23,7 @@
 ## `2026-11-12-rr-replay-of-a-c-program-that-uses-the-heap-fails-on-the-linux-workstation.md`).
 ##
 ## Prerequisites, named rather than assumed (`MISSING-PREREQ SKIP:` with which
-## is missing): `ct` (`$CT_BIN`, else the checkout's `src/build-debug/bin/ct`,
+## is missing): `ct` (`$CT_BIN`, else the checkout's `src/build-debug-repro/bin/ct`,
 ## else `ct` on the PATH); `ct-mcr` (`$CODETRACER_CT_MCR_CMD`, else
 ## `$CODETRACER_CT_MCR_PATH`, else the sibling codetracer-native-recorder's
 ## `ct_cli/ct_cli`, which `scripts/detect-siblings.sh` exports the same way);
@@ -77,7 +77,7 @@ proc findCt(): string =
   let fromEnv = getEnv("CT_BIN")
   if fromEnv.len > 0:
     return (if fileExists(fromEnv): fromEnv else: "")
-  let built = repoRootOf() / "src" / "build-debug" / "bin" / "ct"
+  let built = repoRootOf() / "src" / "build-debug-repro" / "bin" / "ct"
   if fileExists(built): built else: findExe("ct")
 
 proc findCtMcr(): string =

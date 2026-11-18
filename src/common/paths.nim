@@ -533,7 +533,7 @@ let
   codetracerInstallDir* = when defined(builtWithNix):
     codetracerExeDir # e.g. result/ (from result/)
   else:
-    codetracerExeDir.parentDir.parentDir # <top-level>/ (from <top-level>/src/build-debug/)
+    codetracerExeDir.parentDir.parentDir # <top-level>/ (from <top-level>/src/build-debug-repro/)
 
   nodeModulesPath* = codetracerPrefix / "node_modules"
 

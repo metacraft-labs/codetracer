@@ -48,7 +48,7 @@ type Node = {
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repo = path.resolve(here, "..", "..", "..", "..", "..");
 const srcDir = path.join(repo, "src");
-const buildDir = process.env.CODETRACER_BUILD_DIR ?? path.join(srcDir, "build-debug");
+const buildDir = process.env.CODETRACER_BUILD_DIR ?? path.join(srcDir, "build-debug-repro");
 const ctBin = process.env.CT_BIN ?? path.join(buildDir, "bin", "ct");
 // How long a window's document may take to load: the arm's own open wait
 // (DemoVideoScript-Playwright `OPEN_WAIT`), not Playwright's 30 s default.

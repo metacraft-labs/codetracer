@@ -15,7 +15,7 @@
 ## password at all, and while a message named a `--password` flag that does not
 ## exist.  Both were found by running the shipped binary.
 ##
-## So the subject here is `src/build-debug/bin/ct`, run as a user runs it,
+## So the subject here is `src/build-debug-repro/bin/ct`, run as a user runs it,
 ## against a stand-in for the sharing service on a real loopback socket, with a
 ## scratch `HOME` so the real trace index and the real config are untouched.
 ##
@@ -66,7 +66,7 @@ import ../../ct_test/incremental/m1_ctfs_fixture
 import ../../common/lang
 
 const
-  CtBinary = "src/build-debug/bin/ct"
+  CtBinary = "src/build-debug-repro/bin/ct"
   ServiceTenantId = "0194a000-2222-7abc-8def-000000000002"
     ## A GUID, so `resolveTenantId` returns it directly and the upload path
     ## needs no `/tenants` round trip.  The download path does need one, and
