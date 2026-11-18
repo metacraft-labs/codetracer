@@ -8,9 +8,11 @@
 //
 // The stories are the "Layouts" group's L1 to L14, read from stories.json
 // (ids `codetracer-layouts--l-<n>-...`), which `just storybook-stories` writes
-// from the same declaration the editor instance shows. Each is opened in the
-// editor's page preview, the surface that carries the zoom cluster, through
-// its story URL (`view=page`, `viewport=wide`, `zoom=fit`), in a 1920x1080
+// from the same declaration the editor instance shows. The instance lists the
+// Layouts group under Pages (its stories are whole windows), so each is a
+// page story (`kind=page`), opened in the editor's page preview, the surface
+// that carries the zoom cluster, through its story URL (`view=page`,
+// `viewport=wide`, `zoom=fit`), in a 1920x1080
 // browser window, once in each CodeTracer theme (`ctTheme=dark` and
 // `ctTheme=light`). Every number below is measured in the live page; nothing is
 // judged from a screenshot. The screenshots, `l-<n>-<fit|100>-<theme>.png` in
@@ -143,7 +145,7 @@ function storyUrl(story, zoom, theme) {
   const index = Math.max(0, stories.filter((s) => s.editorGroup === story.editorGroup)
     .findIndex((s) => s.name === story.name));
   const q = new URLSearchParams({ view: "page", storyGroup: story.editorGroup, story: story.name,
-    kind: "component", index: String(index), viewport: "wide", zoom, ctTheme: theme });
+    kind: "page", index: String(index), viewport: "wide", zoom, ctTheme: theme });
   return `${origin}/?${q}`;
 }
 
