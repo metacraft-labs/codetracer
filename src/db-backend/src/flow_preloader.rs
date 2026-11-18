@@ -124,6 +124,67 @@ fn step_belongs_to_window_file(window_path: &str, step_path: &str) -> bool {
 #[derive(Debug)]
 pub struct FlowPreloader {
     pub expr_loader: ExprLoader,
+    /// Who hears how a walk is going while it runs, if anyone (see
+    /// [`FlowPreloader::report_progress`]).
+    progress: Option<FlowProgressReporter>,
+}
+
+/// How far a flow walk has got: sent while it runs, so a front-end waiting
+/// on `ct/load-flow` sees a working engine rather than silence.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FlowProgress {
+    /// The steps the walk has visited so far, rendered or not.
+    pub steps_walked: i64,
+    /// Milliseconds since the walk began.
+    pub elapsed_ms: u64,
+}
+
+/// A walk's progress listener and how often it is told.
+struct FlowProgressReporter {
+    every_ms: u64,
+    report: Box<dyn Fn(FlowProgress) + Send>,
+}
+
+impl std::fmt::Debug for FlowProgressReporter {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("FlowProgressReporter")
+            .field("every_ms", &self.every_ms)
+            .finish()
+    }
+}
+
+/// The walk's progress clock: when it began and when it last reported.
+struct ProgressClock {
+    started_ms: u64,
+    last_report_ms: u64,
+}
+
+impl ProgressClock {
+    fn start() -> Self {
+        let now = crate::wall_clock::monotonic_ms();
+        ProgressClock {
+            started_ms: now,
+            last_report_ms: now,
+        }
+    }
+
+    /// Tell the reporter, if there is one and `every_ms` has passed since the
+    /// last time it was told.
+    fn tick(&mut self, reporter: Option<&FlowProgressReporter>, steps_walked: i64) {
+        let Some(reporter) = reporter else {
+            return;
+        };
+        let now = crate::wall_clock::monotonic_ms();
+        if now.saturating_sub(self.last_report_ms) < reporter.every_ms {
+            return;
+        }
+        self.last_report_ms = now;
+        (reporter.report)(FlowProgress {
+            steps_walked,
+            elapsed_ms: now.saturating_sub(self.started_ms),
+        });
+    }
 }
 
 #[allow(clippy::new_without_default)]
@@ -131,7 +192,21 @@ impl FlowPreloader {
     pub fn new() -> Self {
         FlowPreloader {
             expr_loader: ExprLoader::new(CoreTrace::default()),
+            progress: None,
         }
+    }
+
+    /// Report the progress of every walk this preloader runs, at most once
+    /// per `every` while it walks, until [`Self::stop_reporting_progress`].
+    pub fn report_progress(&mut self, every: std::time::Duration, report: impl Fn(FlowProgress) + Send + 'static) {
+        self.progress = Some(FlowProgressReporter {
+            every_ms: u64::try_from(every.as_millis()).unwrap_or(u64::MAX),
+            report: Box::new(report),
+        });
+    }
+
+    pub fn stop_reporting_progress(&mut self) {
+        self.progress = None;
     }
 
     /// Puts this preloader, and every walk it starts, under a session's
@@ -873,6 +948,7 @@ impl<'a> CallFlowPreloader<'a> {
         // counts only RENDERED steps, so it cannot bound a walk that is skipping
         // foreign-file steps (see `step_belongs_to_window_file`).
         let mut walked_steps: i64 = 0;
+        let mut progress_clock = ProgressClock::start();
         // How many steps this window declined because they came from another
         // file. Reported once at the end so the skipping is visible rather than
         // a silent difference in the step count.
@@ -1099,6 +1175,7 @@ impl<'a> CallFlowPreloader<'a> {
                 // itself as well, or a trace that spends its whole call in
                 // other files would walk without limit.
                 walked_steps += 1;
+                progress_clock.tick(self.flow_preloader.progress.as_ref(), walked_steps);
                 if walked_steps >= STEP_COUNT_LIMIT as i64 {
                     info!("  break flow because of walked step limit while skipping foreign-file steps");
                     break;
@@ -1106,6 +1183,7 @@ impl<'a> CallFlowPreloader<'a> {
                 continue;
             }
             walked_steps += 1;
+            progress_clock.tick(self.flow_preloader.progress.as_ref(), walked_steps);
 
             let events = self.load_step_flow_events(replay, step_id);
             // for now not sending last step id for line visit
