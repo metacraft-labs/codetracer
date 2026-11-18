@@ -4626,6 +4626,32 @@ jobs:
             # `ct shell-session` imports nim_pty (src/common/shell_session.nim).
             nim-pty
 
+      # codetracer-trace-format-nim's recipe reads its tool paths from the
+      # schema-1 manifest its `toolPathsFile` variant selects, with no ambient
+      # fallback; without it its provider refuses to start and build-once
+      # refuses first. Windows has no Nix dev shell to publish the manifest, so
+      # trace-format-nim's own binders write it and select it in REPRO_VARIANTS
+      # (through GITHUB_ENV), exactly as its ci-reprobuild.yml Windows leg does.
+      - name: Bind trace-format-nim's locked Nim sources (tool-path manifest)
+        shell: pwsh
+        working-directory: ../codetracer-trace-format-nim
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $here = (Get-Location).Path
+          ./ci/acquire-windows-nim-sources.ps1 -Destination "$env:RUNNER_TEMP/trace-nim-sources" `
+            -Manifest (Join-Path $here 'ci/windows-complete-source-manifest.json') `
+            -Lock (Join-Path $here 'flake.lock') `
+            -Receipt "$env:RUNNER_TEMP/trace-nim-source-receipt.json"
+
+      - name: Bind trace-format-nim's declared Zstd (tool-path manifest)
+        shell: pwsh
+        working-directory: ../codetracer-trace-format-nim
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $powerShell = (Get-Command pwsh -CommandType Application -ErrorAction Stop | Select-Object -First 1).Source
+          repro exec ./ci/windows-zstd-prerequisite -- $powerShell -NoProfile -File (Join-Path (Get-Location).Path 'ci/bind-declared-windows-zstd.ps1')
+          if ($LASTEXITCODE -ne 0) { throw "declared Windows Zstd prerequisite failed: $LASTEXITCODE" }
+
       - name: Build CodeTracer-Setup.exe
         shell: bash
         env:

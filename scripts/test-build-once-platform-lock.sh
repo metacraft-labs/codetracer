@@ -125,12 +125,45 @@ if [ "$status" != 71 ] || ! grep -Fq 'toolPathsFile=/chosen/paths.json' "$work/a
 fi
 echo 'PASS: an explicit toolPathsFile selection wins over the dev shell manifest'
 tool_paths_run MINGW64_NT
-if [ "$status" != 71 ] || grep -q toolPathsFile "$work/args.variants"; then
+if [ "$status" = 71 ] || [ -e "$work/args" ] || ! grep -q 'acquire-windows-nim-sources.ps1' "$work/log"; then
 	cat "$work/log" >&2
-	echo 'FAIL: the Windows branch, which has no dev-shell manifest, changed behaviour' >&2
+	echo 'FAIL: a Windows build without the tool-path manifest was not refused, naming the binders' >&2
 	exit 1
 fi
-echo 'PASS: the Windows branch selects a manifest only when one is named'
+tool_paths_run MINGW64_NT 'REPRO_VARIANTS=toolPathsFile=C:\a\trace-repro-tool-paths.json'
+if [ "$status" != 71 ] || ! grep -Fq 'toolPathsFile=C:\a\trace-repro-tool-paths.json' "$work/args.variants"; then
+	cat "$work/log" >&2
+	echo "FAIL: the Windows binders' REPRO_VARIANTS selection was not passed to repro" >&2
+	exit 1
+fi
+echo 'PASS: Windows refuses without the binders, and passes their selection through'
+
+# The Windows installer job runs trace-format-nim's binders, from that
+# sibling's checkout, before build-once.sh; a copy without either is caught.
+wf_binders_ok() { # $1 = workflow file
+	awk '
+		/^  windows-installer-build:$/ { job = 1; next }
+		job && /^  [A-Za-z0-9_-]+:$/ { job = 0 }
+		!job { next }
+		/working-directory: \.\.\/codetracer-trace-format-nim/ { dir = 1 }
+		dir && /acquire-windows-nim-sources\.ps1/ && !build { sources = 1 }
+		dir && /bind-declared-windows-zstd\.ps1/ && !build { zstd = 1 }
+		/bash scripts\/build-once\.sh/ { build = 1 }
+		END { exit !(sources && zstd && build) }
+	' "$1"
+}
+wf="$root/.github/workflows/codetracer.yml"
+wf_binders_ok "$wf" || {
+	echo 'FAIL: windows-installer-build does not bind trace-format-nim tool paths before build-once' >&2
+	exit 1
+}
+grep -v 'bind-declared-windows-zstd\.ps1' "$wf" >"$work/wf-no-zstd.yml"
+grep -v 'acquire-windows-nim-sources\.ps1' "$wf" >"$work/wf-no-sources.yml"
+if wf_binders_ok "$work/wf-no-zstd.yml" || wf_binders_ok "$work/wf-no-sources.yml"; then
+	echo 'FAIL: the workflow binder check passes a copy without a binder' >&2
+	exit 1
+fi
+echo 'PASS: windows-installer-build binds the tool paths before build-once, and a copy without a binder is caught'
 mkdir "$work/other"
 run_driver Darwin arm64 build "$work/other"
 grep -Fx -- "$work/locks/arm64-macosx.lock" "$work/args" >/dev/null
