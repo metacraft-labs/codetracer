@@ -1039,9 +1039,9 @@ argv: ct "ct-complete" "record" ""
 env: (none)
 exit: 0
 --- stdout
+cthome/
 home/
 tmp/
-cthome/
 --- stderr
 --- end
 
@@ -1105,9 +1105,9 @@ argv: ct "ct-complete" "upload" "--omniscient-db" ""
 env: (none)
 exit: 0
 --- stdout
+cthome/
 home/
 tmp/
-cthome/
 --- stderr
 --- end
 
@@ -1124,9 +1124,9 @@ argv: ct "ct-complete" "trace" ""
 env: (none)
 exit: 0
 --- stdout
+cthome/
 home/
 tmp/
-cthome/
 --- stderr
 --- end
 
@@ -1135,9 +1135,9 @@ argv: ct "ct-complete" "ci" ""
 env: (none)
 exit: 0
 --- stdout
+cthome/
 home/
 tmp/
-cthome/
 --- stderr
 --- end
 
@@ -1156,9 +1156,9 @@ argv: ct "ct-complete" "arb" ""
 env: (none)
 exit: 0
 --- stdout
+cthome/
 home/
 tmp/
-cthome/
 --- stderr
 --- end
 
@@ -1213,9 +1213,9 @@ argv: ct "ct-complete" "review" ""
 env: (none)
 exit: 0
 --- stdout
+cthome/
 home/
 tmp/
-cthome/
 --- stderr
 --- end
 
