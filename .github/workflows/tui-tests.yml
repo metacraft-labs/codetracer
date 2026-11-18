@@ -255,6 +255,27 @@ jobs:
           [[ $result =~ ^needed=(true|false)$ ]] || { echo "scenario-slice-uses-stage printed '${result}', not needed=true|false" >&2; exit 1; }
           echo "$result" | tee -a "$GITHUB_OUTPUT"
 
+      - name: Restore the visual replay tools from the visual-replay-tools job
+        # ct-native-replay, ct_gfx_player and ct-mcr, built once per run in
+        # parallel with ct-build (visual-replay-tools.yml), rather than in this
+        # job (about 22 minutes for ct-mcr alone in GPUI shard 1 of run
+        # 44269676398). Best effort: when the artifact is missing or short,
+        # ci/test/visual-replay-tools.sh builds them here as before.
+        if: ${{ !cancelled() && steps.ct.outcome == 'success' && steps.player.outputs.needed == 'true' }}
+        id: vr_tools
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: visual-replay-tools
+          path: ${{ runner.temp }}/visual-replay-tools
+
+      - name: Unpack the visual replay tools
+        if: ${{ !cancelled() && steps.ct.outcome == 'success' && steps.player.outputs.needed == 'true' && steps.vr_tools.outcome == 'success' }}
+        continue-on-error: true
+        run: |
+          bash ci/unpack-ct-build-products.sh "${RUNNER_TEMP}/visual-replay-tools" visual-replay-tools.tar.gz
+          echo "CT_VISUAL_REPLAY_TOOLS_PREBUILT=1" >>"$GITHUB_ENV"
+
       - name: Build the visual replay player for this shard's visual-recording scenarios
         # terminal/visual-replay-video-player opens a visual recording, which
         # needs ct_gfx_player, ct-native-replay's test licence and ct-mcr; no

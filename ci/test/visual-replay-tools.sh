@@ -44,8 +44,19 @@ mkdir -p "${license_dir}"
 	--license-file "${license_dir}/visual-replay-test.license.dat" \
 	--env-file "${license_dir}/visual-replay-test.env"
 
-(cd "${visual}" && CODETRACER_NATIVE_REPLAY="${native_replay}" nix develop --command bash -c \
-	'nimble build && ./scripts/install-native-replay-companion.sh && just build-ct-mcr')
+# CT_VISUAL_REPLAY_TOOLS_PREBUILT=1: the job restored ct_gfx_player, its
+# companion and ct-mcr from the visual-replay-tools job (built once per run), so
+# they are not rebuilt here. Only that flag, never a binary merely being
+# present, skips the build: a persistent runner keeps an older build from
+# another revision in the same paths.
+if [ "${CT_VISUAL_REPLAY_TOOLS_PREBUILT:-}" = 1 ] && [ -x "${visual}/ct_gfx_player" ] &&
+	[ -x "${recorder}/ct_cli/ct_cli" ]; then
+	echo "visual-replay-tools: ct_gfx_player and ct-mcr are prebuilt (the visual-replay-tools job)"
+	[ -x "${visual}/ct-native-replay" ] || cp "${native_replay}" "${visual}/ct-native-replay"
+else
+	(cd "${visual}" && CODETRACER_NATIVE_REPLAY="${native_replay}" nix develop --command bash -c \
+		'nimble build && ./scripts/install-native-replay-companion.sh && just build-ct-mcr')
+fi
 
 {
 	cat "${license_dir}/visual-replay-test.env"

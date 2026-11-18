@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
-# unpack-ct-build-products.sh DIR -- check, then unpack, the ct-build job's
-# products archive (DIR/ct-build-products.tar.gz) beside the sibling checkouts.
+# unpack-ct-build-products.sh DIR [ARCHIVE] -- check, then unpack, an archive a
+# once-per-run job uploads (DIR/ARCHIVE, default ct-build-products.tar.gz: the
+# ct-build job's; visual-replay-tools.tar.gz is the visual-replay-tools job's)
+# beside the sibling checkouts.
 #
 # actions/download-artifact can end "successfully" with a short file: GPUI
 # shard 15 and TUI shard 7 of run 44269676398 spent 20 minutes downloading the
@@ -10,8 +12,8 @@
 # good archive unpacks as before. ci/test/unpack-ct-build-products-test.sh
 # holds both.
 set -euo pipefail
-dir="${1:?usage: unpack-ct-build-products.sh DIR}"
-archive="${dir}/ct-build-products.tar.gz"
+dir="${1:?usage: unpack-ct-build-products.sh DIR [ARCHIVE]}"
+archive="${dir}/${2:-ct-build-products.tar.gz}"
 dest="${CT_BUILD_PRODUCTS_DEST:-..}"
 if [ ! -s "$archive" ]; then
 	echo "unpack-ct-build-products: ${archive} is missing or empty" >&2

@@ -64,6 +64,12 @@ lint_step "a commit outside a package's inputs leaves its derivation alone" \
 lint_step "every flake package is built by a CI job or excepted" \
 	bash ci/test/flake-packages-built-test.sh
 
+# The dev shells copy tree-sitter-nim's parser from the tree-sitter-nim-parser
+# package instead of generating it per checkout: it must be what `tree-sitter
+# generate` writes for the pinned grammar, and copied only for that grammar.
+lint_step "the prebuilt tree-sitter-nim parser is what the grammar generates" \
+	bash ci/test/tree-sitter-nim-parser-test.sh
+
 # Requires the host's Nix daemon and real local bare repositories, so this
 # belongs to the Nix lane rather than the lightweight shell-only lint lane.
 lint_step "Nix Git hooks in fresh worktrees" bash ci/test/nix-git-hooks-test.sh
