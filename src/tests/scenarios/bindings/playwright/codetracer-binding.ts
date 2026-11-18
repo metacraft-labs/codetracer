@@ -50,6 +50,9 @@ const repo = path.resolve(here, "..", "..", "..", "..", "..");
 const srcDir = path.join(repo, "src");
 const buildDir = process.env.CODETRACER_BUILD_DIR ?? path.join(srcDir, "build-debug");
 const ctBin = process.env.CT_BIN ?? path.join(buildDir, "bin", "ct");
+// How long a window's document may take to load: the arm's own open wait
+// (DemoVideoScript-Playwright `OPEN_WAIT`), not Playwright's 30 s default.
+const WINDOW_LOAD_WAIT_MS = 600_000;
 
 function stageCli(): string {
   const p = process.env.CT_SCENARIO_STAGE ?? path.join(repo, "build", "bin", "ct-scenario-stage");
@@ -3392,7 +3395,12 @@ async function launchElectron(ctx: Ctx, launch: any): Promise<void> {
     if (!page) await new Promise((r) => setTimeout(r, 100));
   }
   if (!page) throw new Error("Electron opened no editor window");
-  await page.waitForLoadState("domcontentloaded");
+  // The window's document, waited for as long as the arm waits for a page to
+  // load (DemoVideoScript-Playwright's OPEN_WAIT, 600 s): Playwright's 30 s
+  // default is less than a loaded host takes to load the desktop's page, and
+  // the stage then failed before the scenario's first step. Whether the
+  // application is ready is the scenario's own first wait.
+  await page.waitForLoadState("domcontentloaded", { timeout: WINDOW_LOAD_WAIT_MS });
   // the window at the size the stage asked for
   // (A multi-recording session can navigate its window while it loads, which
   // destroys the context this runs in: try again.)
@@ -3694,7 +3702,7 @@ const binding = {
         p.url() !== "about:blank" && !p.url().startsWith("devtools://"));
       if (w) {
         taken.push(w);
-        await w.waitForLoadState("domcontentloaded");
+        await w.waitForLoadState("domcontentloaded", { timeout: WINDOW_LOAD_WAIT_MS });
         // A window opened after startup is sent its session once its renderer
         // answers the main process's handshake; it has finished opening when
         // it shows the session's stop (the `replay-idle` reading). Waited for
