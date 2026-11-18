@@ -444,9 +444,10 @@ jobs:
             # nim-agent-harbor 2026-11-15, after the lock re-pin 7cae04a33.
             # isonim, nim-pty and nim-agents 2026-11-16, to the revisions
             # flake.lock and repro.lock pin (they had moved past this list).
+            # isonim-gpui 2026-11-18 (it renders only what changed per frame).
             isonim=03183989147a6e5d109bf03638dc49bb74ecf248
             isonim-tui=8e43ce06f7f078530c7a8585c210ad7648fa0051
-            isonim-gpui=2db29d9fa463ee6975ba436844553993a385661f
+            isonim-gpui=2fdadfdf9baaa9af67fd4cc9e0039c4c83fb7af0
             nim-everywhere=2f5b67a5dafd96ca5d57c9270fc3c2da2c5f2b0b
             nim-termctl=63560ed41ce0fea563431a44db9e9d852cd703dd
             nim-pty=6ffb8d788e8a740ca78ec29c7a3a489a13818bcb
