@@ -1719,6 +1719,11 @@ proc committedLayout(): Layout =
   let idx = gShell.windows.indexOf(gWindow)
   gShell.windows.windows[idx].layout
 
+const FaceAppliedAttribute = "data-ct-face"
+const EditorPadAttribute = "data-ct-editor-pad"
+  ## The `padding-top` the replay editor was last given.
+  ## The font family `applyTextFaces` last gave an element.
+
 proc applyTextFaces*(r: GpuiRenderer; node: GpuiElement): int {.discardable.} =
   ## PLAT-35 — **THE DECLARED TEXT METRIC, APPLIED.**
   ##
@@ -1756,7 +1761,12 @@ proc applyTextFaces*(r: GpuiRenderer; node: GpuiElement): int {.discardable.} =
     return 0
   let family = fontFamilyForMetric(getAttribute(node, TextMetricAttribute))
   if family.len > 0:
-    r.setStyle(node, "font-family", family)
+    # Stamped once per element: every setter marks the node changed in the
+    # shadow tree, and a pane re-stamped after each redraw would be
+    # re-planned whole even where nothing in it moved.
+    if getAttribute(node, FaceAppliedAttribute) != family:
+      r.setStyle(node, "font-family", family)
+      r.setAttribute(node, FaceAppliedAttribute, family)
     result = 1
   for i in 0 ..< childCount(node):
     result += applyTextFaces(r, nthChild(node, i))
@@ -2621,21 +2631,101 @@ proc syncLeafContext() =
     callTracePaneWidthPx = gGeom.nodes[ct].body.w
     callTracePaneHeightPx = gGeom.nodes[ct].body.h
 
+proc wireDetached(r: GpuiRenderer; root: GpuiElement)
+  ## A redraw drawn into a detached element wired and pointer-stamped as
+  ## `wireClicks` would wire it, so it compares equal to the live content it
+  ## may stand for (`patchPane`).
+
+var gFullRedraw = getEnv("CODETRACER_GPUI_FULL_REDRAW").len > 0
+  ## Every redraw replaces the pane's whole content (the old behaviour), for
+  ## the test that compares the two.
+
+proc shallowSame(a, b: JsonNode): bool =
+  ## Two render-plan nodes that draw the same element, apart from children.
+  for k in ["kind", "tag", "text", "has_click_handler", "has_input_handler",
+            "event_names", "styles", "attributes"]:
+    if a{k} != b{k}:
+      return false
+  true
+
+proc patchChildren(r: GpuiRenderer; live, fresh: GpuiElement;
+                   liveJ, freshJ: JsonNode): int {.discardable.} =
+  ## Make `live`'s children draw what `fresh`'s draw, keeping every live
+  ## element whose plan is the fresh one's: an unchanged element keeps its
+  ## identity and receives no write, so the shadow tree's dirty marks — and
+  ## the shim's cached views — skip it. A changed element with handlers is
+  ## REPLACED (its handlers are closures over the state it was drawn from);
+  ## one without is kept and patched below when only its children differ.
+  ## Answers how many elements were replaced. `fresh` is left holding
+  ## whatever it did not give up.
+  let lc = liveJ{"children"}
+  let fc = freshJ{"children"}
+  let n = childCount(live)
+  if lc.isNil or fc.isNil or n != childCount(fresh) or lc.len != n or fc.len != n:
+    while childCount(live) > 0:
+      r.removeChild(live, nthChild(live, childCount(live) - 1))
+    while childCount(fresh) > 0:
+      let c = nthChild(fresh, 0)
+      r.removeChild(fresh, c)
+      r.appendChild(live, c)
+      inc result
+    return
+  var replace: seq[int]
+  for i in 0 ..< n:
+    if lc[i] == fc[i]:
+      continue
+    let quiet = not fc[i]{"has_click_handler"}.getBool and
+                not fc[i]{"has_input_handler"}.getBool and
+                fc[i]{"event_names"}.len == 0
+    if quiet and shallowSame(lc[i], fc[i]):
+      result += patchChildren(r, nthChild(live, i), nthChild(fresh, i), lc[i], fc[i])
+    else:
+      replace.add i
+  # Replaced from the last, so the earlier indices stand.
+  for k in countdown(replace.high, 0):
+    let i = replace[k]
+    let old = nthChild(live, i)
+    let neu = nthChild(fresh, i)
+    r.removeChild(fresh, neu)
+    r.insertBefore(live, neu, old)
+    r.removeChild(live, old)
+    inc result
+
+proc patchPane(r: GpuiRenderer; live, fresh: GpuiElement) =
+  ## `live`'s content made `fresh`'s (see `patchChildren`), then `fresh` and
+  ## whatever it still holds freed.
+  if gFullRedraw:
+    while childCount(live) > 0:
+      r.removeChild(live, nthChild(live, childCount(live) - 1))
+    while childCount(fresh) > 0:
+      let c = nthChild(fresh, 0)
+      r.removeChild(fresh, c)
+      r.appendChild(live, c)
+  else:
+    let liveJ = parseJson(r.renderPlanJson(live))
+    let freshJ = parseJson(r.renderPlanJson(fresh))
+    patchChildren(r, live, fresh, liveJ, freshJ)
+  gpui_destroy_tree(fresh)
+
 proc redrawWindowLeaf(r: GpuiRenderer; pane: GpuiElement; leaf: GpuiLeaf) =
   ## `leaves.redrawLeafBody` for a pane whose heading the window removed:
-  ## that procedure keeps its node's FIRST child as the heading and redraws
-  ## the rest, so the old content is cleared first and a stand-in first child
-  ## held while it runs, then dropped — the pane is left with exactly the
-  ## content `renderPaneView` drew.
+  ## drawn into a detached element (that procedure keeps its node's FIRST
+  ## child as the heading, so a stand-in first child is held while it runs,
+  ## then dropped), its faces stamped, and then PATCHED into the pane
+  ## (`patchPane`): the pane is left with exactly the content
+  ## `renderPaneView` drew, and an element that draws as it did is kept.
   syncLeafContext()
   if pane.isNil:
     return
-  while childCount(pane) > 0:
-    r.removeChild(pane, nthChild(pane, childCount(pane) - 1))
+  let fresh = r.createElement("div")
   let stand = r.createElement("div")
-  r.appendChild(pane, stand)
-  redrawLeafBody(r, pane, leaf)
-  r.removeChild(pane, stand)
+  r.appendChild(fresh, stand)
+  redrawLeafBody(r, fresh, leaf)
+  r.removeChild(fresh, stand)
+  gpui_destroy_tree(stand)
+  applyTextFaces(r, fresh)
+  wireDetached(r, fresh)
+  patchPane(r, pane, fresh)
   # M71 (#838): the Files and VCS panes' scrollbars were the pane's children
   # too; drawn again over what the leaf now shows.
   if leaf.kind == glkBuiltin and leaf.builtin in {paneFileTree, paneVcs}:
@@ -6249,15 +6339,19 @@ proc redrawReplayEditor(r: GpuiRenderer) =
     medium = GpuiMedium,
     points = editorPointsOf(gSession.session.store.pointList.rows.val))
   # No heading in the window (PLAT-49): every child is the editor's own.
-  while childCount(editor) > 0:
-    r.removeChild(editor, nthChild(editor, childCount(editor) - 1))
+  # Drawn into a detached element and patched in (`patchPane`): the rows a
+  # move did not change keep their elements.
+  let fresh = r.createElement("div")
   # PLAT-51: the caret stays where the user put it (a move does not move
   # it), on the file it was placed in — it is the file's document's
   # (PLAT-68), and so is the selection.
   # The flow's values are on the surface already (`editor_surface.
   # flowValuesByLine`, the rule the terminal draws too).
   gEditorSurface = withDebugDocument(surface)
-  r.setStyle(editor, "padding-top", $max(0, editorTopInsetPx()) & "px")
+  let padTop = $max(0, editorTopInsetPx()) & "px"
+  if getAttribute(editor, EditorPadAttribute) != padTop:
+    r.setAttribute(editor, EditorPadAttribute, padTop)
+    r.setStyle(editor, "padding-top", padTop)
   editorLoopZones = loopZonesOf(gEditorSurface)
   block:
     let i = gGeom.tabsNodeOfPane($paneEditor)
@@ -6273,16 +6367,19 @@ proc redrawReplayEditor(r: GpuiRenderer) =
                             elif gSourceService.fileLines.hasKey(gEditorSurface.path):
                               gSourceService.fileLines[gEditorSurface.path].len
                             else: -1))
-  drawEditorBody(r, editor, sticky)
+  drawEditorBody(r, fresh, sticky)
   # A negative inset starts the rows above the editor's top: the first row
   # is pulled up by it, the pane's clip cutting off what is above.
   let inset = editorTopInsetPx()
   if inset < 0:
-    for k in 0 ..< childCount(editor):
-      let child = nthChild(editor, k)
+    for k in 0 ..< childCount(fresh):
+      let child = nthChild(fresh, k)
       if getAttribute(child, EditorRowAttribute).len > 0:
         r.setStyle(child, "margin-top", $inset & "px")
         break
+  applyTextFaces(r, fresh)
+  wireDetached(r, fresh)
+  patchPane(r, editor, fresh)
   noteEditorTab(r, editorTabLabel(surface.path, false))
   # The rows just drawn take the design's faces here, whoever asked for the
   # redraw: a divider's resize redraws the editor through `syncEditorViewport`,
@@ -13775,6 +13872,11 @@ proc wireClicks(r: GpuiRenderer) =
   # The tree is read once for both walks (`snapshotTree`): they run after
   # every redraw, a divider's live drag redraws on every motion, and reading
   # it element by element cost that drag about 50 ms a motion.
+  var nodes = snapshotTree(root)
+  discard wireWindowClicks(r, nodes, addr gPressDedupe, onPaneClick)
+  stampPointerShapes(r, nodes)
+
+proc wireDetached(r: GpuiRenderer; root: GpuiElement) =
   var nodes = snapshotTree(root)
   discard wireWindowClicks(r, nodes, addr gPressDedupe, onPaneClick)
   stampPointerShapes(r, nodes)

@@ -17,6 +17,8 @@ export pointer_shape
 const
   PointerStampAttribute* = "data-ct-pointer-kind"
     ## The `HitKind` a walk read off an element, for the render plan's reader.
+  PointerCssAttribute* = "data-ct-pointer-css"
+    ## The `cursor` a walk last gave an element.
 
   AttributeKinds: array[63, (string, HitKind)] = [
     ("data-ct-control", hkControl), ("data-ct-tool", hkControl),
@@ -115,4 +117,10 @@ proc stampPointerShapes*(r: GpuiRenderer; nodes: openArray[SnapshotNode]) =
       let kindName = $target.kind
       if n.attr(PointerStampAttribute) != kindName:
         r.setAttribute(el, PointerStampAttribute, kindName)
-      r.setStyle(el, "cursor", pointerShapeOf(target).cssName)
+      # Set only when it changes: every setter marks the element changed in
+      # the shadow tree, and this walk runs over the whole window after
+      # every redraw.
+      let css = pointerShapeOf(target).cssName
+      if n.attr(PointerCssAttribute) != css:
+        r.setAttribute(el, PointerCssAttribute, css)
+        r.setStyle(el, "cursor", css)
