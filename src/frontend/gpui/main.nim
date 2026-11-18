@@ -4162,6 +4162,18 @@ proc pressTableHBar(r: GpuiRenderer; x, y: int): bool =
     return true
   false
 
+proc listScrubberAt(x, y: int): bool =
+  ## Whether `(x, y)` is on a list pane's scrubber track (the State pane's
+  ## bar included): the press there is the scrubber's, not the row's under it.
+  for (kind, sm) in listScrubbers():
+    let body = visibleBodyOf(kind)
+    if body.w > 0 and sm.total > 0 and
+       listScrubHit(body, sm, x, y, $kind).onTrack:
+      return true
+  let track = stateBarTrack()
+  track.h > 0 and x >= track.x and x < track.x + track.w and
+    y >= track.y and y < track.y + track.h
+
 proc pressListScrubber(r: GpuiRenderer; x, y: int): bool =
   ## A left press on a list pane's scrubber: the track jumps the view, the
   ## thumb starts a drag.
@@ -13485,6 +13497,12 @@ proc onPaneClick(c: GPaneClick) =
   # not jump the debugger or reorder the log for it.
   if c.button == gbLeft and tableGestureAt(c.x, c.y):
     traceGesture("pane click " & $c.part & " left to the table gesture")
+    return
+  # Likewise a press on a list's scrubber track: the VCS pane's rows run
+  # under its inset track, and the row took the press the track's jump
+  # wanted (the root listener's `pressListScrubber`, which follows).
+  if c.button == gbLeft and listScrubberAt(c.x, c.y):
+    traceGesture("pane click " & $c.part & " left to the list scrubber")
     return
   traceGesture("pane click " & $c.part & " " & c.key & " #" & $c.index &
                " line " & $c.line & " " & $c.button &
