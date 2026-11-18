@@ -440,6 +440,16 @@ with pkgs;
     # Darwin shells.
     ourPkgs.ctRemote
 
+    # gdb, for the backtrace in an engine stall's dump
+    # (src/frontend/viewmodel/backend/engine_stall_dump.nim: a
+    # `replay-server` that stops answering is attached with
+    # `gdb -batch -ex "thread apply all bt"` before it is torn down). It
+    # adds nothing to the closure: this gdb is already in it, as the
+    # debugger the nixpkgs Nim wrapper (`nim-wrapper-2.2.4`) references for
+    # its `nim-gdb`. It was only off PATH, so
+    # CI's dumps read "(eu-stack is not on PATH)" where the backtrace goes.
+    gdb
+
     # glibc_multi resolves -m32 builds that Nim's csources still
     # produces in some configurations.
     glibc_multi
