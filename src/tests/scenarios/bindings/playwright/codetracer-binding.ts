@@ -302,7 +302,7 @@ Object.assign(ROLES, {
 });
 ROLES["tracepoint-editor"].properties.push("disabled");
 ROLES["tracepoint-editor"].properties.push("shared");
-ROLES["macro-expansion"] = { affordances: [], properties: ["line", "text"] };
+ROLES["macro-expansion"] = { affordances: [], properties: ["line", "text", "contrast"] };
 ROLES.window.properties.push("theme");
 ROLES.window.properties.push("monaco-editors");
 ROLES["trace-row"].affordances.push("context-click");
@@ -2518,7 +2518,24 @@ function readSurfacePw6(root: any): void {
       const lines = (Array.from(x.querySelectorAll(".view-lines > .view-line")) as HTMLElement[])
         .sort((p, q) => p.getBoundingClientRect().top - q.getBoundingClientRect().top)
         .map((l) => (l.textContent ?? "").replace(/\u00a0/g, " "));
-      ed.children.push(node("macro-expansion", x, { line, text: lines }, [["line", String(line)]]));
+      // `contrast`: the LOWEST WCAG contrast ratio between a code token's
+      // colour and the expansion editor's background, as painted.
+      const rgb = (c: string) => (c.match(/[\d.]+/g) ?? []).slice(0, 3).map(Number);
+      const lum = (c: string) => {
+        const [r, g, b2] = rgb(c).map((v) => { const s = v / 255; return s <= 0.03928 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4); });
+        return 0.2126 * r + 0.7152 * g + 0.0722 * b2;
+      };
+      const bgEl = (x.querySelector(".monaco-editor-background") ?? x.querySelector(".monaco-editor")) as HTMLElement | null;
+      const bg = bgEl ? getComputedStyle(bgEl).backgroundColor : "";
+      let contrast = 0;
+      if (bg && rgb(bg).length === 3) {
+        const lb = lum(bg);
+        const ratios = (Array.from(x.querySelectorAll(".view-lines > .view-line span span")) as HTMLElement[])
+          .filter((t) => (t.textContent ?? "").trim().length > 0)
+          .map((t) => { const lt = lum(getComputedStyle(t).color); return (Math.max(lt, lb) + 0.05) / (Math.min(lt, lb) + 0.05); });
+        if (ratios.length > 0) contrast = Math.round(Math.min(...ratios) * 100) / 100;
+      }
+      ed.children.push(node("macro-expansion", x, { line, text: lines, contrast }, [["line", String(line)]]));
     }
   }
 

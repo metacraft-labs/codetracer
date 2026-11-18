@@ -32,3 +32,5 @@ steps:
   - wait: { until: { at: 'editor[file="main.nim"]/macro-expansion[line="17"]', present: true }, timeout: 30s }
   - expect: { at: 'editor[file="main.nim"]/macro-expansion[line="17"]', text: { contains: "addTwice expansion" } }
   - expect: { at: 'editor[file="main.nim"]/macro-expansion[line="17"]', text: { contains: "counter += 3" } }
+  # Readable in the theme it is drawn in (WCAG AA for normal text is 4.5).
+  - expect: { at: 'editor[file="main.nim"]/macro-expansion[line="17"]', contrast: { gt: 4.5 } }

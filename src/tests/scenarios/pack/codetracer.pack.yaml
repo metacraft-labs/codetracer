@@ -325,7 +325,9 @@ roles:
   # Expansion): the expanded code, row by row.
   macro-expansion:
     keys: [line]
-    properties: { line: int, text: lines }
+    # `contrast`: the lowest WCAG contrast ratio of the expansion's code text
+    # against its background, as painted.
+    properties: { line: int, text: lines, contrast: number }
 
   # pw6: one argument of a call, as the call trace draws it.
   call-argument:
