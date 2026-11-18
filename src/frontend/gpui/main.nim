@@ -6331,6 +6331,11 @@ proc redrawReplayEditor(r: GpuiRenderer) =
         r.setStyle(child, "margin-top", $inset & "px")
         break
   noteEditorTab(r, editorTabLabel(surface.path, false))
+  # The rows just drawn take the design's faces here, whoever asked for the
+  # redraw: a divider's resize redraws the editor through `syncEditorViewport`,
+  # which applied none, and the editor showed its code in the default face
+  # until the next press drew it again.
+  discard applyTextFaces(r, editor)
   # The state pane's code line (`updateCodeStateLine`, what the desktop's
   # editor feeds it): the stop's line and its source, unindented.
   for row in gEditorSurface.rows:
