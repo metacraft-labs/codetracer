@@ -94,6 +94,33 @@ BUTTON_TRANSITION = background-color BUTTON_TRANSITION_TIMING, color BUTTON_TRAN
 // its own: the mask covers the whole box.
 ICON_CHEVRON_DOWN = url('../../public/resources/shared/build_chevron_down.svg')
 ICON_OPEN_DIFF = url('../../public/resources/shared/vc-open-diff.svg')
+// D-38: these replace the `ct-images-*` pictures that only the dark theme
+// defined, so the light theme drew nothing.  Names are the Figma variants.
+ICON_STOP = url('../../public/resources/shared/build_stop.svg') // icons-lg=stop
+ICON_REC_AND_REPLAY = url('../../public/resources/shared/run_test_img.svg') // nav-icons=rec-and-replay
+ICON_COPY = url('../../public/resources/shared/copy.svg') // icons-lg=copy
+ICON_CLOSE_SM = url('../../public/resources/shared/close_sm.svg') // icons-lg=close-sm
+ICON_CHEVRON_LEFT = url('../../public/resources/shared/chevron_left.svg') // icons-lg=chevron-left
+ICON_CHEVRON_RIGHT = url('../../public/resources/shared/chevron_right.svg') // icons-lg=chevron-right
+ICON_TAB_MENU = url('../../public/resources/shared/tab_menu.svg') // icons-lg=tab-menu
+// alert-icons, size=lg (20px).  Painted in the status icon tokens, which the
+// light theme re-maps, so one file serves both themes.
+ICON_ALERT_INFO = url('../../public/resources/notifications/alert_info_lg.svg')
+ICON_ALERT_WARNING = url('../../public/resources/notifications/alert_warning_lg.svg')
+ICON_ALERT_ERROR = url('../../public/resources/notifications/alert_error_lg.svg')
+ICON_ALERT_SUCCESS = url('../../public/resources/notifications/alert_success_lg.svg')
+
+// The same, for a button that also holds a tooltip or text: the icon is a
+// `::before`, and the old background picture is switched off.  `h` defaults to
+// `w`; give it for artwork that is not square.
+button-icon(img, w = 1rem, h = null)
+  background-image: none !important
+
+  &::before
+    content: ""
+    mask-icon(img, w)
+    if h
+      height: h
 
 mask-icon(img, size = 1rem)
   display: inline-block
@@ -369,44 +396,14 @@ button
   path, line, polyline, polygon, circle, rect, ellipse
     vector-effect: non-scaling-stroke
 
-#reset-operation-loading-image
-  background-image: ct-images-reset-operation-loading
-
-// Stop and Run Tests draw their marks as the strip's twelve inline marks do
-// (`views/debug_control_marks.nim`): in the button's own `color`, through a
-// `::before` stencil (a mask uses only the file's shape), as
-// `#trace-run-button` does below.  They were `background-image`s named by
-// `ct-images-stop` / `ct-images-run-tests`, which only the dark palette
-// defines, each a fixed near-white drawing; in the light theme the
-// declaration was the bare identifier, which the browser drops, so both
-// buttons were empty.  Following `color` also gives them the strip's hover,
-// focus and inert treatment.  Sized as the old images were: 1em tall, the
-// width from the artwork's ratio (16x16 and 21x16).
-#stop-image,
-#run-tests-image[class*="ct-button-image-"],
-#jump-to-live-debug
-  background-image: none
-
-  &::before
-    content: ""
-    flex: 0 0 auto
-    height: 1em
-    background-color: currentColor
-    pointer-events: none
-    -webkit-mask: var(--ct-toolbar-stencil) center / contain no-repeat
-    mask: var(--ct-toolbar-stencil) center / contain no-repeat
-
+// D-38: every icon below is a Design System icon painted in the button's
+// text colour (`button-icon`), not a picture named by a `ct-images-*`
+// variable that only the dark theme defined.  The rules for
+// `reset-operation-loading`, `jump-before`, `jump-after` and
+// `run-tests-loading` were removed: no screen renders those ids.
 #stop-image
-  --ct-toolbar-stencil: url('../../public/resources/debug/stop_16_dark.svg')
-
-  &::before
-    width: 1em
-
-#jump-before-image
-  background-image: ct-images-jump-before
-
-#jump-after-image
-  background-image: ct-images-jump-after
+  // 1em tall, like the twelve marks beside it on the strip (.ct-control-mark).
+  button-icon(ICON_STOP, 1em)
 
 // `run-tests-image` is the ONE id the two topbar surfaces share, and the
 // page-object contract says so out loud (`EDIT_TOOLBAR_IDS.runTests` in
@@ -426,20 +423,14 @@ button
 // gets the sizing rules above.
 #run-tests-image[class*="ct-button-image-"]
 #jump-to-live-debug
-  --ct-toolbar-stencil: url('../../public/resources/shared/run_test_img.svg')
-
-  &::before
-    width: 1.3125em
-
-#run-tests-loading-image
-  background-image: ct-images-run-tests-loading
+  // The artwork is 21x16; 1em tall like the strip's other marks.
+  button-icon(ICON_REC_AND_REPLAY, 1.3125em, 1em)
 
 #copy-path-image
-  background-image: ct-images-copy-path
+  button-icon(ICON_COPY)
 
 #category-image
-  background-image: ct-images-layout-tab
-  background-size: 1em auto !important
+  button-icon(ICON_TAB_MENU)
 
   // The button look (top of this file), like every other button — it used to
   // copy the search field it sits beside (Nikolay, 2026-10-20: the Event Log's
@@ -453,12 +444,11 @@ button
     border-color: colors-ui-border-action !important
 
 #close-element
-  background-image: ct-images-close-button
-  background-size: 0.5em 0.5em !important
+  // The same × as the strip tabs and the tab list (D-01).
+  button-icon(ICON_CLOSE_SM)
 
 #backward-loop
-  background-image: ct-images-omni-backward
-  background-size: 0.5em !important
+  button-icon(ICON_CHEVRON_LEFT)
   z-index: 10
   height: 1.3em !important
   width: 1.3em !important
@@ -466,33 +456,16 @@ button
   max-height: 1.3em !important
 
 #forward-loop
-  background-image: ct-images-omni-forward
-  background-size: 0.5em !important
+  button-icon(ICON_CHEVRON_RIGHT)
   z-index: 10
   height: 1.3em !important
   width: 1.3em !important
   max-width: 1.3em !important
   max-height: 1.3em !important
 
-// These two paint their icon as a background image, which `color` cannot reach
-// and `opacity` cannot dim without fading the fill too (D-20).  A half-strength
-// layer of the button's own fill over the image dims only the icon.
-//
-// The layer is an inset box-shadow, not a `linear-gradient`: a gradient is
-// drawn by a dithering shader, and over this button's rounded corners the
-// software rasteriser's dither flipped between two states a few seconds apart
-// (11 pixels, one grey level), which made the PLAT-35 tier-1 canary of the
-// Electron capture drift one run in five.  A shadow is a flat rounded-rect
-// fill, so the frame no longer changes after it has settled.  The spread is
-// larger than the button, so it covers the whole padding box; the buttons have
-// no border (`ct-button-no-border`).
-LOOP_ICON_DIM = inset 0 0 0 2em rgba(colors-ui-surface-primary-default, 0.5)
-
-#backward-loop:disabled
-  box-shadow: LOOP_ICON_DIM
-
-#forward-loop:disabled
-  box-shadow: LOOP_ICON_DIM
+// Disabled: the shared `:disabled` rule turns the text colour to
+// `text/primary/disabled`, and the masked icon follows it (D-20).  The
+// half-strength fill layer these two used to dim a picture is no longer needed.
 
 // The trace editor's run and options buttons draw the design system's ui-icons
 // (icons-lg) as the Build panel's buttons do (`.build-ctrl-btn`,
