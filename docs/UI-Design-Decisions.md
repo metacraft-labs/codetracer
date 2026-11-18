@@ -280,7 +280,7 @@ including primary ones and the welcome screens' own look (D-14). (2026-11-02)
 
 ```guard
 src/frontend/styles/components/button.styl :: Disabled changes only the text, the icon or the border, never the fill
-src/frontend/styles/components/button.styl :: LOOP_ICON_DIM
+src/frontend/styles/components/button.styl :: `text/primary/disabled`, and the masked icon follows it (D-20)
 src/frontend/styles/components/welcome_screen.styl :: &:hover:not(:disabled):not([aria-disabled="true"])
 ```
 
@@ -555,6 +555,35 @@ src/frontend/viewmodel/views/isonim_agent_activity_view.nim :: "agent-model-item
 src/frontend/viewmodel/views/isonim_agent_activity_view.nim :: button(class = "ct-button-md-secondary agent-settings-select-trigger",
 src/frontend/viewmodel/views/isonim_agent_activity_view.nim :: button(class = "ct-button-md-secondary agent-idle-chip"
 src/frontend/viewmodel/views/keyboard_focus.nim :: '.agent-model-wrapper, .agent-branch-wrapper, .agent-settings-select-wrapper'
+```
+
+### D-38: Every icon is a Design System icon in the text colour
+
+An icon is a Design System icon (Figma icons page, node 1:12), painted through a
+mask in the element's text or status colour: `mask-icon()` for an element of its
+own, `button-icon()` for a button that also holds a tooltip or a label (both in
+`button.styl`). One file serves both themes, so no icon can exist in one theme and
+not the other. Icons named by `ct-images-*` variables that only the dark theme
+defined left 22 icons blank in the light theme: Stop and Run tests on the debugger
+bar, the Event Log "⋯", the scratchpad close, the Flow loop arrows, the copy-path
+mark, and every notification's status icon and ×. They are now `icons-lg=stop`,
+`nav-icons=rec-and-replay`, `icons-lg=tab-menu`, `icons-lg=close-sm`,
+`icons-lg=chevron-left` / `chevron-right`, `icons-lg=copy` and `alert-icons`
+(size=lg, in the `colors/ui/icon/{information,warning,error,success}/primary`
+tokens). The check fails if a component uses a `ct-images-*` variable that either
+theme file does not define. (2026-11-18)
+
+```guard
+src/frontend/styles/components/button.styl :: button-icon(img, w = 1rem, h = null)
+src/frontend/styles/components/button.styl :: button-icon(ICON_STOP, 1em)
+src/frontend/styles/components/button.styl :: button-icon(ICON_REC_AND_REPLAY, 1.3125em, 1em)
+src/frontend/styles/components/button.styl :: button-icon(ICON_TAB_MENU)
+src/frontend/styles/components/button.styl :: button-icon(ICON_CLOSE_SM)
+src/frontend/styles/components/button.styl :: button-icon(ICON_CHEVRON_LEFT)
+src/frontend/styles/components/notifications.styl :: mask-icon(ICON_ALERT_INFO, 1.25rem)
+src/frontend/styles/components/notifications.styl :: mask: ICON_CLOSE_SM center / 1rem no-repeat
+src/frontend/styles/components/status_bar.styl :: mask-image: ICON_COPY
+ci/test/ui-design-decisions.py :: def undefined_theme_images(used, theme_sources):
 ```
 
 ## Focus rules

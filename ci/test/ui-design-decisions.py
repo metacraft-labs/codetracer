@@ -14,8 +14,9 @@ WHAT THIS CHECKS
 `text` must appear in its `path`. Standard library only and no build, so it runs
 in seconds and can be a required status check, unlike the wider suites.
 
-It also enforces the one standing rule a source check can judge: no stylesheet
-under `src/frontend/styles` sizes anything in px.
+It also enforces the standing rules a source check can judge: no stylesheet
+under `src/frontend/styles` sizes anything in px, and every `ct-images-*`
+icon variable a component uses is defined in both theme files (D-38).
 
 Run from the repository root:
 
@@ -85,6 +86,37 @@ def px_values(stylesheet):
     return found
 
 
+THEME_FILES = (
+    Path("src/frontend/styles/default_dark_theme.styl"),
+    Path("src/frontend/styles/default_white_theme.styl"),
+)
+THEME_IMAGE_USE = re.compile(r"\bct-images-[\w-]+")
+THEME_IMAGE_DEFINITION = re.compile(r"^(ct-images-[\w-]+)\s*=", re.MULTILINE)
+
+
+def theme_images_used(stylesheet):
+    """The `ct-images-*` names a component stylesheet uses, outside comments."""
+    blanked = BLOCK_COMMENT.sub(" ", stylesheet)
+    used = set()
+    for line in blanked.splitlines():
+        used.update(THEME_IMAGE_USE.findall(LINE_COMMENT.sub("", line)))
+    return used
+
+
+def undefined_theme_images(used, theme_sources):
+    """(name, theme) pairs for every used name a theme file does not define.
+
+    D-38: Stylus passes an unknown name through as a bare word, so an icon
+    variable defined in one theme only compiles to `background-image:
+    ct-images-stop` in the other, which the browser drops: a blank icon.
+    """
+    missing = []
+    for theme, source in theme_sources:
+        defined = set(THEME_IMAGE_DEFINITION.findall(source))
+        missing.extend((name, theme) for name in sorted(used - defined))
+    return missing
+
+
 def read_repo_file(path):
     try:
         return Path(path).read_text(encoding="utf-8")
@@ -126,6 +158,17 @@ def run_controls():
     )
     found = [number for number, _ in px_values(stylesheet)]
     assert found == [2, 8], f"control: px found on lines {found}"
+
+    used = theme_images_used(
+        ".a\n  background-image: ct-images-stop\n  // ct-images-commented\n"
+        "  /* ct-images-blocked */\n  mask-image: ct-images-copy\n"
+    )
+    assert used == {"ct-images-stop", "ct-images-copy"}, f"control: used {used}"
+    missing = undefined_theme_images(
+        used, [("dark", "ct-images-stop = a\nct-images-copy = b\n"),
+               ("light", "ct-images-stop = a\n")]
+    )
+    assert missing == [("ct-images-copy", "light")], f"control: undefined {missing}"
 
 
 def main():
@@ -176,8 +219,23 @@ def main():
         )
         return 1
 
+    used = set()
+    for path in sorted((STYLES_DIR / "components").rglob("*.styl")):
+        used |= theme_images_used(path.read_text(encoding="utf-8"))
+    undefined = undefined_theme_images(
+        used, [(str(path), path.read_text(encoding="utf-8")) for path in THEME_FILES]
+    )
+    if undefined:
+        print("FAILED: a component uses an icon variable a theme does not define,"
+              "\nso that theme draws no icon (D-38).\n")
+        for name, theme in undefined:
+            print(f"  {name} is missing from {theme}")
+        print("\nPaint a Design System icon with `button-icon()` / `mask-icon()`"
+              "\n(button.styl) instead of a per-theme picture.")
+        return 1
+
     print(f"OK: {len(guards)} guards across {len(headed)} UI design decisions;"
-          " no px in the stylesheets.")
+          " no px in the stylesheets; every theme icon is defined in both themes.")
     return 0
 
 

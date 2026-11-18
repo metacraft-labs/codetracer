@@ -1329,11 +1329,13 @@ NOTIFICATION_STACK_BOTTOM = STATUS_BAR_OUTER_HEIGHT + NOTIFICATION_STACK_GAP
 
   &::before
     content: ""
-    width: 0.9375rem
-    height: 0.875rem
+    // D-38: icons-lg=copy.  The variable it used existed only in the dark
+    // theme, so in the light theme the mask was dropped and nothing showed.
+    width: 1rem
+    height: 1rem
     background-color: currentColor
-    -webkit-mask-image: ct-images-copy-path
-    mask-image: ct-images-copy-path
+    -webkit-mask-image: ICON_COPY
+    mask-image: ICON_COPY
     -webkit-mask-repeat: no-repeat
     mask-repeat: no-repeat
     -webkit-mask-position: center
