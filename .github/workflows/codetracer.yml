@@ -3813,9 +3813,21 @@ jobs:
     uses: ./.github/workflows/ct-build.yml
     secrets: inherit
 
+  visual-replay-tools:
+    # The job is in visual-replay-tools.yml: ct-native-replay, ct_gfx_player
+    # and ct-mcr, once per run and in parallel with ct-build, for GPUI shard 1
+    # and the TUI shard that opens a visual recording. The shards need it but
+    # run without it (`needs.ct-build.result` below): a missing artifact makes
+    # them build the tools themselves, as before.
+    uses: ./.github/workflows/visual-replay-tools.yml
+    secrets: inherit
+
   tui-tests:
-    # The job is in tui-tests.yml; it takes ct from ct-build.
-    needs: ct-build
+    # The job is in tui-tests.yml; it takes ct from ct-build and the
+    # visual replay tools from visual-replay-tools.
+    needs: [ct-build, visual-replay-tools]
+    # ct-build is required; visual-replay-tools only saves time.
+    if: ${{ !cancelled() && needs.ct-build.result == 'success' }}
     uses: ./.github/workflows/tui-tests.yml
     secrets: inherit
 
@@ -3924,8 +3936,11 @@ jobs:
           if-no-files-found: ignore
 
   gpui-window-captures:
-    # The job is in gpui-window-captures.yml; it takes ct from ct-build.
-    needs: ct-build
+    # The job is in gpui-window-captures.yml; it takes ct from ct-build and the
+    # visual replay tools from visual-replay-tools.
+    needs: [ct-build, visual-replay-tools]
+    # ct-build is required; visual-replay-tools only saves time.
+    if: ${{ !cancelled() && needs.ct-build.result == 'success' }}
     uses: ./.github/workflows/gpui-window-captures.yml
     secrets: inherit
 

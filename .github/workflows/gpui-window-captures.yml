@@ -226,6 +226,27 @@ jobs:
         if: ${{ steps.unpack.outcome == 'failure' }}
         run: bash ci/unpack-ct-build-products.sh "${RUNNER_TEMP}/ct-build-retry"
 
+      - name: Restore the visual replay tools from the visual-replay-tools job
+        # ct-native-replay, ct_gfx_player and ct-mcr, built once per run in
+        # parallel with ct-build (visual-replay-tools.yml), rather than in this
+        # job (about 22 minutes for ct-mcr alone in GPUI shard 1 of run
+        # 44269676398). Best effort: when the artifact is missing or short,
+        # ci/test/visual-replay-tools.sh builds them here as before.
+        if: ${{ !cancelled() && steps.ct.outcome == 'success' && matrix.shard == 1 }}
+        id: vr_tools
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: visual-replay-tools
+          path: ${{ runner.temp }}/visual-replay-tools
+
+      - name: Unpack the visual replay tools
+        if: ${{ !cancelled() && steps.ct.outcome == 'success' && matrix.shard == 1 && steps.vr_tools.outcome == 'success' }}
+        continue-on-error: true
+        run: |
+          bash ci/unpack-ct-build-products.sh "${RUNNER_TEMP}/visual-replay-tools" visual-replay-tools.tar.gz
+          echo "CT_VISUAL_REPLAY_TOOLS_PREBUILT=1" >>"$GITHUB_ENV"
+
       - name: Build the windowed GPUI front-end the scenario lane opens
         # Linked here, against the restored shim, because the front-end pins
         # the shim's absolute path (-d:gpuiShimPath) and runners differ in

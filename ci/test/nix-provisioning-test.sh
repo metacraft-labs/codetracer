@@ -281,7 +281,11 @@ done
 # 43 -> 44: ct-build.yml's `ct-build`, which runs build-once and isonim-gpui's
 # windowed shim once per run for the TUI and GPUI shards. It provisions Nix
 # through setup-db-backend-siblings, env-flavor nix, as those jobs do.
-readonly EXPECTED_NIX_JOBS=44
+#
+# 44 -> 45: visual-replay-tools.yml's `visual-replay-tools`, which builds
+# ct-native-replay, ct_gfx_player and ct-mcr once per run for GPUI shard 1 and
+# the TUI player shard. It provisions Nix the same way as ct-build.
+readonly EXPECTED_NIX_JOBS=45
 
 if [ "${#nix_jobs[@]}" -eq "$EXPECTED_NIX_JOBS" ]; then
 	ok "the scanner still classifies the nix-using jobs (${#nix_jobs[@]})"
