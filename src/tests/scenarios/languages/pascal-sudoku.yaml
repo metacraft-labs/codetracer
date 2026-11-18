@@ -4,12 +4,16 @@ pack: codetracer
 summary: >-
   The Pascal sudoku solver's rr recording opens sudoku.pas and fills the event log, whose
   output says "Solved"; a click on the call trace's $main call moves the replay
-  into sudoku.pas.
+  into sudoku.pas, where main's flow shows `boards` as a preview whose eye opens
+  the whole value.
 
 stage:
   - use: record-program
     with: { program: pascal_sudoku_solver/sudoku.pas, backend: rr }
+  # Wide enough that a flow chip after main's lines (line 100's `boards`) is
+  # on screen beside them, not past the editor's edge.
   - use: open-recording
+    with: { width: 2400, height: 1350 }
 
 steps:
   - wait: { until: replay-idle, timeout: 180s }
@@ -33,3 +37,22 @@ steps:
       - wait: { until: replay-idle, timeout: 120s }
       - expect: { at: 'editor[file="sudoku.pas"]', active: true }
 
+  - beat: flow
+    steps:
+      # `boards` holds 10 x 9 x 9 cells, so main's flow carries a bounded
+      # preview of it at each step, and the eye opens the whole value. The
+      # chip is the initialisation loop's body (line 100): it is a single
+      # chip, because what the line changes is past the preview's cut, and
+      # it is the only chip on its line, where line 103 has one per statement.
+      - wait: { until: { at: 'editor[file="sudoku.pas"]/flow-value[name="boards", side="single", line="100"]', present: true }, timeout: 900s }
+      - expect: { at: 'editor[file="sudoku.pas"]/flow-value[name="boards", side="single", line="100"]', cut: true }
+      # The replay stands near main's end, so the editor shows its last lines:
+      # bring line 100 on screen before its eye: from the top, a notch scrolls
+      # the editor about 2.4 lines, so 33 notches put lines ~80-118 on screen.
+      - wheel: { at: 'editor[file="sudoku.pas"]', direction: up, amount: 60 }
+      - wheel: { at: 'editor[file="sudoku.pas"]', direction: down, amount: 33 }
+      - wait: { until: { at: 'editor[file="sudoku.pas"]', assert: "shows-line(100)" }, timeout: 10s }
+      - wait: { until: { at: 'editor[file="sudoku.pas"]/flow-value[name="boards", side="single", line="100"]', eye-shown: true }, timeout: 30s }
+      - click: { at: 'editor[file="sudoku.pas"]/flow-value[name="boards", side="single", line="100"]', anchor: eye }
+      - wait: { until: { at: popup, present: true }, timeout: 30s }
+      - wait: { until: { at: popup, cut: false }, timeout: 60s }

@@ -786,7 +786,10 @@ roles:
   popup:
     # pw3: a typed value's popup (a flow chip's): the value as expanded, its
     # type, and the side of the chip it belongs to.
-    properties: { title: text, text: lines, value: text, type: text, anchored: "enum{single,before,after,none}" }
+    # pw8: `cut`: it shows a collection a flow value's preview cut short
+    # (its "k of N shown" or "Load more"); a flow chip's popup loads the
+    # whole value as it opens, so it ends false.
+    properties: { title: text, text: lines, value: text, type: text, anchored: "enum{single,before,after,none}", cut: bool }
     affordances: [click]
     assertions:
       shows(t): "text contains t"

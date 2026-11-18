@@ -211,6 +211,7 @@ pub fn execute_bytecode(
                     let array = stack.pop().unwrap();
 
                     if let ValueRecordWithType::Sequence {
+                        len: _,
                         elements,
                         typ: _,
                         is_slice,

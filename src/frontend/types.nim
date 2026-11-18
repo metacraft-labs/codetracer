@@ -651,6 +651,12 @@ type
     isScratchpadValue*:  bool
     isOperationRunning*: bool
     historyScrollTop*:   int
+    heldBackLoader*:     proc(path: seq[int], start: int,
+                              apply: proc(elements: seq[Value], more: bool))
+      ## Set on a flow value's popup: loads the next elements of a collection
+      ## the flow's preview cut short (`ct/load-flow-value-elements`) and
+      ## hands them to `apply`. `path` is the element indices from the base
+      ## value to the collection.
 
   ScratchpadComponent* = ref object of Component
     i*:             int

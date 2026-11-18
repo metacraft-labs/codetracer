@@ -1686,6 +1686,37 @@ impl ReplaySession for RecreatorReplaySession {
         Ok(res)
     }
 
+    fn load_value_limited(
+        &mut self,
+        expression: &str,
+        depth_limit: Option<usize>,
+        count_limit: Option<usize>,
+        lang: Lang,
+    ) -> Result<ValueRecordWithType, Box<dyn Error>> {
+        self.ensure_active_stable()?;
+        Ok(serde_json::from_str::<ValueRecordWithType>(
+            &self.stable.dispatch_replay_query(ReplayQuery::LoadValueLimited {
+                expression: expression.to_string(),
+                depth_limit,
+                count_limit,
+                lang,
+            })?,
+        )?)
+    }
+
+    fn load_stop_position(&mut self) -> Option<String> {
+        self.ensure_active_stable().ok()?;
+        let answer = self.stable.dispatch_replay_query(ReplayQuery::LoadStopPosition);
+        match answer.and_then(|json| Ok(serde_json::from_str::<String>(&json)?)) {
+            Ok(position) if !position.is_empty() => Some(position),
+            Ok(_) => None,
+            Err(e) => {
+                warn!("load_stop_position: the worker named no stop: {e}");
+                None
+            }
+        }
+    }
+
     fn load_return_value(
         &mut self,
         depth_limit: Option<usize>,

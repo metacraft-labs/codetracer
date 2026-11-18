@@ -43,6 +43,15 @@ pub fn is_collection(kind: TypeKind) -> bool {
     )
 }
 
+/// Whether `value` or anything in it is a collection cut short: its
+/// `elements` hold fewer than its `elements_total`.
+pub fn is_cut(value: &Value) -> bool {
+    (is_collection(value.kind) && value.elements_total > value.elements.len())
+        || value.elements.iter().any(is_cut)
+        || value.ref_value.as_deref().is_some_and(is_cut)
+        || value.active_variant_value.as_deref().is_some_and(is_cut)
+}
+
 /// Cut the collections of `values` to `count_budget` elements in total,
 /// keeping at least `min_count_limit` in each. A budget of 0 or less means
 /// "no budget": nothing is cut. Returns how many elements were dropped.
@@ -62,7 +71,9 @@ pub fn apply_count_budget(values: &mut [&mut Value], count_budget: i64, min_coun
             let keep = len.min(floor.max(remaining));
             if keep < len {
                 value.elements.truncate(keep);
-                value.elements_total = len;
+                // A collection the worker already cut keeps the true length
+                // it said (`ValueRecordWithType::Sequence::len`).
+                value.elements_total = value.elements_total.max(len);
                 dropped += len - keep;
             }
             remaining = remaining.saturating_sub(keep);
@@ -252,5 +263,160 @@ mod tests {
         let full = seq(3);
         assert_eq!(elements_slice(&full, &[7], 0, 1), Err(SliceError::PathOutOfRange));
         assert_eq!(elements_slice(&int(1), &[], 0, 1), Err(SliceError::NotACollection));
+    }
+
+    #[test]
+    fn a_kept_flow_value_comes_back_whole_and_identical_values_are_stored_once() {
+        let mut kept = HeldBackValues::default();
+        assert!(kept.is_empty());
+        let whole = seq(300);
+        kept.keep(7, false, "xs", &whole);
+        kept.keep(6, true, "xs", &whole); // the previous step's after value
+        assert_eq!(kept.whole(7, false, "xs"), Some(whole.clone()));
+        assert_eq!(kept.whole(6, true, "xs"), Some(whole.clone()));
+        assert_eq!(kept.whole(7, true, "xs"), None, "the side is part of the key");
+        assert_eq!(kept.whole(7, false, "ys"), None);
+        let once = kept.stored_bytes();
+        let json = serde_json::to_vec(&whole).unwrap().len();
+        assert!(
+            once <= json,
+            "stored once (and compressed natively): {once} of {json} bytes"
+        );
+
+        let mut other = HeldBackValues::default();
+        other.keep(9, false, "ys", &seq(20));
+        kept.absorb(other);
+        assert_eq!(kept.whole(9, false, "ys"), Some(seq(20)));
+
+        // A slice of the kept value continues a preview.
+        let slice = elements_slice(&kept.whole(7, false, "xs").unwrap(), &[], 16, 0).unwrap();
+        assert_eq!(
+            (slice.start_index, slice.elements.len(), slice.total, slice.more),
+            (16, 284, 300, false)
+        );
+    }
+}
+
+/// The whole values behind the previews a flow sent: for each value the
+/// flow's budget cut (`flow_preloader::flow_ct_value`), the uncut value, kept
+/// so `ct/load-flow-value-elements` can continue the preview from the popup.
+///
+/// A value cannot be read again by seeking a replay to the step's tick,
+/// because consecutive steps of an rr recording share a tick (a loop's passes
+/// start `481, 481, 482, …`), so a seek can land on another pass. So either
+/// the value is kept, or the step's exact stop is:
+///
+/// * a replay that names its stops exactly (`ReplaySession::load_stop_position`:
+///   rr's event, ticks, PC and registers; MCR's geid and instruction count)
+///   gets the stop's position (`positions`), and the value is loaded whole
+///   there when the popup asks. The flow then loads only the preview.
+/// * any other gets the uncut value, stored once by its content (a flow's
+///   after value is usually the next step's before value) and, natively,
+///   compressed.
+#[derive(Debug, Default, Clone)]
+pub struct HeldBackValues {
+    keys: std::collections::HashMap<(i64, bool, String), u64>,
+    blobs: std::collections::HashMap<u64, StoredValue>,
+    positions: std::collections::HashMap<(i64, bool, String), crate::task::Location>,
+}
+
+#[derive(Debug, Clone)]
+struct StoredValue {
+    compressed: bool,
+    bytes: Vec<u8>,
+}
+
+impl HeldBackValues {
+    /// Keep `whole`, the uncut value of `expression` at the flow step
+    /// `step_count` (its after value when `after`).
+    pub fn keep(&mut self, step_count: i64, after: bool, expression: &str, whole: &Value) {
+        let Ok(json) = serde_json::to_vec(whole) else {
+            return;
+        };
+        let id = content_id(&json);
+        self.blobs.entry(id).or_insert_with(|| pack(json));
+        self.keys.insert((step_count, after, expression.to_string()), id);
+    }
+
+    /// The uncut value of `expression` at `step_count`, if the flow cut it.
+    /// Keep the exact stop at which `expression`'s value on `step_count` can
+    /// be loaded whole: the stop's location, its `replay_position` set, as a
+    /// `JumpToCall` returns to it.
+    pub fn keep_position(&mut self, step_count: i64, after: bool, expression: &str, stop: &crate::task::Location) {
+        self.positions
+            .insert((step_count, after, expression.to_string()), stop.clone());
+    }
+
+    /// The stop kept by `keep_position`.
+    pub fn position(&self, step_count: i64, after: bool, expression: &str) -> Option<&crate::task::Location> {
+        self.positions.get(&(step_count, after, expression.to_string()))
+    }
+
+    pub fn whole(&self, step_count: i64, after: bool, expression: &str) -> Option<Value> {
+        let id = self.keys.get(&(step_count, after, expression.to_string()))?;
+        let stored = self.blobs.get(id)?;
+        let json = unpack(stored)?;
+        serde_json::from_slice(&json).ok()
+    }
+
+    /// Add `other`'s values to these.
+    pub fn absorb(&mut self, other: HeldBackValues) {
+        self.blobs.extend(other.blobs);
+        self.keys.extend(other.keys);
+        self.positions.extend(other.positions);
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.keys.is_empty() && self.positions.is_empty()
+    }
+
+    /// The bytes the kept values occupy.
+    pub fn stored_bytes(&self) -> usize {
+        self.blobs.values().map(|b| b.bytes.len()).sum()
+    }
+}
+
+fn content_id(json: &[u8]) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    json.len().hash(&mut hasher);
+    json.hash(&mut hasher);
+    hasher.finish()
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn pack(json: Vec<u8>) -> StoredValue {
+    match zstd::encode_all(json.as_slice(), 3) {
+        Ok(bytes) => StoredValue {
+            compressed: true,
+            bytes,
+        },
+        Err(_) => StoredValue {
+            compressed: false,
+            bytes: json,
+        },
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn pack(json: Vec<u8>) -> StoredValue {
+    // The wasm build has a zstd decoder (`ruzstd`) but no encoder.
+    StoredValue {
+        compressed: false,
+        bytes: json,
+    }
+}
+
+fn unpack(stored: &StoredValue) -> Option<Vec<u8>> {
+    if !stored.compressed {
+        return Some(stored.bytes.clone());
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        zstd::decode_all(stored.bytes.as_slice()).ok()
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        None
     }
 }

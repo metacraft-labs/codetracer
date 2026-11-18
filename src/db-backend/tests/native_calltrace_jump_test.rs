@@ -1579,3 +1579,334 @@ fn rust_rr_sudoku_main_flows_after_its_call_trace_row_is_activated() {
     );
     session.runner.finish().expect("disconnect failed");
 }
+
+/// A click on the Pascal main block's call-trace row, and its flow from
+/// there (`test-programs/pascal/pascal_loop_flow_test.pas`).
+///
+/// The flow widens the row's stop to the entry of `$main` with a breakpoint
+/// and a continue. On rr the breakpoint install barrier left a `Z0` of its own
+/// in rr beside LLDB's, and the Pascal sudoku solver's flow ran past `main`'s
+/// entry to the end of the recording: no step was drawn, and every later
+/// `when-ticks` came back empty.
+#[test]
+fn pascal_rr_main_flows_after_its_call_trace_row_is_activated() {
+    let name = "pascal_rr_main_flows_after_its_call_trace_row_is_activated";
+    if !Language::Pascal.compiler_available() {
+        test_harness::skip_or_fail_missing_prerequisite(name, "fpc is not on PATH", "install Free Pascal (fpc)");
+        return;
+    }
+    let Some(mut session) = open_session_for(
+        name,
+        Recorder::Rr,
+        Language::Pascal,
+        "pascal/pascal_loop_flow_test.pas",
+        &[],
+    ) else {
+        return;
+    };
+    let client = session.runner.client();
+    let root = row_of(client, "$main");
+    let moved = activate_row(client, &root);
+    println!("JUMP line={} ticks={}", moved.location.line, moved.location.rr_ticks.0);
+    let body = client
+        .load_flow(ct_dap_client::types::flow::LoadFlowArguments {
+            flow_mode: ct_dap_client::types::flow::FlowMode::Call,
+            location: moved.location.clone(),
+        })
+        .expect("ct/load-flow");
+    let flow = FlowData::from_event_body(&body).expect("parse the flow");
+    println!(
+        "FLOW {} steps, first {:?}",
+        flow.steps.len(),
+        flow.steps.iter().take(6).map(|s| s.line).collect::<Vec<_>>()
+    );
+    assert!(
+        flow.steps
+            .iter()
+            .any(|step| step.line == 30 && step.after_values.contains_key("grid")),
+        "main's flow walks its loop and shows grid: {} steps",
+        flow.steps.len()
+    );
+    session.runner.finish().expect("disconnect failed");
+}
+
+/// A Pascal program's main block, whose loops come after a function's loop
+/// (`test-programs/pascal/pascal_loop_flow_test.pas`).
+///
+/// The flow names each loop by its place among the loops it sends: the steps
+/// of a loop body point at that loop, and each loop's `base` is its own place.
+/// With the parser's per-function numbering, main's loops were 2 and 3 against
+/// three loops, the renderer raised `IndexDefect` on every loop line and drew
+/// no value, and the steps' iteration bookkeeping was skipped.
+///
+/// The loop body mentions a 10 x 10 array on each of its 100 passes, and the
+/// flow carries a bounded preview of it on each: no value over 6 KB, and the
+/// array's rows say how long they really are. The rest of a cut collection
+/// is served by `ct/load-flow-value-elements`, from the uncut value the flow
+/// kept.
+#[test]
+fn pascal_rr_main_block_loops_are_named_by_their_place_and_carry_bounded_values() {
+    let name = "pascal_rr_main_block_loops_are_named_by_their_place_and_carry_bounded_values";
+    if !Language::Pascal.compiler_available() {
+        test_harness::skip_or_fail_missing_prerequisite(name, "fpc is not on PATH", "install Free Pascal (fpc)");
+        return;
+    }
+    let program = "pascal/pascal_loop_flow_test.pas";
+    let Some(mut session) = open_session_for(
+        name,
+        Recorder::Rr,
+        Language::Pascal,
+        program,
+        &[(30, "grid[r][c] := r * 10 + c;")],
+    ) else {
+        return;
+    };
+    let file = session.file.clone();
+    let client = session.runner.client();
+    let moved = continue_to_line(client, &file, 30);
+    let body = client
+        .load_flow(ct_dap_client::types::flow::LoadFlowArguments {
+            flow_mode: ct_dap_client::types::flow::FlowMode::Call,
+            location: moved.location.clone(),
+        })
+        .expect("ct/load-flow");
+    let update = &body["viewUpdates"][0];
+    let loops = update["loops"].as_array().expect("the flow's loops");
+    let steps = update["steps"].as_array().expect("the flow's steps");
+    for (place, l) in loops.iter().enumerate() {
+        assert_eq!(
+            l["base"].as_i64(),
+            Some(place as i64),
+            "loop {place} is named by its place: {l}"
+        );
+    }
+    for step in steps {
+        let lp = step["loop"].as_i64().unwrap_or(0);
+        assert!(
+            lp >= 0 && (lp as usize) < loops.len(),
+            "a step names a loop the flow sends: line {} names loop {lp} of {}",
+            step["position"],
+            loops.len()
+        );
+    }
+    let body_steps: Vec<&Value> = steps.iter().filter(|s| s["position"].as_i64() == Some(30)).collect();
+    let inner = &loops[body_steps.first().expect("a step on the loop body")["loop"]
+        .as_i64()
+        .unwrap_or(0) as usize];
+    assert_eq!(
+        inner["registeredLine"].as_i64(),
+        Some(29),
+        "the body line is in the `for c` loop: {inner}"
+    );
+    assert!(
+        inner["stepCounts"].as_array().map_or(0, |s| s.len()) > 1,
+        "the `for c` loop's passes are counted"
+    );
+
+    let mut largest = 0usize;
+    let mut cut_rows = 0usize;
+    for step in steps {
+        for side in ["beforeValues", "afterValues"] {
+            for (_, value) in step[side].as_object().into_iter().flatten() {
+                largest = largest.max(value.to_string().len());
+                cut_rows += cut_collections(value);
+            }
+        }
+    }
+    println!(
+        "FLOW steps={} largest value={largest} bytes, cut rows={cut_rows}",
+        steps.len()
+    );
+    assert!(
+        largest <= 6_144,
+        "no flow value is over 6 KB: the largest is {largest} bytes"
+    );
+    assert!(
+        cut_rows > 0,
+        "the array is a preview whose cut collections carry their full length"
+    );
+
+    // The popup continues a preview: the rest of a cut collection, from the
+    // uncut value the flow kept, without moving the debugger.
+    let flow_ticks = body["location"]["rrTicks"].as_i64().expect("the flow's tick");
+    let (step_count, after, path, held) = assert_cut_grid_rests_load_at_their_own_steps(client, steps, flow_ticks);
+
+    // A flow that is not kept is refused by name, not answered from another.
+    let seq = client
+        .send_request(
+            "ct/load-flow-value-elements",
+            json!({
+                "flowRrTicks": flow_ticks + 1_000_000, "stepCount": step_count, "after": after,
+                "expression": "grid", "path": path, "startIndex": held, "count": 0,
+            }),
+        )
+        .expect("send ct/load-flow-value-elements");
+    let ((ok, message, _), _) = response_to(client, seq, "ct/load-flow-value-elements");
+    assert!(!ok, "a flow that is not kept is refused");
+    println!("REFUSED {message:?}");
+    session.runner.finish().expect("disconnect failed");
+}
+
+/// A C loop filling a 10 x 10 array (`test-programs/c/c_grid_flow_test.c`):
+/// the flow sends previews of `grid`, and the rest of a cut one loads whole on
+/// demand, at the step it was cut on.
+fn c_grid_flow_rest_loads_at_its_own_step(name: &str, recorder: Recorder) {
+    let Some(mut session) = open_session(
+        name,
+        recorder,
+        "c_grid_flow_test.c",
+        &[(10, "grid[r][c] = r * 10 + c;")],
+    ) else {
+        return;
+    };
+    let file = session.file.clone();
+    let client = session.runner.client();
+    let moved = continue_to_line(client, &file, 10);
+    let body = client
+        .load_flow(ct_dap_client::types::flow::LoadFlowArguments {
+            flow_mode: ct_dap_client::types::flow::FlowMode::Call,
+            location: moved.location.clone(),
+        })
+        .expect("ct/load-flow");
+    let steps = body["viewUpdates"][0]["steps"].as_array().expect("the flow's steps");
+    let flow_ticks = body["location"]["rrTicks"].as_i64().expect("the flow's tick");
+    assert_cut_grid_rests_load_at_their_own_steps(client, steps, flow_ticks);
+    session.runner.finish().expect("disconnect failed");
+}
+
+#[test]
+fn c_rr_flow_value_rest_loads_at_its_own_step() {
+    c_grid_flow_rest_loads_at_its_own_step("c_rr_flow_value_rest_loads_at_its_own_step", Recorder::Rr);
+}
+
+#[test]
+fn c_mcr_flow_value_rest_loads_at_its_own_step() {
+    c_grid_flow_rest_loads_at_its_own_step("c_mcr_flow_value_rest_loads_at_its_own_step", Recorder::Mcr);
+}
+
+/// The rest of `grid` (a 10 x 10 array the flow's loop fills with
+/// `r * 10 + c`), cut in the flow's previews, loads whole on demand
+/// (`ct/load-flow-value-elements`), and at the step it was cut on: the first
+/// cut grid's rest is still all zeros, the last one's is all assigned.
+/// Returns the first cut's step, side, path and held count.
+fn assert_cut_grid_rests_load_at_their_own_steps(
+    client: &mut DapStdioClient,
+    steps: &[Value],
+    flow_ticks: i64,
+) -> (i64, bool, Vec<usize>, usize) {
+    let cuts: Vec<(i64, bool, Vec<usize>, usize, usize)> = steps
+        .iter()
+        .flat_map(|step| {
+            [("beforeValues", false), ("afterValues", true)]
+                .into_iter()
+                .filter_map(move |(side, after)| {
+                    let value = step[side].get("grid")?;
+                    let (path, held, total) = first_cut(value, vec![])?;
+                    Some((step["stepCount"].as_i64()?, after, path, held, total))
+                })
+        })
+        .collect();
+    // The rest of the first and the last cut grid: before the loop has
+    // assigned anything the grid is all zeros, after it every cell is
+    // `r * 10 + c`. A rest loaded at any other step than its own would show
+    // the other one's cells.
+    let first = cuts.first().cloned().expect("a cut collection in a grid value");
+    let last = cuts.last().cloned().expect("a cut collection in a grid value");
+    assert!(first.0 < last.0, "grid is cut on more than one step");
+    let mut rests = vec![];
+    for (step_count, after, path, held, total) in [first, last] {
+        let seq = client
+            .send_request(
+                "ct/load-flow-value-elements",
+                json!({
+                    "flowRrTicks": flow_ticks, "stepCount": step_count, "after": after,
+                    "expression": "grid", "path": path, "startIndex": held, "count": 0,
+                }),
+            )
+            .expect("send ct/load-flow-value-elements");
+        let ((ok, message, slice), moved) = response_to(client, seq, "ct/load-flow-value-elements");
+        assert!(ok, "the rest of the cut collection is served: {message:?}");
+        assert!(moved.is_none(), "continuing a flow value does not move the debugger");
+        println!("SLICE step={step_count} after={after} path={path:?} held={held} total={total} -> {slice}");
+        assert_eq!(slice["startIndex"].as_u64(), Some(held as u64));
+        assert_eq!(slice["total"].as_u64(), Some(total as u64));
+        assert_eq!(
+            slice["elements"].as_array().map(|e| e.len()),
+            Some(total - held),
+            "the rest of the collection"
+        );
+        assert_eq!(slice["more"].as_bool(), Some(false));
+        rests.push((path, held, slice));
+    }
+    let cells = |slice: &Value| -> Vec<Vec<i64>> {
+        slice["elements"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .map(|row| {
+                row["elements"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .map(|cell| int_field(cell).expect("an integer cell"))
+                    .collect()
+            })
+            .collect()
+    };
+    let (first_path, first_held, first_rest) = &rests[0];
+    if first_path.is_empty() {
+        for row in cells(first_rest) {
+            assert_eq!(
+                row,
+                vec![0; 10],
+                "before the loop, the rest of the grid is all zeros, and whole"
+            );
+        }
+    }
+    let (last_path, last_held, last_rest) = &rests[1];
+    if last_path.is_empty() {
+        for (offset, row) in cells(last_rest).into_iter().enumerate() {
+            let r = (last_held + offset) as i64;
+            assert_eq!(
+                row,
+                (0..10).map(|c| r * 10 + c).collect::<Vec<_>>(),
+                "after the loop, row {r} is assigned, and whole"
+            );
+        }
+    }
+    (cuts[0].0, cuts[0].1, first_path.clone(), *first_held)
+}
+
+/// An integer value's number (the wire carries it as a string).
+fn int_field(value: &Value) -> Option<i64> {
+    match &value["i"] {
+        Value::String(text) => text.parse().ok(),
+        Value::Number(number) => number.as_i64(),
+        _ => None,
+    }
+}
+
+/// The element path to the first collection in `value` whose preview holds
+/// fewer elements than its `elementsTotal`, with how many it holds and has.
+fn first_cut(value: &Value, path: Vec<usize>) -> Option<(Vec<usize>, usize, usize)> {
+    let elements = value["elements"].as_array();
+    let held = elements.map_or(0, |e| e.len());
+    let total = value["elementsTotal"].as_u64().unwrap_or(0) as usize;
+    if total > held {
+        return Some((path, held, total));
+    }
+    elements?.iter().enumerate().find_map(|(i, element)| {
+        let mut deeper = path.clone();
+        deeper.push(i);
+        first_cut(element, deeper)
+    })
+}
+
+/// How many collections in `value` (at any depth) carry fewer elements than
+/// their `elementsTotal`.
+fn cut_collections(value: &Value) -> usize {
+    let elements = value["elements"].as_array();
+    let held = elements.map_or(0, |e| e.len()) as u64;
+    let mine = usize::from(value["elementsTotal"].as_u64().unwrap_or(0) > held);
+    mine + elements.into_iter().flatten().map(cut_collections).sum::<usize>()
+}

@@ -270,6 +270,7 @@ const EVENT_KIND_TO_DAP_MAPPING*: array[CtEventKind, cstring] = [
   CtLoadRequestSpans: "ct/load-request-spans",
   CtLoadSymbols: "ct/load-symbols",
   CtLoadValueElements: "ct/load-value-elements",
+  CtLoadFlowValueElements: "ct/load-flow-value-elements",
   CtLoadTerminalLines: "ct/load-terminal-lines",
   CtLoadStepLines: "ct/load-step-lines",
   # Multi-process sessions (M29 §5.2 / M42 §14.8). The same command

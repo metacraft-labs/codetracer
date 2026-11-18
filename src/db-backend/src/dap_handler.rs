@@ -64,6 +64,10 @@ use crate::value_budget;
 
 const TRACEPOINT_RESULTS_LIMIT_BEFORE_UPDATE: usize = 5;
 
+/// How many flows' uncut values `ct/load-flow-value-elements` can still
+/// answer from: one per open editor, roughly, before the oldest is dropped.
+const MAX_FLOWS_HELD_BACK: usize = 4;
+
 /// The geid a launched session opens at, when set: the environment variable
 /// `ct host` exports from a manifest's `replay_start.geid` and the replay
 /// agent sets on the hosted replay (codetracer-pm `spec/CLI/ct/host.md`, "The
@@ -218,6 +222,11 @@ pub struct Handler {
     /// it is about: `ct/load-value-elements` slices from it, so "Load More"
     /// re-reads nothing from the trace.
     full_locals: Option<(i64, Vec<Variable>)>,
+    /// The uncut values behind the previews of the last few flows sent, by
+    /// the flow's `location.rrTicks`, newest last:
+    /// `ct/load-flow-value-elements` slices from them. A few, not one,
+    /// because each editor loads its own flow.
+    flow_held_back: std::collections::VecDeque<(i64, crate::value_budget::HeldBackValues)>,
 
     /// Cached list of terminal-output (Write) events, populated lazily by
     /// `load_terminal()`.
@@ -702,6 +711,7 @@ impl Handler {
             cached_events: None,
             event_tick_index: None,
             full_locals: None,
+            flow_held_back: std::collections::VecDeque::new(),
             cached_terminal_events: None,
             cached_terminal_lines: None,
             macro_sourcemaps: MacroSourceMapCollection::default(),
@@ -1788,6 +1798,24 @@ impl Handler {
         // The update names the query it answers, so a client holding a call
         // flow and a diff flow can tell the two apart on the one event.
         flow_update.mode = arg.flow_mode;
+        // Keep the uncut values behind this flow's previews for
+        // `ct/load-flow-value-elements` (they are never sent).
+        let mut held_back = crate::value_budget::HeldBackValues::default();
+        for view in flow_update.view_updates.iter_mut() {
+            held_back.absorb(std::mem::take(&mut view.held_back));
+        }
+        if !held_back.is_empty() {
+            let flow_ticks = flow_update.location.rr_ticks.0;
+            info!(
+                "  flow at tick {flow_ticks} keeps {} bytes of uncut values",
+                held_back.stored_bytes()
+            );
+            self.flow_held_back.retain(|(ticks, _)| *ticks != flow_ticks);
+            self.flow_held_back.push_back((flow_ticks, held_back));
+            while self.flow_held_back.len() > MAX_FLOWS_HELD_BACK {
+                self.flow_held_back.pop_front();
+            }
+        }
         if self.trace_kind == TraceKind::Materialized {
             for view in flow_update.view_updates.iter_mut() {
                 for step in view.steps.iter_mut() {
@@ -3585,6 +3613,91 @@ impl Handler {
             sender,
         )?;
         Ok(())
+    }
+
+    /// `ct/load-flow-value-elements`: the next slice of a collection a flow
+    /// value's preview cut short (the popup's "k of N shown"). Out of the
+    /// uncut value kept when the flow was sent, or, for a flow that loaded only
+    /// its previews, out of the value loaded whole at the step's exact stop:
+    /// the flow's replay returns there (`jump_to_call` with the stop's
+    /// `replay_position`). The session's own debugger does not move.
+    pub fn load_flow_value_elements(
+        &mut self,
+        req: dap::Request,
+        args: task::LoadFlowValueElementsArguments,
+        sender: Sender<DapMessage>,
+    ) -> Result<(), Box<dyn Error>> {
+        let Some((_, held_back)) = self
+            .flow_held_back
+            .iter()
+            .rev()
+            .find(|(ticks, _)| *ticks == args.flow_rr_ticks)
+        else {
+            return Err(format!(
+                "ct/load-flow-value-elements: no flow at tick {} is kept (it was replaced by later ones)",
+                args.flow_rr_ticks
+            )
+            .into());
+        };
+        let whole = match held_back.whole(args.step_count, args.after, &args.expression) {
+            Some(whole) => whole,
+            None => {
+                let Some(stop) = held_back
+                    .position(args.step_count, args.after, &args.expression)
+                    .cloned()
+                else {
+                    return Err(format!(
+                        "ct/load-flow-value-elements: the flow at tick {} kept no cut value of {:?} at step {}",
+                        args.flow_rr_ticks, args.expression, args.step_count
+                    )
+                    .into());
+                };
+                self.load_flow_value_at_stop(&stop, &args.expression)?
+            }
+        };
+        // At the root of a value that is not a collection (a struct whose
+        // field the preview cut), the "elements" are its fields: the popup
+        // asks for them whole to show the whole value.
+        let slice = if args.path.is_empty() && !value_budget::is_collection(whole.kind) {
+            let total = whole.elements.len();
+            value_budget::ElementsSlice {
+                elements: whole.elements.clone(),
+                start_index: 0,
+                total,
+                more: false,
+            }
+        } else {
+            value_budget::elements_slice(&whole, &args.path, args.start_index, args.count)
+                .map_err(|e| format!("ct/load-flow-value-elements: {e:?}"))?
+        };
+        self.respond_dap(
+            req,
+            task::LoadValueElementsResponseBody {
+                elements: slice.elements,
+                start_index: slice.start_index,
+                total: slice.total,
+                more: slice.more,
+            },
+            sender,
+        )?;
+        Ok(())
+    }
+
+    /// `expression`'s value, whole, at the exact stop a flow kept for it.
+    fn load_flow_value_at_stop(&mut self, stop: &Location, expression: &str) -> Result<Value, Box<dyn Error>> {
+        let landed = self.replay.jump_to_call(stop).map_err(|e| {
+            format!(
+                "ct/load-flow-value-elements: the replay could not return to the step's stop at {}:{}: {e}",
+                stop.path, stop.line
+            )
+        })?;
+        info!(
+            "  load-flow-value-elements: back at {}:{} (tick {}) for {expression:?}",
+            landed.path, landed.line, landed.rr_ticks.0
+        );
+        let lang = crate::lang::lang_from_context(std::path::Path::new(&stop.path));
+        let record = self.replay.load_value(expression, None, lang)?;
+        Ok(crate::value::to_ct_value(&record))
     }
 
     /// `ct/load-symbols`: every function the recording called, once, with

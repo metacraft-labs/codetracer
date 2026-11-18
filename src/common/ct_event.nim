@@ -125,6 +125,7 @@ type
     CtLoadRequestSpans,
     CtLoadSymbols,
     CtLoadValueElements,
+    CtLoadFlowValueElements,
     CtLoadTerminalLines,
     CtLoadStepLines,
     # Multi-process sessions (M29 §5.2 / M42 §14.8). `ct/listProcesses`
@@ -252,6 +253,7 @@ func commandToCtResponseEventKind*(command: string): CtEventKind =
   of "ct/run-tracepoints": CtRunTracepoints
   of "ct/load-symbols": CtLoadSymbols
   of "ct/load-value-elements": CtLoadValueElements
+  of "ct/load-flow-value-elements": CtLoadFlowValueElements
   of "ct/load-terminal-lines": CtLoadTerminalLines
   of "ct/load-step-lines": CtLoadStepLines
   # Multi-process sessions (M42 §14.8)

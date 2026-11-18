@@ -870,6 +870,93 @@ proc renderLoadMoreButtonDom(self: ValueComponent, value: Value, path: seq[SubPa
           discard self.loadMoreValues(value, cPath))
   result.appendText(cstring"Load More")
 
+proc elementIndexPath(root: Value, path: seq[SubPath]): Option[seq[int]] =
+  ## The element indices from `root` to the value `path` names, the form
+  ## `ct/load-flow-value-elements` takes. A field is found by its label; a
+  ## pointer is followed without an index (the backend does the same).
+  var current = root
+  var indices: seq[int] = @[]
+  for sub in path:
+    if current.isNil:
+      return none(seq[int])
+    case sub.kind
+    of Expression:
+      discard
+    of Index:
+      if sub.index < 0 or sub.index >= current.elements.len:
+        return none(seq[int])
+      indices.add sub.index
+      current = current.elements[sub.index]
+    of Field:
+      var at = -1
+      if not current.typ.isNil:
+        for i, label in current.typ.labels:
+          if label == sub.name:
+            at = i
+            break
+      if at < 0 or at >= current.elements.len:
+        return none(seq[int])
+      indices.add at
+      current = current.elements[at]
+    of Dereference:
+      current = current.refValue
+    of VariantKind:
+      return none(seq[int])
+  some(indices)
+
+proc hasHeldBack*(value: Value): bool =
+  ## Whether a collection anywhere in `value` carries fewer elements than it
+  ## has (`elementsTotal`): a flow value's preview cut it.
+  if value.isNil:
+    return false
+  if value.elementsTotal > value.elements.len:
+    return true
+  for element in value.elements:
+    if hasHeldBack(element):
+      return true
+  if not value.refValue.isNil and hasHeldBack(value.refValue):
+    return true
+  false
+
+proc loadWholeValue*(self: ValueComponent) =
+  ## A flow value's popup shows the WHOLE value (`Omniscience-Flow.md`, "A
+  ## flow value is a preview"): when the preview cut anything, the root's
+  ## elements are fetched uncut (`ct/load-flow-value-elements`) as the popup
+  ## opens, and replace the preview's. If the fetch fails, each cut
+  ## collection keeps its own "Load more".
+  if self.heldBackLoader.isNil or not hasHeldBack(self.baseValue) or
+     self.isOperationRunning:
+    return
+  self.isOperationRunning = true
+  let base = self.baseValue
+  self.heldBackLoader(@[], 0, proc(elements: seq[Value], more: bool) =
+    self.isOperationRunning = false
+    if elements.len > 0 and not more:
+      base.elements = elements
+      base.elementsTotal = 0
+      self.redrawAfterValueMutation())
+
+proc renderHeldBackButtonDom(self: ValueComponent, value: Value, indices: seq[int]): Node =
+  ## "Load more (k of N)" under a collection a flow value's preview cut
+  ## short: the next elements, from the uncut value the flow kept.
+  result = newElement(cstring"button", cstring"value-load-more-button value-held-back-load-more")
+  result.appendText(cstring(fmt"Load more ({value.elements.len} of {value.elementsTotal})"))
+  let button = result.toJs
+  let loader = self.heldBackLoader
+  capture value, indices:
+    bindPressOperation(button, "variables.load-more",
+      proc(p: PressInfo) =
+        if self.isOperationRunning:
+          return
+        self.isOperationRunning = true
+        loader(indices, value.elements.len, proc(elements: seq[Value], more: bool) =
+          self.isOperationRunning = false
+          for element in elements:
+            value.elements.add(element)
+          if not more:
+            value.elementsTotal = 0
+          self.redrawAfterValueMutation()))
+
 proc childPathForExpandedValue(parent: Value, childName: cstring, element: Value, path: seq[SubPath]): seq[SubPath] =
   result = path
 
@@ -1157,6 +1244,20 @@ proc renderValueRowDom(
 
   if value.partiallyExpanded and self.uiExpanded(value, expression):
     atomParent.appendChild(self.renderLoadMoreButtonDom(value, path))
+
+  # A collection the ANSWER cut short (`elementsTotal`): a flow value is a
+  # preview of each collection's first elements (`Omniscience-Flow.md`, "A
+  # flow value is a preview"). Its popup continues it; anywhere else the
+  # count is stated.
+  if value.kind != TableKind and value.elementsTotal > value.elements.len and
+     self.uiExpanded(value, expression):
+    let indices = elementIndexPath(self.baseValue, path)
+    if not self.heldBackLoader.isNil and indices.isSome:
+      atomParent.appendChild(self.renderHeldBackButtonDom(value, indices.get))
+    else:
+      let note = newElement(cstring"span", cstring"value-held-back")
+      note.appendText(cstring(fmt"… {value.elements.len} of {value.elementsTotal} shown"))
+      atomParent.appendChild(note)
 
   result.appendChild(atomParent)
 

@@ -37,7 +37,7 @@ template ck(condition: untyped) =
   inc countedAssertions
   check condition
 
-const ExpectedAssertions = 246
+const ExpectedAssertions = 250
   ## Written from a run. See the final case.
   ##
   ## Was 179 before 2026-09-07. PLAT-3 extended `PresentationKind` from five
@@ -304,6 +304,21 @@ suite "PLAT-2: the budget is an input, and the presenter returns what fits":
     let elided = present(bigSeq(300), StatePanelBudget)
     ck elided.root.text.contains("…")
     ck not elided.root.text.contains("..]")
+
+  test "a collection the ANSWER held back ends in the same elision":
+    # A flow value (and a locals answer over budget) carries a collection's
+    # first elements and its full length, `elementsTotal`. The two it holds
+    # must not read as a complete two-element list.
+    let held = PValue(kind: pvkSequence, typeName: "TRow", sourceKind: "Array",
+                      members: @[member("", i("5")), member("", i("3"))],
+                      elementsTotal: 9)
+    let shown = present(held, StatePanelBudget)
+    ck shown.root.text.contains("5, 3, …")
+    ck shown.truncated
+    ck not shown.root.text.contains("..")
+    let whole = PValue(kind: pvkSequence, typeName: "TRow", sourceKind: "Array",
+                       members: @[member("", i("5")), member("", i("3"))])
+    ck not present(whole, StatePanelBudget).root.text.contains("…")
 
   test "the annotated budget is what produces the second numeric base":
     ck present(i("306"), tuiRowBudget(40, focused = false)).root.text == "306"
