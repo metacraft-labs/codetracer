@@ -62,6 +62,11 @@ jobs:
     # 60-minute life) could not cover a longer job's clones anyway -- here every
     # authenticated clone happens in the first steps.
     steps:
+      - name: Record when the job started
+        # For the cache push at the end, whose budget is what the job's time
+        # limit leaves.
+        run: echo "CT_JOB_STARTED_AT=$(date +%s)" >>"$GITHUB_ENV"
+
       - name: Generate CI token
         id: ci_token
         uses: actions/create-github-app-token@v2
@@ -140,6 +145,7 @@ jobs:
         # the step above, which installed Nix: this action reaches `repro`
         # through the dev shell. The token is required: one build input,
         # codetracer-image-diff, is private.
+        id: provision
         uses: ./.github/actions/provision-repro-lock-siblings
         with:
           app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
@@ -326,3 +332,28 @@ jobs:
           path: ${{ runner.temp }}/memory-samples.log
           if-no-files-found: ignore
           retention-days: 7
+
+      - name: Push the dev shells this shard realised to the cache
+        # The shells ct-build and every shard realise (ci, default), and the
+        # flake's inputs, so the next run substitutes them when the lock has
+        # moved faster than cache-push.yml can finish (run 44048043714 found
+        # nothing built on the lock 64a81f1844c moved to). Here, at the end of
+        # ONE TUI shard: every shard waits for ct-build, nothing waits for a
+        # shard, and a TUI shard has hours of its limit left where a GPUI shard
+        # had none (GPUI shard 1, which carried this push, hit its 90 minutes
+        # before reaching it in run 44269676398). Best effort (a 15-minute
+        # budget capped at what the job's limit leaves, exit 0 on any failure,
+        # continue-on-error), and only dev and agents write the shared cache
+        # (ci/test/push-built-closure-test.sh).
+        if: ${{ !cancelled() && matrix.shard == 1 && steps.provision.outcome == 'success' && (github.ref_name == 'dev' || github.ref_name == 'agents') }}
+        continue-on-error: true
+        timeout-minutes: 20
+        env:
+          ATTIC_ENDPOINT: ${{ vars.ATTIC_ENDPOINT }}
+          ATTIC_CACHE: ${{ vars.ATTIC_CACHE }}
+          ATTIC_TOKEN: ${{ secrets.ATTIC_TOKEN }}
+          CT_JOB_TIMEOUT_MINUTES: 355
+        # CT_JOB_TIMEOUT_MINUTES is this job's timeout-minutes: the push's
+        # budget is capped at what the limit leaves, so it never cancels the
+        # job (push-built-closure-test.sh holds the two numbers equal).
+        run: bash ci/deploy/push-built-closure.sh --gcroots "${CT_GCROOT_DIR:-$RUNNER_TEMP/ct-gcroots}" --flake-inputs
