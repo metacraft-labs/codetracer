@@ -490,3 +490,9 @@ src/frontend/tui/tests/plat65-nim-tracing-mutation-control.sha256	src/frontend/g
 src/frontend/tui/tests/plat42-surface-mutation-control.sha256	src/frontend/viewmodel/backend/stdio_backend.nim	59bc2f08f98659cdba4e0a3fe7053873cf7cf6eb4b4138f846c2877e94754ea2	0ce2c7aad74a90c98350a4a2b1c8cd65b8d214919334abbe8bdf5646e7e3c1d3
 src/frontend/tui/tests/plat51-parity-mutation-control.sha256	src/frontend/tui/tests/real_terminal/test_plat51_pty.nim	b64a204ec9eed957a1fc524199a8383c81306fc2864b45e4ab93b1ef0836e8b0	75e63c0e673c13a419a8739bc4e04392eda4032e45d0ca1a0833dbfde494a384
 src/frontend/tui/tests/plat59-visual-replay-mutation-control.sha256	src/frontend/viewmodel/backend/stdio_backend.nim	59bc2f08f98659cdba4e0a3fe7053873cf7cf6eb4b4138f846c2877e94754ea2	0ce2c7aad74a90c98350a4a2b1c8cd65b8d214919334abbe8bdf5646e7e3c1d3
+# The Agent Harbor session timeline (`feat(agent-harbor): the session activity timeline in every host, and middle cuts for paths`)
+# moved test_gpui_window_frame.nim and the keymap's overlay_rows.nim and scope_path.nim.
+# Re-grade the arms whose needles sit in them.
+src/frontend/gpui/tests/plat37-window-mutation-control.sha256	src/frontend/gpui/tests/test_gpui_window_frame.nim	514b52c02495327b842feb6cf2cb8cd9ef01878073a9ae1dfc7fe673e79f4e2b	40f5de09b1e97db5d711bbbc47ea609c1b675e2f73e2a80c8adb382d3f709677
+src/frontend/tui/tests/plat59-visual-replay-mutation-control.sha256	src/frontend/viewmodel/keymap/overlay_rows.nim	092a2a5123f4201bd27d7756c774dcbc3f2e80b14ea515064b4c6e5c5d97584e	29d13621166a061d890ce4e32b6f11947812f0926f5f1929385f4b3209618834
+src/frontend/tui/tests/plat60-low-level-code-mutation-control.sha256	src/frontend/viewmodel/keymap/scope_path.nim	b6c5ae61a3b680c3360ebbc53a196fdcc68d5b62f76f02d10ca37d6bd383eef2	9f54d356aa008b67426202d3b6334a9a17405cba676564ab018911801236ce15
