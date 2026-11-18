@@ -3522,6 +3522,12 @@ proc renderState*(r: GpuiRenderer; parent: GpuiElement; vm: StateVM;
   r.setStyle(table, "overflow", "hidden")
   r.setStyle(table, "margin-top", "12px")
   r.setStyle(table, "padding-left", $StateInsetPx & "px")
+  # The table is the pane's scroll box, so it fills what is left of the pane
+  # (as the VCS pane's box does). Sized by its content instead, it was as
+  # tall as the rows LESS their scroll, since the scroller's negative margin
+  # counts against it: in the window a wheel to the end left a box that
+  # clipped every row, while the plan, which lays nothing out, was right.
+  r.setStyle(table, "flex-grow", "1")
   # The rows, moved by the box's scroll (`stateScroll`): the table clips.
   let scroller = r.createElement("div")
   r.setAttribute(scroller, "data-ct-state-scroll",
