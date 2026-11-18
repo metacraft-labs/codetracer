@@ -5,7 +5,8 @@
 ## pane loads included, and the flow window is one of them. A native flow can
 ## take longer than that on a loaded host (one stepped by rr, a step at a
 ## time): the engine is working, not stopped. So while it computes a flow the
-## engine sends progress (`ct/flow-progress` events, about every 2 s), and the
+## engine sends progress (`ct/flow-progress` events, `stepsWalked` and
+## `elapsedMs`, at most every 2 s), and the
 ## clock, which is per message, starts again on each one.
 ##
 ## The fake engine answers `ct/load-flow` after several budgets, in two modes:
@@ -70,7 +71,8 @@ while True:
             step += 1
             if mode == "progress":
                 send({"type": "event", "event": "ct/flow-progress",
-                      "body": {"steps": step}})
+                      "body": {"stepsWalked": step,
+                               "elapsedMs": int((time.time() - start) * 1000)}})
         send({"type": "response", "request_seq": msg["seq"], "success": True,
               "command": "ct/load-flow", "body": {}})
     else:
