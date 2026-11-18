@@ -1626,28 +1626,39 @@ proc readFindField(ctx: GuiContext; f: Frame; left, top, right: int): Option[Sur
   if at < 0 and widget:
     # The counter is drawn dim and small: read the field's right part again
     # as ink on paper (its words run together there: `3of12`), and take the
-    # query from the first reading, left of where the counter starts.
-    let right = ctx.wordsInk(f, right - 150, top + 2, 140, 30, level = 77)
-    var joined = ""
+    # query from the first reading, left of where the counter starts. OCR
+    # misreads its digits often (`20f11`, `Sof11` for 3 of 11), so it is read
+    # at three ink levels and a reading whose two numbers are digits wins;
+    # otherwise the counter is reported AS READ (`S of 11`), never with a
+    # digit guessed for a letter.
+    proc split(joined: string): tuple[a, b: string] =
+      # `n of m` run together: an o-like letter (`o`, `0`, `O`) and `f`
+      # between two short runs.
+      for i in 1 ..< joined.len - 2:
+        if joined[i] in {'o', '0', 'O'} and joined[i + 1] == 'f' and
+           i <= 4 and joined.len - i - 2 in 1 .. 4:
+          return (joined[0 ..< i], joined[i + 2 .. ^1])
+    var fallback = ""
     var startX = high(int)
-    for wd in right:
-      if wd.text.startsWith("Aa"): break
-      joined.add wd.text
-      startX = min(startX, wd.x)
-    if getEnv("CT_GUI_BINDING_DEBUG").len > 0:
-      stderr.writeLine "find-field ink right part ", joined
-    # `n of m` with its words run together; the dim `o` is read as `0` or
-    # `O` too (`20f11` is 2 of 11), so the split is where an o-like letter
-    # and `f` stand between two runs of digits.
-    var o = -1
-    for i in 1 ..< joined.len - 2:
-      if joined[i] in {'o', '0', 'O'} and joined[i + 1] == 'f' and
-         joined[0 ..< i].allCharsInSet(Digits) and
-         joined[i + 2 .. ^1].allCharsInSet(Digits):
-        o = i
+    for level in [77, 100, 60]:
+      let part = ctx.wordsInk(f, right - 150, top + 2, 140, 30, level = level)
+      var joined = ""
+      var sx = high(int)
+      for wd in part:
+        if wd.text.startsWith("Aa"): break
+        joined.add wd.text
+        sx = min(sx, wd.x)
+      if getEnv("CT_GUI_BINDING_DEBUG").len > 0:
+        stderr.writeLine "find-field ink right part at ", level, ": ", joined
+      let (a, b) = split(joined)
+      if a.len == 0: continue
+      startX = min(startX, sx)
+      if a.allCharsInSet(Digits) and b.allCharsInSet(Digits):
+        counter = a & " of " & b
         break
-    if o > 0:
-      counter = joined[0 ..< o] & " of " & joined[o + 2 .. ^1]
+      if fallback.len == 0: fallback = a & " of " & b
+    if counter.len == 0: counter = fallback
+    if counter.len > 0:
       var q: seq[Word]
       for wd in ws:
         if wd.x + wd.w < startX - 4: q.add wd
