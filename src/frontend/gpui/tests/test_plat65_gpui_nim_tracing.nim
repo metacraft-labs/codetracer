@@ -87,7 +87,9 @@ proc windowPlan(p: NimProject; ops: string; trace: var string;
     args.add "--window-ops=" & ops
   args.add p.recording
   let proc0 = startProcess("/bin/sh",
-    args = @["-c", "exec timeout 600 \"$0\" \"$@\" 2>" & quoteShell(errFile),
+    # twice the shared hang ceiling: this suite's runs replay a native Nim
+    # recording, and it gave them ten minutes before the ceiling was shared
+    args = @["-c", gpuiRunScript("2>" & quoteShell(errFile), 2 * WindowRunCeilingS),
              bin] & args,
     workingDir = p.root, env = env, options = {})
   let output = proc0.outputStream.readAll()
@@ -97,7 +99,7 @@ proc windowPlan(p: NimProject; ops: string; trace: var string;
   removeFile(errFile)
   removeDir(state)
   if rc != 0:
-    checkpoint("codetracer-gpui exited " & $rc & ": " & trace)
+    checkpoint("codetracer-gpui " & gpuiExitText(rc, 2 * WindowRunCeilingS) & ": " & trace)
     raise newException(IOError, "the window plan run failed (" & ops & ")")
   parseJson(output)
 

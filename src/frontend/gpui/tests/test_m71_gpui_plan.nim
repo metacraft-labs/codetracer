@@ -112,7 +112,7 @@ proc run(ops: string; subject: string; pre: seq[string] = @[];
   args.add subject
   let errFile = genTempPath("m71-gpui-plan-", ".err")
   let p = startProcess("/bin/sh",
-    args = @["-c", "exec timeout 120 \"$0\" \"$@\" 2>" & quoteShell(errFile),
+    args = @["-c", gpuiRunScript("2>" & quoteShell(errFile)),
              bin] & args,
     workingDir = workDir, env = env, options = {})
   let output = p.outputStream.readAll()
@@ -123,7 +123,7 @@ proc run(ops: string; subject: string; pre: seq[string] = @[];
   removeDir(state)
   result.plan = if result.rc == 0: parseJson(output) else: newJNull()
   if result.rc != 0:
-    checkpoint("codetracer-gpui exited " & $result.rc & " (" & ops & "): " &
+    checkpoint("codetracer-gpui " & gpuiExitText(result.rc) & " (" & ops & "): " &
                result.err)
 
 proc attr(n: JsonNode; name: string): string =

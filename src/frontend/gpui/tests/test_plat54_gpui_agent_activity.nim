@@ -46,6 +46,7 @@ import replay_prerequisite
 import std/[json, os, osproc, streams, strtabs, strutils, tempfiles, unittest]
 
 import ../../tui/tests/fixtures/fixture_provider
+import ./gpui_child_env
 import ../../../ct/review_session
 
 var CHECKS = 0
@@ -103,8 +104,9 @@ proc windowPlan(ops: string; extra: seq[string] = @[];
   var env = newStringTable()
   for k, v in envPairs():
     env[k] = v
-  env["LD_LIBRARY_PATH"] = shimDir &
-    (if existsEnv("LD_LIBRARY_PATH"): ":" & getEnv("LD_LIBRARY_PATH") else: "")
+  # The shim's own libraries too (`gpui_child_env`): the shim's directory
+  # alone left the child unable to load it outside a shell that exports them.
+  env["LD_LIBRARY_PATH"] = gpuiLibraryPath(shimDir)
   env[StateDirEnvVar] = state
   env["XDG_STATE_HOME"] = state
   env["CODETRACER_HOME"] = state / "ct-home"
@@ -115,7 +117,8 @@ proc windowPlan(ops: string; extra: seq[string] = @[];
   let args = @["--report-window-plan", "--width=" & $W, "--height=" & $H,
                "--window-ops=" & ops] & extra & @[trace]
   let p = startProcess("/bin/sh",
-    args = @["-c", "exec \"$0\" \"$@\" 2>" & quoteShell(errFile), bin] & args,
+    # the shared hang ceiling: a run that never finishes fails, not waits
+    args = @["-c", gpuiRunScript("2>" & quoteShell(errFile)), bin] & args,
     env = env, options = {})
   let output = p.outputStream.readAll()
   let rc = p.waitForExit()
@@ -124,7 +127,7 @@ proc windowPlan(ops: string; extra: seq[string] = @[];
   removeFile(errFile)
   removeDir(state)
   if rc != 0:
-    checkpoint("codetracer-gpui exited " & $rc & ": " & result.trace)
+    checkpoint("codetracer-gpui " & gpuiExitText(rc) & ": " & result.trace)
     raise newException(IOError, "the window plan run failed (" & ops & ")")
   result.plan = parseJson(output)
 

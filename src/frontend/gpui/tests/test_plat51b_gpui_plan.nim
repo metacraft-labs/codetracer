@@ -110,7 +110,7 @@ proc windowPlan(ops: string; geometry: var JsonNode; state = "";
   args.add calc
   let errFile = genTempPath("plat51b-gpui-plan-", ".err")
   let p = startProcess("/bin/sh",
-    args = @["-c", "exec \"$0\" \"$@\" 2>" & quoteShell(errFile), bin] & args,
+    args = @["-c", gpuiRunScript("2>" & quoteShell(errFile)), bin] & args,
     env = env, options = {})
   let output = p.outputStream.readAll()
   let rc = p.waitForExit()
@@ -121,7 +121,7 @@ proc windowPlan(ops: string; geometry: var JsonNode; state = "";
   if own:
     removeDir(root)
   if rc != 0:
-    checkpoint("codetracer-gpui exited " & $rc & ": " & err)
+    checkpoint("codetracer-gpui " & gpuiExitText(rc) & ": " & err)
     raise newException(IOError, "the window plan run failed (" & ops & ")")
   parseJson(output)
 

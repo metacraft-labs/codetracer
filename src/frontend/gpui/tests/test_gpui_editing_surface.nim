@@ -77,6 +77,7 @@ import ../host/gpui_host
 import ../../view_vocabulary/pane_views
 import ../../view_vocabulary/gpui_layout_answers
 import ../../../common/view_vocabulary
+import ./gpui_child_env
 
 var asserted = 0
 var countedAssertions = 0
@@ -950,7 +951,8 @@ suite "PLAT-22: the GPUI editing surface":
       removeFile(built)
       removeDir(built & ".cache")
     let trace = calcFixture()
-    let (output, code) = execCmdEx(built & " --report-plan " & trace)
+    let (output, code) = execCmdEx("timeout " & $WindowRunCeilingS & " " & built &
+                                   " --report-plan " & trace)
     ck code == 0
     ck output.len > 0
     # THE PANES ARE LIVE. The negative is the load-bearing half: this exact

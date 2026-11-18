@@ -51,10 +51,11 @@ proc run(ops: string; subject = calc; rows = UserRows):
   let args = @["--report-window-plan", "--width=" & $W, "--height=" & $H,
                "--window-ops=" & ops, subject]
   let p = startProcess("/bin/sh",
-    args = @["-c", "exec timeout 120 \"$0\" \"$@\" 2>" & quoteShell(errFile), bin] & args,
+    args = @["-c", gpuiRunScript("2>" & quoteShell(errFile)), bin] & args,
     env = env, options = {})
   let output = p.outputStream.readAll()
   let rc = p.waitForExit()
+  if rc == TimeoutKilledExit: checkpoint("codetracer-gpui " & gpuiExitText(rc))
   p.close()
   result.trace = if fileExists(errFile): readFile(errFile) else: ""
   removeFile(errFile)

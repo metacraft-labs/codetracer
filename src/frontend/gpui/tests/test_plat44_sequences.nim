@@ -81,13 +81,15 @@ let shimDir = getEnv("ISONIM_GPUI_SHIM_DIR",
                    repo.parentDir / "isonim-gpui/rust/target/debug")
 
 proc runBinary(project, state: string; specs: seq[string]): (int, string) =
-  let p = startProcess(bin,
-    args = @["--edit", "--report-plan", "--width=1600", "--height=1200",
+  let p = startProcess("/bin/sh",
+    args = @["-c", gpuiRunScript("2>&1"), bin,
+             "--edit", "--report-plan", "--width=1600", "--height=1200",
              "--edit-keys=" & specs.join(","), project],
     env = gpuiChildEnv(shimDir, state),
-    options = {poStdErrToStdOut})
+    options = {})
   let output = p.outputStream.readAll()
   let rc = p.waitForExit()
+  if rc == TimeoutKilledExit: checkpoint("codetracer-gpui " & gpuiExitText(rc))
   p.close()
   (rc, output)
 

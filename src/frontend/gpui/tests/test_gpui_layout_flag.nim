@@ -66,10 +66,11 @@ proc runBinary(extra: seq[string]): (int, string, string) =
   args.add calc
   # stderr to a file rather than merged: the plan on stdout must parse as JSON.
   let p = startProcess("/bin/sh",
-    args = @["-c", "exec \"$0\" \"$@\" 2>" & quoteShell(errFile), bin] & args,
+    args = @["-c", gpuiRunScript("2>" & quoteShell(errFile)), bin] & args,
     env = env, options = {})
   let output = p.outputStream.readAll()
   let rc = p.waitForExit()
+  if rc == TimeoutKilledExit: checkpoint("codetracer-gpui " & gpuiExitText(rc))
   p.close()
   let err = if fileExists(errFile): readFile(errFile) else: ""
   removeFile(errFile)

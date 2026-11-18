@@ -78,7 +78,7 @@ proc windowPlan(ops: string): tuple[plan: JsonNode, trace: string] =
   let args = @["--report-window-plan", "--width=" & $W, "--height=" & $H,
                "--window-ops=" & ops, trace]
   let p = startProcess("/bin/sh",
-    args = @["-c", "exec \"$0\" \"$@\" 2>" & quoteShell(errFile), bin] & args,
+    args = @["-c", gpuiRunScript("2>" & quoteShell(errFile)), bin] & args,
     env = env, options = {})
   let output = p.outputStream.readAll()
   let rc = p.waitForExit()
@@ -87,7 +87,7 @@ proc windowPlan(ops: string): tuple[plan: JsonNode, trace: string] =
   removeFile(errFile)
   removeDir(state)
   if rc != 0:
-    checkpoint("codetracer-gpui exited " & $rc & ": " & result.trace)
+    checkpoint("codetracer-gpui " & gpuiExitText(rc) & ": " & result.trace)
     raise newException(IOError, "the window plan run failed (" & ops & ")")
   result.plan = parseJson(output)
 

@@ -99,7 +99,7 @@ proc windowPlan(ops: string; geometry: var JsonNode;
   args.add (if subject.len > 0: subject else: calc)
   let errFile = genTempPath("plat49-gpui-plan-", ".err")
   let p = startProcess("/bin/sh",
-    args = @["-c", "exec \"$0\" \"$@\" 2>" & quoteShell(errFile), bin] & args,
+    args = @["-c", gpuiRunScript("2>" & quoteShell(errFile)), bin] & args,
     env = env, options = {})
   let output = p.outputStream.readAll()
   let rc = p.waitForExit()
@@ -109,7 +109,7 @@ proc windowPlan(ops: string; geometry: var JsonNode;
   geometry = if fileExists(geomFile): parseFile(geomFile) else: newJNull()
   removeDir(state)
   if rc != 0:
-    checkpoint("codetracer-gpui exited " & $rc & ": " & err)
+    checkpoint("codetracer-gpui " & gpuiExitText(rc) & ": " & err)
     raise newException(IOError, "the window plan run failed (" & ops & ")")
   result = parseJson(output)
   # The marks' SVG files the plan names are left for its reader; drop them.

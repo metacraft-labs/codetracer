@@ -76,7 +76,7 @@ proc run(args: seq[string]; trace: var string): string =
   env["CODETRACER_GPUI_PIXELS_RAW"] = "1"
   let errFile = genTempPath("plat59-gpui-", ".err")
   let p = startProcess("/bin/sh",
-    args = @["-c", "exec timeout 300 \"$0\" \"$@\" 2>" & quoteShell(errFile),
+    args = @["-c", gpuiRunScript("2>" & quoteShell(errFile)),
              bin] & args, env = env, options = {})
   result = p.outputStream.readAll()
   let rc = p.waitForExit()
@@ -85,7 +85,7 @@ proc run(args: seq[string]; trace: var string): string =
   removeFile(errFile)
   removeDir(state)
   if rc != 0:
-    checkpoint("codetracer-gpui exited " & $rc & ": " & trace)
+    checkpoint("codetracer-gpui " & gpuiExitText(rc) & ": " & trace)
     raise newException(IOError, "the codetracer-gpui run failed (" &
                        args.join(" ") & ")")
 
