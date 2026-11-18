@@ -9,7 +9,150 @@
     let
       inherit (pkgs) stdenv;
 
-      src = ../../.;
+      # THE PACKAGES' SOURCE: an explicit list, never "the repository minus X".
+      # With the whole checkout here, every commit -- a scenario, a test, a CI
+      # script -- changed every package's derivation, so the cache never held
+      # a build of the tree a CI run had (run 44081496736's nixos leg rebuilt
+      # codetracer and its front-end bundles from source). Left out: ci/,
+      # .github/, docs/ and src/tests/, which no package build reads (the
+      # scenario packs, page objects, stages and Playwright suites, and the
+      # CI scripts) -- except docs/agent-prompt/deepreview-evidence.md, which
+      # `ct agent` embeds with `staticRead` (src/ct/agent_cli.nim). A path
+      # added at the top level, or directly under src/, is left out until it
+      # is listed here; ci/test/package-src-completeness.nix fails a package
+      # module that `staticRead`s or `slurp`s a file the list leaves out, and
+      # ci/test/package-src-invariance-test.sh holds that an edit under
+      # src/tests, ci/, docs/ or .github/ leaves the packages' derivations
+      # as they were. db-backend narrows further (see below).
+      src =
+        let
+          root = ../../.;
+          topLevel = [
+            ".agents"
+            ".ah"
+            ".babelrc"
+            ".cargo"
+            ".config"
+            ".cspell.json"
+            ".devcontainer"
+            ".editorconfig"
+            ".env.example"
+            ".envrc"
+            ".gitattributes"
+            ".gitignore"
+            ".gitlab-ci.yml"
+            ".gitmodules"
+            ".markdownlint-cli2.yaml"
+            ".projectile"
+            ".shellcheckrc"
+            "0005-python-recorder-db-backend-integration.md"
+            "0006-ct-host-reload-resilience.md"
+            "0007-ct-host-heartbeat-and-idle-timeout.md"
+            "AGENTS.md"
+            "CHANGELOG.md"
+            "CODE_OF_CONDUCT.md"
+            "CONTRIBUTING.md"
+            "COPYRIGHT"
+            "LICENSE"
+            "PLAN_OPEN_DIR.md"
+            "README.md"
+            "SECURITY.md"
+            "SUPPORT.md"
+            "THIRD_PARTY_NOTICES.md"
+            "appimage-scripts"
+            "bench-results"
+            "browser-replay"
+            "build_for_extension.sh"
+            "config.nims"
+            "config.toml"
+            "ct-dap.md"
+            "ct-host-heartbeat-and-idle-timeout-implementation-plan.md"
+            "ct-host-heartbeat-status.md"
+            "ct-host-reload-resilience-implementation-plan.md"
+            "ct-host-reload-status.md"
+            "env.ps1"
+            "env.sh"
+            "examples"
+            "flake.lock"
+            "flake.nix"
+            "funding.json"
+            "get"
+            "icon.svg"
+            "install-on-distributions.sh"
+            "install.ps1"
+            "issues"
+            "justfile"
+            "libs"
+            "locks"
+            "media"
+            "nix"
+            "node-packages"
+            "non-nix-build"
+            "package.json"
+            "packaging"
+            "project-words.txt"
+            "python-api"
+            "python-recorder-db-backend-implementation-plan.md"
+            "python-recorder-part2-status.md"
+            "refs"
+            "release_checklist.md"
+            "repro.lock"
+            "repro.nim"
+            "reprobuild"
+            "resources"
+            "schema"
+            "scripts"
+            "signatures"
+            "storybook"
+            "test"
+            "test-programs"
+            "tests"
+            "tools"
+            "views"
+            "wdio.conf.js"
+            "webpack.config.js"
+            "windows-porting-initiative-status.md"
+          ];
+          underSrc = [
+            ".cargo"
+            "Tupfile"
+            "Tupfile.ini"
+            "Tuprules.tup"
+            "backend-manager"
+            "bpf-monitor"
+            "build-debug"
+            "build-release"
+            "codetracer-bench"
+            "common"
+            "config"
+            "ct"
+            "ct_incremental_adapter.nim"
+            "ct_test"
+            "db-backend"
+            "db_connector"
+            "frontend"
+            "helpers.js"
+            "helpers.ts"
+            "lsp.nim"
+            "lsp"
+            "public"
+            "shell-integrations"
+            "tools"
+            "tracer"
+            "tui"
+          ];
+          extra = [ "docs/agent-prompt/deepreview-evidence.md" ];
+        in
+        pkgs.lib.fileset.toSource {
+          inherit root;
+          # maybeMissing: libs/ and refs/ hold submodules, present only when the
+          # flake is evaluated with `?submodules=1`, as every package build is.
+          fileset = pkgs.lib.fileset.unions (
+            map (p: pkgs.lib.fileset.maybeMissing (root + "/${p}")) (
+              topLevel ++ map (p: "src/" + p) underSrc ++ extra
+            )
+          );
+        };
 
       # Nim and other toolchains from the shared codetracer-toolchains flake.
       toolchainsPkgs = inputs."codetracer-toolchains".packages.${system};
@@ -2200,6 +2343,18 @@
             # developer's link against the same runtime.
             read -r -a ts_flags < <(sed 's/^/--passL:/; s/ / --passL:/g' \
               build/grammars/tui-link-flags.txt)
+
+            # The sibling libraries config.nims puts on the path from these
+            # variables, as the codetracer package sets them: the TUI's import
+            # chain reaches src/ct_test (certificate_content_id_native.nim ->
+            # `import runquota_process`), and without RUNQUOTA_SRC the build
+            # stopped at "cannot open file: runquota_process".
+            export RUNQUOTA_SRC="${inputs.runquota}"
+            export CODETRACER_TRACE_FORMAT_NIM_SRC="${inputs.codetracer-trace-format-nim}/src"
+            export CODETRACER_RESULTS_SRC="${inputs.nim-results}"
+            export IO_MON_SRC="${inputs.io-mon}/src"
+            export NIM_STACKABLE_HOOKS_SRC="${inputs.nim-stackable-hooks}/src"
+            export TEST_CERTIFICATES_TOOLS_SRC="${inputs.test-certificates-tools}/src"
 
             ${nim-codetracer.out}/bin/nim2 \
               ${isonimNimPaths} \

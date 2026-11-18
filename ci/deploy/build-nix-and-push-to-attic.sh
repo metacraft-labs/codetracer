@@ -63,3 +63,15 @@ echo "== ${#inputs[@]} input source(s) present"
 if [ "${#inputs[@]}" -gt 0 ]; then
 	attic_push "${inputs[@]}"
 fi
+
+# The terminal front-end's install component, and with it #codetracer-tui (its
+# build input): no other job builds either, so a change that broke them went
+# unnoticed -- the TUI's import chain reached runquota while the package set no
+# RUNQUOTA_SRC, and it failed to compile for as long as nothing built it. Last,
+# so a failure here fails this job without holding back the pushes above.
+# ci/test/flake-packages-built-test.sh holds that every flake package is built
+# by some job, as an input of one, or is a named exception.
+echo "== building and pushing #codetracer-tui-component"
+tui_out="$(nix build --no-link --print-out-paths '.?submodules=1#codetracer-tui-component')"
+# shellcheck disable=SC2086 # one store path per line
+attic_push ${tui_out}

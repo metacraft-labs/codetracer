@@ -46,8 +46,19 @@ lint_step "backend-manager sandbox package inputs" \
 lint_step "db-backend package inputs" \
 	nix build --impure --no-link --max-jobs 2 --cores 2 \
 	--expr 'import ./ci/test/db-backend-package-inputs.nix { }'
+# The other packages build from an explicit list that leaves out src/tests/,
+# ci/, docs/ and .github/: it must hold every file their modules embed.
+lint_step "the packages' source holds every file their modules embed" \
+	nix build --impure --no-link --max-jobs 2 --cores 2 \
+	--expr 'import ./ci/test/package-src-completeness.nix { }'
 lint_step "a commit outside a package's inputs leaves its derivation alone" \
 	bash ci/test/package-src-invariance-test.sh
+
+# Every flake package is built by a CI job, built as an input of one, or a
+# named exception, so a change that breaks one fails a job rather than going
+# unnoticed (#codetracer-tui did).
+lint_step "every flake package is built by a CI job or excepted" \
+	bash ci/test/flake-packages-built-test.sh
 
 # Requires the host's Nix daemon and real local bare repositories, so this
 # belongs to the Nix lane rather than the lightweight shell-only lint lane.

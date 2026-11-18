@@ -2,16 +2,18 @@
 # ci/test/package-src-invariance-test.sh -- a commit outside a package's inputs
 # leaves its derivation, and so its cached output, unchanged.
 #
-# db-backend used the whole checkout as its source, so every commit changed its
-# derivation, no cache push could cover the tree a CI run had, and the nixos leg
-# rebuilt it from source for over 100 minutes (run 44081496736, cancelled at
-# 150 minutes). nix/packages/default.nix now builds it from an explicit file
-# set: its crate and the libraries its manifests reach.
+# The packages used the whole checkout as their source, so every commit -- a
+# scenario, a test, a CI script -- changed every package's derivation, no cache
+# push could cover the tree a CI run had, and the nixos leg rebuilt db-backend
+# and codetracer from source (run 44081496736, cancelled at 150 minutes).
+# nix/packages/default.nix now builds them from explicit file sets: the
+# packages' source leaves out src/tests/, ci/, docs/ and .github/, and
+# db-backend's holds only its crate and libraries.
 #
-# This evaluates db-backend's drvPath at the checkout, then with one tracked
-# file edited at a time: each file OUTSIDE its inputs must leave the drvPath
-# equal, and the control file, inside them, must change it (or the evaluation
-# is not seeing edits at all).
+# This evaluates db-backend's, codetracer's and codetracer-tui's drvPaths at the
+# checkout, then with one tracked file edited at a time: each file OUTSIDE a
+# package's inputs must leave its drvPath equal, and the control file, inside
+# all of them, must change each (or the evaluation is not seeing edits at all).
 # Every edited file is restored byte for byte. Run by ci/lint/nix.sh.
 set -euo pipefail
 cd "$(dirname "$0")/../.."
@@ -24,10 +26,10 @@ ok() { echo "  ok   $*"; }
 
 # file|packages it must leave unchanged
 outside=(
-	"src/tests/scenarios/lanes/terminal.lane.yaml|db"
-	"ci/lint/bash.sh|db"
-	"docs/UI-Design-Decisions.md|db"
-	".github/workflows/codetracer.yml|db"
+	"src/tests/scenarios/lanes/terminal.lane.yaml|db codetracer tui"
+	"ci/lint/bash.sh|db codetracer tui"
+	"docs/UI-Design-Decisions.md|db codetracer tui"
+	".github/workflows/codetracer.yml|db codetracer tui"
 	"src/frontend/ui/CROSS_WINDOW_PANEL_TRANSFER.md|db"
 )
 control=src/db-backend/notes.md
@@ -43,7 +45,7 @@ system="$(nix eval --impure --raw --expr builtins.currentSystem)"
 drvs() {
 	# shellcheck disable=SC2016 # a Nix expression, not shell
 	nix eval --raw ".?submodules=1#packages.${system}" --apply \
-		'p: "db=${p.db-backend.drvPath}"' 2>/dev/null
+		'p: "db=${p.db-backend.drvPath} codetracer=${p.codetracer.drvPath} tui=${p.codetracer-tui.drvPath}"' 2>/dev/null
 }
 pick() { tr ' ' '\n' <<<"$1" | sed -n "s/^$2=//p"; }
 
@@ -81,11 +83,13 @@ for entry in "${outside[@]}"; do
 	done
 done
 after="$(probe "$control")"
-if [ -n "$(pick "$after" db)" ] && [ "$(pick "$after" db)" != "$(pick "$base" db)" ]; then
-	ok "control: an edit to ${control} changes db's derivation"
-else
-	fail "control: an edit to ${control} did not change db's derivation, so the checks above prove nothing"
-fi
+for pkg in db codetracer tui; do
+	if [ -n "$(pick "$after" "$pkg")" ] && [ "$(pick "$after" "$pkg")" != "$(pick "$base" "$pkg")" ]; then
+		ok "control: an edit to ${control} changes ${pkg}'s derivation"
+	else
+		fail "control: an edit to ${control} did not change ${pkg}'s derivation, so the checks above prove nothing"
+	fi
+done
 
 echo
 if [ "$failures" -gt 0 ]; then
