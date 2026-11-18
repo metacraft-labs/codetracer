@@ -52,7 +52,7 @@ proc repoRoot(): string =
 proc ctBinary(): string =
   result = getEnv("CODETRACER_E2E_CT_PATH", "")
   if result.len == 0:
-    result = getEnv("CODETRACER_BUILD_DIR", repoRoot() / "src" / "build-debug") /
+    result = getEnv("CODETRACER_BUILD_DIR", repoRoot() / "src" / "build-debug-repro") /
       "bin" / "ct"
 
 proc nargoBinary(): string =

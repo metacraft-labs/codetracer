@@ -18,7 +18,7 @@
 ##
 ## ## What runs
 ##
-## The real `ct host` (default `src/build-debug/bin/ct`, or `CODETRACER_CT_BIN`)
+## The real `ct host` (default `src/build-debug-repro/bin/ct`, or `CODETRACER_CT_BIN`)
 ## with a scratch `CODETRACER_HOME` and `TMPDIR`, on a real rr recording of the
 ## shared native fixture `codetracer-native-test-programs/c/sudoku_solver`
 ## (`frontend/tui/tests/fixtures/native_recording`). The suite reads what the
@@ -47,7 +47,7 @@ proc repoRoot(): string =
   dir
 
 let root = repoRoot()
-let ctBinary = getEnv("CODETRACER_CT_BIN", root / "src" / "build-debug" / "bin" / "ct")
+let ctBinary = getEnv("CODETRACER_CT_BIN", root / "src" / "build-debug-repro" / "bin" / "ct")
 
 proc importedId(output: string): string =
   ## The recording id `ct host` prints once the import is done, "" before.

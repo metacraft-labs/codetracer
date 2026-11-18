@@ -322,8 +322,8 @@ when not defined(js):
       ## matches the prefix only where a class can start (`rollupClassesIn`),
       ## because the bundle also embeds the checkout's own path.
       for artefact in [
-          "src/build-debug/ui.js",
-          "src/build-debug/frontend/styles/default_dark_theme_electron.css"]:
+          "src/build-debug-repro/ui.js",
+          "src/build-debug-repro/frontend/styles/default_dark_theme_electron.css"]:
         if not fileExists(artefact):
           echo "  (skipped: no ", artefact, " — run `just build-once`)"
           continue

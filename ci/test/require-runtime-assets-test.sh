@@ -138,13 +138,14 @@ expect "$d" 1 "a published asset that no longer matches its source is rejected" 
 	"CONTENT DIFFERS FROM SOURCE"
 
 # --- 6/7. symlinks --------------------------------------------------------
-# tup's `!tup_preserve` publishes a SYMLINK into the variant tree, so a live
+# A published asset may be a SYMLINK into the source tree (the retired tup build
+# published them so, and a dev tree may still hold one), so a live
 # symlink must be accepted and a dangling one must not. Both cases need real
 # symlinks; an environment that quietly turns `ln -s` into a copy (Git Bash
 # without MSYS=winsymlinks:nativestrict) would make case 7 pass for the wrong
 # reason, so each case verifies the artifact it just created and fails BY NAME
 # when the environment could not produce it. That is deliberate: silently
-# dropping the two checks that cover tup's actual output shape is exactly the
+# dropping the two checks that cover the symlink shape is exactly the
 # kind of hole this suite exists to prevent.
 require_symlink() {
 	local path="$1" desc="$2" want_dangling="$3"
@@ -152,8 +153,8 @@ require_symlink() {
 		note_fail "$desc" \
 			"this environment did not create a symlink at $path" \
 			"it produced: $(ls -ld "$path" 2>&1)" \
-			"tup publishes runtime assets AS SYMLINKS, so this check cannot be" \
-			"skipped without dropping coverage of tup's real output shape." \
+			"a published runtime asset may be a SYMLINK, so this check cannot be" \
+			"skipped without dropping coverage of that output shape." \
 			"Run this suite on a filesystem with symlink support (Linux, macOS," \
 			"or Git Bash with MSYS=winsymlinks:nativestrict)."
 		return 1
@@ -171,8 +172,8 @@ d="$(make_case symlink)"
 rm "$d/out/config/default_config.yaml"
 ln -s ../../src/config/default_config.yaml "$d/out/config/default_config.yaml" 2>/dev/null || true
 if require_symlink "$d/out/config/default_config.yaml" \
-	"a symlink into the source tree is accepted (tup !tup_preserve)" no; then
-	expect "$d" 0 "a symlink into the source tree is accepted (tup !tup_preserve)" "ok --"
+	"a symlink into the source tree is accepted" no; then
+	expect "$d" 0 "a symlink into the source tree is accepted" "ok --"
 fi
 
 d="$(make_case dangling)"

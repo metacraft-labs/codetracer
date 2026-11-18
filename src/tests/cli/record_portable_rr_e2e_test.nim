@@ -31,7 +31,7 @@ import std/[os, osproc, strutils, unittest]
 proc ctBinary(): string =
   result = getEnv("CODETRACER_E2E_CT_PATH", "")
   if result.len == 0:
-    result = currentSourcePath.parentDir.parentDir.parentDir / "build-debug" /
+    result = currentSourcePath.parentDir.parentDir.parentDir / "build-debug-repro" /
              "bin" / "ct"
 
 suite "ct record --backend=rr --portable":

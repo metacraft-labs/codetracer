@@ -24,14 +24,13 @@ just build-vscode-panel "${media_dir}/vscode_panel.js"
 just build-vscode-host "${media_dir}/vscode_host.js"
 just build-vscode-middleware "${media_dir}/ct_vscode.js"
 
-# The replay backend, built into the SAME compiler-bound Cargo target base as
-# the tup build of this checkout (ci/lib/tup-cargo-target.sh;
-# codetracer-pm spec/Testing/UI-Cargo-Output-Ownership.md). It used to build
-# into the crate's own `src/db-backend/target`, which nothing binds to a
-# compiler: a toolchain change left the previous compiler's artefacts beside
+# The replay backend, built into the SAME compiler-bound Cargo target slot as
+# the Reprobuild build of this checkout (ci/lib/repro-cargo-slot.sh). It used
+# to build into the crate's own `src/db-backend/target`, which nothing binds to
+# a compiler: a toolchain change left the previous compiler's artefacts beside
 # the new one's, the E0514 case the shared target produced. The helper
-# refuses a base it cannot prove is this checkout's and this compiler's, and
-# `--reap` (this is a build) removes this checkout's older-compiler bases.
+# refuses a slot it cannot prove is this checkout's and this compiler's, and
+# retires an older compiler's slot instead of feeding it to the new compiler.
 # `cargo build` keeps its flags; only the target directory is bound.
 #
 # `src/db-backend/target/debug/replay-server`, which several harnesses name as
@@ -39,9 +38,9 @@ just build-vscode-middleware "${media_dir}/ct_vscode.js"
 # src/db-backend produces, and this script no longer writes it as a side
 # effect.
 checkout="$(pwd -P)"
-cargo_base="$(bash ci/lib/tup-cargo-target.sh --reap "${checkout}" | sed -n 1p)"
+cargo_base="$(bash ci/lib/repro-cargo-slot.sh "${checkout}" | sed -n 1p)"
 if [ -z "${cargo_base}" ]; then
-	echo "build_for_extension.sh: no Cargo target base this checkout owns (see above)." >&2
+	echo "build_for_extension.sh: no Cargo target slot this checkout owns (see above)." >&2
 	exit 1
 fi
 (cd ./src/db-backend && cargo build --target-dir "${cargo_base}/db_backend_target")

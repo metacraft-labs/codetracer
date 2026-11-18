@@ -17,15 +17,15 @@
 #       assembled and its `bin/ct` is a copy of that one;
 #   (b) no `ct` anywhere: the script fails, and says so on stderr, naming the
 #       path it looked at;
-#   (c) `CODETRACER_BUILD_DIR` unset and a `ct` in `src/build-debug/bin`: the
+#   (c) `CODETRACER_BUILD_DIR` unset and a `ct` in `src/build-debug-repro/bin`: the
 #       default is unchanged.
 #
-# Why a fake `nim` (the one stand-in here): the script compiles this checkout's
+# Why a fake `repro` (the one stand-in here): the script builds this checkout's
 # desktop JavaScript after it has chosen the `ct`, and that takes minutes and a
-# dev shell. Nothing under test depends on what the compiler produces, only on
-# the script reaching it and then assembling the prefix, so `nim` is replaced by
-# a stub that writes the `--out:` file it was asked for. Everything else — the
-# script, the Tuprules flag extraction, the mirroring and copying — is the real
+# dev shell. Nothing under test depends on what the build produces, only on the
+# script reaching it and then assembling the prefix, so `repro` is replaced by
+# a stub that writes the two bundles the targets name. Everything else — the
+# script, the mirroring and copying — is the real
 # code on the real filesystem. Pure bash + python3 over mktemp; no nix, no
 # network, no build.
 set -euo pipefail
@@ -40,19 +40,17 @@ fail() {
 	failures=$((failures + 1))
 }
 
-# The stub compiler: write the file named by `--out:` and succeed.
+# The stub build: `repro build <targets>` writes the two bundles the targets
+# name into the checkout's output tree and succeeds.
 mkdir -p "$work/stub-bin"
-cat >"$work/stub-bin/nim" <<'SH'
+cat >"$work/stub-bin/repro" <<'SH'
 #!/usr/bin/env bash
-for arg in "$@"; do
-	case "$arg" in
-	--out:*) out="${arg#--out:}" ;;
-	esac
-done
-[ -n "${out:-}" ] || { echo "stub nim: no --out: given" >&2; exit 2; }
-echo "// stub output" >"$out"
+[ "${1:-}" = build ] || { echo "stub repro: only build is stubbed" >&2; exit 2; }
+mkdir -p "$PWD/src/build-debug-repro"
+echo "// stub index" >"$PWD/src/build-debug-repro/index.js"
+echo "// stub ui" >"$PWD/src/build-debug-repro/ui.js"
 SH
-chmod +x "$work/stub-bin/nim"
+chmod +x "$work/stub-bin/repro"
 
 # A scratch checkout with what the script reads, and nothing it does not.
 make_checkout() {
@@ -63,11 +61,6 @@ make_checkout() {
 	: >"$root/libs/nim-chronicles/chronicles.nim"
 	echo "theme: default_dark" >"$root/src/config/default_config.yaml"
 	echo '{}' >"$root/src/config/default_layout.json"
-	cat >"$root/src/Tuprules.tup" <<'TUP'
-NIM_COMMON_FLAGS = --hints:off
-NIM_REPO_PATH_FLAGS = --path:$(ROOT)/libs/nim-chronicles
-NIM_DEBUG_FLAGS = -d:debug
-TUP
 }
 
 # A built variant: a `ct` that names itself, plus the directories the script
@@ -121,17 +114,17 @@ else
 	echo "ok   (b) a missing ct fails with a message naming $b/src/build-debug-repro/bin/ct"
 fi
 
-# (c) Unset CODETRACER_BUILD_DIR: the default src/build-debug is still used.
+# (c) Unset CODETRACER_BUILD_DIR: the default src/build-debug-repro is still used.
 c="$work/c"
 make_checkout "$c"
-make_build "$c/src/build-debug" "the-default-ct"
+make_build "$c/src/build-debug-repro" "the-default-ct"
 rc="$(run_script "$c" "$work/c.err")"
 if [ "$rc" != 0 ]; then
-	fail "(c) with ct in src/build-debug and no CODETRACER_BUILD_DIR the script exited $rc; stderr: '$(cat "$work/c.err")'"
-elif ! cmp -s "$c/prefix/bin/ct" "$c/src/build-debug/bin/ct"; then
-	fail "(c) the prefix's bin/ct is not a copy of src/build-debug/bin/ct"
+	fail "(c) with ct in src/build-debug-repro and no CODETRACER_BUILD_DIR the script exited $rc; stderr: '$(cat "$work/c.err")'"
+elif ! cmp -s "$c/prefix/bin/ct" "$c/src/build-debug-repro/bin/ct"; then
+	fail "(c) the prefix's bin/ct is not a copy of src/build-debug-repro/bin/ct"
 else
-	echo "ok   (c) the default src/build-debug is unchanged"
+	echo "ok   (c) the default src/build-debug-repro is unchanged"
 fi
 
 if [ "$failures" -gt 0 ]; then

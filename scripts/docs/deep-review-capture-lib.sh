@@ -82,7 +82,7 @@ ctdr_require_cmd() {
 # `CTDR_CT` / `CTDR_BUILD_ROOT` for everything downstream.
 ctdr_resolve_ct() {
 	local repo_root="$1"
-	CTDR_CT="${CODETRACER_CT_CMD:-${repo_root}/src/build-debug/bin/ct}"
+	CTDR_CT="${CODETRACER_CT_CMD:-${repo_root}/src/build-debug-repro/bin/ct}"
 	[[ -x ${CTDR_CT} ]] || ctdr_die \
 		"no ct binary at '${CTDR_CT}'. Build it with 'just build-once', or set CODETRACER_CT_CMD."
 	CTDR_BUILD_ROOT="$(cd -- "$(dirname -- "${CTDR_CT}")/.." && pwd)"
@@ -252,7 +252,7 @@ ctdr_require_sibling_binary_not_stale() {
 # checkout's own statement of what its sources are, in whatever layout it uses,
 # and a build output is never in it. That is what makes the comparison correct
 # for a sibling repository this one has never seen the inside of, and it is
-# equally what keeps it from tripping over `src/build-debug/` here: the build
+# equally what keeps it from tripping over `src/build-debug-repro/` here: the build
 # tree is ignored, so it is not in the list, so a `find` that would have walked
 # into it never happens.
 #

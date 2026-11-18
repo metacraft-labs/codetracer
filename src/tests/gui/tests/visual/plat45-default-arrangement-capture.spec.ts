@@ -62,7 +62,7 @@ function prefixVar(which: string): string {
 function buildPrefix(): string {
   const build = process.env.CODETRACER_BUILD_DIR && process.env.CODETRACER_BUILD_DIR.length > 0
     ? process.env.CODETRACER_BUILD_DIR
-    : path.join(repoRoot, "src", "build-debug");
+    : path.join(repoRoot, "src", "build-debug-repro");
   // A job that runs a PACKAGED `ct` (CODETRACER_E2E_CT_PATH, the nix build)
   // has no tup build directory; its `config/` is this checkout's `src/config/`
   // copied into the package, so that is the shipped default to compare with.

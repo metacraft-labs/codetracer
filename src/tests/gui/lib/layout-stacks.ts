@@ -172,7 +172,7 @@ export function debugDefaultStacks(bundled: number[][]): number[][] {
 
 /**
  * The prefix of the BUILD the suite launches when no prepared prefix is
- * named: `CODETRACER_BUILD_DIR`, else this checkout's `src/build-debug`. A job
+ * named: `CODETRACER_BUILD_DIR`, else this checkout's `src/build-debug-repro`. A job
  * that runs a PACKAGED `ct` (`CODETRACER_E2E_CT_PATH`, the nix build) has no
  * tup build directory; its `config/` is this checkout's `src/config/` copied
  * into the package, so that is the shipped default to compare with.
@@ -180,7 +180,7 @@ export function debugDefaultStacks(bundled: number[][]): number[][] {
 export function buildPrefix(): string {
   const configured = process.env.CODETRACER_BUILD_DIR ?? "";
   const build = configured === ""
-    ? path.join(repoRoot, "src", "build-debug")
+    ? path.join(repoRoot, "src", "build-debug-repro")
     : configured;
   if (!fs.existsSync(path.join(build, "config", "default_layout.json"))) {
     return path.join(repoRoot, "src");

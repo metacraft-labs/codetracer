@@ -1382,8 +1382,8 @@ proc newestSource(): tuple[path: string, time: Time] =
 proc locateBinary(): tuple[bin, problem: string] =
   let bin = ctBinary()
   if not fileExists(bin):
-    return ("", "no ct binary at " & bin & ": build it (`just build-once`, or " &
-      "the `ct` rule of src/ct/Tupfile) or point CODETRACER_E2E_CT_PATH at one")
+    return ("", "no ct binary at " & bin & ": build it (`just build-once`) " &
+      "or point CODETRACER_E2E_CT_PATH at one")
   try:
     let binTime = getLastModificationTime(bin)
     let newest = newestSource()

@@ -1626,7 +1626,7 @@ fi
 # ---------------------------------------------------------------------------
 # 9c. THE CORE BUILD'S WORKSPACE: complete, pinned, and on flake.lock's revs.
 #
-# `Build the codetracer-desktop core` runs `just build-once`, whose tup build
+# `Build the codetracer-desktop core` runs `just build-once`, whose build
 # reads every build sibling by RELATIVE PATH. The planner's repos are the
 # corners of the edge under test, not that workspace; the rest comes from the
 # literal block of `Setup dev env + clone the remaining siblings`. That block
@@ -1871,7 +1871,7 @@ sibling_ref_violations() {
 		[ -n "$lock_rev" ] || continue # not a flake input (the io-mon family)
 		compared="$compared $name"
 		if [ "$ref" != "$lock_rev" ]; then
-			echo "'$name' is pinned to $ref here but flake.lock pins $lock_rev; the tup driver reads this checkout and the nix driver reads flake.lock, so they would compile different trees"
+			echo "'$name' is pinned to $ref here but flake.lock pins $lock_rev; the build reads this checkout and the nix driver reads flake.lock, so they would compile different trees"
 			rc=1
 		fi
 	done <<<"$entries"

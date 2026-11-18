@@ -16,7 +16,7 @@
 ##
 ## ## What runs
 ##
-## The real `ct host` (default `src/build-debug/bin/ct`, or `CODETRACER_CT_BIN`)
+## The real `ct host` (default `src/build-debug-repro/bin/ct`, or `CODETRACER_CT_BIN`)
 ## with a scratch `CODETRACER_HOME` and `TMPDIR`, on a copy of the shared
 ## native fixture recording (`frontend/tui/tests/fixtures/native_recording`)
 ## carrying a symbol index in the shape `recordSymbols` writes. The suite
@@ -45,7 +45,7 @@ proc repoRoot(): string =
   dir
 
 let root = repoRoot()
-let ctBinary = getEnv("CODETRACER_CT_BIN", root / "src" / "build-debug" / "bin" / "ct")
+let ctBinary = getEnv("CODETRACER_CT_BIN", root / "src" / "build-debug-repro" / "bin" / "ct")
 
 proc importedId(output: string): string =
   ## The recording id `ct host` prints once the import is done, "" before.

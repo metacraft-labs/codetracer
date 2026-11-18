@@ -69,7 +69,7 @@ We have to fix the tests.
 However let's look at the three main sets:
 
 ```bash
-example-based/  nim.cfg  programs/  quicktests/  README.md  reproductions/  run/  Tupfile
+example-based/  nim.cfg  programs/  quicktests/  README.md  reproductions/  run/
 ```
 
 In `example-based` we have normal tests.

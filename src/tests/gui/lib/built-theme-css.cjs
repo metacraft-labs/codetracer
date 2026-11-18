@@ -61,9 +61,9 @@
  *
  * WHY NEWEST RATHER THAN FIRST AMONG THE CANDIDATE DIRECTORIES
  * ------------------------------------------------------------
- * `src/build-debug` and `src/build-debug-repro` are produced by two different
- * build systems and neither removes the other, so both are routinely present
- * and one is routinely old. Ordering them and taking the first is a preference
+ * `CODETRACER_BUILD_DIR` (another checkout's build, or a release tree) and this
+ * checkout's `src/build-debug-repro` are produced by separate builds and neither
+ * removes the other, so both are routinely present and one is routinely old. Ordering them and taking the first is a preference
  * for whichever happens to be staler. Candidates are still passed in preference
  * order, and `>` rather than `>=` keeps the earlier one winning a tie.
  */
@@ -85,7 +85,6 @@ function candidateStyleDirs(repoRoot) {
   if (process.env.CODETRACER_BUILD_DIR) {
     dirs.push(path.join(process.env.CODETRACER_BUILD_DIR, "frontend", "styles"));
   }
-  dirs.push(path.join(repoRoot, "src", "build-debug", "frontend", "styles"));
   dirs.push(path.join(repoRoot, "src", "build-debug-repro", "frontend", "styles"));
   if (process.env.CODETRACER_E2E_CT_PATH) {
     dirs.push(
@@ -159,7 +158,7 @@ function resolveBuiltThemeCss(repoRoot, theme) {
       `built theme stylesheet \`${theme}\` not found — run \`just build-once\`. ` +
         `Looked in:\n  ${tried.join("\n  ")}\n` +
         `Or compile it directly with\n` +
-        `  node node_modules/stylus/bin/stylus -o src/build-debug/frontend/styles ` +
+        `  node node_modules/stylus/bin/stylus -o src/build-debug-repro/frontend/styles ` +
         `src/frontend/styles/${theme.replace(/\.css$/, ".styl")}`,
     );
   }

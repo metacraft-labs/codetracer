@@ -16,7 +16,7 @@
 ## `TEST_CERTIFICATES_DIR`, never to the user's store.
 ##
 ## Run: `nim c -r src/tests/cli/ct_test_run_delegation_test.nim` after
-## `just build-once` (which builds `ct` and `ct-test` into `src/build-debug/bin`).
+## `just build-once` (which builds `ct` and `ct-test` into `src/build-debug-repro/bin`).
 ## `CODETRACER_E2E_CT_PATH` / `CODETRACER_E2E_CT_TEST_PATH` point it elsewhere.
 
 import std/[json, os, osproc, strtabs, strutils, unittest]
@@ -37,7 +37,7 @@ proc ctBinary(): string =
   if result.len > 0:
     return
   let buildDir = getEnv("CODETRACER_BUILD_DIR",
-    repoRoot() / "src" / "build-debug")
+    repoRoot() / "src" / "build-debug-repro")
   result = buildDir / "bin" / addFileExt("ct", ExeExt)
 
 proc ctTestBinary(): string =

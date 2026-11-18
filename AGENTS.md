@@ -35,7 +35,7 @@ relative path `../<sibling>`:
 
 | resolver | where | how it fails from the wrong place |
 | --- | --- | --- |
-| Nim | `config.nims` (`repoRoot.parentDir()`), `src/Tuprules.tup` (`$(ROOT)/../…`) | `--path` to a missing dir is silently ignored → `cannot open file: runquota_process`, minutes in |
+| Nim | `config.nims` (`repoRoot.parentDir()`) | `--path` to a missing dir is silently ignored → `cannot open file: runquota_process`, minutes in |
 | Cargo | `src/db-backend/Cargo.toml` (`path = "../../../codetracer-trace-format/…"`) | `failed to load manifest` |
 | cc | `src/db-backend/build.rs` (`../../../codetracer-native-recorder/ct_emulator`) | 81 undefined `mcr*` symbols at link |
 | Repro/Nix | `repro.nim` and native workspace input overrides (`../io-mon`, `../reprobuild`, …) | sibling overrides cannot be resolved |
@@ -73,7 +73,7 @@ To rebuild the full CodeTracer frontend (Nim backend CLI, Nim renderer JS, webpa
 just build-once
 ```
 
-This runs tup (incremental build) and webpack. Use this after modifying any `.nim` files in
+This runs the Reprobuild build (`repro build`, incremental) and webpack. Use this after modifying any `.nim` files in
 `src/ct/`, `src/frontend/`, or `src/common/`.
 
 ## Local dev-env services (`repro up`)
@@ -126,7 +126,7 @@ The user-facing reference is README.md, "Running the terminal (TUI) and native
    move the user's sibling checkouts; use the `../<repo>-pin` worktree loop from
    README.md and `export ISONIM_TUI_SRC=$PWD/../isonim-tui-pin/src
    ISONIM_GPUI_SRC=$PWD/../isonim-gpui-pin/src` before building.
-3. **Build:** `repro exec . -- just build-once` (only if `src/build-debug/bin/ct` or
+3. **Build:** `repro exec . -- just build-once` (only if `src/build-debug-repro/bin/ct` or
    `replay-server` is missing), then `repro exec . -- just build-tui`.
 4. **A trace.** Reuse `test-logs/tui-fixtures/calc-*/` if `just test-tui` has run
    here, or record one: `repro exec . -- ct record -o /tmp/ct-calc
@@ -142,11 +142,11 @@ The user-facing reference is README.md, "Running the terminal (TUI) and native
    tmux split-window -v -c "$PWD" "build/bin/codetracer-tui <trace> || read"
    ```
 
-   Equivalent through the launcher: `src/build-debug/bin/ct replay --ui=tui <trace>`.
+   Equivalent through the launcher: `src/build-debug-repro/bin/ct replay --ui=tui <trace>`.
    A dev build finds the `replay-server` of its own checkout, in the order
    `src/common/replay_server_path.nim` defines (the build's published output
-   root, then `src/build-debug-repro/bin/`, then `src/build-debug/bin/`, then
-   cargo's `target/` trees); set `REPLAY_SERVER_BIN=<path>` when the engine
+   root, then `src/build-debug-repro/bin/`, then cargo's `target/` trees); set
+   `REPLAY_SERVER_BIN=<path>` when the engine
    lives elsewhere (for example another worktree's build).
 7. **State.** When launching for the user, do NOT set `CODETRACER_TUI_LAYOUT_DIR`:
    they expect their own remembered layout in `$XDG_STATE_HOME/codetracer/`
@@ -172,7 +172,7 @@ GPUI: build the windowed shim in the same isonim-gpui checkout the build compile
 against (`repro exec . -- bash -c 'cd rust && cargo build --features gpui-backend'`
 inside it), `repro exec . -- just build-gpui`, and launch with
 `repro exec . -- bash -c 'LD_LIBRARY_PATH=$CODETRACER_GPUI_RUNTIME_LIB_PATH
-src/build-debug/bin/ct replay --ui=gpui <trace>'` from a graphical session. With
+src/build-debug-repro/bin/ct replay --ui=gpui <trace>'` from a graphical session. With
 no display, use `--report-plan` (same command) to check the build; `--headless`
 is TUI-only and `ct` refuses it with `--ui=gpui`. A window launch that cannot
 open a window (the featureless shim, or no `DISPLAY` / `WAYLAND_DISPLAY`) exits 3
@@ -306,7 +306,7 @@ CI lane. Spec arguments are relative to `src/tests/gui/`, e.g.
 The tests launch the real Electron app via the `ct` binary at `$CODETRACER_E2E_CT_PATH` when
 that is set (CI points it at the nix build), otherwise at `$CODETRACER_BUILD_DIR/bin/ct` (the
 dev shell sets `CODETRACER_BUILD_DIR` to the platform's build output), falling back to
-`src/build-debug/bin/ct`; see `src/tests/gui/lib/fixtures.ts`. If you modify frontend Nim
+`src/build-debug-repro/bin/ct`; see `src/tests/gui/lib/fixtures.ts`. If you modify frontend Nim
 code, run `just build-once` first to rebuild the frontend before running `just test-e2e`;
 `just test-gui` runs it for you as a prerequisite.
 
@@ -360,8 +360,8 @@ cd src/db-backend && cargo build && cargo test && cargo clippy
 cd src/tui && cargo build && cargo test   # the legacy Rust TUI crate, NOT the terminal front-end (`just build-tui`)
 cd src/backend-manager && cargo build
 
-# Full frontend (Nim + Tup)
-cd src/build-debug && source ../../env.sh && tup upd
+# Full frontend (Nim + webpack), built by Reprobuild
+source env.sh && bash scripts/build-once.sh
 ```
 
 ### Version pins

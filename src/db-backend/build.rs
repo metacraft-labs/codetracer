@@ -187,8 +187,8 @@ fn emit_replay_provenance() {
 /// declares eighty `pub fn mcr*` plus `NimMain` in one `unsafe extern "C"`
 /// block with no `#[cfg]`. Skipping the link directives therefore did not
 /// avoid the dependency — it only deferred it, from a build-script message
-/// nobody reads (tup runs cargo inside its FUSE sandbox, see
-/// `!debug_rust_cargo_db_backend` in `src/Tuprules.tup`) to eighty-one
+/// nobody reads (the build runs cargo as one action and shows its output only
+/// on failure) to eighty-one
 /// undefined symbols at the final `rustc -C link` step, attributed to the
 /// linker rather than to the missing checkout.
 ///
@@ -630,7 +630,7 @@ fn build_native(private_build: &PrivateEmulatorBuild, target_arch: &str) {
     // `@loader_path` on macOS), and the library is deployed there: into the
     // profile directory, where `replay-server` is linked, and into `deps/`,
     // where cargo links the test binaries. Whoever installs `replay-server`
-    // elsewhere copies the library with it (src/Tuprules.tup, repro.nim,
+    // elsewhere copies the library with it (repro.nim,
     // build_for_extension.sh).
     //
     // There used to be a second entry, `-rpath <OUT_DIR>`, and that is the

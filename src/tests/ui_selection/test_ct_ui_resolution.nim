@@ -11,7 +11,7 @@
 ##   * `codetracer-launcher/out/launcher` — the real `ct`, `--os:standalone
 ##     --mm:none`, byte for byte the binary that repository's `just build`
 ##     produces.
-##   * `src/build-debug/bin/ct` — the real desktop core, which is what resolves
+##   * `src/build-debug-repro/bin/ct` — the real desktop core, which is what resolves
 ##     `--ui`.
 ##   * `build/bin/codetracer-tui` — the real terminal front-end, which is what
 ##     the handoff `exec`s.
@@ -131,7 +131,7 @@ proc repoRoot(): string =
 
 let
   root = repoRoot()
-  ctBinary = root / "src" / "build-debug" / "bin" / "ct"
+  ctBinary = root / "src" / "build-debug-repro" / "bin" / "ct"
   tuiBinary = root / "build" / "bin" / "codetracer-tui"
   launcherRepo = root.parentDir / "codetracer-launcher"
   launcherBin = launcherRepo / "out" / "launcher"

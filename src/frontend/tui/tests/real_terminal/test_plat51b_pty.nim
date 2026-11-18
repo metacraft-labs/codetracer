@@ -86,7 +86,7 @@ proc ctUnderTest(): string =
   ## the engine) when this one is missing.
   let named = getEnv("CT_BIN", "")
   if named.len > 0: named
-  else: lifecycle_support.repoRoot() / "src" / "build-debug" / "bin" / "ct"
+  else: lifecycle_support.repoRoot() / "src" / "build-debug-repro" / "bin" / "ct"
 
 proc builder(args: seq[string]; layoutDir: string;
              subject = ""): TuiTestBuilder =

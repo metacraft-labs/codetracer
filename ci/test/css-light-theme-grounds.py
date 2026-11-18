@@ -144,9 +144,9 @@ The web IDE ships no light sheet of its own: its deployment carries the
 dark ``_electron`` sheet (``web_deployment.nim`` ``rendererThemeStylesPath``)
 and ``renderer.nim``'s ``loadTheme`` resolves any other theme to the same
 ``{name}_theme_electron.css`` the desktop loads, so the light sheet graded
-here IS the web IDE's.  The Tupfile's other light output,
-``default_white_theme.css``, is the palette file compiled alone; it defines
-variables only and compiles to an empty sheet.
+here IS the web IDE's.  The retired tup build's other light output,
+``default_white_theme.css``, was the palette file compiled alone; it defined
+variables only and compiled to an empty sheet, and nothing read it.
 
 Usage: css-light-theme-grounds.py --repo-root DIR --light CSS --dark CSS
 """

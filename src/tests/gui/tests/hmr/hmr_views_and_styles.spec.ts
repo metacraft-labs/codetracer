@@ -4,18 +4,19 @@
 // These tests prove the developer-facing workflow:
 //
 //   1. Run `just build` (produces the dev binary with -d:ctHmr,
-//      starts `tup monitor -a`, and starts a `livereload` daemon
-//      watching src/build-debug/).
-//   2. Launch `src/build-debug/bin/ct` (HMR active by default — the
+//      starts `repro watch`, and starts a `livereload` daemon
+//      watching src/build-debug-repro/).
+//   2. Launch `src/build-debug-repro/bin/ct` (HMR active by default — the
 //      renderer connects to the daemon as a LiveReload WS client).
 //   3. Edit a `.nim` panel source or a `.styl` theme file.
 //   4. The running ct window updates without a navigation.
 //
 // Each test backs the source file up at start, mutates it, runs
-// `tup upd` (which rebuilds the affected output — Stylus → .css for
-// `.styl` edits, nim js → ui.js for `.nim` edits), and waits for the
+// `scripts/build-once.sh` (an incremental `repro build`, which rebuilds the
+// affected output — Stylus → .css for `.styl` edits, nim js → ui.js for
+// `.nim` edits), and waits for the
 // renderer to receive the daemon's `reload` broadcast and apply it.
-// On test exit the source file is restored and Tup is re-run so the
+// On test exit the source file is restored and the build is re-run so the
 // build artifacts settle back to their pristine state.
 //
 // The tests spin up their own `livereload` daemon (on a random
@@ -32,7 +33,7 @@
 // inner loop.
 //
 // Requires the binary to be built with -d:ctHmr (the default for
-// `just build` since src/Tuprules.tup landed the flag).
+// `just build`).
 
 import { test, expect, _electron, type ElectronApplication, type Page } from "@playwright/test";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -42,40 +43,36 @@ import { execSync, spawn, type ChildProcess } from "node:child_process";
 import { createConnection } from "node:net";
 
 const REPO_ROOT = resolve(__dirname, "..", "..", "..", "..", "..");
-const CT_BIN = join(REPO_ROOT, "src", "build-debug", "bin", "ct");
-// Electron loads index.html from src/build-debug/, so its
-// `<script src='ui.js'>` resolves to src/build-debug/ui.js — *not* the
-// public/ui.js copy that Tup's cp rule produces for server-mode use.
-const UI_JS_PATH = join(REPO_ROOT, "src", "build-debug", "ui.js");
-const STYLES_DIR = join(REPO_ROOT, "src", "build-debug", "frontend", "styles");
+const CT_BIN = join(REPO_ROOT, "src", "build-debug-repro", "bin", "ct");
+// Electron loads index.html from src/build-debug-repro/, so its
+// `<script src='ui.js'>` resolves to src/build-debug-repro/ui.js — *not* the
+// public/ui.js copy that the build's copy action produces for server-mode use.
+const UI_JS_PATH = join(REPO_ROOT, "src", "build-debug-repro", "ui.js");
+const STYLES_DIR = join(REPO_ROOT, "src", "build-debug-repro", "frontend", "styles");
 const LOADER_CSS_PATH = join(STYLES_DIR, "loader.css");
 
 // Source paths the tests mutate. Both live under src/frontend/ and
-// are part of the dependency graph Tup builds.
+// are part of the dependency graph the build covers.
 const HMR_RUNTIME_NIM = join(
   REPO_ROOT, "src", "frontend", "hmr_runtime.nim",
 );
 const LOADER_STYL = join(
   REPO_ROOT, "src", "frontend", "styles", "loader.styl",
 );
-// Tup wants to run from the src/ directory (where the .tup state
-// lives).
-const TUP_CWD = join(REPO_ROOT, "src");
-
-function tupUpd() {
-  // `tup upd` is the supported entry point and is idempotent — if
-  // tup monitor -a is already running in the background (started by
-  // `just build`) the explicit call is at worst redundant. Capture
-  // stderr so a failed rebuild (Nim type error, Stylus parse error)
-  // surfaces in the test log rather than vanishing.
+function rebuild() {
+  // `scripts/build-once.sh` is the supported entry point and is idempotent — if
+  // `repro watch` is already running in the background (started by `just
+  // build`) the explicit call is at worst redundant. Capture stderr so a
+  // failed rebuild (Nim type error, Stylus parse error) surfaces in the test
+  // log rather than vanishing.
   try {
-    execSync("tup upd", {
-      cwd: TUP_CWD,
+    execSync("bash scripts/build-once.sh", {
+      cwd: REPO_ROOT,
       stdio: ["ignore", "ignore", "pipe"],
     });
   } catch (e) {
     const err = e as { stdout?: string; stderr?: string };
-    console.log(`# tup upd FAILED:\nstdout=${err.stdout ?? ""}\nstderr=${err.stderr ?? ""}`);
+    console.log(`# rebuild FAILED:\nstdout=${err.stdout ?? ""}\nstderr=${err.stderr ?? ""}`);
     throw e;
   }
 }
@@ -139,10 +136,10 @@ async function waitForTcpPort(port: number, timeoutMs: number = 10_000): Promise
 function startLivereloadDaemon(port: number): ChildProcess {
   // Mirror the invocation in scripts/build.sh. `--wait` is the
   // livereload-CLI knob for "delay reload broadcasts by N ms",
-  // which softens Tup's occasional multi-pass rebuilds.
+  // which softens the occasional multi-pass rebuild.
   const bin = join(REPO_ROOT, "node_modules", ".bin", "livereload");
   return spawn(bin, [
-    join(REPO_ROOT, "src", "build-debug"),
+    join(REPO_ROOT, "src", "build-debug-repro"),
     "--port", String(port),
     "--wait", "200",
     "--usepolling", "false",
@@ -221,7 +218,7 @@ test.describe("CodeTracer HMR — full build pipeline", () => {
 
     expect(
       existsSync(LOADER_CSS_PATH),
-      `loader.css must be built at ${LOADER_CSS_PATH}; run the normal Tup/Stylus build pipeline before HMR tests`,
+      `loader.css must be built at ${LOADER_CSS_PATH}; run the normal build (just build-once) before HMR tests`,
     ).toBe(true);
 
     const stylBackup = captureSource(LOADER_STYL);
@@ -245,7 +242,7 @@ test.describe("CodeTracer HMR — full build pipeline", () => {
       `\n[${probeAttr}]\n  color: rgb(11, 22, 33)\n`;
     try {
       writeFileSync(LOADER_STYL, stylBackup + probeRule);
-      tupUpd();
+      rebuild();
 
       // The daemon notices loader.css changed and broadcasts
       // `reload`; the renderer's LiveReload transport classifies
@@ -273,7 +270,7 @@ test.describe("CodeTracer HMR — full build pipeline", () => {
       expect(/[?&]v=\d+/.test(newHref!)).toBe(true);
     } finally {
       writeFileSync(LOADER_STYL, stylBackup);
-      tupUpd();
+      rebuild();
     }
   });
 
@@ -315,7 +312,7 @@ test.describe("CodeTracer HMR — full build pipeline", () => {
       `  setCtHmrTestMarker()\n`;
     try {
       writeFileSync(HMR_RUNTIME_NIM, nimBackup + appended);
-      tupUpd();
+      rebuild();
 
       // Nim's full re-compile + bundle load on the renderer side
       // can take ~20s on a cold cache. 60s is the safety net.
@@ -331,13 +328,13 @@ test.describe("CodeTracer HMR — full build pipeline", () => {
       expect(navsAfter).toBe(navsBefore);
     } finally {
       writeFileSync(HMR_RUNTIME_NIM, nimBackup);
-      tupUpd();
+      rebuild();
     }
   });
 
   test("a single .nim edit triggers HMR in TWO concurrent ct instances watching the same bundle", async () => {
     // Each ct renderer connects to the shared LiveReload daemon as
-    // a WS client. A single source edit makes Tup rebuild ui.js;
+    // a WS client. A single source edit makes the build rebuild ui.js;
     // the daemon notices the file change and fans the `reload`
     // message out to every connected client. Both renderers
     // evaluate the new bundle in-place and the marker shows up in
@@ -405,7 +402,7 @@ test.describe("CodeTracer HMR — full build pipeline", () => {
         `    {.emit: ${JSON.stringify(setExpr)}.}\n` +
         `  setCtHmrMultiMarker()\n`;
       writeFileSync(HMR_RUNTIME_NIM, nimBackup + appended);
-      tupUpd();
+      rebuild();
 
       // Both renderers should see the marker. Parallel waits —
       // a serial check works too but parallelising surfaces a
@@ -433,7 +430,7 @@ test.describe("CodeTracer HMR — full build pipeline", () => {
       expect(navsAfter2).toBe(navsBefore2);
     } finally {
       writeFileSync(HMR_RUNTIME_NIM, nimBackup);
-      tupUpd();
+      rebuild();
       if (app2 !== null) {
         const pid = app2.process().pid;
         if (pid !== undefined) {

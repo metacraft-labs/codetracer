@@ -701,7 +701,7 @@ test_lane_extra_flags() {
 		;;
 	renderer-electron)
 		# The product's own renderer defines, from `RendererDefines` in
-		# repro.nim (the tup `!nim_js` macro carries the same pair). They are
+		# repro.nim. They are
 		# load-bearing, not decoration:
 		#
 		#   -d:ctRenderer            selects the browser/renderer arm in
@@ -742,8 +742,8 @@ test_lane_extra_flags() {
 		echo "-d:chronicles_enabled=off -d:ctRenderer"
 		;;
 	main-process)
-		# The Electron MAIN process's defines — `!nim_node_index_server` in
-		# `Tuprules.tup` (`server_index.js`): `-d:ctIndex` selects the
+		# The Electron MAIN process's defines — the `frontend-server-index-js`
+		# action in `repro.nim` (`server_index.js`): `-d:ctIndex` selects the
 		# main-process arm of the shared modules, and `-d:server` is what lets
 		# `index/electron_vars.nim` load without Electron, so the suites run
 		# under plain node. The modules under test have no `when
@@ -996,7 +996,7 @@ test_lane_files() {
 		#                     platform_host and runs on the C backend
 		#   js (Electron)     THIS LANE — nothing else compiles it. The
 		#                     renderer entry `ui_js.nim` does, but only in the
-		#                     tup build, which CI does not run for this job
+		#                     product build, which CI does not run for this job
 		#   js + ctWeb        ci/test/web-bundle-smoke.sh, which builds
 		#                     web_main.nim with -d:ctWeb and additionally
 		#                     asserts the bundle links no host bindings
@@ -1017,7 +1017,7 @@ test_lane_files() {
 		# does not ship. The renderer-electron/web lanes use js-browser and
 		# `renderer-browser-build.sh` checks the DOM binding they select.
 		#
-		# The tup product build also compiles it transitively through ui_js.nim.
+		# The product build also compiles it transitively through ui_js.nim.
 		# `browser_tab.nim` is here for the same reason `web_browser.nim` is:
 		# it is `importjs` and `{.emit.}` throughout, so `vm-unit` cannot see
 		# it, and the two modules that DO import it — `web_browser.nim` here
@@ -1038,7 +1038,7 @@ test_lane_files() {
 		# they actually ship on. This lane and `renderer-web` below are what
 		# close the hole the note in `host-instantiations` describes: until
 		# they existed, NOTHING IN CI COMPILED THE RENDERER, and the only gate
-		# was the tup product build at package time.
+		# was the product build at package time.
 		#
 		# THAT HOLE WAS NOT HYPOTHETICAL, and the cost is the reason these
 		# lanes are worth their minutes. Commit 333ec709 removed

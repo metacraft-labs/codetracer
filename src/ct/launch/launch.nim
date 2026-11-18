@@ -162,7 +162,7 @@ proc runInitial*(conf: CodetracerConf; uiSelection: string = "") =
 
   case conf.cmd:
     of StartupCommand.install:
-      let rootDir = when defined(withTup):
+      let rootDir = when defined(ctDevTree):
           let gitTopLevelResult = getGitTopLevel(".")
           if gitTopLevelResult.isOk:
             gitTopLevelResult.value & "/"

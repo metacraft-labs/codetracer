@@ -139,7 +139,7 @@ budget_for() {
 	# renderer's import graph, which is what kept `-d:ctWeb` impossible.
 	src/frontend/lib/electron_presence.nim) echo "1 guarded" ;;
 	# STILL `facade`, and deliberately not migrated in the same pass:
-	# `ui_js.nim` does not compile standalone in the dev shell (it needs the tup
+	# `ui_js.nim` does not compile standalone in the dev shell (it needs the
 	# build's generated sources; on `dev` it fails at `resolvePendingDapResponse`
 	# before any of this), so an edit here could not be verified. Both sites are
 	# already written as `(typeof require === 'function') && ...`, so they are

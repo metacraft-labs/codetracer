@@ -16,7 +16,7 @@ let
 in
 with pkgs;
 mkShell {
-  # inputsFrom = [ pkgs.codetracer ]; TODO: useful for tup
+  # inputsFrom = [ pkgs.codetracer ];
 
   # TODO: Add comment explaining why this is needed
   hardeningDisable = [ "all" ];
@@ -67,19 +67,6 @@ mkShell {
     killall
     ripgrep
     universal-ctags
-
-    # Tup builds.
-    #
-    # `fuse` (FUSE 2) used to sit here and was removed: tup links
-    # `libfuse3.so.4`, so the FUSE 2 `fusermount` it provides is never
-    # spawned. `fuse3` replaces it because libfuse's second mount attempt is
-    # `posix_spawnp("fusermount3", …)` — a bare name, so PATH is searched
-    # and this copy is used. See the long note in `ci-base.nix`: it still
-    # does not grant the mount, which needs a setuid wrapper and /dev/fuse
-    # from the system, and `scripts/require-fuse-mount-helper.sh` reports
-    # those by name.
-    tup
-    fuse3
 
     # Make alternative
     # https://github.com/casey/just
@@ -259,7 +246,7 @@ mkShell {
     export PLAYWRIGHT_BROWSERS_PATH=${pkgs.playwright-driver.browsers}
     export PLAYWRIGHT_SKIP_VALIDATE_HOST_REQUIREMENTS=true
 
-    # workaround to reuse devshell node_modules for tup build
+    # workaround to reuse devshell node_modules for the build
     # make sure it's always updated
     if [ -n "$ROOT_PATH" ]; then
       rm -rf "$ROOT_PATH/node_modules"

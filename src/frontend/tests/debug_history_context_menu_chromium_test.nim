@@ -18,7 +18,7 @@ import ../viewmodel/views/isonim_debug_controls_view
 # rule as `src/tests/gui/lib/fixtures.ts`. `ci/test/chromium-theme-build-dir-test.sh`
 # holds this to account on any host.
 const ThemeCss = staticRead(getEnv("CODETRACER_BUILD_DIR",
-  currentSourcePath().parentDir / "../../build-debug") /
+  currentSourcePath().parentDir / "../../build-debug-repro") /
   "frontend/styles/default_dark_theme_electron.css")
 
 proc ctClick(selector: cstring; button: cstring = cstring"left"): Future[void]

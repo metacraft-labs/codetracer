@@ -13,7 +13,7 @@ function resolveBuildDir() {
   const candidates = [
     process.env.NIX_CODETRACER_EXE_DIR,
     path.resolve(__dirname, ".."),
-    path.resolve(__dirname, "..", "..", "..", "build-debug"),
+    path.resolve(__dirname, "..", "..", "..", "build-debug-repro"),
     path.resolve(__dirname, "..", ".."),
   ].filter(Boolean);
 

@@ -87,7 +87,7 @@
 # Environment:
 #   CODETRACER_CORE_BIN      override the built core binary used by scenario 14
 #   CODETRACER_E2E_CT_PATH   same, shared with the other ci/test scripts
-#   CODETRACER_BUILD_DIR     build tree to probe (default src/build-debug)
+#   CODETRACER_BUILD_DIR     build tree to probe (default src/build-debug-repro)
 #   CT_CAPS_CHECK_VERBOSE=1  echo every one of the checker's ~340 individual
 #                            assertions instead of just the per-command sets
 #                            (a FAILING assertion is always printed in full)
@@ -171,10 +171,8 @@ command -v nim >/dev/null 2>&1 ||
 CORE_BIN="${CODETRACER_CORE_BIN:-${CODETRACER_E2E_CT_PATH:-}}"
 if [[ -z $CORE_BIN ]]; then
 	for candidate in \
-		"${CODETRACER_BUILD_DIR:-$ROOT_DIR/src/build-debug}/bin/ct$EXE_SUFFIX" \
-		"$ROOT_DIR/src/build-debug/bin/ct$EXE_SUFFIX" \
+		"${CODETRACER_BUILD_DIR:-$ROOT_DIR/src/build-debug-repro}/bin/ct$EXE_SUFFIX" \
 		"$ROOT_DIR/src/build-debug-repro/bin/ct$EXE_SUFFIX" \
-		"$ROOT_DIR/src/build-release/bin/ct$EXE_SUFFIX" \
 		"$ROOT_DIR/src/build-release-repro/bin/ct$EXE_SUFFIX"; do
 		if [[ -x $candidate ]]; then
 			CORE_BIN="$candidate"

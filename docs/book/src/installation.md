@@ -72,7 +72,7 @@ Direnv should be set up in your shell, as shown [here](https://direnv.net/docs/h
    ```
 4. Run `nix develop`
 5. Run `direnv allow`
-6. To build codetracer simply run `just build`. The location of the resulting binary will be `./src/build-debug/bin/ct`
+6. To build codetracer simply run `just build`. The location of the resulting binary will be `./src/build-debug-repro/bin/ct`
 7. Now every time you enter the `codetracer` directory your environment should be updated
 
 > [!TIP]

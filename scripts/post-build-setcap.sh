@@ -1,8 +1,7 @@
 #!/bin/sh
 # scripts/post-build-setcap.sh — Re-apply BPF capabilities after compilation.
 #
-# Called by the tup build rule (!codetracer_bpf in Tuprules.tup) after
-# compiling the ct binary. Re-applies cap_bpf+cap_perfmon+cap_dac_read_search
+# Called by scripts/build-once.sh after the build has compiled the ct binary. Re-applies cap_bpf+cap_perfmon+cap_dac_read_search
 # via the codetracer-setcap helper installed by `just developer-setup` or
 # the NixOS developer-bpf module.
 #

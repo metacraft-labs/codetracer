@@ -27,7 +27,7 @@
 ##
 ## ## What runs
 ##
-## The real `ct host` (default `src/build-debug/bin/ct`, or `CODETRACER_CT_BIN`)
+## The real `ct host` (default `src/build-debug-repro/bin/ct`, or `CODETRACER_CT_BIN`)
 ## with a scratch `CODETRACER_HOME` and `TMPDIR`. It refuses before it starts
 ## the node index, so nothing else is needed and nothing is left running; a run
 ## that does not exit within `ExitTimeoutMs` is killed and fails.
@@ -80,7 +80,7 @@ proc repoRoot(): string =
 
 let
   root = repoRoot()
-  ctBinary = getEnv("CODETRACER_CT_BIN", root / "src" / "build-debug" / "bin" / "ct")
+  ctBinary = getEnv("CODETRACER_CT_BIN", root / "src" / "build-debug-repro" / "bin" / "ct")
 
 proc containerRefusal(version: int): string =
   ## `openCtfs`'s message for `version`, word for word — the same sentence
@@ -222,7 +222,7 @@ suite "ct host refuses a container it cannot read, by name":
     removeDir(scratch)
 
   test "the binary under test exists":
-    checkpoint("CODETRACER_CT_BIN / src/build-debug/bin/ct: " & ctBinary)
+    checkpoint("CODETRACER_CT_BIN / src/build-debug-repro/bin/ct: " & ctBinary)
     check fileExists(ctBinary)
 
   test "a trace folder holding a version 4 container":

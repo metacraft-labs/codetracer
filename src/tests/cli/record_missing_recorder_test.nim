@@ -70,7 +70,7 @@ proc ctBinary(): string =
   result = getEnv("CODETRACER_E2E_CT_PATH", "")
   if result.len > 0:
     return
-  let buildDir = getEnv("CODETRACER_BUILD_DIR", repoRoot() / "src" / "build-debug")
+  let buildDir = getEnv("CODETRACER_BUILD_DIR", repoRoot() / "src" / "build-debug-repro")
   result = buildDir / "bin" / "ct"
 
 type
@@ -579,7 +579,7 @@ suite "ct record missing-recorder diagnostics":
     check aliased.count(note) == 1     # once: ct prints it, db-backend-record does not
 
     # WHAT THIS CASE CAN AND CANNOT SEE (test-integrity note, LRS-4 review).
-    # `ct` here is whatever `src/build-debug/bin/ct` currently is, and no lane
+    # `ct` here is whatever `src/build-debug-repro/bin/ct` currently is, and no lane
     # in this file builds it (`test-cli-record` depends on `vm-test-prereqs`,
     # which only runs the tailwind extract).  A ct built BEFORE LRS-4 is
     # caught: it prints "no recorder for Ruby" / "retired" and the three

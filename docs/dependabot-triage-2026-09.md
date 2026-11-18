@@ -141,8 +141,8 @@ of `libs/*` have **zero** alerts.
   `cdylib`. Note Dependabot marks all Cargo entries `runtime` — `Cargo.lock` carries
   no dev/normal distinction, so that field is meaningless for Rust.
 - `src/tui/Cargo.lock` (2) — `src/tui` **ships nowhere**: absent from `nix/`,
-  `flake.nix`, the justfile, and every install script; its Tupfile rule is commented
-  out. It is only compiled by CI lint. Alerts are `bytes` (unreachable; `ratatui` never
+  `flake.nix`, the justfile, and every install script; its build rule was commented
+  out in the (since retired) tup build. It is only compiled by CI lint. Alerts are `bytes` (unreachable; `ratatui` never
   calls the affected API) and `lru` (unreachable; blocked behind a `ratatui` major).
 - `src/backend-manager/Cargo.lock` (1) — this **is** shipped (`nix/packages/default.nix:544,983`).
   One `bytes` integer-overflow alert, transitive under `tokio`/`http`/`tungstenite`,

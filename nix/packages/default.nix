@@ -118,9 +118,6 @@
           ];
           underSrc = [
             ".cargo"
-            "Tupfile"
-            "Tupfile.ini"
-            "Tuprules.tup"
             "backend-manager"
             "bpf-monitor"
             "build-debug"
@@ -330,7 +327,7 @@
         # reprobuild's `nim-fork-src` to it and mirror the reprobuild pin here
         # the usual way (nixos-modules first, then `flake.nix`). Nothing in
         # this repository depends on it today: the renderer no longer passes
-        # `--hotCodeReloading:on` at all (see `src/Tuprules.tup` and the
+        # `--hotCodeReloading:on` at all (see the
         # `ctNimJs` note in `repro.nim`), so the fix is belt-and-braces.
         # Deliberately NOT naming a SHA here: the workspace checkout gets
         # rebased and the SHA in this comment rotted once already.
@@ -1923,12 +1920,12 @@
             node $stylus src/frontend/styles/default_dark_theme_electron.styl
             # The web and extension shells link `default_dark_theme_extension.css`,
             # and web/server mode additionally expects `default_dark_theme.css`.
-            # src/frontend/styles/Tupfile builds both (the second as a copy of the
+            # `repro.nim` builds both (the second as a copy of the
             # first); this derivation built neither, so the nix-packaged deployment
             # shipped without the two stylesheets those surfaces actually load, and
             # the build-panel / footer-visibility stylesheet guards failed on the
-            # Linux leg while passing on the tup-built macOS one. Keep this list in
-            # step with that Tupfile.
+            # Linux leg while passing on the macOS one. Keep this list in step
+            # with `StylusCssEntryPoints` in `repro.nim`.
             node $stylus src/frontend/styles/default_dark_theme_extension.styl
             cp src/frontend/styles/default_dark_theme_extension.css \
               src/frontend/styles/default_dark_theme.css

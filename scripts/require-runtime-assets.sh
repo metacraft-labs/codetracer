@@ -18,15 +18,14 @@
 #     Unhandled No such file or directory
 #     Additional info: <prefix>/config/default_config.yaml
 #
-# For as long as the tup branch existed, nothing published those two files into
-# the variant tree. `src/Tupfile` asserted they arrived "via the variant source
-# mirror" — the mirror reproduces the source DIRECTORY tree and copies no
-# files, so `build-debug/config/` was created empty on every clean build and
-# `tup` exited 0. Every downstream consumer had quietly grown its own `cp`
+# For as long as the retired tup build existed, nothing published those two
+# files into the output tree: the build created `config/` empty on every clean
+# build and exited 0. Every downstream consumer had quietly grown its own `cp`
 # (non-nix-build/windows/setup-codetracer-runtime-env.{ps1,sh},
 # scripts/docs/deep-review-capture-lib.sh, and at least one milestone log in
-# codetracer-specs). `src/config/Tupfile` is the fix; THIS script is what makes
-# the next regression loud, at the end of the build, instead of in a stack
+# codetracer-specs). `repro.nim` publishes them now (targets
+# `config-default-config-yaml` / `config-default-layout-json`); THIS script is
+# what makes the next regression loud, at the end of the build, instead of in a stack
 # trace on a user's first run.
 #
 # WHAT IT CHECKS
@@ -34,8 +33,7 @@
 # For every asset in the startup closure:
 #   * the source of truth exists under `src/config/` and is non-empty;
 #   * the built tree has it at `<out-root>/<config-dir>/<name>`, resolving
-#     symlinks (tup's `!tup_preserve` publishes symlinks into the variant, and
-#     that is a correct publication);
+#     symlinks (a published symlink is a correct publication);
 #   * it is non-empty; and
 #   * it is byte-identical to the source.
 #
@@ -52,8 +50,7 @@
 # `--source-root` exists so ci/test/require-runtime-assets-test.sh can drive
 # the checks against synthetic trees. It is not used by the build.
 #
-# Lane: called at the end of scripts/build-once.sh on BOTH branches (tup and
-#       reprobuild). Self-test: ci/test/require-runtime-assets-test.sh, run
+# Lane: called at the end of scripts/build-once.sh. Self-test: ci/test/require-runtime-assets-test.sh, run
 #       from ci/lint/bash.sh.
 # =============================================================================
 set -euo pipefail
@@ -223,9 +220,8 @@ check_asset() {
 			"built tree:  $built  -- $how" \
 			'effect: `ct` dies on a pristine profile with an uncaught OSError from' \
 			"        loadConfig (src/common/config.nim), naming this exact path." \
-			"fix:    src/config/Tupfile publishes it on the tup branch and repro.nim" \
-			"        (targets config-default-config-yaml / config-default-layout-json)" \
-			"        on the reprobuild branch. One of them has stopped running."
+			"fix:    repro.nim publishes it (targets config-default-config-yaml /" \
+			"        config-default-layout-json). That action has stopped running."
 		return
 	fi
 	if [ ! -f "$built" ]; then

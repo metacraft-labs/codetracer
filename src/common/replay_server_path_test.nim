@@ -12,8 +12,7 @@
 ##
 ## The first case is the issue's scenario verbatim (codetracer-pm
 ## `issues/2026-09-29-replay-server-discovery-misses-the-repro-build-output-root.md`):
-## a Repro-built engine and a stale cargo one side by side, and a `src/build-debug/`
-## holding only `tup.config`.
+## a Repro-built engine and a stale cargo one side by side.
 ##
 ## The last suite is the regression guard: no Nim source under `src/` other
 ## than this module may build a `replay-server` candidate path of its own,
@@ -25,7 +24,7 @@ import replay_server_path
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads this spelling
 # as the suite's RUNTIME assertion count.
-const ExpectedAssertions = 32
+const ExpectedAssertions = 29
 
 var countedAssertions = 0
 
@@ -82,32 +81,13 @@ suite "replay-server discovery order":
 
   test "the Repro output root beats a stale cargo build (the issue's case)":
     root = fakeCheckout("repro_vs_cargo")
-    # Tracked in git exactly like this: the directory exists, its bin/ does
-    # not. Testing for the directory would select a path that is not there.
-    createDir(root / "src" / "build-debug")
-    writeFile(root / "src" / "build-debug" / "tup.config", "CONFIG_DEBUG=1\n")
+    # An output directory that exists with no bin/ in it. Testing for the
+    # directory would select a path that is not there.
+    createDir(root / "src" / "build-debug-repro")
     let repro = server(root, "src", "build-debug-repro", "bin")
     let cargo = server(root, "src", "db-backend", "target", "debug")
     stub(repro)
     stub(cargo)
-    ck findReplayServerIn(root) == repro
-
-  test "an empty tup tree is skipped in favour of cargo":
-    root = fakeCheckout("tup_config_only")
-    createDir(root / "src" / "build-debug")
-    writeFile(root / "src" / "build-debug" / "tup.config", "CONFIG_DEBUG=1\n")
-    let cargo = server(root, "src", "db-backend", "target", "debug")
-    stub(cargo)
-    ck findReplayServerIn(root) == cargo
-
-  test "the tup tree is searched after the Repro one and before cargo":
-    root = fakeCheckout("tup_populated")
-    let tup = server(root, "src", "build-debug", "bin")
-    stub(tup)
-    stub(server(root, "src", "db-backend", "target", "debug"))
-    ck findReplayServerIn(root) == tup
-    let repro = server(root, "src", "build-debug-repro", "bin")
-    stub(repro)
     ck findReplayServerIn(root) == repro
 
   test "cargo debug before cargo release":
@@ -183,7 +163,7 @@ suite "replay-server discovery order":
 
   test "nothing built: \"\", and the diagnostic names what was searched":
     root = fakeCheckout("nothing")
-    createDir(root / "src" / "build-debug")
+    createDir(root / "src" / "build-debug-repro")
     ck findReplayServerIn(root) == ""
     let message = missingReplayServerMessage(root)
     ck message.contains(server(root, "src", "build-debug-repro", "bin"))
@@ -256,13 +236,15 @@ suite "the search order is spelled once":
     # spelling.
     let exempt = ["src" / "common" / "replay_server_path.nim",
                   "src" / "common" / "paths.nim"]
-    # The two suites that pin the order build stub engines at the paths the
+    # The suites that pin the order build stub engines at the paths the
     # order names, by joining onto `ReplayServerExe`; that is a fixture, not a
     # search, so they are exempt from that one tail only.
     let fixtureJoinExempt = [
       "src" / "common" / "replay_server_path_test.nim",
       "src" / "frontend" / "tui" / "tests" /
-        "test_native_host_replay_server.nim"]
+        "test_native_host_replay_server.nim",
+      "src" / "frontend" / "tui" / "tests" /
+        "test_plat65_prereq_finds_built_replay_server.nim"]
     let checkout = codetracerCheckoutRoot()
     var offenders: seq[string]
     var scanned = 0

@@ -22,7 +22,7 @@ Default install root:
 - Missing Node tool deps are auto-provisioned by default
   (`WINDOWS_DIY_SETUP_NODE_DEPS=1`) via `yarn install` in
   `node-packages`, so `stylus.cmd`/`webpack.cmd` are available
-  for Tup/Just workflows.
+  for the build and Just workflows.
 - Set `WINDOWS_DIY_SETUP_NODE_DEPS=0` to disable this
   auto-install and manage Node deps manually.
 
@@ -43,8 +43,8 @@ Default install root:
     `CODETRACER_BUILD_DIR` (neither helper exports `CODETRACER_PREFIX`: `ct`
     resolves its prefix from its own location)
   - sets `CODETRACER_E2E_CT_PATH` to
-    `src/build-debug/bin/ct.exe` when available
-  - prepends `src/build-debug/bin` to PATH for direct `ct`
+    `src/build-debug-repro/bin/ct.exe` when available
+  - prepends `src/build-debug-repro/bin` to PATH for direct `ct`
     invocation
 - Resolves `.NET` from `WINDOWS_DIY_DOTNET_ROOT` (if set),
   then
@@ -240,7 +240,7 @@ install paths:
 - `NIM_WINDOWS_SOURCE_BOOTSTRAP_GCC_FROM_TUP_MSYS2`
   (default: `1`)
   - When `gcc` is not on PATH, bootstrap may provision/reuse
-    pinned Tup MSYS2 toolchain to supply `gcc`.
+    pinned MSYS2 toolchain to supply `gcc`.
 
 Deterministic cache paths under install root
 (`$WINDOWS_DIY_INSTALL_ROOT`, default
@@ -338,107 +338,6 @@ Reuse policy:
 - In `auto` mode on non-x64 architectures, bootstrap selects
   source mode directly.
 
-## Tup source selection and cache layout
-
-`bootstrap-windows-diy.ps1` supports pinned prebuilt Tup
-bootstrap by default, with source mode still available:
-
-- `TUP_WINDOWS_SOURCE_MODE` (default: `prebuilt`)
-  - `auto`: prefer pinned prebuilt ZIP first, then fallback
-    to source build if prebuilt bootstrap fails.
-  - `source`: require source build.
-  - `prebuilt`: require prebuilt install (uses pinned
-    `TUP_PREBUILT_*` defaults unless
-    `TUP_WINDOWS_PREBUILT_*` overrides are set).
-- `TUP_WINDOWS_SOURCE_REPO` (default from pin:
-  `TUP_SOURCE_REPO`)
-- `TUP_WINDOWS_SOURCE_REF` (default from pin:
-  `TUP_SOURCE_REF`)
-- `TUP_WINDOWS_SOURCE_REVISION` (optional exact commit hash
-  override; skips ref resolution)
-- `TUP_WINDOWS_SOURCE_BUILD_COMMAND` (default from pin:
-  `TUP_SOURCE_BUILD_COMMAND`, currently
-  `TUP_MINGW=1 TUP_MINGW32=0 ./bootstrap.sh`)
-  - When this remains at the pinned default, bootstrap now
-    generates and runs `codetracer-bootstrap-windows.sh`
-    inside the Tup source checkout (MinGW-only compile path
-    that avoids upstream `bootstrap.sh` Unix defaults and
-    does not require `pkg-config fuse`).
-  - Any non-default value is treated as an explicit override
-    and executed as-is in the MSYS2 shell.
-- `TUP_WINDOWS_MSYS2_BASE_VERSION` (default from pin:
-  `TUP_MSYS2_BASE_VERSION`)
-- `TUP_WINDOWS_MSYS2_PACKAGES` (default from pin:
-  `TUP_MSYS2_PACKAGES`)
-- `TUP_WINDOWS_SELF_HOST_UPDATE` (default: unset/off)
-  - Off by default: bootstrap treats manually compiled
-    `build/tup.exe` as the final artifact and skips
-    `tup init`/`tup upd`.
-  - Set to `1`/`true`/`yes`/`on` only for debugging
-    self-host updates inside the staged source checkout.
-- Pinned prebuilt defaults (toolchain pins):
-  - `TUP_PREBUILT_URL` (currently
-    `https://gittup.org/tup/win32/tup-latest.zip`)
-  - `TUP_PREBUILT_SHA256` (currently
-    `efa3a4ecb4e63a9b3f9ced9c18d15ef59fabaf1942c9fffa9a930fb5ebf853a0`)
-  - `TUP_PREBUILT_VERSION` (currently `latest`)
-- Optional prebuilt override controls:
-  - `TUP_WINDOWS_PREBUILT_URL`
-  - `TUP_WINDOWS_PREBUILT_SHA256`
-  - `TUP_WINDOWS_PREBUILT_VERSION`
-
-Deterministic cache paths under install root
-(`$WINDOWS_DIY_INSTALL_ROOT`, default
-`%LOCALAPPDATA%/codetracer/windows-diy`):
-
-- Source build cache root:
-  `tup/cache/source/<cache-key>/`
-- Cached source install dir:
-  `tup/cache/source/<cache-key>/install`
-- Optional explicit prebuilt install dir:
-  `tup/prebuilt/<sha256>/install`
-- Selected install pointer:
-  `tup/tup.install.relative-path`
-- Selected install metadata: `tup/tup.install.meta`
-- Source cache metadata:
-  `tup/cache/source/<cache-key>/tup.source.meta`
-
-`cache-key` is SHA256 over normalized build inputs:
-
-- Tup source repo/ref/resolved revision
-- requested source build command
-- effective source build command identity (for default path
-  this is the codetracer-owned generated script version)
-
-Host prerequisites for source mode:
-
-- `git` must be present on PATH.
-- Bootstrap now provisions an MSYS2 base
-  (`msys2-base-x86_64-<version>.tar.xz`) under
-  `$WINDOWS_DIY_INSTALL_ROOT/tup/msys2/<version>/msys64`
-  and installs the pinned package set
-  (`mingw-w64-x86_64-gcc mingw-w64-x86_64-pkgconf make`)
-  before running the Tup source build command.
-- Tup source bootstrap exports `TUP_MINGW=1` and
-  `TUP_MINGW32=0`, and prepends MinGW bin directories
-  (`mingw64/bin`, `mingw32/bin`) in the MSYS2 shell PATH so
-  Tup builds target MinGW compilers by default.
-- In default mode, bootstrap emits
-  `codetracer-bootstrap-windows.sh` and compiles Tup directly
-  with the MinGW toolchain (including `src/compat/win32` and
-  `src/tup/server/windepfile.c`), then installs the compiled
-  `build/tup.exe` as the bootstrap artifact without running
-  self-host `tup init`/`tup upd`.
-
-Reuse policy:
-
-- If `tup.source.meta` matches current normalized inputs and
-  `tup --version` succeeds, bootstrap reuses the cached
-  source install and skips rebuild.
-- `prebuilt` and `auto` modes use pinned upstream ZIP
-  URL/SHA by default for reproducibility. Use `source` mode
-  when you need to force source bootstrap.
-
 ## Version Bump Process (`toolchain-versions.env`)
 
 1. Pick target versions and verify they exist upstream:
@@ -490,29 +389,13 @@ Reuse policy:
      used for source mode cache keying/build.
    - `CAPNP_SOURCE_REF`: Cap'n Proto source ref to resolve
      (tag/branch/refname).
-   - `TUP_SOURCE_REPO`: Tup source repository URL used for
-     source mode cache keying/build (default pin points to
-     the variants-capable Windows fork).
-   - `TUP_SOURCE_REF`: Tup source ref to resolve
-     (tag/branch/refname), defaulting to
-     `variants-for-windows`.
-   - `TUP_SOURCE_BUILD_COMMAND`: Bash command executed inside
-     Tup source checkout to build Tup for Windows bootstrap
-     (default pin sets
-     `TUP_MINGW=1 TUP_MINGW32=0 ./bootstrap.sh`).
-   - `TUP_PREBUILT_VERSION`: version label for the pinned
-     official prebuilt Tup archive.
-   - `TUP_PREBUILT_URL`: prebuilt Tup archive URL (default
-     pin points to
-     `https://gittup.org/tup/win32/tup-latest.zip`).
-   - `TUP_PREBUILT_SHA256`: SHA256 for that exact prebuilt
-     Tup archive.
    - `TUP_MSYS2_BASE_VERSION`: pinned MSYS2 base release
-     date (YYYYMMDD) used for Tup source prerequisites.
+     date (YYYYMMDD) used for the Nim and Nargo source prerequisites
+     (the `TUP_` prefix dates from when the tup bootstrap shared them).
    - `TUP_MSYS2_BASE_X64_SHA256`: SHA256 for
      `msys2-base-x86_64-<version>.tar.xz`.
    - `TUP_MSYS2_PACKAGES`: space-separated MSYS2 package
-     list installed for Tup source builds (default pin uses
+     list installed for source builds (default pin uses
      MinGW-targeted
      `mingw-w64-x86_64-gcc mingw-w64-x86_64-pkgconf make`).
 2. Update
@@ -634,19 +517,10 @@ fallback. Nim source mode can be attempted on both `x64` and
 now supports
 `CAPNP_WINDOWS_SOURCE_MODE=auto|source|prebuilt`: prebuilt
 remains pinned to x64 ZIP, and source mode provides the
-non-x64 path with deterministic source-cache reuse. Tup now
-supports `TUP_WINDOWS_SOURCE_MODE=prebuilt|auto|source` with
-default pinned prebuilt install from
-`https://gittup.org/tup/win32/tup-latest.zip` and
-`TUP_PREBUILT_SHA256`, while keeping source bootstrap support
-pinned to `https://github.com/zah/tup.git` branch
-`variants-for-windows`, MinGW-targeted bootstrap defaults
-(`TUP_SOURCE_BUILD_COMMAND=TUP_MINGW=1 TUP_MINGW32=0 ./bootstrap.sh`)
-and MSYS2 prerequisite pins (`TUP_MSYS2_*`) to provision
-`mingw-w64-x86_64-gcc`, `mingw-w64-x86_64-pkgconf`, and
+non-x64 path with deterministic source-cache reuse. MSYS2 prerequisite pins (`TUP_MSYS2_*`)
+provision `mingw-w64-x86_64-gcc`, `mingw-w64-x86_64-pkgconf`, and
 `make` reproducibly before source builds. Source defaults come
-from `NIM_SOURCE_*`, `NIM_CSOURCES_*`, `CAPNP_SOURCE_*`, and
-`TUP_SOURCE_*` pins.
+from `NIM_SOURCE_*`, `NIM_CSOURCES_*` and `CAPNP_SOURCE_*` pins.
 
 ### ct-remote arm64 blocker runbook
 

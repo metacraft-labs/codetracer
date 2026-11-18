@@ -42,7 +42,7 @@ fn record_via_ct_python_fixture_produces_real_ct_container() {
     if ct_cli_binary().is_none() {
         skip(
             "ct CLI not discoverable (need either CT_CLI_BIN, `ct` on PATH \
-             whose --help mentions start_backend, or src/build-debug/bin/ct \
+             whose --help mentions start_backend, or src/build-debug-repro/bin/ct \
              under CODETRACER_REPO_ROOT_PATH) — run `just build-once` first",
         );
         return;
@@ -82,7 +82,7 @@ fn record_via_ct_python_fixture_produces_real_ct_container() {
             // When `ct record` returns exit=0 but no .ct lands, that's
             // usually because the `codetracer-python-recorder` shim
             // binary referenced by db_backend_record.nim's
-            // `pythonRecorderExe` (= src/build-debug/bin/
+            // `pythonRecorderExe` (= src/build-debug-repro/bin/
             // codetracer-python-recorder) is not present in the dev
             // shell — `db-backend-record` silently catches the spawn
             // exception and reports the recordingId anyway.  The
@@ -93,7 +93,7 @@ fn record_via_ct_python_fixture_produces_real_ct_container() {
                 skip(&format!(
                     "ct record returned exit=0 but produced no .ct container under {}; \
                      usually means `codetracer-python-recorder` shim is not at \
-                     src/build-debug/bin/codetracer-python-recorder (db-backend-record \
+                     src/build-debug-repro/bin/codetracer-python-recorder (db-backend-record \
                      swallows the spawn error).  Build the shim or run from a fully \
                      populated dev shell.",
                     trace_dir.display(),

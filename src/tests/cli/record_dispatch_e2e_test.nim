@@ -56,7 +56,7 @@ proc ctBinary(): string =
   result = getEnv("CODETRACER_E2E_CT_PATH", "")
   if result.len > 0:
     return
-  let buildDir = getEnv("CODETRACER_BUILD_DIR", repoRoot() / "src" / "build-debug")
+  let buildDir = getEnv("CODETRACER_BUILD_DIR", repoRoot() / "src" / "build-debug-repro")
   result = buildDir / "bin" / "ct"
 
 type

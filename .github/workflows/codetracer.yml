@@ -269,7 +269,6 @@ jobs:
             "non-nix-build/windows/ensure-uv.ps1",
             "non-nix-build/windows/ensure-nim.ps1",
             "non-nix-build/windows/ensure-capnp.ps1",
-            "non-nix-build/windows/ensure-tup.ps1",
             "non-nix-build/windows/ensure-ct-remote.ps1",
             "non-nix-build/windows/ensure-nargo.ps1",
             "non-nix-build/windows/ensure-ttd.ps1",
@@ -2452,12 +2451,11 @@ jobs:
       - name: Clone runquota sibling
         # `just build-once` below compiles `ct`, and src/ct/codetracer.nim ->
         # ../ct_test/ct_test -> src/ct_test/process_exec.nim opens with
-        # `import runquota_process`. On the tup driver this checkout is the only
-        # source of those modules: src/Tuprules.tup's NIM_REPO_PATH_FLAGS names
-        # `$(ROOT)/../runquota/...`, and tup's environment allowlist in that
-        # same file omits RUNQUOTA_SRC, so the dev shell export cannot stand in
-        # for it. Cloned here rather than via the two composite actions above
-        # because neither owns this dependency (issue #641).
+        # `import runquota_process`. The build's Nim search path
+        # (`config.nims`) names `../runquota/...`, so this checkout is where
+        # those modules come from; scripts/require-siblings.sh requires it. Cloned here rather than via
+        # the two composite actions above because neither owns this dependency
+        # (issue #641).
         uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
         with:
           repo: metacraft-labs/runquota
@@ -2660,9 +2658,8 @@ jobs:
         # The `just build-once` step below compiles `ct`, whose import chain
         # (src/ct/codetracer.nim -> ../ct_test/ct_test ->
         # src/ct_test/process_exec.nim) starts with `import runquota_process`.
-        # Under tup the checkout is the only way those modules resolve --
-        # NIM_REPO_PATH_FLAGS points at `$(ROOT)/../runquota/...` and tup's
-        # environment allowlist omits RUNQUOTA_SRC (issue #641).
+        # The checkout is where those modules resolve from --
+        # `config.nims` points at `../runquota/...` (issue #641).
         uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
         with:
           repo: metacraft-labs/runquota
@@ -2728,7 +2725,7 @@ jobs:
         # claim is that it sees something no human and no compiler sees. Its
         # ten arms feed it defects it must report and legal CSS it must
         # not, and include the two instrument checks that stop an empty
-        # stylesheet or an unreadable Tupfile scoring as a pass — which is not
+        # stylesheet or an unreadable entry-point list scoring as a pass — which is not
         # hypothetical, `default_white_theme.styl` compiles to zero bytes.
         #
         # Hermetic and sub-second on synthetic fixtures, so it runs BEFORE the
@@ -2807,7 +2804,7 @@ jobs:
         # and until now nothing else did either. `ci/lib/test-lane-files.sh`
         # recorded why: every JS lane passes `-d:nodejs`, and the renderer does
         # not compile under it — `kdom`'s `createElementNS` is a browser
-        # binding. The only gate was the tup product build, at package time.
+        # binding. The only gate was the product build, at package time.
         #
         # `dev` duly carried a renderer entry point that did not compile.
         # Commit 333ec709 removed `ui_imports`' `electron_lib` re-export after
@@ -4163,8 +4160,25 @@ jobs:
           app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
           private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
 
+      - name: Clone runquota sibling
+        # The build (`just build-once`) compiles `ct`, and src/ct/codetracer.nim
+        # -> ../ct_test/ct_test -> src/ct_test/process_exec.nim opens with
+        # `import runquota_process`; the Nim search path (`config.nims`) names
+        # `../runquota/...`. scripts/require-siblings.sh requires the checkout
+        # before any compile starts. The step this job used to run
+        # (`ci/build/dev.sh`, the tup build) never ran that preflight, so the
+        # job never needed it; every other job that runs `build-once` clones
+        # it the same way (issue #641).
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
+        with:
+          repo: metacraft-labs/runquota
+          ref: dev
+          path: ${{ github.workspace }}/../runquota
+          gh-token: ${{ steps.ci_token.outputs.token }}
+          submodules: 'false'
+
       - name: Allow direnv in cloned codetracer-native-recorder
-        # ci/build/dev.sh builds src/db-backend, whose build.rs invokes
+        # the build (`just build-once`) builds src/db-backend, whose build.rs invokes
         # ``direnv exec <recorder-root> bash ct_emulator/build_native_api.sh``
         # to materialise the recorder's generated C before the Rust build. A
         # fresh clone has its .envrc "blocked", so direnv refuses and build.rs
@@ -4196,7 +4210,15 @@ jobs:
       - name: Build
         env:
           CT_EMULATOR_EXTRA_NIM_PATHS: ${{ github.workspace }}/libs/nim-stew/stew:${{ github.workspace }}/libs/nim-stew:${{ github.workspace }}/libs/nim-result
-        run: "nix develop .#devShells.x86_64-linux.default --command ./ci/build/dev.sh"
+        run: "nix develop .#devShells.x86_64-linux.default --command just build-once"
+
+      - name: Assert the build produced every product the retired tup build did
+        # products_parity. `ci/build/linux-products-baseline.txt` is
+        # the list of products the last tup build produced, recorded before the
+        # tup rules files were removed; a clean `repro build` has to produce all of it.
+        # The build tree is the one the dev shell names in CODETRACER_BUILD_DIR
+        # (src/build-debug-repro).
+        run: "nix develop .#devShells.x86_64-linux.default --command bash ci/test/products-parity.sh"
 
   nix-build:
     runs-on: [self-hosted, linux, x64]  # CIP-5 nix job; H4: routed to GPU host gpu-server-002
@@ -5991,8 +6013,8 @@ jobs:
         # src/ct_test/process_exec.nim. On Darwin build-once selects the
         # reprobuild driver, which could resolve runquota from its nix flake
         # input alone -- but scripts/require-siblings.sh requires the checkout
-        # on every driver so there is a single workspace-completeness rule (the
-        # tup driver has no other way in; see the notes in that script).
+        # on every driver so there is a single workspace-completeness rule (see
+        # the notes in that script).
         uses: metacraft-labs/metacraft-github-actions/setup-dev-env@dev
         with:
           env-flavor: nix
@@ -6271,7 +6293,7 @@ jobs:
         # ct binary at ``src/build-debug-repro/bin/ct`` — the path
         # ``ci/test/ui-tests-db.sh`` points ``CODETRACER_E2E_CT_PATH`` at. The
         # in-repo ``libs/codetracer-trace-format{,-nim}`` staged above feed the
-        # recipe; no ``--override-input`` is needed for the tup/reprobuild dev
+        # recipe; no ``--override-input`` is needed for the dev
         # build. Replaces the old Homebrew ``./non-nix-build/build.sh``.
         #
         # The `repro daemon stop` is a de-poisoning step, not hygiene. The
@@ -7136,11 +7158,9 @@ jobs:
         #
         # `runquota` is on the list because this gate runs `just build-once`,
         # which compiles `ct`, which pulls in src/ct_test/process_exec.nim ->
-        # `import runquota_process`. Under the tup driver this CHECKOUT is the
-        # only way those modules resolve: NIM_REPO_PATH_FLAGS points at
-        # `$(ROOT)/../runquota/...`, and tup's environment allowlist in
-        # src/Tuprules.tup does not carry RUNQUOTA_SRC, so the dev shell's
-        # export of it never reaches `nim`. Its absence is what made this job
+        # `import runquota_process`. This CHECKOUT is
+        # where those modules resolve from: `config.nims` points at
+        # `../runquota/...`. Its absence is what made this job
         # die on `cannot open file: runquota_process` (issue #641), fifteen
         # minutes into the Nim compile rather than here.
         uses: metacraft-labs/metacraft-github-actions/setup-dev-env@dev
@@ -8769,16 +8789,15 @@ jobs:
         # the state of the dev-shell lanes.
         run: bash tools/visual-review/deepreview-harness-test.sh
 
-      - name: Assert no web bundle is assembled inside a tup variant directory
+      - name: Assert no web bundle is assembled inside a build output directory
         if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
         # `just test-web-bundle` defaulted its output to `src/build-debug/web`,
-        # inside tup's variant directory, and the ViewModel job runs it before
-        # `build-once`: tup then refuses the variant ("Variant directory must
-        # only contain a tup.config file. Found extra files: web"), so the
-        # build step could not pass once the smoke had. Both web-bundle
-        # scripts now default to ci/lib/web-bundle-dir.sh's `build/web`; this
-        # fails when that default, or a literal one in any script, lies inside
-        # a directory holding a tracked `tup.config`. Pure bash and git.
+        # inside a build output tree, and the ViewModel job runs it before
+        # `build-once`; the build that owned that tree refused the extra
+        # directory, so the build step could not pass once the smoke had. Both
+        # web-bundle scripts now default to ci/lib/web-bundle-dir.sh's
+        # `build/web`; this fails when that default, or a literal one in any
+        # script, lies inside a `src/build-*` directory. Pure bash and git.
         run: bash ci/test/web-bundle-default-dir-test.sh
 
   ci-verdict:

@@ -35,7 +35,7 @@
 ## kind, so the kind does not matter here.
 ##
 ## Prerequisites (a missing one FAILS the row, it never skips): the built `ct`
-## under `src/build-debug/bin` (or CODETRACER_E2E_CT_PATH), and `nim` on PATH
+## under `src/build-debug-repro/bin` (or CODETRACER_E2E_CT_PATH), and `nim` on PATH
 ## to build the stub.
 ##
 ## Compile and run:
@@ -50,7 +50,7 @@ proc ctBinary(): string =
   result = getEnv("CODETRACER_E2E_CT_PATH", "")
   if result.len > 0:
     return
-  result = (getEnv("CODETRACER_BUILD_DIR", repoRoot() / "src" / "build-debug") /
+  result = (getEnv("CODETRACER_BUILD_DIR", repoRoot() / "src" / "build-debug-repro") /
             "bin" / "ct").addFileExt(ExeExt)
 
 const stubSource = """

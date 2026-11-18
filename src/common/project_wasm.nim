@@ -119,8 +119,7 @@
 ## runs this file's suite — compiles with Nim 2.x's default ORC, so the defect
 ## was real there and the two long-body cases and arms W18/W19 belong there.
 ## `ct-cli-units` compiles `--mm:refc`, and EVERY SHIPPED BINARY IS REFC:
-## `repro.nim`'s `ctNative` and `ctNimJs` both pass `mm = "refc"`, and
-## `src/Tuprules.tup` passes `--mm:refc`. **No shipped `ct` ever carried this
+## `repro.nim`'s `ctNative` and `ctNimJs` both pass `mm = "refc"`. **No shipped `ct` ever carried this
 ## defect.** The repair is correct and free under both, and it is kept because
 ## the lane that grades the property is ORC and a build that moved to ORC would
 ## meet it.

@@ -5,7 +5,7 @@
 ## lane runs `test_*.nim` only.
 ##
 ## `startHost` runs `ct host --trace-path` (default binary:
-## `src/build-debug/bin/ct`, or `CODETRACER_CT_BIN`) on a recording checked
+## `src/build-debug-repro/bin/ct`, or `CODETRACER_CT_BIN`) on a recording checked
 ## into this repository, in its own process group so that stopping it stops
 ## the node index and the replay processes it starts, with a scratch
 ## `CODETRACER_HOME`. The page port is auto-assigned and read back from the
@@ -40,7 +40,7 @@ proc repoRoot*(): string =
 
 let
   root* = repoRoot()
-  ctBinary* = getEnv("CODETRACER_CT_BIN", root / "src" / "build-debug" / "bin" / "ct")
+  ctBinary* = getEnv("CODETRACER_CT_BIN", root / "src" / "build-debug-repro" / "bin" / "ct")
   prefixModules = ctBinary.parentDir.parentDir / "node_modules"
   # Where `socket.io-client` is: the prefix's `node_modules`, else the
   # checkout's.

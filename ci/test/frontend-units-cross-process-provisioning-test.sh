@@ -268,8 +268,8 @@ else
 fi
 # idle_timeout_integration_test needs $CODETRACER_PREFIX/server_index.js.  A
 # `${CODETRACER_PREFIX:-…}` default never applies under `repro exec`: the dev
-# env sets src/build-<type>-repro, which tup (build-once on Linux) never
-# writes, so the suite reported DID NOT RUN after a successful build.  The
+# env sets src/build-<type>-repro, which a build that writes src/build-<type>
+# never populates, so the suite reported DID NOT RUN after a successful build.  The
 # recipe has to build with build-once and take the output root it publishes.
 # shellcheck disable=SC2016 # literal recipe text, not an expansion
 build_line="$(grep -nF 'CODETRACER_BUILD_ENV_FILE="$ct_build_env_file" bash scripts/build-once.sh' <<<"$recipe" | head -1 | cut -d: -f1)"

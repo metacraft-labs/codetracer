@@ -85,7 +85,7 @@ impl std::fmt::Display for ReplayServerRefusal {
 ///
 /// The candidates, in order: `explicit` (`CODETRACER_REPLAY_SERVER_CMD`),
 /// which must be a file; the one beside `server`; `db_backend`'s
-/// `target/{release,debug}` build; `src/build-debug/bin`.  The first that
+/// `target/{release,debug}` build; `src/build-debug-repro/bin`.  The first that
 /// exists is the one, and none of the files it is built from may be newer
 /// than it ([`check_replay_server_fresh`]), or this says why, naming the
 /// binary, the newer file and the command that rebuilds it.  A binary that
@@ -112,13 +112,13 @@ pub fn locate_replay_server(
         for profile in ["release", "debug"] {
             candidates.push(db_backend.join(format!("target/{profile}/replay-server{exe}")));
         }
-        candidates.push(db_backend.join(format!("../build-debug/bin/replay-server{exe}")));
+        candidates.push(db_backend.join(format!("../build-debug-repro/bin/replay-server{exe}")));
         match candidates.into_iter().find(|candidate| candidate.is_file()) {
             Some(candidate) => candidate.canonicalize().unwrap_or(candidate),
             None => {
                 return Err(ReplayServerRefusal::NotBuilt(format!(
                     "replay-server was not found (CODETRACER_REPLAY_SERVER_CMD, beside {}, \
-                     {}/target/{{release,debug}} or src/build-debug/bin); build it first: \
+                     {}/target/{{release,debug}} or src/build-debug-repro/bin); build it first: \
                      cd {} && cargo build --bin replay-server",
                     server.display(),
                     db_backend.display(),

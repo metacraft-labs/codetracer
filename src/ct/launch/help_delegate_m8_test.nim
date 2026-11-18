@@ -28,7 +28,7 @@ import std/[ os, osproc, streams, strtabs, strutils, unittest ]
 
 const repoRoot = currentSourcePath().parentDir.parentDir.parentDir.parentDir
   ## ``src/ct/launch/help_delegate_m8_test.nim`` -> repo root.
-const ctBinary = repoRoot / "src" / "build-debug" / "bin" / "ct"
+const ctBinary = repoRoot / "src" / "build-debug-repro" / "bin" / "ct"
 
 proc runtimeEnv(extras: openArray[(string, string)]): StringTableRef =
   ## Build a child process env: parent env minus any test-isolation

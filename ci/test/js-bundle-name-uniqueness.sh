@@ -66,7 +66,7 @@ done
 
 if [ ${#build_dirs[@]} -eq 0 ]; then
 	REQUIRED_BUNDLES="ui.js subwindow.js index.js server_index.js"
-	for candidate in src/build-debug-repro src/build-debug; do
+	for candidate in src/build-debug-repro src/build-debug-repro; do
 		[ -d "${candidate}" ] && build_dirs+=("${candidate}")
 	done
 else
@@ -75,7 +75,7 @@ fi
 
 if [ ${#build_dirs[@]} -eq 0 ]; then
 	echo "FAIL: no build directory found (looked for src/build-debug-repro," >&2
-	echo "      src/build-debug).  Build first, or pass one as an argument." >&2
+	echo "      src/build-debug-repro).  Build first, or pass one as an argument." >&2
 	exit 1
 fi
 

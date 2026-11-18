@@ -67,7 +67,7 @@
 # Environment:
 #   CODETRACER_CORE_BIN         override the built core binary to bundle
 #   CODETRACER_E2E_CT_PATH      same, shared with the other ci/test scripts
-#   CODETRACER_BUILD_DIR        build tree to probe (default src/build-debug)
+#   CODETRACER_BUILD_DIR        build tree to probe (default src/build-debug-repro)
 #   CODETRACER_LAUNCHER_PATH    override the codetracer-launcher checkout
 # =============================================================================
 
@@ -165,10 +165,8 @@ dir_absent_or_empty() {
 CORE_BIN="${CODETRACER_CORE_BIN:-${CODETRACER_E2E_CT_PATH:-}}"
 if [[ -z $CORE_BIN ]]; then
 	for candidate in \
-		"${CODETRACER_BUILD_DIR:-$ROOT_DIR/src/build-debug}/bin/ct$EXE_SUFFIX" \
-		"$ROOT_DIR/src/build-debug/bin/ct$EXE_SUFFIX" \
+		"${CODETRACER_BUILD_DIR:-$ROOT_DIR/src/build-debug-repro}/bin/ct$EXE_SUFFIX" \
 		"$ROOT_DIR/src/build-debug-repro/bin/ct$EXE_SUFFIX" \
-		"$ROOT_DIR/src/build-release/bin/ct$EXE_SUFFIX" \
 		"$ROOT_DIR/src/build-release-repro/bin/ct$EXE_SUFFIX"; do
 		if [[ -x $candidate ]]; then
 			CORE_BIN="$candidate"

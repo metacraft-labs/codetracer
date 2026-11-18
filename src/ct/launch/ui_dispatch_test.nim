@@ -218,7 +218,7 @@ suite "PLAT-1 §3: finding the component the handoff names":
     # field while this stayed green.
     delEnv(tuiBinaryEnvVar)
     let componentsRoot = scratch / "components"
-    let standIn = root / "src" / "build-debug" / "bin" / "ct"
+    let standIn = root / "src" / "build-debug-repro" / "bin" / "ct"
     if not fileExists(standIn):
       checkpoint("missing " & standIn & " — run `just build-once`")
     ck fileExists(standIn)
@@ -265,7 +265,7 @@ suite "PLAT-1 §3: finding the component the handoff names":
     # else. Two roots, each holding a bundle, and the one named by
     # `CODETRACER_COMPONENT_DIR` must win.
     delEnv(tuiBinaryEnvVar)
-    let standIn = root / "src" / "build-debug" / "bin" / "ct"
+    let standIn = root / "src" / "build-debug-repro" / "bin" / "ct"
     var roots: seq[string] = @[]
     for name in ["self-root", "other-root"]:
       let r = scratch / name

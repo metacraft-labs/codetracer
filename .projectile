@@ -1,6 +1,6 @@
 +/src/
--/src/build-debug/
--/src/.tup
+-/src/build-debug-repro/
+-/src/build-release-repro/
 -/src/tests/records/
 -/src/tests/binaries/
 -/src/public/

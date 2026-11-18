@@ -208,8 +208,8 @@ proc findBPFTraceScript*(): string =
     return shareScript
 
   # Development layout: workspace root contains codetracer/ and codetracer-ci/ side by side.
-  # The ct binary is typically at src/build-debug/bin/ct, so we walk up to the repo root.
-  let repoRoot = ctBin.parentDir.parentDir.parentDir  # src/build-debug/bin -> src/build-debug -> src -> repo
+  # The ct binary is typically at src/build-debug-repro/bin/ct, so we walk up to the repo root.
+  let repoRoot = ctBin.parentDir.parentDir.parentDir  # src/build-debug-repro/bin -> src/build-debug-repro -> src -> repo
   let devScript = repoRoot.parentDir / "codetracer-ci" / "apps" /
                   "EventSourcing" / "EventSourcing.Host" / "bpftrace-collection.bt"
   if fileExists(devScript):
