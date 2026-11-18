@@ -363,6 +363,11 @@ lint_step "a shard that fails uploads what held its memory" \
 lint_step "a CI dev shell re-anchors hooks another Repro build wrote" \
 	bash ci/test/ci-hooks-re-anchor-test.sh
 
+# codetracer-native-backend's submodules are checked out, with the job's
+# credentials, before the visual replay Git policy applies to a Nix fetch of it.
+lint_step "native-backend's submodules are checked out before the visual replay policy" \
+	bash ci/test/native-backend-submodules-test.sh
+
 # A GPUI shard gives a bare host the Vulkan driver, cursor theme and D-Bus
 # session configuration the window and its compositor need.
 lint_step "a GPUI shard provisions what a bare host lacks" \

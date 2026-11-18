@@ -7117,6 +7117,17 @@ jobs:
             test-certificates-tools
             nim-pty
 
+      - name: Check out codetracer-native-backend's submodules
+        # setup-dev-env clones the sibling without them. Where the gate has to
+        # build ct-native-replay (a runner with no build of it in the sibling's
+        # target/), `nix develop '.?submodules=1'` then fetched libs/rr and
+        # libs/delve from the empty paths over file://, which the gate's Git
+        # policy refuses ("transport 'file' not allowed", the TUI job's player
+        # build in run 44081496736). Checked out, Nix reads them in place. Here,
+        # because libs/rr is private and the gate step runs with no credential
+        # but the lldb-sys header (ci/test/native-backend-submodules-test.sh).
+        run: git -C "${{ github.workspace }}/../codetracer-native-backend" submodule update --init --recursive
+
       - name: Build ct for the gate and the Visual Replay capture
         # Its own step, so the capture below can wait on it (the gate rebuilds).
         id: ct
