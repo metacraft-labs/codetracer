@@ -15,8 +15,9 @@
 #   * linked worktree, hooks from this build: nothing written, nothing said;
 #   * linked worktree with CT_REPRO_HOOKS_WRITE=1, and the main checkout: ensure
 #     runs, as before.
-# Negative control: the block as it was (no worktree check) rewrites the shared
-# hooks from the linked worktree.
+# Negative control: the block opted back in (CT_REPRO_HOOKS_WRITE=1) rewrites
+# the shared hooks from the linked worktree; and the block as it was at
+# 5578c28798a (no worktree check) does, when that object is in the clone.
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 root="$PWD"
@@ -106,14 +107,33 @@ enter "$work/main" "$current"
 check "the main checkout still runs repro hooks ensure" "the main checkout no longer runs ensure" \
 	test -e "$work/ensure.log"
 
-# Negative control: the step as it was, from the linked worktree.
-git -C "$root" show HEAD:nix/git-hooks.nix >"$work/old-git-hooks.nix"
+# Negative control, always run: the same block opted back in from the linked
+# worktree rewrites the shared hooks, so `unchanged` can see a rewrite. (It
+# used to read HEAD:nix/git-hooks.nix, which was the pre-fix file only until
+# the fix landed; from then on the control failed on the fixed file.)
 install_hooks aaaa
-enter "$work/wt" "$work/old-git-hooks.nix"
+enter "$work/wt" "$current" CT_REPRO_HOOKS_WRITE=1
 if unchanged; then
-	fail "control: the previous step left the shared hooks alone, so this test cannot see the defect"
+	fail "control: a linked worktree that writes left the shared hooks alone, so this test cannot see the defect"
 else
-	ok "control: the previous step rewrites the shared hooks from a linked worktree"
+	ok "control: a linked worktree that writes rewrites the shared hooks, and this test sees it"
+fi
+
+# The historical case: the block before the fix (ab331ec8e35's parent),
+# pinned to a SHA so it cannot turn into the fixed file. Skipped when the
+# object is absent: the lint lane checks out at fetch-depth 1.
+PRE_FIX_REV=5578c28798a
+if git -C "$root" cat-file -e "$PRE_FIX_REV:nix/git-hooks.nix" 2>/dev/null; then
+	git -C "$root" show "$PRE_FIX_REV:nix/git-hooks.nix" >"$work/old-git-hooks.nix"
+	install_hooks aaaa
+	enter "$work/wt" "$work/old-git-hooks.nix"
+	if unchanged; then
+		fail "the block at $PRE_FIX_REV left the shared hooks alone from a linked worktree; it should show the defect"
+	else
+		ok "the block at $PRE_FIX_REV rewrites the shared hooks from a linked worktree (the defect)"
+	fi
+else
+	echo "  skip the block at $PRE_FIX_REV: object not in this clone"
 fi
 
 echo
