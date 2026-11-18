@@ -877,16 +877,26 @@
         # what `tree-sitter generate` writes for the pinned grammar.
         tree-sitter-nim-parser = pkgs.stdenvNoCC.mkDerivation {
           name = "tree-sitter-nim-parser";
-          src = pkgs.lib.fileset.toSource {
-            root = ../../libs/tree-sitter-nim;
-            fileset = pkgs.lib.fileset.unions (
-              map (f: pkgs.lib.fileset.maybeMissing (../../libs/tree-sitter-nim + "/${f}")) [
-                "grammar.js"
-                "tree-sitter.json"
-                "package.json"
-              ]
-            );
-          };
+          # Without the submodule (a flake evaluated without ?submodules=1,
+          # as the macOS jobs do) the root does not exist and toSource throws
+          # at EVALUATION, which takes down every dev shell whose hook names
+          # this package. An empty source defers the failure to a build that
+          # nothing in such a shell performs; the hook only copies the parser
+          # when the checkout has grammar.js.
+          src =
+            if builtins.pathExists ../../libs/tree-sitter-nim/grammar.js then
+              pkgs.lib.fileset.toSource {
+                root = ../../libs/tree-sitter-nim;
+                fileset = pkgs.lib.fileset.unions (
+                  map (f: pkgs.lib.fileset.maybeMissing (../../libs/tree-sitter-nim + "/${f}")) [
+                    "grammar.js"
+                    "tree-sitter.json"
+                    "package.json"
+                  ]
+                );
+              }
+            else
+              pkgs.emptyDirectory;
           nativeBuildInputs = [
             pkgs.tree-sitter
             pkgs.nodejs_20

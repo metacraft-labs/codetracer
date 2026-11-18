@@ -14,7 +14,8 @@
 #     `tree-sitter generate` of the checkout's grammar with that CLI;
 #   * the gate copies them when the grammar matches, and generates when it does
 #     not (a fake CLI records whether it ran), leaving a newer grammar.js
-#     regenerated rather than shadowed by a stale copy.
+#     regenerated rather than shadowed by a stale copy;
+#   * without submodules the package and the dev shell still evaluate.
 # Run by ci/lint/nix.sh.
 set -euo pipefail
 cd "$(dirname "$0")/../.."
@@ -99,6 +100,16 @@ check "edited grammar: the gate generates instead of copying" \
 	grep -q '^generate' "$work/cli.log"
 check "and the stale prebuilt parser is not what is left" "the prebuilt parser shadows the edited grammar" \
 	test "$(cat "$gate_root/libs/tree-sitter-nim/src/parser.c")" = generated
+
+# A flake evaluated WITHOUT submodules (the macOS jobs' `nix develop`) has no
+# libs/tree-sitter-nim. The dev shells' hook names the package, so its source
+# must still evaluate there: run 44374890263 lost every macOS job to
+# "lib.fileset.toSource: `root` ... libs/tree-sitter-nim ... does not exist".
+for attr in "packages.${system}.tree-sitter-nim-parser" "devShells.${system}.default"; do
+	check "${attr} evaluates without submodules" \
+		"${attr} does not evaluate without submodules" \
+		nix eval --raw "git+file://${root}#${attr}.drvPath" >/dev/null
+done
 
 echo
 if [ "$failures" -gt 0 ]; then
