@@ -61,4 +61,16 @@ applicable:
   - ../gpui/nim-tracing-constant-from-the-menu.yaml
   - ../gpui/requests-pane-filters-and-goes-to-the-handler.yaml
   - ../gpui/top-bar-ctrl-o-reveals-docked.yaml
+  - ../gpui/clicks-event-row-goes-to-event.yaml
+  - ../gpui/constraints-pane-in-edit-mode.yaml
+  - ../gpui/find-ctrl-f-seeds-and-walks.yaml
+  - ../gpui/list-scrubber-vcs-wheel-and-track.yaml
+  - ../gpui/low-level-code-beside-the-source.yaml
+  - ../gpui/parity-shift-right-click-opens-the-menu.yaml
+  - ../gpui/problems-after-a-failed-build.yaml
+  - ../gpui/shell-pane-recorded-build.yaml
+  - ../gpui/terminal-output-press-goes-to-the-write.yaml
+  - ../gpui/test-results-run-the-tests.yaml
+  - ../gpui/verification-run-lists-findings.yaml
+  - ../gpui/welcome-from-the-plus.yaml
 unsupported: []
