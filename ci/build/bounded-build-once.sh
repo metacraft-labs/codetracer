@@ -17,6 +17,8 @@
 #  3. then build-once again with REPRO_DAEMON=off, killed after
 #     SECOND_MINUTES -- the candidate workaround, measured in the same run.
 #
+# FIRST_MINUTES=0 skips step 1 and builds without the daemon straight away.
+#
 # Each attempt's duration and outcome is printed as `bounded-build-once:`
 # lines, so the two modes can be compared from the log. Exits with the last
 # attempt's status (124 when it was killed).
@@ -56,14 +58,17 @@ dump() { # dump LABEL
 	sed -n '1,20p' "$out/zombies.txt"
 }
 
-attempt daemon "$first"
-rc=$?
-if [ "$rc" -ne 124 ] && [ "$rc" -ne 137 ]; then
-	exit "$rc"
+# FIRST_MINUTES=0 skips the daemon attempt: build without the daemon at once.
+if [ "$first" != 0 ]; then
+	attempt daemon "$first"
+	rc=$?
+	if [ "$rc" -ne 124 ] && [ "$rc" -ne 137 ]; then
+		exit "$rc"
+	fi
+	dump daemon-stall
+	# The stalled daemon's sessions must not hold the retry's locks.
+	repro daemon stop >/dev/null 2>&1 || true
 fi
-dump daemon-stall
-# The stalled daemon's sessions must not hold the retry's locks.
-repro daemon stop >/dev/null 2>&1 || true
 attempt no-daemon "$second" REPRO_DAEMON=off
 rc=$?
 if [ "$rc" -eq 124 ] || [ "$rc" -eq 137 ]; then

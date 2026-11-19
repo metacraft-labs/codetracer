@@ -8,7 +8,8 @@
 #   * a stall under the daemon, then a finished retry: the dump (process tree,
 #     zombies, the daemon's status, sessions and log), and the retry ran with
 #     REPRO_DAEMON=off;
-#   * a stall in both: two dumps and exit 124.
+#   * a stall in both: two dumps and exit 124;
+#   * a first bound of 0 (ct-build's setting): one attempt, REPRO_DAEMON=off.
 # Run by ci/lint/bash.sh.
 set -euo pipefail
 cd "$(dirname "$0")/../.."
@@ -77,6 +78,21 @@ check "the dump holds the daemon's status and sessions" "repro-daemon.txt: $(cat
 	grep -q "fake repro daemon sessions" "$diag/daemon-stall/repro-daemon.txt"
 check "each attempt's duration is printed" "no per-attempt lines: $out" \
 	test "$(grep -c '^bounded-build-once: .*: exit ' <<<"$out")" = 2
+
+# FIRST_MINUTES=0 (ct-build's setting while reprobuild-pm's daemon stall is
+# open): one attempt, without the daemon.
+rm -f "$work/calls" "$work/log"
+printf '%s\n' 0 >"$work/plan"
+diag="$work/diag-skip"
+code=0
+out="$(PATH="$work/bin:$PATH" FAKE_DIR="$work" bash "$root/ci/build/bounded-build-once.sh" "$diag" 0 0.05 2>&1)" || code=$?
+check "a first bound of 0 builds once, without the daemon" \
+	"first bound 0: exit $code, calls $(cat "$work/calls" 2>/dev/null), log: $(cat "$work/log" 2>/dev/null)" \
+	test "$code" = 0 -a "$(cat "$work/calls")" = 1
+check "and that build ran with REPRO_DAEMON=off" "env: $(cat "$work/log" 2>/dev/null)" \
+	grep -qx "call 1 REPRO_DAEMON=off" "$work/log"
+check "ct-build builds without the daemon (first bound 0)" "ct-build.yml does not pass a first bound of 0" \
+	grep -qE 'bounded-build-once\.sh "\$\{RUNNER_TEMP\}/build-once-diagnostics" 0 [0-9]+$' "$root/.github/workflows/ct-build.yml"
 
 run hang hang
 check "a stall in both attempts exits 124 with both dumps" \
