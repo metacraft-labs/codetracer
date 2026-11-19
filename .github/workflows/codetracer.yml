@@ -3825,11 +3825,17 @@ jobs:
     secrets: inherit
 
   tui-tests:
-    # The job is in tui-tests.yml; it takes ct from ct-build and the
-    # visual replay tools from visual-replay-tools.
-    needs: [ct-build, visual-replay-tools]
-    # ct-build is required; visual-replay-tools only saves time.
+    # The job is in tui-tests.yml; it takes ct from ct-build. The shards that
+    # use the visual replay tools wait for visual-replay-tools' artifact
+    # themselves (ci/wait-for-run-artifact.sh): as a `needs` it held every
+    # shard back until the tools job ended, 43 minutes after ct-build in run
+    # 44384977215.
+    needs: [ct-build]
     if: ${{ !cancelled() && needs.ct-build.result == 'success' }}
+    permissions:
+      contents: read
+      id-token: write
+      actions: read
     uses: ./.github/workflows/tui-tests.yml
     secrets: inherit
 
@@ -3964,11 +3970,17 @@ jobs:
           if-no-files-found: ignore
 
   gpui-window-captures:
-    # The job is in gpui-window-captures.yml; it takes ct from ct-build and the
-    # visual replay tools from visual-replay-tools.
-    needs: [ct-build, visual-replay-tools]
-    # ct-build is required; visual-replay-tools only saves time.
+    # The job is in gpui-window-captures.yml; it takes ct from ct-build. The shards that
+    # use the visual replay tools wait for visual-replay-tools' artifact
+    # themselves (ci/wait-for-run-artifact.sh): as a `needs` it held every
+    # shard back until the tools job ended, 43 minutes after ct-build in run
+    # 44384977215.
+    needs: [ct-build]
     if: ${{ !cancelled() && needs.ct-build.result == 'success' }}
+    permissions:
+      contents: read
+      id-token: write
+      actions: read
     uses: ./.github/workflows/gpui-window-captures.yml
     secrets: inherit
 

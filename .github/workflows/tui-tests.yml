@@ -8,6 +8,8 @@ on:
 permissions:
   contents: read
   id-token: write
+  # ci/wait-for-run-artifact.sh lists this run's artifacts and jobs.
+  actions: read
 
 jobs:
   tui-tests:
@@ -255,13 +257,27 @@ jobs:
           [[ $result =~ ^needed=(true|false)$ ]] || { echo "scenario-slice-uses-stage printed '${result}', not needed=true|false" >&2; exit 1; }
           echo "$result" | tee -a "$GITHUB_OUTPUT"
 
+      - name: Wait for the visual replay tools
+        # The tools job runs beside ct-build and is not a `needs` of this
+        # job, so that the shards that do not use its tools start when
+        # ct-build ends. This one waits for its artifact here, after its own
+        # provisioning, which normally outlasts the tools job; when the job
+        # failed, or the bound passes, it does not wait and the restore below
+        # is skipped, so ci/test/visual-replay-tools.sh builds the tools here.
+        if: ${{ !cancelled() && steps.ct.outcome == 'success' && steps.player.outputs.needed == 'true' }}
+        id: vr_wait
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: nix develop .#ci --command bash ci/wait-for-run-artifact.sh visual-replay-tools "visual-replay-tools /" 3600
+
       - name: Restore the visual replay tools from the visual-replay-tools job
         # ct-native-replay, ct_gfx_player and ct-mcr, built once per run in
         # parallel with ct-build (visual-replay-tools.yml), rather than in this
         # job (about 22 minutes for ct-mcr alone in GPUI shard 1 of run
         # 44269676398). Best effort: when the artifact is missing or short,
         # ci/test/visual-replay-tools.sh builds them here as before.
-        if: ${{ !cancelled() && steps.ct.outcome == 'success' && steps.player.outputs.needed == 'true' }}
+        if: ${{ !cancelled() && steps.ct.outcome == 'success' && steps.player.outputs.needed == 'true' && steps.vr_wait.outcome == 'success' }}
         id: vr_tools
         continue-on-error: true
         uses: actions/download-artifact@v4

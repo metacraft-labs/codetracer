@@ -8,16 +8,26 @@ on:
 permissions:
   contents: read
   id-token: write
+  # ci/wait-for-run-artifact.sh lists this run's artifacts and jobs.
+  actions: read
 
 jobs:
   gpui-window-captures:
     runs-on: [self-hosted, linux, x64]  # the label isonim-gpui's "GUI tests (headless sway)" job runs green on
-    # NEW, NO SAMPLE YET. The work is two cargo builds of isonim-gpui's shim
-    # (windowed and featureless; incremental on a runner that kept its work
-    # tree), `just build-once`, three windowed front-end builds' worth of Nim,
-    # and three captures of 2-5 minutes each on this host class. 90m is a
-    # generous first bound, to be tightened from the first green runs.
-    timeout-minutes: 90
+    # Sized for shard 1, the capture shard, which has never finished inside
+    # 90m (cancelled at 90 in runs 43935388749, 44269676398 and 44384977215).
+    # Measured on garm in 44384977215: 74m from job start to the capture step
+    # (54.5m of it provisioning: ~15m dev-shell substitution, 6m of
+    # `tree-sitter generate`, ~10m of uncached git sources, 11m rebuilding
+    # cargo-build-sbf after a private-cache timeout disabled the substituter,
+    # 11.5m of sibling clones), then 14m of in-step builds (plat45's
+    # featureless shim and `just build-gpui`) before the first of its nine
+    # fixtures. Those fixtures take 2-5 minutes each here (unmeasured as a
+    # whole: the shard never reached the end). 74 + 14 + 9 x 5 = 133m; 150m
+    # covers that. The bound is one literal for the whole matrix
+    # (ci/verdict/job-timeouts.py), so the other shards, which finish in
+    # 22-88m, carry it too. Tighten it from shard 1's first green run.
+    timeout-minutes: 150
     # The GPUI scenario lane does not fit one 90-minute job (70 runs at about
     # 6 minutes each, run 43806398582), so it runs as 20 shards: 10 left each
     # shard about 8 runs of 5-11 minutes, about 55 minutes before a cold
@@ -226,13 +236,27 @@ jobs:
         if: ${{ steps.unpack.outcome == 'failure' }}
         run: bash ci/unpack-ct-build-products.sh "${RUNNER_TEMP}/ct-build-retry"
 
+      - name: Wait for the visual replay tools
+        # The tools job runs beside ct-build and is not a `needs` of this
+        # job, so that the shards that do not use its tools start when
+        # ct-build ends. This one waits for its artifact here, after its own
+        # provisioning, which normally outlasts the tools job; when the job
+        # failed, or the bound passes, it does not wait and the restore below
+        # is skipped, so ci/test/visual-replay-tools.sh builds the tools here.
+        if: ${{ !cancelled() && steps.ct.outcome == 'success' && matrix.shard == 1 }}
+        id: vr_wait
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: nix develop .#ci --command bash ci/wait-for-run-artifact.sh visual-replay-tools "visual-replay-tools /" 3600
+
       - name: Restore the visual replay tools from the visual-replay-tools job
         # ct-native-replay, ct_gfx_player and ct-mcr, built once per run in
         # parallel with ct-build (visual-replay-tools.yml), rather than in this
         # job (about 22 minutes for ct-mcr alone in GPUI shard 1 of run
         # 44269676398). Best effort: when the artifact is missing or short,
         # ci/test/visual-replay-tools.sh builds them here as before.
-        if: ${{ !cancelled() && steps.ct.outcome == 'success' && matrix.shard == 1 }}
+        if: ${{ !cancelled() && steps.ct.outcome == 'success' && matrix.shard == 1 && steps.vr_wait.outcome == 'success' }}
         id: vr_tools
         continue-on-error: true
         uses: actions/download-artifact@v4

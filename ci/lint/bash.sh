@@ -379,6 +379,11 @@ lint_step "native-backend's submodules are checked out before the visual replay 
 lint_step "a short ct-build products download is retried" \
 	bash ci/test/unpack-ct-build-products-test.sh
 
+# A shard that uses the visual replay tools waits for their artifact itself,
+# and stops waiting when the tools job failed or the bound passes.
+lint_step "a shard waits for the visual replay tools only while waiting can help" \
+	bash ci/test/wait-for-run-artifact-test.sh
+
 # A GPUI shard gives a bare host the Vulkan driver, cursor theme and D-Bus
 # session configuration the window and its compositor need.
 lint_step "a GPUI shard provisions what a bare host lacks" \
