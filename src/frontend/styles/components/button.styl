@@ -60,7 +60,8 @@ LIST_HOVER_BG = colors-ui-surface-primary-secondary-hover
 // chosen row's fill (Nikolay, 2026-11-02; docs/UI-Design-Decisions.md, D-30).
 // It only shows on the dark surfaces dropdowns normally have (#161616, #1b1b1b):
 // a dropdown painted #242424 or lighter stays on LIST_HOVER_BG.
-DROPDOWN_HOVER_BG = colors-ui-surface-primary-default-hover
+// Light: pure white, `colors/base/white` (Nikolay, 2026-11-18, D-30).
+DROPDOWN_HOVER_BG = by-mode(colors-ui-surface-primary-default-hover, colors-base-white)
 
 // Button transition — ONE timing for every button's state change (hover, and
 // the welcome forms' Record / Download turning primary): the colours ease over
@@ -144,12 +145,16 @@ light-icon(img, size = contain, color = colors-ui-icon-primary-default)
       -webkit-mask: img center / size no-repeat
       mask: img center / size no-repeat
 
+// The icon is painted in the text colour unless its button names an icon
+// colour in `--ct-icon-color`.  A primary button does (D-45, below): its icons
+// take `icon/on-action/primary`.  Everywhere else nothing sets it, so every
+// other icon looks exactly as it did.
 mask-icon(img, size = 1rem)
   display: inline-block
   flex: 0 0 auto
   width: size
   height: size
-  background: currentColor
+  background: var(--ct-icon-color, currentColor)
   -webkit-mask-image: img
   mask-image: img
   -webkit-mask-repeat: no-repeat
@@ -286,14 +291,28 @@ button
 [class*="-button-"][class*="-primary"]
   background-color: colors-ui-surface-action-primary
   color: colors-ui-text-on-action-primary
+  // D-45: an icon on the action fill is `icon/on-action/primary`, light in both
+  // modes, the same value as the label (Nikolay, 2026-11-19).  The general icon
+  // tokens can't be used here: `icon/primary/default` is dark in Light, so the
+  // marks came out near-black on the indigo, and `icon/primary/on-color` is
+  // dark in Dark.  `mask-icon()` reads this variable.
+  --ct-icon-color: colors-ui-icon-on-action-primary
 
+  // The label keeps the on-action ink on hover.  Without it the generic
+  // `button:hover` text colour (above) won, which in light is the dark body
+  // ink: "Done" turned near-black on brand/700.  Dark keeps the colour that
+  // rule always gave it (text/primary/body).
   &:hover:not(:disabled)
     background-color: colors-ui-surface-action-primary-hover !important
+    color: by-mode(colors-ui-text-primary-body, colors-ui-text-on-action-primary-hover)
 
   // The fill stays (D-20), so the grey disabled text would all but vanish on it
   // (#727272 on #6366F1 is 1.1:1).  Its own text colour, dimmed, stays readable.
+  // Light keeps more of it (0.7, 3.4:1 on brand/600), so it still reads (D-44).
   &:disabled
-    color: rgba(colors-ui-text-on-action-primary, 0.5) !important
+    color: rgba(colors-ui-text-on-action-primary, by-mode(0.5, 0.7)) !important
+    // The icon dims with the label (D-20): back to the label's colour.
+    --ct-icon-color: currentColor
 
 // Secondary and tertiary are one look now: the button look (top of this file).
 // Tertiary was a second, flatter fill with no border; it is kept as a class
@@ -585,14 +604,14 @@ button
 .ct-button-no-border
   border: none !important
 
-// The design system's Tooltip (Figma: ❖ Tooltip), Size=sm.  In the light theme the
-// text is the body colour: Figma's `text/on-color/body` is #d2ccc1 there, unreadable
-// on this #f8f6f2.
+// The design system's Tooltip (Figma: ❖ Tooltip), Size=sm.  In the light theme it
+// is an inverse chip: `surface/on-color/secondary` is dark there (stone 900) and
+// `text/on-color/body` is its light ink (stone 100, 10.7:1).
 TOOLTIP_BORDER_WIDTH = by-mode(0.0625rem, 0)
 
 tooltip-look()
   background-color: by-mode(colors-ui-surface-base-raised, colors-ui-surface-on-color-secondary)
-  color: colors-ui-text-primary-body
+  color: by-mode(colors-ui-text-primary-body, colors-ui-text-on-color-body)
   padding: by-mode(0.375rem 0.75rem, 0.25rem 0.5rem)
   border-radius: 0.25rem
   // Drawn inside, as Figma's border is, so it adds nothing to the size.

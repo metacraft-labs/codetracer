@@ -404,14 +404,16 @@ src/frontend/styles/components/shared_widgets.styl :: No line between rows, on a
 
 ### D-30: A dropdown row's hover is quieter than a list row's
 
-A dropdown row's hover uses `colors-ui-surface-primary-default-hover`, `#262626` in
-the dark themes and `#DBD6CC` in the light ones. Lists and tables keep the stronger
+A dropdown row's hover uses `colors-ui-surface-primary-default-hover`, `#262626`, in
+the dark themes. In the light theme every dropdown row's hover is pure white,
+`colors/base/white` `#FFFFFF` (Nikolay, 2026-11-18), including the Navigate menu's
+search results and the tracepoint view menu. Lists and tables keep the stronger
 `#333333`, which is also the chosen row's fill, so hover no longer looks like the
 chosen row. A dropdown painted `#242424` or lighter stays on the list hover, because
 this colour would not show on it. (2026-11-02)
 
 ```guard
-src/frontend/styles/components/button.styl :: DROPDOWN_HOVER_BG = colors-ui-surface-primary-default-hover
+src/frontend/styles/components/button.styl :: DROPDOWN_HOVER_BG = by-mode(colors-ui-surface-primary-default-hover, colors-base-white)
 src/frontend/styles/components/menu_item.styl :: background: DROPDOWN_HOVER_BG
 ```
 
@@ -608,13 +610,14 @@ src/frontend/styles/components/shared_widgets.styl :: No placeholder colour here
 A fill, line or hover written as white at low strength (`rgba(255, 255, 255, …)`)
 is invisible on a light surface. Each one keeps its dark value through
 `by-mode(dark, light)` and takes a token in the light theme. The switch's off
-track, hover and knob take the Design System Switch's own tokens
-(`surface/base/raised`, `surface/primary/default-hover`, `surface/on-color/default`),
-so an off switch is visible in light. The video player's spinner and loupe keep
+track and hover take `surface/primary/tertiary` / `tertiary-hover` (one step
+darker than the panel) and the knob `surface/on-color/default` (near-white), so
+an off switch is visible in light. (Changed with D-44: `surface/base/raised`
+became the lightest surface, so the knob vanished on it.) The video player's spinner and loupe keep
 white: they sit on the video, which is dark in both themes. (2026-11-18)
 
 ```guard
-src/frontend/styles/components/toggle.styl :: --ct-toggle-track: by-mode(rgba(255, 255, 255, 0.12), colors-ui-surface-base-raised)
+src/frontend/styles/components/toggle.styl :: --ct-toggle-track: by-mode(rgba(255, 255, 255, 0.12), colors-ui-surface-primary-tertiary)
 src/frontend/styles/components/toggle.styl :: --ct-toggle-thumb-color: by-mode(#ffffff, colors-ui-surface-on-color-default)
 src/frontend/styles/components/status_bar.styl :: background-color: by-mode(rgba(255, 255, 255, 0.1), colors-ui-surface-primary-secondary-hover)
 src/frontend/styles/components/unified_diff.styl :: background-color by-mode(rgba(255, 255, 255, 0.045), colors-ui-surface-base-card)
@@ -677,8 +680,8 @@ src/frontend/styles/components/menu_bar.styl :: light-icon(ct-images-logo-dark, 
 ### D-43: In the light theme, every text field is `surface/input/default`
 
 Every text field (panel and search fields, the welcome forms, the command prompt,
-the Event Log "Rows" field, the Search panel's field) takes the field token the
-Figma light screens use, `colors/ui/surface/input/default` (#F8F6F2), at rest and
+the Event Log "Rows" field, the Search panel's field, the Agent prompt box and its whole tray) takes the field token the
+Figma light screens use, `colors/ui/surface/input/default` (#F7F6F4 since D-44), at rest and
 while in use: the same colour as the frame around the panels. The dark theme keeps
 each field's own fill. One helper, `field-fill()` in `input.styl`, so a new field
 takes the same rule. (Nikolay, 2026-11-18)
@@ -689,6 +692,100 @@ src/frontend/styles/components/input.styl :: background: field-fill(colors-ui-su
 src/frontend/styles/components/command-palette.styl :: background: field-fill(colors-ui-surface-primary-default)
 src/frontend/styles/components/event_log.styl :: background: field-fill(colors-ui-surface-input-secondary)
 src/frontend/styles/components/search.styl :: background: field-fill(colors-ui-surface-input-secondary)
+src/frontend/styles/components/agent_activity.styl :: background: by-mode(colors-ui-surface-base-canvas, colors-ui-surface-input-default)
+src/frontend/styles/components/agent_activity.styl :: // D-43: the whole prompt tray reads as one field in light
+```
+
+### D-44: The light theme is built from contrast, not from a flipped scale
+
+The light theme's colours come from Figma's Light mode, on its own neutral ramp
+`colors/neutral/stone` (half the warmth of `clay`, same lightness per step). Each
+light token was picked to match the contrast its dark twin has on its surface,
+not by mirroring the dark step. So: the canvas (`surface/base/canvas`, stone/150)
+is darker than the panels on it (`surface/base/panel`, stone/100; see D-46); cards,
+menus and popovers are the lightest (`raised`); text levels stay visibly apart
+(body 13:1, label 11, body-subtle 7.5, caption 6, label-subtle 4.8, caption-subtle
+4, disabled 3); hover on text and icons adds contrast; status colours sit at
+700-800; the primary action is `brand/600` with near-white text (5.8:1); the
+tooltip is an inverse dark chip; the code editor's ground follows the panel. The
+light palette (`default_white_theme.styl`) names these tokens, never a hex, so a
+change in Figma reaches the app by regenerating the tokens. Because `raised` is
+now the lightest surface, a segmented control's track is `surface/primary/tertiary`
+in light (its selected tab stays `card`), and hover panels and menus use a soft
+ink shadow instead of the dark theme's heavy black one. Dark is unchanged.
+(Nikolay, 2026-11-18; both orders compared in the app, darker canvas kept,
+Nikolay, 2026-11-19)
+
+```guard
+src/frontend/styles/generated/mapped-light.styl :: colors-ui-surface-base-canvas = colors-neutral-stone-150
+src/frontend/styles/generated/mapped-light.styl :: colors-ui-surface-base-panel = colors-neutral-stone-100
+src/frontend/styles/generated/mapped-light.styl :: colors-ui-surface-action-primary = colors-brand-600
+src/frontend/styles/generated/mapped-light.styl :: colors-editor-surface-primary = colors-neutral-stone-50
+src/frontend/styles/default_white_theme.styl :: BACKGROUND_COLOR=colors-ui-surface-primary-default
+src/frontend/styles/components/button.styl :: color: by-mode(colors-ui-text-primary-body, colors-ui-text-on-color-body)
+src/frontend/styles/components/shared_widgets.styl :: background-color: by-mode(colors-ui-surface-base-raised, colors-ui-surface-primary-tertiary)
+src/frontend/styles/components/event_log.styl :: background-color: by-mode(colors-ui-surface-base-raised, colors-ui-surface-primary-tertiary)
+src/frontend/styles/components/auto_hide.styl :: OVERLAY_ELEVATION_SHADOW = by-mode(OVERLAY_ELEVATION_SHADOW_DARK, OVERLAY_ELEVATION_SHADOW_LIGHT)
+src/frontend/styles/components/button.styl :: color: by-mode(colors-ui-text-primary-body, colors-ui-text-on-action-primary-hover)
+```
+
+### D-45: An icon on a primary button is `icon/on-action/primary`
+
+Icons on the action fill (a primary button) use their own token,
+`icon/on-action/primary`: light in both modes, the same value as the label
+(`text/on-action/primary`). Not `icon/primary/default`, which is dark in Light
+and put near-black marks on the indigo, and not `icon/primary/on-color`, which
+is dark in Dark. In the code a primary button sets `--ct-icon-color` to the
+token and `mask-icon()` paints with it; a disabled primary hands the icon back
+to the dimmed label colour (D-20). An icon on a primary button is always a mask
+(`button-icon()` / `mask-icon()`), never a picture with a colour baked in: the
+Agent panel's Send arrow was one. Figma's ❖ Button primary variants use the
+same token. (Nikolay, 2026-11-19)
+
+```guard
+src/frontend/styles/generated/mapped.styl :: colors-ui-icon-on-action-primary = colors-neutral-cold-50
+src/frontend/styles/generated/mapped-light.styl :: colors-ui-icon-on-action-primary = colors-neutral-stone-50
+src/frontend/styles/components/button.styl :: background: var(--ct-icon-color, currentColor)
+src/frontend/styles/components/button.styl :: --ct-icon-color: colors-ui-icon-on-action-primary
+src/frontend/styles/components/agent_activity.styl :: button-icon(COMMAND_PALETTE_START_MSG_IMG, 1em)
+```
+
+### D-46: The frame around the panels is `surface/base/canvas`
+
+In the light theme the frame (the page behind the panels, the top bar, the gaps
+between panels you drag to resize, and the status bar) is
+`colors/ui/surface/base/canvas` (stone/150, #E4E2DF), and the panels on it are
+`surface/base/panel` (stone/100, #EFEEEC): a darker frame with lighter panels,
+as Figma's light screens draw it (their outer frame is bound to `canvas`). Every
+frame part names the canvas token, so the frame changes with one token in
+Figma and its parts cannot drift apart. Text fields stay `surface/input/default`
+(D-43). The dark theme keeps its own frame colour. (Nikolay, 2026-11-19, after
+comparing both orders in the app)
+
+```guard
+src/frontend/styles/generated/mapped-light.styl :: colors-ui-surface-base-canvas = colors-neutral-stone-150
+src/frontend/styles/generated/mapped-light.styl :: colors-ui-surface-base-panel = colors-neutral-stone-100
+src/frontend/styles/components/shared_widgets.styl :: background-color: by-mode(colors-ui-surface-primary-default, colors-ui-surface-base-canvas) !important  // D-46
+src/frontend/styles/components/menu_bar.styl :: background-color: by-mode(colors-ui-surface-primary-default, colors-ui-surface-base-canvas)
+src/frontend/styles/components/golden_layout.styl :: background: by-mode(colors-ui-surface-primary-default, colors-ui-surface-base-canvas) !important
+src/frontend/styles/components/status_bar.styl :: background-color: by-mode(colors-ui-surface-primary-default, colors-ui-surface-base-canvas)
+```
+
+### D-47: The caption bar's buttons take the frame's colours
+
+The buttons in the caption bar (back / forward, the step and continue controls,
+run tests, stop, the + for a new session) sit on the frame (D-46), so: at rest
+their fill is `surface/base/canvas`, the frame itself; on hover, and while open
+or switched on, it is `surface/base/panel`; switched on also carries the
+`border/action` outline in Figma; disabled stays on the canvas with the icon in
+`icon/primary/disabled` (D-20). Figma's ❖ Button / `main-menu-buttons`
+(type=primary) holds the same states. The logo is not a button here.
+(Nikolay, 2026-11-19)
+
+```guard
+src/frontend/styles/components/menu_bar.styl :: #menu button[class*="ct-button-image-"]:not(:where(#menu-root *))
+src/frontend/styles/components/menu_bar.styl :: background-color: colors-ui-surface-base-canvas !important
+src/frontend/styles/components/menu_bar.styl :: background-color: colors-ui-surface-base-panel !important
 ```
 
 ## Focus rules

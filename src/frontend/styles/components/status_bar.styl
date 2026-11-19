@@ -602,7 +602,8 @@ NOTIFICATION_STACK_BOTTOM = STATUS_BAR_OUTER_HEIGHT + NOTIFICATION_STACK_GAP
     // NOTE the guard reads the COMPILED theme, so it only sees an edit to this
     // file after `just build-once`.
     bottom: 0
-    background-color: colors-ui-surface-primary-default
+    // D-46: the status bar is part of the frame, `surface/base/canvas` in light.
+    background-color: by-mode(colors-ui-surface-primary-default, colors-ui-surface-base-canvas)
     // THE BAR DECLARES A TEXT COLOUR, because it declares a background.
     //
     // Reported from noirstudio.dev as *"the colors in the status bar are
@@ -729,7 +730,7 @@ NOTIFICATION_STACK_BOTTOM = STATUS_BAR_OUTER_HEIGHT + NOTIFICATION_STACK_GAP
     // `UNREACHABLE_SELECTORS` rather than repainted.
     .status-button-clicked
       background-color: colors-ui-surface-primary-secondary-hover
-      color: colors-ui-border-primary
+      color: by-mode(colors-ui-border-primary, colors-ui-text-primary-label-subtle)
       float: left
       width: max-content
       margin-left: 1.25rem

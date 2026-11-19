@@ -239,7 +239,8 @@ CAPTION_BAR_PADDING_BOTTOM = unquote("var(--caption-bar-padding-bottom)")
 #menu
   /* based on design : psd file and krita color selector */
   /* TODO move to light theme */
-  background-color: colors-ui-surface-primary-default
+  // D-46: the top bar is part of the frame, `surface/base/canvas` in light.
+  background-color: by-mode(colors-ui-surface-primary-default, colors-ui-surface-base-canvas)
   position: fixed
   width: 100vw
   top: 0
@@ -626,9 +627,10 @@ CAPTION_BAR_PADDING_BOTTOM = unquote("var(--caption-bar-padding-bottom)")
     color: colors-ui-text-primary-body
     background-color: colors-ui-surface-input-default
 
-    // The list hover (LIST_HOVER_BG, button.styl); these rows had none.
+    // The list hover (LIST_HOVER_BG, button.styl); these rows had none.  In
+    // light they are a dropdown's rows and take its white hover (D-30).
     &:hover
-      background-color: LIST_HOVER_BG
+      background-color: by-mode(LIST_HOVER_BG, DROPDOWN_HOVER_BG)
 
   .menu-sub-group-separator
     display: none
@@ -661,6 +663,21 @@ CAPTION_BAR_PADDING_BOTTOM = unquote("var(--caption-bar-padding-bottom)")
 // every other icon button carries (button.styl).
 #menu #menu-root [class*="ct-button-image-"]
   border: none !important
+
+// D-47: the caption bar's buttons sit on the frame, so they take the frame's
+// colours (Figma: ❖ Button / main-menu-buttons, type=primary).  At rest the
+// fill is the canvas, so a button reads as part of the bar; on hover, and while
+// it is open or switched on, the fill is the panel colour.  Open / on also
+// carries the action border where the button has one.  Disabled stays on the
+// canvas with a dimmed icon (D-20).  The logo is not a button here (above).
+#menu button[class*="ct-button-image-"]:not(:where(#menu-root *))
+  background-color: colors-ui-surface-base-canvas !important
+
+  &:hover:not(:disabled)
+  &.open
+  &.active
+  &[aria-expanded="true"]
+    background-color: colors-ui-surface-base-panel !important
 
 // The debugger toolbar's navigation buttons are a category of their own: they
 // keep the behaviour they had before the shared button changes in button.styl.
