@@ -1253,11 +1253,11 @@
     "codetracer-image-diff": {
       "flake": false,
       "locked": {
-        "lastModified": 1794846715,
-        "narHash": "sha256-r/EzsQjVWaAo4L4ch/sTq42+25kiV3AS0eOH/s6XBL4=",
+        "lastModified": 1795049649,
+        "narHash": "sha256-qsGHQqCDRXrQZ16kwrzQcD17Agc6NuN8dPQU/7iqf5A=",
         "owner": "metacraft-labs",
         "repo": "codetracer-image-diff",
-        "rev": "d04b56d822c7d4335fbc40f0a1aad387a1b838b5",
+        "rev": "982e669585a150ede87973db281df63188459328",
         "type": "github"
       },
       "original": {
