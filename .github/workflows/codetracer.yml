@@ -5823,7 +5823,11 @@ jobs:
         shell: bash
         env:
           CODETRACER_TRACE_FORMAT_NIM_SKIP_NIMBLE_INSTALL: "1"
-          CODETRACER_TRACE_FORMAT_NIM_EXTRA_PATHS: ${{ github.workspace }}/libs/nim-stew/stew:${{ github.workspace }}/libs/nim-stew
+          # libs/nim-result LAST: Nim gives the last --path precedence, and
+          # without it `import results` finds libs/nim-stew/stew's legacy copy
+          # (no `unsafeError`, a `func mapErr` nim-fork 2.3.1 refuses), as in
+          # run 44384977215's regression gate. ct-build sets the same three.
+          CODETRACER_TRACE_FORMAT_NIM_EXTRA_PATHS: ${{ github.workspace }}/libs/nim-stew/stew:${{ github.workspace }}/libs/nim-stew:${{ github.workspace }}/libs/nim-result
         run: |
           set -euo pipefail
           cd "${{ github.workspace }}"
@@ -5852,7 +5856,11 @@ jobs:
         shell: bash
         env:
           CODETRACER_TRACE_FORMAT_NIM_SKIP_NIMBLE_INSTALL: "1"
-          CODETRACER_TRACE_FORMAT_NIM_EXTRA_PATHS: ${{ github.workspace }}/libs/nim-stew/stew:${{ github.workspace }}/libs/nim-stew
+          # libs/nim-result LAST: Nim gives the last --path precedence, and
+          # without it `import results` finds libs/nim-stew/stew's legacy copy
+          # (no `unsafeError`, a `func mapErr` nim-fork 2.3.1 refuses), as in
+          # run 44384977215's regression gate. ct-build sets the same three.
+          CODETRACER_TRACE_FORMAT_NIM_EXTRA_PATHS: ${{ github.workspace }}/libs/nim-stew/stew:${{ github.workspace }}/libs/nim-stew:${{ github.workspace }}/libs/nim-result
         run: |
           set -euo pipefail
           cd "${{ github.workspace }}"
@@ -7227,7 +7235,11 @@ jobs:
           CODETRACER_DB_BACKEND_SKIP_DIRENV: "1"
           CODETRACER_TRACE_FORMAT_NIM_SKIP_NIMBLE_INSTALL: "1"
           CT_EMULATOR_EXTRA_NIM_PATHS: ${{ github.workspace }}/libs/nim-stew/stew:${{ github.workspace }}/libs/nim-stew
-          CODETRACER_TRACE_FORMAT_NIM_EXTRA_PATHS: ${{ github.workspace }}/libs/nim-stew/stew:${{ github.workspace }}/libs/nim-stew
+          # libs/nim-result LAST: Nim gives the last --path precedence, and
+          # without it `import results` finds libs/nim-stew/stew's legacy copy
+          # (no `unsafeError`, a `func mapErr` nim-fork 2.3.1 refuses), as in
+          # run 44384977215's regression gate. ct-build sets the same three.
+          CODETRACER_TRACE_FORMAT_NIM_EXTRA_PATHS: ${{ github.workspace }}/libs/nim-stew/stew:${{ github.workspace }}/libs/nim-stew:${{ github.workspace }}/libs/nim-result
           CODETRACER_VISUAL_REPLAY_REPO_PATH: ${{ github.workspace }}/../codetracer-visual-replay
           CODETRACER_VISUAL_REPLAY_GITHUB_TOKEN: ${{ steps.ci_token.outputs.token }}
           PLAYWRIGHT_GLOBAL_TIMEOUT: "10800000"
@@ -7564,7 +7576,11 @@ jobs:
         # recording assertions into checks of nothing.
         env:
           CODETRACER_TRACE_FORMAT_NIM_SKIP_NIMBLE_INSTALL: "1"
-          CODETRACER_TRACE_FORMAT_NIM_EXTRA_PATHS: ${{ github.workspace }}/libs/nim-stew/stew:${{ github.workspace }}/libs/nim-stew
+          # libs/nim-result LAST: Nim gives the last --path precedence, and
+          # without it `import results` finds libs/nim-stew/stew's legacy copy
+          # (no `unsafeError`, a `func mapErr` nim-fork 2.3.1 refuses), as in
+          # run 44384977215's regression gate. ct-build sets the same three.
+          CODETRACER_TRACE_FORMAT_NIM_EXTRA_PATHS: ${{ github.workspace }}/libs/nim-stew/stew:${{ github.workspace }}/libs/nim-stew:${{ github.workspace }}/libs/nim-result
           # codetracer-native-recorder depends on the PRIVATE metacraft-labs/lldb-sys.rs.
           # Cargo's default libgit2 transport does not read gitconfig, so it never
           # presents the org-scoped extraHeader that `Setup dev env` installs job-wide

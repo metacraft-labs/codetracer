@@ -390,6 +390,11 @@ lint_step "a short ct-build products download is retried" \
 lint_step "a shard waits for the visual replay tools only while waiting can help" \
 	bash ci/test/wait-for-run-artifact-test.sh
 
+# Every job that hands trace-format-nim codetracer's libraries lists
+# libs/nim-result last, so `import results` is not stew's legacy copy.
+lint_step "trace-format-nim builds see nim-results, not stew's legacy results" \
+	bash ci/test/trace-format-nim-extra-paths-test.sh
+
 # A GPUI shard gives a bare host the Vulkan driver, cursor theme and D-Bus
 # session configuration the window and its compositor need.
 lint_step "a GPUI shard provisions what a bare host lacks" \
