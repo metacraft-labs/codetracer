@@ -75,4 +75,5 @@ applicable:
   - ../gpui/welcome-from-the-plus.yaml
   - ../gpui/origin-chain-from-the-menu.yaml
   - ../gpui/low-level-code-native-steps-by-instruction.yaml
+  - ../gpui/visual-replay-video-player.yaml
 unsupported: []
