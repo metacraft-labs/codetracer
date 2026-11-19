@@ -938,6 +938,7 @@
             # codetracer-native-recorder come from flake inputs (postUnpack).
             dbBackendLibs = [
               "ct-dap-client"
+              "ct-flow-wire"
               "ct-data-breakpoints"
               "ct-home"
               "ct-lang"
@@ -1127,6 +1128,7 @@
             let
               dbBackendLibs = [
                 "ct-dap-client"
+                "ct-flow-wire"
                 "ct-lang"
                 "jsbound"
                 "origin-classifier"
