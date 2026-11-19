@@ -56,6 +56,17 @@ for f in .github/workflows/gpui-window-captures.yml .github/workflows/tui-tests.
 		grep -q 'run: bash ci/unpack-ct-build-products.sh "${RUNNER_TEMP}/ct-build-retry"$' "$f"
 done
 
+# ct-build packs build-once's output directory, which the justfile names as
+# `require-runtime-assets`' OUT_ROOT. 471fb023529 moved it to
+# src/build-debug-repro and ct-build kept packing src/build-debug: run
+# 44444132651's ct-build failed at "Cannot stat" and no shard ran.
+out_root="$(sed -nE 's/^require-runtime-assets OUT_ROOT="([^"]+)":.*/\1/p' justfile)"
+if [ -n "$out_root" ] && grep -qF " codetracer/${out_root} \\" .github/workflows/ct-build.yml; then
+	ok "ct-build packs build-once's output directory (${out_root})"
+else
+	fail "ct-build does not pack build-once's output directory '${out_root}' (justfile require-runtime-assets OUT_ROOT)"
+fi
+
 echo
 if [ "$failures" -gt 0 ]; then
 	echo "$failures failure(s)"
