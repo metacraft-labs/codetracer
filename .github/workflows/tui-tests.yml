@@ -247,6 +247,12 @@ jobs:
         # Decided from the slice itself, not a shard number, so a rebalance of
         # the shards moves the player with its scenarios
         # (ci/test/scenario-slice-uses-stage-test.sh).
+        # Not `success()`: the scenario lane runs after an earlier step's
+        # failure too (`!cancelled()`), and in run 44384977215 TUI shard 6's
+        # launcher build was stopped by the host's disk guard, this step was
+        # skipped with it, and the lane then ran without the player
+        # (visual-replay-video-player: MISSING-PREREQ).
+        if: ${{ !cancelled() && steps.ct.outcome == 'success' }}
         id: player
         # In the dev shell: it runs python3, which a persistent runner's bare
         # PATH lacks (TUI shard 6 of run 44269676398 skipped the player build).
