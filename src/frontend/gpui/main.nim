@@ -114,6 +114,7 @@ import ./window_pointer
 import ./window_preflight               # refuse by kind when no window can open
 import ./list_scrubber
 import ../viewmodel/views/debug_control_marks
+import ../viewmodel/views/cut_text_rules   # the status bar's location: the shared path cut
 import ../viewmodel/viewmodels/history_cursor   # history back / forward: the desktop's cursor rule
 import ../viewmodel/viewmodels/generated_code_presenter   # Generated-Code-Listing §13.4
 from ../viewmodel/sdk/source_provider import newDapSourceProvider, fetch,
@@ -5419,9 +5420,11 @@ proc drawFooter(r: GpuiRenderer) =
     gTopEls.add strip
   # PLAT-54: the status line's note — after the file info and the bottom
   # strip, before the right-hand items — in the same face.
-  # The note and the location share the row: when both do not fit, the
-  # location gives way first (`fitFooterRow`), so a long path (a CI runner's
-  # work directory) does not cut what a key just said to a few letters.
+  # The note, the location and the certificate label share the row, and the
+  # note keeps its words first (`fitFooterRow`): the location gives way, cut
+  # in its middle down to its file name, line and ticks, then the
+  # certificate label is left out. A long path (a CI runner's work
+  # directory) never cuts what a key just said.
   var noteX = gGeom.footer.x + FooterFileInfoX
   if info.len > 0:
     noteX = max(noteX, FooterFileInfoX + FooterFileInfoPx + 16)
@@ -5430,14 +5433,24 @@ proc drawFooter(r: GpuiRenderer) =
   let cert = if gSession.isNil: "" else: certificateLabel()
   let certW = if cert.len > 0: groteskTextPx(cert, 14.0) + 8 else: 0
   let locationW = if gSession.isNil: 0 else: groteskTextPx(location, 14.0)
+  # The location's floor: its shortest middle cut (`…/main.py:12#345`), with
+  # two pixels for the shaper's rounding, so the cut the text element draws
+  # in it keeps the file name, the line and the ticks.
+  let locationCuts = pathCutCandidates(location)
+  let locationFloor = if locationCuts.len == 0: locationW
+                      else: groteskTextPx(locationCuts[^1], 14.0) + 2
   let rowEnd = if gSession.isNil: gGeom.footer.x + gGeom.footer.w - 8
                else: copyPathRect().x - 8
   let noteNeed = if gStatusNote.len > 0: groteskTextPx(gStatusNote, 14.0) + 8
                  else: 0
-  let fit = fitFooterRow(rowEnd - noteX - 16 - certW, noteNeed, locationW)
+  let fit = if gStatusNote.len > 0:
+              fitFooterRow(rowEnd - noteX - 16, noteNeed, locationW,
+                           locationFloor, certW)
+            else:
+              (note: 0, location: locationW, certificate: certW)
   if gStatusNote.len > 0:
     let noteEnd = if gSession.isNil: rowEnd
-                  else: rowEnd - fit.location - 16 - certW
+                  else: rowEnd - fit.location - 16 - fit.certificate
     let note = absBox(r, PxRect(x: noteX, y: rowY, w: max(0, noteEnd - noteX),
                                 h: TabHeightPx))
     r.setAttribute(note, "data-ct-footer-note", gStatusNote)
@@ -5459,25 +5472,29 @@ proc drawFooter(r: GpuiRenderer) =
     r.setStyle(icon, "height", "16px")
     r.appendChild(cb, icon)
     gTopEls.add cb
-    let lw = if gStatusNote.len > 0: fit.location else: locationW
-    let lx = max(gGeom.footer.x, copy.x - 8 - lw)
+    let lx = max(gGeom.footer.x, copy.x - 8 - fit.location)
     let p = absBox(r, PxRect(x: lx, y: rowY, w: copy.x - 8 - lx,
                              h: TabHeightPx))
     r.setAttribute(p, "data-ct-footer-position", location)
     r.setStyle(p, "color", ink)
     r.setStyle(p, "overflow", "hidden")
-    # Cut at its start, keeping the file, the line and the ticks.
-    var shown = location
-    if groteskTextPx(shown, 14.0) > copy.x - 8 - lx:
-      var tail = location
-      while tail.len > 1 and groteskTextPx("…" & tail, 14.0) > copy.x - 8 - lx:
-        tail = tail[1 .. ^1]
-        while tail.len > 1 and (ord(tail[0]) and 0xC0) == 0x80:
-          tail = tail[1 .. ^1]
-      shown = "…" & tail
-    text(r, p, shown)
+    # Cut in its middle by the shared path rule (CTF-P1c D6, amended for
+    # paths), which isonim-gpui's text element draws: it keeps the first
+    # segment and the file name with its line and ticks, with the trim rule
+    # on both sides of the "…".
+    let t = r.createElement("div")
+    r.setStyle(t, "font-size", "14px")
+    r.setStyle(t, "white-space", "nowrap")
+    r.setStyle(t, "overflow", "hidden")
+    r.setStyle(t, "text-overflow", "ellipsis")
+    r.setStyle(t, "flex-shrink", "1")
+    r.setAttribute(t, EllipsisTrimAttribute, CutSeparators.join(""))
+    r.setAttribute(t, EllipsisAtAttribute, "middle")
+    r.setAttribute(t, EllipsisSegmentsAttribute, $PathSeparator)
+    r.appendChild(t, r.createTextNode(location))
+    r.appendChild(p, t)
     gTopEls.add p
-    if cert.len > 0:
+    if fit.certificate > 0:
       let cw = groteskTextPx(cert, 14.0)
       let c = absBox(r, PxRect(x: lx - 8 - cw, y: rowY, w: cw, h: TabHeightPx))
       r.setAttribute(c, "data-ct-footer-certificate", cert)
