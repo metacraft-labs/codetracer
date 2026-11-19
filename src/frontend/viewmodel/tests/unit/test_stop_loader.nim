@@ -350,6 +350,55 @@ suite "2026-11-04: the flow window is delivered once, on the event":
     check loader.status[spDiffFlow].val == plsFailed
     check session.flowVM.diffLoadingState.val == lsError
 
+suite "a flow request a newer one superseded":
+  # The engine answers a `ct/load-flow` that a newer one of the same mode
+  # overtook before it started with a refusal, and computes only the newer
+  # one (`success: false`, a `message` that starts with `superseded`). The
+  # panel shows the newer request's state, so that refusal
+  # must not flip it to an error while the flow of the stop on screen loads.
+
+  test "the older request's refusal leaves the panel loading the newer one":
+    let mock = newMockBackendService(autoRespond = true)
+    let session = newLoaderSession(mock)
+    session.store.moveTo(40, 3)
+    mock.deferResponses = true
+    var outcomes: seq[bool] = @[]
+    session.flowVM.requestWindow(proc(applied: bool) = outcomes.add applied)
+    session.flowVM.requestWindow(proc(applied: bool) = outcomes.add applied)
+    check mock.pendingDeferredCount == 2
+    mock.settleDeferred(%*{"success": false, "message":
+      "superseded: a newer ct/load-flow (request 2) for the same flow mode " &
+      "arrived before this one started"})
+    check outcomes == @[false]
+    check session.flowVM.loadingState.val == lsLoading
+    mock.settleDeferred(flowAcknowledgement())
+    mock.emitEvent(flowEvent(flowWindowAnswer(40, 3)))
+    check outcomes == @[false, true]
+    check session.flowVM.loadingState.val == lsIdle
+    check session.flowVM.layoutWindows.val.len == 1
+
+  test "the newest request's own refusal still fails the panel":
+    # The control: the same refusal of the request the panel is waiting for.
+    let mock = newMockBackendService(autoRespond = true)
+    let session = newLoaderSession(mock)
+    session.store.moveTo(40, 3)
+    mock.deferResponses = true
+    session.flowVM.requestWindow()
+    mock.settleDeferred(%*{"success": false, "message": "no flow here"})
+    check session.flowVM.loadingState.val == lsError
+
+  test "the same for the diff flow":
+    let mock = newMockBackendService(autoRespond = true)
+    let session = newLoaderSession(mock)
+    session.flowVM.diffSession.val = true
+    mock.deferResponses = true
+    session.flowVM.requestDiffFlow()
+    session.flowVM.requestDiffFlow()
+    mock.settleDeferred(newJObject())          # the older one, refused
+    check session.flowVM.diffLoadingState.val == lsLoading
+    mock.settleDeferred(newJObject())          # the newer one, refused
+    check session.flowVM.diffLoadingState.val == lsError
+
 suite "HSF-S1: an answer is applied to the stop it was asked at":
 
   test "an answer that lands after the debugger moved is dropped":

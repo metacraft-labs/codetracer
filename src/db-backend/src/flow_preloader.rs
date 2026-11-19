@@ -156,6 +156,11 @@ pub struct FlowPreloader {
     /// Who hears how a walk is going while it runs, if anyone (see
     /// [`FlowPreloader::report_progress`]).
     progress: Option<FlowProgressReporter>,
+    /// The cancellation token of the `ct/load-flow` being loaded, if it can
+    /// be superseded (`flow_supersession`): the walk stops at the next step
+    /// once a newer request has superseded it, since its result will be
+    /// dropped. Set by `Handler::load_flow` for each request.
+    pub cancel: Option<crate::flow_supersession::FlowCancel>,
 }
 
 /// How far a flow walk has got: sent while it runs, so a front-end waiting
@@ -222,6 +227,7 @@ impl FlowPreloader {
         FlowPreloader {
             expr_loader: ExprLoader::new(CoreTrace::default()),
             progress: None,
+            cancel: None,
         }
     }
 
@@ -1035,6 +1041,10 @@ impl<'a> CallFlowPreloader<'a> {
         self.stop_position = None;
         info!("flow loop: values cut at the source: {}", self.cut_at_the_source);
         loop {
+            if let Some(newer_seq) = self.flow_preloader.cancel.as_ref().and_then(|c| c.superseded_by()) {
+                info!("  break flow: superseded by ct/load-flow {newer_seq}");
+                break;
+            }
             // let (step_id, progressing) = if first {
             //     first = false;
             //     self.find_first_step(iter_step_id, replay)
@@ -2015,6 +2025,15 @@ mod tests {
         /// every seek fails and `worker_death` reports this text, as
         /// `RecreatorReplaySession::without_respawn_after_worker_death` does.
         death: Option<String>,
+        /// When non-empty, the positions a forward `next` walks through, in
+        /// order: `step(Next, true)` moves to the next one and
+        /// `load_location` reports the current one (see `scripted`). Empty
+        /// for the doubles that only seek.
+        script: Vec<Location>,
+        script_index: usize,
+        /// How often the walk asked for the current step id, which on a
+        /// replayed trace is a location query to the worker.
+        step_id_reads: usize,
     }
 
     impl MockReplay {
@@ -2025,13 +2044,28 @@ mod tests {
                 call_entry_location,
                 calls: vec![],
                 death: None,
+                script: vec![],
+                script_index: 0,
+                step_id_reads: 0,
             }
+        }
+
+        /// A replay that starts at `script[0]`, which is also the entry of
+        /// the call, and walks the rest of `script` one `next` at a time. Its
+        /// lines name no variable it knows and record no events.
+        fn scripted(script: Vec<Location>) -> Self {
+            let mut replay = Self::new(script[0].clone(), script[0].clone());
+            replay.script = script;
+            replay
         }
     }
 
     impl ReplaySession for MockReplay {
         fn load_location(&mut self, _expr_loader: &mut ExprLoader) -> Result<Location, Box<dyn Error>> {
             self.calls.push("load_location".to_string());
+            if !self.script.is_empty() {
+                return Ok(self.script[self.script_index].clone());
+            }
             Ok(self.current_location.clone())
         }
 
@@ -2043,12 +2077,22 @@ mod tests {
             unimplemented!()
         }
 
-        fn step(&mut self, _action: Action, _forward: bool) -> Result<bool, Box<dyn Error>> {
-            unimplemented!()
+        fn step(&mut self, action: Action, forward: bool) -> Result<bool, Box<dyn Error>> {
+            assert!(
+                !self.script.is_empty() && action == Action::Next && forward,
+                "only a scripted double walks, and only forward with `next`: {action:?} forward={forward}"
+            );
+            self.calls.push("next".to_string());
+            if self.script_index + 1 >= self.script.len() {
+                return Err("the scripted walk has no further position".into());
+            }
+            self.script_index += 1;
+            Ok(true)
         }
 
         fn load_locals(&mut self, _arg: CtLoadLocalsArguments) -> Result<Vec<VariableWithRecord>, Box<dyn Error>> {
-            unimplemented!()
+            assert!(!self.script.is_empty(), "only a scripted double's walk reads locals");
+            Ok(vec![])
         }
 
         fn load_value(
@@ -2069,7 +2113,10 @@ mod tests {
         }
 
         fn load_step_events(&mut self, _step_id: StepId, _exact: bool) -> Vec<DbRecordEvent> {
-            unimplemented!()
+            // As `RecreatorReplaySession` answers: a replayed trace records no
+            // per-step events for the flow.
+            assert!(!self.script.is_empty(), "only a scripted double's walk reads events");
+            vec![]
         }
 
         fn load_callstack(&mut self) -> Result<Vec<CallLine>, Box<dyn Error>> {
@@ -2158,6 +2205,10 @@ mod tests {
         }
 
         fn current_step_id(&mut self) -> StepId {
+            self.step_id_reads += 1;
+            if !self.script.is_empty() {
+                return StepId(self.script[self.script_index].rr_ticks.0);
+            }
             self.current_step_id
         }
 
@@ -2442,5 +2493,74 @@ mod tests {
             update.error_message
         );
         assert!(update.view_updates.is_empty());
+    }
+
+    /// A replayed call flow reads each walked position from the worker once.
+    ///
+    /// Every read is a round trip to the debugger driving the recording. The
+    /// walk used to read the location after each `next` and again at the top
+    /// of the loop, and the step id twice more for the same position: on the
+    /// flow of `print_board` in the Rust sudoku solver that was 1414 of 2930
+    /// worker queries (codetracer-pm issue
+    /// `2026-11-15-mcr-rust-sudoku-load-flow-takes-19-to-48-seconds`).
+    #[test]
+    fn a_replayed_call_flow_reads_each_walked_position_once() {
+        let at = |line: i64, ticks: i64, key: &str| Location {
+            path: "/src/main.rs".to_string(),
+            line,
+            rr_ticks: RRTicks(ticks),
+            key: key.to_string(),
+            ..Location::default()
+        };
+        // The call's entry, three more lines of it, then a position in
+        // another call, which ends the walk.
+        let script = vec![
+            at(1, 10, "0"),
+            at(2, 11, "0"),
+            at(3, 12, "0"),
+            at(4, 13, "0"),
+            at(9, 14, "1"),
+        ];
+        let request = script[2].clone();
+        let flow_preloader = FlowPreloader::new();
+        let mut replay = MockReplay::scripted(script);
+        let mut preloader = CallFlowPreloader::new(
+            &flow_preloader,
+            request.clone(),
+            HashSet::new(),
+            HashSet::new(),
+            FlowMode::Call,
+            TraceKind::Recreator,
+        );
+
+        let update = preloader.load_flow(request, &mut replay);
+
+        assert!(!update.error, "the walk must succeed: {}", update.error_message);
+        let steps = &update.view_updates[0].steps;
+        assert_eq!(
+            steps.iter().map(|step| step.position.0).collect::<Vec<_>>(),
+            vec![1, 2, 3, 4],
+            "the walk renders the call's four lines and stops at the other call"
+        );
+        let location_reads = replay.calls.iter().filter(|call| *call == "load_location").count();
+        let nexts = replay.calls.iter().filter(|call| *call == "next").count();
+        assert_eq!(nexts, 4, "one `next` per step after the entry: {:?}", replay.calls);
+        // One read to resolve the stop the seek landed on, then one per
+        // position the walk reached: the entry and each `next`.
+        assert_eq!(
+            location_reads,
+            1 + 1 + nexts,
+            "each walked position is read once: {:?}",
+            replay.calls
+        );
+        // On a replayed (rr) trace a step's id is the rr ticks of the
+        // location just read, so the walk asks the replay for no step id at
+        // all, and each step still carries its own position's ticks.
+        assert_eq!(replay.step_id_reads, 0, "no step-id read on a replayed trace");
+        assert_eq!(
+            steps.iter().map(|step| step.rr_ticks.0).collect::<Vec<_>>(),
+            vec![10, 11, 12, 13],
+            "each step's id is its own position's rr ticks"
+        );
     }
 }

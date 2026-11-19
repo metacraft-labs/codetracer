@@ -458,18 +458,18 @@ jobs:
             nim-agent-harbor=9694f6b41be21315243df1b19cabd02c5f271d7d
             nim-agents=77f8a5a6c4af477f60979063a36290f6d09f77b3
             # THE REPROBUILD-PACKAGES CATALOG, pinned to the revision the
-            # locked reprobuild (flake.lock `reprobuild`, 372aece6) is tested
-            # against: its own `.github/sibling-repos` pins
-            # `reprobuild-packages=b68b01d3…`. `repro.nim`'s `uses:` names
-            # `shellcheck`, which that reprobuild no longer bundles; the
-            # catalog defines it from eed38ec on. The bundle build points
+            # locked reprobuild (flake.lock root input `reprobuild`,
+            # 33be1e9964) is tested against: its own `repro.lock` pins
+            # `reprobuild-packages` at 56ffd673, which is also this repo's
+            # flake input and repro.lock entry. `repro.nim`'s `uses:` names
+            # `shellcheck`, which reprobuild no longer bundles; the catalog
+            # defines it from eed38ec on. The bundle build points
             # REPROBUILD_PACKAGES_ROOT here. TO REFRESH: when flake.lock moves
-            # `reprobuild`, copy the `reprobuild-packages=` line from that
-            # revision's `.github/sibling-repos`. (The flake input
-            # `reprobuild-packages`, 2c58192, is a later catalog commit that
-            # also defines it; this entry deliberately follows reprobuild's
-            # tested pairing rather than the flake input.)
-            reprobuild-packages=b68b01d3a775709869b1f2ba5f7f70f01873f20c
+            # `reprobuild`, copy the `reprobuild-packages` revision from that
+            # reprobuild revision's `repro.lock` (its `.github/sibling-repos`
+            # no longer names a revision), and keep this repo's flake input
+            # and repro.lock at the same catalog commit.
+            reprobuild-packages=56ffd673bc0f43ab266de53fd5e2e7f656e37431
 
       - name: Remove sibling checkouts this job did not clone
         # Persistent runners keep earlier jobs' sibling clones beside the

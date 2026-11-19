@@ -114,6 +114,7 @@ pub mod emulator_wasm_libc_shims;
 pub mod event_db;
 pub mod expr_loader;
 pub mod flow_preloader;
+pub mod flow_supersession;
 pub mod in_memory_trace_reader;
 pub mod lang;
 pub mod macro_sourcemap;

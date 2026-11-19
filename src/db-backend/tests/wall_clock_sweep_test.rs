@@ -69,8 +69,10 @@ const EXEMPTIONS: &[Exemption] = &[
     },
     Exemption {
         path: "src/recreator_session.rs",
-        occurrences: 4,
-        reason: "every read is inside a `#[cfg(unix)]` or `#[cfg(windows)]` item; \
+        occurrences: 5,
+        reason: "every read is inside a `#[cfg(unix)]` or `#[cfg(windows)]` item \
+                 (four in the worker socket setup, one in a `#[cfg(test)]` test \
+                 gated `#[cfg(unix)]`); \
                  wasm32-unknown-unknown is neither, so they are not compiled in \
                  (verified: `cargo check --target wasm32-unknown-unknown` reports \
                  `unused import: Instant` for this file)",
