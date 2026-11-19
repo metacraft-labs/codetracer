@@ -41,7 +41,8 @@ TAB_CORNER_RADIUS = 0.375rem
   z-index: 3 !important
 
 .lm_splitter
-  background: colors-ui-surface-primary-default !important
+  // D-46: the gaps between panels are the frame, `surface/base/canvas` in light.
+  background: by-mode(colors-ui-surface-primary-default, colors-ui-surface-base-canvas) !important
   opacity: unset !important
   transition: background 150ms ease !important
   z-index: 4 !important

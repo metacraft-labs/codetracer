@@ -20,6 +20,32 @@ browser drops that rule and nothing else reports it. Write such a `calc()` as
 `"calc(%s + %s)" % (A B)`. CI runs this check on pull requests and on `dev`;
 nothing runs it on `agents`, so run it yourself there.
 
+## Styling with the design system
+
+Colours, type and spacing come from the CodeTracer design system
+(`libs/codetracer-design-system`, Figma file `Ytr6Ux4bYZYRUBpgNsSVml`).
+
+- Use the token variables from `src/frontend/styles/generated/`: colours are
+  `colors-ui-*` and `colors-editor-*`, type is `type-ui-*` and `type-editor-*`,
+  spacing is `gap-*`, `padding-*` and `border-*`. Never write a hex, `rgb()` or
+  px value in a component stylesheet. Write sizes in rem or em (root 16px).
+- Never edit `generated/`. `scripts/tokens-to-styl.sh` builds it from the
+  design-system JSON, and `ci/test/design-tokens-fresh.sh` fails if it is stale.
+- Choose colours with `libs/codetracer-design-system/docs/foundations/color.md`:
+  every token with what it is for and its Dark and Light value. Missing a token?
+  Don't invent a colour. Use the nearest role and ask Nikolay.
+- Reuse the shared looks instead of restyling: buttons are the
+  `ct-button-<size>-<type>` classes and the `control-button*()` mixins,
+  keyboard focus is `key-focus()`, icons are `button-icon()` / `mask-icon()`,
+  tooltips are `tooltip-look()` (all in `components/button.styl`); dropdowns are
+  `dropdown-surface()` and tabs `segmented-tabs()` (`components/shared_widgets.styl`);
+  the checkbox is `.ct-checkmark` (`components/checkmark.styl`).
+- Space Grotesk for all interface text; Space Mono only for code and program
+  data. Dark theme: no font weight above 300.
+- Before building or changing a component, read its page in
+  `libs/codetracer-design-system/docs/components/` if one exists (e.g.
+  `button.md`), then `docs/UI-Design-Decisions.md` for what you must not undo.
+
 ## Where a checkout — or a worktree — has to live
 
 **A checkout of this repo must sit DIRECTLY under the workspace root, beside its

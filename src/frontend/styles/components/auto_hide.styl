@@ -53,7 +53,12 @@ OVERLAY_SLIDE_EASING = cubic-bezier(0.42, 0, 1, 1)
     transform: translateY(calc(100% + 2rem))
 
 // Hovered (overlay) panels' elevation — see `#auto-hide-overlay`.
-OVERLAY_ELEVATION_SHADOW = 0 0.75rem 2rem rgba(0, 0, 0, 0.55), 0 0.125rem 0.5rem rgba(0, 0, 0, 0.45)
+// Light: the dark theme's 55%/45% black reads as a thick grey band on a light
+// screen, so it takes a hairline edge in the ink colour plus a short, faint
+// drop (stone 1000, #1D1C1A) — enough to lift the panel, no heavier.
+OVERLAY_ELEVATION_SHADOW_DARK = 0 0.75rem 2rem rgba(0, 0, 0, 0.55), 0 0.125rem 0.5rem rgba(0, 0, 0, 0.45)
+OVERLAY_ELEVATION_SHADOW_LIGHT = 0 0 0 0.0625rem rgba(29, 28, 26, 0.08), 0 0.5rem 1.5rem rgba(29, 28, 26, 0.1), 0 0.125rem 0.25rem rgba(29, 28, 26, 0.06)
+OVERLAY_ELEVATION_SHADOW = by-mode(OVERLAY_ELEVATION_SHADOW_DARK, OVERLAY_ELEVATION_SHADOW_LIGHT)
 
 #auto-hide-layout-row
   display: flex

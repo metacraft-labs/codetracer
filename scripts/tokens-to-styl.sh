@@ -274,7 +274,7 @@ def render_file(title, flat_map, known_vars):
 # without it still work. Add a new collection folder here (or make it optional)
 # and it flows through with no other change.
 REQUIRED_LAYERS = ["brand", "alias", "mapped"]
-OPTIONAL_LAYERS = ["space"]
+OPTIONAL_LAYERS = ["space", "typography"]  # typography: built from Figma text styles
 
 layers = list(REQUIRED_LAYERS)
 for name in OPTIONAL_LAYERS:

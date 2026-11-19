@@ -700,5 +700,6 @@ RESIZING_BORDER_SIZE = 0.25rem
 // the text left as it is.  One class deeper than Bootstrap's rule, to win.
 .dropdown-menu .dropdown-item:hover,
 .dropdown-menu .dropdown-item:focus
-  background-color: LIST_HOVER_BG
+  // Light: the dropdown hover, white (D-30).
+  background-color: by-mode(LIST_HOVER_BG, DROPDOWN_HOVER_BG)
   color: inherit

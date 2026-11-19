@@ -203,7 +203,11 @@ segmented-tabs()
   // The outline wraps the tabs instead of running the panel's width.
   width: fit-content
   padding: 0.125rem
-  background-color: colors-ui-surface-base-raised
+  // The track is recessed: in dark `surface/base/raised` sits below the panel;
+  // in light raised is the lightest surface (menus, D-44), the same as the
+  // selected tab's `surface/base/card`, so the track takes `surface/primary/
+  // tertiary`, one step darker than the panel, and the selected tab shows.
+  background-color: by-mode(colors-ui-surface-base-raised, colors-ui-surface-primary-tertiary)
   // The shared control outline (button.styl) — this is where it started.
   border: CONTROL_BORDER_WIDTH solid CONTROL_BORDER_COLOR
   border-radius: CONTROL_RADIUS
@@ -391,7 +395,8 @@ body
   font-family: "SpaceGrotesk", sans-serif !important
   -webkit-font-smoothing: antialiased
   -moz-osx-font-smoothing: grayscale
-  background-color: colors-ui-surface-primary-default !important
+  // D-46: the frame is `surface/base/canvas` in light.
+  background-color: by-mode(colors-ui-surface-primary-default, colors-ui-surface-base-canvas) !important
 
 [data-tippy-root]
   max-width: calc(100vw - 0.625em)
@@ -553,7 +558,7 @@ CAPTION_BAR_HEIGHT = unquote("var(--caption-bar-height)")
   // The auto-hide row and GoldenLayout both rely on #ROOT staying flexible.
   // A fixed viewport width here collapses the height chain and only tab
   // headers remain visible after layout restore.
-  background-color: colors-ui-surface-primary-default !important
+  background-color: by-mode(colors-ui-surface-primary-default, colors-ui-surface-base-canvas) !important  // D-46
   color: colors-ui-text-primary-body
   height: 100%
   flex: 1

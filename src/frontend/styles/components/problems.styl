@@ -53,7 +53,7 @@
   opacity: 0.8
 
 .problems-count-error
-  color: #f85149
+  color: by-mode(#f85149, colors-ui-text-error-primary)
 
 .problems-count-warning
   // GitHub-dark's amber, 2.3:1 on the light ground: the warning text token
@@ -149,7 +149,7 @@
   font-size: 0.75rem
 
 .problems-icon-error
-  color: #f85149
+  color: by-mode(#f85149, colors-ui-text-error-primary)
 
 // The severity glyphs and the dimmed path text were written for the dark
 // ground; the light theme takes the icon and caption tokens (`by-mode`, defaults.styl).
@@ -198,7 +198,7 @@
 
 // Severity-tinted left border for quick scanning
 .problems-severity-error
-  border-left: 0.1875rem solid #f85149
+  border-left: 0.1875rem solid by-mode(#f85149, colors-ui-border-error)
 
 // In the light theme the severity icon tokens, as the glyphs above.
 .problems-severity-warning
@@ -231,12 +231,13 @@
 
 .build-diagnostic-margin-error:before
   content: "\25cf"
-  color: #f85149
+  // Light: the icon tokens of the Problems pane above (D-44).
+  color: by-mode(#f85149, colors-ui-icon-error-primary)
 
 .build-diagnostic-margin-warning:before
   content: "\26a0"
-  color: #d29922
+  color: by-mode(#d29922, colors-ui-icon-warning-primary)
 
 .build-diagnostic-margin-info:before
   content: "\24d8"
-  color: #58a6ff
+  color: by-mode(#58a6ff, colors-ui-icon-information-primary)

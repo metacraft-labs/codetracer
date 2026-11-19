@@ -8,5 +8,5 @@ const
     ## ground and the other tabs' on one strip — the focused strip's
     ## included — so the selected tab is told apart by its ground and not by
     ## its weight alone. The focused strip's measure: ui/surface/primary/
-    ## default against ui/border/secondary, 1.51:1 (Dark) and 1.83:1
+    ## default against ui/border/secondary, 1.51:1 (Dark) and 1.48:1
     ## (Light).
