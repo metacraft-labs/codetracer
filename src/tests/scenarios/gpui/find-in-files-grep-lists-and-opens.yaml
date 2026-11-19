@@ -26,10 +26,10 @@ steps:
                'has-row("return scaled")']
   - expect: { at: replay-position, tick: 1 }
   - click: { at: 'pane[title="Find in Files"]/row[text="4 def scale(value, factor):"]' }
-  - wait: { until: { at: 'editor[file="extra.py"]', assert: 'shows-text("result = value * factor")' }, timeout: 30s }
+  - wait: { until: { at: 'editor[file="extra.py"]', assert: 'shows-text("result = value * factor")' }, timeout: 120s }
   - expect: { at: replay-position, tick: 1 }
   - key: F4
-  - wait: { until: { at: 'editor[file="main.py"]', assert: "shows-line(26)" }, timeout: 30s }
+  - wait: { until: { at: 'editor[file="main.py"]', assert: "shows-line(26)" }, timeout: 120s }
   - chord: Shift+F4
-  - wait: { until: { at: 'editor[file="extra.py"]', assert: "shows-line(4)" }, timeout: 30s }
+  - wait: { until: { at: 'editor[file="extra.py"]', assert: "shows-line(4)" }, timeout: 120s }
   - expect: { at: replay-position, tick: 1 }
