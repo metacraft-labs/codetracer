@@ -14,7 +14,8 @@
 ##
 ##   * shows that the untouched drawing agrees with its viewmodel, at the
 ##     brief's three widths and in both colour modes, for a story of each
-##     tab, an inbox mid-walk and item pages of each kind; and
+##     tab, an inbox mid-walk, an inbox emptied beside the gone item's page
+##     and item pages of each kind; and
 ##   * plants one disagreement at a time and shows it is reported by name:
 ##     the spec card list drawn one card short, a card's state word drawn
 ##     but tagged with another, the item on screen moved after drawing, a
@@ -121,6 +122,17 @@ suite "CTF-P3: the GPUI views draw what their viewmodels say":
     ck failures.len == 0
     ck drawnCount == (inboxStoryFixtures.len - 1) * Widths.len * Modes.len
 
+  test "the emptied inbox keeps the gone item's page beside its notice":
+    # `emptied`: what the fixture claims, then that the panel draws both
+    # the empty inbox and the page (the comparison above checks they agree).
+    let (view, vm) = drawnInbox("emptied", 1432, dmDark)
+    ck vm.isEmpty and vm.notice == EmptyInboxText
+    ck not vm.canNext and not vm.canPrev
+    ck not vm.current.val.isNone and not vm.page.isNil
+    ck view.values("item").len == 0
+    ck view.values("notice") == @["empty"] and view.values("page") == @["inbox"]
+    vm.dispose()
+
   test "every item page story fixture, at each width and in both modes":
     var failures: seq[string]
     var drawnCount = 0
@@ -205,4 +217,4 @@ suite "CTF-P3: the comparison can fail (positive controls)":
 
 suite "CTF-P3: assertion count":
   test "every assertion ran":
-    check countedAssertions == 23
+    check countedAssertions == 28
